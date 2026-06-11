@@ -96,5 +96,20 @@ A Qwen profile is router-selectable only when all pass on the live endpoint:
 }
 ```
 
-Note: `qwen/qwen3.6-27b` is LM Studio's API identifier; load the **MLX-8bit**
-variant in LM Studio so that identifier resolves to the 8-bit weights.
+Note: with only the MLX-8bit variant on disk, `qwen/qwen3.6-27b` is the
+unambiguous API identifier (no `@8bit` suffix needed).
+
+## Always-on posture
+
+The model is loaded **with no TTL** (pinned) so it never idle-unloads during
+operation:
+
+```
+lms load qwen/qwen3.6-27b --context-length 65536 --gpu max -y   # no --ttl ⇒ persistent
+```
+
+LM Studio's server has `autoStartOnLaunch: true` and `justInTimeModelLoading:
+true`, so the server comes up with the app and any HiveMatrix request
+auto-loads the model if it isn't resident (≈4s). For 24×7 across reboots, LM
+Studio itself must launch on login (macOS Login Item) — the only remaining
+manual step for full always-on.
