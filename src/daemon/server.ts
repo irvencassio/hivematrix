@@ -118,6 +118,34 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /metrics — soak/operational metrics for unattended monitoring
+      if (req.method === "GET" && urlPath === "/metrics") {
+        const db = getDb();
+        const byStatus = db.prepare("SELECT status, COUNT(*) as n FROM tasks GROUP BY status").all() as { status: string; n: number }[];
+        const taskByStatus: Record<string, number> = {};
+        for (const r of byStatus) taskByStatus[r.status] = r.n;
+        const dirByStatus = db.prepare("SELECT status, COUNT(*) as n FROM directives GROUP BY status").all() as { status: string; n: number }[];
+        const directiveByStatus: Record<string, number> = {};
+        for (const r of dirByStatus) directiveByStatus[r.status] = r.n;
+        const runsTotal = (db.prepare("SELECT COUNT(*) as n FROM runs").get() as { n: number }).n;
+        const runsDone = (db.prepare("SELECT COUNT(*) as n FROM runs WHERE phase='done'").get() as { n: number }).n;
+        const runsFailed = (db.prepare("SELECT COUNT(*) as n FROM runs WHERE phase='failed'").get() as { n: number }).n;
+        const recentFailures = db.prepare(
+          "SELECT _id, error FROM tasks WHERE status='failed' ORDER BY updatedAt DESC LIMIT 5"
+        ).all() as { _id: string; error: string | null }[];
+        json(res, 200, {
+          uptimeSeconds: Math.round(process.uptime()),
+          connectivity: policy.mode,
+          tasksByStatus: taskByStatus,
+          directivesByStatus: directiveByStatus,
+          runs: { total: runsTotal, done: runsDone, failed: runsFailed },
+          recentFailures,
+          memoryRssMb: Math.round(process.memoryUsage().rss / 1048576),
+          generatedAt: new Date().toISOString(),
+        });
+        return;
+      }
+
       // GET /connectivity
       if (req.method === "GET" && urlPath === "/connectivity") {
         json(res, 200, policy.getState());
