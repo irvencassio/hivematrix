@@ -10,8 +10,8 @@ import { invalidateCachedLocalModelHealth, writeCachedLocalModelHealth } from ".
 async function withTempHome<T>(config: Record<string, unknown>, run: () => Promise<T> | T): Promise<T> {
   const originalHome = process.env.HOME;
   const tempHome = mkdtempSync(join(tmpdir(), "hive-local-fallback-test-"));
-  mkdirSync(join(tempHome, ".hive"), { recursive: true });
-  writeFileSync(join(tempHome, ".hive", "config.json"), JSON.stringify(config, null, 2));
+  mkdirSync(join(tempHome, ".hivematrix"), { recursive: true });
+  writeFileSync(join(tempHome, ".hivematrix", "config.json"), JSON.stringify(config, null, 2));
   process.env.HOME = tempHome;
   invalidateCachedLocalModelHealth();
   try {

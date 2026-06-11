@@ -1,5 +1,7 @@
 export type StreamEvent =
   | { type: "text"; content: string }
+  | { type: "reasoning"; content: string }
+  | { type: "log"; content: string }
   | { type: "session"; sessionId: string }
   | { type: "question"; prompt: string; options?: string[] }
   | { type: "tool_use"; tool: string; input: string }

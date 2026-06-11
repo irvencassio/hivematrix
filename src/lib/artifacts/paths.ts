@@ -2,7 +2,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { mkdirSync } from "fs";
 
-export const ARTIFACTS_ROOT = join(homedir(), ".hive", "artifacts");
+export const ARTIFACTS_ROOT = join(homedir(), ".hivematrix", "artifacts");
 
 export function ensureDirs(): void {
   mkdirSync(join(ARTIFACTS_ROOT, "tasks"), { recursive: true });

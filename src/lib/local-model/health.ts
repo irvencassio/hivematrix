@@ -21,6 +21,11 @@ export interface LocalModelHealth {
   offlineReady: boolean;
   message: string;
   models: string[];
+  // Phase 2 Qwen readiness checks (populated by probeQwenReadiness only)
+  toolChain?: boolean;
+  thinkSeparation?: boolean;
+  decodeRateTokPerSec?: number | null;
+  qwenReady?: boolean;
 }
 
 interface ProbeOptions extends LocalModelConfig {
@@ -28,7 +33,15 @@ interface ProbeOptions extends LocalModelConfig {
   toolCallTimeoutMs?: number;
 }
 
-const HEALTH_FILE = join(homedir(), ".hive", "local-model-health.json");
+export interface QwenReadinessResult extends LocalModelHealth {
+  toolChain: boolean;
+  thinkSeparation: boolean;
+  decodeRateTokPerSec: number | null;
+  qwenReady: boolean;
+  minDecodeRate: number;
+}
+
+const HEALTH_FILE = join(homedir(), ".hivematrix", "local-model-health.json");
 const LOCAL_PROVIDER_SET = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai"]);
 const DEFAULT_LOCAL_FALLBACK: LocalFallbackSettings = {
   enabled: true,
@@ -340,7 +353,7 @@ export function readCachedLocalModelHealth(): LocalModelHealth | null {
 
 export function writeCachedLocalModelHealth(health: LocalModelHealth): void {
   try {
-    mkdirSync(join(homedir(), ".hive"), { recursive: true });
+    mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
     writeFileSync(HEALTH_FILE, JSON.stringify(health, null, 2));
   } catch {
     // best effort
@@ -386,9 +399,249 @@ export async function getLocalModelHealth(options?: { maxAgeMs?: number; timeout
   return g.__hiveLocalModelHealthPromise;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 2: Qwen readiness probes
+// ---------------------------------------------------------------------------
+
+async function probeToolChain(endpoint: string, modelName: string, timeoutMs: number): Promise<boolean> {
+  // Step 1: ask model to call "step1" tool to get a value
+  const step1Body = {
+    model: modelName,
+    stream: false,
+    max_tokens: 256,
+    temperature: 0,
+    messages: [{ role: "user", content: "Call step1 tool with input 'hello' to get a value, then call step2 tool with that value." }],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "step1",
+          description: "Get a token from an input string.",
+          parameters: { type: "object", properties: { input: { type: "string" } }, required: ["input"] },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "step2",
+          description: "Process a token.",
+          parameters: { type: "object", properties: { token: { type: "string" } }, required: ["token"] },
+        },
+      },
+    ],
+  };
+
+  for (const url of buildCandidateUrls(endpoint, "chat/completions")) {
+    try {
+      const res1 = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(step1Body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res1.ok) continue;
+      const p1 = await res1.json() as { choices?: Array<{ message?: { tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> } }> };
+      const tc1 = p1.choices?.[0]?.message?.tool_calls?.[0];
+      if (tc1?.function?.name !== "step1") continue;
+
+      // Feed result back and expect step2
+      const step2Body = {
+        ...step1Body,
+        messages: [
+          ...step1Body.messages,
+          { role: "assistant", content: null, tool_calls: [{ id: "tc_1", type: "function", function: tc1.function }] },
+          { role: "tool", tool_call_id: "tc_1", content: JSON.stringify({ token: "abc123" }) },
+        ],
+      };
+      const res2 = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(step2Body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res2.ok) continue;
+      const p2 = await res2.json() as { choices?: Array<{ message?: { tool_calls?: Array<{ function?: { name?: string } }> } }> };
+      const tc2 = p2.choices?.[0]?.message?.tool_calls?.[0];
+      if (tc2?.function?.name === "step2") return true;
+    } catch {
+      // try next URL
+    }
+  }
+  return false;
+}
+
+async function probeThinkSeparation(endpoint: string, modelName: string, timeoutMs: number): Promise<boolean> {
+  const body = {
+    model: modelName,
+    stream: false,
+    max_tokens: 512,
+    temperature: 0,
+    messages: [{ role: "user", content: "Think carefully then call ping with value hello." }],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "ping",
+          description: "Return the supplied value.",
+          parameters: { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+        },
+      },
+    ],
+    tool_choice: "required",
+  };
+
+  for (const url of buildCandidateUrls(endpoint, "chat/completions")) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) continue;
+      const payload = await res.json() as { choices?: Array<{ message?: { tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> } }> };
+      const tc = payload.choices?.[0]?.message?.tool_calls?.[0];
+      if (tc?.function?.name !== "ping") continue;
+      const args = tc.function.arguments ?? "";
+      // Think blocks must not leak into tool arguments
+      if (args.includes("<think>") || args.includes("</think>")) return false;
+      try {
+        const parsed = JSON.parse(args) as Record<string, unknown>;
+        if (typeof parsed.value === "string") return true;
+      } catch {
+        continue;
+      }
+    } catch {
+      // try next URL
+    }
+  }
+  return false;
+}
+
+interface DecodeRateResult {
+  tokPerSec: number | null;
+  ok: boolean;
+}
+
+async function probeDecodeRate(endpoint: string, modelName: string, timeoutMs: number, minTokPerSec: number): Promise<DecodeRateResult> {
+  const body = {
+    model: modelName,
+    messages: [{ role: "user", content: "Count from 1 to 50, one number per line." }],
+    stream: true,
+    max_tokens: 256,
+  };
+
+  for (const url of buildCandidateUrls(endpoint, "chat/completions")) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok || !res.body) continue;
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let tokenCount = 0;
+      let startMs: number | null = null;
+      let endMs = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const dataStr = trimmed.slice(5).trim();
+          if (dataStr === "[DONE]") break;
+          try {
+            const payload = JSON.parse(dataStr) as { choices?: Array<{ delta?: { content?: string }; usage?: { completion_tokens?: number } }> };
+            const delta = payload.choices?.[0]?.delta?.content;
+            if (typeof delta === "string" && delta) {
+              if (startMs === null) startMs = Date.now();
+              endMs = Date.now();
+              // Rough token estimate: ~4 chars per token
+              tokenCount += Math.ceil(delta.length / 4);
+            }
+          } catch { /* skip */ }
+        }
+      }
+
+      if (startMs !== null && tokenCount > 0) {
+        const elapsedS = Math.max(0.1, (endMs - startMs) / 1000);
+        const tokPerSec = tokenCount / elapsedS;
+        return { tokPerSec, ok: tokPerSec >= minTokPerSec };
+      }
+    } catch {
+      // try next URL
+    }
+  }
+  return { tokPerSec: null, ok: false };
+}
+
+/**
+ * Run all 6 Qwen readiness checks against a live endpoint.
+ * Used by the router before accepting a Qwen profile as eligible.
+ */
+export async function probeQwenReadiness(
+  config: ProbeOptions & { minDecodeRate?: number }
+): Promise<QwenReadinessResult> {
+  const minDecodeRate = config.minDecodeRate ?? 15;
+  const base = await probeLocalModel(config);
+
+  if (!base.ok) {
+    return {
+      ...base,
+      toolChain: false,
+      thinkSeparation: false,
+      decodeRateTokPerSec: null,
+      qwenReady: false,
+      minDecodeRate,
+    };
+  }
+
+  const endpoint = normalizeBaseUrl(config.endpoint);
+  const modelName = config.modelName.trim();
+  const chainTimeoutMs = Math.max(1000, config.toolCallTimeoutMs ?? 90_000);
+
+  const [toolChain, thinkSeparation, decodeRateResult] = await Promise.all([
+    probeToolChain(endpoint, modelName, chainTimeoutMs).catch(() => false),
+    probeThinkSeparation(endpoint, modelName, chainTimeoutMs).catch(() => false),
+    probeDecodeRate(endpoint, modelName, Math.max(1000, config.timeoutMs ?? 30_000), minDecodeRate).catch(() => ({ tokPerSec: null, ok: false })),
+  ]);
+
+  const qwenReady = base.ready && toolChain && thinkSeparation && decodeRateResult.ok;
+  const issues: string[] = [];
+  if (!base.streaming) issues.push("streaming failed");
+  if (!base.toolCalls) issues.push("single tool call failed");
+  if (!toolChain) issues.push("multi-step tool chain failed");
+  if (!thinkSeparation) issues.push("think-block separation failed");
+  if (!decodeRateResult.ok) {
+    issues.push(`decode rate ${decodeRateResult.tokPerSec !== null ? `${decodeRateResult.tokPerSec.toFixed(1)} tok/s` : "unknown"} < ${minDecodeRate} tok/s floor`);
+  }
+
+  return {
+    ...base,
+    toolChain,
+    thinkSeparation,
+    decodeRateTokPerSec: decodeRateResult.tokPerSec,
+    qwenReady,
+    minDecodeRate,
+    message: qwenReady
+      ? `Qwen ready — all 5 checks passed (≥${minDecodeRate} tok/s)`
+      : `Qwen not ready: ${issues.join("; ")}`,
+  };
+}
+
 export function getLocalFallbackSettings(): LocalFallbackSettings {
   try {
-    const config = JSON.parse(readFileSync(join(homedir(), ".hive", "config.json"), "utf-8")) as {
+    const config = JSON.parse(readFileSync(join(homedir(), ".hivematrix", "config.json"), "utf-8")) as {
       localFallback?: Partial<LocalFallbackSettings>;
     };
     return {

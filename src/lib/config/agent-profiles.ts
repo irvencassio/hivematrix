@@ -12,7 +12,7 @@ export interface AgentProfile {
   icon: string;
 }
 
-const CUSTOM_PROFILES_DIR = join(homedir(), ".hive", "agents");
+const CUSTOM_PROFILES_DIR = join(homedir(), ".hivematrix", "agents");
 
 // ── Built-in profiles ──────────────────────────────────────────────
 

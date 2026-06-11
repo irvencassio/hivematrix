@@ -87,7 +87,7 @@ const g = globalThis as unknown as { __hiveActiveProfile?: string };
 export function getActiveProfile(): string {
   if (g.__hiveActiveProfile) return g.__hiveActiveProfile;
   try {
-    const config = JSON.parse(readFileSync(join(homedir(), ".hive", "config.json"), "utf-8"));
+    const config = JSON.parse(readFileSync(join(homedir(), ".hivematrix", "config.json"), "utf-8"));
     const profiles: { configDir: string }[] = config.profiles ?? [];
     const preferred = config.defaultProfile;
     if (preferred && profiles.some((p) => p.configDir === preferred)) return preferred;
@@ -118,7 +118,7 @@ export function getActiveTaskProfileKey(): string {
 // SSH diagnostics — opt-in feature, default off
 export function isSshDiagnosticsEnabled(): boolean {
   try {
-    const config = JSON.parse(readFileSync(join(homedir(), ".hive", "config.json"), "utf-8"));
+    const config = JSON.parse(readFileSync(join(homedir(), ".hivematrix", "config.json"), "utf-8"));
     return config.sshDiagnostics === true;
   } catch {
     return false;
@@ -134,7 +134,7 @@ export interface LocalModelConfig {
 
 export function getLocalModelConfig(): LocalModelConfig | null {
   try {
-    const config = JSON.parse(readFileSync(join(homedir(), ".hive", "config.json"), "utf-8"));
+    const config = JSON.parse(readFileSync(join(homedir(), ".hivematrix", "config.json"), "utf-8"));
     if (config.localModel?.endpoint && config.localModel?.modelName) {
       return config.localModel;
     }

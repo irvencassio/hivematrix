@@ -127,6 +127,41 @@ function buildMessages(
   ];
 }
 
+/**
+ * Strip Qwen3 <think>...</think> reasoning blocks from streamed text.
+ * Returns the clean content and the extracted reasoning (for logging).
+ * Handles partial blocks at the edge of a stream chunk correctly by
+ * treating an unclosed <think> tag as "still thinking" (content empty).
+ */
+export function stripThinkBlocks(text: string): { content: string; reasoning: string } {
+  if (!text.includes("<think>")) return { content: text, reasoning: "" };
+
+  let content = "";
+  let reasoning = "";
+  let remaining = text;
+
+  while (remaining) {
+    const openIdx = remaining.indexOf("<think>");
+    if (openIdx === -1) {
+      content += remaining;
+      break;
+    }
+    // text before the think block
+    content += remaining.slice(0, openIdx);
+    const afterOpen = remaining.slice(openIdx + 7);
+    const closeIdx = afterOpen.indexOf("</think>");
+    if (closeIdx === -1) {
+      // Unclosed block — treat the rest as reasoning; content gets nothing
+      reasoning += afterOpen;
+      break;
+    }
+    reasoning += afterOpen.slice(0, closeIdx);
+    remaining = afterOpen.slice(closeIdx + 8);
+  }
+
+  return { content: content.trimStart(), reasoning };
+}
+
 export function buildGenericRequestBody(
   provider: ModelProvider,
   modelId: string,
@@ -305,7 +340,14 @@ async function runAgentLoop(
       onEvent(taskId, { type: "error", content: `Stream error: ${err instanceof Error ? err.message : String(err)}` });
     }
 
-    fullText += turnText;
+    // Strip Qwen3 <think> blocks before storing in conversation history.
+    // The cleaned content goes into messages; reasoning is logged separately.
+    const { content: cleanTurnText, reasoning: turnReasoning } = stripThinkBlocks(turnText);
+    if (turnReasoning) {
+      onEvent(taskId, { type: "reasoning", content: turnReasoning });
+    }
+
+    fullText += cleanTurnText;
     const usage = getUsage(state);
     totalTokens += usage.totalTokens;
     inputTokens += usage.promptTokens;
@@ -318,7 +360,7 @@ async function runAgentLoop(
       // Add assistant message with tool calls to conversation
       messages.push({
         role: "assistant",
-        content: turnText || null,
+        content: cleanTurnText || null,
         tool_calls: toolCalls.map((tc) => ({
           id: tc.id,
           type: "function",

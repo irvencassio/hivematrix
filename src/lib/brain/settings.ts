@@ -31,7 +31,7 @@ export function defaultBrainRootDir(): string {
 
 export function readHiveConfig(): Record<string, unknown> {
   try {
-    return JSON.parse(readFileSync(join(homedir(), ".hive", "config.json"), "utf-8")) as Record<string, unknown>;
+    return JSON.parse(readFileSync(join(homedir(), ".hivematrix", "config.json"), "utf-8")) as Record<string, unknown>;
   } catch {
     return {};
   }

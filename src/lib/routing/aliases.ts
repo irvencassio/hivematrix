@@ -3,14 +3,14 @@ import { join } from "path";
 import { homedir } from "os";
 import { BUILTIN_SYSTEM_PROJECTS, DEFAULT_TASK_PROJECT, LEGACY_SYSTEM_PROJECTS, VIRTUAL_PERSONAL_PROJECTS } from "./project-constants";
 
-const CUSTOM_PROJECTS_PATH = join(homedir(), ".hive", "projects.json");
+const CUSTOM_PROJECTS_PATH = join(homedir(), ".hivematrix", "projects.json");
 
 // Builtin aliases are loaded from ~/.hive/aliases.json if present.
 // Auto-discovery of git repos in $HOME covers most cases.
 // Users add custom aliases via ~/.hive/projects.json.
 function loadBuiltinAliases(): Record<string, string> {
   try {
-    const aliasPath = join(homedir(), ".hive", "aliases.json");
+    const aliasPath = join(homedir(), ".hivematrix", "aliases.json");
     const data = readFileSync(aliasPath, "utf-8");
     return JSON.parse(data);
   } catch {
@@ -32,19 +32,19 @@ function loadCustomProjects(): Record<string, string> {
 export function saveCustomProject(name: string, path: string) {
   const custom = loadCustomProjects();
   custom[name.toLowerCase().trim()] = path;
-  mkdirSync(join(homedir(), ".hive"), { recursive: true });
+  mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
   writeFileSync(CUSTOM_PROJECTS_PATH, JSON.stringify(custom, null, 2));
 }
 
 export function removeProject(name: string) {
   const custom = loadCustomProjects();
   delete custom[name.toLowerCase().trim()];
-  mkdirSync(join(homedir(), ".hive"), { recursive: true });
+  mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
   writeFileSync(CUSTOM_PROJECTS_PATH, JSON.stringify(custom, null, 2));
 }
 
 export function saveAllProjects(projects: Record<string, string>) {
-  mkdirSync(join(homedir(), ".hive"), { recursive: true });
+  mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
   writeFileSync(CUSTOM_PROJECTS_PATH, JSON.stringify(projects, null, 2));
 }
 
