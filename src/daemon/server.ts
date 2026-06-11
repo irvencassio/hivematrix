@@ -134,8 +134,12 @@ export function createDaemonServer() {
         return;
       }
 
-      // GET /health
+      // GET /health — liveness, no secrets. This is the ONLY route with CORS
+      // enabled: the Tauri shell's splash (a different, bundled origin) probes
+      // it cross-origin before navigating to the same-origin console. Data and
+      // mutating routes stay token-gated with no CORS.
       if (req.method === "GET" && urlPath === "/health") {
+        res.setHeader("Access-Control-Allow-Origin", "*");
         const db = getDb();
         const taskCount = (db.prepare("SELECT COUNT(*) as n FROM tasks WHERE status IN ('backlog','assigned','in_progress')").get() as { n: number }).n;
         json(res, 200, {
