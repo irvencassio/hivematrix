@@ -1,0 +1,165 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { getUsageAvailabilityForTask, shouldClearStaleUsageDelay } from "./scheduler";
+import type { UsageData } from "@/lib/usage/fetcher";
+
+const usage: UsageData = {
+  fetchedAt: "2026-05-15T13:40:10.577Z",
+  profiles: [
+    {
+      profile: "irv",
+      accountName: "",
+      accountEmail: "",
+      planType: "",
+      provider: "claude",
+      fiveHour: { utilization: 100, resetsAt: "2026-05-15T18:00:01.013Z" },
+      sevenDay: { utilization: 6, resetsAt: "2026-05-21T06:00:01.013Z" },
+      sevenDayOpus: null,
+      sevenDaySonnet: null,
+      extraUsage: null,
+      fetchedAt: "2026-05-15T13:40:10.577Z",
+    },
+    {
+      profile: "chatgpt",
+      accountName: "",
+      accountEmail: "",
+      planType: "",
+      provider: "codex",
+      fiveHour: { utilization: 14, resetsAt: "2026-05-14T23:31:53.000Z" },
+      sevenDay: { utilization: 8, resetsAt: "2026-05-19T12:35:02.000Z" },
+      sevenDayOpus: null,
+      sevenDaySonnet: null,
+      extraUsage: null,
+      fetchedAt: "2026-05-15T13:40:10.577Z",
+    },
+  ],
+};
+
+test("Codex tasks are not blocked by the active Claude profile limit", () => {
+  const result = getUsageAvailabilityForTask(
+    { model: "codex:gpt-5.4", profile: "claude-irv" },
+    usage,
+    ".claude-irv"
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.provider, "codex");
+  assert.equal(result.profile, "chatgpt");
+});
+
+test("Claude tasks are blocked by their own exhausted Claude profile", () => {
+  const result = getUsageAvailabilityForTask(
+    { model: "claude-sonnet-4-6", profile: "claude-irv" },
+    usage,
+    ".claude-el"
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.provider, "claude");
+  assert.equal(result.profile, "irv");
+  assert.equal(result.resetsAt, "2026-05-15T18:00:01.013Z");
+});
+
+test("Codex tasks clear stale delayUntil values copied from Claude usage resets", () => {
+  assert.equal(
+    shouldClearStaleUsageDelay(
+      {
+        model: "codex:gpt-5.4",
+        profile: "claude-irv",
+        delayUntil: "2026-05-15T18:00:01.013Z",
+      },
+      usage,
+      ".claude-irv"
+    ),
+    true
+  );
+});
+
+test("Codex tasks clear stale delayUntil values when the cached reset shifts slightly", () => {
+  assert.equal(
+    shouldClearStaleUsageDelay(
+      {
+        model: "codex:gpt-5.4",
+        profile: "claude-irv",
+        delayUntil: "2026-05-15T18:00:01.013Z",
+      },
+      {
+        ...usage,
+        profiles: usage.profiles.map((profile) => profile.profile === "irv"
+          ? {
+              ...profile,
+              fiveHour: {
+                utilization: 100,
+                resetsAt: "2026-05-15T18:00:01.492Z",
+              },
+            }
+          : profile),
+      },
+      ".claude-irv"
+    ),
+    true
+  );
+});
+
+test("Claude tasks keep their own rate-limit delay", () => {
+  assert.equal(
+    shouldClearStaleUsageDelay(
+      {
+        model: "claude-sonnet-4-6",
+        profile: "claude-irv",
+        delayUntil: "2026-05-15T18:00:01.013Z",
+      },
+      usage,
+      ".claude-irv"
+    ),
+    false
+  );
+});
+
+test("manually queued delays are not cleared when they match a usage reset", () => {
+  assert.equal(
+    shouldClearStaleUsageDelay(
+      {
+        model: "codex:gpt-5.4",
+        profile: "claude-irv",
+        delayUntil: "2026-05-15T18:00:01.013Z",
+        delayReason: "manual",
+      },
+      usage,
+      ".claude-irv"
+    ),
+    false
+  );
+});
+
+test("usage-limit delays still clear when the provider becomes available", () => {
+  assert.equal(
+    shouldClearStaleUsageDelay(
+      {
+        model: "codex:gpt-5.4",
+        profile: "claude-irv",
+        delayUntil: "2026-05-15T18:00:01.013Z",
+        delayReason: "usage_limit",
+      },
+      usage,
+      ".claude-irv"
+    ),
+    true
+  );
+});
+
+test("non usage-reset delays are not cleared", () => {
+  assert.equal(
+    shouldClearStaleUsageDelay(
+      {
+        model: "codex:gpt-5.4",
+        profile: "claude-irv",
+        delayUntil: "2026-05-15T13:45:00.000Z",
+      },
+      usage,
+      ".claude-irv"
+    ),
+    false
+  );
+});

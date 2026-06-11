@@ -1,0 +1,584 @@
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, execSync } from "node:child_process";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
+
+import { loadHiveConfig, saveHiveConfig } from "@/lib/central/config";
+import { getBeeDefinition, listBeeDefinitions, type BeeDefinition } from "@/lib/bees/catalog";
+
+export type BeeRuntimeMode = "embedded" | "launchagent" | "planned";
+
+export interface BeeLaunchAgentSettings {
+  autoStart: boolean;
+  repoPath: string;
+  plistLabel: string;
+  plistPath: string;
+}
+
+interface NodeRuntimeSpec {
+  executable: string;
+  environment?: Record<string, string>;
+}
+
+export interface BeeHealthSnapshot {
+  ok: boolean;
+  summary?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface BeeServiceStatus {
+  kind: string;
+  name: string;
+  role: BeeDefinition["role"];
+  phase: BeeDefinition["phase"];
+  summary: string;
+  runtimeMode: BeeRuntimeMode;
+  manageable: boolean;
+  available: boolean;
+  autoStart: boolean;
+  running: boolean;
+  loaded: boolean;
+  healthy: boolean | null;
+  pid: number | null;
+  repoPath: string | null;
+  plistLabel: string | null;
+  plistPath: string | null;
+  healthcheckUrl: string | null;
+  statusDetail: string | null;
+}
+
+interface BeeServiceDescriptor {
+  kind: string;
+  runtimeMode: BeeRuntimeMode;
+  manageable: boolean;
+  defaultRepoPath?: string;
+  defaultPlistLabel?: string;
+  healthcheckUrl?: string;
+  distEntry?: string;
+  logDirName?: string;
+}
+
+interface BeeServicesConfigShape {
+  beeServices?: Record<string, Partial<BeeLaunchAgentSettings>>;
+}
+
+const MANAGED_BEE_DESCRIPTORS: BeeServiceDescriptor[] = [
+  {
+    kind: "messagebee",
+    runtimeMode: "launchagent",
+    manageable: true,
+    defaultRepoPath: join(homedir(), "messagebee"),
+    defaultPlistLabel: "com.messagebee.agent",
+    healthcheckUrl: "http://127.0.0.1:7891/healthcheck",
+    distEntry: "dist/index.js",
+    logDirName: "messagebee",
+  },
+  {
+    kind: "inventorbee",
+    runtimeMode: "launchagent",
+    manageable: true,
+    defaultRepoPath: join(homedir(), "inventorbee"),
+    defaultPlistLabel: "com.inventorbee.agent",
+    healthcheckUrl: "http://127.0.0.1:4014/healthcheck",
+    distEntry: "dist/index.js",
+    logDirName: "inventorbee",
+  },
+  {
+    kind: "brainbee",
+    runtimeMode: "launchagent",
+    manageable: true,
+    defaultRepoPath: join(homedir(), "brainbee"),
+    defaultPlistLabel: "com.brainbee.agent",
+    healthcheckUrl: "http://127.0.0.1:4013/healthcheck",
+    distEntry: "dist/index.js",
+    logDirName: "brainbee",
+  },
+  {
+    kind: "browserbee",
+    runtimeMode: "embedded",
+    manageable: false,
+  },
+  {
+    kind: "webbee",
+    runtimeMode: "embedded",
+    manageable: false,
+  },
+  {
+    kind: "computerbee",
+    runtimeMode: "embedded",
+    manageable: false,
+  },
+  {
+    kind: "cronbee",
+    runtimeMode: "embedded",
+    manageable: false,
+  },
+  {
+    kind: "authbee",
+    runtimeMode: "embedded",
+    manageable: false,
+  },
+  {
+    kind: "tubebee",
+    runtimeMode: "embedded",
+    manageable: false,
+  },
+];
+
+const DESCRIPTOR_MAP = new Map(MANAGED_BEE_DESCRIPTORS.map((descriptor) => [descriptor.kind, descriptor]));
+
+function getUid(): string {
+  return execSync("id -u", { encoding: "utf-8", timeout: 2000 }).trim();
+}
+
+function expandHomePath(value: string): string {
+  return value.startsWith("~/") ? join(homedir(), value.slice(2)) : value;
+}
+
+function readBeeServicesConfig(): Record<string, Partial<BeeLaunchAgentSettings>> {
+  const config = loadHiveConfig() as BeeServicesConfigShape;
+  return config.beeServices ?? {};
+}
+
+function saveBeeServicesConfig(settings: Record<string, Partial<BeeLaunchAgentSettings>>): void {
+  const config = loadHiveConfig() as BeeServicesConfigShape & Record<string, unknown>;
+  config.beeServices = settings;
+  saveHiveConfig(config);
+}
+
+export function resolveBeeLaunchAgentSettings(kind: string): BeeLaunchAgentSettings | null {
+  const descriptor = DESCRIPTOR_MAP.get(kind);
+  if (!descriptor || descriptor.runtimeMode !== "launchagent") return null;
+
+  const saved = readBeeServicesConfig()[kind] ?? {};
+  const plistLabel = String(saved.plistLabel || descriptor.defaultPlistLabel || "").trim();
+  const repoPath = expandHomePath(String(saved.repoPath || descriptor.defaultRepoPath || "").trim());
+  const plistPath = expandHomePath(
+    String(saved.plistPath || join(homedir(), "Library", "LaunchAgents", `${plistLabel}.plist`)).trim(),
+  );
+
+  return {
+    autoStart: saved.autoStart === true,
+    repoPath,
+    plistLabel,
+    plistPath,
+  };
+}
+
+export function updateBeeLaunchAgentSettings(kind: string, updates: Partial<BeeLaunchAgentSettings>): BeeLaunchAgentSettings | null {
+  const current = resolveBeeLaunchAgentSettings(kind);
+  if (!current) return null;
+
+  const next: BeeLaunchAgentSettings = {
+    ...current,
+    ...updates,
+  };
+
+  const all = readBeeServicesConfig();
+  all[kind] = next;
+  saveBeeServicesConfig(all);
+  return next;
+}
+
+export function buildLaunchAgentPlist(
+  kind: string,
+  settings: BeeLaunchAgentSettings,
+  nodeRuntime: string | NodeRuntimeSpec,
+): string {
+  const descriptor = DESCRIPTOR_MAP.get(kind);
+  if (!descriptor || !descriptor.distEntry) {
+    throw new Error(`Bee ${kind} does not support LaunchAgent generation`);
+  }
+
+  const runtime = typeof nodeRuntime === "string"
+    ? { executable: nodeRuntime, environment: {} }
+    : { executable: nodeRuntime.executable, environment: nodeRuntime.environment ?? {} };
+  const distPath = join(settings.repoPath, descriptor.distEntry);
+  const logDir = join(homedir(), "Library", "Logs", descriptor.logDirName || kind);
+  const outLog = join(logDir, `${kind}.out.log`);
+  const errLog = join(logDir, `${kind}.err.log`);
+  const extraEnvironment = Object.entries(runtime.environment)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `    <key>${escapeXml(key)}</key><string>${escapeXml(value)}</string>`)
+    .join("\n");
+  const environmentBlock = extraEnvironment ? `${extraEnvironment}\n` : "";
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${escapeXml(settings.plistLabel)}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${escapeXml(runtime.executable)}</string>
+    <string>--enable-source-maps</string>
+    <string>${escapeXml(distPath)}</string>
+  </array>
+  <key>WorkingDirectory</key><string>${escapeXml(settings.repoPath)}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NODE_ENV</key><string>production</string>
+${environmentBlock}  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>${escapeXml(outLog)}</string>
+  <key>StandardErrorPath</key><string>${escapeXml(errLog)}</string>
+</dict>
+</plist>
+`;
+}
+
+function isPlainNodeBinary(path: string): boolean {
+  return basename(path).toLowerCase() === "node";
+}
+
+function parseNodeVersion(name: string): number[] {
+  const match = name.trim().match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/i);
+  if (!match) return [-1, -1, -1];
+  return [match[1], match[2] ?? "0", match[3] ?? "0"].map((part) => Number.parseInt(part, 10));
+}
+
+function compareNodeVersionsDesc(left: string, right: string): number {
+  const a = parseNodeVersion(left);
+  const b = parseNodeVersion(right);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const delta = (b[index] ?? -1) - (a[index] ?? -1);
+    if (delta !== 0) return delta;
+  }
+  return right.localeCompare(left);
+}
+
+function listNvmNodeBins(): string[] {
+  const versionsDir = join(homedir(), ".nvm", "versions", "node");
+  if (!existsSync(versionsDir)) return [];
+
+  return readdirSync(versionsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort(compareNodeVersionsDesc)
+    .map((version) => join(versionsDir, version, "bin", "node"))
+    .filter((candidate) => existsSync(candidate));
+}
+
+function resolveNodeRuntime(): NodeRuntimeSpec {
+  if (process.execPath && existsSync(process.execPath) && isPlainNodeBinary(process.execPath)) {
+    return { executable: process.execPath };
+  }
+
+  try {
+    const shellNode = execSync("which node", { encoding: "utf-8", timeout: 3000 }).trim();
+    if (shellNode && existsSync(shellNode)) {
+      return { executable: shellNode };
+    }
+  } catch {
+    // ignore shell lookup failures and keep trying deterministic paths
+  }
+
+  const candidates = [
+    ...listNvmNodeBins(),
+    "/opt/homebrew/bin/node",
+    "/usr/local/bin/node",
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return { executable: candidate };
+    }
+  }
+
+  if (process.execPath && existsSync(process.execPath)) {
+    return {
+      executable: process.execPath,
+      environment: {
+        ELECTRON_RUN_AS_NODE: "1",
+      },
+    };
+  }
+
+  throw new Error("Unable to find a usable node binary");
+}
+
+export function resolveNodeBin(): string {
+  return resolveNodeRuntime().executable;
+}
+
+function ensureLaunchAgentPrereqs(kind: string, settings: BeeLaunchAgentSettings): { descriptor: BeeServiceDescriptor; nodeRuntime: NodeRuntimeSpec } {
+  const descriptor = DESCRIPTOR_MAP.get(kind);
+  if (!descriptor || descriptor.runtimeMode !== "launchagent") {
+    throw new Error(`Bee ${kind} is not launchagent-managed`);
+  }
+  if (!settings.repoPath || !existsSync(settings.repoPath)) {
+    throw new Error(`Repo path does not exist for ${kind}: ${settings.repoPath}`);
+  }
+  if (!descriptor.distEntry || !existsSync(join(settings.repoPath, descriptor.distEntry))) {
+    throw new Error(`Built entry missing for ${kind}. Run the Bee build first.`);
+  }
+  if (!settings.plistLabel.trim()) {
+    throw new Error(`Missing LaunchAgent label for ${kind}`);
+  }
+  const nodeRuntime = resolveNodeRuntime();
+  return { descriptor, nodeRuntime };
+}
+
+function writeLaunchAgent(kind: string, settings: BeeLaunchAgentSettings): void {
+  const { descriptor, nodeRuntime } = ensureLaunchAgentPrereqs(kind, settings);
+  const plistDir = join(homedir(), "Library", "LaunchAgents");
+  mkdirSync(plistDir, { recursive: true });
+  mkdirSync(join(homedir(), "Library", "Logs", descriptor.logDirName || kind), { recursive: true });
+  writeFileSync(settings.plistPath, buildLaunchAgentPlist(kind, settings, nodeRuntime));
+}
+
+function launchctlPrint(label: string): string | null {
+  try {
+    return execFileSync("launchctl", ["print", `gui/${getUid()}/${label}`], {
+      encoding: "utf-8",
+      timeout: 4000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+}
+
+function parseLaunchctlStatus(output: string | null): { loaded: boolean; running: boolean; pid: number | null; detail: string | null } {
+  if (!output) return { loaded: false, running: false, pid: null, detail: null };
+
+  const pidMatch = output.match(/\bpid = (\d+)/);
+  const stateMatch = output.match(/\bstate = ([a-z_]+)/i);
+  const lastExitMatch = output.match(/\blast exit code = (\d+)/i);
+  return {
+    loaded: true,
+    running: Boolean(pidMatch),
+    pid: pidMatch ? Number.parseInt(pidMatch[1], 10) : null,
+    detail: stateMatch?.[1] ?? lastExitMatch?.[1] ?? null,
+  };
+}
+
+async function checkHealth(url: string | undefined): Promise<{ healthy: boolean | null; detail: string | null }> {
+  if (!url) return { healthy: null, detail: null };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      clearTimeout(timeout);
+      return { healthy: false, detail: `health_http_${response.status}` };
+    }
+    const body = await response.json().catch(() => null);
+    clearTimeout(timeout);
+    const parsed = summarizeEmbeddedHealthDetail(url, body);
+    return { healthy: true, detail: parsed };
+  } catch (error) {
+    clearTimeout(timeout);
+    return { healthy: false, detail: error instanceof Error ? error.message : "health_unreachable" };
+  }
+}
+
+export function summarizeEmbeddedHealthDetail(kindOrUrl: string, payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  const bee = typeof record.bee === "string" ? record.bee : kindOrUrl;
+
+  if (bee === "browserbee") {
+    const sessionPlane = record.sessionPlane;
+    if (!sessionPlane || typeof sessionPlane !== "object" || Array.isArray(sessionPlane)) return null;
+    const plane = sessionPlane as Record<string, unknown>;
+    const ready = typeof plane.ready === "number" ? plane.ready : 0;
+    const needsReauth = typeof plane.needsReauth === "number" ? plane.needsReauth : 0;
+    const expired = typeof plane.expired === "number" ? plane.expired : 0;
+    const providers = Array.isArray(plane.providers)
+      ? plane.providers.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+      : [];
+    const providerSuffix = providers.length > 0 ? ` · ${providers.join(", ")}` : "";
+    return `${ready} ready · ${needsReauth} needs reauth · ${expired} expired${providerSuffix}`;
+  }
+
+  if (bee === "authbee") {
+    const counts = record.counts;
+    if (!counts || typeof counts !== "object" || Array.isArray(counts)) return null;
+    const values = counts as Record<string, unknown>;
+    const ready = typeof values.ready === "number" ? values.ready : 0;
+    const needsReauth = typeof values.needsReauth === "number" ? values.needsReauth : 0;
+    const expired = typeof values.expired === "number" ? values.expired : 0;
+    return `${ready} ready · ${needsReauth} needs reauth · ${expired} expired`;
+  }
+
+  return null;
+}
+
+function descriptorForKind(kind: string): BeeServiceDescriptor {
+  const existing = DESCRIPTOR_MAP.get(kind);
+  if (existing) return existing;
+  return {
+    kind,
+    runtimeMode: "planned",
+    manageable: false,
+  };
+}
+
+export function getBeeRuntimeDescriptor(kind: string): Pick<BeeServiceDescriptor, "kind" | "runtimeMode" | "manageable"> {
+  const descriptor = descriptorForKind(kind);
+  return {
+    kind: descriptor.kind,
+    runtimeMode: descriptor.runtimeMode,
+    manageable: descriptor.manageable,
+  };
+}
+
+export async function listBeeServiceStatuses(): Promise<BeeServiceStatus[]> {
+  const definitions = listBeeDefinitions();
+  const statuses: BeeServiceStatus[] = [];
+
+  for (const definition of definitions) {
+    const descriptor = descriptorForKind(definition.kind);
+    if (descriptor.runtimeMode === "launchagent") {
+      const settings = resolveBeeLaunchAgentSettings(definition.kind);
+      const repoPath = settings?.repoPath ?? null;
+      const available = Boolean(repoPath && existsSync(repoPath));
+      const launchState = settings ? parseLaunchctlStatus(launchctlPrint(settings.plistLabel)) : { loaded: false, running: false, pid: null, detail: null };
+      const health = await checkHealth(descriptor.healthcheckUrl);
+
+      statuses.push({
+        kind: definition.kind,
+        name: definition.name,
+        role: definition.role,
+        phase: definition.phase,
+        summary: definition.summary,
+        runtimeMode: descriptor.runtimeMode,
+        manageable: descriptor.manageable,
+        available,
+        autoStart: settings?.autoStart === true,
+        running: launchState.running,
+        loaded: launchState.loaded,
+        healthy: health.healthy,
+        pid: launchState.pid,
+        repoPath,
+        plistLabel: settings?.plistLabel ?? null,
+        plistPath: settings?.plistPath ?? null,
+        healthcheckUrl: descriptor.healthcheckUrl ?? null,
+        statusDetail: health.detail ?? launchState.detail,
+      });
+      continue;
+    }
+
+    const embeddedHealthUrl = embeddedHealthRoute(definition.kind);
+    const health = await checkHealth(embeddedHealthUrl ? `http://127.0.0.1:${process.env.PORT || "4000"}${embeddedHealthUrl}` : undefined);
+    const available = descriptor.runtimeMode === "embedded";
+    statuses.push({
+      kind: definition.kind,
+      name: definition.name,
+      role: definition.role,
+      phase: definition.phase,
+      summary: definition.summary,
+      runtimeMode: descriptor.runtimeMode,
+      manageable: descriptor.manageable,
+      available,
+      autoStart: descriptor.runtimeMode === "embedded",
+      running: descriptor.runtimeMode === "embedded",
+      loaded: descriptor.runtimeMode === "embedded",
+      healthy: descriptor.runtimeMode === "embedded" ? health.healthy : null,
+      pid: null,
+      repoPath: null,
+      plistLabel: null,
+      plistPath: null,
+      healthcheckUrl: embeddedHealthUrl,
+      statusDetail: descriptor.runtimeMode === "planned" ? "No runtime registered yet." : health.detail,
+    });
+  }
+
+  return statuses;
+}
+
+function embeddedHealthRoute(kind: string): string | null {
+  switch (kind) {
+    case "browserbee":
+      return "/api/browserbee/health";
+    case "computerbee":
+      return "/api/computerbee/health";
+    case "cronbee":
+      return "/api/cronbee/health";
+    case "authbee":
+      return "/api/authbee/health";
+    case "inventorbee":
+      return "/api/inventorbee/health";
+    default:
+      return null;
+  }
+}
+
+export function setBeeAutoStart(kind: string, autoStart: boolean, repoPath?: string): BeeLaunchAgentSettings | null {
+  const current = resolveBeeLaunchAgentSettings(kind);
+  if (!current) return null;
+
+  const next = updateBeeLaunchAgentSettings(kind, {
+    autoStart,
+    ...(repoPath ? { repoPath } : {}),
+  });
+  if (!next) return null;
+
+  if (autoStart) {
+    writeLaunchAgent(kind, next);
+    try {
+      execFileSync("launchctl", ["bootstrap", `gui/${getUid()}`, next.plistPath], { timeout: 5000, stdio: "ignore" });
+    } catch {
+      // already bootstrapped or loaded
+    }
+    execFileSync("launchctl", ["kickstart", "-k", `gui/${getUid()}/${next.plistLabel}`], { timeout: 5000, stdio: "ignore" });
+  } else {
+    try {
+      execFileSync("launchctl", ["bootout", `gui/${getUid()}`, next.plistPath], { timeout: 5000, stdio: "ignore" });
+    } catch {
+      // already stopped
+    }
+    rmSync(next.plistPath, { force: true });
+  }
+
+  return next;
+}
+
+export function ensureBeeServiceLoaded(kind: string): boolean {
+  const settings = resolveBeeLaunchAgentSettings(kind);
+  if (!settings) {
+    throw new Error(`Bee ${kind} is not launchagent-managed`);
+  }
+  if (!settings.autoStart) return false;
+
+  const current = parseLaunchctlStatus(launchctlPrint(settings.plistLabel));
+  if (current.loaded && current.running) return false;
+
+  writeLaunchAgent(kind, settings);
+  try {
+    execFileSync("launchctl", ["bootstrap", `gui/${getUid()}`, settings.plistPath], { timeout: 5000, stdio: "ignore" });
+  } catch {
+    // already bootstrapped
+  }
+  execFileSync("launchctl", ["kickstart", "-k", `gui/${getUid()}/${settings.plistLabel}`], { timeout: 5000, stdio: "ignore" });
+  return true;
+}
+
+export function restartBeeService(kind: string): void {
+  const settings = resolveBeeLaunchAgentSettings(kind);
+  if (!settings) {
+    throw new Error(`Bee ${kind} is not restartable`);
+  }
+  writeLaunchAgent(kind, settings);
+  try {
+    execFileSync("launchctl", ["bootstrap", `gui/${getUid()}`, settings.plistPath], { timeout: 5000, stdio: "ignore" });
+  } catch {
+    // already bootstrapped
+  }
+  execFileSync("launchctl", ["kickstart", "-k", `gui/${getUid()}/${settings.plistLabel}`], { timeout: 5000, stdio: "ignore" });
+}
+
+export function beeServiceExists(kind: string): boolean {
+  return getBeeDefinition(kind) !== null;
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}

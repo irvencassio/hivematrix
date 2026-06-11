@@ -1,0 +1,672 @@
+import Database from "better-sqlite3";
+import { randomUUID } from "crypto";
+import { join } from "path";
+import { homedir } from "os";
+import { mkdirSync } from "fs";
+import { normalizeBrainSelection } from "@/lib/brain/selection";
+
+const DB_DIR = join(homedir(), ".hivematrix");
+const DB_PATH = join(DB_DIR, "hivematrix.db");
+
+mkdirSync(DB_DIR, { recursive: true });
+
+// Singleton database instance (shared across orchestrator + API routes via globalThis)
+const g = globalThis as unknown as { __hivematrixSqlite?: Database.Database };
+
+// ------------------------------------------------------------------
+// Schema migrations — each entry runs once, tracked via PRAGMA user_version.
+// Append-only: never edit or reorder existing entries.
+// ------------------------------------------------------------------
+const MIGRATIONS: string[] = [
+  // v1: core tasks table (goals/missions/scheduledTasks dropped; directive replaces them)
+  `CREATE TABLE IF NOT EXISTS tasks (
+      _id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      project TEXT NOT NULL,
+      projectPath TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'backlog',
+      position INTEGER DEFAULT 0,
+      agentPid INTEGER,
+      sessionId TEXT,
+      resumeSessionId TEXT,
+      source TEXT DEFAULT 'dashboard',
+      workflow TEXT DEFAULT 'standalone',
+      model TEXT,
+      profile TEXT,
+      nextStep TEXT,
+      parentTaskId TEXT,
+      centralTaskId TEXT,
+      output TEXT DEFAULT '{}',
+      logs TEXT DEFAULT '[]',
+      approvals TEXT DEFAULT '[]',
+      comments TEXT DEFAULT '[]',
+      error TEXT,
+      executor TEXT DEFAULT 'agent',
+      dependsOn TEXT DEFAULT '[]',
+      workflowStepIndex INTEGER DEFAULT 0,
+      worktreeName TEXT DEFAULT NULL,
+      launchCommand TEXT DEFAULT NULL,
+      agentType TEXT DEFAULT 'auto',
+      turns TEXT DEFAULT '[]',
+      thinkingMode TEXT DEFAULT 'auto',
+      delayUntil TEXT DEFAULT NULL,
+      timeoutMinutes INTEGER DEFAULT 60,
+      maxBudgetUsd REAL DEFAULT 5.0,
+      completedBy TEXT DEFAULT NULL,
+      proverType TEXT DEFAULT NULL,
+      completionNote TEXT DEFAULT NULL,
+      assignedAt TEXT,
+      startedAt TEXT,
+      completedAt TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_tasks_status_position ON tasks(status, position);
+    CREATE INDEX IF NOT EXISTS idx_tasks_project_path_status ON tasks(projectPath, status);`,
+
+  // v2: task_history archive table + usage_totals aggregation table
+  `CREATE TABLE IF NOT EXISTS task_history (
+      _id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      project TEXT NOT NULL,
+      projectPath TEXT NOT NULL,
+      status TEXT NOT NULL,
+      executor TEXT DEFAULT 'agent',
+      workflow TEXT DEFAULT 'standalone',
+      model TEXT,
+      profile TEXT,
+      output TEXT DEFAULT '{}',
+      logs TEXT DEFAULT '[]',
+      approvals TEXT DEFAULT '[]',
+      comments TEXT DEFAULT '[]',
+      error TEXT,
+      cost REAL DEFAULT 0,
+      turns INTEGER DEFAULT 0,
+      inputTokens INTEGER DEFAULT 0,
+      outputTokens INTEGER DEFAULT 0,
+      cacheReadTokens INTEGER DEFAULT 0,
+      cacheCreationTokens INTEGER DEFAULT 0,
+      contextWindow INTEGER DEFAULT 0,
+      timeoutMinutes INTEGER DEFAULT 60,
+      maxBudgetUsd REAL DEFAULT 5.0,
+      createdAt TEXT,
+      startedAt TEXT,
+      completedAt TEXT,
+      archivedAt TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_history_project ON task_history(project);
+    CREATE INDEX IF NOT EXISTS idx_history_profile ON task_history(profile);
+    CREATE INDEX IF NOT EXISTS idx_history_archived ON task_history(archivedAt);
+    CREATE INDEX IF NOT EXISTS idx_history_completed ON task_history(completedAt);`,
+
+  // v3: usage_totals aggregation table
+  `CREATE TABLE IF NOT EXISTS usage_totals (
+      _id INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile TEXT NOT NULL,
+      project TEXT NOT NULL,
+      period TEXT NOT NULL,
+      periodStart TEXT NOT NULL,
+      taskCount INTEGER DEFAULT 0,
+      cost REAL DEFAULT 0,
+      inputTokens INTEGER DEFAULT 0,
+      outputTokens INTEGER DEFAULT 0,
+      cacheReadTokens INTEGER DEFAULT 0,
+      cacheCreationTokens INTEGER DEFAULT 0,
+      turns INTEGER DEFAULT 0,
+      updatedAt TEXT DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_totals_key ON usage_totals(profile, project, period, periodStart);`,
+
+  // v4: artifacts table for agent-produced visual output
+  `CREATE TABLE IF NOT EXISTS artifacts (
+      _id TEXT PRIMARY KEY,
+      scope TEXT NOT NULL,
+      scopeId TEXT,
+      filename TEXT NOT NULL,
+      title TEXT,
+      mimeType TEXT NOT NULL,
+      sizeBytes INTEGER NOT NULL DEFAULT 0,
+      stem TEXT NOT NULL DEFAULT '',
+      versionNum INTEGER NOT NULL DEFAULT 1,
+      state TEXT NOT NULL DEFAULT 'active',
+      supersededBy TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_artifacts_scope ON artifacts(scope, scopeId);
+    CREATE INDEX IF NOT EXISTS idx_artifacts_stem ON artifacts(scope, scopeId, stem);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_file ON artifacts(scope, scopeId, filename);`,
+
+  // v5: messaging control-plane — channels, identities, deliveries, inbound, sessions
+  `CREATE TABLE IF NOT EXISTS message_channels (
+      _id TEXT PRIMARY KEY,
+      channel TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      transport TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'off',
+      lastStartAt TEXT,
+      lastStopAt TEXT,
+      lastInboundAt TEXT,
+      lastOutboundAt TEXT,
+      lastError TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_message_channels_channel ON message_channels(channel);
+    CREATE TABLE IF NOT EXISTS message_identities (
+      _id TEXT PRIMARY KEY,
+      channel TEXT NOT NULL,
+      address TEXT NOT NULL,
+      displayName TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      capabilities TEXT NOT NULL DEFAULT '[]',
+      pairedAt TEXT,
+      lastSeenAt TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_message_identities_channel_address ON message_identities(channel, address);
+    CREATE INDEX IF NOT EXISTS idx_message_identities_status ON message_identities(channel, status);`,
+
+  // v6: directives table — replaces goals/missions/scheduled_tasks as the unified planning primitive
+  `CREATE TABLE IF NOT EXISTS directives (
+      _id TEXT PRIMARY KEY,
+      goal TEXT NOT NULL,
+      triggerPolicy TEXT NOT NULL DEFAULT 'manual',
+      budgetPolicy TEXT NOT NULL DEFAULT '{}',
+      approvalPolicy TEXT NOT NULL DEFAULT '{}',
+      brainSelection TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'active',
+      profile TEXT NOT NULL,
+      project TEXT NOT NULL,
+      projectPath TEXT NOT NULL,
+      lastRunId TEXT,
+      lastRunAt TEXT,
+      nextRunAt TEXT,
+      retiredReason TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_directives_profile_status ON directives(profile, status);
+    CREATE INDEX IF NOT EXISTS idx_directives_project ON directives(project);
+    CREATE INDEX IF NOT EXISTS idx_directives_next_run ON directives(nextRunAt);`,
+
+  // v7: runs table — execution records for each directive invocation
+  `CREATE TABLE IF NOT EXISTS runs (
+      _id TEXT PRIMARY KEY,
+      directiveId TEXT NOT NULL,
+      phase TEXT NOT NULL DEFAULT 'plan',
+      planSummary TEXT,
+      reflectionText TEXT,
+      startedAt TEXT NOT NULL DEFAULT (datetime('now')),
+      completedAt TEXT,
+      failedAt TEXT,
+      failReason TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_runs_directive ON runs(directiveId);
+    CREATE INDEX IF NOT EXISTS idx_runs_phase ON runs(directiveId, phase);`,
+
+  // v8: run_journal table — step-by-step recovery log for resumable runs
+  `CREATE TABLE IF NOT EXISTS run_journal (
+      _id INTEGER PRIMARY KEY AUTOINCREMENT,
+      runId TEXT NOT NULL,
+      directiveId TEXT NOT NULL,
+      step TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      recordedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_run_journal_run ON run_journal(runId);
+    CREATE INDEX IF NOT EXISTS idx_run_journal_directive ON run_journal(directiveId);`,
+
+  // v9: directive_criteria table — verified-completion criteria for directives
+  `CREATE TABLE IF NOT EXISTS directive_criteria (
+      _id TEXT PRIMARY KEY,
+      directiveId TEXT NOT NULL,
+      description TEXT NOT NULL,
+      proverId TEXT,
+      proverType TEXT,
+      proven INTEGER NOT NULL DEFAULT 0,
+      provenAt TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_directive_criteria_directive ON directive_criteria(directiveId);
+    CREATE INDEX IF NOT EXISTS idx_directive_criteria_proven ON directive_criteria(directiveId, proven);`,
+
+  // v10: add directiveId FK on tasks — links a task back to its originating directive
+  `ALTER TABLE tasks ADD COLUMN directiveId TEXT DEFAULT NULL;
+    CREATE INDEX IF NOT EXISTS idx_tasks_directive ON tasks(directiveId);`,
+];
+
+// ------------------------------------------------------------------
+// Open / initialise the database
+// ------------------------------------------------------------------
+function openDb(): Database.Database {
+  const db = new Database(DB_PATH);
+
+  // Enable WAL mode for concurrent read performance
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+
+  const currentVersion = (db.pragma("user_version", { simple: true }) as number) ?? 0;
+
+  for (let i = currentVersion; i < MIGRATIONS.length; i++) {
+    db.exec(MIGRATIONS[i]);
+    db.pragma(`user_version = ${i + 1}`);
+  }
+
+  return db;
+}
+
+export function getDb(): Database.Database {
+  if (!g.__hivematrixSqlite) {
+    g.__hivematrixSqlite = openDb();
+  }
+  return g.__hivematrixSqlite;
+}
+
+export default getDb;
+
+export function generateId(): string {
+  return randomUUID().replace(/-/g, "").slice(0, 24);
+}
+
+// ------------------------------------------------------------------
+// TaskStore — drop-in replacement for Mongoose Task model
+// ------------------------------------------------------------------
+
+interface TaskRow {
+  _id: string;
+  title: string;
+  description: string;
+  project: string;
+  projectPath: string;
+  status: string;
+  position: number;
+  agentPid: number | null;
+  sessionId: string | null;
+  resumeSessionId: string | null;
+  source: string;
+  executor: string;
+  workflow: string;
+  workflowStepIndex: number;
+  model: string | null;
+  profile: string | null;
+  nextStep: string | null;
+  parentTaskId: string | null;
+  centralTaskId: string | null;
+  directiveId: string | null;
+  delayUntil: string | null;
+  delayReason: string | null;
+  worktreeName: string | null;
+  launchCommand: string | null;
+  agentType: string;
+  thinkingMode: string;
+  brainSelection: string;
+  dependsOn: string;
+  output: string;
+  logs: string;
+  turns: string;
+  approvals: string;
+  comments: string;
+  error: string | null;
+  timeoutMinutes: number;
+  maxBudgetUsd: number;
+  completedBy: string | null;
+  proverType: string | null;
+  completionNote: string | null;
+  assignedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type TaskDoc = Omit<TaskRow, "output" | "logs" | "turns" | "approvals" | "comments" | "dependsOn" | "brainSelection"> & {
+  output: Record<string, unknown>;
+  logs: Array<Record<string, unknown>>;
+  turns: Array<Record<string, unknown>>;
+  approvals: Array<Record<string, unknown>>;
+  comments: Array<Record<string, unknown>>;
+  dependsOn: string[];
+  brainSelection: ReturnType<typeof normalizeBrainSelection>;
+  [key: string]: unknown;
+};
+
+function rowToTask(row: TaskRow): TaskDoc {
+  return {
+    ...row,
+    output: JSON.parse(row.output || "{}"),
+    logs: JSON.parse(row.logs || "[]"),
+    turns: JSON.parse(row.turns || "[]"),
+    approvals: JSON.parse(row.approvals || "[]"),
+    comments: JSON.parse(row.comments || "[]"),
+    dependsOn: JSON.parse(row.dependsOn || "[]"),
+    brainSelection: normalizeBrainSelection(JSON.parse(row.brainSelection || "{}")),
+  };
+}
+
+function buildWhere(query: Record<string, unknown>): { where: string; params: unknown[] } {
+  if (Object.keys(query).length === 0) return { where: "", params: [] };
+
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  for (const [key, value] of Object.entries(query)) {
+    if (key === "$or") {
+      const orClauses = (value as Record<string, unknown>[]).map((clause) => {
+        const sub = buildWhere(clause);
+        params.push(...sub.params);
+        return `(${sub.where.replace(" WHERE ", "")})`;
+      });
+      conditions.push(`(${orClauses.join(" OR ")})`);
+    } else if (key === "$and") {
+      const andClauses = (value as Record<string, unknown>[]).map((clause) => {
+        const sub = buildWhere(clause);
+        params.push(...sub.params);
+        return `(${sub.where.replace(" WHERE ", "")})`;
+      });
+      conditions.push(`(${andClauses.join(" AND ")})`);
+    } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      const op = value as Record<string, unknown>;
+      if (op.$in) {
+        const vals = op.$in as unknown[];
+        conditions.push(`${key} IN (${vals.map(() => "?").join(", ")})`);
+        params.push(...vals);
+      } else if (op.$nin) {
+        const vals = op.$nin as unknown[];
+        conditions.push(`${key} NOT IN (${vals.map(() => "?").join(", ")})`);
+        params.push(...vals);
+      } else if (op.$ne !== undefined) {
+        if (op.$ne === null) {
+          conditions.push(`${key} IS NOT NULL`);
+        } else {
+          conditions.push(`${key} != ?`);
+          params.push(op.$ne);
+        }
+      } else if (op.$exists !== undefined) {
+        conditions.push(op.$exists ? `${key} IS NOT NULL` : `${key} IS NULL`);
+      } else if (op.$lte !== undefined) {
+        conditions.push(`${key} <= ?`);
+        params.push(op.$lte);
+      } else if (op.$gte !== undefined) {
+        conditions.push(`${key} >= ?`);
+        params.push(op.$gte);
+      } else if (op.$gt !== undefined) {
+        conditions.push(`${key} > ?`);
+        params.push(op.$gt);
+      } else if (op.$lt !== undefined) {
+        conditions.push(`${key} < ?`);
+        params.push(op.$lt);
+      }
+    } else if (value === null) {
+      conditions.push(`${key} IS NULL`);
+    } else {
+      conditions.push(`${key} = ?`);
+      params.push(value);
+    }
+  }
+
+  return { where: conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "", params };
+}
+
+export const Task = {
+  find(query: Record<string, unknown> = {}) {
+    const db = getDb();
+    const { where, params } = buildWhere(query);
+    const sql = `SELECT * FROM tasks${where}`;
+    let sortClause = "";
+    let limitVal = 0;
+    const chain = {
+      sort(sort: Record<string, number>) {
+        sortClause = ` ORDER BY ${Object.entries(sort).map(([k, v]) => `${k} ${v === 1 ? "ASC" : "DESC"}`).join(", ")}`;
+        return chain;
+      },
+      limit(n: number) { limitVal = n; return chain; },
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      select(_fields?: string) { return chain; },
+      lean() { return chain; },
+      then<TResult1 = TaskDoc[], TResult2 = never>(
+        resolve?: ((val: TaskDoc[]) => TResult1 | PromiseLike<TResult1>) | null,
+        reject?: ((err: unknown) => TResult2 | PromiseLike<TResult2>) | null
+      ): Promise<TResult1 | TResult2> {
+        try {
+          let finalSql = sql + sortClause;
+          if (limitVal > 0) finalSql += ` LIMIT ${limitVal}`;
+          const rows = db.prepare(finalSql).all(...params) as TaskRow[];
+          const result = rows.map(rowToTask);
+          return Promise.resolve(resolve ? resolve(result) : result as unknown as TResult1);
+        } catch (err) {
+          if (reject) return Promise.resolve(reject(err));
+          return Promise.reject(err);
+        }
+      },
+    };
+    return chain;
+  },
+
+  findOne(query: Record<string, unknown> = {}) {
+    const db = getDb();
+    const { where, params } = buildWhere(query);
+    let sortClause = "";
+    const chain = {
+      sort(sort: Record<string, number>) {
+        sortClause = ` ORDER BY ${Object.entries(sort).map(([k, v]) => `${k} ${v === 1 ? "ASC" : "DESC"}`).join(", ")}`;
+        return chain;
+      },
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      select(_fields?: string) { return chain; },
+      lean() { return chain; },
+      then<TResult1 = TaskDoc | null, TResult2 = never>(
+        resolve?: ((val: TaskDoc | null) => TResult1 | PromiseLike<TResult1>) | null,
+        reject?: ((err: unknown) => TResult2 | PromiseLike<TResult2>) | null
+      ): Promise<TResult1 | TResult2> {
+        try {
+          const row = db.prepare(`SELECT * FROM tasks${where}${sortClause} LIMIT 1`).get(...params) as TaskRow | undefined;
+          const result = row ? rowToTask(row) : null;
+          return Promise.resolve(resolve ? resolve(result) : result as unknown as TResult1);
+        } catch (err) {
+          if (reject) return Promise.resolve(reject(err));
+          return Promise.reject(err);
+        }
+      },
+    };
+    return chain;
+  },
+
+  async findById(id: string): Promise<TaskDoc | null> {
+    const db = getDb();
+    const row = db.prepare("SELECT * FROM tasks WHERE _id = ?").get(id) as TaskRow | undefined;
+    return row ? rowToTask(row) : null;
+  },
+
+  async findByIdAndUpdate(id: string, updates: Record<string, unknown>): Promise<TaskDoc | null> {
+    const db = getDb();
+
+    if (updates.$push) {
+      const pushOps = updates.$push as Record<string, unknown>;
+      for (const [field, value] of Object.entries(pushOps)) {
+        if (["logs", "turns", "approvals", "comments"].includes(field)) {
+          const current = db.prepare(`SELECT ${field} FROM tasks WHERE _id = ?`).get(id) as Record<string, string> | undefined;
+          if (current) {
+            const arr = JSON.parse(current[field] || "[]");
+            arr.push(value);
+            db.prepare(`UPDATE tasks SET ${field} = ?, updatedAt = datetime('now') WHERE _id = ?`).run(JSON.stringify(arr), id);
+          }
+        }
+      }
+      delete updates.$push;
+    }
+
+    if (updates.$set) {
+      const setOps = updates.$set as Record<string, unknown>;
+      for (const [key, value] of Object.entries(setOps)) {
+        if (key.startsWith("approvals.")) {
+          const current = db.prepare("SELECT approvals FROM tasks WHERE _id = ?").get(id) as { approvals: string } | undefined;
+          if (current) {
+            const approvals = JSON.parse(current.approvals || "[]");
+            for (const a of approvals) {
+              if (!a.decision) {
+                if (key.includes("decision")) a.decision = value;
+                if (key.includes("decidedVia")) a.decidedVia = setOps["approvals.$[elem].decidedVia"];
+              }
+            }
+            db.prepare("UPDATE tasks SET approvals = ?, updatedAt = datetime('now') WHERE _id = ?").run(JSON.stringify(approvals), id);
+          }
+        }
+      }
+      delete updates.$set;
+      if (Object.keys(updates).length === 0) {
+        const row = db.prepare("SELECT * FROM tasks WHERE _id = ?").get(id) as TaskRow | undefined;
+        return row ? rowToTask(row) : null;
+      }
+    }
+
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(updates)) {
+      if (k.startsWith("$") || v === undefined) continue;
+      clean[k] = v;
+    }
+
+    if (Object.keys(clean).length > 0) {
+      if (clean.output && typeof clean.output === "object") clean.output = JSON.stringify(clean.output);
+      if (clean.logs && Array.isArray(clean.logs)) clean.logs = JSON.stringify(clean.logs);
+      if (clean.turns && Array.isArray(clean.turns)) clean.turns = JSON.stringify(clean.turns);
+      if (clean.approvals && Array.isArray(clean.approvals)) clean.approvals = JSON.stringify(clean.approvals);
+      if (clean.comments && Array.isArray(clean.comments)) clean.comments = JSON.stringify(clean.comments);
+      if (clean.dependsOn && Array.isArray(clean.dependsOn)) clean.dependsOn = JSON.stringify(clean.dependsOn);
+      if (clean.brainSelection && typeof clean.brainSelection === "object") {
+        clean.brainSelection = JSON.stringify(normalizeBrainSelection(clean.brainSelection));
+      }
+
+      const setClauses = [...Object.keys(clean).map((k) => `${k} = ?`), "updatedAt = datetime('now')"];
+      db.prepare(`UPDATE tasks SET ${setClauses.join(", ")} WHERE _id = ?`).run(...Object.values(clean), id);
+    }
+
+    const row = db.prepare("SELECT * FROM tasks WHERE _id = ?").get(id) as TaskRow | undefined;
+    return row ? rowToTask(row) : null;
+  },
+
+  async findOneAndUpdate(query: Record<string, unknown>, updates: Record<string, unknown>, opts?: { sort?: Record<string, number> }) {
+    const db = getDb();
+    const { where, params } = buildWhere(query);
+    let sql = `SELECT _id FROM tasks${where}`;
+    if (opts?.sort) {
+      sql += ` ORDER BY ${Object.entries(opts.sort).map(([k, v]) => `${k} ${v === 1 ? "ASC" : "DESC"}`).join(", ")}`;
+    }
+    sql += " LIMIT 1";
+    const row = db.prepare(sql).get(...params) as { _id: string } | undefined;
+    if (!row) return null;
+    return Task.findByIdAndUpdate(row._id, updates);
+  },
+
+  async create(data: Record<string, unknown>): Promise<TaskDoc> {
+    const db = getDb();
+    const id = (data._id as string) || generateId();
+    const now = new Date().toISOString();
+    const fields: Record<string, unknown> = {
+      _id: id,
+      title: data.title,
+      description: data.description,
+      project: data.project,
+      projectPath: data.projectPath,
+      status: data.status ?? "backlog",
+      position: data.position ?? 0,
+      agentPid: data.agentPid ?? null,
+      sessionId: data.sessionId ?? null,
+      resumeSessionId: data.resumeSessionId ?? null,
+      source: data.source ?? "dashboard",
+      executor: data.executor ?? "agent",
+      workflow: data.workflow ?? "standalone",
+      workflowStepIndex: data.workflowStepIndex ?? 0,
+      model: data.model ?? null,
+      profile: data.profile ?? null,
+      nextStep: data.nextStep ?? null,
+      parentTaskId: data.parentTaskId ?? null,
+      centralTaskId: data.centralTaskId ?? null,
+      directiveId: data.directiveId ?? null,
+      delayUntil: data.delayUntil ?? null,
+      delayReason: data.delayReason ?? null,
+      worktreeName: data.worktreeName ?? null,
+      launchCommand: data.launchCommand ?? null,
+      agentType: data.agentType ?? "auto",
+      thinkingMode: data.thinkingMode ?? "auto",
+      brainSelection: JSON.stringify(normalizeBrainSelection(data.brainSelection)),
+      dependsOn: JSON.stringify(data.dependsOn ?? []),
+      output: JSON.stringify(data.output ?? {}),
+      logs: JSON.stringify(data.logs ?? []),
+      turns: JSON.stringify(data.turns ?? []),
+      approvals: JSON.stringify(data.approvals ?? []),
+      comments: JSON.stringify(data.comments ?? []),
+      error: data.error ?? null,
+      timeoutMinutes: data.timeoutMinutes ?? 60,
+      maxBudgetUsd: data.maxBudgetUsd ?? 5.0,
+      completedBy: data.completedBy ?? null,
+      proverType: data.proverType ?? null,
+      completionNote: data.completionNote ?? null,
+      assignedAt: data.assignedAt ?? null,
+      startedAt: data.startedAt ?? null,
+      completedAt: data.completedAt ?? null,
+      createdAt: data.createdAt ?? now,
+      updatedAt: data.updatedAt ?? now,
+    };
+    const columns = Object.keys(fields);
+    db.prepare(`INSERT INTO tasks (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`).run(...Object.values(fields));
+    const row = db.prepare("SELECT * FROM tasks WHERE _id = ?").get(id) as TaskRow;
+    return rowToTask(row);
+  },
+
+  async findByIdAndDelete(id: string) {
+    const db = getDb();
+    const row = db.prepare("SELECT * FROM tasks WHERE _id = ?").get(id) as TaskRow | undefined;
+    if (!row) return null;
+    db.prepare("DELETE FROM tasks WHERE _id = ?").run(id);
+    return rowToTask(row);
+  },
+
+  async deleteMany(query: Record<string, unknown>) {
+    const db = getDb();
+    const { where, params } = buildWhere(query);
+    const result = db.prepare(`DELETE FROM tasks${where}`).run(...params);
+    return { deletedCount: result.changes };
+  },
+
+  async countDocuments(query: Record<string, unknown>): Promise<number> {
+    const db = getDb();
+    const { where, params } = buildWhere(query);
+    const row = db.prepare(`SELECT COUNT(*) as count FROM tasks${where}`).get(...params) as { count: number };
+    return row.count;
+  },
+
+  async updateMany(query: Record<string, unknown>, updates: Record<string, unknown>) {
+    const db = getDb();
+    const { where, params } = buildWhere(query);
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(updates)) {
+      if (k.startsWith("$") || v === undefined) continue;
+      clean[k] = v;
+    }
+    if (Object.keys(clean).length === 0) return { modifiedCount: 0 };
+    if (clean.output && typeof clean.output === "object") clean.output = JSON.stringify(clean.output);
+    if (clean.brainSelection && typeof clean.brainSelection === "object") {
+      clean.brainSelection = JSON.stringify(normalizeBrainSelection(clean.brainSelection));
+    }
+    const setClauses = [...Object.keys(clean).map((k) => `${k} = ?`), "updatedAt = datetime('now')"];
+    const result = db.prepare(`UPDATE tasks SET ${setClauses.join(", ")}${where}`).run(...Object.values(clean), ...params);
+    return { modifiedCount: result.changes };
+  },
+
+  countByStatus(): Record<string, number> {
+    const db = getDb();
+    const rows = db.prepare("SELECT status, COUNT(*) as count FROM tasks GROUP BY status").all() as { status: string; count: number }[];
+    const result: Record<string, number> = {};
+    for (const row of rows) result[row.status] = row.count;
+    return result;
+  },
+};

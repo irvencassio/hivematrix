@@ -1,0 +1,457 @@
+import type { TaskDoc } from "@/lib/db";
+import { ContractValidationError } from "@/lib/central/contracts";
+import { CODEX_COMPUTER_USE_MODEL_ID } from "@/lib/models/catalog";
+import { buildAuthBeeSessionPlaneSummary, type AuthBeeSessionRecord } from "@/lib/session/contracts";
+
+export const BROWSERBEE_JOB_TYPES = [
+  "authenticated_research",
+  "form_fill",
+  "site_ops",
+  "capture",
+  "triage",
+] as const;
+export type BrowserBeeJobType = (typeof BROWSERBEE_JOB_TYPES)[number];
+
+export const BROWSERBEE_RUN_MODES = ["isolated", "attached", "manual_escalation"] as const;
+export type BrowserBeeRunMode = (typeof BROWSERBEE_RUN_MODES)[number];
+
+export const BROWSERBEE_APPROVAL_MODES = ["auto", "confirm_external", "manual"] as const;
+export type BrowserBeeApprovalMode = (typeof BROWSERBEE_APPROVAL_MODES)[number];
+
+export const BROWSERBEE_ARTIFACT_POLICIES = ["none", "screenshots", "screenshots_and_html"] as const;
+export type BrowserBeeArtifactPolicy = (typeof BROWSERBEE_ARTIFACT_POLICIES)[number];
+
+export const BROWSERBEE_TRACE_POLICIES = ["none", "timeline", "timeline_and_screenshots"] as const;
+export type BrowserBeeTracePolicy = (typeof BROWSERBEE_TRACE_POLICIES)[number];
+
+export interface BrowserBeeJobCreatePayload {
+  title: string;
+  objective: string;
+  project: string;
+  startUrl: string;
+  siteLabel: string | null;
+  requestedBy: string;
+  requiresLogin: boolean;
+  runMode: BrowserBeeRunMode;
+  approvalMode: BrowserBeeApprovalMode;
+  jobType: BrowserBeeJobType;
+  allowedDomains: string[];
+  steps: string[];
+  successCriteria: string[];
+  artifactPolicy: BrowserBeeArtifactPolicy;
+  tracePolicy: BrowserBeeTracePolicy;
+  sessionLabel: string | null;
+  notes: string;
+}
+
+export interface BrowserBeeTaskRequestEnvelope extends BrowserBeeJobCreatePayload {
+  requestedProjectPath: string;
+  backingModel: string;
+  createdVia: string;
+}
+
+export interface BrowserBeeJobSnapshot {
+  id: string;
+  title: string;
+  status: string;
+  requestedProject: string;
+  requestedProjectPath: string;
+  startUrl: string;
+  siteLabel: string | null;
+  requestedBy: string;
+  requiresLogin: boolean;
+  runMode: BrowserBeeRunMode;
+  approvalMode: BrowserBeeApprovalMode;
+  jobType: BrowserBeeJobType;
+  allowedDomains: string[];
+  artifactPolicy: BrowserBeeArtifactPolicy;
+  tracePolicy: BrowserBeeTracePolicy;
+  sessionLabel: string | null;
+  model: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BrowserBeeHealthSnapshot {
+  ok: true;
+  bee: "browserbee";
+  backingModel: string;
+  readiness: {
+    codexConfigured: boolean;
+    codexAuthMode: string;
+    acknowledgedComputerUse: boolean;
+    consentRequired: boolean;
+  };
+  counts: {
+    total: number;
+    backlog: number;
+    active: number;
+    review: number;
+    done: number;
+    failed: number;
+    cancelled: number;
+  };
+  latestTaskAt: string | null;
+  sessionPlane: {
+    mode: "shared_session_plane";
+    total: number;
+    ready: number;
+    needsReauth: number;
+    expired: number;
+    providers: string[];
+  };
+  runModesSupported: BrowserBeeRunMode[];
+  approvalModesSupported: BrowserBeeApprovalMode[];
+}
+
+type UnknownRecord = Record<string, unknown>;
+type BrowserBeeTaskWithOutput = Pick<TaskDoc, "_id" | "title" | "status" | "createdAt" | "updatedAt" | "model" | "output">;
+
+function fail(message: string): never {
+  throw new ContractValidationError(message);
+}
+
+function asRecord(value: unknown, label: string): UnknownRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    fail(`${label} must be an object`);
+  }
+  return value as UnknownRecord;
+}
+
+function readString(
+  record: UnknownRecord,
+  key: string,
+  label: string,
+  { required = true, allowEmpty = false }: { required?: boolean; allowEmpty?: boolean } = {},
+): string | null {
+  const value = record[key];
+  if (value == null) {
+    if (required) fail(`${label} is required`);
+    return null;
+  }
+  if (typeof value !== "string") fail(`${label} must be a string`);
+  const trimmed = value.trim();
+  if (!allowEmpty && trimmed.length === 0) {
+    if (required) fail(`${label} is required`);
+    return null;
+  }
+  return trimmed;
+}
+
+function readBoolean(record: UnknownRecord, key: string, fallback: boolean): boolean {
+  const value = record[key];
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function readStringArray(record: UnknownRecord, key: string): string[] {
+  const value = record[key];
+  if (value == null) return [];
+  if (!Array.isArray(value)) fail(`${key} must be an array`);
+  return value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function normalizeEnum<T extends readonly string[]>(value: unknown, allowed: T, fallback: T[number], label: string): T[number] {
+  if (typeof value !== "string" || value.trim().length === 0) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if ((allowed as readonly string[]).includes(normalized)) {
+    return normalized as T[number];
+  }
+  fail(`${label} must be one of: ${allowed.join(", ")}`);
+}
+
+function normalizeUrl(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    fail(`Invalid startUrl: ${value}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    fail("startUrl must use http or https");
+  }
+  return parsed.toString();
+}
+
+function deriveJobTitle(input: { title: string | null; objective: string; siteLabel: string | null; startUrl: string }): string {
+  if (input.title) return input.title;
+  if (input.siteLabel) return `BrowserBee: ${input.siteLabel}`;
+  const host = new URL(input.startUrl).hostname.replace(/^www\./, "");
+  const words = input.objective.split(/\s+/).slice(0, 5).join(" ");
+  return `BrowserBee: ${host}${words ? ` - ${words}` : ""}`.slice(0, 100);
+}
+
+function deriveApprovalMode(runMode: BrowserBeeRunMode, requiresLogin: boolean): BrowserBeeApprovalMode {
+  if (runMode === "attached") return "manual";
+  if (requiresLogin) return "confirm_external";
+  return "auto";
+}
+
+function readBrowserBeeEnvelope(task: BrowserBeeTaskWithOutput): BrowserBeeTaskRequestEnvelope | null {
+  const output = task.output;
+  if (!output || typeof output !== "object" || Array.isArray(output)) return null;
+  const request = (output as Record<string, unknown>).browserbeeRequest;
+  if (!request || typeof request !== "object" || Array.isArray(request)) return null;
+
+  const record = request as UnknownRecord;
+  const title = readString(record, "title", "browserbeeRequest.title", { required: false }) ?? task.title;
+  const objective = readString(record, "objective", "browserbeeRequest.objective", { required: false }) ?? task.title;
+  const project = readString(record, "project", "browserbeeRequest.project", { required: false }) ?? "ops";
+  const startUrl = readString(record, "startUrl", "browserbeeRequest.startUrl", { required: false }) ?? "about:blank";
+
+  return {
+    title,
+    objective,
+    project,
+    startUrl,
+    siteLabel: readString(record, "siteLabel", "browserbeeRequest.siteLabel", { required: false }),
+    requestedBy: readString(record, "requestedBy", "browserbeeRequest.requestedBy", { required: false }) ?? "hive",
+    requiresLogin: readBoolean(record, "requiresLogin", false),
+    runMode: normalizeEnum(record.runMode, BROWSERBEE_RUN_MODES, "isolated", "browserbeeRequest.runMode"),
+    approvalMode: normalizeEnum(
+      record.approvalMode,
+      BROWSERBEE_APPROVAL_MODES,
+      "manual",
+      "browserbeeRequest.approvalMode",
+    ),
+    jobType: normalizeEnum(record.jobType, BROWSERBEE_JOB_TYPES, "site_ops", "browserbeeRequest.jobType"),
+    allowedDomains: readStringArray(record, "allowedDomains"),
+    steps: readStringArray(record, "steps"),
+    successCriteria: readStringArray(record, "successCriteria"),
+    artifactPolicy: normalizeEnum(
+      record.artifactPolicy,
+      BROWSERBEE_ARTIFACT_POLICIES,
+      "screenshots",
+      "browserbeeRequest.artifactPolicy",
+    ),
+    tracePolicy: normalizeEnum(record.tracePolicy, BROWSERBEE_TRACE_POLICIES, "timeline", "browserbeeRequest.tracePolicy"),
+    sessionLabel: readString(record, "sessionLabel", "browserbeeRequest.sessionLabel", { required: false }),
+    notes: readString(record, "notes", "browserbeeRequest.notes", { required: false, allowEmpty: true }) ?? "",
+    requestedProjectPath: readString(record, "requestedProjectPath", "browserbeeRequest.requestedProjectPath", { required: false }) ?? "",
+    backingModel: readString(record, "backingModel", "browserbeeRequest.backingModel", { required: false }) ?? CODEX_COMPUTER_USE_MODEL_ID,
+    createdVia: readString(record, "createdVia", "browserbeeRequest.createdVia", { required: false }) ?? "browserbee",
+  };
+}
+
+export function parseBrowserBeeJobCreate(input: unknown): BrowserBeeJobCreatePayload {
+  const record = asRecord(input, "browserbee job");
+  const objective = readString(record, "objective", "objective")!;
+  const project = readString(record, "project", "project")!;
+  const normalizedStartUrl = normalizeUrl(readString(record, "startUrl", "startUrl")!);
+  const startUrl = new URL(normalizedStartUrl);
+  const siteLabel = readString(record, "siteLabel", "siteLabel", { required: false });
+  const requiresLogin = readBoolean(record, "requiresLogin", false);
+  const runMode = normalizeEnum(record.runMode, BROWSERBEE_RUN_MODES, "isolated", "runMode");
+  const requestedBy = readString(record, "requestedBy", "requestedBy", { required: false }) ?? "hive";
+  const title = deriveJobTitle({
+    title: readString(record, "title", "title", { required: false }),
+    objective,
+    siteLabel,
+    startUrl: normalizedStartUrl,
+  });
+
+  const allowedDomains = Array.from(
+    new Set([startUrl.hostname, ...readStringArray(record, "allowedDomains")].map((entry) => entry.trim()).filter(Boolean)),
+  );
+  const successCriteria = readStringArray(record, "successCriteria");
+
+  return {
+    title,
+    objective,
+    project,
+    startUrl: normalizedStartUrl,
+    siteLabel,
+    requestedBy,
+    requiresLogin,
+    runMode,
+    approvalMode: normalizeEnum(
+      record.approvalMode,
+      BROWSERBEE_APPROVAL_MODES,
+      deriveApprovalMode(runMode, requiresLogin),
+      "approvalMode",
+    ),
+    jobType: normalizeEnum(record.jobType, BROWSERBEE_JOB_TYPES, "site_ops", "jobType"),
+    allowedDomains,
+    steps: readStringArray(record, "steps"),
+    successCriteria:
+      successCriteria.length > 0
+        ? successCriteria
+        : ["Complete the requested browser workflow and leave a concise summary in the final task result."],
+    artifactPolicy: normalizeEnum(record.artifactPolicy, BROWSERBEE_ARTIFACT_POLICIES, "screenshots", "artifactPolicy"),
+    tracePolicy: normalizeEnum(record.tracePolicy, BROWSERBEE_TRACE_POLICIES, "timeline", "tracePolicy"),
+    sessionLabel: readString(record, "sessionLabel", "sessionLabel", { required: false }),
+    notes: readString(record, "notes", "notes", { required: false, allowEmpty: true }) ?? "",
+  };
+}
+
+export function buildBrowserBeeTaskDescription(
+  payload: BrowserBeeJobCreatePayload,
+  options: { requestedProjectPath: string },
+): string {
+  const sections = [
+    "This task came from BrowserBee.",
+    "Treat it as a stateful browser workflow, not a generic fresh-public-web research request.",
+    "If the work can be completed by WebBee without login state, multi-step browser control, or rendered interaction, stop and note that the request should be rerouted.",
+    "Use the BrowserBee backing path via Codex Computer Use only within the approved domains and stated workflow scope.",
+    "",
+    `Requested by: ${payload.requestedBy}`,
+    `Target project: ${payload.project}`,
+    `Target project path: ${options.requestedProjectPath}`,
+    `Start URL: ${payload.startUrl}`,
+    `Site: ${payload.siteLabel ?? new URL(payload.startUrl).hostname}`,
+    `Job type: ${payload.jobType}`,
+    `Run mode: ${payload.runMode}`,
+    `Approval mode: ${payload.approvalMode}`,
+    `Requires login: ${payload.requiresLogin ? "yes" : "no"}`,
+    `Allowed domains: ${payload.allowedDomains.join(", ")}`,
+    `Artifact policy: ${payload.artifactPolicy}`,
+    `Trace policy: ${payload.tracePolicy}`,
+  ];
+
+  if (payload.sessionLabel) {
+    sections.push(`Session label: ${payload.sessionLabel}`);
+  }
+
+  sections.push("", "Objective:", payload.objective);
+
+  if (payload.steps.length > 0) {
+    sections.push("", "Execution steps:");
+    for (const step of payload.steps) {
+      sections.push(`- ${step}`);
+    }
+  }
+
+  if (payload.successCriteria.length > 0) {
+    sections.push("", "Success criteria:");
+    for (const criterion of payload.successCriteria) {
+      sections.push(`- ${criterion}`);
+    }
+  }
+
+  if (payload.notes.trim()) {
+    sections.push("", "Operator notes:", payload.notes.trim());
+  }
+
+  sections.push(
+    "",
+    "Output expectations:",
+    "- Summarize what happened on the site.",
+    "- Call out any approvals or blockers encountered.",
+    "- Mention screenshots, traces, or HTML captures created while executing the workflow.",
+  );
+
+  return sections.join("\n");
+}
+
+export function buildBrowserBeeTaskRequestEnvelope(
+  payload: BrowserBeeJobCreatePayload,
+  requestedProjectPath: string,
+): BrowserBeeTaskRequestEnvelope {
+  return {
+    ...payload,
+    requestedProjectPath,
+    backingModel: CODEX_COMPUTER_USE_MODEL_ID,
+    createdVia: "browserbee.jobs",
+  };
+}
+
+export function buildBrowserBeeJobSnapshot(task: BrowserBeeTaskWithOutput): BrowserBeeJobSnapshot {
+  const request = readBrowserBeeEnvelope(task);
+
+  return {
+    id: String(task._id),
+    title: task.title,
+    status: task.status,
+    requestedProject: request?.project ?? "ops",
+    requestedProjectPath: request?.requestedProjectPath ?? "",
+    startUrl: request?.startUrl ?? "",
+    siteLabel: request?.siteLabel ?? null,
+    requestedBy: request?.requestedBy ?? "hive",
+    requiresLogin: request?.requiresLogin ?? false,
+    runMode: request?.runMode ?? "isolated",
+    approvalMode: request?.approvalMode ?? "manual",
+    jobType: request?.jobType ?? "site_ops",
+    allowedDomains: request?.allowedDomains ?? [],
+    artifactPolicy: request?.artifactPolicy ?? "screenshots",
+    tracePolicy: request?.tracePolicy ?? "timeline",
+    sessionLabel: request?.sessionLabel ?? null,
+    model: task.model ?? request?.backingModel ?? null,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+  };
+}
+
+export function buildBrowserBeeHealthSnapshot(args: {
+  tasks: Array<Pick<TaskDoc, "status" | "createdAt">>;
+  readiness: {
+    codexConfigured: boolean;
+    codexAuthMode: string;
+    acknowledgedComputerUse: boolean;
+  };
+  sessions?: Array<Pick<AuthBeeSessionRecord, "provider" | "status" | "kind" | "attachedTo" | "domains">>;
+}): BrowserBeeHealthSnapshot {
+  const counts = {
+    total: args.tasks.length,
+    backlog: 0,
+    active: 0,
+    review: 0,
+    done: 0,
+    failed: 0,
+    cancelled: 0,
+  };
+
+  let latestTaskAt: string | null = null;
+  for (const task of args.tasks) {
+    if (!latestTaskAt || task.createdAt > latestTaskAt) latestTaskAt = task.createdAt;
+    switch (task.status) {
+      case "backlog":
+        counts.backlog += 1;
+        break;
+      case "assigned":
+      case "in_progress":
+        counts.active += 1;
+        break;
+      case "review":
+        counts.review += 1;
+        break;
+      case "done":
+        counts.done += 1;
+        break;
+      case "failed":
+        counts.failed += 1;
+        break;
+      case "cancelled":
+        counts.cancelled += 1;
+        break;
+      default:
+        break;
+    }
+  }
+
+  const sessionSummary = buildAuthBeeSessionPlaneSummary(args.sessions ?? []);
+  const sessionPlane = {
+    mode: sessionSummary.mode,
+    total: sessionSummary.total,
+    ready: sessionSummary.ready,
+    needsReauth: sessionSummary.needsReauth,
+    expired: sessionSummary.expired,
+    providers: sessionSummary.providers,
+  };
+
+  return {
+    ok: true,
+    bee: "browserbee",
+    backingModel: CODEX_COMPUTER_USE_MODEL_ID,
+    readiness: {
+      ...args.readiness,
+      consentRequired: args.readiness.acknowledgedComputerUse !== true,
+    },
+    counts,
+    latestTaskAt,
+    sessionPlane,
+    runModesSupported: [...BROWSERBEE_RUN_MODES],
+    approvalModesSupported: [...BROWSERBEE_APPROVAL_MODES],
+  };
+}
