@@ -124,10 +124,11 @@ export async function checkForUpdate(
   currentVersion: string,
   channelUrl: string,
   channel: UpdateChannel = "stable",
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  headers?: Record<string, string>
 ): Promise<{ available: boolean; release: UpdateRelease | null; manifest: UpdateManifest | null; error?: string }> {
   try {
-    const res = await fetchImpl(channelUrl, { signal: AbortSignal.timeout(15_000) });
+    const res = await fetchImpl(channelUrl, { signal: AbortSignal.timeout(15_000), headers });
     if (!res.ok) return { available: false, release: null, manifest: null, error: `HTTP ${res.status}` };
     const manifest = parseManifest(await res.json());
     if (!manifest) return { available: false, release: null, manifest: null, error: "invalid manifest" };

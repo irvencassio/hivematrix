@@ -22,6 +22,19 @@ export interface UpdaterConfig {
   channelUrl: string | null;
   channel: UpdateChannel;
   publicKeyPem: string | null;
+  /** Headers for the channel fetch (e.g. private-repo auth). */
+  headers?: Record<string, string>;
+}
+
+function resolveAuthToken(u: Record<string, unknown>): string | null {
+  if (typeof u.authTokenPath === "string" && existsSync(u.authTokenPath)) {
+    try { return readFileSync(u.authTokenPath, "utf-8").trim(); } catch { /* ignore */ }
+  }
+  if (typeof u.authTokenEnv === "string" && process.env[u.authTokenEnv]) {
+    return process.env[u.authTokenEnv]!;
+  }
+  if (typeof u.authToken === "string") return u.authToken;
+  return null;
 }
 
 export function getUpdaterConfig(): UpdaterConfig {
@@ -37,10 +50,21 @@ export function getUpdaterConfig(): UpdaterConfig {
   } else if (typeof u.publicKeyPem === "string") {
     publicKeyPem = u.publicKeyPem;
   }
+
+  // Auth headers for a private channel (e.g. a private GitHub release asset:
+  // GET the asset API URL with a token + Accept: application/octet-stream).
+  let headers: Record<string, string> | undefined;
+  const token = resolveAuthToken(u);
+  if (token) {
+    headers = { Authorization: `Bearer ${token}` };
+    if (typeof u.accept === "string") headers.Accept = u.accept;
+  }
+
   return {
     channelUrl: typeof u.channelUrl === "string" ? u.channelUrl : null,
     channel,
     publicKeyPem,
+    headers,
   };
 }
 
@@ -73,13 +97,15 @@ export async function checkUpdateStatus(): Promise<{
       available: false, latestVersion: null, signatureReady: !!cfg.publicKeyPem,
     };
   }
-  const r = await checkForUpdate(CURRENT_VERSION, cfg.channelUrl, cfg.channel);
+  const r = await checkForUpdate(CURRENT_VERSION, cfg.channelUrl, cfg.channel, fetch, cfg.headers);
   return {
     configured: true,
     currentVersion: CURRENT_VERSION,
     channel: cfg.channel,
     available: r.available,
-    latestVersion: r.release?.version ?? null,
+    // The version the channel advertises (surfaced even when not newer), so a
+    // successful fetch+parse is observable. null only if the fetch failed.
+    latestVersion: r.manifest?.latest.version ?? null,
     signatureReady: !!cfg.publicKeyPem,
     error: r.error,
   };

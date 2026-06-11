@@ -50,3 +50,21 @@ test("checkUpdateStatus: reports not-configured when no channel url", async () =
   assert.equal(s.available, false);
   assert.equal(s.currentVersion, CURRENT_VERSION);
 });
+
+test("getUpdaterConfig: builds auth headers from a token file (private channel)", () => {
+  const tokenPath = join(TMP, "token");
+  writeFileSync(tokenPath, "ghp_secrettoken\n");
+  writeConfig({ updater: {
+    channelUrl: "https://api.github.com/repos/o/r/releases/assets/1",
+    authTokenPath: tokenPath, accept: "application/octet-stream",
+  } });
+  const c = getUpdaterConfig();
+  assert.ok(c.headers);
+  assert.equal(c.headers!.Authorization, "Bearer ghp_secrettoken");
+  assert.equal(c.headers!.Accept, "application/octet-stream");
+});
+
+test("getUpdaterConfig: no headers when no token configured", () => {
+  writeConfig({ updater: { channelUrl: "https://x/m.json" } });
+  assert.equal(getUpdaterConfig().headers, undefined);
+});
