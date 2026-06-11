@@ -11,6 +11,7 @@ import { scheduledRunnerTick } from "./scheduled-runner";
 import { isCodexModel } from "@/lib/models/catalog";
 import { dispatchInventorBeeTask } from "@/lib/inventorbee/task-dispatch";
 import type { TaskDelayReason } from "@/lib/types";
+import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let consecutiveErrors = 0;
@@ -182,6 +183,7 @@ async function clearStaleUsageDelays(
   }).limit(50);
 
   let cleared = 0;
+  const restoredProviders = new Set<string>();
   for (const task of delayed) {
     if (!shouldClearStaleUsageDelay(
       {
@@ -197,7 +199,16 @@ async function clearStaleUsageDelays(
     }
     await Task.findByIdAndUpdate(task._id.toString(), { delayUntil: null, delayReason: null });
     broadcast({ type: "task:updated", taskId: task._id.toString(), fields: { delayUntil: null, delayReason: null } });
+    const subject = getUsageSubject(
+      { model: task.model ?? undefined, profile: task.profile ?? undefined },
+      activeProfile
+    );
+    restoredProviders.add(subject.provider);
     cleared++;
+  }
+  const policy = getConnectivityPolicy();
+  for (const provider of restoredProviders) {
+    policy.onUsageWindowRestored(provider);
   }
   return cleared;
 }
@@ -309,6 +320,10 @@ async function tick() {
         activeProfile
       );
       if (!usage.ok) {
+        // Notify connectivity policy so it can degrade to local-only mode
+        if (usage.provider) {
+          getConnectivityPolicy().onUsageWindowExhausted(usage.provider);
+        }
         const fallback = await getLocalFallbackDecision({
           currentModelId: task.model ?? undefined,
           project: task.project,

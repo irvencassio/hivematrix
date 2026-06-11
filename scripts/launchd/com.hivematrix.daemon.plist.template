@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  HiveMatrix Daemon launchd plist template.
+  Rendered at onboarding time with:
+    HIVEMATRIX_DIR    — absolute path to the hivematrix repo
+    HIVEMATRIX_LOG    — absolute path to log directory (e.g. ~/Library/Logs/HiveMatrix)
+    NODE_PATH         — absolute path to node binary
+
+  Install:
+    cp rendered.plist ~/Library/LaunchAgents/com.hivematrix.daemon.plist
+    launchctl load -w ~/Library/LaunchAgents/com.hivematrix.daemon.plist
+
+  Auto-restart: KeepAlive = true (launchd restarts on any exit)
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.hivematrix.daemon</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{NODE_PATH}}</string>
+    <string>--import</string>
+    <string>tsx/esm</string>
+    <string>{{HIVEMATRIX_DIR}}/src/daemon/index.ts</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>{{HIVEMATRIX_DIR}}</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NODE_ENV</key>
+    <string>production</string>
+    <key>HIVEMATRIX_PORT</key>
+    <string>3747</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Throttle restarts to avoid hammering on startup crash -->
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <key>StandardOutPath</key>
+  <string>{{HIVEMATRIX_LOG}}/daemon.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>{{HIVEMATRIX_LOG}}/daemon.err.log</string>
+</dict>
+</plist>

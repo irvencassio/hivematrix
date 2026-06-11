@@ -1,0 +1,215 @@
+/**
+ * HiveMatrix Daemon HTTP server.
+ *
+ * Exposes a REST + SSE API consumed by the console (Next.js or Tauri).
+ * Uses Node's built-in http module — no framework dependency.
+ *
+ * Routes:
+ *   GET  /health                     — daemon health snapshot
+ *   GET  /connectivity               — current connectivity state
+ *   POST /connectivity/mode          — manual override { mode: 'cloud-ok'|'local-only'|'offline'|null }
+ *   GET  /tasks                      — list tasks (query: status, profile, project)
+ *   GET  /tasks/:id                  — get task
+ *   POST /tasks                      — create task
+ *   PATCH /tasks/:id                 — update task fields
+ *   DELETE /tasks/:id                — cancel/delete task
+ *   GET  /events                     — SSE stream (tasks:*, connectivity:*)
+ */
+
+import { createServer, type IncomingMessage, type ServerResponse } from "http";
+import { getDb } from "@/lib/db";
+import { getConnectivityPolicy } from "@/lib/connectivity/policy";
+import type { ConnectivityMode } from "@/lib/connectivity/policy";
+
+// SSE client registry
+const sseClients = new Set<ServerResponse>();
+
+export function broadcast(event: string, data: unknown): void {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of sseClients) {
+    try {
+      res.write(payload);
+    } catch {
+      sseClients.delete(res);
+    }
+  }
+}
+
+function json(res: ServerResponse, statusCode: number, body: unknown): void {
+  const payload = JSON.stringify(body);
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(payload),
+  });
+  res.end(payload);
+}
+
+function parseBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}"));
+      } catch {
+        reject(new Error("Invalid JSON body"));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function parseQueryString(url: string): Record<string, string> {
+  const idx = url.indexOf("?");
+  if (idx === -1) return {};
+  const params: Record<string, string> = {};
+  for (const [k, v] of new URLSearchParams(url.slice(idx + 1))) {
+    params[k] = v;
+  }
+  return params;
+}
+
+export function createDaemonServer() {
+  const policy = getConnectivityPolicy();
+
+  // Broadcast mode changes over SSE
+  policy.on("modeChange", (state) => {
+    broadcast("connectivity:change", state);
+  });
+
+  const server = createServer(async (req, res) => {
+    // CORS for console dev server
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    const urlPath = (req.url ?? "/").split("?")[0];
+
+    try {
+      // GET /health
+      if (req.method === "GET" && urlPath === "/health") {
+        const db = getDb();
+        const taskCount = (db.prepare("SELECT COUNT(*) as n FROM tasks WHERE status IN ('backlog','assigned','in_progress')").get() as { n: number }).n;
+        json(res, 200, {
+          status: "ok",
+          version: "0.1.0",
+          connectivity: policy.mode,
+          activeTasks: taskCount,
+          uptime: process.uptime(),
+        });
+        return;
+      }
+
+      // GET /connectivity
+      if (req.method === "GET" && urlPath === "/connectivity") {
+        json(res, 200, policy.getState());
+        return;
+      }
+
+      // POST /connectivity/mode
+      if (req.method === "POST" && urlPath === "/connectivity/mode") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const mode = body.mode as ConnectivityMode | null;
+        if (mode !== null && mode !== "cloud-ok" && mode !== "local-only" && mode !== "offline") {
+          json(res, 400, { error: "mode must be cloud-ok, local-only, offline, or null" });
+          return;
+        }
+        policy.setManualOverride(mode, "API request");
+        json(res, 200, policy.getState());
+        return;
+      }
+
+      // GET /events — SSE stream
+      if (req.method === "GET" && urlPath === "/events") {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+        });
+        res.write(`event: connected\ndata: ${JSON.stringify({ connectivity: policy.mode })}\n\n`);
+        sseClients.add(res);
+        req.on("close", () => sseClients.delete(res));
+        return;
+      }
+
+      // GET /tasks
+      if (req.method === "GET" && urlPath === "/tasks") {
+        const q = parseQueryString(req.url ?? "");
+        const db = getDb();
+        const conditions: string[] = [];
+        const params: string[] = [];
+        if (q.status) { conditions.push("status = ?"); params.push(q.status); }
+        if (q.profile) { conditions.push("profile = ?"); params.push(q.profile); }
+        if (q.project) { conditions.push("project = ?"); params.push(q.project); }
+        const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
+        const rows = db.prepare(`SELECT * FROM tasks${where} ORDER BY position ASC`).all(...params);
+        json(res, 200, rows);
+        return;
+      }
+
+      // GET /tasks/:id
+      const taskMatch = urlPath.match(/^\/tasks\/([^/]+)$/);
+      if (req.method === "GET" && taskMatch) {
+        const db = getDb();
+        const row = db.prepare("SELECT * FROM tasks WHERE _id = ?").get(taskMatch[1]);
+        if (!row) { json(res, 404, { error: "Not found" }); return; }
+        json(res, 200, row);
+        return;
+      }
+
+      // POST /tasks
+      if (req.method === "POST" && urlPath === "/tasks") {
+        const { Task, generateId } = await import("@/lib/db");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const task = await Task.create({ _id: generateId(), ...body });
+        broadcast("tasks:created", { taskId: task._id });
+        json(res, 201, task);
+        return;
+      }
+
+      // PATCH /tasks/:id
+      if (req.method === "PATCH" && taskMatch) {
+        const { Task } = await import("@/lib/db");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const task = await Task.findByIdAndUpdate(taskMatch[1], body);
+        if (!task) { json(res, 404, { error: "Not found" }); return; }
+        broadcast("tasks:updated", { taskId: task._id, status: task.status });
+        json(res, 200, task);
+        return;
+      }
+
+      // DELETE /tasks/:id
+      if (req.method === "DELETE" && taskMatch) {
+        const { Task } = await import("@/lib/db");
+        await Task.findByIdAndUpdate(taskMatch[1], { status: "cancelled" });
+        broadcast("tasks:updated", { taskId: taskMatch[1], status: "cancelled" });
+        json(res, 204, null);
+        return;
+      }
+
+      json(res, 404, { error: "Not found" });
+    } catch (err) {
+      console.error("[daemon] Request error:", err);
+      json(res, 500, { error: err instanceof Error ? err.message : "Internal error" });
+    }
+  });
+
+  return server;
+}
+
+export function startDaemonServer(port = 3747): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const server = createDaemonServer();
+    server.on("error", reject);
+    server.listen(port, "127.0.0.1", () => {
+      console.log(`[hivematrix] Daemon listening on http://127.0.0.1:${port}`);
+      resolve();
+    });
+  });
+}
