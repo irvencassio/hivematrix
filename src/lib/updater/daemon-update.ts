@@ -111,6 +111,46 @@ export async function checkUpdateStatus(): Promise<{
   };
 }
 
+/**
+ * Download a release tarball to a temp path. GitHub-aware: for a private repo,
+ * the public release-download URL 404s even with a token, so when the URL is a
+ * github.com release-download URL and we have auth, resolve the asset's API URL
+ * (api.github.com/.../releases/assets/:id) and fetch that with
+ * Accept: application/octet-stream. Public repos / non-GitHub URLs fetch directly.
+ */
+export async function downloadRelease(
+  release: UpdateRelease,
+  headers: Record<string, string> | undefined,
+  destPath: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const { writeFile } = await import("fs/promises");
+  let url = release.tarballUrl;
+  let reqHeaders: Record<string, string> = { ...(headers ?? {}) };
+
+  const gh = release.tarballUrl.match(
+    /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\/download\/([^/]+)\/(.+)$/
+  );
+  const token = headers?.Authorization;
+  if (gh && token) {
+    const [, owner, repo, tag, name] = gh;
+    const apiTag = `https://api.github.com/repos/${owner}/${repo}/releases/tags/${tag}`;
+    const relRes = await fetchImpl(apiTag, { headers: { Authorization: token, Accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(20_000) });
+    if (!relRes.ok) throw new Error(`release lookup failed: HTTP ${relRes.status}`);
+    const rel = await relRes.json() as { assets?: Array<{ name: string; url: string }> };
+    const asset = rel.assets?.find((a) => a.name === decodeURIComponent(name));
+    if (!asset) throw new Error(`asset ${name} not found in release ${tag}`);
+    url = asset.url;
+    reqHeaders = { Authorization: token, Accept: "application/octet-stream" };
+  }
+
+  const res = await fetchImpl(url, { headers: reqHeaders, signal: AbortSignal.timeout(120_000) });
+  if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  await writeFile(destPath, buf);
+  return destPath;
+}
+
 /** Build the production UpdateHooks (download via fetch, restart via launchd). */
 export function productionHooks(
   download: (release: UpdateRelease) => Promise<string>,
