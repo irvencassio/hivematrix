@@ -40,6 +40,21 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .col.context { border-left: 1px solid var(--border); background: var(--panel); }
   h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted);
     margin: 4px 0 10px; }
+  .addbtn { width: 100%; text-align: left; background: var(--panel-2); color: var(--accent);
+    border: 1px dashed var(--border); border-radius: 8px; padding: 7px 10px; cursor: pointer;
+    font-size: 12px; font-weight: 600; margin-bottom: 10px; }
+  .addbtn:hover { border-color: var(--accent); }
+  .form { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px; margin-bottom: 12px; display: none; }
+  .form.open { display: block; }
+  .form input, .form textarea { width: 100%; box-sizing: border-box; background: var(--bg);
+    color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+    font-size: 12px; margin-bottom: 6px; font-family: inherit; }
+  .form textarea { resize: vertical; min-height: 48px; }
+  .form .row { display: flex; gap: 6px; }
+  .form button.create { background: var(--accent); color: #1a1a1a; border: 0; border-radius: 6px;
+    padding: 6px 14px; font-weight: 700; cursor: pointer; font-size: 12px; }
+  .form .err { color: var(--err); font-size: 11px; margin-top: 4px; }
   .lane { margin-bottom: 16px; }
   .lane-title { font-size: 11px; color: var(--muted); margin-bottom: 6px; display: flex; gap: 6px; }
   .lane-title .count { color: var(--accent); }
@@ -91,6 +106,15 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <main>
   <section class="col board">
     <h2>Board</h2>
+    <button class="addbtn" onclick="toggleForm('taskForm')">＋ New task</button>
+    <div class="form" id="taskForm">
+      <input id="t_title" placeholder="Title" />
+      <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
+      <input id="t_path" placeholder="Project path (working dir)" value="/tmp" />
+      <input id="t_model" placeholder="Model" value="qwen/qwen3.6-27b" />
+      <div class="row"><button class="create" onclick="createTask()">Create task</button></div>
+      <div class="err" id="t_err"></div>
+    </div>
     <div id="board"></div>
   </section>
   <section class="col session">
@@ -104,6 +128,15 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <h2 style="margin-top:20px">Connectivity</h2>
     <div id="conn"></div>
     <h2 style="margin-top:20px">Directives</h2>
+    <button class="addbtn" onclick="toggleForm('dirForm')">＋ New directive</button>
+    <div class="form" id="dirForm">
+      <input id="d_goal" placeholder="Standing goal" />
+      <input id="d_path" placeholder="Project path" value="/tmp" />
+      <input id="d_crit" placeholder="Success criterion (optional)" />
+      <input id="d_interval" placeholder="Repeat interval (e.g. PT4H, P1D) — blank = manual" />
+      <div class="row"><button class="create" onclick="createDirective()">Create directive</button></div>
+      <div class="err" id="d_err"></div>
+    </div>
     <div id="directives"></div>
   </section>
 </main>
@@ -226,6 +259,41 @@ document.getElementById("modeSel").addEventListener("change", async (e) => {
     body: JSON.stringify({ mode: e.target.value || null }) });
   refresh();
 });
+
+function toggleForm(id) { document.getElementById(id).classList.toggle("open"); }
+
+async function createTask() {
+  const err = document.getElementById("t_err"); err.textContent = "";
+  const title = document.getElementById("t_title").value.trim();
+  const description = document.getElementById("t_desc").value.trim();
+  const projectPath = document.getElementById("t_path").value.trim();
+  const model = document.getElementById("t_model").value.trim();
+  if (!title || !description || !projectPath) { err.textContent = "Title, description, and project path are required."; return; }
+  try {
+    const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ title, description, projectPath, project: "console", model: model || null, status: "backlog", executor: "agent" }) });
+    if (!t || !t._id) { err.textContent = "Create failed."; return; }
+    document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = "";
+    toggleForm("taskForm"); refresh();
+  } catch (e2) { err.textContent = String(e2); }
+}
+
+async function createDirective() {
+  const err = document.getElementById("d_err"); err.textContent = "";
+  const goal = document.getElementById("d_goal").value.trim();
+  const projectPath = document.getElementById("d_path").value.trim();
+  const crit = document.getElementById("d_crit").value.trim();
+  const interval = document.getElementById("d_interval").value.trim();
+  if (!goal || !projectPath) { err.textContent = "Goal and project path are required."; return; }
+  const triggerPolicy = interval ? { type: "schedule", interval } : { type: "manual" };
+  try {
+    const d = await api("/directives", { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ goal, project: "console", projectPath, triggerPolicy, criteria: crit ? [crit] : [] }) });
+    if (!d || !d._id) { err.textContent = "Create failed."; return; }
+    document.getElementById("d_goal").value = ""; document.getElementById("d_crit").value = "";
+    toggleForm("dirForm"); refresh();
+  } catch (e2) { err.textContent = String(e2); }
+}
 
 // SSE for live updates; fall back to polling.
 function connectSSE() {
