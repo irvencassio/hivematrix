@@ -2,7 +2,7 @@ import { EventEmitter } from "events";
 import type { ChildProcess } from "child_process";
 import type { ModelProvider } from "@/lib/config/providers";
 import type { AgentProcess, AgentEventHandler } from "./subprocess";
-import { existsSync, readFileSync } from "fs";
+import { promises as fsp } from "fs";
 import { join } from "path";
 import {
   parseOpenAIChunk,
@@ -64,7 +64,7 @@ export function genericThinkingInstruction(thinkingMode?: string | null): string
   return "Use your maximum supported reasoning depth for this task. Do not reduce scope to conserve tokens or budget.";
 }
 
-function buildSystemPrompt(projectPath: string, agentType: string, thinkingMode?: string | null): string {
+async function buildSystemPrompt(projectPath: string, agentType: string, thinkingMode?: string | null): Promise<string> {
   const profile = getAgentProfile(agentType);
   let prompt = `${profile.systemPrompt}\n\n--- Brain Doc Policy ---\n${brainDocPolicyText()}`;
   const thinkingInstruction = genericThinkingInstruction(thinkingMode);
@@ -72,7 +72,7 @@ function buildSystemPrompt(projectPath: string, agentType: string, thinkingMode?
     prompt += `\n\n--- Reasoning Effort ---\n${thinkingInstruction}`;
   }
   const projectName = projectPath.split("/").filter(Boolean).pop() ?? "";
-  const memoryBundle = buildBrainMemoryBundle({
+  const memoryBundle = await buildBrainMemoryBundle({
     project: projectName,
     role: agentType,
     bee: projectName.toLowerCase() === "hive" ? "managerbee" : undefined,
@@ -87,13 +87,16 @@ function buildSystemPrompt(projectPath: string, agentType: string, thinkingMode?
     prompt += memoryBundle;
   }
 
-  // Only inject CLAUDE.md for profiles that request it (developer, cto)
+  // Only inject CLAUDE.md for profiles that request it (developer, cto).
+  // Async read so a project on a cloud mount can't stall the daemon.
   if (profile.loadClaudeMd) {
     try {
-      const claudeMd = join(projectPath, "CLAUDE.md");
-      if (existsSync(claudeMd)) {
-        const content = readFileSync(claudeMd, "utf-8").slice(0, 4000);
-        prompt += `\n\nProject instructions (from CLAUDE.md):\n${content}`;
+      const content = await Promise.race([
+        fsp.readFile(join(projectPath, "CLAUDE.md"), "utf-8").then((c) => c).catch(() => null),
+        new Promise<null>((r) => setTimeout(() => r(null), 3_000)),
+      ]);
+      if (content) {
+        prompt += `\n\nProject instructions (from CLAUDE.md):\n${content.slice(0, 4000)}`;
       }
     } catch {
       // skip
@@ -115,14 +118,14 @@ function getProfileTools(agentType: string): typeof TOOL_DEFINITIONS {
 /**
  * Build the OpenAI messages array for the initial request.
  */
-function buildMessages(
+async function buildMessages(
   description: string,
   projectPath: string,
   agentType: string,
   thinkingMode?: string | null
-): Array<Record<string, unknown>> {
+): Promise<Array<Record<string, unknown>>> {
   return [
-    { role: "system", content: buildSystemPrompt(projectPath, agentType, thinkingMode) },
+    { role: "system", content: await buildSystemPrompt(projectPath, agentType, thinkingMode) },
     { role: "user", content: description },
   ];
 }
@@ -250,7 +253,7 @@ async function runAgentLoop(
   toolContext?: ToolContext,
   thinkingMode?: string | null
 ): Promise<{ code: number; result: string; turns: number; totalTokens: number; inputTokens: number; outputTokens: number }> {
-  const messages = buildMessages(description, projectPath, agentType, thinkingMode);
+  const messages = await buildMessages(description, projectPath, agentType, thinkingMode);
   const profileTools = getProfileTools(agentType);
   let turns = 0;
   let fullText = "";
@@ -394,8 +397,8 @@ async function runAgentLoop(
             ? `[Already retrieved — content unchanged]\n\n${cached.slice(0, 200)}…\n\n[Loop guard: ${callCount} identical calls. Do not call this tool again. Synthesise and respond.]`
             : `[Loop guard: you have called ${tc.name} with these exact arguments ${callCount} times. Do not repeat it. Use what you already know and write your response.]`;
         } else {
-          // Normal execution
-          result = executeTool(tc.name, tc.arguments, projectPath, toolContext);
+          // Normal execution (async — bash runs off the event loop)
+          result = await executeTool(tc.name, tc.arguments, projectPath, toolContext);
           // Cache read-file results for deduplication
           if (tc.name === "read_file" || tc.name === "Read") {
             readCache.set(loopKey, result);

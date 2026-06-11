@@ -60,7 +60,7 @@ Worker contract landed cleanly.
 `
   );
 
-  const bundle = buildBrainMemoryBundle({
+  const bundle = await buildBrainMemoryBundle({
     brainRootDir: brainRoot,
     project: "hive",
     bee: "managerbee",

@@ -323,7 +323,7 @@ export function buildClaudeSpawnArgs(input: {
   return args;
 }
 
-export function spawnAgent(
+export async function spawnAgent(
   taskId: string,
   description: string,
   projectPath: string,
@@ -340,7 +340,7 @@ export function spawnAgent(
   agentType?: string,
   thinkingMode?: string,
   fastMode?: boolean,
-): AgentProcess {
+): Promise<AgentProcess> {
   if (isCodexModel(model)) {
     return spawnCodexAgent(
       taskId,
@@ -476,7 +476,7 @@ export function spawnAgent(
       // plus legacy role/project playbooks and recap excerpts.
       try {
         const pbRole = agentType && agentType !== "auto" ? agentType : "developer";
-        const pb = buildBrainMemoryBundle({
+        const pb = await buildBrainMemoryBundle({
           project: row.project,
           role: pbRole,
           bee: "managerbee",

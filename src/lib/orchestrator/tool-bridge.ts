@@ -1,7 +1,10 @@
-import { execSync } from "child_process";
+import { exec } from "child_process";
+import { promisify } from "util";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, relative } from "path";
 import { AGENT_PROFILE_IDS } from "@/lib/config/agent-profiles";
+
+const execAsync = promisify(exec);
 
 /**
  * Tool definitions in OpenAI function-calling format.
@@ -138,12 +141,12 @@ export interface ToolContext {
 /**
  * Execute a tool call and return the result string.
  */
-export function executeTool(
+export async function executeTool(
   name: string,
   argsJson: string,
   projectPath: string,
   context?: ToolContext
-): string {
+): Promise<string> {
   let args: Record<string, unknown>;
   try {
     args = JSON.parse(argsJson);
@@ -154,7 +157,7 @@ export function executeTool(
   try {
     switch (name) {
       case "bash":
-        return executeBash(args, projectPath);
+        return await executeBash(args, projectPath);
       case "read_file":
         return executeReadFile(args, projectPath);
       case "write_file":
@@ -162,11 +165,11 @@ export function executeTool(
       case "edit_file":
         return executeEditFile(args, projectPath);
       case "search":
-        return executeSearch(args, projectPath);
+        return await executeSearch(args, projectPath);
       case "list_files":
-        return executeListFiles(args, projectPath);
+        return await executeListFiles(args, projectPath);
       case "create_task":
-        return executeCreateTask(args, context);
+        return await executeCreateTask(args, context);
       default:
         return `Error: Unknown tool "${name}"`;
     }
@@ -181,24 +184,33 @@ function resolvePath(p: string, projectPath: string): string {
   return resolve(projectPath, p);
 }
 
-function executeBash(args: Record<string, unknown>, projectPath: string): string {
+async function executeBash(args: Record<string, unknown>, projectPath: string): Promise<string> {
   const command = args.command as string;
   if (!command) return "Error: No command provided";
 
+  // Async exec — must NOT block the daemon event loop. A synchronous execSync
+  // here freezes the HTTP server, scheduler, and every other in-flight task for
+  // the command's duration (up to the timeout); fatal for a 24x7 daemon.
+  // `killSignal: SIGKILL` ensures a hung command is actually torn down at the
+  // timeout rather than lingering as a detached child.
   try {
-    const output = execSync(command, {
+    const { stdout } = await execAsync(command, {
       cwd: projectPath,
       encoding: "utf-8",
       timeout: 120_000, // 2 min timeout
+      killSignal: "SIGKILL",
       maxBuffer: 1024 * 1024 * 10, // 10MB
       env: { ...process.env, HIVE_AGENT: "1" },
     });
-    return output.slice(0, 50_000); // Cap output at 50KB
+    return stdout.slice(0, 50_000); // Cap output at 50KB
   } catch (err: unknown) {
-    const execErr = err as { stdout?: string; stderr?: string; status?: number };
+    const execErr = err as { stdout?: string; stderr?: string; code?: number; killed?: boolean; signal?: string };
+    if (execErr.killed || execErr.signal) {
+      return `Error: command timed out or was killed (signal ${execErr.signal ?? "?"}) after 120s`;
+    }
     const stdout = (execErr.stdout ?? "").slice(0, 20_000);
     const stderr = (execErr.stderr ?? "").slice(0, 20_000);
-    return `Exit code: ${execErr.status ?? "unknown"}\nStdout: ${stdout}\nStderr: ${stderr}`;
+    return `Exit code: ${execErr.code ?? "unknown"}\nStdout: ${stdout}\nStderr: ${stderr}`;
   }
 }
 
@@ -250,21 +262,22 @@ function executeEditFile(args: Record<string, unknown>, projectPath: string): st
   return `Edited: ${relative(projectPath, filePath)}`;
 }
 
-function executeSearch(args: Record<string, unknown>, projectPath: string): string {
+async function executeSearch(args: Record<string, unknown>, projectPath: string): Promise<string> {
   const pattern = args.pattern as string;
   if (!pattern) return "Error: No pattern provided";
 
   const searchPath = args.path ? resolvePath(args.path as string, projectPath) : projectPath;
   const globFilter = (args.glob as string) ?? "";
 
-  // Use grep for search (faster than walking the tree)
+  // Use grep for search (faster than walking the tree). Async so a grep over a
+  // large tree never blocks the daemon event loop.
   const globArg = globFilter ? `--include="${globFilter}"` : "";
   try {
-    const output = execSync(
+    const { stdout } = await execAsync(
       `grep -rn ${globArg} -E ${JSON.stringify(pattern)} ${JSON.stringify(searchPath)} 2>/dev/null | head -100`,
-      { encoding: "utf-8", timeout: 30_000, maxBuffer: 1024 * 1024 * 5 }
+      { encoding: "utf-8", timeout: 30_000, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 * 5 }
     );
-    return output.slice(0, 50_000) || "No matches found";
+    return stdout.slice(0, 50_000) || "No matches found";
   } catch {
     return "No matches found";
   }
@@ -273,7 +286,7 @@ function executeSearch(args: Record<string, unknown>, projectPath: string): stri
 const MAX_SUBTASK_DEPTH = 2;
 const MAX_SUBTASKS_PER_PARENT = 10;
 
-function executeCreateTask(args: Record<string, unknown>, context?: ToolContext): string {
+async function executeCreateTask(args: Record<string, unknown>, context?: ToolContext): Promise<string> {
   const description = args.description as string;
   const agentType = args.agentType as string;
   const project = (args.project as string) || context?.parentProject || "ops";
@@ -284,14 +297,17 @@ function executeCreateTask(args: Record<string, unknown>, context?: ToolContext)
     return "Error: description and agentType are required";
   }
 
+  // Subtask delegation goes through the daemon's task API on the local port.
+  const base = `http://127.0.0.1:${process.env.HIVEMATRIX_PORT ?? "3747"}`;
+
   // Safety: check subtask depth (max 2 levels)
   if (parentTaskId) {
     try {
-      const depthResult = execSync(
-        `curl -s http://localhost:4000/api/tasks/${parentTaskId}`,
-        { encoding: "utf-8", timeout: 5_000 }
+      const { stdout } = await execAsync(
+        `curl -s ${base}/tasks/${parentTaskId}`,
+        { encoding: "utf-8", timeout: 5_000, killSignal: "SIGKILL" }
       );
-      const parentTask = JSON.parse(depthResult);
+      const parentTask = JSON.parse(stdout);
       if (parentTask.parentTaskId) {
         // Parent already has a parent → this would be depth 3 — reject
         return "Error: Maximum subtask depth (2 levels) reached. A subtask cannot create subtasks.";
@@ -302,11 +318,11 @@ function executeCreateTask(args: Record<string, unknown>, context?: ToolContext)
 
     // Safety: check subtask count (max 10 per parent)
     try {
-      const countResult = execSync(
-        `curl -s "http://localhost:4000/api/tasks?parentTaskId=${parentTaskId}"`,
-        { encoding: "utf-8", timeout: 5_000 }
+      const { stdout } = await execAsync(
+        `curl -s "${base}/tasks?parentTaskId=${parentTaskId}"`,
+        { encoding: "utf-8", timeout: 5_000, killSignal: "SIGKILL" }
       );
-      const siblings = JSON.parse(countResult);
+      const siblings = JSON.parse(stdout);
       const siblingCount = Array.isArray(siblings) ? siblings.length : (siblings.tasks?.length ?? 0);
       if (siblingCount >= MAX_SUBTASKS_PER_PARENT) {
         return `Error: Maximum subtasks per parent (${MAX_SUBTASKS_PER_PARENT}) reached.`;
@@ -324,11 +340,11 @@ function executeCreateTask(args: Record<string, unknown>, context?: ToolContext)
       source,
       parentTaskId,
     });
-    const result = execSync(
-      `curl -s -X POST http://localhost:4000/api/tasks -H "Content-Type: application/json" -d '${body.replace(/'/g, "'\\''")}'`,
-      { encoding: "utf-8", timeout: 10_000 }
+    const { stdout } = await execAsync(
+      `curl -s -X POST ${base}/tasks -H "Content-Type: application/json" -d '${body.replace(/'/g, "'\\''")}'`,
+      { encoding: "utf-8", timeout: 10_000, killSignal: "SIGKILL" }
     );
-    const task = JSON.parse(result);
+    const task = JSON.parse(stdout);
     return `Created task ${task._id}: "${task.title}" (agent: ${agentType}, project: ${project})`;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -336,19 +352,19 @@ function executeCreateTask(args: Record<string, unknown>, context?: ToolContext)
   }
 }
 
-function executeListFiles(args: Record<string, unknown>, projectPath: string): string {
+async function executeListFiles(args: Record<string, unknown>, projectPath: string): Promise<string> {
   const pattern = args.pattern as string;
   if (!pattern) return "Error: No pattern provided";
 
   const basePath = args.path ? resolvePath(args.path as string, projectPath) : projectPath;
 
-  // Use find + glob pattern via bash
+  // Use find + glob pattern; async so a find over a large tree never blocks.
   try {
-    const output = execSync(
+    const { stdout } = await execAsync(
       `find ${JSON.stringify(basePath)} -path "*/${pattern}" -o -name "${pattern}" 2>/dev/null | head -200`,
-      { encoding: "utf-8", timeout: 15_000, maxBuffer: 1024 * 1024 }
+      { encoding: "utf-8", timeout: 15_000, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 }
     );
-    return output.slice(0, 50_000) || "No files found";
+    return stdout.slice(0, 50_000) || "No files found";
   } catch {
     return "No files found";
   }

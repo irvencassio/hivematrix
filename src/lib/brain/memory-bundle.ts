@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "fs";
+import { existsSync } from "fs";
 import { promises as fs } from "fs";
 import { join } from "path";
 import {
@@ -13,6 +13,24 @@ const DEFAULT_SECTION_MAX_CHARS = 2_500;
 const DEFAULT_RECAP_MAX_CHARS = 1_500;
 const DEFAULT_RECAP_LIMIT = 2;
 const DEFAULT_BUNDLE_MAX_CHARS = 12_000;
+
+// The brain root commonly lives on a cloud mount (e.g. ~/_GD → Google Drive).
+// A synchronous read of a dehydrated cloud file blocks the daemon's main thread
+// on open() indefinitely. All brain reads MUST be async (so open() runs on the
+// libuv threadpool, not the event loop) AND time-bounded (so a stalled Drive
+// read fails gracefully instead of stalling agent spawn).
+const BRAIN_READ_TIMEOUT_MS = 3_000;
+
+async function readWithTimeout(path: string, timeoutMs = BRAIN_READ_TIMEOUT_MS): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); });
+  const read = fs.readFile(path, "utf-8").then((c) => c as string).catch(() => null);
+  try {
+    return await Promise.race([read, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export interface BrainMemoryBundleOptions {
   project?: string;
@@ -54,15 +72,12 @@ function legacyPlaybooksDir(brainRootDir?: string): string {
   return join(getBrainRootDir(brainRootDir) ?? defaultBrainRootDir(), "hive", "playbooks");
 }
 
-function boundedRead(path: string, maxChars: number, mode: ReadMode = "head"): string {
-  if (!existsSync(path)) return "";
-  try {
-    const content = readFileSync(path, "utf-8").trim();
-    if (content.length <= maxChars) return content;
-    return mode === "tail" ? content.slice(-maxChars) : content.slice(0, maxChars);
-  } catch {
-    return "";
-  }
+async function boundedRead(path: string, maxChars: number, mode: ReadMode = "head"): Promise<string> {
+  const raw = await readWithTimeout(path);
+  if (raw == null) return ""; // missing, unreadable, or timed out (cloud stall)
+  const content = raw.trim();
+  if (content.length <= maxChars) return content;
+  return mode === "tail" ? content.slice(-maxChars) : content.slice(0, maxChars);
 }
 
 function section(title: string, body: string): string {
@@ -71,20 +86,15 @@ function section(title: string, body: string): string {
   return `### ${title}\n${trimmed}`;
 }
 
-function extractProjectFromRecap(content: string): string | null {
-  const match = content.match(/^\*\*Project\*\*:\s*(.+)$/m);
-  return match?.[1]?.trim().toLowerCase() ?? null;
-}
-
-function readLegacyRolePlaybook(role: string, brainRootDir: string, maxChars: number): string {
+function readLegacyRolePlaybook(role: string, brainRootDir: string, maxChars: number): Promise<string> {
   return boundedRead(join(legacyPlaybooksDir(brainRootDir), "roles", `${slugify(role)}.md`), maxChars, "tail");
 }
 
-function readLegacyProjectPlaybook(project: string, brainRootDir: string, maxChars: number): string {
+function readLegacyProjectPlaybook(project: string, brainRootDir: string, maxChars: number): Promise<string> {
   return boundedRead(join(legacyPlaybooksDir(brainRootDir), "projects", `${slugify(project)}.md`), maxChars, "tail");
 }
 
-function readLegacyAccessLedger(project: string, brainRootDir: string, maxChars: number): string {
+function readLegacyAccessLedger(project: string, brainRootDir: string, maxChars: number): Promise<string> {
   return boundedRead(
     join(legacyPlaybooksDir(brainRootDir), "projects", `${slugify(project)}-access.md`),
     maxChars,
@@ -92,38 +102,7 @@ function readLegacyAccessLedger(project: string, brainRootDir: string, maxChars:
   );
 }
 
-function readRecentMissionRecaps(
-  project: string | undefined,
-  brainRootDir: string,
-  recapLimit: number,
-  recapMaxChars: number
-): string[] {
-  const normalizedProject = project ? slugify(project) : "";
-  if (!normalizedProject) return [];
-
-  const recapDir = hiveMissionRecapsDir(brainRootDir);
-  if (!existsSync(recapDir)) return [];
-
-  const files = readdirSync(recapDir)
-    .filter((name) => name.endsWith(".md"))
-    .sort()
-    .reverse();
-
-  const excerpts: string[] = [];
-  for (const name of files) {
-    const content = boundedRead(join(recapDir, name), recapMaxChars, "head");
-    if (!content) continue;
-    const recapProject = extractProjectFromRecap(content);
-    if (recapProject !== normalizedProject) continue;
-
-    excerpts.push(`#### ${name.replace(/\.md$/, "")}\n${content}`);
-    if (excerpts.length >= recapLimit) break;
-  }
-
-  return excerpts;
-}
-
-export function buildBrainMemoryBundle(options: BrainMemoryBundleOptions = {}): string {
+export async function buildBrainMemoryBundle(options: BrainMemoryBundleOptions = {}): Promise<string> {
   const brainRootDir = getBrainRootDir(options.brainRootDir);
   if (!brainRootDir) return "";
   const sectionMaxChars = options.sectionMaxChars ?? DEFAULT_SECTION_MAX_CHARS;
@@ -140,29 +119,29 @@ export function buildBrainMemoryBundle(options: BrainMemoryBundleOptions = {}): 
     const bee = options.bee ? slugify(options.bee) : "";
     const domain = options.domain ? slugify(options.domain) : "";
 
-    sections.push(section("Agent Brief", boundedRead(join(projectDir, "agent-brief.md"), sectionMaxChars, "head")));
-    sections.push(section("Known Issues", boundedRead(join(projectDir, "known-issues.md"), sectionMaxChars, "head")));
+    sections.push(section("Agent Brief", await boundedRead(join(projectDir, "agent-brief.md"), sectionMaxChars, "head")));
+    sections.push(section("Known Issues", await boundedRead(join(projectDir, "known-issues.md"), sectionMaxChars, "head")));
     if (bee) {
       sections.push(
-        section(`Bee Playbook (${bee})`, boundedRead(join(projectDir, "bees", `${bee}.md`), sectionMaxChars, "head"))
+        section(`Bee Playbook (${bee})`, await boundedRead(join(projectDir, "bees", `${bee}.md`), sectionMaxChars, "head"))
       );
     }
     if (domain) {
       sections.push(
         section(
           `Domain Playbook (${domain})`,
-          boundedRead(join(projectDir, "bees", "domains", `${domain}.md`), sectionMaxChars, "head")
+          await boundedRead(join(projectDir, "bees", "domains", `${domain}.md`), sectionMaxChars, "head")
         )
       );
     }
   }
 
   if (options.role) {
-    sections.push(section(`Role Playbook (${options.role})`, readLegacyRolePlaybook(options.role, brainRootDir, sectionMaxChars)));
+    sections.push(section(`Role Playbook (${options.role})`, await readLegacyRolePlaybook(options.role, brainRootDir, sectionMaxChars)));
   }
   if (project) {
-    sections.push(section(`Project Playbook (${project})`, readLegacyProjectPlaybook(project, brainRootDir, sectionMaxChars)));
-    sections.push(section(`Project Access Ledger (${project})`, readLegacyAccessLedger(project, brainRootDir, sectionMaxChars)));
+    sections.push(section(`Project Playbook (${project})`, await readLegacyProjectPlaybook(project, brainRootDir, sectionMaxChars)));
+    sections.push(section(`Project Access Ledger (${project})`, await readLegacyAccessLedger(project, brainRootDir, sectionMaxChars)));
   }
 
   // Directive reflections are written per-run in SQLite; no file-based recaps in HiveMatrix

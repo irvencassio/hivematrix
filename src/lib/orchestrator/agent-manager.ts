@@ -260,7 +260,7 @@ class AgentManager {
       startedAt: new Date().toISOString(),
     });
 
-    const agent = spawnProcess(
+    const agent = await spawnProcess(
       taskId,
       description,
       projectPath,

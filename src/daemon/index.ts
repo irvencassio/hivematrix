@@ -11,6 +11,13 @@ import { getDb } from "@/lib/db";
 import { startDaemonServer } from "./server";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 
+// Prepend an ISO-8601 timestamp to every daemon log line. launchd routes
+// stdout/stderr to log files; timestamps make a 72h soak log readable.
+for (const level of ["log", "warn", "error"] as const) {
+  const orig = console[level].bind(console);
+  console[level] = (...args: unknown[]) => orig(`[${new Date().toISOString()}]`, ...args);
+}
+
 const PORT = parseInt(process.env.HIVEMATRIX_PORT ?? "3747", 10);
 
 async function main(): Promise<void> {
