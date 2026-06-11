@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  DesktopBee helper launchd agent.
+  Render {{HELPER_APP}} to the absolute path of DesktopBeeHelper.app and
+  {{HELPER_LOG}} to a log directory, then:
+    cp rendered.plist ~/Library/LaunchAgents/com.hivematrix.desktopbee.helper.plist
+    launchctl load -w ~/Library/LaunchAgents/com.hivematrix.desktopbee.helper.plist
+
+  The helper is the only process holding Accessibility + Screen Recording;
+  launchd keeps it alive (loopback API on 3748).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.hivematrix.desktopbee.helper</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{HELPER_APP}}/Contents/MacOS/DesktopBeeHelper</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DESKTOPBEE_PORT</key>
+    <string>3748</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <key>StandardOutPath</key>
+  <string>{{HELPER_LOG}}/desktopbee-helper.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{HELPER_LOG}}/desktopbee-helper.err.log</string>
+</dict>
+</plist>
