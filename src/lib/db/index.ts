@@ -242,6 +242,14 @@ const MIGRATIONS: string[] = [
   // v10: add directiveId FK on tasks — links a task back to its originating directive
   `ALTER TABLE tasks ADD COLUMN directiveId TEXT DEFAULT NULL;
     CREATE INDEX IF NOT EXISTS idx_tasks_directive ON tasks(directiveId);`,
+
+  // v11: add delayReason on tasks — the scheduler tags usage-limit delays so
+  // clearStaleUsageDelays can distinguish them from other delay causes.
+  `ALTER TABLE tasks ADD COLUMN delayReason TEXT DEFAULT NULL;`,
+
+  // v12: add brainSelection on tasks — pinned brain doc paths persisted per
+  // task (the Task store reads/writes it; was missing from the base schema).
+  `ALTER TABLE tasks ADD COLUMN brainSelection TEXT NOT NULL DEFAULT '[]';`,
 ];
 
 // ------------------------------------------------------------------
