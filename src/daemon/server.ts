@@ -20,6 +20,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { getDb } from "@/lib/db";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import type { ConnectivityMode } from "@/lib/connectivity/policy";
+import { setBroadcastFn } from "@/lib/ws/broadcaster";
 
 // SSE client registry
 const sseClients = new Set<ServerResponse>();
@@ -71,6 +72,9 @@ function parseQueryString(url: string): Record<string, string> {
 
 export function createDaemonServer() {
   const policy = getConnectivityPolicy();
+
+  // Wire the internal broadcaster so scheduler/recovery can emit SSE events
+  setBroadcastFn((payload) => broadcast("hive:event", payload));
 
   // Broadcast mode changes over SSE
   policy.on("modeChange", (state) => {

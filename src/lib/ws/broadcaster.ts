@@ -1,8 +1,22 @@
-// WebSocket broadcaster stub — Phase 1 will wire this to the daemon's WS layer.
+/**
+ * Internal broadcast helper — dispatches events to connected SSE clients.
+ *
+ * In-process callers (scheduler, recovery, agent-manager) call this.
+ * The daemon server registers the real SSE broadcast function at startup
+ * via setBroadcastFn(); before registration it is a safe no-op.
+ */
 
 export type BroadcastPayload = Record<string, unknown>;
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function broadcast(_payload: BroadcastPayload): void {
-  // no-op until the daemon WS layer is built in Phase 1
+type BroadcastFn = (payload: BroadcastPayload) => void;
+
+let _broadcastFn: BroadcastFn | null = null;
+
+export function setBroadcastFn(fn: BroadcastFn): void {
+  _broadcastFn = fn;
 }
+
+export function broadcast(payload: BroadcastPayload): void {
+  _broadcastFn?.(payload);
+}
+
