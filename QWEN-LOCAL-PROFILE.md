@@ -36,7 +36,9 @@ Serving: **LM Studio** (MLX engine primary, GGUF available). vLLM deferred.
 - Dense (all params active) — no MoE routing variance; flagship-level coding
 - 256K native context (loaded at 65K; raise per task need)
 - 8-bit chosen over 4-bit for quality headroom ("128GB affords Q8" — and Irv's
-  explicit "we need quality too" steer). 4-bit MLX + Q8 GGUF also on disk as fallbacks.
+  explicit "we need quality too" steer). The 4-bit MLX and Q8 GGUF variants were
+  removed after the 8-bit was validated (unused-model cleanup); they are one
+  `lms get` away if a fallback is ever needed.
 - Tool calling + reasoning separation proven by the readiness gate before router use
 
 ### Secondary — (optional fast lane)
@@ -51,8 +53,10 @@ the live profile.
 - **Primary: LM Studio** (`lms server`, port 1234) — OpenAI-compatible
   `/v1/chat/completions`, tool calling parsed into `tool_calls`, reasoning in
   `reasoning_content`. MLX engine on Apple Silicon.
-- **Fallback: LM Studio GGUF engine** — the Q8_0 GGUF is already on disk
-  (`lmstudio-community/Qwen3.6-27B-GGUF`) if the MLX path ever regresses.
+- **Fallback: LM Studio GGUF engine** — `lmstudio-community/Qwen3.6-27B-GGUF`
+  (Q8_0) is the fallback if the MLX path ever regresses; re-pull with
+  `lms get lmstudio-community/Qwen3.6-27B-GGUF` (removed from disk after MLX-8bit
+  was validated, to reclaim space).
 - **Deferred: vLLM** — only if a LAN Linux/GPU box appears.
 - **Provider config**: `provider: "lmstudio"`, `supportsTools` is probe-driven
   by the readiness gate, not hardcoded. See `src/lib/local-model/health.ts`.
