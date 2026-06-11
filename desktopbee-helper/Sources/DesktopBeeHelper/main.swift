@@ -67,6 +67,24 @@ func handleAction(_ body: [String: Any]) -> [String: Any] {
         return activate(app) ? resp(true, data: ["activated": app], strategy: "ax")
                              : resp(false, error: "app not running: \(app)")
 
+    case "desktop.app.launch":
+        // Launch via /usr/bin/open — no Automation/Apple Events permission needed.
+        // params.path opens a file (in its default app or params.app); params.app
+        // opens an app by name.
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        if let path = params["path"] as? String {
+            proc.arguments = (app != nil) ? ["-a", app!, path] : [path]
+        } else if let app {
+            proc.arguments = ["-a", app]
+        } else {
+            return resp(false, error: "app or params.path required")
+        }
+        do { try proc.run(); proc.waitUntilExit() } catch { return resp(false, error: "open failed: \(error)") }
+        return proc.terminationStatus == 0
+            ? resp(true, data: ["launched": app ?? params["path"] as? String ?? ""], strategy: "ax")
+            : resp(false, error: "open exited \(proc.terminationStatus)")
+
     case "desktop.ax.query":
         guard Permissions.accessibilityTrusted(prompt: false) else {
             return resp(false, error: "Accessibility permission not granted")

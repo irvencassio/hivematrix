@@ -16,6 +16,7 @@
 
 export const DESKTOPBEE_ACTIONS = [
   "desktop.apps.list",   // list running/launchable apps (read)
+  "desktop.app.launch",  // launch an app / open a file via `open` (act, no Automation)
   "desktop.app.activate", // bring an app to the foreground (act)
   "desktop.ax.query",    // read the Accessibility tree of an app/window (read)
   "desktop.ax.act",      // press/setValue/menu on an AX element (act)
@@ -42,6 +43,7 @@ const ACTION_TIER: Record<DesktopBeeAction, DesktopBeeTier> = {
   "desktop.ax.query": "free",
   "desktop.capture": "free",
   "desktop.permissions": "free",
+  "desktop.app.launch": "policy",
   "desktop.app.activate": "policy",
   "desktop.ax.act": "policy",
   "desktop.type": "policy",

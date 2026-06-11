@@ -1,9 +1,11 @@
-// Screen capture for verification (not pixel-guessing). Uses the system
-// `screencapture` tool — robust across macOS versions and gated by the Screen
-// Recording TCC grant on the helper. Writes a PNG to the audit directory and
-// returns its path as captureRef.
+// Screen capture for verification (not pixel-guessing). Captured IN-PROCESS so
+// the helper's own Screen Recording TCC grant applies — shelling out to
+// /usr/sbin/screencapture attributes the permission to that subprocess instead
+// and fails. Writes a PNG to the audit directory; returns its path as captureRef.
 
 import Foundation
+import CoreGraphics
+import AppKit
 
 enum Capture {
     static var auditDir: String {
@@ -13,32 +15,27 @@ enum Capture {
         return dir
     }
 
-    /// Capture the full screen (or a specific window owner is a future option).
-    /// Returns the file path on success.
+    /// Capture the main display to a PNG. Returns the file path on success.
     static func screen(tag: String) -> Result<String, String> {
+        guard Permissions.screenRecordingAuthorized(prompt: false) else {
+            return .failure("Screen Recording permission not granted")
+        }
+        let displayID = CGMainDisplayID()
+        guard let image = CGDisplayCreateImage(displayID) else {
+            return .failure("could not create image from display (Screen Recording permission?)")
+        }
+        let rep = NSBitmapImageRep(cgImage: image)
+        guard let png = rep.representation(using: .png, properties: [:]) else {
+            return .failure("could not encode PNG")
+        }
         let safeTag = tag.replacingOccurrences(of: "/", with: "_")
         let stamp = String(Int(Date().timeIntervalSince1970 * 1000))
         let path = "\(auditDir)/\(stamp)-\(safeTag).png"
-
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        // -x: no sound, -o: no window shadow, -t png
-        proc.arguments = ["-x", "-o", "-t", "png", path]
-        let errPipe = Pipe()
-        proc.standardError = errPipe
         do {
-            try proc.run()
-            proc.waitUntilExit()
+            try png.write(to: URL(fileURLWithPath: path))
+            return .success(path)
         } catch {
-            return .failure("screencapture failed to launch: \(error)")
+            return .failure("write failed: \(error)")
         }
-        if proc.terminationStatus != 0 {
-            let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            return .failure("screencapture exited \(proc.terminationStatus): \(err)")
-        }
-        guard FileManager.default.fileExists(atPath: path) else {
-            return .failure("capture produced no file (Screen Recording permission?)")
-        }
-        return .success(path)
     }
 }
