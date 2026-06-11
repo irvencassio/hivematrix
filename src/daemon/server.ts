@@ -146,6 +146,13 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /update/check — query the configured release channel for an update
+      if (req.method === "GET" && urlPath === "/update/check") {
+        const { checkUpdateStatus } = await import("@/lib/updater/daemon-update");
+        json(res, 200, await checkUpdateStatus());
+        return;
+      }
+
       // GET /onboarding — first-run / readiness checklist
       if (req.method === "GET" && urlPath === "/onboarding") {
         const { getOnboardingStatus } = await import("@/lib/onboarding/onboarding");
