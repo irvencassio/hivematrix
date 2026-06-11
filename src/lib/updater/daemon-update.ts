@@ -53,19 +53,17 @@ export function getUpdaterConfig(): UpdaterConfig {
 
   // Auth headers for a private channel (e.g. a private GitHub release asset:
   // GET the asset API URL with a token + Accept: application/octet-stream).
+  // Only attach the bearer token over HTTPS so a misconfigured (http / wrong
+  // host) channelUrl can't leak the token in cleartext.
   let headers: Record<string, string> | undefined;
   const token = resolveAuthToken(u);
-  if (token) {
+  const channelUrl = typeof u.channelUrl === "string" ? u.channelUrl : null;
+  if (token && channelUrl && channelUrl.startsWith("https://")) {
     headers = { Authorization: `Bearer ${token}` };
     if (typeof u.accept === "string") headers.Accept = u.accept;
   }
 
-  return {
-    channelUrl: typeof u.channelUrl === "string" ? u.channelUrl : null,
-    channel,
-    publicKeyPem,
-    headers,
-  };
+  return { channelUrl, channel, publicKeyPem, headers };
 }
 
 /**
