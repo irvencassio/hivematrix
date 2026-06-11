@@ -1,35 +1,61 @@
 # HiveMatrix Qwen Local Profile — M5 Max 128GB
 
 Date: 2026-06-11
-Status: Phase 2 target spec (Q2 decision)
+Status: Phase 2 — provisioned and running (Q2 decision)
+Revised: 2026-06-11 — model + serving stack updated after install (see "Revision" note)
+
+## Revision note (2026-06-11)
+
+The original target (Qwen3-Coder-Next 80B-A3B served via mlx-lm/Rapid-MLX) was
+superseded during provisioning by two findings:
+
+1. **Model**: Irv selected **Qwen 3.6 27B** — a *dense* model released
+   2026-04-21, "flagship-level coding in 27B," 256K context, native vision +
+   agentic-coding + thinking-mode. Qwen states it surpasses the prior
+   Qwen3.5-397B-A17B flagship on major coding benchmarks. A 27B dense model at
+   8-bit is a better quality/latency fit on this hardware than an 80B MoE at
+   4-bit, and it removes the MoE serving complexity.
+2. **Serving**: **LM Studio** is already installed and serves an
+   OpenAI-compatible API (`http://localhost:1234/v1`) with working tool calling
+   (verified) and native reasoning separation via the `reasoning_content` field.
+   It manages both MLX and GGUF engines. mlx-lm / Rapid-MLX were therefore NOT
+   adopted — LM Studio satisfies the tool-calling gate, which was the bar for
+   choosing it over standing up our own server.
 
 ## Hardware baseline
 
 MacBook Pro M5 Max, 128GB unified memory, no LAN GPU box.
-Primary serving: MLX-first (mlx-lm or Rapid-MLX). Fallback: llama.cpp/GGUF. vLLM deferred.
+Serving: **LM Studio** (MLX engine primary, GGUF available). vLLM deferred.
 
 ## Model targets
 
-### Primary — `code-critical` (local), `execute` (heavy)
+### Primary — `think` (local-only), `code-critical` (local), `execute`
 
-**Qwen3-Coder-Next (80B-A3B), 4-bit MLX quant**
-- ~42GB on disk, ~48GB+ RAM in use — fits 128GB with room for 100K+ context
-- ~70% SWE-bench class per community benchmarks; agentic-coding specialist
-- 262K native context
-- Tool calling must be proven by readiness gate on the MLX path before the router will use it
+**Qwen 3.6 27B (dense), MLX 8-bit** (`lmstudio-community/Qwen3.6-27B-MLX-8bit`)
+- ~28GB on disk; comfortable on 128GB with 65K+ context loaded
+- Dense (all params active) — no MoE routing variance; flagship-level coding
+- 256K native context (loaded at 65K; raise per task need)
+- 8-bit chosen over 4-bit for quality headroom ("128GB affords Q8" — and Irv's
+  explicit "we need quality too" steer). 4-bit MLX + Q8 GGUF also on disk as fallbacks.
+- Tool calling + reasoning separation proven by the readiness gate before router use
 
-### Secondary — `execute` (fast/bulk), `cheap-web`, summarization
+### Secondary — (optional fast lane)
 
-**Qwen3.6-35B-A3B (or current 3.5/3.6 medium MoE), Q8**
-- ~70–80 tok/s class on Apple Silicon — fast lane for extraction, drafting, WebBee summarization
-- 128GB affords Q8 where quality over Q4 matters
+Not provisioned. The 27B dense model is fast enough on M5 Max to serve as the
+single local model for v1; a smaller fast-lane model can be added later if
+extraction/summarization throughput demands it. `qwen.secondary` is `null` in
+the live profile.
 
 ## Serving stack
 
-- **Primary: MLX** — mlx-lm server or Rapid-MLX (OpenAI drop-in with tool-parser + `<think>`-separation, which aligns with Phase 2 generic-loop fixes).
-- **Fallback: llama.cpp / GGUF** (unsloth quants) — most battle-tested tool-calling path for Qwen3-Coder.
+- **Primary: LM Studio** (`lms server`, port 1234) — OpenAI-compatible
+  `/v1/chat/completions`, tool calling parsed into `tool_calls`, reasoning in
+  `reasoning_content`. MLX engine on Apple Silicon.
+- **Fallback: LM Studio GGUF engine** — the Q8_0 GGUF is already on disk
+  (`lmstudio-community/Qwen3.6-27B-GGUF`) if the MLX path ever regresses.
 - **Deferred: vLLM** — only if a LAN Linux/GPU box appears.
-- **Required fix (Phase 2):** `mlx` provider must NOT be hardcoded `supportsTools: false` — capability is probed by the readiness gate. See `src/lib/local-model/health.ts` TODO comment.
+- **Provider config**: `provider: "lmstudio"`, `supportsTools` is probe-driven
+  by the readiness gate, not hardcoded. See `src/lib/local-model/health.ts`.
 
 ## Readiness gate (Phase 2 extension of `health.ts`)
 
@@ -46,8 +72,25 @@ A Qwen profile is router-selectable only when all pass on the live endpoint:
 
 | Role | Model |
 |------|-------|
-| `think` | Frontier favorite (Claude); local-only: Qwen3-Coder-Next |
-| `code-critical` | Frontier harness while headroom; else Qwen3-Coder-Next via Qwen Code, frontier review queued |
-| `execute` | Qwen3.6-35B-A3B; escalate to Coder-Next on failure or by task tag |
-| `cheap-web` | Qwen3.6-35B-A3B |
+| `think` | Frontier favorite (Claude); local-only: Qwen 3.6 27B |
+| `code-critical` | Frontier harness while headroom; else Qwen 3.6 27B via Qwen Code, frontier review queued |
+| `execute` | Qwen 3.6 27B |
+| `cheap-web` | Qwen 3.6 27B |
 | `image` | Nano Banana (cloud-ok); local mflux fallback in local-only/offline |
+
+## Live profile (`~/.hivematrix/config.json`)
+
+```json
+{
+  "localModel": { "provider": "lmstudio", "endpoint": "http://localhost:1234/v1", "modelName": "qwen/qwen3.6-27b" },
+  "qwen": {
+    "location": "local",
+    "primary": { "modelId": "qwen/qwen3.6-27b", "endpoint": "http://localhost:1234/v1", "provider": "lmstudio", "contextLimit": 65536 },
+    "secondary": null,
+    "thinkingEnabled": true, "minDecodeRate": 15, "probeTimeoutMs": 120000
+  }
+}
+```
+
+Note: `qwen/qwen3.6-27b` is LM Studio's API identifier; load the **MLX-8bit**
+variant in LM Studio so that identifier resolves to the 8-bit weights.

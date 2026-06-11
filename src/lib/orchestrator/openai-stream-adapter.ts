@@ -44,6 +44,13 @@ export function parseOpenAIChunk(
   const finishReason = choice.finish_reason as string | null;
 
   if (delta) {
+    // Reasoning delta — Qwen 3.6 / LM Studio emit thinking via a separate
+    // `reasoning_content` field (not inline <think> tags). Route it to a
+    // reasoning event so it never contaminates content or tool arguments.
+    if (typeof delta.reasoning_content === "string" && delta.reasoning_content) {
+      events.push({ type: "reasoning", content: delta.reasoning_content });
+    }
+
     // Text content delta
     if (typeof delta.content === "string" && delta.content) {
       events.push({ type: "text", content: delta.content });
