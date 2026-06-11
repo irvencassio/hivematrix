@@ -39,7 +39,7 @@ async function main() {
     endpoint,
     modelName: modelId,
     minDecodeRate: profile.minDecodeRate,
-    timeoutMs: 30_000,
+    timeoutMs: 60_000,
     toolCallTimeoutMs: profile.probeTimeoutMs,
   });
 
@@ -62,7 +62,8 @@ async function main() {
 
   // --- Eval suite ---
   line("Running standing eval suite (6 cases)...");
-  const suite = await runEvalSuite(endpoint, modelId, { timeoutMs: 300_000 });
+  // Generous budget: reasoning-heavy cases run 60–120s each on a 27B local model.
+  const suite = await runEvalSuite(endpoint, modelId, { timeoutMs: 900_000 });
   for (const r of suite.results) {
     const skipped = (r.output as { skipped?: boolean })?.skipped === true;
     const status = skipped ? "⊘ skip" : r.passed ? "✓ pass" : "✗ FAIL";

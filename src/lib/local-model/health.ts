@@ -404,11 +404,14 @@ export async function getLocalModelHealth(options?: { maxAgeMs?: number; timeout
 // ---------------------------------------------------------------------------
 
 async function probeToolChain(endpoint: string, modelName: string, timeoutMs: number): Promise<boolean> {
-  // Step 1: ask model to call "step1" tool to get a value
+  // Step 1: ask model to call "step1" tool to get a value.
+  // NOTE: max_tokens must be generous for reasoning models (Qwen 3.6 spends
+  // ~400 reasoning tokens before emitting a tool call). Too low → the response
+  // finishes with reason "length" mid-think and no tool call is ever produced.
   const step1Body = {
     model: modelName,
     stream: false,
-    max_tokens: 256,
+    max_tokens: 2048,
     temperature: 0,
     messages: [{ role: "user", content: "Call step1 tool with input 'hello' to get a value, then call step2 tool with that value." }],
     tools: [
@@ -474,7 +477,9 @@ async function probeThinkSeparation(endpoint: string, modelName: string, timeout
   const body = {
     model: modelName,
     stream: false,
-    max_tokens: 512,
+    // Generous budget: "think carefully" deliberately triggers extended
+    // reasoning, which must not starve the tool call (see probeToolChain note).
+    max_tokens: 2048,
     temperature: 0,
     messages: [{ role: "user", content: "Think carefully then call ping with value hello." }],
     tools: [
@@ -526,9 +531,12 @@ interface DecodeRateResult {
 async function probeDecodeRate(endpoint: string, modelName: string, timeoutMs: number, minTokPerSec: number): Promise<DecodeRateResult> {
   const body = {
     model: modelName,
-    messages: [{ role: "user", content: "Count from 1 to 50, one number per line." }],
+    // "/no_think" hint plus a trivial task minimises reasoning so the measured
+    // rate reflects sustained decode, not think latency. We still count
+    // reasoning_content deltas (below) as decoded tokens if the model thinks.
+    messages: [{ role: "user", content: "Count from 1 to 50, one number per line. /no_think" }],
     stream: true,
-    max_tokens: 256,
+    max_tokens: 512,
   };
 
   for (const url of buildCandidateUrls(endpoint, "chat/completions")) {
@@ -561,9 +569,11 @@ async function probeDecodeRate(endpoint: string, modelName: string, timeoutMs: n
           const dataStr = trimmed.slice(5).trim();
           if (dataStr === "[DONE]") break;
           try {
-            const payload = JSON.parse(dataStr) as { choices?: Array<{ delta?: { content?: string }; usage?: { completion_tokens?: number } }> };
-            const delta = payload.choices?.[0]?.delta?.content;
-            if (typeof delta === "string" && delta) {
+            const payload = JSON.parse(dataStr) as { choices?: Array<{ delta?: { content?: string; reasoning_content?: string }; usage?: { completion_tokens?: number } }> };
+            const d = payload.choices?.[0]?.delta;
+            // Count both content and reasoning_content — both are decoded tokens.
+            const delta = (d?.content ?? "") + (d?.reasoning_content ?? "");
+            if (delta) {
               if (startMs === null) startMs = Date.now();
               endMs = Date.now();
               // Rough token estimate: ~4 chars per token

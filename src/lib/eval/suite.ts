@@ -57,7 +57,9 @@ async function callChatNonStreaming(
 ): Promise<{ content: string | null; toolCalls: Array<{ name: string; arguments: string }>; tokensUsed: number }> {
   const base = endpoint.replace(/\/$/, "");
   const urls = [`${base}/chat/completions`, `${base}/v1/chat/completions`];
-  const body: Record<string, unknown> = { model: modelId, messages, stream: false, max_tokens: 1024, temperature: 0 };
+  // 4096 max_tokens: reasoning models (Qwen 3.6) spend hundreds of tokens
+  // thinking before content/tool calls; a tight budget truncates mid-think.
+  const body: Record<string, unknown> = { model: modelId, messages, stream: false, max_tokens: 4096, temperature: 0 };
   if (tools && tools.length > 0) body.tools = tools;
 
   for (const url of urls) {
@@ -218,7 +220,12 @@ const UI_SLICE_CASE: EvalCase = {
       const html = r.content ?? "";
       const hasHtml = html.includes("<!DOCTYPE") || html.includes("<html");
       const hasButton = html.includes("<button") || html.includes("Click me");
-      const hasJs = html.includes("<script") && (html.includes("alert") || html.includes("addEventListener"));
+      // Accept any valid wiring of the click→alert behavior: a <script> block,
+      // an inline onclick handler, or addEventListener. Inline onclick is a
+      // legitimate single-file implementation, so don't require <script>.
+      const hasAlert = html.includes("alert");
+      const hasHandler = html.includes("<script") || html.includes("onclick") || html.includes("addEventListener");
+      const hasJs = hasAlert && hasHandler;
 
       return {
         caseId: "ui-slice",
