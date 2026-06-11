@@ -97,7 +97,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="session"><div class="session-empty">Select a task to inspect its session.</div></div>
   </section>
   <section class="col context">
-    <h2>Soak / Health</h2>
+    <h2>Setup</h2>
+    <div id="onboarding"></div>
+    <h2 style="margin-top:20px">Soak / Health</h2>
     <div id="metrics"></div>
     <h2 style="margin-top:20px">Connectivity</h2>
     <div id="conn"></div>
@@ -107,7 +109,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 </main>
 <script>
 const LANES = ["backlog","assigned","in_progress","review","done","failed"];
-let state = { tasks: [], directives: [], conn: null, metrics: null, selected: null };
+let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null };
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -190,12 +192,27 @@ function renderMetrics() {
     + '</div>';
 }
 
+function renderOnboarding() {
+  const o = state.onboarding; if (!o) return;
+  const html = o.steps.map(s => {
+    const mark = s.state === "done" ? "✓" : "○";
+    const cls = s.state === "done" ? "ok" : (s.required ? "err" : "muted");
+    return '<div class="s" title="'+esc(s.remediation||s.detail)+'">'
+      + '<span class="dot '+(s.state==="done"?"done":(s.required?"failed":"sleeping"))+'"></span>'
+      + '<span style="color:var(--'+cls+')">'+mark+'</span> '+esc(s.title)
+      + (s.required?'':' <span class="muted">(optional)</span>')+'</div>';
+  }).join("");
+  document.getElementById("onboarding").innerHTML = html
+    + '<div class="muted" style="margin-top:6px">'
+    + (o.requiredComplete ? 'Required setup complete.' : 'Required setup incomplete.') + '</div>';
+}
+
 async function refresh() {
   try {
-    [state.tasks, state.directives, state.conn, state.metrics] = await Promise.all([
-      api("/tasks"), api("/directives"), api("/connectivity"), api("/metrics"),
+    [state.tasks, state.directives, state.conn, state.metrics, state.onboarding] = await Promise.all([
+      api("/tasks"), api("/directives"), api("/connectivity"), api("/metrics"), api("/onboarding"),
     ]);
-    renderBoard(); renderConn(); renderDirectives(); renderMetrics();
+    renderBoard(); renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
     if (state.selected) selectTask(state.selected);
   } catch (e) { /* transient */ }
 }

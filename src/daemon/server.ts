@@ -146,6 +146,26 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /onboarding — first-run / readiness checklist
+      if (req.method === "GET" && urlPath === "/onboarding") {
+        const { getOnboardingStatus } = await import("@/lib/onboarding/onboarding");
+        const { probeDesktopBeeHelper, dispatchDesktopBeeAction } = await import("@/lib/desktopbee/client");
+        // Live-probe the DesktopBee helper for build + permission state.
+        let helperBuilt = false;
+        let desktopPermissions: { accessibility: boolean; screenRecording: boolean } | null = null;
+        const health = await probeDesktopBeeHelper().catch(() => null);
+        if (health) {
+          helperBuilt = true;
+          const r = await dispatchDesktopBeeAction(
+            { action: "desktop.permissions", params: { prompt: false } }
+          ).catch(() => null);
+          const d = r?.data as { accessibility?: boolean; screenRecording?: boolean } | undefined;
+          if (d) desktopPermissions = { accessibility: !!d.accessibility, screenRecording: !!d.screenRecording };
+        }
+        json(res, 200, getOnboardingStatus({ helperBuilt, desktopPermissions }));
+        return;
+      }
+
       // GET /connectivity
       if (req.method === "GET" && urlPath === "/connectivity") {
         json(res, 200, policy.getState());

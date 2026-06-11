@@ -23,6 +23,7 @@ export const DESKTOPBEE_ACTIONS = [
   "desktop.click",       // synthesize a mouse click at a point/element (act)
   "desktop.capture",     // ScreenCaptureKit screenshot for verification (read)
   "desktop.script.run",  // run AppleScript/JXA, allowlisted apps (approval)
+  "desktop.permissions", // read/prompt Accessibility + Screen Recording status (read)
 ] as const;
 
 export type DesktopBeeAction = (typeof DESKTOPBEE_ACTIONS)[number];
@@ -40,6 +41,7 @@ const ACTION_TIER: Record<DesktopBeeAction, DesktopBeeTier> = {
   "desktop.apps.list": "free",
   "desktop.ax.query": "free",
   "desktop.capture": "free",
+  "desktop.permissions": "free",
   "desktop.app.activate": "policy",
   "desktop.ax.act": "policy",
   "desktop.type": "policy",
