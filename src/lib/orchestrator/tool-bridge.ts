@@ -3,6 +3,7 @@ import { promisify } from "util";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, relative } from "path";
 import { AGENT_PROFILE_IDS } from "@/lib/config/agent-profiles";
+import { readToken } from "@/lib/auth/token";
 
 const execAsync = promisify(exec);
 
@@ -297,14 +298,17 @@ async function executeCreateTask(args: Record<string, unknown>, context?: ToolCo
     return "Error: description and agentType are required";
   }
 
-  // Subtask delegation goes through the daemon's task API on the local port.
+  // Subtask delegation goes through the daemon's task API on the local port,
+  // authenticated with the daemon shared-secret token.
   const base = `http://127.0.0.1:${process.env.HIVEMATRIX_PORT ?? "3747"}`;
+  const token = readToken("auth-token") ?? "";
+  const authArg = `-H "Authorization: Bearer ${token}"`;
 
   // Safety: check subtask depth (max 2 levels)
   if (parentTaskId) {
     try {
       const { stdout } = await execAsync(
-        `curl -s ${base}/tasks/${parentTaskId}`,
+        `curl -s ${authArg} ${base}/tasks/${parentTaskId}`,
         { encoding: "utf-8", timeout: 5_000, killSignal: "SIGKILL" }
       );
       const parentTask = JSON.parse(stdout);
@@ -319,7 +323,7 @@ async function executeCreateTask(args: Record<string, unknown>, context?: ToolCo
     // Safety: check subtask count (max 10 per parent)
     try {
       const { stdout } = await execAsync(
-        `curl -s "${base}/tasks?parentTaskId=${parentTaskId}"`,
+        `curl -s ${authArg} "${base}/tasks?parentTaskId=${parentTaskId}"`,
         { encoding: "utf-8", timeout: 5_000, killSignal: "SIGKILL" }
       );
       const siblings = JSON.parse(stdout);
@@ -341,7 +345,7 @@ async function executeCreateTask(args: Record<string, unknown>, context?: ToolCo
       parentTaskId,
     });
     const { stdout } = await execAsync(
-      `curl -s -X POST ${base}/tasks -H "Content-Type: application/json" -d '${body.replace(/'/g, "'\\''")}'`,
+      `curl -s -X POST ${authArg} ${base}/tasks -H "Content-Type: application/json" -d '${body.replace(/'/g, "'\\''")}'`,
       { encoding: "utf-8", timeout: 10_000, killSignal: "SIGKILL" }
     );
     const task = JSON.parse(stdout);

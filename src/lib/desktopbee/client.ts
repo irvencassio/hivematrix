@@ -15,8 +15,14 @@ import {
   type DesktopBeeResponse,
   type DesktopBeeApprovalPolicy,
 } from "./actions";
+import { readToken, HELPER_TOKEN_FILE } from "@/lib/auth/token";
 
 const DEFAULT_HELPER_PORT = 3748;
+
+function helperAuthHeader(): Record<string, string> {
+  const token = readToken(HELPER_TOKEN_FILE);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export interface DesktopBeeClientOptions {
   port?: number;
@@ -40,7 +46,8 @@ export async function dispatchDesktopBeeAction(
   options: DesktopBeeClientOptions = {}
 ): Promise<DesktopBeeResponse> {
   const decision = decideApproval(req, options.policy);
-  if (!decision.autoApproved && options.approved !== true) {
+  const approved = decision.autoApproved || options.approved === true;
+  if (!approved) {
     return {
       ok: false,
       action: req.action,
@@ -53,8 +60,10 @@ export async function dispatchDesktopBeeAction(
   try {
     const res = await fetch(`${url}/action`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req),
+      headers: { "Content-Type": "application/json", ...helperAuthHeader() },
+      // Carry the approved flag so the helper can enforce its own server-side
+      // approval gate (defence-in-depth: the helper refuses act/script without it).
+      body: JSON.stringify({ ...req, approved }),
       signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
     });
     if (!res.ok) {

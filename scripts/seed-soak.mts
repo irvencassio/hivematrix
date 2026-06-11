@@ -14,8 +14,14 @@
  * skips a goal that already exists.
  */
 
+import { readFileSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+
 const PORT = process.env.HIVEMATRIX_PORT ?? "3747";
 const BASE = `http://127.0.0.1:${PORT}`;
+const TOKEN = (() => { try { return readFileSync(join(homedir(), ".hivematrix", "auth-token"), "utf-8").trim(); } catch { return ""; } })();
+const AUTH = { "Authorization": "Bearer " + TOKEN };
 
 const SOAK_DIRECTIVES = [
   { goal: "SOAK heartbeat A: use the bash tool to append the current date to /tmp/hm-soak-heartbeat-A.txt, then stop.", interval: "PT3M" },
@@ -24,7 +30,7 @@ const SOAK_DIRECTIVES = [
 ];
 
 async function main() {
-  const listRes = await fetch(`${BASE}/directives`);
+  const listRes = await fetch(`${BASE}/directives`, { headers: AUTH });
   if (!listRes.ok) throw new Error(`daemon not reachable at ${BASE} (HTTP ${listRes.status})`);
   const existing = new Set((await listRes.json() as { goal: string }[]).map((d) => d.goal));
 
@@ -36,7 +42,7 @@ async function main() {
     }
     const res = await fetch(`${BASE}/directives`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...AUTH },
       body: JSON.stringify({
         goal: spec.goal,
         project: "hivematrix",

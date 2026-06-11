@@ -109,9 +109,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 </main>
 <script>
 const LANES = ["backlog","assigned","in_progress","review","done","failed"];
+// Shared-secret token injected by the daemon into this same-origin page.
+const HM_TOKEN = "%%HM_TOKEN%%";
 let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null };
 
 async function api(path, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({}, opts.headers, { "Authorization": "Bearer " + HM_TOKEN });
   const r = await fetch(path, opts);
   if (r.status === 204) return null;
   return r.json();
@@ -226,7 +230,7 @@ document.getElementById("modeSel").addEventListener("change", async (e) => {
 // SSE for live updates; fall back to polling.
 function connectSSE() {
   try {
-    const es = new EventSource("/events");
+    const es = new EventSource("/events?token=" + encodeURIComponent(HM_TOKEN));
     const live = document.getElementById("live");
     es.onopen = () => { live.className = "live"; live.textContent = "● live"; };
     es.onmessage = () => refresh();

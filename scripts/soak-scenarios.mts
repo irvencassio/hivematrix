@@ -15,13 +15,18 @@
 
 import { promisify } from "util";
 import { execFile } from "child_process";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
 
 const execFileAsync = promisify(execFile);
 const BASE = "http://127.0.0.1:3747";
+const TOKEN = (() => { try { return readFileSync(join(homedir(), ".hivematrix", "auth-token"), "utf-8").trim(); } catch { return ""; } })();
 function line(s = "") { process.stdout.write(s + "\n"); }
 
-async function api(path: string, opts?: RequestInit): Promise<any> {
-  const r = await fetch(BASE + path, { ...opts, signal: AbortSignal.timeout(8000) });
+async function api(path: string, opts: RequestInit = {}): Promise<any> {
+  const headers = { ...(opts.headers ?? {}), "Authorization": "Bearer " + TOKEN };
+  const r = await fetch(BASE + path, { ...opts, headers, signal: AbortSignal.timeout(8000) });
   if (r.status === 204) return null;
   return r.json();
 }

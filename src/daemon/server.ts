@@ -22,6 +22,7 @@ import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import type { ConnectivityMode } from "@/lib/connectivity/policy";
 import { setBroadcastFn } from "@/lib/ws/broadcaster";
 import { CONSOLE_HTML } from "./console";
+import { getOrCreateToken, tokenEquals, DAEMON_TOKEN_FILE } from "@/lib/auth/token";
 
 // SSE client registry
 const sseClients = new Set<ServerResponse>();
@@ -73,6 +74,7 @@ function parseQueryString(url: string): Record<string, string> {
 
 export function createDaemonServer() {
   const policy = getConnectivityPolicy();
+  const AUTH_TOKEN = getOrCreateToken(DAEMON_TOKEN_FILE);
 
   // Wire the internal broadcaster so scheduler/recovery can emit SSE events
   setBroadcastFn((payload) => broadcast("hive:event", payload));
@@ -82,11 +84,31 @@ export function createDaemonServer() {
     broadcast("connectivity:change", state);
   });
 
+  // Routes servable without the token: liveness + the console page itself
+  // (the page receives the token injected into its HTML, same-origin only).
+  const isPublicRoute = (method: string, path: string) =>
+    method === "GET" && (path === "/health" || path === "/" || path === "/console");
+
+  // Extract the caller's token from the Authorization header or ?token= query
+  // (EventSource can't set headers, so SSE passes it as a query param).
+  function requestToken(req: IncomingMessage, urlPath: string): string | null {
+    void urlPath;
+    const auth = req.headers["authorization"];
+    if (typeof auth === "string" && auth.startsWith("Bearer ")) return auth.slice(7).trim();
+    const url = req.url ?? "";
+    const idx = url.indexOf("?");
+    if (idx !== -1) {
+      const t = new URLSearchParams(url.slice(idx + 1)).get("token");
+      if (t) return t;
+    }
+    return null;
+  }
+
   const server = createServer(async (req, res) => {
-    // CORS for console dev server
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    // No wildcard CORS. The console is served same-origin (and the Tauri shell
+    // navigates to the daemon origin), so cross-origin access is neither needed
+    // nor allowed — this closes the browser drive-by (CSRF) vector.
+    res.setHeader("Vary", "Origin");
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
@@ -96,11 +118,19 @@ export function createDaemonServer() {
 
     const urlPath = (req.url ?? "/").split("?")[0];
 
+    // Authenticate everything except the public liveness/page routes.
+    if (!isPublicRoute(req.method ?? "GET", urlPath)) {
+      if (!tokenEquals(requestToken(req, urlPath), AUTH_TOKEN)) {
+        json(res, 401, { error: "unauthorized" });
+        return;
+      }
+    }
+
     try {
-      // GET / or /console — the operator console (centered shell)
+      // GET / or /console — the operator console (token injected for same-origin use)
       if (req.method === "GET" && (urlPath === "/" || urlPath === "/console")) {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(CONSOLE_HTML);
+        res.end(CONSOLE_HTML.replace("%%HM_TOKEN%%", AUTH_TOKEN));
         return;
       }
 
