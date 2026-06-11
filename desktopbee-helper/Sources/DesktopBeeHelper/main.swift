@@ -31,28 +31,108 @@ func listApps() -> [[String: Any]] {
     }
 }
 
+// Apps whose AppleScript may run. The HiveMatrix client also gates by
+// allowlist; this is defence-in-depth at the helper boundary.
+let SCRIPT_APP_ALLOWLIST = ProcessInfo.processInfo.environment["DESKTOPBEE_SCRIPT_ALLOWLIST"]?
+    .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) } ?? ["Finder", "System Events"]
+
+func activate(_ app: String) -> Bool {
+    guard let r = NSWorkspace.shared.runningApplications.first(where: {
+        $0.bundleIdentifier == app || $0.localizedName == app
+    }) else { return false }
+    return r.activate()
+}
+
 func handleAction(_ body: [String: Any]) -> [String: Any] {
     let action = body["action"] as? String ?? ""
     let requestId = body["requestId"] as? String
-    func resp(_ ok: Bool, data: Any? = nil, error: String? = nil, strategy: String? = nil) -> [String: Any] {
+    let app = body["app"] as? String
+    let params = body["params"] as? [String: Any] ?? [:]
+    func resp(_ ok: Bool, data: Any? = nil, error: String? = nil, strategy: String? = nil, captureRef: String? = nil) -> [String: Any] {
         var r: [String: Any] = ["ok": ok, "action": action]
         if let requestId { r["requestId"] = requestId }
         if let data { r["data"] = data }
         if let error { r["error"] = error }
         if let strategy { r["strategy"] = strategy }
+        if let captureRef { r["captureRef"] = captureRef }
         return r
     }
 
     switch action {
     case "desktop.apps.list":
         return resp(true, data: listApps(), strategy: "ax")
-    case "desktop.app.activate",
-         "desktop.ax.query", "desktop.ax.act",
-         "desktop.type", "desktop.click",
-         "desktop.capture", "desktop.script.run":
-        // Declared in the contract; implemented in the next increment (needs
-        // Accessibility / Screen Recording permission + AX/CGEvent/SCKit code).
-        return resp(false, error: "action '\(action)' not yet implemented in helper v1")
+
+    case "desktop.app.activate":
+        guard let app else { return resp(false, error: "app required") }
+        return activate(app) ? resp(true, data: ["activated": app], strategy: "ax")
+                             : resp(false, error: "app not running: \(app)")
+
+    case "desktop.ax.query":
+        guard Permissions.accessibilityTrusted(prompt: false) else {
+            return resp(false, error: "Accessibility permission not granted")
+        }
+        guard let app else { return resp(false, error: "app required") }
+        let maxDepth = (params["maxDepth"] as? Int) ?? 6
+        guard let tree = AX.tree(for: app, maxDepth: maxDepth) else {
+            return resp(false, error: "app not running or no AX tree: \(app)")
+        }
+        return resp(true, data: tree, strategy: "ax")
+
+    case "desktop.ax.act":
+        guard Permissions.accessibilityTrusted(prompt: false) else {
+            return resp(false, error: "Accessibility permission not granted")
+        }
+        guard let app, let path = params["path"] as? String else {
+            return resp(false, error: "app and params.path required")
+        }
+        let op = (params["op"] as? String) ?? "press"
+        switch AX.act(app: app, path: path, op: op, value: params["value"] as? String) {
+        case .success(let m): return resp(true, data: ["result": m], strategy: "ax")
+        case .failure(let e): return resp(false, error: e, strategy: "ax")
+        }
+
+    case "desktop.type":
+        guard Permissions.accessibilityTrusted(prompt: false) else {
+            return resp(false, error: "Accessibility permission not granted")
+        }
+        guard let text = params["text"] as? String else { return resp(false, error: "params.text required") }
+        switch Input.type(text) {
+        case .success(let m): return resp(true, data: ["result": m], strategy: "coordinate")
+        case .failure(let e): return resp(false, error: e, strategy: "coordinate")
+        }
+
+    case "desktop.click":
+        guard Permissions.accessibilityTrusted(prompt: false) else {
+            return resp(false, error: "Accessibility permission not granted")
+        }
+        guard let x = params["x"] as? Double, let y = params["y"] as? Double else {
+            return resp(false, error: "params.x and params.y required")
+        }
+        switch Input.click(x: x, y: y, count: (params["count"] as? Int) ?? 1) {
+        case .success(let m): return resp(true, data: ["result": m], strategy: "coordinate")
+        case .failure(let e): return resp(false, error: e, strategy: "coordinate")
+        }
+
+    case "desktop.capture":
+        switch Capture.screen(tag: (params["tag"] as? String) ?? "capture") {
+        case .success(let path): return resp(true, data: ["path": path], strategy: "ax", captureRef: path)
+        case .failure(let e): return resp(false, error: e)
+        }
+
+    case "desktop.script.run":
+        guard let app, SCRIPT_APP_ALLOWLIST.contains(app) else {
+            return resp(false, error: "app '\(app ?? "?")' not in helper script allowlist")
+        }
+        guard let source = params["script"] as? String else { return resp(false, error: "params.script required") }
+        switch Scripting.run(source) {
+        case .success(let out): return resp(true, data: ["output": out], strategy: "script")
+        case .failure(let e): return resp(false, error: e, strategy: "script")
+        }
+
+    case "desktop.permissions":
+        let prompt = (params["prompt"] as? Bool) ?? false
+        return resp(true, data: Permissions.snapshot(prompt: prompt))
+
     default:
         return resp(false, error: "unknown action '\(action)'")
     }
