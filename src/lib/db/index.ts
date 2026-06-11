@@ -5,10 +5,14 @@ import { homedir } from "os";
 import { mkdirSync } from "fs";
 import { normalizeBrainSelection } from "@/lib/brain/selection";
 
-const DB_DIR = join(homedir(), ".hivematrix");
-const DB_PATH = join(DB_DIR, "hivematrix.db");
-
-mkdirSync(DB_DIR, { recursive: true });
+// DB path is resolved lazily (from $HOME at open time) so tests can point it
+// at a temp dir via HIVEMATRIX_DB_PATH / HOME before the first getDb() call.
+function resolveDbPath(): string {
+  if (process.env.HIVEMATRIX_DB_PATH) return process.env.HIVEMATRIX_DB_PATH;
+  const dir = join(homedir(), ".hivematrix");
+  mkdirSync(dir, { recursive: true });
+  return join(dir, "hivematrix.db");
+}
 
 // Singleton database instance (shared across orchestrator + API routes via globalThis)
 const g = globalThis as unknown as { __hivematrixSqlite?: Database.Database };
@@ -260,7 +264,7 @@ const MIGRATIONS: string[] = [
 // Open / initialise the database
 // ------------------------------------------------------------------
 function openDb(): Database.Database {
-  const db = new Database(DB_PATH);
+  const db = new Database(resolveDbPath());
 
   // Enable WAL mode for concurrent read performance
   db.pragma("journal_mode = WAL");
@@ -284,6 +288,15 @@ export function getDb(): Database.Database {
 }
 
 export default getDb;
+
+/**
+ * Test-only: close and clear the singleton so the next getDb() reopens against
+ * the current HIVEMATRIX_DB_PATH/HOME. Not for production use.
+ */
+export function _resetDbForTests(): void {
+  try { g.__hivematrixSqlite?.close(); } catch { /* ignore */ }
+  delete g.__hivematrixSqlite;
+}
 
 export function generateId(): string {
   return randomUUID().replace(/-/g, "").slice(0, 24);
