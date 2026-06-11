@@ -21,6 +21,7 @@ import { getDb } from "@/lib/db";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import type { ConnectivityMode } from "@/lib/connectivity/policy";
 import { setBroadcastFn } from "@/lib/ws/broadcaster";
+import { CONSOLE_HTML } from "./console";
 
 // SSE client registry
 const sseClients = new Set<ServerResponse>();
@@ -96,6 +97,13 @@ export function createDaemonServer() {
     const urlPath = (req.url ?? "/").split("?")[0];
 
     try {
+      // GET / or /console — the operator console (centered shell)
+      if (req.method === "GET" && (urlPath === "/" || urlPath === "/console")) {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(CONSOLE_HTML);
+        return;
+      }
+
       // GET /health
       if (req.method === "GET" && urlPath === "/health") {
         const db = getDb();
