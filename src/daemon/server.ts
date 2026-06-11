@@ -197,6 +197,57 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /directives — create a directive (optionally with criteria[])
+      if (req.method === "POST" && urlPath === "/directives") {
+        const store = await import("@/lib/orchestrator/directive-store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const directive = store.createDirective({
+          goal: String(body.goal ?? ""),
+          profile: String(body.profile ?? "default"),
+          project: String(body.project ?? "hivematrix"),
+          projectPath: String(body.projectPath ?? process.cwd()),
+          triggerPolicy: (body.triggerPolicy as Record<string, unknown>) ?? { type: "manual" },
+          nextRunAt: (body.nextRunAt as string | null) ?? null,
+        });
+        const criteria = Array.isArray(body.criteria) ? body.criteria : [];
+        for (const c of criteria) {
+          if (typeof c === "string") store.addCriterion(directive._id, c);
+        }
+        broadcast("directives:created", { directiveId: directive._id });
+        json(res, 201, { ...directive, criteria: store.getCriteria(directive._id) });
+        return;
+      }
+
+      // GET /directives — list all directives
+      if (req.method === "GET" && urlPath === "/directives") {
+        const db = getDb();
+        const rows = db.prepare("SELECT * FROM directives ORDER BY createdAt DESC").all();
+        json(res, 200, rows);
+        return;
+      }
+
+      // GET /directives/:id — directive with its criteria + runs
+      const dirMatch = urlPath.match(/^\/directives\/([^/]+)$/);
+      if (req.method === "GET" && dirMatch) {
+        const store = await import("@/lib/orchestrator/directive-store");
+        const directive = store.getDirective(dirMatch[1]);
+        if (!directive) { json(res, 404, { error: "Not found" }); return; }
+        const db = getDb();
+        const runs = db.prepare("SELECT * FROM runs WHERE directiveId = ? ORDER BY startedAt DESC").all(dirMatch[1]);
+        json(res, 200, { ...directive, criteria: store.getCriteria(dirMatch[1]), runs });
+        return;
+      }
+
+      // POST /directives/:id/criteria — add a success criterion
+      const critMatch = urlPath.match(/^\/directives\/([^/]+)\/criteria$/);
+      if (req.method === "POST" && critMatch) {
+        const store = await import("@/lib/orchestrator/directive-store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const c = store.addCriterion(critMatch[1], String(body.description ?? ""), body.proverType as string | undefined);
+        json(res, 201, c);
+        return;
+      }
+
       json(res, 404, { error: "Not found" });
     } catch (err) {
       console.error("[daemon] Request error:", err);

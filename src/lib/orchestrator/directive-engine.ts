@@ -36,6 +36,9 @@ import {
   allCriteriaProven,
 } from "./directive-store";
 import { computeNextRunAt, parseTriggerPolicy, type TriggerPolicy } from "@/lib/scheduling/trigger-policy";
+import { getConnectivityPolicy } from "@/lib/connectivity/policy";
+import { routeByRole } from "@/lib/routing/router";
+import { resolveModelId } from "@/lib/routing/model-resolver";
 
 const MAX_TASKS_PER_RUN = 5;
 const TERMINAL_TASK_STATUSES = new Set(["review", "done", "failed"]);
@@ -64,6 +67,12 @@ async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
     ? criteria.slice(0, MAX_TASKS_PER_RUN).map((c) => c.description)
     : [directive.goal];
 
+  // Route directive work by role through the connectivity policy, then resolve
+  // the tier to a concrete model ID. Directive tasks are "execute" role by
+  // default (bulk work); cloud-ok → frontier, local-only → local Qwen.
+  const route = routeByRole("execute", getConnectivityPolicy());
+  const modelId = resolveModelId(route.tier);
+
   const createdTaskIds: string[] = [];
   for (const target of targets) {
     const task = await Task.create({
@@ -72,11 +81,12 @@ async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
       project: directive.project,
       projectPath: directive.projectPath,
       profile: directive.profile,
+      model: modelId,
       directiveId: directive._id,
       status: "backlog",
       executor: "agent",
       // Tag the originating run so verify can find this run's tasks.
-      output: { runId: run._id },
+      output: { runId: run._id, routedTier: route.tier },
     });
     createdTaskIds.push(task._id.toString());
   }
