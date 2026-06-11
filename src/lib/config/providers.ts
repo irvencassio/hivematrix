@@ -63,7 +63,7 @@ const MODEL_PROVIDER_MAP: [string, string][] = [
 ];
 
 /**
- * Read provider configs from ~/.hive/config.json
+ * Read provider configs from ~/.hivematrix/config.json
  */
 function getProviderConfigs(): Record<string, ProviderConfig> {
   try {

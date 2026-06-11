@@ -4,7 +4,7 @@ import { Task } from "@/lib/db";
 import { broadcast } from "@/lib/ws/broadcaster";
 import { notifySuperwhisperPermissionRequest } from "@/lib/integrations/superwhisper-hive";
 
-const APPROVALS_DIR = join(process.env.HOME!, ".hive", "approvals");
+const APPROVALS_DIR = join(process.env.HOME!, ".hivematrix", "approvals");
 const STUCK_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour default — matches human reply latency
 
 if (!existsSync(APPROVALS_DIR)) mkdirSync(APPROVALS_DIR, { recursive: true });
@@ -28,7 +28,7 @@ export interface StuckDecision {
  * Raise a "stuck" request. Returns a promise that resolves to the human's
  * decision (or null on timeout). The MCP tool `hive_ask_human` awaits this.
  *
- * Stored as `~/.hive/approvals/stuck-<taskId>-<ts>.json` so it's visible
+ * Stored as `~/.hivematrix/approvals/stuck-<taskId>-<ts>.json` so it's visible
  * alongside approvals in the UI. Decision is written as `<same>.decision`
  * and optional free text as `<same>.reply`.
  */

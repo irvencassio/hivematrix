@@ -5,9 +5,9 @@ import { BUILTIN_SYSTEM_PROJECTS, DEFAULT_TASK_PROJECT, LEGACY_SYSTEM_PROJECTS, 
 
 const CUSTOM_PROJECTS_PATH = join(homedir(), ".hivematrix", "projects.json");
 
-// Builtin aliases are loaded from ~/.hive/aliases.json if present.
+// Builtin aliases are loaded from ~/.hivematrix/aliases.json if present.
 // Auto-discovery of git repos in $HOME covers most cases.
-// Users add custom aliases via ~/.hive/projects.json.
+// Users add custom aliases via ~/.hivematrix/projects.json.
 function loadBuiltinAliases(): Record<string, string> {
   try {
     const aliasPath = join(homedir(), ".hivematrix", "aliases.json");

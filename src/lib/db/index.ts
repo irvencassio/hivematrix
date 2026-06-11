@@ -250,6 +250,10 @@ const MIGRATIONS: string[] = [
   // v12: add brainSelection on tasks — pinned brain doc paths persisted per
   // task (the Task store reads/writes it; was missing from the base schema).
   `ALTER TABLE tasks ADD COLUMN brainSelection TEXT NOT NULL DEFAULT '[]';`,
+
+  // v13: add reviewState on tasks — distinguishes needs_input from
+  // ready_for_review under the review status (set by agent-manager on exit).
+  `ALTER TABLE tasks ADD COLUMN reviewState TEXT DEFAULT NULL;`,
 ];
 
 // ------------------------------------------------------------------
@@ -296,6 +300,7 @@ interface TaskRow {
   project: string;
   projectPath: string;
   status: string;
+  reviewState: string | null;
   position: number;
   agentPid: number | null;
   sessionId: string | null;
@@ -585,6 +590,7 @@ export const Task = {
       project: data.project,
       projectPath: data.projectPath,
       status: data.status ?? "backlog",
+      reviewState: data.reviewState ?? null,
       position: data.position ?? 0,
       agentPid: data.agentPid ?? null,
       sessionId: data.sessionId ?? null,

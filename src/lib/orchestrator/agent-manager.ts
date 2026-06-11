@@ -85,7 +85,7 @@ class AgentManager {
    * within `watchdogMinutes` (default 5), raise a `stuck` request so a human
    * can nudge via Telegram/iOS. Applies to mission and dashboard-started tasks.
    * Default-on per user spec — opt out by setting
-   * `telegram.watchdogMinutes` to 0 in ~/.hive/config.json.
+   * `telegram.watchdogMinutes` to 0 in ~/.hivematrix/config.json.
    */
   startWatchdog() {
     if (this.watchdogInterval) return;
@@ -132,7 +132,7 @@ class AgentManager {
 
   private loadWatchdogMinutes(): number {
     try {
-      const cfg = JSON.parse(readFileSync(join(homedir(), ".hive", "config.json"), "utf-8"));
+      const cfg = JSON.parse(readFileSync(join(homedir(), ".hivematrix", "config.json"), "utf-8"));
       const v = cfg?.telegram?.watchdogMinutes;
       if (typeof v === "number" && Number.isFinite(v)) return v;
     } catch {

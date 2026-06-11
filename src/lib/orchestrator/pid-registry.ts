@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
 
-const PID_FILE = `${process.env.HOME}/.hive/pids.json`;
+const PID_FILE = `${process.env.HOME}/.hivematrix/pids.json`;
 
 interface PidEntry {
   taskId: string;

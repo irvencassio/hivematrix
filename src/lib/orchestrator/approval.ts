@@ -4,8 +4,8 @@ import { Task } from "@/lib/db";
 import { broadcast } from "@/lib/ws/broadcaster";
 import { notifySuperwhisperPermissionRequest } from "@/lib/integrations/superwhisper-hive";
 
-const APPROVALS_DIR = join(process.env.HOME!, ".hive", "approvals");
-const HOOKS_DIR = join(process.env.HOME!, ".hive", "hooks");
+const APPROVALS_DIR = join(process.env.HOME!, ".hivematrix", "approvals");
+const HOOKS_DIR = join(process.env.HOME!, ".hivematrix", "hooks");
 const APPROVAL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 // Ensure directories exist
@@ -58,7 +58,7 @@ case "$TOOL_NAME" in
 esac
 
 # Read-only SSH MCP tools — auto-approve when sshDiagnostics is enabled
-if grep -q '"sshDiagnostics".*true' "$HOME/.hive/config.json" 2>/dev/null; then
+if grep -q '"sshDiagnostics".*true' "$HOME/.hivematrix/config.json" 2>/dev/null; then
   case "$TOOL_NAME" in
     mcp__ssh__list_hosts|mcp__ssh__exec|mcp__ssh__read_file|mcp__ssh__compare_files|mcp__ssh__list_crontabs|mcp__ssh__check_cron_output)
       exit 0

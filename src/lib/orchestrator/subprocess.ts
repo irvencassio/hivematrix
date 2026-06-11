@@ -31,7 +31,7 @@ const CLAUDE_SEARCH_PATHS = [
 function resolveClaudeCommand(): { binary: string; extraArgs: string[] } {
   // Check config for a custom claude command (e.g. "claudew" or "claude --include plugin")
   try {
-    const configPath = join(homedir(), ".hive", "config.json");
+    const configPath = join(homedir(), ".hivematrix", "config.json");
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
     if (config.claudeCommand && typeof config.claudeCommand === "string" && config.claudeCommand.trim()) {
       const parts = config.claudeCommand.trim().split(/\s+/);
@@ -46,7 +46,7 @@ function resolveClaudeCommand(): { binary: string; extraArgs: string[] } {
 function resolveClaudeBinary(): string {
   // 1. Check config for cached path
   try {
-    const configPath = join(homedir(), ".hive", "config.json");
+    const configPath = join(homedir(), ".hivematrix", "config.json");
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
     if (config.claudeBinaryPath && existsSync(config.claudeBinaryPath)) {
       return config.claudeBinaryPath;
@@ -220,7 +220,7 @@ export interface AgentProcess {
 export type AgentEventHandler = (taskId: string, event: StreamEvent) => void;
 
 // Load the Hive agent guide so spawned agents know how to manage projects, etc.
-const AGENT_GUIDE_PATH = join(homedir(), ".hive", "agent-guide.md");
+const AGENT_GUIDE_PATH = join(homedir(), ".hivematrix", "agent-guide.md");
 function loadAgentGuide(): string {
   try {
     return readFileSync(AGENT_GUIDE_PATH, "utf-8");
@@ -242,7 +242,7 @@ function resolvePromptPrefix(workflowId?: string, stepIndex?: number): string {
 
   // Try loading from new config format (workflowSteps + workflows with stepIds)
   try {
-    const configPath = join(homedir(), ".hive", "config.json");
+    const configPath = join(homedir(), ".hivematrix", "config.json");
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
 
     const stepLibrary = config.workflowSteps as WorkflowStep[] | undefined;
@@ -522,7 +522,7 @@ export function spawnAgent(
   // Per-process shared secret so only our spawned agents (which inherit it)
   // can call privileged inter-process endpoints like /api/tasks/:id/ask-human.
   env.HIVE_TASK_TOKEN = process.env.HIVE_TASK_TOKEN ?? "";
-  env.HIVE_ARTIFACT_DIR = join(homedir(), ".hive", "artifacts", "tasks", taskId);
+  env.HIVE_ARTIFACT_DIR = join(homedir(), ".hivematrix", "artifacts", "tasks", taskId);
   env.HIVE_ARTIFACT_EVENTS = join(env.HIVE_ARTIFACT_DIR, "events.jsonl");
 
   // For local models, inject the provider endpoint as env vars

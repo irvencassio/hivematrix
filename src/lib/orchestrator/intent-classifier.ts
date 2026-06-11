@@ -37,7 +37,7 @@ function resolveClaudeBinary(): string {
 
   // Check config for custom command or cached path
   try {
-    const configPath = join(homedir(), ".hive", "config.json");
+    const configPath = join(homedir(), ".hivematrix", "config.json");
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
     if (config.claudeCommand && typeof config.claudeCommand === "string" && config.claudeCommand.trim()) {
       return config.claudeCommand.trim().split(/\s+/)[0];

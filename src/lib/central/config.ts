@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 function getConfigDir(): string {
-  return join(homedir(), ".hive");
+  return join(homedir(), ".hivematrix");
 }
 
 function getConfigPath(): string {

@@ -394,7 +394,7 @@ async function tick() {
           const { readFileSync } = await import("fs");
           const { join } = await import("path");
           const { homedir } = await import("os");
-          const cfg = JSON.parse(readFileSync(join(homedir(), ".hive", "config.json"), "utf-8"));
+          const cfg = JSON.parse(readFileSync(join(homedir(), ".hivematrix", "config.json"), "utf-8"));
           specializationEnabled = cfg.features?.agentSpecialization === true;
         } catch { /* default off */ }
 
