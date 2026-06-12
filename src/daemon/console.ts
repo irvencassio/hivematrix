@@ -20,6 +20,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     --text: #e6edf3; --muted: #8b949e; --accent: #d9a441; --accent-2: #58a6ff;
     --ok: #3fb950; --warn: #d29922; --err: #f85149;
   }
+  html[data-theme="light"] {
+    --bg: #f6f8fa; --panel: #ffffff; --panel-2: #eef1f5; --border: #d0d7de;
+    --text: #1f2328; --muted: #656d76; --accent: #9a6700; --accent-2: #0969da;
+    --ok: #1a7f37; --warn: #9a6700; --err: #cf222e;
+  }
+  /* Wallpaper: panels go translucent so the image shows through; text stays readable. */
+  html[data-wallpaper="1"] body { background-size: cover; background-position: center; background-attachment: fixed; }
+  html[data-wallpaper="1"] .col, html[data-wallpaper="1"] header { background-color: color-mix(in srgb, var(--panel) 82%, transparent); backdrop-filter: blur(6px); }
   * { box-sizing: border-box; }
   body { margin: 0; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
@@ -162,6 +170,23 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <label class="flbl" style="margin-top:14px">Local server endpoint</label>
       <div class="row"><input id="s_endpoint" placeholder="http://localhost:1234/v1" style="flex:1" />
         <button class="create" onclick="saveEndpoint()">Save</button></div>
+
+      <label class="flbl" style="margin-top:16px">Appearance</label>
+      <div class="row" style="align-items:center; gap:10px">
+        <span class="muted">Theme</span>
+        <select id="s_theme" onchange="saveTheme()" style="width:auto">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </div>
+      <label class="flbl" style="margin-top:10px">Wallpaper</label>
+      <div class="row"><input id="s_wallpaper" placeholder="/path/to/image.jpg (or upload →)" style="flex:1" />
+        <button class="create" onclick="saveWallpaperPath()">Set</button></div>
+      <div class="row" style="margin-top:6px">
+        <input type="file" id="s_wallpaper_file" accept="image/*" onchange="uploadWallpaper()" style="font-size:11px" />
+        <button onclick="clearWallpaper()" style="background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer">Clear</button>
+      </div>
 
       <div class="vinfo" id="s_version">…</div>
     </div>
@@ -390,9 +415,24 @@ function toggleForm(id) { document.getElementById(id).classList.toggle("open"); 
 let models = null;            // { backends, available, defaultModel, version }
 const modelById = {};         // UiModel.id → {modelId, fast}
 
+function applyTheme(theme, hasWallpaper) {
+  const root = document.documentElement;
+  let resolved = theme;
+  if (theme === "system") resolved = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  root.dataset.theme = resolved;
+  if (hasWallpaper) {
+    root.dataset.wallpaper = "1";
+    document.body.style.backgroundImage = 'url("/wallpaper?token=' + encodeURIComponent(HM_TOKEN) + '&t=' + Date.now() + '")';
+  } else {
+    delete root.dataset.wallpaper;
+    document.body.style.backgroundImage = "";
+  }
+}
+
 async function loadModels() {
   models = await api("/models");
   if (!models) return;
+  applyTheme(models.theme || "system", !!models.hasWallpaper);
   for (const m of models.available) modelById[m.id] = { modelId: m.modelId, fast: !!m.fast };
   // Populate the New Task dropdown
   const sel = document.getElementById("t_model");
@@ -417,8 +457,37 @@ function openSettings() {
   document.getElementById("s_endpoint").value = (local && local.endpoint) || "http://localhost:1234/v1";
   const v = models.version || {};
   document.getElementById("s_version").textContent = "HiveMatrix v" + (v.version||"?") + " · build " + (v.build||"?") + " · " + (v.date||"?");
+  document.getElementById("s_theme").value = models.theme || "system";
 }
 function closeSettings() { document.getElementById("settingsOverlay").classList.remove("open"); }
+
+async function saveTheme() {
+  const theme = document.getElementById("s_theme").value;
+  models = await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ theme }) }) || models;
+  applyTheme(theme, !!(models && models.hasWallpaper));
+}
+async function saveWallpaperPath() {
+  const wallpaperPath = document.getElementById("s_wallpaper").value.trim();
+  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperPath }) });
+  await loadModels();
+}
+async function clearWallpaper() {
+  document.getElementById("s_wallpaper").value = "";
+  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperPath: null }) });
+  await loadModels();
+}
+function uploadWallpaper() {
+  const f = document.getElementById("s_wallpaper_file").files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const b64 = String(reader.result).split(",")[1];
+    const ext = (f.name.split(".").pop() || "png").toLowerCase();
+    await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperData: b64, wallpaperExt: ext }) });
+    await loadModels();
+  };
+  reader.readAsDataURL(f);
+}
 
 async function saveDefault() {
   const modelId = document.getElementById("s_default").value;

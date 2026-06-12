@@ -155,27 +155,51 @@ export function createDaemonServer() {
       // GET /models — backends, available models, default, version (for Settings + New Task)
       if (req.method === "GET" && urlPath === "/models") {
         const { detectBackends } = await import("@/lib/models/backends");
-        const { buildAvailableModels, getDefaultModel } = await import("@/lib/models/available");
+        const { buildAvailableModels, getDefaultModel, getThemeSettings } = await import("@/lib/models/available");
         const { versionInfo } = await import("@/lib/version");
         const backends = detectBackends();
         const available = buildAvailableModels(backends);
+        const theme = getThemeSettings();
         json(res, 200, {
           backends,
           available,
           defaultModel: getDefaultModel(available),
           version: versionInfo(),
+          theme: theme.theme,
+          hasWallpaper: !!theme.wallpaperPath,
         });
         return;
       }
 
-      // POST /settings — update default model and/or local endpoint
+      // POST /settings — default model, local endpoint, theme, wallpaper
       if (req.method === "POST" && urlPath === "/settings") {
         const body = await parseBody(req) as Record<string, unknown>;
-        const { setDefaultModel, setLocalEndpoint, buildAvailableModels, getDefaultModel } = await import("@/lib/models/available");
-        if (typeof body.defaultModel === "string") setDefaultModel(body.defaultModel);
-        if (typeof body.localEndpoint === "string" && body.localEndpoint.trim()) setLocalEndpoint(body.localEndpoint.trim());
-        const available = buildAvailableModels();
-        json(res, 200, { ok: true, defaultModel: getDefaultModel(available) });
+        const m = await import("@/lib/models/available");
+        if (typeof body.defaultModel === "string") m.setDefaultModel(body.defaultModel);
+        if (typeof body.localEndpoint === "string" && body.localEndpoint.trim()) m.setLocalEndpoint(body.localEndpoint.trim());
+        if (body.theme === "system" || body.theme === "light" || body.theme === "dark") m.setTheme(body.theme);
+        if (typeof body.wallpaperPath === "string") m.setWallpaperPath(body.wallpaperPath.trim() || null);
+        if (body.wallpaperPath === null) m.setWallpaperPath(null);
+        if (typeof body.wallpaperData === "string" && typeof body.wallpaperExt === "string") {
+          m.saveWallpaperUpload(body.wallpaperData, body.wallpaperExt);
+        }
+        const available = m.buildAvailableModels();
+        const theme = m.getThemeSettings();
+        json(res, 200, { ok: true, defaultModel: m.getDefaultModel(available), theme: theme.theme, hasWallpaper: !!theme.wallpaperPath });
+        return;
+      }
+
+      // GET /wallpaper — serve the configured wallpaper image (token via ?token=)
+      if (req.method === "GET" && urlPath === "/wallpaper") {
+        const { getThemeSettings } = await import("@/lib/models/available");
+        const wp = getThemeSettings().wallpaperPath;
+        const { existsSync, readFileSync } = await import("fs");
+        if (!wp || !existsSync(wp)) { json(res, 404, { error: "no wallpaper" }); return; }
+        const ext = wp.split(".").pop()?.toLowerCase() ?? "png";
+        const ctype = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "webp" ? "image/webp" : ext === "gif" ? "image/gif" : "image/png";
+        const buf = readFileSync(wp);
+        res.writeHead(200, { "Content-Type": ctype, "Content-Length": buf.length });
+        res.end(buf);
         return;
       }
 

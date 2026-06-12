@@ -93,6 +93,48 @@ export function setDefaultModel(modelId: string): void {
   writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
 }
 
+// --- Theme + wallpaper (Settings → Appearance) ---
+
+export type ThemeMode = "system" | "light" | "dark";
+
+export interface ThemeSettings {
+  theme: ThemeMode;
+  wallpaperPath: string | null;
+}
+
+export function getThemeSettings(): ThemeSettings {
+  const cfg = readConfig();
+  const theme = cfg.theme === "light" || cfg.theme === "dark" ? cfg.theme : "system";
+  const wallpaperPath = typeof cfg.wallpaperPath === "string" && cfg.wallpaperPath ? cfg.wallpaperPath : null;
+  return { theme, wallpaperPath };
+}
+
+export function setTheme(theme: ThemeMode): void {
+  const cfg = readConfig();
+  cfg.theme = theme;
+  mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
+  writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+}
+
+/** Set the wallpaper to a file path, or null to clear. */
+export function setWallpaperPath(path: string | null): void {
+  const cfg = readConfig();
+  if (path) cfg.wallpaperPath = path; else delete cfg.wallpaperPath;
+  mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
+  writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+}
+
+/** Save an uploaded wallpaper (base64) to ~/.hivematrix and set it. Returns the path. */
+export function saveWallpaperUpload(base64: string, ext: string): string {
+  const dir = join(homedir(), ".hivematrix");
+  mkdirSync(dir, { recursive: true });
+  const safeExt = /^[a-z0-9]{2,5}$/i.test(ext) ? ext.toLowerCase() : "png";
+  const path = join(dir, `wallpaper.${safeExt}`);
+  writeFileSync(path, Buffer.from(base64, "base64"));
+  setWallpaperPath(path);
+  return path;
+}
+
 /** Persist the local-server endpoint (Settings → Models → local config). */
 export function setLocalEndpoint(endpoint: string): void {
   const cfg = readConfig();
