@@ -1,19 +1,27 @@
 #!/usr/bin/env bash
 #
-# Sign every Mach-O bundled inside HiveMatrix.app with our Developer ID under
+# Sign every Mach-O we bundle into HiveMatrix.app with our Developer ID under
 # hardened runtime. Notarization inspects ALL nested binaries — the official
 # Node binary is signed by the Node Foundation, so it MUST be re-signed by us or
 # notarization rejects the foreign signature.
 #
-#   bash scripts/sign-bundled-machos.sh <path-to-HiveMatrix.app>
+#   bash scripts/sign-bundled-machos.sh <daemon-dir> <helper.app>
 #
+# Called twice by build-app.sh:
+#   1. PRE-build on the source resources (dist/daemon,
+#      desktopbee-helper/DesktopBeeHelper.app) so the dmg + updater tarball
+#      that `cargo tauri build` packages mid-build already contain valid
+#      signatures (it bundles them verbatim before our post-build pass runs).
+#   2. POST-build on the bundled copies inside the .app (belt and braces; the
+#      outer app is re-sealed afterwards).
 # Signs inside-out (deepest first) so the later outer re-sign in build-app.sh
 # seals over valid inner signatures. Idempotent (--force).
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP="${1:?usage: sign-bundled-machos.sh <HiveMatrix.app>}"
+DAEMON_DIR="${1:?usage: sign-bundled-machos.sh <daemon-dir> <helper.app>}"
+HELPER="${2:?usage: sign-bundled-machos.sh <daemon-dir> <helper.app>}"
 IDENTITY="Developer ID Application: Irven Cassio (8B3CHTY93V)"
 DAEMON_ENT="src-tauri/entitlements/daemon.entitlements.plist"
 HELPER_ENT="desktopbee-helper/Resources/entitlements.plist"
@@ -21,20 +29,19 @@ HELPER_ENT="desktopbee-helper/Resources/entitlements.plist"
 sign() { codesign --force --options runtime --timestamp --sign "$IDENTITY" "$@"; }
 
 echo "==> Signing bundled Node + native addon (daemon entitlements)"
-sign --entitlements "$DAEMON_ENT" "$APP/Contents/Resources/daemon/bin/node"
+sign --entitlements "$DAEMON_ENT" "$DAEMON_DIR/bin/node"
 # Native .node addons are dlopen'd dylibs — sign with hardened runtime, no entitlements.
 while IFS= read -r -d '' addon; do
   echo "    $addon"
   sign "$addon"
-done < <(find "$APP/Contents/Resources/daemon" -name "*.node" -print0)
+done < <(find "$DAEMON_DIR" -name "*.node" -print0)
 
-echo "==> Signing nested DesktopBeeHelper.app (its own entitlements)"
-HELPER="$APP/Contents/Resources/DesktopBeeHelper.app"
+echo "==> Signing DesktopBeeHelper.app (its own entitlements)"
 if [ -d "$HELPER" ]; then
   sign --entitlements "$HELPER_ENT" "$HELPER/Contents/MacOS/DesktopBeeHelper"
   sign --entitlements "$HELPER_ENT" "$HELPER"
 else
-  echo "    (no nested helper found at $HELPER — skipping)"
+  echo "    (no helper found at $HELPER — skipping)"
 fi
 
-echo "✓ Inner Mach-Os signed. The outer app must be re-signed after this."
+echo "✓ Inner Mach-Os signed."

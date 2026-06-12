@@ -18,14 +18,19 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 NOTARY_PROFILE="hivematrix"
-IDENTITY="Developer ID Application: Irven Cassio (8B3CHTY93V)"
-APP_ENT="src-tauri/entitlements/app.entitlements.plist"
 # shellcheck disable=SC1090
 source "$HOME/.cargo/env"
 
 echo "==> Building the self-contained daemon runtime (bundled Node + addon)…"
 # Must run before cargo tauri build so Tauri picks up dist/daemon as a resource.
 npm run build:daemon
+
+# Sign the SOURCE resources before bundling: cargo tauri build packages the dmg
+# and the updater tarball mid-build, straight from these files — signing only
+# the bundled copies afterwards ships unsigned Mach-Os in those artifacts and
+# notarization rejects the dmg.
+echo "==> Pre-signing source resources (so dmg/updater artifacts are valid)…"
+bash scripts/sign-bundled-machos.sh dist/daemon desktopbee-helper/DesktopBeeHelper.app
 
 echo "==> Building + signing (cargo tauri build)…"
 # Don't abort the whole script if only the dmg sub-step fails; we check artifacts next.
@@ -40,16 +45,11 @@ if [ -z "$APP" ]; then
 fi
 echo "==> App: $APP"
 
-# Tauri signs the outer app, but the binaries we injected as resources (the
-# bundled Node, better_sqlite3.node, the nested DesktopBeeHelper.app) need OUR
-# Developer ID + hardened runtime + the right entitlements, or notarization
-# rejects them. Sign inside-out: inner Mach-Os first, then re-seal the outer app.
-echo "==> Signing bundled inner Mach-Os…"
-bash scripts/sign-bundled-machos.sh "$APP"
-
-echo "==> Re-sealing the outer app (preserves inner signatures)…"
-codesign --force --options runtime --timestamp --entitlements "$APP_ENT" --sign "$IDENTITY" "$APP"
-
+# Resources were pre-signed BEFORE bundling and Tauri sealed the outer app over
+# them — do NOT re-sign anything here. Any post-build re-sign changes the .app's
+# cdhash away from the copy inside the already-packaged dmg, so the notarization
+# ticket for the dmg's contents would no longer match the on-disk .app and
+# stapling it fails with "Record not found".
 echo "==> Verifying signature + hardened runtime…"
 codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -2
 codesign -dvv "$APP" 2>&1 | grep -E "Authority=Developer ID|flags=.*runtime|TeamIdentifier" || true
@@ -73,6 +73,18 @@ xcrun stapler staple "$APP"
 
 echo "==> Gatekeeper assessment…"
 spctl --assess --type execute --verbose=2 "$APP" 2>&1 | tail -2
+
+# Regenerate the updater artifact from the FINAL app (re-sealed + stapled) and
+# re-sign it with the updater key — the tarball Tauri emitted mid-build
+# predates the staple. Picks up the key from the TAURI_SIGNING_PRIVATE_KEY(+
+# _PASSWORD) env vars cargo tauri signer reads natively.
+if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}${TAURI_SIGNING_PRIVATE_KEY_PATH:-}" ]; then
+  echo "==> Regenerating updater artifact from the stapled app…"
+  TARBALL="$(dirname "$APP")/$(basename "$APP").tar.gz"
+  tar -czf "$TARBALL" -C "$(dirname "$APP")" "$(basename "$APP")"
+  cargo tauri signer sign "$TARBALL"
+  echo "   Updater artifact: $TARBALL (+ .sig)"
+fi
 
 # Distributable zip of the stapled app.
 DIST="src-tauri/target/release/bundle/HiveMatrix.app.zip"

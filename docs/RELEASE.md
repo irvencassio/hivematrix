@@ -34,22 +34,35 @@ At runtime the daemon reads the Info.plist version (`getBundledVersion`); on a
 version bump it backs up the DB, runs migrations, self-checks, and records the
 new `installedVersion` in `~/.hivematrix/state.json` — no re-onboarding.
 
-## Auto-update (Tauri updater + GitHub Releases) — release-time secret
-Auto-update is wired (plugin + `plugins.updater` endpoints + a Rust background
-check in `src-tauri/src/lib.rs`) but **disabled until you provide the signing
-key**, because that key permanently anchors update continuity and must be owned
-by the release maintainer, not generated ad hoc.
+## Auto-update (Tauri updater + GitHub Releases) — ENABLED (v0.1.1+)
+Auto-update is live: the signing keypair exists, the public key is embedded in
+`src-tauri/tauri.conf.json` (`plugins.updater.pubkey`), and
+`bundle.createUpdaterArtifacts` is `true`. The private key **permanently anchors
+update continuity** — if it (or its password) is lost, installed apps can never
+verify another update and users must reinstall manually.
 
-To enable:
-1. `cargo tauri signer generate -w ~/.hivematrix/tauri-updater.key` (guard the
-   private key; store it in CI secrets, never commit it).
-2. Put the printed **public key** in `src-tauri/tauri.conf.json`
-   `plugins.updater.pubkey` (replacing the placeholder).
-3. Set `bundle.createUpdaterArtifacts: true`.
-4. Build with `TAURI_SIGNING_PRIVATE_KEY` (+ `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`)
-   in the environment.
-5. Publish the `.app.tar.gz`, its `.sig`, and a `latest.json` to the GitHub
-   Releases `latest` tag (the endpoint in `plugins.updater.endpoints`).
+Key material (never commit; copy into CI/GitHub Actions secrets):
+- `~/.hivematrix/tauri-updater.key` — private key (encrypted)
+- `~/.hivematrix/tauri-updater.key.password` — its password
+- `~/.hivematrix/tauri-updater.key.pub` — public key (same value as the
+  `pubkey` in tauri.conf.json; safe to share)
+
+Cutting a release:
+1. Bump the three version fields (section above).
+2. Build with the signing key in the environment:
+   `export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.hivematrix/tauri-updater.key)"`
+   `export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ~/.hivematrix/tauri-updater.key.password)"`
+   `bash scripts/build-app.sh`
+   This emits `…/bundle/macos/HiveMatrix.app.tar.gz` + `.sig` alongside the
+   .app/.dmg.
+3. Publish: `bash scripts/publish-release.sh` — creates the `v<version>` GitHub
+   release with the .dmg, the .app.tar.gz, its .sig, and a generated
+   `latest.json` (the update manifest the endpoint in
+   `plugins.updater.endpoints` resolves via `releases/latest/download/`).
+
+Bootstrap note: builds ≤0.1.0 shipped with a placeholder pubkey and cannot
+consume this feed — install ≥0.1.1 manually once; every later release then
+auto-updates (the daemon's boot gate handles migrations on relaunch).
 
 ## First-run wizard (what the installed app sets up)
 Served from the daemon console when required setup is incomplete; each step POSTs
