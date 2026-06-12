@@ -158,6 +158,23 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /projects — discovered projects for the project selector
+      if (req.method === "GET" && urlPath === "/projects") {
+        const { discoverProjects, shouldPreSelect } = await import("@/lib/routing/project-discovery");
+        const projects = discoverProjects();
+        json(res, 200, {
+          projects: projects.map((p) => ({
+            name: p.name,
+            path: p.path,
+            sources: p.sources,
+            hasManifest: p.hasManifest,
+            lastModified: p.lastModified.toISOString(),
+            preSelect: shouldPreSelect(p),
+          })),
+        });
+        return;
+      }
+
       // GET /models — backends, available models, default, version (for Settings + New Task)
       if (req.method === "GET" && urlPath === "/models") {
         const { detectBackends } = await import("@/lib/models/backends");

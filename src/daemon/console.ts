@@ -62,6 +62,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .form .row { display: flex; gap: 6px; }
   .form button.create { background: var(--accent); color: #1a1a1a; border: 0; border-radius: 6px;
     padding: 6px 14px; font-weight: 700; cursor: pointer; font-size: 12px; }
+  .form button.cancel { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 12px; }
+  .form button.cancel:hover { border-color: var(--text); color: var(--text); }
   .form .err { color: var(--err); font-size: 11px; margin-top: 4px; }
   .form select { width: 100%; margin-bottom: 6px; }
   .flbl { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase;
@@ -148,6 +151,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <header>
   <span class="logo">HiveMatrix</span>
   <span class="live" id="live">● live</span>
+  <span style="display:flex;align-items:center;gap:8px">
+    <span class="muted">project</span>
+    <select id="projectSel" style="max-width:220px">
+      <option value="">(all projects)</option>
+    </select>
+  </span>
   <span class="mode">
     <span class="muted">connectivity</span>
     <select id="modeSel">
@@ -164,7 +173,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <div class="overlay" id="settingsOverlay">
   <div class="modal">
     <h1>Settings <span class="x" onclick="closeSettings()">✕</span></h1>
-    <div class="tabs"><div class="tab active" id="tab-models">Models</div></div>
+    <div class="tabs"><div class="tab active" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-projects" onclick="switchSettingsTab('projects')">Projects</div></div>
     <div id="settingsModels">
       <label class="flbl">Default model</label>
       <select id="s_default" style="width:100%"></select>
@@ -229,6 +238,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 
       <div class="vinfo" id="s_version">…</div>
     </div>
+    <div id="settingsProjects" style="display:none">
+      <div class="kv"><span class="k">discovered</span><span id="s_proj_count">…</span></div>
+      <div id="s_projects"></div>
+      <div class="row" style="margin-top:10px"><button class="create" onclick="refreshProjects()">↻ Re-scan</button></div>
+      <div class="muted" style="font-size:11px;margin-top:8px">Projects discovered from git repos, Claude Code history, and VS Code recents. ★ = pre-selected (active project).</div>
+    </div>
   </div>
 </div>
 
@@ -239,12 +254,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="form" id="taskForm">
       <input id="t_title" placeholder="Title (optional — derived from instructions)" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
+      <label class="flbl">Project</label>
+      <select id="t_project" onchange="onProjectSelect()"></select>
       <input id="t_path" placeholder="Project path (working dir)" value="/tmp" />
       <label class="flbl">Model</label>
       <select id="t_model"></select>
       <label class="flbl">Attachments (file paths, comma-separated — optional)</label>
       <input id="t_attach" placeholder="/path/to/file.png, /path/to/notes.md" />
-      <div class="row"><button class="create" onclick="createTask()">Create task</button></div>
+      <div class="row"><button class="create" onclick="createTask()">Create task</button><button class="cancel" onclick="cancelForm('taskForm')">Cancel</button></div>
       <div class="err" id="t_err"></div>
     </div>
     <div id="board"></div>
@@ -266,7 +283,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <input id="d_path" placeholder="Project path" value="/tmp" />
       <input id="d_crit" placeholder="Success criterion (optional)" />
       <input id="d_interval" placeholder="Repeat interval (e.g. PT4H, P1D) — blank = manual" />
-      <div class="row"><button class="create" onclick="createDirective()">Create directive</button></div>
+      <div class="row"><button class="create" onclick="createDirective()">Create directive</button><button class="cancel" onclick="cancelForm('dirForm')">Cancel</button></div>
       <div class="err" id="d_err"></div>
     </div>
     <div id="directives"></div>
@@ -299,7 +316,7 @@ function requireToken() {
     + '<div style="color:#8b949e;font-size:11px;max-width:340px;text-align:center">Find this token in the local HiveMatrix console under Settings → Remote access.</div></div>';
   return false;
 }
-let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null };
+let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, projects: [], selectedProject: "" };
 
 async function api(path, opts) {
   opts = opts || {};
@@ -314,7 +331,11 @@ function renderBoard() {
   const statusToLane = {};
   LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
   const byLane = {}; LANE_DEFS.forEach(L => byLane[L.key] = []);
-  for (const t of state.tasks) { const k = statusToLane[t.status]; if (k) byLane[k].push(t); }
+  // Filter by selected project if one is chosen
+  const filtered = state.selectedProject
+    ? state.tasks.filter(t => t.project === state.selectedProject)
+    : state.tasks;
+  for (const t of filtered) { const k = statusToLane[t.status]; if (k) byLane[k].push(t); }
   const el = document.getElementById("board");
   el.innerHTML = LANE_DEFS.map(L => {
     const items = byLane[L.key] || [];
@@ -474,6 +495,7 @@ document.getElementById("modeSel").addEventListener("change", async (e) => {
 });
 
 function toggleForm(id) { document.getElementById(id).classList.toggle("open"); }
+function cancelForm(id) { document.getElementById(id).classList.remove("open"); }
 
 // --- Models / Settings ---
 let models = null;            // { backends, available, defaultModel, version }
@@ -507,6 +529,52 @@ async function loadModels() {
   if (def) sel.value = def.id;
 }
 
+// --- Projects ---
+async function loadProjects() {
+  try {
+    const data = await api("/projects");
+    if (!data || !Array.isArray(data.projects)) return;
+    state.projects = data.projects;
+    // Populate header project selector
+    const sel = document.getElementById("projectSel");
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">(all projects)</option>'
+      + data.projects.map(p => '<option value="'+esc(p.name)+'" data-path="'+esc(p.path)+'">'+esc(p.name)+(p.preSelect?' ★':'')+'</option>').join("");
+    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+    // Auto-select first pre-selected project if none chosen
+    if (!sel.value) {
+      const ps = data.projects.find(p => p.preSelect);
+      if (ps) sel.value = ps.name;
+    }
+    // Populate New Task project dropdown
+    const tProj = document.getElementById("t_project");
+    tProj.innerHTML = '<option value="">(other)</option>'
+      + data.projects.map(p => '<option value="'+esc(p.name)+'" data-path="'+esc(p.path)+'">'+esc(p.name)+' — '+esc(p.path)+'</option>').join("");
+    // Restore saved project filter
+    const saved = localStorage.getItem("hm_project");
+    if (saved && sel.querySelector('option[value="'+CSS.escape(saved)+'"]')) {
+      sel.value = saved;
+      state.selectedProject = saved;
+    } else if (sel.value) {
+      state.selectedProject = sel.value;
+    }
+  } catch (e) { /* transient */ }
+}
+
+document.getElementById("projectSel").addEventListener("change", async (e) => {
+  state.selectedProject = e.target.value;
+  localStorage.setItem("hm_project", e.target.value);
+  renderBoard();
+});
+
+function onProjectSelect() {
+  const sel = document.getElementById("t_project");
+  const opt = sel.options[sel.selectedIndex];
+  if (opt && opt.dataset.path) {
+    document.getElementById("t_path").value = opt.dataset.path;
+  }
+}
+
 function openSettings() {
   document.getElementById("settingsOverlay").classList.add("open");
   if (!models) return;
@@ -526,6 +594,46 @@ function openSettings() {
   loadTunnel();
 }
 function closeSettings() { document.getElementById("settingsOverlay").classList.remove("open"); }
+
+function switchSettingsTab(tab) {
+  document.getElementById("tab-models").className = "tab" + (tab === "models" ? " active" : "");
+  document.getElementById("tab-projects").className = "tab" + (tab === "projects" ? " active" : "");
+  document.getElementById("settingsModels").style.display = tab === "models" ? "" : "none";
+  document.getElementById("settingsProjects").style.display = tab === "projects" ? "" : "none";
+  if (tab === "projects") renderSettingsProjects();
+}
+
+function renderSettingsProjects() {
+  const el = document.getElementById("s_projects");
+  const countEl = document.getElementById("s_proj_count");
+  if (!state.projects.length) {
+    el.innerHTML = '<div class="muted">No projects discovered yet. Run a re-scan.</div>';
+    countEl.textContent = "0";
+    return;
+  }
+  countEl.textContent = state.projects.length;
+  el.innerHTML = state.projects.map(p => {
+    const sourceLabels = p.sources.map(s => s === "claude-code" ? "Claude" : s === "vscode" ? "VS Code" : "Git").join(", ");
+    return '<div class="card" style="cursor:default" onclick="selectProjectFromSettings(\''+esc(p.name)+'\')">'
+      + '<div class="t">'+esc(p.name)+(p.preSelect?' <span class="badge" style="color:var(--ok)">★ active</span>':'')+'</div>'
+      + '<div class="m"><span class="badge">'+esc(p.path)+'</span>'
+      + (p.hasManifest?'<span class="badge" style="color:var(--accent-2)">manifest</span>':'')
+      + '<span class="badge">'+sourceLabels+'</span></div></div>';
+  }).join("");
+}
+
+function selectProjectFromSettings(name) {
+  const sel = document.getElementById("projectSel");
+  sel.value = name;
+  state.selectedProject = name;
+  localStorage.setItem("hm_project", name);
+  renderBoard();
+}
+
+async function refreshProjects() {
+  await loadProjects();
+  renderSettingsProjects();
+}
 
 let tunnel = null;
 function copyField(id){ var i=document.getElementById(id); i.select(); document.execCommand("copy"); }
@@ -618,6 +726,8 @@ async function createTask() {
   const title = document.getElementById("t_title").value.trim();
   let description = document.getElementById("t_desc").value.trim();
   const projectPath = document.getElementById("t_path").value.trim();
+  const projSel = document.getElementById("t_project");
+  const projName = projSel.value || null;
   const sel = modelById[document.getElementById("t_model").value] || { modelId: null, fast: false };
   const attach = document.getElementById("t_attach").value.trim();
   if (!description || !projectPath) { err.textContent = "Description and project path are required."; return; }
@@ -625,7 +735,7 @@ async function createTask() {
   try {
     // Title optional — omit when blank so the daemon derives it from the instructions.
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ title: title || undefined, description, projectPath, project: "console", model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent" }) });
+      body: JSON.stringify({ title: title || undefined, description, projectPath, project: projName || "console", model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent" }) });
     if (!t || !t._id) { err.textContent = "Create failed."; return; }
     document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = ""; document.getElementById("t_attach").value = "";
     toggleForm("taskForm"); refresh();
@@ -666,6 +776,7 @@ function connectSSE() {
 
 if (requireToken()) {
   loadModels();
+  loadProjects();
   refresh();
   connectSSE();
   setInterval(refresh, 5000);
