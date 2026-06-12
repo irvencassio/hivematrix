@@ -381,6 +381,14 @@ class AgentManager {
       return;
     }
 
+    // Reasoning deltas (Qwen <think>/reasoning_content) are streamed live for
+    // the UI but NOT persisted to the transcript — they're high-volume noise in
+    // task.logs. Broadcast and return without logging.
+    if (event.type === "reasoning") {
+      this.broadcaster(taskId, event);
+      return;
+    }
+
     // Flush any pending text before non-text events
     if (this.textBuffers.has(taskId)) {
       clearTimeout(this.textBuffers.get(taskId)!.timer);
