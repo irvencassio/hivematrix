@@ -393,8 +393,17 @@ export function createDaemonServer() {
       const taskMatch = urlPath.match(/^\/tasks\/([^/]+)$/);
       if (req.method === "GET" && taskMatch) {
         const db = getDb();
-        const row = db.prepare("SELECT * FROM tasks WHERE _id = ?").get(taskMatch[1]);
+        const row = db.prepare("SELECT * FROM tasks WHERE _id = ?").get(taskMatch[1]) as Record<string, unknown> | undefined;
         if (!row) { json(res, 404, { error: "Not found" }); return; }
+        // Attach pending stuck request so the UI can surface the question.
+        if (row.reviewState === "needs_input") {
+          const { getPendingStuck } = await import("@/lib/orchestrator/stuck");
+          const pending = getPendingStuck().filter(r => r.taskId === taskMatch[1]);
+          if (pending.length) {
+            const latest = pending.sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
+            (row as Record<string, unknown>).pendingQuestion = latest.reason;
+          }
+        }
         json(res, 200, row);
         return;
       }
@@ -422,6 +431,26 @@ export function createDaemonServer() {
         broadcast("tasks:updated", { taskId: task._id, status: task.status });
         json(res, 200, task);
         return;
+      }
+
+      // POST /tasks/:id/reply — send a text reply to a needs_input task
+      const replyMatch = urlPath.match(/^\/tasks\/([^/]+)\/reply$/);
+      if (req.method === "POST" && replyMatch) {
+        const tid = replyMatch[1];
+        const body = await parseBody(req) as Record<string, unknown>;
+        const text = String(body.text ?? "").trim();
+        if (!text) { json(res, 400, { error: "text is required" }); return; }
+        const { getPendingStuck, resolveStuck } = await import("@/lib/orchestrator/stuck");
+        const pending = getPendingStuck().filter(r => r.taskId === tid);
+        if (!pending.length) { json(res, 404, { error: "No pending input request for this task" }); return; }
+        // Resolve the most-recent pending request.
+        const req2 = pending.sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
+        const ok = await resolveStuck(tid, req2.timestamp, "reply", "console", text);
+        if (!ok) { json(res, 409, { error: "Already resolved" }); return; }
+        // Clear the needs_input reviewState so the board stops flagging it.
+        const { Task } = await import("@/lib/db");
+        await Task.findByIdAndUpdate(tid, { reviewState: null });
+        json(res, 200, { ok: true }); return;
       }
 
       // POST /tasks/:id/<action> — retry | archive | cancel

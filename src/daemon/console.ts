@@ -136,6 +136,15 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     border-radius: 6px; padding: 5px 12px; font-size: 11px; cursor: pointer; }
   .actions button:hover { border-color: var(--accent-2); }
   .actions button.danger:hover { border-color: var(--err); color: var(--err); }
+  .reply-question { background: rgba(88,166,255,.08); border: 1px solid var(--accent-2); border-radius: 6px;
+    padding: 8px 12px; font-size: 12px; color: var(--text); margin-bottom: 8px; }
+  .reply-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 16px; }
+  .reply-input { flex: 1; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font: 12px/1.4 inherit; padding: 6px 10px; resize: vertical; }
+  .reply-input:focus { outline: none; border-color: var(--accent-2); }
+  .reply-row button { background: var(--accent-2); color: #fff; border: none; border-radius: 6px;
+    padding: 6px 14px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+  .reply-row button:hover { opacity: .85; }
   .transcript { background: #0a0d12; border: 1px solid var(--border); border-radius: 8px; padding: 10px;
     max-height: 46vh; overflow-y: auto; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
     white-space: pre-wrap; margin-bottom: 16px; }
@@ -399,7 +408,14 @@ function taskActionsHtml(t) {
   if (["failed","review","cancelled"].includes(t.status)) b.push('<button onclick="taskAction(\''+t._id+'\',\'retry\')">↻ Retry</button>');
   if (!running) b.push('<button onclick="taskAction(\''+t._id+'\',\'archive\')">⌫ Archive</button>');
   b.push('<button class="danger" onclick="deleteTask(\''+t._id+'\')">🗑 Delete</button>');
-  return '<div class="actions">'+b.join("")+'</div>';
+  let html = '<div class="actions">'+b.join("")+'</div>';
+  if (t.reviewState === "needs_input") {
+    const q = t.pendingQuestion ? '<div class="reply-question">'+esc(t.pendingQuestion)+'</div>' : '';
+    html += q
+      + '<div class="reply-row"><textarea id="replyText" class="reply-input" placeholder="Type your reply…" rows="2"></textarea>'
+      + '<button onclick="replyTask(\''+t._id+'\')">↩ Send Reply</button></div>';
+  }
+  return html;
 }
 
 async function selectTask(id) {
@@ -448,6 +464,16 @@ async function cardArchive(id) {
   await api("/tasks/"+id+"/archive", { method: "POST" });
   if (state.selected === id) state.selected = null;
   refresh();
+}
+
+async function replyTask(id) {
+  const el = document.getElementById("replyText") as HTMLTextAreaElement;
+  const text = el ? el.value.trim() : "";
+  if (!text) { el && el.focus(); return; }
+  el.disabled = true;
+  const r = await api("/tasks/"+id+"/reply", { method: "POST", body: JSON.stringify({ text }) });
+  if (r && r.ok) { refresh(); selectTask(id); }
+  else { alert(r?.error || "Failed to send reply"); el.disabled = false; }
 }
 
 function renderConn() {
