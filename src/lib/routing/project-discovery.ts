@@ -17,10 +17,12 @@ import { homedir } from "os";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+export type ProjectSource = "git" | "claude-code" | "vscode";
+
 export interface DiscoveredProject {
   name: string;
   path: string;
-  sources: ("git" | "claude-code" | "vscode")[];
+  sources: ProjectSource[];
   lastModified: Date;
   hasManifest: boolean;
 }
@@ -110,7 +112,7 @@ function scanClaudeCodeHistory(): Map<string, string> {
   const claudeProjectsDir = join(home, ".claude", "projects");
 
   try {
-    const entries = readdirSync(claudeProjectsDir, { withFileTypes: false });
+    const entries = readdirSync(claudeProjectsDir, { encoding: "utf-8", withFileTypes: false });
 
     for (const entry of entries) {
       const projectDir = join(claudeProjectsDir, entry);
@@ -286,7 +288,7 @@ function hasProjectManifest(projectPath: string): boolean {
   return manifests.some((m) => existsSync(join(projectPath, m)));
 }
 
-function uniqueSources(sources: string[]): string[] {
+function uniqueSources(sources: ProjectSource[]): ProjectSource[] {
   return [...new Set(sources)];
 }
 
