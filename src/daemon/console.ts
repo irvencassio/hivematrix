@@ -19,11 +19,27 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     --bg: #0d1117; --panel: #161b22; --panel-2: #1c2230; --border: #2d333b;
     --text: #e6edf3; --muted: #8b949e; --accent: #d9a441; --accent-2: #58a6ff;
     --ok: #3fb950; --warn: #d29922; --err: #f85149;
+    --code-bg: #0a0d12; --code-text: #e6edf3;
+    --badge-bg: #21262d; --badge-text: #8b949e;
+    --overlay-bg: rgba(0,0,0,.55);
+    --reply-q-bg: rgba(88,166,255,.08);
+    --hover-bg: rgba(255,255,255,.06);
+    --card-shadow: none;
+    --create-btn-text: #1a1a1a;
+    --errbox-bg: rgba(248,81,73,.08);
   }
   html[data-theme="light"] {
-    --bg: #f6f8fa; --panel: #ffffff; --panel-2: #eef1f5; --border: #d0d7de;
-    --text: #1f2328; --muted: #656d76; --accent: #9a6700; --accent-2: #0969da;
+    --bg: #f6f8fa; --panel: #ffffff; --panel-2: #f0f3f6; --border: #d0d7de;
+    --text: #1f2328; --muted: #57606a; --accent: #9a6700; --accent-2: #0969da;
     --ok: #1a7f37; --warn: #9a6700; --err: #cf222e;
+    --code-bg: #e8ecf1; --code-text: #1f2328;
+    --badge-bg: #e8ecf1; --badge-text: #57606a;
+    --overlay-bg: rgba(0,0,0,.25);
+    --reply-q-bg: rgba(9,105,218,.08);
+    --hover-bg: rgba(0,0,0,.04);
+    --card-shadow: 0 1px 3px rgba(0,0,0,.06);
+    --create-btn-text: #fff;
+    --errbox-bg: rgba(207,34,46,.06);
   }
   /* Wallpaper: panels go translucent so the image shows through; text stays readable. */
   html[data-wallpaper="1"] body { background-size: cover; background-position: center; background-attachment: fixed; }
@@ -60,7 +76,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     font-size: 12px; margin-bottom: 6px; font-family: inherit; }
   .form textarea { resize: vertical; min-height: 48px; }
   .form .row { display: flex; gap: 6px; }
-  .form button.create { background: var(--accent); color: #1a1a1a; border: 0; border-radius: 6px;
+  .form button.create { background: var(--accent); color: var(--create-btn-text); border: 0; border-radius: 6px;
     padding: 6px 14px; font-weight: 700; cursor: pointer; font-size: 12px; }
   .form button.cancel { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border);
     border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 12px; }
@@ -71,7 +87,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     letter-spacing: .5px; margin: 2px 0 3px; }
   .gear { cursor: pointer; color: var(--muted); font-size: 16px; background: none; border: 0; }
   .gear:hover { color: var(--accent); }
-  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none;
+  .overlay { position: fixed; inset: 0; background: var(--overlay-bg); display: none;
     align-items: center; justify-content: center; z-index: 50; }
   .overlay.open { display: flex; }
   .modal { width: 640px; max-width: 92vw; max-height: 84vh; overflow-y: auto; background: var(--panel);
@@ -90,7 +106,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .lane-title { font-size: 11px; color: var(--muted); margin-bottom: 6px; display: flex; gap: 6px; }
   .lane-title .count { color: var(--accent); }
   .card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
-    padding: 8px 10px; margin-bottom: 6px; cursor: pointer; transition: border-color .1s; position: relative; }
+    padding: 8px 10px; margin-bottom: 6px; cursor: pointer; transition: border-color .1s; position: relative;
+    box-shadow: var(--card-shadow); }
   .card:hover { border-color: var(--accent-2); }
   .card.sel { border-color: var(--accent); }
   .card .t { font-weight: 600; margin-bottom: 2px; padding-right: 22px; }
@@ -107,7 +124,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .attach-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .attach-chip .rm { cursor: pointer; color: var(--muted); font-size: 14px; flex-shrink: 0; }
   .attach-chip .rm:hover { color: var(--err); }
-  .badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #21262d; color: var(--muted); }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: var(--badge-bg); color: var(--badge-text); }
   .badge.model { color: var(--accent-2); }
   .session-empty { color: var(--muted); text-align: center; margin-top: 40px; }
   .session h1 { font-size: 18px; margin: 0 0 4px; }
@@ -141,7 +158,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     border-radius: 6px; padding: 5px 12px; font-size: 11px; cursor: pointer; }
   .actions button:hover { border-color: var(--accent-2); }
   .actions button.danger:hover { border-color: var(--err); color: var(--err); }
-  .reply-question { background: rgba(88,166,255,.08); border: 1px solid var(--accent-2); border-radius: 6px;
+  .reply-question { background: var(--reply-q-bg); border: 1px solid var(--accent-2); border-radius: 6px;
     padding: 8px 12px; font-size: 12px; color: var(--text); margin-bottom: 8px; }
   .reply-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 16px; }
   .reply-input { flex: 1; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
@@ -150,19 +167,19 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .reply-row button { background: var(--accent-2); color: #fff; border: none; border-radius: 6px;
     padding: 6px 14px; font-size: 11px; cursor: pointer; white-space: nowrap; }
   .reply-row button:hover { opacity: .85; }
-  .transcript { background: #0a0d12; border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+  .transcript { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
     max-height: 46vh; overflow-y: auto; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-    white-space: pre-wrap; margin-bottom: 16px; }
+    white-space: pre-wrap; margin-bottom: 16px; color: var(--code-text); }
   .transcript .ln { padding: 1px 0; }
   .transcript .ln.error { color: var(--err); }
   .transcript .ln.tool { color: var(--accent); }
   .transcript .ln.text { color: var(--text); }
-  .errbox { background: rgba(248,81,73,.08); border: 1px solid var(--err); border-radius: 8px;
+  .errbox { background: var(--errbox-bg); border: 1px solid var(--err); border-radius: 8px;
     padding: 10px; color: var(--err); white-space: pre-wrap; margin-bottom: 16px; font-size: 12px; }
   .md h1,.md h2,.md h3 { color: var(--text); margin: 8px 0 4px; }
   .md h1 { font-size: 16px; } .md h2 { font-size: 14px; } .md h3 { font-size: 13px; }
-  .md code { background: #0a0d12; padding: 1px 4px; border-radius: 4px; font-family: ui-monospace, Menlo, monospace; }
-  .md pre { background: #0a0d12; border: 1px solid var(--border); border-radius: 6px; padding: 8px; overflow-x: auto; }
+  .md code { background: var(--code-bg); padding: 1px 4px; border-radius: 4px; font-family: ui-monospace, Menlo, monospace; color: var(--code-text); }
+  .md pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; overflow-x: auto; color: var(--code-text); }
   .md a { color: var(--accent-2); } .md ul { margin: 4px 0; padding-left: 18px; }
   .streaming { font-size: 10px; color: var(--ok); margin-left: 6px; }
   .remote-status { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; margin-top: 8px; }
@@ -178,7 +195,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .project-search input:focus { outline: none; border-color: var(--accent); }
   .project-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-    margin-top: 2px; max-height: 240px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+    margin-top: 2px; max-height: 240px; overflow-y: auto; box-shadow: 0 8px 24px var(--overlay-bg); }
   .project-dropdown.hidden { display: none; }
   .project-sort-row { display: flex; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
   .project-sort-btn { font-size: 10px; padding: 2px 8px; border-radius: 999px; cursor: pointer;
@@ -188,7 +205,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .project-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer;
     font-size: 12px; border-bottom: 1px solid var(--border); }
   .project-item:last-child { border-bottom: none; }
-  .project-item:hover, .project-item.selected { background: var(--panel-2); }
+  .project-item:hover, .project-item.selected { background: var(--hover-bg); }
   .project-item .pname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .project-item .pstar { color: var(--ok); font-size: 11px; }
   .project-item .ptime { font-size: 10px; color: var(--muted); }
@@ -394,12 +411,13 @@ let HM_TOKEN = "%%HM_TOKEN%%" || localStorage.getItem("hm_token") || "";
 function requireToken() {
   if (HM_TOKEN) { if ("%%HM_TOKEN%%") localStorage.setItem("hm_token", HM_TOKEN); return true; }
   // Remote with no stored token → prompt for it (obtained from local Settings).
-  document.body.innerHTML = '<div style="height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;font-family:-apple-system,sans-serif;color:#e6edf3;background:#0d1117">'
-    + '<div style="font-size:22px;font-weight:700;color:#d9a441">HiveMatrix</div>'
-    + '<div style="color:#8b949e">Remote access — paste your access token</div>'
-    + '<input id="lt" type="password" placeholder="access token" style="width:320px;padding:8px;border-radius:6px;border:1px solid #2d333b;background:#161b22;color:#e6edf3" />'
-    + '<button onclick="(function(){var v=document.getElementById(\'lt\').value.trim();if(v){localStorage.setItem(\'hm_token\',v);location.reload();}})()" style="background:#d9a441;color:#1a1a1a;border:0;border-radius:6px;padding:8px 18px;font-weight:700;cursor:pointer">Connect</button>'
-    + '<div style="color:#8b949e;font-size:11px;max-width:340px;text-align:center">Find this token in the local HiveMatrix console under Settings → Remote access.</div></div>';
+  // Use CSS variables so the prompt respects the current theme.
+  document.body.innerHTML = '<div id="tokenPrompt" style="height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;font-family:-apple-system,sans-serif;color:var(--text,#e6edf3);background:var(--bg,#0d1117)">'
+    + '<div style="font-size:22px;font-weight:700;color:var(--accent,#d9a441)">HiveMatrix</div>'
+    + '<div style="color:var(--muted,#8b949e)">Remote access — paste your access token</div>'
+    + '<input id="lt" type="password" placeholder="access token" style="width:320px;padding:8px;border-radius:6px;border:1px solid var(--border,#2d333b);background:var(--panel-2,#1c2230);color:var(--text,#e6edf3)" />'
+    + '<button onclick="(function(){var v=document.getElementById(\'lt\').value.trim();if(v){localStorage.setItem(\'hm_token\',v);location.reload();}})()" style="background:var(--accent,#d9a441);color:var(--create-btn-text,#1a1a1a);border:0;border-radius:6px;padding:8px 18px;font-weight:700;cursor:pointer">Connect</button>'
+    + '<div style="color:var(--muted,#8b949e);font-size:11px;max-width:340px;text-align:center">Find this token in the local HiveMatrix console under Settings → Remote access.</div></div>';
   return false;
 }
 let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, projects: [], selectedProject: "" };
@@ -917,7 +935,7 @@ async function loadTunnel() {
     // QR from the daemon (token via query); cache-bust per URL.
     document.getElementById("s_qr").innerHTML = tunnel.qrInstalled
       ? '<img src="/tunnel/qr?token=' + encodeURIComponent(HM_TOKEN) + '&u=' + encodeURIComponent(tunnel.url) + '" style="width:100%;height:100%" alt="pairing QR" />'
-      : '<div class="muted" style="font-size:11px;color:#333">QR unavailable — brew install qrencode</div>';
+      : '<div class="muted" style="font-size:11px">QR unavailable — brew install qrencode</div>';
   } else {
     dot.className = "dot off"; label.textContent = "Remote access OFF";
     detail.textContent = "Start a tunnel to reach this daemon from your phone.";
