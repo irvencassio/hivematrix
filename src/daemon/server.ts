@@ -330,6 +330,46 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /bees — status of every embedded/managed bee lane (Settings view)
+      if (req.method === "GET" && urlPath === "/bees") {
+        const { listBeeServiceStatuses } = await import("@/lib/bees/service-manager");
+        json(res, 200, { bees: await listBeeServiceStatuses() });
+        return;
+      }
+
+      // POST /bees/:kind/autostart — enable+start or disable+stop a manageable
+      // (launchagent) bee. Body: { enabled: boolean }.
+      const beeAutostartMatch = urlPath.match(/^\/bees\/([a-z]+)\/autostart$/);
+      if (req.method === "POST" && beeAutostartMatch) {
+        const kind = beeAutostartMatch[1];
+        const body = await parseBody(req) as Record<string, unknown>;
+        const enabled = body.enabled === true;
+        const { setBeeAutoStart, getBeeRuntimeDescriptor } = await import("@/lib/bees/service-manager");
+        const desc = getBeeRuntimeDescriptor(kind);
+        if (!desc.manageable || desc.runtimeMode !== "launchagent") {
+          json(res, 400, { error: `${kind} is not a manageable launchagent bee` });
+          return;
+        }
+        try {
+          const next = setBeeAutoStart(kind, enabled);
+          if (!next) { json(res, 404, { error: `bee ${kind} not found` }); return; }
+          json(res, 200, { kind, enabled, settings: next });
+        } catch (e) {
+          json(res, 500, { error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
+      // POST /bees/:kind/restart — restart a running launchagent bee
+      const beeRestartMatch = urlPath.match(/^\/bees\/([a-z]+)\/restart$/);
+      if (req.method === "POST" && beeRestartMatch) {
+        const kind = beeRestartMatch[1];
+        const { restartBeeService } = await import("@/lib/bees/service-manager");
+        try { restartBeeService(kind); json(res, 200, { kind, restarted: true }); }
+        catch (e) { json(res, 400, { error: e instanceof Error ? e.message : String(e) }); }
+        return;
+      }
+
       // GET /connectivity
       if (req.method === "GET" && urlPath === "/connectivity") {
         json(res, 200, policy.getState());

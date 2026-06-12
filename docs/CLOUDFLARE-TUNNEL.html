@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HiveMatrix Brain Doc — Cloudflare Tunnels &amp; Remote Access</title>
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --muted: #555;
+    --line: #e3e3e3;
+    --accent: #f48120;   /* Cloudflare orange */
+    --blue: #1f6feb;
+    --good: #1a7f37;
+    --bad: #b42318;
+    --chip: #f5f5f5;
+    --code: #f6f6f7;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: #ffffff;
+    color: var(--ink);
+    margin: 0;
+    font: 16px/1.62 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 48px 28px 96px; }
+  header.doc { border-bottom: 3px solid var(--accent); padding-bottom: 18px; margin-bottom: 8px; }
+  .kicker { text-transform: uppercase; letter-spacing: .12em; font-size: 12px; font-weight: 700; color: var(--accent); }
+  h1 { font-size: 30px; line-height: 1.2; margin: 6px 0 8px; }
+  h2 { font-size: 21px; margin: 40px 0 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+  h2:first-of-type { border-top: none; }
+  h3 { font-size: 16px; margin: 22px 0 6px; }
+  p, li { color: var(--ink); }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { background: var(--code); padding: 1.5px 5px; border-radius: 4px; font: 13.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #fafafa; font-weight: 700; }
+  td.good { color: var(--good); font-weight: 600; }
+  td.bad { color: var(--bad); font-weight: 600; }
+  .tldr { background: #fff8f1; border: 1px solid #f6d3ad; border-left: 4px solid var(--accent); border-radius: 8px; padding: 16px 18px; margin: 18px 0; }
+  .tldr strong { color: #8a4a00; }
+  .callout { border-radius: 8px; padding: 12px 16px; margin: 14px 0; font-size: 14.5px; }
+  .callout.warn { background: #fff6f5; border: 1px solid #f3c2bd; }
+  .callout.ok   { background: #f1fbf3; border: 1px solid #bfe6c8; }
+  .callout.info { background: #f2f7ff; border: 1px solid #c2d8f6; }
+  .chip { display: inline-block; background: var(--chip); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 12px; margin: 2px 4px 2px 0; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .card h3 { margin-top: 0; }
+  .footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+  .kvs { font-size: 13.5px; }
+  .kvs div { padding: 3px 0; border-bottom: 1px dotted var(--line); display: flex; gap: 10px; }
+  .kvs span.k { color: var(--muted); min-width: 150px; display: inline-block; }
+  ol li, ul li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <div class="kicker">HiveMatrix · Brain Doc</div>
+  <h1>Cloudflare Tunnels &amp; Remote Access</h1>
+  <div class="meta">How HiveMatrix gets a public URL · quick vs. named tunnels · whether it holds up for multiple users<br>
+  Written 2026-06-12 · Reflects the live state of this Mac at time of writing.</div>
+</header>
+
+<div class="tldr">
+  <strong>TL;DR.</strong> Yes — <code>prot-crafts-cameron-tomato.trycloudflare.com</code> is a
+  <strong>randomly generated, account-free “quick tunnel.”</strong> Cloudflare hands these out with no signup,
+  which is why it “just worked.” But a quick tunnel is a <em>throwaway dev URL</em>: it changes on every
+  restart, has no uptime guarantee, is rate-limited, and is not meant for real users. For long-term or
+  multi-user use you want a <strong>named tunnel</strong> tied to a Cloudflare account + your own domain —
+  and you already have one of those running on this machine. The fix is to <strong>stop relying on the quick
+  tunnel and standardize on the named tunnel</strong> (plus Cloudflare Access for auth).
+</div>
+
+<h2>1 · The two kinds of Cloudflare tunnel</h2>
+<p>
+  Both are run by the same <code>cloudflared</code> binary, but they are completely different products.
+  HiveMatrix can drive either one (Settings → Remote Access).
+</p>
+
+<table>
+  <thead>
+    <tr><th>&nbsp;</th><th>Quick tunnel (“try cloudflare”)</th><th>Named tunnel</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>URL</strong></td>
+      <td><code>https://&lt;random-words&gt;.trycloudflare.com</code><br><span class="meta">e.g. prot-crafts-cameron-tomato</span></td>
+      <td><code>https://hive.yourdomain.com</code><br><span class="meta">a hostname you choose</span></td>
+    </tr>
+    <tr>
+      <td><strong>Cloudflare account</strong></td>
+      <td class="bad">None required</td>
+      <td>Required (free tier is fine)</td>
+    </tr>
+    <tr>
+      <td><strong>Command</strong></td>
+      <td><code>cloudflared tunnel --url http://localhost:3747</code></td>
+      <td><code>cloudflared tunnel run --token &lt;token&gt;</code></td>
+    </tr>
+    <tr>
+      <td><strong>URL stability</strong></td>
+      <td class="bad">New random URL every start — anyone you shared it with must be re-sent the link</td>
+      <td class="good">Stable; survives restarts and reboots</td>
+    </tr>
+    <tr>
+      <td><strong>Uptime / SLA</strong></td>
+      <td class="bad">Best-effort, no guarantee; can be throttled or dropped</td>
+      <td class="good">Backed by your Cloudflare account; production-grade</td>
+    </tr>
+    <tr>
+      <td><strong>Rate limits</strong></td>
+      <td class="bad">Aggressive; intended for short tests/demos</td>
+      <td class="good">Normal Cloudflare limits</td>
+    </tr>
+    <tr>
+      <td><strong>Auth in front</strong></td>
+      <td class="bad">None — only HiveMatrix’s own bearer token protects it</td>
+      <td class="good">Can layer Cloudflare Access (SSO, email OTP, allow-lists)</td>
+    </tr>
+    <tr>
+      <td><strong>Good for</strong></td>
+      <td>“Let me test the iPhone app for 20 minutes”</td>
+      <td>Always-on, multiple users, anything you depend on</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout info">
+  <strong>Why no signup felt suspicious — and is fine for testing.</strong> Cloudflare runs the
+  <code>*.trycloudflare.com</code> service as a free, anonymous on-ramp to <code>cloudflared</code>. It is
+  genuinely zero-config. It is <em>also</em> genuinely disposable: treat any trycloudflare URL as valid only
+  until the next restart.
+</div>
+
+<h2>2 · What is actually running on this Mac right now</h2>
+<p>There are <strong>two independent things</strong>, which is the source of the confusion:</p>
+
+<div class="grid2">
+  <div class="card">
+    <h3>① A named tunnel (account-managed)</h3>
+    <p class="meta">Running since this week, as <code>root</code>, via Homebrew’s cloudflared.</p>
+    <div class="kvs">
+      <div><span class="k">Process</span><span><code>cloudflared tunnel run --token …</code></span></div>
+      <div><span class="k">Account tag</span><span><code>5fa97ef7…d9123fe78</code></span></div>
+      <div><span class="k">Tunnel id</span><span><code>f4f80cb7-d109-402a-816c-ed44eaeb8825</code></span></div>
+      <div><span class="k">Config lives in</span><span>Cloudflare Zero Trust dashboard (remotely managed — no local <code>config.yml</code>)</span></div>
+    </div>
+    <p style="margin-bottom:0">This is the <strong>robust path</strong>. It is tied to a real Cloudflare
+    account and a stable hostname. This is what you’ll want every long-term user to connect through.</p>
+  </div>
+
+  <div class="card">
+    <h3>② HiveMatrix’s own quick-tunnel ability</h3>
+    <p class="meta">On-demand, started/stopped from Settings → Remote Access.</p>
+    <div class="kvs">
+      <div><span class="k">Starts</span><span><code>POST /tunnel/start</code></span></div>
+      <div><span class="k">Produces</span><span>a fresh <code>*.trycloudflare.com</code> URL</span></div>
+      <div><span class="k">Status now</span><span><code>GET /tunnel</code> → <code>running:false</code></span></div>
+    </div>
+    <p style="margin-bottom:0">The <code>prot-crafts-cameron-tomato</code> URL came from one of these quick
+    tunnels in an earlier session. HiveMatrix reports <strong>no quick tunnel running now</strong>, so that
+    specific URL is already dead — your working connection is going through the named tunnel (or loopback).</p>
+  </div>
+</div>
+
+<div class="callout warn">
+  <strong>Action item.</strong> Pick one path and stick to it. Mixing a disposable quick-tunnel URL with a
+  stable named tunnel is exactly why “the URL I bookmarked stopped working.” For anything beyond a quick test,
+  use the named tunnel’s hostname and stop starting quick tunnels.
+</div>
+
+<h2>3 · Will this hold up long-term with multiple users?</h2>
+
+<div class="callout warn">
+  <strong>Quick tunnel — No.</strong> Don’t build on it. The URL rotates on restart, it’s rate-limited, has no
+  uptime guarantee, and puts <em>zero</em> auth in front of the daemon (only HiveMatrix’s bearer token stands
+  between the internet and your machine). Fine for a demo; wrong for users you can’t personally re-send a link to.
+</div>
+
+<div class="callout ok">
+  <strong>Named tunnel — Yes, with the right shape.</strong> A named tunnel on a free Cloudflare account gives
+  you a stable hostname, real uptime, and the ability to put <strong>Cloudflare Access</strong> in front
+  (email OTP / SSO / allow-listed identities) so each user authenticates at the edge <em>before</em> a request
+  ever reaches the daemon. That is the correct multi-user posture.
+</div>
+
+<h3>The honest caveat: one Mac is still one origin</h3>
+<p>
+  Even with a perfect named tunnel, every request ultimately lands on <strong>this one laptop’s daemon</strong>
+  (<code>127.0.0.1:3747</code>, single SQLite database, single process). Cloudflare makes it
+  <em>reachable and authenticated</em>; it does not make it <em>highly available or horizontally scalable</em>.
+  For a handful of trusted users that’s fine. Before it’s “real product for many users,” the origin — not the
+  tunnel — becomes the limiting factor (always-on host, backups, per-user identity inside HiveMatrix, and
+  eventually a server rather than a laptop).
+</p>
+
+<h2>4 · Recommended setup for durable / multi-user access</h2>
+<ol>
+  <li><strong>Create a named tunnel</strong> (you effectively already have one). In the Cloudflare Zero Trust
+    dashboard: <em>Networks → Tunnels → Create</em>, choose “Cloudflared,” copy the connector token.</li>
+  <li><strong>Route a hostname to the daemon:</strong> add a public hostname
+    <code>hive.yourdomain.com → http://localhost:3747</code> on that tunnel.</li>
+  <li><strong>Run it from HiveMatrix:</strong> Settings → Remote Access → <em>Advanced: named tunnel</em> →
+    paste the connector token + hostname (this calls <code>POST /tunnel/start-named</code>). Or let the
+    system <code>cloudflared</code> service run it (what’s happening today).</li>
+  <li><strong>Put Cloudflare Access in front:</strong> add an Access application for that hostname with an
+    email-OTP or SSO policy. Now strangers can’t even reach the login.</li>
+  <li><strong>Keep the bearer token as defense-in-depth:</strong> HiveMatrix still requires its access token on
+    every route except <code>/health</code>. The console never hands the token to tunneled visitors — they
+    paste it manually (from local Settings) or scan the pairing QR.</li>
+  <li><strong>Stop using quick tunnels</strong> for anything you expect to revisit.</li>
+</ol>
+
+<h2>5 · Security model (already enforced)</h2>
+<ul>
+  <li>The daemon binds <strong>loopback only</strong> (<code>127.0.0.1:3747</code>); <code>cloudflared</code>
+    is the only thing bridging it to the internet.</li>
+  <li><strong>Bearer-token auth</strong> on every route except <code>/health</code>, <code>/</code>,
+    <code>/console</code>.</li>
+  <li>Remote (tunneled) visitors — detected via the <code>CF-Connecting-IP</code> header — are served the
+    console <strong>without</strong> the token baked in; they must paste it or pair by QR. Loopback users get
+    it injected automatically.</li>
+  <li>Pairing QR (<code>GET /tunnel/qr</code>) encodes <code>{url, token}</code> and is rendered locally with
+    <code>qrencode</code> — the token never traverses Cloudflare.</li>
+</ul>
+
+<h2>6 · Reference</h2>
+<div class="kvs">
+  <div><span class="k">Daemon (loopback)</span><span><code>127.0.0.1:3747</code></span></div>
+  <div><span class="k">Tunnel status</span><span><code>GET /tunnel</code> → <code>{installed, running, url, binary, qrInstalled}</code></span></div>
+  <div><span class="k">Start quick tunnel</span><span><code>POST /tunnel/start</code></span></div>
+  <div><span class="k">Start named tunnel</span><span><code>POST /tunnel/start-named</code> · body <code>{connectorToken, hostname}</code></span></div>
+  <div><span class="k">Stop tunnel</span><span><code>POST /tunnel/stop</code></span></div>
+  <div><span class="k">Pairing QR (SVG)</span><span><code>GET /tunnel/qr</code></span></div>
+  <div><span class="k">Tunnel code</span><span><code>src/lib/tunnel/cloudflared.ts</code></span></div>
+  <div><span class="k">Markdown sibling</span><span><code>docs/REMOTE-ACCESS.md</code></span></div>
+</div>
+
+<div class="footer">
+  HiveMatrix brain doc · Cloudflare Tunnels &amp; Remote Access · the named-tunnel + Cloudflare Access pattern
+  is the supported path for durable, multi-user remote access. Quick tunnels are test-only.
+</div>
+
+</div>
+</body>
+</html>
