@@ -1,0 +1,96 @@
+/**
+ * Notification loop: pushes escalations out and reads button taps back.
+ *
+ *  - escalation tick: any new pending stuck task or approval is pushed to the
+ *    founder via notify() — Telegram gets inline action buttons.
+ *  - telegram tick: long-polls getUpdates; an allowlisted button tap resolves
+ *    the stuck/approval the same way the console would.
+ *
+ * Dedup of outbound escalations is in-memory (a restart may re-notify a still
+ * pending item once — acceptable).
+ */
+
+import { getPendingStuck, resolveStuck } from "@/lib/orchestrator/stuck";
+import { getPendingApprovals, resolveApproval } from "@/lib/orchestrator/approval";
+import { notify } from "./notify";
+import {
+  getTelegramConfig, getUpdates, isAuthorizedUpdate, parseCallbackData,
+  answerCallback, editMessageText, stuckKeyboard, approvalKeyboard,
+} from "./telegram";
+
+const ESCALATION_INTERVAL_MS = 5_000;
+const notified = new Set<string>();
+
+function mark(key: string): boolean {
+  if (notified.has(key)) return false;
+  notified.add(key);
+  if (notified.size > 1000) notified.clear(); // bound
+  return true;
+}
+
+/** Push any new pending stuck/approval out to the founder's channels. */
+export async function escalationTick(): Promise<void> {
+  for (const s of getPendingStuck()) {
+    const key = `stuck:${s.taskId}:${s.timestamp}`;
+    if (!mark(key)) continue;
+    const text = `⚠️ Task needs input\n${s.reason || "(no detail)"}\n\nReply or tap an action.`;
+    await notify(text, { telegramMarkup: stuckKeyboard(s.taskId, s.timestamp) });
+  }
+  for (const a of getPendingApprovals()) {
+    const key = `approval:${a.taskId}:${a.timestamp}`;
+    if (!mark(key)) continue;
+    const text = `🔐 Approval needed\nTool: ${a.tool}\n${a.command}\n${a.context ?? ""}`.slice(0, 1500);
+    await notify(text, { telegramMarkup: approvalKeyboard(a.taskId, a.timestamp) });
+  }
+}
+
+let tgOffset = 0;
+
+/** Long-poll Telegram for button taps and resolve them. */
+export async function telegramTick(): Promise<void> {
+  const cfg = getTelegramConfig();
+  if (!cfg) return;
+  const updates = await getUpdates(cfg, tgOffset);
+  for (const u of updates) {
+    tgOffset = Math.max(tgOffset, u.update_id + 1);
+    const cq = u.callback_query;
+    if (!cq?.data || !isAuthorizedUpdate(cfg, u)) continue;
+    const parsed = parseCallbackData(cq.data);
+    if (!parsed) { await answerCallback(cfg, cq.id, "Malformed action"); continue; }
+
+    let ok = false;
+    if (parsed.kind === "stuck") {
+      ok = await resolveStuck(parsed.id, parsed.timestamp, parsed.decision, "telegram");
+    } else {
+      const d = parsed.decision === "approve" ? "approve" : "denied";
+      await resolveApproval(parsed.id, parsed.timestamp, d, "telegram");
+      ok = true;
+    }
+    await answerCallback(cfg, cq.id, ok ? `Done: ${parsed.decision}` : "Already resolved");
+    const msgId = cq.message?.message_id;
+    if (msgId) await editMessageText(cfg, msgId, `→ ${parsed.decision} (via Telegram)`);
+  }
+}
+
+let escTimer: ReturnType<typeof setInterval> | null = null;
+let tgRunning = false;
+
+/** Start the notification loop (idempotent). Returns a stop fn. */
+export function startNotifyLoop(intervalMs = ESCALATION_INTERVAL_MS): () => void {
+  if (escTimer) return stopNotifyLoop;
+  let escRunning = false;
+  escTimer = setInterval(() => {
+    if (!escRunning) { escRunning = true; void escalationTick().finally(() => { escRunning = false; }); }
+    // Telegram long-poll runs back-to-back, not on the escalation cadence.
+    if (!tgRunning && getTelegramConfig()) {
+      tgRunning = true;
+      void telegramTick().finally(() => { tgRunning = false; });
+    }
+  }, intervalMs);
+  if (typeof escTimer.unref === "function") escTimer.unref();
+  return stopNotifyLoop;
+}
+
+export function stopNotifyLoop(): void {
+  if (escTimer) { clearInterval(escTimer); escTimer = null; }
+}

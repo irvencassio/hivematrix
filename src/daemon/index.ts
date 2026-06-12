@@ -83,6 +83,11 @@ async function main(): Promise<void> {
   const { startLocalServingSupervisor } = await import("@/lib/local-model/serving");
   startLocalServingSupervisor();
 
+  // Notification loop: escalate stuck tasks / approvals to the founder's phone
+  // (Telegram/iMessage/email) and read button taps back. Self-gates on config.
+  const { startNotifyLoop } = await import("@/lib/notify/notify-loop");
+  startNotifyLoop();
+
   // Update finalize: the daemon reached "ready", so the migrated DB is queryable.
   // Record the new version (so the next boot is "same"); roll back on a failed
   // post-update self-check rather than advancing into a broken state.

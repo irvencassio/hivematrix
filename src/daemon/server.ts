@@ -453,6 +453,41 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /notify/status — configured notification channels
+      if (req.method === "GET" && urlPath === "/notify/status") {
+        const { getTelegramConfig } = await import("@/lib/notify/telegram");
+        const { resolveNotifyTargets } = await import("@/lib/notify/notify");
+        const { loadHiveConfig } = await import("@/lib/central/config");
+        const cfg = loadHiveConfig();
+        const tg = getTelegramConfig();
+        json(res, 200, {
+          telegramConfigured: tg !== null,
+          targets: resolveNotifyTargets((cfg.notify as Record<string, unknown>) ?? {}, tg !== null),
+        });
+        return;
+      }
+
+      // POST /notify/config — set notify channels + Telegram bot config.
+      if (req.method === "POST" && urlPath === "/notify/config") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { writeConfigStep } = await import("@/lib/onboarding/actions");
+        const patch: Record<string, unknown> = {};
+        if (body.notify && typeof body.notify === "object") patch.notify = body.notify;
+        if (body.telegram && typeof body.telegram === "object") patch.telegram = body.telegram;
+        writeConfigStep(patch);
+        json(res, 200, { ok: true });
+        return;
+      }
+
+      // POST /notify/test — fan a test message out to all configured channels.
+      if (req.method === "POST" && urlPath === "/notify/test") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { notify } = await import("@/lib/notify/notify");
+        const result = await notify(typeof body.text === "string" && body.text.trim() ? body.text : "HiveMatrix test notification");
+        json(res, 200, result);
+        return;
+      }
+
       // GET /mailbee — channel status (enabled, Mail controllable, allowlist)
       if (req.method === "GET" && urlPath === "/mailbee") {
         const { isChannelEnabled, listIdentities, trustedDomains, triageAll } = await import("@/lib/mailbee/store");
