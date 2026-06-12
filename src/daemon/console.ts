@@ -475,7 +475,7 @@ async function cardArchive(id) {
 }
 
 async function replyTask(id) {
-  const el = document.getElementById("replyText") as HTMLTextAreaElement;
+  const el = document.getElementById("replyText");
   const text = el ? el.value.trim() : "";
   if (!text) { el && el.focus(); return; }
   el.disabled = true;
