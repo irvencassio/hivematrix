@@ -245,7 +245,16 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   </section>
 </main>
 <script>
-const LANES = ["backlog","assigned","in_progress","review","done","failed"];
+// Board lanes (display-only). The underlying task statuses are unchanged
+// (no migration): "backlog" is shown as "queued", and "assigned" (a ~2s
+// transient) is folded into the in-progress lane.
+const LANE_DEFS = [
+  { key: "queued",      label: "queued",      statuses: ["backlog"] },
+  { key: "in_progress", label: "in progress", statuses: ["assigned", "in_progress"] },
+  { key: "review",      label: "review",      statuses: ["review"] },
+  { key: "done",        label: "done",        statuses: ["done"] },
+  { key: "failed",      label: "failed",      statuses: ["failed"] },
+];
 // Token: injected by the daemon for loopback requests; for remote (tunnel)
 // requests the daemon serves an empty value, so we fall back to a token the
 // user pasted once (stored locally). See requireToken().
@@ -274,13 +283,15 @@ async function api(path, opts) {
 function esc(s){ return (s==null?"":String(s)).replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
 
 function renderBoard() {
-  const byLane = {}; LANES.forEach(l => byLane[l] = []);
-  for (const t of state.tasks) (byLane[t.status] = byLane[t.status] || []).push(t);
+  const statusToLane = {};
+  LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
+  const byLane = {}; LANE_DEFS.forEach(L => byLane[L.key] = []);
+  for (const t of state.tasks) { const k = statusToLane[t.status]; if (k) byLane[k].push(t); }
   const el = document.getElementById("board");
-  el.innerHTML = LANES.map(lane => {
-    const items = byLane[lane] || [];
-    if (!items.length && (lane==="done"||lane==="failed")) return "";
-    return '<div class="lane"><div class="lane-title">'+lane+' <span class="count">'+items.length+'</span></div>'
+  el.innerHTML = LANE_DEFS.map(L => {
+    const items = byLane[L.key] || [];
+    if (!items.length && (L.key==="done"||L.key==="failed")) return "";
+    return '<div class="lane"><div class="lane-title">'+L.label+' <span class="count">'+items.length+'</span></div>'
       + items.map(t => '<div class="card'+(state.selected===t._id?' sel':'')+'" onclick="selectTask(\''+t._id+'\')">'
           + '<div class="t">'+esc(t.title||t._id)+'</div>'
           + '<div class="m">'+(t.model?'<span class="badge model">'+esc(t.model)+'</span>':'')

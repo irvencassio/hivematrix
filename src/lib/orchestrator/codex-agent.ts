@@ -46,6 +46,10 @@ export function spawnCodexAgent(
   const proc = spawn(codexPath, args, {
     cwd: projectPath,
     env: { ...process.env, PATH: buildCliPath() },
+    // The prompt is passed as a positional arg, so codex needs no stdin.
+    // Leaving stdin as an open pipe makes `codex exec` block forever on
+    // "Reading additional input from stdin..." — close it so it proceeds.
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
   const pid = proc.pid ?? fakePidCounter--;
