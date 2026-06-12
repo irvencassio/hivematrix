@@ -361,7 +361,11 @@ export function createDaemonServer() {
       // POST /tasks
       if (req.method === "POST" && urlPath === "/tasks") {
         const { Task, generateId } = await import("@/lib/db");
+        const { deriveTaskTitle } = await import("@/lib/tasks/derive-title");
         const body = await parseBody(req) as Record<string, unknown>;
+        // Title is optional — derive it from the instructions when absent/blank.
+        const title = typeof body.title === "string" ? body.title.trim() : "";
+        body.title = title || deriveTaskTitle(body.description as string);
         const task = await Task.create({ _id: generateId(), ...body });
         broadcast("tasks:created", { taskId: task._id });
         json(res, 201, task);

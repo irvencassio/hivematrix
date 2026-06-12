@@ -209,7 +209,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <h2>Board <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></h2>
     <button class="addbtn" onclick="toggleForm('taskForm')">＋ New task</button>
     <div class="form" id="taskForm">
-      <input id="t_title" placeholder="Title" />
+      <input id="t_title" placeholder="Title (optional — derived from instructions)" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
       <input id="t_path" placeholder="Project path (working dir)" value="/tmp" />
       <label class="flbl">Model</label>
@@ -566,11 +566,12 @@ async function createTask() {
   const projectPath = document.getElementById("t_path").value.trim();
   const sel = modelById[document.getElementById("t_model").value] || { modelId: null, fast: false };
   const attach = document.getElementById("t_attach").value.trim();
-  if (!title || !description || !projectPath) { err.textContent = "Title, description, and project path are required."; return; }
+  if (!description || !projectPath) { err.textContent = "Description and project path are required."; return; }
   if (attach) description += "\n\nAttached files:\n" + attach.split(",").map(s => "- " + s.trim()).filter(Boolean).join("\n");
   try {
+    // Title optional — omit when blank so the daemon derives it from the instructions.
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ title, description, projectPath, project: "console", model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent" }) });
+      body: JSON.stringify({ title: title || undefined, description, projectPath, project: "console", model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent" }) });
     if (!t || !t._id) { err.textContent = "Create failed."; return; }
     document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = ""; document.getElementById("t_attach").value = "";
     toggleForm("taskForm"); refresh();
