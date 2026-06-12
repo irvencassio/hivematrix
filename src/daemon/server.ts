@@ -152,6 +152,33 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /models — backends, available models, default, version (for Settings + New Task)
+      if (req.method === "GET" && urlPath === "/models") {
+        const { detectBackends } = await import("@/lib/models/backends");
+        const { buildAvailableModels, getDefaultModel } = await import("@/lib/models/available");
+        const { versionInfo } = await import("@/lib/version");
+        const backends = detectBackends();
+        const available = buildAvailableModels(backends);
+        json(res, 200, {
+          backends,
+          available,
+          defaultModel: getDefaultModel(available),
+          version: versionInfo(),
+        });
+        return;
+      }
+
+      // POST /settings — update default model and/or local endpoint
+      if (req.method === "POST" && urlPath === "/settings") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { setDefaultModel, setLocalEndpoint, buildAvailableModels, getDefaultModel } = await import("@/lib/models/available");
+        if (typeof body.defaultModel === "string") setDefaultModel(body.defaultModel);
+        if (typeof body.localEndpoint === "string" && body.localEndpoint.trim()) setLocalEndpoint(body.localEndpoint.trim());
+        const available = buildAvailableModels();
+        json(res, 200, { ok: true, defaultModel: getDefaultModel(available) });
+        return;
+      }
+
       // GET /metrics — soak/operational metrics for unattended monitoring
       if (req.method === "GET" && urlPath === "/metrics") {
         const db = getDb();

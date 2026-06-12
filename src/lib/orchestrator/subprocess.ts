@@ -341,6 +341,28 @@ export async function spawnAgent(
   thinkingMode?: string,
   fastMode?: boolean,
 ): Promise<AgentProcess> {
+  // "mixed" is resolved through the role-based router + connectivity policy:
+  // frontier for thinking-heavy work when available, local otherwise (with a
+  // frontier-review debt). This wires the New-Task "Mixed" option into the
+  // existing router rather than introducing a parallel path.
+  if (model === "mixed") {
+    const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
+    const { routeByRole } = await import("@/lib/routing/router");
+    const { resolveModelId } = await import("@/lib/routing/model-resolver");
+    const route = routeByRole("code-critical", getConnectivityPolicy());
+    const resolved = resolveModelId(route.tier);
+    onEvent(taskId, { type: "log", content: `[mixed] routed code-critical → ${route.tier}${route.frontierReviewDebt ? " (frontier review queued)" : ""} → ${resolved ?? "unavailable"}` });
+    model = resolved ?? undefined;
+    if (!model) {
+      onEvent(taskId, { type: "error", content: "[mixed] no model available for the current connectivity mode" });
+      onExit(taskId, 1, null);
+      // Return a minimal already-exited process so the caller can proceed.
+      const { EventEmitter } = await import("events");
+      const dead = new EventEmitter() as unknown as import("child_process").ChildProcess;
+      return { proc: dead, pid: -1, taskId, projectPath, startedAt: new Date(), textBuffer: "", modelsUsed: [] };
+    }
+  }
+
   if (isCodexModel(model)) {
     return spawnCodexAgent(
       taskId,
@@ -352,6 +374,7 @@ export async function spawnAgent(
       model!,
       resumeSessionId,
       thinkingMode,
+      fastMode,
     );
   }
 

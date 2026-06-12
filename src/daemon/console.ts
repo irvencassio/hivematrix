@@ -55,6 +55,26 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .form button.create { background: var(--accent); color: #1a1a1a; border: 0; border-radius: 6px;
     padding: 6px 14px; font-weight: 700; cursor: pointer; font-size: 12px; }
   .form .err { color: var(--err); font-size: 11px; margin-top: 4px; }
+  .form select { width: 100%; margin-bottom: 6px; }
+  .flbl { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .5px; margin: 2px 0 3px; }
+  .gear { cursor: pointer; color: var(--muted); font-size: 16px; background: none; border: 0; }
+  .gear:hover { color: var(--accent); }
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none;
+    align-items: center; justify-content: center; z-index: 50; }
+  .overlay.open { display: flex; }
+  .modal { width: 640px; max-width: 92vw; max-height: 84vh; overflow-y: auto; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .modal h1 { font-size: 16px; margin: 0 0 14px; display: flex; align-items: center; }
+  .modal h1 .x { margin-left: auto; cursor: pointer; color: var(--muted); font-weight: 400; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+  .tab { padding: 6px 12px; cursor: pointer; font-size: 12px; color: var(--muted); border-bottom: 2px solid transparent; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .backend { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .backend .nm { font-weight: 600; min-width: 150px; }
+  .backend .st { font-size: 11px; }
+  .backend .st.ok { color: var(--ok); } .backend .st.no { color: var(--muted); }
+  .vinfo { font-size: 11px; color: var(--muted); margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
   .lane { margin-bottom: 16px; }
   .lane-title { font-size: 11px; color: var(--muted); margin-bottom: 6px; display: flex; gap: 6px; }
   .lane-title .count { color: var(--accent); }
@@ -101,8 +121,31 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <option value="offline">offline</option>
     </select>
     <span class="pill" id="modePill">…</span>
+    <button class="gear" title="Settings" onclick="openSettings()">⚙</button>
   </span>
 </header>
+
+<div class="overlay" id="settingsOverlay">
+  <div class="modal">
+    <h1>Settings <span class="x" onclick="closeSettings()">✕</span></h1>
+    <div class="tabs"><div class="tab active" id="tab-models">Models</div></div>
+    <div id="settingsModels">
+      <label class="flbl">Default model</label>
+      <select id="s_default" style="width:100%"></select>
+      <div class="row" style="margin:8px 0"><button class="create" onclick="saveDefault()">Save default</button></div>
+
+      <label class="flbl" style="margin-top:14px">Backends</label>
+      <div id="s_backends"></div>
+
+      <label class="flbl" style="margin-top:14px">Local server endpoint</label>
+      <div class="row"><input id="s_endpoint" placeholder="http://localhost:1234/v1" style="flex:1" />
+        <button class="create" onclick="saveEndpoint()">Save</button></div>
+
+      <div class="vinfo" id="s_version">…</div>
+    </div>
+  </div>
+</div>
+
 <main>
   <section class="col board">
     <h2>Board</h2>
@@ -111,7 +154,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <input id="t_title" placeholder="Title" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
       <input id="t_path" placeholder="Project path (working dir)" value="/tmp" />
-      <input id="t_model" placeholder="Model" value="qwen/qwen3.6-27b" />
+      <label class="flbl">Model</label>
+      <select id="t_model"></select>
+      <label class="flbl">Attachments (file paths, comma-separated — optional)</label>
+      <input id="t_attach" placeholder="/path/to/file.png, /path/to/notes.md" />
       <div class="row"><button class="create" onclick="createTask()">Create task</button></div>
       <div class="err" id="t_err"></div>
     </div>
@@ -262,18 +308,65 @@ document.getElementById("modeSel").addEventListener("change", async (e) => {
 
 function toggleForm(id) { document.getElementById(id).classList.toggle("open"); }
 
+// --- Models / Settings ---
+let models = null;            // { backends, available, defaultModel, version }
+const modelById = {};         // UiModel.id → {modelId, fast}
+
+async function loadModels() {
+  models = await api("/models");
+  if (!models) return;
+  for (const m of models.available) modelById[m.id] = { modelId: m.modelId, fast: !!m.fast };
+  // Populate the New Task dropdown
+  const sel = document.getElementById("t_model");
+  sel.innerHTML = models.available.map(m => '<option value="'+esc(m.id)+'">'+esc(m.name)+(m.note?' — '+esc(m.note):'')+'</option>').join("")
+    || '<option value="">(no models configured)</option>';
+  // Default selection
+  const def = models.available.find(m => m.modelId === models.defaultModel || m.id === models.defaultModel);
+  if (def) sel.value = def.id;
+}
+
+function openSettings() {
+  document.getElementById("settingsOverlay").classList.add("open");
+  if (!models) return;
+  const sd = document.getElementById("s_default");
+  sd.innerHTML = models.available.map(m => '<option value="'+esc(m.modelId)+'">'+esc(m.name)+'</option>').join("");
+  if (models.defaultModel) sd.value = models.defaultModel;
+  document.getElementById("s_backends").innerHTML = models.backends.map(b =>
+    '<div class="backend"><span class="nm">'+esc(b.name)+'</span>'
+    + '<span class="st '+(b.configured?'ok':'no')+'">'+(b.configured?'✓ '+esc(b.detail):'not set up')+'</span>'
+    + (b.configured?'':'<span class="muted" style="flex:1"> — '+esc(b.connect||'')+'</span>')+'</div>').join("");
+  const local = models.backends.find(b => b.id === "local");
+  document.getElementById("s_endpoint").value = (local && local.endpoint) || "http://localhost:1234/v1";
+  const v = models.version || {};
+  document.getElementById("s_version").textContent = "HiveMatrix v" + (v.version||"?") + " · build " + (v.build||"?") + " · " + (v.date||"?");
+}
+function closeSettings() { document.getElementById("settingsOverlay").classList.remove("open"); }
+
+async function saveDefault() {
+  const modelId = document.getElementById("s_default").value;
+  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ defaultModel: modelId }) });
+  await loadModels();
+}
+async function saveEndpoint() {
+  const localEndpoint = document.getElementById("s_endpoint").value.trim();
+  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ localEndpoint }) });
+  await loadModels();
+}
+
 async function createTask() {
   const err = document.getElementById("t_err"); err.textContent = "";
   const title = document.getElementById("t_title").value.trim();
-  const description = document.getElementById("t_desc").value.trim();
+  let description = document.getElementById("t_desc").value.trim();
   const projectPath = document.getElementById("t_path").value.trim();
-  const model = document.getElementById("t_model").value.trim();
+  const sel = modelById[document.getElementById("t_model").value] || { modelId: null, fast: false };
+  const attach = document.getElementById("t_attach").value.trim();
   if (!title || !description || !projectPath) { err.textContent = "Title, description, and project path are required."; return; }
+  if (attach) description += "\n\nAttached files:\n" + attach.split(",").map(s => "- " + s.trim()).filter(Boolean).join("\n");
   try {
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ title, description, projectPath, project: "console", model: model || null, status: "backlog", executor: "agent" }) });
+      body: JSON.stringify({ title, description, projectPath, project: "console", model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent" }) });
     if (!t || !t._id) { err.textContent = "Create failed."; return; }
-    document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = "";
+    document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = ""; document.getElementById("t_attach").value = "";
     toggleForm("taskForm"); refresh();
   } catch (e2) { err.textContent = String(e2); }
 }
@@ -310,6 +403,7 @@ function connectSSE() {
   } catch (e) { /* polling covers it */ }
 }
 
+loadModels();
 refresh();
 connectSSE();
 setInterval(refresh, 5000);
