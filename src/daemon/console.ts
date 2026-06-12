@@ -122,7 +122,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .directive { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
     padding: 8px 10px; margin-bottom: 6px; }
   .directive .g { font-weight: 600; margin-bottom: 3px; }
-  .directive .s { font-size: 11px; color: var(--muted); }
+  .directive .s { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .directive .directive-actions { margin-left: auto; display: flex; gap: 4px; }
+  .sm { font-size: 10px; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--muted); cursor: pointer; }
+  .sm:hover { border-color: var(--accent-2); color: var(--text); }
+  .sm.err:hover { border-color: var(--err); color: var(--err); }
   .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
   .dot.active { background: var(--ok); } .dot.done { background: var(--accent-2); }
   .dot.sleeping { background: var(--muted); } .dot.blocked, .dot.failed { background: var(--err); }
@@ -166,6 +171,29 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .copybtn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px; font-size: 11px; cursor: pointer; }
   .copybtn:hover { border-color: var(--accent); }
   #s_qr svg { width: 100%; height: 100%; }
+  /* Project search dropdown */
+  .project-search { position: relative; margin-bottom: 6px; }
+  .project-search input { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-family: inherit; }
+  .project-search input:focus { outline: none; border-color: var(--accent); }
+  .project-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    margin-top: 2px; max-height: 240px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+  .project-dropdown.hidden { display: none; }
+  .project-sort-row { display: flex; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  .project-sort-btn { font-size: 10px; padding: 2px 8px; border-radius: 999px; cursor: pointer;
+    color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); user-select: none; }
+  .project-sort-btn.active { color: var(--accent); border-color: var(--accent); }
+  .project-list { max-height: 200px; overflow-y: auto; }
+  .project-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer;
+    font-size: 12px; border-bottom: 1px solid var(--border); }
+  .project-item:last-child { border-bottom: none; }
+  .project-item:hover, .project-item.selected { background: var(--panel-2); }
+  .project-item .pname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .project-item .pstar { color: var(--ok); font-size: 11px; }
+  .project-item .ptime { font-size: 10px; color: var(--muted); }
+  .project-empty { padding: 12px 10px; font-size: 11px; color: var(--muted); text-align: center; }
+  .project-empty.hidden { display: none; }
 </style>
 </head>
 <body>
@@ -217,12 +245,17 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         </select>
       </div>
       <label class="flbl" style="margin-top:10px">Wallpaper</label>
-      <div class="row"><input id="s_wallpaper" placeholder="/path/to/image.jpg (or upload →)" style="flex:1" />
-        <button class="create" onclick="saveWallpaperPath()">Set</button></div>
-      <div class="row" style="margin-top:6px">
-        <input type="file" id="s_wallpaper_file" accept="image/*" onchange="uploadWallpaper()" style="font-size:11px" />
-        <button onclick="clearWallpaper()" style="background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer">Clear</button>
+      <div id="wallpaper_preview" style="display:none;margin-bottom:6px">
+        <img id="wallpaper_preview_img" style="width:100%;max-height:160px;object-fit:cover;border-radius:6px;border:1px solid var(--border)" />
       </div>
+      <div class="row" style="gap:6px">
+        <input type="file" id="s_wallpaper_file" accept="image/*" style="display:none" onchange="onWallpaperFileSelected(this)" />
+        <button class="create" onclick="document.getElementById('s_wallpaper_file').click()">📁 Choose image</button>
+        <input id="s_wallpaper" placeholder="Or type a path…" style="flex:1" />
+        <button class="sm" onclick="saveWallpaperPath()">Set path</button>
+        <button class="sm" onclick="clearWallpaper()">Clear</button>
+      </div>
+      <div id="wallpaper_status" style="font-size:11px;margin-top:4px;min-height:16px"></div>
 
       <h2 style="margin-top:18px">Remote Access</h2>
       <div class="remote-status"><span class="dot" id="s_remote_dot"></span><span id="s_remote_label">…</span></div>
@@ -284,7 +317,17 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <input id="t_title" placeholder="Title (optional — derived from instructions)" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
       <label class="flbl">Project</label>
-      <select id="t_project" onchange="onProjectSelect()"></select>
+      <div id="t_project_wrapper" class="project-search">
+        <input id="t_project_search" type="text" placeholder="Search projects…" oninput="filterProjectDropdown()" onfocus="openProjectDropdown()" />
+        <div id="t_project_dropdown" class="project-dropdown hidden">
+          <div class="project-sort-row">
+            <span class="project-sort-btn active" data-sort="recent" onclick="sortProjectsDropdown('recent')">Most recent</span>
+            <span class="project-sort-btn" data-sort="name" onclick="sortProjectsDropdown('name')">Name A–Z</span>
+          </div>
+          <div id="t_project_list" class="project-list"></div>
+          <div id="t_project_empty" class="project-empty hidden">No projects found</div>
+        </div>
+      </div>
       <input id="t_path" placeholder="Project path (working dir)" value="/tmp" />
       <label class="flbl">Model</label>
       <select id="t_model"></select>
@@ -319,6 +362,15 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <input id="d_interval" placeholder="Repeat interval (e.g. PT4H, P1D) — blank = manual" />
       <div class="row"><button class="create" onclick="createDirective()">Create directive</button><button class="cancel" onclick="cancelForm('dirForm')">Cancel</button></div>
       <div class="err" id="d_err"></div>
+    </div>
+    <div class="form" id="dirEditForm" style="display:none">
+      <input id="de_id" type="hidden" />
+      <input id="de_goal" placeholder="Standing goal" />
+      <input id="de_path" placeholder="Project path" />
+      <input id="de_interval" placeholder="Repeat interval (e.g. PT4H, P1D) — blank = manual" />
+      <select id="de_status"><option value="active">active</option><option value="sleeping">sleeping</option><option value="blocked">blocked</option><option value="retired">retired</option></select>
+      <div class="row"><button class="create" onclick="saveDirective()">Save changes</button><button class="cancel" onclick="cancelForm('dirEditForm')">Cancel</button></div>
+      <div class="err" id="de_err"></div>
     </div>
     <div id="directives"></div>
   </section>
@@ -501,7 +553,11 @@ function renderDirectives() {
   if (!state.directives.length) { el.innerHTML = '<div class="muted">None.</div>'; return; }
   el.innerHTML = state.directives.map(d => '<div class="directive">'
     + '<div class="g"><span class="dot '+d.status+'"></span>'+esc(d.goal)+'</div>'
-    + '<div class="s">'+esc(d.status)+(d.nextRunAt?' · next '+esc(new Date(d.nextRunAt).toLocaleTimeString()):'')+'</div></div>').join("");
+    + '<div class="s">'+esc(d.status)+(d.nextRunAt?' · next '+esc(new Date(d.nextRunAt).toLocaleTimeString()):'')
+    + '<span class="directive-actions">'
+    + '<button class="sm" onclick="editDirective(\''+d._id+'\')">Edit</button>'
+    + '<button class="sm err" onclick="deleteDirective(\''+d._id+'\')">Delete</button>'
+    + '</span></div></div>').join("");
 }
 
 function fmtUptime(s) {
@@ -588,6 +644,85 @@ async function loadModels() {
 }
 
 // --- Projects ---
+let projectDropdownSort = "recent";  // "recent" | "name"
+let projectDropdownItems = [];       // full list of {name, path, preSelect, lastModified}
+let selectedProjectName = "";        // currently selected project in the task form
+
+function sortProjectItems(items, mode) {
+  if (mode === "name") return items.slice().sort((a, b) => a.name.localeCompare(b.name));
+  // "recent": by lastModified desc, then name asc
+  return items.slice().sort((a, b) => {
+    const tA = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+    const tB = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+    if (tB !== tA) return tB - tA;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function renderProjectDropdown() {
+  const search = (document.getElementById("t_project_search")?.value || "").toLowerCase();
+  const listEl = document.getElementById("t_project_list");
+  const emptyEl = document.getElementById("t_project_empty");
+  if (!listEl) return;
+
+  const filtered = projectDropdownItems.filter(p => p.name.toLowerCase().includes(search));
+  const sorted = sortProjectItems(filtered, projectDropdownSort);
+
+  if (!sorted.length) {
+    listEl.innerHTML = "";
+    if (emptyEl) emptyEl.classList.remove("hidden");
+    return;
+  }
+  if (emptyEl) emptyEl.classList.add("hidden");
+
+  listEl.innerHTML = sorted.map(p => {
+    const timeStr = p.lastModified ? new Date(p.lastModified).toLocaleDateString() : "";
+    return '<div class="project-item'+(selectedProjectName===p.name?' selected':'')+'" onclick="selectProjectFromDropdown(\''+esc(p.name)+'\',\''+esc(p.path)+'\')">'
+      + (p.preSelect ? '<span class="pstar">★</span>' : '')
+      + '<span class="pname">'+esc(p.name)+'</span>'
+      + (timeStr ? '<span class="ptime">'+esc(timeStr)+'</span>' : '')
+      + '</div>';
+  }).join("");
+}
+
+function filterProjectDropdown() {
+  renderProjectDropdown();
+}
+
+function sortProjectsDropdown(mode) {
+  projectDropdownSort = mode;
+  document.querySelectorAll(".project-sort-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.sort === mode);
+  });
+  renderProjectDropdown();
+}
+
+function openProjectDropdown() {
+  const dd = document.getElementById("t_project_dropdown");
+  if (dd) dd.classList.remove("hidden");
+  renderProjectDropdown();
+}
+
+function closeProjectDropdown() {
+  const dd = document.getElementById("t_project_dropdown");
+  if (dd) dd.classList.add("hidden");
+}
+
+function selectProjectFromDropdown(name, path) {
+  selectedProjectName = name;
+  const search = document.getElementById("t_project_search");
+  if (search) search.value = name;
+  const pathInput = document.getElementById("t_path");
+  if (pathInput) pathInput.value = path;
+  closeProjectDropdown();
+}
+
+// Close dropdown when clicking outside
+document.addEventListener("click", (e) => {
+  const wrapper = document.getElementById("t_project_wrapper");
+  if (wrapper && !wrapper.contains(e.target)) closeProjectDropdown();
+});
+
 async function loadProjects() {
   try {
     const data = await api("/projects");
@@ -605,15 +740,20 @@ async function loadProjects() {
       sel.value = saved;
       state.selectedProject = saved;
     }
-    // Populate New Task project dropdown — pre-select ★ project for path auto-fill
-    const tProj = document.getElementById("t_project");
-    tProj.innerHTML = '<option value="">(other)</option>'
-      + data.projects.map(p => '<option value="'+esc(p.name)+'" data-path="'+esc(p.path)+'">'+esc(p.name)+(p.preSelect?' ★':'')+'</option>').join("");
+    // Populate New Task project search dropdown
+    projectDropdownItems = data.projects.map(p => ({
+      name: p.name,
+      path: p.path,
+      preSelect: !!p.preSelect,
+      lastModified: p.lastModified || "",
+    }));
     const preSelected = data.projects.find(p => p.preSelect);
     if (preSelected) {
-      tProj.value = preSelected.name;
+      selectedProjectName = preSelected.name;
+      document.getElementById("t_project_search").value = preSelected.name;
       document.getElementById("t_path").value = preSelected.path;
     }
+    renderProjectDropdown();
     // If a filter was restored, also sync the task form path
     if (state.selectedProject) {
       const activeOpt = sel.options[sel.selectedIndex];
@@ -632,9 +772,7 @@ document.getElementById("projectSel").addEventListener("change", async (e) => {
 });
 
 function onProjectSelect() {
-  const sel = document.getElementById("t_project");
-  const opt = sel.options[sel.selectedIndex];
-  if (opt && opt.dataset.path) document.getElementById("t_path").value = opt.dataset.path;
+  // Legacy hook — no-op now that we use the search dropdown
 }
 
 let _attachPaths = [];
@@ -811,25 +949,77 @@ async function saveTheme() {
 }
 async function saveWallpaperPath() {
   const wallpaperPath = document.getElementById("s_wallpaper").value.trim();
-  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperPath }) });
-  await loadModels();
+  const statusEl = document.getElementById("wallpaper_status");
+  statusEl.style.color = "var(--accent)";
+  statusEl.textContent = "Saving…";
+  try {
+    await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperPath }) });
+    await loadModels();
+    statusEl.style.color = "var(--ok)";
+    statusEl.textContent = "✓ Wallpaper set";
+    if (wallpaperPath) showWallpaperPreview();
+    setTimeout(() => { statusEl.textContent = ""; }, 3000);
+  } catch (e) {
+    statusEl.style.color = "var(--err)";
+    statusEl.textContent = "Failed to save";
+  }
 }
 async function clearWallpaper() {
   document.getElementById("s_wallpaper").value = "";
-  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperPath: null }) });
-  await loadModels();
-}
-function uploadWallpaper() {
-  const f = document.getElementById("s_wallpaper_file").files[0];
-  if (!f) return;
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const b64 = String(reader.result).split(",")[1];
-    const ext = (f.name.split(".").pop() || "png").toLowerCase();
-    await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperData: b64, wallpaperExt: ext }) });
+  document.getElementById("wallpaper_preview").style.display = "none";
+  const statusEl = document.getElementById("wallpaper_status");
+  statusEl.style.color = "var(--accent)";
+  statusEl.textContent = "Clearing…";
+  try {
+    await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperPath: null }) });
     await loadModels();
+    statusEl.style.color = "var(--ok)";
+    statusEl.textContent = "✓ Wallpaper cleared";
+    setTimeout(() => { statusEl.textContent = ""; }, 3000);
+  } catch (e) {
+    statusEl.style.color = "var(--err)";
+    statusEl.textContent = "Failed to clear";
+  }
+}
+// Called when the user picks a file via the "Choose image" button.
+// Shows a preview immediately, then uploads the file to the daemon.
+function onWallpaperFileSelected(input) {
+  const f = input.files?.[0];
+  if (!f) return;
+  const statusEl = document.getElementById("wallpaper_status");
+  // Show local preview immediately
+  const preview = document.getElementById("wallpaper_preview");
+  const img = document.getElementById("wallpaper_preview_img");
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    img.src = String(e.target?.result || "");
+    preview.style.display = "block";
+    statusEl.style.color = "var(--accent)";
+    statusEl.textContent = "Uploading…";
+    // Upload as base64
+    const b64 = String(e.target?.result || "").split(",")[1];
+    const ext = (f.name.split(".").pop() || "png").toLowerCase();
+    try {
+      await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperData: b64, wallpaperExt: ext }) });
+      await loadModels();
+      statusEl.style.color = "var(--ok)";
+      statusEl.textContent = "✓ Wallpaper set from " + f.name;
+      // Update the path field to show where it was saved
+      document.getElementById("s_wallpaper").value = "~/.hivematrix/wallpaper." + ext;
+      setTimeout(() => { statusEl.textContent = ""; }, 4000);
+    } catch (err) {
+      statusEl.style.color = "var(--err)";
+      statusEl.textContent = "Upload failed — try again";
+    }
   };
   reader.readAsDataURL(f);
+  input.value = ""; // allow re-selecting the same file
+}
+function showWallpaperPreview() {
+  const preview = document.getElementById("wallpaper_preview");
+  const img = document.getElementById("wallpaper_preview_img");
+  img.src = "/wallpaper?token=" + encodeURIComponent(HM_TOKEN) + "&t=" + Date.now();
+  preview.style.display = "block";
 }
 
 async function saveDefault() {
@@ -848,8 +1038,7 @@ async function createTask() {
   const title = document.getElementById("t_title").value.trim();
   let description = document.getElementById("t_desc").value.trim();
   const projectPath = document.getElementById("t_path").value.trim();
-  const projSel = document.getElementById("t_project");
-  const projName = projSel.value || null;
+  const projName = selectedProjectName || null;
   const sel = modelById[document.getElementById("t_model").value] || { modelId: null, fast: false };
   if (!description || !projectPath) { err.textContent = "Description and project path are required."; return; }
   if (_attachPaths.length) description += "\n\nAttached files:\n" + _attachPaths.map(p => "- " + p).join("\n");
@@ -881,6 +1070,46 @@ async function createDirective() {
   } catch (e2) { err.textContent = String(e2); }
 }
 
+function editDirective(id) {
+  const d = state.directives.find(x => x._id === id);
+  if (!d) return;
+  document.getElementById("de_id").value = d._id;
+  document.getElementById("de_goal").value = d.goal;
+  document.getElementById("de_path").value = d.projectPath;
+  document.getElementById("de_status").value = d.status;
+  // Reverse-engineer interval from triggerPolicy JSON
+  try {
+    const tp = JSON.parse(d.triggerPolicy || "{}");
+    document.getElementById("de_interval").value = tp.interval || "";
+  } catch { document.getElementById("de_interval").value = ""; }
+  toggleForm("dirEditForm");
+}
+
+async function saveDirective() {
+  const err = document.getElementById("de_err"); err.textContent = "";
+  const id = document.getElementById("de_id").value;
+  const goal = document.getElementById("de_goal").value.trim();
+  const projectPath = document.getElementById("de_path").value.trim();
+  const status = document.getElementById("de_status").value;
+  const interval = document.getElementById("de_interval").value.trim();
+  if (!goal || !projectPath) { err.textContent = "Goal and project path are required."; return; }
+  const triggerPolicy = interval ? { type: "schedule", interval } : { type: "manual" };
+  try {
+    const d = await api("/directives/" + encodeURIComponent(id), { method:"PATCH", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ goal, projectPath, status, triggerPolicy }) });
+    if (!d) { err.textContent = "Update failed."; return; }
+    toggleForm("dirEditForm"); refresh();
+  } catch (e2) { err.textContent = String(e2); }
+}
+
+async function deleteDirective(id) {
+  if (!confirm("Delete this directive and all its runs?")) return;
+  try {
+    await api("/directives/" + encodeURIComponent(id), { method: "DELETE" });
+    refresh();
+  } catch (e2) { /* transient */ }
+}
+
 // SSE for live updates; fall back to polling.
 function connectSSE() {
   try {
@@ -891,6 +1120,9 @@ function connectSSE() {
     es.addEventListener("hive:event", refresh);
     es.addEventListener("tasks:created", refresh);
     es.addEventListener("tasks:updated", refresh);
+    es.addEventListener("directives:created", refresh);
+    es.addEventListener("directives:updated", refresh);
+    es.addEventListener("directives:deleted", refresh);
     es.addEventListener("connectivity:change", refresh);
     es.onerror = () => { live.className = "live stale"; live.textContent = "● reconnecting"; };
   } catch (e) { /* polling covers it */ }
