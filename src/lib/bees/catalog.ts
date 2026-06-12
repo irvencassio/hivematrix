@@ -73,6 +73,15 @@ const BEE_DEFINITIONS: BeeDefinition[] = [
     standalone: false,
   },
   {
+    kind: "termbee",
+    name: "TermBee",
+    role: "capability",
+    phase: 1,
+    summary: "Persistent terminal sessions the agent drives across turns (real shells, no native deps). Available in every connectivity mode — the offline workhorse.",
+    capabilities: ["persistent-shell", "run-command", "scrollback", "offline"],
+    standalone: false,
+  },
+  {
     kind: "desktopbee",
     name: "DesktopBee",
     role: "capability",

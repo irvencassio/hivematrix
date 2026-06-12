@@ -17,8 +17,8 @@ test("isBeeTool recognizes the three lanes and rejects others", () => {
   assert.equal(isBeeTool("read_file"), false);
 });
 
-test("all three bee tools are defined with required schemas", () => {
-  assert.equal(BEE_TOOL_DEFINITIONS.length, 3);
+test("all bee tools are defined with required schemas", () => {
+  assert.equal(BEE_TOOL_DEFINITIONS.length, 5);
   for (const t of BEE_TOOL_DEFINITIONS) {
     assert.equal(t.type, "function");
     assert.ok(t.function.name.length > 0);
@@ -27,16 +27,17 @@ test("all three bee tools are defined with required schemas", () => {
   }
 });
 
-test("cloud-ok advertises all three lanes", () => {
-  assert.deepEqual(names(availableBeeTools(cloud())), ["browserbee_run", "desktopbee_action", "webbee_search"]);
+test("cloud-ok advertises every lane", () => {
+  assert.deepEqual(names(availableBeeTools(cloud())),
+    ["browserbee_run", "desktopbee_action", "termbee_run", "termbee_session", "webbee_search"]);
 });
 
-test("local-only advertises only DesktopBee (web lanes need internet)", () => {
-  assert.deepEqual(names(availableBeeTools(local())), ["desktopbee_action"]);
+test("local-only advertises DesktopBee + TermBee (web lanes need internet)", () => {
+  assert.deepEqual(names(availableBeeTools(local())), ["desktopbee_action", "termbee_run", "termbee_session"]);
 });
 
-test("offline advertises only DesktopBee", () => {
-  assert.deepEqual(names(availableBeeTools(offline())), ["desktopbee_action"]);
+test("offline advertises DesktopBee + TermBee (the offline workhorses)", () => {
+  assert.deepEqual(names(availableBeeTools(offline())), ["desktopbee_action", "termbee_run", "termbee_session"]);
 });
 
 test("executeBeeTool refuses an unknown bee tool", async () => {

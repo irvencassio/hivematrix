@@ -22,6 +22,8 @@ const BEE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
   webbee_search: "webbee",
   browserbee_run: "browserbee",
   desktopbee_action: "desktopbee",
+  termbee_session: "termbee",
+  termbee_run: "termbee",
 };
 
 export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
@@ -95,6 +97,40 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "termbee_session",
+      description:
+        "TermBee: manage persistent terminal sessions (real shells that keep their cwd/env across commands). action=create starts a session (optional cwd), list shows sessions, kill ends one. Use a session to run a multi-step build/repo workflow. Available in every connectivity mode (works offline).",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["create", "list", "kill"], description: "Session action" },
+          sessionId: { type: "string", description: "Session id (for kill; optional for create)" },
+          cwd: { type: "string", description: "Working directory for a new session" },
+        },
+        required: ["action"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "termbee_run",
+      description:
+        "TermBee: run a shell command in a persistent session and get its combined output + exit code. Creates the session on demand if it doesn't exist. State persists between calls (e.g. cd, exported vars).",
+      parameters: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string", description: "Session to run in (created if absent)" },
+          command: { type: "string", description: "The shell command to run" },
+          timeoutMs: { type: "number", description: "Max time to wait (default 120000)" },
+        },
+        required: ["sessionId", "command"],
+      },
+    },
+  },
 ];
 
 export function isBeeTool(name: string): boolean {
@@ -140,9 +176,45 @@ export async function executeBeeTool(
       return executeBrowserBeeRun(args, ctx);
     case "desktopbee_action":
       return executeDesktopBeeAction(args);
+    case "termbee_session":
+      return executeTermBeeSession(args);
+    case "termbee_run":
+      return executeTermBeeRun(args);
     default:
       return `Error: Unknown bee tool "${name}"`;
   }
+}
+
+async function executeTermBeeSession(args: Record<string, unknown>): Promise<string> {
+  const { createSession, listSessions, killSession } = await import("@/lib/termbee/session");
+  const action = args.action as string;
+  if (action === "create") {
+    const id = createSession({
+      id: typeof args.sessionId === "string" ? args.sessionId : undefined,
+      cwd: typeof args.cwd === "string" ? args.cwd : undefined,
+    });
+    return `TermBee session created: ${id}`;
+  }
+  if (action === "list") {
+    const s = listSessions();
+    return s.length ? s.map((x) => `${x.id} (cwd=${x.cwd}, alive=${x.alive})`).join("\n") : "(no sessions)";
+  }
+  if (action === "kill") {
+    const id = typeof args.sessionId === "string" ? args.sessionId : "";
+    return killSession(id) ? `Killed ${id}` : `No such session ${id}`;
+  }
+  return `Error: action must be create | list | kill`;
+}
+
+async function executeTermBeeRun(args: Record<string, unknown>): Promise<string> {
+  const sessionId = typeof args.sessionId === "string" ? args.sessionId.trim() : "";
+  const command = typeof args.command === "string" ? args.command : "";
+  if (!sessionId || !command) return "Error: sessionId and command are required";
+  const { runCommand } = await import("@/lib/termbee/session");
+  const timeoutMs = typeof args.timeoutMs === "number" ? args.timeoutMs : undefined;
+  const r = await runCommand(sessionId, command, timeoutMs);
+  const status = r.timedOut ? "(timed out)" : `(exit ${r.exitCode})`;
+  return `${r.output}\n${status}`.slice(0, 16_000);
 }
 
 async function executeWebBeeSearch(args: Record<string, unknown>, ctx: BeeToolContext): Promise<string> {

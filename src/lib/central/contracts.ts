@@ -13,6 +13,7 @@ export const WORKER_KINDS = [
   "browserbee",
   "computerbee",
   "desktopbee",
+  "termbee",
   "cronbee",
   "authbee",
   "voicebee",

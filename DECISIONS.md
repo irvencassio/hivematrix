@@ -132,4 +132,28 @@ Scope wall + COMPONENT-MAP amended. **Provers:** `src/lib/mailbee/*.test.ts`
 
 ---
 
+## Q10 — TermBee becomes an owned embedded lane
+
+Date closed: 2026-06-12.
+
+**Decision.** TermBee is no longer "Canopy provider" — it's a **HiveMatrix-owned
+embedded capability lane**: persistent terminal sessions the agent drives across
+turns. Self-contained — **real shells managed in-process** (no node-pty native
+addon, no tmux dependency); a per-command completion marker reads each command's
+combined output + exit code back off the shared stdout stream. State (cwd, env,
+shell vars) persists between commands like a real terminal.
+
+**Availability: every connectivity mode** (cloud-ok / local-only / offline) —
+TermBee is the offline workhorse, so it's added to the ConnectivityPolicy matrix
+as always-available.
+
+**Code:** `src/lib/termbee/` (contracts, session manager). Exposed to the agent
+loop via `bee-tools.ts` as `termbee_session` (create/list/kill) and `termbee_run`
+(run a command in a session). Capability `termbee` in `connectivity/policy.ts`;
+catalog + COMPONENT-MAP updated. **Provers:** `src/lib/termbee/*.test.ts`
+(marker parsing + a real multi-step session: cd persists, command output across
+turns, runs offline).
+
+---
+
 Proposals for future phase boundaries go below this line. Nothing above is re-opened without a new decision entry.

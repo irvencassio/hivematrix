@@ -17,7 +17,7 @@ import { EventEmitter } from "events";
 
 export type ConnectivityMode = "cloud-ok" | "local-only" | "offline";
 
-export type CapabilityId = "frontier" | "local" | "webbee" | "browserbee" | "desktopbee" | "image";
+export type CapabilityId = "frontier" | "local" | "webbee" | "browserbee" | "desktopbee" | "termbee" | "image";
 
 export interface CapabilityAvailability {
   available: boolean;
@@ -31,6 +31,7 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     webbee:     { available: true },
     browserbee: { available: true },
     desktopbee: { available: true },
+    termbee:    { available: true },
     image:      { available: true },
   },
   "local-only": {
@@ -39,6 +40,7 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     webbee:     { available: false, reason: "WebBee requires internet access" },
     browserbee: { available: false, reason: "BrowserBee requires internet access in local-only mode" },
     desktopbee: { available: true },
+    termbee:    { available: true },
     image:      { available: false, reason: "Nano Banana image generation requires cloud; local mflux fallback if configured" },
   },
   "offline": {
@@ -47,6 +49,7 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     webbee:     { available: false, reason: "No network connectivity" },
     browserbee: { available: false, reason: "No network connectivity" },
     desktopbee: { available: true },
+    termbee:    { available: true },
     image:      { available: false, reason: "No network connectivity; local mflux fallback if configured" },
   },
 };
