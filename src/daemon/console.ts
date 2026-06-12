@@ -188,6 +188,17 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <button onclick="clearWallpaper()" style="background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer">Clear</button>
       </div>
 
+      <label class="flbl" style="margin-top:16px">Remote access (Cloudflare tunnel)</label>
+      <div id="s_tunnel" class="muted">…</div>
+      <div class="row" style="margin-top:6px">
+        <button class="create" id="s_tunnel_btn" onclick="toggleTunnel()">Start tunnel</button>
+      </div>
+      <div id="s_tunnel_url" style="font-size:12px;margin-top:6px;word-break:break-all"></div>
+      <label class="flbl" style="margin-top:10px">Access token (paste into remote clients / the iOS app)</label>
+      <div class="row"><input id="s_token" readonly style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
+        <button onclick="(function(){var i=document.getElementById('s_token');i.select();document.execCommand('copy')})()" style="background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer">Copy</button></div>
+      <div class="muted" style="font-size:11px;margin-top:6px">⚠ A tunnel exposes the daemon to the internet; the access token is the only barrier. Treat it like a password. The console never hands the token to tunneled visitors — they must paste it. For production use a named tunnel behind Cloudflare Access.</div>
+
       <div class="vinfo" id="s_version">…</div>
     </div>
   </div>
@@ -235,8 +246,22 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 </main>
 <script>
 const LANES = ["backlog","assigned","in_progress","review","done","failed"];
-// Shared-secret token injected by the daemon into this same-origin page.
-const HM_TOKEN = "%%HM_TOKEN%%";
+// Token: injected by the daemon for loopback requests; for remote (tunnel)
+// requests the daemon serves an empty value, so we fall back to a token the
+// user pasted once (stored locally). See requireToken().
+let HM_TOKEN = "%%HM_TOKEN%%" || localStorage.getItem("hm_token") || "";
+
+function requireToken() {
+  if (HM_TOKEN) { if ("%%HM_TOKEN%%") localStorage.setItem("hm_token", HM_TOKEN); return true; }
+  // Remote with no stored token → prompt for it (obtained from local Settings).
+  document.body.innerHTML = '<div style="height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;font-family:-apple-system,sans-serif;color:#e6edf3;background:#0d1117">'
+    + '<div style="font-size:22px;font-weight:700;color:#d9a441">HiveMatrix</div>'
+    + '<div style="color:#8b949e">Remote access — paste your access token</div>'
+    + '<input id="lt" type="password" placeholder="access token" style="width:320px;padding:8px;border-radius:6px;border:1px solid #2d333b;background:#161b22;color:#e6edf3" />'
+    + '<button onclick="(function(){var v=document.getElementById(\'lt\').value.trim();if(v){localStorage.setItem(\'hm_token\',v);location.reload();}})()" style="background:#d9a441;color:#1a1a1a;border:0;border-radius:6px;padding:8px 18px;font-weight:700;cursor:pointer">Connect</button>'
+    + '<div style="color:#8b949e;font-size:11px;max-width:340px;text-align:center">Find this token in the local HiveMatrix console under Settings → Remote access.</div></div>';
+  return false;
+}
 let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null };
 
 async function api(path, opts) {
@@ -458,8 +483,31 @@ function openSettings() {
   const v = models.version || {};
   document.getElementById("s_version").textContent = "HiveMatrix v" + (v.version||"?") + " · build " + (v.build||"?") + " · " + (v.date||"?");
   document.getElementById("s_theme").value = models.theme || "system";
+  document.getElementById("s_token").value = HM_TOKEN || "(load the local console to see the token)";
+  loadTunnel();
 }
 function closeSettings() { document.getElementById("settingsOverlay").classList.remove("open"); }
+
+let tunnel = null;
+async function loadTunnel() {
+  tunnel = await api("/tunnel");
+  const st = document.getElementById("s_tunnel"), btn = document.getElementById("s_tunnel_btn"), urlEl = document.getElementById("s_tunnel_url");
+  if (!tunnel) return;
+  if (!tunnel.installed) { st.textContent = "cloudflared not installed — brew install cloudflared"; btn.style.display = "none"; return; }
+  btn.style.display = "";
+  st.textContent = tunnel.running ? "running" : "stopped";
+  btn.textContent = tunnel.running ? "Stop tunnel" : "Start tunnel";
+  urlEl.innerHTML = tunnel.url ? 'Public URL: <a href="'+esc(tunnel.url)+'" target="_blank" style="color:var(--accent-2)">'+esc(tunnel.url)+'</a>' : "";
+}
+async function toggleTunnel() {
+  const btn = document.getElementById("s_tunnel_btn");
+  btn.disabled = true; btn.textContent = tunnel && tunnel.running ? "Stopping…" : "Starting…";
+  try {
+    tunnel = await api(tunnel && tunnel.running ? "/tunnel/stop" : "/tunnel/start", { method: "POST" });
+  } catch (e) { /* */ }
+  btn.disabled = false;
+  loadTunnel();
+}
 
 async function saveTheme() {
   const theme = document.getElementById("s_theme").value;
@@ -550,10 +598,12 @@ function connectSSE() {
   } catch (e) { /* polling covers it */ }
 }
 
-loadModels();
-refresh();
-connectSSE();
-setInterval(refresh, 5000);
+if (requireToken()) {
+  loadModels();
+  refresh();
+  connectSSE();
+  setInterval(refresh, 5000);
+}
 </script>
 </body>
 </html>`;

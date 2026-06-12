@@ -127,10 +127,16 @@ export function createDaemonServer() {
     }
 
     try {
-      // GET / or /console — the operator console (token injected for same-origin use)
+      // GET / or /console — the operator console.
+      // SECURITY: the token is injected into the HTML ONLY for direct loopback
+      // requests. Requests arriving via Cloudflare (tunnel) carry a
+      // CF-Connecting-IP header — for those we serve the console WITHOUT the
+      // token, so a remote visitor must paste it (obtained from local Settings).
+      // This closes the "anyone with the tunnel URL gets the token" hole.
       if (req.method === "GET" && (urlPath === "/" || urlPath === "/console")) {
+        const viaCloudflare = !!(req.headers["cf-connecting-ip"] || req.headers["cf-ray"]);
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(CONSOLE_HTML.replace("%%HM_TOKEN%%", AUTH_TOKEN));
+        res.end(CONSOLE_HTML.replace("%%HM_TOKEN%%", viaCloudflare ? "" : AUTH_TOKEN));
         return;
       }
 
@@ -255,6 +261,31 @@ export function createDaemonServer() {
           if (d) desktopPermissions = { accessibility: !!d.accessibility, screenRecording: !!d.screenRecording };
         }
         json(res, 200, getOnboardingStatus({ helperBuilt, desktopPermissions }));
+        return;
+      }
+
+      // GET /tunnel — cloudflared status
+      if (req.method === "GET" && urlPath === "/tunnel") {
+        const { tunnelStatus } = await import("@/lib/tunnel/cloudflared");
+        json(res, 200, tunnelStatus());
+        return;
+      }
+      // POST /tunnel/start — start a quick tunnel to this daemon
+      if (req.method === "POST" && urlPath === "/tunnel/start") {
+        const { startQuickTunnel, tunnelStatus } = await import("@/lib/tunnel/cloudflared");
+        try {
+          const url = await startQuickTunnel(parseInt(process.env.HIVEMATRIX_PORT ?? "3747", 10));
+          json(res, 200, { ...tunnelStatus(), url });
+        } catch (e) {
+          json(res, 500, { error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+      // POST /tunnel/stop
+      if (req.method === "POST" && urlPath === "/tunnel/stop") {
+        const { stopTunnel, tunnelStatus } = await import("@/lib/tunnel/cloudflared");
+        stopTunnel();
+        json(res, 200, tunnelStatus());
         return;
       }
 
