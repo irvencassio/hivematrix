@@ -77,6 +77,8 @@ export const TASK_STATUSES = [
   "review",
   "done",
   "failed",
+  "cancelled",
+  "archived",
 ] as const;
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];

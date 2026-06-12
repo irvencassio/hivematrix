@@ -106,6 +106,28 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .muted { color: var(--muted); }
   .live { font-size: 10px; color: var(--ok); }
   .live.stale { color: var(--err); }
+  .archive-link { font-size: 11px; color: var(--accent-2); cursor: pointer; font-weight: 400; text-transform: none; letter-spacing: 0; }
+  .archive-link:hover { text-decoration: underline; }
+  .actions { display: flex; gap: 6px; margin: 10px 0 16px; flex-wrap: wrap; }
+  .actions button { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 12px; font-size: 11px; cursor: pointer; }
+  .actions button:hover { border-color: var(--accent-2); }
+  .actions button.danger:hover { border-color: var(--err); color: var(--err); }
+  .transcript { background: #0a0d12; border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+    max-height: 46vh; overflow-y: auto; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap; margin-bottom: 16px; }
+  .transcript .ln { padding: 1px 0; }
+  .transcript .ln.error { color: var(--err); }
+  .transcript .ln.tool { color: var(--accent); }
+  .transcript .ln.text { color: var(--text); }
+  .errbox { background: rgba(248,81,73,.08); border: 1px solid var(--err); border-radius: 8px;
+    padding: 10px; color: var(--err); white-space: pre-wrap; margin-bottom: 16px; font-size: 12px; }
+  .md h1,.md h2,.md h3 { color: var(--text); margin: 8px 0 4px; }
+  .md h1 { font-size: 16px; } .md h2 { font-size: 14px; } .md h3 { font-size: 13px; }
+  .md code { background: #0a0d12; padding: 1px 4px; border-radius: 4px; font-family: ui-monospace, Menlo, monospace; }
+  .md pre { background: #0a0d12; border: 1px solid var(--border); border-radius: 6px; padding: 8px; overflow-x: auto; }
+  .md a { color: var(--accent-2); } .md ul { margin: 4px 0; padding-left: 18px; }
+  .streaming { font-size: 10px; color: var(--ok); margin-left: 6px; }
 </style>
 </head>
 <body>
@@ -148,7 +170,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 
 <main>
   <section class="col board">
-    <h2>Board</h2>
+    <h2>Board <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></h2>
     <button class="addbtn" onclick="toggleForm('taskForm')">＋ New task</button>
     <div class="form" id="taskForm">
       <input id="t_title" placeholder="Title" />
@@ -216,16 +238,54 @@ function renderBoard() {
           + (t.directiveId?'<span class="badge">directive</span>':'')+'</div></div>').join("")
       + '</div>';
   }).join("") || '<div class="muted">No tasks.</div>';
+  const archivable = state.tasks.filter(t => ["review","done","failed","cancelled"].includes(t.status)).length;
+  const ab = document.getElementById("archiveBtn");
+  if (ab) ab.textContent = archivable ? "· archive completed (" + archivable + ")" : "";
+}
+
+// Minimal, safe markdown → HTML (escapes first, then a few inline/block rules).
+function mdToHtml(src) {
+  let s = esc(src || "");
+  s = s.replace(/\x60\x60\x60([\s\S]*?)\x60\x60\x60/g, (m,c)=>'<pre>'+c.replace(/^\n/,'')+'</pre>');
+  s = s.replace(/\x60([^\x60]+)\x60/g, '<code>$1</code>');
+  s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>').replace(/^## (.+)$/gm, '<h2>$1</h2>').replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  s = s.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+  s = s.replace(/^(?:- |\* )(.+)$/gm, '<li>$1</li>').replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>');
+  return s.replace(/\n/g, '<br>');
+}
+
+function renderTranscript(logs) {
+  if (!Array.isArray(logs) || !logs.length) return '<div class="muted">No transcript yet.</div>';
+  return '<div class="transcript">' + logs.slice(-400).map(l => {
+    const cls = l.type === "error" ? "error" : (l.type === "tool_use" || l.type === "tool_result") ? "tool" : "text";
+    const txt = typeof l.content === "string" ? l.content : JSON.stringify(l.content);
+    return '<div class="ln '+cls+'">'+esc(txt)+'</div>';
+  }).join("") + '</div>';
+}
+
+function taskActionsHtml(t) {
+  const b = [];
+  const running = ["backlog","assigned","in_progress"].includes(t.status);
+  if (running) b.push('<button onclick="taskAction(\''+t._id+'\',\'cancel\')">■ Cancel</button>');
+  if (["failed","review","cancelled"].includes(t.status)) b.push('<button onclick="taskAction(\''+t._id+'\',\'retry\')">↻ Retry</button>');
+  if (!running) b.push('<button onclick="taskAction(\''+t._id+'\',\'archive\')">⌫ Archive</button>');
+  b.push('<button class="danger" onclick="deleteTask(\''+t._id+'\')">🗑 Delete</button>');
+  return '<div class="actions">'+b.join("")+'</div>';
 }
 
 async function selectTask(id) {
   state.selected = id;
   renderBoard();
   const t = await api("/tasks/"+id);
+  if (!t || !t._id) { state.selected = null; return; }
   const out = t.output ? (typeof t.output==="string"?JSON.parse(t.output):t.output) : {};
+  const logs = typeof t.logs === "string" ? (()=>{try{return JSON.parse(t.logs)}catch{return[]}})() : (t.logs||[]);
+  const live = ["assigned","in_progress"].includes(t.status);
   const el = document.getElementById("session");
-  el.innerHTML = '<div class="session"><h1>'+esc(t.title||t._id)+'</h1>'
+  el.innerHTML = '<div class="session"><h1>'+esc(t.title||t._id)+(live?'<span class="streaming">● running</span>':'')+'</h1>'
     + '<div class="sub">'+esc(t.project||"")+' · '+esc(t.status)+(t.reviewState?' · '+esc(t.reviewState):'')+'</div>'
+    + taskActionsHtml(t)
     + '<div class="kv">'
     + '<span class="k">model</span><span>'+esc(t.model||"—")+'</span>'
     + '<span class="k">project path</span><span>'+esc(t.projectPath||"—")+'</span>'
@@ -233,9 +293,27 @@ async function selectTask(id) {
     + '<span class="k">completedBy</span><span>'+esc(t.completedBy||"—")+'</span>'
     + '<span class="k">prover</span><span>'+esc(t.proverType||"—")+'</span>'
     + '</div>'
-    + '<h2>Description</h2><div class="desc">'+esc(t.description||"")+'</div>'
-    + (out.summary?'<h2>Result</h2><div class="desc">'+esc(out.summary)+'</div>':'')
+    + '<h2>Description</h2><div class="desc md">'+mdToHtml(t.description||"")+'</div>'
+    + (t.error?'<h2>Error</h2><div class="errbox">'+esc(t.error)+'</div>':'')
+    + '<h2>Session transcript</h2>'+renderTranscript(logs)
+    + (out.summary?'<h2>Result</h2><div class="desc md">'+mdToHtml(out.summary)+'</div>':'')
     + '</div>';
+  // Keep the transcript scrolled to the latest line while running.
+  const tr = el.querySelector(".transcript"); if (tr && live) tr.scrollTop = tr.scrollHeight;
+}
+
+async function taskAction(id, action) {
+  await api("/tasks/"+id+"/"+action, { method: "POST" });
+  refresh();
+}
+async function deleteTask(id) {
+  await api("/tasks/"+id, { method: "DELETE" });
+  if (state.selected === id) { state.selected = null; document.getElementById("session").innerHTML = '<div class="session-empty">Select a task to inspect its session.</div>'; }
+  refresh();
+}
+async function archiveCompleted() {
+  const r = await api("/tasks/archive-completed", { method: "POST" });
+  refresh();
 }
 
 function renderConn() {

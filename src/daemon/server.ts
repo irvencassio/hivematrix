@@ -266,18 +266,30 @@ export function createDaemonServer() {
         return;
       }
 
-      // GET /tasks
+      // GET /tasks — excludes archived by default (pass ?status=archived to see them)
       if (req.method === "GET" && urlPath === "/tasks") {
         const q = parseQueryString(req.url ?? "");
         const db = getDb();
         const conditions: string[] = [];
         const params: string[] = [];
         if (q.status) { conditions.push("status = ?"); params.push(q.status); }
+        else { conditions.push("status != 'archived'"); }
         if (q.profile) { conditions.push("profile = ?"); params.push(q.profile); }
         if (q.project) { conditions.push("project = ?"); params.push(q.project); }
         const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
-        const rows = db.prepare(`SELECT * FROM tasks${where} ORDER BY position ASC`).all(...params);
+        const rows = db.prepare(`SELECT * FROM tasks${where} ORDER BY position ASC LIMIT 300`).all(...params);
         json(res, 200, rows);
+        return;
+      }
+
+      // POST /tasks/archive-completed — bulk-archive terminal tasks (declutter the board)
+      if (req.method === "POST" && urlPath === "/tasks/archive-completed") {
+        const db = getDb();
+        const r = db.prepare(
+          "UPDATE tasks SET status='archived', updatedAt=datetime('now') WHERE status IN ('review','done','failed','cancelled')"
+        ).run();
+        broadcast("tasks:updated", { archived: r.changes });
+        json(res, 200, { archived: r.changes });
         return;
       }
 
@@ -312,11 +324,42 @@ export function createDaemonServer() {
         return;
       }
 
-      // DELETE /tasks/:id
+      // POST /tasks/:id/<action> — retry | archive | cancel
+      const taskActionMatch = urlPath.match(/^\/tasks\/([^/]+)\/(retry|archive|cancel)$/);
+      if (req.method === "POST" && taskActionMatch) {
+        const { Task } = await import("@/lib/db");
+        const [, tid, action] = taskActionMatch;
+        if (action === "retry") {
+          const t = await Task.findByIdAndUpdate(tid, {
+            status: "backlog", error: null, agentPid: null, startedAt: null, completedAt: null, reviewState: null,
+          });
+          if (!t) { json(res, 404, { error: "Not found" }); return; }
+          broadcast("tasks:updated", { taskId: tid, status: "backlog" });
+          json(res, 200, t); return;
+        }
+        if (action === "cancel") {
+          // Kill a running agent if present, then mark cancelled.
+          try {
+            const { agentManager } = await import("@/lib/orchestrator/agent-manager");
+            await agentManager.killAgentByTaskId(tid);
+          } catch { /* not running */ }
+          const t = await Task.findByIdAndUpdate(tid, { status: "cancelled", agentPid: null });
+          if (!t) { json(res, 404, { error: "Not found" }); return; }
+          broadcast("tasks:updated", { taskId: tid, status: "cancelled" });
+          json(res, 200, t); return;
+        }
+        // archive
+        const t = await Task.findByIdAndUpdate(tid, { status: "archived" });
+        if (!t) { json(res, 404, { error: "Not found" }); return; }
+        broadcast("tasks:updated", { taskId: tid, status: "archived" });
+        json(res, 200, t); return;
+      }
+
+      // DELETE /tasks/:id — hard delete
       if (req.method === "DELETE" && taskMatch) {
         const { Task } = await import("@/lib/db");
-        await Task.findByIdAndUpdate(taskMatch[1], { status: "cancelled" });
-        broadcast("tasks:updated", { taskId: taskMatch[1], status: "cancelled" });
+        await Task.findByIdAndDelete(taskMatch[1]);
+        broadcast("tasks:updated", { taskId: taskMatch[1], deleted: true });
         json(res, 204, null);
         return;
       }
