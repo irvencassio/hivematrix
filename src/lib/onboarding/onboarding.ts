@@ -18,6 +18,7 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { findBinary, CLAUDE_BINARY_SEARCH_PATHS, CODEX_BINARY_SEARCH_PATHS } from "@/lib/config/binary-detection";
 
 export type StepState = "done" | "incomplete";
 
@@ -115,16 +116,27 @@ export function getOnboardingStatus(opts: {
     remediation: brainOk ? undefined : "Set config.brainRootDir to your brain directory (e.g. ~/_GD/brain) and ensure it exists.",
   });
 
-  // frontier (optional)
+  // frontier (optional) — API keys OR installed CLIs both count
   const hasFrontierKey = !!process.env.OPENAI_API_KEY || !!process.env.ANTHROPIC_API_KEY ||
     !!((cfg?.providers as Record<string, unknown>)?.openai);
+  const claudePath = findBinary("claude", CLAUDE_BINARY_SEARCH_PATHS);
+  const codexPath  = findBinary("codex",  CODEX_BINARY_SEARCH_PATHS);
+  const hasFrontierCli = !!(claudePath || codexPath);
+  const hasFrontier = hasFrontierKey || hasFrontierCli;
+  const frontierDetail = hasFrontier
+    ? [
+        hasFrontierKey ? "API key present" : null,
+        claudePath ? `claude CLI (${claudePath})` : null,
+        codexPath  ? `codex CLI (${codexPath})`  : null,
+      ].filter(Boolean).join(", ")
+    : "no frontier key or CLI found (local-only operation)";
   steps.push({
     id: "frontier",
     title: "Frontier model access",
     required: false,
-    state: hasFrontierKey ? "done" : "incomplete",
-    detail: hasFrontierKey ? "frontier credentials present" : "no frontier key (local-only operation)",
-    remediation: hasFrontierKey ? undefined : "Optional: provide a Claude/OpenAI key for cloud-ok mode; HiveMatrix runs local-only without it.",
+    state: hasFrontier ? "done" : "incomplete",
+    detail: frontierDetail,
+    remediation: hasFrontier ? undefined : "Optional: install the claude or codex CLI, or provide an ANTHROPIC_API_KEY/OPENAI_API_KEY for cloud-ok mode.",
   });
 
   // desktopbee (optional)
