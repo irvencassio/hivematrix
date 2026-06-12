@@ -73,6 +73,11 @@ async function main(): Promise<void> {
   const { startMessageBeePoller } = await import("@/lib/messagebee/poller");
   startMessageBeePoller();
 
+  // Supervise the local model server when Qwen is "on this laptop": launch it,
+  // health-probe it, relaunch on crash (self-gates on location === "local").
+  const { startLocalServingSupervisor } = await import("@/lib/local-model/serving");
+  startLocalServingSupervisor();
+
   // Update finalize: the daemon reached "ready", so the migrated DB is queryable.
   // Record the new version (so the next boot is "same"); roll back on a failed
   // post-update self-check rather than advancing into a broken state.

@@ -400,6 +400,13 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /local-model/status — local serving supervisor state (managed, healthy, pid…)
+      if (req.method === "GET" && urlPath === "/local-model/status") {
+        const { getServingStatus } = await import("@/lib/local-model/serving");
+        json(res, 200, getServingStatus());
+        return;
+      }
+
       // GET /messagebee — channel status (enabled, chat.db readable, allowlist)
       if (req.method === "GET" && urlPath === "/messagebee") {
         const { isChannelEnabled, listIdentities } = await import("@/lib/messagebee/store");
