@@ -261,6 +261,15 @@ function listNvmNodeBins(): string[] {
 }
 
 function resolveNodeRuntime(): NodeRuntimeSpec {
+  // In a packaged appliance the daemon runs under the Node bundled inside the
+  // .app; HIVEMATRIX_NODE_BIN (set by the launchd plist / Tauri bootstrap) points
+  // at it and is authoritative, so bee services spawn with the same bundled Node
+  // rather than an unrelated system Node that may not exist on a clean machine.
+  const bundledNode = process.env.HIVEMATRIX_NODE_BIN;
+  if (bundledNode && existsSync(bundledNode)) {
+    return { executable: bundledNode };
+  }
+
   if (process.execPath && existsSync(process.execPath) && isPlainNodeBinary(process.execPath)) {
     return { executable: process.execPath };
   }

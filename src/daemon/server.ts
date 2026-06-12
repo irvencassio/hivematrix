@@ -148,9 +148,10 @@ export function createDaemonServer() {
         res.setHeader("Access-Control-Allow-Origin", "*");
         const db = getDb();
         const taskCount = (db.prepare("SELECT COUNT(*) as n FROM tasks WHERE status IN ('backlog','assigned','in_progress')").get() as { n: number }).n;
+        const { getBundledVersion } = await import("@/lib/version/bundle-version");
         json(res, 200, {
           status: "ok",
-          version: "0.1.0",
+          version: getBundledVersion(),
           connectivity: policy.mode,
           activeTasks: taskCount,
           uptime: process.uptime(),
@@ -278,6 +279,65 @@ export function createDaemonServer() {
           if (d) desktopPermissions = { accessibility: !!d.accessibility, screenRecording: !!d.screenRecording };
         }
         json(res, 200, getOnboardingStatus({ helperBuilt, desktopPermissions }));
+        return;
+      }
+
+      // POST /onboarding/config — write config.json + ensure the daemon token
+      if (req.method === "POST" && urlPath === "/onboarding/config") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { writeConfigStep } = await import("@/lib/onboarding/actions");
+        json(res, 200, writeConfigStep((body.config as Record<string, unknown>) ?? {}));
+        return;
+      }
+
+      // POST /onboarding/brain — set the canonical brain root (config.memory.brainRootDir)
+      if (req.method === "POST" && urlPath === "/onboarding/brain") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { setBrainRoot } = await import("@/lib/onboarding/actions");
+        json(res, 200, setBrainRoot({
+          brainRootDir: String(body.brainRootDir ?? ""),
+          createIfMissing: body.createIfMissing !== false,
+          makeShortcut: body.makeShortcut === true,
+        }));
+        return;
+      }
+
+      // POST /onboarding/local-model — point-at / cloud-only / download
+      if (req.method === "POST" && urlPath === "/onboarding/local-model") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { configureLocalModel } = await import("@/lib/onboarding/actions");
+        const mode = body.mode === "endpoint" || body.mode === "cloud-only" || body.mode === "download" ? body.mode : "endpoint";
+        json(res, 200, await configureLocalModel({
+          mode,
+          endpoint: typeof body.endpoint === "string" ? body.endpoint : undefined,
+          modelId: typeof body.modelId === "string" ? body.modelId : undefined,
+          provider: typeof body.provider === "string" ? body.provider : undefined,
+        }));
+        return;
+      }
+
+      // POST /onboarding/frontier — store API key(s) / detect CLIs
+      if (req.method === "POST" && urlPath === "/onboarding/frontier") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { configureFrontier } = await import("@/lib/onboarding/actions");
+        json(res, 200, await configureFrontier({
+          anthropicApiKey: typeof body.anthropicApiKey === "string" ? body.anthropicApiKey : undefined,
+          openaiApiKey: typeof body.openaiApiKey === "string" ? body.openaiApiKey : undefined,
+        }));
+        return;
+      }
+
+      // POST /onboarding/daemon — install + load the launchd agent (the finish/handoff)
+      if (req.method === "POST" && urlPath === "/onboarding/daemon") {
+        const { installDaemonLaunchAgent } = await import("@/lib/onboarding/actions");
+        json(res, 200, installDaemonLaunchAgent());
+        return;
+      }
+
+      // POST /onboarding/desktopbee — install helper agent + return TCC deep-links
+      if (req.method === "POST" && urlPath === "/onboarding/desktopbee") {
+        const { installDesktopBeeHelper } = await import("@/lib/onboarding/actions");
+        json(res, 200, installDesktopBeeHelper());
         return;
       }
 
@@ -571,6 +631,37 @@ export function createDaemonServer() {
         const db = getDb();
         const runs = db.prepare("SELECT * FROM runs WHERE directiveId = ? ORDER BY startedAt DESC").all(dirMatch[1]);
         json(res, 200, { ...directive, criteria: store.getCriteria(dirMatch[1]), runs });
+        return;
+      }
+
+      // PATCH /directives/:id — update a directive (any subset of fields)
+      if (req.method === "PATCH" && dirMatch) {
+        const store = await import("@/lib/orchestrator/directive-store");
+        const existing = store.getDirective(dirMatch[1]);
+        if (!existing) { json(res, 404, { error: "Not found" }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        const fields: Record<string, string | null> = {};
+        for (const key of ["goal", "status", "profile", "project", "projectPath", "retiredReason"]) {
+          if (body[key] !== undefined) fields[key] = String(body[key]);
+        }
+        if (body.triggerPolicy !== undefined) fields.triggerPolicy = JSON.stringify(body.triggerPolicy);
+        if (body.budgetPolicy !== undefined) fields.budgetPolicy = JSON.stringify(body.budgetPolicy);
+        if (body.approvalPolicy !== undefined) fields.approvalPolicy = JSON.stringify(body.approvalPolicy);
+        if (body.brainSelection !== undefined) fields.brainSelection = JSON.stringify(body.brainSelection);
+        if (body.nextRunAt !== undefined) fields.nextRunAt = body.nextRunAt ? String(body.nextRunAt) : null;
+        store.updateDirective(dirMatch[1], fields);
+        broadcast("directives:updated", { directiveId: dirMatch[1] });
+        json(res, 200, store.getDirective(dirMatch[1]));
+        return;
+      }
+
+      // DELETE /directives/:id — delete a directive and all associated data
+      if (req.method === "DELETE" && dirMatch) {
+        const store = await import("@/lib/orchestrator/directive-store");
+        const deleted = store.deleteDirective(dirMatch[1]);
+        if (!deleted) { json(res, 404, { error: "Not found" }); return; }
+        broadcast("directives:deleted", { directiveId: dirMatch[1] });
+        json(res, 204, null);
         return;
       }
 

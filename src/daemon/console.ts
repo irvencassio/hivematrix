@@ -600,14 +600,48 @@ function renderOnboarding() {
   const html = o.steps.map(s => {
     const mark = s.state === "done" ? "✓" : "○";
     const cls = s.state === "done" ? "ok" : (s.required ? "err" : "muted");
+    const btn = s.state === "done" ? ''
+      : ' <button onclick="wizardAction(\''+s.id+'\')" style="margin-left:6px;font-size:11px;padding:1px 7px;cursor:pointer">Set up</button>';
     return '<div class="s" title="'+esc(s.remediation||s.detail)+'">'
       + '<span class="dot '+(s.state==="done"?"done":(s.required?"failed":"sleeping"))+'"></span>'
       + '<span style="color:var(--'+cls+')">'+mark+'</span> '+esc(s.title)
-      + (s.required?'':' <span class="muted">(optional)</span>')+'</div>';
+      + (s.required?'':' <span class="muted">(optional)</span>')+btn+'</div>';
   }).join("");
   document.getElementById("onboarding").innerHTML = html
     + '<div class="muted" style="margin-top:6px">'
-    + (o.requiredComplete ? 'Required setup complete.' : 'Required setup incomplete.') + '</div>';
+    + (o.requiredComplete ? '✓ Required setup complete.' : 'First-run setup — complete the required steps below.') + '</div>';
+}
+
+// First-run wizard: drive each incomplete step through its POST endpoint.
+async function wizardAction(id) {
+  try {
+    let body = {};
+    if (id === 'config') {
+      body = { config: {} };
+    } else if (id === 'brain') {
+      const d = prompt('Canonical brain folder (the one store every model reads):', '~/_GD/brain');
+      if (!d) return;
+      const sc = confirm('Also create a ~/brain shortcut pointing at it?');
+      body = { brainRootDir: d, createIfMissing: true, makeShortcut: sc };
+    } else if (id === 'local-model') {
+      const ep = prompt('Local model — enter an OpenAI-compatible endpoint (e.g. http://127.0.0.1:1234/v1), or type "cloud-only" to skip local:', 'http://127.0.0.1:1234/v1');
+      if (ep === null) return;
+      if (ep.trim().toLowerCase() === 'cloud-only') { body = { mode: 'cloud-only' }; }
+      else { const m = prompt('Model id served there:', 'qwen/qwen3.6-27b'); if (!m) return; body = { mode: 'endpoint', endpoint: ep.trim(), modelId: m.trim() }; }
+    } else if (id === 'frontier') {
+      const k = prompt('Paste an Anthropic or OpenAI API key (blank = rely on the claude/codex CLI):', '');
+      body = k && k.startsWith('sk-ant') ? { anthropicApiKey: k } : (k ? { openaiApiKey: k } : {});
+    }
+    // 'daemon' and 'desktopbee' take no input.
+    const r = await api('/onboarding/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (r && r.data && r.data.deepLinks) {
+      // Open the TCC panes so the user can grant Accessibility + Screen Recording.
+      window.open(r.data.deepLinks.accessibility);
+      window.open(r.data.deepLinks.screenRecording);
+    }
+    if (r && r.ok === false) alert(id + ': ' + (r.detail || 'failed'));
+    await refresh();
+  } catch (e) { alert('Setup failed: ' + e); }
 }
 
 async function refresh() {

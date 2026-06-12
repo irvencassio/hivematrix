@@ -18,8 +18,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 NOTARY_PROFILE="hivematrix"
+IDENTITY="Developer ID Application: Irven Cassio (8B3CHTY93V)"
+APP_ENT="src-tauri/entitlements/app.entitlements.plist"
 # shellcheck disable=SC1090
 source "$HOME/.cargo/env"
+
+echo "==> Building the self-contained daemon runtime (bundled Node + addon)…"
+# Must run before cargo tauri build so Tauri picks up dist/daemon as a resource.
+npm run build:daemon
 
 echo "==> Building + signing (cargo tauri build)…"
 # Don't abort the whole script if only the dmg sub-step fails; we check artifacts next.
@@ -33,6 +39,16 @@ if [ -z "$APP" ]; then
   exit 1
 fi
 echo "==> App: $APP"
+
+# Tauri signs the outer app, but the binaries we injected as resources (the
+# bundled Node, better_sqlite3.node, the nested DesktopBeeHelper.app) need OUR
+# Developer ID + hardened runtime + the right entitlements, or notarization
+# rejects them. Sign inside-out: inner Mach-Os first, then re-seal the outer app.
+echo "==> Signing bundled inner Mach-Os…"
+bash scripts/sign-bundled-machos.sh "$APP"
+
+echo "==> Re-sealing the outer app (preserves inner signatures)…"
+codesign --force --options runtime --timestamp --entitlements "$APP_ENT" --sign "$IDENTITY" "$APP"
 
 echo "==> Verifying signature + hardened runtime…"
 codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -2

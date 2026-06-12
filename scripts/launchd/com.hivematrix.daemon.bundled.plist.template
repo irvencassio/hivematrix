@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  HiveMatrix Daemon launchd plist — BUNDLED appliance variant.
+
+  Unlike the dev template (com.hivematrix.daemon.plist.template, which runs the
+  TypeScript source via system Node + tsx out of a repo checkout), this points at
+  the self-contained runtime inside the installed .app:
+    {{NODE_BIN}}    = /Applications/HiveMatrix.app/Contents/Resources/daemon/bin/node
+    {{DAEMON_CJS}}  = /Applications/HiveMatrix.app/Contents/Resources/daemon/daemon.cjs
+    {{LOG_DIR}}     = ~/Library/Logs/HiveMatrix
+
+  No system Node, no tsx, no git checkout required. Rendered + installed by the
+  first-run wizard (POST /onboarding/daemon); the daemon computes these paths from
+  its own location (process.execPath) so they always point inside /Applications.
+
+  KeepAlive=true → launchd restarts the daemon on any exit (24/7 supervision).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.hivematrix.daemon</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{NODE_BIN}}</string>
+    <string>{{DAEMON_CJS}}</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NODE_ENV</key>
+    <string>production</string>
+    <key>HIVEMATRIX_PORT</key>
+    <string>3747</string>
+    <key>HIVEMATRIX_NODE_BIN</key>
+    <string>{{NODE_BIN}}</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Throttle restarts to avoid hammering on a startup crash -->
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <key>StandardOutPath</key>
+  <string>{{LOG_DIR}}/daemon.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>{{LOG_DIR}}/daemon.err.log</string>
+</dict>
+</plist>

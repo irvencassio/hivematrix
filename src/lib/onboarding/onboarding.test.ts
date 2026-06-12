@@ -40,7 +40,7 @@ test("config + qwen + daemon + brain => required complete", () => {
     mkdirSync(join(home, ".hivematrix"), { recursive: true });
     writeFileSync(join(home, ".hivematrix", "config.json"), JSON.stringify({
       qwen: { primary: { modelId: "qwen/qwen3.6-27b", endpoint: "http://localhost:1234/v1" } },
-      brainRootDir: join(home, "brain"),
+      memory: { brainRootDir: join(home, "brain") },
     }));
     mkdirSync(join(home, "brain"), { recursive: true });
     mkdirSync(join(home, "Library", "LaunchAgents"), { recursive: true });
@@ -54,6 +54,15 @@ test("config + qwen + daemon + brain => required complete", () => {
   assert.equal(status.requiredComplete, true);
   // frontier + desktopbee optional, still incomplete → not allComplete
   assert.equal(status.allComplete, false);
+});
+
+test("local-model step is satisfied by cloud-only posture (no local model)", () => {
+  const status = withHome((home) => {
+    mkdirSync(join(home, ".hivematrix"), { recursive: true });
+    writeFileSync(join(home, ".hivematrix", "config.json"), JSON.stringify({ runMode: "cloud-only" }));
+  }, () => getOnboardingStatus({ now: "T" }));
+  assert.equal(step(status, "local-model").state, "done");
+  assert.match(step(status, "local-model").detail, /cloud-only/);
 });
 
 test("desktopbee done only when helper built AND both permissions granted", () => {

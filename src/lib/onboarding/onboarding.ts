@@ -19,6 +19,7 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { findBinary, CLAUDE_BINARY_SEARCH_PATHS, CODEX_BINARY_SEARCH_PATHS } from "@/lib/config/binary-detection";
+import { resolveMemorySettings } from "@/lib/brain/settings";
 
 export type StepState = "done" | "incomplete";
 
@@ -78,19 +79,24 @@ export function getOnboardingStatus(opts: {
     remediation: cfg ? undefined : "Create ~/.hivematrix/config.json (the onboarding flow writes it).",
   });
 
-  // local-model (Qwen)
+  // local-model (Qwen) — satisfied by a configured local model OR an explicit
+  // cloud-only posture (where the absence of a local model is intentional).
   const qwen = cfg?.qwen as Record<string, unknown> | undefined;
-  const localOk = !!(qwen && (qwen.primary as Record<string, unknown>)?.modelId) ||
+  const modelConfigured = !!(qwen && (qwen.primary as Record<string, unknown>)?.modelId) ||
     !!(cfg?.localModel as Record<string, unknown>)?.modelName;
+  const cloudOnly = cfg?.runMode === "cloud-only";
+  const localOk = modelConfigured || cloudOnly;
   steps.push({
     id: "local-model",
     title: "Local model (Qwen)",
     required: true,
     state: localOk ? "done" : "incomplete",
-    detail: localOk
+    detail: modelConfigured
       ? `model: ${(qwen?.primary as Record<string, unknown>)?.modelId ?? (cfg?.localModel as Record<string, unknown>)?.modelName}`
-      : "no local model configured",
-    remediation: localOk ? undefined : "Load a Qwen model in LM Studio and set config.qwen.primary.modelId + endpoint.",
+      : cloudOnly
+        ? "cloud-only mode — no local model required"
+        : "no local model configured",
+    remediation: localOk ? undefined : "Pick a local model endpoint (or choose cloud-only) in the setup wizard's Local model step.",
   });
 
   // daemon (launchd)
@@ -104,8 +110,9 @@ export function getOnboardingStatus(opts: {
     remediation: daemonOk ? undefined : "Render scripts/launchd/com.hivematrix.daemon.plist.template to ~/Library/LaunchAgents and `launchctl load -w`.",
   });
 
-  // brain
-  const brainRoot = (cfg?.brainRootDir as string) || join(homedir(), "_GD", "brain");
+  // brain — read the SAME source of truth every harness uses
+  // (config.memory.brainRootDir via resolveMemorySettings), not a separate key.
+  const brainRoot = resolveMemorySettings(cfg ?? {}).brainRootDir;
   const brainOk = existsSync(brainRoot);
   steps.push({
     id: "brain",
@@ -113,7 +120,7 @@ export function getOnboardingStatus(opts: {
     required: true,
     state: brainOk ? "done" : "incomplete",
     detail: brainOk ? `brain root: ${brainRoot}` : `brain root not found: ${brainRoot}`,
-    remediation: brainOk ? undefined : "Set config.brainRootDir to your brain directory (e.g. ~/_GD/brain) and ensure it exists.",
+    remediation: brainOk ? undefined : "Set config.memory.brainRootDir to your brain directory and ensure it exists (the wizard's Brain step does this).",
   });
 
   // frontier (optional) — API keys OR installed CLIs both count

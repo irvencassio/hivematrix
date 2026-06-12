@@ -8,7 +8,8 @@
     "test:watch": "node --import tsx/esm --test --watch 'src/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
-    "scope-wall": "node scripts/scope-wall.mjs"
+    "scope-wall": "node scripts/scope-wall.mjs",
+    "build:daemon": "node scripts/build-daemon.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",
@@ -18,6 +19,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
+    "esbuild": "^0.28.1",
     "tsx": "^4.21.0",
     "typescript": "5.9.3"
   }

@@ -23,8 +23,34 @@ const PORT = parseInt(process.env.HIVEMATRIX_PORT ?? "3747", 10);
 async function main(): Promise<void> {
   console.log("[hivematrix] Starting daemon...");
 
-  // Initialize database (runs migrations if needed)
-  const db = getDb();
+  // Decide fresh / update / same BEFORE getDb() creates or migrates the DB.
+  const { getBundledVersion } = await import("@/lib/version/bundle-version");
+  const { planBoot, recordInstalledVersion } = await import("@/lib/onboarding/install-state");
+  const { backupDatabase, pruneBackups, restoreDatabase } = await import("@/lib/updater/updater");
+  const bundledVersion = getBundledVersion();
+  const boot = planBoot(bundledVersion);
+  console.log(`[hivematrix] boot: ${boot.mode} (${boot.from ?? "—"} -> ${boot.to})`);
+
+  // On an update, back up the DB so a failed migration can be rolled back.
+  let preUpdateBackup: string | null = null;
+  if (boot.mode === "update") {
+    preUpdateBackup = backupDatabase("preupdate");
+    pruneBackups();
+    console.log(`[hivematrix] pre-update DB backup: ${preUpdateBackup ?? "(no existing db)"}`);
+  }
+
+  // Initialize database (runs forward-only migrations if needed). On an update,
+  // restore the backup if a migration throws, then re-raise.
+  let db;
+  try {
+    db = getDb();
+  } catch (err) {
+    if (boot.mode === "update" && preUpdateBackup) {
+      console.error("[hivematrix] migration failed — restoring pre-update DB backup");
+      restoreDatabase(preUpdateBackup);
+    }
+    throw err;
+  }
   console.log(`[hivematrix] Database ready`);
 
   // Initialize connectivity policy (singleton)
@@ -41,6 +67,25 @@ async function main(): Promise<void> {
   // Start scheduler
   const { startScheduler } = await import("@/lib/orchestrator/scheduler");
   startScheduler();
+
+  // Update finalize: the daemon reached "ready", so the migrated DB is queryable.
+  // Record the new version (so the next boot is "same"); roll back on a failed
+  // post-update self-check rather than advancing into a broken state.
+  if (boot.mode === "update") {
+    try {
+      db.prepare("SELECT COUNT(*) FROM tasks").get();
+      recordInstalledVersion(bundledVersion);
+      console.log(`[hivematrix] update applied: ${boot.from ?? "—"} -> ${boot.to}`);
+    } catch (err) {
+      console.error("[hivematrix] post-update self-check failed — restoring DB backup, not advancing version", err);
+      if (preUpdateBackup) restoreDatabase(preUpdateBackup);
+      db.close();
+      process.exit(1);
+    }
+  } else if (boot.mode === "fresh") {
+    // Record so the first real launch after setup isn't mistaken for an update.
+    recordInstalledVersion(bundledVersion);
+  }
 
   console.log("[hivematrix] Daemon ready");
 

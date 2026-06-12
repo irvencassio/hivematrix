@@ -13,10 +13,13 @@ import { promisify } from "util";
 import { execFile } from "child_process";
 import { checkForUpdate, type UpdateHooks } from "./updater";
 import type { UpdateChannel, UpdateRelease } from "./manifest";
+import { getBundledVersion } from "@/lib/version/bundle-version";
 
 const execFileAsync = promisify(execFile);
 const LAUNCHD_LABEL = "com.hivematrix.daemon";
-export const CURRENT_VERSION = "0.1.0";
+// Single source of truth: the running bundle's version (Info.plist when packaged,
+// the compiled-in VERSION otherwise). No more hardcoded constant to drift.
+export const CURRENT_VERSION = getBundledVersion();
 
 export interface UpdaterConfig {
   channelUrl: string | null;
