@@ -160,7 +160,7 @@ current connectivity mode.</p>
     </tr>
     <tr>
       <td><strong>BrowserBee</strong></td>
-      <td>Authenticated / stateful browser workflows (login, multi-step, forms, screenshots) — runs as a Codex Computer Use task</td>
+      <td>Authenticated / stateful browser workflows (login, multi-step, forms, screenshots) — runs as a Codex Computer Use task. With no Codex auth, an opt-in <strong>DesktopBee fallback</strong> (<code>browserbee.desktopFallback</code>) lets the local model drive a desktop browser instead.</td>
       <td><code>browserbee_run</code></td>
       <td><span class="tag on">embedded · running</span></td>
     </tr>
@@ -187,7 +187,10 @@ current connectivity mode.</p>
 <div class="callout warn">
   <strong>Availability follows connectivity.</strong> WebBee and BrowserBee need the internet, so they're disabled in
   <em>local-only</em> and <em>offline</em> modes; DesktopBee works in every mode. An agent is only shown the lanes it can
-  actually use right now.
+  actually use right now. <strong>BrowserBee without a Codex subscription:</strong> by default the lane refuses (it needs the
+  Codex Computer Use backing). Set <code>browserbee.desktopFallback: true</code> in <code>~/.hivematrix/config.json</code> to
+  let it degrade to a local DesktopBee-driven browser instead — lower reliability, but it keeps authenticated browser work
+  running with no subscription.
 </div>
 <div class="callout info">
   <strong>iMessage note.</strong> Sending iMessage <em>into</em> HiveMatrix is not available — MessageBee is deferred in

@@ -50,7 +50,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "browserbee_run",
       description:
-        "BrowserBee: delegate a stateful or authenticated browser workflow (login required, multi-step navigation, form fill, rendered/JS interaction, screenshots). Creates a BrowserBee task run on the Codex Computer Use backing path. Use only when WebBee's read-only retrieval is insufficient.",
+        "BrowserBee: delegate a stateful or authenticated browser workflow (login required, multi-step navigation, form fill, rendered/JS interaction, screenshots). Creates a BrowserBee task that runs on the Codex Computer Use backing path; if no Codex auth is available and the operator enabled the DesktopBee fallback, it instead drives a desktop browser locally via DesktopBee. Use only when WebBee's read-only retrieval is insufficient.",
       parameters: {
         type: "object",
         properties: {
@@ -170,9 +170,16 @@ async function executeWebBeeSearch(args: Record<string, unknown>, ctx: BeeToolCo
 }
 
 async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: BeeToolContext): Promise<string> {
-  const { parseBrowserBeeJobCreate, buildBrowserBeeTaskDescription, buildBrowserBeeTaskRequestEnvelope } =
-    await import("@/lib/browserbee/contracts");
+  const {
+    parseBrowserBeeJobCreate,
+    buildBrowserBeeTaskDescription,
+    buildBrowserBeeDesktopFallbackDescription,
+    buildBrowserBeeTaskRequestEnvelope,
+    resolveBrowserBeeBacking,
+    readBrowserBeeDesktopFallbackEnabled,
+  } = await import("@/lib/browserbee/contracts");
   const { CODEX_COMPUTER_USE_MODEL_ID } = await import("@/lib/models/catalog");
+  const { readCodexAuthState } = await import("@/lib/usage/codex");
 
   let payload;
   try {
@@ -189,11 +196,42 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: BeeToolC
     return `Error: invalid BrowserBee request — ${msg}`;
   }
 
-  const envelope = buildBrowserBeeTaskRequestEnvelope(payload, ctx.projectPath);
-  const description = buildBrowserBeeTaskDescription(payload, { requestedProjectPath: ctx.projectPath });
+  // Decide which engine drives the browser. Codex Computer Use is preferred;
+  // the local DesktopBee path is used only when Codex auth is missing AND the
+  // operator opted into the fallback AND DesktopBee is available.
+  const desktopBeeAvailable = getConnectivityPolicy().getCapability("desktopbee").available;
+  const decision = resolveBrowserBeeBacking({
+    codexAuthMode: readCodexAuthState().authMode,
+    desktopFallbackEnabled: readBrowserBeeDesktopFallbackEnabled(),
+    desktopBeeAvailable,
+  });
+  if (!decision.backing) return `Error: ${decision.reason}`;
 
-  // BrowserBee jobs run as delegated Codex Computer Use tasks. Create one
-  // through the daemon's task API (loopback, daemon shared-secret auth).
+  let model: string;
+  let description: string;
+  if (decision.backing === "desktop_fallback") {
+    const { getLocalModelConfig } = await import("@/lib/config/constants");
+    const local = getLocalModelConfig();
+    if (!local?.modelName) {
+      return "Error: the DesktopBee fallback needs a configured local model (config localModel.modelName), but none is set.";
+    }
+    model = local.modelName;
+    description = buildBrowserBeeDesktopFallbackDescription(payload, { requestedProjectPath: ctx.projectPath });
+  } else {
+    model = CODEX_COMPUTER_USE_MODEL_ID;
+    description = buildBrowserBeeTaskDescription(payload, { requestedProjectPath: ctx.projectPath });
+  }
+
+  const envelope = buildBrowserBeeTaskRequestEnvelope(payload, ctx.projectPath, {
+    backing: decision.backing,
+    backingModel: model,
+  });
+  const laneLabel = decision.backing === "desktop_fallback" ? "DesktopBee fallback — local model" : "Codex Computer Use";
+
+  // Create the job through the daemon's task API (loopback, shared-secret auth).
+  // The task's model selects the executor: Codex Computer Use for the default
+  // path, or the local model (which carries the desktopbee_action tool) for the
+  // fallback path.
   const base = `http://127.0.0.1:${process.env.HIVEMATRIX_PORT ?? "3747"}`;
   const token = readToken("auth-token") ?? "";
   try {
@@ -205,7 +243,7 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: BeeToolC
         description,
         project: payload.project,
         projectPath: ctx.projectPath,
-        model: CODEX_COMPUTER_USE_MODEL_ID,
+        model,
         status: "backlog",
         executor: "agent",
         source: "browserbee",
@@ -215,7 +253,7 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: BeeToolC
     });
     if (!res.ok) return `Error: failed to create BrowserBee task (HTTP ${res.status})`;
     const task = await res.json() as { _id?: string; title?: string };
-    return `Created BrowserBee task ${task._id ?? "?"}: "${task.title ?? payload.title}" (Codex Computer Use). It will run the browser workflow and post a summary to its task result.`;
+    return `Created BrowserBee task ${task._id ?? "?"}: "${task.title ?? payload.title}" (${laneLabel}). It will run the browser workflow and post a summary to its task result.`;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return `Error creating BrowserBee task: ${msg}`;

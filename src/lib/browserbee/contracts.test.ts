@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildBrowserBeeDesktopFallbackDescription,
   buildBrowserBeeHealthSnapshot,
   buildBrowserBeeJobSnapshot,
   buildBrowserBeeTaskDescription,
   buildBrowserBeeTaskRequestEnvelope,
   parseBrowserBeeJobCreate,
+  readBrowserBeeDesktopFallbackEnabled,
+  resolveBrowserBeeBacking,
 } from "./contracts";
 
 test("parseBrowserBeeJobCreate normalizes defaults from the URL and risk posture", () => {
@@ -80,6 +83,118 @@ test("buildBrowserBeeJobSnapshot reads task-backed request metadata", () => {
   assert.equal(snapshot.runMode, "attached");
   assert.equal(snapshot.approvalMode, "manual");
   assert.equal(snapshot.sessionLabel, "crm-daily");
+});
+
+test("resolveBrowserBeeBacking prefers Codex when auth is usable", () => {
+  for (const codexAuthMode of ["subscription", "api-key"]) {
+    const decision = resolveBrowserBeeBacking({
+      codexAuthMode,
+      desktopFallbackEnabled: true,
+      desktopBeeAvailable: true,
+    });
+    assert.equal(decision.backing, "codex_computer_use");
+  }
+});
+
+test("resolveBrowserBeeBacking refuses when Codex auth is missing and fallback is off", () => {
+  const decision = resolveBrowserBeeBacking({
+    codexAuthMode: "logged-out",
+    desktopFallbackEnabled: false,
+    desktopBeeAvailable: true,
+  });
+  assert.equal(decision.backing, null);
+  assert.match(decision.reason, /desktopFallback=true/);
+});
+
+test("resolveBrowserBeeBacking uses the DesktopBee fallback when enabled and available", () => {
+  const decision = resolveBrowserBeeBacking({
+    codexAuthMode: "logged-out",
+    desktopFallbackEnabled: true,
+    desktopBeeAvailable: true,
+  });
+  assert.equal(decision.backing, "desktop_fallback");
+});
+
+test("resolveBrowserBeeBacking refuses the fallback when DesktopBee is unavailable", () => {
+  const decision = resolveBrowserBeeBacking({
+    codexAuthMode: "logged-out",
+    desktopFallbackEnabled: true,
+    desktopBeeAvailable: false,
+  });
+  assert.equal(decision.backing, null);
+  assert.match(decision.reason, /DesktopBee is unavailable/);
+});
+
+test("readBrowserBeeDesktopFallbackEnabled reads the opt-in flag, default off", () => {
+  assert.equal(readBrowserBeeDesktopFallbackEnabled({}), false);
+  assert.equal(readBrowserBeeDesktopFallbackEnabled({ browserbee: {} }), false);
+  assert.equal(readBrowserBeeDesktopFallbackEnabled({ browserbee: { desktopFallback: true } }), true);
+  assert.equal(readBrowserBeeDesktopFallbackEnabled({ browserbee: { desktopFallback: false } }), false);
+});
+
+test("buildBrowserBeeDesktopFallbackDescription drives the browser via DesktopBee", () => {
+  const payload = parseBrowserBeeJobCreate({
+    project: "hive",
+    startUrl: "https://app.example.com/inbox",
+    objective: "Check the inbox and capture new messages.",
+    requiresLogin: true,
+  });
+
+  const description = buildBrowserBeeDesktopFallbackDescription(payload, {
+    requestedProjectPath: "/Users/irvencassio/Hive",
+  });
+
+  assert.match(description, /DesktopBee fallback backing/);
+  assert.match(description, /desktopbee_action tool/);
+  assert.match(description, /no Codex Computer Use engine/);
+  // shared body is still present
+  assert.match(description, /Allowed domains: app\.example\.com/);
+  assert.match(description, /Objective:/);
+});
+
+test("buildBrowserBeeTaskRequestEnvelope records the chosen backing", () => {
+  const payload = parseBrowserBeeJobCreate({
+    project: "hive",
+    startUrl: "https://app.example.com/inbox",
+    objective: "Check the inbox.",
+  });
+
+  const codex = buildBrowserBeeTaskRequestEnvelope(payload, "/Users/irvencassio/Hive");
+  assert.equal(codex.backing, "codex_computer_use");
+  assert.equal(codex.backingModel, "codex:gpt-5.4-computer-use");
+
+  const fallback = buildBrowserBeeTaskRequestEnvelope(payload, "/Users/irvencassio/Hive", {
+    backing: "desktop_fallback",
+    backingModel: "qwen3-coder",
+  });
+  assert.equal(fallback.backing, "desktop_fallback");
+  assert.equal(fallback.backingModel, "qwen3-coder");
+});
+
+test("buildBrowserBeeHealthSnapshot surfaces the fallback decision", () => {
+  const offline = buildBrowserBeeHealthSnapshot({
+    readiness: {
+      codexConfigured: false,
+      codexAuthMode: "logged-out",
+      acknowledgedComputerUse: true,
+      desktopFallbackEnabled: false,
+    },
+    tasks: [],
+  });
+  assert.equal(offline.readiness.effectiveBacking, "unavailable");
+  assert.equal(offline.readiness.desktopFallbackEnabled, false);
+
+  const fallbackOn = buildBrowserBeeHealthSnapshot({
+    readiness: {
+      codexConfigured: false,
+      codexAuthMode: "logged-out",
+      acknowledgedComputerUse: true,
+      desktopFallbackEnabled: true,
+      desktopBeeAvailable: true,
+    },
+    tasks: [],
+  });
+  assert.equal(fallbackOn.readiness.effectiveBacking, "desktop_fallback");
 });
 
 test("buildBrowserBeeHealthSnapshot counts queue states", () => {
