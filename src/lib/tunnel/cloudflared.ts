@@ -17,6 +17,31 @@ import { spawn, type ChildProcess } from "child_process";
 import { findBinary, buildCliPath } from "@/lib/config/binary-detection";
 
 const CLOUDFLARED_PATHS = ["/opt/homebrew/bin/cloudflared", "/usr/local/bin/cloudflared"];
+const QRENCODE_PATHS = ["/opt/homebrew/bin/qrencode", "/usr/local/bin/qrencode"];
+
+/** The pairing payload encoded into the QR (and matched by the iOS scanner). */
+export function pairingPayload(url: string, token: string): string {
+  return JSON.stringify({ type: "hivematrix-connection", version: 1, url, token });
+}
+
+export function qrencodeInstalled(): boolean {
+  return !!findBinary("qrencode", QRENCODE_PATHS);
+}
+
+/** Render `data` to an SVG QR locally via qrencode (token never leaves the box). */
+export function generateQrSvg(data: string): Promise<string | null> {
+  const bin = findBinary("qrencode", QRENCODE_PATHS);
+  if (!bin) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    // Pass the payload as a positional arg (no shell → safe); qrencode's
+    // stdin (-r -) isn't supported. -l M = medium error correction.
+    const proc = spawn(bin, ["-t", "SVG", "-o", "-", "-m", "2", "-l", "M", data], { env: { ...process.env, PATH: buildCliPath() } });
+    let out = "";
+    proc.stdout.on("data", (d) => (out += d.toString()));
+    proc.on("error", () => resolve(null));
+    proc.on("close", (code) => resolve(code === 0 && out.includes("<svg") ? out : null));
+  });
+}
 
 interface TunnelState {
   proc: ChildProcess | null;
@@ -39,12 +64,13 @@ export interface TunnelStatus {
   running: boolean;
   url: string | null;
   binary: string | null;
+  qrInstalled: boolean;
 }
 
 export function tunnelStatus(): TunnelStatus {
   const s = state();
   const bin = cloudflaredPath();
-  return { installed: !!bin, running: !!s.proc && !s.proc.killed, url: s.url, binary: bin };
+  return { installed: !!bin, running: !!s.proc && !s.proc.killed, url: s.url, binary: bin, qrInstalled: qrencodeInstalled() };
 }
 
 const TRYCF_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
@@ -83,6 +109,38 @@ export function startQuickTunnel(port: number, timeoutMs = 20_000): Promise<stri
     const timer = setTimeout(() => {
       if (!settled) { settled = true; try { proc.kill(); } catch { /* */ } reject(new Error("tunnel URL not received in time")); }
     }, timeoutMs);
+  });
+}
+
+/**
+ * Run a *named* tunnel via its connector token (from the Cloudflare dashboard).
+ * The public hostname is configured in the dashboard, not parsed from output,
+ * so the caller supplies it for display/QR. Resolves once the connector starts.
+ */
+export function startNamedTunnel(connectorToken: string, hostname: string): Promise<string> {
+  const s = state();
+  const bin = cloudflaredPath();
+  if (!bin) return Promise.reject(new Error("cloudflared not installed"));
+  if (s.proc && !s.proc.killed) stopTunnel();
+  return new Promise((resolve, reject) => {
+    const proc = spawn(bin, ["tunnel", "--no-autoupdate", "run", "--token", connectorToken], {
+      env: { ...process.env, PATH: buildCliPath() },
+    });
+    s.proc = proc;
+    s.url = hostname.trim().replace(/\/+$/, "");
+    s.startedAt = Date.now();
+    let settled = false;
+    const onData = (buf: Buffer) => {
+      const t = buf.toString("utf-8");
+      // "Registered tunnel connection" / "Connection ... registered" → up.
+      if (!settled && /registered tunnel connection|connection .* registered|Updated to new configuration/i.test(t)) {
+        settled = true; clearTimeout(timer); resolve(s.url ?? hostname);
+      }
+    };
+    proc.stdout?.on("data", onData);
+    proc.stderr?.on("data", onData);
+    proc.on("exit", () => { s.proc = null; s.url = null; });
+    const timer = setTimeout(() => { if (!settled) { settled = true; resolve(s.url ?? hostname); } }, 12_000);
   });
 }
 

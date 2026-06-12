@@ -136,6 +136,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .md pre { background: #0a0d12; border: 1px solid var(--border); border-radius: 6px; padding: 8px; overflow-x: auto; }
   .md a { color: var(--accent-2); } .md ul { margin: 4px 0; padding-left: 18px; }
   .streaming { font-size: 10px; color: var(--ok); margin-left: 6px; }
+  .remote-status { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; margin-top: 8px; }
+  .remote-status .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .remote-status .dot.on { background: var(--ok); } .remote-status .dot.off { background: var(--muted); } .remote-status .dot.err { background: var(--err); }
+  .copybtn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px; font-size: 11px; cursor: pointer; }
+  .copybtn:hover { border-color: var(--accent); }
+  #s_qr svg { width: 100%; height: 100%; }
 </style>
 </head>
 <body>
@@ -188,16 +194,38 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <button onclick="clearWallpaper()" style="background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer">Clear</button>
       </div>
 
-      <label class="flbl" style="margin-top:16px">Remote access (Cloudflare tunnel)</label>
-      <div id="s_tunnel" class="muted">…</div>
-      <div class="row" style="margin-top:6px">
+      <h2 style="margin-top:18px">Remote Access</h2>
+      <div class="remote-status"><span class="dot" id="s_remote_dot"></span><span id="s_remote_label">…</span></div>
+      <div id="s_tunnel_detail" class="muted" style="font-size:11px;margin-top:4px"></div>
+
+      <div class="row" style="margin-top:10px">
         <button class="create" id="s_tunnel_btn" onclick="toggleTunnel()">Start tunnel</button>
       </div>
-      <div id="s_tunnel_url" style="font-size:12px;margin-top:6px;word-break:break-all"></div>
-      <label class="flbl" style="margin-top:10px">Access token (paste into remote clients / the iOS app)</label>
+
+      <div id="s_tunnel_live" style="display:none;margin-top:10px">
+        <label class="flbl">Public URL</label>
+        <div class="row"><input id="s_tunnel_url" readonly style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
+          <button class="copybtn" onclick="copyField('s_tunnel_url')">Copy</button></div>
+        <label class="flbl" style="margin-top:10px">Scan to pair (iPhone)</label>
+        <div id="s_qr" style="background:#fff;border-radius:8px;padding:8px;width:188px;height:188px"></div>
+        <div class="muted" style="font-size:11px;margin-top:4px">Open HiveMatrix on iPhone → Scan QR. Encodes the URL + token (generated locally).</div>
+      </div>
+
+      <label class="flbl" style="margin-top:14px">Access token (manual pairing)</label>
       <div class="row"><input id="s_token" readonly style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
-        <button onclick="(function(){var i=document.getElementById('s_token');i.select();document.execCommand('copy')})()" style="background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer">Copy</button></div>
-      <div class="muted" style="font-size:11px;margin-top:6px">⚠ A tunnel exposes the daemon to the internet; the access token is the only barrier. Treat it like a password. The console never hands the token to tunneled visitors — they must paste it. For production use a named tunnel behind Cloudflare Access.</div>
+        <button class="copybtn" onclick="copyField('s_token')">Copy</button></div>
+
+      <details style="margin-top:12px">
+        <summary class="muted" style="cursor:pointer;font-size:12px">Advanced: named tunnel (Cloudflare Access)</summary>
+        <label class="flbl" style="margin-top:8px">Connector token</label>
+        <input id="s_named_token" type="password" placeholder="from Cloudflare Zero Trust dashboard" style="width:100%" />
+        <label class="flbl" style="margin-top:6px">Public hostname</label>
+        <div class="row"><input id="s_named_host" placeholder="hive.example.com" style="flex:1" />
+          <button class="copybtn" onclick="startNamedTunnel()">Run</button></div>
+        <div class="muted" style="font-size:11px;margin-top:4px">Recommended for always-on remote use — put a Cloudflare Access policy in front.</div>
+      </details>
+
+      <div class="muted" style="font-size:11px;margin-top:10px">⚠ A tunnel exposes the daemon to the internet; the access token is the only barrier — treat it like a password. The console never hands the token to tunneled visitors.</div>
 
       <div class="vinfo" id="s_version">…</div>
     </div>
@@ -500,15 +528,33 @@ function openSettings() {
 function closeSettings() { document.getElementById("settingsOverlay").classList.remove("open"); }
 
 let tunnel = null;
+function copyField(id){ var i=document.getElementById(id); i.select(); document.execCommand("copy"); }
 async function loadTunnel() {
   tunnel = await api("/tunnel");
-  const st = document.getElementById("s_tunnel"), btn = document.getElementById("s_tunnel_btn"), urlEl = document.getElementById("s_tunnel_url");
+  const dot = document.getElementById("s_remote_dot"), label = document.getElementById("s_remote_label");
+  const detail = document.getElementById("s_tunnel_detail"), btn = document.getElementById("s_tunnel_btn"), live = document.getElementById("s_tunnel_live");
   if (!tunnel) return;
-  if (!tunnel.installed) { st.textContent = "cloudflared not installed — brew install cloudflared"; btn.style.display = "none"; return; }
+  if (!tunnel.installed) {
+    dot.className = "dot err"; label.textContent = "cloudflared not installed";
+    detail.textContent = "Install with: brew install cloudflared";
+    btn.style.display = "none"; live.style.display = "none"; return;
+  }
   btn.style.display = "";
-  st.textContent = tunnel.running ? "running" : "stopped";
-  btn.textContent = tunnel.running ? "Stop tunnel" : "Start tunnel";
-  urlEl.innerHTML = tunnel.url ? 'Public URL: <a href="'+esc(tunnel.url)+'" target="_blank" style="color:var(--accent-2)">'+esc(tunnel.url)+'</a>' : "";
+  if (tunnel.running && tunnel.url) {
+    dot.className = "dot on"; label.textContent = "Remote access ON";
+    detail.textContent = "Reachable over the tunnel" + (tunnel.qrInstalled ? "" : " (install qrencode for the QR: brew install qrencode)");
+    btn.textContent = "Stop tunnel";
+    live.style.display = "block";
+    document.getElementById("s_tunnel_url").value = tunnel.url;
+    // QR from the daemon (token via query); cache-bust per URL.
+    document.getElementById("s_qr").innerHTML = tunnel.qrInstalled
+      ? '<img src="/tunnel/qr?token=' + encodeURIComponent(HM_TOKEN) + '&u=' + encodeURIComponent(tunnel.url) + '" style="width:100%;height:100%" alt="pairing QR" />'
+      : '<div class="muted" style="font-size:11px;color:#333">QR unavailable — brew install qrencode</div>';
+  } else {
+    dot.className = "dot off"; label.textContent = "Remote access OFF";
+    detail.textContent = "Start a tunnel to reach this daemon from your phone.";
+    btn.textContent = "Start tunnel"; live.style.display = "none";
+  }
 }
 async function toggleTunnel() {
   const btn = document.getElementById("s_tunnel_btn");
@@ -517,6 +563,14 @@ async function toggleTunnel() {
     tunnel = await api(tunnel && tunnel.running ? "/tunnel/stop" : "/tunnel/start", { method: "POST" });
   } catch (e) { /* */ }
   btn.disabled = false;
+  loadTunnel();
+}
+async function startNamedTunnel() {
+  const connectorToken = document.getElementById("s_named_token").value.trim();
+  const hostname = document.getElementById("s_named_host").value.trim();
+  if (!connectorToken || !hostname) return;
+  tunnel = await api("/tunnel/start-named", { method: "POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ connectorToken, hostname }) });
   loadTunnel();
 }
 

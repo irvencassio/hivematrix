@@ -288,6 +288,30 @@ export function createDaemonServer() {
         json(res, 200, tunnelStatus());
         return;
       }
+      // POST /tunnel/start-named — run a named tunnel via connector token
+      if (req.method === "POST" && urlPath === "/tunnel/start-named") {
+        const { startNamedTunnel, tunnelStatus } = await import("@/lib/tunnel/cloudflared");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const token = String(body.connectorToken ?? "").trim();
+        const hostname = String(body.hostname ?? "").trim();
+        if (!token || !hostname) { json(res, 400, { error: "connectorToken and hostname required" }); return; }
+        try { await startNamedTunnel(token, hostname.startsWith("http") ? hostname : `https://${hostname}`); json(res, 200, tunnelStatus()); }
+        catch (e) { json(res, 500, { error: e instanceof Error ? e.message : String(e) }); }
+        return;
+      }
+      // GET /tunnel/qr — QR (SVG) of the pairing payload {url, token} for iOS.
+      // Generated locally via qrencode; the token never leaves the machine.
+      if (req.method === "GET" && urlPath === "/tunnel/qr") {
+        const { tunnelStatus, pairingPayload, generateQrSvg } = await import("@/lib/tunnel/cloudflared");
+        const st = tunnelStatus();
+        if (!st.url) { json(res, 400, { error: "no tunnel running" }); return; }
+        if (!st.qrInstalled) { json(res, 503, { error: "qrencode not installed (brew install qrencode)" }); return; }
+        const svg = await generateQrSvg(pairingPayload(st.url, AUTH_TOKEN));
+        if (!svg) { json(res, 500, { error: "qr generation failed" }); return; }
+        res.writeHead(200, { "Content-Type": "image/svg+xml" });
+        res.end(svg);
+        return;
+      }
 
       // GET /connectivity
       if (req.method === "GET" && urlPath === "/connectivity") {
