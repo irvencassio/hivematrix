@@ -453,6 +453,13 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /frontier-debt/status — pending/drained frontier-review-debt counts
+      if (req.method === "GET" && urlPath === "/frontier-debt/status") {
+        const { getDebtStatus } = await import("@/lib/orchestrator/frontier-debt");
+        json(res, 200, getDebtStatus());
+        return;
+      }
+
       // GET /notify/status — configured notification channels
       if (req.method === "GET" && urlPath === "/notify/status") {
         const { getTelegramConfig } = await import("@/lib/notify/telegram");

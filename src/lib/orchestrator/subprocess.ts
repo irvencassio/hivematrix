@@ -352,6 +352,11 @@ export async function spawnAgent(
     const route = routeByRole("code-critical", getConnectivityPolicy());
     const resolved = resolveModelId(route.tier);
     onEvent(taskId, { type: "log", content: `[mixed] routed code-critical → ${route.tier}${route.frontierReviewDebt ? " (frontier review queued)" : ""} → ${resolved ?? "unavailable"}` });
+    if (route.frontierReviewDebt) {
+      // Record the debt so it can be replayed as a frontier review when cloud-ok returns.
+      const { enqueueFrontierDebt } = await import("@/lib/orchestrator/frontier-debt");
+      enqueueFrontierDebt(taskId, project ?? null, projectPath);
+    }
     model = resolved ?? undefined;
     if (!model) {
       onEvent(taskId, { type: "error", content: "[mixed] no model available for the current connectivity mode" });

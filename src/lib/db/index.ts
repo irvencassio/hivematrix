@@ -258,6 +258,22 @@ const MIGRATIONS: string[] = [
   // v13: add reviewState on tasks — distinguishes needs_input from
   // ready_for_review under the review status (set by agent-manager on exit).
   `ALTER TABLE tasks ADD COLUMN reviewState TEXT DEFAULT NULL;`,
+
+  // v14: frontier-review-debt queue — code-critical work that ran locally
+  // (mixed mode, cloud unavailable) is recorded here and replayed as a frontier
+  // review task when cloud-ok returns.
+  `CREATE TABLE IF NOT EXISTS frontier_review_debt (
+      _id TEXT PRIMARY KEY,
+      taskId TEXT NOT NULL,
+      project TEXT,
+      projectPath TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      reviewTaskId TEXT,
+      enqueuedAt TEXT NOT NULL DEFAULT (datetime('now')),
+      drainedAt TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_frontier_debt_task ON frontier_review_debt(taskId);
+    CREATE INDEX IF NOT EXISTS idx_frontier_debt_status ON frontier_review_debt(status);`,
 ];
 
 // ------------------------------------------------------------------

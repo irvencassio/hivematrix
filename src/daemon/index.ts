@@ -88,6 +88,14 @@ async function main(): Promise<void> {
   const { startNotifyLoop } = await import("@/lib/notify/notify-loop");
   startNotifyLoop();
 
+  // Frontier-review-debt loop: replay code-critical work that ran locally as a
+  // frontier review when cloud-ok returns. Also drain immediately on that edge.
+  const { startFrontierDebtLoop, drainFrontierDebt } = await import("@/lib/orchestrator/frontier-debt");
+  startFrontierDebtLoop();
+  policy.on("modeChange", ({ current }: { current: string }) => {
+    if (current === "cloud-ok") void drainFrontierDebt().catch(() => 0);
+  });
+
   // Update finalize: the daemon reached "ready", so the migrated DB is queryable.
   // Record the new version (so the next boot is "same"); roll back on a failed
   // post-update self-check rather than advancing into a broken state.
