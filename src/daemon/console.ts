@@ -100,6 +100,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     border-radius: 4px; opacity: 0; transition: opacity .1s; }
   .card:hover .card-archive { opacity: 1; }
   .card .card-archive:hover { color: var(--accent-2); background: var(--border); }
+  .attach-row { display: flex; align-items: center; gap: 6px; }
+  .attach-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .attach-chip { display: flex; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 4px; padding: 2px 6px; font-size: 11px; max-width: 260px; overflow: hidden; }
+  .attach-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .attach-chip .rm { cursor: pointer; color: var(--muted); font-size: 14px; flex-shrink: 0; }
+  .attach-chip .rm:hover { color: var(--err); }
   .badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #21262d; color: var(--muted); }
   .badge.model { color: var(--accent-2); }
   .session-empty { color: var(--muted); text-align: center; margin-top: 40px; }
@@ -264,8 +271,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <input id="t_path" placeholder="Project path (working dir)" value="/tmp" />
       <label class="flbl">Model</label>
       <select id="t_model"></select>
-      <label class="flbl">Attachments (file paths, comma-separated — optional)</label>
-      <input id="t_attach" placeholder="/path/to/file.png, /path/to/notes.md" />
+      <label class="flbl">Attachments (optional)</label>
+      <div class="attach-row">
+        <input type="file" id="t_attach_input" multiple style="display:none" onchange="onAttachFiles(this)">
+        <button type="button" class="cancel" onclick="document.getElementById('t_attach_input').click()">⊕ Browse files</button>
+        <span class="muted" id="t_attach_hint" style="font-size:11px">No files selected</span>
+      </div>
+      <div class="attach-chips" id="t_attach_chips"></div>
       <div class="row"><button class="create" onclick="createTask()">Create task</button><button class="cancel" onclick="cancelForm('taskForm')">Cancel</button></div>
       <div class="err" id="t_err"></div>
     </div>
@@ -570,6 +582,9 @@ async function loadProjects() {
     } else if (sel.value) {
       state.selectedProject = sel.value;
     }
+    // Sync task-form path to whichever project is now active
+    const activeOpt = sel.options[sel.selectedIndex];
+    if (activeOpt && activeOpt.dataset.path) document.getElementById("t_path").value = activeOpt.dataset.path;
   } catch (e) { /* transient */ }
 }
 
@@ -577,14 +592,38 @@ document.getElementById("projectSel").addEventListener("change", async (e) => {
   state.selectedProject = e.target.value;
   localStorage.setItem("hm_project", e.target.value);
   renderBoard();
+  // Sync task-form project path when header project changes
+  const opt = e.target.options[e.target.selectedIndex];
+  if (opt && opt.dataset.path) document.getElementById("t_path").value = opt.dataset.path;
 });
 
 function onProjectSelect() {
   const sel = document.getElementById("t_project");
   const opt = sel.options[sel.selectedIndex];
-  if (opt && opt.dataset.path) {
-    document.getElementById("t_path").value = opt.dataset.path;
+  if (opt && opt.dataset.path) document.getElementById("t_path").value = opt.dataset.path;
+}
+
+let _attachPaths = [];
+function onAttachFiles(input) {
+  for (const f of input.files) {
+    const p = f.path || f.name;  // Tauri exposes .path; fallback to name
+    if (p && !_attachPaths.includes(p)) _attachPaths.push(p);
   }
+  input.value = "";  // allow re-selecting the same file
+  renderAttachChips();
+}
+function removeAttach(idx) {
+  _attachPaths.splice(idx, 1);
+  renderAttachChips();
+}
+function renderAttachChips() {
+  const chips = document.getElementById("t_attach_chips");
+  const hint = document.getElementById("t_attach_hint");
+  hint.textContent = _attachPaths.length ? "" : "No files selected";
+  chips.innerHTML = _attachPaths.map((p, i) => {
+    const name = p.split("/").pop() || p;
+    return '<div class="attach-chip" title="'+esc(p)+'"><span>'+esc(name)+'</span><span class="rm" onclick="removeAttach('+i+')">×</span></div>';
+  }).join("");
 }
 
 function openSettings() {
@@ -741,15 +780,15 @@ async function createTask() {
   const projSel = document.getElementById("t_project");
   const projName = projSel.value || null;
   const sel = modelById[document.getElementById("t_model").value] || { modelId: null, fast: false };
-  const attach = document.getElementById("t_attach").value.trim();
   if (!description || !projectPath) { err.textContent = "Description and project path are required."; return; }
-  if (attach) description += "\n\nAttached files:\n" + attach.split(",").map(s => "- " + s.trim()).filter(Boolean).join("\n");
+  if (_attachPaths.length) description += "\n\nAttached files:\n" + _attachPaths.map(p => "- " + p).join("\n");
   try {
     // Title optional — omit when blank so the daemon derives it from the instructions.
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ title: title || undefined, description, projectPath, project: projName || "console", model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent" }) });
     if (!t || !t._id) { err.textContent = "Create failed."; return; }
-    document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = ""; document.getElementById("t_attach").value = "";
+    document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = "";
+    _attachPaths = []; renderAttachChips();
     toggleForm("taskForm"); refresh();
   } catch (e2) { err.textContent = String(e2); }
 }
