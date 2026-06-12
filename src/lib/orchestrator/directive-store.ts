@@ -194,3 +194,20 @@ export function allCriteriaProven(directiveId: string): boolean {
   if (criteria.length === 0) return false; // a directive with no criteria can never self-report done
   return criteria.every((c) => c.proven === 1);
 }
+
+/** Delete a directive and all its runs, criteria, and journal entries. */
+export function deleteDirective(id: string): boolean {
+  const db = getDb();
+  // Gather run IDs so we can clean up journal entries.
+  const runs = db.prepare("SELECT _id FROM runs WHERE directiveId = ?").all(id) as Array<{ _id: string }>;
+  const runIds = runs.map((r) => r._id);
+
+  db.prepare("DELETE FROM run_journal WHERE directiveId = ?").run(id);
+  if (runIds.length > 0) {
+    const placeholders = runIds.map(() => "?").join(",");
+    db.prepare(`DELETE FROM runs WHERE directiveId = ? AND _id IN (${placeholders})`).run([id, ...runIds]);
+  }
+  db.prepare("DELETE FROM directive_criteria WHERE directiveId = ?").run(id);
+  const result = db.prepare("DELETE FROM directives WHERE _id = ?").run(id);
+  return result.changes > 0;
+}
