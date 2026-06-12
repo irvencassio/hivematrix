@@ -564,27 +564,27 @@ async function loadProjects() {
     const prev = sel.value;
     sel.innerHTML = '<option value="">(all projects)</option>'
       + data.projects.map(p => '<option value="'+esc(p.name)+'" data-path="'+esc(p.path)+'">'+esc(p.name)+(p.preSelect?' ★':'')+'</option>').join("");
-    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
-    // Auto-select first pre-selected project if none chosen
-    if (!sel.value) {
-      const ps = data.projects.find(p => p.preSelect);
-      if (ps) sel.value = ps.name;
-    }
-    // Populate New Task project dropdown
-    const tProj = document.getElementById("t_project");
-    tProj.innerHTML = '<option value="">(other)</option>'
-      + data.projects.map(p => '<option value="'+esc(p.name)+'" data-path="'+esc(p.path)+'">'+esc(p.name)+' — '+esc(p.path)+'</option>').join("");
-    // Restore saved project filter
+    // Restore only an explicit user choice — never auto-select on startup.
+    // The ★ project still pre-fills New Task path but never filters the board.
     const saved = localStorage.getItem("hm_project");
     if (saved && sel.querySelector('option[value="'+CSS.escape(saved)+'"]')) {
       sel.value = saved;
       state.selectedProject = saved;
-    } else if (sel.value) {
-      state.selectedProject = sel.value;
     }
-    // Sync task-form path to whichever project is now active
-    const activeOpt = sel.options[sel.selectedIndex];
-    if (activeOpt && activeOpt.dataset.path) document.getElementById("t_path").value = activeOpt.dataset.path;
+    // Populate New Task project dropdown — pre-select ★ project for path auto-fill
+    const tProj = document.getElementById("t_project");
+    tProj.innerHTML = '<option value="">(other)</option>'
+      + data.projects.map(p => '<option value="'+esc(p.name)+'" data-path="'+esc(p.path)+'">'+esc(p.name)+(p.preSelect?' ★':'')+'</option>').join("");
+    const preSelected = data.projects.find(p => p.preSelect);
+    if (preSelected) {
+      tProj.value = preSelected.name;
+      document.getElementById("t_path").value = preSelected.path;
+    }
+    // If a filter was restored, also sync the task form path
+    if (state.selectedProject) {
+      const activeOpt = sel.options[sel.selectedIndex];
+      if (activeOpt && activeOpt.dataset.path) document.getElementById("t_path").value = activeOpt.dataset.path;
+    }
   } catch (e) { /* transient */ }
 }
 
