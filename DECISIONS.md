@@ -100,4 +100,36 @@ non-allowlisted sender cannot trigger execution.
 
 ---
 
+## Q9 — MailBee un-deferred (email watch + trust-gated drafting)
+
+Date closed: 2026-06-12.
+
+**Decision.** MailBee becomes an **active embedded channel lane** (the founder's
+inbox, watched and triaged). Self-contained via **Apple Mail (osascript)** — no
+IMAP/SMTP creds, no OAuth; it reads/sends through accounts Mail.app already holds
+(Gmail + Outlook both work). Same daemon-embedded pattern as MessageBee (Q8).
+
+**The safety story (ported from Hive 1, the highest-value reusable asset).**
+Every inbound email is **trust-classified** before anything acts on it
+(`classifyMailTrust`): prompt-injection signal detection in subject/body, risky
+(executable/script) attachment detection, and trust hints (known sender +
+authenticated domain). Levels: `trusted` (known + authenticated domain) /
+`external` (default) / `suspicious` (injection or risky attachment). The email
+body/thread/links/attachments are treated as **untrusted input**; auto-send is
+gated to `trusted` senders; everything else drafts-for-approval.
+
+**Mechanism.** Read recent inbox messages via `osascript` (high-water by Mail
+message id), trust-classify, create a task (`source: "mailbee"`) carrying the
+trust assessment; the agent drafts a reply; approval (e.g. via MessageBee text,
+W1.3) sends it. Allowlist + "trusted domains" live in `message_identities` /
+config (channel `email`). State in the v5 `message_channels`/`message_identities`
+tables.
+
+**Code:** `src/lib/mailbee/` (contracts incl. `classifyMailTrust`, applemail I/O,
+store, handoff, poller). Endpoints `/mailbee/*`; onboarding `mailbee` step.
+Scope wall + COMPONENT-MAP amended. **Provers:** `src/lib/mailbee/*.test.ts`
+(trust classification + routing); live-Mac: real Mail.app read/draft.
+
+---
+
 Proposals for future phase boundaries go below this line. Nothing above is re-opened without a new decision entry.

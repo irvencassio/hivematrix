@@ -73,6 +73,11 @@ async function main(): Promise<void> {
   const { startMessageBeePoller } = await import("@/lib/messagebee/poller");
   startMessageBeePoller();
 
+  // Start the MailBee poll loop (self-gates: no-ops unless the email channel is
+  // enabled). Watches Apple Mail; trust-classifies inbound into triage tasks.
+  const { startMailBeePoller } = await import("@/lib/mailbee/poller");
+  startMailBeePoller();
+
   // Supervise the local model server when Qwen is "on this laptop": launch it,
   // health-probe it, relaunch on crash (self-gates on location === "local").
   const { startLocalServingSupervisor } = await import("@/lib/local-model/serving");

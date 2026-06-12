@@ -68,7 +68,7 @@ const RULES = [
     label: 'Possible new Bee brand — check COMPONENT-MAP.md to confirm it is listed there',
     allowFiles: [
       'TermBee', 'BrowserBee', 'WebBee', 'DesktopBee', 'CronBee', 'MessageBee',
-      'messagebee', 'COMPONENT-MAP.md', 'DECISIONS.md',
+      'messagebee', 'MailBee', 'mailbee', 'COMPONENT-MAP.md', 'DECISIONS.md',
     ],
     warnOnly: true,  // warning, not hard fail — false positives possible with this broad pattern
   },

@@ -66,6 +66,7 @@ export function getOnboardingStatus(opts: {
   helperBuilt?: boolean;
   desktopPermissions?: { accessibility: boolean; screenRecording: boolean } | null;
   messagebee?: { enabled: boolean; chatDbReadable: boolean } | null;
+  mailbee?: { enabled: boolean; mailControllable: boolean } | null;
 } = {}): OnboardingStatus {
   const cfg = readConfig();
   const steps: OnboardingStep[] = [];
@@ -180,6 +181,24 @@ export function getOnboardingStatus(opts: {
     state: messagebeeOk ? "done" : "incomplete",
     detail: messagebeeDetail,
     remediation: messagebeeOk ? undefined : "Optional: grant Full Disk Access (to read Messages), enable the channel, and allowlist your phone in Settings → MessageBee.",
+  });
+
+  // mailbee (optional) — email watch + trust-gated drafting via Apple Mail
+  const ml = opts.mailbee;
+  const mailbeeOk = !!ml && ml.enabled && ml.mailControllable;
+  let mailbeeDetail = "MailBee disabled";
+  if (ml) {
+    if (!ml.mailControllable) mailbeeDetail = "Mail.app automation permission needed";
+    else if (!ml.enabled) mailbeeDetail = "Mail controllable; channel disabled";
+    else mailbeeDetail = "enabled; watching the inbox";
+  }
+  steps.push({
+    id: "mailbee",
+    title: "MailBee (email watch)",
+    required: false,
+    state: mailbeeOk ? "done" : "incomplete",
+    detail: mailbeeDetail,
+    remediation: mailbeeOk ? undefined : "Optional: grant HiveMatrix Automation control of Mail.app, enable the channel, and add trusted senders in Settings → MailBee.",
   });
 
   const requiredComplete = steps.filter((s) => s.required).every((s) => s.state === "done");

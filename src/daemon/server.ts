@@ -281,7 +281,10 @@ export function createDaemonServer() {
         const { isChannelEnabled } = await import("@/lib/messagebee/store");
         const { canReadChatDb } = await import("@/lib/messagebee/imessage");
         const messagebee = { enabled: isChannelEnabled(), chatDbReadable: canReadChatDb() };
-        json(res, 200, getOnboardingStatus({ helperBuilt, desktopPermissions, messagebee }));
+        const { isChannelEnabled: mailEnabled } = await import("@/lib/mailbee/store");
+        const { canControlMail } = await import("@/lib/mailbee/applemail");
+        const mailbee = { enabled: mailEnabled(), mailControllable: await canControlMail() };
+        json(res, 200, getOnboardingStatus({ helperBuilt, desktopPermissions, messagebee, mailbee }));
         return;
       }
 
@@ -445,6 +448,49 @@ export function createDaemonServer() {
         const status = ["pending", "allowed", "paired", "blocked"].includes(body.status as string)
           ? (body.status as "pending" | "allowed" | "paired" | "blocked") : "allowed";
         const { upsertIdentity, listIdentities } = await import("@/lib/messagebee/store");
+        upsertIdentity(address, status, typeof body.displayName === "string" ? body.displayName : null);
+        json(res, 200, { ok: true, identities: listIdentities() });
+        return;
+      }
+
+      // GET /mailbee — channel status (enabled, Mail controllable, allowlist)
+      if (req.method === "GET" && urlPath === "/mailbee") {
+        const { isChannelEnabled, listIdentities, trustedDomains, triageAll } = await import("@/lib/mailbee/store");
+        const { canControlMail } = await import("@/lib/mailbee/applemail");
+        json(res, 200, {
+          enabled: isChannelEnabled(),
+          mailControllable: await canControlMail(),
+          identities: listIdentities(),
+          trustedDomains: trustedDomains(),
+          triageAll: triageAll(),
+        });
+        return;
+      }
+
+      // POST /mailbee/enable — { enabled }. On enable, set high-water to newest msg id.
+      if (req.method === "POST" && urlPath === "/mailbee/enable") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { setChannelEnabled, setLastId, ensureChannel } = await import("@/lib/mailbee/store");
+        const { canControlMail, readInboxSince } = await import("@/lib/mailbee/applemail");
+        const enabled = body.enabled !== false;
+        ensureChannel();
+        if (enabled) {
+          if (!(await canControlMail())) { json(res, 412, { error: "Mail.app not controllable — open Mail and grant Automation permission to HiveMatrix" }); return; }
+          const recent = await readInboxSince(0, 1);
+          setLastId(recent[0]?.id ?? 0);
+        }
+        setChannelEnabled(enabled);
+        json(res, 200, { ok: true, enabled });
+        return;
+      }
+
+      // POST /mailbee/identities — manage the trusted-sender allowlist.
+      if (req.method === "POST" && urlPath === "/mailbee/identities") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const address = String(body.address ?? "").trim();
+        if (!address) { json(res, 400, { error: "address is required" }); return; }
+        const status = ["pending", "allowed", "paired", "blocked"].includes(body.status as string) ? (body.status as string) : "allowed";
+        const { upsertIdentity, listIdentities } = await import("@/lib/mailbee/store");
         upsertIdentity(address, status, typeof body.displayName === "string" ? body.displayName : null);
         json(res, 200, { ok: true, identities: listIdentities() });
         return;

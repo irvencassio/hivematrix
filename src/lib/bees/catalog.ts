@@ -28,6 +28,15 @@ const BEE_DEFINITIONS: BeeDefinition[] = [
     standalone: false,
   },
   {
+    kind: "mailbee",
+    name: "MailBee",
+    role: "channel",
+    phase: 1,
+    summary: "Email watch + trust-gated drafting via Apple Mail (osascript). Every inbound is trust-classified (prompt-injection + risky-attachment detection); auto-send only for trusted senders, else draft-for-approval.",
+    capabilities: ["email-watch", "trust-classification", "draft-for-approval", "apple-mail"],
+    standalone: false,
+  },
+  {
     kind: "webbee",
     name: "WebBee",
     role: "capability",

@@ -42,6 +42,7 @@ Qwen-Agent: optional compatibility adapter only, never an orchestrator.
 - WebBee — read-only public web; disabled in offline
 - DesktopBee (Q1; ComputerBee name retired) — Swift helper daemon; AppleScript-first → AX semantic actions → vision last resort; approval-gated; audited
 - MessageBee (Q8; channel) — SMS/iMessage in/out; reads ~/Library/Messages/chat.db (Full Disk Access) high-water-marked by ROWID, sends via osascript; allowlisted senders only; routes inbound to needs_input replies or new tasks (source: messagebee)
+- MailBee (Q9; channel) — email watch + trust-gated drafting via Apple Mail (osascript; no IMAP/SMTP/OAuth). classifyMailTrust gates every inbound (prompt-injection + risky-attachment detection, trusted/external/suspicious); auto-send only for trusted senders, else draft-for-approval; tasks source: mailbee
 
 ## Internal subsystems (no public brand)
 
@@ -52,7 +53,7 @@ Qwen-Agent: optional compatibility adapter only, never an orchestrator.
 
 - VoiceBee
 - TubeBee + import workflows (return as BrowserBee workflow recipes)
-- MailBee beyond minimal notification egress (MessageBee un-deferred — see Q8 + lanes above)
+- (MessageBee + MailBee un-deferred — see Q8/Q9 + lanes above)
 
 ## Standalone provider products (unchanged)
 
