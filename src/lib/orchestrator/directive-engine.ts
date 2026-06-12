@@ -39,9 +39,58 @@ import { computeNextRunAt, parseTriggerPolicy, type TriggerPolicy } from "@/lib/
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { routeByRole } from "@/lib/routing/router";
 import { resolveModelId } from "@/lib/routing/model-resolver";
+import {
+  parseDirectivePlanOutput,
+  parseDirectiveRetrospectiveOutput,
+  parseDirectiveReviewOutput,
+  type DirectiveCorrectiveTask,
+  type DirectivePlan,
+  writeDirectiveRetrospectiveLearning,
+} from "./directive-autonomy";
+import { configuredBrainRootDir, defaultBrainRootDir } from "@/lib/brain/settings";
 
 const MAX_TASKS_PER_RUN = 5;
 const TERMINAL_TASK_STATUSES = new Set(["review", "done", "failed"]);
+
+type DirectivePlanner = (input: {
+  directive: DirectiveRow;
+  run: RunRow;
+  criteria: Array<{ _id: string; description: string }>;
+}) => Promise<string | null>;
+
+type DirectiveReviewer = (input: {
+  directive: DirectiveRow;
+  run: RunRow;
+  criteria: Array<{ _id: string; description: string }>;
+  tasks: Array<{ _id: string; status: string }>;
+}) => Promise<string | null>;
+
+type DirectiveRetrospectiveWriter = (input: {
+  directive: DirectiveRow;
+  run: RunRow;
+  done: boolean;
+  reflection: string;
+}) => Promise<string | null>;
+
+interface DirectiveTickOptions {
+  brainRootDir?: string;
+}
+
+let directivePlannerForTests: DirectivePlanner | null = null;
+let directiveReviewerForTests: DirectiveReviewer | null = null;
+let directiveRetrospectiveForTests: DirectiveRetrospectiveWriter | null = null;
+
+export function _setDirectivePlannerForTests(planner: DirectivePlanner | null): void {
+  directivePlannerForTests = planner;
+}
+
+export function _setDirectiveReviewerForTests(reviewer: DirectiveReviewer | null): void {
+  directiveReviewerForTests = reviewer;
+}
+
+export function _setDirectiveRetrospectiveForTests(retrospective: DirectiveRetrospectiveWriter | null): void {
+  directiveRetrospectiveForTests = retrospective;
+}
 
 async function collectRunTasks(directiveId: string, runId: string): Promise<Array<{ _id: string; status: string }>> {
   // Tasks spawned by this run are tagged with directiveId and a runId marker in output.
@@ -60,6 +109,22 @@ async function collectRunTasks(directiveId: string, runId: string): Promise<Arra
 
 async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
   const criteria = getCriteria(directive._id).filter((c) => c.proven === 0);
+
+  if (directivePlannerForTests) {
+    const plannerText = await directivePlannerForTests({
+      directive,
+      run,
+      criteria: criteria.map((c) => ({ _id: c._id, description: c.description })),
+    });
+    if (plannerText) {
+      const parsed = parseDirectivePlanOutput(plannerText, criteria.map((c) => ({ _id: c._id, description: c.description })));
+      if (parsed.plan) {
+        await createAutonomyPlanTasks(directive, run, parsed.plan);
+        return;
+      }
+      journal(run._id, directive._id, "planning_fallback", { reason: parsed.error ?? "invalid planner output" });
+    }
+  }
 
   // Deterministic v1 planner: one task per unmet criterion (capped). If a
   // directive has no criteria yet, fall back to a single goal task.
@@ -100,6 +165,45 @@ async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
   journal(run._id, directive._id, "planned", { taskIds: createdTaskIds, planSummary });
 }
 
+async function createAutonomyPlanTasks(directive: DirectiveRow, run: RunRow, plan: DirectivePlan): Promise<void> {
+  const { getDefaultModel, CLOUD_ONLY_ID } = await import("@/lib/models/available");
+  const noLocal = getDefaultModel() === CLOUD_ONLY_ID;
+  const route = routeByRole("execute", getConnectivityPolicy(), { noLocal });
+  const modelId = resolveModelId(route.tier);
+
+  const createdTaskIds: string[] = [];
+  for (const [index, planned] of plan.tasks.entries()) {
+    const task = await Task.create({
+      title: `[directive] ${planned.title.slice(0, 60)}`,
+      description: planned.description,
+      project: directive.project,
+      projectPath: directive.projectPath,
+      profile: planned.agentType || directive.profile,
+      model: modelId,
+      directiveId: directive._id,
+      status: "backlog",
+      executor: "agent",
+      output: {
+        runId: run._id,
+        routedTier: route.tier,
+        directiveDagIndex: index,
+        dependsOnDagIndices: planned.dependsOn,
+        criterionIds: planned.criterionIds,
+        goalIndex: planned.goalIndex,
+      },
+    });
+    createdTaskIds.push(task._id.toString());
+  }
+
+  const planSummary = `Planned ${createdTaskIds.length} autonomy task(s): ${plan.tasks.map((t) => t.title.slice(0, 40)).join("; ")}`;
+  setRunPhase(run._id, "execute", { planSummary });
+  journal(run._id, directive._id, "task_dag_planned", {
+    taskIds: createdTaskIds,
+    planSummary,
+    tasks: plan.tasks,
+  });
+}
+
 async function advanceExecuting(directive: DirectiveRow, run: RunRow): Promise<void> {
   const tasks = await collectRunTasks(directive._id, run._id);
   if (tasks.length === 0) {
@@ -122,6 +226,52 @@ async function verifyRun(directive: DirectiveRow, run: RunRow, nowIso: string): 
   const succeeded = new Set(tasks.filter((t) => t.status === "review" || t.status === "done").map((t) => t._id));
   const criteria = getCriteria(directive._id).filter((c) => c.proven === 0);
 
+  if (directiveReviewerForTests) {
+    const reviewerText = await directiveReviewerForTests({
+      directive,
+      run,
+      criteria: criteria.map((c) => ({ _id: c._id, description: c.description })),
+      tasks,
+    });
+    if (reviewerText) {
+      const parsed = parseDirectiveReviewOutput(reviewerText, criteria.map((c) => ({ _id: c._id, description: c.description })));
+      if (parsed.review) {
+        if (parsed.review.status !== "pass" && parsed.review.correctiveTasks.length > 0) {
+          const correctiveTaskIds = await createCorrectiveTasks(directive, run, parsed.review.correctiveTasks);
+          setRunPhase(run._id, "execute");
+          journal(run._id, directive._id, "reviewed", {
+            status: parsed.review.status,
+            findings: parsed.review.findings,
+            gaps: parsed.review.gaps,
+            summary: parsed.review.summary,
+            correctiveTaskIds,
+          });
+          return;
+        }
+
+        const proven: string[] = [];
+        if (parsed.review.status === "pass" && succeeded.size > 0) {
+          for (const c of criteria) {
+            markCriterionProven(c._id, nowIso);
+            proven.push(c._id);
+          }
+        }
+        setRunPhase(run._id, "reflect");
+        journal(run._id, directive._id, "reviewed", {
+          status: parsed.review.status,
+          findings: parsed.review.findings,
+          gaps: parsed.review.gaps,
+          summary: parsed.review.summary,
+          correctiveTaskIds: [],
+          provenCriteria: proven,
+          successfulTasks: succeeded.size,
+        });
+        return;
+      }
+      journal(run._id, directive._id, "review_fallback", { reason: parsed.error ?? "invalid reviewer output" });
+    }
+  }
+
   // v1 prover: a criterion is proven when the run produced ≥1 successful task.
   // (Richer provers — test/probe/artifact — slot in here by criterion.proverType.)
   const proven: string[] = [];
@@ -136,11 +286,65 @@ async function verifyRun(directive: DirectiveRow, run: RunRow, nowIso: string): 
   journal(run._id, directive._id, "verified", { provenCriteria: proven, successfulTasks: succeeded.size });
 }
 
-function reflectAndYield(directive: DirectiveRow, run: RunRow, nowIso: string): void {
+async function createCorrectiveTasks(directive: DirectiveRow, run: RunRow, correctiveTasks: DirectiveCorrectiveTask[]): Promise<string[]> {
+  const { getDefaultModel, CLOUD_ONLY_ID } = await import("@/lib/models/available");
+  const noLocal = getDefaultModel() === CLOUD_ONLY_ID;
+  const route = routeByRole("execute", getConnectivityPolicy(), { noLocal });
+  const modelId = resolveModelId(route.tier);
+
+  const createdTaskIds: string[] = [];
+  for (const [index, corrective] of correctiveTasks.entries()) {
+    const task = await Task.create({
+      title: `[directive corrective] ${corrective.title.slice(0, 50)}`,
+      description: corrective.description,
+      project: directive.project,
+      projectPath: directive.projectPath,
+      profile: corrective.agentType || directive.profile,
+      model: modelId,
+      directiveId: directive._id,
+      status: "backlog",
+      executor: "agent",
+      output: {
+        runId: run._id,
+        routedTier: route.tier,
+        corrective: true,
+        correctiveIndex: index,
+        criterionIds: corrective.criterionIds,
+      },
+    });
+    createdTaskIds.push(task._id.toString());
+  }
+  return createdTaskIds;
+}
+
+async function reflectAndYield(directive: DirectiveRow, run: RunRow, nowIso: string, options: DirectiveTickOptions = {}): Promise<void> {
   const done = allCriteriaProven(directive._id);
   const reflection = done
     ? `All criteria proven; directive complete.`
     : `Run complete; criteria remain open. Re-arming per trigger policy.`;
+
+  if (directiveRetrospectiveForTests) {
+    try {
+      const retrospectiveText = await directiveRetrospectiveForTests({ directive, run, done, reflection });
+      if (retrospectiveText) {
+        const parsed = parseDirectiveRetrospectiveOutput(retrospectiveText);
+        if (parsed.retrospective) {
+          const result = await writeDirectiveRetrospectiveLearning(parsed.retrospective, {
+            brainRootDir: options.brainRootDir ?? configuredBrainRootDir() ?? defaultBrainRootDir(),
+            project: directive.project,
+            runId: run._id,
+            directiveGoal: directive.goal,
+            dateStr: nowIso.slice(0, 10),
+          });
+          journal(run._id, directive._id, "retrospective_recorded", { ...result });
+        } else {
+          journal(run._id, directive._id, "retrospective_fallback", { reason: parsed.error ?? "invalid retrospective output" });
+        }
+      }
+    } catch (err) {
+      journal(run._id, directive._id, "retrospective_failed", { reason: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   setRunPhase(run._id, "done", { reflectionText: reflection, completedAt: nowIso });
   journal(run._id, directive._id, "reflected", { done, reflection });
@@ -175,7 +379,7 @@ function reflectAndYield(directive: DirectiveRow, run: RunRow, nowIso: string): 
  *
  * Idempotent and safe to call every scheduler tick.
  */
-export async function directiveTick(now: Date = new Date()): Promise<void> {
+export async function directiveTick(now: Date = new Date(), options: DirectiveTickOptions = {}): Promise<void> {
   const nowIso = now.toISOString();
 
   // 1. Advance in-flight runs.
@@ -193,7 +397,7 @@ export async function directiveTick(now: Date = new Date()): Promise<void> {
         case "plan":    await planRun(directive, run); break;
         case "execute": await advanceExecuting(directive, run); break;
         case "verify":  await verifyRun(directive, run, nowIso); break;
-        case "reflect": reflectAndYield(directive, run, nowIso); break;
+        case "reflect": await reflectAndYield(directive, run, nowIso, options); break;
       }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
