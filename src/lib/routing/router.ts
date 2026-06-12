@@ -26,11 +26,27 @@ export interface RouterResult {
   reason: string;
 }
 
-export function routeByRole(role: ModelRole, policy: ConnectivityPolicy): RouterResult {
-  const tier = policy.resolveModelTier(role);
+export interface RouteOptions {
+  /**
+   * "Cloud-only" posture: never route to the local model. Any role that would
+   * resolve to a local tier is promoted to frontier when the cloud is
+   * reachable, or marked unavailable otherwise (so the task waits for cloud
+   * rather than silently falling back to local Qwen).
+   */
+  noLocal?: boolean;
+}
 
-  // code-critical in local mode accrues frontier-review debt
-  const frontierReviewDebt = role === "code-critical" && tier !== "frontier";
+export function routeByRole(role: ModelRole, policy: ConnectivityPolicy, opts: RouteOptions = {}): RouterResult {
+  let tier = policy.resolveModelTier(role);
+
+  if (opts.noLocal && (tier === "local-primary" || tier === "local-secondary")) {
+    tier = policy.canUseCloud() ? "frontier" : "unavailable";
+  }
+
+  // code-critical that did NOT land on frontier accrues frontier-review debt —
+  // except under noLocal, where an unavailable tier means "wait for cloud", not
+  // "ran locally", so there is nothing to review later.
+  const frontierReviewDebt = role === "code-critical" && tier !== "frontier" && tier !== "unavailable";
 
   let reason: string;
   switch (tier) {

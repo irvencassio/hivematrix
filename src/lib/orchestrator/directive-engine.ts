@@ -70,7 +70,11 @@ async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
   // Route directive work by role through the connectivity policy, then resolve
   // the tier to a concrete model ID. Directive tasks are "execute" role by
   // default (bulk work); cloud-ok → frontier, local-only → local Qwen.
-  const route = routeByRole("execute", getConnectivityPolicy());
+  // When the default posture is cloud-only, bulk work also stays on frontier
+  // (the local model is never used).
+  const { getDefaultModel, CLOUD_ONLY_ID } = await import("@/lib/models/available");
+  const noLocal = getDefaultModel() === CLOUD_ONLY_ID;
+  const route = routeByRole("execute", getConnectivityPolicy(), { noLocal });
   const modelId = resolveModelId(route.tier);
 
   const createdTaskIds: string[] = [];

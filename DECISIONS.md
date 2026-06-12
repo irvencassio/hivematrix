@@ -32,6 +32,37 @@ Date closed: 2026-06-11. All six reset questions are closed.
 **Decision:** Mission is retired. The long-horizon autonomy unit is the **Directive** (standing objective + proven success criteria + trigger/budget policy + recoverable run loop). Mission tables are not ported.
 **Code:** `src/lib/db/index.ts` has `directives`, `runs`, `run_journal`, `directive_criteria` tables. No missions table.
 
+## Q7 — Cloud-only run mode + Bee lanes for the local agent
+
+Date closed: 2026-06-12.
+
+**Decision A — Cloud-only posture.** Alongside `Local` (pure Qwen) and `Mixed`
+(router: frontier thinking + local processing), a third selectable macro mode
+**Cloud-only** runs every role on frontier and never spawns the local model.
+When the cloud is unreachable a cloud-only task is **not** downgraded to local —
+it is left for retry when `cloud-ok` returns (no silent local fallback). This is
+a router preference (`routeByRole(role, policy, { noLocal })`), surfaced as the
+`cloud-only` model option; setting it as the default model also makes directive
+"execute" work stay on frontier.
+**Code:** `src/lib/routing/router.ts` (`RouteOptions.noLocal`),
+`src/lib/models/available.ts` (`CLOUD_ONLY_ID`), `src/lib/orchestrator/subprocess.ts`
+(`model === "cloud-only"` branch), `src/lib/orchestrator/directive-engine.ts`.
+
+**Decision B — Bee lanes available to the local (Qwen) agent.** The three
+existing embedded lanes — WebBee, BrowserBee, DesktopBee — are exposed to the
+local/generic agent tool loop as function tools (`webbee_search`,
+`browserbee_run`, `desktopbee_action`). No new brands. Each is gated by the
+ConnectivityPolicy capability matrix: a lane disabled in the current mode is
+neither advertised to the model nor dispatched. BrowserBee jobs run as delegated
+Codex Computer Use tasks. DesktopBee acts are auto-approved at dispatch (Irv's
+explicit posture), with the Swift helper's server-side gate retained as
+defence-in-depth.
+**Code:** `src/lib/orchestrator/bee-tools.ts`, wired via
+`src/lib/orchestrator/tool-bridge.ts` and `generic-agent.ts`.
+**Provers:** `src/lib/orchestrator/bee-tools.test.ts`,
+`src/lib/routing/router.test.ts` (noLocal cases),
+`src/lib/models/available.test.ts` (cloud-only cases).
+
 ---
 
 Proposals for future phase boundaries go below this line. Nothing above is re-opened without a new decision entry.

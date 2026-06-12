@@ -46,3 +46,15 @@ test("Mixed appears only with local AND a frontier backend", () => {
   assert.ok(ids(backends(true, true, false)).includes("mixed"), "local + claude → mixed");
   assert.ok(ids(backends(true, false, true)).includes("mixed"), "local + codex → mixed");
 });
+
+test("Cloud-only appears with any frontier backend, no local required", () => {
+  assert.ok(!ids(backends(true, false, false)).includes("cloud-only"), "local only → no cloud-only");
+  assert.ok(ids(backends(false, true, false)).includes("cloud-only"), "claude only → cloud-only");
+  assert.ok(ids(backends(false, false, true)).includes("cloud-only"), "codex only → cloud-only");
+  assert.ok(ids(backends(true, true, false)).includes("cloud-only"), "local + claude → cloud-only");
+});
+
+test("Cloud-only model id is the cloud-only sentinel", () => {
+  const m = buildAvailableModels(backends(false, true, false)).find((x) => x.id === "cloud-only");
+  assert.equal(m?.modelId, "cloud-only");
+});

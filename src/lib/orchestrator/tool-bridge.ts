@@ -7,11 +7,21 @@ import { readToken } from "@/lib/auth/token";
 
 const execAsync = promisify(exec);
 
+/** OpenAI-style function tool definition shared by the local agent tool set. */
+export interface ChatTool {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
 /**
  * Tool definitions in OpenAI function-calling format.
  * These are sent to the model so it knows what tools are available.
  */
-export const TOOL_DEFINITIONS = [
+export const TOOL_DEFINITIONS: ChatTool[] = [
   {
     type: "function" as const,
     function: {
@@ -171,8 +181,20 @@ export async function executeTool(
         return await executeListFiles(args, projectPath);
       case "create_task":
         return await executeCreateTask(args, context);
-      default:
+      default: {
+        // Embedded capability lanes (WebBee / BrowserBee / DesktopBee) are
+        // resolved by the bee-tools module, which enforces the connectivity
+        // policy gate before dispatching.
+        const { isBeeTool, executeBeeTool } = await import("./bee-tools");
+        if (isBeeTool(name)) {
+          return await executeBeeTool(name, args, {
+            projectPath,
+            project: context?.parentProject ?? "ops",
+            requestedBy: context?.parentTaskId ? `task:${context.parentTaskId}` : "hive",
+          });
+        }
         return `Error: Unknown tool "${name}"`;
+      }
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

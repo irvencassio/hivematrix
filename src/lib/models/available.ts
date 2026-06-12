@@ -14,6 +14,7 @@ export const CLAUDE_OPUS_ID = "claude-opus-4-8";   // Opus 4.8
 export const CLAUDE_FABLE_ID = "claude-fable-5";   // Fable 5 (latest "F")
 export const CODEX_NEWEST_ID = "codex:gpt-5.5-codex"; // GPT-5.5 (newest Codex, 2026-04-23)
 export const MIXED_ID = "mixed";
+export const CLOUD_ONLY_ID = "cloud-only";
 
 export interface UiModel {
   id: string;        // selection value (unique; e.g. "codex-fast")
@@ -60,6 +61,18 @@ export function buildAvailableModels(backends: BackendStatus[] = detectBackends(
       modelId: MIXED_ID,
       backend: "mixed",
       note: "router-driven: frontier when available, local otherwise",
+    });
+  }
+
+  // Cloud-only is the no-local posture: every role runs on frontier, the local
+  // model is never spawned. Only needs a frontier backend (no local required).
+  if (hasFrontier) {
+    models.push({
+      id: "cloud-only",
+      name: "Cloud-only — frontier, no local model",
+      modelId: CLOUD_ONLY_ID,
+      backend: "mixed",
+      note: "every role runs on frontier; local model never used",
     });
   }
 

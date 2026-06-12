@@ -11,7 +11,8 @@ import {
   getUsage,
   parseSSEStream,
 } from "./openai-stream-adapter";
-import { TOOL_DEFINITIONS, executeTool, type ToolContext } from "./tool-bridge";
+import { TOOL_DEFINITIONS, executeTool, type ToolContext, type ChatTool } from "./tool-bridge";
+import { availableBeeTools } from "./bee-tools";
 import { getAgentProfile } from "@/lib/config/agent-profiles";
 import { buildBrainMemoryBundle } from "@/lib/brain/memory-bundle";
 import { brainDocPolicyText } from "@/lib/brain/settings";
@@ -107,12 +108,19 @@ async function buildSystemPrompt(projectPath: string, agentType: string, thinkin
 }
 
 /**
- * Get the filtered tool definitions for a given agent profile.
+ * Get the tool definitions for a given agent profile.
+ *
+ * The profile's own allowlist filters the local file/shell tools, then the
+ * embedded capability lanes (WebBee / BrowserBee / DesktopBee) are appended —
+ * but only the lanes the current connectivity mode permits, so the model is
+ * never shown a tool it cannot use.
  */
-function getProfileTools(agentType: string): typeof TOOL_DEFINITIONS {
+function getProfileTools(agentType: string): ChatTool[] {
   const profile = getAgentProfile(agentType);
-  if (profile.tools.length === 0) return [];
-  return TOOL_DEFINITIONS.filter((t) => profile.tools.includes(t.function.name));
+  const local = profile.tools.length === 0
+    ? []
+    : TOOL_DEFINITIONS.filter((t) => profile.tools.includes(t.function.name));
+  return [...local, ...availableBeeTools()];
 }
 
 /**
@@ -169,7 +177,7 @@ export function buildGenericRequestBody(
   provider: ModelProvider,
   modelId: string,
   messages: Array<Record<string, unknown>>,
-  profileTools?: typeof TOOL_DEFINITIONS
+  profileTools?: ChatTool[]
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: modelId,
@@ -202,7 +210,7 @@ async function callChatCompletions(
   modelId: string,
   messages: Array<Record<string, unknown>>,
   signal: AbortSignal,
-  profileTools?: typeof TOOL_DEFINITIONS
+  profileTools?: ChatTool[]
 ): Promise<Response> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",

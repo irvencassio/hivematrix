@@ -78,6 +78,38 @@ test("reason string is present and non-empty", () => {
   assert.ok(r.reason.length > 0);
 });
 
+test("noLocal: cloud-ok execute is promoted to frontier", () => {
+  const r = routeByRole("execute", cloud(), { noLocal: true });
+  assert.equal(r.tier, "frontier");
+});
+
+test("noLocal: cloud-ok cheap-web is promoted to frontier", () => {
+  assert.equal(routeByRole("cheap-web", cloud(), { noLocal: true }).tier, "frontier");
+});
+
+test("noLocal: code-critical stays frontier with no debt in cloud-ok", () => {
+  const r = routeByRole("code-critical", cloud(), { noLocal: true });
+  assert.equal(r.tier, "frontier");
+  assert.equal(r.frontierReviewDebt, false);
+});
+
+test("noLocal: local-only marks would-be-local roles unavailable (no fallback)", () => {
+  const r = routeByRole("execute", local(), { noLocal: true });
+  assert.equal(r.tier, "unavailable");
+  // unavailable means "wait for cloud", not "ran locally" — so no review debt
+  const cc = routeByRole("code-critical", local(), { noLocal: true });
+  assert.equal(cc.tier, "unavailable");
+  assert.equal(cc.frontierReviewDebt, false);
+});
+
+test("noLocal: offline marks would-be-local roles unavailable", () => {
+  assert.equal(routeByRole("execute", offline(), { noLocal: true }).tier, "unavailable");
+});
+
+test("noLocal does not affect image role", () => {
+  assert.equal(routeByRole("image", cloud(), { noLocal: true }).tier, "nanai");
+});
+
 test("cheap-web always routes to local-secondary", () => {
   assert.equal(routeByRole("cheap-web", cloud()).tier, "local-secondary");
   assert.equal(routeByRole("cheap-web", local()).tier, "local-secondary");

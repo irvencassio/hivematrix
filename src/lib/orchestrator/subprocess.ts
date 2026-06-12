@@ -363,6 +363,27 @@ export async function spawnAgent(
     }
   }
 
+  // "cloud-only" is the no-local posture: every role resolves to frontier and
+  // the local model is never spawned. If the cloud is unreachable the task is
+  // NOT downgraded to local — it is left for retry when cloud-ok returns.
+  if (model === "cloud-only") {
+    const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
+    const { routeByRole } = await import("@/lib/routing/router");
+    const { resolveModelId } = await import("@/lib/routing/model-resolver");
+    const policy = getConnectivityPolicy();
+    const route = routeByRole("code-critical", policy, { noLocal: true });
+    const resolved = resolveModelId(route.tier);
+    onEvent(taskId, { type: "log", content: `[cloud-only] routed code-critical → ${route.tier} → ${resolved ?? "unavailable"}` });
+    model = resolved ?? undefined;
+    if (!model) {
+      onEvent(taskId, { type: "error", content: `[cloud-only] frontier unavailable in ${policy.mode} mode — not falling back to local; retry when cloud-ok is restored` });
+      onExit(taskId, 1, null);
+      const { EventEmitter } = await import("events");
+      const dead = new EventEmitter() as unknown as import("child_process").ChildProcess;
+      return { proc: dead, pid: -1, taskId, projectPath, startedAt: new Date(), textBuffer: "", modelsUsed: [] };
+    }
+  }
+
   if (isCodexModel(model)) {
     return spawnCodexAgent(
       taskId,
