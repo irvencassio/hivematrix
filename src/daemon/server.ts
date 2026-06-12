@@ -7,6 +7,7 @@
  * Routes:
  *   GET  /health                     — daemon health snapshot
  *   GET  /connectivity               — current connectivity state
+ *   GET  /posture                    — capability dispositions for each connectivity mode
  *   POST /connectivity/mode          — manual override { mode: 'cloud-ok'|'local-only'|'offline'|null }
  *   GET  /tasks                      — list tasks (query: status, profile, project)
  *   GET  /tasks/:id                  — get task
@@ -453,6 +454,13 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /posture — per-mode capability disposition (works/degraded/queued)
+      if (req.method === "GET" && urlPath === "/posture") {
+        const { getPostureReport } = await import("@/lib/connectivity/posture");
+        json(res, 200, getPostureReport());
+        return;
+      }
+
       // GET /frontier-debt/status — pending/drained frontier-review-debt counts
       if (req.method === "GET" && urlPath === "/frontier-debt/status") {
         const { getDebtStatus } = await import("@/lib/orchestrator/frontier-debt");
@@ -585,7 +593,8 @@ export function createDaemonServer() {
 
       // GET /connectivity
       if (req.method === "GET" && urlPath === "/connectivity") {
-        json(res, 200, policy.getState());
+        const { getPostureReport } = await import("@/lib/connectivity/posture");
+        json(res, 200, { ...policy.getState(), posture: getPostureReport() });
         return;
       }
 

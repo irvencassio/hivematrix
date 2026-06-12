@@ -187,6 +187,16 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .remote-status .dot.on { background: var(--ok); } .remote-status .dot.off { background: var(--muted); } .remote-status .dot.err { background: var(--err); }
   .copybtn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px; font-size: 11px; cursor: pointer; }
   .copybtn:hover { border-color: var(--accent); }
+  .posture { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel-2); }
+  .posture-summary { padding: 8px 10px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); }
+  .posture-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); font-size: 11px; }
+  .posture-row:last-child { border-bottom: none; }
+  .posture-row .pname { font-weight: 600; color: var(--text); }
+  .posture-row .pnote { grid-column: 1 / -1; color: var(--muted); line-height: 1.35; }
+  .disp { border-radius: 999px; padding: 1px 7px; font-size: 10px; font-weight: 700; align-self: start; }
+  .disp.works { color: var(--ok); background: rgba(37, 211, 102, .12); }
+  .disp.degraded { color: var(--warn); background: rgba(249, 174, 66, .14); }
+  .disp.queued { color: var(--err); background: rgba(255, 92, 122, .12); }
   #s_qr svg { width: 100%; height: 100%; }
   /* Project search dropdown */
   .project-search { position: relative; margin-bottom: 6px; }
@@ -558,12 +568,22 @@ function renderConn() {
   const c = state.conn; if (!c) return;
   document.getElementById("modePill").className = "pill "+c.mode;
   document.getElementById("modePill").textContent = c.mode;
+  const posture = c.posture && c.posture.current ? c.posture.current : null;
+  const postureHtml = posture ? '<div class="posture">'
+    + '<div class="posture-summary">'+esc(posture.summary)+' <span class="muted">('+esc(posture.counts.works)+' works, '+esc(posture.counts.degraded)+' degraded, '+esc(posture.counts.queued)+' queued)</span></div>'
+    + posture.capabilities.map(p => '<div class="posture-row">'
+      + '<span class="pname">'+esc(p.label || p.id)+'</span>'
+      + '<span class="disp '+esc(p.disposition)+'">'+esc(p.disposition)+'</span>'
+      + '<span class="pnote">'+esc(p.note)+'</span>'
+      + '</div>').join("")
+    + '</div>' : '';
   document.getElementById("conn").innerHTML = '<div class="kv">'
     + '<span class="k">mode</span><span>'+esc(c.mode)+'</span>'
     + '<span class="k">override</span><span>'+esc(c.manualOverride||"none")+'</span>'
     + '<span class="k">exhausted</span><span>'+esc((c.exhaustedProviders||[]).join(", ")||"none")+'</span>'
     + '<span class="k">probe fails</span><span>'+esc(c.probeFailures)+'</span>'
-    + '<span class="k">reason</span><span>'+esc(c.reason)+'</span></div>';
+    + '<span class="k">reason</span><span>'+esc(c.reason)+'</span></div>'
+    + postureHtml;
 }
 
 function renderDirectives() {
