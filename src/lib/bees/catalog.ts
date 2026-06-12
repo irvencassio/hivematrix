@@ -1,8 +1,9 @@
 import type { WorkerKind } from "@/lib/central/contracts";
 
 // HiveMatrix bee catalog — scoped per COMPONENT-MAP.md.
-// Removed: VoiceBee, TubeBee (deferred), MessageBee/MailBee (deferred beyond notifications),
-//          ComputerBee (renamed DesktopBee), AuthBee (internal session plane, no public brand).
+// Active channel: MessageBee (Q8, SMS/iMessage). Removed: VoiceBee, TubeBee
+// (deferred), MailBee (deferred beyond notifications), ComputerBee (renamed
+// DesktopBee), AuthBee (internal session plane, no public brand).
 
 export type BeeRole = "channel" | "capability" | "meta" | "workflow";
 
@@ -17,6 +18,15 @@ export interface BeeDefinition {
 }
 
 const BEE_DEFINITIONS: BeeDefinition[] = [
+  {
+    kind: "messagebee",
+    name: "MessageBee",
+    role: "channel",
+    phase: 1,
+    summary: "SMS/iMessage in and out. Reads Messages chat.db (Full Disk Access) and sends via osascript; allowlisted senders route to needs_input replies or new tasks.",
+    capabilities: ["imessage-in", "imessage-out", "sms", "needs-input-reply", "sender-allowlist"],
+    standalone: false,
+  },
   {
     kind: "webbee",
     name: "WebBee",

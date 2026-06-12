@@ -67,8 +67,8 @@ const RULES = [
     pattern: '\b[A-Z][a-z]+Bee\b',
     label: 'Possible new Bee brand — check COMPONENT-MAP.md to confirm it is listed there',
     allowFiles: [
-      'TermBee', 'BrowserBee', 'WebBee', 'DesktopBee', 'CronBee',
-      'COMPONENT-MAP.md', 'DECISIONS.md',
+      'TermBee', 'BrowserBee', 'WebBee', 'DesktopBee', 'CronBee', 'MessageBee',
+      'messagebee', 'COMPONENT-MAP.md', 'DECISIONS.md',
     ],
     warnOnly: true,  // warning, not hard fail — false positives possible with this broad pattern
   },

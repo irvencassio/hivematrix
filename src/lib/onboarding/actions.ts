@@ -32,6 +32,8 @@ function logDir(): string { return join(homedir(), "Library", "Logs", "HiveMatri
 export const TCC_DEEP_LINKS = {
   accessibility: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
   screenRecording: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+  // Full Disk Access — required for the daemon to read ~/Library/Messages/chat.db (MessageBee).
+  fullDiskAccess: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
 } as const;
 
 // ── Pure builders (unit-tested) ───────────────────────────────────────────────

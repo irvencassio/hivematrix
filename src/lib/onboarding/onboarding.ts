@@ -65,6 +65,7 @@ export function getOnboardingStatus(opts: {
   now?: string;
   helperBuilt?: boolean;
   desktopPermissions?: { accessibility: boolean; screenRecording: boolean } | null;
+  messagebee?: { enabled: boolean; chatDbReadable: boolean } | null;
 } = {}): OnboardingStatus {
   const cfg = readConfig();
   const steps: OnboardingStep[] = [];
@@ -161,6 +162,24 @@ export function getOnboardingStatus(opts: {
     state: desktopOk ? "done" : "incomplete",
     detail: desktopDetail,
     remediation: desktopOk ? undefined : "Optional: build desktopbee-helper and grant Accessibility + Screen Recording in System Settings.",
+  });
+
+  // messagebee (optional) — SMS/iMessage control surface
+  const mb = opts.messagebee;
+  const messagebeeOk = !!mb && mb.enabled && mb.chatDbReadable;
+  let messagebeeDetail = "MessageBee disabled";
+  if (mb) {
+    if (!mb.chatDbReadable) messagebeeDetail = "Full Disk Access needed to read Messages (chat.db)";
+    else if (!mb.enabled) messagebeeDetail = "chat.db readable; channel disabled";
+    else messagebeeDetail = "enabled; reading chat.db and sending via Messages";
+  }
+  steps.push({
+    id: "messagebee",
+    title: "MessageBee (text HiveMatrix)",
+    required: false,
+    state: messagebeeOk ? "done" : "incomplete",
+    detail: messagebeeDetail,
+    remediation: messagebeeOk ? undefined : "Optional: grant Full Disk Access (to read Messages), enable the channel, and allowlist your phone in Settings → MessageBee.",
   });
 
   const requiredComplete = steps.filter((s) => s.required).every((s) => s.state === "done");

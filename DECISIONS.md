@@ -65,4 +65,39 @@ defence-in-depth.
 
 ---
 
+## Q8 — MessageBee un-deferred (SMS/iMessage channel lane)
+
+Date closed: 2026-06-12.
+
+**Decision.** MessageBee moves from "deferred beyond notification egress" to an
+**active embedded channel lane** — the top channel priority for the autonomous
+business operator, because SMS/iMessage is the founder's control surface
+(approvals, `needs_input` replies, content sign-off by text). No standalone
+runtime and no new HTTP brand service: it runs **inside the daemon**, like the
+WebBee/BrowserBee/DesktopBee lanes (Q7-B pattern).
+
+**Mechanism (self-contained — no external `imessage` CLI).**
+- **Read:** poll `~/Library/Messages/chat.db` directly via better-sqlite3
+  (read-only), high-water-marked by `message.ROWID`. Requires the daemon to hold
+  **Full Disk Access** (a new optional onboarding step + System Settings
+  deep-link, mirroring the DesktopBee TCC pattern).
+- **Send:** `osascript` AppleScript `tell application "Messages" … send` (built
+  into macOS; recipient + text passed as `on run` argv to avoid escaping).
+- **Routing:** inbound from an **allowlisted** identity (`message_identities`)
+  → resolve a pending `needs_input` task for that sender and post the reply, else
+  create a task (`source: "messagebee"`). Non-allowlisted senders are read-only
+  (never create or resolve work). `/model` directives parsed (ported pattern).
+- **State:** the existing `message_channels` / `message_identities` tables (db
+  v5). chat.db schema access is version-gated; the AppleScript send path is
+  independent of the read path so a chat.db schema drift can't break sending.
+
+**Code:** `src/lib/messagebee/` (contracts, imessage I/O, store, handoff, poller),
+wired into the daemon boot + `src/daemon/server.ts` (`/messagebee/*`) +
+onboarding. **Scope wall + COMPONENT-MAP amended** in the same change.
+**Provers:** `src/lib/messagebee/*.test.ts` (routing/allowlist/parse/applescript);
+end-to-end: SMS in → task → iMessage reply; `needs_input` round-trip; a
+non-allowlisted sender cannot trigger execution.
+
+---
+
 Proposals for future phase boundaries go below this line. Nothing above is re-opened without a new decision entry.

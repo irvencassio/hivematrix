@@ -278,7 +278,10 @@ export function createDaemonServer() {
           const d = r?.data as { accessibility?: boolean; screenRecording?: boolean } | undefined;
           if (d) desktopPermissions = { accessibility: !!d.accessibility, screenRecording: !!d.screenRecording };
         }
-        json(res, 200, getOnboardingStatus({ helperBuilt, desktopPermissions }));
+        const { isChannelEnabled } = await import("@/lib/messagebee/store");
+        const { canReadChatDb } = await import("@/lib/messagebee/imessage");
+        const messagebee = { enabled: isChannelEnabled(), chatDbReadable: canReadChatDb() };
+        json(res, 200, getOnboardingStatus({ helperBuilt, desktopPermissions, messagebee }));
         return;
       }
 
@@ -394,6 +397,61 @@ export function createDaemonServer() {
       if (req.method === "GET" && urlPath === "/bees") {
         const { listBeeServiceStatuses } = await import("@/lib/bees/service-manager");
         json(res, 200, { bees: await listBeeServiceStatuses() });
+        return;
+      }
+
+      // GET /messagebee — channel status (enabled, chat.db readable, allowlist)
+      if (req.method === "GET" && urlPath === "/messagebee") {
+        const { isChannelEnabled, listIdentities } = await import("@/lib/messagebee/store");
+        const { canReadChatDb } = await import("@/lib/messagebee/imessage");
+        json(res, 200, {
+          enabled: isChannelEnabled(),
+          chatDbReadable: canReadChatDb(),
+          identities: listIdentities(),
+        });
+        return;
+      }
+
+      // POST /messagebee/enable — { enabled: boolean }. On enable, set the
+      // high-water mark to the current max ROWID so we never replay history.
+      if (req.method === "POST" && urlPath === "/messagebee/enable") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { setChannelEnabled, setLastRowid, ensureChannel } = await import("@/lib/messagebee/store");
+        const { currentMaxRowid, canReadChatDb } = await import("@/lib/messagebee/imessage");
+        const enabled = body.enabled !== false;
+        ensureChannel();
+        if (enabled) {
+          if (!canReadChatDb()) { json(res, 412, { error: "chat.db not readable — grant Full Disk Access to HiveMatrix" }); return; }
+          setLastRowid(currentMaxRowid());
+        }
+        setChannelEnabled(enabled);
+        json(res, 200, { ok: true, enabled });
+        return;
+      }
+
+      // POST /messagebee/identities — manage the sender allowlist.
+      // Body: { address, status: pending|allowed|paired|blocked, displayName? }
+      if (req.method === "POST" && urlPath === "/messagebee/identities") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const address = String(body.address ?? "").trim();
+        if (!address) { json(res, 400, { error: "address is required" }); return; }
+        const status = ["pending", "allowed", "paired", "blocked"].includes(body.status as string)
+          ? (body.status as "pending" | "allowed" | "paired" | "blocked") : "allowed";
+        const { upsertIdentity, listIdentities } = await import("@/lib/messagebee/store");
+        upsertIdentity(address, status, typeof body.displayName === "string" ? body.displayName : null);
+        json(res, 200, { ok: true, identities: listIdentities() });
+        return;
+      }
+
+      // POST /messagebee/test-send — { handle, text } verify outbound works.
+      if (req.method === "POST" && urlPath === "/messagebee/test-send") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const handle = String(body.handle ?? "").trim();
+        const text = String(body.text ?? "HiveMatrix test message").trim();
+        if (!handle) { json(res, 400, { error: "handle is required" }); return; }
+        const { sendIMessage } = await import("@/lib/messagebee/imessage");
+        const ok = await sendIMessage(handle, text);
+        json(res, ok ? 200 : 502, { ok });
         return;
       }
 

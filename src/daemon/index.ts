@@ -68,6 +68,11 @@ async function main(): Promise<void> {
   const { startScheduler } = await import("@/lib/orchestrator/scheduler");
   startScheduler();
 
+  // Start the MessageBee poll loop (self-gates: no-ops unless the imessage
+  // channel is enabled + chat.db is readable). SMS/iMessage in/out.
+  const { startMessageBeePoller } = await import("@/lib/messagebee/poller");
+  startMessageBeePoller();
+
   // Update finalize: the daemon reached "ready", so the migrated DB is queryable.
   // Record the new version (so the next boot is "same"); roll back on a failed
   // post-update self-check rather than advancing into a broken state.
