@@ -90,11 +90,16 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .lane-title { font-size: 11px; color: var(--muted); margin-bottom: 6px; display: flex; gap: 6px; }
   .lane-title .count { color: var(--accent); }
   .card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
-    padding: 8px 10px; margin-bottom: 6px; cursor: pointer; transition: border-color .1s; }
+    padding: 8px 10px; margin-bottom: 6px; cursor: pointer; transition: border-color .1s; position: relative; }
   .card:hover { border-color: var(--accent-2); }
   .card.sel { border-color: var(--accent); }
-  .card .t { font-weight: 600; margin-bottom: 2px; }
+  .card .t { font-weight: 600; margin-bottom: 2px; padding-right: 22px; }
   .card .m { font-size: 11px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
+  .card .card-archive { position: absolute; top: 6px; right: 8px; font-size: 13px; line-height: 1;
+    color: var(--muted); background: none; border: none; cursor: pointer; padding: 2px 4px;
+    border-radius: 4px; opacity: 0; transition: opacity .1s; }
+  .card:hover .card-archive { opacity: 1; }
+  .card .card-archive:hover { color: var(--accent-2); background: var(--border); }
   .badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #21262d; color: var(--muted); }
   .badge.model { color: var(--accent-2); }
   .session-empty { color: var(--muted); text-align: center; margin-top: 40px; }
@@ -342,6 +347,7 @@ function renderBoard() {
     if (!items.length && (L.key==="done"||L.key==="failed")) return "";
     return '<div class="lane"><div class="lane-title">'+L.label+' <span class="count">'+items.length+'</span></div>'
       + items.map(t => '<div class="card'+(state.selected===t._id?' sel':'')+'" onclick="selectTask(\''+t._id+'\')">'
+          + '<button class="card-archive" title="Archive" onclick="event.stopPropagation();cardArchive(\''+t._id+'\')">⌫</button>'
           + '<div class="t">'+esc(t.title||t._id)+'</div>'
           + '<div class="m">'+(t.model?'<span class="badge model">'+esc(t.model)+'</span>':'')
           + (t.reviewState?'<span class="badge">'+esc(t.reviewState)+'</span>':'')
@@ -423,6 +429,12 @@ async function deleteTask(id) {
 }
 async function archiveCompleted() {
   const r = await api("/tasks/archive-completed", { method: "POST" });
+  refresh();
+}
+
+async function cardArchive(id) {
+  await api("/tasks/"+id+"/archive", { method: "POST" });
+  if (state.selected === id) state.selected = null;
   refresh();
 }
 
