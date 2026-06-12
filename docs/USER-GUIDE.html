@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HiveMatrix — User Guide &amp; Capabilities</title>
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --muted: #585858;
+    --line: #e6e6e6;
+    --accent: #c98a00;     /* honey / hive amber */
+    --accent-soft: #fff7e6;
+    --accent-line: #f0d28a;
+    --blue: #1f6feb;
+    --good: #1a7f37;
+    --bad: #b42318;
+    --warn: #9a6700;
+    --chip: #f5f5f5;
+    --code: #f6f6f7;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  body { background:#fff; color:var(--ink); margin:0;
+    font:16px/1.62 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 920px; margin:0 auto; padding:48px 28px 110px; }
+  header.doc { border-bottom:3px solid var(--accent); padding-bottom:18px; margin-bottom:10px; }
+  .kicker { text-transform:uppercase; letter-spacing:.12em; font-size:12px; font-weight:700; color:var(--accent); }
+  h1 { font-size:32px; line-height:1.18; margin:6px 0 8px; }
+  h2 { font-size:22px; margin:44px 0 10px; padding-top:10px; border-top:1px solid var(--line); scroll-margin-top:16px; }
+  h2 .n { color:var(--accent); font-variant-numeric:tabular-nums; margin-right:8px; }
+  h3 { font-size:16.5px; margin:24px 0 6px; }
+  p, li { color:var(--ink); }
+  .meta { color:var(--muted); font-size:13px; margin-top:4px; }
+  a { color:var(--blue); text-decoration:none; } a:hover { text-decoration:underline; }
+  code { background:var(--code); padding:1.5px 5px; border-radius:4px; font:13.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre { background:var(--code); border:1px solid var(--line); border-radius:8px; padding:14px 16px; overflow-x:auto;
+    font:13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  table { width:100%; border-collapse:collapse; margin:14px 0; font-size:14.5px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:#faf8f3; font-weight:700; }
+  td.good { color:var(--good); font-weight:600; } td.bad { color:var(--bad); font-weight:600; }
+  .tag { display:inline-block; font-size:11px; font-weight:700; border-radius:999px; padding:1px 9px; }
+  .tag.on { background:#e7f6ec; color:var(--good); } .tag.off { background:#f3f3f3; color:var(--muted); }
+  .tag.soon { background:#fff3d6; color:var(--warn); }
+  .lead { background:var(--accent-soft); border:1px solid var(--accent-line); border-left:4px solid var(--accent);
+    border-radius:8px; padding:16px 18px; margin:18px 0; }
+  .callout { border-radius:8px; padding:12px 16px; margin:14px 0; font-size:14.5px; }
+  .callout.info { background:#f2f7ff; border:1px solid #c2d8f6; }
+  .callout.ok { background:#f1fbf3; border:1px solid #bfe6c8; }
+  .callout.warn { background:#fff8ef; border:1px solid #f0d6a8; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+  @media (max-width:680px){ .grid2,.grid3 { grid-template-columns:1fr; } }
+  .card { border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .card h3 { margin-top:0; }
+  .toc { columns:2; column-gap:28px; font-size:14px; margin:8px 0 0; padding:0; list-style:none; }
+  .toc li { margin:5px 0; break-inside:avoid; }
+  .toc a { color:var(--ink); } .toc a:hover { color:var(--blue); }
+  .kvs { font-size:13.5px; } .kvs div { padding:3px 0; border-bottom:1px dotted var(--line); display:flex; gap:10px; }
+  .kvs span.k { color:var(--muted); min-width:170px; display:inline-block; }
+  ol li, ul li { margin:4px 0; }
+  .step { border-left:3px solid var(--accent-line); padding:2px 0 2px 14px; margin:10px 0; }
+  .step b { display:block; }
+  .ui { display:inline-block; border:1px solid var(--line); border-radius:5px; background:#fafafa; padding:0 6px; font-size:13px; }
+  .footer { margin-top:60px; padding-top:16px; border-top:1px solid var(--line); color:var(--muted); font-size:12.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <div class="kicker">HiveMatrix · User Guide</div>
+  <h1>HiveMatrix — Capabilities &amp; Setup</h1>
+  <div class="meta">What it can do, how the pieces fit, and how to set it up — including a full tour of the Settings screen.<br>
+  Updated 2026-06-12 · daemon build 616 · reflects the live configuration on this Mac.</div>
+</header>
+
+<div class="lead">
+  <strong>HiveMatrix is a personal AI operations system.</strong> A headless daemon on your Mac runs <em>tasks</em> and
+  long-running <em>directives</em> across a fleet of AI models — frontier (Claude, Codex/ChatGPT), a local model (Qwen),
+  or a router that mixes them — and gives those agents real capabilities through <strong>Bees</strong>: web search,
+  browser automation, and desktop control. You drive it from the desktop console or the iPhone app, locally or over a
+  Cloudflare tunnel.
+</div>
+
+<h2 id="toc"><span class="n">·</span>Contents</h2>
+<ul class="toc">
+  <li><a href="#bigpic">1 · The big picture</a></li>
+  <li><a href="#models">2 · Models &amp; run modes</a></li>
+  <li><a href="#bees">3 · The Bees (capability lanes)</a></li>
+  <li><a href="#connectivity">4 · Connectivity modes</a></li>
+  <li><a href="#tasks">5 · Tasks</a></li>
+  <li><a href="#directives">6 · Directives</a></li>
+  <li><a href="#remote">7 · Remote access (iPhone)</a></li>
+  <li><a href="#setup">8 · First-time setup</a></li>
+  <li><a href="#settings">9 · The Settings screen</a></li>
+  <li><a href="#ref">10 · Quick reference</a></li>
+</ul>
+
+<h2 id="bigpic"><span class="n">1</span>The big picture</h2>
+<div class="grid2">
+  <div class="card">
+    <h3>Daemon</h3>
+    <p>A headless background service (launchd, auto-restarts) bound to <code>127.0.0.1:3747</code>. It owns tasks,
+    directives, the model router, connectivity policy, approvals, memory, and the Bees. Everything else is a client of it.</p>
+  </div>
+  <div class="card">
+    <h3>Console &amp; iPhone app</h3>
+    <p>The desktop console (served by the daemon) and the HiveMatrix-iOS app are both thin clients. The iPhone app reaches
+    the daemon over a Cloudflare tunnel; both show the same board, tasks, directives, and settings.</p>
+  </div>
+  <div class="card">
+    <h3>Model plane</h3>
+    <p>Three harnesses behind one contract: <strong>Claude Code</strong>, <strong>Codex</strong>, and
+    <strong>Qwen</strong> (local). A role-based router picks which one runs a given piece of work.</p>
+  </div>
+  <div class="card">
+    <h3>Bees</h3>
+    <p>Embedded capability lanes the agents can call: <strong>WebBee</strong> (web), <strong>BrowserBee</strong>
+    (browser), <strong>DesktopBee</strong> (desktop), plus internal <strong>BrainBee</strong> (memory) and
+    <strong>ManagerBee</strong> (coordination).</p>
+  </div>
+</div>
+
+<h2 id="models"><span class="n">2</span>Models &amp; run modes</h2>
+<p>Each task picks a model. Beyond the individual models, three <strong>macro run modes</strong> decide the local-vs-cloud
+split:</p>
+<table>
+  <thead><tr><th>Option</th><th>What runs it</th><th>Use it for</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Claude</strong> — Opus 4.8 / Fable 5</td><td>Claude Code (subscription)</td><td>Highest-quality reasoning, code, planning</td></tr>
+    <tr><td><strong>Codex / ChatGPT</strong> — GPT-5.5</td><td>Codex CLI (subscription)</td><td>OpenAI-flavored coding; "fast mode" = lower effort</td></tr>
+    <tr><td><strong>Codex Computer Use</strong></td><td>Codex driving the screen</td><td>Mouse/keyboard/screenshot automation (also the BrowserBee backing path)</td></tr>
+    <tr><td><strong>Nano Banana</strong></td><td>Cloud image model (mflux local fallback)</td><td>Image generation</td></tr>
+    <tr><td><strong>Local Model</strong></td><td>Qwen 3.6 27B via LM Studio (on this Mac)</td><td>Runs 100% locally; private, no cloud</td></tr>
+    <tr><td><strong>Mixed</strong></td><td>Router: frontier thinking + local bulk work</td><td>Best cost/quality blend when both are available</td></tr>
+    <tr><td><strong>Cloud-only</strong> <span class="tag on">new</span></td><td>Every role on frontier; local never used</td><td>"No local model" posture — and it won't silently fall back to local</td></tr>
+  </tbody>
+</table>
+<div class="callout info">
+  <strong>How "Mixed" routes.</strong> Thinking and final/critical code go to frontier; bulk execution and cheap web
+  summarizing go to the local Qwen model. <strong>Cloud-only</strong> overrides that and keeps <em>everything</em> on
+  frontier — if the cloud is unreachable, those tasks wait rather than dropping to local. Set any of these as the default
+  in Settings, or pick per-task in the New Task form.
+</div>
+
+<h2 id="bees"><span class="n">3</span>The Bees — capability lanes</h2>
+<p>Bees are how an agent does more than think. As of now they're wired into the <strong>local (Qwen) agent's tool
+loop</strong> too — so the local model can search the web, drive a browser, or control the desktop, each gated by the
+current connectivity mode.</p>
+<table>
+  <thead><tr><th>Bee</th><th>Does</th><th>Agent tool</th><th>Status here</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>WebBee</strong></td>
+      <td>Read-only fresh web retrieval with citations — current facts, news, prices, docs</td>
+      <td><code>webbee_search</code></td>
+      <td><span class="tag on">embedded · running</span></td>
+    </tr>
+    <tr>
+      <td><strong>BrowserBee</strong></td>
+      <td>Authenticated / stateful browser workflows (login, multi-step, forms, screenshots) — runs as a Codex Computer Use task</td>
+      <td><code>browserbee_run</code></td>
+      <td><span class="tag on">embedded · running</span></td>
+    </tr>
+    <tr>
+      <td><strong>DesktopBee</strong></td>
+      <td>Native macOS automation via a signed Swift helper: AppleScript → Accessibility actions → click/type as last resort</td>
+      <td><code>desktopbee_action</code></td>
+      <td><span class="tag on">helper on :3748</span></td>
+    </tr>
+    <tr>
+      <td><strong>BrainBee</strong></td>
+      <td>Memory compilation &amp; retrieval (internal; launch-agent lane, toggle in Settings → Bees)</td>
+      <td>—</td>
+      <td><span class="tag off">stopped</span></td>
+    </tr>
+    <tr>
+      <td><strong>ManagerBee</strong></td>
+      <td>Planning / routing / review coordination (internal)</td>
+      <td>—</td>
+      <td><span class="tag soon">planned</span></td>
+    </tr>
+  </tbody>
+</table>
+<div class="callout warn">
+  <strong>Availability follows connectivity.</strong> WebBee and BrowserBee need the internet, so they're disabled in
+  <em>local-only</em> and <em>offline</em> modes; DesktopBee works in every mode. An agent is only shown the lanes it can
+  actually use right now.
+</div>
+<div class="callout info">
+  <strong>iMessage note.</strong> Sending iMessage <em>into</em> HiveMatrix is not available — MessageBee is deferred in
+  this generation (the old standalone Hive 1 MessageBee has been removed). Outbound notifications only.
+</div>
+
+<h2 id="connectivity"><span class="n">4</span>Connectivity modes</h2>
+<p>The daemon always operates in one of three modes (auto-detected, or set manually in Settings → Connectivity):</p>
+<div class="grid3">
+  <div class="card"><h3>cloud-ok</h3><p class="meta">Default. Frontier APIs reachable; every capability available.</p></div>
+  <div class="card"><h3>local-only</h3><p class="meta">LAN/loopback only. Frontier + WebBee + BrowserBee off; Qwen + DesktopBee on.</p></div>
+  <div class="card"><h3>offline</h3><p class="meta">No network. Only the local model + DesktopBee on local apps.</p></div>
+</div>
+<p class="meta">Auto-degrades when frontier usage windows are exhausted (→ local-only) or the network is unreachable (→ offline),
+and restores automatically. A manual override always wins.</p>
+
+<h2 id="tasks"><span class="n">5</span>Tasks</h2>
+<p>A task is one unit of work for an agent. Create one from the board (<span class="ui">＋ New task</span>):</p>
+<ul>
+  <li><strong>Instructions</strong> — what to do (title is optional; it's derived from the instructions if blank).</li>
+  <li><strong>Project</strong> — pick a discovered project and the working directory is filled in automatically; the agent
+    then knows where to operate. ★ marks your active project.</li>
+  <li><strong>Model</strong> — any option from §2.</li>
+  <li><strong>Attachments</strong> — click <span class="ui">⊕ Browse files</span> to attach local files; they're passed to the agent.</li>
+</ul>
+<p>Each task card supports quick <strong>archive</strong> (the <span class="ui">⌫</span> on hover) without opening it.
+Open a task to see the live transcript and actions:</p>
+<ul>
+  <li><strong>Retry / Archive / Cancel / Delete</strong> depending on state.</li>
+  <li><strong>Reply</strong> — when an agent needs input it enters <code>needs_input</code> and shows its question with a
+    reply box; type an answer and the agent resumes (works in the console and on iPhone).</li>
+</ul>
+
+<h2 id="directives"><span class="n">6</span>Directives</h2>
+<p>A directive is a <strong>standing objective</strong> that runs over time — a goal, optional success criteria, and a
+trigger policy (manual, or a repeat interval like <code>PT4H</code> / <code>P1D</code>). The daemon plans tasks toward the
+goal, executes them (honoring your default run mode, including Cloud-only), and tracks proven criteria in a run journal.
+Create one from the right-hand <span class="ui">＋ New directive</span> panel.</p>
+
+<h2 id="remote"><span class="n">7</span>Remote access (iPhone)</h2>
+<p>The daemon is loopback-only; <code>cloudflared</code> bridges it to the internet when you choose.</p>
+<ol>
+  <li>Settings → <strong>Remote Access</strong> → <span class="ui">Start tunnel</span> for a quick test URL, or use a
+    <strong>named tunnel</strong> (Advanced) for durable, multi-user access.</li>
+  <li>A <strong>pairing QR</strong> appears — open HiveMatrix on iPhone and scan it. It encodes the URL + access token,
+    generated locally; the token never travels through Cloudflare.</li>
+  <li>Or paste the <strong>access token</strong> manually (remote visitors never get it auto-injected).</li>
+</ol>
+<div class="callout warn">
+  <strong>For anything lasting, use a named tunnel.</strong> Quick <code>trycloudflare.com</code> URLs are random and change
+  on restart. See the companion brain doc <em>"HiveMatrix — Cloudflare Tunnels &amp; Remote Access"</em> for the full
+  quick-vs-named breakdown and the multi-user setup.
+</div>
+
+<h2 id="setup"><span class="n">8</span>First-time setup</h2>
+<p>Onboarding (right-hand <strong>Setup</strong> panel) tracks these. In order:</p>
+<div class="step"><b>1 · Configuration file</b> <code>~/.hivematrix/config.json</code> holds model + provider settings. Created on first run.</div>
+<div class="step"><b>2 · Local model (Qwen)</b> Install <strong>LM Studio</strong>, load <code>qwen/qwen3.6-27b</code> (MLX 8-bit) and start its server on <code>:1234</code>. HiveMatrix probes readiness (tool-calling, decode rate) before using it. Pin the model with no TTL and set LM Studio to launch at login for always-on.</div>
+<div class="step"><b>3 · Background daemon (launchd)</b> Installs <code>~/Library/LaunchAgents/com.hivematrix.daemon.plist</code> so the daemon runs 24×7 and restarts on exit.</div>
+<div class="step"><b>4 · Brain memory plane</b> Canonical memory lives at <code>~/_GD/brain</code>. Agents read/curate it for durable context.</div>
+<div class="step"><b>5 · Frontier model access</b> Sign in to the <code>claude</code> and/or <code>codex</code> CLIs (subscriptions). Detected automatically and shown under Settings → Backends.</div>
+<div class="step"><b>6 · DesktopBee (desktop control)</b> Grant the Swift helper <strong>Accessibility</strong> and <strong>Screen Recording</strong> in System Settings → Privacy &amp; Security. (Rebuilding the helper can invalidate a prior grant — re-toggle it if DesktopBee shows no permission.)</div>
+
+<h2 id="settings"><span class="n">9</span>The Settings screen</h2>
+<p>Open with the <span class="ui">⚙</span> gear (top of the console). Four tabs:</p>
+
+<h3>Models tab</h3>
+<ul>
+  <li><strong>Default model</strong> — the model new tasks use unless overridden (set it to <em>Cloud-only</em> for a no-local posture, or <em>Mixed</em> for the blend). <span class="ui">Save default</span>.</li>
+  <li><strong>Backends</strong> — live detection of Local (LM Studio/Qwen), Claude CLI, and Codex CLI, with a ✓ when configured.</li>
+  <li><strong>Local server endpoint</strong> — the OpenAI-compatible URL for the local model (default <code>http://localhost:1234/v1</code>).</li>
+  <li><strong>Appearance</strong> — theme (System / Light / Dark) and an optional wallpaper (path or upload).</li>
+  <li><strong>Remote Access</strong> — tunnel status, Start/Stop, the public URL, pairing QR, the access token, and the Advanced named-tunnel form. (See §7.)</li>
+</ul>
+
+<h3>Projects tab</h3>
+<p>Projects auto-discovered from git repos, Claude Code history, and VS Code recents. Click one to make it the active board
+filter; <span class="ui">↻ Re-scan</span> refreshes. ★ = the pre-selected active project whose path pre-fills New Task /
+New Directive.</p>
+
+<h3>Bees tab <span class="tag on">new</span></h3>
+<p>A live view of every capability lane: a status dot (green = running &amp; healthy, amber = running but unhealthy, grey =
+stopped), the runtime mode (<em>embedded</em> = runs in the daemon and follows connectivity; <em>launchagent</em> =
+separate service; <em>planned</em> = not yet wired), and health badges. <strong>Launch-agent lanes</strong> (e.g.
+BrainBee) have a <span class="ui">Turn on / Turn off</span> toggle that installs or removes their macOS LaunchAgent.
+Embedded lanes can't be toggled — they follow the connectivity mode. The same view exists in the iPhone app under
+Settings → Bees.</p>
+
+<h3>Connectivity (right panel)</h3>
+<p>Shows the current mode and lets you force <em>cloud-ok / local-only / offline</em> (or return to auto). Useful to go
+private (local-only) or to test offline behavior.</p>
+
+<h2 id="ref"><span class="n">10</span>Quick reference</h2>
+<div class="kvs">
+  <div><span class="k">Daemon</span><span><code>127.0.0.1:3747</code> (launchd: <code>com.hivematrix.daemon</code>)</span></div>
+  <div><span class="k">Data</span><span><code>~/.hivematrix/hivematrix.db</code> (SQLite, WAL) · config <code>~/.hivematrix/config.json</code></span></div>
+  <div><span class="k">Local model</span><span>LM Studio <code>:1234</code> · <code>qwen/qwen3.6-27b</code></span></div>
+  <div><span class="k">DesktopBee helper</span><span><code>127.0.0.1:3748</code></span></div>
+  <div><span class="k">Bees status</span><span><code>GET /bees</code> · toggle <code>POST /bees/:kind/autostart</code></span></div>
+  <div><span class="k">Models</span><span><code>GET /models</code> (backends + available + default)</span></div>
+  <div><span class="k">Tunnel</span><span><code>GET /tunnel</code> · <code>POST /tunnel/start</code> · <code>/tunnel/start-named</code> · <code>/tunnel/qr</code></span></div>
+  <div><span class="k">Brain memory</span><span><code>~/_GD/brain</code> (canonical)</span></div>
+  <div><span class="k">Companion docs</span><span>Cloudflare tunnels brain doc · <code>docs/REMOTE-ACCESS.md</code> · <code>COMPONENT-MAP.md</code> · <code>DECISIONS.md</code></span></div>
+</div>
+
+<div class="footer">
+  HiveMatrix user guide · capabilities reflect daemon build 616 (2026-06-12). Models, Bees, and the Cloud-only run mode are
+  live; BrainBee is a toggleable launch-agent lane; ManagerBee is planned. iMessage ingestion (MessageBee) is deferred.
+</div>
+
+</div>
+</body>
+</html>
