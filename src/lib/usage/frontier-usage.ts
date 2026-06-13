@@ -7,7 +7,12 @@
 
 import { Task } from "@/lib/db";
 import { MODEL_SHORT_NAMES } from "@/lib/models/catalog";
-import { getSubscriptionRemaining, type SubscriptionUsage } from "./subscription";
+import {
+  getSubscriptionRemainingDetailed,
+  type SubscriptionUsage,
+  type SubscriptionUsageResult,
+  type SubscriptionUsageStatus,
+} from "./subscription";
 
 export interface FrontierModelUsage {
   modelId: string;
@@ -26,6 +31,8 @@ export interface FrontierUsage {
   byModel: FrontierModelUsage[];
   /** Remaining subscription capacity from the Anthropic OAuth usage API. Null when not logged in via claude.ai subscription. */
   subscription: SubscriptionUsage | null;
+  /** Non-secret status for why subscription usage is available or unavailable. */
+  subscriptionStatus: SubscriptionUsageStatus;
 }
 
 /** A model id that bills (frontier) vs. local Qwen / image models (free). */
@@ -46,6 +53,8 @@ interface UsageTask {
   updatedAt?: string | null;
   createdAt?: string | null;
 }
+
+let subscriptionReader: () => Promise<SubscriptionUsageResult> = getSubscriptionRemainingDetailed;
 
 function parseOutput(output: unknown): TaskOutput {
   if (!output) return {};
@@ -82,7 +91,7 @@ export async function getFrontierUsage(): Promise<FrontierUsage> {
     byModel.set(primary, row);
   }
 
-  const subscription = await getSubscriptionRemaining();
+  const subscriptionResult = await subscriptionReader();
 
   return {
     totalCost: Math.round(totalCost * 10000) / 10000,
@@ -92,6 +101,11 @@ export async function getFrontierUsage(): Promise<FrontierUsage> {
     todayCost: Math.round(todayCost * 10000) / 10000,
     todayTaskCount,
     byModel: [...byModel.values()].sort((a, b) => b.cost - a.cost),
-    subscription,
+    subscription: subscriptionResult.usage,
+    subscriptionStatus: subscriptionResult.status,
   };
+}
+
+export function _setSubscriptionReaderForTests(reader: (() => Promise<SubscriptionUsageResult>) | null): void {
+  subscriptionReader = reader ?? getSubscriptionRemainingDetailed;
 }

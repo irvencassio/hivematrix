@@ -9,13 +9,21 @@ process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 process.env.HOME = TMP; // so resolveModelId reads a clean config (defaults)
 
 const { getDb, _resetDbForTests, Task } = await import("@/lib/db");
-const { getFrontierUsage, isFrontierModel } = await import("./frontier-usage");
+const { getFrontierUsage, isFrontierModel, _setSubscriptionReaderForTests } = await import("./frontier-usage");
 const { resolveModelId } = await import("@/lib/routing/model-resolver");
 
 _resetDbForTests();
 getDb();
+_setSubscriptionReaderForTests(async () => ({
+  usage: null,
+  status: {
+    state: "missing_credentials",
+    message: "Subscription usage disabled in tests.",
+  },
+}));
 
 test.after(() => {
+  _setSubscriptionReaderForTests(null);
   _resetDbForTests();
   delete process.env.HIVEMATRIX_DB_PATH;
   rmSync(TMP, { recursive: true, force: true });

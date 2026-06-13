@@ -133,6 +133,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .mb-chip { display: inline-block; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px;
     padding: 1px 9px; margin: 2px 4px 2px 0; font-size: 11px; }
   .mb-ignored-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11px; }
+  .ss-section { margin-top:12px; }
+  .ss-section-hd { font-weight:600; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
+  .ss-chip { display:inline-flex; align-items:center; background:var(--panel-2); border:1px solid var(--border); border-radius:12px; padding:1px 6px 1px 9px; margin:2px 4px 2px 0; font-size:11px; gap:3px; }
+  .ss-chip .x { cursor:pointer; color:var(--muted); font-size:10px; line-height:1; }
+  .ss-chip .x:hover { color:var(--err); }
   .mb-ignored-row .mb-ig-addr { font-weight: 600; }
   .mb-ignored-row .mb-ig-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; }
   .mb-ignored-row button { font-size: 10px; padding: 2px 9px; border-radius: 6px; cursor: pointer;
@@ -424,6 +429,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <button class="copybtn" onclick="renderSettingsBees()">↻ Refresh</button>
       </div>
       <div id="s_bees" style="margin-top:8px"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <label class="flbl" style="margin:0">Safe senders</label>
+        <button class="copybtn" onclick="renderSafeSenders()">↻</button>
+      </div>
+      <div id="s_safe_senders" style="margin-top:4px"></div>
       <div class="muted" style="font-size:11px;margin-top:10px">Embedded lanes run inside the daemon and follow the connectivity mode. Launch-agent lanes (e.g. BrainBee) can be toggled on/off — that installs/removes their macOS LaunchAgent.</div>
     </div>
   </div>
@@ -1164,11 +1175,19 @@ function renderSubBar(label, win) {
     + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div></div>';
 }
 
+function usagePlanLabel(status) {
+  if (!status) return "usage";
+  if (status.subscriptionType === "max" && status.rateLimitTier === "default_claude_max_5x") return "Max 5x";
+  if (status.subscriptionType) return String(status.subscriptionType).charAt(0).toUpperCase() + String(status.subscriptionType).slice(1);
+  return "usage";
+}
+
 async function checkUsage() {
   try {
     const u = await api("/usage");
     if (!u) return;
     const sub = u.subscription;
+    const subStatus = u.subscriptionStatus;
     const pill = document.getElementById("usagePill");
 
     if (pill) {
@@ -1185,6 +1204,12 @@ async function checkUsage() {
         if (sub.sevenDaySonnet) lines.push("7-day Sonnet: " + sub.sevenDaySonnet.remaining.toFixed(1) + "% left");
         if (u.taskCount > 0) lines.push("", "HiveMatrix spend: $" + (u.totalCost||0).toFixed(2) + " over " + u.taskCount + " task(s)");
         pill.title = lines.join("\n");
+      } else if (subStatus && subStatus.state !== "missing_credentials") {
+        const label = usagePlanLabel(subStatus);
+        pill.textContent = "⚡ " + label + " ?";
+        pill.style.display = "";
+        pill.title = (subStatus.message || "Claude subscription usage left is unavailable.")
+          + "\nHiveMatrix spend: $" + (u.totalCost || 0).toFixed(2) + " over " + (u.taskCount||0) + " task(s)";
       } else {
         // No subscription data — fall back to spend.
         const total = "$" + (u.totalCost || 0).toFixed(2);
@@ -1207,11 +1232,14 @@ async function checkUsage() {
       html += renderSubBar("7-day overall", sub.sevenDay);
       html += renderSubBar("7-day Opus", sub.sevenDayOpus);
       html += renderSubBar("7-day Sonnet", sub.sevenDaySonnet);
+    } else if (subStatus && subStatus.state !== "missing_credentials") {
+      html += '<div class="urow"><span><b>Claude subscription</b></span><span class="um">' + esc(usagePlanLabel(subStatus)) + '</span></div>'
+        + '<div class="muted" style="font-size:11px">' + esc(subStatus.message || "Usage left unavailable.") + '</div>';
     }
 
     // HiveMatrix task spend.
     if (u.byModel && u.byModel.length) {
-      if (sub && (sub.fiveHour || sub.sevenDay)) html += '<div class="usep"></div>';
+      if ((sub && (sub.fiveHour || sub.sevenDay)) || (subStatus && subStatus.state !== "missing_credentials")) html += '<div class="usep"></div>';
       const total = "$" + (u.totalCost || 0).toFixed(2);
       html += '<div class="urow"><span><b>' + total + '</b> spent</span>'
         + '<span class="um">' + u.taskCount + ' tasks · ' + fmtTokens(u.inputTokens) + ' in / ' + fmtTokens(u.outputTokens) + ' out</span></div>'
@@ -1510,7 +1538,7 @@ function switchSettingsTab(tab) {
   document.getElementById("settingsProjects").style.display = tab === "projects" ? "" : "none";
   document.getElementById("settingsBees").style.display = tab === "bees" ? "" : "none";
   if (tab === "projects") renderSettingsProjects();
-  if (tab === "bees") renderSettingsBees();
+  if (tab === "bees") { renderSettingsBees(); renderSafeSenders(); }
 }
 
 async function renderSettingsBees() {
@@ -1545,6 +1573,99 @@ async function toggleBee(kind, enable) {
   const r = await api("/bees/"+kind+"/autostart", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ enabled: enable }) });
   if (r && r.error) { hmAlert(r.error); }
   setTimeout(renderSettingsBees, 800); // give launchctl a moment
+}
+
+// --- Safe senders (MessageBee + MailBee) ------------------------------------
+async function renderSafeSenders() {
+  const el = document.getElementById("s_safe_senders");
+  if (!el) return;
+  el.innerHTML = '<div class="muted" style="font-size:11px">Loading…</div>';
+  const [mbData, mlData, igData] = await Promise.all([
+    api("/messagebee").catch(() => null),
+    api("/mailbee").catch(() => null),
+    api("/messagebee/ignored").catch(() => null),
+  ]);
+  function chips(ids, rmFn) {
+    if (!ids.length) return '<span class="muted" style="font-size:11px">None yet.</span>';
+    return ids.map(i => {
+      const safeAddr = esc(i.address).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      return '<span class="ss-chip">' + esc(i.address)
+        + ' <span class="x" onclick="' + rmFn + '(\'' + safeAddr + '\')" title="Remove">✕</span></span>';
+    }).join("");
+  }
+  const mbIds = mbData ? (mbData.identities || []).filter(i => i.status === "allowed" || i.status === "paired") : [];
+  const mlIds = mlData ? (mlData.identities || []).filter(i => i.status === "allowed" || i.status === "paired") : [];
+  const ig = igData ? (igData.ignored || []) : [];
+  const ignoredHtml = ig.length
+    ? '<div style="margin-top:5px"><div class="muted" style="font-size:11px;margin-bottom:2px">Texted but not allowlisted:</div>'
+      + ig.map(i => {
+          const safeAddr = esc(i.address).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+          return '<div class="mb-ignored-row"><span class="mb-ig-addr">' + esc(i.address) + '</span>'
+            + (i.text ? '<span class="muted mb-ig-text">"' + esc(i.text.slice(0, 50)) + '"</span>' : "")
+            + '<button onclick="allowIgnoredInSafeSenders(\'' + safeAddr + '\')">Allow</button></div>';
+        }).join("") + "</div>"
+    : "";
+  el.innerHTML =
+    '<div class="ss-section">'
+    + '<div class="ss-section-hd">MessageBee — iMessage / SMS</div>'
+    + chips(mbIds, "rmMbSender") + ignoredHtml
+    + '<div class="row" style="margin-top:6px;gap:6px">'
+    + '<input id="ss_mb_input" class="dialog-input" placeholder="+15551234567 or you@icloud.com" style="flex:1;margin:0"'
+    + ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();addMbSender();}" />'
+    + '<button class="copybtn" onclick="addMbSender()">Add</button></div>'
+    + '<div class="err" id="ss_mb_err" style="font-size:11px;margin-top:3px"></div>'
+    + '</div>'
+    + '<div class="ss-section">'
+    + '<div class="ss-section-hd">MailBee — Email</div>'
+    + chips(mlIds, "rmMlSender")
+    + '<div class="row" style="margin-top:6px;gap:6px">'
+    + '<input id="ss_ml_input" class="dialog-input" placeholder="trusted@example.com" style="flex:1;margin:0"'
+    + ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();addMlSender();}" />'
+    + '<button class="copybtn" onclick="addMlSender()">Add</button></div>'
+    + '<div class="err" id="ss_ml_err" style="font-size:11px;margin-top:3px"></div>'
+    + '</div>';
+}
+async function addMbSender() {
+  const input = document.getElementById("ss_mb_input");
+  const errEl = document.getElementById("ss_mb_err");
+  const address = input ? input.value.trim() : "";
+  if (!address || !errEl) return;
+  errEl.textContent = "";
+  try {
+    await api("/messagebee/identities", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ address, status:"allowed" }) });
+    input.value = "";
+    renderSafeSenders();
+  } catch(e) { errEl.textContent = String(e); }
+}
+async function rmMbSender(address) {
+  try {
+    await api("/messagebee/identities", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ address, status:"pending" }) });
+    renderSafeSenders();
+  } catch(e) { /* ignore */ }
+}
+async function addMlSender() {
+  const input = document.getElementById("ss_ml_input");
+  const errEl = document.getElementById("ss_ml_err");
+  const address = input ? input.value.trim() : "";
+  if (!address || !errEl) return;
+  errEl.textContent = "";
+  try {
+    await api("/mailbee/identities", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ address, status:"allowed" }) });
+    input.value = "";
+    renderSafeSenders();
+  } catch(e) { errEl.textContent = String(e); }
+}
+async function rmMlSender(address) {
+  try {
+    await api("/mailbee/identities", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ address, status:"pending" }) });
+    renderSafeSenders();
+  } catch(e) { /* ignore */ }
+}
+async function allowIgnoredInSafeSenders(address) {
+  try {
+    await api("/messagebee/allow", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ address }) });
+    renderSafeSenders();
+  } catch(e) { /* ignore */ }
 }
 
 function renderSettingsProjects() {
