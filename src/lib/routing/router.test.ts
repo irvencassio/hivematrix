@@ -7,9 +7,9 @@ function cloud() { return new ConnectivityPolicy(); }
 function local() { const p = new ConnectivityPolicy(); p.setManualOverride("local-only"); return p; }
 function offline() { const p = new ConnectivityPolicy(); p.setManualOverride("offline"); return p; }
 
-test("cloud-ok: think → frontier, no debt", () => {
+test("cloud-ok: think → frontier-premium (Opus), no debt", () => {
   const r = routeByRole("think", cloud());
-  assert.equal(r.tier, "frontier");
+  assert.equal(r.tier, "frontier-premium");
   assert.equal(r.frontierReviewDebt, false);
 });
 

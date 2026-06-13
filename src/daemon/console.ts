@@ -87,6 +87,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     letter-spacing: .5px; margin: 2px 0 3px; }
   .gear { cursor: pointer; color: var(--muted); font-size: 16px; background: none; border: 0; }
   .gear:hover { color: var(--accent); }
+  .usage-pill { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px 11px; font-size: 11px; font-weight: 600; white-space: nowrap; cursor: default; }
+  .usage-breakdown { font-size: 11px; }
+  .usage-breakdown .urow { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+  .usage-breakdown .urow .um { color: var(--muted); }
   .update-pill { cursor: pointer; background: var(--accent); color: var(--create-btn-text, #1a1a1a);
     border-radius: 999px; padding: 3px 11px; font-size: 11px; font-weight: 700; white-space: nowrap;
     animation: updatePulse 2s ease-in-out infinite; }
@@ -276,6 +281,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <option value="offline">offline</option>
     </select>
     <span class="pill" id="modePill">…</span>
+    <span class="usage-pill" id="usagePill" style="display:none" title="Frontier model spend (local Qwen is free)">⚡ —</span>
     <span class="update-pill" id="updatePill" style="display:none" onclick="applyUpdate()" title="Click to install and restart">⬆ Update</span>
     <button class="gear" title="Settings" onclick="openSettings()">⚙</button>
   </span>
@@ -487,6 +493,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="onboarding"></div>
     <h2 style="margin-top:20px">Soak / Health</h2>
     <div id="metrics"></div>
+    <h2 style="margin-top:20px">Frontier Usage</h2>
+    <div id="usage"><div class="muted">No frontier spend yet.</div></div>
     <h2 style="margin-top:20px">Connectivity</h2>
     <div id="conn"></div>
     <h2 style="margin-top:20px">Directives</h2>
@@ -992,6 +1000,31 @@ async function refresh() {
     ]);
     renderBoard(); renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
     if (state.selected) selectTask(state.selected);
+  } catch (e) { /* transient */ }
+}
+
+// --- Frontier usage indicator -----------------------------------------------
+function fmtTokens(n) { return n >= 1e6 ? (n/1e6).toFixed(1)+"M" : n >= 1e3 ? Math.round(n/1e3)+"k" : String(n||0); }
+async function checkUsage() {
+  try {
+    const u = await api("/usage");
+    if (!u) return;
+    const pill = document.getElementById("usagePill");
+    const total = "$" + (u.totalCost || 0).toFixed(2);
+    if (pill) {
+      pill.textContent = "⚡ " + total;
+      pill.style.display = u.taskCount > 0 ? "" : "none";
+      pill.title = "Frontier spend: " + total + " over " + u.taskCount + " task(s)\n"
+        + (u.byModel||[]).map(m => m.label + ": $" + m.cost.toFixed(2) + " (" + m.tasks + ")").join("\n");
+    }
+    const el = document.getElementById("usage");
+    if (el) {
+      if (!u.byModel || !u.byModel.length) { el.innerHTML = '<div class="muted">No frontier spend yet — local Qwen work is free.</div>'; return; }
+      el.innerHTML = '<div class="usage-breakdown">'
+        + '<div class="urow"><span><b>'+total+'</b> total</span><span class="um">'+u.taskCount+' tasks · '+fmtTokens(u.inputTokens)+' in / '+fmtTokens(u.outputTokens)+' out</span></div>'
+        + u.byModel.map(m => '<div class="urow"><span>'+esc(m.label)+'</span><span class="um">$'+m.cost.toFixed(2)+' · '+m.tasks+' task'+(m.tasks===1?'':'s')+'</span></div>').join("")
+        + '</div>';
+    }
   } catch (e) { /* transient */ }
 }
 
@@ -1585,6 +1618,8 @@ if (requireToken()) {
   setInterval(refresh, 5000);
   checkUpdate();
   setInterval(checkUpdate, 5 * 60 * 1000);
+  checkUsage();
+  setInterval(checkUsage, 30 * 1000);
 }
 </script>
 </body>

@@ -274,6 +274,12 @@ export function createDaemonServer() {
         json(res, 200, await checkUpdateStatus());
         return;
       }
+      // GET /usage — frontier model spend aggregated from task outputs
+      if (req.method === "GET" && urlPath === "/usage") {
+        const { getFrontierUsage } = await import("@/lib/usage/frontier-usage");
+        json(res, 200, await getFrontierUsage());
+        return;
+      }
       // GET /update/status — compare the GitHub release feed to the running version (drives the console pill)
       if (req.method === "GET" && urlPath === "/update/status") {
         const { getUpdateStatus } = await import("@/lib/updater/feed-check");

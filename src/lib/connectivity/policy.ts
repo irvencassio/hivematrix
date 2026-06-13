@@ -55,12 +55,12 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
 };
 
 export type ModelRole = "think" | "execute" | "code-critical" | "image" | "cheap-web";
-export type ModelTier = "frontier" | "local-primary" | "local-secondary" | "nanai" | "unavailable";
+export type ModelTier = "frontier-premium" | "frontier" | "local-primary" | "local-secondary" | "nanai" | "unavailable";
 
 const ROLE_TIER_CLOUD_OK: Record<ModelRole, ModelTier> = {
-  think:          "frontier",
-  "code-critical": "frontier",
-  execute:        "local-secondary",
+  think:          "frontier-premium", // planning/review/architecture → Opus
+  "code-critical": "frontier",        // final implementation/UI → Sonnet
+  execute:        "local-secondary",  // bulk/file ops → local Qwen
   "cheap-web":    "local-secondary",
   image:          "nanai",
 };

@@ -50,8 +50,9 @@ test("scenario 1: cloud-ok — frontier and all network capabilities available",
 
   // Work routes to frontier
   const thinkRoute = routeByRole("think", policy);
-  assert.equal(thinkRoute.tier, "frontier");
+  assert.equal(thinkRoute.tier, "frontier-premium");
   assert.equal(thinkRoute.frontierReviewDebt, false);
+  assert.equal(routeByRole("code-critical", policy).tier, "frontier");
 });
 
 // ---------------------------------------------------------------------------

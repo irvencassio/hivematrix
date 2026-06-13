@@ -50,6 +50,9 @@ export function routeByRole(role: ModelRole, policy: ConnectivityPolicy, opts: R
 
   let reason: string;
   switch (tier) {
+    case "frontier-premium":
+      reason = `${role} → frontier-premium / Opus (cloud-ok)`;
+      break;
     case "frontier":
       reason = `${role} → frontier (cloud-ok)`;
       break;
@@ -85,6 +88,6 @@ export function routeMultiple(
 /** Returns true when the given tier is satisfied by the connectivity policy. */
 export function isTierAvailable(tier: ModelTier, policy: ConnectivityPolicy): boolean {
   if (tier === "unavailable") return false;
-  if (tier === "frontier" || tier === "nanai") return policy.canUseCloud();
+  if (tier === "frontier-premium" || tier === "frontier" || tier === "nanai") return policy.canUseCloud();
   return true; // local-primary and local-secondary are always available (if model loaded)
 }

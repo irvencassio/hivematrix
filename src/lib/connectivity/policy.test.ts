@@ -91,9 +91,10 @@ test("modeChange event fires on restoration", (t, done) => {
   p.onUsageWindowRestored("claude");
 });
 
-test("resolveModelTier — cloud-ok maps think to frontier", () => {
+test("resolveModelTier — cloud-ok maps think to frontier-premium (Opus)", () => {
   const p = freshPolicy();
-  assert.equal(p.resolveModelTier("think"), "frontier");
+  assert.equal(p.resolveModelTier("think"), "frontier-premium");
+  assert.equal(p.resolveModelTier("code-critical"), "frontier");
   assert.equal(p.resolveModelTier("execute"), "local-secondary");
   assert.equal(p.resolveModelTier("image"), "nanai");
 });
