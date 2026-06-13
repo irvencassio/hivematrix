@@ -514,6 +514,41 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /approvals/pending — unified queue (checkpoints/content/tool/stuck) for mobile (W6.1)
+      if (req.method === "GET" && urlPath === "/approvals/pending") {
+        const { buildApprovalQueue } = await import("@/lib/approvals/queue");
+        json(res, 200, { approvals: buildApprovalQueue() });
+        return;
+      }
+
+      // POST /approvals/resolve — approve/deny (or stuck retry/skip/abort) from the phone (W6.1)
+      if (req.method === "POST" && urlPath === "/approvals/resolve") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const taskId = typeof body.taskId === "string" ? body.taskId : "";
+        const timestamp = typeof body.timestamp === "string" ? body.timestamp : "";
+        const decision = typeof body.decision === "string" ? body.decision : "";
+        if (!taskId || !timestamp || !decision) { json(res, 400, { error: "taskId, timestamp, decision required" }); return; }
+        if (body.kind === "stuck") {
+          const { resolveStuck } = await import("@/lib/orchestrator/stuck");
+          await resolveStuck(taskId, timestamp, decision, "mobile");
+        } else {
+          const { resolveApproval } = await import("@/lib/orchestrator/approval");
+          await resolveApproval(taskId, timestamp, decision === "approve" || decision === "done" ? "approve" : "denied", "mobile");
+        }
+        json(res, 200, { ok: true });
+        return;
+      }
+
+      // GET /runs/:runId/journal — directive run progress (phase transitions) for mobile (W6.1)
+      const runJournalMatch = urlPath.match(/^\/runs\/([^/]+)\/journal$/);
+      if (req.method === "GET" && runJournalMatch) {
+        const { getRun, getJournal } = await import("@/lib/orchestrator/directive-store");
+        const run = getRun(runJournalMatch[1]);
+        if (!run) { json(res, 404, { error: "Not found" }); return; }
+        json(res, 200, { run, journal: getJournal(runJournalMatch[1]) });
+        return;
+      }
+
       // GET /notify/status — configured notification channels
       if (req.method === "GET" && urlPath === "/notify/status") {
         const { getTelegramConfig } = await import("@/lib/notify/telegram");

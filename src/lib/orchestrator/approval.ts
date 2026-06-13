@@ -300,7 +300,9 @@ export async function resolveApproval(
 export function getPendingApprovals(): ApprovalRequest[] {
   try {
     const files = readdirSync(APPROVALS_DIR);
-    const jsonFiles = files.filter((f) => f.endsWith(".json"));
+    // Stuck requests share this directory (stuck-*.json) but have a different
+    // shape and their own getPendingStuck() reader — exclude them here.
+    const jsonFiles = files.filter((f) => f.endsWith(".json") && !f.startsWith("stuck-"));
     const pending: ApprovalRequest[] = [];
     for (const f of jsonFiles) {
       const decisionFile = f.replace(".json", ".decision");
