@@ -785,8 +785,9 @@ async function wizardAction(id) {
     const r = await api('/onboarding/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (r && r.data && r.data.deepLinks) {
       // Open the TCC panes so the user can grant Accessibility + Screen Recording.
-      window.open(r.data.deepLinks.accessibility);
-      window.open(r.data.deepLinks.screenRecording);
+      // (Opened daemon-side — the webview's window.open is a no-op for x-apple URLs.)
+      await openSystemPane('accessibility');
+      await openSystemPane('screenRecording');
     }
     if (r && r.ok === false) await hmAlert((r.detail || 'failed'), 'Setup: ' + id);
     await refresh();
@@ -804,10 +805,20 @@ function openMessageBeeSetup() {
   setTimeout(() => document.getElementById('mb_phone').focus(), 30);
 }
 function closeMessageBee() { document.getElementById('mbOverlay').classList.remove('open'); }
-function openFullDiskAccess() {
-  // The same x-apple.systempreferences deep-link mechanism the DesktopBee step uses.
-  window.open('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles');
+// Ask the daemon to open a macOS privacy pane — window.open() is a no-op for the
+// x-apple.* URL scheme inside the Tauri/WKWebView, so the native side does it.
+const PANE_LABELS = { fullDiskAccess: 'Full Disk Access', accessibility: 'Accessibility', screenRecording: 'Screen Recording' };
+async function openSystemPane(pane) {
+  try {
+    const r = await api('/system/open-pane', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pane }) });
+    if (!r || r.ok === false) {
+      await hmAlert('Could not open System Settings automatically. Open it manually: System Settings → Privacy & Security → ' + (PANE_LABELS[pane] || pane) + ', then add HiveMatrix.', 'Open System Settings');
+      return false;
+    }
+    return true;
+  } catch (e) { await hmAlert('Could not open System Settings: ' + e, 'Open System Settings'); return false; }
 }
+async function openFullDiskAccess() { await openSystemPane('fullDiskAccess'); }
 // Reflect status into the three step marks. data is the POST result (or null = derive from onboarding).
 function renderMessageBeeState(data) {
   const fdaReadable = data ? !!data.chatDbReadable : !/Full Disk Access/i.test((mbStep() || {}).detail || 'x');

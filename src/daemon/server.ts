@@ -356,6 +356,15 @@ export function createDaemonServer() {
         json(res, 200, await configureMessageBee(body ?? {}));
         return;
       }
+      // POST /system/open-pane — open a macOS privacy pane natively (webview window.open can't)
+      if (req.method === "POST" && urlPath === "/system/open-pane") {
+        const body = await parseBody(req) as { pane?: string };
+        const allowed = ["accessibility", "screenRecording", "fullDiskAccess"];
+        if (!body?.pane || !allowed.includes(body.pane)) { json(res, 400, { ok: false, detail: "invalid pane" }); return; }
+        const { openSystemSettingsPane } = await import("@/lib/onboarding/actions");
+        json(res, 200, openSystemSettingsPane(body.pane as "accessibility" | "screenRecording" | "fullDiskAccess"));
+        return;
+      }
 
       // GET /tunnel — cloudflared status
       if (req.method === "GET" && urlPath === "/tunnel") {

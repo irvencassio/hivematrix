@@ -8,6 +8,7 @@ import {
   probeOpenAiEndpoint,
   installDaemonLaunchAgent,
   installDesktopBeeHelper,
+  openSystemSettingsPane,
   TCC_DEEP_LINKS,
 } from "./actions";
 
@@ -84,3 +85,16 @@ test("TCC deep-links target the right panes", () => {
 });
 
 void INSTALLED;
+
+test("openSystemSettingsPane shells `open` at the right TCC URL", () => {
+  const calls: Array<[string, string[]]> = [];
+  const r = openSystemSettingsPane("fullDiskAccess", (cmd, args) => { calls.push([cmd, args]); });
+  assert.equal(r.ok, true);
+  assert.deepEqual(calls, [["open", [TCC_DEEP_LINKS.fullDiskAccess]]]);
+});
+
+test("openSystemSettingsPane reports a failed `open` instead of throwing", () => {
+  const r = openSystemSettingsPane("accessibility", () => { throw new Error("no open"); });
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /no open/);
+});

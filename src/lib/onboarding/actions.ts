@@ -110,6 +110,26 @@ export function mergeConfig(base: HiveConfig, patch: Record<string, unknown>): H
 export type Exec = (cmd: string, args: string[]) => void;
 const defaultExec: Exec = (cmd, args) => { execFileSync(cmd, args, { stdio: "ignore" }); };
 
+/**
+ * Open a macOS System Settings privacy pane natively. The console runs in a
+ * Tauri/WKWebView where window.open() is a no-op for the x-apple.* URL scheme,
+ * so the daemon (a normal process) shells out to `open` instead. Restricted to
+ * the known TCC panes — never opens an arbitrary URL/file.
+ */
+export function openSystemSettingsPane(
+  pane: keyof typeof TCC_DEEP_LINKS,
+  exec: Exec = defaultExec,
+): ActionResult {
+  const url = TCC_DEEP_LINKS[pane];
+  if (!url) return { ok: false, detail: `unknown pane: ${pane}` };
+  try {
+    exec("open", [url]);
+    return { ok: true, detail: `opened ${pane} pane` };
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /** bootout (ignore failure) → bootstrap → kickstart. Mirrors service-manager. */
 function bootstrapLaunchAgent(label: string, plistPath: string, exec: Exec): void {
   const uid = process.getuid?.() ?? 0;
