@@ -468,6 +468,26 @@ export function createDaemonServer() {
         return;
       }
 
+      // ManagerBee — control-plane heartbeat + diagnostics (W4.2)
+      if (req.method === "GET" && (urlPath === "/managerbee/status" || urlPath === "/api/managerbee/health")) {
+        const { getManagerBeeStatus } = await import("@/lib/managerbee/heartbeat");
+        const report = getManagerBeeStatus();
+        json(res, 200, urlPath === "/api/managerbee/health"
+          ? { bee: "managerbee", ok: report.health === "ok", health: report.health, report }
+          : report);
+        return;
+      }
+
+      // BrainBee — playbook-hygiene status (W4.2)
+      if (req.method === "GET" && (urlPath === "/brainbee/status" || urlPath === "/api/brainbee/health")) {
+        const { getBrainBeeStatus } = await import("@/lib/brainbee/poller");
+        const status = getBrainBeeStatus();
+        json(res, 200, urlPath === "/api/brainbee/health"
+          ? { bee: "brainbee", ok: status.enabled, ...status }
+          : status);
+        return;
+      }
+
       // GET /notify/status — configured notification channels
       if (req.method === "GET" && urlPath === "/notify/status") {
         const { getTelegramConfig } = await import("@/lib/notify/telegram");

@@ -88,6 +88,16 @@ async function main(): Promise<void> {
   const { startNotifyLoop } = await import("@/lib/notify/notify-loop");
   startNotifyLoop();
 
+  // ManagerBee heartbeat: fold scheduler diagnostics + directive/run state +
+  // pending escalations into a control-plane report, cached + broadcast.
+  const { startManagerBeeHeartbeat } = await import("@/lib/managerbee/heartbeat");
+  startManagerBeeHeartbeat();
+
+  // BrainBee poller: curate playbook files (dedup repeated retrospective rules)
+  // on a slow schedule. Self-gates when the brain root is unreachable.
+  const { startBrainBeePoller } = await import("@/lib/brainbee/poller");
+  startBrainBeePoller();
+
   // Frontier-review-debt loop: replay code-critical work that ran locally as a
   // frontier review when cloud-ok returns. Also drain immediately on that edge.
   const { startFrontierDebtLoop, drainFrontierDebt } = await import("@/lib/orchestrator/frontier-debt");

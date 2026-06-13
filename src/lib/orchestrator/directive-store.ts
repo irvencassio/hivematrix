@@ -107,6 +107,11 @@ export function getDirective(id: string): DirectiveRow | null {
   return (getDb().prepare("SELECT * FROM directives WHERE _id = ?").get(id) as DirectiveRow | undefined) ?? null;
 }
 
+/** Every directive, newest first — used by ManagerBee for the control-plane report. */
+export function listDirectives(): DirectiveRow[] {
+  return getDb().prepare("SELECT * FROM directives ORDER BY createdAt DESC").all() as DirectiveRow[];
+}
+
 /** Active directives that are due to run (nextRunAt <= now, or null = run-immediately). */
 export function getDueDirectives(nowIso: string): DirectiveRow[] {
   return getDb()

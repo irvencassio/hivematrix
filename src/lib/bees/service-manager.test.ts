@@ -16,17 +16,28 @@ test("buildLaunchAgentPlist emits a KeepAlive launch agent with the Bee label", 
   assert.match(plist, /dist\/index\.js/);
 });
 
-test("buildLaunchAgentPlist supports BrainBee defaults", () => {
-  const plist = buildLaunchAgentPlist("brainbee", {
+test("buildLaunchAgentPlist supports MessageBee defaults", () => {
+  const plist = buildLaunchAgentPlist("messagebee", {
     autoStart: true,
-    repoPath: "/Users/example/brainbee",
-    plistLabel: "com.brainbee.agent",
-    plistPath: "/Users/example/Library/LaunchAgents/com.brainbee.agent.plist",
+    repoPath: "/Users/example/messagebee",
+    plistLabel: "com.messagebee.agent",
+    plistPath: "/Users/example/Library/LaunchAgents/com.messagebee.agent.plist",
   }, "/opt/homebrew/bin/node");
 
-  assert.match(plist, /com\.brainbee\.agent/);
+  assert.match(plist, /com\.messagebee\.agent/);
   assert.match(plist, /dist\/index\.js/);
-  assert.match(plist, /Users\/example\/brainbee/);
+  assert.match(plist, /Users\/example\/messagebee/);
+});
+
+test("ManagerBee and BrainBee are embedded control-plane workers", () => {
+  // W4.2: both run in-daemon (heartbeat + curation poller), like the other
+  // embedded Bees — no separate launchd repo to ship.
+  const manager = getBeeRuntimeDescriptor("managerbee");
+  const brain = getBeeRuntimeDescriptor("brainbee");
+  assert.equal(manager.runtimeMode, "embedded");
+  assert.equal(manager.manageable, false);
+  assert.equal(brain.runtimeMode, "embedded");
+  assert.equal(brain.manageable, false);
 });
 
 test("buildLaunchAgentPlist includes extra runtime environment variables", () => {

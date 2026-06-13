@@ -84,14 +84,14 @@ const MANAGED_BEE_DESCRIPTORS: BeeServiceDescriptor[] = [
     logDirName: "inventorbee",
   },
   {
+    kind: "managerbee",
+    runtimeMode: "embedded",
+    manageable: false,
+  },
+  {
     kind: "brainbee",
-    runtimeMode: "launchagent",
-    manageable: true,
-    defaultRepoPath: join(homedir(), "brainbee"),
-    defaultPlistLabel: "com.brainbee.agent",
-    healthcheckUrl: "http://127.0.0.1:4013/healthcheck",
-    distEntry: "dist/index.js",
-    logDirName: "brainbee",
+    runtimeMode: "embedded",
+    manageable: false,
   },
   {
     kind: "browserbee",
@@ -500,6 +500,10 @@ export async function listBeeServiceStatuses(): Promise<BeeServiceStatus[]> {
 
 function embeddedHealthRoute(kind: string): string | null {
   switch (kind) {
+    case "managerbee":
+      return "/api/managerbee/health";
+    case "brainbee":
+      return "/api/brainbee/health";
     case "browserbee":
       return "/api/browserbee/health";
     case "computerbee":
