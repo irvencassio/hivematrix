@@ -691,6 +691,39 @@ export function createDaemonServer() {
       }
 
       // POST /tasks
+      // POST /content/brief — fan a content brief into channel renditions,
+      // stage them as task artifacts, and raise one approve-by-text gate (W5.2).
+      if (req.method === "POST" && urlPath === "/content/brief") {
+        const { Task, generateId } = await import("@/lib/db");
+        const { runContentPipeline } = await import("@/lib/content/pipeline");
+        const { CONTENT_CHANNELS, isContentChannel } = await import("@/lib/content/channels");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const topic = typeof body.topic === "string" ? body.topic.trim() : "";
+        if (!topic) { json(res, 400, { error: "topic is required" }); return; }
+        const brief = {
+          topic,
+          audience: typeof body.audience === "string" ? body.audience : undefined,
+          goal: typeof body.goal === "string" ? body.goal : undefined,
+          notes: typeof body.notes === "string" ? body.notes : undefined,
+        };
+        const channels = Array.isArray(body.channels)
+          ? body.channels.filter((c): c is string => typeof c === "string").filter(isContentChannel)
+          : CONTENT_CHANNELS;
+        const task = await Task.create({
+          _id: generateId(),
+          title: `Content: ${topic.slice(0, 60)}`,
+          description: `Content brief → renditions for ${channels.join(", ")}`,
+          profile: "marketing",
+          source: "content",
+          status: "review",
+          executor: "agent",
+        });
+        const result = await runContentPipeline(task._id, brief, channels.length ? channels : CONTENT_CHANNELS);
+        broadcast("tasks:created", { taskId: task._id });
+        json(res, 201, result);
+        return;
+      }
+
       if (req.method === "POST" && urlPath === "/tasks") {
         const { Task, generateId } = await import("@/lib/db");
         const { deriveTaskTitle } = await import("@/lib/tasks/derive-title");
