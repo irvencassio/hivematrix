@@ -17,12 +17,14 @@ const {
   getJournal,
   getActiveRuns,
   getRun,
+  deleteDirective,
 } = await import("./directive-store");
 const {
   directiveTick,
   _setDirectivePlannerForTests,
   _setDirectiveReviewerForTests,
   _setDirectiveRetrospectiveForTests,
+  _setDirectiveCheckpointResolverForTests,
 } = await import("./directive-engine");
 
 // Fresh DB for this file.
@@ -42,12 +44,14 @@ test.beforeEach(() => {
   _setDirectivePlannerForTests(null);
   _setDirectiveReviewerForTests(null);
   _setDirectiveRetrospectiveForTests(null);
+  _setDirectiveCheckpointResolverForTests(null);
 });
 
 test.afterEach(() => {
   _setDirectivePlannerForTests(null);
   _setDirectiveReviewerForTests(null);
   _setDirectiveRetrospectiveForTests(null);
+  _setDirectiveCheckpointResolverForTests(null);
 });
 
 function mkDirective(extra: Record<string, unknown> = {}) {
@@ -643,4 +647,125 @@ test("production retrospective phase task records learning before yielding", asy
     readFileSync(join(brainRoot, "hive", "playbooks", "roles", "coo.md"), "utf-8"),
     /Capture production retrospective learnings/
   );
+});
+
+type Decision = "approve" | "reject" | "pending";
+
+function execTasksFor(directiveId: string, runId: string) {
+  return getRunTasks(directiveId, runId).then((tasks) =>
+    tasks.filter((t) => !((t.output ?? {}) as Record<string, unknown>).directivePhase)
+  );
+}
+
+test("plan checkpoint holds the run before execution, then approves", async () => {
+  useLegacyDeterministicPhases();
+  const d = mkDirective({ approvalPolicy: { checkpoint: "plan" } });
+  addCriterion(d._id, "criterion A");
+
+  let decision: Decision = "pending";
+  _setDirectiveCheckpointResolverForTests(async () => decision);
+
+  await directiveTick(new Date("2026-06-11T12:00:00Z")); // open run (plan)
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-06-11T12:00:01Z")); // plan tick — held pending
+
+  assert.equal(getRun(run._id)!.phase, "plan", "run holds in plan while checkpoint pending");
+  assert.equal((await execTasksFor(d._id, run._id)).length, 0, "no execution tasks before approval");
+  assert.ok(getJournal(run._id).some((j) => j.step === "checkpoint_pending" && j.payload.includes('"gate":"plan"')));
+
+  decision = "approve";
+  await directiveTick(new Date("2026-06-11T12:00:02Z")); // plan tick — approved
+  assert.equal(getRun(run._id)!.phase, "execute");
+  assert.equal((await execTasksFor(d._id, run._id)).length, 1);
+  assert.ok(getJournal(run._id).some((j) => j.step === "checkpoint_approved" && j.payload.includes('"gate":"plan"')));
+});
+
+test("plan checkpoint rejection fails the run before any execution task", async () => {
+  useLegacyDeterministicPhases();
+  const d = mkDirective({ approvalPolicy: { checkpoint: "plan" } });
+  addCriterion(d._id, "criterion A");
+  _setDirectiveCheckpointResolverForTests(async () => "reject");
+
+  await directiveTick(new Date("2026-06-11T12:10:00Z")); // open run (plan)
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-06-11T12:10:01Z")); // plan tick — rejected
+
+  assert.equal(getRun(run._id)!.phase, "failed");
+  assert.equal(getRun(run._id)!.failReason, "checkpoint_rejected");
+  assert.equal((await execTasksFor(d._id, run._id)).length, 0, "no execution tasks spawned on rejection");
+  assert.ok(getJournal(run._id).some((j) => j.step === "checkpoint_rejected"));
+  // A failed run leaves the directive due; retire it so it does not reopen runs
+  // that would hit the real approval store once the resolver resets.
+  deleteDirective(d._id);
+});
+
+test("checkpoint level none runs autonomously with no checkpoint journal", async () => {
+  useLegacyDeterministicPhases();
+  const d = mkDirective(); // approvalPolicy defaults to {} → none
+  addCriterion(d._id, "criterion A");
+  // A resolver that would reject if it were ever consulted for this run.
+  _setDirectiveCheckpointResolverForTests(async () => "reject");
+
+  await directiveTick(new Date("2026-06-11T12:20:00Z"));
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-06-11T12:20:01Z"));
+
+  assert.equal(getRun(run._id)!.phase, "execute", "none-level run is fully autonomous");
+  assert.ok(
+    !getJournal(run._id).some((j) => j.step.startsWith("checkpoint_")),
+    "no checkpoint gating for a none-level run"
+  );
+});
+
+test("full checkpoint gates completion: criteria proven only after approval", async () => {
+  useLegacyDeterministicPhases();
+  const d = mkDirective({ approvalPolicy: { checkpoint: "full" } });
+  const c = addCriterion(d._id, "criterion A");
+
+  const gates: Record<string, Decision> = { plan: "approve", completion: "pending" };
+  _setDirectiveCheckpointResolverForTests(async ({ gate }) => gates[gate]);
+
+  await directiveTick(new Date("2026-06-11T13:00:00Z")); // open
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-06-11T13:00:01Z")); // plan (approve) → execute
+  assert.equal(getRun(run._id)!.phase, "execute");
+
+  await completeRunTasks(d._id, run._id, "review");
+  await directiveTick(new Date("2026-06-11T13:00:02Z")); // execute → verify
+  assert.equal(getRun(run._id)!.phase, "verify");
+
+  await directiveTick(new Date("2026-06-11T13:00:03Z")); // verify — completion held
+  assert.equal(getRun(run._id)!.phase, "verify", "held in verify pending completion approval");
+  assert.equal(getCriteria(d._id).find((x) => x._id === c._id)!.proven, 0, "criterion unproven while held");
+  assert.ok(
+    getJournal(run._id).some((j) => j.step === "checkpoint_pending" && j.payload.includes('"gate":"completion"'))
+  );
+
+  gates.completion = "approve";
+  await directiveTick(new Date("2026-06-11T13:00:04Z")); // verify → reflect
+  assert.notEqual(getRun(run._id)!.phase, "verify");
+  assert.equal(getCriteria(d._id).find((x) => x._id === c._id)!.proven, 1, "criterion proven after approval");
+});
+
+test("full checkpoint completion rejection fails the run with criteria unproven", async () => {
+  useLegacyDeterministicPhases();
+  const d = mkDirective({ approvalPolicy: { checkpoint: "full" } });
+  const c = addCriterion(d._id, "criterion A");
+  const gates: Record<string, Decision> = { plan: "approve", completion: "reject" };
+  _setDirectiveCheckpointResolverForTests(async ({ gate }) => gates[gate]);
+
+  await directiveTick(new Date("2026-06-11T14:00:00Z"));
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-06-11T14:00:01Z")); // plan → execute
+  await completeRunTasks(d._id, run._id, "review");
+  await directiveTick(new Date("2026-06-11T14:00:02Z")); // execute → verify
+  await directiveTick(new Date("2026-06-11T14:00:03Z")); // verify — completion rejected
+
+  assert.equal(getRun(run._id)!.phase, "failed");
+  assert.equal(getRun(run._id)!.failReason, "checkpoint_rejected");
+  assert.equal(getCriteria(d._id).find((x) => x._id === c._id)!.proven, 0, "rejected outcome leaves criteria unproven");
+  assert.ok(
+    getJournal(run._id).some((j) => j.step === "checkpoint_rejected" && j.payload.includes('"gate":"completion"'))
+  );
+  deleteDirective(d._id);
 });

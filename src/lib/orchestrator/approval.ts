@@ -319,6 +319,45 @@ export function getPendingApprovals(): ApprovalRequest[] {
 }
 
 /**
+ * Directive checkpoint approvals.
+ *
+ * A directive run checkpoint (W4.1) reuses this same file-based approval store
+ * so the notify plane (W1.3) escalates it like any other approval and a
+ * tap/text resolves it through resolveApproval(). The request is keyed by
+ * `${runId}-checkpoint-${gate}` so it is created exactly once per (run, gate)
+ * and the decision survives daemon restarts.
+ */
+export function requestCheckpointApproval(opts: { id: string; gate: string; goal: string; summary: string }): void {
+  const requestFile = join(APPROVALS_DIR, `${opts.id}-checkpoint-${opts.gate}.json`);
+  const decisionFile = join(APPROVALS_DIR, `${opts.id}-checkpoint-${opts.gate}.decision`);
+  if (existsSync(requestFile) || existsSync(decisionFile)) return; // already requested / resolved
+  const request: ApprovalRequest = {
+    taskId: opts.id,
+    timestamp: `checkpoint-${opts.gate}`,
+    tool: "Directive checkpoint",
+    command: opts.goal,
+    context: opts.summary,
+  };
+  try {
+    writeFileSync(requestFile, JSON.stringify(request), { flag: "wx" });
+  } catch {
+    // Another tick already wrote it — first-write-wins.
+  }
+}
+
+/** Read a resolved checkpoint decision, or null if still pending. */
+export function readCheckpointDecision(id: string, gate: string): "approve" | "denied" | null {
+  const decisionFile = join(APPROVALS_DIR, `${id}-checkpoint-${gate}.decision`);
+  if (!existsSync(decisionFile)) return null;
+  try {
+    const value = readFileSync(decisionFile, "utf-8").trim();
+    return value === "approve" || value === "done" ? "approve" : "denied";
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Clean up hook files for a completed/failed task.
  */
 export function cleanupHookFiles(taskId: string) {

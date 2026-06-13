@@ -9,9 +9,24 @@ import {
   parseDirectivePlanOutput,
   parseDirectiveReviewOutput,
   parseDirectiveRetrospectiveOutput,
+  parseDirectiveCheckpointPolicy,
   normalizeDirectivePlan,
   writeDirectiveRetrospectiveLearning,
 } from "./directive-autonomy";
+
+test("parseDirectiveCheckpointPolicy reads terse, nested, default, and bad shapes", () => {
+  assert.equal(parseDirectiveCheckpointPolicy(JSON.stringify({ checkpoint: "plan" })).level, "plan");
+  assert.equal(parseDirectiveCheckpointPolicy(JSON.stringify({ checkpoint: "full" })).level, "full");
+  assert.equal(parseDirectiveCheckpointPolicy(JSON.stringify({ checkpoint: { level: "plan" } })).level, "plan");
+  // default / empty / inert config → none
+  assert.equal(parseDirectiveCheckpointPolicy(JSON.stringify({})).level, "none");
+  assert.equal(parseDirectiveCheckpointPolicy("{}").level, "none");
+  assert.equal(parseDirectiveCheckpointPolicy(null).level, "none");
+  assert.equal(parseDirectiveCheckpointPolicy(undefined).level, "none");
+  // unknown / malformed → none (fails open to "no gate")
+  assert.equal(parseDirectiveCheckpointPolicy(JSON.stringify({ checkpoint: "sometimes" })).level, "none");
+  assert.equal(parseDirectiveCheckpointPolicy("not json").level, "none");
+});
 
 const CRITERIA = [
   { _id: "crit_a", description: "Alpha criterion" },

@@ -32,6 +32,7 @@ import {
   updateDirective,
   journal,
   getCriteria,
+  getJournal,
   markCriterionProven,
   allCriteriaProven,
 } from "./directive-store";
@@ -43,10 +44,13 @@ import {
   parseDirectivePlanOutput,
   parseDirectiveRetrospectiveOutput,
   parseDirectiveReviewOutput,
+  parseDirectiveCheckpointPolicy,
+  type DirectiveCheckpointLevel,
   type DirectiveCorrectiveTask,
   type DirectivePlan,
   writeDirectiveRetrospectiveLearning,
 } from "./directive-autonomy";
+import { requestCheckpointApproval, readCheckpointDecision } from "./approval";
 import { configuredBrainRootDir, defaultBrainRootDir } from "@/lib/brain/settings";
 import { deriveOutput } from "./derive-output";
 import type { Turn } from "./turn-types";
@@ -96,6 +100,90 @@ export function _setDirectiveReviewerForTests(reviewer: DirectiveReviewer | null
 
 export function _setDirectiveRetrospectiveForTests(retrospective: DirectiveRetrospectiveWriter | null): void {
   directiveRetrospectiveForTests = retrospective;
+}
+
+type CheckpointGate = "plan" | "completion";
+type CheckpointDecision = "approve" | "reject" | "pending";
+
+type DirectiveCheckpointResolver = (input: {
+  directive: DirectiveRow;
+  run: RunRow;
+  gate: CheckpointGate;
+  summary: string;
+}) => Promise<CheckpointDecision>;
+
+let directiveCheckpointResolverForTests: DirectiveCheckpointResolver | null = null;
+
+export function _setDirectiveCheckpointResolverForTests(resolver: DirectiveCheckpointResolver | null): void {
+  directiveCheckpointResolverForTests = resolver;
+}
+
+function checkpointLevel(directive: DirectiveRow): DirectiveCheckpointLevel {
+  return parseDirectiveCheckpointPolicy(directive.approvalPolicy).level;
+}
+
+/** Journal a checkpoint step at most once per (run, gate) so a held run stays quiet. */
+function journalCheckpointOnce(run: RunRow, directive: DirectiveRow, step: string, gate: CheckpointGate): void {
+  const already = getJournal(run._id).some(
+    (j) => j.step === step && j.payload.includes(`"gate":"${gate}"`)
+  );
+  if (already) return;
+  journal(run._id, directive._id, step, { gate });
+}
+
+/**
+ * Resolve a checkpoint to approve/reject/pending. Tests inject a resolver; in
+ * production this reuses the file-based approval store (escalated by the W1.3
+ * notify plane) — a pending checkpoint (re)writes the request and waits.
+ */
+async function resolveCheckpoint(input: {
+  directive: DirectiveRow;
+  run: RunRow;
+  gate: CheckpointGate;
+  summary: string;
+}): Promise<CheckpointDecision> {
+  if (directiveCheckpointResolverForTests) return directiveCheckpointResolverForTests(input);
+
+  const decision = readCheckpointDecision(input.run._id, input.gate);
+  if (decision === "approve") return "approve";
+  if (decision === "denied") return "reject";
+  requestCheckpointApproval({
+    id: input.run._id,
+    gate: input.gate,
+    goal: input.directive.goal,
+    summary: input.summary,
+  });
+  return "pending";
+}
+
+/**
+ * Apply a checkpoint gate. Returns "proceed" when the run may continue (gate
+ * not required, or approved), "hold" when it must wait, or "reject" when the
+ * founder denied it. The caller turns "reject" into a failed run.
+ */
+async function applyCheckpoint(
+  directive: DirectiveRow,
+  run: RunRow,
+  gate: CheckpointGate,
+  summary: string
+): Promise<"proceed" | "hold" | "reject"> {
+  const level = checkpointLevel(directive);
+  const required = gate === "plan" ? level === "plan" || level === "full" : level === "full";
+  if (!required) return "proceed";
+
+  const decision = await resolveCheckpoint({ directive, run, gate, summary });
+  if (decision === "approve") {
+    journalCheckpointOnce(run, directive, "checkpoint_approved", gate);
+    return "proceed";
+  }
+  if (decision === "reject") return "reject";
+  journalCheckpointOnce(run, directive, "checkpoint_pending", gate);
+  return "hold";
+}
+
+function failRunRejected(run: RunRow, directive: DirectiveRow, gate: CheckpointGate, nowIso: string): void {
+  setRunPhase(run._id, "failed", { failedAt: nowIso, failReason: "checkpoint_rejected" });
+  journal(run._id, directive._id, "checkpoint_rejected", { gate });
 }
 
 function isDirectivePhaseTask(task: Pick<TaskDoc, "output">): boolean {
@@ -362,6 +450,14 @@ async function markPhaseTaskConsumed(task: DirectiveRunTask, nowIso: string): Pr
 // Phase handlers
 // ---------------------------------------------------------------------------
 
+function summarizePlan(plan: DirectivePlan): string {
+  return plan.tasks.map((t) => t.title).join("; ").slice(0, 200) || "(empty plan)";
+}
+
+function completionSummary(directive: DirectiveRow): string {
+  return `Completion of: ${directive.goal.slice(0, 160)}`;
+}
+
 async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
   const criteria = getCriteria(directive._id).filter((c) => c.proven === 0);
   let useProductionPlannerTask = true;
@@ -376,6 +472,12 @@ async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
     if (plannerText) {
       const parsed = parseDirectivePlanOutput(plannerText, criteria.map((c) => ({ _id: c._id, description: c.description })));
       if (parsed.plan) {
+        const gate = await applyCheckpoint(directive, run, "plan", summarizePlan(parsed.plan));
+        if (gate === "hold") return;
+        if (gate === "reject") {
+          failRunRejected(run, directive, "plan", new Date().toISOString());
+          return;
+        }
         await createAutonomyPlanTasks(directive, run, parsed.plan);
         return;
       }
@@ -405,7 +507,15 @@ async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
       if (plannerText) {
         const parsed = parseDirectivePlanOutput(plannerText, criteria.map((c) => ({ _id: c._id, description: c.description })));
         if (parsed.plan) {
-          await markPhaseTaskConsumed(plannerTask, new Date().toISOString());
+          const gate = await applyCheckpoint(directive, run, "plan", summarizePlan(parsed.plan));
+          if (gate === "hold") return; // leave the planner task unconsumed; re-gate next tick
+          const nowIso = new Date().toISOString();
+          if (gate === "reject") {
+            await markPhaseTaskConsumed(plannerTask, nowIso);
+            failRunRejected(run, directive, "plan", nowIso);
+            return;
+          }
+          await markPhaseTaskConsumed(plannerTask, nowIso);
           await createAutonomyPlanTasks(directive, run, parsed.plan);
           return;
         }
@@ -432,6 +542,14 @@ async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
   const targets = criteria.length > 0
     ? criteria.slice(0, MAX_TASKS_PER_RUN).map((c) => c.description)
     : [directive.goal];
+
+  const deterministicSummary = `Plan ${targets.length} task(s): ${targets.map((t) => t.slice(0, 40)).join("; ")}`;
+  const planGate = await applyCheckpoint(directive, run, "plan", deterministicSummary);
+  if (planGate === "hold") return;
+  if (planGate === "reject") {
+    failRunRejected(run, directive, "plan", new Date().toISOString());
+    return;
+  }
 
   // Route directive work by role through the connectivity policy, then resolve
   // the tier to a concrete model ID. Directive tasks are "execute" role by
@@ -652,6 +770,13 @@ async function verifyRun(directive: DirectiveRow, run: RunRow, nowIso: string): 
           return;
         }
 
+        const completion = await applyCheckpoint(directive, run, "completion", completionSummary(directive));
+        if (completion === "hold") return;
+        if (completion === "reject") {
+          failRunRejected(run, directive, "completion", nowIso);
+          return;
+        }
+
         const proven: string[] = [];
         if (parsed.review.status === "pass" && succeeded.size > 0) {
           for (const c of criteria) {
@@ -697,8 +822,8 @@ async function verifyRun(directive: DirectiveRow, run: RunRow, nowIso: string): 
       if (reviewerText) {
         const parsed = parseDirectiveReviewOutput(reviewerText, criteria.map((c) => ({ _id: c._id, description: c.description })));
         if (parsed.review) {
-          await markPhaseTaskConsumed(reviewerTask, nowIso);
           if (parsed.review.status !== "pass" && parsed.review.correctiveTasks.length > 0) {
+            await markPhaseTaskConsumed(reviewerTask, nowIso);
             const correctiveTaskIds = await createCorrectiveTasks(directive, run, parsed.review.correctiveTasks);
             setRunPhase(run._id, "execute");
             journal(run._id, directive._id, "reviewed", {
@@ -710,6 +835,15 @@ async function verifyRun(directive: DirectiveRow, run: RunRow, nowIso: string): 
             });
             return;
           }
+
+          const completion = await applyCheckpoint(directive, run, "completion", completionSummary(directive));
+          if (completion === "hold") return; // leave the reviewer task unconsumed; re-gate next tick
+          if (completion === "reject") {
+            await markPhaseTaskConsumed(reviewerTask, nowIso);
+            failRunRejected(run, directive, "completion", nowIso);
+            return;
+          }
+          await markPhaseTaskConsumed(reviewerTask, nowIso);
 
           const proven: string[] = [];
           if (parsed.review.status === "pass" && succeeded.size > 0) {
@@ -746,6 +880,13 @@ async function verifyRun(directive: DirectiveRow, run: RunRow, nowIso: string): 
         taskId: reviewerTask._id.toString(),
       });
     }
+  }
+
+  const completion = await applyCheckpoint(directive, run, "completion", completionSummary(directive));
+  if (completion === "hold") return;
+  if (completion === "reject") {
+    failRunRejected(run, directive, "completion", nowIso);
+    return;
   }
 
   // v1 prover: a criterion is proven when the run produced ≥1 successful task.

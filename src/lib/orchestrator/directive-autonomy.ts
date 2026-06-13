@@ -78,6 +78,41 @@ export interface DirectiveRetrospectiveLearningResult {
   accessLedgerFile: string | null;
 }
 
+export type DirectiveCheckpointLevel = "none" | "plan" | "full";
+
+export interface DirectiveCheckpointPolicy {
+  level: DirectiveCheckpointLevel;
+}
+
+const CHECKPOINT_LEVELS: ReadonlySet<string> = new Set(["none", "plan", "full"]);
+
+/**
+ * Parse the directive's `approvalPolicy` JSON column into a checkpoint policy.
+ *
+ * Accepts the terse `{ "checkpoint": "plan" }` and the nested
+ * `{ "checkpoint": { "level": "plan" } }` shapes. Anything missing, malformed,
+ * or unrecognized resolves to `none` (fully autonomous) — the policy fails open
+ * to "no gate" so a bad config never bricks a directive, while the engine fails
+ * closed on an *active* checkpoint that cannot be resolved.
+ */
+export function parseDirectiveCheckpointPolicy(approvalPolicyJson: string | null | undefined): DirectiveCheckpointPolicy {
+  if (!approvalPolicyJson) return { level: "none" };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(approvalPolicyJson);
+  } catch {
+    return { level: "none" };
+  }
+  if (!parsed || typeof parsed !== "object") return { level: "none" };
+  const raw = (parsed as Record<string, unknown>).checkpoint;
+  let level: unknown = raw;
+  if (raw && typeof raw === "object") level = (raw as Record<string, unknown>).level;
+  if (typeof level === "string" && CHECKPOINT_LEVELS.has(level)) {
+    return { level: level as DirectiveCheckpointLevel };
+  }
+  return { level: "none" };
+}
+
 export function extractDirectiveJson<T = unknown>(text: string): { parsed: T | null; raw: string | null; error: string | null } {
   let fenceError: string | null = null;
   const fenceMatch = text.match(/```json\s*\n?([\s\S]*?)```/);
