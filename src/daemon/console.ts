@@ -87,6 +87,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     letter-spacing: .5px; margin: 2px 0 3px; }
   .gear { cursor: pointer; color: var(--muted); font-size: 16px; background: none; border: 0; }
   .gear:hover { color: var(--accent); }
+  .update-pill { cursor: pointer; background: var(--accent); color: var(--create-btn-text, #1a1a1a);
+    border-radius: 999px; padding: 3px 11px; font-size: 11px; font-weight: 700; white-space: nowrap;
+    animation: updatePulse 2s ease-in-out infinite; }
+  .update-pill:hover { filter: brightness(1.08); }
+  @keyframes updatePulse { 0%,100% { opacity: 1; } 50% { opacity: .72; } }
   .overlay { position: fixed; inset: 0; background: var(--overlay-bg); display: none;
     align-items: center; justify-content: center; z-index: 50; }
   .overlay.open { display: flex; }
@@ -266,6 +271,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <option value="offline">offline</option>
     </select>
     <span class="pill" id="modePill">…</span>
+    <span class="update-pill" id="updatePill" style="display:none" onclick="applyUpdate()" title="Click to install and restart">⬆ Update</span>
     <button class="gear" title="Settings" onclick="openSettings()">⚙</button>
   </span>
 </header>
@@ -598,26 +604,49 @@ function renderTranscript(logs) {
   }).join("") + '</div>';
 }
 
+// Inline attachment picker shared by the retry-steer and reply forms. ctx scopes
+// the element ids + state bucket ('retry' | 'reply').
+function attachPickerHtml(ctx) {
+  return '<div class="attach-row" style="margin-top:6px">'
+    + '<input type="file" id="'+ctx+'AttachInput" multiple style="display:none" onchange="onCtxAttach(\''+ctx+'\',this)">'
+    + '<button type="button" class="cancel" onclick="document.getElementById(\''+ctx+'AttachInput\').click()">⊕ Attach files</button>'
+    + '<span class="muted" id="'+ctx+'AttachHint" style="font-size:11px">No files</span></div>'
+    + '<div class="attach-chips" id="'+ctx+'AttachChips"></div>';
+}
+
 function taskActionsHtml(t) {
   const b = [];
   const running = ["backlog","assigned","in_progress"].includes(t.status);
+  const retryable = ["failed","review","cancelled"].includes(t.status);
   if (running) b.push('<button onclick="taskAction(\''+t._id+'\',\'cancel\')">■ Cancel</button>');
-  if (["failed","review","cancelled"].includes(t.status)) b.push('<button onclick="taskAction(\''+t._id+'\',\'retry\')">↻ Retry</button>');
+  if (retryable) b.push('<button class="reply-toggle" id="retryToggle_'+t._id+'" onclick="toggleRetry(\''+t._id+'\')">↻ Retry</button>');
   if (t.pendingQuestion) b.push('<button class="reply-toggle" id="replyToggle_'+t._id+'" onclick="toggleReply(\''+t._id+'\')">↩ Reply</button>');
   if (!running) b.push('<button onclick="taskAction(\''+t._id+'\',\'archive\')">⌫ Archive</button>');
   b.push('<button class="danger" onclick="deleteTask(\''+t._id+'\')">🗑 Delete</button>');
   let html = '<div class="actions">'+b.join("")+'</div>';
+  // Retry-with-steer: optional guidance text + attachments fold out under Retry.
+  if (retryable) {
+    html += '<div id="retrySection_'+t._id+'" class="reply-section">'
+      + '<textarea id="retryText" class="reply-input" placeholder="Optional: add guidance to steer the rerun…" rows="2"></textarea>'
+      + attachPickerHtml('retry')
+      + '<div class="reply-row" style="margin-top:6px"><button onclick="submitRetry(\''+t._id+'\')">↻ Retry'+(t.status==='cancelled'?'':' with guidance')+'</button></div></div>';
+  }
+  // Reply to a needs_input question: text (auto-opens) + attachments.
   const isOpen = t.reviewState === "needs_input";
   const q = t.pendingQuestion ? '<div class="reply-question">'+esc(t.pendingQuestion)+'</div>' : '';
   html += '<div id="replySection_'+t._id+'" class="reply-section'+(isOpen?' open':'')+'">'
     + q
-    + '<div class="reply-row"><textarea id="replyText" class="reply-input" placeholder="Type your reply…" rows="2"></textarea>'
-    + '<button onclick="replyTask(\''+t._id+'\')">↩ Send Reply</button></div></div>';
+    + '<textarea id="replyText" class="reply-input" placeholder="Type your reply…" rows="2"></textarea>'
+    + attachPickerHtml('reply')
+    + '<div class="reply-row" style="margin-top:6px"><button onclick="replyTask(\''+t._id+'\')">↩ Send Reply</button></div></div>';
   return html;
 }
 
 async function selectTask(id) {
   state.selected = id;
+  // Switching tasks clears any half-composed retry/reply attachments; staying on
+  // the same task across a live refresh keeps them.
+  if (_ctxAttachTask !== id) { _ctxAttach = { retry: [], reply: [] }; _ctxAttachTask = id; }
   renderBoard();
   const t = await api("/tasks/"+id);
   if (!t || !t._id) { state.selected = null; return; }
@@ -642,6 +671,8 @@ async function selectTask(id) {
     + '</div>';
   // Keep the transcript scrolled to the latest line while running.
   const tr = el.querySelector(".transcript"); if (tr && live) tr.scrollTop = tr.scrollHeight;
+  // Restore attachment chips after the innerHTML rebuild.
+  renderCtxChips("retry"); renderCtxChips("reply");
 }
 
 async function taskAction(id, action) {
@@ -664,13 +695,56 @@ async function cardArchive(id) {
   refresh();
 }
 
+// Per-context attachment state for the retry-steer + reply forms. Reset when a
+// different task is selected (see selectTask), preserved across same-task
+// re-renders so a live refresh doesn't drop files mid-compose.
+let _ctxAttach = { retry: [], reply: [] };
+let _ctxAttachTask = null;
+function onCtxAttach(ctx, input) {
+  for (const f of input.files) { const p = f.path || f.name; if (p && !_ctxAttach[ctx].includes(p)) _ctxAttach[ctx].push(p); }
+  input.value = "";
+  renderCtxChips(ctx);
+}
+function removeCtxAttach(ctx, idx) { _ctxAttach[ctx].splice(idx, 1); renderCtxChips(ctx); }
+function renderCtxChips(ctx) {
+  const chips = document.getElementById(ctx+"AttachChips");
+  const hint = document.getElementById(ctx+"AttachHint");
+  if (!chips) return;
+  if (hint) hint.textContent = _ctxAttach[ctx].length ? "" : "No files";
+  chips.innerHTML = _ctxAttach[ctx].map((p, i) => {
+    const name = p.split("/").pop() || p;
+    return '<div class="attach-chip" title="'+esc(p)+'"><span>'+esc(name)+'</span><span class="rm" onclick="removeCtxAttach(\''+ctx+'\','+i+')">×</span></div>';
+  }).join("");
+}
+
+function toggleRetry(id) {
+  const sec = document.getElementById("retrySection_"+id);
+  const btn = document.getElementById("retryToggle_"+id);
+  if (!sec) return;
+  const opening = !sec.classList.contains("open");
+  sec.classList.toggle("open", opening);
+  if (btn) btn.classList.toggle("active", opening);
+  if (opening) { const ta = document.getElementById("retryText"); if (ta) ta.focus(); }
+}
+async function submitRetry(id) {
+  const ta = document.getElementById("retryText");
+  const steer = ta ? ta.value.trim() : "";
+  const attachments = _ctxAttach.retry.slice();
+  await api("/tasks/"+id+"/retry", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ steer, attachments }) });
+  _ctxAttach.retry = [];
+  refresh();
+}
+
 async function replyTask(id) {
   const el = document.getElementById("replyText");
-  const text = el ? el.value.trim() : "";
-  if (!text) { el && el.focus(); return; }
+  let text = el ? el.value.trim() : "";
+  const attachments = _ctxAttach.reply.slice();
+  if (!text && !attachments.length) { el && el.focus(); return; }
+  if (attachments.length) text += (text ? "\n\n" : "") + "Attached files:\n" + attachments.map(p => "- " + p).join("\n");
   el.disabled = true;
   const r = await api("/tasks/"+id+"/reply", { method: "POST", body: JSON.stringify({ text }) });
-  if (r && r.ok) { refresh(); selectTask(id); }
+  if (r && r.ok) { _ctxAttach.reply = []; refresh(); selectTask(id); }
   else { hmAlert(r?.error || "Failed to send reply"); el.disabled = false; }
 }
 
@@ -864,6 +938,32 @@ async function refresh() {
     renderBoard(); renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
     if (state.selected) selectTask(state.selected);
   } catch (e) { /* transient */ }
+}
+
+// --- Update indicator -------------------------------------------------------
+async function checkUpdate() {
+  try {
+    const s = await api("/update/status");
+    const pill = document.getElementById("updatePill");
+    if (!pill) return;
+    if (s && s.updateAvailable && s.latest) {
+      pill.textContent = "⬆ Update " + s.latest;
+      pill.dataset.latest = s.latest;
+      pill.style.display = "";
+    } else {
+      pill.style.display = "none";
+    }
+  } catch (e) { /* offline / transient */ }
+}
+async function applyUpdate() {
+  const pill = document.getElementById("updatePill");
+  const latest = (pill && pill.dataset.latest) || "the latest version";
+  if (!await hmConfirm("Install HiveMatrix " + latest + " now? The app will restart to apply it.", { okLabel: "Install & restart" })) return;
+  try {
+    const r = await api("/update/apply", { method: "POST" });
+    if (r && r.ok === false) { await hmAlert(r.detail || "Could not start the update.", "Update"); return; }
+    if (pill) { pill.textContent = "⏳ Updating…"; pill.style.cursor = "default"; }
+  } catch (e) { await hmAlert("Could not start the update: " + e, "Update"); }
 }
 
 document.getElementById("modeSel").addEventListener("change", async (e) => {
@@ -1398,6 +1498,8 @@ if (requireToken()) {
   refresh();
   connectSSE();
   setInterval(refresh, 5000);
+  checkUpdate();
+  setInterval(checkUpdate, 5 * 60 * 1000);
 }
 </script>
 </body>

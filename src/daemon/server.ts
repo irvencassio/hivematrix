@@ -264,6 +264,18 @@ export function createDaemonServer() {
         json(res, 200, await checkUpdateStatus());
         return;
       }
+      // GET /update/status — compare the GitHub release feed to the running version (drives the console pill)
+      if (req.method === "GET" && urlPath === "/update/status") {
+        const { getUpdateStatus } = await import("@/lib/updater/feed-check");
+        json(res, 200, await getUpdateStatus());
+        return;
+      }
+      // POST /update/apply — relaunch the desktop app so its updater installs the update
+      if (req.method === "POST" && urlPath === "/update/apply") {
+        const { applyUpdateViaRelaunch } = await import("@/lib/updater/feed-check");
+        json(res, 200, applyUpdateViaRelaunch());
+        return;
+      }
 
       // GET /onboarding — first-run / readiness checklist
       if (req.method === "GET" && urlPath === "/onboarding") {
@@ -924,9 +936,24 @@ export function createDaemonServer() {
         const { Task } = await import("@/lib/db");
         const [, tid, action] = taskActionMatch;
         if (action === "retry") {
-          const t = await Task.findByIdAndUpdate(tid, {
+          // Optional steering: append operator guidance + attachment paths to the
+          // task's instructions so the rerun is steered, not a blind repeat.
+          const body = await parseBody(req) as Record<string, unknown>;
+          const steer = String(body.steer ?? "").trim();
+          const attachments = Array.isArray(body.attachments)
+            ? (body.attachments as unknown[]).map(String).map((s) => s.trim()).filter(Boolean) : [];
+          const updates: Record<string, unknown> = {
             status: "backlog", error: null, agentPid: null, startedAt: null, completedAt: null, reviewState: null,
-          });
+          };
+          if (steer || attachments.length) {
+            const cur = await Task.findById(tid);
+            if (!cur) { json(res, 404, { error: "Not found" }); return; }
+            let block = "\n\n--- Operator guidance (retry) ---";
+            if (steer) block += "\n" + steer;
+            if (attachments.length) block += "\nAttached files:\n" + attachments.map((p) => "- " + p).join("\n");
+            updates.description = (cur.description ?? "") + block;
+          }
+          const t = await Task.findByIdAndUpdate(tid, updates);
           if (!t) { json(res, 404, { error: "Not found" }); return; }
           broadcast("tasks:updated", { taskId: tid, status: "backlog" });
           json(res, 200, t); return;
