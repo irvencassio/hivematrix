@@ -12,9 +12,17 @@ const CHANNEL = "imessage";
 
 export type IdentityStatus = "pending" | "allowed" | "paired" | "blocked";
 
+export interface IgnoredSender {
+  address: string;
+  text: string;
+  at: string;
+}
+
 export interface ChannelMeta {
   lastRowid: number;
   notifiedStuck: string[]; // "taskId:timestamp" keys already sent to the sender
+  notifiedDone: string[];  // "taskId:updatedAt" keys whose RESULT was texted back
+  recentIgnored: IgnoredSender[]; // non-allowlisted senders, for one-click allow
 }
 
 export interface MessageIdentity {
@@ -31,12 +39,18 @@ interface ChannelRow {
 }
 
 function readMeta(row: ChannelRow | undefined): ChannelMeta {
-  if (!row) return { lastRowid: 0, notifiedStuck: [] };
+  const empty: ChannelMeta = { lastRowid: 0, notifiedStuck: [], notifiedDone: [], recentIgnored: [] };
+  if (!row) return empty;
   try {
     const m = JSON.parse(row.metadata) as Partial<ChannelMeta>;
-    return { lastRowid: m.lastRowid ?? 0, notifiedStuck: m.notifiedStuck ?? [] };
+    return {
+      lastRowid: m.lastRowid ?? 0,
+      notifiedStuck: m.notifiedStuck ?? [],
+      notifiedDone: m.notifiedDone ?? [],
+      recentIgnored: m.recentIgnored ?? [],
+    };
   } catch {
-    return { lastRowid: 0, notifiedStuck: [] };
+    return empty;
   }
 }
 
@@ -111,6 +125,45 @@ export function markStuckNotified(key: string): void {
     if (meta.notifiedStuck.length > 500) meta.notifiedStuck = meta.notifiedStuck.slice(-500);
     writeMeta(meta);
   }
+}
+
+// ── completed-result notify de-dup (text the answer back once per run) ────────
+
+export function wasDoneNotified(key: string): boolean {
+  return readMeta(getRow()).notifiedDone.includes(key);
+}
+
+export function markDoneNotified(key: string): void {
+  ensureChannel();
+  const meta = readMeta(getRow());
+  if (!meta.notifiedDone.includes(key)) {
+    meta.notifiedDone.push(key);
+    if (meta.notifiedDone.length > 500) meta.notifiedDone = meta.notifiedDone.slice(-500);
+    writeMeta(meta);
+  }
+}
+
+// ── recently-ignored (non-allowlisted) senders, for one-click allow ───────────
+
+export function recordIgnoredSender(address: string, text: string, at = new Date().toISOString()): void {
+  ensureChannel();
+  const meta = readMeta(getRow());
+  // De-dup by address: keep the latest message, move to front.
+  meta.recentIgnored = meta.recentIgnored.filter((i) => i.address !== address);
+  meta.recentIgnored.unshift({ address, text: text.slice(0, 120), at });
+  if (meta.recentIgnored.length > 20) meta.recentIgnored = meta.recentIgnored.slice(0, 20);
+  writeMeta(meta);
+}
+
+export function listIgnoredSenders(): IgnoredSender[] {
+  return readMeta(getRow()).recentIgnored;
+}
+
+export function clearIgnoredSender(address: string): void {
+  ensureChannel();
+  const meta = readMeta(getRow());
+  meta.recentIgnored = meta.recentIgnored.filter((i) => i.address !== address);
+  writeMeta(meta);
 }
 
 // ── sender allowlist (identities) ────────────────────────────────────────────

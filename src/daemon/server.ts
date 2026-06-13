@@ -187,6 +187,7 @@ export function createDaemonServer() {
         const backends = detectBackends();
         const available = buildAvailableModels(backends);
         const theme = getThemeSettings();
+        const { getLocation, getAutoUpdate } = await import("@/lib/models/available");
         json(res, 200, {
           backends,
           available,
@@ -194,6 +195,10 @@ export function createDaemonServer() {
           version: versionInfo(),
           theme: theme.theme,
           hasWallpaper: !!theme.wallpaperPath,
+          wallpaperPath: theme.wallpaperPath,
+          wallpaperOpacity: theme.wallpaperOpacity,
+          location: getLocation(),
+          autoUpdate: getAutoUpdate(),
         });
         return;
       }
@@ -210,9 +215,14 @@ export function createDaemonServer() {
         if (typeof body.wallpaperData === "string" && typeof body.wallpaperExt === "string") {
           m.saveWallpaperUpload(body.wallpaperData, body.wallpaperExt);
         }
+        if (typeof body.wallpaperOpacity === "number") m.setWallpaperOpacity(body.wallpaperOpacity);
+        if (typeof body.location === "string") m.setLocation(body.location);
+        if (typeof body.autoUpdate === "boolean") m.setAutoUpdate(body.autoUpdate);
         const available = m.buildAvailableModels();
         const theme = m.getThemeSettings();
-        json(res, 200, { ok: true, defaultModel: m.getDefaultModel(available), theme: theme.theme, hasWallpaper: !!theme.wallpaperPath });
+        json(res, 200, { ok: true, defaultModel: m.getDefaultModel(available), theme: theme.theme,
+          hasWallpaper: !!theme.wallpaperPath, wallpaperPath: theme.wallpaperPath,
+          wallpaperOpacity: theme.wallpaperOpacity, location: m.getLocation(), autoUpdate: m.getAutoUpdate() });
         return;
       }
 
@@ -366,6 +376,23 @@ export function createDaemonServer() {
         const body = await parseBody(req) as { enable?: boolean; phone?: string; displayName?: string };
         const { configureMessageBee } = await import("@/lib/onboarding/actions");
         json(res, 200, await configureMessageBee(body ?? {}));
+        return;
+      }
+      // GET /messagebee/ignored — non-allowlisted senders seen recently (one-click allow)
+      if (req.method === "GET" && urlPath === "/messagebee/ignored") {
+        const { listIgnoredSenders } = await import("@/lib/messagebee/store");
+        json(res, 200, { ignored: listIgnoredSenders() });
+        return;
+      }
+      // POST /messagebee/allow — allowlist a handle and drop it from the ignored list
+      if (req.method === "POST" && urlPath === "/messagebee/allow") {
+        const body = await parseBody(req) as { address?: string };
+        const address = String(body.address ?? "").trim();
+        if (!address) { json(res, 400, { error: "address required" }); return; }
+        const { upsertIdentity, clearIgnoredSender } = await import("@/lib/messagebee/store");
+        upsertIdentity(address, "allowed");
+        clearIgnoredSender(address);
+        json(res, 200, { ok: true, address });
         return;
       }
       // POST /system/open-pane — open a macOS privacy pane natively (webview window.open can't)

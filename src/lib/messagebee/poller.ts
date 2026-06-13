@@ -21,7 +21,9 @@ import {
   isChannelEnabled, getLastRowid, setLastRowid, isAllowed,
   recordInbound, recordOutbound, recordError,
   wasStuckNotified, markStuckNotified,
+  wasDoneNotified, markDoneNotified, recordIgnoredSender,
 } from "./store";
+import { getLocation } from "@/lib/models/available";
 
 const POLL_INTERVAL_MS = 3_000;
 
@@ -51,7 +53,11 @@ async function handleInbound(msg: { rowid: number; handle: string; text: string;
     { allowlisted: isAllowed(msg.handle), pendingInput: await pendingInputForSender(msg.handle) },
   );
 
-  if (route.kind === "ignore") return;
+  if (route.kind === "ignore") {
+    // Surface non-allowlisted senders so the operator can one-click allow them.
+    if (!isAllowed(msg.handle)) recordIgnoredSender(msg.handle, msg.text);
+    return;
+  }
 
   if (route.kind === "reply_to_task") {
     const ok = await resolveStuck(route.taskId, route.stuckTimestamp, "reply", "messagebee", route.text);
@@ -59,10 +65,13 @@ async function handleInbound(msg: { rowid: number; handle: string; text: string;
     return;
   }
 
-  // new_task
+  // new_task — share the operator's location so location-aware asks (weather,
+  // "near me", local time) have it without the agent having to ask.
+  const loc = getLocation();
+  const description = loc ? route.description + "\n\n[Operator location: " + loc + "]" : route.description;
   await Task.create({
     title: route.title,
-    description: route.description,
+    description,
     project: DEFAULT_TASK_PROJECT,
     projectPath: homedir(),
     status: "backlog",
@@ -71,6 +80,22 @@ async function handleInbound(msg: { rowid: number; handle: string; text: string;
     model: route.model ?? undefined,
     output: { messagebee: { handle: msg.handle, service: msg.service } },
   });
+}
+
+/** Text the RESULT of a finished messagebee task back to its sender (once). */
+async function notifyCompletedResults(): Promise<void> {
+  const tasks = await Task.find({ source: "messagebee", status: { $in: ["review", "done"] } });
+  for (const task of tasks) {
+    const key = `${task._id}:${task.updatedAt ?? ""}`;
+    if (wasDoneNotified(key)) continue;
+    const handle = taskHandle(task);
+    if (!handle) continue;
+    const out = (task.output ?? {}) as { summary?: string };
+    const result = typeof out.summary === "string" ? out.summary.trim() : "";
+    if (!result) continue;
+    const sent = await sendIMessage(handle, result);
+    if (sent) { recordOutbound(); markDoneNotified(key); }
+  }
 }
 
 /** Text out any unsent needs_input question for a messagebee task. */
@@ -100,6 +125,7 @@ export async function pollOnce(): Promise<void> {
     }
     if (maxRowid > since) setLastRowid(maxRowid);
     await notifyPendingInputs();
+    await notifyCompletedResults();
   } catch (err) {
     recordError(err instanceof Error ? err.message : String(err));
   }

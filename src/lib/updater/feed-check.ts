@@ -9,7 +9,13 @@
  */
 
 import { spawn } from "child_process";
+import { writeFileSync, mkdirSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 import { getBundledVersion } from "@/lib/version/bundle-version";
+
+/** Flag file the desktop app checks to force one install even when auto-update is off. */
+export const FORCE_UPDATE_FLAG = join(homedir(), ".hivematrix", ".force-update");
 
 // Must match plugins.updater.endpoints in src-tauri/tauri.conf.json.
 const FEED_URL =
@@ -76,6 +82,9 @@ export function applyUpdateViaRelaunch(
   spawnImpl: typeof spawn = spawn,
 ): { ok: boolean; detail: string } {
   try {
+    // Drop a force flag so the app installs this update even if auto-update is
+    // off (manual "Install" must work regardless of the setting).
+    try { mkdirSync(join(homedir(), ".hivematrix"), { recursive: true }); writeFileSync(FORCE_UPDATE_FLAG, "1"); } catch { /* best effort */ }
     spawnImpl(
       "sh",
       ["-c", `sleep 1; pkill -f '${APP_PROCESS_MATCH}'; sleep 2; open -a HiveMatrix`],

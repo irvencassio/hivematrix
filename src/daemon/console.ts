@@ -43,7 +43,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   }
   /* Wallpaper: panels go translucent so the image shows through; text stays readable. */
   html[data-wallpaper="1"] body { background-size: cover; background-position: center; background-attachment: fixed; }
-  html[data-wallpaper="1"] .col, html[data-wallpaper="1"] header { background-color: color-mix(in srgb, var(--panel) 82%, transparent); backdrop-filter: blur(6px); }
+  html[data-wallpaper="1"] .col, html[data-wallpaper="1"] header { background-color: color-mix(in srgb, var(--panel) var(--wp-opacity, 82%), transparent); backdrop-filter: blur(6px); }
   * { box-sizing: border-box; }
   body { margin: 0; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
@@ -120,6 +120,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
   .mb-chip { display: inline-block; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px;
     padding: 1px 9px; margin: 2px 4px 2px 0; font-size: 11px; }
+  .mb-ignored-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11px; }
+  .mb-ignored-row .mb-ig-addr { font-weight: 600; }
+  .mb-ignored-row .mb-ig-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; }
+  .mb-ignored-row button { font-size: 10px; padding: 2px 9px; border-radius: 6px; cursor: pointer;
+    background: var(--accent); color: var(--create-btn-text, #1a1a1a); border: 0; font-weight: 700; }
   .tabs { display: flex; gap: 6px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
   .tab { padding: 6px 12px; cursor: pointer; font-size: 12px; color: var(--muted); border-bottom: 2px solid transparent; }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
@@ -313,6 +318,28 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <button class="sm" onclick="clearWallpaper()">Clear</button>
       </div>
       <div id="wallpaper_status" style="font-size:11px;margin-top:4px;min-height:16px"></div>
+      <div id="wallpaper_opacity_row" style="display:none;margin-top:8px">
+        <label class="flbl">Panel translucency over wallpaper</label>
+        <div class="row" style="align-items:center;gap:10px">
+          <input type="range" id="s_wp_opacity" min="40" max="100" step="1" style="flex:1" oninput="onOpacityInput(this.value)" onchange="saveOpacity(this.value)" />
+          <span class="muted" id="s_wp_opacity_val" style="min-width:42px;text-align:right">82%</span>
+        </div>
+        <div class="muted" style="font-size:11px">Lower = more wallpaper shows through the panels.</div>
+      </div>
+
+      <label class="flbl" style="margin-top:16px">Location</label>
+      <div class="row" style="gap:6px">
+        <input id="s_location" placeholder="e.g. Cincinnati, OH" style="flex:1" />
+        <button class="sm" onclick="saveLocation()">Save</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:2px">Shared with location-aware tasks (weather, "near me", local time) — e.g. texts to MessageBee.</div>
+
+      <label class="flbl" style="margin-top:16px">Updates</label>
+      <div class="row" style="align-items:center;gap:8px">
+        <input type="checkbox" id="s_autoupdate" onchange="saveAutoUpdate()" style="width:auto" />
+        <span class="muted">Automatically install updates on launch</span>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:2px">Off = you'll see an "Update" button in the header to install when you choose.</div>
 
       <h2 style="margin-top:18px">Remote Access</h2>
       <div class="remote-status"><span class="dot" id="s_remote_dot"></span><span id="s_remote_label">…</span></div>
@@ -399,6 +426,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <div class="muted">Only allowlisted senders can drive HiveMatrix. Add your iMessage number or email.</div>
         <input class="dialog-input" id="mb_phone" placeholder="+15551234567 or you@icloud.com" style="margin-top:6px;margin-bottom:4px" />
         <div id="mb_identities"></div>
+        <div id="mb_ignored" style="margin-top:6px"></div>
       </div>
     </div>
     <div class="mb-step" style="border-bottom:0">
@@ -875,8 +903,35 @@ function openMessageBeeSetup() {
   document.getElementById('mb_status').textContent = '';
   document.getElementById('mb_phone').value = '';
   renderMessageBeeState(null);
+  renderIgnoredSenders();
   document.getElementById('mbOverlay').classList.add('open');
   setTimeout(() => document.getElementById('mb_phone').focus(), 30);
+}
+// Show non-allowlisted senders that have texted, each with a one-click Allow —
+// catches the common "set up with my number but iMessage sent as my email" case.
+async function renderIgnoredSenders() {
+  const el = document.getElementById('mb_ignored');
+  if (!el) return;
+  try {
+    const r = await api('/messagebee/ignored');
+    const ig = (r && r.ignored) || [];
+    if (!ig.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<div class="muted" style="font-size:11px;margin-bottom:3px">Texted but not allowlisted:</div>'
+      + ig.map(i => '<div class="mb-ignored-row">'
+        + '<span class="mb-ig-addr">' + esc(i.address) + '</span>'
+        + (i.text ? '<span class="muted mb-ig-text">"' + esc(i.text) + '"</span>' : '')
+        + '<button onclick="allowIgnored(\'' + esc(i.address).replace(/'/g, "\\'") + '\')">Allow</button></div>').join('');
+  } catch (e) { el.innerHTML = ''; }
+}
+async function allowIgnored(address) {
+  try {
+    await api('/messagebee/allow', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ address }) });
+    await renderIgnoredSenders();
+    const r = await api('/onboarding/messagebee', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enable: true }) });
+    if (r && r.data) renderMessageBeeState(r.data);
+    document.getElementById('mb_status').textContent = 'Allowlisted ' + address + ' — text again and it will create a task.';
+    await refresh();
+  } catch (e) { document.getElementById('mb_err').textContent = String(e); }
 }
 function closeMessageBee() { document.getElementById('mbOverlay').classList.remove('open'); }
 // Ask the daemon to open a macOS privacy pane — window.open() is a no-op for the
@@ -986,6 +1041,8 @@ function applyTheme(theme, hasWallpaper) {
   root.dataset.theme = resolved;
   if (hasWallpaper) {
     root.dataset.wallpaper = "1";
+    const op = (models && typeof models.wallpaperOpacity === "number") ? models.wallpaperOpacity : 82;
+    root.style.setProperty("--wp-opacity", op + "%");
     document.body.style.backgroundImage = 'url("/wallpaper?token=' + encodeURIComponent(HM_TOKEN) + '&t=' + Date.now() + '")';
   } else {
     delete root.dataset.wallpaper;
@@ -1178,9 +1235,37 @@ function openSettings() {
   document.getElementById("s_version").textContent = "HiveMatrix v" + (v.version||"?") + " · build " + (v.build||"?") + " · " + (v.date||"?");
   document.getElementById("s_theme").value = models.theme || "system";
   document.getElementById("s_token").value = HM_TOKEN || "(load the local console to see the token)";
+  // Wallpaper: reflect the current image + path so settings shows what's active.
+  const hasWp = !!models.hasWallpaper;
+  document.getElementById("s_wallpaper").value = hasWp ? (models.wallpaperPath || "") : "";
+  if (hasWp) showWallpaperPreview(); else document.getElementById("wallpaper_preview").style.display = "none";
+  document.getElementById("wallpaper_opacity_row").style.display = hasWp ? "" : "none";
+  const op = typeof models.wallpaperOpacity === "number" ? models.wallpaperOpacity : 82;
+  document.getElementById("s_wp_opacity").value = op;
+  document.getElementById("s_wp_opacity_val").textContent = op + "%";
+  document.getElementById("s_location").value = models.location || "";
+  document.getElementById("s_autoupdate").checked = !!models.autoUpdate;
   loadTunnel();
 }
 function closeSettings() { document.getElementById("settingsOverlay").classList.remove("open"); }
+function onOpacityInput(v) {
+  document.getElementById("s_wp_opacity_val").textContent = v + "%";
+  document.documentElement.style.setProperty("--wp-opacity", v + "%"); // live preview
+}
+async function saveOpacity(v) {
+  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperOpacity: parseInt(v,10) }) });
+  await loadModels();
+}
+async function saveLocation() {
+  const location = document.getElementById("s_location").value.trim();
+  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ location }) });
+  await loadModels();
+}
+async function saveAutoUpdate() {
+  const autoUpdate = document.getElementById("s_autoupdate").checked;
+  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ autoUpdate }) });
+  await loadModels();
+}
 
 function switchSettingsTab(tab) {
   document.getElementById("tab-models").className = "tab" + (tab === "models" ? " active" : "");

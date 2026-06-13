@@ -113,13 +113,51 @@ export type ThemeMode = "system" | "light" | "dark";
 export interface ThemeSettings {
   theme: ThemeMode;
   wallpaperPath: string | null;
+  /** Panel opacity over a wallpaper, 40–100 (% of solid). Default 82. */
+  wallpaperOpacity: number;
 }
 
 export function getThemeSettings(): ThemeSettings {
   const cfg = readConfig();
   const theme = cfg.theme === "light" || cfg.theme === "dark" ? cfg.theme : "system";
   const wallpaperPath = typeof cfg.wallpaperPath === "string" && cfg.wallpaperPath ? cfg.wallpaperPath : null;
-  return { theme, wallpaperPath };
+  const raw = typeof cfg.wallpaperOpacity === "number" ? cfg.wallpaperOpacity : 82;
+  const wallpaperOpacity = Math.min(100, Math.max(40, Math.round(raw)));
+  return { theme, wallpaperPath, wallpaperOpacity };
+}
+
+function writeConfig(cfg: Record<string, unknown>): void {
+  mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
+  writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+}
+
+/** Panel translucency over a wallpaper (40–100). */
+export function setWallpaperOpacity(pct: number): void {
+  const cfg = readConfig();
+  cfg.wallpaperOpacity = Math.min(100, Math.max(40, Math.round(pct)));
+  writeConfig(cfg);
+}
+
+/** Operator location (city/region) shared into location-aware tasks. */
+export function getLocation(): string {
+  const cfg = readConfig();
+  return typeof cfg.location === "string" ? cfg.location : "";
+}
+export function setLocation(location: string): void {
+  const cfg = readConfig();
+  const v = location.trim();
+  if (v) cfg.location = v; else delete cfg.location;
+  writeConfig(cfg);
+}
+
+/** Whether updates install automatically on app launch (default false = manual). */
+export function getAutoUpdate(): boolean {
+  return readConfig().autoUpdate === true;
+}
+export function setAutoUpdate(on: boolean): void {
+  const cfg = readConfig();
+  cfg.autoUpdate = !!on;
+  writeConfig(cfg);
 }
 
 export function setTheme(theme: ThemeMode): void {

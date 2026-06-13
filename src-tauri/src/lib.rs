@@ -93,6 +93,23 @@ fn launchd_agent_installed() -> bool {
         .unwrap_or(false)
 }
 
+/// Whether to install an available update now. True if a force flag is present
+/// (the in-app "Install" button drops it — consumed here) OR config.autoUpdate
+/// is true. Default is manual: the console shows an "Update" pill instead.
+fn should_install_update() -> bool {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let force = std::path::Path::new(&home).join(".hivematrix/.force-update");
+    if force.exists() {
+        let _ = std::fs::remove_file(&force);
+        return true;
+    }
+    // No JSON dep in the shell crate; whitespace-strip then substring-match the
+    // daemon's pretty-printed config.json.
+    std::fs::read_to_string(std::path::Path::new(&home).join(".hivematrix/config.json"))
+        .map(|t| t.split_whitespace().collect::<String>().contains("\"autoUpdate\":true"))
+        .unwrap_or(false)
+}
+
 /// Best-effort background update check via the Tauri updater (GitHub Releases
 /// feed). Because the UI is served by the daemon over http (no Tauri IPC), the
 /// check is driven from Rust, not JS. No-ops safely when the updater isn't
@@ -111,6 +128,10 @@ fn check_for_update(app: tauri::AppHandle) {
         match updater.check().await {
             Ok(Some(update)) => {
                 log::info!("updater: update available {} -> {}", current, update.version);
+                if !should_install_update() {
+                    log::info!("updater: auto-update off — leaving {} for the in-app Install button", update.version);
+                    return;
+                }
                 if let Err(e) = update.download_and_install(
                     |_, _| {},
                     || log::info!("updater: download complete, installing…"),
