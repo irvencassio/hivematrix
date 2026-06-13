@@ -533,6 +533,39 @@ export function createDaemonServer() {
         return;
       }
 
+      // Feedback — local bug/enhancement backlog (file by text/console/mobile)
+      if (req.method === "GET" && urlPath === "/feedback") {
+        const { listFeedback, feedbackSummary } = await import("@/lib/feedback/feedback");
+        const q = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+        const kind = q.get("kind") as "bug" | "enhancement" | null;
+        const status = q.get("status") as never;
+        json(res, 200, { feedback: listFeedback({ kind: kind ?? undefined, status: status ?? undefined }), summary: feedbackSummary() });
+        return;
+      }
+      if (req.method === "POST" && urlPath === "/feedback") {
+        const { recordFeedback } = await import("@/lib/feedback/feedback");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const title = typeof body.title === "string" ? body.title.trim() : "";
+        if (!title) { json(res, 400, { error: "title is required" }); return; }
+        const item = recordFeedback({
+          kind: body.kind === "enhancement" ? "enhancement" : "bug",
+          title,
+          detail: typeof body.detail === "string" ? body.detail : "",
+          source: typeof body.source === "string" ? body.source : "console",
+        });
+        json(res, 201, item);
+        return;
+      }
+      const feedbackMatch = urlPath.match(/^\/feedback\/([^/]+)$/);
+      if (req.method === "PATCH" && feedbackMatch) {
+        const { setFeedbackStatus } = await import("@/lib/feedback/feedback");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const updated = setFeedbackStatus(feedbackMatch[1], body.status as never);
+        if (!updated) { json(res, 404, { error: "Not found" }); return; }
+        json(res, 200, updated);
+        return;
+      }
+
       // GET /approvals/pending — unified queue (checkpoints/content/tool/stuck) for mobile (W6.1)
       if (req.method === "GET" && urlPath === "/approvals/pending") {
         const { buildApprovalQueue } = await import("@/lib/approvals/queue");

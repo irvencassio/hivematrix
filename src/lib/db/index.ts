@@ -289,6 +289,21 @@ const MIGRATIONS: string[] = [
     );
     CREATE INDEX IF NOT EXISTS idx_telemetry_category ON telemetry_events(category);
     CREATE INDEX IF NOT EXISTS idx_telemetry_created ON telemetry_events(createdAt);`,
+
+  // v16: feedback — bugs and enhancement requests filed by the founder (by text,
+  // console, or mobile) and triaged locally. Lightweight backlog, not a tracker.
+  `CREATE TABLE IF NOT EXISTS feedback (
+      _id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      source TEXT NOT NULL DEFAULT 'console',
+      status TEXT NOT NULL DEFAULT 'open',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_feedback_kind ON feedback(kind);
+    CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);`,
 ];
 
 // ------------------------------------------------------------------
