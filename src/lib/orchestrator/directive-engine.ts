@@ -20,7 +20,7 @@
  * without changing the state machine.
  */
 
-import { Task } from "@/lib/db";
+import { Task, type TaskDoc } from "@/lib/db";
 import {
   type DirectiveRow,
   type RunRow,
@@ -48,9 +48,15 @@ import {
   writeDirectiveRetrospectiveLearning,
 } from "./directive-autonomy";
 import { configuredBrainRootDir, defaultBrainRootDir } from "@/lib/brain/settings";
+import { deriveOutput } from "./derive-output";
+import type { Turn } from "./turn-types";
 
 const MAX_TASKS_PER_RUN = 5;
 const TERMINAL_TASK_STATUSES = new Set(["review", "done", "failed"]);
+const PHASE_TASK_STATUSES = new Set(["review", "done", "failed", "cancelled"]);
+
+type DirectivePhaseTaskKind = "planner" | "reviewer" | "retrospective";
+type DirectiveRunTask = Pick<TaskDoc, "_id" | "title" | "status" | "output" | "logs" | "turns">;
 
 type DirectivePlanner = (input: {
   directive: DirectiveRow;
@@ -92,15 +98,212 @@ export function _setDirectiveRetrospectiveForTests(retrospective: DirectiveRetro
   directiveRetrospectiveForTests = retrospective;
 }
 
-async function collectRunTasks(directiveId: string, runId: string): Promise<Array<{ _id: string; status: string }>> {
+function isDirectivePhaseTask(task: Pick<TaskDoc, "output">): boolean {
+  const out = (task.output ?? {}) as Record<string, unknown>;
+  return typeof out.directivePhase === "string";
+}
+
+async function collectAllRunTasks(directiveId: string, runId: string): Promise<DirectiveRunTask[]> {
   // Tasks spawned by this run are tagged with directiveId and a runId marker in output.
   const tasks = await Task.find({ directiveId });
   return tasks
-    .filter((t) => {
+    .filter((t): t is TaskDoc => {
       const out = (t.output ?? {}) as Record<string, unknown>;
       return out.runId === runId;
-    })
+    });
+}
+
+async function collectRunTasks(directiveId: string, runId: string): Promise<Array<{ _id: string; status: string }>> {
+  return (await collectAllRunTasks(directiveId, runId))
+    .filter((t) => !isDirectivePhaseTask(t))
     .map((t) => ({ _id: t._id.toString(), status: t.status as string }));
+}
+
+async function findPhaseTask(directiveId: string, runId: string, phase: DirectivePhaseTaskKind): Promise<DirectiveRunTask | null> {
+  const tasks = await collectAllRunTasks(directiveId, runId);
+  return tasks.find((t) => {
+    const out = (t.output ?? {}) as Record<string, unknown>;
+    return out.directivePhase === phase && !out.directivePhaseConsumedAt;
+  }) ?? null;
+}
+
+async function createPhaseTask(
+  directive: DirectiveRow,
+  run: RunRow,
+  phase: DirectivePhaseTaskKind,
+  title: string,
+  description: string,
+  profile: string
+): Promise<DirectiveRunTask> {
+  const { getDefaultModel, CLOUD_ONLY_ID } = await import("@/lib/models/available");
+  const noLocal = getDefaultModel() === CLOUD_ONLY_ID;
+  const route = routeByRole("think", getConnectivityPolicy(), { noLocal });
+  const modelId = resolveModelId(route.tier);
+  return Task.create({
+    title,
+    description,
+    project: directive.project,
+    projectPath: directive.projectPath,
+    profile,
+    model: modelId,
+    directiveId: directive._id,
+    status: "backlog",
+    source: "directive",
+    executor: "agent",
+    output: {
+      runId: run._id,
+      directivePhase: phase,
+      directivePhaseFor: run.phase,
+      routedTier: route.tier,
+    },
+  });
+}
+
+function extractTaskText(task: DirectiveRunTask): string | null {
+  const out = (task.output ?? {}) as Record<string, unknown>;
+  for (const key of ["summary", "result", "text"]) {
+    if (typeof out[key] === "string" && out[key].trim()) return out[key].trim();
+  }
+
+  if (Array.isArray(task.turns) && task.turns.length > 0) {
+    try {
+      const view = deriveOutput(task.turns as unknown as Turn[]);
+      if (view.headline?.text?.trim()) return view.headline.text.trim();
+      if (view.resultStats?.summaryText?.trim()) return view.resultStats.summaryText.trim();
+    } catch {
+      // Fall through to log fallback.
+    }
+  }
+
+  if (Array.isArray(task.logs) && task.logs.length > 0) {
+    let text = "";
+    for (let i = task.logs.length - 1; i >= 0; i--) {
+      const log = task.logs[i] as Record<string, unknown>;
+      if (log.type === "text" && typeof log.content === "string" && log.content.trim()) {
+        text = log.content + text;
+      } else if (text) {
+        break;
+      }
+    }
+    if (text.trim()) return text.trim();
+  }
+
+  return null;
+}
+
+function buildPlannerPrompt(
+  directive: DirectiveRow,
+  run: RunRow,
+  criteria: Array<{ _id: string; description: string }>
+): string {
+  const criteriaText = criteria.length > 0
+    ? criteria.map((c, index) => `${index + 1}. ${c._id}: ${c.description}`).join("\n")
+    : "No explicit criteria exist yet. Plan against the directive goal.";
+
+  return [
+    "You are planning a HiveMatrix Directive run.",
+    "",
+    `Directive goal: ${directive.goal}`,
+    `Run id: ${run._id}`,
+    "",
+    "Unproven criteria:",
+    criteriaText,
+    "",
+    "Return only fenced JSON with this shape:",
+    "```json",
+    "{",
+    '  "tasks": [',
+    "    {",
+    '      "title": "short task title",',
+    '      "description": "self-contained task instructions",',
+    '      "agentType": "developer",',
+    '      "dependsOn": [0],',
+    '      "criterionRefs": ["criterion id or exact description"],',
+    '      "goalIndex": 0',
+    "    }",
+    "  ]",
+    "}",
+    "```",
+    "",
+    `Create at most ${MAX_TASKS_PER_RUN} tasks. Use dependsOn indexes only for earlier tasks. Do not create tasks outside this directive.`,
+  ].join("\n");
+}
+
+function buildReviewerPrompt(
+  directive: DirectiveRow,
+  run: RunRow,
+  criteria: Array<{ _id: string; description: string }>,
+  tasks: Array<{ _id: string; status: string }>
+): string {
+  const criteriaText = criteria.length > 0
+    ? criteria.map((c, index) => `${index + 1}. ${c._id}: ${c.description}`).join("\n")
+    : "No explicit criteria remain.";
+  const taskText = tasks.length > 0
+    ? tasks.map((t, index) => `${index + 1}. ${t._id}: ${t.status}`).join("\n")
+    : "No execution tasks were produced.";
+
+  return [
+    "You are reviewing a HiveMatrix Directive run.",
+    "",
+    `Directive goal: ${directive.goal}`,
+    `Run id: ${run._id}`,
+    "",
+    "Unproven criteria:",
+    criteriaText,
+    "",
+    "Execution tasks:",
+    taskText,
+    "",
+    "Return only fenced JSON with this shape:",
+    "```json",
+    "{",
+    '  "status": "pass",',
+    '  "findings": [{ "task": "task id or title", "assessment": "pass", "notes": "evidence summary" }],',
+    '  "gaps": [],',
+    '  "correctiveTasks": [',
+    '    { "title": "fix title", "description": "specific correction", "agentType": "developer", "criterionRefs": ["criterion id"] }',
+    "  ],",
+    '  "summary": "short review summary"',
+    "}",
+    "```",
+    "",
+    'Use status "pass" only when the evidence proves the criteria. Use "partial" or "fail" when gaps remain.',
+  ].join("\n");
+}
+
+function buildRetrospectivePrompt(directive: DirectiveRow, run: RunRow, done: boolean, reflection: string): string {
+  return [
+    "You are writing a HiveMatrix Directive retrospective.",
+    "",
+    `Directive goal: ${directive.goal}`,
+    `Run id: ${run._id}`,
+    `Directive complete: ${done ? "yes" : "no"}`,
+    `Engine reflection: ${reflection}`,
+    "",
+    "Return only fenced JSON with this shape:",
+    "```json",
+    "{",
+    '  "overallAssessment": "what happened and what should be remembered",',
+    '  "playbookDeltas": [',
+    '    { "scope": "role:coo", "rule": "operational rule to remember", "reason": "why", "confidence": "medium" }',
+    "  ],",
+    '  "accessLedger": [',
+    '    { "system": "service name", "status": "configured", "notes": "access state or blocker" }',
+    "  ]",
+    "}",
+    "```",
+    "",
+    "Keep entries factual and reusable. Omit arrays when there is nothing useful to record.",
+  ].join("\n");
+}
+
+async function markPhaseTaskConsumed(task: DirectiveRunTask, nowIso: string): Promise<void> {
+  await Task.findByIdAndUpdate(task._id.toString(), {
+    output: {
+      ...(task.output ?? {}),
+      directivePhaseConsumedAt: nowIso,
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -109,8 +312,10 @@ async function collectRunTasks(directiveId: string, runId: string): Promise<Arra
 
 async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
   const criteria = getCriteria(directive._id).filter((c) => c.proven === 0);
+  let useProductionPlannerTask = true;
 
   if (directivePlannerForTests) {
+    useProductionPlannerTask = false;
     const plannerText = await directivePlannerForTests({
       directive,
       run,
@@ -123,6 +328,49 @@ async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
         return;
       }
       journal(run._id, directive._id, "planning_fallback", { reason: parsed.error ?? "invalid planner output" });
+    }
+  }
+
+  if (useProductionPlannerTask) {
+    const plannerTask = await findPhaseTask(directive._id, run._id, "planner");
+    if (!plannerTask) {
+      const task = await createPhaseTask(
+        directive,
+        run,
+        "planner",
+        `[directive planner] ${directive.goal.slice(0, 50)}`,
+        buildPlannerPrompt(directive, run, criteria.map((c) => ({ _id: c._id, description: c.description }))),
+        "coo"
+      );
+      journal(run._id, directive._id, "planner_task_started", { taskId: task._id.toString() });
+      return;
+    }
+
+    if (!PHASE_TASK_STATUSES.has(plannerTask.status as string)) return;
+
+    if (plannerTask.status !== "failed" && plannerTask.status !== "cancelled") {
+      const plannerText = extractTaskText(plannerTask);
+      if (plannerText) {
+        const parsed = parseDirectivePlanOutput(plannerText, criteria.map((c) => ({ _id: c._id, description: c.description })));
+        if (parsed.plan) {
+          await createAutonomyPlanTasks(directive, run, parsed.plan);
+          return;
+        }
+        journal(run._id, directive._id, "planning_fallback", {
+          reason: parsed.error ?? "invalid planner output",
+          taskId: plannerTask._id.toString(),
+        });
+      } else {
+        journal(run._id, directive._id, "planning_fallback", {
+          reason: "planner task produced no text output",
+          taskId: plannerTask._id.toString(),
+        });
+      }
+    } else {
+      journal(run._id, directive._id, "planning_fallback", {
+        reason: `planner task ended ${plannerTask.status}`,
+        taskId: plannerTask._id.toString(),
+      });
     }
   }
 
@@ -225,8 +473,10 @@ async function verifyRun(directive: DirectiveRow, run: RunRow, nowIso: string): 
   const tasks = await collectRunTasks(directive._id, run._id);
   const succeeded = new Set(tasks.filter((t) => t.status === "review" || t.status === "done").map((t) => t._id));
   const criteria = getCriteria(directive._id).filter((c) => c.proven === 0);
+  let useProductionReviewerTask = true;
 
   if (directiveReviewerForTests) {
+    useProductionReviewerTask = false;
     const reviewerText = await directiveReviewerForTests({
       directive,
       run,
@@ -269,6 +519,79 @@ async function verifyRun(directive: DirectiveRow, run: RunRow, nowIso: string): 
         return;
       }
       journal(run._id, directive._id, "review_fallback", { reason: parsed.error ?? "invalid reviewer output" });
+    }
+  }
+
+  if (useProductionReviewerTask) {
+    const reviewerTask = await findPhaseTask(directive._id, run._id, "reviewer");
+    if (!reviewerTask) {
+      const task = await createPhaseTask(
+        directive,
+        run,
+        "reviewer",
+        `[directive reviewer] ${directive.goal.slice(0, 49)}`,
+        buildReviewerPrompt(directive, run, criteria.map((c) => ({ _id: c._id, description: c.description })), tasks),
+        "qa"
+      );
+      journal(run._id, directive._id, "reviewer_task_started", { taskId: task._id.toString() });
+      return;
+    }
+
+    if (!PHASE_TASK_STATUSES.has(reviewerTask.status as string)) return;
+
+    if (reviewerTask.status !== "failed" && reviewerTask.status !== "cancelled") {
+      const reviewerText = extractTaskText(reviewerTask);
+      if (reviewerText) {
+        const parsed = parseDirectiveReviewOutput(reviewerText, criteria.map((c) => ({ _id: c._id, description: c.description })));
+        if (parsed.review) {
+          await markPhaseTaskConsumed(reviewerTask, nowIso);
+          if (parsed.review.status !== "pass" && parsed.review.correctiveTasks.length > 0) {
+            const correctiveTaskIds = await createCorrectiveTasks(directive, run, parsed.review.correctiveTasks);
+            setRunPhase(run._id, "execute");
+            journal(run._id, directive._id, "reviewed", {
+              status: parsed.review.status,
+              findings: parsed.review.findings,
+              gaps: parsed.review.gaps,
+              summary: parsed.review.summary,
+              correctiveTaskIds,
+            });
+            return;
+          }
+
+          const proven: string[] = [];
+          if (parsed.review.status === "pass" && succeeded.size > 0) {
+            for (const c of criteria) {
+              markCriterionProven(c._id, nowIso);
+              proven.push(c._id);
+            }
+          }
+          setRunPhase(run._id, "reflect");
+          journal(run._id, directive._id, "reviewed", {
+            status: parsed.review.status,
+            findings: parsed.review.findings,
+            gaps: parsed.review.gaps,
+            summary: parsed.review.summary,
+            correctiveTaskIds: [],
+            provenCriteria: proven,
+            successfulTasks: succeeded.size,
+          });
+          return;
+        }
+        journal(run._id, directive._id, "review_fallback", {
+          reason: parsed.error ?? "invalid reviewer output",
+          taskId: reviewerTask._id.toString(),
+        });
+      } else {
+        journal(run._id, directive._id, "review_fallback", {
+          reason: "reviewer task produced no text output",
+          taskId: reviewerTask._id.toString(),
+        });
+      }
+    } else {
+      journal(run._id, directive._id, "review_fallback", {
+        reason: `reviewer task ended ${reviewerTask.status}`,
+        taskId: reviewerTask._id.toString(),
+      });
     }
   }
 
@@ -322,15 +645,18 @@ async function reflectAndYield(directive: DirectiveRow, run: RunRow, nowIso: str
   const reflection = done
     ? `All criteria proven; directive complete.`
     : `Run complete; criteria remain open. Re-arming per trigger policy.`;
+  const brainRootDir = options.brainRootDir ?? configuredBrainRootDir() ?? defaultBrainRootDir();
+  let useProductionRetrospectiveTask = true;
 
   if (directiveRetrospectiveForTests) {
+    useProductionRetrospectiveTask = false;
     try {
       const retrospectiveText = await directiveRetrospectiveForTests({ directive, run, done, reflection });
       if (retrospectiveText) {
         const parsed = parseDirectiveRetrospectiveOutput(retrospectiveText);
         if (parsed.retrospective) {
           const result = await writeDirectiveRetrospectiveLearning(parsed.retrospective, {
-            brainRootDir: options.brainRootDir ?? configuredBrainRootDir() ?? defaultBrainRootDir(),
+            brainRootDir,
             project: directive.project,
             runId: run._id,
             directiveGoal: directive.goal,
@@ -343,6 +669,64 @@ async function reflectAndYield(directive: DirectiveRow, run: RunRow, nowIso: str
       }
     } catch (err) {
       journal(run._id, directive._id, "retrospective_failed", { reason: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  if (useProductionRetrospectiveTask) {
+    const retrospectiveTask = await findPhaseTask(directive._id, run._id, "retrospective");
+    if (!retrospectiveTask) {
+      const task = await createPhaseTask(
+        directive,
+        run,
+        "retrospective",
+        `[directive retrospective] ${directive.goal.slice(0, 45)}`,
+        buildRetrospectivePrompt(directive, run, done, reflection),
+        "coo"
+      );
+      journal(run._id, directive._id, "retrospective_task_started", { taskId: task._id.toString() });
+      return;
+    }
+
+    if (!PHASE_TASK_STATUSES.has(retrospectiveTask.status as string)) return;
+
+    if (retrospectiveTask.status !== "failed" && retrospectiveTask.status !== "cancelled") {
+      const retrospectiveText = extractTaskText(retrospectiveTask);
+      if (retrospectiveText) {
+        try {
+          const parsed = parseDirectiveRetrospectiveOutput(retrospectiveText);
+          if (parsed.retrospective) {
+            await markPhaseTaskConsumed(retrospectiveTask, nowIso);
+            const result = await writeDirectiveRetrospectiveLearning(parsed.retrospective, {
+              brainRootDir,
+              project: directive.project,
+              runId: run._id,
+              directiveGoal: directive.goal,
+              dateStr: nowIso.slice(0, 10),
+            });
+            journal(run._id, directive._id, "retrospective_recorded", { ...result });
+          } else {
+            journal(run._id, directive._id, "retrospective_fallback", {
+              reason: parsed.error ?? "invalid retrospective output",
+              taskId: retrospectiveTask._id.toString(),
+            });
+          }
+        } catch (err) {
+          journal(run._id, directive._id, "retrospective_failed", {
+            reason: err instanceof Error ? err.message : String(err),
+            taskId: retrospectiveTask._id.toString(),
+          });
+        }
+      } else {
+        journal(run._id, directive._id, "retrospective_fallback", {
+          reason: "retrospective task produced no text output",
+          taskId: retrospectiveTask._id.toString(),
+        });
+      }
+    } else {
+      journal(run._id, directive._id, "retrospective_fallback", {
+        reason: `retrospective task ended ${retrospectiveTask.status}`,
+        taskId: retrospectiveTask._id.toString(),
+      });
     }
   }
 

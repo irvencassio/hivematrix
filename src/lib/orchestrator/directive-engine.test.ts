@@ -38,6 +38,18 @@ test.after(() => {
   rmSync(TMP, { recursive: true, force: true });
 });
 
+test.beforeEach(() => {
+  _setDirectivePlannerForTests(null);
+  _setDirectiveReviewerForTests(null);
+  _setDirectiveRetrospectiveForTests(null);
+});
+
+test.afterEach(() => {
+  _setDirectivePlannerForTests(null);
+  _setDirectiveReviewerForTests(null);
+  _setDirectiveRetrospectiveForTests(null);
+});
+
 function mkDirective(extra: Record<string, unknown> = {}) {
   return createDirective({
     goal: "Keep the docs index current",
@@ -49,15 +61,38 @@ function mkDirective(extra: Record<string, unknown> = {}) {
   });
 }
 
+function useLegacyDeterministicPhases() {
+  _setDirectivePlannerForTests(async () => null);
+  _setDirectiveReviewerForTests(async () => null);
+  _setDirectiveRetrospectiveForTests(async () => null);
+}
+
 // Drive a run from plan to done, simulating task completion between ticks.
 async function completeRunTasks(directiveId: string, runId: string, status = "review") {
   const tasks = await Task.find({ directiveId });
   for (const t of tasks) {
     const out = (t.output ?? {}) as Record<string, unknown>;
-    if (out.runId === runId) {
+    if (out.runId === runId && !out.directivePhase) {
       await Task.findByIdAndUpdate(t._id.toString(), { status });
     }
   }
+}
+
+async function getRunTasks(directiveId: string, runId: string) {
+  const tasks = await Task.find({ directiveId });
+  return tasks.filter((t) => ((t.output ?? {}) as Record<string, unknown>).runId === runId);
+}
+
+async function completeTaskWithSummary(taskId: string, status: string, summary: string) {
+  const task = await Task.findById(taskId);
+  assert.ok(task, `task ${taskId} should exist`);
+  await Task.findByIdAndUpdate(taskId, {
+    status,
+    output: {
+      ...(task.output ?? {}),
+      summary,
+    },
+  });
 }
 
 test("directiveTick opens a run for a due directive and journals run_started", async () => {
@@ -74,6 +109,7 @@ test("directiveTick opens a run for a due directive and journals run_started", a
 });
 
 test("plan phase creates one task per unmet criterion and moves to execute", async () => {
+  useLegacyDeterministicPhases();
   const d = mkDirective();
   addCriterion(d._id, "criterion A");
   addCriterion(d._id, "criterion B");
@@ -93,6 +129,7 @@ test("plan phase creates one task per unmet criterion and moves to execute", asy
 });
 
 test("execute phase waits for tasks, then verify proves criteria, reflect re-arms", async () => {
+  useLegacyDeterministicPhases();
   const d = mkDirective();
   addCriterion(d._id, "the one criterion");
 
@@ -126,6 +163,7 @@ test("execute phase waits for tasks, then verify proves criteria, reflect re-arm
 });
 
 test("directive with no criteria runs a goal task but stays active (cannot self-complete)", async () => {
+  useLegacyDeterministicPhases();
   const d = mkDirective({ triggerPolicy: { type: "schedule", interval: "PT2H" } });
 
   await directiveTick(new Date("2026-06-11T12:00:00Z"));
@@ -143,6 +181,7 @@ test("directive with no criteria runs a goal task but stays active (cannot self-
 });
 
 test("manual directive without a schedule goes to sleeping after its run", async () => {
+  useLegacyDeterministicPhases();
   const d = mkDirective({ triggerPolicy: { type: "manual" } });
   addCriterion(d._id, "c");
 
@@ -204,6 +243,45 @@ test("plan phase accepts autonomy planner output and records DAG metadata", asyn
   _setDirectivePlannerForTests(null);
 });
 
+test("production planner phase task plans execution DAG after terminal JSON output", async () => {
+  const d = mkDirective();
+  const c = addCriterion(d._id, "Publish the autonomy plan");
+
+  await directiveTick(new Date("2026-06-11T13:30:00Z"));
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-06-11T13:30:01Z"));
+
+  assert.equal(getRun(run._id)!.phase, "plan", "planner phase task should keep run in plan while pending");
+  const phaseTasks = (await getRunTasks(d._id, run._id)).filter(
+    (t) => ((t.output ?? {}) as Record<string, unknown>).directivePhase === "planner"
+  );
+  assert.equal(phaseTasks.length, 1);
+  assert.equal(phaseTasks[0].status, "backlog");
+
+  await completeTaskWithSummary(phaseTasks[0]._id.toString(), "review", `\`\`\`json
+{
+  "tasks": [
+    {
+      "title": "Publish plan",
+      "description": "Write and publish the autonomy plan.",
+      "agentType": "developer",
+      "criterionRefs": ["${c._id}"]
+    }
+  ]
+}
+\`\`\``);
+
+  await directiveTick(new Date("2026-06-11T13:30:02Z"));
+  assert.equal(getRun(run._id)!.phase, "execute");
+
+  const runTasks = await getRunTasks(d._id, run._id);
+  const executionTasks = runTasks.filter((t) => !((t.output ?? {}) as Record<string, unknown>).directivePhase);
+  assert.equal(executionTasks.length, 1);
+  assert.equal(((executionTasks[0].output ?? {}) as Record<string, unknown>).directiveDagIndex, 0);
+  assert.ok(getJournal(run._id).some((j) => j.step === "planner_task_started"));
+  assert.ok(getJournal(run._id).some((j) => j.step === "task_dag_planned"));
+});
+
 test("invalid autonomy planner output falls back to deterministic criterion tasks", async () => {
   const d = mkDirective();
   addCriterion(d._id, "Fallback criterion A");
@@ -225,6 +303,8 @@ test("invalid autonomy planner output falls back to deterministic criterion task
 });
 
 test("review gate must pass before criteria are proven", async () => {
+  _setDirectivePlannerForTests(async () => null);
+  _setDirectiveRetrospectiveForTests(async () => null);
   const d = mkDirective();
   addCriterion(d._id, "Review-gated criterion");
   _setDirectiveReviewerForTests(async () => `\`\`\`json
@@ -253,6 +333,8 @@ test("review gate must pass before criteria are proven", async () => {
 });
 
 test("review pass proves criteria", async () => {
+  _setDirectivePlannerForTests(async () => null);
+  _setDirectiveRetrospectiveForTests(async () => null);
   const d = mkDirective();
   addCriterion(d._id, "Review pass criterion");
   _setDirectiveReviewerForTests(async () => `\`\`\`json
@@ -277,6 +359,8 @@ test("review pass proves criteria", async () => {
 });
 
 test("review partial with corrective tasks creates tasks and returns to execute", async () => {
+  _setDirectivePlannerForTests(async () => null);
+  _setDirectiveRetrospectiveForTests(async () => null);
   const d = mkDirective();
   const c = addCriterion(d._id, "Correct the gap");
   _setDirectiveReviewerForTests(async () => `\`\`\`json
@@ -311,7 +395,93 @@ test("review partial with corrective tasks creates tasks and returns to execute"
   _setDirectiveReviewerForTests(null);
 });
 
+test("production reviewer phase task gates proof until terminal pass JSON", async () => {
+  const d = mkDirective();
+  const c = addCriterion(d._id, "Reviewer proves this");
+
+  await directiveTick(new Date("2026-06-11T17:30:00Z"));
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-06-11T17:30:01Z"));
+  const plannerTask = (await getRunTasks(d._id, run._id)).find(
+    (t) => ((t.output ?? {}) as Record<string, unknown>).directivePhase === "planner"
+  )!;
+  await completeTaskWithSummary(plannerTask._id.toString(), "review", `\`\`\`json
+{ "tasks": [{ "title": "Do proof work", "description": "Produce evidence.", "criterionRefs": ["${c._id}"] }] }
+\`\`\``);
+  await directiveTick(new Date("2026-06-11T17:30:02Z"));
+  await completeRunTasks(d._id, run._id, "review");
+  await directiveTick(new Date("2026-06-11T17:30:03Z")); // execute -> verify
+  await directiveTick(new Date("2026-06-11T17:30:04Z")); // start reviewer task
+
+  assert.equal(getRun(run._id)!.phase, "verify");
+  const reviewerTask = (await getRunTasks(d._id, run._id)).find(
+    (t) => ((t.output ?? {}) as Record<string, unknown>).directivePhase === "reviewer"
+  );
+  assert.ok(reviewerTask);
+  assert.ok(getCriteria(d._id).every((criterion) => criterion.proven === 0));
+
+  await completeTaskWithSummary(reviewerTask._id.toString(), "review", `\`\`\`json
+{
+  "status": "pass",
+  "findings": [{ "task": "Do proof work", "assessment": "pass", "notes": "Evidence satisfies the criterion." }],
+  "gaps": [],
+  "correctiveTasks": [],
+  "summary": "Pass."
+}
+\`\`\``);
+  await directiveTick(new Date("2026-06-11T17:30:05Z"));
+
+  assert.equal(getRun(run._id)!.phase, "reflect");
+  assert.ok(getCriteria(d._id).every((criterion) => criterion.proven === 1));
+  assert.ok(getJournal(run._id).some((j) => j.step === "reviewer_task_started"));
+  assert.ok(getJournal(run._id).some((j) => j.step === "reviewed"));
+});
+
+test("production reviewer phase task can create corrective tasks and return to execute", async () => {
+  const d = mkDirective();
+  const c = addCriterion(d._id, "Reviewer requests correction");
+
+  await directiveTick(new Date("2026-06-11T17:45:00Z"));
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-06-11T17:45:01Z"));
+  const plannerTask = (await getRunTasks(d._id, run._id)).find(
+    (t) => ((t.output ?? {}) as Record<string, unknown>).directivePhase === "planner"
+  )!;
+  await completeTaskWithSummary(plannerTask._id.toString(), "review", `\`\`\`json
+{ "tasks": [{ "title": "Initial attempt", "description": "Try to satisfy the criterion.", "criterionRefs": ["${c._id}"] }] }
+\`\`\``);
+  await directiveTick(new Date("2026-06-11T17:45:02Z"));
+  await completeRunTasks(d._id, run._id, "review");
+  await directiveTick(new Date("2026-06-11T17:45:03Z"));
+  await directiveTick(new Date("2026-06-11T17:45:04Z"));
+  const reviewerTask = (await getRunTasks(d._id, run._id)).find(
+    (t) => ((t.output ?? {}) as Record<string, unknown>).directivePhase === "reviewer"
+  )!;
+
+  await completeTaskWithSummary(reviewerTask._id.toString(), "review", `\`\`\`json
+{
+  "status": "partial",
+  "findings": [],
+  "gaps": ["needs a stronger artifact"],
+  "correctiveTasks": [
+    { "title": "Strengthen proof", "description": "Add the missing artifact.", "criterionRefs": ["${c._id}"] }
+  ],
+  "summary": "Needs one correction."
+}
+\`\`\``);
+  await directiveTick(new Date("2026-06-11T17:45:05Z"));
+
+  assert.equal(getRun(run._id)!.phase, "execute");
+  const executionTasks = (await getRunTasks(d._id, run._id)).filter(
+    (t) => !((t.output ?? {}) as Record<string, unknown>).directivePhase
+  );
+  assert.ok(executionTasks.some((t) => String(t.title).includes("Strengthen proof")));
+  assert.ok(getCriteria(d._id).every((criterion) => criterion.proven === 0));
+});
+
 test("reflect phase records retrospective learning paths", async () => {
+  _setDirectivePlannerForTests(async () => null);
+  _setDirectiveReviewerForTests(async () => null);
   const brainRoot = mkdtempSync(join(TMP, "brain-"));
   const d = mkDirective();
   addCriterion(d._id, "Retrospective criterion");
@@ -344,4 +514,48 @@ test("reflect phase records retrospective learning paths", async () => {
   assert.match(readFileSync(join(brainRoot, "hive", "playbooks", "roles", "coo.md"), "utf-8"), /Keep directive plans reviewable/);
   assert.match(readFileSync(join(brainRoot, "hive", "playbooks", "projects", "hivematrix-access.md"), "utf-8"), /GitHub/);
   _setDirectiveRetrospectiveForTests(null);
+});
+
+test("production retrospective phase task records learning before yielding", async () => {
+  _setDirectivePlannerForTests(async () => null);
+  _setDirectiveReviewerForTests(async () => null);
+  const brainRoot = mkdtempSync(join(TMP, "brain-production-"));
+  const d = mkDirective();
+  addCriterion(d._id, "Retrospective production criterion");
+
+  await directiveTick(new Date("2026-06-11T18:30:00Z"));
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-06-11T18:30:01Z"));
+  await completeRunTasks(d._id, run._id, "review");
+  await directiveTick(new Date("2026-06-11T18:30:02Z"));
+  await directiveTick(new Date("2026-06-11T18:30:03Z"));
+  assert.equal(getRun(run._id)!.phase, "reflect");
+
+  await directiveTick(new Date("2026-06-11T18:30:04Z"), { brainRootDir: brainRoot });
+  assert.equal(getRun(run._id)!.phase, "reflect", "retrospective task should keep run in reflect while pending");
+  const retrospectiveTask = (await getRunTasks(d._id, run._id)).find(
+    (t) => ((t.output ?? {}) as Record<string, unknown>).directivePhase === "retrospective"
+  );
+  assert.ok(retrospectiveTask);
+
+  await completeTaskWithSummary(retrospectiveTask._id.toString(), "review", `\`\`\`json
+{
+  "overallAssessment": "The run completed cleanly.",
+  "playbookDeltas": [
+    { "scope": "role:coo", "rule": "Capture production retrospective learnings before yielding" }
+  ],
+  "accessLedger": [
+    { "system": "HiveMatrix", "status": "configured", "notes": "Directive phase tasks completed" }
+  ]
+}
+\`\`\``);
+  await directiveTick(new Date("2026-06-11T18:30:05Z"), { brainRootDir: brainRoot });
+
+  assert.equal(getRun(run._id)!.phase, "done");
+  assert.ok(getJournal(run._id).some((j) => j.step === "retrospective_task_started"));
+  assert.ok(getJournal(run._id).some((j) => j.step === "retrospective_recorded"));
+  assert.match(
+    readFileSync(join(brainRoot, "hive", "playbooks", "roles", "coo.md"), "utf-8"),
+    /Capture production retrospective learnings/
+  );
 });
