@@ -48,6 +48,15 @@ function json(res: ServerResponse, statusCode: number, body: unknown): void {
   res.end(payload);
 }
 
+export function consoleHtmlHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+  };
+}
+
 function parseBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -136,7 +145,7 @@ export function createDaemonServer() {
       // This closes the "anyone with the tunnel URL gets the token" hole.
       if (req.method === "GET" && (urlPath === "/" || urlPath === "/console")) {
         const viaCloudflare = !!(req.headers["cf-connecting-ip"] || req.headers["cf-ray"]);
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.writeHead(200, consoleHtmlHeaders());
         res.end(CONSOLE_HTML.replace("%%HM_TOKEN%%", viaCloudflare ? "" : AUTH_TOKEN));
         return;
       }
