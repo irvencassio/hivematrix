@@ -38,3 +38,18 @@ test("remote access UI supports persistent named tunnel and Access credentials",
   assert.match(CONSOLE_HTML, /\/tunnel\/configure-named/);
   assert.match(CONSOLE_HTML, /\/tunnel\/access-credentials/);
 });
+
+test("MessageBee modal fetches structured status before reporting readability", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /const r = await api\('\/messagebee'\)/);
+  assert.doesNotMatch(js, /!\s*\/Full Disk Access\/i\.test/);
+});
+
+test("reply and retry drafts survive live detail refreshes", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.ok(js.includes("onCtxDraft(\\'reply\\',this)"));
+  assert.ok(js.includes("onCtxDraft(\\'retry\\',this)"));
+  assert.match(js, /syncCtxDrafts\(\)/);
+  assert.match(js, /restoreCtxDrafts\(\)/);
+  assert.match(js, /_ctxDraft\.reply = ""/);
+});

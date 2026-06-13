@@ -743,7 +743,7 @@ function taskActionsHtml(t) {
   // Retry-with-steer: optional guidance text + attachments fold out under Retry.
   if (retryable) {
     html += '<div id="retrySection_'+t._id+'" class="reply-section">'
-      + '<textarea id="retryText" class="reply-input" placeholder="Optional: add guidance to steer the rerun…" rows="2"></textarea>'
+      + '<textarea id="retryText" class="reply-input" placeholder="Optional: add guidance to steer the rerun…" rows="2" oninput="onCtxDraft(\'retry\',this)"></textarea>'
       + attachPickerHtml('retry')
       + '<div class="reply-row" style="margin-top:6px"><button onclick="submitRetry(\''+t._id+'\')">↻ Retry'+(t.status==='cancelled'?'':' with guidance')+'</button></div></div>';
   }
@@ -752,7 +752,7 @@ function taskActionsHtml(t) {
   const q = t.pendingQuestion ? '<div class="reply-question">'+esc(t.pendingQuestion)+'</div>' : '';
   html += '<div id="replySection_'+t._id+'" class="reply-section'+(isOpen?' open':'')+'">'
     + q
-    + '<textarea id="replyText" class="reply-input" placeholder="Type your reply…" rows="2"></textarea>'
+    + '<textarea id="replyText" class="reply-input" placeholder="Type your reply…" rows="2" oninput="onCtxDraft(\'reply\',this)"></textarea>'
     + attachPickerHtml('reply')
     + '<div class="reply-row" style="margin-top:6px"><button onclick="replyTask(\''+t._id+'\')">↩ Send Reply</button></div></div>';
   return html;
@@ -760,9 +760,15 @@ function taskActionsHtml(t) {
 
 async function selectTask(id) {
   state.selected = id;
-  // Switching tasks clears any half-composed retry/reply attachments; staying on
-  // the same task across a live refresh keeps them.
-  if (_ctxAttachTask !== id) { _ctxAttach = { retry: [], reply: [] }; _ctxAttachTask = id; }
+  // Switching tasks clears half-composed retry/reply state; staying on the same
+  // task across a live refresh keeps files and draft text.
+  if (_ctxTask !== id) {
+    _ctxAttach = { retry: [], reply: [] };
+    _ctxDraft = { retry: "", reply: "" };
+    _ctxTask = id;
+  } else {
+    syncCtxDrafts();
+  }
   renderBoard();
   const t = await api("/tasks/"+id);
   if (!t || !t._id) { state.selected = null; return; }
@@ -792,7 +798,8 @@ async function selectTask(id) {
     if (live) tr.scrollTop = tr.scrollHeight;
     else if (prevScrollTop !== null) tr.scrollTop = prevScrollTop;
   }
-  // Restore attachment chips after the innerHTML rebuild.
+  // Restore form state after the innerHTML rebuild.
+  restoreCtxDrafts();
   renderCtxChips("retry"); renderCtxChips("reply");
 }
 
@@ -816,11 +823,25 @@ async function cardArchive(id) {
   refresh();
 }
 
-// Per-context attachment state for the retry-steer + reply forms. Reset when a
-// different task is selected (see selectTask), preserved across same-task
-// re-renders so a live refresh doesn't drop files mid-compose.
+// Per-context draft/attachment state for the retry-steer + reply forms. Reset
+// when a different task is selected (see selectTask), preserved across same-task
+// re-renders so a live refresh doesn't drop files or text mid-compose.
 let _ctxAttach = { retry: [], reply: [] };
-let _ctxAttachTask = null;
+let _ctxDraft = { retry: "", reply: "" };
+let _ctxTask = null;
+function onCtxDraft(ctx, input) { _ctxDraft[ctx] = input.value; }
+function syncCtxDrafts() {
+  const retry = document.getElementById("retryText");
+  const reply = document.getElementById("replyText");
+  if (retry) _ctxDraft.retry = retry.value;
+  if (reply) _ctxDraft.reply = reply.value;
+}
+function restoreCtxDrafts() {
+  const retry = document.getElementById("retryText");
+  const reply = document.getElementById("replyText");
+  if (retry) retry.value = _ctxDraft.retry;
+  if (reply) reply.value = _ctxDraft.reply;
+}
 function onCtxAttach(ctx, input) {
   for (const f of input.files) { const p = f.path || f.name; if (p && !_ctxAttach[ctx].includes(p)) _ctxAttach[ctx].push(p); }
   input.value = "";
@@ -854,6 +875,7 @@ async function submitRetry(id) {
   await api("/tasks/"+id+"/retry", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ steer, attachments }) });
   _ctxAttach.retry = [];
+  _ctxDraft.retry = "";
   refresh();
 }
 
@@ -865,7 +887,7 @@ async function replyTask(id) {
   if (attachments.length) text += (text ? "\n\n" : "") + "Attached files:\n" + attachments.map(p => "- " + p).join("\n");
   el.disabled = true;
   const r = await api("/tasks/"+id+"/reply", { method: "POST", body: JSON.stringify({ text }) });
-  if (r && r.ok) { _ctxAttach.reply = []; refresh(); selectTask(id); }
+  if (r && r.ok) { _ctxAttach.reply = []; _ctxDraft.reply = ""; refresh(); selectTask(id); }
   else { hmAlert(r?.error || "Failed to send reply"); el.disabled = false; }
 }
 
@@ -992,7 +1014,7 @@ async function wizardAction(id) {
 
 // --- MessageBee guided setup ------------------------------------------------
 function mbStep() { return (state.onboarding && state.onboarding.steps || []).find(s => s.id === 'messagebee'); }
-function openMessageBeeSetup() {
+async function openMessageBeeSetup() {
   document.getElementById('mb_err').textContent = '';
   document.getElementById('mb_status').textContent = '';
   document.getElementById('mb_phone').value = '';
@@ -1000,6 +1022,10 @@ function openMessageBeeSetup() {
   renderIgnoredSenders();
   document.getElementById('mbOverlay').classList.add('open');
   setTimeout(() => document.getElementById('mb_phone').focus(), 30);
+  try {
+    const r = await api('/messagebee');
+    if (r) renderMessageBeeState(r);
+  } catch (e) { /* modal can still show onboarding-derived fallback */ }
 }
 // Show non-allowlisted senders that have texted, each with a one-click Allow —
 // catches the common "set up with my number but iMessage sent as my email" case.
@@ -1044,15 +1070,17 @@ async function openSystemPane(pane) {
 async function openFullDiskAccess() { await openSystemPane('fullDiskAccess'); }
 // Reflect status into the three step marks. data is the POST result (or null = derive from onboarding).
 function renderMessageBeeState(data) {
-  const fdaReadable = data ? !!data.chatDbReadable : !/Full Disk Access/i.test((mbStep() || {}).detail || 'x');
+  const fallbackDetail = ((mbStep() || {}).detail || '');
+  const fdaReadable = data ? !!data.chatDbReadable : /\b(chat\.db readable|enabled; reading|Messages database readable)\b/i.test(fallbackDetail);
   const enabled = data ? !!data.enabled : ((mbStep() || {}).state === 'done');
   const ids = data ? (data.identities || []) : null;
+  const detail = data ? (data.chatDbDetail || '') : fallbackDetail;
   const mark = (el, ok) => { el.textContent = ok ? '✓' : '○'; el.className = 'mb-mark ' + (ok ? 'ok' : 'no'); };
   mark(document.getElementById('mb_fda_mark'), fdaReadable);
   mark(document.getElementById('mb_chan_mark'), enabled);
   document.getElementById('mb_fda_detail').textContent = fdaReadable
     ? 'Granted — HiveMatrix can read Messages.'
-    : 'HiveMatrix needs Full Disk Access to read Messages (chat.db). Grant it, then re-run.';
+    : (detail || 'HiveMatrix needs Full Disk Access to read Messages (chat.db). Grant it, then re-run.');
   if (ids) {
     const allow = ids.filter(i => i.status === 'allowed' || i.status === 'paired');
     mark(document.getElementById('mb_phone_mark'), allow.length > 0);
@@ -1559,12 +1587,15 @@ async function renderSettingsBees() {
     const toggle = (b.manageable && b.runtimeMode === "launchagent")
       ? '<button class="copybtn" onclick="toggleBee(\''+esc(b.kind)+'\','+(b.running?'false':'true')+')">'+(b.running?'Turn off':'Turn on')+'</button>'
       : '<span class="muted" style="font-size:10px">'+(b.runtimeMode==="embedded"?'follows mode':'—')+'</span>';
+    const setupBtn = b.kind === 'mailbee' ? '<button class="copybtn" onclick="openMailBeeSetup()" style="margin-right:6px">Set up</button>'
+      : b.kind === 'messagebee' ? '<button class="copybtn" onclick="openMessageBeeSetup()" style="margin-right:6px">Set up</button>'
+      : '';
     return '<div class="card" style="cursor:default">'
       + '<div class="t"><span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+dotColor+';margin-right:6px"></span>'+esc(b.name)+'</div>'
       + '<div class="m">'+modeBadge+healthBadge+'<span class="badge">'+esc(stateTxt)+'</span></div>'
       + (b.summary?'<div class="muted" style="font-size:11px;margin-top:4px">'+esc(b.summary)+'</div>':'')
       + (b.statusDetail?'<div class="muted" style="font-size:10px;margin-top:2px">'+esc(b.statusDetail)+'</div>':'')
-      + '<div class="row" style="margin-top:6px;justify-content:flex-end">'+toggle+'</div>'
+      + '<div class="row" style="margin-top:6px;justify-content:flex-end">'+setupBtn+toggle+'</div>'
       + '</div>';
   }).join("");
 }

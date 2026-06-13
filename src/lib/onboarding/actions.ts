@@ -302,7 +302,7 @@ export async function configureMessageBee(opts: {
 }): Promise<ActionResult> {
   const store = await import("@/lib/messagebee/store");
   const { normalizeHandle } = await import("@/lib/messagebee/contracts");
-  const { canReadChatDb } = await import("@/lib/messagebee/imessage");
+  const { probeChatDbAccess } = await import("@/lib/messagebee/imessage");
 
   if (opts.enable !== false) store.setChannelEnabled(true);
 
@@ -313,14 +313,15 @@ export async function configureMessageBee(opts: {
     else store.upsertIdentity(raw, "allowed", opts.displayName ?? null);
   }
 
-  const chatDbReadable = canReadChatDb();
+  const chatDbProbe = probeChatDbAccess();
+  const chatDbReadable = chatDbProbe.ok;
   const enabled = store.isChannelEnabled();
   const identities = store.listIdentities();
   const allowlisted = identities.filter((i) => i.status === "allowed" || i.status === "paired").length;
   const ok = enabled && chatDbReadable && allowlisted > 0;
 
   let detail: string;
-  if (!chatDbReadable) detail = "Channel enabled, but grant Full Disk Access so HiveMatrix can read Messages.";
+  if (!chatDbReadable) detail = `Channel enabled, but MessageBee is not ready: ${chatDbProbe.detail}`;
   else if (allowlisted === 0) detail = "Channel enabled and Messages readable — add an allowlisted sender to start driving it.";
   else detail = "MessageBee ready: channel on, Messages readable, sender allowlisted.";
 
@@ -330,6 +331,7 @@ export async function configureMessageBee(opts: {
     data: {
       enabled,
       chatDbReadable,
+      chatDbDetail: chatDbProbe.detail,
       identities,
       deepLinks: { fullDiskAccess: TCC_DEEP_LINKS.fullDiskAccess },
       warnings: warnings.length ? warnings : undefined,

@@ -84,6 +84,30 @@ test("frontier step reflects env credentials", () => {
   assert.equal(step(status, "frontier").state, "done");
 });
 
+test("messagebee uses diagnostic chat.db detail when unreadable", () => {
+  const status = withHome(() => {}, () => getOnboardingStatus({
+    now: "T",
+    messagebee: {
+      enabled: true,
+      chatDbReadable: false,
+      chatDbDetail: "Messages database opened, but the message table check failed: no such table: message",
+    },
+  }));
+  const mb = step(status, "messagebee");
+  assert.equal(mb.state, "incomplete");
+  assert.match(mb.detail, /message table check failed/);
+});
+
+test("messagebee still reports channel disabled after readable chat.db", () => {
+  const status = withHome(() => {}, () => getOnboardingStatus({
+    now: "T",
+    messagebee: { enabled: false, chatDbReadable: true, chatDbDetail: "Messages database readable" },
+  }));
+  const mb = step(status, "messagebee");
+  assert.equal(mb.state, "incomplete");
+  assert.match(mb.detail, /channel disabled/);
+});
+
 test("incomplete steps carry remediation hints", () => {
   const status = withHome(() => {}, () => getOnboardingStatus({ now: "T" }));
   for (const s of status.steps.filter((s) => s.state === "incomplete")) {

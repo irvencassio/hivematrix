@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { appleDateToIso, readInboundSince, currentMaxRowid } from "./imessage";
+import {
+  appleDateToIso,
+  canReadChatDb,
+  currentMaxRowid,
+  probeChatDbAccess,
+  readInboundSince,
+} from "./imessage";
 
 test("appleDateToIso handles seconds and nanoseconds since 2001", () => {
   // 0 seconds since 2001 epoch
@@ -38,6 +44,55 @@ function makeChatDb(): string {
   db.close();
   return path;
 }
+
+/** Build a chat.db that opens but is missing the message schema. */
+function makeSchemaFailedChatDb(): string {
+  const dir = mkdtempSync(join(tmpdir(), "mb-schema-"));
+  const path = join(dir, "chat.db");
+  writeFileSync(path, "");
+  const db = new Database(path);
+  db.exec("CREATE TABLE not_message (id INTEGER PRIMARY KEY)");
+  db.close();
+  return path;
+}
+
+test("probeChatDbAccess reports a missing chat database", () => {
+  const dir = mkdtempSync(join(tmpdir(), "mb-missing-"));
+  const path = join(dir, "chat.db");
+  try {
+    const probe = probeChatDbAccess(path);
+    assert.equal(probe.ok, false);
+    assert.equal(probe.reason, "missing");
+    assert.equal(canReadChatDb(path), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("probeChatDbAccess reports readable chat database", () => {
+  const path = makeChatDb();
+  try {
+    const probe = probeChatDbAccess(path);
+    assert.equal(probe.ok, true);
+    assert.match(probe.detail, /readable/i);
+    assert.equal(canReadChatDb(path), true);
+  } finally {
+    rmSync(join(path, ".."), { recursive: true, force: true });
+  }
+});
+
+test("probeChatDbAccess distinguishes schema failures from permission failures", () => {
+  const path = makeSchemaFailedChatDb();
+  try {
+    const probe = probeChatDbAccess(path);
+    assert.equal(probe.ok, false);
+    assert.equal(probe.reason, "schema_failed");
+    assert.match(probe.detail, /opened/i);
+    assert.equal(canReadChatDb(path), false);
+  } finally {
+    rmSync(join(path, ".."), { recursive: true, force: true });
+  }
+});
 
 test("readInboundSince returns only new inbound text messages, sets high-water", () => {
   const path = makeChatDb();

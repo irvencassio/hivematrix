@@ -534,13 +534,14 @@ export async function listBeeServiceStatuses(): Promise<BeeServiceStatus[]> {
 async function channelStatus(kind: string): Promise<{ enabled: boolean; permitted: boolean; detail: string }> {
   if (kind === "messagebee") {
     const { isChannelEnabled } = await import("@/lib/messagebee/store");
-    const { canReadChatDb } = await import("@/lib/messagebee/imessage");
+    const { probeChatDbAccess } = await import("@/lib/messagebee/imessage");
     const enabled = isChannelEnabled();
-    const permitted = canReadChatDb();
+    const probe = probeChatDbAccess();
+    const permitted = probe.ok;
     return {
       enabled, permitted,
       detail: !enabled ? "channel off — set up to enable"
-        : permitted ? "running; reading Messages chat.db" : "enabled, but Full Disk Access is missing",
+        : permitted ? "running; reading Messages chat.db" : `enabled, but ${probe.detail}`,
     };
   }
   // mailbee

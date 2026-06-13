@@ -65,7 +65,7 @@ export function getOnboardingStatus(opts: {
   now?: string;
   helperBuilt?: boolean;
   desktopPermissions?: { accessibility: boolean; screenRecording: boolean } | null;
-  messagebee?: { enabled: boolean; chatDbReadable: boolean } | null;
+  messagebee?: { enabled: boolean; chatDbReadable: boolean; chatDbDetail?: string } | null;
   mailbee?: { enabled: boolean; mailControllable: boolean } | null;
 } = {}): OnboardingStatus {
   const cfg = readConfig();
@@ -170,7 +170,7 @@ export function getOnboardingStatus(opts: {
   const messagebeeOk = !!mb && mb.enabled && mb.chatDbReadable;
   let messagebeeDetail = "MessageBee disabled";
   if (mb) {
-    if (!mb.chatDbReadable) messagebeeDetail = "Full Disk Access needed to read Messages (chat.db)";
+    if (!mb.chatDbReadable) messagebeeDetail = mb.chatDbDetail ?? "Full Disk Access needed to read Messages (chat.db)";
     else if (!mb.enabled) messagebeeDetail = "chat.db readable; channel disabled";
     else messagebeeDetail = "enabled; reading chat.db and sending via Messages";
   }

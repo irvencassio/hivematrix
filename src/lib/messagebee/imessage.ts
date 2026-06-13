@@ -21,6 +21,12 @@ import { type InboundMessage } from "./contracts";
 
 const APPLE_EPOCH_UNIX_SECONDS = 978_307_200; // 2001-01-01T00:00:00Z
 
+export type ChatDbAccessReason = "missing" | "open_failed" | "schema_failed";
+
+export type ChatDbAccessProbe =
+  | { ok: true; detail: string }
+  | { ok: false; reason: ChatDbAccessReason; detail: string };
+
 export function chatDbPath(): string {
   return join(homedir(), "Library", "Messages", "chat.db");
 }
@@ -34,22 +40,50 @@ export function appleDateToIso(appleDate: number): string {
   return new Date(unixSeconds * 1000).toISOString();
 }
 
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
- * Can the daemon read chat.db? False when the file is missing or Full Disk
- * Access isn't granted (open/read throws SQLITE_CANTOPEN / authorization denied).
+ * Diagnose whether the daemon can read chat.db. Opening and schema probing are
+ * split so the UI can avoid blaming Full Disk Access for schema/drift failures.
  */
-export function canReadChatDb(path = chatDbPath()): boolean {
-  if (!existsSync(path)) return false;
+export function probeChatDbAccess(path = chatDbPath()): ChatDbAccessProbe {
+  if (!existsSync(path)) {
+    return { ok: false, reason: "missing", detail: `Messages database not found: ${path}` };
+  }
   let db: Database.Database | null = null;
   try {
     db = new Database(path, { readonly: true, fileMustExist: true });
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "open_failed",
+      detail: `Cannot open Messages database; grant Full Disk Access to the running HiveMatrix app/daemon, then restart HiveMatrix: ${errorDetail(error)}`,
+    };
+  }
+
+  try {
     db.prepare("SELECT 1 FROM message LIMIT 1").get();
-    return true;
-  } catch {
-    return false;
+    return { ok: true, detail: "Messages database readable" };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "schema_failed",
+      detail: `Messages database opened, but the message table check failed: ${errorDetail(error)}`,
+    };
   } finally {
     try { db?.close(); } catch { /* ignore */ }
   }
+}
+
+/**
+ * Can the daemon read chat.db? False when the file is missing, inaccessible, or
+ * the Messages schema probe fails. Use probeChatDbAccess when user-facing detail
+ * matters.
+ */
+export function canReadChatDb(path = chatDbPath()): boolean {
+  return probeChatDbAccess(path).ok;
 }
 
 /**
