@@ -691,6 +691,27 @@ export function createDaemonServer() {
       }
 
       // POST /tasks
+      // GET /linkedin/job — preview the domain-locked LinkedIn engagement job spec (W5.3)
+      if (req.method === "GET" && urlPath === "/linkedin/job") {
+        const { buildLinkedInEngagementJob } = await import("@/lib/linkedin/engagement");
+        json(res, 200, buildLinkedInEngagementJob());
+        return;
+      }
+
+      // POST /linkedin/ritual — install the daily LinkedIn engagement directive (W5.3)
+      if (req.method === "POST" && urlPath === "/linkedin/ritual") {
+        const { buildLinkedInRitualDirective } = await import("@/lib/linkedin/engagement");
+        const { createDirective } = await import("@/lib/orchestrator/directive-store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const directive = createDirective(buildLinkedInRitualDirective({
+          projectPath: typeof body.projectPath === "string" ? body.projectPath : undefined,
+          dailyAtHour: typeof body.dailyAtHour === "number" ? body.dailyAtHour : undefined,
+          voiceNote: typeof body.voiceNote === "string" ? body.voiceNote : undefined,
+        }));
+        json(res, 201, directive);
+        return;
+      }
+
       // POST /content/brief — fan a content brief into channel renditions,
       // stage them as task artifacts, and raise one approve-by-text gate (W5.2).
       if (req.method === "POST" && urlPath === "/content/brief") {
