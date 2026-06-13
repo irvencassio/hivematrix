@@ -488,6 +488,32 @@ export function createDaemonServer() {
         return;
       }
 
+      // Telemetry — opt-in, local-first (W7.2)
+      if (req.method === "GET" && urlPath === "/telemetry/status") {
+        const { getTelemetrySummary } = await import("@/lib/telemetry/telemetry");
+        json(res, 200, getTelemetrySummary());
+        return;
+      }
+      if (req.method === "POST" && urlPath === "/telemetry/config") {
+        const { setTelemetryEnabled } = await import("@/lib/telemetry/telemetry");
+        const body = await parseBody(req) as Record<string, unknown>;
+        json(res, 200, setTelemetryEnabled(body.enabled === true));
+        return;
+      }
+      if (req.method === "POST" && urlPath === "/telemetry/clear") {
+        const { clearTelemetry } = await import("@/lib/telemetry/telemetry");
+        json(res, 200, { cleared: clearTelemetry() });
+        return;
+      }
+
+      // GET /diagnostics/bundle — operational support bundle (opt-in to send) (W7.2)
+      if (req.method === "GET" && urlPath === "/diagnostics/bundle") {
+        const { buildDiagnosticsBundle } = await import("@/lib/telemetry/diagnostics");
+        const { getBundledVersion } = await import("@/lib/version/bundle-version");
+        json(res, 200, buildDiagnosticsBundle({ version: getBundledVersion(), connectivity: policy.mode }));
+        return;
+      }
+
       // GET /notify/status — configured notification channels
       if (req.method === "GET" && urlPath === "/notify/status") {
         const { getTelegramConfig } = await import("@/lib/notify/telegram");

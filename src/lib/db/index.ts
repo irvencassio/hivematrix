@@ -274,6 +274,21 @@ const MIGRATIONS: string[] = [
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_frontier_debt_task ON frontier_review_debt(taskId);
     CREATE INDEX IF NOT EXISTS idx_frontier_debt_status ON frontier_review_debt(status);`,
+
+  // v15: telemetry_events — opt-in, local-first event log (privacy is a selling
+  // point, so nothing is recorded unless config.telemetry.enabled is true and
+  // nothing leaves the machine without an explicit "send diagnostics").
+  `CREATE TABLE IF NOT EXISTS telemetry_events (
+      _id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL,
+      event TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      connectivity TEXT,
+      version TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_telemetry_category ON telemetry_events(category);
+    CREATE INDEX IF NOT EXISTS idx_telemetry_created ON telemetry_events(createdAt);`,
 ];
 
 // ------------------------------------------------------------------

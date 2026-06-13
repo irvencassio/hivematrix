@@ -57,6 +57,21 @@ async function main(): Promise<void> {
   const policy = getConnectivityPolicy();
   console.log(`[hivematrix] Connectivity policy: ${policy.mode}`);
 
+  // Telemetry context (opt-in, local-first): tag events with version + mode, and
+  // capture crashes as events when the operator has enabled telemetry.
+  const { setTelemetryContext, recordTelemetryEvent } = await import("@/lib/telemetry/telemetry");
+  setTelemetryContext({ connectivity: policy.mode, version: bundledVersion });
+  policy.on("modeChange", ({ current }: { current: string }) => setTelemetryContext({ connectivity: current }));
+  recordTelemetryEvent({ category: "daemon", event: "started", payload: { boot: boot.mode } });
+  for (const signal of ["uncaughtException", "unhandledRejection"] as const) {
+    process.on(signal, (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      recordTelemetryEvent({ category: "crash", event: signal, payload: { message } });
+      console.error(`[hivematrix] ${signal}:`, err);
+      if (signal === "uncaughtException") process.exit(1);
+    });
+  }
+
   // Start HTTP server
   await startDaemonServer(PORT);
 
