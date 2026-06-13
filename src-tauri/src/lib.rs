@@ -87,15 +87,20 @@ fn spawn_bundled_daemon(app: &tauri::App) -> Option<Child> {
 fn check_for_update(app: tauri::AppHandle) {
     use tauri_plugin_updater::UpdaterExt;
     tauri::async_runtime::spawn(async move {
+        let current = app.package_info().version.to_string();
+        log::info!("updater: checking feed (current version {current})");
         let updater = match app.updater() {
             Ok(u) => u,
-            Err(e) => { log::info!("updater not configured: {e}"); return; }
+            Err(e) => { log::warn!("updater: not configured: {e}"); return; }
         };
         match updater.check().await {
             Ok(Some(update)) => {
-                log::info!("update available: {}", update.version);
-                if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
-                    log::error!("update install failed: {e}");
+                log::info!("updater: update available {} -> {}", current, update.version);
+                if let Err(e) = update.download_and_install(
+                    |_, _| {},
+                    || log::info!("updater: download complete, installing…"),
+                ).await {
+                    log::error!("updater: download/install FAILED: {e}");
                     return;
                 }
                 // The console + REST API are served by the launchd-supervised
@@ -103,15 +108,15 @@ fn check_for_update(app: tauri::AppHandle) {
                 // swaps daemon.cjs on disk, but the running daemon keeps the old
                 // code in memory until it restarts — so kick it before we
                 // relaunch, otherwise the user sees the old console post-update.
-                log::info!("update installed — restarting daemon + relaunching");
-                let _ = std::process::Command::new("sh")
+                let kick = std::process::Command::new("sh")
                     .arg("-c")
                     .arg("launchctl kickstart -k gui/$(id -u)/com.hivematrix.daemon")
                     .status();
+                log::info!("updater: installed; daemon kickstart -> {kick:?}; relaunching");
                 app.restart();
             }
-            Ok(None) => log::info!("no update available"),
-            Err(e) => log::warn!("update check failed: {e}"),
+            Ok(None) => log::info!("updater: no update available (feed not newer than {current})"),
+            Err(e) => log::warn!("updater: check FAILED: {e}"),
         }
     });
 }
@@ -123,13 +128,22 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(DaemonChild(Mutex::new(None)))
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // Log in release too — to ~/Library/Logs/HiveMatrix/app.log — so the
+            // updater (and any other) failures are diagnosable. They were
+            // previously invisible because the log plugin was debug-only, which
+            // is exactly why the silent auto-update failure couldn't be traced.
+            let log_dir = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
+                .join("Library/Logs/HiveMatrix");
+            let _ = std::fs::create_dir_all(&log_dir);
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .target(tauri_plugin_log::Target::new(
+                        tauri_plugin_log::TargetKind::Folder { path: log_dir, file_name: Some("app".into()) },
+                    ))
+                    .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout))
+                    .build(),
+            )?;
 
             // Ensure a daemon is up so the webview's health-poll redirects.
             if daemon_health_ok() {
