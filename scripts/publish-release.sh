@@ -56,10 +56,10 @@ ASSETS=("$TARBALL" "$SIG" "$MANIFEST")
 [ -n "$DMG" ] && ASSETS+=("$DMG")
 
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-  echo "==> Release $TAG exists — replacing assets…"
+  echo "==> Release ${TAG} exists - replacing assets..."
   gh release upload "$TAG" "${ASSETS[@]}" --repo "$REPO" --clobber
 else
-  echo "==> Creating release $TAG…"
+  echo "==> Creating release ${TAG}..."
   gh release create "$TAG" "${ASSETS[@]}" --repo "$REPO" \
     --title "HiveMatrix $VERSION" \
     --notes "HiveMatrix $VERSION — see commit history for changes. Auto-update feed: latest.json (darwin-aarch64)." \
