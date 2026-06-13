@@ -164,8 +164,10 @@ export function createDaemonServer() {
 
       // GET /projects — discovered projects for the project selector
       if (req.method === "GET" && urlPath === "/projects") {
-        const { discoverProjects, shouldPreSelect } = await import("@/lib/routing/project-discovery");
-        const projects = discoverProjects();
+        const { discoverProjects, discoverProjectsFresh, shouldPreSelect } = await import("@/lib/routing/project-discovery");
+        // ?fresh=1 bypasses the 5-min cache (the "Re-scan" button).
+        const fresh = parseQueryString(req.url ?? "").fresh === "1";
+        const projects = fresh ? discoverProjectsFresh() : discoverProjects();
         json(res, 200, {
           projects: projects.map((p) => ({
             name: p.name,

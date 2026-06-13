@@ -44,7 +44,13 @@ const SKIP_DIRS = new Set([
 function loadCache(): { projects: DiscoveredProject[]; timestamp: number } | null {
   try {
     const data = JSON.parse(readFileSync(CACHED_PROJECTS_PATH, "utf-8"));
-    if (Date.now() - data.timestamp < CACHE_TTL_MS) return data;
+    if (Date.now() - data.timestamp < CACHE_TTL_MS) {
+      // JSON.stringify turned each Date into a string; revive it so callers'
+      // Date methods (.toISOString in /projects, .getTime in sort/preSelect)
+      // don't throw on a cached read — the bug that showed "0 projects".
+      data.projects = (data.projects ?? []).map((p: DiscoveredProject) => ({ ...p, lastModified: new Date(p.lastModified) }));
+      return data;
+    }
   } catch {
     // no cache or corrupt
   }

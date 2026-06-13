@@ -1181,9 +1181,9 @@ document.addEventListener("click", (e) => {
   if (wrapper && !wrapper.contains(e.target)) closeProjectDropdown();
 });
 
-async function loadProjects() {
+async function loadProjects(fresh) {
   try {
-    const data = await api("/projects");
+    const data = await api("/projects" + (fresh ? "?fresh=1" : ""));
     if (!data || !Array.isArray(data.projects)) return;
     state.projects = data.projects;
     // Populate header project selector
@@ -1377,7 +1377,7 @@ function selectProjectFromSettings(name) {
 }
 
 async function refreshProjects() {
-  await loadProjects();
+  await loadProjects(true); // bypass the cache
   renderSettingsProjects();
 }
 
