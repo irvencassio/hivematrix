@@ -18,6 +18,8 @@ words.
 2. Preserve existing attachment behavior across same-task live refreshes.
 3. Preserve focus and selection/caret position across same-task live refreshes.
 4. Clear draft text when switching tasks or after a successful submit.
+5. If a task is marked `needs_input` but its structured pending request has already disappeared, treat a console reply as operator continuation guidance and requeue the task instead of showing a dead-end error.
+6. Do not restore retry/reply focus when the operator has moved focus outside the task detail pane, such as into the new-task composer.
 5. Keep the change local to the raw console script.
 
 ## Non-Goals
@@ -25,6 +27,8 @@ words.
 - Do not alter task reply API semantics.
 - Do not debounce or disable live refresh globally.
 - Do not persist unsent reply drafts to disk.
+- Do not require a stuck-request sidecar file for every console reply; stale `needs_input` tasks still need a recovery path.
+- Do not let task-detail refreshes steal focus from the task composer or other controls outside `#session`.
 
 ## Selected Design
 

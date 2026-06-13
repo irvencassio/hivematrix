@@ -1001,7 +1001,28 @@ export function createDaemonServer() {
         if (!text) { json(res, 400, { error: "text is required" }); return; }
         const { getPendingStuck, resolveStuck } = await import("@/lib/orchestrator/stuck");
         const pending = getPendingStuck().filter(r => r.taskId === tid);
-        if (!pending.length) { json(res, 404, { error: "No pending input request for this task" }); return; }
+        if (!pending.length) {
+          const { Task } = await import("@/lib/db");
+          const { appendReplyContinuation } = await import("@/lib/tasks/reply-continuation");
+          const cur = await Task.findById(tid);
+          if (!cur) { json(res, 404, { error: "Not found" }); return; }
+          if (cur.reviewState !== "needs_input") {
+            json(res, 404, { error: "No pending input request for this task" });
+            return;
+          }
+          await Task.findByIdAndUpdate(tid, {
+            description: appendReplyContinuation(String(cur.description ?? ""), text),
+            status: "backlog",
+            error: null,
+            agentPid: null,
+            startedAt: null,
+            completedAt: null,
+            reviewState: null,
+          });
+          broadcast("tasks:updated", { taskId: tid, status: "backlog" });
+          json(res, 200, { ok: true, fallback: "requeued" });
+          return;
+        }
         // Resolve the most-recent pending request.
         const req2 = pending.sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
         const ok = await resolveStuck(tid, req2.timestamp, "reply", "console", text);

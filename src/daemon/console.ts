@@ -858,12 +858,23 @@ function restoreCtxState() {
   if (retry) retry.value = _ctxDraft.retry;
   if (reply) reply.value = _ctxDraft.reply;
   const restore = _ctxFocus.active === "retry" ? retry : _ctxFocus.active === "reply" ? reply : null;
+  if (restore && !shouldRestoreCtxFocus()) {
+    _ctxFocus = { active: null, start: null, end: null };
+    return;
+  }
   if (restore) {
     restore.focus();
     if (_ctxFocus.start !== null && _ctxFocus.end !== null) {
       try { restore.setSelectionRange(_ctxFocus.start, _ctxFocus.end); } catch { /* ignore */ }
     }
   }
+}
+function shouldRestoreCtxFocus() {
+  const active = document.activeElement;
+  if (!active) return true;
+  const session = document.getElementById("session");
+  if (!session) return true;
+  return active === document.body || session.contains(active);
 }
 function onCtxAttach(ctx, input) {
   for (const f of input.files) { const p = f.path || f.name; if (p && !_ctxAttach[ctx].includes(p)) _ctxAttach[ctx].push(p); }
@@ -909,7 +920,7 @@ async function replyTask(id) {
   if (!text && !attachments.length) { el && el.focus(); return; }
   if (attachments.length) text += (text ? "\n\n" : "") + "Attached files:\n" + attachments.map(p => "- " + p).join("\n");
   el.disabled = true;
-  const r = await api("/tasks/"+id+"/reply", { method: "POST", body: JSON.stringify({ text }) });
+  const r = await api("/tasks/"+id+"/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
   if (r && r.ok) { _ctxAttach.reply = []; _ctxDraft.reply = ""; refresh(); selectTask(id); }
   else { hmAlert(r?.error || "Failed to send reply"); el.disabled = false; }
 }

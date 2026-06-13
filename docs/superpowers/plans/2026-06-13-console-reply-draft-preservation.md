@@ -18,6 +18,9 @@
   reset drafts/focus only when switching tasks.
 - [x] Restore draft values and focus/caret after rebuilding the detail pane.
 - [x] Clear the relevant draft only after successful retry/reply submission.
+- [x] Add a tested reply fallback for `needs_input` tasks whose structured pending request is missing.
+- [x] Send console reply bodies as JSON with content type and verify the browser script still parses.
+- [x] Guard retry/reply focus restoration so it cannot steal focus from the new-task composer.
 - [x] Run focused console tests.
 - [x] Run `npm test`, `npm run typecheck`, and `node scripts/scope-wall.mjs`.
 

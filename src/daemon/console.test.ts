@@ -56,6 +56,20 @@ test("reply and retry drafts survive live detail refreshes", () => {
   assert.match(js, /_ctxDraft\.reply = ""/);
 });
 
+test("reply focus restoration does not steal focus outside task detail", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function shouldRestoreCtxFocus/);
+  assert.match(js, /document\.getElementById\("session"\)/);
+  assert.match(js, /return active === document\.body \|\| session\.contains\(active\)/);
+  assert.match(js, /_ctxFocus = \{ active: null, start: null, end: null \}/);
+});
+
+test("console sends reply bodies as JSON", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /"Content-Type": "application\/json"/);
+  assert.match(js, /\/tasks\/"\+id\+"\/reply/);
+});
+
 test("frontier usage panel renders a separate Codex usage section", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /codexSubscription/);

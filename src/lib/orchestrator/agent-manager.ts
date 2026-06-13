@@ -14,6 +14,7 @@ import type { Turn, WorkflowPhase } from "./turn-types";
 import { deriveOutput } from "./derive-output";
 import { raiseStuck } from "./stuck";
 import { deriveReviewStateFromTurns } from "@/lib/tasks/review-state";
+import { deliverTrustedMailBeeReply } from "@/lib/mailbee/delivery";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -750,18 +751,33 @@ class AgentManager {
 
         const agentReportedFailure = currentStatus === "failed";
         const completedAt = new Date().toISOString();
-        const output = {
+        let output: Record<string, unknown> = {
           ...accumulatedOutput,
           summary,
           filesChanged: [],
           transientRetries: 0, // reset on success
         };
-        const nextStatus = agentReportedFailure ? "failed" : "review";
-        const reviewState = agentReportedFailure
+        let nextStatus = agentReportedFailure ? "failed" : "review";
+        let reviewState = agentReportedFailure
           ? null
           : summary.startsWith("❓ Awaiting your reply:")
             ? "needs_input"
             : deriveReviewStateFromTurns(turns as unknown as Turn[]);
+        if (!agentReportedFailure) {
+          const delivery = await deliverTrustedMailBeeReply(
+            {
+              _id: taskId,
+              source: (task as Record<string, unknown> | null)?.source as string | null | undefined,
+              output,
+            },
+            { reviewState },
+          );
+          output = delivery.output;
+          if (delivery.sent) {
+            nextStatus = "done";
+            reviewState = null;
+          }
+        }
         const update: Record<string, unknown> = {
           status: nextStatus,
           reviewState,

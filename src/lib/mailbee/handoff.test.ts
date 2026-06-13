@@ -21,7 +21,8 @@ test("known + authenticated sender creates an auto-send-eligible task", () => {
   if (r.kind === "new_task") {
     assert.equal(r.trust.level, "trusted");
     assert.equal(r.autoSendEligible, true);
-    assert.match(r.description, /UNTRUSTED input/);
+    assert.doesNotMatch(r.description, /attachments as UNTRUSTED input/);
+    assert.match(r.description, /Attachments from this trusted sender may be read/);
     assert.match(r.description, /Sender is trusted/);
   }
 });
