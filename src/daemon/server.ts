@@ -349,6 +349,13 @@ export function createDaemonServer() {
         json(res, 200, installDesktopBeeHelper());
         return;
       }
+      // POST /onboarding/messagebee — enable the iMessage channel + allowlist a sender
+      if (req.method === "POST" && urlPath === "/onboarding/messagebee") {
+        const body = await parseBody(req) as { enable?: boolean; phone?: string; displayName?: string };
+        const { configureMessageBee } = await import("@/lib/onboarding/actions");
+        json(res, 200, await configureMessageBee(body ?? {}));
+        return;
+      }
 
       // GET /tunnel — cloudflared status
       if (req.method === "GET" && urlPath === "/tunnel") {

@@ -268,6 +268,53 @@ export async function probeOpenAiEndpoint(
   }
 }
 
+/**
+ * Guided MessageBee setup: enable the iMessage channel, allowlist a sender, and
+ * report whether Full Disk Access (chat.db readability) is in place. Idempotent
+ * and safe to re-run; returns the live state the wizard renders.
+ */
+export async function configureMessageBee(opts: {
+  enable?: boolean;
+  phone?: string;
+  displayName?: string;
+}): Promise<ActionResult> {
+  const store = await import("@/lib/messagebee/store");
+  const { normalizeHandle } = await import("@/lib/messagebee/contracts");
+  const { canReadChatDb } = await import("@/lib/messagebee/imessage");
+
+  if (opts.enable !== false) store.setChannelEnabled(true);
+
+  const warnings: string[] = [];
+  const raw = (opts.phone ?? "").trim();
+  if (raw) {
+    if (!normalizeHandle(raw)) warnings.push(`"${raw}" is not a valid phone number or email — not allowlisted`);
+    else store.upsertIdentity(raw, "allowed", opts.displayName ?? null);
+  }
+
+  const chatDbReadable = canReadChatDb();
+  const enabled = store.isChannelEnabled();
+  const identities = store.listIdentities();
+  const allowlisted = identities.filter((i) => i.status === "allowed" || i.status === "paired").length;
+  const ok = enabled && chatDbReadable && allowlisted > 0;
+
+  let detail: string;
+  if (!chatDbReadable) detail = "Channel enabled, but grant Full Disk Access so HiveMatrix can read Messages.";
+  else if (allowlisted === 0) detail = "Channel enabled and Messages readable — add an allowlisted sender to start driving it.";
+  else detail = "MessageBee ready: channel on, Messages readable, sender allowlisted.";
+
+  return {
+    ok,
+    detail,
+    data: {
+      enabled,
+      chatDbReadable,
+      identities,
+      deepLinks: { fullDiskAccess: TCC_DEEP_LINKS.fullDiskAccess },
+      warnings: warnings.length ? warnings : undefined,
+    },
+  };
+}
+
 /** Configure frontier access: store an API key and/or report detected CLIs. */
 export async function configureFrontier(opts: {
   anthropicApiKey?: string;

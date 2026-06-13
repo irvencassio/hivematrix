@@ -94,6 +94,27 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
   .modal h1 { font-size: 16px; margin: 0 0 14px; display: flex; align-items: center; }
   .modal h1 .x { margin-left: auto; cursor: pointer; color: var(--muted); font-weight: 400; }
+  /* Generic in-DOM dialogs (the Tauri/WKWebView webview has no native alert/confirm/prompt). */
+  .modal.dialog { width: 420px; }
+  .dialog-msg { font-size: 13px; line-height: 1.5; white-space: pre-wrap; margin-bottom: 12px; }
+  .dialog-input { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; margin-bottom: 12px; font-family: inherit; }
+  .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .dialog-actions button { border-radius: 6px; padding: 7px 16px; font-size: 12px; cursor: pointer; font-weight: 600; }
+  .dialog-actions .ok { background: var(--accent); color: var(--create-btn-text); border: 0; }
+  .dialog-actions .ok.danger { background: var(--err); color: #fff; }
+  .dialog-actions .cancel { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+  .dialog-actions .cancel:hover { border-color: var(--text); color: var(--text); }
+  /* MessageBee guided setup */
+  .mb-step { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .mb-step .mb-mark { font-size: 13px; line-height: 1.4; }
+  .mb-step .mb-mark.ok { color: var(--ok); } .mb-step .mb-mark.no { color: var(--err); }
+  .mb-step .mb-body { flex: 1; }
+  .mb-step .mb-body .t { font-weight: 600; margin-bottom: 2px; }
+  .mb-step button { margin-top: 5px; font-size: 11px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  .mb-chip { display: inline-block; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1px 9px; margin: 2px 4px 2px 0; font-size: 11px; }
   .tabs { display: flex; gap: 6px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
   .tab { padding: 6px 12px; cursor: pointer; font-size: 12px; color: var(--muted); border-bottom: 2px solid transparent; }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
@@ -167,6 +188,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .reply-row button { background: var(--accent-2); color: #fff; border: none; border-radius: 6px;
     padding: 6px 14px; font-size: 11px; cursor: pointer; white-space: nowrap; }
   .reply-row button:hover { opacity: .85; }
+  .reply-section { display: none; }
+  .reply-section.open { display: block; }
+  .reply-toggle.active { border-color: var(--accent-2) !important; color: var(--accent-2) !important; }
   .transcript { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
     max-height: 46vh; overflow-y: auto; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
     white-space: pre-wrap; margin-bottom: 16px; color: var(--code-text); }
@@ -336,6 +360,57 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Generic dialog (replaces native alert/confirm/prompt, which don't work in the webview). -->
+<div class="overlay" id="dialogOverlay">
+  <div class="modal dialog">
+    <h1 id="dialogTitle">HiveMatrix</h1>
+    <div class="dialog-msg" id="dialogMsg"></div>
+    <input class="dialog-input" id="dialogInput" style="display:none" onkeydown="if(event.key==='Enter'){event.preventDefault();dialogResolve(true);}else if(event.key==='Escape'){event.preventDefault();dialogResolve(false);}" />
+    <div class="dialog-actions">
+      <button class="cancel" id="dialogCancel" onclick="dialogResolve(false)">Cancel</button>
+      <button class="ok" id="dialogOk" onclick="dialogResolve(true)">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- MessageBee guided setup. -->
+<div class="overlay" id="mbOverlay">
+  <div class="modal" style="width:460px">
+    <h1>Set up MessageBee <span class="x" onclick="closeMessageBee()">✕</span></h1>
+    <div class="muted" style="font-size:12px;margin-bottom:10px">Text HiveMatrix from your phone over iMessage/SMS. Three things get it running:</div>
+    <div class="mb-step" id="mb_fda">
+      <span class="mb-mark no" id="mb_fda_mark">○</span>
+      <div class="mb-body">
+        <div class="t">Full Disk Access</div>
+        <div class="muted" id="mb_fda_detail">HiveMatrix needs Full Disk Access to read Messages (chat.db).</div>
+        <button onclick="openFullDiskAccess()">Open Full Disk Access settings</button>
+      </div>
+    </div>
+    <div class="mb-step">
+      <span class="mb-mark no" id="mb_phone_mark">○</span>
+      <div class="mb-body">
+        <div class="t">Allowlist your phone</div>
+        <div class="muted">Only allowlisted senders can drive HiveMatrix. Add your iMessage number or email.</div>
+        <input class="dialog-input" id="mb_phone" placeholder="+15551234567 or you@icloud.com" style="margin-top:6px;margin-bottom:4px" />
+        <div id="mb_identities"></div>
+      </div>
+    </div>
+    <div class="mb-step" style="border-bottom:0">
+      <span class="mb-mark no" id="mb_chan_mark">○</span>
+      <div class="mb-body">
+        <div class="t">Enable the channel</div>
+        <div class="muted">Turning on the iMessage channel starts the inbound/outbound poller.</div>
+      </div>
+    </div>
+    <div class="err" id="mb_err"></div>
+    <div class="dialog-actions" style="margin-top:12px">
+      <button class="cancel" onclick="closeMessageBee()">Close</button>
+      <button class="ok" onclick="submitMessageBee()">Enable &amp; allowlist</button>
+    </div>
+    <div class="muted" id="mb_status" style="font-size:11px;margin-top:8px"></div>
+  </div>
+</div>
+
 <main>
   <section class="col board">
     <h2>Board <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></h2>
@@ -390,7 +465,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="row"><button class="create" onclick="createDirective()">Create directive</button><button class="cancel" onclick="cancelForm('dirForm')">Cancel</button></div>
       <div class="err" id="d_err"></div>
     </div>
-    <div class="form" id="dirEditForm" style="display:none">
+    <div class="form" id="dirEditForm">
       <input id="de_id" type="hidden" />
       <input id="de_goal" placeholder="Standing goal" />
       <input id="de_path" placeholder="Project path" />
@@ -440,6 +515,40 @@ async function api(path, opts) {
   return r.json();
 }
 function esc(s){ return (s==null?"":String(s)).replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+// --- In-DOM dialogs ---------------------------------------------------------
+// The Tauri/WKWebView webview has no working native alert/confirm/prompt
+// (prompt returns null, alert is a no-op), so these reimplement them in the DOM.
+let _dialogResolver = null;
+function dialogResolve(ok) {
+  const ov = document.getElementById("dialogOverlay");
+  const input = document.getElementById("dialogInput");
+  const usesInput = input.style.display !== "none";
+  ov.classList.remove("open");
+  const r = _dialogResolver; _dialogResolver = null;
+  if (r) r(usesInput ? (ok ? input.value : null) : ok);
+}
+function _openDialog(opts) {
+  return new Promise((resolve) => {
+    _dialogResolver = resolve;
+    document.getElementById("dialogTitle").textContent = opts.title || "HiveMatrix";
+    document.getElementById("dialogMsg").textContent = opts.message || "";
+    const input = document.getElementById("dialogInput");
+    if (opts.prompt) {
+      input.style.display = ""; input.value = opts.defaultValue || "";
+    } else { input.style.display = "none"; }
+    const cancel = document.getElementById("dialogCancel");
+    cancel.style.display = opts.hideCancel ? "none" : "";
+    const ok = document.getElementById("dialogOk");
+    ok.textContent = opts.okLabel || "OK";
+    ok.classList.toggle("danger", !!opts.danger);
+    document.getElementById("dialogOverlay").classList.add("open");
+    if (opts.prompt) setTimeout(() => { input.focus(); input.select(); }, 30);
+  });
+}
+function hmAlert(message, title) { return _openDialog({ message, title, hideCancel: true }); }
+function hmConfirm(message, opts) { return _openDialog(Object.assign({ message }, opts || {})); }
+function hmPrompt(message, defaultValue, opts) { return _openDialog(Object.assign({ message, prompt: true, defaultValue }, opts || {})); }
 
 function renderBoard() {
   const statusToLane = {};
@@ -494,15 +603,16 @@ function taskActionsHtml(t) {
   const running = ["backlog","assigned","in_progress"].includes(t.status);
   if (running) b.push('<button onclick="taskAction(\''+t._id+'\',\'cancel\')">■ Cancel</button>');
   if (["failed","review","cancelled"].includes(t.status)) b.push('<button onclick="taskAction(\''+t._id+'\',\'retry\')">↻ Retry</button>');
+  if (t.pendingQuestion) b.push('<button class="reply-toggle" id="replyToggle_'+t._id+'" onclick="toggleReply(\''+t._id+'\')">↩ Reply</button>');
   if (!running) b.push('<button onclick="taskAction(\''+t._id+'\',\'archive\')">⌫ Archive</button>');
   b.push('<button class="danger" onclick="deleteTask(\''+t._id+'\')">🗑 Delete</button>');
   let html = '<div class="actions">'+b.join("")+'</div>';
-  if (t.reviewState === "needs_input") {
-    const q = t.pendingQuestion ? '<div class="reply-question">'+esc(t.pendingQuestion)+'</div>' : '';
-    html += q
-      + '<div class="reply-row"><textarea id="replyText" class="reply-input" placeholder="Type your reply…" rows="2"></textarea>'
-      + '<button onclick="replyTask(\''+t._id+'\')">↩ Send Reply</button></div>';
-  }
+  const isOpen = t.reviewState === "needs_input";
+  const q = t.pendingQuestion ? '<div class="reply-question">'+esc(t.pendingQuestion)+'</div>' : '';
+  html += '<div id="replySection_'+t._id+'" class="reply-section'+(isOpen?' open':'')+'">'
+    + q
+    + '<div class="reply-row"><textarea id="replyText" class="reply-input" placeholder="Type your reply…" rows="2"></textarea>'
+    + '<button onclick="replyTask(\''+t._id+'\')">↩ Send Reply</button></div></div>';
   return html;
 }
 
@@ -561,7 +671,17 @@ async function replyTask(id) {
   el.disabled = true;
   const r = await api("/tasks/"+id+"/reply", { method: "POST", body: JSON.stringify({ text }) });
   if (r && r.ok) { refresh(); selectTask(id); }
-  else { alert(r?.error || "Failed to send reply"); el.disabled = false; }
+  else { hmAlert(r?.error || "Failed to send reply"); el.disabled = false; }
+}
+
+function toggleReply(id) {
+  const sec = document.getElementById("replySection_"+id);
+  const btn = document.getElementById("replyToggle_"+id);
+  if (!sec) return;
+  const opening = !sec.classList.contains("open");
+  sec.classList.toggle("open", opening);
+  if (btn) btn.classList.toggle("active", opening);
+  if (opening) { const ta = document.getElementById("replyText"); if (ta) ta.focus(); }
 }
 
 function renderConn() {
@@ -632,36 +752,97 @@ function renderOnboarding() {
     + (o.requiredComplete ? '✓ Required setup complete.' : 'First-run setup — complete the required steps below.') + '</div>';
 }
 
+// Steps that POST straight to /onboarding/<id> with no extra input.
+const NO_INPUT_STEPS = ['config', 'daemon', 'desktopbee'];
+
 // First-run wizard: drive each incomplete step through its POST endpoint.
 async function wizardAction(id) {
   try {
+    // MessageBee has its own guided modal (channel + allowlist + Full Disk Access).
+    if (id === 'messagebee') { openMessageBeeSetup(); return; }
     let body = {};
     if (id === 'config') {
       body = { config: {} };
     } else if (id === 'brain') {
-      const d = prompt('Canonical brain folder (the one store every model reads):', '~/_GD/brain');
+      const d = await hmPrompt('Canonical brain folder (the one store every model reads):', '~/_GD/brain');
       if (!d) return;
-      const sc = confirm('Also create a ~/brain shortcut pointing at it?');
+      const sc = await hmConfirm('Also create a ~/brain shortcut pointing at it?', { okLabel: 'Yes' });
       body = { brainRootDir: d, createIfMissing: true, makeShortcut: sc };
     } else if (id === 'local-model') {
-      const ep = prompt('Local model — enter an OpenAI-compatible endpoint (e.g. http://127.0.0.1:1234/v1), or type "cloud-only" to skip local:', 'http://127.0.0.1:1234/v1');
+      const ep = await hmPrompt('Local model — enter an OpenAI-compatible endpoint (e.g. http://127.0.0.1:1234/v1), or type "cloud-only" to skip local:', 'http://127.0.0.1:1234/v1');
       if (ep === null) return;
       if (ep.trim().toLowerCase() === 'cloud-only') { body = { mode: 'cloud-only' }; }
-      else { const m = prompt('Model id served there:', 'qwen/qwen3.6-27b'); if (!m) return; body = { mode: 'endpoint', endpoint: ep.trim(), modelId: m.trim() }; }
+      else { const m = await hmPrompt('Model id served there:', 'qwen/qwen3.6-27b'); if (!m) return; body = { mode: 'endpoint', endpoint: ep.trim(), modelId: m.trim() }; }
     } else if (id === 'frontier') {
-      const k = prompt('Paste an Anthropic or OpenAI API key (blank = rely on the claude/codex CLI):', '');
+      const k = await hmPrompt('Paste an Anthropic or OpenAI API key (blank = rely on the claude/codex CLI):', '');
+      if (k === null) return;
       body = k && k.startsWith('sk-ant') ? { anthropicApiKey: k } : (k ? { openaiApiKey: k } : {});
+    } else if (!NO_INPUT_STEPS.includes(id)) {
+      // No wizard flow wired for this step yet — don't POST to a missing endpoint silently.
+      await hmAlert('This step is configured in Settings — see the step description for what to grant or enable.', 'Setup');
+      return;
     }
-    // 'daemon' and 'desktopbee' take no input.
     const r = await api('/onboarding/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (r && r.data && r.data.deepLinks) {
       // Open the TCC panes so the user can grant Accessibility + Screen Recording.
       window.open(r.data.deepLinks.accessibility);
       window.open(r.data.deepLinks.screenRecording);
     }
-    if (r && r.ok === false) alert(id + ': ' + (r.detail || 'failed'));
+    if (r && r.ok === false) await hmAlert((r.detail || 'failed'), 'Setup: ' + id);
     await refresh();
-  } catch (e) { alert('Setup failed: ' + e); }
+  } catch (e) { await hmAlert('Setup failed: ' + e, 'Setup'); }
+}
+
+// --- MessageBee guided setup ------------------------------------------------
+function mbStep() { return (state.onboarding && state.onboarding.steps || []).find(s => s.id === 'messagebee'); }
+function openMessageBeeSetup() {
+  document.getElementById('mb_err').textContent = '';
+  document.getElementById('mb_status').textContent = '';
+  document.getElementById('mb_phone').value = '';
+  renderMessageBeeState(null);
+  document.getElementById('mbOverlay').classList.add('open');
+  setTimeout(() => document.getElementById('mb_phone').focus(), 30);
+}
+function closeMessageBee() { document.getElementById('mbOverlay').classList.remove('open'); }
+function openFullDiskAccess() {
+  // The same x-apple.systempreferences deep-link mechanism the DesktopBee step uses.
+  window.open('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles');
+}
+// Reflect status into the three step marks. data is the POST result (or null = derive from onboarding).
+function renderMessageBeeState(data) {
+  const fdaReadable = data ? !!data.chatDbReadable : !/Full Disk Access/i.test((mbStep() || {}).detail || 'x');
+  const enabled = data ? !!data.enabled : ((mbStep() || {}).state === 'done');
+  const ids = data ? (data.identities || []) : null;
+  const mark = (el, ok) => { el.textContent = ok ? '✓' : '○'; el.className = 'mb-mark ' + (ok ? 'ok' : 'no'); };
+  mark(document.getElementById('mb_fda_mark'), fdaReadable);
+  mark(document.getElementById('mb_chan_mark'), enabled);
+  document.getElementById('mb_fda_detail').textContent = fdaReadable
+    ? 'Granted — HiveMatrix can read Messages.'
+    : 'HiveMatrix needs Full Disk Access to read Messages (chat.db). Grant it, then re-run.';
+  if (ids) {
+    const allow = ids.filter(i => i.status === 'allowed' || i.status === 'paired');
+    mark(document.getElementById('mb_phone_mark'), allow.length > 0);
+    document.getElementById('mb_identities').innerHTML = allow.length
+      ? allow.map(i => '<span class="mb-chip">' + esc(i.address) + '</span>').join('')
+      : '';
+  }
+}
+async function submitMessageBee() {
+  const err = document.getElementById('mb_err'); err.textContent = '';
+  const status = document.getElementById('mb_status');
+  const phone = document.getElementById('mb_phone').value.trim();
+  status.textContent = 'Enabling…';
+  try {
+    const r = await api('/onboarding/messagebee', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enable: true, phone: phone || undefined }),
+    });
+    if (!r) { err.textContent = 'No response from daemon.'; status.textContent = ''; return; }
+    renderMessageBeeState(r.data || {});
+    status.textContent = r.detail || (r.ok ? 'Configured.' : 'Done.');
+    document.getElementById('mb_phone').value = '';
+    await refresh();
+  } catch (e) { err.textContent = String(e); status.textContent = ''; }
 }
 
 async function refresh() {
@@ -931,7 +1112,7 @@ async function renderSettingsBees() {
 
 async function toggleBee(kind, enable) {
   const r = await api("/bees/"+kind+"/autostart", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ enabled: enable }) });
-  if (r && r.error) { alert(r.error); }
+  if (r && r.error) { hmAlert(r.error); }
   setTimeout(renderSettingsBees, 800); // give launchctl a moment
 }
 
@@ -1175,7 +1356,7 @@ async function saveDirective() {
 }
 
 async function deleteDirective(id) {
-  if (!confirm("Delete this directive and all its runs?")) return;
+  if (!await hmConfirm("Delete this directive and all its runs?", { okLabel: "Delete", danger: true })) return;
   try {
     await api("/directives/" + encodeURIComponent(id), { method: "DELETE" });
     refresh();
