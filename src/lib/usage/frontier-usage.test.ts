@@ -30,16 +30,20 @@ test("isFrontierModel: bills for claude/gpt/codex, free for local qwen", () => {
 });
 
 test("getFrontierUsage aggregates cost/tokens and excludes local-only tasks", async () => {
+  const today = new Date().toISOString();
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   await Task.create({ title: "opus task", description: "opus task", project: "p", projectPath: "/tmp", status: "review", executor: "agent",
-    output: { cost: 0.5, inputTokens: 1000, outputTokens: 200, modelsUsed: ["claude-opus-4-8"] } });
+    completedAt: today, output: { cost: 0.5, inputTokens: 1000, outputTokens: 200, modelsUsed: ["claude-opus-4-8"] } });
   await Task.create({ title: "sonnet task", description: "sonnet task", project: "p", projectPath: "/tmp", status: "done", executor: "agent",
-    output: { cost: 0.1, inputTokens: 500, outputTokens: 100, modelsUsed: ["claude-sonnet-4-6"] } });
+    completedAt: yesterday, output: { cost: 0.1, inputTokens: 500, outputTokens: 100, modelsUsed: ["claude-sonnet-4-6"] } });
   await Task.create({ title: "local task", description: "local task", project: "p", projectPath: "/tmp", status: "done", executor: "agent",
-    output: { cost: 0, inputTokens: 999, outputTokens: 99, modelsUsed: ["qwen/qwen3.6-27b"] } });
+    completedAt: today, output: { cost: 0, inputTokens: 999, outputTokens: 99, modelsUsed: ["qwen/qwen3.6-27b"] } });
 
   const u = await getFrontierUsage();
   assert.equal(u.taskCount, 2, "local-only task excluded");
   assert.equal(u.totalCost, 0.6);
+  assert.equal(u.todayCost, 0.5);
+  assert.equal(u.todayTaskCount, 1);
   assert.equal(u.inputTokens, 1500, "qwen tokens not counted");
   assert.equal(u.byModel.length, 2);
   assert.equal(u.byModel[0].label, "Opus", "sorted by cost desc");

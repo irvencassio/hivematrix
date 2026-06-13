@@ -455,14 +455,38 @@ export function createDaemonServer() {
         catch (e) { json(res, 500, { error: e instanceof Error ? e.message : String(e) }); }
         return;
       }
+      // POST /tunnel/configure-named — persist/adopt a named tunnel hostname for pairing.
+      if (req.method === "POST" && urlPath === "/tunnel/configure-named") {
+        const { configureNamedTunnel } = await import("@/lib/tunnel/cloudflared");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const hostname = String(body.hostname ?? "").trim();
+        if (!hostname) { json(res, 400, { error: "hostname required" }); return; }
+        json(res, 200, configureNamedTunnel(hostname));
+        return;
+      }
+      // POST /tunnel/access-credentials — persist optional Cloudflare Access service-token credentials for mobile pairing.
+      if (req.method === "POST" && urlPath === "/tunnel/access-credentials") {
+        const { updateNamedTunnelAccess } = await import("@/lib/tunnel/cloudflared");
+        const body = await parseBody(req) as Record<string, unknown>;
+        json(res, 200, updateNamedTunnelAccess({
+          cloudflareAccessClientId: String(body.cloudflareAccessClientId ?? ""),
+          cloudflareAccessClientSecret: String(body.cloudflareAccessClientSecret ?? ""),
+        }));
+        return;
+      }
       // GET /tunnel/qr — QR (SVG) of the pairing payload {url, token} for iOS.
       // Generated locally via qrencode; the token never leaves the machine.
       if (req.method === "GET" && urlPath === "/tunnel/qr") {
         const { tunnelStatus, pairingPayload, generateQrSvg } = await import("@/lib/tunnel/cloudflared");
+        const { readRemoteAccessSettings } = await import("@/lib/tunnel/remote-access-settings");
         const st = tunnelStatus();
         if (!st.url) { json(res, 400, { error: "no tunnel running" }); return; }
         if (!st.qrInstalled) { json(res, 503, { error: "qrencode not installed (brew install qrencode)" }); return; }
-        const svg = await generateQrSvg(pairingPayload(st.url, AUTH_TOKEN));
+        const settings = readRemoteAccessSettings();
+        const svg = await generateQrSvg(pairingPayload(st.url, AUTH_TOKEN, {
+          cloudflareAccessClientId: settings.cloudflareAccessClientId,
+          cloudflareAccessClientSecret: settings.cloudflareAccessClientSecret,
+        }));
         if (!svg) { json(res, 500, { error: "qr generation failed" }); return; }
         res.writeHead(200, { "Content-Type": "image/svg+xml" });
         res.end(svg);

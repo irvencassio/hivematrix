@@ -15,13 +15,34 @@
 
 import { spawn, type ChildProcess } from "child_process";
 import { findBinary, buildCliPath } from "@/lib/config/binary-detection";
+import {
+  mergeRemoteAccessSettings,
+  normalizePublicUrl,
+  readRemoteAccessSettings,
+  type RemoteAccessSettings,
+} from "@/lib/tunnel/remote-access-settings";
 
 const CLOUDFLARED_PATHS = ["/opt/homebrew/bin/cloudflared", "/usr/local/bin/cloudflared"];
 const QRENCODE_PATHS = ["/opt/homebrew/bin/qrencode", "/usr/local/bin/qrencode"];
 
+export interface PairingPayloadOptions {
+  cloudflareAccessClientId?: string;
+  cloudflareAccessClientSecret?: string;
+}
+
 /** The pairing payload encoded into the QR (and matched by the iOS scanner). */
-export function pairingPayload(url: string, token: string): string {
-  return JSON.stringify({ type: "hivematrix-connection", version: 1, url, token });
+export function pairingPayload(url: string, token: string, options: PairingPayloadOptions = {}): string {
+  const cloudflareAccessClientId = options.cloudflareAccessClientId?.trim();
+  const cloudflareAccessClientSecret = options.cloudflareAccessClientSecret?.trim();
+  return JSON.stringify({
+    type: "hivematrix-connection",
+    version: 1,
+    url,
+    token,
+    ...(cloudflareAccessClientId && cloudflareAccessClientSecret
+      ? { cloudflareAccess: { clientId: cloudflareAccessClientId, clientSecret: cloudflareAccessClientSecret } }
+      : {}),
+  });
 }
 
 export function qrencodeInstalled(): boolean {
@@ -47,11 +68,13 @@ interface TunnelState {
   proc: ChildProcess | null;
   url: string | null;
   startedAt: number | null;
+  mode: TunnelMode;
+  owner: TunnelOwner | null;
 }
 
 const g = globalThis as typeof globalThis & { __hmTunnel?: TunnelState };
 function state(): TunnelState {
-  if (!g.__hmTunnel) g.__hmTunnel = { proc: null, url: null, startedAt: null };
+  if (!g.__hmTunnel) g.__hmTunnel = { proc: null, url: null, startedAt: null, mode: "none", owner: null };
   return g.__hmTunnel;
 }
 
@@ -59,18 +82,41 @@ export function cloudflaredPath(): string | null {
   return findBinary("cloudflared", CLOUDFLARED_PATHS);
 }
 
+export type TunnelMode = "none" | "quick" | "named";
+export type TunnelOwner = "hivematrix" | "external" | "configured";
+
 export interface TunnelStatus {
   installed: boolean;
   running: boolean;
   url: string | null;
   binary: string | null;
   qrInstalled: boolean;
+  mode: TunnelMode;
+  owner: TunnelOwner | null;
+  canStop: boolean;
+  cloudflareAccessConfigured: boolean;
 }
 
 export function tunnelStatus(): TunnelStatus {
   const s = state();
   const bin = cloudflaredPath();
-  return { installed: !!bin, running: !!s.proc && !s.proc.killed, url: s.url, binary: bin, qrInstalled: qrencodeInstalled() };
+  const settings = readRemoteAccessSettings();
+  const childRunning = !!s.proc && !s.proc.killed;
+  const configuredUrl = settings.namedHostname ?? null;
+  const url = childRunning ? s.url : configuredUrl;
+  const mode: TunnelMode = childRunning ? s.mode : configuredUrl ? "named" : "none";
+  const owner: TunnelOwner | null = childRunning ? s.owner : configuredUrl ? "configured" : null;
+  return {
+    installed: !!bin,
+    running: childRunning || !!configuredUrl,
+    url,
+    binary: bin,
+    qrInstalled: qrencodeInstalled(),
+    mode,
+    owner,
+    canStop: childRunning && s.owner === "hivematrix",
+    cloudflareAccessConfigured: !!(settings.cloudflareAccessClientId && settings.cloudflareAccessClientSecret),
+  };
 }
 
 const TRYCF_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
@@ -93,6 +139,8 @@ export function startQuickTunnel(port: number, timeoutMs = 20_000): Promise<stri
     s.proc = proc;
     s.url = null;
     s.startedAt = Date.now();
+    s.mode = "quick";
+    s.owner = "hivematrix";
     let settled = false;
     const onData = (buf: Buffer) => {
       const m = buf.toString("utf-8").match(TRYCF_RE);
@@ -105,7 +153,7 @@ export function startQuickTunnel(port: number, timeoutMs = 20_000): Promise<stri
     };
     proc.stdout?.on("data", onData);
     proc.stderr?.on("data", onData); // cloudflared prints the URL to stderr
-    proc.on("exit", () => { s.proc = null; s.url = null; });
+    proc.on("exit", () => { s.proc = null; s.url = null; s.mode = "none"; s.owner = null; });
     const timer = setTimeout(() => {
       if (!settled) { settled = true; try { proc.kill(); } catch { /* */ } reject(new Error("tunnel URL not received in time")); }
     }, timeoutMs);
@@ -122,13 +170,17 @@ export function startNamedTunnel(connectorToken: string, hostname: string): Prom
   const bin = cloudflaredPath();
   if (!bin) return Promise.reject(new Error("cloudflared not installed"));
   if (s.proc && !s.proc.killed) stopTunnel();
+  const publicUrl = normalizePublicUrl(hostname) ?? hostname;
+  mergeRemoteAccessSettings({ namedHostname: publicUrl });
   return new Promise((resolve, reject) => {
     const proc = spawn(bin, ["tunnel", "--no-autoupdate", "run", "--token", connectorToken], {
       env: { ...process.env, PATH: buildCliPath() },
     });
     s.proc = proc;
-    s.url = hostname.trim().replace(/\/+$/, "");
+    s.url = publicUrl;
     s.startedAt = Date.now();
+    s.mode = "named";
+    s.owner = "hivematrix";
     let settled = false;
     const onData = (buf: Buffer) => {
       const t = buf.toString("utf-8");
@@ -139,14 +191,33 @@ export function startNamedTunnel(connectorToken: string, hostname: string): Prom
     };
     proc.stdout?.on("data", onData);
     proc.stderr?.on("data", onData);
-    proc.on("exit", () => { s.proc = null; s.url = null; });
-    const timer = setTimeout(() => { if (!settled) { settled = true; resolve(s.url ?? hostname); } }, 12_000);
+    proc.on("exit", () => { s.proc = null; s.url = null; s.mode = "none"; s.owner = null; });
+    const timer = setTimeout(() => { if (!settled) { settled = true; resolve(s.url ?? publicUrl); } }, 12_000);
   });
+}
+
+export function configureNamedTunnel(hostname: string): TunnelStatus {
+  mergeRemoteAccessSettings({ namedHostname: hostname });
+  const s = state();
+  if (!s.proc || s.proc.killed) {
+    s.url = null;
+    s.mode = "none";
+    s.owner = null;
+  }
+  return tunnelStatus();
+}
+
+export function updateNamedTunnelAccess(settings: RemoteAccessSettings): TunnelStatus {
+  mergeRemoteAccessSettings({
+    cloudflareAccessClientId: settings.cloudflareAccessClientId,
+    cloudflareAccessClientSecret: settings.cloudflareAccessClientSecret,
+  });
+  return tunnelStatus();
 }
 
 export function stopTunnel(): boolean {
   const s = state();
   if (s.proc && !s.proc.killed) { try { s.proc.kill(); } catch { /* */ } }
-  s.proc = null; s.url = null; s.startedAt = null;
+  s.proc = null; s.url = null; s.startedAt = null; s.mode = "none"; s.owner = null;
   return true;
 }

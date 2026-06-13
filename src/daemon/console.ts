@@ -351,9 +351,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="remote-status"><span class="dot" id="s_remote_dot"></span><span id="s_remote_label">…</span></div>
       <div id="s_tunnel_detail" class="muted" style="font-size:11px;margin-top:4px"></div>
 
-      <div class="row" style="margin-top:10px">
-        <button class="create" id="s_tunnel_btn" onclick="toggleTunnel()">Start tunnel</button>
+      <label class="flbl" style="margin-top:10px">Temporary ad-hoc tunnel</label>
+      <div class="row">
+        <button class="create" id="s_tunnel_btn" onclick="toggleTunnel()">Start temporary tunnel</button>
       </div>
+      <div class="muted" style="font-size:11px;margin-top:4px">Creates a temporary trycloudflare.com URL for quick pairing.</div>
 
       <div id="s_tunnel_live" style="display:none;margin-top:10px">
         <label class="flbl">Public URL</label>
@@ -369,13 +371,23 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <button class="copybtn" onclick="copyField('s_token')">Copy</button></div>
 
       <details style="margin-top:12px">
-        <summary class="muted" style="cursor:pointer;font-size:12px">Advanced: named tunnel (Cloudflare Access)</summary>
+        <summary class="muted" style="cursor:pointer;font-size:12px">Advanced: Named Cloudflare tunnel</summary>
+        <label class="flbl" style="margin-top:8px">Public hostname</label>
+        <div class="row"><input id="s_named_host" placeholder="hivey.cassio.io" style="flex:1" />
+          <button class="copybtn" onclick="configureNamedTunnel()">Save / show QR</button></div>
+        <div class="muted" style="font-size:11px;margin-top:4px">Use a stable Cloudflare hostname for one-time mobile pairing.</div>
+
+        <label class="flbl" style="margin-top:8px">Cloudflare Access Client ID</label>
+        <input id="s_cf_access_id" placeholder="optional service-token client id for mobile" style="width:100%;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
+        <label class="flbl" style="margin-top:6px">Cloudflare Access Client Secret</label>
+        <div class="row"><input id="s_cf_access_secret" type="password" placeholder="optional service-token client secret" style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
+          <button class="copybtn" onclick="saveCloudflareAccessCredentials()">Save Access</button></div>
+        <div class="muted" id="s_cf_access_detail" style="font-size:11px;margin-top:4px">Only needed when Cloudflare Access protects the hostname for iOS/API calls.</div>
+
         <label class="flbl" style="margin-top:8px">Connector token</label>
-        <input id="s_named_token" type="password" placeholder="from Cloudflare Zero Trust dashboard" style="width:100%" />
-        <label class="flbl" style="margin-top:6px">Public hostname</label>
-        <div class="row"><input id="s_named_host" placeholder="hive.example.com" style="flex:1" />
-          <button class="copybtn" onclick="startNamedTunnel()">Run</button></div>
-        <div class="muted" style="font-size:11px;margin-top:4px">Recommended for always-on remote use — put a Cloudflare Access policy in front.</div>
+        <input id="s_named_token" type="password" placeholder="optional — only if HiveMatrix should start cloudflared" style="width:100%" />
+        <div class="row" style="margin-top:6px"><button class="copybtn" onclick="startNamedTunnel()">Run with token</button></div>
+        <div class="muted" style="font-size:11px;margin-top:4px">Leave blank when an existing Cloudflare connector is already running.</div>
       </details>
 
       <div class="muted" style="font-size:11px;margin-top:10px">⚠ A tunnel exposes the daemon to the internet; the access token is the only barrier — treat it like a password. The console never hands the token to tunneled visitors.</div>
@@ -729,6 +741,8 @@ async function selectTask(id) {
   const logs = typeof t.logs === "string" ? (()=>{try{return JSON.parse(t.logs)}catch{return[]}})() : (t.logs||[]);
   const live = ["assigned","in_progress"].includes(t.status);
   const el = document.getElementById("session");
+  // Preserve scroll for non-live tasks — innerHTML rebuild resets scrollTop to 0.
+  const prevScrollTop = live ? null : (el.querySelector(".transcript")?.scrollTop ?? null);
   el.innerHTML = '<div class="session"><h1>'+esc(t.title||t._id)+(live?'<span class="streaming">● running</span>':'')+'</h1>'
     + '<div class="sub">'+esc(t.project||"")+' · '+esc(t.status)+(t.reviewState?' · '+esc(t.reviewState):'')+'</div>'
     + taskActionsHtml(t)
@@ -744,8 +758,11 @@ async function selectTask(id) {
     + '<h2>Session transcript</h2>'+renderTranscript(logs)
     + (out.summary?'<h2>Result</h2><div class="desc md">'+mdToHtml(out.summary)+'</div>':'')
     + '</div>';
-  // Keep the transcript scrolled to the latest line while running.
-  const tr = el.querySelector(".transcript"); if (tr && live) tr.scrollTop = tr.scrollHeight;
+  const tr = el.querySelector(".transcript");
+  if (tr) {
+    if (live) tr.scrollTop = tr.scrollHeight;
+    else if (prevScrollTop !== null) tr.scrollTop = prevScrollTop;
+  }
   // Restore attachment chips after the innerHTML rebuild.
   renderCtxChips("retry"); renderCtxChips("reply");
 }
@@ -1034,14 +1051,27 @@ async function submitMessageBee() {
 }
 
 // --- MailBee guided setup ---------------------------------------------------
+let _mlPollTimer = null;
 function openMailBeeSetup() {
   document.getElementById('ml_err').textContent = '';
   document.getElementById('ml_status').textContent = '';
   document.getElementById('ml_email').value = '';
   renderMailBeeState(null);
   document.getElementById('mailOverlay').classList.add('open');
+  async function pollMl() {
+    const data = await api('/mailbee');
+    if (data) renderMailBeeState(data);
+    if (document.getElementById('mailOverlay').classList.contains('open'))
+      _mlPollTimer = setTimeout(pollMl, 3000);
+  }
+  clearTimeout(_mlPollTimer);
+  pollMl();
 }
-function closeMailBee() { document.getElementById('mailOverlay').classList.remove('open'); }
+function closeMailBee() {
+  clearTimeout(_mlPollTimer);
+  _mlPollTimer = null;
+  document.getElementById('mailOverlay').classList.remove('open');
+}
 function renderMailBeeState(data) {
   const mark = (id, ok) => { const el = document.getElementById(id); el.textContent = ok ? '✓' : '○'; el.className = 'mb-mark ' + (ok ? 'ok' : 'no'); };
   const controllable = data ? !!data.mailControllable : false;
@@ -1479,10 +1509,18 @@ async function loadTunnel() {
   btn.style.display = "";
   if (tunnel.running && tunnel.url) {
     dot.className = "dot on"; label.textContent = "Remote access ON";
-    detail.textContent = "Reachable over the tunnel" + (tunnel.qrInstalled ? "" : " (install qrencode for the QR: brew install qrencode)");
-    btn.textContent = "Stop tunnel";
+    const modeLabel = tunnel.mode === "named"
+      ? (tunnel.owner === "hivematrix" ? "Named tunnel running from HiveMatrix" : "Named tunnel configured for pairing")
+      : "Temporary ad-hoc tunnel running";
+    detail.textContent = modeLabel + (tunnel.cloudflareAccessConfigured ? " · Cloudflare Access credentials included in QR" : "") + (tunnel.qrInstalled ? "" : " (install qrencode for the QR: brew install qrencode)");
+    btn.textContent = tunnel.canStop ? "Stop tunnel" : "Start temporary tunnel";
     live.style.display = "block";
     document.getElementById("s_tunnel_url").value = tunnel.url;
+    if (tunnel.mode === "named") document.getElementById("s_named_host").value = tunnel.url;
+    const cfDetail = document.getElementById("s_cf_access_detail");
+    if (cfDetail) cfDetail.textContent = tunnel.cloudflareAccessConfigured
+      ? "Cloudflare Access service-token credentials are saved and will be included in the QR."
+      : "Only needed when Cloudflare Access protects the hostname for iOS/API calls.";
     // QR from the daemon (token via query); cache-bust per URL.
     document.getElementById("s_qr").innerHTML = tunnel.qrInstalled
       ? '<img src="/tunnel/qr?token=' + encodeURIComponent(HM_TOKEN) + '&u=' + encodeURIComponent(tunnel.url) + '" style="width:100%;height:100%" alt="pairing QR" />'
@@ -1490,16 +1528,32 @@ async function loadTunnel() {
   } else {
     dot.className = "dot off"; label.textContent = "Remote access OFF";
     detail.textContent = "Start a tunnel to reach this daemon from your phone.";
-    btn.textContent = "Start tunnel"; live.style.display = "none";
+    btn.textContent = "Start temporary tunnel"; live.style.display = "none";
   }
 }
 async function toggleTunnel() {
   const btn = document.getElementById("s_tunnel_btn");
-  btn.disabled = true; btn.textContent = tunnel && tunnel.running ? "Stopping…" : "Starting…";
+  const stopping = tunnel && tunnel.canStop;
+  btn.disabled = true; btn.textContent = stopping ? "Stopping…" : "Starting…";
   try {
-    tunnel = await api(tunnel && tunnel.running ? "/tunnel/stop" : "/tunnel/start", { method: "POST" });
+    tunnel = await api(stopping ? "/tunnel/stop" : "/tunnel/start", { method: "POST" });
   } catch (e) { /* */ }
   btn.disabled = false;
+  loadTunnel();
+}
+async function configureNamedTunnel() {
+  const hostname = document.getElementById("s_named_host").value.trim();
+  if (!hostname) return;
+  tunnel = await api("/tunnel/configure-named", { method: "POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ hostname }) });
+  loadTunnel();
+}
+async function saveCloudflareAccessCredentials() {
+  const cloudflareAccessClientId = document.getElementById("s_cf_access_id").value.trim();
+  const cloudflareAccessClientSecret = document.getElementById("s_cf_access_secret").value.trim();
+  tunnel = await api("/tunnel/access-credentials", { method: "POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ cloudflareAccessClientId, cloudflareAccessClientSecret }) });
+  document.getElementById("s_cf_access_secret").value = "";
   loadTunnel();
 }
 async function startNamedTunnel() {

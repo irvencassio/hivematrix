@@ -20,6 +20,8 @@ export interface FrontierUsage {
   inputTokens: number;
   outputTokens: number;
   taskCount: number;
+  todayCost: number;
+  todayTaskCount: number;
   byModel: FrontierModelUsage[];
 }
 
@@ -35,6 +37,13 @@ interface TaskOutput {
   modelsUsed?: string[];
 }
 
+interface UsageTask {
+  output?: unknown;
+  completedAt?: string | null;
+  updatedAt?: string | null;
+  createdAt?: string | null;
+}
+
 function parseOutput(output: unknown): TaskOutput {
   if (!output) return {};
   if (typeof output === "string") { try { return JSON.parse(output) as TaskOutput; } catch { return {}; } }
@@ -42,9 +51,10 @@ function parseOutput(output: unknown): TaskOutput {
 }
 
 export async function getFrontierUsage(): Promise<FrontierUsage> {
-  const tasks = await Task.find({});
+  const tasks = await Task.find({}) as UsageTask[];
   const byModel = new Map<string, FrontierModelUsage>();
-  let totalCost = 0, inputTokens = 0, outputTokens = 0, taskCount = 0;
+  let totalCost = 0, inputTokens = 0, outputTokens = 0, taskCount = 0, todayCost = 0, todayTaskCount = 0;
+  const today = new Date().toISOString().slice(0, 10);
 
   for (const task of tasks) {
     const out = parseOutput(task.output);
@@ -55,6 +65,11 @@ export async function getFrontierUsage(): Promise<FrontierUsage> {
     inputTokens += out.inputTokens ?? 0;
     outputTokens += out.outputTokens ?? 0;
     taskCount += 1;
+    const taskDate = (task.completedAt ?? task.updatedAt ?? task.createdAt ?? "").slice(0, 10);
+    if (taskDate === today) {
+      todayCost += cost;
+      todayTaskCount += 1;
+    }
     // Attribute the task's cost to the first frontier model it used (avoids
     // double-counting when a task touched more than one).
     const primary = frontier[0];
@@ -69,6 +84,8 @@ export async function getFrontierUsage(): Promise<FrontierUsage> {
     inputTokens,
     outputTokens,
     taskCount,
+    todayCost: Math.round(todayCost * 10000) / 10000,
+    todayTaskCount,
     byModel: [...byModel.values()].sort((a, b) => b.cost - a.cost),
   };
 }

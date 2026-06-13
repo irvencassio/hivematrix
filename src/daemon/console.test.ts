@@ -29,3 +29,12 @@ test("console script has no obvious TS-only syntax", () => {
   // Guard the specific footguns: `x as Type` casts and `: Type` annotations.
   assert.doesNotMatch(js, /\bas\s+(HTML[A-Za-z]+|string|number|boolean|any)\b/, "found a TS `as Type` cast");
 });
+
+test("remote access UI supports persistent named tunnel and Access credentials", () => {
+  assert.match(CONSOLE_HTML, /Temporary ad-hoc tunnel/);
+  assert.match(CONSOLE_HTML, /Named Cloudflare tunnel/);
+  assert.match(CONSOLE_HTML, /Cloudflare Access Client ID/);
+  assert.match(CONSOLE_HTML, /Cloudflare Access Client Secret/);
+  assert.match(CONSOLE_HTML, /\/tunnel\/configure-named/);
+  assert.match(CONSOLE_HTML, /\/tunnel\/access-credentials/);
+});
