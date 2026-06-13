@@ -49,7 +49,16 @@ test("reply and retry drafts survive live detail refreshes", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.ok(js.includes("onCtxDraft(\\'reply\\',this)"));
   assert.ok(js.includes("onCtxDraft(\\'retry\\',this)"));
-  assert.match(js, /syncCtxDrafts\(\)/);
-  assert.match(js, /restoreCtxDrafts\(\)/);
+  assert.match(js, /syncCtxState\(\)/);
+  assert.match(js, /restoreCtxState\(\)/);
+  assert.match(js, /document\.activeElement/);
+  assert.match(js, /setSelectionRange/);
   assert.match(js, /_ctxDraft\.reply = ""/);
+});
+
+test("frontier usage panel renders a separate Codex usage section", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /codexSubscription/);
+  assert.match(js, /Codex subscription/);
+  assert.match(js, /renderCodexBar/);
 });

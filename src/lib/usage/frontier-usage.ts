@@ -13,6 +13,7 @@ import {
   type SubscriptionUsageResult,
   type SubscriptionUsageStatus,
 } from "./subscription";
+import { readCodexUsageProfile, type CodexUsageProfile } from "./codex";
 
 export interface FrontierModelUsage {
   modelId: string;
@@ -33,6 +34,8 @@ export interface FrontierUsage {
   subscription: SubscriptionUsage | null;
   /** Non-secret status for why subscription usage is available or unavailable. */
   subscriptionStatus: SubscriptionUsageStatus;
+  /** Codex/ChatGPT subscription rate-limit windows parsed from local Codex session logs. */
+  codexSubscription: CodexUsageProfile | null;
 }
 
 /** A model id that bills (frontier) vs. local Qwen / image models (free). */
@@ -55,6 +58,7 @@ interface UsageTask {
 }
 
 let subscriptionReader: () => Promise<SubscriptionUsageResult> = getSubscriptionRemainingDetailed;
+let codexUsageReader: () => CodexUsageProfile | null = readCodexUsageProfile;
 
 function parseOutput(output: unknown): TaskOutput {
   if (!output) return {};
@@ -92,6 +96,7 @@ export async function getFrontierUsage(): Promise<FrontierUsage> {
   }
 
   const subscriptionResult = await subscriptionReader();
+  const codexSubscription = codexUsageReader();
 
   return {
     totalCost: Math.round(totalCost * 10000) / 10000,
@@ -103,9 +108,14 @@ export async function getFrontierUsage(): Promise<FrontierUsage> {
     byModel: [...byModel.values()].sort((a, b) => b.cost - a.cost),
     subscription: subscriptionResult.usage,
     subscriptionStatus: subscriptionResult.status,
+    codexSubscription,
   };
 }
 
 export function _setSubscriptionReaderForTests(reader: (() => Promise<SubscriptionUsageResult>) | null): void {
   subscriptionReader = reader ?? getSubscriptionRemainingDetailed;
+}
+
+export function _setCodexUsageReaderForTests(reader: (() => CodexUsageProfile | null) | null): void {
+  codexUsageReader = reader ?? readCodexUsageProfile;
 }

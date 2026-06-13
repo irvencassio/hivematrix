@@ -4,8 +4,8 @@
  *
  * Every inbound email is untrusted input until classified. classifyMailTrust
  * gates what may act on it: prompt-injection signals + risky attachments push to
- * "suspicious"; known sender + authenticated domain earns "trusted" (the only
- * level eligible for auto-send); everything else is "external" (draft-for-approval).
+ * "suspicious"; known allowlisted senders earn "trusted" (the only level
+ * eligible for auto-send); everything else is "external" (draft-for-approval).
  */
 
 /** A message read from Apple Mail. */
@@ -80,7 +80,7 @@ export function classifyMailTrust(input: TrustInput): MailTrustAssessment {
     if (h.knownSender) reasons.push("Sender was marked as a known contact.");
     if (h.authenticatedDomain) reasons.push("Sender domain was marked as authenticated.");
     if (h.sameOrg) reasons.push("Sender was marked as same-organization.");
-    if (h.knownSender && h.authenticatedDomain) {
+    if (h.knownSender || (h.sameOrg && h.authenticatedDomain)) {
       level = "trusted";
     } else if (!h.knownSender && !h.sameOrg) {
       reasons.push("Sender should be treated as external until intent is verified.");

@@ -26,12 +26,13 @@ test("known + authenticated sender creates an auto-send-eligible task", () => {
   }
 });
 
-test("known sender, no authenticated domain → external, draft-for-approval", () => {
+test("known sender, no authenticated domain is auto-send eligible", () => {
   const r = routeEmail(email(), { knownSender: true, authenticatedDomain: false, triageAll: false });
   assert.equal(r.kind, "new_task");
   if (r.kind === "new_task") {
-    assert.equal(r.autoSendEligible, false);
-    assert.match(r.description, /DRAFT a reply for human approval/);
+    assert.equal(r.trust.level, "trusted");
+    assert.equal(r.autoSendEligible, true);
+    assert.match(r.description, /Sender is trusted/);
   }
 });
 

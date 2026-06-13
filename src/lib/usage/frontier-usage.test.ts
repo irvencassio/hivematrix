@@ -9,7 +9,7 @@ process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 process.env.HOME = TMP; // so resolveModelId reads a clean config (defaults)
 
 const { getDb, _resetDbForTests, Task } = await import("@/lib/db");
-const { getFrontierUsage, isFrontierModel, _setSubscriptionReaderForTests } = await import("./frontier-usage");
+const { getFrontierUsage, isFrontierModel, _setSubscriptionReaderForTests, _setCodexUsageReaderForTests } = await import("./frontier-usage");
 const { resolveModelId } = await import("@/lib/routing/model-resolver");
 
 _resetDbForTests();
@@ -21,9 +21,11 @@ _setSubscriptionReaderForTests(async () => ({
     message: "Subscription usage disabled in tests.",
   },
 }));
+_setCodexUsageReaderForTests(() => null);
 
 test.after(() => {
   _setSubscriptionReaderForTests(null);
+  _setCodexUsageReaderForTests(null);
   _resetDbForTests();
   delete process.env.HIVEMATRIX_DB_PATH;
   rmSync(TMP, { recursive: true, force: true });
@@ -61,4 +63,27 @@ test("getFrontierUsage aggregates cost/tokens and excludes local-only tasks", as
 test("resolveModelId maps frontier-premium to Opus", () => {
   assert.equal(resolveModelId("frontier-premium"), "claude-opus-4-8");
   assert.equal(resolveModelId("frontier"), "claude-sonnet-4-6");
+});
+
+test("getFrontierUsage includes Codex subscription windows when available", async () => {
+  _setCodexUsageReaderForTests(() => ({
+    provider: "codex",
+    profile: "chatgpt",
+    accountName: "Irv",
+    accountEmail: "irv@example.com",
+    planType: "plus",
+    fiveHour: { utilization: 12, resetsAt: "2026-06-13T20:00:00.000Z" },
+    sevenDay: { utilization: 34, resetsAt: "2026-06-20T20:00:00.000Z" },
+    sevenDayOpus: null,
+    sevenDaySonnet: null,
+    extraUsage: null,
+    fetchedAt: "2026-06-13T18:00:00.000Z",
+  }));
+
+  const u = await getFrontierUsage();
+  assert.equal(u.codexSubscription?.provider, "codex");
+  assert.equal(u.codexSubscription?.fiveHour?.utilization, 12);
+  assert.equal(u.codexSubscription?.sevenDay?.utilization, 34);
+
+  _setCodexUsageReaderForTests(() => null);
 });

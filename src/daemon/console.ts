@@ -765,9 +765,10 @@ async function selectTask(id) {
   if (_ctxTask !== id) {
     _ctxAttach = { retry: [], reply: [] };
     _ctxDraft = { retry: "", reply: "" };
+    _ctxFocus = { active: null, start: null, end: null };
     _ctxTask = id;
   } else {
-    syncCtxDrafts();
+    syncCtxState();
   }
   renderBoard();
   const t = await api("/tasks/"+id);
@@ -799,7 +800,7 @@ async function selectTask(id) {
     else if (prevScrollTop !== null) tr.scrollTop = prevScrollTop;
   }
   // Restore form state after the innerHTML rebuild.
-  restoreCtxDrafts();
+  restoreCtxState();
   renderCtxChips("retry"); renderCtxChips("reply");
 }
 
@@ -828,19 +829,35 @@ async function cardArchive(id) {
 // re-renders so a live refresh doesn't drop files or text mid-compose.
 let _ctxAttach = { retry: [], reply: [] };
 let _ctxDraft = { retry: "", reply: "" };
+let _ctxFocus = { active: null, start: null, end: null };
 let _ctxTask = null;
-function onCtxDraft(ctx, input) { _ctxDraft[ctx] = input.value; }
-function syncCtxDrafts() {
+function onCtxDraft(ctx, input) {
+  _ctxDraft[ctx] = input.value;
+  if (document.activeElement === input) {
+    _ctxFocus = { active: ctx, start: input.selectionStart, end: input.selectionEnd };
+  }
+}
+function syncCtxState() {
   const retry = document.getElementById("retryText");
   const reply = document.getElementById("replyText");
   if (retry) _ctxDraft.retry = retry.value;
   if (reply) _ctxDraft.reply = reply.value;
+  const active = document.activeElement;
+  if (active === retry) _ctxFocus = { active: "retry", start: retry.selectionStart, end: retry.selectionEnd };
+  else if (active === reply) _ctxFocus = { active: "reply", start: reply.selectionStart, end: reply.selectionEnd };
 }
-function restoreCtxDrafts() {
+function restoreCtxState() {
   const retry = document.getElementById("retryText");
   const reply = document.getElementById("replyText");
   if (retry) retry.value = _ctxDraft.retry;
   if (reply) reply.value = _ctxDraft.reply;
+  const restore = _ctxFocus.active === "retry" ? retry : _ctxFocus.active === "reply" ? reply : null;
+  if (restore) {
+    restore.focus();
+    if (_ctxFocus.start !== null && _ctxFocus.end !== null) {
+      try { restore.setSelectionRange(_ctxFocus.start, _ctxFocus.end); } catch { /* ignore */ }
+    }
+  }
 }
 function onCtxAttach(ctx, input) {
   for (const f of input.files) { const p = f.path || f.name; if (p && !_ctxAttach[ctx].includes(p)) _ctxAttach[ctx].push(p); }
@@ -1203,6 +1220,16 @@ function renderSubBar(label, win) {
     + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div></div>';
 }
 
+function renderCodexBar(label, win) {
+  if (!win) return "";
+  const pct = Math.min(100, Math.max(0, win.utilization || 0));
+  const remaining = Math.max(0, 100 - pct);
+  const cls = usageBarClass(pct);
+  return '<div class="urow"><span>' + esc(label) + '</span>'
+    + '<span class="um">' + remaining.toFixed(1) + '% left · ' + esc(fmtResets(win.resetsAt)) + '</span></div>'
+    + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div></div>';
+}
+
 function usagePlanLabel(status) {
   if (!status) return "usage";
   if (status.subscriptionType === "max" && status.rateLimitTier === "default_claude_max_5x") return "Max 5x";
@@ -1216,6 +1243,7 @@ async function checkUsage() {
     if (!u) return;
     const sub = u.subscription;
     const subStatus = u.subscriptionStatus;
+    const codexSubscription = u.codexSubscription;
     const pill = document.getElementById("usagePill");
 
     if (pill) {
@@ -1265,9 +1293,23 @@ async function checkUsage() {
         + '<div class="muted" style="font-size:11px">' + esc(subStatus.message || "Usage left unavailable.") + '</div>';
     }
 
+    if (codexSubscription) {
+      if ((sub && (sub.fiveHour || sub.sevenDay || sub.sevenDayOpus || sub.sevenDaySonnet)) || (subStatus && subStatus.state !== "missing_credentials")) {
+        html += '<div class="usep"></div>';
+      }
+      const codexPlan = codexSubscription.planType ? String(codexSubscription.planType) : "subscription";
+      html += '<div class="urow"><span><b>Codex subscription</b></span><span class="um">' + esc(codexPlan) + '</span></div>';
+      if (codexSubscription.fiveHour || codexSubscription.sevenDay) {
+        html += renderCodexBar("5-hour rolling", codexSubscription.fiveHour);
+        html += renderCodexBar("7-day overall", codexSubscription.sevenDay);
+      } else {
+        html += '<div class="muted" style="font-size:11px">' + esc(codexSubscription.error || "Usage unavailable.") + '</div>';
+      }
+    }
+
     // HiveMatrix task spend.
     if (u.byModel && u.byModel.length) {
-      if ((sub && (sub.fiveHour || sub.sevenDay)) || (subStatus && subStatus.state !== "missing_credentials")) html += '<div class="usep"></div>';
+      if ((sub && (sub.fiveHour || sub.sevenDay)) || (subStatus && subStatus.state !== "missing_credentials") || codexSubscription) html += '<div class="usep"></div>';
       const total = "$" + (u.totalCost || 0).toFixed(2);
       html += '<div class="urow"><span><b>' + total + '</b> spent</span>'
         + '<span class="um">' + u.taskCount + ' tasks · ' + fmtTokens(u.inputTokens) + ' in / ' + fmtTokens(u.outputTokens) + ' out</span></div>'

@@ -11,10 +11,10 @@ test("clean email from known + authenticated domain is trusted", () => {
   assert.equal(mayAutoSend(a.level), true);
 });
 
-test("known sender without authenticated domain stays external", () => {
+test("known sender without authenticated domain is trusted", () => {
   const a = classifyMailTrust({ ...base, trustHints: { knownSender: true } });
-  assert.equal(a.level, "external");
-  assert.equal(mayAutoSend(a.level), false);
+  assert.equal(a.level, "trusted");
+  assert.equal(mayAutoSend(a.level), true);
 });
 
 test("unknown sender defaults to external", () => {

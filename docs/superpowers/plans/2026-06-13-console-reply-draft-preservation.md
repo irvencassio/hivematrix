@@ -13,9 +13,10 @@
 - [x] Edit `src/daemon/console.ts` so retry/reply textareas call
   `onCtxDraft(ctx, this)` on input.
 - [x] Add local `_ctxDraft` state for `retry` and `reply`.
+- [x] Add local active textarea/caret state for `retry` and `reply`.
 - [x] In `selectTask()`, sync drafts before same-task `innerHTML` rebuilds and
-  reset drafts only when switching tasks.
-- [x] Restore draft values after rebuilding the detail pane.
+  reset drafts/focus only when switching tasks.
+- [x] Restore draft values and focus/caret after rebuilding the detail pane.
 - [x] Clear the relevant draft only after successful retry/reply submission.
 - [x] Run focused console tests.
 - [x] Run `npm test`, `npm run typecheck`, and `node scripts/scope-wall.mjs`.
