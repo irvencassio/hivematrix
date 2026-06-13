@@ -52,6 +52,11 @@ function dirSize(p) {
   catch { return 0; }
 }
 
+function gitValue(args, fallback = null) {
+  try { return execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim(); }
+  catch { return fallback; }
+}
+
 // ── 1. Clean output ─────────────────────────────────────────────────────────
 log(`output: ${OUT}`);
 rmSync(OUT, { recursive: true, force: true });
@@ -119,6 +124,8 @@ chmodSync(join(OUT, "bin", "node"), 0o755);
 // ── 5. Build info ─────────────────────────────────────────────────────────────
 const info = {
   generatedAt: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+  sourceCommit: gitValue(["rev-parse", "HEAD"]),
+  sourceDirty: !!gitValue(["status", "--porcelain"], ""),
   nodeVersion: NODE_VERSION,
   arch: ARCH,
   externals: NATIVE_EXTERNALS,

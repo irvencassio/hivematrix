@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
     "scope-wall": "node scripts/scope-wall.mjs",
-    "build:daemon": "node scripts/build-daemon.mjs"
+    "build:daemon": "node scripts/build-daemon.mjs",
+    "release:verify": "tsx scripts/verify-autoupdate-release.mts"
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",

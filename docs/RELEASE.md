@@ -59,6 +59,19 @@ Cutting a release:
    release with the .dmg, the .app.tar.gz, its .sig, and a generated
    `latest.json` (the update manifest the endpoint in
    `plugins.updater.endpoints` resolves via `releases/latest/download/`).
+   The publish script refuses to publish if `v<version>` already points at a
+   different commit; installed apps only update when the version increases, so
+   never re-use a version for new code.
+4. Prove the live feed:
+   `npm run release:verify`
+   This verifies that `package.json`, `src-tauri/tauri.conf.json`,
+   `src/lib/version.ts`, the `v<version>` tag, the GitHub release, and
+   `latest.json` all point at the current commit.
+
+Operational directive: keep
+`docs/directives/autoupdate-release-directive.md` as the standing checklist for
+agentic release work. A `main` commit is not considered delivered to installed
+users until that directive's proof passes.
 
 Bootstrap note: builds ≤0.1.0 shipped with a placeholder pubkey and cannot
 consume this feed — install ≥0.1.1 manually once; every later release then
