@@ -55,7 +55,7 @@ const MAX_TASKS_PER_RUN = 5;
 const TERMINAL_TASK_STATUSES = new Set(["review", "done", "failed"]);
 const PHASE_TASK_STATUSES = new Set(["review", "done", "failed", "cancelled"]);
 
-type DirectivePhaseTaskKind = "planner" | "reviewer" | "retrospective";
+type DirectivePhaseTaskKind = "planner" | "replanner" | "reviewer" | "retrospective";
 type DirectiveRunTask = Pick<TaskDoc, "_id" | "title" | "status" | "output" | "logs" | "turns">;
 
 type DirectivePlanner = (input: {
@@ -229,6 +229,58 @@ function buildPlannerPrompt(
   ].join("\n");
 }
 
+function buildReplannerPrompt(
+  directive: DirectiveRow,
+  run: RunRow,
+  criteria: Array<{ _id: string; description: string }>,
+  tasks: Array<{ _id: string; status: string }>
+): string {
+  const criteriaText = criteria.length > 0
+    ? criteria.map((c, index) => `${index + 1}. ${c._id}: ${c.description}`).join("\n")
+    : "No explicit criteria remain.";
+  const taskText = tasks.length > 0
+    ? tasks.map((t, index) => `${index + 1}. ${t._id}: ${t.status}`).join("\n")
+    : "No execution tasks were produced.";
+  const failedText = tasks
+    .filter((t) => t.status === "failed")
+    .map((t) => `- ${t._id}`)
+    .join("\n") || "None";
+
+  return [
+    "You are replanning a HiveMatrix Directive run after execution failures.",
+    "",
+    `Directive goal: ${directive.goal}`,
+    `Run id: ${run._id}`,
+    "",
+    "Unproven criteria:",
+    criteriaText,
+    "",
+    "Execution task statuses:",
+    taskText,
+    "",
+    "Failed task ids:",
+    failedText,
+    "",
+    "Return only fenced JSON with this shape:",
+    "```json",
+    "{",
+    '  "tasks": [',
+    "    {",
+    '      "title": "short task title",',
+    '      "description": "self-contained recovery instructions",',
+    '      "agentType": "developer",',
+    '      "dependsOn": [0],',
+    '      "criterionRefs": ["criterion id or exact description"],',
+    '      "goalIndex": 0',
+    "    }",
+    "  ]",
+    "}",
+    "```",
+    "",
+    "Create only the additional tasks needed to recover from failed work. Do not repeat successful work unless it is required as context.",
+  ].join("\n");
+}
+
 function buildReviewerPrompt(
   directive: DirectiveRow,
   run: RunRow,
@@ -353,6 +405,7 @@ async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
       if (plannerText) {
         const parsed = parseDirectivePlanOutput(plannerText, criteria.map((c) => ({ _id: c._id, description: c.description })));
         if (parsed.plan) {
+          await markPhaseTaskConsumed(plannerTask, new Date().toISOString());
           await createAutonomyPlanTasks(directive, run, parsed.plan);
           return;
         }
@@ -452,6 +505,103 @@ async function createAutonomyPlanTasks(directive: DirectiveRow, run: RunRow, pla
   });
 }
 
+async function createReplanTasks(directive: DirectiveRow, run: RunRow, plan: DirectivePlan): Promise<string[]> {
+  const { getDefaultModel, CLOUD_ONLY_ID } = await import("@/lib/models/available");
+  const noLocal = getDefaultModel() === CLOUD_ONLY_ID;
+  const route = routeByRole("execute", getConnectivityPolicy(), { noLocal });
+  const modelId = resolveModelId(route.tier);
+
+  const existingTasks = await collectRunTasks(directive._id, run._id);
+  const createdTaskIds: string[] = [];
+  for (const [index, planned] of plan.tasks.entries()) {
+    const task = await Task.create({
+      title: `[directive replan] ${planned.title.slice(0, 50)}`,
+      description: planned.description,
+      project: directive.project,
+      projectPath: directive.projectPath,
+      profile: planned.agentType || directive.profile,
+      model: modelId,
+      directiveId: directive._id,
+      status: "backlog",
+      executor: "agent",
+      output: {
+        runId: run._id,
+        routedTier: route.tier,
+        directiveDagIndex: existingTasks.length + index,
+        dependsOnDagIndices: planned.dependsOn,
+        criterionIds: planned.criterionIds,
+        goalIndex: planned.goalIndex,
+        replan: true,
+        replanIndex: index,
+      },
+    });
+    createdTaskIds.push(task._id.toString());
+  }
+  return createdTaskIds;
+}
+
+async function handleExecutionFailures(
+  directive: DirectiveRow,
+  run: RunRow,
+  tasks: Array<{ _id: string; status: string }>
+): Promise<boolean> {
+  const failedTaskIds = tasks.filter((t) => t.status === "failed").map((t) => t._id);
+  if (failedTaskIds.length === 0) return false;
+
+  const criteria = getCriteria(directive._id).filter((c) => c.proven === 0);
+  const replannerTask = await findPhaseTask(directive._id, run._id, "replanner");
+  if (!replannerTask) {
+    const task = await createPhaseTask(
+      directive,
+      run,
+      "replanner",
+      `[directive replanner] ${directive.goal.slice(0, 47)}`,
+      buildReplannerPrompt(directive, run, criteria.map((c) => ({ _id: c._id, description: c.description })), tasks),
+      "coo"
+    );
+    journal(run._id, directive._id, "replan_task_started", {
+      taskId: task._id.toString(),
+      failedTaskIds,
+    });
+    return true;
+  }
+
+  if (!PHASE_TASK_STATUSES.has(replannerTask.status as string)) return true;
+
+  if (replannerTask.status !== "failed" && replannerTask.status !== "cancelled") {
+    const replannerText = extractTaskText(replannerTask);
+    if (replannerText) {
+      const parsed = parseDirectivePlanOutput(replannerText, criteria.map((c) => ({ _id: c._id, description: c.description })));
+      if (parsed.plan) {
+        await markPhaseTaskConsumed(replannerTask, new Date().toISOString());
+        const taskIds = await createReplanTasks(directive, run, parsed.plan);
+        journal(run._id, directive._id, "replanned", {
+          taskIds,
+          failedTaskIds,
+          tasks: parsed.plan.tasks,
+        });
+        return true;
+      }
+      journal(run._id, directive._id, "replan_fallback", {
+        reason: parsed.error ?? "invalid replanner output",
+        taskId: replannerTask._id.toString(),
+      });
+      return false;
+    }
+    journal(run._id, directive._id, "replan_fallback", {
+      reason: "replanner task produced no text output",
+      taskId: replannerTask._id.toString(),
+    });
+    return false;
+  }
+
+  journal(run._id, directive._id, "replan_fallback", {
+    reason: `replanner task ended ${replannerTask.status}`,
+    taskId: replannerTask._id.toString(),
+  });
+  return false;
+}
+
 async function advanceExecuting(directive: DirectiveRow, run: RunRow): Promise<void> {
   const tasks = await collectRunTasks(directive._id, run._id);
   if (tasks.length === 0) {
@@ -462,6 +612,9 @@ async function advanceExecuting(directive: DirectiveRow, run: RunRow): Promise<v
   }
   const allTerminal = tasks.every((t) => TERMINAL_TASK_STATUSES.has(t.status));
   if (!allTerminal) return; // keep waiting; re-checked next tick
+
+  const handledFailure = await handleExecutionFailures(directive, run, tasks);
+  if (handledFailure) return;
 
   setRunPhase(run._id, "verify");
   journal(run._id, directive._id, "executed", {

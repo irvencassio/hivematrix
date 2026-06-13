@@ -181,14 +181,24 @@ test("directive with no criteria runs a goal task but stays active (cannot self-
 });
 
 test("manual directive without a schedule goes to sleeping after its run", async () => {
-  useLegacyDeterministicPhases();
+  _setDirectivePlannerForTests(async () => null);
+  _setDirectiveReviewerForTests(async () => `\`\`\`json
+{
+  "status": "fail",
+  "findings": [],
+  "gaps": ["manual directive remains unproven"],
+  "correctiveTasks": [],
+  "summary": "Do not prove the criterion."
+}
+\`\`\``);
+  _setDirectiveRetrospectiveForTests(async () => null);
   const d = mkDirective({ triggerPolicy: { type: "manual" } });
   addCriterion(d._id, "c");
 
   await directiveTick(new Date("2026-06-11T12:00:00Z"));
   const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
   await directiveTick(new Date("2026-06-11T12:00:01Z")); // plan→execute
-  await completeRunTasks(d._id, run._id, "failed"); // failed task ⇒ criterion NOT proven
+  await completeRunTasks(d._id, run._id, "review");
   await directiveTick(new Date("2026-06-11T12:00:02Z")); // →verify
   await directiveTick(new Date("2026-06-11T12:00:03Z")); // →reflect
   await directiveTick(new Date("2026-06-11T12:00:04Z")); // →done
@@ -477,6 +487,81 @@ test("production reviewer phase task can create corrective tasks and return to e
   );
   assert.ok(executionTasks.some((t) => String(t.title).includes("Strengthen proof")));
   assert.ok(getCriteria(d._id).every((criterion) => criterion.proven === 0));
+});
+
+test("production execution failure creates a replanner task before verify", async () => {
+  const d = mkDirective();
+  const c = addCriterion(d._id, "Recover from failed execution");
+
+  await directiveTick(new Date("2026-06-11T18:00:00Z"));
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-06-11T18:00:01Z"));
+  const plannerTask = (await getRunTasks(d._id, run._id)).find(
+    (t) => ((t.output ?? {}) as Record<string, unknown>).directivePhase === "planner"
+  )!;
+  await completeTaskWithSummary(plannerTask._id.toString(), "review", `\`\`\`json
+{ "tasks": [{ "title": "First attempt", "description": "Try the work.", "criterionRefs": ["${c._id}"] }] }
+\`\`\``);
+  await directiveTick(new Date("2026-06-11T18:00:02Z"));
+
+  const firstExecutionTask = (await getRunTasks(d._id, run._id)).find(
+    (t) => !((t.output ?? {}) as Record<string, unknown>).directivePhase
+  )!;
+  await Task.findByIdAndUpdate(firstExecutionTask._id.toString(), { status: "failed" });
+  await directiveTick(new Date("2026-06-11T18:00:03Z"));
+
+  assert.equal(getRun(run._id)!.phase, "execute");
+  const replannerTask = (await getRunTasks(d._id, run._id)).find(
+    (t) => ((t.output ?? {}) as Record<string, unknown>).directivePhase === "replanner"
+  );
+  assert.ok(replannerTask);
+  assert.match(String(replannerTask.description), new RegExp(firstExecutionTask._id.toString()));
+  assert.ok(getJournal(run._id).some((j) => j.step === "replan_task_started"));
+
+  await completeTaskWithSummary(replannerTask._id.toString(), "review", `\`\`\`json
+{ "tasks": [{ "title": "Second attempt", "description": "Recover and prove the criterion.", "criterionRefs": ["${c._id}"] }] }
+\`\`\``);
+  await directiveTick(new Date("2026-06-11T18:00:04Z"));
+
+  assert.equal(getRun(run._id)!.phase, "execute");
+  const runTasks = await getRunTasks(d._id, run._id);
+  const executionTasks = runTasks.filter((t) => !((t.output ?? {}) as Record<string, unknown>).directivePhase);
+  assert.equal(executionTasks.length, 2);
+  assert.ok(executionTasks.some((t) => String(t.title).includes("Second attempt")));
+  const consumedReplanner = (await Task.findById(replannerTask._id.toString()))!;
+  assert.ok(((consumedReplanner.output ?? {}) as Record<string, unknown>).directivePhaseConsumedAt);
+  assert.ok(getJournal(run._id).some((j) => j.step === "replanned"));
+});
+
+test("invalid production replanner output falls back to verify", async () => {
+  const d = mkDirective();
+  const c = addCriterion(d._id, "Fallback after invalid replan");
+
+  await directiveTick(new Date("2026-06-11T18:10:00Z"));
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-06-11T18:10:01Z"));
+  const plannerTask = (await getRunTasks(d._id, run._id)).find(
+    (t) => ((t.output ?? {}) as Record<string, unknown>).directivePhase === "planner"
+  )!;
+  await completeTaskWithSummary(plannerTask._id.toString(), "review", `\`\`\`json
+{ "tasks": [{ "title": "Failing attempt", "description": "Try the work.", "criterionRefs": ["${c._id}"] }] }
+\`\`\``);
+  await directiveTick(new Date("2026-06-11T18:10:02Z"));
+
+  const executionTask = (await getRunTasks(d._id, run._id)).find(
+    (t) => !((t.output ?? {}) as Record<string, unknown>).directivePhase
+  )!;
+  await Task.findByIdAndUpdate(executionTask._id.toString(), { status: "failed" });
+  await directiveTick(new Date("2026-06-11T18:10:03Z"));
+  const replannerTask = (await getRunTasks(d._id, run._id)).find(
+    (t) => ((t.output ?? {}) as Record<string, unknown>).directivePhase === "replanner"
+  )!;
+
+  await completeTaskWithSummary(replannerTask._id.toString(), "review", "not json");
+  await directiveTick(new Date("2026-06-11T18:10:04Z"));
+
+  assert.equal(getRun(run._id)!.phase, "verify");
+  assert.ok(getJournal(run._id).some((j) => j.step === "replan_fallback"));
 });
 
 test("reflect phase records retrospective learning paths", async () => {
