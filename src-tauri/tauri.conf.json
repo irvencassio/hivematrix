@@ -1,0 +1,58 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HiveMatrix",
+  "version": "0.1.4",
+  "identifier": "com.hivematrix.app",
+  "build": {
+    "frontendDist": "../ui",
+    "devUrl": "http://127.0.0.1:3747",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "HiveMatrix",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 960,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/irvencassio/hivematrix/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMzOTIyMDM4OTdCMTRDMkEKUldRcVRMR1hPQ0NTdzdNZGpsUmc1TXFsNlZMZm9FK05lenhsVmh0aHNDSkQxTVBUd0xnRkMrZSsK"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "createUpdaterArtifacts": true,
+    "resources": {
+      "../dist/daemon": "daemon",
+      "../desktopbee-helper/DesktopBeeHelper.app": "DesktopBeeHelper.app"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "signingIdentity": "Developer ID Application: Irven Cassio (8B3CHTY93V)",
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "12.0",
+      "entitlements": "entitlements/app.entitlements.plist"
+    }
+  }
+}
