@@ -78,6 +78,21 @@ fn spawn_bundled_daemon(app: &tauri::App) -> Option<Child> {
     }
 }
 
+/// Whether the daemon's launchd agent is installed (i.e. onboarding ran). When
+/// it is, launchd owns the daemon's lifecycle. The app must NOT spawn its own
+/// child in that case: the child orphans (reparents to launchd) and squats
+/// :3747, so the real launchd-managed daemon crash-loops on EADDRINUSE and the
+/// port keeps serving stale code — exactly the failure seen after an update.
+fn launchd_agent_installed() -> bool {
+    std::env::var("HOME")
+        .map(|h| {
+            std::path::Path::new(&h)
+                .join("Library/LaunchAgents/com.hivematrix.daemon.plist")
+                .exists()
+        })
+        .unwrap_or(false)
+}
+
 /// Best-effort background update check via the Tauri updater (GitHub Releases
 /// feed). Because the UI is served by the daemon over http (no Tauri IPC), the
 /// check is driven from Rust, not JS. No-ops safely when the updater isn't
@@ -148,6 +163,11 @@ pub fn run() {
             // Ensure a daemon is up so the webview's health-poll redirects.
             if daemon_health_ok() {
                 log::info!("daemon already healthy on :{DAEMON_PORT}");
+            } else if launchd_agent_installed() {
+                // launchd owns the daemon; it will (re)start it. Spawning our own
+                // child here would orphan and squat the port. The webview
+                // health-polls until launchd's daemon answers.
+                log::info!("daemon not healthy yet, but launchd agent is installed — deferring to launchd");
             } else if let Some(child) = spawn_bundled_daemon(app) {
                 *app.state::<DaemonChild>().0.lock().unwrap() = Some(child);
             }
