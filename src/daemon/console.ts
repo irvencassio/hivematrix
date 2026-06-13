@@ -451,6 +451,45 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   </div>
 </div>
 
+<!-- MailBee guided setup. -->
+<div class="overlay" id="mailOverlay">
+  <div class="modal" style="width:460px">
+    <h1>Set up MailBee <span class="x" onclick="closeMailBee()">✕</span></h1>
+    <div class="muted" style="font-size:12px;margin-bottom:10px">Watch email and draft/send replies via Apple Mail. Trusted senders auto-send; everyone else is draft-for-approval.</div>
+    <div class="mb-step">
+      <span class="mb-mark no" id="ml_auto_mark">○</span>
+      <div class="mb-body">
+        <div class="t">Apple Mail Automation</div>
+        <div class="muted" id="ml_auto_detail">HiveMatrix needs permission to control Mail (read inbox + draft/send).</div>
+        <button onclick="openSystemPane('automation')">Open Automation settings</button>
+        <div class="muted" style="font-size:11px;margin-top:3px">Open Mail.app first so it appears in the Automation list.</div>
+      </div>
+    </div>
+    <div class="mb-step">
+      <span class="mb-mark no" id="ml_trust_mark">○</span>
+      <div class="mb-body">
+        <div class="t">Trusted senders (optional)</div>
+        <div class="muted">Trusted senders get auto-sent replies; everyone else becomes a draft for your approval.</div>
+        <input class="dialog-input" id="ml_email" placeholder="trusted@example.com" style="margin-top:6px;margin-bottom:4px" />
+        <div id="ml_identities"></div>
+      </div>
+    </div>
+    <div class="mb-step" style="border-bottom:0">
+      <span class="mb-mark no" id="ml_chan_mark">○</span>
+      <div class="mb-body">
+        <div class="t">Enable the channel</div>
+        <div class="muted">Starts watching new mail (existing inbox is not replayed).</div>
+      </div>
+    </div>
+    <div class="err" id="ml_err"></div>
+    <div class="dialog-actions" style="margin-top:12px">
+      <button class="cancel" onclick="closeMailBee()">Close</button>
+      <button class="ok" onclick="submitMailBee()">Enable MailBee</button>
+    </div>
+    <div class="muted" id="ml_status" style="font-size:11px;margin-top:8px"></div>
+  </div>
+</div>
+
 <main>
   <section class="col board">
     <h2>Board <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></h2>
@@ -868,8 +907,9 @@ const NO_INPUT_STEPS = ['config', 'daemon', 'desktopbee'];
 // First-run wizard: drive each incomplete step through its POST endpoint.
 async function wizardAction(id) {
   try {
-    // MessageBee has its own guided modal (channel + allowlist + Full Disk Access).
+    // MessageBee / MailBee have their own guided modals.
     if (id === 'messagebee') { openMessageBeeSetup(); return; }
+    if (id === 'mailbee') { openMailBeeSetup(); return; }
     let body = {};
     if (id === 'config') {
       body = { config: {} };
@@ -944,7 +984,7 @@ async function allowIgnored(address) {
 function closeMessageBee() { document.getElementById('mbOverlay').classList.remove('open'); }
 // Ask the daemon to open a macOS privacy pane — window.open() is a no-op for the
 // x-apple.* URL scheme inside the Tauri/WKWebView, so the native side does it.
-const PANE_LABELS = { fullDiskAccess: 'Full Disk Access', accessibility: 'Accessibility', screenRecording: 'Screen Recording' };
+const PANE_LABELS = { fullDiskAccess: 'Full Disk Access', accessibility: 'Accessibility', screenRecording: 'Screen Recording', automation: 'Automation' };
 async function openSystemPane(pane) {
   try {
     const r = await api('/system/open-pane', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pane }) });
@@ -989,6 +1029,49 @@ async function submitMessageBee() {
     renderMessageBeeState(r.data || {});
     status.textContent = r.detail || (r.ok ? 'Configured.' : 'Done.');
     document.getElementById('mb_phone').value = '';
+    await refresh();
+  } catch (e) { err.textContent = String(e); status.textContent = ''; }
+}
+
+// --- MailBee guided setup ---------------------------------------------------
+function openMailBeeSetup() {
+  document.getElementById('ml_err').textContent = '';
+  document.getElementById('ml_status').textContent = '';
+  document.getElementById('ml_email').value = '';
+  renderMailBeeState(null);
+  document.getElementById('mailOverlay').classList.add('open');
+}
+function closeMailBee() { document.getElementById('mailOverlay').classList.remove('open'); }
+function renderMailBeeState(data) {
+  const mark = (id, ok) => { const el = document.getElementById(id); el.textContent = ok ? '✓' : '○'; el.className = 'mb-mark ' + (ok ? 'ok' : 'no'); };
+  const controllable = data ? !!data.mailControllable : false;
+  const enabled = data ? !!data.enabled : false;
+  mark('ml_auto_mark', controllable);
+  mark('ml_chan_mark', enabled);
+  document.getElementById('ml_auto_detail').textContent = controllable
+    ? 'Granted — HiveMatrix can control Apple Mail.'
+    : 'HiveMatrix needs permission to control Mail (read inbox + draft/send). Open Mail, then approve.';
+  if (data && data.identities) {
+    const trusted = data.identities.filter(i => i.status === 'allowed' || i.status === 'paired');
+    mark('ml_trust_mark', trusted.length > 0);
+    document.getElementById('ml_identities').innerHTML = trusted.length
+      ? trusted.map(i => '<span class="mb-chip">' + esc(i.address) + '</span>').join('') : '';
+  }
+}
+async function submitMailBee() {
+  const err = document.getElementById('ml_err'); err.textContent = '';
+  const status = document.getElementById('ml_status');
+  const email = document.getElementById('ml_email').value.trim();
+  status.textContent = 'Enabling…';
+  try {
+    const r = await api('/onboarding/mailbee', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enable: true, email: email || undefined }),
+    });
+    if (!r) { err.textContent = 'No response from daemon.'; status.textContent = ''; return; }
+    renderMailBeeState(r.data || {});
+    status.textContent = r.detail || (r.ok ? 'Configured.' : 'Done.');
+    document.getElementById('ml_email').value = '';
     await refresh();
   } catch (e) { err.textContent = String(e); status.textContent = ''; }
 }

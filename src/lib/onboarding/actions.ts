@@ -34,6 +34,8 @@ export const TCC_DEEP_LINKS = {
   screenRecording: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
   // Full Disk Access — required for the daemon to read ~/Library/Messages/chat.db (MessageBee).
   fullDiskAccess: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+  // Automation — required to drive Apple Mail via osascript (MailBee).
+  automation: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
 } as const;
 
 // ── Pure builders (unit-tested) ───────────────────────────────────────────────
@@ -330,6 +332,62 @@ export async function configureMessageBee(opts: {
       chatDbReadable,
       identities,
       deepLinks: { fullDiskAccess: TCC_DEEP_LINKS.fullDiskAccess },
+      warnings: warnings.length ? warnings : undefined,
+    },
+  };
+}
+
+/**
+ * Guided MailBee setup: enable the email channel, add a trusted sender, and
+ * report whether Apple Mail is controllable (Automation permission). On enable,
+ * advances the high-water mark to the newest message so the whole mailbox isn't
+ * replayed into tasks. Idempotent; returns the live state the wizard renders.
+ */
+export async function configureMailBee(opts: {
+  enable?: boolean;
+  email?: string;
+  displayName?: string;
+}): Promise<ActionResult> {
+  const store = await import("@/lib/mailbee/store");
+  const { canControlMail, readInboxSince } = await import("@/lib/mailbee/applemail");
+
+  const warnings: string[] = [];
+  const raw = (opts.email ?? "").trim();
+  if (raw) {
+    if (!raw.includes("@")) warnings.push(`"${raw}" is not an email — not added to trusted senders`);
+    else store.upsertIdentity(raw, "allowed", opts.displayName ?? null);
+  }
+
+  const mailControllable = await canControlMail();
+  // Only enable once Mail is controllable, and pin the high-water to the newest
+  // message so existing inbox mail isn't turned into a flood of tasks.
+  if (opts.enable !== false && mailControllable) {
+    store.ensureChannel();
+    const recent = await readInboxSince(0, 1);
+    store.setLastId(recent[0]?.id ?? 0);
+    store.setChannelEnabled(true);
+  }
+
+  const enabled = store.isChannelEnabled();
+  const identities = store.listIdentities();
+  const trusted = identities.filter((i) => i.status === "allowed" || i.status === "paired").length;
+  const ok = enabled && mailControllable;
+
+  let detail: string;
+  if (!mailControllable) detail = "Grant Apple Mail Automation permission (open Mail, then approve), then re-run.";
+  else if (!enabled) detail = "Mail controllable — enabling the channel…";
+  else detail = trusted > 0
+    ? "MailBee ready: channel on, Mail controllable, trusted sender set."
+    : "Channel on and Mail controllable — add a trusted sender for auto-send (others are draft-for-approval).";
+
+  return {
+    ok,
+    detail,
+    data: {
+      enabled,
+      mailControllable,
+      identities,
+      deepLinks: { automation: TCC_DEEP_LINKS.automation },
       warnings: warnings.length ? warnings : undefined,
     },
   };

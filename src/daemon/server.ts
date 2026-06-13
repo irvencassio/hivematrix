@@ -386,6 +386,13 @@ export function createDaemonServer() {
         json(res, 200, await configureMessageBee(body ?? {}));
         return;
       }
+      // POST /onboarding/mailbee — enable the email channel + add a trusted sender
+      if (req.method === "POST" && urlPath === "/onboarding/mailbee") {
+        const body = await parseBody(req) as { enable?: boolean; email?: string; displayName?: string };
+        const { configureMailBee } = await import("@/lib/onboarding/actions");
+        json(res, 200, await configureMailBee(body ?? {}));
+        return;
+      }
       // GET /messagebee/ignored — non-allowlisted senders seen recently (one-click allow)
       if (req.method === "GET" && urlPath === "/messagebee/ignored") {
         const { listIgnoredSenders } = await import("@/lib/messagebee/store");
@@ -406,10 +413,10 @@ export function createDaemonServer() {
       // POST /system/open-pane — open a macOS privacy pane natively (webview window.open can't)
       if (req.method === "POST" && urlPath === "/system/open-pane") {
         const body = await parseBody(req) as { pane?: string };
-        const allowed = ["accessibility", "screenRecording", "fullDiskAccess"];
+        const allowed = ["accessibility", "screenRecording", "fullDiskAccess", "automation"];
         if (!body?.pane || !allowed.includes(body.pane)) { json(res, 400, { ok: false, detail: "invalid pane" }); return; }
         const { openSystemSettingsPane } = await import("@/lib/onboarding/actions");
-        json(res, 200, openSystemSettingsPane(body.pane as "accessibility" | "screenRecording" | "fullDiskAccess"));
+        json(res, 200, openSystemSettingsPane(body.pane as "accessibility" | "screenRecording" | "fullDiskAccess" | "automation"));
         return;
       }
 

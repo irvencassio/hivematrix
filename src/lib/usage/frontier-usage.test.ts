@@ -26,7 +26,7 @@ test("isFrontierModel: bills for claude/gpt/codex, free for local qwen", () => {
   assert.equal(isFrontierModel("claude-sonnet-4-6"), true);
   assert.equal(isFrontierModel("codex:gpt-5.4"), true);
   assert.equal(isFrontierModel("qwen/qwen3.6-27b"), false);
-  assert.equal(isFrontierModel("gemini-3.1-flash-image-preview"), false);
+  assert.equal(isFrontierModel("nano-banana"), false);
 });
 
 test("getFrontierUsage aggregates cost/tokens and excludes local-only tasks", async () => {

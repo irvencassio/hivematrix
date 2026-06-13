@@ -64,14 +64,18 @@ interface BeeServicesConfigShape {
 
 const MANAGED_BEE_DESCRIPTORS: BeeServiceDescriptor[] = [
   {
+    // In HiveMatrix, MessageBee is an in-daemon poller (not a standalone Hive-1
+    // launchagent). Status is derived from the iMessage channel state below;
+    // managed via the MessageBee Set up modal, so no Bees-panel toggle.
     kind: "messagebee",
-    runtimeMode: "launchagent",
-    manageable: true,
-    defaultRepoPath: join(homedir(), "messagebee"),
-    defaultPlistLabel: "com.messagebee.agent",
-    healthcheckUrl: "http://127.0.0.1:7891/healthcheck",
-    distEntry: "dist/index.js",
-    logDirName: "messagebee",
+    runtimeMode: "embedded",
+    manageable: false,
+  },
+  {
+    // Likewise an in-daemon poller, gated on the email channel being enabled.
+    kind: "mailbee",
+    runtimeMode: "embedded",
+    manageable: false,
   },
   {
     kind: "inventorbee",
@@ -440,6 +444,34 @@ export async function listBeeServiceStatuses(): Promise<BeeServiceStatus[]> {
 
   for (const definition of definitions) {
     const descriptor = descriptorForKind(definition.kind);
+
+    // Channel bees (messagebee/mailbee) are in-daemon pollers — report live
+    // status from the channel state + its OS permission, not launchctl/HTTP.
+    if (definition.kind === "messagebee" || definition.kind === "mailbee") {
+      const ch = await channelStatus(definition.kind);
+      statuses.push({
+        kind: definition.kind,
+        name: definition.name,
+        role: definition.role,
+        phase: definition.phase,
+        summary: definition.summary,
+        runtimeMode: "embedded",
+        manageable: false,
+        available: true,
+        autoStart: ch.enabled,
+        running: ch.enabled,
+        loaded: ch.enabled,
+        healthy: ch.enabled ? ch.permitted : null,
+        pid: null,
+        repoPath: null,
+        plistLabel: null,
+        plistPath: null,
+        healthcheckUrl: null,
+        statusDetail: ch.detail,
+      });
+      continue;
+    }
+
     if (descriptor.runtimeMode === "launchagent") {
       const settings = resolveBeeLaunchAgentSettings(definition.kind);
       const repoPath = settings?.repoPath ?? null;
@@ -496,6 +528,31 @@ export async function listBeeServiceStatuses(): Promise<BeeServiceStatus[]> {
   }
 
   return statuses;
+}
+
+/** Live status for an in-daemon channel bee: enabled? OS permission granted? */
+async function channelStatus(kind: string): Promise<{ enabled: boolean; permitted: boolean; detail: string }> {
+  if (kind === "messagebee") {
+    const { isChannelEnabled } = await import("@/lib/messagebee/store");
+    const { canReadChatDb } = await import("@/lib/messagebee/imessage");
+    const enabled = isChannelEnabled();
+    const permitted = canReadChatDb();
+    return {
+      enabled, permitted,
+      detail: !enabled ? "channel off — set up to enable"
+        : permitted ? "running; reading Messages chat.db" : "enabled, but Full Disk Access is missing",
+    };
+  }
+  // mailbee
+  const { isChannelEnabled } = await import("@/lib/mailbee/store");
+  const { canControlMail } = await import("@/lib/mailbee/applemail");
+  const enabled = isChannelEnabled();
+  const permitted = enabled ? await canControlMail() : false;
+  return {
+    enabled, permitted,
+    detail: !enabled ? "channel off — set up to enable"
+      : permitted ? "running; controlling Apple Mail" : "enabled, but Mail Automation permission is missing",
+  };
 }
 
 function embeddedHealthRoute(kind: string): string | null {

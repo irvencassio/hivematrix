@@ -16,17 +16,15 @@ test("buildLaunchAgentPlist emits a KeepAlive launch agent with the Bee label", 
   assert.match(plist, /dist\/index\.js/);
 });
 
-test("buildLaunchAgentPlist supports MessageBee defaults", () => {
-  const plist = buildLaunchAgentPlist("messagebee", {
-    autoStart: true,
-    repoPath: "/Users/example/messagebee",
-    plistLabel: "com.messagebee.agent",
-    plistPath: "/Users/example/Library/LaunchAgents/com.messagebee.agent.plist",
-  }, "/opt/homebrew/bin/node");
-
-  assert.match(plist, /com\.messagebee\.agent/);
-  assert.match(plist, /dist\/index\.js/);
-  assert.match(plist, /Users\/example\/messagebee/);
+test("MessageBee and MailBee are embedded channel pollers (not launchagents)", () => {
+  // In HiveMatrix both run in-daemon; status comes from the channel state, and
+  // they're managed via their Set up modals (no Bees-panel launchctl toggle).
+  const message = getBeeRuntimeDescriptor("messagebee");
+  const mail = getBeeRuntimeDescriptor("mailbee");
+  assert.equal(message.runtimeMode, "embedded");
+  assert.equal(message.manageable, false);
+  assert.equal(mail.runtimeMode, "embedded");
+  assert.equal(mail.manageable, false);
 });
 
 test("ManagerBee and BrainBee are embedded control-plane workers", () => {
