@@ -294,6 +294,19 @@ export function createDaemonServer() {
         json(res, 200, await getFrontierUsage({ bypassSubscriptionCache: q.get("refresh") === "1" }));
         return;
       }
+      // POST /claude/auth/login — open Terminal for the interactive Claude CLI OAuth flow.
+      if (req.method === "POST" && urlPath === "/claude/auth/login") {
+        const { startClaudeAuthLogin } = await import("@/lib/usage/claude-auth-login");
+        try {
+          json(res, 200, await startClaudeAuthLogin());
+        } catch (e) {
+          json(res, 500, {
+            ok: false,
+            detail: e instanceof Error ? e.message : String(e),
+          });
+        }
+        return;
+      }
       // GET /update/status — compare the GitHub release feed to the running version (drives the console pill)
       if (req.method === "GET" && urlPath === "/update/status") {
         const { getUpdateStatus } = await import("@/lib/updater/feed-check");

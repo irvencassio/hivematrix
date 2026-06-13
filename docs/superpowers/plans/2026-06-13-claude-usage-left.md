@@ -15,3 +15,6 @@
 - [x] Verify with targeted tests first, then the repository gates.
 - [x] Add a visible Frontier Usage refresh button that bypasses the Claude subscription cache after `claude auth login`.
 - [x] Add focused tests for cache-bypass plumbing and console refresh wiring.
+- [x] Add a tested Claude auth-login launcher helper that writes a fixed Terminal `.command` script.
+- [x] Add a daemon endpoint and Frontier Usage login button for `claude auth login` recovery states.
+- [x] Bump HiveMatrix to 0.1.17, run focused tests, full gates, and publish the updater release.

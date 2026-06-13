@@ -27,9 +27,15 @@ HiveMatrix will read the existing `Claude Code-credentials` Keychain entry. If t
 
 The console should expose a visible refresh button beside Frontier Usage. That button calls `/usage?refresh=1`, bypassing the short-lived subscription cache so a just-completed `claude auth login` is reflected immediately instead of waiting for the background interval.
 
+## Auth Login Control
+
+When `/usage` reports missing Claude credentials, a missing refresh token, or a refresh failure that asks for `claude auth login`, the Frontier Usage panel should expose a visible login button. The button calls a loopback-only authenticated daemon endpoint that writes a short `~/.hivematrix/claude-auth-login.command` script and opens it with Terminal. The script runs `claude auth login` with HiveMatrix's CLI PATH, then tells the operator to return to HiveMatrix and refresh usage.
+
 ## Security
 
 No tokens are logged, exposed through `/usage`, or rendered in the console. Tests use fake tokens only. The Keychain write updates the same Claude Code credential service and keeps the refreshed token local to the Mac.
+
+The login endpoint does not accept shell input from the browser. It opens a fixed local command script and relies on the Claude CLI's own OAuth flow to update Keychain.
 
 ## Verification
 

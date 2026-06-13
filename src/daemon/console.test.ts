@@ -84,3 +84,11 @@ test("frontier usage panel has a manual refresh that bypasses cached auth state"
   assert.match(js, /checkUsage\(true\)/);
   assert.match(js, /\/usage\?refresh=1/);
 });
+
+test("frontier usage panel exposes Claude auth login action", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function runClaudeAuthLogin/);
+  assert.match(js, /\/claude\/auth\/login/);
+  assert.match(js, /claudeAuthLogin/);
+  assert.match(js, /Run Claude login/);
+});

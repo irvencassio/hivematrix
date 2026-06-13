@@ -105,6 +105,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     width:24px; height:24px; border-radius:6px; cursor:pointer; line-height:1; font-size:13px; }
   .usage-refresh:hover { color:var(--text); border-color:var(--text); }
   .usage-refresh[disabled] { opacity:.45; cursor:default; }
+  .usage-action { border:1px solid var(--border); background:var(--panel-2); color:var(--text);
+    border-radius:6px; cursor:pointer; font-size:11px; padding:4px 8px; margin-top:6px; }
+  .usage-action:hover { border-color:var(--accent-2); }
+  .usage-action[disabled] { opacity:.45; cursor:default; }
   .update-pill { cursor: pointer; background: var(--accent); color: var(--create-btn-text, #1a1a1a);
     border-radius: 999px; padding: 3px 11px; font-size: 11px; font-weight: 700; white-space: nowrap;
     animation: updatePulse 2s ease-in-out infinite; }
@@ -1307,7 +1311,10 @@ async function checkUsage(forceRefresh) {
       html += renderSubBar("7-day Sonnet", sub.sevenDaySonnet);
     } else if (subStatus && subStatus.state !== "missing_credentials") {
       html += '<div class="urow"><span><b>Claude subscription</b></span><span class="um">' + esc(usagePlanLabel(subStatus)) + '</span></div>'
-        + '<div class="muted" style="font-size:11px">' + esc(subStatus.message || "Usage left unavailable.") + '</div>';
+        + '<div class="muted" style="font-size:11px">' + esc(subStatus.message || "Usage left unavailable.") + '</div>'
+        + (String(subStatus.message || "").includes("claude auth login")
+          ? '<button id="claudeAuthLogin" class="usage-action" onclick="runClaudeAuthLogin()">Run Claude login</button>'
+          : '');
     }
 
     if (codexSubscription) {
@@ -1348,6 +1355,21 @@ async function refreshUsageNow() {
     await checkUsage(true);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "↻"; }
+  }
+}
+
+async function runClaudeAuthLogin() {
+  const btn = document.getElementById("claudeAuthLogin");
+  if (btn) { btn.disabled = true; btn.textContent = "Opening Terminal…"; }
+  try {
+    const r = await api("/claude/auth/login", { method: "POST" });
+    if (!r || !r.ok) {
+      await hmAlert(r?.detail || r?.error || "Could not start Claude auth login.");
+    } else {
+      await hmAlert("Terminal opened for Claude login. Complete it there, then click the Frontier Usage refresh button.");
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Run Claude login"; }
   }
 }
 
