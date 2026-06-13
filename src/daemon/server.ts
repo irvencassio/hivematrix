@@ -290,7 +290,8 @@ export function createDaemonServer() {
       // GET /usage — frontier model spend aggregated from task outputs
       if (req.method === "GET" && urlPath === "/usage") {
         const { getFrontierUsage } = await import("@/lib/usage/frontier-usage");
-        json(res, 200, await getFrontierUsage());
+        const q = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+        json(res, 200, await getFrontierUsage({ bypassSubscriptionCache: q.get("refresh") === "1" }));
         return;
       }
       // GET /update/status — compare the GitHub release feed to the running version (drives the console pill)

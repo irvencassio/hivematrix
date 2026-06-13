@@ -62,3 +62,11 @@ test("frontier usage panel renders a separate Codex usage section", () => {
   assert.match(js, /Codex subscription/);
   assert.match(js, /renderCodexBar/);
 });
+
+test("frontier usage panel has a manual refresh that bypasses cached auth state", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(CONSOLE_HTML, /usageRefresh/);
+  assert.match(js, /function refreshUsageNow/);
+  assert.match(js, /checkUsage\(true\)/);
+  assert.match(js, /\/usage\?refresh=1/);
+});

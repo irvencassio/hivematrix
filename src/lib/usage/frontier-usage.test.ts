@@ -87,3 +87,28 @@ test("getFrontierUsage includes Codex subscription windows when available", asyn
 
   _setCodexUsageReaderForTests(() => null);
 });
+
+test("getFrontierUsage can bypass the Claude subscription cache", async () => {
+  let bypassSeen = false;
+  _setSubscriptionReaderForTests(async (options) => {
+    bypassSeen = options?.bypassCache === true;
+    return {
+      usage: null,
+      status: {
+        state: "missing_refresh_token",
+        message: "Claude token is expired.",
+      },
+    };
+  });
+
+  await getFrontierUsage({ bypassSubscriptionCache: true });
+  assert.equal(bypassSeen, true);
+
+  _setSubscriptionReaderForTests(async () => ({
+    usage: null,
+    status: {
+      state: "missing_credentials",
+      message: "Subscription usage disabled in tests.",
+    },
+  }));
+});

@@ -10,6 +10,7 @@ import { MODEL_SHORT_NAMES } from "@/lib/models/catalog";
 import {
   getSubscriptionRemainingDetailed,
   type SubscriptionUsage,
+  type SubscriptionUsageOptions,
   type SubscriptionUsageResult,
   type SubscriptionUsageStatus,
 } from "./subscription";
@@ -57,7 +58,13 @@ interface UsageTask {
   createdAt?: string | null;
 }
 
-let subscriptionReader: () => Promise<SubscriptionUsageResult> = getSubscriptionRemainingDetailed;
+export interface FrontierUsageOptions {
+  bypassSubscriptionCache?: boolean;
+}
+
+type SubscriptionReader = (options?: SubscriptionUsageOptions) => Promise<SubscriptionUsageResult>;
+
+let subscriptionReader: SubscriptionReader = (options) => getSubscriptionRemainingDetailed(undefined, options);
 let codexUsageReader: () => CodexUsageProfile | null = readCodexUsageProfile;
 
 function parseOutput(output: unknown): TaskOutput {
@@ -66,7 +73,7 @@ function parseOutput(output: unknown): TaskOutput {
   return output as TaskOutput;
 }
 
-export async function getFrontierUsage(): Promise<FrontierUsage> {
+export async function getFrontierUsage(options: FrontierUsageOptions = {}): Promise<FrontierUsage> {
   const tasks = await Task.find({}) as UsageTask[];
   const byModel = new Map<string, FrontierModelUsage>();
   let totalCost = 0, inputTokens = 0, outputTokens = 0, taskCount = 0, todayCost = 0, todayTaskCount = 0;
@@ -95,7 +102,7 @@ export async function getFrontierUsage(): Promise<FrontierUsage> {
     byModel.set(primary, row);
   }
 
-  const subscriptionResult = await subscriptionReader();
+  const subscriptionResult = await subscriptionReader({ bypassCache: options.bypassSubscriptionCache });
   const codexSubscription = codexUsageReader();
 
   return {
@@ -112,8 +119,8 @@ export async function getFrontierUsage(): Promise<FrontierUsage> {
   };
 }
 
-export function _setSubscriptionReaderForTests(reader: (() => Promise<SubscriptionUsageResult>) | null): void {
-  subscriptionReader = reader ?? getSubscriptionRemainingDetailed;
+export function _setSubscriptionReaderForTests(reader: SubscriptionReader | null): void {
+  subscriptionReader = reader ?? ((options) => getSubscriptionRemainingDetailed(undefined, options));
 }
 
 export function _setCodexUsageReaderForTests(reader: (() => CodexUsageProfile | null) | null): void {

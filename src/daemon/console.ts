@@ -99,6 +99,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-bar-fill.ok  { background: var(--ok,  #4caf50); }
   .usage-bar-fill.warn { background: #f0a500; }
   .usage-bar-fill.hi  { background: #e05b2c; }
+  .usage-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:20px; }
+  .usage-head h2 { margin:0 0 10px; }
+  .usage-refresh { border:1px solid var(--border); background:var(--panel-2); color:var(--muted);
+    width:24px; height:24px; border-radius:6px; cursor:pointer; line-height:1; font-size:13px; }
+  .usage-refresh:hover { color:var(--text); border-color:var(--text); }
+  .usage-refresh[disabled] { opacity:.45; cursor:default; }
   .update-pill { cursor: pointer; background: var(--accent); color: var(--create-btn-text, #1a1a1a);
     border-radius: 999px; padding: 3px 11px; font-size: 11px; font-weight: 700; white-space: nowrap;
     animation: updatePulse 2s ease-in-out infinite; }
@@ -573,7 +579,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="onboarding"></div>
     <h2 style="margin-top:20px">Soak / Health</h2>
     <div id="metrics"></div>
-    <h2 style="margin-top:20px">Frontier Usage</h2>
+    <div class="usage-head"><h2>Frontier Usage</h2><button id="usageRefresh" class="usage-refresh" title="Refresh Claude/Codex usage" onclick="refreshUsageNow()">↻</button></div>
     <div id="usage"><div class="muted">No frontier spend yet.</div></div>
     <h2 style="margin-top:20px">Connectivity</h2>
     <div id="conn"></div>
@@ -1237,9 +1243,9 @@ function usagePlanLabel(status) {
   return "usage";
 }
 
-async function checkUsage() {
+async function checkUsage(forceRefresh) {
   try {
-    const u = await api("/usage");
+    const u = await api(forceRefresh ? "/usage?refresh=1" : "/usage");
     if (!u) return;
     const sub = u.subscription;
     const subStatus = u.subscriptionStatus;
@@ -1322,6 +1328,16 @@ async function checkUsage() {
     html += '</div>';
     el.innerHTML = html;
   } catch (e) { /* transient */ }
+}
+
+async function refreshUsageNow() {
+  const btn = document.getElementById("usageRefresh");
+  if (btn) { btn.disabled = true; btn.textContent = "…"; }
+  try {
+    await checkUsage(true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "↻"; }
+  }
 }
 
 // --- Update indicator -------------------------------------------------------

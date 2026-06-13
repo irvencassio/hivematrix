@@ -13,3 +13,5 @@
 - [x] Update `src/lib/usage/frontier-usage.ts` to include `subscriptionStatus` while preserving `subscription`.
 - [x] Update `src/daemon/console.ts` to show a useful status line when subscription usage is unavailable, without disturbing the existing Safe Senders work in the dirty file.
 - [x] Verify with targeted tests first, then the repository gates.
+- [x] Add a visible Frontier Usage refresh button that bypasses the Claude subscription cache after `claude auth login`.
+- [x] Add focused tests for cache-bypass plumbing and console refresh wiring.

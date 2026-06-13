@@ -23,6 +23,10 @@ HiveMatrix will read the existing `Claude Code-credentials` Keychain entry. If t
 
 `/usage` will also include a non-secret `subscriptionStatus` object so the console can explain when remaining usage is unavailable. The UI still leads with percent-left when the subscription usage fetch succeeds.
 
+## Refresh Control
+
+The console should expose a visible refresh button beside Frontier Usage. That button calls `/usage?refresh=1`, bypassing the short-lived subscription cache so a just-completed `claude auth login` is reflected immediately instead of waiting for the background interval.
+
 ## Security
 
 No tokens are logged, exposed through `/usage`, or rendered in the console. Tests use fake tokens only. The Keychain write updates the same Claude Code credential service and keeps the refreshed token local to the Mac.

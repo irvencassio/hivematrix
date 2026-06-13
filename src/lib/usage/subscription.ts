@@ -40,6 +40,10 @@ export interface SubscriptionUsageResult {
   status: SubscriptionUsageStatus;
 }
 
+export interface SubscriptionUsageOptions {
+  bypassCache?: boolean;
+}
+
 type SubscriptionExecFileSync = (
   file: string,
   args: readonly string[],
@@ -315,8 +319,9 @@ async function fetchUsage(
 
 export async function getSubscriptionRemainingDetailed(
   deps: SubscriptionTestDeps = defaultDeps,
+  options: SubscriptionUsageOptions = {},
 ): Promise<SubscriptionUsageResult> {
-  if (_cache && deps === defaultDeps && deps.now() - _cache.at < CACHE_TTL_MS) return _cache.data;
+  if (!options.bypassCache && _cache && deps === defaultDeps && deps.now() - _cache.at < CACHE_TTL_MS) return _cache.data;
 
   const resolved = await resolveOAuthToken(deps);
   if (!resolved.token) {
