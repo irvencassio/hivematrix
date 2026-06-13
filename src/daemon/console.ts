@@ -92,6 +92,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-breakdown { font-size: 11px; }
   .usage-breakdown .urow { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
   .usage-breakdown .urow .um { color: var(--muted); }
+  .usage-breakdown .usep { border-top: 1px solid var(--border); margin: 5px 0 3px; }
+  .usage-bar-wrap { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; }
+  .usage-bar { height: 6px; border-radius: 3px; background: var(--border); flex: 1; overflow: hidden; }
+  .usage-bar-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+  .usage-bar-fill.ok  { background: var(--ok,  #4caf50); }
+  .usage-bar-fill.warn { background: #f0a500; }
+  .usage-bar-fill.hi  { background: #e05b2c; }
   .update-pill { cursor: pointer; background: var(--accent); color: var(--create-btn-text, #1a1a1a);
     border-radius: 999px; padding: 3px 11px; font-size: 11px; font-weight: 700; white-space: nowrap;
     animation: updatePulse 2s ease-in-out infinite; }
@@ -281,7 +288,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <option value="offline">offline</option>
     </select>
     <span class="pill" id="modePill">…</span>
-    <span class="usage-pill" id="usagePill" style="display:none" title="Frontier model spend (local Qwen is free)">⚡ —</span>
+    <span class="usage-pill" id="usagePill" style="display:none" title="">⚡ —</span>
     <span class="update-pill" id="updatePill" style="display:none" onclick="applyUpdate()" title="Click to install and restart">⬆ Update</span>
     <button class="gear" title="Settings" onclick="openSettings()">⚙</button>
   </span>
@@ -298,6 +305,17 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 
       <label class="flbl" style="margin-top:14px">Backends</label>
       <div id="s_backends"></div>
+
+      <div id="s_frontier_provider_row" style="display:none;margin-top:14px">
+        <label class="flbl">Frontier provider (Mixed / Cloud-only)</label>
+        <div class="row" style="align-items:center;gap:8px">
+          <select id="s_frontier_provider" onchange="saveFrontierProvider()" style="width:auto">
+            <option value="claude">Claude (Sonnet / Opus)</option>
+            <option value="codex">Codex (GPT-5.5)</option>
+          </select>
+        </div>
+        <div class="muted" style="font-size:11px;margin-top:2px">Which provider handles the frontier tier in Mixed and Cloud-only modes.</div>
+      </div>
 
       <label class="flbl" style="margin-top:14px">Local server endpoint</label>
       <div class="row"><input id="s_endpoint" placeholder="http://localhost:1234/v1" style="flex:1" />
@@ -1122,26 +1140,89 @@ async function refresh() {
 
 // --- Frontier usage indicator -----------------------------------------------
 function fmtTokens(n) { return n >= 1e6 ? (n/1e6).toFixed(1)+"M" : n >= 1e3 ? Math.round(n/1e3)+"k" : String(n||0); }
+
+function fmtResets(iso) {
+  if (!iso) return "";
+  const diff = new Date(iso).getTime() - Date.now();
+  if (diff <= 0) return "resetting soon";
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  if (h >= 24) { const d = Math.floor(h/24); return "in " + d + "d " + (h%24) + "h"; }
+  return "in " + h + "h " + m + "m";
+}
+
+function usageBarClass(util) {
+  return util >= 80 ? "hi" : util >= 60 ? "warn" : "ok";
+}
+
+function renderSubBar(label, win) {
+  if (!win) return "";
+  const pct = Math.min(100, Math.max(0, win.utilization));
+  const cls = usageBarClass(pct);
+  return '<div class="urow"><span>' + esc(label) + '</span>'
+    + '<span class="um">' + win.remaining.toFixed(1) + '% left · ' + esc(fmtResets(win.resetsAt)) + '</span></div>'
+    + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div></div>';
+}
+
 async function checkUsage() {
   try {
     const u = await api("/usage");
     if (!u) return;
+    const sub = u.subscription;
     const pill = document.getElementById("usagePill");
-    const total = "$" + (u.totalCost || 0).toFixed(2);
+
     if (pill) {
-      pill.textContent = "⚡ " + total;
-      pill.style.display = u.taskCount > 0 ? "" : "none";
-      pill.title = "Frontier spend: " + total + " over " + u.taskCount + " task(s)\n"
-        + (u.byModel||[]).map(m => m.label + ": $" + m.cost.toFixed(2) + " (" + m.tasks + ")").join("\n");
+      if (sub && (sub.fiveHour || sub.sevenDay)) {
+        // Prefer the most-constrained window for the pill label.
+        const win = sub.fiveHour ?? sub.sevenDay;
+        const pct = win.remaining.toFixed(0);
+        pill.textContent = "⚡ " + pct + "% left";
+        pill.style.display = "";
+        const lines = [];
+        if (sub.fiveHour) lines.push("5-hour: " + sub.fiveHour.remaining.toFixed(1) + "% left (" + fmtResets(sub.fiveHour.resetsAt) + ")");
+        if (sub.sevenDay) lines.push("7-day:  " + sub.sevenDay.remaining.toFixed(1) + "% left (" + fmtResets(sub.sevenDay.resetsAt) + ")");
+        if (sub.sevenDayOpus) lines.push("7-day Opus: " + sub.sevenDayOpus.remaining.toFixed(1) + "% left");
+        if (sub.sevenDaySonnet) lines.push("7-day Sonnet: " + sub.sevenDaySonnet.remaining.toFixed(1) + "% left");
+        if (u.taskCount > 0) lines.push("", "HiveMatrix spend: $" + (u.totalCost||0).toFixed(2) + " over " + u.taskCount + " task(s)");
+        pill.title = lines.join("\n");
+      } else {
+        // No subscription data — fall back to spend.
+        const total = "$" + (u.totalCost || 0).toFixed(2);
+        pill.textContent = "⚡ " + total;
+        pill.style.display = u.taskCount > 0 ? "" : "none";
+        pill.title = "Frontier spend: " + total + " over " + (u.taskCount||0) + " task(s)\n"
+          + (u.byModel||[]).map(m => m.label + ": $" + m.cost.toFixed(2) + " (" + m.tasks + ")").join("\n");
+      }
     }
+
     const el = document.getElementById("usage");
-    if (el) {
-      if (!u.byModel || !u.byModel.length) { el.innerHTML = '<div class="muted">No frontier spend yet — local Qwen work is free.</div>'; return; }
-      el.innerHTML = '<div class="usage-breakdown">'
-        + '<div class="urow"><span><b>'+total+'</b> total</span><span class="um">'+u.taskCount+' tasks · '+fmtTokens(u.inputTokens)+' in / '+fmtTokens(u.outputTokens)+' out</span></div>'
-        + u.byModel.map(m => '<div class="urow"><span>'+esc(m.label)+'</span><span class="um">$'+m.cost.toFixed(2)+' · '+m.tasks+' task'+(m.tasks===1?'':'s')+'</span></div>').join("")
-        + '</div>';
+    if (!el) return;
+
+    let html = '<div class="usage-breakdown">';
+
+    // Subscription remaining rows (Code + Claude share same subscription).
+    if (sub && (sub.fiveHour || sub.sevenDay || sub.sevenDayOpus || sub.sevenDaySonnet)) {
+      html += '<div class="urow"><span><b>Claude subscription</b></span><span class="um">remaining allotment</span></div>';
+      html += renderSubBar("5-hour rolling", sub.fiveHour);
+      html += renderSubBar("7-day overall", sub.sevenDay);
+      html += renderSubBar("7-day Opus", sub.sevenDayOpus);
+      html += renderSubBar("7-day Sonnet", sub.sevenDaySonnet);
     }
+
+    // HiveMatrix task spend.
+    if (u.byModel && u.byModel.length) {
+      if (sub && (sub.fiveHour || sub.sevenDay)) html += '<div class="usep"></div>';
+      const total = "$" + (u.totalCost || 0).toFixed(2);
+      html += '<div class="urow"><span><b>' + total + '</b> spent</span>'
+        + '<span class="um">' + u.taskCount + ' tasks · ' + fmtTokens(u.inputTokens) + ' in / ' + fmtTokens(u.outputTokens) + ' out</span></div>'
+        + u.byModel.map(m => '<div class="urow"><span>' + esc(m.label) + '</span>'
+          + '<span class="um">$' + m.cost.toFixed(2) + ' · ' + m.tasks + ' task' + (m.tasks===1?'':'s') + '</span></div>').join("");
+    } else if (!sub || (!sub.fiveHour && !sub.sevenDay)) {
+      html += '<div class="muted">No frontier spend yet — local Qwen work is free.</div>';
+    }
+
+    html += '</div>';
+    el.innerHTML = html;
   } catch (e) { /* transient */ }
 }
 
@@ -1395,6 +1476,10 @@ function openSettings() {
   document.getElementById("s_wp_opacity_val").textContent = op + "%";
   document.getElementById("s_location").value = models.location || "";
   document.getElementById("s_autoupdate").checked = !!models.autoUpdate;
+  const hasBothFrontier = models.backends.some(b => b.id === "claude" && b.configured)
+                        && models.backends.some(b => b.id === "codex" && b.configured);
+  document.getElementById("s_frontier_provider_row").style.display = hasBothFrontier ? "" : "none";
+  if (hasBothFrontier) document.getElementById("s_frontier_provider").value = models.frontierProvider || "claude";
   loadTunnel();
 }
 function closeSettings() { document.getElementById("settingsOverlay").classList.remove("open"); }
@@ -1648,6 +1733,11 @@ function showWallpaperPreview() {
 async function saveDefault() {
   const modelId = document.getElementById("s_default").value;
   await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ defaultModel: modelId }) });
+  await loadModels();
+}
+async function saveFrontierProvider() {
+  const frontierProvider = document.getElementById("s_frontier_provider").value;
+  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ frontierProvider }) });
   await loadModels();
 }
 async function saveEndpoint() {

@@ -189,7 +189,7 @@ export function createDaemonServer() {
         const backends = detectBackends();
         const available = buildAvailableModels(backends);
         const theme = getThemeSettings();
-        const { getLocation, getAutoUpdate } = await import("@/lib/models/available");
+        const { getLocation, getAutoUpdate, getFrontierProvider } = await import("@/lib/models/available");
         json(res, 200, {
           backends,
           available,
@@ -201,6 +201,7 @@ export function createDaemonServer() {
           wallpaperOpacity: theme.wallpaperOpacity,
           location: getLocation(),
           autoUpdate: getAutoUpdate(),
+          frontierProvider: getFrontierProvider(),
         });
         return;
       }
@@ -220,6 +221,7 @@ export function createDaemonServer() {
         if (typeof body.wallpaperOpacity === "number") m.setWallpaperOpacity(body.wallpaperOpacity);
         if (typeof body.location === "string") m.setLocation(body.location);
         if (typeof body.autoUpdate === "boolean") m.setAutoUpdate(body.autoUpdate);
+        if (body.frontierProvider === "claude" || body.frontierProvider === "codex") m.setFrontierProvider(body.frontierProvider);
         const available = m.buildAvailableModels();
         const theme = m.getThemeSettings();
         json(res, 200, { ok: true, defaultModel: m.getDefaultModel(available), theme: theme.theme,

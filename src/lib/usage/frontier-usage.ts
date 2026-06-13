@@ -7,6 +7,7 @@
 
 import { Task } from "@/lib/db";
 import { MODEL_SHORT_NAMES } from "@/lib/models/catalog";
+import { getSubscriptionRemaining, type SubscriptionUsage } from "./subscription";
 
 export interface FrontierModelUsage {
   modelId: string;
@@ -23,6 +24,8 @@ export interface FrontierUsage {
   todayCost: number;
   todayTaskCount: number;
   byModel: FrontierModelUsage[];
+  /** Remaining subscription capacity from the Anthropic OAuth usage API. Null when not logged in via claude.ai subscription. */
+  subscription: SubscriptionUsage | null;
 }
 
 /** A model id that bills (frontier) vs. local Qwen / image models (free). */
@@ -79,6 +82,8 @@ export async function getFrontierUsage(): Promise<FrontierUsage> {
     byModel.set(primary, row);
   }
 
+  const subscription = await getSubscriptionRemaining();
+
   return {
     totalCost: Math.round(totalCost * 10000) / 10000,
     inputTokens,
@@ -87,5 +92,6 @@ export async function getFrontierUsage(): Promise<FrontierUsage> {
     todayCost: Math.round(todayCost * 10000) / 10000,
     todayTaskCount,
     byModel: [...byModel.values()].sort((a, b) => b.cost - a.cost),
+    subscription,
   };
 }

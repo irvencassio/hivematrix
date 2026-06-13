@@ -17,6 +17,7 @@ import { getQwenProfile } from "@/lib/config/qwen-profile";
 
 const DEFAULT_FRONTIER = "claude-sonnet-4-6"; // Q3: Claude is the shipped default
 const DEFAULT_FRONTIER_PREMIUM = "claude-opus-4-8"; // think/planning → Opus
+const DEFAULT_FRONTIER_CODEX = "codex:gpt-5.5-codex"; // Codex provider alternative
 const NANO_BANANA = "nano-banana";
 
 function readConfig(): Record<string, unknown> {
@@ -34,13 +35,14 @@ function readConfig(): Record<string, unknown> {
 export function resolveModelId(tier: ModelTier): string | null {
   switch (tier) {
     case "frontier-premium": {
-      // Premium frontier (think/planning/review) → Opus by default; overridable.
       const cfg = readConfig();
+      if (cfg.frontierProvider === "codex") return DEFAULT_FRONTIER_CODEX;
       const m = (cfg.thinkModel as string | undefined)?.trim();
       return m || DEFAULT_FRONTIER_PREMIUM;
     }
     case "frontier": {
       const cfg = readConfig();
+      if (cfg.frontierProvider === "codex") return DEFAULT_FRONTIER_CODEX;
       const fav = (cfg.frontierModel as string | undefined)?.trim();
       return fav || DEFAULT_FRONTIER;
     }

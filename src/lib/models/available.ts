@@ -186,6 +186,21 @@ export function saveWallpaperUpload(base64: string, ext: string): string {
   return path;
 }
 
+// --- Frontier provider (Settings → Models) ---
+
+export type FrontierProvider = "claude" | "codex";
+
+export function getFrontierProvider(): FrontierProvider {
+  const cfg = readConfig();
+  return cfg.frontierProvider === "codex" ? "codex" : "claude";
+}
+
+export function setFrontierProvider(provider: FrontierProvider): void {
+  const cfg = readConfig();
+  cfg.frontierProvider = provider;
+  writeConfig(cfg);
+}
+
 /** Persist the local-server endpoint (Settings → Models → local config). */
 export function setLocalEndpoint(endpoint: string): void {
   const cfg = readConfig();
