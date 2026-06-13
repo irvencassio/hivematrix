@@ -98,7 +98,16 @@ fn check_for_update(app: tauri::AppHandle) {
                     log::error!("update install failed: {e}");
                     return;
                 }
-                log::info!("update installed — relaunching");
+                // The console + REST API are served by the launchd-supervised
+                // daemon, a SEPARATE process from this shell. Updating the .app
+                // swaps daemon.cjs on disk, but the running daemon keeps the old
+                // code in memory until it restarts — so kick it before we
+                // relaunch, otherwise the user sees the old console post-update.
+                log::info!("update installed — restarting daemon + relaunching");
+                let _ = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg("launchctl kickstart -k gui/$(id -u)/com.hivematrix.daemon")
+                    .status();
                 app.restart();
             }
             Ok(None) => log::info!("no update available"),
