@@ -57,6 +57,13 @@ async function main(): Promise<void> {
   const policy = getConnectivityPolicy();
   console.log(`[hivematrix] Connectivity policy: ${policy.mode}`);
 
+  // License check — local + offline-friendly. Never hard-blocks (no phone-home,
+  // must run in 100%-local posture); a missing/expired license is surfaced, not
+  // enforced, in v1. Status is exposed on /health and /license/status.
+  const { getLicenseStatus } = await import("@/lib/license/license");
+  const license = getLicenseStatus();
+  console.log(`[hivematrix] License: ${license.state} — ${license.reason}`);
+
   // Telemetry context (opt-in, local-first): tag events with version + mode, and
   // capture crashes as events when the operator has enabled telemetry.
   const { setTelemetryContext, recordTelemetryEvent } = await import("@/lib/telemetry/telemetry");

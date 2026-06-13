@@ -150,12 +150,14 @@ export function createDaemonServer() {
         const db = getDb();
         const taskCount = (db.prepare("SELECT COUNT(*) as n FROM tasks WHERE status IN ('backlog','assigned','in_progress')").get() as { n: number }).n;
         const { getBundledVersion } = await import("@/lib/version/bundle-version");
+        const { getLicenseStatus } = await import("@/lib/license/license");
         json(res, 200, {
           status: "ok",
           version: getBundledVersion(),
           connectivity: policy.mode,
           activeTasks: taskCount,
           uptime: process.uptime(),
+          license: getLicenseStatus().state,
         });
         return;
       }
@@ -511,6 +513,23 @@ export function createDaemonServer() {
         const { buildDiagnosticsBundle } = await import("@/lib/telemetry/diagnostics");
         const { getBundledVersion } = await import("@/lib/version/bundle-version");
         json(res, 200, buildDiagnosticsBundle({ version: getBundledVersion(), connectivity: policy.mode }));
+        return;
+      }
+
+      // License — local, offline-friendly verification (W7.3)
+      if (req.method === "GET" && urlPath === "/license/status") {
+        const { getLicenseStatus } = await import("@/lib/license/license");
+        json(res, 200, getLicenseStatus());
+        return;
+      }
+      if (req.method === "POST" && urlPath === "/license") {
+        const { installLicense } = await import("@/lib/license/license");
+        const body = await parseBody(req) as Record<string, unknown>;
+        if (!body || typeof body !== "object" || !body.payload || typeof body.signature !== "string") {
+          json(res, 400, { error: "expected a signed license { payload, signature }" });
+          return;
+        }
+        json(res, 200, installLicense(body as never));
         return;
       }
 
