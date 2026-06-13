@@ -81,7 +81,11 @@ spctl --assess --type execute --verbose=2 "$APP" 2>&1 | tail -2
 if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}${TAURI_SIGNING_PRIVATE_KEY_PATH:-}" ]; then
   echo "==> Regenerating updater artifact from the stapled app…"
   TARBALL="$(dirname "$APP")/$(basename "$APP").tar.gz"
-  tar -czf "$TARBALL" -C "$(dirname "$APP")" "$(basename "$APP")"
+  # COPYFILE_DISABLE=1 stops macOS tar from embedding AppleDouble (._*) entries
+  # for extended attributes. Tauri's updater unpacks with a non-Apple tar reader
+  # that treats those ._* entries as real files and fails ("failed to unpack
+  # ._HiveMatrix.app") — which silently broke EVERY auto-update before this.
+  COPYFILE_DISABLE=1 tar -czf "$TARBALL" -C "$(dirname "$APP")" "$(basename "$APP")"
   cargo tauri signer sign "$TARBALL"
   echo "   Updater artifact: $TARBALL (+ .sig)"
 fi
