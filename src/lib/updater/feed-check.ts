@@ -20,7 +20,7 @@ export const FORCE_UPDATE_FLAG = join(homedir(), ".hivematrix", ".force-update")
 // Must match plugins.updater.endpoints in src-tauri/tauri.conf.json.
 const FEED_URL =
   "https://github.com/irvencassio/hivematrix/releases/latest/download/latest.json";
-const TTL_MS = 5 * 60 * 1000;
+const TTL_MS = 60 * 1000;
 const APP_PROCESS_MATCH = "HiveMatrix.app/Contents/MacOS/app";
 
 export interface UpdateStatus {

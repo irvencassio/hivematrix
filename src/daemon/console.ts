@@ -1001,6 +1001,10 @@ async function refresh() {
     renderBoard(); renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
     if (state.selected) selectTask(state.selected);
   } catch (e) { /* transient */ }
+  // Check for updates on every tick (cheap — daemon caches ~60s). Tied to
+  // refresh so it fires on SSE activity too, not just a slow background timer
+  // the webview may throttle when unfocused.
+  checkUpdate();
 }
 
 // --- Frontier usage indicator -----------------------------------------------
