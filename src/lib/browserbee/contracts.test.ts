@@ -85,15 +85,34 @@ test("buildBrowserBeeJobSnapshot reads task-backed request metadata", () => {
   assert.equal(snapshot.sessionLabel, "crm-daily");
 });
 
-test("resolveBrowserBeeBacking prefers Codex when auth is usable", () => {
-  for (const codexAuthMode of ["subscription", "api-key"]) {
-    const decision = resolveBrowserBeeBacking({
-      codexAuthMode,
-      desktopFallbackEnabled: true,
-      desktopBeeAvailable: true,
-    });
-    assert.equal(decision.backing, "codex_computer_use");
-  }
+test("resolveBrowserBeeBacking uses Codex Computer Use ONLY with an API-key account", () => {
+  // api-key: the computer-use model is available → Codex backing.
+  const apiKey = resolveBrowserBeeBacking({
+    codexAuthMode: "api-key",
+    desktopFallbackEnabled: false,
+    desktopBeeAvailable: true,
+  });
+  assert.equal(apiKey.backing, "codex_computer_use");
+});
+
+test("resolveBrowserBeeBacking does NOT use Codex on a ChatGPT-subscription account (model 400s)", () => {
+  // Regression: gpt-5.4-computer-use is unsupported on subscription accounts, so
+  // it must NOT create a doomed Codex task. With no fallback → refuse clearly.
+  const refuse = resolveBrowserBeeBacking({
+    codexAuthMode: "subscription",
+    desktopFallbackEnabled: false,
+    desktopBeeAvailable: true,
+  });
+  assert.equal(refuse.backing, null);
+  assert.match(refuse.reason, /ChatGPT-subscription/);
+  assert.match(refuse.reason, /desktopFallback=true/);
+  // With the fallback enabled → route to DesktopBee instead of Codex.
+  const fallback = resolveBrowserBeeBacking({
+    codexAuthMode: "subscription",
+    desktopFallbackEnabled: true,
+    desktopBeeAvailable: true,
+  });
+  assert.equal(fallback.backing, "desktop_fallback");
 });
 
 test("resolveBrowserBeeBacking refuses when Codex auth is missing and fallback is off", () => {

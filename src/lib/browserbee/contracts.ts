@@ -438,27 +438,34 @@ export interface BrowserBeeBackingDecision {
 /**
  * Decide which backing path a BrowserBee job should run on.
  *
- * Codex Computer Use is preferred whenever Codex auth is usable (subscription
- * or API key). When it is not, the job only runs if the operator has enabled
- * the DesktopBee fallback AND DesktopBee is actually available; otherwise the
- * job is refused with an actionable reason.
+ * The Codex Computer Use model (gpt-5.4-computer-use) is ONLY available with an
+ * OpenAI API-key Codex account — it returns HTTP 400 "not supported when using
+ * Codex with a ChatGPT account" on a subscription login. So only `api-key` auth
+ * qualifies for that backing. Otherwise (subscription or logged-out) the job
+ * runs on the DesktopBee fallback when the operator enabled it AND DesktopBee is
+ * available; else it is refused with an actionable reason instead of creating a
+ * task that will 400 and fail silently.
  */
 export function resolveBrowserBeeBacking(input: {
   codexAuthMode: string;
   desktopFallbackEnabled: boolean;
   desktopBeeAvailable: boolean;
 }): BrowserBeeBackingDecision {
-  const codexUsable = input.codexAuthMode === "subscription" || input.codexAuthMode === "api-key";
+  // Subscription (ChatGPT) accounts cannot run the computer-use model.
+  const codexUsable = input.codexAuthMode === "api-key";
   if (codexUsable) {
     return { backing: "codex_computer_use", reason: `Codex ${input.codexAuthMode} auth available` };
   }
+  const why =
+    input.codexAuthMode === "subscription"
+      ? "The Codex Computer Use model (gpt-5.4-computer-use) isn't available on a ChatGPT-subscription Codex account — it needs an OpenAI API key."
+      : "No usable Codex auth was found (run `codex login`).";
   if (!input.desktopFallbackEnabled) {
     return {
       backing: null,
       reason:
-        "BrowserBee runs on the Codex Computer Use backing, but no usable Codex auth was found. " +
-        "Run `codex login`, or enable the DesktopBee fallback (set browserbee.desktopFallback=true in " +
-        "~/.hivematrix/config.json) to drive a desktop browser with the local model instead.",
+        `${why} Enable the DesktopBee fallback (set browserbee.desktopFallback=true in ` +
+        "~/.hivematrix/config.json) to drive a real desktop browser with the local model instead.",
     };
   }
   if (!input.desktopBeeAvailable) {
@@ -469,7 +476,7 @@ export function resolveBrowserBeeBacking(input: {
   }
   return {
     backing: "desktop_fallback",
-    reason: "No usable Codex auth — using the DesktopBee fallback (local model drives a desktop browser).",
+    reason: `${why} Using the DesktopBee fallback (local model drives a desktop browser).`,
   };
 }
 

@@ -640,7 +640,7 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: BeeToolC
     });
     if (!res.ok) return `Error: failed to create BrowserBee task (HTTP ${res.status})`;
     const task = await res.json() as { _id?: string; title?: string };
-    return `Created BrowserBee task ${task._id ?? "?"}: "${task.title ?? payload.title}" (${laneLabel}). It will run the browser workflow and post a summary to its task result.`;
+    return `Created BrowserBee task ${task._id ?? "?"}: "${task.title ?? payload.title}" (${laneLabel}). It runs independently — its result appears on the board as that task completes. There is no push notification; do not claim the user will be notified.`;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return `Error creating BrowserBee task: ${msg}`;

@@ -806,3 +806,28 @@ separator (`buildCodexExecArgs` extracted + unit-tested in codex-agent.ts).
 
 **Verification.** tsc clean, scope-wall 0, 616/616 tests (codex args + new console
 coverage), daemon bundles.
+
+## BrowserBee: Codex Computer Use unavailable on ChatGPT-subscription accounts (2026-06-14)
+
+**Investigation (LinkedIn "friend requests" task did nothing).** The parent agent created
+a BrowserBee child task (model `codex:gpt-5.4-computer-use`) and reported "browser running,
+I'll be notified." The child FAILED in ~10s with HTTP 400:
+`"The 'gpt-5.4-computer-use' model is not supported when using Codex with a ChatGPT account."`
+So BrowserBee's default "Codex Computer Use" backing (which is just `codex exec -m
+gpt-5.4-computer-use` — no real browser harness) cannot run on a subscription Codex login.
+The failure was silent; the parent's "you'll be notified" was false (no such notification).
+(Confirmed the `--` arg fix works — the routing prompt showed as the user message, not an
+arg error. Secondary: browserbee tasks got `projectPath: /`.)
+
+**Fix.** `resolveBrowserBeeBacking` now treats ONLY `api-key` Codex auth as usable for the
+computer-use backing (was subscription|api-key). A subscription account routes to the
+DesktopBee fallback when enabled, else **refuses with a clear, actionable reason** instead
+of creating a doomed task that 400s silently. The `browserbee_run` success message no longer
+implies a push notification. Tests updated.
+
+**Still open (operator choice):** to make browser tasks actually work on a subscription
+account, enable the DesktopBee fallback (`browserbee.desktopFallback=true`) so the local
+model drives a real desktop browser via AppleScript/Accessibility — lower reliability, but
+the only working path without an OpenAI API key.
+
+**Verification.** tsc clean, scope-wall 0, 617/617 tests, daemon bundles.
