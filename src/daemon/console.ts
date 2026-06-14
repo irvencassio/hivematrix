@@ -260,6 +260,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .reply-row button:hover { opacity: .85; }
   .reply-section { display: none; }
   .reply-section.open { display: block; }
+  /* needs_input: the reply window stands out so a waiting question is unmissable. */
+  .reply-section.needs { display: block; border: 1.5px solid var(--accent-2); border-radius: 10px;
+    padding: 12px 14px; background: var(--reply-q-bg); margin: 14px 0; box-shadow: 0 0 0 3px rgba(76,201,240,.10); }
+  .reply-head { font-size: 13px; font-weight: 700; color: var(--accent-2); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .reply-row button.reply-primary { font-size: 13px; font-weight: 600; padding: 8px 18px; }
   .reply-toggle.active { border-color: var(--accent-2) !important; color: var(--accent-2) !important; }
   .transcript { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
     max-height: 240px; overflow-y: auto; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -352,7 +357,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <div class="overlay" id="settingsOverlay">
   <div class="modal">
     <h1>Settings <span class="x" onclick="closeSettings()">✕</span></h1>
-    <div class="tabs"><div class="tab active" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">General</div><div class="tab" id="tab-projects" onclick="switchSettingsTab('projects')">Projects</div><div class="tab" id="tab-bees" onclick="switchSettingsTab('bees')">Bees</div></div>
+    <div class="tabs"><div class="tab active" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-bees" onclick="switchSettingsTab('bees')">Bees</div><div class="tab" id="tab-projects" onclick="switchSettingsTab('projects')">Projects</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">General</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-about" onclick="switchSettingsTab('about')">About</div></div>
     <div id="settingsModels">
       <label class="flbl">Default model</label>
       <select id="s_default" style="width:100%"></select>
@@ -375,10 +380,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="s_role_models" style="display:none;margin-top:16px">
         <label class="flbl">Mixed-mode role models</label>
         <div class="muted" style="font-size:11px;margin-bottom:8px">In Mixed mode each kind of work routes to its own model. Pick which one — or leave on Default.</div>
-        <div class="role-row"><span class="role-name">🧠 Thinking <span class="muted">planning · architecture · review</span></span>
-          <select id="s_role_thinking" onchange="saveRoleModel('thinking', this.value)"></select></div>
-        <div class="role-row"><span class="role-name">⌨️ Coding <span class="muted">critical implementation · UI</span></span>
-          <select id="s_role_coding" onchange="saveRoleModel('coding', this.value)"></select></div>
+        <div id="s_role_frontier_rows">
+          <div class="role-row"><span class="role-name">🧠 Thinking <span class="muted">planning · architecture · review</span></span>
+            <select id="s_role_thinking" onchange="saveRoleModel('thinking', this.value)"></select></div>
+          <div class="role-row"><span class="role-name">⌨️ Coding <span class="muted">critical implementation · UI</span></span>
+            <select id="s_role_coding" onchange="saveRoleModel('coding', this.value)"></select></div>
+        </div>
+        <div id="s_role_codex_note" class="muted" style="display:none;font-size:11px;margin-bottom:8px">🧠 Thinking &amp; ⌨️ Coding both run on <b>Codex</b> — set by Frontier provider above.</div>
         <div class="role-row"><span class="role-name">⚙️ Operational <span class="muted">bulk execution · file ops (on-device)</span></span>
           <select id="s_role_operational" onchange="saveRoleModel('operational', this.value)"></select></div>
       </div>
@@ -478,7 +486,20 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <span class="muted">Automatically install updates on launch</span>
       </div>
       <div class="muted" style="font-size:11px;margin-top:2px">Off = you'll see an "Update" button in the header to install when you choose.</div>
-
+    </div>
+    <div id="settingsAbout" style="display:none">
+      <h2 style="margin-top:4px">HiveMatrix</h2>
+      <div class="muted" style="font-size:12px;margin-bottom:12px">The autonomous business operator.</div>
+      <div class="kv">
+        <span class="k">version</span><span id="ab_version">…</span>
+        <span class="k">build</span><span id="ab_build">…</span>
+        <span class="k">released</span><span id="ab_date">…</span>
+        <span class="k">update status</span><span id="ab_update">checking…</span>
+      </div>
+      <div class="row" style="margin-top:12px;gap:6px">
+        <button class="create" onclick="checkUpdate(true)">↻ Check for updates</button>
+        <button class="sm" id="ab_update_btn" style="display:none" onclick="applyUpdate()">⬆ Install update</button>
+      </div>
       <div class="vinfo" id="s_version">…</div>
     </div>
     <div id="settingsProjects" style="display:none">
@@ -880,11 +901,12 @@ function taskActionsHtml(t) {
   // Reply to a needs_input question: text (auto-opens) + attachments.
   const isOpen = t.reviewState === "needs_input";
   const q = t.pendingQuestion ? '<div class="reply-question">'+esc(t.pendingQuestion)+'</div>' : '';
-  html += '<div id="replySection_'+t._id+'" class="reply-section'+(isOpen?' open':'')+'">'
+  html += '<div id="replySection_'+t._id+'" class="reply-section'+(isOpen?' open needs':'')+'">'
+    + (isOpen ? '<div class="reply-head">✋ Awaiting your reply</div>' : '')
     + q
-    + '<textarea id="replyText" class="reply-input" placeholder="Type your reply…" rows="2" oninput="onCtxDraft(\'reply\',this)"></textarea>'
+    + '<textarea id="replyText" class="reply-input" placeholder="Type your reply…" rows="'+(isOpen?'3':'2')+'" oninput="onCtxDraft(\'reply\',this)"></textarea>'
     + attachPickerHtml('reply')
-    + '<div class="reply-row" style="margin-top:6px"><button onclick="replyTask(\''+t._id+'\')">↩ Send Reply</button></div></div>';
+    + '<div class="reply-row" style="margin-top:6px"><button class="reply-primary" onclick="replyTask(\''+t._id+'\')">Reply</button></div></div>';
   return html;
 }
 
@@ -1804,19 +1826,24 @@ async function runClaudeAuthLogin() {
 }
 
 // --- Update indicator -------------------------------------------------------
-async function checkUpdate() {
+async function checkUpdate(force) {
+  const abStatus = document.getElementById("ab_update");
+  const abBtn = document.getElementById("ab_update_btn");
+  if (force && abStatus) abStatus.textContent = "checking…";
   try {
-    const s = await api("/update/status");
+    const s = await api(force ? "/update/status?refresh=1" : "/update/status");
     const pill = document.getElementById("updatePill");
-    if (!pill) return;
-    if (s && s.updateAvailable && s.latest) {
-      pill.textContent = "⬆ Update " + s.latest;
-      pill.dataset.latest = s.latest;
-      pill.style.display = "";
-    } else {
-      pill.style.display = "none";
+    const has = !!(s && s.updateAvailable && s.latest);
+    if (pill) {
+      if (has) { pill.textContent = "⬆ Update " + s.latest; pill.dataset.latest = s.latest; pill.style.display = ""; }
+      else { pill.style.display = "none"; }
     }
-  } catch (e) { /* offline / transient */ }
+    // About tab reflection.
+    if (abStatus) abStatus.textContent = has ? ("update available — " + s.latest) : "up to date";
+    if (abBtn) abBtn.style.display = has ? "" : "none";
+  } catch (e) {
+    if (abStatus) abStatus.textContent = "couldn't check (offline?)";
+  }
 }
 async function applyUpdate() {
   const pill = document.getElementById("updatePill");
@@ -2087,8 +2114,18 @@ function renderRoleModels() {
     sel.disabled = !!disabled;
     sel.title = disabled ? "Frontier provider is set to Codex — Claude role models are ignored. Switch provider to Claude to use these." : "";
   };
-  fill("s_role_thinking", frontier, codex ? "Codex (provider override)" : "Default — Opus 4.8", rm.thinking, codex);
-  fill("s_role_coding", frontier, codex ? "Codex (provider override)" : "Default — Sonnet 4.6", rm.coding, codex);
+  // When the frontier provider is Codex, Thinking + Coding both run on Codex
+  // (set by the provider dropdown above) — so hide those rows entirely instead
+  // of showing redundant disabled override selects. Only the
+  // local Operational role stays meaningful. With Claude, show all three.
+  const fRows = document.getElementById("s_role_frontier_rows");
+  const note = document.getElementById("s_role_codex_note");
+  if (fRows) fRows.style.display = codex ? "none" : "";
+  if (note) note.style.display = codex ? "" : "none";
+  if (!codex) {
+    fill("s_role_thinking", frontier, "Default — Opus 4.8", rm.thinking, false);
+    fill("s_role_coding", frontier, "Default — Sonnet 4.6", rm.coding, false);
+  }
   fill("s_role_operational", local, "Default — local Qwen", rm.operational, false);
 }
 
@@ -2117,14 +2154,23 @@ async function saveAutoUpdate() {
 }
 
 function switchSettingsTab(tab) {
-  const tabs = ["models", "remote", "general", "projects", "bees"];
-  const panels = { models: "settingsModels", remote: "settingsRemote", general: "settingsGeneral", projects: "settingsProjects", bees: "settingsBees" };
+  const tabs = ["models", "bees", "projects", "general", "remote", "about"];
+  const panels = { models: "settingsModels", bees: "settingsBees", projects: "settingsProjects", general: "settingsGeneral", remote: "settingsRemote", about: "settingsAbout" };
   for (const t of tabs) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
   if (tab === "projects") renderSettingsProjects();
   if (tab === "bees") { renderSettingsBees(); renderSafeSenders(); }
+  if (tab === "about") { renderAbout(); checkUpdate(); }
+}
+
+function renderAbout() {
+  const v = (models && models.version) || {};
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set("ab_version", "v" + (v.version || "?"));
+  set("ab_build", String(v.build || "?"));
+  set("ab_date", v.date || "?");
 }
 
 async function renderSettingsBees() {

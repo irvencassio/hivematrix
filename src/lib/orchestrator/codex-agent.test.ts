@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCodexPrompt } from "./codex-agent";
+import { buildCodexPrompt, buildCodexExecArgs } from "./codex-agent";
 
 test("buildCodexPrompt prepends the outbound routing block and keeps the task", () => {
   const prompt = buildCodexPrompt("Email Jane the Q3 numbers.");
@@ -12,4 +12,31 @@ test("buildCodexPrompt prepends the outbound routing block and keeps the task", 
   assert.match(prompt, /--- Your task ---\nEmail Jane the Q3 numbers\./);
   // task comes after the guidance, not before
   assert.ok(prompt.indexOf("/mailbee/send") < prompt.indexOf("Email Jane"));
+});
+
+test("the prompt starts with '--' — so codex exec MUST get it after a `--` separator", () => {
+  // Regression guard for the "unexpected argument '--- Outbound Channels …'"
+  // failure: the prompt begins with dashes, which clap rejects as a flag.
+  const prompt = buildCodexPrompt("do a thing");
+  assert.ok(prompt.startsWith("--"), "prompt starts with dashes (the hazard)");
+});
+
+test("buildCodexExecArgs places the prompt after a `--` end-of-options separator", () => {
+  const prompt = buildCodexPrompt("ship it");
+  const args = buildCodexExecArgs({ codexModel: "gpt-5.5-codex", projectPath: "/tmp/p", prompt });
+  // The last two argv entries are exactly: "--", <prompt>
+  assert.equal(args[args.length - 2], "--", "`--` precedes the prompt");
+  assert.equal(args[args.length - 1], prompt, "prompt is the final positional");
+  // and there's exactly one `--` (we didn't accidentally add two)
+  assert.equal(args.filter((a) => a === "--").length, 1);
+  // sanity: model + project are present
+  assert.ok(args.includes("gpt-5.5-codex"));
+  assert.ok(args.includes("/tmp/p"));
+});
+
+test("buildCodexExecArgs adds low reasoning effort only in fast mode", () => {
+  const slow = buildCodexExecArgs({ codexModel: "m", projectPath: "/p", prompt: "x" });
+  const fast = buildCodexExecArgs({ codexModel: "m", projectPath: "/p", prompt: "x", fastMode: true });
+  assert.ok(!slow.some((a) => a.includes("model_reasoning_effort")));
+  assert.ok(fast.some((a) => a.includes('model_reasoning_effort="low"')));
 });

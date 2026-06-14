@@ -778,3 +778,31 @@ honoring the earlier "no dollars on the main screen" change.
 
 **Verification.** tsc clean, scope-wall 0, 609/609 tests (normalizer, store + rollup, Codex
 recovery, console surface), daemon bundles. Not yet released.
+
+## Codex arg bug fix + settings/console UX pass (2026-06-14)
+
+**Bug: every Codex task failed with `unexpected argument '--- Outbound Channels …'`.**
+`buildCodexPrompt` makes the prompt start with the routing guide ("--- Outbound
+Channels (HiveMatrix) ---"); `codex exec`'s clap parser treats a leading-`--`
+positional as an unknown flag and exits 2. Since Mixed mode routes code-critical →
+Codex, those tasks couldn't run. Fix: pass the prompt after a `--` end-of-options
+separator (`buildCodexExecArgs` extracted + unit-tested in codex-agent.ts).
+
+**Console/settings UX (operator feedback):**
+- **needs_input reply stands out** — the reply window gets a highlighted card
+  (`.reply-section.needs`) with a "✋ Awaiting your reply" header; the submit is a
+  labeled primary **Reply** button (was "↩ Send Reply"). (The "up arrow" the operator
+  saw is the iOS app's send button — separate repo.)
+- **Frontier provider vs role models** — evaluated: not a strict duplicate (provider =
+  which provider; role models = which model within Claude), but when provider = Codex
+  the Thinking/Coding rows were redundant disabled "Codex (provider override)" selects.
+  Now those two rows are **hidden** when Codex is selected (replaced by a one-line note);
+  only the local Operational role stays. With Claude, all three show.
+- **About tab** added to Settings (version · build · released date · update status +
+  Check-for-updates / Install buttons); version moved out of General.
+- **Settings tab order** defined: **Models · Bees · Projects · General · Remote · About**.
+- Skills launcher already exists (right context panel → "Skills" section: dropdown + Run);
+  no change, just confirmed.
+
+**Verification.** tsc clean, scope-wall 0, 616/616 tests (codex args + new console
+coverage), daemon bundles.

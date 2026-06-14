@@ -58,6 +58,41 @@ test("observability cost is opt-in (off by default), not on the main board", () 
   assert.match(js, /hm_obs_cost/, "toggle persisted");
 });
 
+test("needs_input reply window stands out and uses a clear 'Reply' button", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // The reply section is given the standout class + header when needs_input.
+  assert.match(js, /reply-section'\+\(isOpen\?' open needs'/);
+  assert.match(js, /✋ Awaiting your reply/);
+  // The submit is a labeled primary "Reply" button, not a bare arrow glyph.
+  assert.match(js, /class="reply-primary"[^>]*>Reply</);
+  assert.doesNotMatch(js, /↩ Send Reply/, "old arrow-labeled button replaced");
+  assert.match(CONSOLE_HTML, /\.reply-section\.needs/, "standout style present");
+});
+
+test("settings has an About tab with version/build/date and update status", () => {
+  assert.match(CONSOLE_HTML, /id="tab-about"/);
+  assert.match(CONSOLE_HTML, /id="settingsAbout"/);
+  for (const id of ["ab_version", "ab_build", "ab_date", "ab_update"]) {
+    assert.match(CONSOLE_HTML, new RegExp('id="' + id + '"'), id + " present");
+  }
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function renderAbout\(/);
+  assert.match(js, /if \(tab === "about"\)/, "About tab wired in switchSettingsTab");
+});
+
+test("settings tabs are in a defined order ending with About", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /\["models", "bees", "projects", "general", "remote", "about"\]/);
+});
+
+test("Mixed-mode role models hide Thinking/Coding when the frontier provider is Codex", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // No more redundant disabled "Codex (provider override)" rows — they're hidden.
+  assert.match(js, /fRows\.style\.display = codex \? "none"/);
+  assert.match(js, /s_role_codex_note/);
+  assert.doesNotMatch(js, /Codex \(provider override\)/, "duplicate-looking override rows removed");
+});
+
 test("console surfaces observability: per-task strip + totals across providers", () => {
   assert.match(CONSOLE_HTML, /id="observability"/, "totals mount point");
   assert.match(CONSOLE_HTML, /<h2>Observability<\/h2>/);

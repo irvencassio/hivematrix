@@ -25,6 +25,32 @@ export function buildCodexPrompt(description: string): string {
   return `${outboundHttpRoutingPrompt()}\n\n${brainSearchRoutingPrompt()}\n\n${beeToolsRoutingPrompt()}\n\n--- Your task ---\n${description}`;
 }
 
+/**
+ * Build the `codex` argv (everything after the binary). The prompt is placed
+ * after a `--` end-of-options separator: it starts with the routing guide
+ * ("--- Outbound Channels …"), and without `--` a clap-style parser rejects it
+ * as an unknown flag ("unexpected argument '--- …'") and the task fails.
+ */
+export function buildCodexExecArgs(opts: {
+  codexModel: string;
+  projectPath: string;
+  fastMode?: boolean;
+  prompt: string;
+}): string[] {
+  const args = [
+    "exec",
+    "--skip-git-repo-check",
+    "-s", "workspace-write",
+    "-m", opts.codexModel,
+    "-C", opts.projectPath,
+  ];
+  if (opts.fastMode) {
+    args.push("-c", 'model_reasoning_effort="low"');
+  }
+  args.push("--", opts.prompt);
+  return args;
+}
+
 export function spawnCodexAgent(
   taskId: string,
   description: string,
@@ -43,17 +69,12 @@ export function spawnCodexAgent(
   }
   const codexModel = resolveCodexModel(model); // strips the "codex:" prefix
 
-  const args = [
-    "exec",
-    "--skip-git-repo-check",
-    "-s", "workspace-write",        // may edit files in the working dir
-    "-m", codexModel,
-    "-C", projectPath,
-  ];
-  if (fastMode) {
-    args.push("-c", 'model_reasoning_effort="low"');
-  }
-  args.push(buildCodexPrompt(description));
+  const args = buildCodexExecArgs({
+    codexModel,
+    projectPath,
+    fastMode,
+    prompt: buildCodexPrompt(description),
+  });
 
   const proc = spawn(codexPath, args, {
     cwd: projectPath,
