@@ -30,6 +30,25 @@ test("console script has no obvious TS-only syntax", () => {
   assert.doesNotMatch(js, /\bas\s+(HTML[A-Za-z]+|string|number|boolean|any)\b/, "found a TS `as Type` cast");
 });
 
+test("desktop console surfaces the founder-in-the-loop approval queue (parity with mobile)", () => {
+  // The bug: iOS rendered /approvals/pending but the desktop console never did.
+  assert.match(CONSOLE_HTML, /id="approvals"/, "approvals mount point present");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function renderApprovals\(/);
+  assert.match(js, /async function resolveApprovalItem\(/);
+  assert.match(js, /api\("\/approvals\/pending"\)/, "fetches the unified queue");
+  assert.match(js, /\/approvals\/resolve/, "resolves via the POST endpoint");
+  assert.match(js, /renderApprovals\(\);/, "rendered on every refresh tick");
+});
+
+test("main screen shows no dollar amounts (usage is counts/tokens only)", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.doesNotMatch(js, /HiveMatrix spend/, "no spend tooltip");
+  assert.doesNotMatch(js, /No frontier spend/, "no spend placeholder");
+  assert.doesNotMatch(js, /\.toFixed\(2\)/, "no dollar-formatted amounts in usage");
+  assert.doesNotMatch(js, /\bspent\b/, "no 'spent' labels");
+});
+
 test("remote access UI offers both a temporary and a named (durable) tunnel with Access credentials", () => {
   // Both setup paths are present, not buried behind a collapsed disclosure.
   assert.match(CONSOLE_HTML, /Temporary tunnel/);

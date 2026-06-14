@@ -718,3 +718,29 @@ things first-class: per-role model selection in Mixed mode, and both Cloudflare 
 **Verification.** `tsc --noEmit` clean, scope-wall 0 violations, 588/588 tests pass (added
 resolver + role-model + console-UI coverage), daemon bundles. Console JS compiled/bundled here,
 not browser-rendered.
+
+## Desktop console: approval queue parity + remove dollar amounts (2026-06-14)
+
+**Bug.** Approvals showed on hivematrix-ios but not on the desktop console. Root cause:
+the daemon's unified approval queue (`GET /approvals/pending` — checkpoint/content/tool/
+stuck gates, "W6.1") was consumed only by the mobile client. The desktop console never
+fetched it; it surfaced only inline `needs_input` task replies, so checkpoint/content/
+tool/stuck approvals were invisible on desktop.
+
+**Fix (console-only — endpoints already existed).** Added an Approvals surface at the top
+of the context column (`#approvals`):
+- `renderApprovals()` renders the queue (kind badge, title, detail, one button per
+  `options` entry — approve/deny, or stuck's retry/skip/abort).
+- `resolveApprovalItem(idx, decision, btn)` POSTs `/approvals/resolve`
+  `{taskId, timestamp, decision, kind}` (index-based to avoid HTML-attribute quoting),
+  disables the buttons, then refreshes.
+- Wired into `refresh()` (5s tick + SSE), so it stays live and at parity with mobile.
+- Hidden (empty) when the queue is empty.
+
+**Also: removed dollar amounts from the main screen** (operator request). The Frontier
+Usage pill and breakdown no longer show `$` spend or per-model cost — they show task
+counts + token totals (and subscription % remaining as before). Placeholders reworded
+("No frontier usage yet — local Qwen work runs on-device").
+
+**Verification.** tsc clean, scope-wall 0, 590/590 tests (added console coverage for the
+approval queue + a guard that the main screen has no dollar amounts), daemon bundles.

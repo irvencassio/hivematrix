@@ -69,6 +69,19 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .ctx-sec > summary::-webkit-details-marker { display: none; }
   .ctx-sec > summary::before { content: '▾ '; color: var(--muted); }
   .ctx-sec:not([open]) > summary::before { content: '▸ '; }
+  .appr-wrap { margin: 0 0 6px; }
+  .appr-head { font-size: 14px; font-weight: 700; margin: 4px 0 8px; color: var(--accent); display: flex; align-items: center; gap: 7px; }
+  .appr-head .cnt { background: var(--accent); color: #1a1205; border-radius: 11px; padding: 0 7px; font-size: 11px; font-weight: 700; }
+  .appr-item { border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; background: rgba(255,182,39,.06); }
+  .appr-item .ak { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); font-weight: 700; }
+  .appr-item .at { font-size: 13px; font-weight: 600; margin: 2px 0; word-break: break-word; }
+  .appr-item .ad { font-size: 11.5px; color: var(--muted); margin: 2px 0 8px; max-height: 64px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+  .appr-item .arow { display: flex; flex-wrap: wrap; gap: 6px; }
+  .appr-btn { border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px; font-size: 12px; cursor: pointer; background: var(--panel-2); color: var(--text); }
+  .appr-btn:hover { border-color: var(--accent); }
+  .appr-btn.yes { background: var(--ok); color: #06281a; border-color: var(--ok); font-weight: 600; }
+  .appr-btn.no { color: var(--accent-2); }
+  .appr-btn[disabled] { opacity: .5; cursor: default; }
   .ctx-toggle.on { color: var(--accent); }
   h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted);
     margin: 4px 0 10px; }
@@ -608,12 +621,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="session"><div class="session-empty">Select a task to inspect its session.</div></div>
   </section>
   <section class="col context">
+    <div id="approvals"></div>
     <details class="ctx-sec" id="setupSec" open><summary id="setupSummary">Setup</summary>
     <div id="onboarding"></div></details>
     <h2 style="margin-top:20px">Soak / Health</h2>
     <div id="metrics"></div>
     <div class="usage-head"><h2>Frontier Usage</h2><button id="usageRefresh" class="usage-refresh" title="Refresh Claude/Codex usage" onclick="refreshUsageNow()">↻</button></div>
-    <div id="usage"><div class="muted">No frontier spend yet.</div></div>
+    <div id="usage"><div class="muted">No frontier usage yet.</div></div>
     <h2 style="margin-top:20px">Connectivity</h2>
     <div id="conn"></div>
     <h2 style="margin-top:20px">Directives</h2>
@@ -1422,13 +1436,55 @@ async function submitMailBee() {
   } catch (e) { err.textContent = String(e); status.textContent = ''; }
 }
 
+// Founder-in-the-loop approvals — the unified queue (checkpoint / content / tool
+// / stuck) the phone consumes via /approvals/pending. Rendered at the top of the
+// context column so the desktop console surfaces the same gates as mobile.
+function renderApprovals() {
+  const el = document.getElementById("approvals");
+  if (!el) return;
+  const items = state.approvals || [];
+  if (!items.length) { el.innerHTML = ""; return; }
+  const label = { checkpoint: "Checkpoint", content: "Content", tool: "Tool", stuck: "Stuck" };
+  el.innerHTML = '<div class="appr-wrap"><div class="appr-head">⚠ Approvals <span class="cnt">' + items.length + '</span></div>'
+    + items.map((a, i) => {
+        const opts = (a.options && a.options.length) ? a.options : ["approve", "deny"];
+        const btns = opts.map(o => {
+          const cls = (o === "approve" || o === "done") ? " yes" : (o === "deny" || o === "abort") ? " no" : "";
+          return '<button class="appr-btn' + cls + '" onclick="resolveApprovalItem(' + i + ',\'' + esc(o) + '\',this)">'
+            + esc(o.charAt(0).toUpperCase() + o.slice(1)) + '</button>';
+        }).join("");
+        return '<div class="appr-item"><div class="ak">' + esc(label[a.kind] || a.kind) + '</div>'
+          + '<div class="at">' + esc(a.title || "Approval needed") + '</div>'
+          + (a.detail ? '<div class="ad">' + esc(a.detail) + '</div>' : '')
+          + '<div class="arow">' + btns + '</div></div>';
+      }).join("")
+    + '</div>';
+}
+
+async function resolveApprovalItem(idx, decision, btn) {
+  const a = (state.approvals || [])[idx];
+  if (!a) return;
+  const item = btn && btn.closest ? btn.closest(".appr-item") : null;
+  if (item) item.querySelectorAll(".appr-btn").forEach(b => { b.disabled = true; });
+  try {
+    await api("/approvals/resolve", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskId: a.taskId, timestamp: a.timestamp, decision, kind: a.kind }) });
+  } catch (e) {
+    if (item) item.querySelectorAll(".appr-btn").forEach(b => { b.disabled = false; });
+    return;
+  }
+  refresh();
+}
+
 async function refresh() {
   try {
-    [state.tasks, state.directives, state.conn, state.metrics, state.onboarding] = await Promise.all([
-      api("/tasks"), api("/directives"), api("/connectivity"), api("/metrics"), api("/onboarding"),
+    const [tasks, directives, conn, metrics, onboarding, appr] = await Promise.all([
+      api("/tasks"), api("/directives"), api("/connectivity"), api("/metrics"), api("/onboarding"), api("/approvals/pending"),
     ]);
+    state.tasks = tasks; state.directives = directives; state.conn = conn; state.metrics = metrics; state.onboarding = onboarding;
+    state.approvals = (appr && appr.approvals) || [];
     renderBoard(); renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
-    renderSkills(); renderMcp();
+    renderApprovals(); renderSkills(); renderMcp();
     if (state.selected) selectTask(state.selected);
   } catch (e) { /* transient */ }
   // Check for updates on every tick (cheap — daemon caches ~60s). Tied to
@@ -1501,21 +1557,20 @@ async function checkUsage(forceRefresh) {
         if (sub.sevenDay) lines.push("7-day:  " + sub.sevenDay.remaining.toFixed(1) + "% left (" + fmtResets(sub.sevenDay.resetsAt) + ")");
         if (sub.sevenDayOpus) lines.push("7-day Opus: " + sub.sevenDayOpus.remaining.toFixed(1) + "% left");
         if (sub.sevenDaySonnet) lines.push("7-day Sonnet: " + sub.sevenDaySonnet.remaining.toFixed(1) + "% left");
-        if (u.taskCount > 0) lines.push("", "HiveMatrix spend: $" + (u.totalCost||0).toFixed(2) + " over " + u.taskCount + " task(s)");
+        if (u.taskCount > 0) lines.push("", "HiveMatrix: " + u.taskCount + " task(s)");
         pill.title = lines.join("\n");
       } else if (subStatus && subStatus.state !== "missing_credentials") {
         const label = usagePlanLabel(subStatus);
         pill.textContent = "⚡ " + label + " ?";
         pill.style.display = "";
         pill.title = (subStatus.message || "Claude subscription usage left is unavailable.")
-          + "\nHiveMatrix spend: $" + (u.totalCost || 0).toFixed(2) + " over " + (u.taskCount||0) + " task(s)";
+          + "\nHiveMatrix: " + (u.taskCount||0) + " task(s)";
       } else {
-        // No subscription data — fall back to spend.
-        const total = "$" + (u.totalCost || 0).toFixed(2);
-        pill.textContent = "⚡ " + total;
+        // No subscription data — show task count (no dollar amounts).
+        pill.textContent = "⚡ " + (u.taskCount||0) + " task" + (u.taskCount===1?"":"s");
         pill.style.display = u.taskCount > 0 ? "" : "none";
-        pill.title = "Frontier spend: " + total + " over " + (u.taskCount||0) + " task(s)\n"
-          + (u.byModel||[]).map(m => m.label + ": $" + m.cost.toFixed(2) + " (" + m.tasks + ")").join("\n");
+        pill.title = "HiveMatrix: " + (u.taskCount||0) + " task(s)\n"
+          + (u.byModel||[]).map(m => m.label + ": " + m.tasks + " task" + (m.tasks===1?"":"s")).join("\n");
       }
     }
 
@@ -1553,16 +1608,15 @@ async function checkUsage(forceRefresh) {
       }
     }
 
-    // HiveMatrix task spend.
+    // HiveMatrix task usage (counts + tokens; no dollar amounts).
     if (u.byModel && u.byModel.length) {
       if ((sub && (sub.fiveHour || sub.sevenDay)) || (subStatus && subStatus.state !== "missing_credentials") || codexSubscription) html += '<div class="usep"></div>';
-      const total = "$" + (u.totalCost || 0).toFixed(2);
-      html += '<div class="urow"><span><b>' + total + '</b> spent</span>'
-        + '<span class="um">' + u.taskCount + ' tasks · ' + fmtTokens(u.inputTokens) + ' in / ' + fmtTokens(u.outputTokens) + ' out</span></div>'
+      html += '<div class="urow"><span><b>' + u.taskCount + '</b> task' + (u.taskCount===1?'':'s') + '</span>'
+        + '<span class="um">' + fmtTokens(u.inputTokens) + ' in / ' + fmtTokens(u.outputTokens) + ' out</span></div>'
         + u.byModel.map(m => '<div class="urow"><span>' + esc(m.label) + '</span>'
-          + '<span class="um">$' + m.cost.toFixed(2) + ' · ' + m.tasks + ' task' + (m.tasks===1?'':'s') + '</span></div>').join("");
+          + '<span class="um">' + m.tasks + ' task' + (m.tasks===1?'':'s') + '</span></div>').join("");
     } else if (!sub || (!sub.fiveHour && !sub.sevenDay)) {
-      html += '<div class="muted">No frontier spend yet — local Qwen work is free.</div>';
+      html += '<div class="muted">No frontier usage yet — local Qwen work runs on-device.</div>';
     }
 
     html += '</div>';

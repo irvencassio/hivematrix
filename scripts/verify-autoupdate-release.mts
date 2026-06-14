@@ -10,10 +10,25 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { evaluateAutoUpdateProof } from "../src/lib/updater/release-proof";
+import { evaluateAutoUpdateProof, type AutoUpdateProof } from "../src/lib/updater/release-proof";
 
 const REPO = "irvencassio/hivematrix";
 const FEED_URL = `https://github.com/${REPO}/releases/latest/download/latest.json`;
+
+/**
+ * GitHub's `releases/latest/download/<asset>` CDN redirect lags the release
+ * "latest" pointer by a few minutes, so immediately after publishing a release
+ * the feed still serves the *previous* version/commit. Only the two feed checks
+ * (feed-version, feed-source-commit) are subject to this lag — every other check
+ * is local/API and is correct the instant it's read. So we poll *only* when the
+ * sole remaining failures are feed checks, giving the CDN time to propagate
+ * before declaring a genuine mismatch.
+ */
+const FEED_CHECK_IDS = new Set(["feed-version", "feed-source-commit"]);
+const FEED_POLL_MAX_ATTEMPTS = 20; // ~20 × 15s ≈ 5 minutes total.
+const FEED_POLL_INTERVAL_MS = 15_000;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 function sh(cmd: string, args: string[], fallback: string | null = null): string | null {
   try {
@@ -21,6 +36,28 @@ function sh(cmd: string, args: string[], fallback: string | null = null): string
   } catch {
     return fallback;
   }
+}
+
+async function fetchFeed(): Promise<{ version: string | null; sourceCommit: string | null }> {
+  try {
+    const res = await fetch(FEED_URL, { signal: AbortSignal.timeout(10_000) });
+    if (res.ok) {
+      const feed = await res.json() as { version?: string; sourceCommit?: string };
+      return {
+        version: typeof feed.version === "string" ? feed.version : null,
+        sourceCommit: typeof feed.sourceCommit === "string" ? feed.sourceCommit : null,
+      };
+    }
+  } catch {
+    // A missing/unreachable feed surfaces as failing feed checks below.
+  }
+  return { version: null, sourceCommit: null };
+}
+
+/** True when the proof's only failures are feed checks — i.e. plausibly CDN lag, worth waiting on. */
+function onlyFeedChecksFailing(proof: AutoUpdateProof): boolean {
+  const failing = proof.checks.filter((c) => !c.ok);
+  return failing.length > 0 && failing.every((c) => FEED_CHECK_IDS.has(c.id));
 }
 
 function sourceVersionInfo(): { version: string; buildNumber: number | null } {
@@ -45,31 +82,36 @@ async function main(): Promise<void> {
 
   const releaseExists = sh("gh", ["release", "view", tagName, "--repo", REPO, "--json", "tagName"], null) !== null;
 
-  let feedVersion: string | null = null;
-  let feedSourceCommit: string | null = null;
-  try {
-    const res = await fetch(FEED_URL, { signal: AbortSignal.timeout(10_000) });
-    if (res.ok) {
-      const feed = await res.json() as { version?: string; sourceCommit?: string };
-      feedVersion = typeof feed.version === "string" ? feed.version : null;
-      feedSourceCommit = typeof feed.sourceCommit === "string" ? feed.sourceCommit : null;
-    }
-  } catch {
-    // Reported by missing feed checks below.
-  }
+  // Local/API inputs above are immediate and correct; only the feed lags behind
+  // GitHub's CDN, so re-fetch it on each polling attempt while everything else
+  // stays fixed.
+  const evaluate = (feed: { version: string | null; sourceCommit: string | null }): AutoUpdateProof =>
+    evaluateAutoUpdateProof({
+      headCommit,
+      packageVersion: pkg.version ?? "",
+      tauriVersion: version,
+      sourceVersion: src.version,
+      buildNumber: src.buildNumber,
+      tagName,
+      tagCommit,
+      releaseExists,
+      feedVersion: feed.version,
+      feedSourceCommit: feed.sourceCommit,
+    });
 
-  const proof = evaluateAutoUpdateProof({
-    headCommit,
-    packageVersion: pkg.version ?? "",
-    tauriVersion: version,
-    sourceVersion: src.version,
-    buildNumber: src.buildNumber,
-    tagName,
-    tagCommit,
-    releaseExists,
-    feedVersion,
-    feedSourceCommit,
-  });
+  let proof = evaluate(await fetchFeed());
+
+  // Poll only when the sole failures are feed checks (CDN propagation lag).
+  // Any other failure is a genuine config error that retrying won't fix, so we
+  // fall straight through to the report and exit.
+  for (let attempt = 1; attempt <= FEED_POLL_MAX_ATTEMPTS && onlyFeedChecksFailing(proof); attempt++) {
+    console.log(
+      `… feed not yet propagated; waiting for GitHub CDN to catch up ` +
+        `(attempt ${attempt}/${FEED_POLL_MAX_ATTEMPTS}, retrying in ${FEED_POLL_INTERVAL_MS / 1000}s)…`,
+    );
+    await sleep(FEED_POLL_INTERVAL_MS);
+    proof = evaluate(await fetchFeed());
+  }
 
   console.log(`HiveMatrix auto-update release proof for ${tagName}`);
   for (const check of proof.checks) {
