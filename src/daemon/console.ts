@@ -254,6 +254,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .remote-status { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; margin-top: 8px; }
   .remote-status .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
   .remote-status .dot.on { background: var(--ok); } .remote-status .dot.off { background: var(--muted); } .remote-status .dot.err { background: var(--err); }
+  .remote-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 12px; background: var(--panel-2); }
+  .remote-card-h { display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 13px; }
+  .role-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .role-row .role-name { font-size: 12px; display: flex; flex-direction: column; gap: 1px; }
+  .role-row .role-name .muted { font-size: 10px; font-weight: 400; }
+  .role-row select { width: 190px; flex: none; }
   .copybtn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px; font-size: 11px; cursor: pointer; }
   .copybtn:hover { border-color: var(--accent); }
   .posture { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel-2); }
@@ -313,7 +319,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <span class="pill" id="modePill">…</span>
     <span class="usage-pill" id="usagePill" style="display:none" title="">⚡ —</span>
     <span class="update-pill" id="updatePill" style="display:none" onclick="applyUpdate()" title="Click to install and restart">⬆ Update</span>
-    <button class="gear ctx-toggle" id="ctxToggle" title="Hide / show the right panel" onclick="toggleContext()">▦</button>
+    <button class="gear ctx-toggle" id="ctxToggle" title="Hide / show the right panel" onclick="toggleContext()">◨</button>
     <button class="gear" title="Settings" onclick="openSettings()">⚙</button>
   </span>
 </header>
@@ -321,7 +327,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <div class="overlay" id="settingsOverlay">
   <div class="modal">
     <h1>Settings <span class="x" onclick="closeSettings()">✕</span></h1>
-    <div class="tabs"><div class="tab active" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-projects" onclick="switchSettingsTab('projects')">Projects</div><div class="tab" id="tab-bees" onclick="switchSettingsTab('bees')">Bees</div></div>
+    <div class="tabs"><div class="tab active" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">General</div><div class="tab" id="tab-projects" onclick="switchSettingsTab('projects')">Projects</div><div class="tab" id="tab-bees" onclick="switchSettingsTab('bees')">Bees</div></div>
     <div id="settingsModels">
       <label class="flbl">Default model</label>
       <select id="s_default" style="width:100%"></select>
@@ -341,11 +347,70 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <div class="muted" style="font-size:11px;margin-top:2px">Which provider handles the frontier tier in Mixed and Cloud-only modes.</div>
       </div>
 
-      <label class="flbl" style="margin-top:14px">Local server endpoint</label>
+      <div id="s_role_models" style="display:none;margin-top:16px">
+        <label class="flbl">Mixed-mode role models</label>
+        <div class="muted" style="font-size:11px;margin-bottom:8px">In Mixed mode each kind of work routes to its own model. Pick which one — or leave on Default.</div>
+        <div class="role-row"><span class="role-name">🧠 Thinking <span class="muted">planning · architecture · review</span></span>
+          <select id="s_role_thinking" onchange="saveRoleModel('thinking', this.value)"></select></div>
+        <div class="role-row"><span class="role-name">⌨️ Coding <span class="muted">critical implementation · UI</span></span>
+          <select id="s_role_coding" onchange="saveRoleModel('coding', this.value)"></select></div>
+        <div class="role-row"><span class="role-name">⚙️ Operational <span class="muted">bulk execution · file ops (on-device)</span></span>
+          <select id="s_role_operational" onchange="saveRoleModel('operational', this.value)"></select></div>
+      </div>
+
+      <label class="flbl" style="margin-top:16px">Local server endpoint</label>
       <div class="row"><input id="s_endpoint" placeholder="http://localhost:1234/v1" style="flex:1" />
         <button class="create" onclick="saveEndpoint()">Save</button></div>
+    </div>
+    <div id="settingsRemote" style="display:none">
+      <div class="remote-status"><span class="dot" id="s_remote_dot"></span><span id="s_remote_label">…</span></div>
+      <div id="s_tunnel_detail" class="muted" style="font-size:11px;margin-top:4px"></div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Reach this daemon from your phone over a Cloudflare tunnel. Two ways to set it up:</div>
 
-      <label class="flbl" style="margin-top:16px">Appearance</label>
+      <div class="remote-card">
+        <div class="remote-card-h"><span>Temporary tunnel</span><span class="badge">quick test</span></div>
+        <div class="muted" style="font-size:11px;margin:4px 0 8px">A throwaway <code>trycloudflare.com</code> URL — fastest way to pair once. Goes away when you stop it.</div>
+        <button class="create" id="s_tunnel_btn" onclick="toggleTunnel()">Start temporary tunnel</button>
+      </div>
+
+      <div class="remote-card">
+        <div class="remote-card-h"><span>Named tunnel</span><span class="badge">durable · multi-user</span></div>
+        <div class="muted" style="font-size:11px;margin:4px 0 8px">A stable hostname you control — survives restarts and is right for ongoing / shared access.</div>
+        <label class="flbl" style="margin-top:0">Public hostname</label>
+        <div class="row"><input id="s_named_host" placeholder="hivey.cassio.io" style="flex:1" />
+          <button class="copybtn" onclick="configureNamedTunnel()">Save / show QR</button></div>
+        <div class="muted" style="font-size:11px;margin-top:4px">A stable Cloudflare hostname for one-time mobile pairing.</div>
+
+        <label class="flbl" style="margin-top:8px">Cloudflare Access Client ID</label>
+        <input id="s_cf_access_id" placeholder="optional service-token client id for mobile" style="width:100%;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
+        <label class="flbl" style="margin-top:6px">Cloudflare Access Client Secret</label>
+        <div class="row"><input id="s_cf_access_secret" type="password" placeholder="optional service-token client secret" style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
+          <button class="copybtn" onclick="saveCloudflareAccessCredentials()">Save Access</button></div>
+        <div class="muted" id="s_cf_access_detail" style="font-size:11px;margin-top:4px">Only needed when Cloudflare Access protects the hostname for iOS/API calls.</div>
+
+        <label class="flbl" style="margin-top:8px">Connector token</label>
+        <input id="s_named_token" type="password" placeholder="optional — only if HiveMatrix should start cloudflared" style="width:100%" />
+        <div class="row" style="margin-top:6px"><button class="copybtn" onclick="startNamedTunnel()">Run with token</button></div>
+        <div class="muted" style="font-size:11px;margin-top:4px">Leave blank when an existing Cloudflare connector is already running.</div>
+      </div>
+
+      <div id="s_tunnel_live" style="display:none;margin-top:10px">
+        <label class="flbl">Public URL</label>
+        <div class="row"><input id="s_tunnel_url" readonly style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
+          <button class="copybtn" onclick="copyField('s_tunnel_url')">Copy</button></div>
+        <label class="flbl" style="margin-top:10px">Scan to pair (iPhone)</label>
+        <div id="s_qr" style="background:#fff;border-radius:8px;padding:8px;width:188px;height:188px"></div>
+        <div class="muted" style="font-size:11px;margin-top:4px">Open HiveMatrix on iPhone → Scan QR. Encodes the URL + token (generated locally).</div>
+      </div>
+
+      <label class="flbl" style="margin-top:14px">Access token (manual pairing)</label>
+      <div class="row"><input id="s_token" readonly style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
+        <button class="copybtn" onclick="copyField('s_token')">Copy</button></div>
+
+      <div class="muted" style="font-size:11px;margin-top:10px">⚠ A tunnel exposes the daemon to the internet; the access token is the only barrier — treat it like a password. The console never hands the token to tunneled visitors.</div>
+    </div>
+    <div id="settingsGeneral" style="display:none">
+      <label class="flbl">Appearance</label>
       <div class="row" style="align-items:center; gap:10px">
         <span class="muted">Theme</span>
         <select id="s_theme" onchange="saveTheme()" style="width:auto">
@@ -388,51 +453,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <span class="muted">Automatically install updates on launch</span>
       </div>
       <div class="muted" style="font-size:11px;margin-top:2px">Off = you'll see an "Update" button in the header to install when you choose.</div>
-
-      <h2 style="margin-top:18px">Remote Access</h2>
-      <div class="remote-status"><span class="dot" id="s_remote_dot"></span><span id="s_remote_label">…</span></div>
-      <div id="s_tunnel_detail" class="muted" style="font-size:11px;margin-top:4px"></div>
-
-      <label class="flbl" style="margin-top:10px">Temporary ad-hoc tunnel</label>
-      <div class="row">
-        <button class="create" id="s_tunnel_btn" onclick="toggleTunnel()">Start temporary tunnel</button>
-      </div>
-      <div class="muted" style="font-size:11px;margin-top:4px">Creates a temporary trycloudflare.com URL for quick pairing.</div>
-
-      <div id="s_tunnel_live" style="display:none;margin-top:10px">
-        <label class="flbl">Public URL</label>
-        <div class="row"><input id="s_tunnel_url" readonly style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
-          <button class="copybtn" onclick="copyField('s_tunnel_url')">Copy</button></div>
-        <label class="flbl" style="margin-top:10px">Scan to pair (iPhone)</label>
-        <div id="s_qr" style="background:#fff;border-radius:8px;padding:8px;width:188px;height:188px"></div>
-        <div class="muted" style="font-size:11px;margin-top:4px">Open HiveMatrix on iPhone → Scan QR. Encodes the URL + token (generated locally).</div>
-      </div>
-
-      <label class="flbl" style="margin-top:14px">Access token (manual pairing)</label>
-      <div class="row"><input id="s_token" readonly style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
-        <button class="copybtn" onclick="copyField('s_token')">Copy</button></div>
-
-      <details style="margin-top:12px">
-        <summary class="muted" style="cursor:pointer;font-size:12px">Advanced: Named Cloudflare tunnel</summary>
-        <label class="flbl" style="margin-top:8px">Public hostname</label>
-        <div class="row"><input id="s_named_host" placeholder="hivey.cassio.io" style="flex:1" />
-          <button class="copybtn" onclick="configureNamedTunnel()">Save / show QR</button></div>
-        <div class="muted" style="font-size:11px;margin-top:4px">Use a stable Cloudflare hostname for one-time mobile pairing.</div>
-
-        <label class="flbl" style="margin-top:8px">Cloudflare Access Client ID</label>
-        <input id="s_cf_access_id" placeholder="optional service-token client id for mobile" style="width:100%;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
-        <label class="flbl" style="margin-top:6px">Cloudflare Access Client Secret</label>
-        <div class="row"><input id="s_cf_access_secret" type="password" placeholder="optional service-token client secret" style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
-          <button class="copybtn" onclick="saveCloudflareAccessCredentials()">Save Access</button></div>
-        <div class="muted" id="s_cf_access_detail" style="font-size:11px;margin-top:4px">Only needed when Cloudflare Access protects the hostname for iOS/API calls.</div>
-
-        <label class="flbl" style="margin-top:8px">Connector token</label>
-        <input id="s_named_token" type="password" placeholder="optional — only if HiveMatrix should start cloudflared" style="width:100%" />
-        <div class="row" style="margin-top:6px"><button class="copybtn" onclick="startNamedTunnel()">Run with token</button></div>
-        <div class="muted" style="font-size:11px;margin-top:4px">Leave blank when an existing Cloudflare connector is already running.</div>
-      </details>
-
-      <div class="muted" style="font-size:11px;margin-top:10px">⚠ A tunnel exposes the daemon to the internet; the access token is the only barrier — treat it like a password. The console never hands the token to tunneled visitors.</div>
 
       <div class="vinfo" id="s_version">…</div>
     </div>
@@ -1829,9 +1849,46 @@ function openSettings() {
                         && models.backends.some(b => b.id === "codex" && b.configured);
   document.getElementById("s_frontier_provider_row").style.display = hasBothFrontier ? "" : "none";
   if (hasBothFrontier) document.getElementById("s_frontier_provider").value = models.frontierProvider || "claude";
+  renderRoleModels();
   loadTunnel();
 }
 function closeSettings() { document.getElementById("settingsOverlay").classList.remove("open"); }
+
+// Mixed-mode role models: thinking → frontier-premium, coding → frontier,
+// operational → local. Shown only when a Mixed posture is possible (local +
+// frontier both configured). Empty value = the router's built-in default.
+function renderRoleModels() {
+  const wrap = document.getElementById("s_role_models");
+  if (!wrap || !models) return;
+  const mixedAvailable = models.available.some(m => m.id === "mixed");
+  wrap.style.display = mixedAvailable ? "" : "none";
+  if (!mixedAvailable) return;
+  const frontier = models.available.filter(m => m.backend === "claude");
+  const local = models.available.filter(m => m.backend === "local");
+  const rm = models.roleModels || { thinking: "", coding: "", operational: "" };
+  const codex = (models.frontierProvider || "claude") === "codex";
+  const fill = (id, list, defLabel, selected, disabled) => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const opts = ['<option value="">' + esc(defLabel) + '</option>']
+      .concat(list.map(m => '<option value="' + esc(m.modelId) + '"' + (m.modelId === selected ? ' selected' : '') + '>' + esc(m.name) + '</option>'));
+    // Selected override that isn't in the catalog (e.g. a hand-set id) still shows.
+    if (selected && !list.some(m => m.modelId === selected)) opts.push('<option value="' + esc(selected) + '" selected>' + esc(selected) + '</option>');
+    sel.innerHTML = opts.join("");
+    sel.value = selected || "";
+    sel.disabled = !!disabled;
+    sel.title = disabled ? "Frontier provider is set to Codex — Claude role models are ignored. Switch provider to Claude to use these." : "";
+  };
+  fill("s_role_thinking", frontier, codex ? "Codex (provider override)" : "Default — Opus 4.8", rm.thinking, codex);
+  fill("s_role_coding", frontier, codex ? "Codex (provider override)" : "Default — Sonnet 4.6", rm.coding, codex);
+  fill("s_role_operational", local, "Default — local Qwen", rm.operational, false);
+}
+
+async function saveRoleModel(role, modelId) {
+  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ roleModel: { role, modelId } }) });
+  await loadModels();   // refreshes the global models object (incl. roleModels)
+  renderRoleModels();
+}
 function onOpacityInput(v) {
   document.getElementById("s_wp_opacity_val").textContent = v + "%";
   document.documentElement.style.setProperty("--wp-opacity", v + "%"); // live preview
@@ -1852,12 +1909,12 @@ async function saveAutoUpdate() {
 }
 
 function switchSettingsTab(tab) {
-  document.getElementById("tab-models").className = "tab" + (tab === "models" ? " active" : "");
-  document.getElementById("tab-projects").className = "tab" + (tab === "projects" ? " active" : "");
-  document.getElementById("tab-bees").className = "tab" + (tab === "bees" ? " active" : "");
-  document.getElementById("settingsModels").style.display = tab === "models" ? "" : "none";
-  document.getElementById("settingsProjects").style.display = tab === "projects" ? "" : "none";
-  document.getElementById("settingsBees").style.display = tab === "bees" ? "" : "none";
+  const tabs = ["models", "remote", "general", "projects", "bees"];
+  const panels = { models: "settingsModels", remote: "settingsRemote", general: "settingsGeneral", projects: "settingsProjects", bees: "settingsBees" };
+  for (const t of tabs) {
+    document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
+    document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
+  }
   if (tab === "projects") renderSettingsProjects();
   if (tab === "bees") { renderSettingsBees(); renderSafeSenders(); }
 }

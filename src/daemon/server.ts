@@ -208,7 +208,7 @@ export function createDaemonServer() {
         const backends = detectBackends();
         const available = buildAvailableModels(backends);
         const theme = getThemeSettings();
-        const { getLocation, getAutoUpdate, getFrontierProvider } = await import("@/lib/models/available");
+        const { getLocation, getAutoUpdate, getFrontierProvider, getRoleModels } = await import("@/lib/models/available");
         json(res, 200, {
           backends,
           available,
@@ -221,6 +221,7 @@ export function createDaemonServer() {
           location: getLocation(),
           autoUpdate: getAutoUpdate(),
           frontierProvider: getFrontierProvider(),
+          roleModels: getRoleModels(),
         });
         return;
       }
@@ -275,6 +276,12 @@ export function createDaemonServer() {
         if (typeof body.location === "string") m.setLocation(body.location);
         if (typeof body.autoUpdate === "boolean") m.setAutoUpdate(body.autoUpdate);
         if (body.frontierProvider === "claude" || body.frontierProvider === "codex") m.setFrontierProvider(body.frontierProvider);
+        if (body.roleModel && typeof body.roleModel === "object") {
+          const rm = body.roleModel as { role?: unknown; modelId?: unknown };
+          if ((rm.role === "thinking" || rm.role === "coding" || rm.role === "operational") && typeof rm.modelId === "string") {
+            m.setRoleModel(rm.role, rm.modelId);
+          }
+        }
         const available = m.buildAvailableModels();
         const theme = m.getThemeSettings();
         json(res, 200, { ok: true, defaultModel: m.getDefaultModel(available), theme: theme.theme,

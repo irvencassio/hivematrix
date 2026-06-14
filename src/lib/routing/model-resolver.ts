@@ -51,6 +51,10 @@ export function resolveModelId(tier: ModelTier): string | null {
       return profile?.primary.modelId ?? null;
     }
     case "local-secondary": {
+      // Operator override (Settings → Models → operational role) wins, then the
+      // Qwen profile's secondary, then its primary.
+      const op = (readConfig().operationalModel as string | undefined)?.trim();
+      if (op) return op;
       const profile = getQwenProfile();
       return profile?.secondary?.modelId ?? profile?.primary.modelId ?? null;
     }

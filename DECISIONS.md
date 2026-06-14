@@ -686,3 +686,35 @@ extra" clutter without losing one-click access.
 **Verification.** `tsc --noEmit` clean, scope-wall 0 violations, daemon bundles, 582/582
 tests pass, skill parses. Console JS itself can only be compiled/bundled here, not
 browser-rendered.
+
+## Settings refinement — tabbed reorg, Mixed-mode role models, Cloudflare clarity, panel icon (2026-06-14)
+
+**Decision.** The Settings → Models tab had become a kitchen sink (appearance, location,
+updates, remote access all crammed under "Models"). Split into focused tabs and made two
+things first-class: per-role model selection in Mixed mode, and both Cloudflare tunnel modes.
+
+- **Tabbed reorg.** Settings tabs are now **Models | Remote | General | Projects | Bees**.
+  - *Models*: default model, backends, frontier provider, Mixed-mode role models, local endpoint.
+  - *Remote*: Cloudflare remote access (was buried in the Models tab).
+  - *General*: appearance (theme/wallpaper/opacity), location, updates, version.
+  All element IDs preserved, so `openSettings`/`loadTunnel` population is unchanged; only the
+  containing tab `<div>`s and `switchSettingsTab` (now table-driven over 5 tabs) changed.
+- **Mixed-mode role models.** New block in the Models tab with three selectors —
+  🧠 Thinking (→ `frontier-premium` / `thinkModel`), ⌨️ Coding (→ `frontier` / `frontierModel`),
+  ⚙️ Operational (→ `local-secondary` / new `operationalModel`). Shown only when a Mixed posture
+  is available (local + frontier configured). Each defaults to "Default" (router fallback);
+  Claude selectors disable with a note when the frontier provider is Codex (which overrides them).
+  Wiring: `getRoleModels`/`setRoleModel` in `models/available.ts`, `operationalModel` honored by
+  `routing/model-resolver.ts` for the local-secondary tier (override → Qwen secondary → primary),
+  exposed via GET `/models` (`roleModels`) and set via POST `/settings` (`{roleModel:{role,modelId}}`).
+- **Cloudflare: both modes visible.** The named/durable tunnel (hostname URL + Access creds +
+  connector token) was hidden inside a collapsed "Advanced" `<details>`. It's now a clearly
+  labeled **Named tunnel (durable · multi-user)** card sitting beside the **Temporary tunnel
+  (quick test)** card — both always visible on the Remote tab. Matches the remote-access posture
+  (named = durable/multi-user, trycloudflare = test-only). No endpoint changes.
+- **Right-panel toggle icon.** Header toggle changed from `▦` (checkerboard) to `◨`
+  (square with right half filled) — a recognizable "right panel" glyph.
+
+**Verification.** `tsc --noEmit` clean, scope-wall 0 violations, 588/588 tests pass (added
+resolver + role-model + console-UI coverage), daemon bundles. Console JS compiled/bundled here,
+not browser-rendered.

@@ -30,13 +30,32 @@ test("console script has no obvious TS-only syntax", () => {
   assert.doesNotMatch(js, /\bas\s+(HTML[A-Za-z]+|string|number|boolean|any)\b/, "found a TS `as Type` cast");
 });
 
-test("remote access UI supports persistent named tunnel and Access credentials", () => {
-  assert.match(CONSOLE_HTML, /Temporary ad-hoc tunnel/);
-  assert.match(CONSOLE_HTML, /Named Cloudflare tunnel/);
+test("remote access UI offers both a temporary and a named (durable) tunnel with Access credentials", () => {
+  // Both setup paths are present, not buried behind a collapsed disclosure.
+  assert.match(CONSOLE_HTML, /Temporary tunnel/);
+  assert.match(CONSOLE_HTML, /Named tunnel/);
+  assert.doesNotMatch(CONSOLE_HTML, /Advanced: Named Cloudflare tunnel/, "named tunnel should not be hidden under an Advanced disclosure");
   assert.match(CONSOLE_HTML, /Cloudflare Access Client ID/);
   assert.match(CONSOLE_HTML, /Cloudflare Access Client Secret/);
   assert.match(CONSOLE_HTML, /\/tunnel\/configure-named/);
   assert.match(CONSOLE_HTML, /\/tunnel\/access-credentials/);
+  // Remote setup lives on its own settings tab now.
+  assert.match(CONSOLE_HTML, /id="settingsRemote"/);
+  assert.match(CONSOLE_HTML, /switchSettingsTab\('remote'\)/);
+});
+
+test("settings expose Mixed-mode role models for thinking, coding, and operational", () => {
+  for (const id of ["s_role_thinking", "s_role_coding", "s_role_operational"]) {
+    assert.match(CONSOLE_HTML, new RegExp('id="' + id + '"'), id + " selector present");
+  }
+  // onchange handlers live in the HTML attributes; the function lives in the script.
+  assert.match(CONSOLE_HTML, /saveRoleModel\('thinking'/);
+  assert.match(CONSOLE_HTML, /saveRoleModel\('coding'/);
+  assert.match(CONSOLE_HTML, /saveRoleModel\('operational'/);
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /async function saveRoleModel\(/);
+  // The role-model block is gated on a Mixed posture being available.
+  assert.match(js, /m\.id === "mixed"/);
 });
 
 test("MessageBee modal fetches structured status before reporting readability", () => {

@@ -201,6 +201,43 @@ export function setFrontierProvider(provider: FrontierProvider): void {
   writeConfig(cfg);
 }
 
+// --- Mixed-mode role models (Settings → Models) ---
+//
+// In Mixed mode the router maps roles to tiers and the model-resolver turns a
+// tier into a concrete model. Three of those are operator-pickable here:
+//   thinking     → frontier-premium tier  → config key `thinkModel`        (default Opus)
+//   coding       → frontier tier          → config key `frontierModel`     (default Sonnet)
+//   operational  → local-secondary tier   → config key `operationalModel`  (default Qwen profile)
+// An empty value means "use the built-in default" (the resolver's fallback).
+
+export interface RoleModels {
+  /** Planning/architecture/review — frontier-premium tier. */
+  thinking: string;
+  /** Critical implementation/UI — frontier tier. */
+  coding: string;
+  /** Bulk execution/file ops — local-secondary tier (on-device in Mixed mode). */
+  operational: string;
+}
+
+export function getRoleModels(): RoleModels {
+  const cfg = readConfig();
+  const str = (k: string) => (typeof cfg[k] === "string" ? (cfg[k] as string) : "");
+  return {
+    thinking: str("thinkModel"),
+    coding: str("frontierModel"),
+    operational: str("operationalModel"),
+  };
+}
+
+/** Set one role's model override. Empty/blank clears it (reverts to default). */
+export function setRoleModel(role: keyof RoleModels, modelId: string): void {
+  const key = role === "thinking" ? "thinkModel" : role === "coding" ? "frontierModel" : "operationalModel";
+  const cfg = readConfig();
+  const v = modelId.trim();
+  if (v) cfg[key] = v; else delete cfg[key];
+  writeConfig(cfg);
+}
+
 /** Persist the local-server endpoint (Settings → Models → local config). */
 export function setLocalEndpoint(endpoint: string): void {
   const cfg = readConfig();
