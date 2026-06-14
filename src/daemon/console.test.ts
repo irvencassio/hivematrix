@@ -69,6 +69,19 @@ test("needs_input reply window stands out and uses a clear 'Reply' button", () =
   assert.match(CONSOLE_HTML, /\.reply-section\.needs/, "standout style present");
 });
 
+test("review/failed tasks get a subtle Reply box, distinct from the needs_input standout", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // Reply is offered on review/failed/cancelled (retryable) tasks, not just needs_input.
+  assert.match(js, /const canReply = t\.reviewState !== "needs_input" && \(t\.pendingQuestion \|\| retryable\)/);
+  assert.match(js, /if \(canReply\) b\.push/);
+  // Two visual treatments: the standout "needs" card vs the subtle box.
+  assert.match(js, /' open needs':' subtle'/);
+  assert.match(js, /reply-subhead/);
+  assert.match(CONSOLE_HTML, /\.reply-section\.subtle\.open/, "subtle reply style present");
+  // Distinct from the needs_input standout header.
+  assert.match(js, /✋ Awaiting your reply/);
+});
+
 test("settings has an About tab with version/build/date and update status", () => {
   assert.match(CONSOLE_HTML, /id="tab-about"/);
   assert.match(CONSOLE_HTML, /id="settingsAbout"/);

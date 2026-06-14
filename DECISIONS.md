@@ -831,3 +831,19 @@ model drives a real desktop browser via AppleScript/Accessibility — lower reli
 the only working path without an OpenAI API key.
 
 **Verification.** tsc clean, scope-wall 0, 617/617 tests, daemon bundles.
+
+## Reply to review/failed tasks (subtle box) (2026-06-14)
+
+Operator feedback: a failed/review task where the agent asked a question (e.g. "tell me
+which task failed") had only Retry/Archive/Delete — no way to *answer*. Added a Reply
+affordance for review/failed/cancelled tasks, styled distinctly from the needs_input
+standout:
+- **Backend**: `POST /tasks/:id/reply` now accepts review/failed/cancelled (not only
+  needs_input) — appends the reply via `appendReplyContinuation` and requeues the task
+  so it re-runs with the operator's message in context.
+- **Frontend**: a `↩ Reply` toggle appears on review/failed/cancelled tasks; opening it
+  shows a **subtle** reply box (thin left rule, muted "your message is added and the task
+  re-runs" subhead) — visually understated vs the needs_input card (highlighted card +
+  "✋ Awaiting your reply"), exactly as requested.
+
+Verification: tsc clean, scope-wall 0, 618/618 tests, daemon bundles.

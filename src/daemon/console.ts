@@ -264,6 +264,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .reply-section.needs { display: block; border: 1.5px solid var(--accent-2); border-radius: 10px;
     padding: 12px 14px; background: var(--reply-q-bg); margin: 14px 0; box-shadow: 0 0 0 3px rgba(76,201,240,.10); }
   .reply-head { font-size: 13px; font-weight: 700; color: var(--accent-2); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  /* review/failed reply: present but understated — a thin left rule, no glow/card. */
+  .reply-section.subtle.open { display: block; border-left: 2px solid var(--border); padding: 8px 0 8px 12px; margin: 12px 0; }
+  .reply-subhead { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
   .reply-row button.reply-primary { font-size: 13px; font-weight: 600; padding: 8px 18px; }
   .reply-toggle.active { border-color: var(--accent-2) !important; color: var(--accent-2) !important; }
   .transcript { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
@@ -878,7 +881,10 @@ function taskActionsHtml(t) {
   const steerable = t.status === "in_progress" && (t.model||"").startsWith("codex:");
   if (running) b.push('<button onclick="taskAction(\''+t._id+'\',\'cancel\')">■ Cancel</button>');
   if (retryable) b.push('<button class="reply-toggle" id="retryToggle_'+t._id+'" onclick="toggleRetry(\''+t._id+'\')">↻ Retry</button>');
-  if (t.pendingQuestion) b.push('<button class="reply-toggle" id="replyToggle_'+t._id+'" onclick="toggleReply(\''+t._id+'\')">↩ Reply</button>');
+  // Reply: answer the agent / continue a finished task (review, failed, cancelled)
+  // — except needs_input, which already shows the fully-standout reply card.
+  const canReply = t.reviewState !== "needs_input" && (t.pendingQuestion || retryable);
+  if (canReply) b.push('<button class="reply-toggle" id="replyToggle_'+t._id+'" onclick="toggleReply(\''+t._id+'\')">↩ Reply</button>');
   if (!running) b.push('<button onclick="taskAction(\''+t._id+'\',\'archive\')">⌫ Archive</button>');
   b.push('<button class="danger" onclick="deleteTask(\''+t._id+'\')">🗑 Delete</button>');
   let html = '<div class="actions">'+b.join("")+'</div>';
@@ -898,13 +904,16 @@ function taskActionsHtml(t) {
       + '<textarea id="steerText" class="reply-input" placeholder="Type a new instruction to steer this run…" rows="2" oninput="onCtxDraft(\'steer\',this)"></textarea>'
       + '<div class="reply-row" style="margin-top:6px"><button onclick="submitSteer(\''+t._id+'\')">⤳ Send Steer</button></div></div>';
   }
-  // Reply to a needs_input question: text (auto-opens) + attachments.
+  // Reply box. needs_input → the fully-standout card (auto-open). Otherwise a
+  // subtler "reply to continue" box (toggled open from the ↩ Reply button).
   const isOpen = t.reviewState === "needs_input";
   const q = t.pendingQuestion ? '<div class="reply-question">'+esc(t.pendingQuestion)+'</div>' : '';
-  html += '<div id="replySection_'+t._id+'" class="reply-section'+(isOpen?' open needs':'')+'">'
-    + (isOpen ? '<div class="reply-head">✋ Awaiting your reply</div>' : '')
+  html += '<div id="replySection_'+t._id+'" class="reply-section'+(isOpen?' open needs':' subtle')+'">'
+    + (isOpen
+        ? '<div class="reply-head">✋ Awaiting your reply</div>'
+        : '<div class="reply-subhead">↩ Reply — your message is added and the task re-runs</div>')
     + q
-    + '<textarea id="replyText" class="reply-input" placeholder="Type your reply…" rows="'+(isOpen?'3':'2')+'" oninput="onCtxDraft(\'reply\',this)"></textarea>'
+    + '<textarea id="replyText" class="reply-input" placeholder="'+(isOpen?'Type your reply…':'Reply to this task…')+'" rows="'+(isOpen?'3':'2')+'" oninput="onCtxDraft(\'reply\',this)"></textarea>'
     + attachPickerHtml('reply')
     + '<div class="reply-row" style="margin-top:6px"><button class="reply-primary" onclick="replyTask(\''+t._id+'\')">Reply</button></div></div>';
   return html;

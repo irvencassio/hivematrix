@@ -1609,8 +1609,13 @@ export function createDaemonServer() {
           const { appendReplyContinuation } = await import("@/lib/tasks/reply-continuation");
           const cur = await Task.findById(tid);
           if (!cur) { json(res, 404, { error: "Not found" }); return; }
-          if (cur.reviewState !== "needs_input") {
-            json(res, 404, { error: "No pending input request for this task" });
+          // Reply is allowed for an explicit needs_input request AND for any
+          // finished task the operator wants to answer/continue (review, failed,
+          // cancelled). In all cases the reply is appended and the task re-runs.
+          const replyable = cur.reviewState === "needs_input"
+            || ["review", "failed", "cancelled"].includes(String(cur.status));
+          if (!replyable) {
+            json(res, 404, { error: "This task can't take a reply in its current state" });
             return;
           }
           await Task.findByIdAndUpdate(tid, {
