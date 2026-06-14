@@ -11,6 +11,7 @@ import { getSchedulerDiagnostics } from "@/lib/orchestrator/scheduler";
 import { listDirectives, getActiveRuns, type DirectiveStatus, type RunPhase } from "@/lib/orchestrator/directive-store";
 import { getPendingApprovals } from "@/lib/orchestrator/approval";
 import { getPendingStuck } from "@/lib/orchestrator/stuck";
+import { loopHealth, type LoopHealth } from "@/lib/feedback/self-improvement";
 
 export interface ManagerBeeReport {
   generatedAt: string;
@@ -36,6 +37,8 @@ export interface ManagerBeeReport {
     pendingApprovals: number;
     pendingStuck: number;
   };
+  /** Self-improvement loop signal: backlog resolution rate, recurring issues, age. */
+  selfImprovement: LoopHealth;
   /** Roll-up health: "ok" unless the scheduler is blocked or escalations are waiting. */
   health: "ok" | "attention";
 }
@@ -79,6 +82,7 @@ export function buildManagerBeeReport(nowIso: string = new Date().toISOString())
     directives: { total: directives.length, byStatus },
     runs: { inFlight: activeRuns.length, byPhase },
     escalations: { pendingApprovals, pendingStuck },
+    selfImprovement: loopHealth(() => nowIso),
     health,
   };
 }

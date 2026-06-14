@@ -12,6 +12,7 @@
 
 import { getPendingStuck, resolveStuck } from "@/lib/orchestrator/stuck";
 import { getPendingApprovals, resolveApproval } from "@/lib/orchestrator/approval";
+import { Task } from "@/lib/db";
 import { notify } from "./notify";
 import {
   getTelegramConfig, getUpdates, isAuthorizedUpdate, parseCallbackData,
@@ -28,7 +29,34 @@ function mark(key: string): boolean {
   return true;
 }
 
-/** Push any new pending stuck/approval out to the founder's channels. */
+// Failure escalation tracks the set of currently-failed task ids. On the first
+// tick it SEEDS (so a backlog of old failures on startup isn't re-announced),
+// then notifies each newly-failed task once. Reassigning the set each tick
+// auto-prunes ids that are no longer failed and bounds memory.
+let failuresSeeded = false;
+let knownFailedIds = new Set<string>();
+
+/** Push any task that newly entered the "failed" state out to the founder. */
+async function notifyFailures(): Promise<void> {
+  const failed = await Task.find({ status: "failed" });
+  const currentIds = new Set(failed.map((t) => String(t._id)));
+  if (!failuresSeeded) {
+    failuresSeeded = true;
+    knownFailedIds = currentIds;
+    return;
+  }
+  for (const t of failed) {
+    if (knownFailedIds.has(String(t._id))) continue;
+    // Skip internal directive phase tasks (planner/reviewer/retrospective): they
+    // churn and self-retry, so escalating them is noise. Real work failures stay.
+    if ((t.output as { directivePhase?: unknown } | undefined)?.directivePhase) continue;
+    const err = typeof t.error === "string" && t.error.trim() ? `\n${t.error.slice(0, 200)}` : "";
+    await notify(`⚠️ Task failed: ${t.title ?? "(untitled)"}${err}`);
+  }
+  knownFailedIds = currentIds;
+}
+
+/** Push any new pending stuck/approval/failure out to the founder's channels. */
 export async function escalationTick(): Promise<void> {
   for (const s of getPendingStuck()) {
     const key = `stuck:${s.taskId}:${s.timestamp}`;
@@ -42,6 +70,7 @@ export async function escalationTick(): Promise<void> {
     const text = `🔐 Approval needed\nTool: ${a.tool}\n${a.command}\n${a.context ?? ""}`.slice(0, 1500);
     await notify(text, { telegramMarkup: approvalKeyboard(a.taskId, a.timestamp) });
   }
+  await notifyFailures();
 }
 
 let tgOffset = 0;

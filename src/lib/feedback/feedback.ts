@@ -48,6 +48,28 @@ export function getFeedback(id: string): FeedbackItem | null {
   return (getDb().prepare("SELECT * FROM feedback WHERE _id = ?").get(id) as FeedbackItem | undefined) ?? null;
 }
 
+/** Normalized title for de-duplication (lowercase, punctuation/whitespace collapsed). */
+export function normalizeFeedbackTitle(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+}
+
+/**
+ * Record feedback, but if an OPEN or TRIAGED item with the same normalized title
+ * already exists, return that instead of inserting a duplicate. Used by the
+ * reflection→feedback bridge so a recurring lesson doesn't file a new row every
+ * directive run. `created` is false when an existing item was returned.
+ */
+export function recordFeedbackDedup(input: RecordFeedbackInput): { item: FeedbackItem; created: boolean } {
+  const norm = normalizeFeedbackTitle(input.title);
+  if (norm) {
+    const existing = listFeedback().find(
+      (f) => (f.status === "open" || f.status === "triaged") && normalizeFeedbackTitle(f.title) === norm,
+    );
+    if (existing) return { item: existing, created: false };
+  }
+  return { item: recordFeedback(input), created: true };
+}
+
 export interface ListFeedbackFilter {
   kind?: FeedbackKind;
   status?: FeedbackStatus;

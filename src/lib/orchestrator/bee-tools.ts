@@ -24,6 +24,13 @@ const BEE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
   desktopbee_action: "desktopbee",
   termbee_session: "termbee",
   termbee_run: "termbee",
+  mailbee_send: "mailbee",
+  mailbee_draft: "mailbee",
+  messagebee_send: "messagebee",
+  brain_search: "brain",
+  skill_used: "brain",
+  digest_url: "webbee",
+  code_graph: "codegraph",
 };
 
 export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
@@ -131,6 +138,120 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "mailbee_send",
+      description:
+        "MailBee: send an email through Apple Mail. This is the ONLY correct way to send email — do not use bash/osascript or any other interface. Safe by default: the email is sent only if the recipient is on the trusted allowlist (a known sender or a configured trusted domain); otherwise it is saved as a draft in Mail for human approval and NOT sent. Returns whether it was sent or drafted.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: { type: "string", description: "Recipient email address" },
+          subject: { type: "string", description: "Email subject line" },
+          body: { type: "string", description: "Plain-text email body" },
+        },
+        required: ["to", "subject", "body"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "mailbee_draft",
+      description:
+        "MailBee: compose an email and save it to the Mail Drafts folder for human review (never sends). Use when you want a person to approve/edit before it goes out, regardless of recipient trust.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: { type: "string", description: "Recipient email address" },
+          subject: { type: "string", description: "Email subject line" },
+          body: { type: "string", description: "Plain-text email body" },
+        },
+        required: ["to", "subject", "body"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "messagebee_send",
+      description:
+        "MessageBee: send an SMS/iMessage through the macOS Messages app. This is the ONLY correct way to send a text — do not use bash/osascript. Safe by default: messages are sent only to allowlisted recipients; a non-allowlisted handle is refused with an actionable error.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: { type: "string", description: "Recipient handle — phone number (E.164, e.g. +14155551234) or iMessage email" },
+          text: { type: "string", description: "The message text to send" },
+        },
+        required: ["to", "text"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "brain_search",
+      description:
+        "Brain: search durable memory (the brain docs / knowledge base stored under the brain root) for documents relevant to a query. Use this to recall things written down earlier — past decisions, analyses, playbooks, runbooks, references — instead of assuming they aren't available. Returns the top matching docs with a relevance score and a snippet; read the full file (read_file) for detail.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "What you're looking for, in natural language or keywords" },
+          maxResults: { type: "number", description: "How many docs to return (default 5)" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "skill_used",
+      description:
+        "Skill library: record that you applied a skill from the library to this task, so it earns its keep and improves. Call this AFTER following a skill. If you found a better way or a gotcha, include a one-line 'refinement' and it gets appended to the skill for next time.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "The skill name (as shown in the skill library index)" },
+          refinement: { type: "string", description: "Optional: a one-line improvement or gotcha to fold into the skill" },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "digest_url",
+      description:
+        "Digest a web link for later review: spawns a task that fetches the page, summarizes it, and saves a markdown brain doc with the summary + source link. Use when you encounter a link worth saving to the knowledge base (e.g. an article in an email).",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "The http(s) URL to digest" },
+          note: { type: "string", description: "Optional note/context to fold into the digest" },
+        },
+        required: ["url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "code_graph",
+      description:
+        "Deterministic code intelligence: find exactly where a symbol (function/class/type/variable) is DEFINED and EVERY place it is REFERENCED across a project, via an exact word-boundary search + definition classification. Use this for precise navigation and — critically — to VERIFY you found every usage of a symbol you changed (don't trust semantic similarity for that). Complements brain_search; works offline.",
+      parameters: {
+        type: "object",
+        properties: {
+          symbol: { type: "string", description: "The identifier to look up (function/class/type/var name)" },
+          path: { type: "string", description: "Project root to search (defaults to the task's project path)" },
+        },
+        required: ["symbol"],
+      },
+    },
+  },
 ];
 
 export function isBeeTool(name: string): boolean {
@@ -147,6 +268,40 @@ export function availableBeeTools(policy = getConnectivityPolicy()): ChatTool[] 
     const cap = BEE_TOOL_CAPABILITY[t.function.name];
     return policy.getCapability(cap).available;
   });
+}
+
+/** Intent → tool mapping, shown for one available lane. */
+const CAPABILITY_ROUTING_LINES: Record<string, string> = {
+  mailbee_send: "Send an email → **mailbee_send** (sends to trusted recipients; drafts for approval otherwise). Save a draft only → **mailbee_draft**.",
+  messagebee_send: "Send an SMS / iMessage → **messagebee_send** (allowlisted recipients only).",
+  webbee_search: "Read or search the live web → **webbee_search**.",
+  browserbee_run: "Drive a logged-in or multi-step browser workflow (e.g. LinkedIn, web apps) → **browserbee_run**.",
+  desktopbee_action: "Control a native macOS app → **desktopbee_action**.",
+  termbee_run: "Run shell commands in a persistent terminal → **termbee_run**.",
+  brain_search: "Recall a stored document / brain doc / past decision → **brain_search** (search durable memory before assuming it isn't written down).",
+  code_graph: "Find where a symbol is defined + every place it's used → **code_graph** (exact, deterministic — use it to verify you found ALL usages of anything you changed, not just the obvious ones).",
+};
+
+/**
+ * The "chief of staff" routing table injected into the agent's system prompt.
+ * Tells the agent which named tool owns each intent so it dispatches to the
+ * right capability lane instead of improvising with bash/osascript or its own
+ * built-in interfaces. Only lanes available in the current connectivity mode are
+ * listed, so the guidance never points at a tool the agent can't call.
+ */
+export function capabilityRoutingGuide(policy = getConnectivityPolicy()): string {
+  const available = new Set(availableBeeTools(policy).map((t) => t.function.name));
+  const lines: string[] = [];
+  for (const [tool, text] of Object.entries(CAPABILITY_ROUTING_LINES)) {
+    if (available.has(tool)) lines.push(`- ${text}`);
+  }
+  if (lines.length === 0) return "";
+  return [
+    "--- Capability Routing (use these tools; do not improvise) ---",
+    "When a task needs one of these actions you MUST use the named tool rather than bash/osascript or your own built-in interfaces:",
+    ...lines,
+    "Only the capabilities available in the current connectivity mode are listed above and present in your tool set. If you need one that isn't listed, say so plainly instead of working around it.",
+  ].join("\n");
 }
 
 export interface BeeToolContext {
@@ -180,9 +335,169 @@ export async function executeBeeTool(
       return executeTermBeeSession(args);
     case "termbee_run":
       return executeTermBeeRun(args);
+    case "mailbee_send":
+      return executeMailBeeSend(args);
+    case "mailbee_draft":
+      return executeMailBeeDraft(args);
+    case "messagebee_send":
+      return executeMessageBeeSend(args);
+    case "brain_search":
+      return executeBrainSearch(args);
+    case "skill_used":
+      return executeSkillUsed(args);
+    case "digest_url":
+      return executeDigestUrl(args);
+    case "code_graph":
+      return executeCodeGraph(args, ctx);
     default:
       return `Error: Unknown bee tool "${name}"`;
   }
+}
+
+async function executeCodeGraph(args: Record<string, unknown>, ctx: BeeToolContext): Promise<string> {
+  const symbol = typeof args.symbol === "string" ? args.symbol.trim() : "";
+  if (!symbol) return "Error: 'symbol' is required for code_graph.";
+  const root = typeof args.path === "string" && args.path.trim() ? args.path.trim() : ctx.projectPath;
+  const { findSymbol } = await import("@/lib/codegraph/provider");
+  const { formatSymbolGraph } = await import("@/lib/codegraph/contracts");
+  return formatSymbolGraph(await findSymbol(symbol, root));
+}
+
+async function executeDigestUrl(args: Record<string, unknown>): Promise<string> {
+  const url = typeof args.url === "string" ? args.url.trim() : "";
+  if (!url) return "Error: 'url' is required for digest_url.";
+  const note = typeof args.note === "string" ? args.note : undefined;
+  const base = `http://127.0.0.1:${process.env.HIVEMATRIX_PORT ?? "3747"}`;
+  const token = readToken("auth-token") ?? "";
+  try {
+    const res = await fetch(`${base}/digest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ url, note }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return `Error: failed to create digest task (HTTP ${res.status})`;
+    const data = await res.json() as { docPath?: string };
+    return `Created a digest task for ${url} — it will fetch + summarize the page and save a brain doc${data.docPath ? ` at ${data.docPath}` : ""}.`;
+  } catch (err) {
+    return `Error creating digest task: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+async function executeBrainSearch(args: Record<string, unknown>): Promise<string> {
+  const query = typeof args.query === "string" ? args.query.trim() : "";
+  if (!query) return "Error: 'query' is required for brain_search.";
+  const maxResults = typeof args.maxResults === "number" && args.maxResults > 0 ? Math.min(args.maxResults, 20) : undefined;
+  const { formatBrainSearchResult } = await import("@/lib/brain/search");
+  const { isEmbeddingsEnabled } = await import("@/lib/embeddings/provider");
+  if (isEmbeddingsEnabled()) {
+    const { hybridBrainSearch } = await import("@/lib/embeddings/search");
+    return formatBrainSearchResult(await hybridBrainSearch(query, { maxResults }));
+  }
+  const { searchBrain } = await import("@/lib/brain/search");
+  return formatBrainSearchResult(await searchBrain(query, { maxResults }));
+}
+
+async function executeSkillUsed(args: Record<string, unknown>): Promise<string> {
+  const name = typeof args.name === "string" ? args.name.trim() : "";
+  if (!name) return "Error: 'name' (the skill name) is required for skill_used.";
+  const refinement = typeof args.refinement === "string" ? args.refinement.trim() : undefined;
+  const { markSkillUsed } = await import("@/lib/skills/store");
+  const r = await markSkillUsed(name, { refinement });
+  if (!r.ok) return `Error: no skill named "${name}" in the library (nothing recorded).`;
+  return `Recorded use of "${name}" (used ${r.useCount}×)${r.refined ? " and folded in your refinement." : "."}`;
+}
+
+// ── Outbound channel lanes (MailBee / MessageBee) ─────────────────────────────
+//
+// These actually act on the founder's behalf, so the safety boundary lives
+// inside the tool, not in the profile: MailBee sends only to trusted recipients
+// (else it drafts for approval), MessageBee sends only to allowlisted handles.
+// The IO is injectable so the trust/allowlist decision is unit-testable without
+// a live database or Apple Mail/Messages.
+
+export interface MailBeeSendIO {
+  /** True when the recipient is a known sender or sits on a configured trusted domain. */
+  isTrustedRecipient(to: string): boolean;
+  sendMail(to: string, subject: string, body: string): Promise<boolean>;
+  draftMail(to: string, subject: string, body: string): Promise<boolean>;
+}
+
+async function defaultMailBeeIO(): Promise<MailBeeSendIO> {
+  const store = await import("@/lib/mailbee/store");
+  const mail = await import("@/lib/mailbee/applemail");
+  return {
+    isTrustedRecipient: (to) => store.isKnownSender(to) || store.isAuthenticatedDomain(to),
+    sendMail: mail.sendMail,
+    draftMail: mail.draftMail,
+  };
+}
+
+function readStringArgs(args: Record<string, unknown>, keys: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of keys) out[k] = typeof args[k] === "string" ? (args[k] as string).trim() : "";
+  return out;
+}
+
+export async function executeMailBeeSend(args: Record<string, unknown>, io?: MailBeeSendIO): Promise<string> {
+  const { to, subject, body } = readStringArgs(args, ["to", "subject", "body"]);
+  if (!to || !body) return "Error: 'to' and 'body' are required to send an email.";
+  const deps = io ?? (await defaultMailBeeIO());
+
+  if (!deps.isTrustedRecipient(to)) {
+    const drafted = await deps.draftMail(to, subject, body);
+    return drafted
+      ? `Recipient ${to} is not on the MailBee trusted allowlist, so the email was NOT sent — it was saved to Mail Drafts for your approval. Approve/edit it in Mail.app, or add ${to} (or its domain) to the MailBee allowlist to enable autonomous send.`
+      : `Error: ${to} is not trusted and saving the draft to Mail failed. Is Mail.app running with Automation permission granted?`;
+  }
+
+  const sent = await deps.sendMail(to, subject, body);
+  return sent
+    ? `Email sent to ${to} via Apple Mail (recipient is on the trusted allowlist).`
+    : `Error: sending the email to ${to} failed. Is Mail.app running with Automation permission granted?`;
+}
+
+export async function executeMailBeeDraft(args: Record<string, unknown>, io?: MailBeeSendIO): Promise<string> {
+  const { to, subject, body } = readStringArgs(args, ["to", "subject", "body"]);
+  if (!to || !body) return "Error: 'to' and 'body' are required to draft an email.";
+  const deps = io ?? (await defaultMailBeeIO());
+  const drafted = await deps.draftMail(to, subject, body);
+  return drafted
+    ? `Draft saved to Mail Drafts for ${to} — review and send it from Mail.app when ready.`
+    : `Error: saving the draft to Mail failed. Is Mail.app running with Automation permission granted?`;
+}
+
+export interface MessageBeeSendIO {
+  isAllowed(handle: string): boolean;
+  sendIMessage(handle: string, text: string): Promise<boolean>;
+  recordOutbound(): void;
+}
+
+async function defaultMessageBeeIO(): Promise<MessageBeeSendIO> {
+  const store = await import("@/lib/messagebee/store");
+  const im = await import("@/lib/messagebee/imessage");
+  return {
+    isAllowed: store.isAllowed,
+    sendIMessage: im.sendIMessage,
+    recordOutbound: store.recordOutbound,
+  };
+}
+
+export async function executeMessageBeeSend(args: Record<string, unknown>, io?: MessageBeeSendIO): Promise<string> {
+  const to = typeof args.to === "string" ? args.to.trim() : "";
+  const text = typeof args.text === "string" ? args.text.trim() : "";
+  if (!to || !text) return "Error: 'to' and 'text' are required to send a message.";
+  const deps = io ?? (await defaultMessageBeeIO());
+
+  if (!deps.isAllowed(to)) {
+    return `Error: ${to} is not on the MessageBee allowlist. SMS/iMessage can only be sent to allowlisted handles — add ${to} in MessageBee settings first, then retry.`;
+  }
+
+  const sent = await deps.sendIMessage(to, text);
+  if (sent) deps.recordOutbound();
+  return sent
+    ? `Message sent to ${to} via Messages.`
+    : `Error: sending the message to ${to} failed. Is Messages signed in and the handle reachable via iMessage?`;
 }
 
 async function executeTermBeeSession(args: Record<string, unknown>): Promise<string> {

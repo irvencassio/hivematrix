@@ -12,7 +12,9 @@ import {
   parseSSEStream,
 } from "./openai-stream-adapter";
 import { TOOL_DEFINITIONS, executeTool, type ToolContext, type ChatTool } from "./tool-bridge";
-import { availableBeeTools } from "./bee-tools";
+import { availableBeeTools, capabilityRoutingGuide } from "./bee-tools";
+import { listSkills } from "@/lib/skills/store";
+import { formatSkillIndex, skillRunsOn } from "@/lib/skills/contracts";
 import { getAgentProfile } from "@/lib/config/agent-profiles";
 import { buildBrainMemoryBundle } from "@/lib/brain/memory-bundle";
 import { brainDocPolicyText } from "@/lib/brain/settings";
@@ -20,6 +22,9 @@ import { resolveThinkingMode } from "@/lib/config/budget-policy";
 
 const MAX_TURNS = 50;
 const LOCAL_OPENAI_COMPATIBLE_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai"]);
+// Providers HiveMatrix serves locally (Qwen). nanai is excluded — it's cloud
+// image generation, not a self-hosted endpoint we wait on for cold start.
+const LOCAL_SERVED_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm"]);
 
 // Loop-guard thresholds: how many identical tool calls before intervening
 const LOOP_WARN_THRESHOLD = 3;  // inject "you already have this" into tool result
@@ -68,6 +73,19 @@ export function genericThinkingInstruction(thinkingMode?: string | null): string
 async function buildSystemPrompt(projectPath: string, agentType: string, thinkingMode?: string | null): Promise<string> {
   const profile = getAgentProfile(agentType);
   let prompt = `${profile.systemPrompt}\n\n--- Brain Doc Policy ---\n${brainDocPolicyText()}`;
+  // Chief-of-staff routing table: tell the agent which capability lane owns each
+  // intent (email → MailBee, browser → BrowserBee, …) so it dispatches to the
+  // right tool instead of improvising. Reflects only currently-available lanes.
+  const routingGuide = capabilityRoutingGuide();
+  if (routingGuide) {
+    prompt += `\n\n${routingGuide}`;
+  }
+  // Skill library index, filtered to skills compatible with THIS harness (the
+  // local/Qwen agent) — chief-of-staff awareness of skill compatibility. Bounded.
+  const skillIndex = formatSkillIndex((await listSkills()).filter((s) => s.trusted && skillRunsOn(s.compat, "qwen")));
+  if (skillIndex) {
+    prompt += `\n\n${skillIndex}`;
+  }
   const thinkingInstruction = genericThinkingInstruction(thinkingMode);
   if (thinkingInstruction) {
     prompt += `\n\n--- Reasoning Effort ---\n${thinkingInstruction}`;
@@ -86,6 +104,14 @@ async function buildSystemPrompt(projectPath: string, agentType: string, thinkin
 
   if (memoryBundle) {
     prompt += memoryBundle;
+  }
+
+  // Inject the repo's AGENTS.md (the converged conventions standard) so the local
+  // agent follows house style — it doesn't read AGENTS.md natively the way Codex does.
+  if (profile.tools.length > 0) {
+    const { readAgentsMd, formatAgentsMd } = await import("@/lib/conventions/agents-md");
+    const agents = formatAgentsMd(await readAgentsMd(projectPath));
+    if (agents) prompt += `\n\n${agents}`;
   }
 
   // Only inject CLAUDE.md for profiles that request it (developer, cto).
@@ -263,6 +289,28 @@ async function runAgentLoop(
 ): Promise<{ code: number; result: string; turns: number; totalTokens: number; inputTokens: number; outputTokens: number }> {
   const messages = await buildMessages(description, projectPath, agentType, thinkingMode);
   const profileTools = getProfileTools(agentType);
+
+  // Pre-flight: if this is a locally-served model (Qwen), make sure the server is
+  // actually up before we start. The supervisor relaunches a crashed server on a
+  // ~12s throttle and an 80B model takes time to load — without this wait a task
+  // dispatched in that window fails with a cryptic connection error and looks
+  // like "Qwen randomly doesn't work". Wait through the cold-start instead.
+  if (LOCAL_SERVED_PROVIDERS.has(provider.name)) {
+    const { isServerUp, waitForServerReady } = await import("@/lib/local-model/serving");
+    if (!(await isServerUp(provider.endpoint))) {
+      onEvent(taskId, { type: "error", content: `Local model server not ready at ${provider.endpoint} — waiting for it to come up (supervisor is (re)launching it)…` });
+      const ready = await waitForServerReady(provider.endpoint, { timeoutMs: 45_000, signal: controller.signal });
+      if (controller.signal.aborted) {
+        return { code: 1, result: "Aborted", turns: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0 };
+      }
+      if (!ready) {
+        const msg = `Local model (Qwen) at ${provider.endpoint} did not become reachable within 45s. Check that the inference server is configured to launch (config qwen.location="local" + a valid provider/serveCommand) and that the model fits in memory. Connectivity mode determines whether this task can fall back to frontier.`;
+        onEvent(taskId, { type: "error", content: msg });
+        return { code: 1, result: msg, turns: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0 };
+      }
+    }
+  }
+
   let turns = 0;
   let fullText = "";
   let totalTokens = 0;

@@ -48,10 +48,16 @@ import {
   type DirectiveCheckpointLevel,
   type DirectiveCorrectiveTask,
   type DirectivePlan,
+  type DirectiveRetrospective,
   writeDirectiveRetrospectiveLearning,
 } from "./directive-autonomy";
 import { requestCheckpointApproval, readCheckpointDecision } from "./approval";
 import { configuredBrainRootDir, defaultBrainRootDir } from "@/lib/brain/settings";
+import {
+  isSelfImprovementDirective,
+  formatOpenFeedbackForPlanning,
+  resolveFeedbackForCompletedTask,
+} from "@/lib/feedback/self-improvement";
 import { deriveOutput } from "./derive-output";
 import type { Turn } from "./turn-types";
 
@@ -288,6 +294,17 @@ function buildPlannerPrompt(
     ? criteria.map((c, index) => `${index + 1}. ${c._id}: ${c.description}`).join("\n")
     : "No explicit criteria exist yet. Plan against the directive goal.";
 
+  // Only the self-improvement directive pulls the global feedback backlog into
+  // its plan; ordinary directives must not be derailed by unrelated feedback.
+  const feedbackBlock = isSelfImprovementDirective(directive.goal)
+    ? (() => {
+        const fragment = formatOpenFeedbackForPlanning(10);
+        return fragment
+          ? `\n${fragment}\nFor each feedback item you choose to address, create a task and set its "feedbackId" to that item's id (shown as the leading token) so it auto-closes when this run proves out.\n`
+          : "\nNo open feedback right now — nothing to do this run.\n";
+      })()
+    : "";
+
   return [
     "You are planning a HiveMatrix Directive run.",
     "",
@@ -296,7 +313,7 @@ function buildPlannerPrompt(
     "",
     "Unproven criteria:",
     criteriaText,
-    "",
+    feedbackBlock,
     "Return only fenced JSON with this shape:",
     "```json",
     "{",
@@ -307,7 +324,8 @@ function buildPlannerPrompt(
     '      "agentType": "developer",',
     '      "dependsOn": [0],',
     '      "criterionRefs": ["criterion id or exact description"],',
-    '      "goalIndex": 0',
+    '      "goalIndex": 0,',
+    '      "feedbackId": "(optional) the feedbackId this task addresses"',
     "    }",
     "  ]",
     "}",
@@ -429,11 +447,15 @@ function buildRetrospectivePrompt(directive: DirectiveRow, run: RunRow, done: bo
     "  ],",
     '  "accessLedger": [',
     '    { "system": "service name", "status": "configured", "notes": "access state or blocker" }',
+    "  ],",
+    '  "skills": [',
+    '    { "name": "short-skill-name", "description": "one line: when to use it", "tags": ["area"],',
+    '      "body": "A reusable recipe a future agent can follow for this kind of task: when it applies, the concrete steps, and the gotchas. Only include a skill if a genuinely reusable procedure worked." }',
     "  ]",
     "}",
     "```",
     "",
-    "Keep entries factual and reusable. Omit arrays when there is nothing useful to record.",
+    "Keep entries factual and reusable. Omit arrays when there is nothing useful to record. Only emit a skill when a repeatable procedure actually worked — not for one-off work.",
   ].join("\n");
 }
 
@@ -609,6 +631,7 @@ async function createAutonomyPlanTasks(directive: DirectiveRow, run: RunRow, pla
         dependsOnDagIndices: planned.dependsOn,
         criterionIds: planned.criterionIds,
         goalIndex: planned.goalIndex,
+        ...(planned.feedbackId ? { feedbackId: planned.feedbackId } : {}),
       },
     });
     createdTaskIds.push(task._id.toString());
@@ -649,6 +672,7 @@ async function createReplanTasks(directive: DirectiveRow, run: RunRow, plan: Dir
         dependsOnDagIndices: planned.dependsOn,
         criterionIds: planned.criterionIds,
         goalIndex: planned.goalIndex,
+        ...(planned.feedbackId ? { feedbackId: planned.feedbackId } : {}),
         replan: true,
         replanIndex: index,
       },
@@ -784,6 +808,7 @@ async function verifyRun(directive: DirectiveRow, run: RunRow, nowIso: string): 
             proven.push(c._id);
           }
         }
+        if (proven.length > 0) await resolveProvenFeedback(directive, run);
         setRunPhase(run._id, "reflect");
         journal(run._id, directive._id, "reviewed", {
           status: parsed.review.status,
@@ -852,6 +877,7 @@ async function verifyRun(directive: DirectiveRow, run: RunRow, nowIso: string): 
               proven.push(c._id);
             }
           }
+          if (proven.length > 0) await resolveProvenFeedback(directive, run);
           setRunPhase(run._id, "reflect");
           journal(run._id, directive._id, "reviewed", {
             status: parsed.review.status,
@@ -899,6 +925,7 @@ async function verifyRun(directive: DirectiveRow, run: RunRow, nowIso: string): 
     }
   }
 
+  if (proven.length > 0) await resolveProvenFeedback(directive, run);
   setRunPhase(run._id, "reflect");
   journal(run._id, directive._id, "verified", { provenCriteria: proven, successfulTasks: succeeded.size });
 }
@@ -934,6 +961,68 @@ async function createCorrectiveTasks(directive: DirectiveRow, run: RunRow, corre
   return createdTaskIds;
 }
 
+/**
+ * Self-improvement bridge: capture a retrospective's problems + follow-ups as
+ * deduped feedback so recurring issues become tracked, measurable work instead
+ * of evaporating into playbook prose. Non-critical — never blocks the run.
+ */
+async function recordReflectionFeedback(retrospective: DirectiveRetrospective, directive: DirectiveRow, run: RunRow): Promise<void> {
+  try {
+    const { recordRetrospectiveFeedback } = await import("@/lib/feedback/self-improvement");
+    const counts = recordRetrospectiveFeedback(retrospective, `directive:${run._id}`);
+    if (counts.created > 0 || counts.skipped > 0) {
+      journal(run._id, directive._id, "reflection_feedback_recorded", counts);
+    }
+  } catch (err) {
+    journal(run._id, directive._id, "reflection_feedback_failed", { reason: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/**
+ * Hook B of the self-improvement loop: when a run proves out, close the feedback
+ * items its feedback-linked tasks addressed (triaged → done). The forward-only
+ * resolver never re-opens or downgrades. Non-critical — never blocks the run.
+ */
+async function resolveProvenFeedback(directive: DirectiveRow, run: RunRow): Promise<void> {
+  try {
+    const tasks = await collectAllRunTasks(directive._id, run._id);
+    let closed = 0;
+    for (const t of tasks) {
+      const out = (t.output ?? {}) as Record<string, unknown>;
+      const fid = typeof out.feedbackId === "string" ? out.feedbackId : null;
+      if (!fid) continue;
+      if (t.status !== "review" && t.status !== "done") continue;
+      if (resolveFeedbackForCompletedTask(fid, "done")) closed++;
+    }
+    if (closed > 0) journal(run._id, directive._id, "feedback_closed_on_proof", { closed });
+  } catch (err) {
+    journal(run._id, directive._id, "feedback_close_failed", { reason: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/**
+ * Skill distillation: persist the retrospective's reusable recipes into the
+ * skill library (<brain>/skills/), refining any that already exist. The
+ * constructive half of self-improvement — experience becomes applicable skill.
+ * Non-critical — never blocks the run.
+ */
+async function recordDistilledSkills(retrospective: DirectiveRetrospective, directive: DirectiveRow, run: RunRow): Promise<void> {
+  if (!retrospective.skills || retrospective.skills.length === 0) return;
+  try {
+    const { upsertSkill } = await import("@/lib/skills/store");
+    let created = 0;
+    let refined = 0;
+    for (const s of retrospective.skills) {
+      const r = await upsertSkill({ name: s.name, description: s.description, tags: s.tags, body: s.body, source: `directive:${run._id}` });
+      if (r.created) created++;
+      else if (r.refined) refined++;
+    }
+    if (created > 0 || refined > 0) journal(run._id, directive._id, "skills_distilled", { created, refined });
+  } catch (err) {
+    journal(run._id, directive._id, "skills_distill_failed", { reason: err instanceof Error ? err.message : String(err) });
+  }
+}
+
 async function reflectAndYield(directive: DirectiveRow, run: RunRow, nowIso: string, options: DirectiveTickOptions = {}): Promise<void> {
   const done = allCriteriaProven(directive._id);
   const reflection = done
@@ -957,6 +1046,8 @@ async function reflectAndYield(directive: DirectiveRow, run: RunRow, nowIso: str
             dateStr: nowIso.slice(0, 10),
           });
           journal(run._id, directive._id, "retrospective_recorded", { ...result });
+          await recordReflectionFeedback(parsed.retrospective, directive, run);
+          await recordDistilledSkills(parsed.retrospective, directive, run);
         } else {
           journal(run._id, directive._id, "retrospective_fallback", { reason: parsed.error ?? "invalid retrospective output" });
         }
@@ -998,6 +1089,8 @@ async function reflectAndYield(directive: DirectiveRow, run: RunRow, nowIso: str
               dateStr: nowIso.slice(0, 10),
             });
             journal(run._id, directive._id, "retrospective_recorded", { ...result });
+            await recordReflectionFeedback(parsed.retrospective, directive, run);
+            await recordDistilledSkills(parsed.retrospective, directive, run);
           } else {
             journal(run._id, directive._id, "retrospective_fallback", {
               reason: parsed.error ?? "invalid retrospective output",

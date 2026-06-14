@@ -10,8 +10,19 @@ import { spawn } from "child_process";
 import type { AgentProcess, AgentEventHandler } from "./subprocess";
 import { findBinary, CODEX_BINARY_SEARCH_PATHS, buildCliPath } from "@/lib/config/binary-detection";
 import { resolveCodexModel } from "@/lib/models/catalog";
+import { outboundHttpRoutingPrompt, brainSearchRoutingPrompt, beeToolsRoutingPrompt } from "./outbound-routing";
 
 let fakePidCounter = -5000;
+
+/**
+ * Codex `exec` has no `--append-system-prompt`, so the outbound-channel routing
+ * guidance is prepended to the prompt (clearly delimited) — same end as the
+ * Claude Code bridge: send email/SMS through the daemon's trust-gated endpoints
+ * with the shell, not osascript.
+ */
+export function buildCodexPrompt(description: string): string {
+  return `${outboundHttpRoutingPrompt()}\n\n${brainSearchRoutingPrompt()}\n\n${beeToolsRoutingPrompt()}\n\n--- Your task ---\n${description}`;
+}
 
 export function spawnCodexAgent(
   taskId: string,
@@ -41,11 +52,11 @@ export function spawnCodexAgent(
   if (fastMode) {
     args.push("-c", 'model_reasoning_effort="low"');
   }
-  args.push(description);
+  args.push(buildCodexPrompt(description));
 
   const proc = spawn(codexPath, args, {
     cwd: projectPath,
-    env: { ...process.env, PATH: buildCliPath() },
+    env: { ...process.env, PATH: buildCliPath(), HIVE_DAEMON_PORT: process.env.HIVEMATRIX_PORT ?? "3747" },
     // The prompt is passed as a positional arg, so codex needs no stdin.
     // Leaving stdin as an open pipe makes `codex exec` block forever on
     // "Reading additional input from stdin..." — close it so it proceeds.

@@ -14,6 +14,8 @@ export interface DirectivePlanTask {
   dependsOn: number[];
   criterionIds: string[];
   goalIndex: number | null;
+  /** When this task addresses a specific feedback item, its id — closed when the run proves out. */
+  feedbackId: string | null;
 }
 
 export interface DirectivePlan {
@@ -54,6 +56,13 @@ export interface DirectiveAccessLedgerEntry {
   notes?: string;
 }
 
+export interface DirectiveDistilledSkill {
+  name: string;
+  description: string;
+  tags: string[];
+  body: string;
+}
+
 export interface DirectiveRetrospective {
   lessonsLearned: string[];
   whatWorked: string[];
@@ -62,6 +71,8 @@ export interface DirectiveRetrospective {
   overallAssessment: string;
   playbookDeltas: DirectivePlaybookDelta[];
   accessLedger: DirectiveAccessLedgerEntry[];
+  /** Reusable procedural recipes distilled from what worked → the skill library. */
+  skills: DirectiveDistilledSkill[];
 }
 
 export interface DirectiveRetrospectiveLearningContext {
@@ -164,6 +175,7 @@ export function normalizeDirectivePlan(input: unknown, criteria: DirectiveCriter
       dependsOn: Array.from(new Set(dependsOn)),
       criterionIds: resolveCriterionIds(task.criterionRefs, criteria),
       goalIndex: typeof task.goalIndex === "number" && Number.isInteger(task.goalIndex) ? task.goalIndex : null,
+      feedbackId: nonEmptyString(task.feedbackId),
     });
   });
 
@@ -223,8 +235,26 @@ export function parseDirectiveRetrospectiveOutput(text: string): { retrospective
       overallAssessment: nonEmptyString(extracted.parsed.overallAssessment) ?? "",
       playbookDeltas: normalizePlaybookDeltas(extracted.parsed.playbookDeltas),
       accessLedger: normalizeAccessLedger(extracted.parsed.accessLedger),
+      skills: normalizeDistilledSkills(extracted.parsed.skills),
     },
   };
+}
+
+function normalizeDistilledSkills(value: unknown): DirectiveDistilledSkill[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const rec = item as Record<string, unknown>;
+    const name = nonEmptyString(rec.name);
+    const body = nonEmptyString(rec.body);
+    if (!name || !body) return []; // a skill needs at least a name and a recipe body
+    const tags = Array.isArray(rec.tags) ? rec.tags.map(nonEmptyString).filter((t): t is string => !!t) : [];
+    return [{
+      name,
+      description: nonEmptyString(rec.description) ?? name,
+      tags,
+      body,
+    }];
+  });
 }
 
 export async function writeDirectiveRetrospectiveLearning(

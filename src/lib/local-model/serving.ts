@@ -103,6 +103,30 @@ export async function isServerUp(endpoint: string, timeoutMs = 2_500): Promise<b
   }
 }
 
+/**
+ * Poll until the local server answers (or timeout). This absorbs the model's
+ * cold-start latency and the supervisor's relaunch-throttle window so a task
+ * dispatched the moment the server is briefly down WAITS for it instead of
+ * failing with a confusing connection error. Returns true once it's up, false
+ * if the window elapses (or the abort signal fires).
+ */
+export async function waitForServerReady(
+  endpoint: string,
+  opts: { timeoutMs?: number; intervalMs?: number; probeTimeoutMs?: number; signal?: AbortSignal } = {},
+): Promise<boolean> {
+  const timeoutMs = opts.timeoutMs ?? 30_000;
+  const intervalMs = opts.intervalMs ?? 1_500;
+  const probeTimeoutMs = opts.probeTimeoutMs ?? 2_500;
+  const end = Date.now() + timeoutMs;
+  if (await isServerUp(endpoint, probeTimeoutMs)) return true;
+  while (Date.now() < end) {
+    if (opts.signal?.aborted) return false;
+    await new Promise((r) => setTimeout(r, intervalMs));
+    if (await isServerUp(endpoint, probeTimeoutMs)) return true;
+  }
+  return false;
+}
+
 // ── Supervisor ────────────────────────────────────────────────────────────────
 
 export interface ServingStatus {

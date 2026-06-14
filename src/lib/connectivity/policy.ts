@@ -17,7 +17,7 @@ import { EventEmitter } from "events";
 
 export type ConnectivityMode = "cloud-ok" | "local-only" | "offline";
 
-export type CapabilityId = "frontier" | "local" | "webbee" | "browserbee" | "desktopbee" | "termbee" | "image";
+export type CapabilityId = "frontier" | "local" | "webbee" | "browserbee" | "desktopbee" | "termbee" | "image" | "mailbee" | "messagebee" | "brain" | "codegraph";
 
 export interface CapabilityAvailability {
   available: boolean;
@@ -33,6 +33,10 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     desktopbee: { available: true },
     termbee:    { available: true },
     image:      { available: true },
+    mailbee:    { available: true },
+    messagebee: { available: true },
+    brain:      { available: true },
+    codegraph:  { available: true },
   },
   "local-only": {
     frontier:   { available: false, reason: "Frontier APIs unavailable in local-only mode" },
@@ -42,6 +46,11 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     desktopbee: { available: true },
     termbee:    { available: true },
     image:      { available: false, reason: "Nano Banana image generation requires cloud; local mflux fallback if configured" },
+    // Apple Mail / Messages are driven via local osascript + chat.db — no cloud needed.
+    mailbee:    { available: true },
+    messagebee: { available: true },
+    brain:      { available: true }, // local file reads of the brain root
+    codegraph:  { available: true }, // local symbol search (grep/rg)
   },
   "offline": {
     frontier:   { available: false, reason: "No network connectivity" },
@@ -51,6 +60,12 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     desktopbee: { available: true },
     termbee:    { available: true },
     image:      { available: false, reason: "No network connectivity; local mflux fallback if configured" },
+    // MailBee/MessageBee deliver through local apps; sending works even fully offline
+    // (Mail/Messages queue + send when the host itself has a link).
+    mailbee:    { available: true },
+    messagebee: { available: true },
+    brain:      { available: true }, // brain docs are local files
+    codegraph:  { available: true }, // local symbol search works offline
   },
 };
 

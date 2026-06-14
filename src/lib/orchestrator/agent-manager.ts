@@ -778,6 +778,16 @@ class AgentManager {
             reviewState = null;
           }
         }
+        // Self-improvement Hook A: if this task addressed a feedback item, advance
+        // that item as the task completes (success → triaged; done → done). The
+        // resolver is forward-only and never re-opens. Non-critical.
+        const linkedFeedbackId = typeof output.feedbackId === "string" ? output.feedbackId : null;
+        if (linkedFeedbackId) {
+          try {
+            const { resolveFeedbackForCompletedTask } = await import("@/lib/feedback/self-improvement");
+            resolveFeedbackForCompletedTask(linkedFeedbackId, nextStatus);
+          } catch { /* non-critical */ }
+        }
         const update: Record<string, unknown> = {
           status: nextStatus,
           reviewState,
@@ -807,6 +817,22 @@ class AgentManager {
           summary,
           error: agentReportedFailure ? currentError : null,
         });
+        // Compliance audit: prompt + outcome + diff. Never breaks the task.
+        try {
+          const { recordTaskAudit } = await import("@/lib/audit/task-audit");
+          const t = task as Record<string, unknown> | null;
+          await recordTaskAudit({
+            taskId,
+            agentType: typeof t?.profile === "string" ? t.profile : undefined,
+            model: task?.model ?? undefined,
+            project: task?.project,
+            prompt: typeof t?.description === "string" ? t.description : undefined,
+            summary,
+            status: nextStatus,
+            turns: Array.isArray(turns) ? turns.length : (typeof turns === "number" ? turns : undefined),
+            projectPath: agent.projectPath,
+          });
+        } catch { /* non-critical */ }
       } else {
         const completedAt = new Date().toISOString();
         const error = signal
@@ -840,6 +866,17 @@ class AgentManager {
           summary,
           error,
         });
+        try {
+          const { recordAudit } = await import("@/lib/audit/audit");
+          const t = task as Record<string, unknown> | null;
+          recordAudit({
+            event: "task_failed", ts: "", taskId,
+            agentType: typeof t?.profile === "string" ? t.profile : undefined,
+            model: task?.model ?? undefined, project: task?.project,
+            prompt: typeof t?.description === "string" ? t.description : undefined,
+            summary: error, status: "failed",
+          });
+        } catch { /* non-critical */ }
       }
     } catch (err) {
       console.error("Failed to update task on agent exit:", err);

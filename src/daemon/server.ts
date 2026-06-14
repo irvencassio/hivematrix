@@ -72,6 +72,16 @@ function parseBody(req: IncomingMessage): Promise<unknown> {
   });
 }
 
+/** Read the raw request body as a string (no parsing). */
+function readRawBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+    req.on("error", reject);
+  });
+}
+
 function parseQueryString(url: string): Record<string, string> {
   const idx = url.indexOf("?");
   if (idx === -1) return {};
@@ -212,6 +222,40 @@ export function createDaemonServer() {
           autoUpdate: getAutoUpdate(),
           frontierProvider: getFrontierProvider(),
         });
+        return;
+      }
+
+      // GET /settings/keys — which API keys (env vars) are SET. Never returns
+      // values — only env name, label, purpose, and a boolean. Keys are provided
+      // via environment variables, not config.json.
+      if (req.method === "GET" && urlPath === "/settings/keys") {
+        const { secretStatuses } = await import("@/lib/config/secrets");
+        json(res, 200, { keys: secretStatuses() });
+        return;
+      }
+
+      // GET /settings/features — feature flags + their on/off state.
+      if (req.method === "GET" && urlPath === "/settings/features") {
+        const { getFeatureFlags, KNOWN_FEATURES } = await import("@/lib/config/features");
+        const flags = getFeatureFlags();
+        json(res, 200, { features: KNOWN_FEATURES.map((f) => ({ ...f, enabled: flags[f.key] === true })) });
+        return;
+      }
+      // POST /settings/features — { key, enabled } toggle a flag.
+      if (req.method === "POST" && urlPath === "/settings/features") {
+        const { setFeature, KNOWN_FEATURES } = await import("@/lib/config/features");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const key = String(body.key ?? "");
+        if (!KNOWN_FEATURES.some((f) => f.key === key)) { json(res, 400, { error: `unknown feature "${key}"` }); return; }
+        const flags = setFeature(key as "ado", body.enabled === true);
+        json(res, 200, { features: flags });
+        return;
+      }
+
+      // GET /ado — Azure DevOps status (flag on? org configured? auth ready?).
+      if (req.method === "GET" && urlPath === "/ado") {
+        const { adoStatus } = await import("@/lib/ado/mcp");
+        json(res, 200, adoStatus());
         return;
       }
 
@@ -656,6 +700,242 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /feedback/loop-health — the self-improvement signal: how much of the
+      // captured backlog (incl. items auto-filed from directive reflection) is
+      // actually being resolved, how many issues recur, and backlog age.
+      if (req.method === "GET" && urlPath === "/feedback/loop-health") {
+        const { loopHealth } = await import("@/lib/feedback/self-improvement");
+        json(res, 200, loopHealth());
+        return;
+      }
+
+      // GET /feedback/for-planning?n= — the open backlog (oldest first) a
+      // maintenance/self-improvement directive can pull into its plan, plus a
+      // ready-to-inject prompt fragment.
+      if (req.method === "GET" && urlPath === "/feedback/for-planning") {
+        const { openFeedbackForPlanning, formatOpenFeedbackForPlanning } = await import("@/lib/feedback/self-improvement");
+        const nRaw = parseInt(parseQueryString(req.url ?? "").n ?? "", 10);
+        const limit = Number.isFinite(nRaw) && nRaw > 0 ? Math.min(nRaw, 50) : undefined;
+        json(res, 200, { items: openFeedbackForPlanning(limit), promptFragment: formatOpenFeedbackForPlanning(limit) });
+        return;
+      }
+
+      // POST /feedback/:id/work — producer (operator): turn a feedback item into
+      // a feedback-linked task and move the item to triaged. When the task
+      // completes, Hook A advances the item (→ done if proven).
+      const feedbackWorkMatch = urlPath.match(/^\/feedback\/([^/]+)\/work$/);
+      if (req.method === "POST" && feedbackWorkMatch) {
+        const { getFeedback, setFeedbackStatus } = await import("@/lib/feedback/feedback");
+        const { Task, generateId } = await import("@/lib/db");
+        const item = getFeedback(feedbackWorkMatch[1]);
+        if (!item) { json(res, 404, { error: "feedback not found" }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        const task = await Task.create({
+          _id: generateId(),
+          title: `[feedback] ${item.title.slice(0, 60)}`,
+          description: `Address this ${item.kind} from the feedback backlog:\n\n${item.title}\n\n${item.detail ?? ""}`.trim(),
+          project: typeof body.project === "string" ? body.project : "hivematrix",
+          projectPath: typeof body.projectPath === "string" ? body.projectPath : process.cwd(),
+          profile: typeof body.agentType === "string" ? body.agentType : "developer",
+          status: "backlog",
+          executor: "agent",
+          source: "feedback",
+          output: { feedbackId: item._id },
+        });
+        setFeedbackStatus(item._id, "triaged");
+        broadcast("tasks:created", { taskId: task._id });
+        json(res, 201, { task, feedback: getFeedback(item._id) });
+        return;
+      }
+
+      // POST /feedback/maintenance-directive — producer (autonomous): install the
+      // standing self-improvement directive that pulls the backlog each run.
+      if (req.method === "POST" && urlPath === "/feedback/maintenance-directive") {
+        const { buildSelfImprovementDirective } = await import("@/lib/feedback/self-improvement");
+        const { createDirective } = await import("@/lib/orchestrator/directive-store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const directive = createDirective(buildSelfImprovementDirective({
+          project: typeof body.project === "string" ? body.project : undefined,
+          projectPath: typeof body.projectPath === "string" ? body.projectPath : undefined,
+          dailyAtHour: typeof body.dailyAtHour === "number" ? body.dailyAtHour : undefined,
+        }));
+        json(res, 201, directive);
+        return;
+      }
+
+      // GET /youtube — watcher status (configured? enabled? last poll/error + counts).
+      if (req.method === "GET" && urlPath === "/youtube") {
+        const { getYouTubeConfig, isYouTubeWatcherEnabled } = await import("@/lib/youtube/config");
+        const { getWatcherState } = await import("@/lib/youtube/store");
+        const cfg = getYouTubeConfig();
+        json(res, 200, {
+          configured: !!cfg && !!cfg.apiKey && !!cfg.playlistId,
+          enabled: isYouTubeWatcherEnabled(),
+          playlistId: cfg?.playlistId ?? null,
+          pollIntervalMinutes: cfg?.pollIntervalMinutes ?? null,
+          state: getWatcherState(),
+        });
+        return;
+      }
+
+      // POST /youtube/poll — run one watcher cycle now (manual trigger for setup/testing).
+      if (req.method === "POST" && urlPath === "/youtube/poll") {
+        const { isYouTubeWatcherEnabled } = await import("@/lib/youtube/config");
+        if (!isYouTubeWatcherEnabled()) {
+          json(res, 400, { error: "YouTube watcher is not configured/enabled (set youtube.enabled, apiKey, playlistId in ~/.hivematrix/config.json)" });
+          return;
+        }
+        const { pollOnce } = await import("@/lib/youtube/poller");
+        const { getWatcherState } = await import("@/lib/youtube/store");
+        await pollOnce();
+        json(res, 200, { ok: true, state: getWatcherState() });
+        return;
+      }
+
+      // POST /digest — "drop in a link" → a task fetches + summarizes the URL and
+      // saves a markdown brain doc for review (scenario #43, the article path the
+      // YouTube watcher doesn't cover). No external dependency.
+      if (req.method === "POST" && urlPath === "/digest") {
+        const { isHttpUrl, digestDocFilename, buildDigestTaskDescription } = await import("@/lib/digest/contracts");
+        const { configuredBrainRootDir, defaultBrainRootDir } = await import("@/lib/brain/settings");
+        const { Task, generateId } = await import("@/lib/db");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const url = typeof body.url === "string" ? body.url.trim() : "";
+        if (!isHttpUrl(url)) { json(res, 400, { error: "a valid http(s) url is required" }); return; }
+        const note = typeof body.note === "string" ? body.note : undefined;
+        const root = configuredBrainRootDir() ?? defaultBrainRootDir();
+        const dateStr = new Date().toISOString().slice(0, 10);
+        const docPath = `${root}/digests/${digestDocFilename(url, dateStr)}`;
+        const task = await Task.create({
+          _id: generateId(),
+          title: `[digest] ${url.slice(0, 60)}`,
+          description: buildDigestTaskDescription({ url, note, docPath }),
+          project: "ops",
+          projectPath: process.cwd(),
+          profile: "researcher",
+          status: "backlog",
+          executor: "agent",
+          source: "digest",
+          output: { digest: { url, docPath } },
+        });
+        broadcast("tasks:created", { taskId: task._id });
+        json(res, 201, { task, docPath });
+        return;
+      }
+
+      // X (Twitter) posting — OPERATOR-triggered (outward-facing/irreversible, so
+      // the operator calling this IS the approval). GET shows keys-set; POST posts.
+      if (req.method === "GET" && urlPath === "/x") {
+        const { isXConfigured } = await import("@/lib/x/provider");
+        json(res, 200, { configured: isXConfigured() });
+        return;
+      }
+      if (req.method === "POST" && urlPath === "/x/post") {
+        const { isXConfigured, postTweet } = await import("@/lib/x/provider");
+        if (!isXConfigured()) { json(res, 400, { error: "X not configured — set X_API_KEY/X_API_SECRET/X_ACCESS_TOKEN/X_ACCESS_SECRET env vars" }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        const text = typeof body.text === "string" ? body.text : "";
+        const r = await postTweet(text, { replyToId: typeof body.replyToId === "string" ? body.replyToId : undefined });
+        json(res, r.ok ? 201 : 502, r);
+        return;
+      }
+      if (req.method === "POST" && urlPath === "/x/thread") {
+        const { isXConfigured, postThread } = await import("@/lib/x/provider");
+        if (!isXConfigured()) { json(res, 400, { error: "X not configured — set X_* env vars" }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        const tweets = Array.isArray(body.tweets) ? body.tweets.filter((t): t is string => typeof t === "string" && t.trim().length > 0) : [];
+        if (tweets.length === 0) { json(res, 400, { error: "tweets[] (non-empty strings) required" }); return; }
+        json(res, 200, await postThread(tweets));
+        return;
+      }
+
+      // GET /traderbee — watch/alert status (keys set? watchlist + last poll).
+      // ANALYSIS & ALERTS ONLY — never trades.
+      if (req.method === "GET" && urlPath === "/traderbee") {
+        const { isTraderBeeConfigured } = await import("@/lib/traderbee/provider");
+        const { getWatchlist, getTraderBeeState } = await import("@/lib/traderbee/store");
+        json(res, 200, { configured: isTraderBeeConfigured(), watchlist: getWatchlist(), state: getTraderBeeState() });
+        return;
+      }
+      // POST /traderbee/watch — { symbol, rules:[{type:"above"|"below"|"pct_move", value}] }
+      if (req.method === "POST" && urlPath === "/traderbee/watch") {
+        const { upsertWatch } = await import("@/lib/traderbee/store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const symbol = typeof body.symbol === "string" ? body.symbol : "";
+        const rules = Array.isArray(body.rules) ? body.rules : [];
+        const item = upsertWatch(symbol, rules);
+        if (!item) { json(res, 400, { error: "valid 'symbol' is required" }); return; }
+        json(res, 201, item);
+        return;
+      }
+      // DELETE /traderbee/watch/:symbol
+      const tbDel = urlPath.match(/^\/traderbee\/watch\/([^/]+)$/);
+      if (req.method === "DELETE" && tbDel) {
+        const { removeWatch } = await import("@/lib/traderbee/store");
+        json(res, 200, { removed: removeWatch(decodeURIComponent(tbDel[1])) });
+        return;
+      }
+      // POST /traderbee/poll — evaluate the watchlist now (manual trigger).
+      if (req.method === "POST" && urlPath === "/traderbee/poll") {
+        const { isTraderBeeConfigured } = await import("@/lib/traderbee/provider");
+        if (!isTraderBeeConfigured()) {
+          json(res, 400, { error: "TraderBee not configured — set APCA_API_KEY_ID + APCA_API_SECRET_KEY env vars (data API only)" });
+          return;
+        }
+        const { pollOnce } = await import("@/lib/traderbee/poller");
+        const { getTraderBeeState } = await import("@/lib/traderbee/store");
+        await pollOnce();
+        json(res, 200, { ok: true, state: getTraderBeeState() });
+        return;
+      }
+
+      // POST /bee/:tool — generic capability-lane dispatch for the CLI executors
+      // (Claude Code / Codex), giving them parity with the local agent for
+      // webbee/browserbee/desktopbee/termbee. Reuses executeBeeTool, so the
+      // connectivity-capability gate is enforced identically. Body: {args:{...}}.
+      const beeMatch = urlPath.match(/^\/bee\/([a-z_]+)$/);
+      if (req.method === "POST" && beeMatch) {
+        const tool = beeMatch[1];
+        const { isBeeTool, executeBeeTool } = await import("@/lib/orchestrator/bee-tools");
+        if (!isBeeTool(tool)) { json(res, 404, { error: `unknown bee tool "${tool}"` }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        const args = (body.args && typeof body.args === "object" && !Array.isArray(body.args))
+          ? body.args as Record<string, unknown>
+          : {};
+        const result = await executeBeeTool(tool, args, {
+          projectPath: typeof body.projectPath === "string" ? body.projectPath : process.cwd(),
+          project: typeof body.project === "string" ? body.project : "ops",
+          requestedBy: "cli",
+        });
+        json(res, result.startsWith("Error") ? 400 : 200, { ok: !result.startsWith("Error"), result });
+        return;
+      }
+
+      // GET /browserbee/health — operator-facing readiness so a refused browser
+      // job (e.g. LinkedIn) explains itself: is Codex auth present? is the
+      // DesktopBee fallback enabled? what backing will actually run?
+      if (req.method === "GET" && urlPath === "/browserbee/health") {
+        const { buildBrowserBeeHealthSnapshot, readBrowserBeeDesktopFallbackEnabled } = await import("@/lib/browserbee/contracts");
+        const { readCodexAuthState } = await import("@/lib/usage/codex");
+        const { readHiveConfig } = await import("@/lib/brain/settings");
+        const { Task } = await import("@/lib/db");
+        const tasks = await Task.find({ source: "browserbee" });
+        const auth = readCodexAuthState();
+        const ack = (readHiveConfig().browserbee as Record<string, unknown> | undefined)?.acknowledgedComputerUse === true;
+        const snapshot = buildBrowserBeeHealthSnapshot({
+          tasks: tasks.map((t) => ({ status: t.status as string, createdAt: t.createdAt as string })),
+          readiness: {
+            codexConfigured: auth.authMode === "subscription" || auth.authMode === "api-key",
+            codexAuthMode: auth.authMode,
+            acknowledgedComputerUse: ack,
+            desktopFallbackEnabled: readBrowserBeeDesktopFallbackEnabled(),
+            desktopBeeAvailable: policy.getCapability("desktopbee").available,
+          },
+        });
+        json(res, 200, snapshot);
+        return;
+      }
+
       // Feedback — local bug/enhancement backlog (file by text/console/mobile)
       if (req.method === "GET" && urlPath === "/feedback") {
         const { listFeedback, feedbackSummary } = await import("@/lib/feedback/feedback");
@@ -811,6 +1091,294 @@ export function createDaemonServer() {
         const { sendIMessage } = await import("@/lib/messagebee/imessage");
         const ok = await sendIMessage(handle, text);
         json(res, ok ? 200 : 502, { ok });
+        return;
+      }
+
+      // Outbound dispatch — the SAME trust-gated send path the local agent uses,
+      // exposed over loopback so the Claude Code / Codex CLI executors (which run
+      // their own toolset and never see the bee tools) can send via the right
+      // channel instead of improvising with osascript. Auth is the daemon token,
+      // already verified above. The execute fns own the safety gate: email sends
+      // only to trusted recipients (else drafts), iMessage only to allowlist.
+      if (req.method === "POST" && (urlPath === "/mailbee/send" || urlPath === "/mailbee/draft")) {
+        const { parseOutboundFields } = await import("@/lib/orchestrator/outbound-routing");
+        const fields = parseOutboundFields(req.headers["content-type"], await readRawBody(req));
+        const { executeMailBeeSend, executeMailBeeDraft } = await import("@/lib/orchestrator/bee-tools");
+        const args = { to: fields.to ?? "", subject: fields.subject ?? "", body: fields.body ?? "" };
+        const message = urlPath === "/mailbee/send"
+          ? await executeMailBeeSend(args)
+          : await executeMailBeeDraft(args);
+        json(res, message.startsWith("Error") ? 400 : 200, { ok: !message.startsWith("Error"), message });
+        return;
+      }
+      if (req.method === "POST" && urlPath === "/messagebee/send") {
+        const { parseOutboundFields } = await import("@/lib/orchestrator/outbound-routing");
+        const fields = parseOutboundFields(req.headers["content-type"], await readRawBody(req));
+        const { executeMessageBeeSend } = await import("@/lib/orchestrator/bee-tools");
+        const message = await executeMessageBeeSend({ to: fields.to ?? "", text: fields.text ?? "" });
+        json(res, message.startsWith("Error") ? 400 : 200, { ok: !message.startsWith("Error"), message });
+        return;
+      }
+
+      // GET /audit — compliance trail (prompt + outcome + diff), newest first,
+      // filterable by ?taskId=&status=&event=&limit=. Never returns secrets.
+      if (req.method === "GET" && urlPath === "/audit") {
+        const { readAudit } = await import("@/lib/audit/audit");
+        const q = parseQueryString(req.url ?? "");
+        const limit = parseInt(q.limit ?? "", 10);
+        json(res, 200, {
+          entries: readAudit({
+            taskId: q.taskId || undefined,
+            status: q.status || undefined,
+            event: q.event || undefined,
+            limit: Number.isFinite(limit) && limit > 0 ? Math.min(limit, 5000) : undefined,
+          }),
+        });
+        return;
+      }
+      // GET /audit/export — newline-delimited JSON (JSONL) for SIEM ingestion.
+      if (req.method === "GET" && urlPath === "/audit/export") {
+        const { readAudit } = await import("@/lib/audit/audit");
+        const q = parseQueryString(req.url ?? "");
+        const limit = parseInt(q.limit ?? "", 10);
+        const entries = readAudit({ limit: Number.isFinite(limit) && limit > 0 ? Math.min(limit, 50000) : 5000 });
+        res.writeHead(200, { "Content-Type": "application/x-ndjson", "Content-Disposition": "attachment; filename=hivematrix-audit.jsonl" });
+        res.end(entries.map((e) => JSON.stringify(e)).join("\n") + (entries.length ? "\n" : ""));
+        return;
+      }
+
+      // GET /codegraph?symbol=X&path=Y — deterministic symbol lookup (definitions
+      // + references). Complements semantic search for large codebases.
+      if (req.method === "GET" && urlPath === "/codegraph") {
+        const q = parseQueryString(req.url ?? "");
+        const symbol = (q.symbol ?? "").trim();
+        const path = (q.path ?? process.cwd()).trim() || process.cwd();
+        if (!symbol) { json(res, 400, { error: "symbol is required" }); return; }
+        const { findSymbol } = await import("@/lib/codegraph/provider");
+        json(res, 200, await findSymbol(symbol, path));
+        return;
+      }
+
+      // GET /skills — the skill library index (name, description, tags, uses,
+      // compat = which harnesses it runs on, hasInput = takes text input).
+      if (req.method === "GET" && urlPath === "/skills") {
+        const { listSkills } = await import("@/lib/skills/store");
+        json(res, 200, { skills: await listSkills() });
+        return;
+      }
+
+      // POST /skills — create a skill (operator → trusted). kind: instruction|script.
+      if (req.method === "POST" && urlPath === "/skills") {
+        const { upsertSkill } = await import("@/lib/skills/store");
+        const { coerceInterpreter } = await import("@/lib/skills/contracts");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const name = typeof body.name === "string" ? body.name.trim() : "";
+        const skillBody = typeof body.body === "string" ? body.body : "";
+        if (!name || !skillBody) { json(res, 400, { error: "name and body are required" }); return; }
+        const result = await upsertSkill({
+          name,
+          description: typeof body.description === "string" ? body.description : "",
+          body: skillBody,
+          source: "operator",
+          kind: body.kind === "script" ? "script" : "instruction",
+          interpreter: coerceInterpreter(typeof body.interpreter === "string" ? body.interpreter : undefined),
+          tags: Array.isArray(body.tags) ? body.tags.filter((t): t is string => typeof t === "string") : undefined,
+        });
+        json(res, result.created || result.refined ? 201 : 200, { ...result, name });
+        return;
+      }
+
+      // POST /skills/import — import a shared skill (team/public) from a URL or
+      // pasted content. Imported skills are UNTRUSTED (instructions an agent would
+      // follow — a prompt-injection vector) until the operator approves them, so
+      // they are NOT auto-shown to agents until trusted.
+      if (req.method === "POST" && urlPath === "/skills/import") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const url = typeof body.url === "string" ? body.url.trim() : "";
+        let content = typeof body.content === "string" ? body.content : "";
+        let source = "import:pasted";
+        if (!content) {
+          if (!url) { json(res, 400, { error: "url or content is required" }); return; }
+          try {
+            const r = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+            if (!r.ok) { json(res, 502, { error: `fetch failed (HTTP ${r.status})` }); return; }
+            content = await r.text();
+            source = `import:${url}`;
+          } catch (e) { json(res, 502, { error: e instanceof Error ? e.message : String(e) }); return; }
+        }
+        const { parseSkillFile } = await import("@/lib/skills/contracts");
+        const { upsertSkill } = await import("@/lib/skills/store");
+        const parsed = parseSkillFile(content);
+        const name = parsed?.name ?? (typeof body.name === "string" ? body.name : "imported-skill");
+        const result = await upsertSkill({
+          name,
+          description: parsed?.description ?? "Imported skill",
+          tags: parsed?.tags,
+          body: parsed?.body ?? content,
+          source,
+          compat: parsed?.compat,
+          trusted: false, // review before agents see it
+        });
+        json(res, result.created || result.refined ? 201 : 200, { ...result, name, trusted: false });
+        return;
+      }
+
+      // POST /skills/:name/trust — { trusted } approve/revoke an imported skill.
+      const skillTrustMatch = urlPath.match(/^\/skills\/([^/]+)\/trust$/);
+      if (req.method === "POST" && skillTrustMatch) {
+        const { setSkillTrusted } = await import("@/lib/skills/store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const ok = await setSkillTrusted(decodeURIComponent(skillTrustMatch[1]), body.trusted !== false);
+        json(res, ok ? 200 : 404, { ok, trusted: body.trusted !== false });
+        return;
+      }
+
+      // GET /skills/:name — full skill (to view/verify) + its shareable markdown
+      // (export/copy to give to a team). DELETE removes it.
+      const skillOneMatch = urlPath.match(/^\/skills\/([^/]+)$/);
+      if (req.method === "GET" && skillOneMatch && decodeURIComponent(skillOneMatch[1]) !== "import") {
+        const { readSkill } = await import("@/lib/skills/store");
+        const { renderSkillFile } = await import("@/lib/skills/contracts");
+        const skill = await readSkill(decodeURIComponent(skillOneMatch[1]));
+        if (!skill) { json(res, 404, { error: "skill not found" }); return; }
+        json(res, 200, { skill, markdown: renderSkillFile(skill) });
+        return;
+      }
+      if (req.method === "DELETE" && skillOneMatch) {
+        const { deleteSkill } = await import("@/lib/skills/store");
+        json(res, 200, { removed: await deleteSkill(decodeURIComponent(skillOneMatch[1])) });
+        return;
+      }
+
+      // GET /skills/runs/:id — status + log of a script-skill run.
+      const skillRunStatusMatch = urlPath.match(/^\/skills\/runs\/([^/]+)$/);
+      if (req.method === "GET" && skillRunStatusMatch) {
+        const { getScriptRun } = await import("@/lib/skills/run-script");
+        const r = getScriptRun(decodeURIComponent(skillRunStatusMatch[1]));
+        if (!r) { json(res, 404, { error: "run not found" }); return; }
+        json(res, 200, r);
+        return;
+      }
+
+      // POST /skills/:name/run — launch a skill. INSTRUCTION skills spawn an agent
+      // task (fills {{input}} or appends). SCRIPT skills EXECUTE deterministically
+      // in the background (trusted-gated) and return a runId to poll.
+      const skillRunMatch = urlPath.match(/^\/skills\/([^/]+)\/run$/);
+      if (req.method === "POST" && skillRunMatch) {
+        const { readSkill } = await import("@/lib/skills/store");
+        const skill = await readSkill(decodeURIComponent(skillRunMatch[1]));
+        if (!skill) { json(res, 404, { error: "skill not found" }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        const input = typeof body.input === "string" ? body.input : "";
+
+        if (skill.kind === "script") {
+          const { runScriptSkill } = await import("@/lib/skills/run-script");
+          const cwd = typeof body.path === "string" && body.path.trim() ? body.path.trim() : process.cwd();
+          const r = runScriptSkill(skill, input, { cwd });
+          json(res, r.ok ? 202 : 400, r.ok ? { kind: "script", runId: r.run!.runId } : { error: r.error });
+          return;
+        }
+
+        const { applySkillInput } = await import("@/lib/skills/contracts");
+        const { Task, generateId } = await import("@/lib/db");
+        const task = await Task.create({
+          _id: generateId(),
+          title: `[skill] ${skill.name}`,
+          description: `Apply this skill:\n\n${applySkillInput(skill.body, input)}`,
+          project: "ops",
+          projectPath: process.cwd(),
+          profile: typeof body.agentType === "string" ? body.agentType : "developer",
+          status: "backlog",
+          executor: "agent",
+          source: "skill",
+          output: { skill: skill.name },
+        });
+        broadcast("tasks:created", { taskId: task._id });
+        json(res, 201, { kind: "instruction", task });
+        return;
+      }
+
+      // GET /mcp — registered MCP servers + status (running/reachable, restartable).
+      if (req.method === "GET" && urlPath === "/mcp") {
+        const { listMcpStatus } = await import("@/lib/mcp/registry");
+        json(res, 200, { servers: await listMcpStatus() });
+        return;
+      }
+      // POST /mcp/:name/restart — restart a managed (HTTP/SSE) MCP server.
+      const mcpRestart = urlPath.match(/^\/mcp\/([^/]+)\/restart$/);
+      if (req.method === "POST" && mcpRestart) {
+        const { getMcpServers, probeMcpServer } = await import("@/lib/mcp/registry");
+        const server = getMcpServers().find((s) => s.name === decodeURIComponent(mcpRestart[1]));
+        if (!server) { json(res, 404, { error: "mcp server not found in config (mcpServers)" }); return; }
+        if (server.transport === "stdio") {
+          json(res, 200, { name: server.name, restarted: false, detail: "stdio MCP servers are launched per session by the executor — nothing to restart; it relaunches on the next task." });
+          return;
+        }
+        // For HTTP/SSE we don't own the process here; re-probe and report. A managed
+        // supervisor (launchagent) is the follow-on for owned MCP processes.
+        const status = await probeMcpServer(server);
+        json(res, 200, { name: server.name, restarted: false, status: status.status, detail: `Not a HiveMatrix-managed process — current status: ${status.detail}. (Owned-process restart is a follow-on.)` });
+        return;
+      }
+
+      // POST /skills/:name/used — usage signal from a CLI executor: bump useCount
+      // and fold in an optional one-line refinement ("improves during use").
+      const skillUsedMatch = urlPath.match(/^\/skills\/([^/]+)\/used$/);
+      if (req.method === "POST" && skillUsedMatch) {
+        const { markSkillUsed } = await import("@/lib/skills/store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const r = await markSkillUsed(decodeURIComponent(skillUsedMatch[1]), {
+          refinement: typeof body.refinement === "string" ? body.refinement : undefined,
+        });
+        json(res, r.ok ? 200 : 404, r);
+        return;
+      }
+
+      // GET /brain/search?q=...&n=... — keyword retrieval over the brain root,
+      // so the console and the CLI executors (Claude Code / Codex) can recall a
+      // stored doc by relevance, not just a pinned path. Same engine as the
+      // brain_search tool; bounded + cloud-stall safe.
+      if (req.method === "GET" && urlPath === "/brain/search") {
+        const q = (parseQueryString(req.url ?? "").q ?? "").trim();
+        const nRaw = parseInt(parseQueryString(req.url ?? "").n ?? "", 10);
+        if (!q) { json(res, 400, { error: "q (query) is required" }); return; }
+        const maxResults = Number.isFinite(nRaw) && nRaw > 0 ? Math.min(nRaw, 20) : undefined;
+        const { isEmbeddingsEnabled } = await import("@/lib/embeddings/provider");
+        if (isEmbeddingsEnabled()) {
+          const { hybridBrainSearch } = await import("@/lib/embeddings/search");
+          json(res, 200, await hybridBrainSearch(q, { maxResults }));
+        } else {
+          const { searchBrain } = await import("@/lib/brain/search");
+          json(res, 200, await searchBrain(q, { maxResults }));
+        }
+        return;
+      }
+
+      // GET /embeddings — semantic-retrieval status (configured? index size?).
+      if (req.method === "GET" && urlPath === "/embeddings") {
+        const { getEmbeddingsConfig, isEmbeddingsEnabled } = await import("@/lib/embeddings/provider");
+        const { loadIndex } = await import("@/lib/embeddings/index-store");
+        const cfg = getEmbeddingsConfig();
+        const idx = loadIndex();
+        json(res, 200, {
+          enabled: isEmbeddingsEnabled(),
+          model: cfg?.model ?? null,
+          endpoint: cfg?.endpoint ?? null,
+          indexedModel: idx.model || null,
+          indexedDocs: Object.keys(idx.entries).length,
+        });
+        return;
+      }
+
+      // POST /embeddings/reindex — rebuild the corpus vector index now.
+      if (req.method === "POST" && urlPath === "/embeddings/reindex") {
+        const { isEmbeddingsEnabled } = await import("@/lib/embeddings/provider");
+        if (!isEmbeddingsEnabled()) {
+          json(res, 400, { error: "embeddings not configured/enabled (set embeddings.enabled, endpoint, model in ~/.hivematrix/config.json)" });
+          return;
+        }
+        const { reindexBrain } = await import("@/lib/embeddings/indexer");
+        json(res, 200, await reindexBrain());
         return;
       }
 

@@ -120,6 +120,22 @@ async function main(): Promise<void> {
   const { startBrainBeePoller } = await import("@/lib/brainbee/poller");
   startBrainBeePoller();
 
+  // YouTube watcher: poll a configured playlist (Data API), summarize new videos
+  // (transcript-based) into HTML brain docs + notify. Self-gates on config
+  // (youtube.enabled + apiKey + playlistId).
+  const { startYouTubeWatcherPoller } = await import("@/lib/youtube/poller");
+  startYouTubeWatcherPoller();
+
+  // Embeddings indexer: keep the brain corpus vector index fresh for semantic
+  // retrieval. Self-gates on config (embeddings.enabled + endpoint + model).
+  const { startEmbeddingsIndexer } = await import("@/lib/embeddings/indexer");
+  startEmbeddingsIndexer();
+
+  // TraderBee: watch market data + fire threshold alerts (analysis/alerts ONLY —
+  // never trades). Self-gates on Alpaca data-API env keys + a non-empty watchlist.
+  const { startTraderBeePoller } = await import("@/lib/traderbee/poller");
+  startTraderBeePoller();
+
   // Frontier-review-debt loop: replay code-critical work that ran locally as a
   // frontier review when cloud-ok returns. Also drain immediately on that edge.
   const { startFrontierDebtLoop, drainFrontierDebt } = await import("@/lib/orchestrator/frontier-debt");

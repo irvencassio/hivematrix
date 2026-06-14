@@ -4,9 +4,11 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import { createServer, type Server } from "node:http";
 import {
   portFromEndpoint, resolveServeCommand, decideServeTick,
   startLocalServingSupervisor, stopLocalServingSupervisor, getServingStatus, isServerUp,
+  waitForServerReady,
 } from "./serving";
 import type { QwenProfile } from "@/lib/config/qwen-profile";
 
@@ -45,6 +47,36 @@ test("decideServeTick covers every branch", () => {
   assert.equal(decideServeTick({ ...base, childAlive: true }).action, "starting");
   assert.equal(decideServeTick({ ...base, msSinceLastStart: 10, throttleMs: 1000 }).action, "throttled");
   assert.equal(decideServeTick(base).action, "spawn");
+});
+
+test("waitForServerReady returns false quickly when nothing is listening", async () => {
+  // Unused port → never comes up; bounded window so the test is fast.
+  const ready = await waitForServerReady("http://127.0.0.1:38766", { timeoutMs: 600, intervalMs: 150, probeTimeoutMs: 200 });
+  assert.equal(ready, false);
+});
+
+test("waitForServerReady resolves true once a server starts mid-wait", { timeout: 10_000 }, async () => {
+  const PORT = 38767;
+  let server: Server | null = null;
+  // Start the server ~400ms in, after the first failed probe.
+  const startTimer = setTimeout(() => {
+    server = createServer((_req, res) => { res.writeHead(200); res.end("ok"); });
+    server.listen(PORT, "127.0.0.1");
+  }, 400);
+  try {
+    const ready = await waitForServerReady(`http://127.0.0.1:${PORT}`, { timeoutMs: 5_000, intervalMs: 150, probeTimeoutMs: 300 });
+    assert.equal(ready, true);
+  } finally {
+    clearTimeout(startTimer);
+    await new Promise<void>((r) => (server ? server.close(() => r()) : r()));
+  }
+});
+
+test("waitForServerReady bails out when the abort signal fires", async () => {
+  const ac = new AbortController();
+  setTimeout(() => ac.abort(), 200);
+  const ready = await waitForServerReady("http://127.0.0.1:38768", { timeoutMs: 5_000, intervalMs: 150, probeTimeoutMs: 200, signal: ac.signal });
+  assert.equal(ready, false);
 });
 
 test("supervisor launches the local server, and relaunches it after a crash", { timeout: 25_000 }, async () => {

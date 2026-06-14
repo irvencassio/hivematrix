@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ConnectivityPolicy } from "@/lib/connectivity/policy";
-import { isBeeTool, availableBeeTools, executeBeeTool, BEE_TOOL_DEFINITIONS } from "./bee-tools";
+import {
+  isBeeTool, availableBeeTools, executeBeeTool, BEE_TOOL_DEFINITIONS,
+  capabilityRoutingGuide, executeMailBeeSend, executeMailBeeDraft, executeMessageBeeSend,
+  type MailBeeSendIO, type MessageBeeSendIO,
+} from "./bee-tools";
 
 function cloud() { return new ConnectivityPolicy(); }
 function local() { const p = new ConnectivityPolicy(); p.setManualOverride("local-only"); return p; }
@@ -9,16 +13,23 @@ function offline() { const p = new ConnectivityPolicy(); p.setManualOverride("of
 
 const names = (tools: { function: { name: string } }[]) => tools.map((t) => t.function.name).sort();
 
-test("isBeeTool recognizes the three lanes and rejects others", () => {
+test("isBeeTool recognizes the lanes (incl. outbound channels) and rejects others", () => {
   assert.equal(isBeeTool("webbee_search"), true);
   assert.equal(isBeeTool("browserbee_run"), true);
   assert.equal(isBeeTool("desktopbee_action"), true);
+  assert.equal(isBeeTool("mailbee_send"), true);
+  assert.equal(isBeeTool("mailbee_draft"), true);
+  assert.equal(isBeeTool("messagebee_send"), true);
+  assert.equal(isBeeTool("brain_search"), true);
+  assert.equal(isBeeTool("skill_used"), true);
+  assert.equal(isBeeTool("digest_url"), true);
+  assert.equal(isBeeTool("code_graph"), true);
   assert.equal(isBeeTool("bash"), false);
   assert.equal(isBeeTool("read_file"), false);
 });
 
 test("all bee tools are defined with required schemas", () => {
-  assert.equal(BEE_TOOL_DEFINITIONS.length, 5);
+  assert.equal(BEE_TOOL_DEFINITIONS.length, 12);
   for (const t of BEE_TOOL_DEFINITIONS) {
     assert.equal(t.type, "function");
     assert.ok(t.function.name.length > 0);
@@ -27,17 +38,38 @@ test("all bee tools are defined with required schemas", () => {
   }
 });
 
-test("cloud-ok advertises every lane", () => {
+test("cloud-ok advertises every lane (web, browser, desktop, term, mail, message, brain, skill, digest)", () => {
   assert.deepEqual(names(availableBeeTools(cloud())),
-    ["browserbee_run", "desktopbee_action", "termbee_run", "termbee_session", "webbee_search"]);
+    ["brain_search", "browserbee_run", "code_graph", "desktopbee_action", "digest_url", "mailbee_draft", "mailbee_send", "messagebee_send", "skill_used", "termbee_run", "termbee_session", "webbee_search"]);
 });
 
-test("local-only advertises DesktopBee + TermBee (web lanes need internet)", () => {
-  assert.deepEqual(names(availableBeeTools(local())), ["desktopbee_action", "termbee_run", "termbee_session"]);
+test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
+  assert.ok(!names(availableBeeTools(offline())).includes("digest_url"));
+  assert.ok(!names(availableBeeTools(local())).includes("digest_url"));
 });
 
-test("offline advertises DesktopBee + TermBee (the offline workhorses)", () => {
-  assert.deepEqual(names(availableBeeTools(offline())), ["desktopbee_action", "termbee_run", "termbee_session"]);
+test("local-only drops web lanes but keeps DesktopBee/TermBee + outbound channels + brain/skill/codegraph", () => {
+  assert.deepEqual(names(availableBeeTools(local())),
+    ["brain_search", "code_graph", "desktopbee_action", "mailbee_draft", "mailbee_send", "messagebee_send", "skill_used", "termbee_run", "termbee_session"]);
+});
+
+test("offline keeps the offline workhorses + outbound channels + brain/skill/codegraph (all local)", () => {
+  assert.deepEqual(names(availableBeeTools(offline())),
+    ["brain_search", "code_graph", "desktopbee_action", "mailbee_draft", "mailbee_send", "messagebee_send", "skill_used", "termbee_run", "termbee_session"]);
+});
+
+test("capabilityRoutingGuide lists email/message/brain lanes in cloud, drops web lanes offline", () => {
+  const cloudGuide = capabilityRoutingGuide(cloud());
+  assert.match(cloudGuide, /mailbee_send/);
+  assert.match(cloudGuide, /messagebee_send/);
+  assert.match(cloudGuide, /brain_search/);
+  assert.match(cloudGuide, /webbee_search/);
+  assert.match(cloudGuide, /do not improvise/i);
+
+  const offlineGuide = capabilityRoutingGuide(offline());
+  assert.match(offlineGuide, /mailbee_send/);   // still routable offline
+  assert.match(offlineGuide, /brain_search/);   // brain is local, still routable
+  assert.doesNotMatch(offlineGuide, /webbee_search/); // web lane gone offline
 });
 
 test("executeBeeTool refuses an unknown bee tool", async () => {
@@ -57,4 +89,70 @@ test("executeBeeTool gates webbee_search behind the connectivity capability", as
   } finally {
     policy.setManualOverride(prev);
   }
+});
+
+// ── Outbound safety: the trust/allowlist gate lives inside the tool ───────────
+
+function mailIO(over: Partial<MailBeeSendIO> & { trusted: boolean }): { io: MailBeeSendIO; calls: string[] } {
+  const calls: string[] = [];
+  const io: MailBeeSendIO = {
+    isTrustedRecipient: () => over.trusted,
+    sendMail: async () => { calls.push("send"); return true; },
+    draftMail: async () => { calls.push("draft"); return true; },
+    ...over,
+  };
+  return { io, calls };
+}
+
+test("mailbee_send SENDS to a trusted recipient", async () => {
+  const { io, calls } = mailIO({ trusted: true });
+  const out = await executeMailBeeSend({ to: "boss@known.com", subject: "Hi", body: "yo" }, io);
+  assert.deepEqual(calls, ["send"]);
+  assert.match(out, /Email sent to boss@known.com/);
+});
+
+test("mailbee_send DRAFTS (does not send) for an untrusted recipient", async () => {
+  const { io, calls } = mailIO({ trusted: false });
+  const out = await executeMailBeeSend({ to: "stranger@nope.com", subject: "Hi", body: "yo" }, io);
+  assert.deepEqual(calls, ["draft"]); // crucially NOT "send"
+  assert.match(out, /not on the MailBee trusted allowlist/);
+  assert.match(out, /saved to Mail Drafts/);
+});
+
+test("mailbee_send requires to + body", async () => {
+  const { io, calls } = mailIO({ trusted: true });
+  const out = await executeMailBeeSend({ to: "", subject: "x", body: "y" }, io);
+  assert.deepEqual(calls, []);
+  assert.match(out, /'to' and 'body' are required/);
+});
+
+test("mailbee_draft never sends, always drafts", async () => {
+  const { io, calls } = mailIO({ trusted: true });
+  const out = await executeMailBeeDraft({ to: "anyone@x.com", subject: "x", body: "y" }, io);
+  assert.deepEqual(calls, ["draft"]);
+  assert.match(out, /Draft saved to Mail Drafts/);
+});
+
+function msgIO(allowed: boolean): { io: MessageBeeSendIO; calls: string[] } {
+  const calls: string[] = [];
+  const io: MessageBeeSendIO = {
+    isAllowed: () => allowed,
+    sendIMessage: async () => { calls.push("send"); return true; },
+    recordOutbound: () => { calls.push("record"); },
+  };
+  return { io, calls };
+}
+
+test("messagebee_send sends to an allowlisted handle and records outbound", async () => {
+  const { io, calls } = msgIO(true);
+  const out = await executeMessageBeeSend({ to: "+14155551234", text: "hi" }, io);
+  assert.deepEqual(calls, ["send", "record"]);
+  assert.match(out, /Message sent to \+14155551234/);
+});
+
+test("messagebee_send refuses a non-allowlisted handle (no send)", async () => {
+  const { io, calls } = msgIO(false);
+  const out = await executeMessageBeeSend({ to: "+19998887777", text: "hi" }, io);
+  assert.deepEqual(calls, []);
+  assert.match(out, /not on the MessageBee allowlist/);
 });

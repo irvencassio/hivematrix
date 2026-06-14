@@ -62,6 +62,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .col { overflow-y: auto; padding: 12px; }
   .col.board { border-right: 1px solid var(--border); }
   .col.context { border-left: 1px solid var(--border); background: var(--panel); }
+  main.ctx-collapsed { grid-template-columns: 300px 1fr; }
+  main.ctx-collapsed .col.context { display: none; }
+  .ctx-sec { margin: 0; }
+  .ctx-sec > summary { cursor: pointer; list-style: none; font-size: 14px; font-weight: 600; margin: 20px 0 6px; color: var(--text); }
+  .ctx-sec > summary::-webkit-details-marker { display: none; }
+  .ctx-sec > summary::before { content: '▾ '; color: var(--muted); }
+  .ctx-sec:not([open]) > summary::before { content: '▸ '; }
+  .ctx-toggle.on { color: var(--accent); }
   h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted);
     margin: 4px 0 10px; }
   .addbtn { width: 100%; text-align: left; background: var(--panel-2); color: var(--accent);
@@ -305,6 +313,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <span class="pill" id="modePill">…</span>
     <span class="usage-pill" id="usagePill" style="display:none" title="">⚡ —</span>
     <span class="update-pill" id="updatePill" style="display:none" onclick="applyUpdate()" title="Click to install and restart">⬆ Update</span>
+    <button class="gear ctx-toggle" id="ctxToggle" title="Hide / show the right panel" onclick="toggleContext()">▦</button>
     <button class="gear" title="Settings" onclick="openSettings()">⚙</button>
   </span>
 </header>
@@ -579,8 +588,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="session"><div class="session-empty">Select a task to inspect its session.</div></div>
   </section>
   <section class="col context">
-    <h2>Setup</h2>
-    <div id="onboarding"></div>
+    <details class="ctx-sec" id="setupSec" open><summary id="setupSummary">Setup</summary>
+    <div id="onboarding"></div></details>
     <h2 style="margin-top:20px">Soak / Health</h2>
     <div id="metrics"></div>
     <div class="usage-head"><h2>Frontier Usage</h2><button id="usageRefresh" class="usage-refresh" title="Refresh Claude/Codex usage" onclick="refreshUsageNow()">↻</button></div>
@@ -607,6 +616,24 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="err" id="de_err"></div>
     </div>
     <div id="directives"></div>
+    <h2 style="margin-top:20px">Skills</h2>
+    <div class="row" style="gap:6px">
+      <select id="skillSelect" onchange="updateSkillMeta()" style="flex:1;min-width:120px"></select>
+      <button class="addbtn" onclick="importSkillPrompt()" title="Import a shared skill from a URL">⇩ Import</button>
+    </div>
+    <input id="skillInput" placeholder="Text input for the skill (optional)" style="margin-top:6px" />
+    <div class="row" style="gap:6px;flex-wrap:wrap">
+      <button class="create" onclick="runSkill()">Run</button>
+      <button class="addbtn" onclick="viewSkill()" title="View / verify the skill">View</button>
+      <button class="addbtn" onclick="exportSkill()" title="Copy the shareable skill markdown">Copy</button>
+      <button class="addbtn" id="skillTrustBtn" onclick="trustSkill()" title="Approve an imported skill so agents may use it" style="display:none">Trust</button>
+      <button class="addbtn" onclick="deleteSkillUI()" title="Delete this skill">🗑</button>
+    </div>
+    <div class="muted" id="skillMeta" style="font-size:11px;margin-top:4px"></div>
+    <div class="muted" id="skillResult" style="font-size:12px;margin-top:4px"></div>
+    <pre id="skillView" style="display:none;max-height:200px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap"></pre>
+    <h2 style="margin-top:20px">MCP Servers</h2>
+    <div id="mcp"></div>
   </section>
 </main>
 <script>
@@ -961,6 +988,152 @@ function renderConn() {
     + postureHtml;
 }
 
+// --- Skills launcher (dropdown + text input + import) -----------------------
+let _skills = [];
+async function renderSkills() {
+  try {
+    const d = await api('/skills');
+    _skills = (d && d.skills) || [];
+    const sel = document.getElementById('skillSelect');
+    if (!sel) return;
+    const prev = sel.value;
+    if (!_skills.length) {
+      sel.innerHTML = '<option value="">(no skills yet)</option>';
+    } else {
+      const opt = s => '<option value="' + esc(s.name) + '">' + esc(s.name)
+        + (s.useCount ? ' (' + s.useCount + '×)' : '') + (s.hasInput ? ' ✎' : '') + '</option>';
+      const scripts = _skills.filter(s => s.kind === 'script');
+      const recipes = _skills.filter(s => s.kind !== 'script');
+      let html = '';
+      if (scripts.length) html += '<optgroup label="⚙ Ops / scripts">' + scripts.map(opt).join('') + '</optgroup>';
+      if (recipes.length) html += '<optgroup label="Skills">' + recipes.map(opt).join('') + '</optgroup>';
+      sel.innerHTML = html;
+    }
+    if (prev) sel.value = prev;
+    updateSkillMeta();
+  } catch (e) { /* transient */ }
+}
+function updateSkillMeta() {
+  const sel = document.getElementById('skillSelect');
+  const meta = document.getElementById('skillMeta');
+  const trustBtn = document.getElementById('skillTrustBtn');
+  const view = document.getElementById('skillView');
+  if (view) view.style.display = 'none';
+  if (!sel || !meta) return;
+  const s = _skills.find(x => x.name === sel.value);
+  if (!s) { meta.textContent = ''; if (trustBtn) trustBtn.style.display = 'none'; return; }
+  const untrusted = s.trusted === false;
+  meta.innerHTML = (untrusted ? '<span style="color:var(--warn)">⚠ untrusted (imported — review before agents use it)</span> · ' : '')
+    + 'runs on: ' + esc((s.compat && s.compat.length ? s.compat : ['all']).join(', '))
+    + (s.hasInput ? ' · takes input' : '')
+    + (s.description ? ' — ' + esc(s.description) : '');
+  if (trustBtn) trustBtn.style.display = untrusted ? '' : 'none';
+}
+function selectedSkill() { const sel = document.getElementById('skillSelect'); return sel && sel.value ? sel.value : ''; }
+async function viewSkill() {
+  const name = selectedSkill(); if (!name) return;
+  const view = document.getElementById('skillView');
+  try {
+    const d = await api('/skills/' + encodeURIComponent(name));
+    if (view && d && d.markdown) { view.textContent = d.markdown; view.style.display = 'block'; }
+  } catch (e) { /* ignore */ }
+}
+async function exportSkill() {
+  const name = selectedSkill(); if (!name) return;
+  const res = document.getElementById('skillResult');
+  try {
+    const d = await api('/skills/' + encodeURIComponent(name));
+    const md = (d && d.markdown) || '';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(md);
+      if (res) res.textContent = 'Copied shareable skill markdown to clipboard.';
+    } else {
+      const view = document.getElementById('skillView');
+      if (view) { view.textContent = md; view.style.display = 'block'; }
+      if (res) res.textContent = 'Copy the markdown below to share.';
+    }
+  } catch (e) { if (res) res.textContent = 'Export failed.'; }
+}
+async function trustSkill() {
+  const name = selectedSkill(); if (!name) return;
+  try {
+    await api('/skills/' + encodeURIComponent(name) + '/trust', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trusted: true }) });
+    renderSkills();
+  } catch (e) { /* ignore */ }
+}
+async function deleteSkillUI() {
+  const name = selectedSkill(); if (!name) return;
+  const ok = await hmConfirm('Delete skill "' + name + '"? This removes the file from the brain.', { okLabel: 'Delete' });
+  if (!ok) return;
+  try { await api('/skills/' + encodeURIComponent(name), { method: 'DELETE' }); renderSkills(); }
+  catch (e) { /* ignore */ }
+}
+async function runSkill() {
+  const sel = document.getElementById('skillSelect');
+  if (!sel || !sel.value) return;
+  const input = (document.getElementById('skillInput') || {}).value || '';
+  const res = document.getElementById('skillResult');
+  if (res) res.textContent = 'Launching…';
+  try {
+    const d = await api('/skills/' + encodeURIComponent(sel.value) + '/run',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input }) });
+    if (d && d.kind === 'script' && d.runId) {
+      if (res) res.textContent = 'Running script… (deterministic)';
+      pollScriptRun(d.runId);
+    } else if (d && d.task) {
+      if (res) res.textContent = 'Launched skill task ' + (d.task._id || d.task.id || '') + ' — see the board.';
+      refresh();
+    } else if (res) { res.textContent = (d && d.error) || 'Launched.'; }
+  } catch (e) { if (res) res.textContent = 'Error launching skill.'; }
+}
+async function pollScriptRun(runId) {
+  const view = document.getElementById('skillView');
+  const res = document.getElementById('skillResult');
+  for (let i = 0; i < 900; i++) { // up to ~15 min for long builds/releases
+    try {
+      const d = await api('/skills/runs/' + encodeURIComponent(runId));
+      if (view && d) { view.textContent = d.log || ''; view.style.display = 'block'; view.scrollTop = view.scrollHeight; }
+      if (d && d.status === 'done') { if (res) res.textContent = 'Script finished (exit ' + d.exitCode + ').'; return; }
+    } catch (e) { /* transient */ }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+}
+async function importSkillPrompt() {
+  const url = await hmPrompt('Skill URL (raw markdown / SKILL.md shared by a team or public repo):', '');
+  if (!url) return;
+  const res = document.getElementById('skillResult');
+  if (res) res.textContent = 'Importing…';
+  try {
+    const d = await api('/skills/import',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url }) });
+    if (res) res.textContent = 'Imported skill: ' + esc((d && d.name) || '?');
+    renderSkills();
+  } catch (e) { if (res) res.textContent = 'Import failed.'; }
+}
+
+// --- MCP servers (status + restart) -----------------------------------------
+async function renderMcp() {
+  try {
+    const d = await api('/mcp');
+    const servers = (d && d.servers) || [];
+    const el = document.getElementById('mcp');
+    if (!el) return;
+    el.innerHTML = servers.length ? servers.map(s => {
+      const dot = s.status === 'reachable' ? 'var(--ok)' : (s.status === 'unreachable' ? 'var(--err)' : 'var(--muted)');
+      return '<div style="display:flex;align-items:center;gap:6px;padding:3px 0">'
+        + '<span style="width:8px;height:8px;border-radius:50%;background:' + dot + ';display:inline-block" title="' + esc(s.detail || s.status) + '"></span>'
+        + '<span style="flex:1">' + esc(s.name) + ' <span class="muted" style="font-size:11px">(' + esc(s.transport) + ' · ' + esc(s.status) + ')</span></span>'
+        + (s.restartable ? '<button class="addbtn" title="Restart" onclick="restartMcp(\'' + esc(s.name) + '\')">↻</button>' : '')
+        + '</div>';
+    }).join('') : '<div class="muted" style="font-size:12px">No MCP servers configured. Add them under config.mcpServers, or enable the Azure DevOps feature.</div>';
+  } catch (e) { /* transient */ }
+}
+async function restartMcp(name) {
+  try { await api('/mcp/' + encodeURIComponent(name) + '/restart', { method: 'POST' }); }
+  catch (e) { /* ignore */ }
+  renderMcp();
+}
+
 function renderDirectives() {
   const el = document.getElementById("directives");
   if (!state.directives.length) { el.innerHTML = '<div class="muted">None.</div>'; return; }
@@ -1005,7 +1178,35 @@ function renderOnboarding() {
   document.getElementById("onboarding").innerHTML = html
     + '<div class="muted" style="margin-top:6px">'
     + (o.requiredComplete ? '✓ Required setup complete.' : 'First-run setup — complete the required steps below.') + '</div>';
+  // Once setup is complete it's just a wall of green checks — collapse it (the
+  // operator can still expand it). Only auto-collapse once, so re-opens stick.
+  const sec = document.getElementById("setupSec");
+  const sum = document.getElementById("setupSummary");
+  if (sec && sum) {
+    sum.textContent = o.requiredComplete ? "Setup ✓" : "Setup";
+    if (o.requiredComplete && !sec.dataset.autocollapsed) { sec.open = false; sec.dataset.autocollapsed = "1"; }
+  }
 }
+
+function toggleContext() {
+  const m = document.querySelector('main');
+  if (!m) return;
+  const collapsed = m.classList.toggle('ctx-collapsed');
+  const btn = document.getElementById('ctxToggle');
+  if (btn) btn.classList.toggle('on', !collapsed);
+  try { localStorage.setItem('hm_ctx_collapsed', collapsed ? '1' : '0'); } catch (e) { /* ignore */ }
+}
+(function applyCtxState() {
+  try {
+    if (localStorage.getItem('hm_ctx_collapsed') === '1') {
+      const m = document.querySelector('main');
+      if (m) m.classList.add('ctx-collapsed');
+    } else {
+      const btn = document.getElementById('ctxToggle');
+      if (btn) btn.classList.add('on');
+    }
+  } catch (e) { /* ignore */ }
+})();
 
 // Steps that POST straight to /onboarding/<id> with no extra input.
 const NO_INPUT_STEPS = ['config', 'daemon', 'desktopbee'];
@@ -1207,6 +1408,7 @@ async function refresh() {
       api("/tasks"), api("/directives"), api("/connectivity"), api("/metrics"), api("/onboarding"),
     ]);
     renderBoard(); renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
+    renderSkills(); renderMcp();
     if (state.selected) selectTask(state.selected);
   } catch (e) { /* transient */ }
   // Check for updates on every tick (cheap — daemon caches ~60s). Tied to

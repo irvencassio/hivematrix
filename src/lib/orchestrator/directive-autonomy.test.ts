@@ -53,7 +53,8 @@ test("parseDirectivePlanOutput normalizes tasks with dependencies and criterion 
       "agentType": "researcher",
       "dependsOn": [],
       "criterionRefs": ["crit_a"],
-      "goalIndex": 0
+      "goalIndex": 0,
+      "feedbackId": "fb_123"
     },
     {
       "title": "Write implementation",
@@ -72,6 +73,8 @@ test("parseDirectivePlanOutput normalizes tasks with dependencies and criterion 
   assert.deepEqual(parsed.plan?.tasks[1].dependsOn, [0], "invalid dependency refs are dropped");
   assert.deepEqual(parsed.plan?.tasks[0].criterionIds, ["crit_a"]);
   assert.deepEqual(parsed.plan?.tasks[1].criterionIds, ["crit_b"]);
+  assert.equal(parsed.plan?.tasks[0].feedbackId, "fb_123", "feedbackId link is parsed");
+  assert.equal(parsed.plan?.tasks[1].feedbackId, null, "absent feedbackId is null");
 });
 
 test("parseDirectiveReviewOutput normalizes review status and corrective tasks", () => {
@@ -106,6 +109,10 @@ test("parseDirectiveRetrospectiveOutput returns playbook deltas and access ledge
   ],
   "accessLedger": [
     { "system": "Stripe", "status": "test-mode", "notes": "No live key" }
+  ],
+  "skills": [
+    { "name": "credential-preflight", "description": "verify creds before planning", "tags": ["ops"], "body": "1. list required systems\\n2. check each\\n3. block if missing" },
+    { "name": "bad-skill-no-body" }
   ]
 }
 \`\`\``);
@@ -114,6 +121,9 @@ test("parseDirectiveRetrospectiveOutput returns playbook deltas and access ledge
   assert.equal(parsed.retrospective?.playbookDeltas[0].scope, "role:coo");
   assert.equal(parsed.retrospective?.accessLedger[0].system, "Stripe");
   assert.equal(parsed.retrospective?.followUpDirectives[0].goal, "Make it sturdier");
+  assert.equal(parsed.retrospective?.skills.length, 1, "skill without a body is dropped");
+  assert.equal(parsed.retrospective?.skills[0].name, "credential-preflight");
+  assert.match(parsed.retrospective!.skills[0].body, /block if missing/);
 });
 
 test("normalizeDirectivePlan rejects missing task arrays", () => {

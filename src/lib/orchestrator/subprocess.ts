@@ -15,6 +15,7 @@ import { StreamParser, type StreamEvent } from "./stream-parser";
 import { generateHookSettings, cleanupHookFiles } from "./approval";
 import { spawnGenericAgent } from "./generic-agent";
 import { spawnCodexAgent } from "./codex-agent";
+import { outboundHttpRoutingPrompt, brainSearchRoutingPrompt, beeToolsRoutingPrompt } from "./outbound-routing";
 import { spawnImageAgent } from "./image-agent";
 import { getAgentProfile } from "@/lib/config/agent-profiles";
 import { isCodexModel, isNanoBananaModel } from "@/lib/models/catalog";
@@ -492,6 +493,34 @@ export async function spawnAgent(
   args.push("--append-system-prompt", brainDocPolicy);
   overheadBytes.agentGuide += Buffer.byteLength(brainDocPolicy);
 
+  // Outbound routing: teach the CLI agent to send email/SMS through the daemon's
+  // trust-gated endpoints (its Bash tool can reach loopback) instead of
+  // improvising with osascript. Mirrors the local agent's capability routing.
+  const outboundRouting = outboundHttpRoutingPrompt();
+  args.push("--append-system-prompt", outboundRouting);
+  overheadBytes.agentGuide += Buffer.byteLength(outboundRouting);
+
+  // Durable-memory retrieval: let the CLI agent recall stored brain docs.
+  const brainRouting = brainSearchRoutingPrompt();
+  args.push("--append-system-prompt", brainRouting);
+  overheadBytes.agentGuide += Buffer.byteLength(brainRouting);
+
+  // Capability parity: web / browser / desktop / terminal via /bee/<tool>.
+  const beeRouting = beeToolsRoutingPrompt();
+  args.push("--append-system-prompt", beeRouting);
+  overheadBytes.agentGuide += Buffer.byteLength(beeRouting);
+
+  // Repo conventions: Claude Code reads CLAUDE.md natively but NOT AGENTS.md (the
+  // converged standard). Inject it so coding tasks follow house style.
+  try {
+    const { readAgentsMd, formatAgentsMd } = await import("@/lib/conventions/agents-md");
+    const agents = formatAgentsMd(await readAgentsMd(projectPath));
+    if (agents) {
+      args.push("--append-system-prompt", agents);
+      overheadBytes.agentGuide += Buffer.byteLength(agents);
+    }
+  } catch { /* non-critical */ }
+
   // Inject agent profile system prompt for non-developer types
   if (agentType && agentType !== "developer" && agentType !== "auto") {
     const agentProfile = getAgentProfile(agentType);
@@ -573,6 +602,8 @@ export async function spawnAgent(
   env.HIVE_TASK_TOKEN = process.env.HIVE_TASK_TOKEN ?? "";
   env.HIVE_ARTIFACT_DIR = join(homedir(), ".hivematrix", "artifacts", "tasks", taskId);
   env.HIVE_ARTIFACT_EVENTS = join(env.HIVE_ARTIFACT_DIR, "events.jsonl");
+  // Loopback daemon port for the outbound-channel curls in the routing prompt.
+  env.HIVE_DAEMON_PORT = process.env.HIVEMATRIX_PORT ?? "3747";
 
   // For local models, inject the provider endpoint as env vars
   if (model && !model.startsWith("claude-")) {
