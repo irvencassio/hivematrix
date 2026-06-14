@@ -332,6 +332,21 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /observability — normalized per-run telemetry + totals across all
+      // three providers (Claude / Codex / local Qwen). ?taskId=… for one task.
+      if (req.method === "GET" && urlPath === "/observability") {
+        const { listTaskTelemetry, getTaskTelemetry, observabilitySummary } = await import("@/lib/observability/store");
+        const oq = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+        const taskId = oq.get("taskId");
+        if (taskId) {
+          json(res, 200, { taskId, runs: getTaskTelemetry(taskId) });
+          return;
+        }
+        const limit = parseInt(oq.get("limit") ?? "50", 10) || 50;
+        json(res, 200, { totals: observabilitySummary(), recent: listTaskTelemetry(limit) });
+        return;
+      }
+
       // GET /update/check — query the configured release channel for an update
       if (req.method === "GET" && urlPath === "/update/check") {
         const { checkUpdateStatus } = await import("@/lib/updater/daemon-update");
@@ -1619,6 +1634,25 @@ export function createDaemonServer() {
         const { Task } = await import("@/lib/db");
         await Task.findByIdAndUpdate(tid, { reviewState: null });
         json(res, 200, { ok: true }); return;
+      }
+
+      // POST /tasks/:id/steer — interrupt a running agent and resume it with new
+      // operator guidance. The agent-manager guards state (in-progress, Codex
+      // thread, session available) and surfaces a clear reason when it can't.
+      const steerMatch = urlPath.match(/^\/tasks\/([^/]+)\/steer$/);
+      if (req.method === "POST" && steerMatch) {
+        const tid = steerMatch[1];
+        const body = await parseBody(req) as Record<string, unknown>;
+        const message = String(body.message ?? body.text ?? "").trim();
+        if (!message) { json(res, 400, { error: "message is required" }); return; }
+        try {
+          const { agentManager } = await import("@/lib/orchestrator/agent-manager");
+          await agentManager.requestSteerByTaskId(tid, message);
+          json(res, 200, { ok: true });
+        } catch (err) {
+          json(res, 409, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
       }
 
       // POST /tasks/:id/<action> — retry | archive | cancel

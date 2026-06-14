@@ -122,6 +122,17 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-bar-fill.hi  { background: #e05b2c; }
   .usage-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:20px; }
   .usage-head h2 { margin:0 0 10px; }
+  .obs-costtgl { font-size:11px; color:var(--muted); display:flex; align-items:center; gap:4px; cursor:pointer; }
+  .obs-costtgl input { width:auto; }
+  .obs-split { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
+  .obs-split .opill { font-size:11px; padding:2px 8px; border-radius:20px; border:1px solid var(--border); background:var(--panel-2); color:var(--muted); }
+  .obs-split .opill.local { color:var(--ok); border-color:rgba(54,211,153,.4); }
+  .obs-tbl { width:100%; border-collapse:collapse; font-size:11.5px; }
+  .obs-tbl th { text-align:left; color:var(--muted); font-weight:600; padding:3px 6px; border-bottom:1px solid var(--border); }
+  .obs-tbl td { padding:3px 6px; border-bottom:1px solid var(--border); }
+  .obs-strip { display:flex; flex-wrap:wrap; gap:14px; margin:8px 0 4px; padding:8px 10px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; }
+  .obs-cell { display:flex; flex-direction:column; font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
+  .obs-cell b { font-size:13px; color:var(--text); text-transform:none; letter-spacing:0; }
   .usage-refresh { border:1px solid var(--border); background:var(--panel-2); color:var(--muted);
     width:24px; height:24px; border-radius:6px; cursor:pointer; line-height:1; font-size:13px; }
   .usage-refresh:hover { color:var(--text); border-color:var(--text); }
@@ -205,6 +216,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .attach-chip .rm:hover { color: var(--err); }
   .badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: var(--badge-bg); color: var(--badge-text); }
   .badge.model { color: var(--accent-2); }
+  .badge.age { opacity: .7; background: transparent; padding-left: 0; }
   .session-empty { color: var(--muted); text-align: center; margin-top: 40px; }
   .session h1 { font-size: 18px; margin: 0 0 4px; }
   .session .sub { color: var(--muted); margin-bottom: 16px; }
@@ -250,7 +262,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .reply-section.open { display: block; }
   .reply-toggle.active { border-color: var(--accent-2) !important; color: var(--accent-2) !important; }
   .transcript { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
-    max-height: 46vh; overflow-y: auto; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    max-height: 240px; overflow-y: auto; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
     white-space: pre-wrap; margin-bottom: 16px; color: var(--code-text); }
   .transcript .ln { padding: 1px 0; }
   .transcript .ln.error { color: var(--err); }
@@ -628,6 +640,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="metrics"></div>
     <div class="usage-head"><h2>Frontier Usage</h2><button id="usageRefresh" class="usage-refresh" title="Refresh Claude/Codex usage" onclick="refreshUsageNow()">↻</button></div>
     <div id="usage"><div class="muted">No frontier usage yet.</div></div>
+
+    <div class="usage-head"><h2>Observability</h2><label class="obs-costtgl" title="Show cost (frontier only)"><input type="checkbox" id="obsCost" onchange="toggleObsCost()"> cost</label></div>
+    <div id="observability"><div class="muted">No task telemetry yet.</div></div>
     <h2 style="margin-top:20px">Connectivity</h2>
     <div id="conn"></div>
     <h2 style="margin-top:20px">Directives</h2>
@@ -743,6 +758,39 @@ function hmAlert(message, title) { return _openDialog({ message, title, hideCanc
 function hmConfirm(message, opts) { return _openDialog(Object.assign({ message }, opts || {})); }
 function hmPrompt(message, defaultValue, opts) { return _openDialog(Object.assign({ message, prompt: true, defaultValue }, opts || {})); }
 
+// Relative "time ago" for task timestamps. The daemon writes two formats: toISOString()
+// on insert ("...T..Z") and SQLite datetime('now') on update ("YYYY-MM-DD HH:MM:SS",
+// space-separated, UTC, no T/Z). Both must be read as UTC. Kept between sentinels so the
+// test suite can extract and exercise the real shipped function.
+/*__TIMEAGO_START__*/
+function timeAgo(value, nowMs) {
+  if (!value) return "";
+  var s = String(value).trim();
+  var m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/);
+  var iso = m ? (m[1] + "T" + m[2] + (m[3] || "") + (m[4] || "Z")) : s;
+  var t = Date.parse(iso);
+  if (isNaN(t)) return "";
+  var now = (typeof nowMs === "number") ? nowMs : Date.now();
+  var sec = Math.floor((now - t) / 1000);
+  if (sec < 45) return "just now";
+  if (sec < 90) return "1 min ago";
+  if (sec < 3600) return Math.round(sec / 60) + " min ago";
+  if (sec < 5400) return "1 hr ago";
+  if (sec < 86400) return Math.round(sec / 3600) + " hr ago";
+  if (sec < 151200) return "1 day ago";
+  if (sec < 2592000) return Math.round(sec / 86400) + " days ago";
+  if (sec < 3888000) return "1 mo ago";
+  if (sec < 31536000) return Math.round(sec / 2592000) + " mo ago";
+  return Math.round(sec / 31536000) + " yr ago";
+}
+/*__TIMEAGO_END__*/
+
+function ageBadge(t) {
+  var raw = (t && t.updatedAt) || (t && t.createdAt) || "";
+  var label = timeAgo(raw, Date.now());
+  return label ? '<span class="badge age" title="'+esc(raw)+'">'+esc(label)+'</span>' : "";
+}
+
 function renderBoard() {
   const statusToLane = {};
   LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
@@ -762,7 +810,7 @@ function renderBoard() {
           + '<div class="t">'+esc(t.title||t._id)+'</div>'
           + '<div class="m">'+(t.model?'<span class="badge model">'+esc(t.model)+'</span>':'')
           + (t.reviewState?'<span class="badge">'+esc(t.reviewState)+'</span>':'')
-          + (t.directiveId?'<span class="badge">directive</span>':'')+'</div></div>').join("")
+          + (t.directiveId?'<span class="badge">directive</span>':'')+ageBadge(t)+'</div></div>').join("")
       + '</div>';
   }).join("") || '<div class="muted">No tasks.</div>';
   const archivable = state.tasks.filter(t => ["review","done","failed","cancelled"].includes(t.status)).length;
@@ -805,6 +853,8 @@ function taskActionsHtml(t) {
   const b = [];
   const running = ["backlog","assigned","in_progress"].includes(t.status);
   const retryable = ["failed","review","cancelled"].includes(t.status);
+  // Steerable: a live Codex run can be interrupted and resumed on the same thread.
+  const steerable = t.status === "in_progress" && (t.model||"").startsWith("codex:");
   if (running) b.push('<button onclick="taskAction(\''+t._id+'\',\'cancel\')">■ Cancel</button>');
   if (retryable) b.push('<button class="reply-toggle" id="retryToggle_'+t._id+'" onclick="toggleRetry(\''+t._id+'\')">↻ Retry</button>');
   if (t.pendingQuestion) b.push('<button class="reply-toggle" id="replyToggle_'+t._id+'" onclick="toggleReply(\''+t._id+'\')">↩ Reply</button>');
@@ -817,6 +867,15 @@ function taskActionsHtml(t) {
       + '<textarea id="retryText" class="reply-input" placeholder="Optional: add guidance to steer the rerun…" rows="2" oninput="onCtxDraft(\'retry\',this)"></textarea>'
       + attachPickerHtml('retry')
       + '<div class="reply-row" style="margin-top:6px"><button onclick="submitRetry(\''+t._id+'\')">↻ Retry'+(t.status==='cancelled'?'':' with guidance')+'</button></div></div>';
+  }
+  // Steer a live Codex run: always-visible box (the task is live-refreshing, so a
+  // collapsible section would close mid-compose). Submitting interrupts the agent
+  // and resumes the same thread with the new instruction.
+  if (steerable) {
+    html += '<div id="steerSection_'+t._id+'" class="reply-section open">'
+      + '<div class="reply-question">Steer this run — your instruction is added and the Codex thread resumes.</div>'
+      + '<textarea id="steerText" class="reply-input" placeholder="Type a new instruction to steer this run…" rows="2" oninput="onCtxDraft(\'steer\',this)"></textarea>'
+      + '<div class="reply-row" style="margin-top:6px"><button onclick="submitSteer(\''+t._id+'\')">⤳ Send Steer</button></div></div>';
   }
   // Reply to a needs_input question: text (auto-opens) + attachments.
   const isOpen = t.reviewState === "needs_input";
@@ -835,7 +894,7 @@ async function selectTask(id) {
   // task across a live refresh keeps files and draft text.
   if (_ctxTask !== id) {
     _ctxAttach = { retry: [], reply: [] };
-    _ctxDraft = { retry: "", reply: "" };
+    _ctxDraft = { retry: "", reply: "", steer: "" };
     _ctxFocus = { active: null, start: null, end: null };
     _ctxTask = id;
   } else {
@@ -860,10 +919,11 @@ async function selectTask(id) {
     + '<span class="k">completedBy</span><span>'+esc(t.completedBy||"—")+'</span>'
     + '<span class="k">prover</span><span>'+esc(t.proverType||"—")+'</span>'
     + '</div>'
+    + taskTelemetryStrip(t, out)
     + '<h2>Description</h2><div class="desc md">'+mdToHtml(t.description||"")+'</div>'
     + (t.error?'<h2>Error</h2><div class="errbox">'+esc(t.error)+'</div>':'')
-    + '<h2>Session transcript</h2>'+renderTranscript(logs)
     + (out.summary?'<h2>Result</h2><div class="desc md">'+mdToHtml(out.summary)+'</div>':'')
+    + '<h2>Session transcript</h2>'+renderTranscript(logs)
     + '</div>';
   const tr = el.querySelector(".transcript");
   if (tr) {
@@ -899,7 +959,7 @@ async function cardArchive(id) {
 // when a different task is selected (see selectTask), preserved across same-task
 // re-renders so a live refresh doesn't drop files or text mid-compose.
 let _ctxAttach = { retry: [], reply: [] };
-let _ctxDraft = { retry: "", reply: "" };
+let _ctxDraft = { retry: "", reply: "", steer: "" };
 let _ctxFocus = { active: null, start: null, end: null };
 let _ctxTask = null;
 function onCtxDraft(ctx, input) {
@@ -911,18 +971,23 @@ function onCtxDraft(ctx, input) {
 function syncCtxState() {
   const retry = document.getElementById("retryText");
   const reply = document.getElementById("replyText");
+  const steer = document.getElementById("steerText");
   if (retry) _ctxDraft.retry = retry.value;
   if (reply) _ctxDraft.reply = reply.value;
+  if (steer) _ctxDraft.steer = steer.value;
   const active = document.activeElement;
   if (active === retry) _ctxFocus = { active: "retry", start: retry.selectionStart, end: retry.selectionEnd };
   else if (active === reply) _ctxFocus = { active: "reply", start: reply.selectionStart, end: reply.selectionEnd };
+  else if (active === steer) _ctxFocus = { active: "steer", start: steer.selectionStart, end: steer.selectionEnd };
 }
 function restoreCtxState() {
   const retry = document.getElementById("retryText");
   const reply = document.getElementById("replyText");
+  const steer = document.getElementById("steerText");
   if (retry) retry.value = _ctxDraft.retry;
   if (reply) reply.value = _ctxDraft.reply;
-  const restore = _ctxFocus.active === "retry" ? retry : _ctxFocus.active === "reply" ? reply : null;
+  if (steer) steer.value = _ctxDraft.steer;
+  const restore = _ctxFocus.active === "retry" ? retry : _ctxFocus.active === "reply" ? reply : _ctxFocus.active === "steer" ? steer : null;
   if (restore && !shouldRestoreCtxFocus()) {
     _ctxFocus = { active: null, start: null, end: null };
     return;
@@ -978,6 +1043,16 @@ async function submitRetry(id) {
   refresh();
 }
 
+async function submitSteer(id) {
+  const ta = document.getElementById("steerText");
+  const message = ta ? ta.value.trim() : "";
+  if (!message) { ta && ta.focus(); return; }
+  ta.disabled = true;
+  const r = await api("/tasks/"+id+"/steer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) });
+  if (r && r.ok) { _ctxDraft.steer = ""; refresh(); selectTask(id); }
+  else { hmAlert(r?.error || "Failed to steer task"); ta.disabled = false; }
+}
+
 async function replyTask(id) {
   const el = document.getElementById("replyText");
   let text = el ? el.value.trim() : "";
@@ -998,6 +1073,85 @@ function toggleReply(id) {
   sec.classList.toggle("open", opening);
   if (btn) btn.classList.toggle("active", opening);
   if (opening) { const ta = document.getElementById("replyText"); if (ta) ta.focus(); }
+}
+
+// --- Observability (per-task telemetry + totals) ---
+let _obsCost = false;
+const OBS_LABELS = { "anthropic": "Claude", "openai-codex": "Codex", "local-qwen": "Qwen (local)", "other": "other" };
+function obsProvider(model) {
+  const m = (model || "").toLowerCase().trim();
+  if (/^(codex|chatgpt)/.test(m) || /^(gpt|o[0-9])/.test(m)) return "Codex";
+  if (/^(claude|opus|sonnet|haiku|fable)/.test(m)) return "Claude";
+  if (/(qwen|mistral|llama|mlx|local|deepseek|gemma|phi|nan)/.test(m)) return "Qwen (local)";
+  return "—";
+}
+function fmtMs(ms) {
+  if (ms == null) return "—";
+  if (ms < 1000) return Math.round(ms) + "ms";
+  if (ms < 60000) return (ms / 1000).toFixed(1) + "s";
+  return Math.floor(ms / 60000) + "m" + Math.round((ms % 60000) / 1000) + "s";
+}
+function fmtNum(n) { return n == null ? "—" : Number(n).toLocaleString(); }
+
+function toggleObsCost() {
+  _obsCost = !!document.getElementById("obsCost").checked;
+  try { localStorage.setItem("hm_obs_cost", _obsCost ? "1" : "0"); } catch (e) { /* */ }
+  renderObservability();
+  if (state.selected) selectTask(state.selected);
+}
+
+// Per-task telemetry strip from the task's own data (no extra fetch). Honors the
+// "unavailable not zero" rule: Codex tasks with 0/0 tokens show "—".
+function taskTelemetryStrip(t, out) {
+  out = out || {};
+  const model = t.model || (out.modelsUsed && out.modelsUsed[0]) || "";
+  const prov = obsProvider(model);
+  let inTok = out.inputTokens, outTok = out.outputTokens;
+  if (prov === "Codex" && !inTok && !outTok) { inTok = null; outTok = null; }
+  let latency = null;
+  if (t.startedAt && t.completedAt) {
+    const a = Date.parse(t.startedAt), b = Date.parse(t.completedAt);
+    if (!isNaN(a) && !isNaN(b)) latency = Math.max(0, b - a);
+  }
+  const tps = (outTok && latency) ? Math.round(outTok / (latency / 1000)) : null;
+  const cells = [
+    ["provider", prov],
+    ["tokens", (inTok != null || outTok != null) ? (fmtNum(inTok || 0) + " in / " + fmtNum(outTok || 0) + " out") : "—"],
+    ["latency", fmtMs(latency)],
+    ["tok/s", tps != null ? tps : "—"],
+    ["turns", out.turns != null ? out.turns : "—"],
+  ];
+  if (_obsCost && prov === "Claude" && out.cost) cells.push(["cost", "$" + Number(out.cost).toFixed(3)]);
+  return '<div class="obs-strip">' + cells.map(c =>
+    '<span class="obs-cell"><b>' + esc(String(c[1])) + '</b>' + esc(c[0]) + '</span>').join("") + '</div>';
+}
+
+async function renderObservability() {
+  const el = document.getElementById("observability");
+  if (!el) return;
+  let data;
+  try { data = await api("/observability?limit=1"); } catch (e) { return; }
+  if (!data || !data.totals) return;
+  const t = data.totals;
+  if (!t.runs) { el.innerHTML = '<div class="muted">No task telemetry yet.</div>'; return; }
+  let html = '<div class="obs-split">'
+    + '<span class="opill">' + t.split.frontier + ' frontier</span>'
+    + '<span class="opill local">' + t.split.local + ' local</span>'
+    + '<span class="opill">' + fmtNum(t.tokens.total) + ' tok</span>'
+    + (_obsCost && t.costUsd != null ? '<span class="opill">$' + t.costUsd.toFixed(2) + '</span>' : '')
+    + '</div>';
+  html += '<table class="obs-tbl"><tr><th>provider</th><th>runs</th><th>tok in/out</th><th>p50</th><th>p95</th>'
+    + (_obsCost ? '<th>cost</th>' : '') + '</tr>';
+  for (const p of t.byProvider) {
+    const label = OBS_LABELS[p.key] || p.key;
+    html += '<tr><td>' + esc(label) + '</td><td>' + p.runs + '</td>'
+      + '<td>' + fmtNum(p.inputTokens) + ' / ' + fmtNum(p.outputTokens) + '</td>'
+      + '<td>' + fmtMs(p.latencyP50Ms) + '</td><td>' + fmtMs(p.latencyP95Ms) + '</td>'
+      + (_obsCost ? '<td>' + (p.costUsd != null ? '$' + p.costUsd.toFixed(2) : '—') + '</td>' : '')
+      + '</tr>';
+  }
+  html += '</table>';
+  el.innerHTML = html;
 }
 
 function renderConn() {
@@ -1484,7 +1638,7 @@ async function refresh() {
     state.tasks = tasks; state.directives = directives; state.conn = conn; state.metrics = metrics; state.onboarding = onboarding;
     state.approvals = (appr && appr.approvals) || [];
     renderBoard(); renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
-    renderApprovals(); renderSkills(); renderMcp();
+    renderApprovals(); renderSkills(); renderMcp(); renderObservability();
     if (state.selected) selectTask(state.selected);
   } catch (e) { /* transient */ }
   // Check for updates on every tick (cheap — daemon caches ~60s). Tied to
@@ -2399,6 +2553,8 @@ function connectSSE() {
 
 if (requireToken()) {
   loadModels();
+  try { _obsCost = localStorage.getItem("hm_obs_cost") === "1"; } catch (e) { /* */ }
+  { const cb = document.getElementById("obsCost"); if (cb) cb.checked = _obsCost; }
   loadProjects();
   refresh();
   connectSSE();

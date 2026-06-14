@@ -10,6 +10,7 @@ import { spawn } from "child_process";
 import type { AgentProcess, AgentEventHandler } from "./subprocess";
 import { findBinary, CODEX_BINARY_SEARCH_PATHS, buildCliPath } from "@/lib/config/binary-detection";
 import { resolveCodexModel } from "@/lib/models/catalog";
+import { readLatestCodexTokenUsage } from "@/lib/usage/codex";
 import { outboundHttpRoutingPrompt, brainSearchRoutingPrompt, beeToolsRoutingPrompt } from "./outbound-routing";
 
 let fakePidCounter = -5000;
@@ -79,6 +80,7 @@ export function spawnCodexAgent(
 
   proc.stdout?.on("data", (chunk: Buffer) => {
     const text = chunk.toString("utf-8");
+    if (!agent.firstTokenAt && text) agent.firstTokenAt = new Date();
     agent.textBuffer += text;
     onEvent(taskId, { type: "text", content: text });
   });
@@ -93,13 +95,24 @@ export function spawnCodexAgent(
 
   proc.on("close", (code, signal) => {
     const result = agent.textBuffer.slice(-2000);
+    // Recover token usage from Codex's own session log (stdout has none).
+    let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, reasoningTokens = 0;
+    try {
+      const usage = readLatestCodexTokenUsage(agent.startedAt.getTime());
+      if (usage) {
+        inputTokens = usage.inputTokens;
+        outputTokens = usage.outputTokens;
+        cacheReadTokens = usage.cachedInputTokens;
+        reasoningTokens = usage.reasoningTokens;
+      }
+    } catch { /* best-effort — leave as 0 (= unavailable downstream) */ }
     agent.lastResult = {
       cost: 0, result, sessionId: taskId, turns: 1,
-      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, contextWindow: 0,
+      inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens: 0, contextWindow: 0, reasoningTokens,
     };
     onEvent(taskId, {
       type: "result", sessionId: taskId, cost: 0, result, turns: 1,
-      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, contextWindow: 0,
+      inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens: 0, contextWindow: 0,
     });
     onExit(taskId, code ?? 0, signal ?? null);
   });

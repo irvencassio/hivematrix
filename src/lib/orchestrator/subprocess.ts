@@ -211,11 +211,13 @@ export interface AgentProcess {
   projectPath: string;
   worktreeName?: string | null;
   startedAt: Date;
+  /** When the first token/text arrived — for time-to-first-token (TTFT). */
+  firstTokenAt?: Date;
   textBuffer: string;
   modelsUsed: string[];
   launchCommand?: string;
   sessionId?: string;
-  lastResult?: { cost: number; result: string; sessionId: string; turns: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; contextWindow: number };
+  lastResult?: { cost: number; result: string; sessionId: string; turns: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; contextWindow: number; reasoningTokens?: number };
 }
 
 export type AgentEventHandler = (taskId: string, event: StreamEvent) => void;
@@ -658,6 +660,7 @@ export async function spawnAgent(
             agent.modelsUsed.push(event.model);
           }
         } else if (event.type === "text") {
+          if (!agent.firstTokenAt && event.content) agent.firstTokenAt = new Date();
           agent.textBuffer += event.content;
         } else if (event.type === "result") {
           agent.lastResult = {
@@ -670,6 +673,7 @@ export async function spawnAgent(
             cacheReadTokens: event.cacheReadTokens,
             cacheCreationTokens: event.cacheCreationTokens,
             contextWindow: event.contextWindow,
+            reasoningTokens: event.reasoningTokens,
           };
         }
         onEvent(taskId, event);
@@ -694,6 +698,7 @@ export async function spawnAgent(
       const events = parser.parseLine(lineBuffer);
       for (const event of events) {
         if (event.type === "text") {
+          if (!agent.firstTokenAt && event.content) agent.firstTokenAt = new Date();
           agent.textBuffer += event.content;
         } else if (event.type === "result") {
           agent.lastResult = {
@@ -706,6 +711,7 @@ export async function spawnAgent(
             cacheReadTokens: event.cacheReadTokens,
             cacheCreationTokens: event.cacheCreationTokens,
             contextWindow: event.contextWindow,
+            reasoningTokens: event.reasoningTokens,
           };
         }
         onEvent(taskId, event);

@@ -304,6 +304,40 @@ const MIGRATIONS: string[] = [
     );
     CREATE INDEX IF NOT EXISTS idx_feedback_kind ON feedback(kind);
     CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);`,
+
+  // v17: task_telemetry — one normalized row per task-run (observability).
+  // NULL columns mean "unavailable" (e.g. Codex tokens before recovery) — never
+  // a fake 0. gen_ai.* shaped for portability.
+  `CREATE TABLE IF NOT EXISTS task_telemetry (
+      _id INTEGER PRIMARY KEY AUTOINCREMENT,
+      taskId TEXT NOT NULL,
+      runIndex INTEGER NOT NULL DEFAULT 0,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      role TEXT,
+      connectivity TEXT,
+      status TEXT NOT NULL,
+      inputTokens INTEGER,
+      outputTokens INTEGER,
+      cacheReadTokens INTEGER,
+      cacheCreationTokens INTEGER,
+      reasoningTokens INTEGER,
+      totalTokens INTEGER,
+      tokensPerSec REAL,
+      latencyMs INTEGER,
+      ttftMs INTEGER,
+      turns INTEGER,
+      toolCalls INTEGER,
+      costUsd REAL,
+      directiveId TEXT,
+      runId TEXT,
+      proverType TEXT,
+      project TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_telemetry_task ON task_telemetry(taskId);
+    CREATE INDEX IF NOT EXISTS idx_task_telemetry_created ON task_telemetry(createdAt);
+    CREATE INDEX IF NOT EXISTS idx_task_telemetry_provider ON task_telemetry(provider);`,
 ];
 
 // ------------------------------------------------------------------

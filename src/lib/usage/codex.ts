@@ -138,6 +138,85 @@ function parseRateLimitsEvent(line: string): CodexRateLimitsSnapshot | null {
   };
 }
 
+// --- Per-run token recovery (observability) ----------------------------------
+//
+// `codex exec` prints raw text to stdout — no usage object. But Codex writes a
+// `token_count` event to its session JSONL carrying `info.total_token_usage`.
+// We read the most-recent session modified within the run window and pull the
+// final cumulative usage. Best-effort: returns null if no fresh session is
+// found, so the caller records tokens as "unavailable" rather than a fake 0.
+
+export interface CodexTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+}
+
+function parseTokenUsageEvent(line: string): CodexTokenUsage | null {
+  const parsed = parseJsonObject(line);
+  const payload = parsed?.payload;
+  if (!payload || typeof payload !== "object") return null;
+  const message = payload as Record<string, unknown>;
+  if (message.type !== "token_count") return null;
+  const info = message.info;
+  if (!info || typeof info !== "object") return null;
+  const total = (info as Record<string, unknown>).total_token_usage;
+  if (!total || typeof total !== "object") return null;
+  const t = total as Record<string, unknown>;
+  const num = (k: string): number => (typeof t[k] === "number" ? (t[k] as number) : 0);
+  return {
+    inputTokens: num("input_tokens"),
+    outputTokens: num("output_tokens"),
+    cachedInputTokens: num("cached_input_tokens"),
+    reasoningTokens: num("reasoning_output_tokens"),
+    totalTokens: num("total_tokens"),
+  };
+}
+
+function extractLatestTokenUsageFromText(text: string): CodexTokenUsage | null {
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i]?.trim();
+    if (!line) continue;
+    const usage = parseTokenUsageEvent(line);
+    if (usage && usage.totalTokens > 0) return usage;
+  }
+  return null;
+}
+
+/**
+ * Recover the token usage for a just-finished Codex run. `sinceMs` is the run's
+ * start time; only sessions modified at/after it (minus a small skew) are
+ * considered, newest first. Returns null when no usage can be recovered.
+ */
+export function readLatestCodexTokenUsage(sinceMs: number): CodexTokenUsage | null {
+  const sessionsDir = join(homedir(), ".codex", "sessions");
+  if (!existsSync(sessionsDir)) return null;
+  const files: string[] = [];
+  collectSessionFiles(sessionsDir, files);
+  const fresh = files
+    .map((f) => {
+      try {
+        return { f, m: statSync(f).mtimeMs };
+      } catch {
+        return null;
+      }
+    })
+    .filter((x): x is { f: string; m: number } => x !== null && x.m >= sinceMs - 5000)
+    .sort((a, b) => b.m - a.m);
+  for (const { f } of fresh.slice(0, 5)) {
+    try {
+      const usage = extractLatestTokenUsageFromText(readFileSync(f, "utf-8"));
+      if (usage) return usage;
+    } catch {
+      // try next
+    }
+  }
+  return null;
+}
+
 function extractLatestRateLimitsFromText(sessionJsonlText: string): CodexRateLimitsSnapshot | null {
   const lines = sessionJsonlText.split("\n");
   for (let i = lines.length - 1; i >= 0; i -= 1) {

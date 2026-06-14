@@ -384,6 +384,7 @@ async function runAgentLoop(
         const events = parseOpenAIChunk(dataStr, state);
         for (const event of events) {
           if (event.type === "text") {
+            if (!agent.firstTokenAt && event.content) agent.firstTokenAt = new Date();
             turnText += event.content;
             agent.textBuffer += event.content;
           }

@@ -7,7 +7,7 @@ export type StreamEvent =
   | { type: "tool_use"; tool: string; input: string }
   | { type: "tool_result"; content: string }
   | { type: "init"; model: string }
-  | { type: "result"; sessionId: string; cost: number; result: string; turns: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; contextWindow: number }
+  | { type: "result"; sessionId: string; cost: number; result: string; turns: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; contextWindow: number; reasoningTokens?: number }
   | { type: "error"; content: string }
   | { type: "unknown"; raw: string };
 
@@ -58,10 +58,12 @@ export class StreamParser {
         const inputTok = baseInput + cacheCreate + cacheRead;
         const outputTok = usage?.output_tokens ?? 0;
         let contextWindow = 0;
+        let reasoningTokens = usage?.reasoning_output_tokens ?? usage?.reasoning_tokens ?? 0;
         const modelUsage = data.modelUsage as Record<string, Record<string, number>> | undefined;
         if (modelUsage) {
           const first = Object.values(modelUsage)[0];
           if (first?.contextWindow) contextWindow = first.contextWindow;
+          if (!reasoningTokens && first?.reasoningTokens) reasoningTokens = first.reasoningTokens;
         }
         return [{
           type: "result",
@@ -81,6 +83,7 @@ export class StreamParser {
           cacheReadTokens: cacheRead,
           cacheCreationTokens: cacheCreate,
           contextWindow,
+          reasoningTokens: reasoningTokens || undefined,
         }];
       }
 

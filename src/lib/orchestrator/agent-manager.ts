@@ -8,6 +8,7 @@ import {
   type AgentProcess,
 } from "./subprocess";
 import { registerPid, unregisterPid } from "./pid-registry";
+import { captureRunTelemetry } from "@/lib/observability/capture";
 import type { StreamEvent } from "./stream-parser";
 import { TurnBuilder } from "./turn-builder";
 import type { Turn, WorkflowPhase } from "./turn-types";
@@ -800,6 +801,7 @@ class AgentManager {
           update.error = currentError;
         }
         await Task.findByIdAndUpdate(taskId, update);
+        captureRunTelemetry({ taskId, task: task as Record<string, unknown> | null, agent, result, status: nextStatus, completedAt, runIndex: prevRunCount });
         this.taskUpdateBroadcaster(taskId, {
           ...update,
           turns,
@@ -845,6 +847,7 @@ class AgentManager {
           error,
           output: { ...accumulatedOutput, summary },
         });
+        captureRunTelemetry({ taskId, task: task as Record<string, unknown> | null, agent, result, status: "failed", completedAt, runIndex: prevRunCount });
         if (task?.missionId) {
           // directive progress is tracked via run_journal in db, not a progress doc
         }

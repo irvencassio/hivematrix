@@ -744,3 +744,37 @@ counts + token totals (and subscription % remaining as before). Placeholders rew
 
 **Verification.** tsc clean, scope-wall 0, 590/590 tests (added console coverage for the
 approval queue + a guard that the main screen has no dollar amounts), daemon bundles.
+
+## Observability — embedded, local-first, 3-provider normalized telemetry (2026-06-14)
+
+**Decision.** Per the research/design doc (brain: 2026-06-14-hivematrix-observability-design),
+we embed the idea rather than adopt a SaaS: an OpenTelemetry-GenAI-shaped telemetry layer in
+the existing SQLite DB, surfaced in the console. No external dependency, works offline,
+prompts never leave the Mac. Built P1 + P2.
+
+**Data model.** New `task_telemetry` table (v17 migration): one normalized row per task-run,
+`gen_ai.*`-shaped. NULL = unavailable, never a fake 0 (the correctness rule for trustworthy
+totals). The dormant `usage_totals` table is now wired (daily rollup by provider + project).
+
+**Normalizer** (`lib/observability/contracts.ts`, pure + unit-tested): `providerForModel`,
+`normalizeRun` (latency, tokens/sec, unavailable-not-zero, cost provider-reported only — local
+& Codex stay null), `summarizeTelemetry` (per-provider/model totals, latency p50/p95,
+local-vs-frontier split). `lib/observability/store.ts` persists + rolls up;
+`capture.ts` is called from agent-manager's success + failure exits (non-critical).
+
+**3-provider solution.**
+- Claude: maps directly from the result event (+ reasoning tokens now extracted in stream-parser).
+- Qwen (local): OpenAI `usage` tokens; cost = null (free, on-device); tokens/sec computed.
+- Codex: **token recovery** — `usage/codex.ts` now reads `info.total_token_usage` from
+  `~/.codex/sessions/*.jsonl` (the file it already parsed for rate-limits), wired into
+  `codex-agent`. Before recovery, tokens record as unavailable (null), not 0.
+- TTFT: `firstTokenAt` captured on the first delta in all three runners.
+
+**Surface.** `GET /observability` (totals + recent; `?taskId=` for one task). Console: a
+per-task telemetry strip (model/provider/tokens/latency/tokens-per-sec/turns, no extra fetch)
+and an Observability totals section (per-provider runs, tokens, latency p50/p95, local/frontier
+split). **Cost is opt-in** (a toggle, off by default, persisted) and never on the main board —
+honoring the earlier "no dollars on the main screen" change.
+
+**Verification.** tsc clean, scope-wall 0, 609/609 tests (normalizer, store + rollup, Codex
+recovery, console surface), daemon bundles. Not yet released.

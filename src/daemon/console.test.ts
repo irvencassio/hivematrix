@@ -41,12 +41,33 @@ test("desktop console surfaces the founder-in-the-loop approval queue (parity wi
   assert.match(js, /renderApprovals\(\);/, "rendered on every refresh tick");
 });
 
-test("main screen shows no dollar amounts (usage is counts/tokens only)", () => {
+test("main screen usage shows no dollar amounts (counts/tokens only)", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.doesNotMatch(js, /HiveMatrix spend/, "no spend tooltip");
   assert.doesNotMatch(js, /No frontier spend/, "no spend placeholder");
-  assert.doesNotMatch(js, /\.toFixed\(2\)/, "no dollar-formatted amounts in usage");
   assert.doesNotMatch(js, /\bspent\b/, "no 'spent' labels");
+  // The Frontier Usage pill fallback shows a task count, never a dollar total.
+  assert.match(js, /pill\.textContent = "⚡ " \+ \(u\.taskCount/, "pill fallback is task count");
+});
+
+test("observability cost is opt-in (off by default), not on the main board", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // Cost figures only render when the _obsCost toggle is on.
+  assert.match(js, /let _obsCost = false/, "cost defaults off");
+  assert.match(js, /_obsCost && /, "cost rendering gated behind the toggle");
+  assert.match(js, /hm_obs_cost/, "toggle persisted");
+});
+
+test("console surfaces observability: per-task strip + totals across providers", () => {
+  assert.match(CONSOLE_HTML, /id="observability"/, "totals mount point");
+  assert.match(CONSOLE_HTML, /<h2>Observability<\/h2>/);
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /async function renderObservability\(/);
+  assert.match(js, /function taskTelemetryStrip\(/, "per-task telemetry strip");
+  assert.match(js, /api\("\/observability/, "fetches the observability endpoint");
+  assert.match(js, /renderObservability\(\);/, "rendered on refresh");
+  // The strip honors unavailable-not-zero for Codex.
+  assert.match(js, /prov === "Codex" && !inTok && !outTok/);
 });
 
 test("remote access UI offers both a temporary and a named (durable) tunnel with Access credentials", () => {
@@ -108,6 +129,20 @@ test("console sends reply bodies as JSON", () => {
   assert.match(js, /\/tasks\/"\+id\+"\/reply/);
 });
 
+test("console can steer a live Codex run, gated to in-progress Codex tasks", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /async function submitSteer\(/);
+  assert.match(js, /\/tasks\/"\+id\+"\/steer/);
+  // Steer box only appears for an in-progress Codex task.
+  assert.ok(
+    js.includes('t.status === "in_progress" && (t.model||"").startsWith("codex:")'),
+    "steer gated to in-progress Codex tasks",
+  );
+  // Its draft survives live refreshes like reply/retry do.
+  assert.ok(js.includes("onCtxDraft(\\'steer\\',this)"), "steer textarea preserves its draft");
+  assert.match(js, /_ctxDraft\.steer = ""/);
+});
+
 test("frontier usage panel renders a separate Codex usage section", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /codexSubscription/);
@@ -129,4 +164,45 @@ test("frontier usage panel exposes Claude auth login action", () => {
   assert.match(js, /\/claude\/auth\/login/);
   assert.match(js, /claudeAuthLogin/);
   assert.match(js, /Run Claude login/);
+});
+
+// Pull the shipped browser `timeAgo` out of the console script and make it callable,
+// so the actual rendered logic (not a copy) is what gets tested.
+function extractTimeAgo(html: string): (value: string | null | undefined, nowMs: number) => string {
+  const m = html.match(/\/\*__TIMEAGO_START__\*\/([\s\S]*?)\/\*__TIMEAGO_END__\*\//);
+  assert.ok(m, "console must contain a sentinel-wrapped timeAgo function");
+  const factory = new Function(m![1] + "; return timeAgo;") as () => (
+    value: string | null | undefined,
+    nowMs: number,
+  ) => string;
+  return factory();
+}
+
+test("console timeAgo humanizes BOTH daemon date formats as UTC", () => {
+  const timeAgo = extractTimeAgo(CONSOLE_HTML);
+  const now = Date.parse("2026-06-14T10:35:45Z");
+  // SQLite datetime('now') — space separator, no T/Z — must be read as UTC, not local.
+  assert.equal(timeAgo("2026-06-14 10:30:45", now), "5 min ago");
+  // toISOString() form written on insert.
+  assert.equal(timeAgo("2026-06-14T10:35:30.000Z", now), "just now");
+  assert.equal(timeAgo("2026-06-14T09:35:45Z", now), "1 hr ago");
+  assert.equal(timeAgo("2026-06-13T10:35:45Z", now), "1 day ago");
+  assert.equal(timeAgo("2026-06-12T10:35:45Z", now), "2 days ago");
+});
+
+test("console timeAgo is null-safe and clamps clock skew", () => {
+  const timeAgo = extractTimeAgo(CONSOLE_HTML);
+  const now = Date.parse("2026-06-14T10:35:45Z");
+  assert.equal(timeAgo("", now), "");
+  assert.equal(timeAgo(null, now), "");
+  assert.equal(timeAgo("not a date", now), "");
+  // a future timestamp (clock skew) must not render "in N min" — clamp to "just now".
+  assert.equal(timeAgo("2026-06-14T10:40:00Z", now), "just now");
+});
+
+test("board renders a per-task age chip from updatedAt", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function ageBadge\(/);
+  assert.match(js, /ageBadge\(t\)/, "renderBoard appends the age chip per card");
+  assert.match(js, /updatedAt/, "age chip is driven by updatedAt");
 });
