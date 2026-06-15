@@ -279,6 +279,11 @@ function resolvePromptPrefix(workflowId?: string, stepIndex?: number): string {
 // "ultrathink" is also kept as an in-prompt keyword for Claude-specific behavior.
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
+/** Remove NUL bytes — argv strings passed to child_process.spawn cannot contain them. */
+export function stripNullBytes(s: string): string {
+  return s.includes("\u0000") ? s.replace(/\u0000/g, "") : s;
+}
+
 export function buildClaudeSpawnArgs(input: {
   prompt: string;
   tools: string[];
@@ -616,8 +621,14 @@ export async function spawnAgent(
   }
 
   const { binary: claudeBinary, extraArgs } = resolveClaudeCommand();
-  const launchCommand = [claudeBinary, ...extraArgs, ...args].join(" ");
-  const proc = spawn(claudeBinary, [...extraArgs, ...args], {
+  // Strip NUL bytes from every argv string: Node's spawn rejects any argument
+  // containing \u0000 ("must be a string without null bytes"). System-prompt
+  // args carry verbatim file content (AGENTS.md, CLAUDE.md, scratchpad), and a
+  // project file may contain a stray NUL — sanitize at the boundary so any
+  // source is covered, not just one file.
+  const spawnArgs = [...extraArgs, ...args].map(stripNullBytes);
+  const launchCommand = [claudeBinary, ...spawnArgs].join(" ");
+  const proc = spawn(claudeBinary, spawnArgs, {
     cwd: projectPath,
     env: env as NodeJS.ProcessEnv,
     stdio: ["ignore", "pipe", "pipe"] as const,
