@@ -1334,6 +1334,85 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /commands — the active (or ?profile=) Claude profile's LOCAL slash
+      // commands + folder skills, discovered under <configDir>/commands and
+      // <configDir>/skills. Read-only listing; these run natively via /commands/run.
+      if (req.method === "GET" && urlPath === "/commands") {
+        const { scanLocalCommands } = await import("@/lib/commands/local-catalog");
+        const profile = parseQueryString(req.url ?? "").profile;
+        json(res, 200, { commands: await scanLocalCommands(profile?.trim() || undefined) });
+        return;
+      }
+
+      // POST /commands/run — { name, args?, profile? }. Run a local command/skill
+      // natively by creating a standalone Task whose description IS "/<name> <args>"
+      // (prompt === description for a standalone/auto task — subprocess.ts). The
+      // name MUST exist in a fresh scan, so an arbitrary "/..." prompt can't be
+      // injected; args is a single line appended after the slash invocation.
+      if (req.method === "POST" && urlPath === "/commands/run") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const name = typeof body.name === "string" ? body.name.trim() : "";
+        const args = typeof body.args === "string" ? body.args.trim() : "";
+        const profile = typeof body.profile === "string" && body.profile.trim() ? body.profile.trim() : undefined;
+        if (!name) { json(res, 400, { error: "name is required" }); return; }
+
+        const { scanLocalCommands } = await import("@/lib/commands/local-catalog");
+        const cmd = (await scanLocalCommands(profile)).find((c) => c.invokeName === name);
+        if (!cmd) { json(res, 404, { error: "command not found in local catalog" }); return; }
+
+        const safeArgs = args.replace(/[\r\n]+/g, " ").trim();
+        const description = safeArgs ? `/${cmd.invokeName} ${safeArgs}` : `/${cmd.invokeName}`;
+
+        const { normalizeTaskProfileKey, getActiveTaskProfileKey } = await import("@/lib/config/constants");
+        const { Task, generateId } = await import("@/lib/db");
+        const task = await Task.create({
+          _id: generateId(),
+          title: `[command] /${cmd.invokeName}`,
+          description,
+          project: "ops",
+          projectPath: process.cwd(),
+          profile: profile ? normalizeTaskProfileKey(profile) : getActiveTaskProfileKey(),
+          status: "backlog",
+          executor: "agent",
+          source: "command",
+          output: { command: cmd.invokeName, kind: cmd.kind },
+        });
+        broadcast("tasks:created", { taskId: task._id });
+        json(res, 201, { task });
+        return;
+      }
+
+      // POST /skills/import-local — bulk-import the active (or ?profile) profile's
+      // folder SKILLS into the brain library. Each SKILL.md body becomes a TRUSTED
+      // instruction skill (operator's own skills). v1 copies SKILL.md text only;
+      // bundled scripts stay at sourcePath (native /commands/run keeps full fidelity).
+      if (req.method === "POST" && urlPath === "/skills/import-local") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const profile = typeof body.profile === "string" && body.profile.trim() ? body.profile.trim() : undefined;
+        const { scanLocalCommands, readManifestBody } = await import("@/lib/commands/local-catalog");
+        const { upsertSkill } = await import("@/lib/skills/store");
+
+        const skills = (await scanLocalCommands(profile)).filter((c) => c.kind === "skill");
+        let imported = 0, refined = 0, skipped = 0, withAssets = 0;
+        for (const s of skills) {
+          const text = await readManifestBody(s.sourcePath);
+          if (!text || !text.trim()) { skipped++; continue; }
+          const r = await upsertSkill({
+            name: s.displayName,
+            description: s.description,
+            body: text,
+            source: s.sourcePath,
+            tags: ["local-skill", "imported"],
+            trusted: true,
+            kind: "instruction",
+          });
+          if (r.created) imported++; else if (r.refined) refined++; else skipped++;
+          if (s.hasBundledFiles) withAssets++;
+        }
+        json(res, 200, { imported, refined, skipped, withAssets });
+        return;
+      }
+
       // GET /mcp — registered MCP servers + status (running/reachable, restartable).
       if (req.method === "GET" && urlPath === "/mcp") {
         const { listMcpStatus } = await import("@/lib/mcp/registry");

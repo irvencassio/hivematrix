@@ -704,6 +704,19 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="muted" id="skillMeta" style="font-size:11px;margin-top:4px"></div>
     <div class="muted" id="skillResult" style="font-size:12px;margin-top:4px"></div>
     <pre id="skillView" style="display:none;max-height:200px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap"></pre></details>
+    <details class="ctx-sec" id="commandsSec"><summary>Commands</summary>
+    <div class="row" style="gap:6px">
+      <select id="commandSelect" onchange="updateCommandMeta()" style="flex:1;min-width:120px"></select>
+      <button class="addbtn" onclick="importLocalSkills()" title="Bulk-import your local folder skills into the brain library">⇩ Import skills → library</button>
+    </div>
+    <input id="commandArgs" placeholder="Arguments (optional)" style="margin-top:6px" />
+    <div class="row" style="gap:6px;flex-wrap:wrap">
+      <button class="create" onclick="runCommand()">Run</button>
+      <button class="addbtn" onclick="viewCommand()" title="View invoke name, source path, allowed-tools">View</button>
+    </div>
+    <div class="muted" id="commandMeta" style="font-size:11px;margin-top:4px"></div>
+    <div class="muted" id="commandResult" style="font-size:12px;margin-top:4px"></div>
+    <pre id="commandView" style="display:none;max-height:200px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap"></pre></details>
     <details class="ctx-sec" id="mcpSec"><summary>MCP Servers</summary>
     <div id="mcp"></div></details>
   </section>
@@ -1346,6 +1359,83 @@ async function importSkillPrompt() {
   } catch (e) { if (res) res.textContent = 'Import failed.'; }
 }
 
+// --- Commands launcher (local Claude slash commands + folder skills) ---------
+let _commands = [];
+async function renderCommands() {
+  try {
+    const d = await api('/commands');
+    _commands = (d && d.commands) || [];
+    const sel = document.getElementById('commandSelect');
+    if (!sel) return;
+    const prev = sel.value;
+    if (!_commands.length) {
+      sel.innerHTML = '<option value="">(no local commands found)</option>';
+    } else {
+      const opt = c => '<option value="' + esc(c.invokeName) + '">' + esc(c.displayName)
+        + (c.hasBundledFiles ? ' ⊕' : '') + '</option>';
+      const cmds = _commands.filter(c => c.kind === 'command');
+      const skills = _commands.filter(c => c.kind === 'skill');
+      let html = '';
+      if (cmds.length) html += '<optgroup label="Commands">' + cmds.map(opt).join('') + '</optgroup>';
+      if (skills.length) html += '<optgroup label="Skills">' + skills.map(opt).join('') + '</optgroup>';
+      sel.innerHTML = html;
+    }
+    if (prev) sel.value = prev;
+    updateCommandMeta();
+  } catch (e) { /* transient */ }
+}
+function selectedCommand() {
+  const sel = document.getElementById('commandSelect');
+  return sel ? _commands.find(c => c.invokeName === sel.value) : null;
+}
+function updateCommandMeta() {
+  const meta = document.getElementById('commandMeta');
+  const view = document.getElementById('commandView');
+  if (view) view.style.display = 'none';
+  if (!meta) return;
+  const c = selectedCommand();
+  if (!c) { meta.textContent = ''; return; }
+  meta.innerHTML = esc(c.kind)
+    + (c.argumentHint ? ' · args: ' + esc(c.argumentHint) : '')
+    + (c.hasBundledFiles ? ' · ' + c.bundledFileCount + ' bundled file(s)' : '')
+    + (c.description ? ' — ' + esc(c.description) : '');
+}
+function viewCommand() {
+  const c = selectedCommand();
+  const view = document.getElementById('commandView');
+  if (!c || !view) return;
+  view.textContent = 'invoke: /' + c.invokeName + '\nkind: ' + c.kind
+    + '\nsource: ' + c.sourcePath
+    + (c.allowedTools ? '\nallowed-tools: ' + c.allowedTools : '')
+    + (c.model ? '\nmodel: ' + c.model : '');
+  view.style.display = 'block';
+}
+async function runCommand() {
+  const c = selectedCommand();
+  if (!c) return;
+  const args = (document.getElementById('commandArgs') || {}).value || '';
+  const res = document.getElementById('commandResult');
+  if (res) res.textContent = 'Launching…';
+  try {
+    const d = await api('/commands/run',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: c.invokeName, args: args }) });
+    if (d && d.task) { if (res) res.textContent = 'Launched /' + c.invokeName + ' — see the board.'; refresh(); }
+    else if (res) { res.textContent = (d && d.error) || 'Launched.'; }
+  } catch (e) { if (res) res.textContent = 'Error launching command.'; }
+}
+async function importLocalSkills() {
+  const res = document.getElementById('commandResult');
+  if (res) res.textContent = 'Importing local skills…';
+  try {
+    const d = await api('/skills/import-local',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    if (res) res.textContent = 'Imported ' + (d.imported || 0) + ', refined ' + (d.refined || 0)
+      + ', skipped ' + (d.skipped || 0)
+      + (d.withAssets ? ' · ' + d.withAssets + ' had bundled assets (text only)' : '') + '.';
+    renderSkills();
+  } catch (e) { if (res) res.textContent = 'Import failed.'; }
+}
+
 // --- MCP servers (status + restart) -----------------------------------------
 async function renderMcp() {
   try {
@@ -1702,7 +1792,7 @@ async function refresh() {
     state.tasks = tasks; state.directives = directives; state.conn = conn; state.metrics = metrics; state.onboarding = onboarding;
     state.approvals = (appr && appr.approvals) || [];
     renderBoard(); renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
-    renderApprovals(); renderSkills(); renderMcp(); renderObservability();
+    renderApprovals(); renderSkills(); renderCommands(); renderMcp(); renderObservability();
     if (state.selected) selectTask(state.selected);
   } catch (e) { /* transient */ }
   // Check for updates on every tick (cheap — daemon caches ~60s). Tied to
