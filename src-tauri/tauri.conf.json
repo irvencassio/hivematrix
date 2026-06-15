@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "HiveMatrix",
-  "version": "0.1.29",
-  "identifier": "com.hivematrix.app",
+  "version": "0.1.30",
+  "identifier": "com.cassio.hivematrix",
   "build": {
     "frontendDist": "../ui",
     "devUrl": "http://127.0.0.1:3747",
