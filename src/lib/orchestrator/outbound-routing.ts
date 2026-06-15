@@ -19,10 +19,25 @@ export interface OutboundFields {
   subject?: string;
   body?: string;
   text?: string;
+  /** File paths to attach (repeated `attachment` form fields, or `attachments` JSON array). */
+  attachments?: string[];
 }
 
 function pickString(o: Record<string, unknown>, k: string): string | undefined {
   return typeof o[k] === "string" ? (o[k] as string) : undefined;
+}
+
+function pickAttachments(o: Record<string, unknown>): string[] | undefined {
+  const a = o.attachments ?? o.attachment;
+  if (Array.isArray(a)) {
+    const list = a.filter((x): x is string => typeof x === "string").map((s) => s.trim()).filter(Boolean);
+    return list.length ? list : undefined;
+  }
+  if (typeof a === "string") {
+    const list = a.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+    return list.length ? list : undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -33,12 +48,16 @@ function pickString(o: Record<string, unknown>, k: string): string | undefined {
  */
 export function parseOutboundFields(contentType: string | undefined, raw: string): OutboundFields {
   const ct = (contentType ?? "").toLowerCase();
-  const fromParams = (p: URLSearchParams): OutboundFields => ({
-    to: p.get("to") ?? undefined,
-    subject: p.get("subject") ?? undefined,
-    body: p.get("body") ?? undefined,
-    text: p.get("text") ?? undefined,
-  });
+  const fromParams = (p: URLSearchParams): OutboundFields => {
+    const att = p.getAll("attachment").concat(p.getAll("attachments")).map((s) => s.trim()).filter(Boolean);
+    return {
+      to: p.get("to") ?? undefined,
+      subject: p.get("subject") ?? undefined,
+      body: p.get("body") ?? undefined,
+      text: p.get("text") ?? undefined,
+      attachments: att.length ? att : undefined,
+    };
+  };
 
   if (ct.includes("application/x-www-form-urlencoded")) {
     return fromParams(new URLSearchParams(raw));
@@ -46,13 +65,13 @@ export function parseOutboundFields(contentType: string | undefined, raw: string
 
   try {
     const o = JSON.parse(raw || "{}") as Record<string, unknown>;
-    return { to: pickString(o, "to"), subject: pickString(o, "subject"), body: pickString(o, "body"), text: pickString(o, "text") };
+    return { to: pickString(o, "to"), subject: pickString(o, "subject"), body: pickString(o, "body"), text: pickString(o, "text"), attachments: pickAttachments(o) };
   } catch {
     // No/!json content-type and not valid JSON — fall back to urlencoded parse
     // (covers a curl --data-urlencode call whose header we didn't match), but
     // only when a recognized field is actually present so junk maps to {}.
     const p = new URLSearchParams(raw);
-    const hasKnown = ["to", "subject", "body", "text"].some((k) => p.has(k));
+    const hasKnown = ["to", "subject", "body", "text", "attachment", "attachments"].some((k) => p.has(k));
     return hasKnown ? fromParams(p) : {};
   }
 }
@@ -71,7 +90,7 @@ export function daemonPort(): string {
 export function outboundHttpRoutingPrompt(port = daemonPort()): string {
   return [
     "--- Outbound Channels (HiveMatrix) ---",
-    "To send an email or an SMS/iMessage you MUST go through the local HiveMatrix daemon — do NOT use osascript, the Mail/Messages apps directly, AppleScript, or any other interface. The daemon enforces the safety gate: email is sent only to trusted recipients and is otherwise saved as a Mail draft for approval; iMessage is sent only to allowlisted handles. Call it with your Bash tool (the token file is readable only by you):",
+    "SENDING an email or an SMS/iMessage MUST go through the local HiveMatrix daemon — do NOT send via osascript, the Mail/Messages apps directly, AppleScript, a Gmail/Google integration, or any other interface. The daemon enforces the safety gate: email is sent only to trusted recipients and is otherwise saved as a Mail draft for approval; iMessage is sent only to allowlisted handles. Call it with your Bash tool (the token file is readable only by you):",
     "",
     "Send an email:",
     `  curl -s -X POST "http://127.0.0.1:${port}/mailbee/send" \\`,
@@ -82,6 +101,8 @@ export function outboundHttpRoutingPrompt(port = daemonPort()): string {
     "",
     "Save an email as a draft only (never sends): identical, but POST to /mailbee/draft.",
     "",
+    'To ATTACH files (images, docs on this machine), add a repeated --data-urlencode "attachment=/ABSOLUTE/PATH" for each file (e.g. two: --data-urlencode "attachment=/Users/you/a.png" --data-urlencode "attachment=/Users/you/b.png"). MailBee attaches them through Apple Mail — you do NOT need Gmail or any external account to send files.',
+    "",
     "Send an SMS/iMessage:",
     `  curl -s -X POST "http://127.0.0.1:${port}/messagebee/send" \\`,
     `    -H "Authorization: Bearer $(cat ~/.hivematrix/auth-token)" \\`,
@@ -89,6 +110,12 @@ export function outboundHttpRoutingPrompt(port = daemonPort()): string {
     `    --data-urlencode "text=MESSAGE TEXT"`,
     "",
     'Each call returns JSON {"ok", "message"}. Read "message" and relay the outcome verbatim (it tells you whether the email was sent or drafted-for-approval, or whether a recipient was refused). For a long body with newlines or quotes, write it to a temp file and pass --data-urlencode "body@/tmp/hive_body.txt".',
+    "",
+    "--- Reading & managing email ---",
+    "To READ, SEARCH, organize, or DELETE email, drive the local Apple Mail app directly with AppleScript via your Bash tool (osascript). That is the correct, private path here — the send-gate above governs only SENDING new mail, not managing the mailbox. Do NOT use a Gmail/Google MCP, web Gmail, IMAP, or any cloud-email integration; HiveMatrix manages mail through the Mail app on THIS machine. For destructive bulk actions (deleting many messages), MOVE the matching messages to the Trash mailbox (recoverable) rather than permanently erasing them, and report the count + match criteria so the operator can confirm.",
+    "",
+    "--- Headless: never ask for interactive auth ---",
+    "HiveMatrix runs as a headless daemon — there is NO interactive Claude Code session and no person to complete an OAuth/login prompt. NEVER tell the user to run `/mcp`, `/login`, or to authenticate an MCP server (e.g. a claude.ai Gmail connector). If a tool would need auth you cannot complete non-interactively, do NOT request it — use the local Apple Mail / daemon path above instead, or state the limitation plainly and stop.",
   ].join("\n");
 }
 

@@ -876,3 +876,24 @@ listed but unused.) Fixes:
   the Bees view shows DesktopBee's real (green) health.
 
 Verification: tsc clean, scope-wall 0, 620/620 tests, daemon bundles.
+
+## MailBee: agent reached for Gmail MCP instead of Apple Mail (2026-06-15)
+
+Two operator reports: asked to "delete emails matching Run failed" and to email wallpaper
+files, HiveMatrix replied (by text/email) "run `/mcp` and authenticate claude.ai Gmail" —
+impossible in the headless daemon, and the wrong tool (MailBee = Apple Mail). Root causes +
+fixes:
+1. **Routing guidance only covered SENDING.** Added to `outboundHttpRoutingPrompt`:
+   - "Reading & managing email" → drive local Apple Mail via osascript; do NOT use a Gmail/
+     Google MCP/web Gmail/IMAP; for bulk deletes, MOVE to the Trash mailbox (recoverable)
+     and report count + criteria.
+   - "Headless: never ask for interactive auth" → NEVER tell the user to run `/mcp`/`/login`
+     or authenticate an MCP; use the local path or report the limitation.
+2. **MailBee couldn't attach files** (so "email me the wallpapers" reached for Gmail). Added
+   attachment support end-to-end: `applemail.ts` SEND_SCRIPT attaches via Apple Mail;
+   `sendMail`/`draftMail` take `attachments[]`; `executeMailBeeSend/Draft` + the
+   `mailbee_send`/`mailbee_draft` tool schemas accept `attachments`; `parseOutboundFields`
+   collects repeated `attachment=` form fields / JSON `attachments[]`; `/mailbee/send` passes
+   them; routing prompt documents `--data-urlencode "attachment=/ABSOLUTE/PATH"`.
+
+Verification: tsc clean, scope-wall 0, 626/626 tests, daemon bundles.

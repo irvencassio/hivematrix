@@ -143,13 +143,14 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "mailbee_send",
       description:
-        "MailBee: send an email through Apple Mail. This is the ONLY correct way to send email — do not use bash/osascript or any other interface. Safe by default: the email is sent only if the recipient is on the trusted allowlist (a known sender or a configured trusted domain); otherwise it is saved as a draft in Mail for human approval and NOT sent. Returns whether it was sent or drafted.",
+        "MailBee: send an email through Apple Mail — including file attachments. This is the ONLY correct way to send email; do NOT use bash/osascript, a Gmail/Google integration, or any other interface, and never ask the user to authenticate an external mail account. Safe by default: the email is sent only if the recipient is on the trusted allowlist (a known sender or a configured trusted domain); otherwise it is saved as a draft in Mail for human approval and NOT sent. Returns whether it was sent or drafted.",
       parameters: {
         type: "object",
         properties: {
           to: { type: "string", description: "Recipient email address" },
           subject: { type: "string", description: "Email subject line" },
           body: { type: "string", description: "Plain-text email body" },
+          attachments: { type: "array", items: { type: "string" }, description: "Optional absolute file paths to attach (e.g. images/docs on this machine)" },
         },
         required: ["to", "subject", "body"],
       },
@@ -160,13 +161,14 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "mailbee_draft",
       description:
-        "MailBee: compose an email and save it to the Mail Drafts folder for human review (never sends). Use when you want a person to approve/edit before it goes out, regardless of recipient trust.",
+        "MailBee: compose an email (with optional file attachments) and save it to the Mail Drafts folder for human review (never sends). Use when you want a person to approve/edit before it goes out, regardless of recipient trust.",
       parameters: {
         type: "object",
         properties: {
           to: { type: "string", description: "Recipient email address" },
           subject: { type: "string", description: "Email subject line" },
           body: { type: "string", description: "Plain-text email body" },
+          attachments: { type: "array", items: { type: "string" }, description: "Optional absolute file paths to attach" },
         },
         required: ["to", "subject", "body"],
       },
@@ -419,8 +421,17 @@ async function executeSkillUsed(args: Record<string, unknown>): Promise<string> 
 export interface MailBeeSendIO {
   /** True when the recipient is a known sender or sits on a configured trusted domain. */
   isTrustedRecipient(to: string): boolean;
-  sendMail(to: string, subject: string, body: string): Promise<boolean>;
-  draftMail(to: string, subject: string, body: string): Promise<boolean>;
+  sendMail(to: string, subject: string, body: string, attachments?: string[]): Promise<boolean>;
+  draftMail(to: string, subject: string, body: string, attachments?: string[]): Promise<boolean>;
+}
+
+/** Read `attachments` from tool args — an array of paths, or a comma/newline list. */
+export function readAttachments(args: Record<string, unknown>): string[] {
+  const a = args.attachments ?? args.attachment;
+  let list: string[] = [];
+  if (Array.isArray(a)) list = a.filter((x): x is string => typeof x === "string");
+  else if (typeof a === "string") list = a.split(/[\n,]+/);
+  return list.map((s) => s.trim()).filter(Boolean);
 }
 
 async function defaultMailBeeIO(): Promise<MailBeeSendIO> {
@@ -442,28 +453,32 @@ function readStringArgs(args: Record<string, unknown>, keys: string[]): Record<s
 export async function executeMailBeeSend(args: Record<string, unknown>, io?: MailBeeSendIO): Promise<string> {
   const { to, subject, body } = readStringArgs(args, ["to", "subject", "body"]);
   if (!to || !body) return "Error: 'to' and 'body' are required to send an email.";
+  const attachments = readAttachments(args);
+  const att = attachments.length ? ` with ${attachments.length} attachment(s)` : "";
   const deps = io ?? (await defaultMailBeeIO());
 
   if (!deps.isTrustedRecipient(to)) {
-    const drafted = await deps.draftMail(to, subject, body);
+    const drafted = await deps.draftMail(to, subject, body, attachments);
     return drafted
-      ? `Recipient ${to} is not on the MailBee trusted allowlist, so the email was NOT sent — it was saved to Mail Drafts for your approval. Approve/edit it in Mail.app, or add ${to} (or its domain) to the MailBee allowlist to enable autonomous send.`
+      ? `Recipient ${to} is not on the MailBee trusted allowlist, so the email was NOT sent — it was saved to Mail Drafts${att} for your approval. Approve/edit it in Mail.app, or add ${to} (or its domain) to the MailBee allowlist to enable autonomous send.`
       : `Error: ${to} is not trusted and saving the draft to Mail failed. Is Mail.app running with Automation permission granted?`;
   }
 
-  const sent = await deps.sendMail(to, subject, body);
+  const sent = await deps.sendMail(to, subject, body, attachments);
   return sent
-    ? `Email sent to ${to} via Apple Mail (recipient is on the trusted allowlist).`
+    ? `Email sent to ${to} via Apple Mail${att} (recipient is on the trusted allowlist).`
     : `Error: sending the email to ${to} failed. Is Mail.app running with Automation permission granted?`;
 }
 
 export async function executeMailBeeDraft(args: Record<string, unknown>, io?: MailBeeSendIO): Promise<string> {
   const { to, subject, body } = readStringArgs(args, ["to", "subject", "body"]);
   if (!to || !body) return "Error: 'to' and 'body' are required to draft an email.";
+  const attachments = readAttachments(args);
+  const att = attachments.length ? ` with ${attachments.length} attachment(s)` : "";
   const deps = io ?? (await defaultMailBeeIO());
-  const drafted = await deps.draftMail(to, subject, body);
+  const drafted = await deps.draftMail(to, subject, body, attachments);
   return drafted
-    ? `Draft saved to Mail Drafts for ${to} — review and send it from Mail.app when ready.`
+    ? `Draft saved to Mail Drafts for ${to}${att} — review and send it from Mail.app when ready.`
     : `Error: saving the draft to Mail failed. Is Mail.app running with Automation permission granted?`;
 }
 

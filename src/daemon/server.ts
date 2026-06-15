@@ -1140,7 +1140,7 @@ export function createDaemonServer() {
         const { parseOutboundFields } = await import("@/lib/orchestrator/outbound-routing");
         const fields = parseOutboundFields(req.headers["content-type"], await readRawBody(req));
         const { executeMailBeeSend, executeMailBeeDraft } = await import("@/lib/orchestrator/bee-tools");
-        const args = { to: fields.to ?? "", subject: fields.subject ?? "", body: fields.body ?? "" };
+        const args = { to: fields.to ?? "", subject: fields.subject ?? "", body: fields.body ?? "", attachments: fields.attachments ?? [] };
         const message = urlPath === "/mailbee/send"
           ? await executeMailBeeSend(args)
           : await executeMailBeeDraft(args);

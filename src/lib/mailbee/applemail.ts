@@ -104,6 +104,7 @@ export async function canControlMail(timeoutMs = 8_000): Promise<boolean> {
   return res.ok;
 }
 
+// argv: to, subject, body, "send"|"draft", then 0+ attachment file paths.
 const SEND_SCRIPT = `on run argv
   set toAddr to item 1 of argv
   set subj to item 2 of argv
@@ -112,6 +113,14 @@ const SEND_SCRIPT = `on run argv
   tell application "Mail"
     set newMsg to make new outgoing message with properties {subject:subj, content:bodyText, visible:true}
     tell newMsg to make new to recipient at end of to recipients with properties {address:toAddr}
+    if (count of argv) > 4 then
+      repeat with i from 5 to (count of argv)
+        try
+          tell newMsg to make new attachment with properties {file name:(POSIX file (item i of argv))} at after the last paragraph of content
+        end try
+      end repeat
+      delay 1
+    end if
     if doSend is "send" then
       send newMsg
     else
@@ -120,16 +129,16 @@ const SEND_SCRIPT = `on run argv
   end tell
 end run`;
 
-/** Send an email via Mail.app. Resolves false on failure. */
-export function sendMail(to: string, subject: string, body: string, timeoutMs = 20_000): Promise<boolean> {
+/** Send an email via Mail.app, optionally with file attachments. Resolves false on failure. */
+export function sendMail(to: string, subject: string, body: string, attachments: string[] = [], timeoutMs = 30_000): Promise<boolean> {
   return new Promise((resolve) => {
-    execFile("osascript", ["-e", SEND_SCRIPT, to, subject, body, "send"], { timeout: timeoutMs }, (err) => resolve(!err));
+    execFile("osascript", ["-e", SEND_SCRIPT, to, subject, body, "send", ...attachments], { timeout: timeoutMs }, (err) => resolve(!err));
   });
 }
 
-/** Save a draft reply to Drafts (for human approval) instead of sending. */
-export function draftMail(to: string, subject: string, body: string, timeoutMs = 20_000): Promise<boolean> {
+/** Save a draft reply (with optional attachments) to Drafts for human approval. */
+export function draftMail(to: string, subject: string, body: string, attachments: string[] = [], timeoutMs = 30_000): Promise<boolean> {
   return new Promise((resolve) => {
-    execFile("osascript", ["-e", SEND_SCRIPT, to, subject, body, "draft"], { timeout: timeoutMs }, (err) => resolve(!err));
+    execFile("osascript", ["-e", SEND_SCRIPT, to, subject, body, "draft", ...attachments], { timeout: timeoutMs }, (err) => resolve(!err));
   });
 }

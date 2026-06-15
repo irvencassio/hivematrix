@@ -7,7 +7,7 @@ test("buildCodexPrompt prepends the outbound routing block and keeps the task", 
   // routing guidance present
   assert.match(prompt, /\/mailbee\/send/);
   assert.match(prompt, /\/messagebee\/send/);
-  assert.match(prompt, /do NOT use osascript/i);
+  assert.match(prompt, /do NOT send via osascript/i);
   // the actual task is preserved, after the delimiter
   assert.match(prompt, /--- Your task ---\nEmail Jane the Q3 numbers\./);
   // task comes after the guidance, not before

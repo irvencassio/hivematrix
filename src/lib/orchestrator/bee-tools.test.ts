@@ -133,6 +133,28 @@ test("mailbee_draft never sends, always drafts", async () => {
   assert.match(out, /Draft saved to Mail Drafts/);
 });
 
+test("mailbee_send forwards attachments to Apple Mail (no Gmail needed)", async () => {
+  let gotAttachments: string[] | undefined;
+  const io: MailBeeSendIO = {
+    isTrustedRecipient: () => true,
+    sendMail: async (_t, _s, _b, att) => { gotAttachments = att; return true; },
+    draftMail: async () => true,
+  };
+  const out = await executeMailBeeSend(
+    { to: "boss@known.com", subject: "files", body: "here", attachments: ["/a/x.png", "/a/y.png"] },
+    io,
+  );
+  assert.deepEqual(gotAttachments, ["/a/x.png", "/a/y.png"]);
+  assert.match(out, /with 2 attachment\(s\)/);
+});
+
+test("readAttachments accepts an array or a comma/newline list", async () => {
+  const { readAttachments } = await import("./bee-tools");
+  assert.deepEqual(readAttachments({ attachments: ["/a", "/b"] }), ["/a", "/b"]);
+  assert.deepEqual(readAttachments({ attachment: "/a, /b\n/c" }), ["/a", "/b", "/c"]);
+  assert.deepEqual(readAttachments({}), []);
+});
+
 function msgIO(allowed: boolean): { io: MessageBeeSendIO; calls: string[] } {
   const calls: string[] = [];
   const io: MessageBeeSendIO = {

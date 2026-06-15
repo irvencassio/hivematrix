@@ -32,15 +32,41 @@ test("parseOutboundFields returns empty object on junk", () => {
   assert.deepEqual(parseOutboundFields("application/json", "not json at all {{{"), {});
 });
 
-test("outboundHttpRoutingPrompt names the endpoints, the token, and forbids osascript", () => {
+test("outboundHttpRoutingPrompt names the endpoints, the token, and gates SENDING", () => {
   const p = outboundHttpRoutingPrompt("3999");
   assert.match(p, /\/mailbee\/send/);
   assert.match(p, /\/mailbee\/draft/);
   assert.match(p, /\/messagebee\/send/);
   assert.match(p, /127\.0\.0\.1:3999/);
   assert.match(p, /~\/\.hivematrix\/auth-token/);
-  assert.match(p, /do NOT use osascript/i);
+  assert.match(p, /SENDING .* MUST go through the local HiveMatrix daemon/);
   assert.match(p, /data-urlencode/);
+});
+
+test("outboundHttpRoutingPrompt covers email management, attachments, and forbids interactive auth", () => {
+  const p = outboundHttpRoutingPrompt("3999");
+  // Managing email = local Apple Mail, never a Gmail MCP.
+  assert.match(p, /Reading & managing email/);
+  assert.match(p, /do NOT use a Gmail\/Google MCP/i);
+  assert.match(p, /Trash mailbox \(recoverable\)/);
+  // Sending files via MailBee attachments — no external account.
+  assert.match(p, /attachment=\/ABSOLUTE\/PATH/);
+  assert.match(p, /do NOT need Gmail/i);
+  // Never tell the user to run /mcp (headless daemon).
+  assert.match(p, /never ask for interactive auth/i);
+  assert.match(p, /NEVER tell the user to run `\/mcp`/);
+});
+
+test("parseOutboundFields collects attachments (form-repeated + JSON array)", () => {
+  const form = parseOutboundFields(
+    "application/x-www-form-urlencoded",
+    "to=a@b.com&subject=s&body=hi&attachment=%2Fa%2Fx.png&attachment=%2Fa%2Fy.png",
+  );
+  assert.deepEqual(form.attachments, ["/a/x.png", "/a/y.png"]);
+  const json = parseOutboundFields("application/json", JSON.stringify({ to: "a@b.com", body: "hi", attachments: ["/p/1", "/p/2"] }));
+  assert.deepEqual(json.attachments, ["/p/1", "/p/2"]);
+  // none → undefined (not an empty array that downstream must special-case)
+  assert.equal(parseOutboundFields("application/json", '{"to":"a@b.com","body":"hi"}').attachments, undefined);
 });
 
 test("brainSearchRoutingPrompt points at the /brain/search endpoint with auth", () => {
