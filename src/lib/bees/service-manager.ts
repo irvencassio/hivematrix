@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 
 import { loadHiveConfig, saveHiveConfig } from "@/lib/central/config";
 import { getBeeDefinition, listBeeDefinitions, type BeeDefinition } from "@/lib/bees/catalog";
+import { readToken } from "@/lib/auth/token";
 
 export type BeeRuntimeMode = "embedded" | "launchagent" | "planned";
 
@@ -367,12 +368,18 @@ function parseLaunchctlStatus(output: string | null): { loaded: boolean; running
   };
 }
 
-async function checkHealth(url: string | undefined): Promise<{ healthy: boolean | null; detail: string | null }> {
+async function checkHealth(
+  url: string | undefined,
+  authToken?: string | null,
+): Promise<{ healthy: boolean | null; detail: string | null }> {
   if (!url) return { healthy: null, detail: null };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 4000);
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    // Daemon-loopback health routes are token-gated; pass the shared secret so
+    // the probe doesn't 401 (the embedded bees would then look falsely unhealthy).
+    const headers = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
+    const response = await fetch(url, { signal: controller.signal, headers });
     if (!response.ok) {
       clearTimeout(timeout);
       return { healthy: false, detail: `health_http_${response.status}` };
@@ -503,7 +510,13 @@ export async function listBeeServiceStatuses(): Promise<BeeServiceStatus[]> {
     }
 
     const embeddedHealthUrl = embeddedHealthRoute(definition.kind);
-    const health = await checkHealth(embeddedHealthUrl ? `http://127.0.0.1:${process.env.PORT || "4000"}${embeddedHealthUrl}` : undefined);
+    // Embedded lanes are served by THIS daemon (HIVEMATRIX_PORT, default 3747) —
+    // not a separate worker on :4000 (a Hive-1 artifact that always "fetch failed").
+    const daemonPort = process.env.HIVEMATRIX_PORT ?? process.env.PORT ?? "3747";
+    const health = await checkHealth(
+      embeddedHealthUrl ? `http://127.0.0.1:${daemonPort}${embeddedHealthUrl}` : undefined,
+      readToken("auth-token"),
+    );
     const available = descriptor.runtimeMode === "embedded";
     statuses.push({
       kind: definition.kind,
@@ -556,14 +569,14 @@ async function channelStatus(kind: string): Promise<{ enabled: boolean; permitte
   };
 }
 
-function embeddedHealthRoute(kind: string): string | null {
+export function embeddedHealthRoute(kind: string): string | null {
   switch (kind) {
     case "managerbee":
       return "/api/managerbee/health";
     case "brainbee":
       return "/api/brainbee/health";
     case "browserbee":
-      return "/api/browserbee/health";
+      return "/browserbee/health";
     case "computerbee":
       return "/api/computerbee/health";
     case "cronbee":

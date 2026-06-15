@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildLaunchAgentPlist, getBeeRuntimeDescriptor, summarizeEmbeddedHealthDetail } from "./service-manager";
+import { buildLaunchAgentPlist, getBeeRuntimeDescriptor, summarizeEmbeddedHealthDetail, embeddedHealthRoute } from "./service-manager";
+
+test("embeddedHealthRoute points at health routes the daemon actually serves", () => {
+  // Regression: these embedded bees showed false "unhealthy / fetch failed" because
+  // the probe hit a non-existent path (and the wrong port). Managerbee/brainbee have
+  // /api/*/health aliases; browserbee only has /browserbee/health (no /api/ prefix).
+  assert.equal(embeddedHealthRoute("managerbee"), "/api/managerbee/health");
+  assert.equal(embeddedHealthRoute("brainbee"), "/api/brainbee/health");
+  assert.equal(embeddedHealthRoute("browserbee"), "/browserbee/health");
+  assert.equal(embeddedHealthRoute("webbee"), null);
+});
 
 test("buildLaunchAgentPlist emits a KeepAlive launch agent with the Bee label", () => {
   const plist = buildLaunchAgentPlist("inventorbee", {

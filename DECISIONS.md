@@ -847,3 +847,18 @@ standout:
   "✋ Awaiting your reply"), exactly as requested.
 
 Verification: tsc clean, scope-wall 0, 618/618 tests, daemon bundles.
+
+## Fix false "unhealthy / fetch failed" on embedded bees (2026-06-14)
+
+ManagerBee, BrainBee, BrowserBee showed "unhealthy · fetch failed" though they run fine
+(embedded in the daemon). Three-part bug in `service-manager` embedded health probe:
+1. **Wrong port** — built the URL with `process.env.PORT || "4000"`; the daemon listens on
+   `HIVEMATRIX_PORT` (3747), so it hit :4000 (nothing there) → "fetch failed". Now uses
+   `HIVEMATRIX_PORT ?? PORT ?? 3747`.
+2. **Wrong BrowserBee path** — probed `/api/browserbee/health` (404); the real route is
+   `/browserbee/health`. Fixed (managerbee/brainbee `/api/*/health` aliases are correct).
+3. **No auth on the loopback probe** — those routes are token-gated (401 without it), but
+   `checkHealth` sent no header. Now passes the daemon shared secret (`readToken`) on the
+   embedded probes; external launchagent probes (e.g. inventorbee :4014) still go unauthenticated.
+
+Verification: tsc clean, scope-wall 0, 619/619 tests (added embeddedHealthRoute guard), daemon bundles.
