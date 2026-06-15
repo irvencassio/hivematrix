@@ -660,16 +660,15 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="approvals"></div>
     <details class="ctx-sec" id="setupSec" open><summary id="setupSummary">Setup</summary>
     <div id="onboarding"></div></details>
-    <h2 style="margin-top:20px">Soak / Health</h2>
-    <div id="metrics"></div>
-    <div class="usage-head"><h2>Frontier Usage</h2><button id="usageRefresh" class="usage-refresh" title="Refresh Claude/Codex usage" onclick="refreshUsageNow()">↻</button></div>
-    <div id="usage"><div class="muted">No frontier usage yet.</div></div>
-
-    <div class="usage-head"><h2>Observability</h2><label class="obs-costtgl" title="Show cost (frontier only)"><input type="checkbox" id="obsCost" onchange="toggleObsCost()"> cost</label></div>
-    <div id="observability"><div class="muted">No task telemetry yet.</div></div>
-    <h2 style="margin-top:20px">Connectivity</h2>
-    <div id="conn"></div>
-    <h2 style="margin-top:20px">Directives</h2>
+    <details class="ctx-sec" id="healthSec"><summary>Soak / Health</summary>
+    <div id="metrics"></div></details>
+    <details class="ctx-sec" id="usageSec"><summary>Frontier Usage <button id="usageRefresh" class="usage-refresh" title="Refresh Claude/Codex usage" onclick="event.stopPropagation();refreshUsageNow()">↻</button></summary>
+    <div id="usage"><div class="muted">No frontier usage yet.</div></div></details>
+    <details class="ctx-sec" id="obsSec"><summary>Observability <label class="obs-costtgl" title="Show cost (frontier only)" onclick="event.stopPropagation()"><input type="checkbox" id="obsCost" onchange="toggleObsCost()"> cost</label></summary>
+    <div id="observability"><div class="muted">No task telemetry yet.</div></div></details>
+    <details class="ctx-sec" id="connSec" open><summary>Connectivity</summary>
+    <div id="conn"></div></details>
+    <details class="ctx-sec" id="dirSec" open><summary>Directives</summary>
     <button class="addbtn" onclick="toggleForm('dirForm')">＋ New directive</button>
     <div class="form" id="dirForm">
       <input id="d_goal" placeholder="Standing goal" />
@@ -688,8 +687,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="row"><button class="create" onclick="saveDirective()">Save changes</button><button class="cancel" onclick="cancelForm('dirEditForm')">Cancel</button></div>
       <div class="err" id="de_err"></div>
     </div>
-    <div id="directives"></div>
-    <h2 style="margin-top:20px">Skills</h2>
+    <div id="directives"></div></details>
+    <details class="ctx-sec" id="skillsSec" open><summary>Skills</summary>
     <div class="row" style="gap:6px">
       <select id="skillSelect" onchange="updateSkillMeta()" style="flex:1;min-width:120px"></select>
       <button class="addbtn" onclick="importSkillPrompt()" title="Import a shared skill from a URL">⇩ Import</button>
@@ -704,9 +703,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     </div>
     <div class="muted" id="skillMeta" style="font-size:11px;margin-top:4px"></div>
     <div class="muted" id="skillResult" style="font-size:12px;margin-top:4px"></div>
-    <pre id="skillView" style="display:none;max-height:200px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap"></pre>
-    <h2 style="margin-top:20px">MCP Servers</h2>
-    <div id="mcp"></div>
+    <pre id="skillView" style="display:none;max-height:200px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap"></pre></details>
+    <details class="ctx-sec" id="mcpSec"><summary>MCP Servers</summary>
+    <div id="mcp"></div></details>
   </section>
 </main>
 <script>
@@ -1431,6 +1430,23 @@ function toggleContext() {
   const btn = document.getElementById('ctxToggle');
   if (btn) btn.classList.toggle('on', !collapsed);
   try { localStorage.setItem('hm_ctx_collapsed', collapsed ? '1' : '0'); } catch (e) { /* ignore */ }
+}
+
+// Right-panel sections are collapsible <details>; remember each one's open state
+// across reloads. (Setup has its own auto-collapse logic, so it's skipped here.)
+function wireCtxSections() {
+  document.querySelectorAll('details.ctx-sec[id]').forEach((d) => {
+    if (d.id === 'setupSec') return;
+    const key = 'hm_sec_' + d.id;
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved === '1') d.open = true;
+      else if (saved === '0') d.open = false;
+    } catch (e) { /* ignore */ }
+    d.addEventListener('toggle', () => {
+      try { localStorage.setItem(key, d.open ? '1' : '0'); } catch (e) { /* ignore */ }
+    });
+  });
 }
 (function applyCtxState() {
   try {
@@ -2627,6 +2643,7 @@ if (requireToken()) {
   loadModels();
   try { _obsCost = localStorage.getItem("hm_obs_cost") === "1"; } catch (e) { /* */ }
   { const cb = document.getElementById("obsCost"); if (cb) cb.checked = _obsCost; }
+  wireCtxSections();
   loadProjects();
   refresh();
   connectSSE();

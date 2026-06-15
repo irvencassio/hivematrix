@@ -106,9 +106,26 @@ test("Mixed-mode role models hide Thinking/Coding when the frontier provider is 
   assert.doesNotMatch(js, /Codex \(provider override\)/, "duplicate-looking override rows removed");
 });
 
+test("right-panel sections are collapsible <details> with persisted open state", () => {
+  // Each context section is a <details class="ctx-sec"> so the long panel can be tidied.
+  for (const id of ["healthSec", "usageSec", "obsSec", "connSec", "dirSec", "skillsSec", "mcpSec"]) {
+    assert.match(CONSOLE_HTML, new RegExp('<details class="ctx-sec" id="' + id + '"'), id + " is a collapsible section");
+  }
+  // Actionable sections default open; info-heavy ones default collapsed.
+  assert.match(CONSOLE_HTML, /id="connSec" open/);
+  assert.match(CONSOLE_HTML, /id="skillsSec" open/);
+  assert.doesNotMatch(CONSOLE_HTML, /id="usageSec" open/, "info sections default collapsed");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function wireCtxSections\(/);
+  assert.match(js, /hm_sec_/, "per-section open state persisted");
+  assert.match(js, /wireCtxSections\(\);/, "wired on init");
+  // In-summary controls don't toggle the section.
+  assert.match(CONSOLE_HTML, /event\.stopPropagation\(\);refreshUsageNow\(\)/);
+});
+
 test("console surfaces observability: per-task strip + totals across providers", () => {
   assert.match(CONSOLE_HTML, /id="observability"/, "totals mount point");
-  assert.match(CONSOLE_HTML, /<h2>Observability<\/h2>/);
+  assert.match(CONSOLE_HTML, /<summary>Observability/);
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /async function renderObservability\(/);
   assert.match(js, /function taskTelemetryStrip\(/, "per-task telemetry strip");
