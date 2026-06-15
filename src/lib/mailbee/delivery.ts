@@ -34,6 +34,24 @@ function asMailBeeOutput(output: Record<string, unknown>): MailBeeOutput {
   return raw && typeof raw === "object" && !Array.isArray(raw) ? raw as MailBeeOutput : {};
 }
 
+/**
+ * Self-defeating-reply guard. A headless MailBee agent has no human to complete
+ * an OAuth/MCP login, and its routing prompt forbids asking for one — yet a model
+ * may still improvise "run /mcp to authenticate Gmail" instead of sending through
+ * Apple Mail. Auto-emailing that to the sender is worse than not replying: it
+ * looks broken and leaks internal tooling. Detect the pattern and hold for human
+ * review instead. Conservative-by-design: a false positive only routes the reply
+ * to review rather than auto-sending it.
+ */
+export function looksLikeAuthRequest(body: string): boolean {
+  const t = body.toLowerCase();
+  // The literal slash-commands the routing prompt explicitly bans.
+  if (/(^|\s)\/(mcp|login)\b/.test(t)) return true;
+  const authAction = /(authenticat|authoriz|\blog ?in\b|\bsign ?in\b|\bconnect\b|grant .*access|need .*access|enable .*access)/;
+  const integration = /(gmail|google|\bmcp\b|oauth|connector|claude\.ai|imap|mail account)/;
+  return authAction.test(t) && integration.test(t);
+}
+
 function replySubject(subject: string): string {
   const trimmed = subject.trim();
   if (!trimmed) return "Re: your email";
@@ -70,8 +88,19 @@ export async function deliverTrustedMailBeeReply(
   if (!to) return { sent: false, reason: "missing_recipient", output };
   if (!body) return { sent: false, reason: "missing_summary", output };
 
-  const sendMail = options.sendMail ?? defaultSendMail;
   const now = options.now ?? (() => new Date().toISOString());
+  // Never auto-send a reply that asks the sender to authenticate Gmail/MCP or run
+  // /mcp — the agent improvised a dead end instead of using the MailBee send path.
+  // Hold it for human review (status stays "review", not "done").
+  if (looksLikeAuthRequest(body)) {
+    return {
+      sent: false,
+      reason: "held_auth_request",
+      output: withMailBee(output, { delivery: "held_auth_request", heldAt: now() }),
+    };
+  }
+
+  const sendMail = options.sendMail ?? defaultSendMail;
   const sent = await sendMail(to, replySubject(subject), body);
   const stamp = now();
   const nextOutput = withMailBee(output, sent

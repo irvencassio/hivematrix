@@ -529,6 +529,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 </div>
 
 <!-- Generic dialog (replaces native alert/confirm/prompt, which don't work in the webview). -->
+<input type="file" id="skillFileInput" accept=".md,text/markdown,.txt" style="display:none" onchange="onSkillFileBrowsed(this)" />
 <div class="overlay" id="dialogOverlay">
   <div class="modal dialog">
     <h1 id="dialogTitle">HiveMatrix</h1>
@@ -536,6 +537,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <input class="dialog-input" id="dialogInput" style="display:none" onkeydown="if(event.key==='Enter'){event.preventDefault();dialogResolve(true);}else if(event.key==='Escape'){event.preventDefault();dialogResolve(false);}" />
     <div class="dialog-actions">
       <button class="cancel" id="dialogCancel" onclick="dialogResolve(false)">Cancel</button>
+      <button class="addbtn" id="dialogBrowse" style="display:none;margin-right:auto" onclick="document.getElementById('skillFileInput').click()">Browse…</button>
       <button class="ok" id="dialogOk" onclick="dialogResolve(true)">OK</button>
     </div>
   </div>
@@ -764,6 +766,7 @@ function esc(s){ return (s==null?"":String(s)).replace(/[&<>]/g, c=>({"&":"&amp;
 // The Tauri/WKWebView webview has no working native alert/confirm/prompt
 // (prompt returns null, alert is a no-op), so these reimplement them in the DOM.
 let _dialogResolver = null;
+let _skillFileContent = null;
 function dialogResolve(ok) {
   const ov = document.getElementById("dialogOverlay");
   const input = document.getElementById("dialogInput");
@@ -786,6 +789,8 @@ function _openDialog(opts) {
     const ok = document.getElementById("dialogOk");
     ok.textContent = opts.okLabel || "OK";
     ok.classList.toggle("danger", !!opts.danger);
+    const browse = document.getElementById("dialogBrowse");
+    if (browse) browse.style.display = opts.browse ? "" : "none";
     document.getElementById("dialogOverlay").classList.add("open");
     if (opts.prompt) setTimeout(() => { input.focus(); input.select(); }, 30);
   });
@@ -793,6 +798,15 @@ function _openDialog(opts) {
 function hmAlert(message, title) { return _openDialog({ message, title, hideCancel: true }); }
 function hmConfirm(message, opts) { return _openDialog(Object.assign({ message }, opts || {})); }
 function hmPrompt(message, defaultValue, opts) { return _openDialog(Object.assign({ message, prompt: true, defaultValue }, opts || {})); }
+async function onSkillFileBrowsed(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  try {
+    _skillFileContent = await file.text();
+    document.getElementById('dialogInput').value = file.name;
+  } catch (e) { _skillFileContent = null; }
+  input.value = '';
+}
 
 // Relative "time ago" for task timestamps. The daemon writes two formats: toISOString()
 // on insert ("...T..Z") and SQLite datetime('now') on update ("YYYY-MM-DD HH:MM:SS",
@@ -1347,13 +1361,16 @@ async function pollScriptRun(runId) {
   }
 }
 async function importSkillPrompt() {
-  const url = await hmPrompt('Skill URL (raw markdown / SKILL.md shared by a team or public repo):', '');
-  if (!url) return;
+  _skillFileContent = null;
+  const val = await hmPrompt('Skill URL (raw markdown / SKILL.md) or Browse to a local file:', '', { browse: true });
+  if (!val && !_skillFileContent) return;
   const res = document.getElementById('skillResult');
   if (res) res.textContent = 'Importing…';
   try {
+    const body = _skillFileContent ? { content: _skillFileContent } : { url: val };
+    _skillFileContent = null;
     const d = await api('/skills/import',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url }) });
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (res) res.textContent = 'Imported skill: ' + esc((d && d.name) || '?');
     renderSkills();
   } catch (e) { if (res) res.textContent = 'Import failed.'; }
