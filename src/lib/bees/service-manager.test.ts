@@ -10,7 +10,15 @@ test("embeddedHealthRoute points at health routes the daemon actually serves", (
   assert.equal(embeddedHealthRoute("managerbee"), "/api/managerbee/health");
   assert.equal(embeddedHealthRoute("brainbee"), "/api/brainbee/health");
   assert.equal(embeddedHealthRoute("browserbee"), "/browserbee/health");
+  assert.equal(embeddedHealthRoute("desktopbee"), "/desktopbee/health");
   assert.equal(embeddedHealthRoute("webbee"), null);
+});
+
+test("termbee and desktopbee are registered runtimes (not 'planned')", () => {
+  // Regression: both showed "planned · No runtime registered yet" because they
+  // were absent from the descriptor map and fell through to the default.
+  assert.equal(getBeeRuntimeDescriptor("termbee").runtimeMode, "embedded");
+  assert.equal(getBeeRuntimeDescriptor("desktopbee").runtimeMode, "embedded");
 });
 
 test("buildLaunchAgentPlist emits a KeepAlive launch agent with the Bee label", () => {

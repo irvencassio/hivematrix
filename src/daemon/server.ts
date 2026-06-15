@@ -933,6 +933,20 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /desktopbee/health — pings the Swift helper (:3748). 200 when up so
+      // the Bees view shows DesktopBee healthy; 503 when the helper is unreachable.
+      if (req.method === "GET" && urlPath === "/desktopbee/health") {
+        const { probeDesktopBeeHelper } = await import("@/lib/desktopbee/client");
+        const health = await probeDesktopBeeHelper().catch(() => null);
+        json(res, health ? 200 : 503, {
+          ok: !!health,
+          bee: "desktopbee",
+          helperVersion: health?.version ?? null,
+          detail: health ? "helper running" : "DesktopBee helper unreachable on :3748",
+        });
+        return;
+      }
+
       // GET /browserbee/health — operator-facing readiness so a refused browser
       // job (e.g. LinkedIn) explains itself: is Codex auth present? is the
       // DesktopBee fallback enabled? what backing will actually run?

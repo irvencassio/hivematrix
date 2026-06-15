@@ -862,3 +862,17 @@ ManagerBee, BrainBee, BrowserBee showed "unhealthy · fetch failed" though they 
    embedded probes; external launchagent probes (e.g. inventorbee :4014) still go unauthenticated.
 
 Verification: tsc clean, scope-wall 0, 619/619 tests (added embeddedHealthRoute guard), daemon bundles.
+
+## TermBee + DesktopBee showed "planned · No runtime registered" (2026-06-14)
+
+Both are real, working lanes (TermBee in-process; DesktopBee = the Swift helper on :3748)
+but were ABSENT from the service-manager descriptor map, so they fell through to the
+default `runtimeMode: "planned"`. ("computerbee" — the retired DesktopBee name — was still
+listed but unused.) Fixes:
+- Added `termbee` (embedded; no health route → live with the daemon) and `desktopbee`
+  (embedded) descriptors.
+- New daemon route `GET /desktopbee/health` pings the helper via probeDesktopBeeHelper →
+  200 when up / 503 when unreachable; mapped `embeddedHealthRoute("desktopbee")` to it, so
+  the Bees view shows DesktopBee's real (green) health.
+
+Verification: tsc clean, scope-wall 0, 620/620 tests, daemon bundles.
