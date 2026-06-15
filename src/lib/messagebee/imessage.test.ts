@@ -11,7 +11,17 @@ import {
   currentMaxRowid,
   probeChatDbAccess,
   readInboundSince,
+  SEND_SCRIPT,
 } from "./imessage";
+
+test("send script uses the modern account/participant API, not the timing-out buddy/service one", () => {
+  // Regression: `buddy … of service` hangs on recent macOS (AppleEvent -1712),
+  // so MessageBee replies silently never delivered.
+  assert.match(SEND_SCRIPT, /account whose service type = iMessage/);
+  assert.match(SEND_SCRIPT, /participant targetHandle of targetAccount/);
+  assert.doesNotMatch(SEND_SCRIPT, /buddy .* of targetService/);
+  assert.match(SEND_SCRIPT, /with timeout of \d+ seconds/, "send is bounded");
+});
 
 test("appleDateToIso handles seconds and nanoseconds since 2001", () => {
   // 0 seconds since 2001 epoch

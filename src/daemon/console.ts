@@ -927,6 +927,7 @@ async function selectTask(id) {
     _ctxAttach = { retry: [], reply: [] };
     _ctxDraft = { retry: "", reply: "", steer: "" };
     _ctxFocus = { active: null, start: null, end: null };
+    _ctxOpen = { retry: false, reply: false };
     _ctxTask = id;
   } else {
     syncCtxState();
@@ -992,6 +993,9 @@ async function cardArchive(id) {
 let _ctxAttach = { retry: [], reply: [] };
 let _ctxDraft = { retry: "", reply: "", steer: "" };
 let _ctxFocus = { active: null, start: null, end: null };
+// Which toggle-opened sections are open — so a live refresh's re-render doesn't
+// collapse the box mid-typing. (needs_input opens from task state, not this.)
+let _ctxOpen = { retry: false, reply: false };
 let _ctxTask = null;
 function onCtxDraft(ctx, input) {
   _ctxDraft[ctx] = input.value;
@@ -1018,6 +1022,17 @@ function restoreCtxState() {
   if (retry) retry.value = _ctxDraft.retry;
   if (reply) reply.value = _ctxDraft.reply;
   if (steer) steer.value = _ctxDraft.steer;
+  // Re-apply the open state so a toggled reply/retry box stays open across the
+  // re-render (otherwise it collapses mid-typing on the 5s refresh).
+  const reopen = (ctx, secPrefix, btnPrefix) => {
+    if (!_ctxOpen[ctx] && !_ctxDraft[ctx]) return;
+    const sec = document.getElementById(secPrefix + _ctxTask);
+    const btn = document.getElementById(btnPrefix + _ctxTask);
+    if (sec) sec.classList.add("open");
+    if (btn) btn.classList.add("active");
+  };
+  reopen("retry", "retrySection_", "retryToggle_");
+  reopen("reply", "replySection_", "replyToggle_");
   const restore = _ctxFocus.active === "retry" ? retry : _ctxFocus.active === "reply" ? reply : _ctxFocus.active === "steer" ? steer : null;
   if (restore && !shouldRestoreCtxFocus()) {
     _ctxFocus = { active: null, start: null, end: null };
@@ -1059,6 +1074,7 @@ function toggleRetry(id) {
   const btn = document.getElementById("retryToggle_"+id);
   if (!sec) return;
   const opening = !sec.classList.contains("open");
+  _ctxOpen.retry = opening;
   sec.classList.toggle("open", opening);
   if (btn) btn.classList.toggle("active", opening);
   if (opening) { const ta = document.getElementById("retryText"); if (ta) ta.focus(); }
@@ -1101,6 +1117,7 @@ function toggleReply(id) {
   const btn = document.getElementById("replyToggle_"+id);
   if (!sec) return;
   const opening = !sec.classList.contains("open");
+  _ctxOpen.reply = opening;
   sec.classList.toggle("open", opening);
   if (btn) btn.classList.toggle("active", opening);
   if (opening) { const ta = document.getElementById("replyText"); if (ta) ta.focus(); }

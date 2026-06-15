@@ -143,14 +143,20 @@ export function currentMaxRowid(path = chatDbPath()): number {
   }
 }
 
-const SEND_SCRIPT = `on run argv
+// Use the modern `account` + `participant` API. The legacy `buddy … of service`
+// lookup hangs on recent macOS (AppleEvent timed out / -1712), which is why
+// MessageBee replies silently never delivered. `with timeout` bounds it so a
+// stuck Messages can't block the whole send for the default 2 minutes.
+export const SEND_SCRIPT = `on run argv
   set targetHandle to item 1 of argv
   set targetMessage to item 2 of argv
-  tell application "Messages"
-    set targetService to 1st service whose service type = iMessage
-    set targetBuddy to buddy targetHandle of targetService
-    send targetMessage to targetBuddy
-  end tell
+  with timeout of 12 seconds
+    tell application "Messages"
+      set targetAccount to 1st account whose service type = iMessage
+      set targetParticipant to participant targetHandle of targetAccount
+      send targetMessage to targetParticipant
+    end tell
+  end timeout
 end run`;
 
 /** Send an iMessage to a handle. Resolves false on failure (never throws). */
@@ -160,7 +166,13 @@ export function sendIMessage(handle: string, text: string, timeoutMs = 15_000): 
       "osascript",
       ["-e", SEND_SCRIPT, handle, text],
       { timeout: timeoutMs },
-      (err) => resolve(!err),
+      (err, _stdout, stderr) => {
+        if (err) {
+          // Surface WHY in the daemon log instead of swallowing it silently.
+          console.error(`[messagebee] send to ${handle} failed: ${(stderr || err.message || "").trim()}`);
+        }
+        resolve(!err);
+      },
     );
   });
 }
