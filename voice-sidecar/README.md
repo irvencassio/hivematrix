@@ -59,9 +59,17 @@ Reasoning **OFF**, measured blocking turn (M-series, 128 GB):
 | TTS (`say`) | 0.83s |
 | **total** | **2.30s** |
 
-2.3s blocking is usable but not instant. Sub-second *feel* comes from **streaming**
-(start TTS on the LLM's first tokens; stream STT for barge-in) in the Pipecat
-realtime wrapper — that's the remaining P2.2/P2.3 work (needs a device to validate).
+**Streaming** (`streaming.py` + `stream_turn.py`): the LLM is streamed and TTS
+starts on the first sentence (eager clause-cut for the opener), so audio begins
+before the full reply is done. Headless proof (`test_streaming.py`): TTFA < total.
+Real multi-sentence turn vs Qwen 27B: **TTFA ~3.0s, total ~4.0s** — first audio
+plays while sentence two is still generating. Short single-sentence replies are
+~2.3s.
+
+The remaining TTFA is the 27B generating its first sentence (model speed, not
+code). Lower it with a faster voice-lane model or more aggressive (choppier)
+first-chunk cuts. The last piece — VAD + barge-in + WebRTC transport (the Pipecat
+realtime wrapper) and the iOS/Mac mic UIs — needs a device to validate.
 
 ## Status
 
