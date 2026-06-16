@@ -712,6 +712,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <button class="addbtn" onclick="importLocalSkills()" title="Bulk-import your local folder skills into the brain library">⇩ Import skills → library</button>
     </div>
     <input id="commandArgs" placeholder="Arguments (optional)" style="margin-top:6px" />
+    <label class="flbl" style="margin-top:6px">Project</label>
+    <select id="commandProject" onchange="onCommandProjectChange()" style="width:100%;margin-bottom:6px">
+      <option value="">Manual path</option>
+    </select>
+    <input id="commandPath" placeholder="Project path (working dir, under $HOME)" value="$HOME" style="margin-top:0" />
     <div class="row" style="gap:6px;flex-wrap:wrap">
       <button class="create" onclick="runCommand()">Run</button>
       <button class="addbtn" onclick="viewCommand()" title="View invoke name, source path, allowed-tools">View</button>
@@ -1415,6 +1420,7 @@ function updateCommandMeta() {
   meta.innerHTML = esc(c.kind)
     + (c.argumentHint ? ' · args: ' + esc(c.argumentHint) : '')
     + (c.hasBundledFiles ? ' · ' + c.bundledFileCount + ' bundled file(s)' : '')
+    + (c.model ? ' · model: ' + esc(c.model) : '')
     + (c.description ? ' — ' + esc(c.description) : '');
 }
 function viewCommand() {
@@ -1422,6 +1428,7 @@ function viewCommand() {
   const view = document.getElementById('commandView');
   if (!c || !view) return;
   view.textContent = 'invoke: /' + c.invokeName + '\nkind: ' + c.kind
+    + '\ncatalog: Claude local profile'
     + '\nsource: ' + c.sourcePath
     + (c.allowedTools ? '\nallowed-tools: ' + c.allowedTools : '')
     + (c.model ? '\nmodel: ' + c.model : '');
@@ -1431,7 +1438,7 @@ async function runCommand() {
   const c = selectedCommand();
   if (!c) return;
   const args = (document.getElementById('commandArgs') || {}).value || '';
-  const projectPath = document.getElementById("t_path").value.trim();
+  const projectPath = ((document.getElementById('commandPath') || {}).value || '$HOME').trim() || '$HOME';
   const res = document.getElementById('commandResult');
   if (res) res.textContent = 'Launching…';
   try {
@@ -2123,6 +2130,44 @@ function selectProjectFromDropdown(name, path) {
   closeProjectDropdown();
 }
 
+function syncCommandProject(name, path) {
+  const input = document.getElementById("commandPath");
+  if (input && path) input.value = path;
+  const sel = document.getElementById("commandProject");
+  if (!sel) return;
+  const opt = Array.from(sel.options).find(o => o.value === name || o.dataset.path === path);
+  sel.value = opt ? opt.value : "";
+}
+
+function populateCommandProjects(projects) {
+  const sel = document.getElementById("commandProject");
+  if (!sel) return;
+  const pathInput = document.getElementById("commandPath");
+  const previousPath = (pathInput && pathInput.value) || "";
+  const previousName = sel.value;
+  sel.innerHTML = '<option value="">Manual path</option>'
+    + projects.map(p => '<option value="'+esc(p.name)+'" data-path="'+esc(p.path)+'">'+esc(p.name)+(p.preSelect?' ★':'')+'</option>').join("");
+
+  const chosen = projects.find(p => previousPath && p.path === previousPath)
+    || projects.find(p => previousName && p.name === previousName)
+    || (state.selectedProject ? projects.find(p => p.name === state.selectedProject) : null)
+    || projects.find(p => p.preSelect)
+    || projects[0];
+  if (chosen && pathInput && (!previousPath || previousPath === "$HOME" || previousPath === "/tmp")) {
+    syncCommandProject(chosen.name, chosen.path);
+  } else if (chosen) {
+    sel.value = chosen.name;
+  }
+}
+
+function onCommandProjectChange() {
+  const sel = document.getElementById("commandProject");
+  if (!sel) return;
+  const opt = sel.options[sel.selectedIndex];
+  const path = opt && opt.dataset ? opt.dataset.path : "";
+  if (path) syncCommandProject(opt.value, path);
+}
+
 // Close dropdown when clicking outside
 document.addEventListener("click", (e) => {
   const wrapper = document.getElementById("t_project_wrapper");
@@ -2153,6 +2198,7 @@ async function loadProjects(fresh) {
       preSelect: !!p.preSelect,
       lastModified: p.lastModified || "",
     }));
+    populateCommandProjects(data.projects);
     const preSelected = data.projects.find(p => p.preSelect);
     if (preSelected) {
       selectedProjectName = preSelected.name;
@@ -2163,7 +2209,10 @@ async function loadProjects(fresh) {
     // If a filter was restored, also sync the task form path
     if (state.selectedProject) {
       const activeOpt = sel.options[sel.selectedIndex];
-      if (activeOpt && activeOpt.dataset.path) document.getElementById("t_path").value = activeOpt.dataset.path;
+      if (activeOpt && activeOpt.dataset.path) {
+        document.getElementById("t_path").value = activeOpt.dataset.path;
+        syncCommandProject(state.selectedProject, activeOpt.dataset.path);
+      }
     }
   } catch (e) { /* transient */ }
 }
@@ -2174,7 +2223,10 @@ document.getElementById("projectSel").addEventListener("change", async (e) => {
   renderBoard();
   // Sync task-form project path when header project changes
   const opt = e.target.options[e.target.selectedIndex];
-  if (opt && opt.dataset.path) document.getElementById("t_path").value = opt.dataset.path;
+  if (opt && opt.dataset.path) {
+    document.getElementById("t_path").value = opt.dataset.path;
+    syncCommandProject(e.target.value, opt.dataset.path);
+  }
 });
 
 function onProjectSelect() {
