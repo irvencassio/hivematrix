@@ -43,12 +43,25 @@ Defaults target the operator's local server (LM Studio, `qwen/qwen3.6-27b` at
 **Validated against the real model:** "capital of France?" → STT (large-v3-turbo)
 → Qwen 3.6 27B → *"The capital of France is Paris."* → WAV out.
 
-> ⚠️ **Latency gate (P2.3):** Qwen 3.6 is a reasoning model and LM Studio runs it
-> with thinking ON by default — ~13s/turn, far over the sub-800ms live-voice
-> budget. The answer is correct (it's in `content`; reasoning is in
-> `reasoning_content`), but for live conversation **reasoning must be turned OFF
-> in LM Studio's model settings** (the `enable_thinking:false` API flag is *not*
-> honored by the current build). This is a serving-config fix, not a code one.
+### Latency (P2.3)
+
+Qwen 3.6 is a reasoning model. With thinking **ON** (LM Studio default) a turn is
+~13s — non-viable. The `enable_thinking:false` API flag is *not* honored by the
+current LM Studio build, so **reasoning must be turned off in LM Studio's model
+settings** (takes effect immediately, no restart).
+
+Reasoning **OFF**, measured blocking turn (M-series, 128 GB):
+
+| stage | time |
+|---|---|
+| STT (whisper-large-v3-turbo) | 0.49s |
+| LLM (Qwen 3.6 27B) | 0.98s |
+| TTS (`say`) | 0.83s |
+| **total** | **2.30s** |
+
+2.3s blocking is usable but not instant. Sub-second *feel* comes from **streaming**
+(start TTS on the LLM's first tokens; stream STT for barge-in) in the Pipecat
+realtime wrapper — that's the remaining P2.2/P2.3 work (needs a device to validate).
 
 ## Status
 
