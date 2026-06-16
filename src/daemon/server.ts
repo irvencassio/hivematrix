@@ -1216,7 +1216,7 @@ export function createDaemonServer() {
         const { parseOutboundFields } = await import("@/lib/orchestrator/outbound-routing");
         const fields = parseOutboundFields(req.headers["content-type"], await readRawBody(req));
         const { executeMessageBeeSend } = await import("@/lib/orchestrator/bee-tools");
-        const message = await executeMessageBeeSend({ to: fields.to ?? "", text: fields.text ?? "" });
+        const message = await executeMessageBeeSend({ to: fields.to ?? "", text: fields.text ?? "", attachments: fields.attachments });
         json(res, message.startsWith("Error") ? 400 : 200, { ok: !message.startsWith("Error"), message });
         return;
       }

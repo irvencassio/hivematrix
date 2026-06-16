@@ -17,6 +17,7 @@ import { DEFAULT_TASK_PROJECT } from "@/lib/routing/project-constants";
 import { handlesMatch } from "./contracts";
 import { routeInbound, type PendingInput } from "./handoff";
 import { readInboundSince, sendIMessage } from "./imessage";
+import { wantsVoiceReply } from "@/lib/voice/tts";
 import {
   isChannelEnabled, getLastRowid, setLastRowid, isAllowed,
   recordInbound, recordOutbound, recordError,
@@ -93,7 +94,25 @@ async function notifyCompletedResults(): Promise<void> {
     const out = (task.output ?? {}) as { summary?: string };
     const result = typeof out.summary === "string" ? out.summary.trim() : "";
     if (!result) continue;
-    const sent = await sendIMessage(handle, result);
+
+    // Voice reply: if the sender asked for a spoken result, synth the summary to
+    // a voice note (.m4a) and send that instead of text. Falls back to text on
+    // any TTS failure so a result is never dropped. (P1.7 — bootstrap `say`
+    // engine; cloned voice swaps in behind synthesizeSpeech.)
+    let body = result;
+    let attachments: string[] = [];
+    if (wantsVoiceReply(typeof task.description === "string" ? task.description : "")) {
+      try {
+        const { synthesizeSpeech } = await import("@/lib/voice/tts");
+        const audio = await synthesizeSpeech(result.slice(0, 1500));
+        attachments = [audio.path];
+        body = ""; // send a clean voice note, no caption
+      } catch (err) {
+        recordError(`voice reply TTS failed, falling back to text: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    const sent = await sendIMessage(handle, body, attachments);
     if (sent) { recordOutbound(); markDoneNotified(key); }
   }
 }

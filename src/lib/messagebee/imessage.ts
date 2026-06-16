@@ -147,24 +147,39 @@ export function currentMaxRowid(path = chatDbPath()): number {
 // lookup hangs on recent macOS (AppleEvent timed out / -1712), which is why
 // MessageBee replies silently never delivered. `with timeout` bounds it so a
 // stuck Messages can't block the whole send for the default 2 minutes.
+// argv: handle, text, then 0+ attachment file paths. Text is sent only when
+// non-empty (so a voice note can be sent with no caption); each attachment is
+// sent as its own message via `send (POSIX file ...)` — the iMessage equivalent
+// of MailBee's attachment loop. Audio (.m4a) arrives as a playable bubble.
 export const SEND_SCRIPT = `on run argv
   set targetHandle to item 1 of argv
   set targetMessage to item 2 of argv
-  with timeout of 12 seconds
+  with timeout of 30 seconds
     tell application "Messages"
       set targetAccount to 1st account whose service type = iMessage
       set targetParticipant to participant targetHandle of targetAccount
-      send targetMessage to targetParticipant
+      if targetMessage is not "" then send targetMessage to targetParticipant
+      if (count of argv) > 2 then
+        repeat with i from 3 to (count of argv)
+          try
+            send (POSIX file (item i of argv)) to targetParticipant
+          end try
+        end repeat
+      end if
     end tell
   end timeout
 end run`;
 
-/** Send an iMessage to a handle. Resolves false on failure (never throws). */
-export function sendIMessage(handle: string, text: string, timeoutMs = 15_000): Promise<boolean> {
+/**
+ * Send an iMessage to a handle, optionally with file attachments (e.g. a voice
+ * note). Resolves false on failure (never throws). Text may be empty when only
+ * attachments are being sent.
+ */
+export function sendIMessage(handle: string, text: string, attachments: string[] = [], timeoutMs = 30_000): Promise<boolean> {
   return new Promise((resolve) => {
     execFile(
       "osascript",
-      ["-e", SEND_SCRIPT, handle, text],
+      ["-e", SEND_SCRIPT, handle, text, ...attachments],
       { timeout: timeoutMs },
       (err, _stdout, stderr) => {
         if (err) {

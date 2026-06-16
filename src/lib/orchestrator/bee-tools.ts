@@ -484,7 +484,7 @@ export async function executeMailBeeDraft(args: Record<string, unknown>, io?: Ma
 
 export interface MessageBeeSendIO {
   isAllowed(handle: string): boolean;
-  sendIMessage(handle: string, text: string): Promise<boolean>;
+  sendIMessage(handle: string, text: string, attachments?: string[]): Promise<boolean>;
   recordOutbound(): void;
 }
 
@@ -501,17 +501,21 @@ async function defaultMessageBeeIO(): Promise<MessageBeeSendIO> {
 export async function executeMessageBeeSend(args: Record<string, unknown>, io?: MessageBeeSendIO): Promise<string> {
   const to = typeof args.to === "string" ? args.to.trim() : "";
   const text = typeof args.text === "string" ? args.text.trim() : "";
-  if (!to || !text) return "Error: 'to' and 'text' are required to send a message.";
+  const attachments = readAttachments(args);
+  if (!to || (!text && attachments.length === 0)) {
+    return "Error: 'to' and either 'text' or an attachment are required to send a message.";
+  }
   const deps = io ?? (await defaultMessageBeeIO());
 
   if (!deps.isAllowed(to)) {
     return `Error: ${to} is not on the MessageBee allowlist. SMS/iMessage can only be sent to allowlisted handles — add ${to} in MessageBee settings first, then retry.`;
   }
 
-  const sent = await deps.sendIMessage(to, text);
+  const sent = await deps.sendIMessage(to, text, attachments);
   if (sent) deps.recordOutbound();
+  const what = attachments.length ? `Message (with ${attachments.length} attachment(s))` : "Message";
   return sent
-    ? `Message sent to ${to} via Messages.`
+    ? `${what} sent to ${to} via Messages.`
     : `Error: sending the message to ${to} failed. Is Messages signed in and the handle reachable via iMessage?`;
 }
 

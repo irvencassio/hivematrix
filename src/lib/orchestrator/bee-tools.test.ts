@@ -178,3 +178,22 @@ test("messagebee_send refuses a non-allowlisted handle (no send)", async () => {
   assert.deepEqual(calls, []);
   assert.match(out, /not on the MessageBee allowlist/);
 });
+
+test("messagebee_send forwards a voice-note attachment with no text required", async () => {
+  let gotAttachments: string[] | undefined;
+  const io: MessageBeeSendIO = {
+    isAllowed: () => true,
+    sendIMessage: async (_h, _t, attachments) => { gotAttachments = attachments; return true; },
+    recordOutbound: () => {},
+  };
+  const out = await executeMessageBeeSend({ to: "+14155551234", attachments: ["/tmp/voice-x.m4a"] }, io);
+  assert.deepEqual(gotAttachments, ["/tmp/voice-x.m4a"]);
+  assert.match(out, /with 1 attachment/);
+});
+
+test("messagebee_send requires either text or an attachment", async () => {
+  const { io, calls } = msgIO(true);
+  const out = await executeMessageBeeSend({ to: "+14155551234" }, io);
+  assert.deepEqual(calls, []);
+  assert.match(out, /required/);
+});
