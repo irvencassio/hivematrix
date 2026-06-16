@@ -1664,6 +1664,26 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /uploads — receive raw file bytes (base64 JSON) from a remote client
+      // and persist them under ~/.hivematrix/uploads, returning the absolute local
+      // path the agent can read. The iOS app's own file paths point at the phone,
+      // which this Mac can't open; callers upload here first, then reference the
+      // returned `path` as a task attachment.
+      if (req.method === "POST" && urlPath === "/uploads") {
+        const { saveUpload } = await import("@/lib/uploads/store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        try {
+          const saved = saveUpload({
+            filename: typeof body.filename === "string" ? body.filename : undefined,
+            dataBase64: typeof body.dataBase64 === "string" ? body.dataBase64 : undefined,
+          });
+          json(res, 201, saved);
+        } catch (err) {
+          json(res, 400, { error: err instanceof Error ? err.message : "upload failed" });
+        }
+        return;
+      }
+
       if (req.method === "POST" && urlPath === "/tasks") {
         const { Task, generateId } = await import("@/lib/db");
         const { deriveTaskTitle } = await import("@/lib/tasks/derive-title");

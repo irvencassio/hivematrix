@@ -470,7 +470,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="wallpaper_opacity_row" style="display:none;margin-top:8px">
         <label class="flbl">Panel translucency over wallpaper</label>
         <div class="row" style="align-items:center;gap:10px">
-          <input type="range" id="s_wp_opacity" min="40" max="100" step="1" style="flex:1" oninput="onOpacityInput(this.value)" onchange="saveOpacity(this.value)" />
+          <input type="range" id="s_wp_opacity" min="0" max="100" step="1" style="flex:1" oninput="onOpacityInput(this.value)" onchange="saveOpacity(this.value)" />
           <span class="muted" id="s_wp_opacity_val" style="min-width:42px;text-align:right">82%</span>
         </div>
         <div class="muted" style="font-size:11px">Lower = more wallpaper shows through the panels.</div>
@@ -903,8 +903,8 @@ function taskActionsHtml(t) {
   const b = [];
   const running = ["backlog","assigned","in_progress"].includes(t.status);
   const retryable = ["failed","review","cancelled"].includes(t.status);
-  // Steerable: a live Codex run can be interrupted and resumed on the same thread.
-  const steerable = t.status === "in_progress" && (t.model||"").startsWith("codex:");
+  // Steerable: any live run can be interrupted and resumed on the same session.
+  const steerable = t.status === "in_progress";
   if (running) b.push('<button onclick="taskAction(\''+t._id+'\',\'cancel\')">■ Cancel</button>');
   if (retryable) b.push('<button class="reply-toggle" id="retryToggle_'+t._id+'" onclick="toggleRetry(\''+t._id+'\')">↻ Retry</button>');
   // Reply: answer the agent / continue a finished task (review, failed, cancelled)
@@ -921,12 +921,12 @@ function taskActionsHtml(t) {
       + attachPickerHtml('retry')
       + '<div class="reply-row" style="margin-top:6px"><button onclick="submitRetry(\''+t._id+'\')">↻ Retry'+(t.status==='cancelled'?'':' with guidance')+'</button></div></div>';
   }
-  // Steer a live Codex run: always-visible box (the task is live-refreshing, so a
+  // Steer a live run: always-visible box (the task is live-refreshing, so a
   // collapsible section would close mid-compose). Submitting interrupts the agent
-  // and resumes the same thread with the new instruction.
+  // and resumes the same session with the new instruction.
   if (steerable) {
     html += '<div id="steerSection_'+t._id+'" class="reply-section open">'
-      + '<div class="reply-question">Steer this run — your instruction is added and the Codex thread resumes.</div>'
+      + '<div class="reply-question">Steer this run — your instruction is added and the session resumes.</div>'
       + '<textarea id="steerText" class="reply-input" placeholder="Type a new instruction to steer this run…" rows="2" oninput="onCtxDraft(\'steer\',this)"></textarea>'
       + '<div class="reply-row" style="margin-top:6px"><button onclick="submitSteer(\''+t._id+'\')">⤳ Send Steer</button></div></div>';
   }

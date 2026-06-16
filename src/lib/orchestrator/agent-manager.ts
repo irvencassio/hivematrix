@@ -913,15 +913,14 @@ class AgentManager {
     const task = await Task.findById(taskId);
     if (!task) throw new Error("Task not found");
     if (task.status !== "in_progress") throw new Error("Can only steer in-progress tasks");
-    if (!isCodexModel(task.model)) throw new Error("Steering is currently supported only for Codex/ChatGPT tasks");
 
     const sessionId = agent.sessionId ?? task.sessionId;
-    if (!sessionId) throw new Error("Codex thread id is not available yet. Wait for the task to finish starting and try again.");
+    if (!sessionId) throw new Error("Session id is not available yet. Wait for the task to finish starting and try again.");
 
     this.pendingSteers.set(taskId, { message: steer, sessionId });
     this.broadcaster(taskId, {
       type: "text",
-      content: `Steer requested. Interrupting current run and resuming the Codex thread with your new instruction.`,
+      content: `Steer requested. Interrupting current run and resuming the session with your new instruction.`,
     });
     await killProcess(agent.proc);
   }

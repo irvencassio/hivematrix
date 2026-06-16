@@ -194,14 +194,18 @@ test("console sends reply bodies as JSON", () => {
   assert.match(js, /\/tasks\/"\+id\+"\/reply/);
 });
 
-test("console can steer a live Codex run, gated to in-progress Codex tasks", () => {
+test("console can steer any live run, gated to in-progress tasks", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /async function submitSteer\(/);
   assert.match(js, /\/tasks\/"\+id\+"\/steer/);
-  // Steer box only appears for an in-progress Codex task.
+  // Steer box appears for any in-progress task (no longer Codex-only).
   assert.ok(
-    js.includes('t.status === "in_progress" && (t.model||"").startsWith("codex:")'),
-    "steer gated to in-progress Codex tasks",
+    js.includes('const steerable = t.status === "in_progress";'),
+    "steer gated to in-progress tasks",
+  );
+  assert.ok(
+    !js.includes('(t.model||"").startsWith("codex:")'),
+    "steer is no longer gated to Codex tasks",
   );
   // Its draft survives live refreshes like reply/retry do.
   assert.ok(js.includes("onCtxDraft(\\'steer\\',this)"), "steer textarea preserves its draft");
