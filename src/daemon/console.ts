@@ -1431,11 +1431,12 @@ async function runCommand() {
   const c = selectedCommand();
   if (!c) return;
   const args = (document.getElementById('commandArgs') || {}).value || '';
+  const projectPath = document.getElementById("t_path").value.trim();
   const res = document.getElementById('commandResult');
   if (res) res.textContent = 'Launching…';
   try {
     const d = await api('/commands/run',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: c.invokeName, args: args }) });
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: c.invokeName, args: args, projectPath: projectPath }) });
     if (d && d.task) { if (res) res.textContent = 'Launched /' + c.invokeName + ' — see the board.'; refresh(); }
     else if (res) { res.textContent = (d && d.error) || 'Launched.'; }
   } catch (e) { if (res) res.textContent = 'Error launching command.'; }

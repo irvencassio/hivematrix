@@ -18,6 +18,8 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
+import { homedir } from "os";
+import { resolve, sep } from "path";
 import { getDb } from "@/lib/db";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import type { ConnectivityMode } from "@/lib/connectivity/policy";
@@ -55,6 +57,36 @@ export function consoleHtmlHeaders(): Record<string, string> {
     "Pragma": "no-cache",
     "Expires": "0",
   };
+}
+
+export function normalizeHomeProjectPath(input: unknown, home = homedir()): string {
+  if (typeof input !== "string" || !input.trim()) {
+    throw new Error("projectPath is required");
+  }
+
+  const normalizedHome = resolve(home);
+  const raw = input.trim();
+  let expanded = raw;
+  if (raw === "~") {
+    expanded = normalizedHome;
+  } else if (raw.startsWith("~/")) {
+    expanded = `${normalizedHome}${sep}${raw.slice(2)}`;
+  } else if (raw === "$HOME" || raw === "${HOME}") {
+    expanded = normalizedHome;
+  } else if (raw.startsWith("$HOME/")) {
+    expanded = `${normalizedHome}${sep}${raw.slice(6)}`;
+  } else if (raw.startsWith("${HOME}/")) {
+    expanded = `${normalizedHome}${sep}${raw.slice(8)}`;
+  }
+
+  const resolved = resolve(expanded);
+  if (resolved === sep) {
+    throw new Error("projectPath cannot be root (/)");
+  }
+  if (resolved !== normalizedHome && !resolved.startsWith(`${normalizedHome}${sep}`)) {
+    throw new Error(`projectPath must be under $HOME (${normalizedHome})`);
+  }
+  return resolved;
 }
 
 function parseBody(req: IncomingMessage): Promise<unknown> {
@@ -1355,6 +1387,13 @@ export function createDaemonServer() {
         const args = typeof body.args === "string" ? body.args.trim() : "";
         const profile = typeof body.profile === "string" && body.profile.trim() ? body.profile.trim() : undefined;
         if (!name) { json(res, 400, { error: "name is required" }); return; }
+        let projectPath: string;
+        try {
+          projectPath = normalizeHomeProjectPath(body.projectPath);
+        } catch (err) {
+          json(res, 400, { error: err instanceof Error ? err.message : "invalid projectPath" });
+          return;
+        }
 
         const { scanLocalCommands } = await import("@/lib/commands/local-catalog");
         const cmd = (await scanLocalCommands(profile)).find((c) => c.invokeName === name);
@@ -1370,7 +1409,7 @@ export function createDaemonServer() {
           title: `[command] /${cmd.invokeName}`,
           description,
           project: "ops",
-          projectPath: process.cwd(),
+          projectPath,
           profile: profile ? normalizeTaskProfileKey(profile) : getActiveTaskProfileKey(),
           status: "backlog",
           executor: "agent",
