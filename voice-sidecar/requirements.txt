@@ -1,0 +1,8 @@
+# VoiceBee sidecar — direct dependencies (Phase 2, DECISIONS Q12).
+# Built on the base system Python (3.14+); create the env with:
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# The .venv is this app's isolated dependency folder, not a separate/legacy
+# Python — it always runs on whatever the base `python3` is.
+
+mlx-whisper==0.4.3      # local streaming STT on Apple Silicon (MLX)
+pipecat-ai==1.3.0       # realtime voice pipeline orchestrator (VAD/STT/LLM/TTS)
