@@ -286,6 +286,72 @@ function extractTimeAgo(html: string): (value: string | null | undefined, nowMs:
   return factory();
 }
 
+function extractExecutionHelpers(html: string): {
+  executionProviderLabel: (model: string | null | undefined) => string;
+  executionRoleLabel: (task: Record<string, unknown>, output: Record<string, unknown>) => string;
+  taskExecutionPanel: (task: Record<string, unknown>, output: Record<string, unknown>) => string;
+} {
+  const js = extractScript(html);
+  const esc = js.match(/function esc\(s\)\{[^\n]+\}/);
+  const block = js.match(/\/\*__EXECUTION_HELPERS_START__\*\/([\s\S]*?)\/\*__EXECUTION_HELPERS_END__\*\//);
+  assert.ok(esc, "console script must define esc");
+  assert.ok(block, "console script must define execution helper block");
+  const factory = new Function(`${esc![0]}\n${block![1]}\nreturn { executionProviderLabel, executionRoleLabel, taskExecutionPanel };`) as () => {
+    executionProviderLabel: (model: string | null | undefined) => string;
+    executionRoleLabel: (task: Record<string, unknown>, output: Record<string, unknown>) => string;
+    taskExecutionPanel: (task: Record<string, unknown>, output: Record<string, unknown>) => string;
+  };
+  return factory();
+}
+
+test("command launcher renders as a compact command shell", () => {
+  assert.match(CONSOLE_HTML, /class="command-shell"/, "command shell wrapper present");
+  assert.match(CONSOLE_HTML, /class="command-head"/, "command header present");
+  assert.match(CONSOLE_HTML, /class="command-grid"/, "command controls grouped in a grid");
+  assert.match(CONSOLE_HTML, /class="command-status"/, "command status callout present");
+  assert.match(CONSOLE_HTML, /class="command-view"/, "command inspect panel present");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function renderCommandStatus\(/, "status rendering helper present");
+  assert.match(js, /function commandMetaChips\(/, "metadata chips helper present");
+  assert.match(js, /catalog: local profile catalog/, "command inspect copy is provider-neutral");
+  assert.doesNotMatch(js, /catalog: Claude local profile/, "command inspect copy does not overclaim Claude execution");
+  assert.doesNotMatch(CONSOLE_HTML, /id="commandMeta" style=/, "command metadata no longer relies on inline style");
+});
+
+test("execution provenance covers Claude, ChatGPT/Codex, and Qwen/local modes", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /taskExecutionPanel\(t, out\)/, "task detail view renders execution provenance");
+
+  const helpers = extractExecutionHelpers(CONSOLE_HTML);
+  assert.equal(helpers.executionProviderLabel("claude-opus-4-8"), "Claude");
+  assert.equal(helpers.executionProviderLabel("codex:gpt-5.4"), "ChatGPT/Codex");
+  assert.equal(helpers.executionProviderLabel("qwen/qwen3.6-27b"), "Qwen/local");
+
+  const claude = helpers.taskExecutionPanel(
+    { model: "claude-opus-4-8", profile: "developer", agentType: "auto", source: "dashboard" },
+    { modelsUsed: ["claude-opus-4-8"], routedTier: "frontier-premium" },
+  );
+  assert.match(claude, /Claude/);
+  assert.match(claude, /Thinking/);
+  assert.match(claude, /frontier-premium/);
+
+  const codex = helpers.taskExecutionPanel(
+    { model: "codex:gpt-5.4", profile: "developer", agentType: "auto", source: "command" },
+    { modelsUsed: ["codex:gpt-5.4"], command: "import-vodafone" },
+  );
+  assert.match(codex, /ChatGPT\/Codex/);
+  assert.match(codex, /Coding/);
+  assert.match(codex, /Command launcher/);
+
+  const qwen = helpers.taskExecutionPanel(
+    { model: "qwen\/qwen3.6-27b", profile: "developer", agentType: "auto", source: "directive" },
+    { modelsUsed: ["qwen\/qwen3.6-27b"], routedTier: "local-secondary", directivePhase: "executor" },
+  );
+  assert.match(qwen, /Qwen\/local/);
+  assert.match(qwen, /Executor/);
+  assert.match(qwen, /local-secondary/);
+});
+
 test("console timeAgo humanizes BOTH daemon date formats as UTC", () => {
   const timeAgo = extractTimeAgo(CONSOLE_HTML);
   const now = Date.parse("2026-06-14T10:35:45Z");

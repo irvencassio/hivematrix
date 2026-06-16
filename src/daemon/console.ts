@@ -134,6 +134,38 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .obs-strip { display:flex; flex-wrap:wrap; gap:14px; margin:8px 0 4px; padding:8px 10px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; }
   .obs-cell { display:flex; flex-direction:column; font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
   .obs-cell b { font-size:13px; color:var(--text); text-transform:none; letter-spacing:0; }
+  .exec-panel { margin:10px 0 10px; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--panel-2); }
+  .exec-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 10px; border-bottom:1px solid var(--border); }
+  .exec-title { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:700; }
+  .exec-provider { font-size:11px; color:var(--accent-2); border:1px solid color-mix(in srgb, var(--accent-2) 45%, var(--border)); border-radius:999px; padding:1px 8px; background:color-mix(in srgb, var(--accent-2) 10%, transparent); }
+  .exec-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; background:var(--border); }
+  .exec-cell { min-width:0; padding:7px 9px; background:var(--panel); }
+  .exec-cell .ek { display:block; font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:1px; }
+  .exec-cell .ev { display:block; color:var(--text); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .exec-cell.wide { grid-column:1 / -1; }
+  .command-shell { border:1px solid var(--border); border-radius:8px; background:var(--panel-2); overflow:hidden; margin-bottom:8px; }
+  .command-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border-bottom:1px solid var(--border); }
+  .command-title { min-width:0; }
+  .command-title b { display:block; font-size:12px; line-height:1.2; }
+  .command-title span { display:block; font-size:10.5px; color:var(--muted); line-height:1.25; margin-top:2px; }
+  .command-import { flex:none; border:1px solid var(--border); background:var(--panel); color:var(--accent); border-radius:6px; padding:4px 7px; font-size:11px; font-weight:700; cursor:pointer; }
+  .command-import:hover { border-color:var(--accent); }
+  .command-grid { padding:10px; display:grid; gap:8px; }
+  .command-grid select, .command-grid input { width:100%; margin:0; }
+  .command-meta { display:flex; flex-wrap:wrap; gap:4px; min-height:22px; align-items:center; }
+  .command-chip { max-width:100%; border:1px solid var(--border); background:var(--panel); color:var(--muted); border-radius:999px; padding:2px 7px; font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .command-chip.primary { color:var(--accent-2); border-color:color-mix(in srgb, var(--accent-2) 42%, var(--border)); }
+  .command-project-row { display:grid; grid-template-columns:minmax(86px,.72fr) minmax(0,1.28fr); gap:6px; }
+  .command-actions { display:flex; gap:6px; }
+  .command-actions button { border-radius:6px; padding:6px 10px; font-size:12px; font-weight:700; cursor:pointer; }
+  .command-run { background:var(--accent); color:var(--create-btn-text); border:0; flex:1; }
+  .command-view-btn { background:var(--panel); color:var(--text); border:1px solid var(--border); }
+  .command-status { display:none; margin:0 10px 10px; padding:7px 9px; border:1px solid var(--border); border-radius:7px; font-size:11.5px; color:var(--muted); background:var(--panel); }
+  .command-status.show { display:block; }
+  .command-status.ok { color:var(--ok); border-color:color-mix(in srgb, var(--ok) 45%, var(--border)); }
+  .command-status.busy { color:var(--accent-2); border-color:color-mix(in srgb, var(--accent-2) 45%, var(--border)); }
+  .command-status.err { color:var(--err); border-color:color-mix(in srgb, var(--err) 45%, var(--border)); }
+  .command-view { display:none; max-height:200px; overflow:auto; font-size:11px; background:var(--code-bg); color:var(--code-text); padding:8px; border-radius:6px; margin:0 10px 10px; white-space:pre-wrap; }
   .usage-refresh { border:1px solid var(--border); background:var(--panel-2); color:var(--muted);
     width:24px; height:24px; border-radius:6px; cursor:pointer; line-height:1; font-size:13px; }
   .usage-refresh:hover { color:var(--text); border-color:var(--text); }
@@ -718,23 +750,38 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="muted" id="skillResult" style="font-size:12px;margin-top:4px"></div>
     <pre id="skillView" style="display:none;max-height:200px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap"></pre></details>
     <details class="ctx-sec" id="commandsSec"><summary>Commands</summary>
-    <div class="row" style="gap:6px">
-      <select id="commandSelect" onchange="updateCommandMeta()" style="flex:1;min-width:120px"></select>
-      <button class="addbtn" onclick="importLocalSkills()" title="Bulk-import your local folder skills into the brain library">⇩ Import skills → library</button>
-    </div>
-    <input id="commandArgs" placeholder="Arguments (optional)" style="margin-top:6px" />
-    <label class="flbl" style="margin-top:6px">Project</label>
-    <select id="commandProject" onchange="onCommandProjectChange()" style="width:100%;margin-bottom:6px">
-      <option value="">Manual path</option>
-    </select>
-    <input id="commandPath" placeholder="Project path (working dir, under $HOME)" value="$HOME" style="margin-top:0" />
-    <div class="row" style="gap:6px;flex-wrap:wrap">
-      <button class="create" onclick="runCommand()">Run</button>
-      <button class="addbtn" onclick="viewCommand()" title="View invoke name, source path, allowed-tools">View</button>
-    </div>
-    <div class="muted" id="commandMeta" style="font-size:11px;margin-top:4px"></div>
-    <div class="muted" id="commandResult" style="font-size:12px;margin-top:4px"></div>
-    <pre id="commandView" style="display:none;max-height:200px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap"></pre></details>
+    <div class="command-shell">
+      <div class="command-head">
+        <div class="command-title"><b>Run command</b><span>Local profile command or folder skill</span></div>
+        <button class="command-import" onclick="importLocalSkills()" title="Bulk-import your local folder skills into the brain library">Import skills</button>
+      </div>
+      <div class="command-grid">
+        <div>
+          <label class="flbl">Command</label>
+          <select id="commandSelect" onchange="updateCommandMeta()"></select>
+        </div>
+        <div id="commandMeta" class="command-meta"></div>
+        <div>
+          <label class="flbl">Arguments</label>
+          <input id="commandArgs" placeholder="Optional arguments" />
+        </div>
+        <div>
+          <label class="flbl">Project</label>
+          <div class="command-project-row">
+            <select id="commandProject" onchange="onCommandProjectChange()">
+              <option value="">Manual path</option>
+            </select>
+            <input id="commandPath" placeholder="Project path under $HOME" value="$HOME" />
+          </div>
+        </div>
+        <div class="command-actions">
+          <button class="command-run" onclick="runCommand()">Run</button>
+          <button class="command-view-btn" onclick="viewCommand()" title="View invoke name, source path, allowed-tools">Inspect</button>
+        </div>
+      </div>
+      <div id="commandResult" class="command-status"></div>
+      <pre id="commandView" class="command-view"></pre>
+    </div></details>
     <details class="ctx-sec" id="mcpSec"><summary>MCP Servers</summary>
     <div id="mcp"></div></details>
   </section>
@@ -1090,8 +1137,8 @@ async function selectTask(id) {
   el.innerHTML = '<div class="session"><h1>'+esc(t.title||t._id)+(live?'<span class="streaming">● running</span>':'')+'</h1>'
     + '<div class="sub">'+esc(t.project||"")+' · '+esc(t.status)+(t.reviewState?' · '+esc(t.reviewState):'')+'</div>'
     + taskActionsHtml(t)
+    + taskExecutionPanel(t, out)
     + '<div class="kv">'
-    + '<span class="k">model</span><span>'+esc(t.model||"—")+'</span>'
     + '<span class="k">project path</span><span>'+esc(t.projectPath||"—")+'</span>'
     + '<span class="k">directive</span><span>'+esc(t.directiveId||"—")+'</span>'
     + '<span class="k">completedBy</span><span>'+esc(t.completedBy||"—")+'</span>'
@@ -1280,6 +1327,103 @@ function obsProvider(model) {
   if (/(qwen|mistral|llama|mlx|local|deepseek|gemma|phi|nan)/.test(m)) return "Qwen (local)";
   return "—";
 }
+
+/*__EXECUTION_HELPERS_START__*/
+function firstText() {
+  for (const v of arguments) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return "";
+}
+function modelList(output) {
+  const rows = output && Array.isArray(output.modelsUsed) ? output.modelsUsed : [];
+  return rows.filter(m => typeof m === "string" && m.trim()).map(m => m.trim());
+}
+function executionModel(task, output) {
+  const used = modelList(output);
+  return firstText(task && task.model, used[used.length - 1], used[0]);
+}
+function executionProviderLabel(model) {
+  const m = (model || "").toLowerCase().trim();
+  if (!m) return "—";
+  if (/^(codex|chatgpt)/.test(m) || /^(gpt|o[0-9])/.test(m)) return "ChatGPT/Codex";
+  if (/^(claude|opus|sonnet|haiku|fable)/.test(m)) return "Claude";
+  if (/(qwen|mistral|llama|mlx|local|deepseek|gemma|phi)/.test(m)) return "Qwen/local";
+  if (/(nano|banana|mflux|image)/.test(m)) return "Image";
+  return "Other";
+}
+function titleCaseLabel(value) {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, ch => ch.toUpperCase())
+    .trim();
+}
+function tierRoleLabel(tier) {
+  switch (tier) {
+    case "frontier-premium": return "Thinking";
+    case "frontier": return "Coding";
+    case "local-primary": return "Execution";
+    case "local-secondary": return "Operational";
+    case "nanai": return "Image";
+    case "unavailable": return "Waiting";
+    default: return "";
+  }
+}
+function modelRoleLabel(model) {
+  const m = (model || "").toLowerCase().trim();
+  if (!m) return "";
+  if (/opus/.test(m)) return "Thinking";
+  if (/sonnet|codex|chatgpt|gpt|o[0-9]/.test(m)) return "Coding";
+  if (/haiku/.test(m)) return "Lightweight";
+  if (/qwen|mistral|llama|mlx|local|deepseek|gemma|phi/.test(m)) return "Operational";
+  if (/nano|banana|mflux|image/.test(m)) return "Image";
+  return "";
+}
+function executionRoleLabel(task, output) {
+  output = output || {};
+  const phase = firstText(output.directivePhase);
+  if (phase) return titleCaseLabel(phase);
+  const tierRole = tierRoleLabel(output.routedTier);
+  if (tierRole) return tierRole;
+  return modelRoleLabel(executionModel(task || {}, output)) || "Agent";
+}
+function executionCoordinatorLabel(task, output) {
+  task = task || {}; output = output || {};
+  if (output.directivePhase || task.directiveId || output.runId) return "ManagerBee / directive";
+  if (task.source === "command" || output.command) return "Command launcher";
+  if (task.source === "skill" || output.skill) return "Skill launcher";
+  if (task.source === "messagebee") return "MessageBee";
+  if (task.source === "mailbee") return "MailBee";
+  if (task.source === "digest") return "Digest";
+  return "Standalone task";
+}
+function executionRow(label, value, wide) {
+  return '<div class="exec-cell' + (wide ? ' wide' : '') + '"><span class="ek">' + esc(label)
+    + '</span><span class="ev" title="' + esc(String(value || "—")) + '">' + esc(String(value || "—")) + '</span></div>';
+}
+function taskExecutionPanel(task, output) {
+  task = task || {}; output = output || {};
+  const model = executionModel(task, output);
+  const provider = executionProviderLabel(model);
+  const role = executionRoleLabel(task, output);
+  const tier = firstText(output.routedTier);
+  const roleTier = role + (tier ? " / " + tier : "");
+  const models = modelList(output);
+  const modelText = models.length ? models.join(" · ") : (model || "—");
+  const profile = firstText(task.profile, task.agentType, "auto");
+  const agentType = firstText(task.agentType, "auto");
+  const coord = executionCoordinatorLabel(task, output);
+  return '<section class="exec-panel"><div class="exec-head"><span class="exec-title">Execution</span>'
+    + '<span class="exec-provider">' + esc(provider) + '</span></div><div class="exec-grid">'
+    + executionRow("role / tier", roleTier, false)
+    + executionRow("profile", profile, false)
+    + executionRow("agent type", agentType, false)
+    + executionRow("coordinator", coord, false)
+    + executionRow("models used", modelText, true)
+    + '</div></section>';
+}
+/*__EXECUTION_HELPERS_END__*/
+
 function fmtMs(ms) {
   if (ms == null) return "—";
   if (ms < 1000) return Math.round(ms) + "ms";
@@ -1497,7 +1641,7 @@ async function importSkillPrompt() {
   } catch (e) { if (res) res.textContent = 'Import failed.'; }
 }
 
-// --- Commands launcher (local Claude slash commands + folder skills) ---------
+// --- Commands launcher (local profile slash commands + folder skills) --------
 let _commands = [];
 async function renderCommands() {
   try {
@@ -1526,25 +1670,46 @@ function selectedCommand() {
   const sel = document.getElementById('commandSelect');
   return sel ? _commands.find(c => c.invokeName === sel.value) : null;
 }
+function commandMetaChips(c) {
+  if (!c) return '<span class="command-chip">No command selected</span>';
+  const chips = [
+    ["primary", c.kind === "skill" ? "folder skill" : "slash command"],
+    ["", "/" + c.invokeName],
+  ];
+  if (c.model) chips.push(["", "model " + c.model]);
+  if (c.argumentHint) chips.push(["", "args " + c.argumentHint]);
+  if (c.hasBundledFiles) chips.push(["", String(c.bundledFileCount || 0) + " bundled"]);
+  if (c.description) chips.push(["", c.description]);
+  return chips.map(([cls, text]) => '<span class="command-chip' + (cls ? ' ' + cls : '')
+    + '" title="' + esc(text) + '">' + esc(text) + '</span>').join("");
+}
+function renderCommandStatus(kind, text) {
+  const res = document.getElementById('commandResult');
+  if (!res) return;
+  res.className = 'command-status show' + (kind ? ' ' + kind : '');
+  res.textContent = text || '';
+}
+function clearCommandStatus() {
+  const res = document.getElementById('commandResult');
+  if (!res) return;
+  res.className = 'command-status';
+  res.textContent = '';
+}
 function updateCommandMeta() {
   const meta = document.getElementById('commandMeta');
   const view = document.getElementById('commandView');
   if (view) view.style.display = 'none';
   if (!meta) return;
   const c = selectedCommand();
-  if (!c) { meta.textContent = ''; return; }
-  meta.innerHTML = esc(c.kind)
-    + (c.argumentHint ? ' · args: ' + esc(c.argumentHint) : '')
-    + (c.hasBundledFiles ? ' · ' + c.bundledFileCount + ' bundled file(s)' : '')
-    + (c.model ? ' · model: ' + esc(c.model) : '')
-    + (c.description ? ' — ' + esc(c.description) : '');
+  meta.innerHTML = commandMetaChips(c);
+  clearCommandStatus();
 }
 function viewCommand() {
   const c = selectedCommand();
   const view = document.getElementById('commandView');
   if (!c || !view) return;
   view.textContent = 'invoke: /' + c.invokeName + '\nkind: ' + c.kind
-    + '\ncatalog: Claude local profile'
+    + '\ncatalog: local profile catalog'
     + '\nsource: ' + c.sourcePath
     + (c.allowedTools ? '\nallowed-tools: ' + c.allowedTools : '')
     + (c.model ? '\nmodel: ' + c.model : '');
@@ -1555,26 +1720,24 @@ async function runCommand() {
   if (!c) return;
   const args = (document.getElementById('commandArgs') || {}).value || '';
   const projectPath = ((document.getElementById('commandPath') || {}).value || '$HOME').trim() || '$HOME';
-  const res = document.getElementById('commandResult');
-  if (res) res.textContent = 'Launching…';
+  renderCommandStatus('busy', 'Launching /' + c.invokeName + '...');
   try {
     const d = await api('/commands/run',
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: c.invokeName, args: args, projectPath: projectPath }) });
-    if (d && d.task) { if (res) res.textContent = 'Launched /' + c.invokeName + ' — see the board.'; refresh(); }
-    else if (res) { res.textContent = (d && d.error) || 'Launched.'; }
-  } catch (e) { if (res) res.textContent = 'Error launching command.'; }
+    if (d && d.task) { renderCommandStatus('ok', 'Launched /' + c.invokeName + ' — see the board.'); refresh(); }
+    else { renderCommandStatus(d && d.error ? 'err' : 'ok', (d && d.error) || 'Launched.'); }
+  } catch (e) { renderCommandStatus('err', 'Error launching command.'); }
 }
 async function importLocalSkills() {
-  const res = document.getElementById('commandResult');
-  if (res) res.textContent = 'Importing local skills…';
+  renderCommandStatus('busy', 'Importing local skills...');
   try {
     const d = await api('/skills/import-local',
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-    if (res) res.textContent = 'Imported ' + (d.imported || 0) + ', refined ' + (d.refined || 0)
+    renderCommandStatus('ok', 'Imported ' + (d.imported || 0) + ', refined ' + (d.refined || 0)
       + ', skipped ' + (d.skipped || 0)
-      + (d.withAssets ? ' · ' + d.withAssets + ' had bundled assets (text only)' : '') + '.';
+      + (d.withAssets ? ' · ' + d.withAssets + ' had bundled assets (text only)' : '') + '.');
     renderSkills();
-  } catch (e) { if (res) res.textContent = 'Import failed.'; }
+  } catch (e) { renderCommandStatus('err', 'Import failed.'); }
 }
 
 // --- MCP servers (status + restart) -----------------------------------------

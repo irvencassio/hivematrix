@@ -1399,7 +1399,7 @@ export function createDaemonServer() {
         return;
       }
 
-      // GET /commands — the active (or ?profile=) Claude profile's LOCAL slash
+      // GET /commands — the active (or ?profile=) local profile's LOCAL slash
       // commands + folder skills, discovered under <configDir>/commands and
       // <configDir>/skills. Read-only listing; these run natively via /commands/run.
       if (req.method === "GET" && urlPath === "/commands") {

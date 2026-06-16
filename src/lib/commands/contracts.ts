@@ -1,9 +1,9 @@
 /**
- * Local Claude command/skill catalog — the operator's OWN slash commands and
- * folder skills, read from their Claude install (under a profile's config dir).
+ * Local profile command/skill catalog — the operator's OWN slash commands and
+ * folder skills, read from their configured profile directory.
  * This is SEPARATE from the brain skill library (src/lib/skills/*): those are
  * HiveMatrix's portable, distilled recipes; these are pre-existing assets the
- * Claude CLI already resolves as `/name` slash commands. We list them so the
+ * profile runtime already resolves as `/name` slash commands. We list them so the
  * operator can run them as tasks, and optionally import the folder skills into
  * the brain library.
  *

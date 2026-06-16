@@ -1,5 +1,5 @@
 /**
- * Scan a Claude profile's config dir for runnable local assets: flat slash
+ * Scan a local profile's config dir for runnable local assets: flat slash
  * commands (<configDir>/commands/**\/*.md) and folder skills
  * (<configDir>/skills/<name>/SKILL.md). The config dir is resolved IDENTICALLY
  * to subprocess.ts (`${HOME}/${normalizeConfigDir(profile ?? active)}`) so the
