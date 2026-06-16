@@ -1221,6 +1221,36 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /voice/session — the VoiceBee sidecar (which owns the realtime audio
+      // loop) hands a finished/escalated conversation here; routeVoiceSession
+      // decides whether it becomes a Hive task ("voice notes → task artifacts").
+      // The decision logic is pure + unit-tested in lib/voice/session.ts; this is
+      // the thin DB/HTTP glue.
+      if (req.method === "POST" && urlPath === "/voice/session") {
+        const { parseVoiceSessionBody, routeVoiceSession } = await import("@/lib/voice/session");
+        const { Task, generateId } = await import("@/lib/db");
+        const { DEFAULT_TASK_PROJECT } = await import("@/lib/routing/project-constants");
+        const parsed = parseVoiceSessionBody(await parseBody(req) as Record<string, unknown>);
+        if ("error" in parsed) { json(res, 400, { error: parsed.error }); return; }
+        const route = routeVoiceSession(parsed.session, { escalated: parsed.escalated });
+        if (route.kind !== "task") { json(res, 200, { created: false, reason: route.reason }); return; }
+        const { sessionId, surface, handle } = parsed.session;
+        const task = await Task.create({
+          _id: generateId(),
+          title: route.title,
+          description: route.description,
+          project: DEFAULT_TASK_PROJECT,
+          projectPath: homedir(),
+          status: "backlog",
+          executor: "agent",
+          source: "voice",
+          output: { voice: { sessionId, surface, handle } },
+        });
+        broadcast("tasks:created", { taskId: task._id });
+        json(res, 201, { created: true, taskId: task._id });
+        return;
+      }
+
       // GET /audit — compliance trail (prompt + outcome + diff), newest first,
       // filterable by ?taskId=&status=&event=&limit=. Never returns secrets.
       if (req.method === "GET" && urlPath === "/audit") {

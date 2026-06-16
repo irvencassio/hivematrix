@@ -40,6 +40,41 @@ export type VoiceHandoff =
   | { kind: "none"; reason: string }
   | { kind: "task"; title: string; description: string };
 
+export interface VoiceSessionInput {
+  session: VoiceSession;
+  escalated: boolean;
+}
+
+/**
+ * Parse + validate an inbound /voice/session request body into a VoiceSession.
+ * Returns `{ error }` for a missing sessionId. `now` is injectable for tests.
+ */
+export function parseVoiceSessionBody(
+  body: Record<string, unknown>,
+  now: () => string = () => new Date().toISOString(),
+): VoiceSessionInput | { error: string } {
+  const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+  if (!sessionId) return { error: "sessionId is required" };
+  const surface: VoiceSurface = body.surface === "mac" ? "mac" : body.surface === "phone" ? "phone" : "ios";
+  const handle = typeof body.handle === "string" ? body.handle : undefined;
+  const turns: VoiceTurn[] = (Array.isArray(body.turns) ? body.turns : []).map((t) => {
+    const o = (t ?? {}) as Record<string, unknown>;
+    return {
+      role: o.role === "assistant" ? "assistant" as const : "user" as const,
+      text: typeof o.text === "string" ? o.text : "",
+    };
+  }).filter((t) => t.text.trim());
+  return {
+    session: {
+      sessionId, surface, handle,
+      startedAt: typeof body.startedAt === "string" ? body.startedAt : now(),
+      endedAt: typeof body.endedAt === "string" ? body.endedAt : undefined,
+      turns,
+    },
+    escalated: body.escalated === true,
+  };
+}
+
 const MAX_TITLE = 70;
 
 function firstUserText(session: VoiceSession): string {

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  deriveVoiceTitle, buildVoiceTaskDescription, routeVoiceSession, type VoiceSession,
+  deriveVoiceTitle, buildVoiceTaskDescription, routeVoiceSession, parseVoiceSessionBody, type VoiceSession,
 } from "./session";
 
 const session = (turns: VoiceSession["turns"], over: Partial<VoiceSession> = {}): VoiceSession => ({
@@ -40,4 +40,32 @@ test("routeVoiceSession skips empty or trivial exchanges", () => {
 test("routeVoiceSession always spawns a task when the sidecar escalated", () => {
   const r = routeVoiceSession(session([{ role: "user", text: "hmm" }]), { escalated: true });
   assert.equal(r.kind, "task");
+});
+
+test("parseVoiceSessionBody validates + normalizes a sidecar payload", () => {
+  const out = parseVoiceSessionBody({
+    sessionId: "s9", surface: "phone", handle: "+1", escalated: true,
+    turns: [
+      { role: "user", text: "hi there" },
+      { role: "bogus", text: "coerced to user" },
+      { role: "assistant", text: "" },        // empty dropped
+      "junk",                                  // non-object dropped
+    ],
+  }, () => "2026-06-16T20:00:00Z");
+  assert.ok(!("error" in out));
+  if (!("error" in out)) {
+    assert.equal(out.escalated, true);
+    assert.equal(out.session.surface, "phone");
+    assert.equal(out.session.startedAt, "2026-06-16T20:00:00Z");
+    assert.deepEqual(out.session.turns, [
+      { role: "user", text: "hi there" },
+      { role: "user", text: "coerced to user" },
+    ]);
+  }
+});
+
+test("parseVoiceSessionBody requires a sessionId and defaults surface to ios", () => {
+  assert.deepEqual(parseVoiceSessionBody({ turns: [] }), { error: "sessionId is required" });
+  const out = parseVoiceSessionBody({ sessionId: "s1" }, () => "T");
+  assert.ok(!("error" in out) && out.session.surface === "ios");
 });
