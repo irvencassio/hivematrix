@@ -52,10 +52,18 @@ console.log(`Releasing HiveMatrix ${pkg.version} → ${version}${note ? ` (${not
 
 if (cap(`git tag -l v${version}`)) die(`tag v${version} already exists — never re-use a version for new code`);
 
-// ── 1. Version bump (the three files that must agree) ───────────────────────
-step(1, "bump version in package.json, tauri.conf.json, version.ts");
+// ── 1. Version bump (the app/package files that must agree) ─────────────────
+step(1, "bump version in package.json, package-lock.json, tauri.conf.json, version.ts");
 pkg.version = version;
 writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+
+const lockPath = join(repo, "package-lock.json");
+if (existsSync(lockPath)) {
+  const lock = JSON.parse(readFileSync(lockPath, "utf-8"));
+  lock.version = version;
+  if (lock.packages?.[""]) lock.packages[""].version = version;
+  writeFileSync(lockPath, JSON.stringify(lock, null, 2) + "\n");
+}
 
 const tauriPath = join(repo, "src-tauri", "tauri.conf.json");
 const tauri = JSON.parse(readFileSync(tauriPath, "utf-8"));

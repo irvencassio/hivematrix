@@ -24,6 +24,7 @@ source "$HOME/.cargo/env"
 echo "==> Building the self-contained daemon runtime (bundled Node + addon)…"
 # Must run before cargo tauri build so Tauri picks up dist/daemon as a resource.
 npm run build:daemon
+npm run verify:daemon-runtime
 
 # Sign the SOURCE resources before bundling: cargo tauri build packages the dmg
 # and the updater tarball mid-build, straight from these files — signing only

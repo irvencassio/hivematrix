@@ -1,6 +1,6 @@
 {
   "name": "hivematrix",
-  "version": "0.1.36",
+  "version": "0.1.37",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,6 +10,7 @@
     "lint": "eslint",
     "scope-wall": "node scripts/scope-wall.mjs",
     "build:daemon": "node scripts/build-daemon.mjs",
+    "verify:daemon-runtime": "node scripts/verify-daemon-runtime.mjs",
     "release:verify": "tsx scripts/verify-autoupdate-release.mts"
   },
   "dependencies": {
