@@ -73,6 +73,27 @@ def write_wav(path: str, audio: np.ndarray, samplerate: int):
         w.writeframes(audio.tobytes())
 
 
+def run_demo(question: str) -> int:
+    """No-mic smoke: speak a built-in question, ask Qwen, play the reply aloud.
+    Validates the Qwen→TTS→playback chain without microphone permissions."""
+    from llm import LocalLLM
+
+    aiff = os.path.join(tempfile.gettempdir(), f"demo-q-{uuid.uuid4().hex}.aiff")
+    subprocess.run(["say", "-o", aiff, question], check=True)
+    player = Player()
+    print(f"you (demo): {question}")
+    res = stream_turn(aiff, LocalLLM().respond_stream, on_audio=player.play)
+    try:
+        os.remove(aiff)
+    except OSError:
+        pass
+    print(f"bee: {' '.join(res.sentences) if res.sentences else '(empty — is reasoning OFF in LM Studio?)'}")
+    if res.ttfa_s is not None:
+        print(f"     (first audio {res.ttfa_s:.1f}s · total {res.total_s:.1f}s)")
+    player.wait()
+    return 0
+
+
 def main() -> int:
     from llm import LocalLLM  # imported here so --help etc. don't need the server
 
@@ -129,4 +150,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    import sys
+    if "--demo" in sys.argv:
+        i = sys.argv.index("--demo")
+        q = sys.argv[i + 1] if len(sys.argv) > i + 1 else "What is the capital of France?"
+        raise SystemExit(run_demo(q))
     raise SystemExit(main())
