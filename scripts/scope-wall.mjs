@@ -26,11 +26,8 @@ const RULES = [
     label: 'Personal dashboard divider (removed from Hive 2)',
   },
   // ── Retired Bee brands ────────────────────────────────────────
-  {
-    pattern: '\bVoiceBee\b',
-    label: 'VoiceBee (deferred from HiveMatrix v1 — no code allowed)',
-    allowFiles: ['COMPONENT-MAP.md', 'DECISIONS.md'],
-  },
+  // VoiceBee un-deferred 2026-06-16 (Q12) — now an active voice ingress/egress
+  // lane; see DECISIONS.md Q12 + the voice/video persona plan in brain.
   {
     pattern: '\bTubeBee\b',
     label: 'TubeBee (deferred from HiveMatrix v1 — no code allowed)',
@@ -68,7 +65,8 @@ const RULES = [
     label: 'Possible new Bee brand — check COMPONENT-MAP.md to confirm it is listed there',
     allowFiles: [
       'TermBee', 'BrowserBee', 'WebBee', 'DesktopBee', 'CronBee', 'MessageBee',
-      'messagebee', 'MailBee', 'mailbee', 'COMPONENT-MAP.md', 'DECISIONS.md',
+      'messagebee', 'MailBee', 'mailbee', 'VoiceBee', 'voicebee', 'TraderBee', 'traderbee',
+      'COMPONENT-MAP.md', 'DECISIONS.md',
     ],
     warnOnly: true,  // warning, not hard fail — false positives possible with this broad pattern
   },

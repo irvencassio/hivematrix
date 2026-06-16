@@ -897,3 +897,40 @@ fixes:
    them; routing prompt documents `--data-urlencode "attachment=/ABSOLUTE/PATH"`.
 
 Verification: tsc clean, scope-wall 0, 626/626 tests, daemon bundles.
+
+## Q12 — VoiceBee un-deferred (voice ingress/egress lane) + video factory as a no-brand capability
+
+Date closed: 2026-06-16. Phase 0 of the voice/video persona plan
+(brain: `projects/hive/plans/2026-06-16-voice-and-video-persona-strategy.md`).
+
+**Context.** The "virtual persona" strategy needs voice. Prior art kept the design
+but scope-wall forbade the code (`projects/hive/bees/voicebee.md`, component map).
+
+**Decision A — VoiceBee un-deferred** from "designs kept, no code" to an active
+**local-first** voice lane (mirrors the Q8/Q9 MessageBee/MailBee un-defer):
+mlx-whisper STT → Hive LLM → cloned-voice TTS (F5-TTS/Chatterbox) orchestrated by
+Pipecat. Two surfaces — **conversation mode** (Mac/iPhone mic, fully local) and
+**phone-answer mode** (Twilio/Telnyx SIP trunk → local pipeline). Hive stays the
+control plane; voice notes/calls land as task artifacts. The only external seam is
+the phone number (a dumb pipe, not an AI vendor). First ship is iMessage voice
+replies (extends the Q9 MailBee attachment pattern to MessageBee `send file`).
+
+**Decision B — Video factory is a no-brand capability.** The script→video pipeline
+(Remotion + ffmpeg + Playwright screen-capture, cloned-voice voiceover) is a
+capability/workflow, **not** a new public Bee brand — same posture as the
+TubeBee→BrowserBee-recipe decision. Extends `content/pipeline.ts` + the `marketing`
+role. The AI avatar is **demoted to an optional component** (HeyGen, used sparingly
+for hero presenter shots only) per the 2026 trust-penalty evidence; default is
+faceless screen + cloned voice. No `VideoBee`/`AvatarBee` brand is created.
+
+**Scope wall + COMPONENT-MAP amended** in this change: removed the VoiceBee
+hard-fail rule; `VoiceBee`/`voicebee` added to the no-new-brands allowlist; VoiceBee
+listed as a Q12 lane and dropped from the deferred list.
+
+**Persona identity (P0.4).** The virtual person is a **digital twin of the
+founder** — the founder's own name, cloned voice, and (optional, sparing) likeness.
+On-strategy with the authenticity thesis: the agent is the founder, scaled — not a
+separate branded assistant.
+
+Verification: scope-wall 0 violations (a `VoiceBee` string in src now passes); docs
+only — no runtime code yet (that's P1+).

@@ -7,7 +7,7 @@ Supersedes: Hive 1 component map
 ## Scope wall (enforced by CI)
 
 - No new Bee brands. New capability ideas enter DECISIONS.md as proposals at phase boundaries.
-- Forbidden in the codebase: Ideation, Goals (personal product surface), personal-task surfaces, Personal dashboard divider, Google model providers (exception: Nano Banana image action and mflux local fallback), AuthBee/Weaver as public brands, ComputerBee (renamed to DesktopBee — use DesktopBee everywhere), missions table/code (replaced by Directive primitive), VoiceBee code, TubeBee code.
+- Forbidden in the codebase: Ideation, Goals (personal product surface), personal-task surfaces, Personal dashboard divider, Google model providers (exception: Nano Banana image action and mflux local fallback), AuthBee/Weaver as public brands, ComputerBee (renamed to DesktopBee — use DesktopBee everywhere), missions table/code (replaced by Directive primitive), TubeBee code. (VoiceBee un-deferred — see Q12 + lanes below.)
 - Every checklist/task completion requires a named prover (test path, probe id, or artifact id) recorded in the verified-completion ledger.
 
 ## Hive daemon (headless, launchd, auto-updating)
@@ -44,6 +44,7 @@ Qwen-Agent: optional compatibility adapter only, never an orchestrator.
 - MessageBee (Q8; channel) — SMS/iMessage in/out; reads ~/Library/Messages/chat.db (Full Disk Access) high-water-marked by ROWID, sends via osascript; allowlisted senders only; routes inbound to needs_input replies or new tasks (source: messagebee)
 - MailBee (Q9; channel) — email watch + trust-gated drafting via Apple Mail (osascript; no IMAP/SMTP/OAuth). classifyMailTrust gates every inbound (prompt-injection + risky-attachment detection, trusted/external/suspicious); auto-send only for trusted senders, else draft-for-approval; tasks source: mailbee
 - TraderBee (Q11; insight lane) — market-data watch + threshold alerts. **Analysis & alerts ONLY — never places trades, never moves money.** Reads quotes from Alpaca's DATA API only (env-var keys `APCA_API_KEY_ID`/`APCA_API_SECRET_KEY`; the trading API is never called); a watchlist + alert rules (above/below/pct-move) evaluated on a poller → notify. Self-gates when keys absent.
+- VoiceBee (Q12; voice lane) — live voice ingress/egress on local models (mlx-whisper STT → Hive LLM → cloned-voice TTS via Pipecat); conversation mode (Mac/iPhone mic) + phone-answer mode (Twilio SIP trunk → local pipeline); voice notes/calls land as task artifacts. Local-first; the only external seam is the phone number. Video production (script→Remotion factory) is a **no-brand capability** (like the TubeBee→recipe pattern), with an optional cloud avatar (HeyGen) used sparingly — not a public Bee brand. See the voice/video persona plan in brain.
 
 ## Internal subsystems (no public brand)
 
@@ -52,9 +53,9 @@ Qwen-Agent: optional compatibility adapter only, never an orchestrator.
 
 ## Deferred from v1 (designs kept, no code)
 
-- VoiceBee
 - TubeBee + import workflows (return as BrowserBee workflow recipes)
 - (MessageBee + MailBee un-deferred — see Q8/Q9 + lanes above)
+- (VoiceBee un-deferred — see Q12 + lane above)
 
 ## Standalone provider products (unchanged)
 
