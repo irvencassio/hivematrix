@@ -14,6 +14,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>HiveMatrix</title>
+<script defer src="/assets/mermaid.min.js"></script>
 <style>
   :root {
     --bg: #0d1117; --panel: #161b22; --panel-2: #1c2230; --border: #2d333b;
@@ -283,6 +284,16 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .md code { background: var(--code-bg); padding: 1px 4px; border-radius: 4px; font-family: ui-monospace, Menlo, monospace; color: var(--code-text); }
   .md pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; overflow-x: auto; color: var(--code-text); }
   .md a { color: var(--accent-2); } .md ul { margin: 4px 0; padding-left: 18px; }
+  .md-table-wrap { overflow-x: auto; margin: 8px 0 10px; border: 1px solid var(--border); border-radius: 8px; }
+  .md-table { width: 100%; border-collapse: collapse; min-width: 520px; background: var(--panel-2); white-space: normal; }
+  .md-table th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; background: var(--panel); }
+  .md-table th, .md-table td { text-align: left; vertical-align: top; padding: 7px 9px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); }
+  .md-table th:last-child, .md-table td:last-child { border-right: 0; }
+  .md-table tr:last-child td { border-bottom: 0; }
+  .md pre.mermaid { background: var(--panel-2); border-color: var(--border); color: var(--text); text-align: center; white-space: pre; }
+  .md .mermaid svg { max-width: 100%; height: auto; }
+  .md .mermaid-pending { color: var(--muted); }
+  .md .mermaid-error { border-color: var(--err); color: var(--err); text-align: left; }
   .streaming { font-size: 10px; color: var(--ok); margin-left: 6px; }
   .remote-status { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; margin-top: 8px; }
   .remote-status .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
@@ -873,17 +884,121 @@ function renderBoard() {
   if (ab) ab.textContent = archivable ? "· archive completed (" + archivable + ")" : "";
 }
 
-// Minimal, safe markdown → HTML (escapes first, then a few inline/block rules).
+/*__MARKDOWN_RENDERER_START__*/
+function stashMdBlock(blocks, html) {
+  const key = "@@HM_MD_BLOCK_" + blocks.length + "@@";
+  blocks.push(html);
+  return key;
+}
+
+function restoreMdBlocks(blocks, html) {
+  return html.replace(/@@HM_MD_BLOCK_(\d+)@@/g, (m, i) => blocks[Number(i)] || m);
+}
+
+function splitMarkdownTableRow(line) {
+  let t = line.trim();
+  if (t.startsWith("|")) t = t.slice(1);
+  if (t.endsWith("|")) t = t.slice(0, -1);
+  return t.split("|").map(c => c.trim());
+}
+
+function isMarkdownTableRow(line) {
+  return /\|/.test(line || "") && line.trim().length > 0;
+}
+
+function isMarkdownTableSeparator(line) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line || "");
+}
+
+function fitMarkdownTableCells(cells, width) {
+  const out = cells.slice(0, width);
+  while (out.length < width) out.push("");
+  return out;
+}
+
+function renderMarkdownTable(header, rows) {
+  const width = header.length;
+  const th = fitMarkdownTableCells(header, width).map(c => "<th>" + c + "</th>").join("");
+  const trs = rows.map(r => "<tr>" + fitMarkdownTableCells(r, width).map(c => "<td>" + c + "</td>").join("") + "</tr>").join("");
+  return '<div class="md-table-wrap"><table class="md-table"><thead><tr>' + th + '</tr></thead><tbody>' + trs + '</tbody></table></div>';
+}
+
+function renderMarkdownTables(src, blocks) {
+  const lines = String(src || "").split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (i + 1 < lines.length && isMarkdownTableRow(lines[i]) && isMarkdownTableSeparator(lines[i + 1])) {
+      const header = splitMarkdownTableRow(lines[i]);
+      const rows = [];
+      i += 2;
+      while (i < lines.length && isMarkdownTableRow(lines[i]) && !isMarkdownTableSeparator(lines[i])) {
+        rows.push(splitMarkdownTableRow(lines[i]));
+        i++;
+      }
+      i--;
+      out.push(stashMdBlock(blocks, renderMarkdownTable(header, rows)));
+    } else {
+      out.push(lines[i]);
+    }
+  }
+  return out.join("\n");
+}
+
+function mdCodeFenceToHtml(lang, code) {
+  const language = String(lang || "").trim().toLowerCase();
+  const body = String(code || "").replace(/^\n/, "").replace(/\n$/, "");
+  if (language === "mermaid") return '<pre class="mermaid">' + body + '</pre>';
+  return '<pre><code>' + body + '</code></pre>';
+}
+
+// Minimal, safe markdown → HTML (escapes first, then controlled block/inline rules).
 function mdToHtml(src) {
+  const blocks = [];
   let s = esc(src || "");
-  s = s.replace(/\x60\x60\x60([\s\S]*?)\x60\x60\x60/g, (m,c)=>'<pre>'+c.replace(/^\n/,'')+'</pre>');
+  s = s.replace(/\x60\x60\x60([A-Za-z0-9_-]+)?[ \t]*\n?([\s\S]*?)\x60\x60\x60/g, (m, lang, c)=>stashMdBlock(blocks, mdCodeFenceToHtml(lang, c)));
+  s = renderMarkdownTables(s, blocks);
   s = s.replace(/\x60([^\x60]+)\x60/g, '<code>$1</code>');
   s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>').replace(/^## (.+)$/gm, '<h2>$1</h2>').replace(/^# (.+)$/gm, '<h1>$1</h1>');
   s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
   s = s.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
   s = s.replace(/^(?:- |\* )(.+)$/gm, '<li>$1</li>').replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>');
-  return s.replace(/\n/g, '<br>');
+  return restoreMdBlocks(blocks, s.replace(/\n/g, '<br>'));
 }
+/*__MARKDOWN_RENDERER_END__*/
+
+let _mermaidTheme = null;
+function initMermaid() {
+  const m = window.mermaid;
+  if (!m) return false;
+  const theme = document.documentElement.dataset.theme === "light" ? "default" : "dark";
+  if (_mermaidTheme !== theme) {
+    m.initialize({ startOnLoad: false, theme, securityLevel: "strict" });
+    _mermaidTheme = theme;
+  }
+  return true;
+}
+
+function markMermaidError(blocks) {
+  blocks.forEach(el => el.classList.add("mermaid-error"));
+}
+
+function renderMermaidBlocks(root) {
+  const scope = root || document;
+  const blocks = Array.from(scope.querySelectorAll(".mermaid:not([data-processed='true'])"));
+  if (!blocks.length) return;
+  if (!initMermaid()) {
+    blocks.forEach(el => el.classList.add("mermaid-pending"));
+    return;
+  }
+  blocks.forEach(el => el.classList.remove("mermaid-pending", "mermaid-error"));
+  try {
+    const r = window.mermaid.run({ nodes: blocks });
+    if (r && typeof r.catch === "function") r.catch(() => markMermaidError(blocks));
+  } catch (e) {
+    markMermaidError(blocks);
+  }
+}
+window.addEventListener("load", () => renderMermaidBlocks());
 
 function renderTranscript(logs) {
   if (!Array.isArray(logs) || !logs.length) return '<div class="muted">No transcript yet.</div>';
@@ -996,6 +1111,7 @@ async function selectTask(id) {
   // Restore form state after the innerHTML rebuild.
   restoreCtxState();
   renderCtxChips("retry"); renderCtxChips("reply");
+  renderMermaidBlocks(el);
 }
 
 async function taskAction(id, action) {

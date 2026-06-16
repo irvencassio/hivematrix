@@ -18,8 +18,9 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
+import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
-import { resolve, sep } from "path";
+import { dirname, resolve, sep } from "path";
 import { getDb } from "@/lib/db";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import type { ConnectivityMode } from "@/lib/connectivity/policy";
@@ -89,6 +90,33 @@ export function normalizeHomeProjectPath(input: unknown, home = homedir()): stri
   return resolved;
 }
 
+function mermaidAssetPath(): string | null {
+  const argvDir = process.argv[1] ? dirname(resolve(process.argv[1])) : "";
+  const candidates = [
+    argvDir ? resolve(argvDir, "assets", "mermaid.min.js") : "",
+    resolve(process.cwd(), "dist", "daemon", "assets", "mermaid.min.js"),
+    resolve(process.cwd(), "node_modules", "mermaid", "dist", "mermaid.min.js"),
+  ].filter(Boolean);
+  return candidates.find((p) => existsSync(p)) ?? null;
+}
+
+function serveMermaidAsset(res: ServerResponse): void {
+  const asset = mermaidAssetPath();
+  if (!asset) {
+    json(res, 404, { error: "mermaid asset not found" });
+    return;
+  }
+  const buf = readFileSync(asset);
+  res.writeHead(200, {
+    "Content-Type": "application/javascript; charset=utf-8",
+    "Content-Length": buf.length,
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+  });
+  res.end(buf);
+}
+
 function parseBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -139,7 +167,7 @@ export function createDaemonServer() {
   // Routes servable without the token: liveness + the console page itself
   // (the page receives the token injected into its HTML, same-origin only).
   const isPublicRoute = (method: string, path: string) =>
-    method === "GET" && (path === "/health" || path === "/" || path === "/console");
+    method === "GET" && (path === "/health" || path === "/" || path === "/console" || path === "/assets/mermaid.min.js");
 
   // Extract the caller's token from the Authorization header or ?token= query
   // (EventSource can't set headers, so SSE passes it as a query param).
@@ -189,6 +217,11 @@ export function createDaemonServer() {
         const viaCloudflare = !!(req.headers["cf-connecting-ip"] || req.headers["cf-ray"]);
         res.writeHead(200, consoleHtmlHeaders());
         res.end(CONSOLE_HTML.replace("%%HM_TOKEN%%", viaCloudflare ? "" : AUTH_TOKEN));
+        return;
+      }
+
+      if (req.method === "GET" && urlPath === "/assets/mermaid.min.js") {
+        serveMermaidAsset(res);
         return;
       }
 

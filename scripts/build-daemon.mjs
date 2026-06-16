@@ -9,6 +9,7 @@
  *   daemon.cjs                       esbuild bundle of src/daemon/index.ts
  *   node_modules/better-sqlite3/...  pruned native module (lib + build/Release/*.node)
  *   node_modules/bindings, file-uri-to-path   better-sqlite3's runtime deps
+ *   assets/mermaid.min.js            browser Mermaid renderer for console output
  *   build-info.json                  what was produced
  *
  * Tauri picks dist/daemon up as a bundle resource (see tauri.conf.json
@@ -161,6 +162,16 @@ for (const dep of ["bindings", "file-uri-to-path"]) {
   log(`staging ${dep}`);
   cpSync(from, join(stagedNM, dep), { recursive: true });
 }
+
+// Browser-side Mermaid renderer for RESULT markdown diagrams.
+log("staging mermaid browser asset");
+const mermaidAsset = join(nativeNM, "mermaid", "dist", "mermaid.min.js");
+if (!existsSync(mermaidAsset)) {
+  console.error(`✗ ${mermaidAsset} not found after pinned production install.`);
+  process.exit(1);
+}
+mkdirSync(join(OUT, "assets"), { recursive: true });
+cpSync(mermaidAsset, join(OUT, "assets", "mermaid.min.js"));
 
 // ── 5. Build info ─────────────────────────────────────────────────────────────
 const info = {

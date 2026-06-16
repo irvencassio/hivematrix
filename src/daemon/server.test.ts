@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
 import { CONSOLE_HTML } from "./console";
-import { consoleHtmlHeaders, normalizeHomeProjectPath } from "./server";
+import { consoleHtmlHeaders, createDaemonServer, normalizeHomeProjectPath } from "./server";
 
 test("console HTML routes are served with update-safe cache headers", () => {
   assert.deepEqual(consoleHtmlHeaders(), {
@@ -10,6 +11,18 @@ test("console HTML routes are served with update-safe cache headers", () => {
     "Pragma": "no-cache",
     "Expires": "0",
   });
+});
+
+test("Mermaid browser asset is served same-origin without a token", async (t) => {
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/assets/mermaid.min.js`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") ?? "", /application\/javascript/);
+  assert.match(await res.text(), /mermaid/i);
 });
 
 test("command project paths resolve from the current user home", () => {

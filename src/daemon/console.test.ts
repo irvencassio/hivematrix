@@ -16,6 +16,16 @@ function extractScript(html: string): string {
   return m![1];
 }
 
+function extractMdToHtml(html: string): (src: string) => string {
+  const js = extractScript(html);
+  const esc = js.match(/function esc\(s\)\{[^\n]+\}/);
+  const md = js.match(/\/\*__MARKDOWN_RENDERER_START__\*\/([\s\S]*?)\/\*__MARKDOWN_RENDERER_END__\*\//);
+  assert.ok(esc, "console script must define esc");
+  assert.ok(md, "console script must define the markdown renderer block");
+  const factory = new Function(`${esc![0]}\n${md![1]}\nreturn mdToHtml;`) as () => (src: string) => string;
+  return factory();
+}
+
 test("console browser script is valid JavaScript (no TypeScript leaks)", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.ok(js.length > 1000, "script block should be substantial");
@@ -28,6 +38,35 @@ test("console script has no obvious TS-only syntax", () => {
   const js = extractScript(CONSOLE_HTML);
   // Guard the specific footguns: `x as Type` casts and `: Type` annotations.
   assert.doesNotMatch(js, /\bas\s+(HTML[A-Za-z]+|string|number|boolean|any)\b/, "found a TS `as Type` cast");
+});
+
+test("result markdown renders pipe tables as real tables", () => {
+  const mdToHtml = extractMdToHtml(CONSOLE_HTML);
+  const html = mdToHtml(`Here are the **6 open Demo Lite tickets**:
+
+| Ticket ID | Created | Store | Customer | Status | Days Open | Category |
+|-----------|---------|-------|----------|--------|-----------|----------|
+| A4541175L | 05/16 | SGH-4199 | Sunglass Hut 4199 - Galleria Ft Lauderdale | Testing Resolution | 30 | Glasses |
+| A4555606L | 05/20 | RB-P650 | P650 - Roosevelt Field Ray-Ban | In progress | 26 | Smartphone |
+
+6 tickets total.`);
+
+  assert.match(html, /<table class="md-table">/, "pipe table rendered as table");
+  assert.match(html, /<th>Ticket ID<\/th>/);
+  assert.match(html, /<td>A4541175L<\/td>/);
+  assert.match(html, /<td>Testing Resolution<\/td>/);
+  assert.doesNotMatch(html, /\| Ticket ID \| Created \|/, "raw table markup is not shown");
+});
+
+test("result markdown prepares Mermaid fences for client-side rendering", () => {
+  const mdToHtml = extractMdToHtml(CONSOLE_HTML);
+  const html = mdToHtml("```mermaid\ngraph TD\n  A[Start] --> B[Done]\n```");
+  assert.match(html, /<pre class="mermaid">graph TD\n  A\[Start\] --&gt; B\[Done\]<\/pre>/);
+
+  assert.match(CONSOLE_HTML, /src="\/assets\/mermaid\.min\.js"/, "console loads bundled Mermaid");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function renderMermaidBlocks\(/, "console renders Mermaid blocks after refresh");
+  assert.match(js, /mermaid\.run/, "console delegates rendering to Mermaid");
 });
 
 test("desktop console surfaces the founder-in-the-loop approval queue (parity with mobile)", () => {

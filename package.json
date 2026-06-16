@@ -1,6 +1,6 @@
 {
   "name": "hivematrix",
-  "version": "0.1.37",
+  "version": "0.1.38",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,7 +16,8 @@
   "dependencies": {
     "better-sqlite3": "^12.8.0",
     "chokidar": "^5.0.0",
-    "dotenv": "^17.3.1"
+    "dotenv": "^17.3.1",
+    "mermaid": "^11.15.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
