@@ -71,12 +71,26 @@ code). Lower it with a faster voice-lane model or more aggressive (choppier)
 first-chunk cuts. The last piece — VAD + barge-in + WebRTC transport (the Pipecat
 realtime wrapper) and the iOS/Mac mic UIs — needs a device to validate.
 
+## Talk to it (Mac mic demo)
+
+```sh
+.venv/bin/python talk.py
+```
+
+Push-to-talk: Enter to start, speak, Enter to stop — it transcribes, asks Qwen,
+and speaks the reply, looping for a real conversation. First run, macOS prompts
+the terminal for **Microphone** access — grant it. Needs LM Studio serving
+`qwen/qwen3.6-27b` on `:1234` with **reasoning OFF**. This is the fastest way to
+actually try the assistant (no iOS / WebRTC).
+
 ## Status
 
 - [x] Python 3.14 base + venv; `mlx-whisper` + `pipecat-ai` install & import
 - [x] STT round-trip verified (`smoke_stt.py`)
 - [x] Turn loop STT→LLM→TTS, headless test (`turn.py` / `test_turn.py`)
-- [ ] Pipecat realtime wrapper: VAD + streaming + WebRTC transport (P2.2 — needs a device to validate)
+- [x] Streaming turn (`streaming.py` / `stream_turn.py` / `test_streaming.py`)
+- [x] Mac mic demo (`talk.py`) — push-to-talk, talk-to-it loop (user validates live)
+- [ ] Pipecat realtime wrapper: VAD + barge-in + WebRTC transport (P2.2 — needs a device to validate)
 - [ ] Daemon tool calls + `POST /voice/session` handoff wired into the live loop (P2.2)
 - [ ] Streaming/interruptions, sub-800 ms (P2.3)
 
