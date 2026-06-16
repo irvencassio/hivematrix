@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --import tsx/esm --test 'src/**/*.test.ts'",
-    "test:watch": "node --import tsx/esm --test --watch 'src/**/*.test.ts'",
+    "test": "node --import tsx/esm --test 'src/**/*.test.ts' 'scripts/**/*.test.mjs'",
+    "test:watch": "node --import tsx/esm --test --watch 'src/**/*.test.ts' 'scripts/**/*.test.mjs'",
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
     "scope-wall": "node scripts/scope-wall.mjs",

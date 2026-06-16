@@ -53,7 +53,12 @@ fi
 
 TARBALL="$(ls -t "$BUNDLE"/macos/*.app.tar.gz 2>/dev/null | head -1 || true)"
 SIG="$(ls -t "$BUNDLE"/macos/*.app.tar.gz.sig 2>/dev/null | head -1 || true)"
-DMG="$(ls -t "$BUNDLE"/dmg/*.dmg 2>/dev/null | head -1 || true)"
+DMG=""
+DMG_ASSET_NAME=""
+DMG_INFO="$(node scripts/release-artifacts.mjs dmg-tsv "$BUNDLE" "$VERSION" || true)"
+if [ -n "$DMG_INFO" ]; then
+  IFS=$'\t' read -r DMG DMG_ASSET_NAME <<< "$DMG_INFO"
+fi
 
 [ -n "$TARBALL" ] || { echo "✗ No .app.tar.gz under $BUNDLE/macos — build with createUpdaterArtifacts=true + signing key." >&2; exit 1; }
 [ -n "$SIG" ] || { echo "✗ No .sig next to the tarball — TAURI_SIGNING_PRIVATE_KEY was missing at build time." >&2; exit 1; }
@@ -103,7 +108,14 @@ PY
 cat "$MANIFEST"
 
 ASSETS=("$TARBALL" "$SIG" "$MANIFEST")
-[ -n "$DMG" ] && ASSETS+=("$DMG")
+if [ -n "$DMG" ]; then
+  DMG_UPLOAD="$DMG"
+  if [ -n "$DMG_ASSET_NAME" ] && [ "$(basename "$DMG")" != "$DMG_ASSET_NAME" ]; then
+    DMG_UPLOAD="$BUNDLE/$DMG_ASSET_NAME"
+    cp -f "$DMG" "$DMG_UPLOAD"
+  fi
+  ASSETS+=("$DMG_UPLOAD")
+fi
 
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   echo "==> Release ${TAG} exists - replacing assets..."
