@@ -83,6 +83,22 @@ the terminal for **Microphone** access — grant it. Needs LM Studio serving
 `qwen/qwen3.6-27b` on `:1234` with **reasoning OFF**. This is the fastest way to
 actually try the assistant (no iOS / WebRTC).
 
+## Make it sound like you (cloned voice)
+
+Record a ~30s reference once; after that everything speaks in your voice — no
+caller changes (the `synthesize()` seam auto-switches from `say` to the cloned
+engine when the profile exists).
+
+```sh
+.venv/bin/python record_voice.py          # reads a script, saves ~/.hivematrix/voice/profile.wav
+.venv/bin/python talk.py --demo "say hello in my voice"
+```
+
+Engine: **Chatterbox** (`mlx-community/Chatterbox-TTS-fp16`) via mlx-audio, zero-shot
+cloning from the reference (no transcript needed). Warm synthesis ~1.2s/sentence —
+fine for live `talk.py` and for async voice notes / video narration. Remove
+`~/.hivematrix/voice/profile.wav` to fall back to the `say` voice.
+
 ## Status
 
 - [x] Python 3.14 base + venv; `mlx-whisper` + `pipecat-ai` install & import
@@ -90,6 +106,7 @@ actually try the assistant (no iOS / WebRTC).
 - [x] Turn loop STT→LLM→TTS, headless test (`turn.py` / `test_turn.py`)
 - [x] Streaming turn (`streaming.py` / `stream_turn.py` / `test_streaming.py`)
 - [x] Mac mic demo (`talk.py`) — push-to-talk, talk-to-it loop (user validates live)
+- [x] Cloned voice (Chatterbox via mlx-audio) behind `synthesize()`; `record_voice.py` profile (record ~30s to enable)
 - [ ] Pipecat realtime wrapper: VAD + barge-in + WebRTC transport (P2.2 — needs a device to validate)
 - [ ] Daemon tool calls + `POST /voice/session` handoff wired into the live loop (P2.2)
 - [ ] Streaming/interruptions, sub-800 ms (P2.3)
