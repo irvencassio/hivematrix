@@ -41,4 +41,18 @@ if (result.status !== 0) {
 }
 
 process.stdout.write(result.stdout);
+
+// #4c: the bundled standalone Python + sidecar scripts must be present and the
+// interpreter must run, so a fresh Mac can provision the voice runtime offline.
+const pythonBin = join(daemonDir, "python", "bin", "python3");
+const sidecarEntry = join(daemonDir, "voice-sidecar", "synth_cli.py");
+if (!existsSync(pythonBin)) die(`missing bundled python at ${pythonBin}; run npm run build:daemon first`);
+if (!existsSync(sidecarEntry)) die(`missing bundled sidecar at ${sidecarEntry}; run npm run build:daemon first`);
+const py = spawnSync(pythonBin, ["--version"], { encoding: "utf8" });
+if (py.status !== 0) {
+  if (py.stderr) process.stderr.write(py.stderr);
+  die(`bundled python probe failed with exit code ${py.status}`);
+}
+process.stdout.write(py.stdout || py.stderr);
+
 console.log("verify-daemon-runtime: ok");

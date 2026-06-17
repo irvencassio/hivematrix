@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the BUNDLED standalone Python (Contents/Resources/daemon/
+  python/bin/python3.x) under hardened runtime (#4c). When a user enables Voice,
+  provision.ts builds a venv FROM this interpreter and pip-installs the MLX wheels
+  into ~/.hivematrix/voice-runtime — .so/.dylib extensions that live OUTSIDE the
+  signed app bundle. Without these, amfid blocks the interpreter the moment it
+  imports mlx and provisioning looks successful but every synth call fails:
+    disable-library-validation  — load the venv's third-party native extensions
+      (mlx, numpy, …) that we did not sign.
+    allow-jit + allow-unsigned-executable-memory  — MLX/Metal and any extension
+      that maps executable memory at runtime.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict>
+</plist>

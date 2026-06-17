@@ -24,6 +24,7 @@ DAEMON_DIR="${1:?usage: sign-bundled-machos.sh <daemon-dir> <helper.app>}"
 HELPER="${2:?usage: sign-bundled-machos.sh <daemon-dir> <helper.app>}"
 IDENTITY="Developer ID Application: Irven Cassio (8B3CHTY93V)"
 DAEMON_ENT="src-tauri/entitlements/daemon.entitlements.plist"
+PYTHON_ENT="src-tauri/entitlements/python.entitlements.plist"
 HELPER_ENT="desktopbee-helper/Resources/entitlements.plist"
 
 sign() { codesign --force --options runtime --timestamp --sign "$IDENTITY" "$@"; }
@@ -35,6 +36,27 @@ while IFS= read -r -d '' addon; do
   echo "    $addon"
   sign "$addon"
 done < <(find "$DAEMON_DIR" -name "*.node" -print0)
+
+# Bundled standalone Python (#4c): sign every nested Mach-O so notarization
+# accepts the app, then sign the interpreter executables LAST with the python
+# entitlements (disable-library-validation, so they can load the venv's MLX .so).
+# Signs .so/.dylib first (deepest), executables after, mirroring inside-out order.
+if [ -d "$DAEMON_DIR/python" ]; then
+  echo "==> Signing bundled Python libraries (.so/.dylib)"
+  while IFS= read -r -d '' lib; do
+    sign "$lib"
+  done < <(find "$DAEMON_DIR/python" \( -name "*.so" -o -name "*.dylib" \) -print0)
+
+  echo "==> Signing bundled Python interpreter binaries (python entitlements)"
+  # The real Mach-O interpreters live in python/bin (python3 is a symlink to the
+  # versioned binary). Sign every non-symlink executable Mach-O there.
+  while IFS= read -r -d '' bin; do
+    if file "$bin" | grep -q "Mach-O"; then
+      echo "    $bin"
+      sign --entitlements "$PYTHON_ENT" "$bin"
+    fi
+  done < <(find "$DAEMON_DIR/python/bin" -type f -perm -u+x -print0)
+fi
 
 echo "==> Signing DesktopBeeHelper.app (its own entitlements)"
 if [ -d "$HELPER" ]; then

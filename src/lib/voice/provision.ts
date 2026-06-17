@@ -10,22 +10,31 @@
 import { spawn } from "child_process";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { dirname, join, resolve } from "path";
+
+/** Directory of the running daemon bundle (…/Resources/daemon in the .app), or "". */
+function bundledDaemonDir(): string {
+  return process.argv[1] ? dirname(resolve(process.argv[1])) : "";
+}
 
 /** Base Python for provisioning: env override → bundled (app) → system python3. */
 export function provisioningPython(): string {
   if (process.env.HIVE_PYTHON && existsSync(process.env.HIVE_PYTHON)) return process.env.HIVE_PYTHON;
+  const bundled = bundledDaemonDir();
   const candidates = [
-    join(process.cwd(), "dist", "daemon", "python", "bin", "python3"), // bundled (build output)
-  ];
+    bundled ? join(bundled, "python", "bin", "python3") : "", // shipped: Resources/daemon/python
+    join(process.cwd(), "dist", "daemon", "python", "bin", "python3"), // build output
+  ].filter(Boolean);
   for (const c of candidates) if (existsSync(c)) return c;
   return "python3";
 }
 
 /** The sidecar SOURCE (.py + requirements), independent of any venv. */
 export function sidecarSourceDir(): string | null {
+  const bundled = bundledDaemonDir();
   const candidates = [
     process.env.HIVE_VOICE_SIDECAR,
+    bundled ? join(bundled, "voice-sidecar") : "", // shipped: Resources/daemon/voice-sidecar
     join(process.cwd(), "voice-sidecar"),
     join(homedir(), "hivematrix", "voice-sidecar"),
   ].filter((d): d is string => !!d);

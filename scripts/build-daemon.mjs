@@ -46,6 +46,18 @@ const NODE_URL = `https://nodejs.org/dist/v${NODE_VERSION}/${NODE_DIST}.tar.gz`;
 const NODE_ROOT = join(CACHE, NODE_DIST);
 const cachedNode = join(NODE_ROOT, "bin", "node");
 
+// Pinned standalone CPython (python-build-standalone, install_only build) bundled
+// for the voice/video runtime (#4c). It's only the BASE interpreter — on first
+// enable, provision.ts builds a venv + pip-installs the MLX wheels from it into
+// the writable ~/.hivematrix/voice-runtime. 3.14 matches the dev sidecar venv, so
+// the same wheels resolve. The install_only tarball extracts to a `python/` dir.
+const PY_RELEASE = "20260610";
+const PY_VERSION = "3.14.6";
+const PY_ASSET = `cpython-${PY_VERSION}+${PY_RELEASE}-aarch64-apple-darwin-install_only.tar.gz`;
+const PY_URL = `https://github.com/astral-sh/python-build-standalone/releases/download/${PY_RELEASE}/${PY_ASSET}`;
+const PY_CACHE_ROOT = join(CACHE, `python-${PY_VERSION}+${PY_RELEASE}`);
+const cachedPython = join(PY_CACHE_ROOT, "python", "bin", "python3");
+
 const NATIVE_EXTERNALS = ["better-sqlite3", "fsevents"];
 
 function log(msg) { console.log(`[build-daemon] ${msg}`); }
@@ -137,6 +149,39 @@ mkdirSync(join(OUT, "bin"), { recursive: true });
 cpSync(cachedNode, join(OUT, "bin", "node"));
 chmodSync(join(OUT, "bin", "node"), 0o755);
 
+// ── 3b. Stage standalone Python + voice sidecar scripts (#4c) ─────────────────
+// The signed app ships a base Python so a fresh Mac can provision the voice
+// runtime offline (no runtime download). The sidecar .py scripts are bundled
+// read-only alongside the daemon; provision.ts builds the venv from this Python.
+if (!existsSync(cachedPython)) {
+  log(`downloading CPython ${PY_VERSION} (aarch64)…`);
+  mkdirSync(PY_CACHE_ROOT, { recursive: true });
+  const tarball = join(PY_CACHE_ROOT, PY_ASSET);
+  execFileSync("curl", ["-fSL", "-o", tarball, PY_URL], { stdio: "inherit" });
+  execFileSync("tar", ["-xzf", tarball, "-C", PY_CACHE_ROOT], { stdio: "inherit" });
+  if (!existsSync(cachedPython)) { console.error(`✗ ${cachedPython} not found after extract`); process.exit(1); }
+}
+const pyVersionOut = execFileSync(cachedPython, ["--version"], { encoding: "utf8" }).trim();
+log(`staging python/ (${pyVersionOut})`);
+cpSync(join(PY_CACHE_ROOT, "python"), join(OUT, "python"), { recursive: true });
+chmodSync(join(OUT, "python", "bin", "python3"), 0o755);
+
+// Bundle the sidecar source: every *.py + requirements.txt (NOT the dev .venv,
+// recorded profile, or downloaded models — those are per-machine/provisioned).
+log("staging voice-sidecar scripts");
+const sidecarSrc = join(ROOT, "voice-sidecar");
+const sidecarOut = join(OUT, "voice-sidecar");
+mkdirSync(sidecarOut, { recursive: true });
+cpSync(sidecarSrc, sidecarOut, {
+  recursive: true,
+  filter: (src) => {
+    const rel = src.slice(sidecarSrc.length + 1);
+    if (!rel) return true;
+    const top = rel.split("/")[0];
+    return !["..venv", ".venv", "__pycache__", "models", ".DS_Store"].includes(top) && top !== "profile.wav";
+  },
+});
+
 // ── 4. Stage native modules (externalized — resolved on disk at runtime) ──────
 const nativeNM = prepareNativeModules();
 const stagedNM = join(OUT, "node_modules");
@@ -180,6 +225,8 @@ const info = {
   sourceDirty: !!gitValue(["status", "--porcelain"], ""),
   nodeVersion: NODE_VERSION,
   nodeAbi,
+  pythonVersion: PY_VERSION,
+  pythonRelease: PY_RELEASE,
   arch: ARCH,
   externals: NATIVE_EXTERNALS,
   totalSize: human(dirSize(OUT)),

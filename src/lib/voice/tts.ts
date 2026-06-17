@@ -14,6 +14,7 @@ import { mkdirSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { randomBytes } from "crypto";
+import { voiceRuntime } from "./runtime";
 
 export type TtsEngine = "say" | "cloned";
 
@@ -44,37 +45,18 @@ export function voiceProfilePath(base: string = homedir()): string {
   return join(base, ".hivematrix", "voice", "profile.wav");
 }
 
-/**
- * Locate the Python voice-sidecar (with its venv) that owns the cloned VoxCPM2
- * voice. Checked: HIVE_VOICE_SIDECAR, ./voice-sidecar (daemon run from repo),
- * ~/hivematrix/voice-sidecar. Null when not present (e.g. the shipped .app),
- * in which case we fall back to `say`.
- */
-export function sidecarDir(): string | null {
-  const candidates = [
-    process.env.HIVE_VOICE_SIDECAR,
-    join(process.cwd(), "voice-sidecar"),
-    join(homedir(), "hivematrix", "voice-sidecar"),
-  ].filter((d): d is string => !!d);
-  for (const d of candidates) {
-    if (existsSync(join(d, ".venv", "bin", "python")) && existsSync(join(d, "synth_cli.py"))) return d;
-  }
-  return null;
-}
-
-/** True when a recorded profile AND the sidecar are both present. */
+/** True when a recorded profile AND a usable voice runtime are both present. */
 export function clonedVoiceAvailable(): boolean {
-  return existsSync(voiceProfilePath()) && sidecarDir() !== null;
+  return existsSync(voiceProfilePath()) && voiceRuntime() !== null;
 }
 
 /** Synthesize via the sidecar's cloned voice. Resolves null on any failure. */
 function synthesizeCloned(txtPath: string, outPath: string, timeoutMs: number): Promise<TtsResult | null> {
   return new Promise((resolve) => {
-    const dir = sidecarDir();
-    if (!dir) { resolve(null); return; }
-    const py = join(dir, ".venv", "bin", "python");
-    const args = [join(dir, "synth_cli.py"), "--text-file", txtPath, "--out", outPath, "--quality", "high"];
-    execFile(py, args, { cwd: dir, timeout: timeoutMs }, (err, _stdout, stderr) => {
+    const rt = voiceRuntime();
+    if (!rt) { resolve(null); return; }
+    const args = [join(rt.scriptsDir, "synth_cli.py"), "--text-file", txtPath, "--out", outPath, "--quality", "high"];
+    execFile(rt.python, args, { cwd: rt.scriptsDir, timeout: timeoutMs }, (err, _stdout, stderr) => {
       if (err || !existsSync(outPath)) {
         console.error(`[voice] cloned synth failed, falling back to say: ${(stderr || err?.message || "").trim()}`);
         resolve(null);
