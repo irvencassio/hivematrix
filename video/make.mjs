@@ -30,6 +30,7 @@ const title = flag("--title", "HiveMatrix");
 const screenSrc = flag("--screen");
 const lang = flag("--lang", "en");
 const musicSrc = flag("--music");
+const presenterSrc = flag("--presenter");
 const topic = flag("--topic");
 const seconds = flag("--seconds", "30");
 
@@ -40,8 +41,8 @@ const scriptPath = topic ? null : positionals[0];
 const outMp4 = positionals.find((p) => p.endsWith(".mp4")) || join(OUT, "video.mp4");
 
 if (!topic && !scriptPath) {
-  console.error('usage: node make.mjs <script.txt> [out.mp4] [--title T] [--lang it] [--screen f] [--music f]\n' +
-    '   or: node make.mjs --topic "..." [out.mp4] [--seconds 30] [--lang it] [--title T] [--screen f] [--music f]');
+  console.error('usage: node make.mjs <script.txt> [out.mp4] [--title T] [--lang it] [--screen f] [--music f] [--presenter f]\n' +
+    '   or: node make.mjs --topic "..." [out.mp4] [--seconds 30] [--lang it] [--title T] [--screen f] [--music f] [--presenter f]');
   process.exit(2);
 }
 
@@ -85,13 +86,15 @@ function stage(src, base) {
   copyFileSync(src, join(VIDEO_DIR, "public", name));
   return name;
 }
-let screenFile, musicFile;
+let screenFile, musicFile, presenterFile;
 if (screenSrc) { screenFile = stage(screenSrc, "screen"); console.log(`→ screen footage: ${screenFile}`); }
 if (musicSrc) { musicFile = stage(musicSrc, "music"); console.log(`→ music bed: ${musicFile}`); }
+if (presenterSrc) { presenterFile = stage(presenterSrc, "presenter"); console.log(`→ presenter clip: ${presenterFile}`); }
 
 writeFileSync(propsPath, JSON.stringify({
   audioFile: "narration.wav", words: caps.words, title, durationInSeconds: dur,
   ...(screenFile ? { screenFile } : {}), ...(musicFile ? { musicFile } : {}),
+  ...(presenterFile ? { presenterFile } : {}),
 }));
 
 console.log("→ render…");

@@ -17,6 +17,13 @@ test("buildMakeArgs — script mode keeps script then out, adds screen", () => {
   );
 });
 
+test("buildMakeArgs — presenter clip is appended as --presenter", () => {
+  assert.deepEqual(
+    buildMakeArgs({ scriptFile: "/tmp/s.txt", out: "/tmp/o.mp4", music: "/tmp/m.mp3", presenter: "/tmp/cam.mp4" }),
+    ["make.mjs", "/tmp/s.txt", "/tmp/o.mp4", "--music", "/tmp/m.mp3", "--presenter", "/tmp/cam.mp4"],
+  );
+});
+
 test("videoRoutingPrompt points the agent at the local /video/make endpoint", () => {
   const p = videoRoutingPrompt();
   assert.match(p, /\/video\/make/);

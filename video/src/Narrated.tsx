@@ -13,6 +13,7 @@ export type NarratedProps = {
   durationInSeconds: number;
   screenFile?: string;      // optional screen-recording footage in video/public/
   musicFile?: string;       // optional background music in video/public/
+  presenterFile?: string;   // optional webcam presenter clip in video/public/ (PIP)
 };
 
 const FPS = 30;
@@ -59,9 +60,32 @@ const Captions: React.FC<{ words: Word[] }> = ({ words }) => {
   );
 };
 
+// Optional presenter slot (P4.7): a real batch-filmed webcam clip composited as
+// a rounded picture-in-picture in the bottom-right margin (clear of the centred
+// caption band). The clip is VISUAL only — muted, since the cloned-voice
+// narration is the audio — and loops to cover the full narration if it's short.
+const Presenter: React.FC<{ src: string }> = ({ src }) => (
+  <div
+    style={{
+      position: "absolute",
+      right: 56,
+      bottom: 220, // clear of the centred caption band (which can run wide)
+      width: 420,
+      height: 420,
+      borderRadius: 24,
+      overflow: "hidden",
+      border: "3px solid rgba(67, 214, 166, 0.85)",
+      boxShadow: "0 12px 40px rgba(0, 0, 0, 0.45)",
+    }}
+  >
+    <OffthreadVideo src={staticFile(src)} muted loop style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+  </div>
+);
+
 // The narrated body: audio (+ optional music bed) over screen footage or a
-// branded background, with captions and a small brand watermark.
-const Main: React.FC<NarratedProps> = ({ audioFile, words, title, screenFile, musicFile }) => {
+// branded background, with captions, an optional presenter PIP, and a small
+// brand watermark.
+const Main: React.FC<NarratedProps> = ({ audioFile, words, title, screenFile, musicFile, presenterFile }) => {
   return (
     <AbsoluteFill style={{ background: "linear-gradient(135deg, #0f1a20 0%, #16302a 100%)" }}>
       <Audio src={staticFile(audioFile)} />
@@ -78,6 +102,7 @@ const Main: React.FC<NarratedProps> = ({ audioFile, words, title, screenFile, mu
       <div style={{ position: "absolute", top: 40, right: 56, color: "#9fd9c6", fontFamily: "Georgia, serif", fontSize: 26, opacity: 0.5 }}>
         {title}
       </div>
+      {presenterFile ? <Presenter src={presenterFile} /> : null}
       <Captions words={words} />
     </AbsoluteFill>
   );

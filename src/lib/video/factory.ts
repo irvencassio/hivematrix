@@ -33,6 +33,7 @@ export interface VideoMakeOptions {
   seconds?: number;
   screen?: string;       // screen-recording footage path
   music?: string;        // music bed path
+  presenter?: string;    // webcam presenter clip path (PIP)
 }
 
 /** Build the argv passed to `node` (make.mjs + flags). Pure → unit-tested. */
@@ -46,6 +47,7 @@ export function buildMakeArgs(o: VideoMakeOptions): string[] {
   if (o.title) args.push("--title", o.title);
   if (o.screen) args.push("--screen", o.screen);
   if (o.music) args.push("--music", o.music);
+  if (o.presenter) args.push("--presenter", o.presenter);
   return args;
 }
 

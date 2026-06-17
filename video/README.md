@@ -38,12 +38,13 @@ node publish.mjs out/howto.mp4 --meta out/meta.json --privacy unlisted
 | `--screen <file>` | screen-recording footage as the background (how-tos) |
 | `--lang <code>` | narration + captions language (e.g. `it`, `es`, `fr`). Your cloned voice is multilingual. |
 | `--music <file>` | background music bed (looped, low volume) |
+| `--presenter <file>` | webcam presenter clip as a rounded picture-in-picture (bottom-right, muted, looped). Use a real batch-filmed clip — sparingly. |
 
 ## Pieces
 
 - `capture.mjs` — screen recorder (ffmpeg/avfoundation)
 - `make.mjs` — orchestrator: voiceover (sidecar) → captions (whisper) → Remotion render
-- `src/` — Remotion compositions: `TitleCard`, `Narrated` (audio + karaoke captions + screen bg + transitions), `Outro`
+- `src/` — Remotion compositions: `TitleCard`, `Narrated` (audio + karaoke captions + screen bg + presenter PIP + transitions), `Outro`
 - `publish.mjs` — YouTube upload (OAuth)
 - sidecar: `script_gen.py` (draft), `synth_cli.py` (voiceover), `word_timings.py` (captions), `yt_meta.py` (metadata)
 
@@ -56,6 +57,7 @@ node publish.mjs out/howto.mp4 --meta out/meta.json --privacy unlisted
 ## Status
 
 Done: render toolchain, cloned-voice narration, whisper captions, screen footage,
-transitions + outro + music, multilingual, script-drafting, YouTube upload.
-Optional/next: presenter slot (real webcam or HeyGen), analytics loop, daemon
+transitions + outro + music, multilingual, script-drafting, YouTube upload,
+presenter PIP (`--presenter`, real webcam clip).
+Optional/next: HeyGen full-frame avatar layer, analytics loop, daemon
 integration so Hive drafts + queues videos.

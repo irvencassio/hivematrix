@@ -1342,6 +1342,7 @@ export function createDaemonServer() {
             title: typeof body.title === "string" ? body.title : undefined,
             seconds: typeof body.seconds === "number" ? body.seconds : undefined,
             screen: typeof body.screen === "string" ? body.screen : undefined,
+            presenter: typeof body.presenter === "string" ? body.presenter : undefined,
           });
           json(res, 201, { ok: true, path: r.path });
         } catch (e) {
