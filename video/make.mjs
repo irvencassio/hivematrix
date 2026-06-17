@@ -34,6 +34,8 @@ const si = args.indexOf("--screen");
 const screenSrc = si >= 0 ? args[si + 1] : null;
 const li = args.indexOf("--lang");
 const lang = li >= 0 ? args[li + 1] : "en";
+const mi = args.indexOf("--music");
+const musicSrc = mi >= 0 ? args[mi + 1] : null;
 
 mkdirSync(OUT, { recursive: true });
 mkdirSync(join(VIDEO_DIR, "public"), { recursive: true });
@@ -60,15 +62,20 @@ const dur = parseFloat(execFileSync("ffprobe",
   ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", narration],
   { encoding: "utf-8" }).trim());
 
-let screenFile;
-if (screenSrc) {
-  if (!existsSync(screenSrc)) { console.error(`--screen file not found: ${screenSrc}`); process.exit(2); }
-  screenFile = "screen" + (screenSrc.match(/\.[a-z0-9]+$/i)?.[0] || ".mp4");
-  copyFileSync(screenSrc, join(VIDEO_DIR, "public", screenFile));
-  console.log(`→ screen footage: ${screenFile}`);
+function stage(src, base) {
+  if (!existsSync(src)) { console.error(`file not found: ${src}`); process.exit(2); }
+  const name = base + (src.match(/\.[a-z0-9]+$/i)?.[0] || ".mp4");
+  copyFileSync(src, join(VIDEO_DIR, "public", name));
+  return name;
 }
+let screenFile, musicFile;
+if (screenSrc) { screenFile = stage(screenSrc, "screen"); console.log(`→ screen footage: ${screenFile}`); }
+if (musicSrc) { musicFile = stage(musicSrc, "music"); console.log(`→ music bed: ${musicFile}`); }
 
-writeFileSync(propsPath, JSON.stringify({ audioFile: "narration.wav", words: caps.words, title, durationInSeconds: dur, ...(screenFile ? { screenFile } : {}) }));
+writeFileSync(propsPath, JSON.stringify({
+  audioFile: "narration.wav", words: caps.words, title, durationInSeconds: dur,
+  ...(screenFile ? { screenFile } : {}), ...(musicFile ? { musicFile } : {}),
+}));
 
 console.log("→ render…");
 execFileSync("npx", ["remotion", "render", "src/index.ts", "Narrated", outMp4, `--props=${propsPath}`],
