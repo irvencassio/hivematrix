@@ -25,22 +25,29 @@ function sidecarDir() {
 }
 
 const args = process.argv.slice(2);
-const scriptPath = args[0];
-if (!scriptPath) { console.error("usage: node make.mjs <script.txt> [out.mp4] [--title T]"); process.exit(2); }
-const outMp4 = args[1] && !args[1].startsWith("--") ? args[1] : join(OUT, "video.mp4");
-const ti = args.indexOf("--title");
-const title = ti >= 0 ? args[ti + 1] : "HiveMatrix";
-const si = args.indexOf("--screen");
-const screenSrc = si >= 0 ? args[si + 1] : null;
-const li = args.indexOf("--lang");
-const lang = li >= 0 ? args[li + 1] : "en";
-const mi = args.indexOf("--music");
-const musicSrc = mi >= 0 ? args[mi + 1] : null;
+const flag = (name, def = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : def; };
+const title = flag("--title", "HiveMatrix");
+const screenSrc = flag("--screen");
+const lang = flag("--lang", "en");
+const musicSrc = flag("--music");
+const topic = flag("--topic");
+const seconds = flag("--seconds", "30");
+
+// Positionals (skip each flag + its value): [scriptFile?] [out.mp4?]
+const positionals = [];
+for (let i = 0; i < args.length; i++) { if (args[i].startsWith("--")) { i++; continue; } positionals.push(args[i]); }
+const scriptPath = topic ? null : positionals[0];
+const outMp4 = positionals.find((p) => p.endsWith(".mp4")) || join(OUT, "video.mp4");
+
+if (!topic && !scriptPath) {
+  console.error('usage: node make.mjs <script.txt> [out.mp4] [--title T] [--lang it] [--screen f] [--music f]\n' +
+    '   or: node make.mjs --topic "..." [out.mp4] [--seconds 30] [--lang it] [--title T] [--screen f] [--music f]');
+  process.exit(2);
+}
 
 mkdirSync(OUT, { recursive: true });
 mkdirSync(join(VIDEO_DIR, "public"), { recursive: true });
 
-const scriptText = readFileSync(scriptPath, "utf-8").trim();
 const sc = sidecarDir();
 const py = join(sc, ".venv", "bin", "python");
 const narration = join(VIDEO_DIR, "public", "narration.wav");
@@ -48,7 +55,17 @@ const scriptTxt = join(OUT, "script.txt");
 const capJson = join(OUT, "captions.json");
 const propsPath = join(OUT, "props.json");
 
-writeFileSync(scriptTxt, scriptText);
+let scriptText;
+if (topic) {
+  console.log(`→ drafting script (topic, lang=${lang})…`);
+  execFileSync(py, [join(sc, "script_gen.py"), "--topic", topic, "--lang", lang, "--seconds", seconds, "--out", scriptTxt],
+    { cwd: sc, stdio: "inherit" });
+  scriptText = readFileSync(scriptTxt, "utf-8").trim();
+  console.log(`  script: ${scriptText.slice(0, 90)}…`);
+} else {
+  scriptText = readFileSync(scriptPath, "utf-8").trim();
+  writeFileSync(scriptTxt, scriptText);
+}
 
 console.log(`→ voiceover (cloned voice, lang=${lang})…`);
 execFileSync(py, [join(sc, "synth_cli.py"), "--text-file", scriptTxt, "--out", narration, "--quality", "high", "--lang", lang],
