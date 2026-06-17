@@ -164,7 +164,21 @@ if (!existsSync(cachedPython)) {
 const pyVersionOut = execFileSync(cachedPython, ["--version"], { encoding: "utf8" }).trim();
 log(`staging python/ (${pyVersionOut})`);
 cpSync(join(PY_CACHE_ROOT, "python"), join(OUT, "python"), { recursive: true });
-chmodSync(join(OUT, "python", "bin", "python3"), 0o755);
+
+// python-build-standalone ships python/python3 as symlinks to python3.14. Tauri
+// DEREFERENCES them into unsigned copies when bundling the .app, which fails
+// notarization ("not signed with a valid Developer ID"). Replace the interpreter
+// symlinks with real copies now, so the pre-sign pass signs all three and the
+// bundled .app ships signed interpreter binaries.
+const pyBinDir = join(OUT, "python", "bin");
+const realPython = join(pyBinDir, "python3.14");
+for (const name of ["python", "python3"]) {
+  const p = join(pyBinDir, name);
+  rmSync(p, { force: true });
+  cpSync(realPython, p);
+  chmodSync(p, 0o755);
+}
+chmodSync(realPython, 0o755);
 
 // Bundle the sidecar source: every *.py + requirements.txt (NOT the dev .venv,
 // recorded profile, or downloaded models — those are per-machine/provisioned).
