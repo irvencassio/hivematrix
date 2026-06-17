@@ -27,6 +27,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import STTSettings, TTSSettings
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.services.tts_service import TTSService
 from pipecat.transports.base_transport import TransportParams
@@ -34,8 +35,8 @@ from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.utils.time import time_now_iso8601
 
-from stt import transcribe
-from tts import synthesize
+from stt import transcribe, DEFAULT_MODEL as STT_WHISPER_MODEL
+from tts import synthesize, VOXCPM_MODEL
 
 # Spoken-style system prompt (mirrors llm.py): short, no markdown — goes to TTS.
 SYSTEM_PROMPT = (
@@ -59,7 +60,11 @@ class MLXWhisperSTT(SegmentedSTTService):
     buffers audio between VAD start/stop and hands us the whole utterance."""
 
     def __init__(self, **kwargs):
-        super().__init__(sample_rate=STT_RATE, **kwargs)
+        super().__init__(
+            sample_rate=STT_RATE,
+            settings=STTSettings(model=STT_WHISPER_MODEL, language="en"),
+            **kwargs,
+        )
 
     def can_generate_metrics(self) -> bool:
         return False
@@ -87,7 +92,11 @@ class VoxCPMTTS(TTSService):
     playback streams and Pipecat can cut it off cleanly on barge-in."""
 
     def __init__(self, quality: str = "fast", **kwargs):
-        super().__init__(sample_rate=TTS_RATE, **kwargs)
+        super().__init__(
+            sample_rate=TTS_RATE,
+            settings=TTSSettings(model=VOXCPM_MODEL, voice="cloned", language="en"),
+            **kwargs,
+        )
         self._quality = quality
 
     def can_generate_metrics(self) -> bool:
@@ -150,5 +159,5 @@ async def answer_offer(offer: dict, ice_servers=None, tts_quality: str = "fast")
     transport = build_transport(connection)
     task, runner = build_pipeline(transport, tts_quality=tts_quality)
     asyncio.create_task(runner.run(task))  # pipeline runs until the peer disconnects
-    answer = await connection.get_answer()
+    answer = connection.get_answer()  # sync — returns the prepared SDP answer dict
     return {"sdp": answer["sdp"], "type": answer["type"]}
