@@ -395,6 +395,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <span class="pill" id="modePill">…</span>
     <span class="usage-pill" id="usagePill" style="display:none" title="">⚡ —</span>
     <span class="update-pill" id="updatePill" style="display:none" onclick="applyUpdate()" title="Click to install and restart">⬆ Update</span>
+    <span class="muted" id="talkStatus" style="display:none;font-size:11px;margin-right:6px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+    <button class="gear" id="talkBtn" style="display:none" title="Push to talk" onclick="toggleTalk()">🎤 Talk</button>
     <button class="gear ctx-toggle" id="ctxToggle" title="Hide / show the right panel" onclick="toggleContext()">◨</button>
     <button class="gear" title="Settings" onclick="openSettings()">⚙</button>
   </span>
@@ -2674,6 +2676,53 @@ async function renderFeatures() {
 async function toggleFeature(key, enabled) {
   await api("/settings/features", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, enabled }) });
   renderFeatures();
+  initVoiceFeature();
+}
+
+// ── In-app push-to-talk (Voice feature) ───────────────────────────────
+let _talkRec = null, _talkChunks = [];
+async function initVoiceFeature() {
+  try {
+    const r = await api("/settings/features");
+    const on = ((r && r.features) || []).some(f => f.key === "voice" && f.enabled);
+    const btn = document.getElementById("talkBtn");
+    if (btn) btn.style.display = on ? "" : "none";
+  } catch (e) { /* ignore */ }
+}
+function talkStatus(msg, show) {
+  const el = document.getElementById("talkStatus");
+  if (!el) return;
+  el.textContent = msg || "";
+  el.style.display = show ? "" : "none";
+}
+function blobToB64(blob) {
+  return new Promise(res => { const fr = new FileReader(); fr.onloadend = () => res(String(fr.result).split(",")[1]); fr.readAsDataURL(blob); });
+}
+async function toggleTalk() {
+  const btn = document.getElementById("talkBtn");
+  if (_talkRec && _talkRec.state === "recording") { _talkRec.stop(); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { talkStatus("mic blocked — allow microphone access", true); return; }
+  _talkChunks = [];
+  _talkRec = new MediaRecorder(stream);
+  _talkRec.ondataavailable = e => { if (e.data && e.data.size) _talkChunks.push(e.data); };
+  _talkRec.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+    btn.textContent = "… thinking"; talkStatus("transcribing…", true);
+    try {
+      const b64 = await blobToB64(new Blob(_talkChunks, { type: "audio/webm" }));
+      const res = await api("/voice/turn", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audioBase64: b64 }) });
+      if (res && res.error) { talkStatus(res.error, true); }
+      else {
+        if (res && res.audioBase64) { try { new Audio("data:audio/mp4;base64," + res.audioBase64).play(); } catch (e) {} }
+        talkStatus((res && res.transcript ? "you: " + res.transcript : "") + (res && res.reply ? "  ·  bee: " + res.reply : ""), true);
+      }
+    } catch (e) { talkStatus("voice turn failed", true); }
+    btn.textContent = "🎤 Talk";
+  };
+  _talkRec.start();
+  btn.textContent = "■ Stop"; talkStatus("listening… (click Stop when done)", true);
 }
 
 function renderAbout() {
@@ -3116,6 +3165,7 @@ if (requireToken()) {
   loadProjects();
   refresh();
   connectSSE();
+  initVoiceFeature();
   setInterval(refresh, 5000);
   checkUpdate();
   setInterval(checkUpdate, 5 * 60 * 1000);

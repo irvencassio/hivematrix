@@ -137,6 +137,16 @@ test("settings tabs are in a defined order ending with About", () => {
   assert.match(js, /\["models", "bees", "projects", "general", "remote", "features", "about"\]/);
 });
 
+test("in-app Talk button is gated by the voice feature flag", () => {
+  assert.match(CONSOLE_HTML, /id="talkBtn" style="display:none"/, "Talk button hidden by default");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /async function initVoiceFeature\(/);
+  assert.match(js, /f\.key === "voice" && f\.enabled/, "shown only when the voice flag is on");
+  assert.match(js, /async function toggleTalk\(/);
+  assert.match(js, /\/voice\/turn/, "posts a turn to the daemon");
+  assert.match(js, /MediaRecorder/, "captures the mic");
+});
+
 test("Features tab lists optional capabilities with on/off toggles", () => {
   assert.match(CONSOLE_HTML, /id="tab-features"/, "Features tab present");
   assert.match(CONSOLE_HTML, /id="settingsFeatures"/, "Features panel present");

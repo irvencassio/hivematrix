@@ -1251,6 +1251,44 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /voice/turn — one in-app push-to-talk turn, gated by the `voice`
+      // feature flag. Recorded audio (base64) → STT → local LLM → cloned-voice
+      // TTS via the sidecar; returns the transcript, reply text, and reply audio.
+      if (req.method === "POST" && urlPath === "/voice/turn") {
+        const { isFeatureEnabled } = await import("@/lib/config/features");
+        if (!isFeatureEnabled("voice")) { json(res, 403, { error: "voice feature is off — enable it in Settings → Features" }); return; }
+        const { sidecarDir } = await import("@/lib/voice/tts");
+        const dir = sidecarDir();
+        if (!dir) { json(res, 503, { error: "voice sidecar not available" }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        const audioB64 = typeof body.audioBase64 === "string" ? body.audioBase64 : "";
+        if (!audioB64) { json(res, 400, { error: "audioBase64 is required" }); return; }
+        const { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync } = await import("fs");
+        const { generateId } = await import("@/lib/db");
+        const { execFile } = await import("child_process");
+        const tmp = join(homedir(), ".hivematrix", "artifacts", "voice");
+        mkdirSync(tmp, { recursive: true });
+        const id = generateId();
+        const inPath = join(tmp, `${id}.webm`);
+        const outPath = join(tmp, `${id}-reply.m4a`);
+        writeFileSync(inPath, Buffer.from(audioB64, "base64"));
+        const py = join(dir, ".venv", "bin", "python");
+        const lang = typeof body.lang === "string" ? body.lang : "en";
+        await new Promise<void>((resolve) => {
+          execFile(py, [join(dir, "turn_cli.py"), inPath, outPath, "--lang", lang], { cwd: dir, timeout: 120_000 }, (err, stdout, stderr) => {
+            if (err) { json(res, 500, { error: ((stderr || err.message || "").trim()).slice(-300) }); resolve(); return; }
+            let meta: { transcript?: string; reply?: string } = {};
+            try { meta = JSON.parse((stdout.trim().split("\n").pop()) || "{}"); } catch { /* ignore */ }
+            const replyB64 = existsSync(outPath) ? readFileSync(outPath).toString("base64") : "";
+            json(res, 200, { transcript: meta.transcript ?? "", reply: meta.reply ?? "", audioBase64: replyB64 });
+            resolve();
+          });
+        });
+        try { unlinkSync(inPath); } catch { /* ignore */ }
+        try { unlinkSync(outPath); } catch { /* ignore */ }
+        return;
+      }
+
       // POST /video/make — agent/daemon-driven video creation, gated by the
       // `video` feature flag. Drives the out-of-process Node video factory
       // (topic→script→cloned-voice narration→captions→render). Long-running.
