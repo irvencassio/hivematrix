@@ -5,6 +5,15 @@
 # Python — it always runs on whatever the base `python3` is.
 
 mlx-whisper==0.4.3      # local streaming STT on Apple Silicon (MLX)
-pipecat-ai==1.3.0       # realtime voice pipeline orchestrator (VAD/STT/LLM/TTS)
-sounddevice==0.5.5      # mic capture for the talk.py Mac demo
+sounddevice==0.5.5      # mic capture for the talk.py / live.py Mac demos
 mlx-audio==0.4.4        # cloned-voice TTS (Chatterbox zero-shot) on Apple Silicon
+
+# Realtime voice (P5 — the iOS WebRTC client). The [webrtc] extra adds aiortc +
+# PyAV + pylibsrtp + opencv (P2P SmallWebRTC transport, no cloud SFU); [silero]
+# adds the VAD used for realtime turn-taking + native barge-in. All ship arm64
+# wheels for Python 3.14 (verified — no source builds). websockets is a base
+# transitive dep not pulled by the narrow pin. NOTE: av and opencv each bundle
+# their own ffmpeg dylibs (a harmless objc duplicate-class warning for our
+# audio-only path) — dedupe when bundling into the signed runtime (#4c).
+pipecat-ai[webrtc,silero]==1.3.0   # realtime pipeline: SmallWebRTC + VAD/STT/LLM/TTS
+websockets==16.0
