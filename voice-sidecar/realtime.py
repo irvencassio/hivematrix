@@ -20,12 +20,16 @@ import uuid
 import wave
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import TranscriptionFrame, TTSAudioRawFrame
+from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import TranscriptionFrame, TTSAudioRawFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import STTSettings, TTSSettings
 from pipecat.services.stt_service import SegmentedSTTService
@@ -117,12 +121,23 @@ class VoxCPMTTS(TTSService):
             yield TTSAudioRawFrame(pcm[i:i + chunk], rate, 1)
 
 
+def make_vad() -> SileroVADAnalyzer:
+    """Silero VAD tuned for the MacBook mic over WebRTC. The default
+    min_volume=0.6 gates out anything below 0.6 normalized, but the built-in mic
+    peaks around ~0.18 — so speech never reached the model. Drop min_volume and
+    soften confidence so real (quiet) speech is detected; the model still does the
+    actual speech/non-speech decision."""
+    return SileroVADAnalyzer(params=VADParams(
+        confidence=0.4, start_secs=0.2, stop_secs=0.8, min_volume=0.0,
+    ))
+
+
 def build_transport(connection: SmallWebRTCConnection) -> SmallWebRTCTransport:
     """SmallWebRTC transport with audio in/out + Silero VAD (turn-taking)."""
     params = TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=make_vad(),
     )
     return SmallWebRTCTransport(webrtc_connection=connection, params=params)
 
@@ -134,7 +149,13 @@ def build_pipeline(transport: SmallWebRTCTransport, tts_quality: str = "fast"):
     tts = VoxCPMTTS(quality=tts_quality)
 
     context = LLMContext([{"role": "system", "content": SYSTEM_PROMPT}])
-    agg = LLMContextAggregatorPair(context)
+    # Pipecat 1.3: the USER aggregator owns VAD (builds a VADController from this),
+    # which drives turn detection + STT segmentation. The transport's vad_analyzer
+    # is not what fires user-speech frames in this version.
+    agg = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(vad_analyzer=make_vad()),
+    )
 
     pipeline = Pipeline([
         transport.input(),
@@ -158,6 +179,39 @@ async def answer_offer(offer: dict, ice_servers=None, tts_quality: str = "fast")
     await connection.initialize(sdp=offer["sdp"], type=offer["type"])
     transport = build_transport(connection)
     task, runner = build_pipeline(transport, tts_quality=tts_quality)
+
+    @transport.event_handler("on_client_connected")
+    async def _greet(_transport, _conn):
+        # Greet on connect: proves the TTS→WebRTC output path (and that the
+        # pipeline source isn't RTVI-gated) independently of mic input.
+        await task.queue_frames([TTSSpeakFrame("Hi, I'm your local assistant. How can I help?")])
+
     asyncio.create_task(runner.run(task))  # pipeline runs until the peer disconnects
     answer = connection.get_answer()  # sync — returns the prepared SDP answer dict
     return {"sdp": answer["sdp"], "type": answer["type"]}
+
+
+# --- Pipecat dev runner entrypoint -------------------------------------------
+# `python realtime.py -t webrtc` serves Pipecat's PREBUILT SmallWebRTC web client
+# (known-good mic capture + data channel) and handles signaling; we only build +
+# run the pipeline. This is the P5.1 validation path; the daemon uses
+# answer_offer() directly in P5.2.
+async def bot(runner_args):
+    from pipecat.runner.utils import create_transport
+    transport = await create_transport(runner_args, {
+        "webrtc": lambda: TransportParams(
+            audio_in_enabled=True, audio_out_enabled=True, vad_analyzer=make_vad(),
+        ),
+    })
+    task, runner = build_pipeline(transport)
+
+    @transport.event_handler("on_client_connected")
+    async def _greet(_transport, _client):
+        await task.queue_frames([TTSSpeakFrame("Hi, I'm your local assistant. How can I help?")])
+
+    await runner.run(task)
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+    main()

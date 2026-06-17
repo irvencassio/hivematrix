@@ -17,3 +17,10 @@ mlx-audio==0.4.4        # cloned-voice TTS (Chatterbox zero-shot) on Apple Silic
 # audio-only path) — dedupe when bundling into the signed runtime (#4c).
 pipecat-ai[webrtc,silero]==1.3.0   # realtime pipeline: SmallWebRTC + VAD/STT/LLM/TTS
 websockets==16.0
+
+# Dev/test only — the Pipecat runner + prebuilt web client used to validate the
+# realtime pipeline from a browser (`python realtime.py -t webrtc`). The daemon
+# path (answer_offer) relays signaling itself and does NOT need these in prod.
+fastapi==0.137.1
+uvicorn==0.49.0
+pipecat-ai-prebuilt==1.0.2
