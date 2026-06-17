@@ -4,9 +4,10 @@ import { parseAdoConfig, buildAdoMcpServer } from "./mcp";
 import { parseFeatures } from "@/lib/config/features";
 
 test("parseFeatures defaults flags off; reads true only for explicit true", () => {
-  assert.deepEqual(parseFeatures({}), { ado: false });
-  assert.deepEqual(parseFeatures({ features: { ado: true } }), { ado: true });
-  assert.deepEqual(parseFeatures({ features: { ado: "yes" } }), { ado: false });
+  assert.deepEqual(parseFeatures({}), { ado: false, voice: false, video: false });
+  assert.deepEqual(parseFeatures({ features: { ado: true } }), { ado: true, voice: false, video: false });
+  assert.deepEqual(parseFeatures({ features: { ado: "yes" } }), { ado: false, voice: false, video: false });
+  assert.deepEqual(parseFeatures({ features: { voice: true } }), { ado: false, voice: true, video: false });
 });
 
 test("parseAdoConfig requires an org; defaults authMode to azcli (Entra)", () => {

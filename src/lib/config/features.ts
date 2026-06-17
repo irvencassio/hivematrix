@@ -11,6 +11,8 @@ import { join } from "path";
 /** Known feature flags. Add a row to surface a new toggle in settings. */
 export const KNOWN_FEATURES = [
   { key: "ado", label: "Azure DevOps", description: "Register the Azure DevOps MCP server so agents can operate repos, PRs, pipelines, and work items." },
+  { key: "voice", label: "Voice (VoiceBee)", description: "Live voice conversation, phone-answering, and spoken replies in your cloned voice. Advanced — runs the local voice sidecar." },
+  { key: "video", label: "Video factory", description: "Turn a script or topic into a narrated, captioned how-to/explainer video in your cloned voice. Advanced — runs the local video pipeline." },
 ] as const;
 
 export type FeatureKey = (typeof KNOWN_FEATURES)[number]["key"];

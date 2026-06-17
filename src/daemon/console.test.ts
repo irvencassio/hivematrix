@@ -134,7 +134,17 @@ test("settings has an About tab with version/build/date and update status", () =
 
 test("settings tabs are in a defined order ending with About", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /\["models", "bees", "projects", "general", "remote", "about"\]/);
+  assert.match(js, /\["models", "bees", "projects", "general", "remote", "features", "about"\]/);
+});
+
+test("Features tab lists optional capabilities with on/off toggles", () => {
+  assert.match(CONSOLE_HTML, /id="tab-features"/, "Features tab present");
+  assert.match(CONSOLE_HTML, /id="settingsFeatures"/, "Features panel present");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /async function renderFeatures\(/);
+  assert.match(js, /api\("\/settings\/features"\)/, "fetches the feature flags");
+  assert.match(js, /async function toggleFeature\(/);
+  assert.match(js, /\/settings\/features.*method: "POST"/s, "toggles via POST");
 });
 
 test("Mixed-mode role models hide Thinking/Coding when the frontier provider is Codex", () => {

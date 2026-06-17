@@ -403,7 +403,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <div class="overlay" id="settingsOverlay">
   <div class="modal">
     <h1>Settings <span class="x" onclick="closeSettings()">✕</span></h1>
-    <div class="tabs"><div class="tab active" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-bees" onclick="switchSettingsTab('bees')">Bees</div><div class="tab" id="tab-projects" onclick="switchSettingsTab('projects')">Projects</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">General</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-about" onclick="switchSettingsTab('about')">About</div></div>
+    <div class="tabs"><div class="tab active" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-bees" onclick="switchSettingsTab('bees')">Bees</div><div class="tab" id="tab-projects" onclick="switchSettingsTab('projects')">Projects</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">General</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-about" onclick="switchSettingsTab('about')">About</div></div>
     <div id="settingsModels">
       <label class="flbl">Default model</label>
       <select id="s_default" style="width:100%"></select>
@@ -532,6 +532,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <span class="muted">Automatically install updates on launch</span>
       </div>
       <div class="muted" style="font-size:11px;margin-top:2px">Off = you'll see an "Update" button in the header to install when you choose.</div>
+    </div>
+    <div id="settingsFeatures" style="display:none">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <label class="flbl" style="margin:0">Optional capabilities</label>
+        <button class="copybtn" onclick="renderFeatures()">↻ Refresh</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin:6px 0 10px">Off by default. Turn on only the advanced capabilities you want.</div>
+      <div id="s_features"></div>
     </div>
     <div id="settingsAbout" style="display:none">
       <h2 style="margin-top:4px">HiveMatrix</h2>
@@ -2635,15 +2643,37 @@ async function saveAutoUpdate() {
 }
 
 function switchSettingsTab(tab) {
-  const tabs = ["models", "bees", "projects", "general", "remote", "about"];
-  const panels = { models: "settingsModels", bees: "settingsBees", projects: "settingsProjects", general: "settingsGeneral", remote: "settingsRemote", about: "settingsAbout" };
+  const tabs = ["models", "bees", "projects", "general", "remote", "features", "about"];
+  const panels = { models: "settingsModels", bees: "settingsBees", projects: "settingsProjects", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout" };
   for (const t of tabs) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
   if (tab === "projects") renderSettingsProjects();
   if (tab === "bees") { renderSettingsBees(); renderSafeSenders(); }
+  if (tab === "features") renderFeatures();
   if (tab === "about") { renderAbout(); checkUpdate(); }
+}
+
+async function renderFeatures() {
+  const el = document.getElementById("s_features");
+  el.innerHTML = '<div class="muted">Loading…</div>';
+  const r = await api("/settings/features");
+  const features = (r && r.features) || [];
+  if (!features.length) { el.innerHTML = '<div class="muted">No optional features.</div>'; return; }
+  el.innerHTML = features.map(f => {
+    const on = f.enabled === true;
+    return '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
+      + '<div style="flex:1"><div style="font-weight:600">' + esc(f.label) + '</div>'
+      + '<div class="muted" style="font-size:11px;margin-top:2px">' + esc(f.description) + '</div></div>'
+      + '<button class="reply-toggle' + (on ? ' active' : '') + '" onclick="toggleFeature(\'' + esc(f.key) + '\',' + (!on) + ')">' + (on ? 'On' : 'Off') + '</button>'
+      + '</div>';
+  }).join('');
+}
+
+async function toggleFeature(key, enabled) {
+  await api("/settings/features", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, enabled }) });
+  renderFeatures();
 }
 
 function renderAbout() {

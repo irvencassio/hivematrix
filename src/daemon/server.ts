@@ -313,7 +313,7 @@ export function createDaemonServer() {
         const body = await parseBody(req) as Record<string, unknown>;
         const key = String(body.key ?? "");
         if (!KNOWN_FEATURES.some((f) => f.key === key)) { json(res, 400, { error: `unknown feature "${key}"` }); return; }
-        const flags = setFeature(key as "ado", body.enabled === true);
+        const flags = setFeature(key as typeof KNOWN_FEATURES[number]["key"], body.enabled === true);
         json(res, 200, { features: flags });
         return;
       }
