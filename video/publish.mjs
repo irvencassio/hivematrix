@@ -2,7 +2,10 @@
  * Upload a video to YouTube (Phase 4, P4.6).
  *
  *   node publish.mjs <video.mp4> --meta out/meta.json [--privacy unlisted|private|public]
- *   node publish.mjs <video.mp4> --title "..." --description "..." --tags "a,b,c"
+ *   node publish.mjs <video.mp4> --title "..." --description "..." --tags "a,b,c" [--kind presenter]
+ *
+ * --kind (faceless|screen|presenter|avatar) records the presentation style in
+ * the upload ledger so analytics.mjs can compare them later (P4.8).
  *
  * One-time setup (yours — I can't auth as you):
  *   1. Google Cloud console → enable "YouTube Data API v3".
@@ -12,37 +15,13 @@
  * ~/.hivematrix/youtube/token.json for next time.
  */
 import { google } from "googleapis";
-import { authenticate } from "@google-cloud/local-auth";
-import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-
-const YT_DIR = join(homedir(), ".hivematrix", "youtube");
-const CREDS = join(YT_DIR, "client_secret.json");
-const TOKEN = join(YT_DIR, "token.json");
-const SCOPES = ["https://www.googleapis.com/auth/youtube.upload"];
+import { createReadStream, existsSync, readFileSync } from "node:fs";
+import { getAuth, SCOPE_UPLOAD } from "./yt-auth.mjs";
+import { appendUpload, normalizeKind } from "./yt-ledger.mjs";
 
 function arg(name, def = null) {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : def;
-}
-
-async function getAuth() {
-  mkdirSync(YT_DIR, { recursive: true });
-  if (!existsSync(CREDS)) {
-    console.error(`Missing ${CREDS}\nSet up a Google OAuth "Desktop app" client (YouTube Data API v3) and save its JSON there.`);
-    process.exit(1);
-  }
-  const keys = JSON.parse(readFileSync(CREDS, "utf-8"));
-  const { client_id, client_secret, redirect_uris } = keys.installed || keys.web;
-  if (existsSync(TOKEN)) {
-    const o = new google.auth.OAuth2(client_id, client_secret, redirect_uris?.[0]);
-    o.setCredentials(JSON.parse(readFileSync(TOKEN, "utf-8")));
-    return o;
-  }
-  const client = await authenticate({ scopes: SCOPES, keyfilePath: CREDS });
-  if (client.credentials) writeFileSync(TOKEN, JSON.stringify(client.credentials));
-  return client;
 }
 
 async function main() {
@@ -62,10 +41,11 @@ async function main() {
   }
   if (!title) { console.error("a --title or --meta with a title is required"); process.exit(2); }
   const privacy = arg("--privacy", "unlisted");
+  const kind = normalizeKind(arg("--kind"));
 
-  const auth = await getAuth();
+  const auth = await getAuth([SCOPE_UPLOAD]);
   const yt = google.youtube({ version: "v3", auth });
-  console.log(`→ uploading "${title}" (${privacy})…`);
+  console.log(`→ uploading "${title}" (${privacy}, kind=${kind})…`);
   const res = await yt.videos.insert({
     part: ["snippet", "status"],
     requestBody: {
@@ -74,7 +54,9 @@ async function main() {
     },
     media: { body: createReadStream(video) },
   });
-  console.log("✅ https://youtu.be/" + res.data.id);
+  const id = res.data.id;
+  appendUpload({ id, title, kind, privacy, publishedAt: res.data.snippet?.publishedAt ?? null });
+  console.log("✅ https://youtu.be/" + id + `  (logged as ${kind})`);
 }
 
 main().catch((e) => { console.error("publish failed:", e?.message || e); process.exit(1); });

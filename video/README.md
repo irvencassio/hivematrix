@@ -45,19 +45,33 @@ node publish.mjs out/howto.mp4 --meta out/meta.json --privacy unlisted
 - `capture.mjs` — screen recorder (ffmpeg/avfoundation)
 - `make.mjs` — orchestrator: voiceover (sidecar) → captions (whisper) → Remotion render
 - `src/` — Remotion compositions: `TitleCard`, `Narrated` (audio + karaoke captions + screen bg + presenter PIP + transitions), `Outro`
-- `publish.mjs` — YouTube upload (OAuth)
+- `publish.mjs` — YouTube upload (OAuth). `--kind faceless|screen|presenter|avatar` records the style in the upload ledger.
+- `analytics.mjs` — per-kind performance comparison (faceless vs screen vs presenter vs avatar) from the ledger + Data API stats
+- `yt-auth.mjs` / `yt-ledger.mjs` / `yt-paths.mjs` — shared OAuth (scope-aware re-auth), upload ledger + pure rollup, paths
 - sidecar: `script_gen.py` (draft), `synth_cli.py` (voiceover), `word_timings.py` (captions), `yt_meta.py` (metadata)
 
 ## YouTube setup (one time)
 
-1. Google Cloud → enable **YouTube Data API v3**.
+1. Google Cloud → enable **YouTube Data API v3** (+ **YouTube Analytics API** later for retention).
 2. Create an OAuth client ID, type **Desktop app**; download the JSON.
-3. Save to `~/.hivematrix/youtube/client_secret.json`. First `publish.mjs` run authorizes in the browser; the token caches for next time.
+3. Save to `~/.hivematrix/youtube/client_secret.json`. First `publish.mjs` run authorizes in the browser; the token caches for next time. `analytics.mjs` needs read access — if the cached token is upload-only it re-authorizes once.
+
+## Measuring what works (P4.8)
+
+Tag each upload with how it was made, then compare:
+
+```
+node publish.mjs out/howto.mp4 --title "How to add a task" --kind presenter
+node analytics.mjs   # per-kind table: avg views/likes/comments + engagement rates
+```
+
+Only kinds logged via `--kind` are comparable. Engagement = views/likes/comments
+today; watch-time **retention** is the next layer (YouTube Analytics API).
 
 ## Status
 
 Done: render toolchain, cloned-voice narration, whisper captions, screen footage,
 transitions + outro + music, multilingual, script-drafting, YouTube upload,
-presenter PIP (`--presenter`, real webcam clip).
-Optional/next: HeyGen full-frame avatar layer, analytics loop, daemon
+presenter PIP (`--presenter`), per-kind analytics (`--kind` + `analytics.mjs`).
+Optional/next: HeyGen full-frame avatar layer, retention (Analytics API), daemon
 integration so Hive drafts + queues videos.
