@@ -35,7 +35,7 @@ document.getElementById('go').onclick = async () => {
   pc.ontrack = (e) => { document.getElementById('remote').srcObject = e.streams[0]; log('▸ receiving audio'); };
   pc.onconnectionstatechange = () => log('state: ' + pc.connectionState);
   const stream = await navigator.mediaDevices.getUserMedia({audio: true});
-  stream.getTracks().forEach(t => pc.addTrack(t, stream));
+  pc.addTransceiver(stream.getAudioTracks()[0], {direction: 'sendrecv'});  // explicit mic up + bot down
   await pc.setLocalDescription(await pc.createOffer());
   // wait for ICE gathering to finish (non-trickle — simplest for a local test)
   await new Promise(r => { if (pc.iceGatheringState === 'complete') r();
