@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Audio, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import { TitleCard } from "./TitleCard";
 
 export type Word = { word: string; start: number; end: number };
@@ -8,6 +8,7 @@ export type NarratedProps = {
   words: Word[];            // whisper word timings (relative to narration start)
   title: string;
   durationInSeconds: number;
+  screenFile?: string;      // optional screen-recording footage in video/public/
 };
 
 const FPS = 30;
@@ -52,7 +53,7 @@ const Captions: React.FC<{ words: Word[] }> = ({ words }) => {
   );
 };
 
-export const Narrated: React.FC<NarratedProps> = ({ audioFile, words, title }) => {
+export const Narrated: React.FC<NarratedProps> = ({ audioFile, words, title, screenFile }) => {
   return (
     <AbsoluteFill style={{ background: "linear-gradient(135deg, #0f1a20 0%, #16302a 100%)" }}>
       <Sequence durationInFrames={INTRO}>
@@ -60,12 +61,18 @@ export const Narrated: React.FC<NarratedProps> = ({ audioFile, words, title }) =
       </Sequence>
       <Sequence from={INTRO}>
         <Audio src={staticFile(audioFile)} />
-        {/* Screen-recording / b-roll slot goes here later; branded background for now. */}
-        <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
-          <div style={{ color: "#2f9b7a", fontFamily: "Georgia, serif", fontSize: 44, opacity: 0.4 }}>
-            {title}
-          </div>
-        </AbsoluteFill>
+        {screenFile ? (
+          // Screen-recording footage as the full-frame background (how-to videos).
+          <AbsoluteFill style={{ backgroundColor: "#0b1116", justifyContent: "center", alignItems: "center" }}>
+            <OffthreadVideo src={staticFile(screenFile)} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          </AbsoluteFill>
+        ) : (
+          <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
+            <div style={{ color: "#2f9b7a", fontFamily: "Georgia, serif", fontSize: 44, opacity: 0.4 }}>
+              {title}
+            </div>
+          </AbsoluteFill>
+        )}
         <Captions words={words} />
       </Sequence>
     </AbsoluteFill>
