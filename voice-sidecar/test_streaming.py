@@ -60,8 +60,41 @@ def test_stream_turn_ttfa():
         os.remove(p)
 
 
+def test_stream_turn_cancel_stops_early():
+    """should_cancel set after the first sentence → no further sentences synth'd
+    (barge-in mid-utterance). Proves live.py can cut a reply short."""
+    audio_in = _say("tell me about paris")
+
+    def stream(_transcript):
+        for tok in ["One. ", "Two. ", "Three. ", "Four."]:
+            yield tok
+
+    spoken = []
+    state = {"n": 0}
+
+    def cancel_after_first():
+        # cancel once one sentence has been handed to on_audio
+        return state["n"] >= 1
+
+    def on_audio(p):
+        state["n"] += 1
+        spoken.append(p)
+
+    r = stream_turn(audio_in, stream, on_audio=on_audio, should_cancel=cancel_after_first)
+    assert r.sentences == ["One."], r.sentences  # stopped before "Two."
+    assert len(spoken) == 1
+    print(f"OK  cancelled after {len(r.sentences)} sentence")
+    os.remove(audio_in)
+    for p in r.audio_paths:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
 if __name__ == "__main__":
     test_chunker()
     test_stream_turn_ttfa()
+    test_stream_turn_cancel_stops_early()
     print("streaming tests passed")
     sys.exit(0)

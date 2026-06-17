@@ -116,15 +116,40 @@ def main() -> int:
     def cb(indata, _frames, _t, _status):
         audio_q.put(indata.copy())
 
+    def run_turn(frames, cancel):
+        """Generate + speak a reply on a worker thread so the mic loop stays live
+        (responsive barge-in). `cancel` (an Event) stops it mid-utterance."""
+        wav = os.path.join(tempfile.gettempdir(), f"live-{uuid.uuid4().hex}.wav")
+        write_wav(wav, frames)
+        try:
+            res = stream_turn(wav, llm.respond_stream, on_audio=player.play,
+                              tts_quality=args.quality, should_cancel=cancel.is_set)
+        finally:
+            try:
+                os.remove(wav)
+            except OSError:
+                pass
+        if cancel.is_set():
+            return
+        if res.transcript:
+            print(f"you: {res.transcript}")
+            print(f"bee: {' '.join(res.sentences)}")
+            if res.ttfa_s is not None:
+                print(f"     (first audio {res.ttfa_s:.1f}s)", flush=True)
+        else:
+            print("…didn't catch that.", flush=True)
+
     preroll: list = []
     utter: list = []
     capturing = False
     was_busy = False
-    cooldown = 0  # frames to ignore after playback ends (let echo/reverb tail decay)
-    started_at = time.time()
+    cooldown = 0       # frames to ignore after playback ends (echo/reverb tail)
+    worker = None      # the in-flight turn thread (None when idle)
+    cancel = None      # its cancel Event
 
     mode = "barge-in" if args.barge_in else "half-duplex"
     print(f"VoiceBee live ({mode}) — just start talking. Ctrl-C to exit.", flush=True)
+    started_at = time.time()
     with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=FRAME, callback=cb):
         while True:
             if args.seconds and time.time() - started_at > args.seconds:
@@ -135,30 +160,40 @@ def main() -> int:
                 continue
             rms = frame_rms(frame)
 
-            # While the assistant is speaking: half-duplex ignores the mic (the
-            # default — without AEC the mic hears the assistant and would
-            # self-interrupt). --barge-in lets a real interruption cut it off.
-            if player.busy():
+            # The assistant is "speaking" while a turn is being generated or
+            # played — UNLESS we've already decided to capture (barge-in), so the
+            # capture isn't dropped by residual playback teardown.
+            speaking = (not capturing) and ((worker is not None and worker.is_alive()) or player.busy())
+            if speaking:
+                # Half-duplex (default) ignores the mic here; without AEC the mic
+                # hears the assistant and would self-interrupt. --barge-in lets a
+                # real interruption cancel the reply mid-utterance.
                 if args.barge_in and barge_vad.push_rms(rms) == "start":
                     print("  …barge-in", flush=True)
+                    if cancel:
+                        cancel.set()
                     player.stop()
                     listen_vad.reset()
                     capturing = True
                     utter = list(preroll) + [frame]
+                    preroll.clear()
+                    continue
                 preroll.append(frame)
                 if len(preroll) > PREROLL_FRAMES:
                     preroll.pop(0)
                 was_busy = True
                 continue
 
-            # Just finished speaking: clear echo-driven VAD state and skip a few
-            # frames so the speaker's reverb tail doesn't read as a new "start".
+            # Just finished a turn: clear VAD state. In half-duplex (speakers)
+            # also skip a few frames so the reverb tail isn't read as a "start";
+            # in barge-in (headphones) there's no echo, so don't drop frames.
             if was_busy:
                 listen_vad.reset()
                 barge_vad.reset()
-                preroll.clear()
-                cooldown = 8
                 was_busy = False
+                if not args.barge_in:
+                    preroll.clear()
+                    cooldown = 8
             if cooldown > 0:
                 cooldown -= 1
                 continue
@@ -167,21 +202,10 @@ def main() -> int:
                 utter.append(frame)
                 if listen_vad.push_rms(rms) == "end":
                     capturing = False
-                    wav = os.path.join(tempfile.gettempdir(), f"live-{uuid.uuid4().hex}.wav")
-                    write_wav(wav, utter)
+                    cancel = threading.Event()
+                    worker = threading.Thread(target=run_turn, args=(utter, cancel), daemon=True)
                     utter = []
-                    res = stream_turn(wav, llm.respond_stream, on_audio=player.play, tts_quality=args.quality)
-                    try:
-                        os.remove(wav)
-                    except OSError:
-                        pass
-                    if res.transcript:
-                        print(f"you: {res.transcript}")
-                        print(f"bee: {' '.join(res.sentences)}")
-                        if res.ttfa_s is not None:
-                            print(f"     (first audio {res.ttfa_s:.1f}s)", flush=True)
-                    else:
-                        print("…didn't catch that.", flush=True)
+                    worker.start()
             else:
                 preroll.append(frame)
                 if len(preroll) > PREROLL_FRAMES:
