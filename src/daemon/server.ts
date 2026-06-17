@@ -1297,6 +1297,25 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /voice/provision — set up the local voice runtime (venv + MLX deps +
+      // models) for a DMG user who just enabled Voice. Gated + capability-checked;
+      // runs in the background, poll GET /voice/provision/status.
+      if (req.method === "POST" && urlPath === "/voice/provision") {
+        const { isFeatureEnabled, featureCapability } = await import("@/lib/config/features");
+        if (!isFeatureEnabled("voice")) { json(res, 403, { error: "voice feature is off — enable it in Settings → Features" }); return; }
+        const cap = featureCapability("voice");
+        if (!cap.capable) { json(res, 400, { error: cap.reason ?? "not available on this machine" }); return; }
+        const { provisionVoiceRuntime, provisionStatus } = await import("@/lib/voice/provision");
+        void provisionVoiceRuntime();
+        json(res, 202, provisionStatus());
+        return;
+      }
+      if (req.method === "GET" && urlPath === "/voice/provision/status") {
+        const { provisionStatus } = await import("@/lib/voice/provision");
+        json(res, 200, provisionStatus());
+        return;
+      }
+
       // POST /video/make — agent/daemon-driven video creation, gated by the
       // `video` feature flag. Drives the out-of-process Node video factory
       // (topic→script→cloned-voice narration→captions→render). Long-running.
