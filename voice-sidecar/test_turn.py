@@ -6,6 +6,8 @@ mic and no live model. Proves the loop wiring end-to-end. Run:
     .venv/bin/python test_turn.py
 """
 import os
+os.environ.setdefault("HIVE_TTS_ENGINE", "say")  # keep tests fast + deterministic
+
 import subprocess
 import sys
 import tempfile

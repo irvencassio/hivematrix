@@ -94,10 +94,18 @@ engine when the profile exists).
 .venv/bin/python talk.py --demo "say hello in my voice"
 ```
 
-Engine: **Chatterbox** (`mlx-community/Chatterbox-TTS-fp16`) via mlx-audio, zero-shot
-cloning from the reference (no transcript needed). Warm synthesis ~1.2s/sentence —
-fine for live `talk.py` and for async voice notes / video narration. Remove
-`~/.hivematrix/voice/profile.wav` to fall back to the `say` voice.
+Engine: **VoxCPM2** (`mlx-community/VoxCPM2-bf16`) via mlx-audio, zero-shot from the
+reference (auto-transcribed by whisper — no transcript needed). Operator-tuned to
+cfg=3.0, temp=0.5. Two **quality tiers** (`synthesize(..., quality=)`):
+
+| tier | steps | warm | used for |
+|---|---|---|---|
+| `high` | 32 | ~4.6s | produced audio — voice notes, video narration (fidelity) |
+| `fast` | 8 | ~2.5s | the live `talk.py` loop (latency) |
+
+Tools to (re)tune: `compare_voices.py` (model A/B), `tune_voxcpm.py` (param sweep).
+Force an engine with `HIVE_TTS_ENGINE=say|cloned`. Remove
+`~/.hivematrix/voice/profile.wav` to fall back to `say`.
 
 ## Status
 

@@ -31,7 +31,8 @@ class StreamTurnResult:
 def stream_turn(audio_in: str,
                 token_stream_fn: Callable[[str], Iterable[str]],
                 on_audio: Optional[Callable[[str], None]] = None,
-                stt_model: Optional[str] = None) -> StreamTurnResult:
+                stt_model: Optional[str] = None,
+                tts_quality: str = "fast") -> StreamTurnResult:
     start = time.time()
     transcript = transcribe(audio_in, model=stt_model)
     stt_s = time.time() - start
@@ -41,7 +42,7 @@ def stream_turn(audio_in: str,
         return res
 
     for sentence in iter_sentences(token_stream_fn(transcript)):
-        wav = synthesize(sentence)
+        wav = synthesize(sentence, quality=tts_quality)
         if res.ttfa_s is None:
             res.ttfa_s = time.time() - start
         res.sentences.append(sentence)
