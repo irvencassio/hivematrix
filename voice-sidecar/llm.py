@@ -2,9 +2,14 @@
 OpenAI-compatible endpoint (the same local server the daemon routes to). All
 config is env-driven so it tracks whatever the operator has serving locally:
 
-    HIVE_LLM_BASE_URL  (default http://127.0.0.1:11434/v1)
-    HIVE_LLM_MODEL     (default "qwen")
+    HIVE_LLM_BASE_URL  (default http://localhost:1234/v1 — LM Studio)
+    HIVE_LLM_MODEL     (default qwen/qwen3.6-27b)
     HIVE_LLM_API_KEY   (default "local" — local servers ignore it)
+
+When spawned by the daemon (/voice/turn) these are set from the operator's
+configured Qwen profile (src/lib/voice/llm-env.ts), so the spoken loop uses the
+same local model as the rest of HiveMatrix. The defaults below only apply when a
+script is run standalone (e.g. talk.py) with nothing in the environment.
 
 Keeping the loop local honors the Q12 "local-first" posture; no cloud call.
 """

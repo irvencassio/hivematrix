@@ -1266,6 +1266,7 @@ export function createDaemonServer() {
         const { isFeatureEnabled } = await import("@/lib/config/features");
         if (!isFeatureEnabled("voice")) { json(res, 403, { error: "voice feature is off — enable it in Settings → Features" }); return; }
         const { voiceRuntime } = await import("@/lib/voice/runtime");
+        const { voiceLlmEnv } = await import("@/lib/voice/llm-env");
         const rt = voiceRuntime();
         if (!rt) { json(res, 503, { error: "voice sidecar not available" }); return; }
         const body = await parseBody(req) as Record<string, unknown>;
@@ -1282,7 +1283,7 @@ export function createDaemonServer() {
         writeFileSync(inPath, Buffer.from(audioB64, "base64"));
         const lang = typeof body.lang === "string" ? body.lang : "en";
         await new Promise<void>((resolve) => {
-          execFile(rt.python, [join(rt.scriptsDir, "turn_cli.py"), inPath, outPath, "--lang", lang], { cwd: rt.scriptsDir, timeout: 120_000 }, (err, stdout, stderr) => {
+          execFile(rt.python, [join(rt.scriptsDir, "turn_cli.py"), inPath, outPath, "--lang", lang], { cwd: rt.scriptsDir, timeout: 120_000, env: { ...process.env, ...voiceLlmEnv() } }, (err, stdout, stderr) => {
             if (err) { json(res, 500, { error: ((stderr || err.message || "").trim()).slice(-300) }); resolve(); return; }
             let meta: { transcript?: string; reply?: string } = {};
             try { meta = JSON.parse((stdout.trim().split("\n").pop()) || "{}"); } catch { /* ignore */ }
