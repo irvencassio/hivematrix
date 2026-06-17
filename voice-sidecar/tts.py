@@ -29,6 +29,11 @@ CLONE_TIERS = {
 }
 DEFAULT_QUALITY = "high"
 
+# Cloned-voice pace. VoxCPM2 renders a touch slow/deliberate for conversation, so
+# we nudge the tempo up (pitch preserved, via ffmpeg atempo). 1.0 = model native;
+# 1.15 = 15% faster. Override with HIVE_TTS_SPEED.
+CLONE_SPEED = float(os.environ.get("HIVE_TTS_SPEED", "1.15"))
+
 
 def voice_profile_path() -> str:
     return os.path.join(os.path.expanduser("~"), ".hivematrix", "voice", "profile.wav")
@@ -100,4 +105,28 @@ def _synthesize_cloned(text: str, out_path: str, ref_audio: str,
     produced = os.path.join(out_dir, f"{prefix}_000.wav")
     if produced != out_path and os.path.exists(produced):
         os.replace(produced, out_path)
+    _speed_up(out_path, CLONE_SPEED)
     return out_path
+
+
+def _speed_up(wav_path: str, factor: float) -> None:
+    """Speed up a WAV by `factor` in place, pitch-preserved (ffmpeg atempo).
+
+    Best-effort: if ffmpeg is missing or fails we keep the native-speed audio
+    rather than break synthesis. atempo handles 0.5–2.0 in one stage.
+    """
+    if abs(factor - 1.0) < 1e-3:
+        return
+    tmp = wav_path + ".sp.wav"
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", wav_path,
+             "-filter:a", f"atempo={factor:.3f}", tmp],
+            check=True,
+        )
+        os.replace(tmp, wav_path)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
