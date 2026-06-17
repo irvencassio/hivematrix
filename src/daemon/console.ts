@@ -2665,10 +2665,15 @@ async function renderFeatures() {
   if (!features.length) { el.innerHTML = '<div class="muted">No optional features.</div>'; return; }
   el.innerHTML = features.map(f => {
     const on = f.enabled === true;
+    const incapable = f.capable === false;
+    const reason = (incapable && f.reason) ? ' <span style="color:var(--accent-2)">— ' + esc(f.reason) + '</span>' : '';
+    const control = incapable
+      ? '<button class="reply-toggle" disabled title="' + esc(f.reason || 'not available') + '" style="opacity:.45;cursor:not-allowed">Unavailable</button>'
+      : '<button class="reply-toggle' + (on ? ' active' : '') + '" onclick="toggleFeature(\'' + esc(f.key) + '\',' + (!on) + ')">' + (on ? 'On' : 'Off') + '</button>';
     return '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
       + '<div style="flex:1"><div style="font-weight:600">' + esc(f.label) + '</div>'
-      + '<div class="muted" style="font-size:11px;margin-top:2px">' + esc(f.description) + '</div></div>'
-      + '<button class="reply-toggle' + (on ? ' active' : '') + '" onclick="toggleFeature(\'' + esc(f.key) + '\',' + (!on) + ')">' + (on ? 'On' : 'Off') + '</button>'
+      + '<div class="muted" style="font-size:11px;margin-top:2px">' + esc(f.description) + reason + '</div></div>'
+      + control
       + '</div>';
   }).join('');
 }

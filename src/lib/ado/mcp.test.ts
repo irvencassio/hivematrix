@@ -1,13 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseAdoConfig, buildAdoMcpServer } from "./mcp";
-import { parseFeatures } from "@/lib/config/features";
+import { parseFeatures, featureCapability } from "@/lib/config/features";
 
 test("parseFeatures defaults flags off; reads true only for explicit true", () => {
   assert.deepEqual(parseFeatures({}), { ado: false, voice: false, video: false });
   assert.deepEqual(parseFeatures({ features: { ado: true } }), { ado: true, voice: false, video: false });
   assert.deepEqual(parseFeatures({ features: { ado: "yes" } }), { ado: false, voice: false, video: false });
   assert.deepEqual(parseFeatures({ features: { voice: true } }), { ado: false, voice: true, video: false });
+});
+
+test("featureCapability gates heavy features on Apple Silicon + RAM", () => {
+  assert.deepEqual(featureCapability("ado"), { capable: true });                        // light feature, always ok
+  assert.equal(featureCapability("voice", { arch: "x64", ramGB: 64 }).capable, false);  // not Apple Silicon
+  assert.equal(featureCapability("voice", { arch: "arm64", ramGB: 8 }).capable, false); // too little RAM
+  assert.equal(featureCapability("voice", { arch: "arm64", ramGB: 64 }).capable, true);
+  assert.equal(featureCapability("video", { arch: "arm64", ramGB: 128 }).capable, true);
 });
 
 test("parseAdoConfig requires an org; defaults authMode to azcli (Entra)", () => {

@@ -5,7 +5,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
-import { homedir } from "os";
+import { homedir, arch, totalmem } from "os";
 import { join } from "path";
 
 /** Known feature flags. Add a row to surface a new toggle in settings. */
@@ -41,6 +41,27 @@ export function parseFeatures(config: Record<string, unknown>): Record<string, b
     for (const f of KNOWN_FEATURES) out[f.key] = false;
   }
   return out;
+}
+
+// Features that run heavy local models (Apple Silicon + RAM). The voice/video
+// pipelines need MLX (whisper + cloned-voice TTS + the video stack), so they're
+// gated; the UI greys the toggle out on machines that can't run them.
+const HEAVY_FEATURES = new Set<string>(["voice", "video"]);
+const MIN_RAM_GB = 16;
+
+export interface FeatureCapability { capable: boolean; reason?: string }
+
+/** Can this machine run the feature? `env` is injectable for tests. */
+export function featureCapability(
+  key: string,
+  env: { arch?: string; ramGB?: number } = {},
+): FeatureCapability {
+  if (!HEAVY_FEATURES.has(key)) return { capable: true };
+  const a = env.arch ?? arch();
+  if (a !== "arm64") return { capable: false, reason: "Requires an Apple Silicon Mac" };
+  const gb = env.ramGB ?? totalmem() / 1e9;
+  if (gb < MIN_RAM_GB) return { capable: false, reason: `Requires ${MIN_RAM_GB} GB+ RAM (this Mac has ${Math.round(gb)} GB)` };
+  return { capable: true };
 }
 
 export function getFeatureFlags(): Record<string, boolean> {

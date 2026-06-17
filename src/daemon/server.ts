@@ -300,19 +300,27 @@ export function createDaemonServer() {
         return;
       }
 
-      // GET /settings/features — feature flags + their on/off state.
+      // GET /settings/features — feature flags + on/off state + machine capability.
       if (req.method === "GET" && urlPath === "/settings/features") {
-        const { getFeatureFlags, KNOWN_FEATURES } = await import("@/lib/config/features");
+        const { getFeatureFlags, KNOWN_FEATURES, featureCapability } = await import("@/lib/config/features");
         const flags = getFeatureFlags();
-        json(res, 200, { features: KNOWN_FEATURES.map((f) => ({ ...f, enabled: flags[f.key] === true })) });
+        json(res, 200, { features: KNOWN_FEATURES.map((f) => {
+          const cap = featureCapability(f.key);
+          return { ...f, enabled: flags[f.key] === true, capable: cap.capable, reason: cap.reason ?? null };
+        }) });
         return;
       }
       // POST /settings/features — { key, enabled } toggle a flag.
       if (req.method === "POST" && urlPath === "/settings/features") {
-        const { setFeature, KNOWN_FEATURES } = await import("@/lib/config/features");
+        const { setFeature, KNOWN_FEATURES, featureCapability } = await import("@/lib/config/features");
         const body = await parseBody(req) as Record<string, unknown>;
         const key = String(body.key ?? "");
         if (!KNOWN_FEATURES.some((f) => f.key === key)) { json(res, 400, { error: `unknown feature "${key}"` }); return; }
+        // Don't let a feature be enabled on a machine that can't run it.
+        if (body.enabled === true) {
+          const cap = featureCapability(key);
+          if (!cap.capable) { json(res, 400, { error: cap.reason ?? "not available on this machine" }); return; }
+        }
         const flags = setFeature(key as typeof KNOWN_FEATURES[number]["key"], body.enabled === true);
         json(res, 200, { features: flags });
         return;
