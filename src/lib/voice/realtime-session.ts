@@ -111,13 +111,18 @@ function startServer(): Promise<number> {
   });
 }
 
-/** Relay an SDP offer to the realtime server and return its SDP answer. */
-export async function relayOffer(offer: { sdp: string; type: string }): Promise<{ status: number; body: unknown }> {
+/** Relay a SmallWebRTC signaling request to the realtime server. `method` is
+ * POST for an offer (returns the SDP answer) or PATCH for trickle-ICE updates.
+ * The body is forwarded verbatim (sdp/type/pc_id/restart_pc/candidates …). */
+export async function relayOffer(
+  body: Record<string, unknown>,
+  method: "POST" | "PATCH" = "POST",
+): Promise<{ status: number; body: unknown }> {
   const port = await ensureRealtimeServer();
   const r = await fetch(`http://127.0.0.1:${port}/offer`, {
-    method: "POST",
+    method,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(offer),
+    body: JSON.stringify(body),
   });
   return { status: r.status, body: await r.json() };
 }

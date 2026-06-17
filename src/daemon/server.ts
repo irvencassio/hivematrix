@@ -1326,20 +1326,19 @@ export function createDaemonServer() {
         return;
       }
 
-      // POST /voice/rtc/offer — realtime voice signaling relay (P5.2). The iOS
-      // client's SDP offer is forwarded to the headless Pipecat realtime server;
-      // its SDP answer is returned. Media flows P2P (phone↔Mac), not through here.
-      // Gated by `voice` + capability.
-      if (req.method === "POST" && urlPath === "/voice/rtc/offer") {
+      // POST/PATCH /voice/rtc/offer — realtime voice signaling relay (P5.2). The
+      // client's SmallWebRTC offer (POST) / trickle-ICE updates (PATCH) are
+      // forwarded to the headless Pipecat realtime server; its answer is returned.
+      // Media flows P2P (phone↔Mac), not through here. Gated by `voice` (+ cap).
+      if ((req.method === "POST" || req.method === "PATCH") && urlPath === "/voice/rtc/offer") {
         const { isFeatureEnabled, featureCapability } = await import("@/lib/config/features");
         if (!isFeatureEnabled("voice")) { json(res, 403, { error: "voice feature is off — enable it in Settings → Features" }); return; }
         const cap = featureCapability("voice");
         if (!cap.capable) { json(res, 400, { error: cap.reason ?? "not available on this machine" }); return; }
         const body = await parseBody(req) as Record<string, unknown>;
-        if (typeof body.sdp !== "string" || typeof body.type !== "string") { json(res, 400, { error: "sdp and type are required" }); return; }
         const { relayOffer } = await import("@/lib/voice/realtime-session");
         try {
-          const { status, body: answer } = await relayOffer({ sdp: body.sdp, type: body.type });
+          const { status, body: answer } = await relayOffer(body, req.method as "POST" | "PATCH");
           json(res, status, answer);
         } catch (e) {
           json(res, 503, { error: e instanceof Error ? e.message : String(e) });

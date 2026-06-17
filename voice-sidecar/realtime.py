@@ -170,6 +170,22 @@ def build_pipeline(transport: SmallWebRTCTransport, tts_quality: str = "fast"):
     return task, PipelineRunner(handle_sigint=False)
 
 
+GREETING = "Hi, I'm your local assistant. How can I help?"
+
+
+async def build_session(transport: SmallWebRTCTransport, tts_quality: str = "fast"):
+    """Build the pipeline on a transport and wire a greeting on connect. Returns
+    (task, runner); the caller decides whether to await runner.run (runner path)
+    or fire it as a background task (request-handler path)."""
+    task, runner = build_pipeline(transport, tts_quality=tts_quality)
+
+    @transport.event_handler("on_client_connected")
+    async def _greet(_transport, _client):
+        await task.queue_frames([TTSSpeakFrame(GREETING)])
+
+    return task, runner
+
+
 async def answer_offer(offer: dict, ice_servers=None, tts_quality: str = "fast") -> dict:
     """Accept a client's WebRTC SDP offer, start the pipeline, and return the SDP
     answer. `offer` = {"sdp": ..., "type": "offer"}. `ice_servers` is a list of
