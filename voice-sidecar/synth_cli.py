@@ -22,6 +22,7 @@ def main() -> int:
     ap.add_argument("--text-file", dest="text_file")
     ap.add_argument("--out", required=True)
     ap.add_argument("--quality", default="high")
+    ap.add_argument("--lang", default="en")
     a = ap.parse_args()
 
     text = a.text
@@ -34,10 +35,10 @@ def main() -> int:
 
     ext = os.path.splitext(a.out)[1].lower()
     if ext == ".wav":
-        synthesize(text, out_path=a.out, quality=a.quality)
+        synthesize(text, out_path=a.out, quality=a.quality, lang=a.lang)
     else:
         wav = a.out + ".wav"
-        synthesize(text, out_path=wav, quality=a.quality)
+        synthesize(text, out_path=wav, quality=a.quality, lang=a.lang)
         fmt = "caff" if ext == ".caf" else "m4af"  # default to MPEG-4/AAC
         subprocess.run(["afconvert", "-f", fmt, "-d", "aac", wav, a.out], check=True)
         try:

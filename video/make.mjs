@@ -32,6 +32,8 @@ const ti = args.indexOf("--title");
 const title = ti >= 0 ? args[ti + 1] : "HiveMatrix";
 const si = args.indexOf("--screen");
 const screenSrc = si >= 0 ? args[si + 1] : null;
+const li = args.indexOf("--lang");
+const lang = li >= 0 ? args[li + 1] : "en";
 
 mkdirSync(OUT, { recursive: true });
 mkdirSync(join(VIDEO_DIR, "public"), { recursive: true });
@@ -46,12 +48,12 @@ const propsPath = join(OUT, "props.json");
 
 writeFileSync(scriptTxt, scriptText);
 
-console.log("→ voiceover (cloned voice)…");
-execFileSync(py, [join(sc, "synth_cli.py"), "--text-file", scriptTxt, "--out", narration, "--quality", "high"],
+console.log(`→ voiceover (cloned voice, lang=${lang})…`);
+execFileSync(py, [join(sc, "synth_cli.py"), "--text-file", scriptTxt, "--out", narration, "--quality", "high", "--lang", lang],
   { cwd: sc, stdio: "inherit" });
 
 console.log("→ caption timings (whisper)…");
-execFileSync(py, [join(sc, "word_timings.py"), narration, capJson], { cwd: sc, stdio: "inherit" });
+execFileSync(py, [join(sc, "word_timings.py"), narration, capJson, "--lang", lang], { cwd: sc, stdio: "inherit" });
 const caps = JSON.parse(readFileSync(capJson, "utf-8"));
 
 const dur = parseFloat(execFileSync("ffprobe",

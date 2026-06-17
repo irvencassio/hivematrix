@@ -4,8 +4,9 @@
 Transcribes narration audio with mlx-whisper and emits word timings as JSON, for
 the Remotion captions track:  {"text", "duration", "words": [{word,start,end}]}.
 
-    python word_timings.py narration.wav [out.json]
+    python word_timings.py narration.wav [out.json] [--lang it]
 """
+import argparse
 import json
 import os
 import sys
@@ -16,11 +17,17 @@ MODEL = os.environ.get("HIVE_STT_MODEL", "mlx-community/whisper-large-v3-turbo")
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        print("usage: word_timings.py <audio> [out.json]", file=sys.stderr)
-        return 2
-    audio, out = sys.argv[1], (sys.argv[2] if len(sys.argv) > 2 else None)
-    r = mlx_whisper.transcribe(audio, path_or_hf_repo=MODEL, word_timestamps=True)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("audio")
+    ap.add_argument("out", nargs="?")
+    ap.add_argument("--lang", default=None, help="force a language (e.g. 'it'); default auto-detect")
+    a = ap.parse_args()
+
+    kwargs = {"path_or_hf_repo": MODEL, "word_timestamps": True}
+    if a.lang:
+        kwargs["language"] = a.lang
+    r = mlx_whisper.transcribe(a.audio, **kwargs)
+
     words = []
     for seg in r.get("segments", []):
         for w in seg.get("words", []):
@@ -29,16 +36,14 @@ def main() -> int:
                 words.append({"word": token,
                               "start": round(float(w["start"]), 3),
                               "end": round(float(w["end"]), 3)})
-    data = {
-        "text": (r.get("text") or "").strip(),
-        "duration": words[-1]["end"] if words else 0.0,
-        "words": words,
-    }
+    data = {"text": (r.get("text") or "").strip(),
+            "duration": words[-1]["end"] if words else 0.0,
+            "words": words}
     payload = json.dumps(data)
-    if out:
-        with open(out, "w") as f:
+    if a.out:
+        with open(a.out, "w") as f:
             f.write(payload)
-        print(out)
+        print(a.out)
     else:
         print(payload)
     return 0

@@ -44,10 +44,12 @@ def _out_path(out_path: str | None) -> str:
 
 def synthesize(text: str, out_path: str | None = None, voice: str | None = None,
                rate: int = SAMPLE_RATE, engine: str | None = None,
-               ref_audio: str | None = None, quality: str = DEFAULT_QUALITY) -> str:
+               ref_audio: str | None = None, quality: str = DEFAULT_QUALITY,
+               lang: str = "en") -> str:
     """Synthesize `text` to a WAV; return its path. Engine auto-selects 'cloned'
     when a profile (or ref_audio) exists, else 'say'. `HIVE_TTS_ENGINE` overrides.
-    `quality` ('high'|'fast') picks the cloned tier."""
+    `quality` ('high'|'fast') picks the cloned tier. `lang` (e.g. 'en', 'it') is a
+    hint for the cloned engine; the cloned voice is multilingual (text-driven)."""
     clean = (text or "").strip()
     if not clean:
         raise ValueError("synthesize: empty text")
@@ -56,7 +58,7 @@ def synthesize(text: str, out_path: str | None = None, voice: str | None = None,
         engine = os.environ.get("HIVE_TTS_ENGINE") or (
             "cloned" if (ref_audio or has_voice_profile()) else "say")
     if engine == "cloned":
-        return _synthesize_cloned(clean, _out_path(out_path), ref_audio or voice_profile_path(), quality)
+        return _synthesize_cloned(clean, _out_path(out_path), ref_audio or voice_profile_path(), quality, lang)
     return _synthesize_say(clean, _out_path(out_path), voice, rate)
 
 
@@ -84,7 +86,7 @@ def _synthesize_say(text: str, out_path: str, voice: str | None, rate: int) -> s
 
 
 def _synthesize_cloned(text: str, out_path: str, ref_audio: str,
-                       quality: str = DEFAULT_QUALITY) -> str:
+                       quality: str = DEFAULT_QUALITY, lang: str = "en") -> str:
     # mlx-audio is heavy (transformers/mlx-lm) — import only when actually cloning.
     from mlx_audio.tts.generate import generate_audio
     tier = CLONE_TIERS.get(quality, CLONE_TIERS["high"])
@@ -93,7 +95,7 @@ def _synthesize_cloned(text: str, out_path: str, ref_audio: str,
     generate_audio(
         text=text, model=tier["model"], ref_audio=ref_audio,
         output_path=out_dir, file_prefix=prefix, audio_format="wav", verbose=False,
-        **tier["params"],
+        lang_code=lang, **tier["params"],
     )
     produced = os.path.join(out_dir, f"{prefix}_000.wav")
     if produced != out_path and os.path.exists(produced):
