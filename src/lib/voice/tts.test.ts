@@ -36,7 +36,7 @@ test("synthesizeSpeech rejects empty text", async () => {
 test("synthesizeSpeech produces a non-empty .m4a via macOS say", { skip: process.platform !== "darwin" }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "tts-"));
   try {
-    const res = await synthesizeSpeech("Hello from HiveMatrix.", { outDir: dir, id: "test" });
+    const res = await synthesizeSpeech("Hello from HiveMatrix.", { outDir: dir, id: "test", engine: "say" });
     assert.equal(res.engine, "say");
     assert.equal(res.path, join(dir, "voice-test.m4a"));
     assert.ok(statSync(res.path).size > 0, "audio file should be non-empty");

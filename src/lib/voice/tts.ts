@@ -10,7 +10,7 @@
  */
 
 import { execFile } from "child_process";
-import { mkdirSync, writeFileSync, unlinkSync } from "fs";
+import { mkdirSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { randomBytes } from "crypto";
@@ -25,6 +25,8 @@ export interface TtsOptions {
   /** Filename stem; default random. */
   id?: string;
   timeoutMs?: number;
+  /** Force an engine. Default: cloned when available, else say. */
+  engine?: TtsEngine;
 }
 
 export interface TtsResult {
@@ -37,41 +39,93 @@ export function voiceOutputDir(base: string = homedir()): string {
   return join(base, ".hivematrix", "uploads");
 }
 
+/** The cloned voice profile the operator recorded (voice-sidecar/record_voice.py). */
+export function voiceProfilePath(base: string = homedir()): string {
+  return join(base, ".hivematrix", "voice", "profile.wav");
+}
+
 /**
- * Synthesize `text` to an .m4a file and return its absolute path. Bootstrap
- * engine = macOS `say`. Rejects on empty text or synthesis failure.
- *
- * Text is passed via a temp file (`say -f`) rather than argv so a summary that
- * happens to start with "-" can't be misread as a flag, and long text is safe.
+ * Locate the Python voice-sidecar (with its venv) that owns the cloned VoxCPM2
+ * voice. Checked: HIVE_VOICE_SIDECAR, ./voice-sidecar (daemon run from repo),
+ * ~/hivematrix/voice-sidecar. Null when not present (e.g. the shipped .app),
+ * in which case we fall back to `say`.
  */
-export function synthesizeSpeech(text: string, opts: TtsOptions = {}): Promise<TtsResult> {
+export function sidecarDir(): string | null {
+  const candidates = [
+    process.env.HIVE_VOICE_SIDECAR,
+    join(process.cwd(), "voice-sidecar"),
+    join(homedir(), "hivematrix", "voice-sidecar"),
+  ].filter((d): d is string => !!d);
+  for (const d of candidates) {
+    if (existsSync(join(d, ".venv", "bin", "python")) && existsSync(join(d, "synth_cli.py"))) return d;
+  }
+  return null;
+}
+
+/** True when a recorded profile AND the sidecar are both present. */
+export function clonedVoiceAvailable(): boolean {
+  return existsSync(voiceProfilePath()) && sidecarDir() !== null;
+}
+
+/** Synthesize via the sidecar's cloned voice. Resolves null on any failure. */
+function synthesizeCloned(txtPath: string, outPath: string, timeoutMs: number): Promise<TtsResult | null> {
+  return new Promise((resolve) => {
+    const dir = sidecarDir();
+    if (!dir) { resolve(null); return; }
+    const py = join(dir, ".venv", "bin", "python");
+    const args = [join(dir, "synth_cli.py"), "--text-file", txtPath, "--out", outPath, "--quality", "high"];
+    execFile(py, args, { cwd: dir, timeout: timeoutMs }, (err, _stdout, stderr) => {
+      if (err || !existsSync(outPath)) {
+        console.error(`[voice] cloned synth failed, falling back to say: ${(stderr || err?.message || "").trim()}`);
+        resolve(null);
+        return;
+      }
+      resolve({ path: outPath, engine: "cloned" });
+    });
+  });
+}
+
+function synthesizeSay(txtPath: string, outPath: string, voice: string | undefined, timeoutMs: number): Promise<TtsResult> {
   return new Promise((resolve, reject) => {
-    const clean = (text ?? "").trim();
-    if (!clean) { reject(new Error("synthesizeSpeech: empty text")); return; }
-
-    const dir = opts.outDir ?? voiceOutputDir();
-    try { mkdirSync(dir, { recursive: true }); } catch { /* best effort */ }
-
-    const id = opts.id ?? randomBytes(6).toString("hex");
-    const outPath = join(dir, `voice-${id}.m4a`);
-    const txtPath = join(dir, `voice-${id}.txt`);
-    try {
-      writeFileSync(txtPath, clean);
-    } catch (e) {
-      reject(e instanceof Error ? e : new Error(String(e)));
-      return;
-    }
-
     const args: string[] = [];
-    if (opts.voice) args.push("-v", opts.voice);
+    if (voice) args.push("-v", voice);
     args.push("-o", outPath, "-f", txtPath);
-
-    execFile("say", args, { timeout: opts.timeoutMs ?? 30_000 }, (err, _stdout, stderr) => {
-      try { unlinkSync(txtPath); } catch { /* ignore */ }
+    execFile("say", args, { timeout: timeoutMs }, (err, _stdout, stderr) => {
       if (err) { reject(new Error(`say failed: ${(stderr || err.message || "").trim()}`)); return; }
       resolve({ path: outPath, engine: "say" });
     });
   });
+}
+
+/**
+ * Synthesize `text` to an .m4a and return its absolute path. Uses the operator's
+ * cloned VoxCPM2 voice when available (a recorded profile + the Python sidecar),
+ * else falls back to macOS `say`. Cloning runs out-of-process in the sidecar, so
+ * the daemon stays Node-only. Text passes via a temp file (never argv).
+ */
+export async function synthesizeSpeech(text: string, opts: TtsOptions = {}): Promise<TtsResult> {
+  const clean = (text ?? "").trim();
+  if (!clean) throw new Error("synthesizeSpeech: empty text");
+
+  const dir = opts.outDir ?? voiceOutputDir();
+  try { mkdirSync(dir, { recursive: true }); } catch { /* best effort */ }
+
+  const id = opts.id ?? randomBytes(6).toString("hex");
+  const outPath = join(dir, `voice-${id}.m4a`);
+  const txtPath = join(dir, `voice-${id}.txt`);
+  writeFileSync(txtPath, clean);
+
+  const sayTimeout = opts.timeoutMs ?? 30_000;
+  try {
+    // Cloned voice (out-of-process, slower) unless the caller forced `say`.
+    if (opts.engine !== "say" && clonedVoiceAvailable()) {
+      const cloned = await synthesizeCloned(txtPath, outPath, Math.max(sayTimeout, 120_000));
+      if (cloned) return cloned;
+    }
+    return await synthesizeSay(txtPath, outPath, opts.voice, sayTimeout);
+  } finally {
+    try { unlinkSync(txtPath); } catch { /* ignore */ }
+  }
 }
 
 /**
