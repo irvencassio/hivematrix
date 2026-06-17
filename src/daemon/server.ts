@@ -1316,6 +1316,37 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /voice/rtc/config — ICE servers (STUN + the operator's Cloudflare
+      // TURN) for the realtime iOS client to gather candidates. Gated by `voice`.
+      if (req.method === "GET" && urlPath === "/voice/rtc/config") {
+        const { isFeatureEnabled } = await import("@/lib/config/features");
+        if (!isFeatureEnabled("voice")) { json(res, 403, { error: "voice feature is off — enable it in Settings → Features" }); return; }
+        const { realtimeIceServers } = await import("@/lib/voice/realtime-session");
+        json(res, 200, { iceServers: realtimeIceServers() });
+        return;
+      }
+
+      // POST /voice/rtc/offer — realtime voice signaling relay (P5.2). The iOS
+      // client's SDP offer is forwarded to the headless Pipecat realtime server;
+      // its SDP answer is returned. Media flows P2P (phone↔Mac), not through here.
+      // Gated by `voice` + capability.
+      if (req.method === "POST" && urlPath === "/voice/rtc/offer") {
+        const { isFeatureEnabled, featureCapability } = await import("@/lib/config/features");
+        if (!isFeatureEnabled("voice")) { json(res, 403, { error: "voice feature is off — enable it in Settings → Features" }); return; }
+        const cap = featureCapability("voice");
+        if (!cap.capable) { json(res, 400, { error: cap.reason ?? "not available on this machine" }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        if (typeof body.sdp !== "string" || typeof body.type !== "string") { json(res, 400, { error: "sdp and type are required" }); return; }
+        const { relayOffer } = await import("@/lib/voice/realtime-session");
+        try {
+          const { status, body: answer } = await relayOffer({ sdp: body.sdp, type: body.type });
+          json(res, status, answer);
+        } catch (e) {
+          json(res, 503, { error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
       // POST /video/make — agent/daemon-driven video creation, gated by the
       // `video` feature flag. Drives the out-of-process Node video factory
       // (topic→script→cloned-voice narration→captions→render). Long-running.
