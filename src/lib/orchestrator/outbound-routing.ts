@@ -82,6 +82,22 @@ export function daemonPort(): string {
 }
 
 /**
+ * Injected only when the `video` feature is enabled — tells the agent to produce
+ * videos via the local video factory rather than improvising. The render runs
+ * out-of-process and returns the output mp4 path.
+ */
+export function videoRoutingPrompt(): string {
+  const port = daemonPort();
+  return [
+    "--- Video creation (video factory) ---",
+    "To make a narrated, captioned video (how-to or explainer) in the operator's cloned voice, POST to the local daemon — do NOT try to render video yourself:",
+    `  curl -s -X POST "http://127.0.0.1:${port}/video/make" -H "Content-Type: application/json" \\`,
+    `    --data '{"topic":"WHAT THE VIDEO IS ABOUT","lang":"en","title":"TITLE","seconds":30}'`,
+    'Use "script" instead of "topic" to supply the exact narration. The JSON response includes the output mp4 "path". Rendering takes about a minute.',
+  ].join("\n");
+}
+
+/**
  * The system-prompt block injected into the Claude Code / Codex agent so it
  * routes outbound email + messaging through MailBee/MessageBee instead of
  * improvising. Mirrors the local agent's capabilityRoutingGuide, but expressed

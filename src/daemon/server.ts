@@ -20,7 +20,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
-import { dirname, resolve, sep } from "path";
+import { dirname, join, resolve, sep } from "path";
 import { getDb } from "@/lib/db";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import type { ConnectivityMode } from "@/lib/connectivity/policy";
@@ -1248,6 +1248,40 @@ export function createDaemonServer() {
         });
         broadcast("tasks:created", { taskId: task._id });
         json(res, 201, { created: true, taskId: task._id });
+        return;
+      }
+
+      // POST /video/make — agent/daemon-driven video creation, gated by the
+      // `video` feature flag. Drives the out-of-process Node video factory
+      // (topic→script→cloned-voice narration→captions→render). Long-running.
+      if (req.method === "POST" && urlPath === "/video/make") {
+        const { isFeatureEnabled } = await import("@/lib/config/features");
+        if (!isFeatureEnabled("video")) { json(res, 403, { error: "video feature is off — enable it in Settings → Features" }); return; }
+        const { runVideoFactory } = await import("@/lib/video/factory");
+        const { generateId } = await import("@/lib/db");
+        const { mkdirSync, writeFileSync } = await import("fs");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const topic = typeof body.topic === "string" && body.topic.trim() ? body.topic.trim() : undefined;
+        const script = typeof body.script === "string" && body.script.trim() ? body.script.trim() : undefined;
+        if (!topic && !script) { json(res, 400, { error: "topic or script is required" }); return; }
+        const id = generateId();
+        const dir = join(homedir(), ".hivematrix", "artifacts", "video");
+        mkdirSync(dir, { recursive: true });
+        const out = join(dir, `${id}.mp4`);
+        let scriptFile: string | undefined;
+        if (script) { scriptFile = join(dir, `${id}.txt`); writeFileSync(scriptFile, script); }
+        try {
+          const r = await runVideoFactory({
+            topic, scriptFile, out,
+            lang: typeof body.lang === "string" ? body.lang : undefined,
+            title: typeof body.title === "string" ? body.title : undefined,
+            seconds: typeof body.seconds === "number" ? body.seconds : undefined,
+            screen: typeof body.screen === "string" ? body.screen : undefined,
+          });
+          json(res, 201, { ok: true, path: r.path });
+        } catch (e) {
+          json(res, 500, { ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
         return;
       }
 
