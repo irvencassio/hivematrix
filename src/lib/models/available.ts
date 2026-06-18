@@ -108,21 +108,21 @@ export function setDefaultModel(modelId: string): void {
 
 // --- Theme + wallpaper (Settings → Appearance) ---
 
-export type ThemeMode = "system" | "light" | "dark";
+export type ThemeMode = "system" | "light" | "dark" | "matrix";
 
 export interface ThemeSettings {
   theme: ThemeMode;
   wallpaperPath: string | null;
-  /** Panel opacity over a wallpaper, 40–100 (% of solid). Default 82. */
+  /** Panel opacity over a wallpaper, 0–100 (% of solid). Default 82. */
   wallpaperOpacity: number;
 }
 
 export function getThemeSettings(): ThemeSettings {
   const cfg = readConfig();
-  const theme = cfg.theme === "light" || cfg.theme === "dark" ? cfg.theme : "system";
+  const theme = cfg.theme === "light" || cfg.theme === "dark" || cfg.theme === "matrix" ? cfg.theme : "system";
   const wallpaperPath = typeof cfg.wallpaperPath === "string" && cfg.wallpaperPath ? cfg.wallpaperPath : null;
   const raw = typeof cfg.wallpaperOpacity === "number" ? cfg.wallpaperOpacity : 82;
-  const wallpaperOpacity = Math.min(100, Math.max(40, Math.round(raw)));
+  const wallpaperOpacity = Math.min(100, Math.max(0, Math.round(raw)));
   return { theme, wallpaperPath, wallpaperOpacity };
 }
 
@@ -131,10 +131,10 @@ function writeConfig(cfg: Record<string, unknown>): void {
   writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
 }
 
-/** Panel translucency over a wallpaper (40–100). */
+/** Panel translucency over a wallpaper (0–100). */
 export function setWallpaperOpacity(pct: number): void {
   const cfg = readConfig();
-  cfg.wallpaperOpacity = Math.min(100, Math.max(40, Math.round(pct)));
+  cfg.wallpaperOpacity = Math.min(100, Math.max(0, Math.round(pct)));
   writeConfig(cfg);
 }
 

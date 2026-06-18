@@ -1,0 +1,33 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="44%" r="72%">
+      <stop offset="0" stop-color="#0e451f"/>
+      <stop offset="52%" stop-color="#06250f"/>
+      <stop offset="100%" stop-color="#020c06"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#3bff5e" stop-opacity="0.50"/>
+      <stop offset="55%" stop-color="#1fd23f" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#1fd23f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hex" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#86ff95"/>
+      <stop offset="1" stop-color="#17b333"/>
+    </linearGradient>
+    <g id="flower" stroke="#03190c" stroke-width="0.7" stroke-linejoin="round">
+      <polygon points="63.5,50 56.75,38.31 43.25,38.31 36.5,50 43.25,61.69 56.75,61.69" fill="url(#hex)"/>
+      <polygon points="88.26,35.7 81.51,24.01 68.01,24.01 61.26,35.7 68.01,47.39 81.51,47.39" fill="url(#hex)"/>
+      <polygon points="63.5,21.4 56.75,9.71 43.25,9.71 36.5,21.4 43.25,33.09 56.75,33.09" fill="url(#hex)"/>
+      <polygon points="38.74,35.7 31.99,24.01 18.49,24.01 11.74,35.7 18.49,47.39 31.99,47.39" fill="url(#hex)"/>
+      <polygon points="38.74,64.3 31.99,52.61 18.49,52.61 11.74,64.3 18.49,75.99 31.99,75.99" fill="url(#hex)"/>
+      <polygon points="63.5,78.6 56.75,66.91 43.25,66.91 36.5,78.6 43.25,90.29 56.75,90.29" fill="url(#hex)"/>
+      <polygon points="88.26,64.3 81.51,52.61 68.01,52.61 61.26,64.3 68.01,75.99 81.51,75.99" fill="url(#hex)"/>
+    </g>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <ellipse cx="512" cy="498" rx="455" ry="455" fill="url(#halo)"/>
+  <g transform="translate(84,84) scale(8.56)">
+    <use href="#flower" transform="translate(50,50) scale(1.16) translate(-50,-50)" opacity="0.16"/>
+    <use href="#flower"/>
+  </g>
+</svg>

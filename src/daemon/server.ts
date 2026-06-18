@@ -339,7 +339,7 @@ export function createDaemonServer() {
         const m = await import("@/lib/models/available");
         if (typeof body.defaultModel === "string") m.setDefaultModel(body.defaultModel);
         if (typeof body.localEndpoint === "string" && body.localEndpoint.trim()) m.setLocalEndpoint(body.localEndpoint.trim());
-        if (body.theme === "system" || body.theme === "light" || body.theme === "dark") m.setTheme(body.theme);
+        if (body.theme === "system" || body.theme === "light" || body.theme === "dark" || body.theme === "matrix") m.setTheme(body.theme);
         if (typeof body.wallpaperPath === "string") m.setWallpaperPath(body.wallpaperPath.trim() || null);
         if (body.wallpaperPath === null) m.setWallpaperPath(null);
         if (typeof body.wallpaperData === "string" && typeof body.wallpaperExt === "string") {

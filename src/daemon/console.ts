@@ -42,9 +42,28 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     --create-btn-text: #fff;
     --errbox-bg: rgba(207,34,46,.06);
   }
-  /* Wallpaper: panels go translucent so the image shows through; text stays readable. */
+  /* Matrix: deep green-black palette with neon-green accents, behind an animated code-rain canvas. */
+  html[data-theme="matrix"] {
+    --bg: #010a05; --panel: #04140b; --panel-2: #0a2113; --border: #1d5a32;
+    --text: #b9ffce; --muted: #57b074; --accent: #39ff7e; --accent-2: #6effa3;
+    --ok: #39ff7e; --warn: #d2e022; --err: #ff5d6c;
+    --code-bg: #03100a; --code-text: #b9ffce;
+    --badge-bg: #0c2416; --badge-text: #57b074;
+    --overlay-bg: rgba(0,10,4,.7);
+    --reply-q-bg: rgba(57,255,126,.08);
+    --hover-bg: rgba(57,255,126,.08);
+    --card-shadow: 0 0 12px rgba(57,255,126,.07);
+    --create-btn-text: #02160a;
+    --errbox-bg: rgba(255,93,108,.1);
+  }
+  /* Code-rain canvas sits behind all content; only shown in the Matrix theme. */
+  #matrixRain { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none; display: none; }
+  html[data-theme="matrix"] #matrixRain { display: block; }
+  html[data-theme="matrix"] header, html[data-theme="matrix"] main { position: relative; z-index: 1; }
+  /* Wallpaper / Matrix: panels go translucent so the backdrop shows through; text stays readable. */
   html[data-wallpaper="1"] body { background-size: cover; background-position: center; background-attachment: fixed; }
-  html[data-wallpaper="1"] .col, html[data-wallpaper="1"] header { background-color: color-mix(in srgb, var(--panel) var(--wp-opacity, 82%), transparent); backdrop-filter: blur(6px); }
+  html[data-wallpaper="1"] .col, html[data-wallpaper="1"] header,
+  html[data-theme="matrix"] .col, html[data-theme="matrix"] header { background-color: color-mix(in srgb, var(--panel) var(--wp-opacity, 82%), transparent); backdrop-filter: blur(6px); }
   * { box-sizing: border-box; }
   body { margin: 0; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
@@ -375,6 +394,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 </style>
 </head>
 <body>
+<canvas id="matrixRain" aria-hidden="true"></canvas>
 <header>
   <span class="logo">HiveMatrix</span>
   <span class="live" id="live">● live</span>
@@ -498,6 +518,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
           <option value="system">System</option>
           <option value="light">Light</option>
           <option value="dark">Dark</option>
+          <option value="matrix">Matrix</option>
         </select>
       </div>
       <label class="flbl" style="margin-top:10px">Wallpaper</label>
@@ -2320,15 +2341,68 @@ function applyTheme(theme, hasWallpaper) {
   let resolved = theme;
   if (theme === "system") resolved = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   root.dataset.theme = resolved;
-  if (hasWallpaper) {
-    root.dataset.wallpaper = "1";
+  const isMatrix = resolved === "matrix";
+  // Panel translucency (--wp-opacity) applies over a wallpaper image OR the Matrix rain.
+  if (hasWallpaper || isMatrix) {
     const op = (models && typeof models.wallpaperOpacity === "number") ? models.wallpaperOpacity : 82;
     root.style.setProperty("--wp-opacity", op + "%");
+  }
+  if (hasWallpaper) {
+    root.dataset.wallpaper = "1";
     document.body.style.backgroundImage = 'url("/wallpaper?token=' + encodeURIComponent(HM_TOKEN) + '&t=' + Date.now() + '")';
   } else {
     delete root.dataset.wallpaper;
     document.body.style.backgroundImage = "";
   }
+  if (isMatrix) startMatrixRain(); else stopMatrixRain();
+}
+
+// --- Matrix theme: animated falling-code canvas ---
+let _matrixRAF = null;
+let _matrixResize = null;
+function startMatrixRain() {
+  const c = document.getElementById("matrixRain");
+  if (!c) return;
+  if (_matrixRAF) return; // already running
+  const ctx = c.getContext("2d");
+  const fontSize = 16;
+  const glyphs = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃ0123456789ABCDEF<>/\\{}[]#$%*".split("");
+  let cols = 0, drops = [];
+  function reset() {
+    c.width = window.innerWidth;
+    c.height = window.innerHeight;
+    cols = Math.ceil(c.width / fontSize);
+    drops = new Array(cols).fill(0).map(() => Math.random() * -60);
+  }
+  reset();
+  _matrixResize = reset;
+  window.addEventListener("resize", _matrixResize);
+  let last = 0;
+  const STEP_MS = 90; // throttle to a calm, classic stepped cadence (not 60fps)
+  function frame(ts) {
+    _matrixRAF = requestAnimationFrame(frame);
+    if (ts - last < STEP_MS) return;
+    last = ts;
+    ctx.fillStyle = "rgba(1,10,5,0.10)"; // trail fade toward the bg colour
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.font = fontSize + "px ui-monospace, Menlo, monospace";
+    for (let i = 0; i < drops.length; i++) {
+      const ch = glyphs[(Math.random() * glyphs.length) | 0];
+      const x = i * fontSize, y = drops[i] * fontSize;
+      ctx.fillStyle = Math.random() < 0.025 ? "#d7ffe6" : "#33e86f"; // bright leading glyph now and then
+      ctx.fillText(ch, x, y);
+      if (y > c.height && Math.random() > 0.975) drops[i] = 0;
+      drops[i] += 1;
+    }
+    _matrixRAF = requestAnimationFrame(frame);
+  }
+  _matrixRAF = requestAnimationFrame(frame);
+}
+function stopMatrixRain() {
+  if (_matrixRAF) { cancelAnimationFrame(_matrixRAF); _matrixRAF = null; }
+  if (_matrixResize) { window.removeEventListener("resize", _matrixResize); _matrixResize = null; }
+  const c = document.getElementById("matrixRain");
+  if (c) { const ctx = c.getContext("2d"); ctx && ctx.clearRect(0, 0, c.width, c.height); }
 }
 
 async function loadModels() {
@@ -2565,7 +2639,7 @@ function openSettings() {
   const hasWp = !!models.hasWallpaper;
   document.getElementById("s_wallpaper").value = hasWp ? (models.wallpaperPath || "") : "";
   if (hasWp) showWallpaperPreview(); else document.getElementById("wallpaper_preview").style.display = "none";
-  document.getElementById("wallpaper_opacity_row").style.display = hasWp ? "" : "none";
+  document.getElementById("wallpaper_opacity_row").style.display = (hasWp || models.theme === "matrix") ? "" : "none";
   const op = typeof models.wallpaperOpacity === "number" ? models.wallpaperOpacity : 82;
   document.getElementById("s_wp_opacity").value = op;
   document.getElementById("s_wp_opacity_val").textContent = op + "%";
@@ -2975,6 +3049,9 @@ async function saveTheme() {
   const theme = document.getElementById("s_theme").value;
   models = await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ theme }) }) || models;
   applyTheme(theme, !!(models && models.hasWallpaper));
+  // The panel-translucency slider applies to the Matrix rain too, so reveal it here.
+  const hasWp = !!(models && models.hasWallpaper);
+  document.getElementById("wallpaper_opacity_row").style.display = (hasWp || theme === "matrix") ? "" : "none";
 }
 async function saveWallpaperPath() {
   const wallpaperPath = document.getElementById("s_wallpaper").value.trim();

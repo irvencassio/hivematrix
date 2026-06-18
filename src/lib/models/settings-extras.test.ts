@@ -29,10 +29,14 @@ test("autoUpdate defaults off and round-trips", () => {
   assert.equal(s.getAutoUpdate(), false);
 });
 
-test("wallpaper opacity defaults to 82 and clamps to 40–100", () => {
+test("wallpaper opacity defaults to 82 and clamps to 0–100", () => {
   assert.equal(s.getThemeSettings().wallpaperOpacity, 82);
   s.setWallpaperOpacity(10);
-  assert.equal(s.getThemeSettings().wallpaperOpacity, 40, "clamped up to 40");
+  assert.equal(s.getThemeSettings().wallpaperOpacity, 10, "values below 40 now persist");
+  s.setWallpaperOpacity(0);
+  assert.equal(s.getThemeSettings().wallpaperOpacity, 0, "fully transparent allowed");
+  s.setWallpaperOpacity(-5);
+  assert.equal(s.getThemeSettings().wallpaperOpacity, 0, "clamped up to 0");
   s.setWallpaperOpacity(999);
   assert.equal(s.getThemeSettings().wallpaperOpacity, 100, "clamped down to 100");
   s.setWallpaperOpacity(65);
