@@ -13,6 +13,7 @@ import { join } from "path";
 import { execFileSync } from "child_process";
 import { loadHiveConfig, saveHiveConfig, type HiveConfig } from "@/lib/central/config";
 import { getOrCreateToken } from "@/lib/auth/token";
+import { buildCliPath } from "@/lib/config/binary-detection";
 import { getBundledDaemonPaths, getBundleInstallReadiness } from "./app-bundle";
 
 export interface ActionResult {
@@ -46,6 +47,7 @@ function plistString(s: string): string {
 
 /** launchd plist for the BUNDLED daemon: `<node> <daemon.cjs>`, no tsx/repo. */
 export function buildDaemonPlist(opts: { nodeBin: string; daemonCjs: string; logDir: string }): string {
+  const cliPath = buildCliPath();
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -61,6 +63,7 @@ export function buildDaemonPlist(opts: { nodeBin: string; daemonCjs: string; log
     <key>NODE_ENV</key><string>production</string>
     <key>HIVEMATRIX_PORT</key><string>3747</string>
     <key>HIVEMATRIX_NODE_BIN</key><string>${plistString(opts.nodeBin)}</string>
+    <key>PATH</key><string>${plistString(cliPath)}</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

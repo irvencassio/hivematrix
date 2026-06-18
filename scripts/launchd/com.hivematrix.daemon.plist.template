@@ -36,6 +36,8 @@
     <string>production</string>
     <key>HIVEMATRIX_PORT</key>
     <string>3747</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
 
   <key>RunAtLoad</key>

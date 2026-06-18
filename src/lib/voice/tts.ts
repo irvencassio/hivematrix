@@ -14,6 +14,7 @@ import { mkdirSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { randomBytes } from "crypto";
+import { buildCliPath } from "@/lib/config/binary-detection";
 import { voiceRuntime } from "./runtime";
 
 export type TtsEngine = "say" | "cloned";
@@ -56,7 +57,7 @@ function synthesizeCloned(txtPath: string, outPath: string, timeoutMs: number): 
     const rt = voiceRuntime();
     if (!rt) { resolve(null); return; }
     const args = [join(rt.scriptsDir, "synth_cli.py"), "--text-file", txtPath, "--out", outPath, "--quality", "high"];
-    execFile(rt.python, args, { cwd: rt.scriptsDir, timeout: timeoutMs }, (err, _stdout, stderr) => {
+    execFile(rt.python, args, { cwd: rt.scriptsDir, timeout: timeoutMs, env: { ...process.env, PATH: buildCliPath() } }, (err, _stdout, stderr) => {
       if (err || !existsSync(outPath)) {
         console.error(`[voice] cloned synth failed, falling back to say: ${(stderr || err?.message || "").trim()}`);
         resolve(null);

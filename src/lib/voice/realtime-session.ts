@@ -15,6 +15,7 @@ import { spawn, type ChildProcess } from "child_process";
 import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { buildCliPath } from "@/lib/config/binary-detection";
 import { voiceRuntime } from "./runtime";
 import { voiceLlmEnv } from "./llm-env";
 
@@ -91,7 +92,7 @@ function startServer(): Promise<number> {
   const rt = voiceRuntime();
   if (!rt) return Promise.reject(new Error("voice runtime not available — enable Voice in Settings"));
   return new Promise<number>((resolve, reject) => {
-    const env = { ...process.env, ...voiceLlmEnv(), ...turnEnv() };
+    const env = { ...process.env, ...voiceLlmEnv(), ...turnEnv(), PATH: buildCliPath() };
     const proc = spawn(rt.python, [join(rt.scriptsDir, "realtime_server.py"), "--port", "0"], { cwd: rt.scriptsDir, env });
     let resolved = false;
     const onLine = (d: Buffer) => {

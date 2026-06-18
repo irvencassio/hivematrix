@@ -27,6 +27,7 @@ test("buildDaemonPlist points at the bundled node + cjs, no tsx", () => {
   assert.match(plist, /Resources\/daemon\/bin\/node/);
   assert.match(plist, /daemon\.cjs/);
   assert.match(plist, /HIVEMATRIX_NODE_BIN/);
+  assert.match(plist, /<key>PATH<\/key><string>[^<]*\/opt\/homebrew\/bin/);
   assert.doesNotMatch(plist, /tsx/);
   assert.match(plist, /<key>KeepAlive<\/key>\s*<true\/>/);
 });

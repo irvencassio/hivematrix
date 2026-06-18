@@ -11,6 +11,7 @@ import { spawn } from "child_process";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { dirname, join, resolve } from "path";
+import { buildCliPath } from "@/lib/config/binary-detection";
 
 /** Directory of the running daemon bundle (…/Resources/daemon in the .app), or "". */
 function bundledDaemonDir(): string {
@@ -61,7 +62,7 @@ export function provisionStatus(): { state: ProvisionState; log: string[] } {
 function step(cmd: string, args: string[], cwd: string): Promise<number> {
   return new Promise((resolve) => {
     _log.push(`$ ${cmd.split("/").pop()} ${args.join(" ")}`);
-    const c = spawn(cmd, args, { cwd });
+    const c = spawn(cmd, args, { cwd, env: { ...process.env, PATH: buildCliPath() } });
     const onData = (d: Buffer) => { const s = d.toString().trimEnd(); if (s) _log.push(s); };
     c.stdout?.on("data", onData);
     c.stderr?.on("data", onData);
