@@ -17,7 +17,7 @@ import { getQwenProfile } from "@/lib/config/qwen-profile";
 
 const DEFAULT_FRONTIER = "claude-sonnet-4-6"; // Q3: Claude is the shipped default
 const DEFAULT_FRONTIER_PREMIUM = "claude-opus-4-8"; // think/planning → Opus
-const DEFAULT_FRONTIER_CODEX = "codex:gpt-5.5-codex"; // Codex provider alternative
+const DEFAULT_FRONTIER_CODEX = "codex:gpt-5.5"; // Codex provider alternative (plain gpt-5.5: the -codex variants are API-key-only, rejected on ChatGPT subscriptions)
 const NANO_BANANA = "nano-banana";
 
 function readConfig(): Record<string, unknown> {

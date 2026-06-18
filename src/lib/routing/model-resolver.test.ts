@@ -31,8 +31,8 @@ test("frontier uses frontierModel (coding) override, else Sonnet default", () =>
 
 test("codex provider overrides both frontier tiers regardless of role models", () => {
   writeCfg({ frontierProvider: "codex", thinkModel: "claude-fable-5", frontierModel: "claude-opus-4-8" });
-  assert.equal(resolveModelId("frontier-premium"), "codex:gpt-5.5-codex");
-  assert.equal(resolveModelId("frontier"), "codex:gpt-5.5-codex");
+  assert.equal(resolveModelId("frontier-premium"), "codex:gpt-5.5");
+  assert.equal(resolveModelId("frontier"), "codex:gpt-5.5");
 });
 
 test("local-secondary honors operationalModel override before the Qwen profile", () => {

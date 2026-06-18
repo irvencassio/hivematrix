@@ -12,7 +12,7 @@ import { detectBackends, type BackendStatus, type BackendId } from "./backends";
 // Pinned current frontier model IDs (2026-06).
 export const CLAUDE_OPUS_ID = "claude-opus-4-8";   // Opus 4.8
 export const CLAUDE_FABLE_ID = "claude-fable-5";   // Fable 5 (latest "F")
-export const CODEX_NEWEST_ID = "codex:gpt-5.5-codex"; // GPT-5.5 (newest Codex, 2026-04-23)
+export const CODEX_NEWEST_ID = "codex:gpt-5.5"; // GPT-5.5 (the -codex variants are API-key-only, rejected on ChatGPT subscriptions)
 export const MIXED_ID = "mixed";
 export const CLOUD_ONLY_ID = "cloud-only";
 
@@ -48,7 +48,7 @@ export function buildAvailableModels(backends: BackendStatus[] = detectBackends(
 
   const codex = by("codex");
   if (codex?.configured) {
-    models.push({ id: "codex", name: "Codex — GPT-5.5 (gpt-5.5-codex)", modelId: CODEX_NEWEST_ID, backend: "codex" });
+    models.push({ id: "codex", name: "Codex — GPT-5.5 (gpt-5.5)", modelId: CODEX_NEWEST_ID, backend: "codex" });
     models.push({ id: "codex-fast", name: "Codex — GPT-5.5, fast mode", modelId: CODEX_NEWEST_ID, backend: "codex", fast: true, note: "lower reasoning effort, faster" });
   }
 
