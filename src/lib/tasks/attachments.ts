@@ -29,7 +29,7 @@ function normalizeOne(input: TaskAttachmentInput): TaskAttachmentRecord | null {
   const filename = cleanString(input.filename) || (path ? basename(path) : "");
   const out: TaskAttachmentRecord = {};
   if (filename) out.filename = filename;
-  if (path) out.path = path;
+  if (path && isAbsolutePath(path)) out.path = path;
   if (typeof input.bytes === "number" && Number.isFinite(input.bytes)) out.bytes = input.bytes;
   return out.filename || out.path ? out : null;
 }

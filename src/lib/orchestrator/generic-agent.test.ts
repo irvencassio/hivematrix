@@ -52,6 +52,7 @@ test("generic/local messages keep formatted attachment paths as user content", a
   const messages = await buildMessages(`Please inspect this image.\n\n${attachmentBlock}`, "/tmp", "developer", "low");
 
   assert.equal(messages[1]?.role, "user");
+  assert.ok(String(messages[1]?.content).includes(attachmentBlock));
   assert.match(String(messages[1]?.content), /path: \/Users\/me\/\.hivematrix\/uploads\/id-shot\.png/);
   assert.match(String(messages[1]?.content), /Use the absolute path above/);
 });

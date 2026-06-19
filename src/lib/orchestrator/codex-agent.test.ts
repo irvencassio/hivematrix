@@ -48,6 +48,7 @@ test("buildCodexPrompt keeps formatted attachment paths in the task section", ()
   ]);
   const prompt = buildCodexPrompt(`Please inspect this image.\n\n${attachmentBlock}`);
 
+  assert.ok(prompt.includes(attachmentBlock));
   assert.match(prompt, /--- Your task ---[\s\S]*path: \/Users\/me\/\.hivematrix\/uploads\/id-shot\.png/);
   assert.ok(prompt.indexOf("--- Your task ---") < prompt.indexOf("id-shot.png"));
 });

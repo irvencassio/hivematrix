@@ -66,6 +66,7 @@ test("Claude prompt args preserve formatted attachment paths", () => {
 
   const promptIndex = args.indexOf("-p");
   assert.notEqual(promptIndex, -1);
+  assert.ok(args[promptIndex + 1].includes(attachmentBlock));
   assert.match(args[promptIndex + 1], /path: \/Users\/me\/\.hivematrix\/uploads\/id-shot\.png/);
   assert.match(args[promptIndex + 1], /Use the absolute path above/);
 });

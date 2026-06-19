@@ -36,6 +36,17 @@ test("normalizeTaskAttachments keeps filename-only legacy values but marks path 
   assert.match(block, /path: unavailable \(attachment was not uploaded\)/);
 });
 
+test("normalizeTaskAttachments treats relative record paths as unavailable", () => {
+  assert.deepEqual(normalizeTaskAttachments([{ filename: "photo.png", path: "photo.png" }]), [
+    { filename: "photo.png" },
+  ]);
+  const block = renderAttachmentBlock([{ filename: "photo.png", path: "photo.png" }]);
+
+  assert.match(block, /- photo\.png/);
+  assert.match(block, /path: unavailable \(attachment was not uploaded\)/);
+  assert.doesNotMatch(block, /path: photo\.png/);
+});
+
 test("normalizeTaskAttachments de-duplicates repeated paths", () => {
   assert.deepEqual(
     normalizeTaskAttachments([
@@ -52,4 +63,19 @@ test("normalizeTaskAttachments de-duplicates repeated paths", () => {
 
 test("appendAttachmentBlock leaves text unchanged when there are no attachments", () => {
   assert.equal(appendAttachmentBlock("hello", []), "hello");
+});
+
+test("appendAttachmentBlock joins text and attachment guidance with one blank line", () => {
+  assert.equal(
+    appendAttachmentBlock("hello", [{ filename: "a.txt", path: "/tmp/a.txt" }]),
+    [
+      "hello",
+      "",
+      "Attached files:",
+      "- a.txt",
+      "  path: /tmp/a.txt",
+      "",
+      "Use the absolute path above to read each attachment from disk. Do not search for the original filename in the working directory.",
+    ].join("\n"),
+  );
 });
