@@ -152,7 +152,7 @@ function getProfileTools(agentType: string): ChatTool[] {
 /**
  * Build the OpenAI messages array for the initial request.
  */
-async function buildMessages(
+export async function buildMessages(
   description: string,
   projectPath: string,
   agentType: string,

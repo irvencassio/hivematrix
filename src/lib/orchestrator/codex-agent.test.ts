@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { renderAttachmentBlock } from "@/lib/tasks/attachments";
 import { buildCodexPrompt, buildCodexExecArgs } from "./codex-agent";
 
 test("buildCodexPrompt prepends the outbound routing block and keeps the task", () => {
@@ -39,4 +40,14 @@ test("buildCodexExecArgs adds low reasoning effort only in fast mode", () => {
   const fast = buildCodexExecArgs({ codexModel: "m", projectPath: "/p", prompt: "x", fastMode: true });
   assert.ok(!slow.some((a) => a.includes("model_reasoning_effort")));
   assert.ok(fast.some((a) => a.includes('model_reasoning_effort="low"')));
+});
+
+test("buildCodexPrompt keeps formatted attachment paths in the task section", () => {
+  const attachmentBlock = renderAttachmentBlock([
+    { filename: "shot.png", path: "/Users/me/.hivematrix/uploads/id-shot.png" },
+  ]);
+  const prompt = buildCodexPrompt(`Please inspect this image.\n\n${attachmentBlock}`);
+
+  assert.match(prompt, /--- Your task ---[\s\S]*path: \/Users\/me\/\.hivematrix\/uploads\/id-shot\.png/);
+  assert.ok(prompt.indexOf("--- Your task ---") < prompt.indexOf("id-shot.png"));
 });

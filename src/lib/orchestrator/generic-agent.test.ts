@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { ModelProvider } from "@/lib/config/providers";
-import { buildChatCompletionsUrls, buildGenericRequestBody, genericThinkingInstruction } from "./generic-agent";
+import { renderAttachmentBlock } from "@/lib/tasks/attachments";
+import { buildChatCompletionsUrls, buildGenericRequestBody, buildMessages, genericThinkingInstruction } from "./generic-agent";
 
 test("generic/local request body uses provider max tokens and leaves cost uncapped", () => {
   const provider: ModelProvider = {
@@ -42,4 +43,15 @@ test("generic/local chat completions tries /v1 fallback for stale Ollama base en
     "http://localhost:11434/chat/completions",
     "http://localhost:11434/v1/chat/completions",
   ]);
+});
+
+test("generic/local messages keep formatted attachment paths as user content", async () => {
+  const attachmentBlock = renderAttachmentBlock([
+    { filename: "shot.png", path: "/Users/me/.hivematrix/uploads/id-shot.png" },
+  ]);
+  const messages = await buildMessages(`Please inspect this image.\n\n${attachmentBlock}`, "/tmp", "developer", "low");
+
+  assert.equal(messages[1]?.role, "user");
+  assert.match(String(messages[1]?.content), /path: \/Users\/me\/\.hivematrix\/uploads\/id-shot\.png/);
+  assert.match(String(messages[1]?.content), /Use the absolute path above/);
 });

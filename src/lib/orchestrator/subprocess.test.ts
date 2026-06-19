@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { renderAttachmentBlock } from "@/lib/tasks/attachments";
 import { buildClaudeSpawnArgs } from "./subprocess";
 
 test("Claude spawn args omit max-budget flag when budget is uncapped", () => {
@@ -54,4 +55,17 @@ test("Claude spawn args omit fast-mode override when disabled", () => {
   });
 
   assert.equal(args.includes("--settings"), false);
+});
+
+test("Claude prompt args preserve formatted attachment paths", () => {
+  const attachmentBlock = renderAttachmentBlock([
+    { filename: "shot.png", path: "/Users/me/.hivematrix/uploads/id-shot.png" },
+  ]);
+  const prompt = `Please inspect this image.\n\n${attachmentBlock}`;
+  const args = buildClaudeSpawnArgs({ prompt, tools: ["Read"], thinkingMode: "auto" });
+
+  const promptIndex = args.indexOf("-p");
+  assert.notEqual(promptIndex, -1);
+  assert.match(args[promptIndex + 1], /path: \/Users\/me\/\.hivematrix\/uploads\/id-shot\.png/);
+  assert.match(args[promptIndex + 1], /Use the absolute path above/);
 });
