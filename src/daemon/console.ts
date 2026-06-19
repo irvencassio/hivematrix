@@ -1143,7 +1143,7 @@ function taskActionsHtml(t) {
   if (retryable) b.push('<button class="reply-toggle" id="retryToggle_'+t._id+'" onclick="toggleRetry(\''+t._id+'\')">↻ Retry</button>');
   // Reply: answer the agent / continue a finished task (review, failed, cancelled)
   // — except needs_input, which already shows the fully-standout reply card.
-  const canReply = t.reviewState !== "needs_input" && (t.pendingQuestion || retryable);
+  const canReply = !steerable && t.reviewState !== "needs_input" && (t.pendingQuestion || retryable);
   if (canReply) b.push('<button class="reply-toggle" id="replyToggle_'+t._id+'" onclick="toggleReply(\''+t._id+'\')">↩ Reply</button>');
   if (!running) b.push('<button onclick="taskAction(\''+t._id+'\',\'archive\')">⌫ Archive</button>');
   b.push('<button class="danger" onclick="deleteTask(\''+t._id+'\')">🗑 Delete</button>');
@@ -1166,16 +1166,18 @@ function taskActionsHtml(t) {
   }
   // Reply box. needs_input → the fully-standout card (auto-open). Otherwise a
   // subtler "reply to continue" box (toggled open from the ↩ Reply button).
-  const isOpen = t.reviewState === "needs_input";
-  const q = t.pendingQuestion ? '<div class="reply-question">'+esc(t.pendingQuestion)+'</div>' : '';
-  html += '<div id="replySection_'+t._id+'" class="reply-section'+(isOpen?' open needs':' subtle')+'">'
-    + (isOpen
-        ? '<div class="reply-head">✋ Awaiting your reply</div>'
-        : '<div class="reply-subhead">↩ Reply — your message is added and the task re-runs</div>')
-    + q
-    + '<textarea id="replyText" class="reply-input" placeholder="'+(isOpen?'Type your reply…':'Reply to this task…')+'" rows="'+(isOpen?'3':'2')+'" oninput="onCtxDraft(\'reply\',this)"></textarea>'
-    + attachPickerHtml('reply')
-    + '<div class="reply-row" style="margin-top:6px"><button class="reply-primary" onclick="replyTask(\''+t._id+'\')">Reply</button></div></div>';
+  if (!steerable) {
+    const isOpen = t.reviewState === "needs_input";
+    const q = t.pendingQuestion ? '<div class="reply-question">'+esc(t.pendingQuestion)+'</div>' : '';
+    html += '<div id="replySection_'+t._id+'" class="reply-section'+(isOpen?' open needs':' subtle')+'">'
+      + (isOpen
+          ? '<div class="reply-head">✋ Awaiting your reply</div>'
+          : '<div class="reply-subhead">↩ Reply — your message is added and the task re-runs</div>')
+      + q
+      + '<textarea id="replyText" class="reply-input" placeholder="'+(isOpen?'Type your reply…':'Reply to this task…')+'" rows="'+(isOpen?'3':'2')+'" oninput="onCtxDraft(\'reply\',this)"></textarea>'
+      + attachPickerHtml('reply')
+      + '<div class="reply-row" style="margin-top:6px"><button class="reply-primary" onclick="replyTask(\''+t._id+'\')">Reply</button></div></div>';
+  }
   return html;
 }
 

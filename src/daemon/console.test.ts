@@ -112,7 +112,7 @@ test("needs_input reply window stands out and uses a clear 'Reply' button", () =
 test("review/failed tasks get a subtle Reply box, distinct from the needs_input standout", () => {
   const js = extractScript(CONSOLE_HTML);
   // Reply is offered on review/failed/cancelled (retryable) tasks, not just needs_input.
-  assert.match(js, /const canReply = t\.reviewState !== "needs_input" && \(t\.pendingQuestion \|\| retryable\)/);
+  assert.match(js, /const canReply = !steerable && t\.reviewState !== "needs_input" && \(t\.pendingQuestion \|\| retryable\)/);
   assert.match(js, /if \(canReply\) b\.push/);
   // Two visual treatments: the standout "needs" card vs the subtle box.
   assert.match(js, /' open needs':' subtle'/);
@@ -120,6 +120,14 @@ test("review/failed tasks get a subtle Reply box, distinct from the needs_input 
   assert.match(CONSOLE_HTML, /\.reply-section\.subtle\.open/, "subtle reply style present");
   // Distinct from the needs_input standout header.
   assert.match(js, /✋ Awaiting your reply/);
+});
+
+test("live steerable tasks do not render Reply controls", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /const steerable = t\.status === "in_progress"/);
+  assert.match(js, /if \(steerable\) \{[\s\S]*submitSteer/, "steer form remains available");
+  assert.match(js, /if \(!steerable\) \{\s*const isOpen = t\.reviewState === "needs_input"/, "Reply section is skipped for live steerable runs");
+  assert.match(js, /const canReply = !steerable &&/, "Reply toggle is skipped for live steerable runs");
 });
 
 test("settings has an About tab with version/build/date and update status", () => {
