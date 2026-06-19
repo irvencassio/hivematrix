@@ -413,6 +413,14 @@ test("command launcher renders as a compact command shell", () => {
   assert.doesNotMatch(CONSOLE_HTML, /id="commandMeta" style=/, "command metadata no longer relies on inline style");
 });
 
+test("command launcher contains long metadata inside the context column", () => {
+  assert.match(CONSOLE_HTML, /\.command-shell \{[^}]*min-width:0;[^}]*max-width:100%;/);
+  assert.match(CONSOLE_HTML, /\.command-grid \{[^}]*min-width:0;/);
+  assert.match(CONSOLE_HTML, /\.command-grid > \* \{[^}]*min-width:0;/);
+  assert.match(CONSOLE_HTML, /\.command-meta \{[^}]*min-width:0;[^}]*overflow:hidden;/);
+  assert.match(CONSOLE_HTML, /\.command-chip \{[^}]*min-width:0;[^}]*max-width:100%;[^}]*display:inline-block;/);
+});
+
 test("execution provenance covers Claude, ChatGPT/Codex, and Qwen/local modes", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /taskExecutionPanel\(t, out\)/, "task detail view renders execution provenance");

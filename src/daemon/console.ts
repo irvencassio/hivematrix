@@ -162,17 +162,18 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .exec-cell .ek { display:block; font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:1px; }
   .exec-cell .ev { display:block; color:var(--text); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .exec-cell.wide { grid-column:1 / -1; }
-  .command-shell { border:1px solid var(--border); border-radius:8px; background:var(--panel-2); overflow:hidden; margin-bottom:8px; }
+  .command-shell { min-width:0; max-width:100%; border:1px solid var(--border); border-radius:8px; background:var(--panel-2); overflow:hidden; margin-bottom:8px; }
   .command-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border-bottom:1px solid var(--border); }
   .command-title { min-width:0; }
   .command-title b { display:block; font-size:12px; line-height:1.2; }
   .command-title span { display:block; font-size:10.5px; color:var(--muted); line-height:1.25; margin-top:2px; }
   .command-import { flex:none; border:1px solid var(--border); background:var(--panel); color:var(--accent); border-radius:6px; padding:4px 7px; font-size:11px; font-weight:700; cursor:pointer; }
   .command-import:hover { border-color:var(--accent); }
-  .command-grid { padding:10px; display:grid; gap:8px; }
+  .command-grid { min-width:0; padding:10px; display:grid; gap:8px; }
+  .command-grid > * { min-width:0; }
   .command-grid select, .command-grid input { width:100%; margin:0; }
-  .command-meta { display:flex; flex-wrap:wrap; gap:4px; min-height:22px; align-items:center; }
-  .command-chip { max-width:100%; border:1px solid var(--border); background:var(--panel); color:var(--muted); border-radius:999px; padding:2px 7px; font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .command-meta { display:flex; flex-wrap:wrap; gap:4px; min-height:22px; min-width:0; overflow:hidden; align-items:center; }
+  .command-chip { min-width:0; max-width:100%; display:inline-block; border:1px solid var(--border); background:var(--panel); color:var(--muted); border-radius:999px; padding:2px 7px; font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .command-chip.primary { color:var(--accent-2); border-color:color-mix(in srgb, var(--accent-2) 42%, var(--border)); }
   .command-project-row { display:grid; grid-template-columns:minmax(86px,.72fr) minmax(0,1.28fr); gap:6px; }
   .command-actions { display:flex; gap:6px; }
