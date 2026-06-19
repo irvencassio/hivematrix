@@ -1920,10 +1920,15 @@ export function createDaemonServer() {
       if (req.method === "POST" && urlPath === "/tasks") {
         const { Task, generateId } = await import("@/lib/db");
         const { deriveTaskTitle } = await import("@/lib/tasks/derive-title");
+        const { normalizeTaskAttachments, appendAttachmentBlock } = await import("@/lib/tasks/attachments");
         const body = await parseBody(req) as Record<string, unknown>;
+        const attachments = normalizeTaskAttachments(Array.isArray(body.attachments) ? body.attachments as unknown[] : []);
+        const description = typeof body.description === "string" ? body.description : "";
+        body.description = appendAttachmentBlock(description, attachments);
+        delete body.attachments;
         // Title is optional — derive it from the instructions when absent/blank.
         const title = typeof body.title === "string" ? body.title.trim() : "";
-        body.title = title || deriveTaskTitle(body.description as string);
+        body.title = title || deriveTaskTitle(description);
         const task = await Task.create({ _id: generateId(), ...body });
         broadcast("tasks:created", { taskId: task._id });
         json(res, 201, task);

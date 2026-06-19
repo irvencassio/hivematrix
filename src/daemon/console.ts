@@ -266,6 +266,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .attach-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .attach-chip .rm { cursor: pointer; color: var(--muted); font-size: 14px; flex-shrink: 0; }
   .attach-chip .rm:hover { color: var(--err); }
+  .attach-clear { border: 0; background: none; color: var(--accent-2); padding: 0; margin-left: 6px; font: inherit; cursor: pointer; }
+  .attach-clear:hover { text-decoration: underline; }
   .badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: var(--badge-bg); color: var(--badge-text); }
   .badge.model { color: var(--accent-2); }
   .badge.age { opacity: .7; background: transparent; padding-left: 0; }
@@ -856,6 +858,39 @@ async function api(path, opts) {
   return r.json();
 }
 function esc(s){ return (s==null?"":String(s)).replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onloadend = () => resolve(String(fr.result || "").split(",")[1] || "");
+    fr.onerror = () => reject(new Error("Attachment read failed"));
+    fr.readAsDataURL(file);
+  });
+}
+async function uploadAttachmentFile(file) {
+  const dataBase64 = await fileToBase64(file);
+  const saved = await api("/uploads", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ filename: file.name || "upload", dataBase64 }) });
+  if (!saved || saved.error) throw new Error((saved && saved.error) || "Upload failed");
+  return saved;
+}
+function attachmentName(a) {
+  return (a && (a.filename || (a.path ? String(a.path).split("/").pop() : ""))) || "attachment";
+}
+function attachmentPath(a) {
+  return (a && a.path) || "";
+}
+function attachmentKey(a) {
+  const path = attachmentPath(a);
+  return path ? "path:" + path : "name:" + attachmentName(a);
+}
+function pushAttachmentRecord(bucket, record) {
+  if (!record || (!record.path && !record.filename)) return false;
+  const out = { filename: record.filename || attachmentName(record), path: record.path || "", bytes: record.bytes };
+  const key = attachmentKey(out);
+  if (bucket.some(a => attachmentKey(a) === key)) return false;
+  bucket.push(out);
+  return true;
+}
 
 // --- In-DOM dialogs ---------------------------------------------------------
 // The Tauri/WKWebView webview has no working native alert/confirm/prompt
@@ -1150,6 +1185,9 @@ async function selectTask(id) {
   // task across a live refresh keeps files and draft text.
   if (_ctxTask !== id) {
     _ctxAttach = { retry: [], reply: [] };
+    _ctxUploading = { retry: 0, reply: 0 };
+    _ctxAttachError = { retry: "", reply: "" };
+    _ctxAttachNonce += 1;
     _ctxDraft = { retry: "", reply: "", steer: "" };
     _ctxFocus = { active: null, start: null, end: null };
     _ctxOpen = { retry: false, reply: false };
@@ -1217,6 +1255,9 @@ async function cardArchive(id) {
 // when a different task is selected (see selectTask), preserved across same-task
 // re-renders so a live refresh doesn't drop files or text mid-compose.
 let _ctxAttach = { retry: [], reply: [] };
+let _ctxUploading = { retry: 0, reply: 0 };
+let _ctxAttachError = { retry: "", reply: "" };
+let _ctxAttachNonce = 0;
 let _ctxDraft = { retry: "", reply: "", steer: "" };
 let _ctxFocus = { active: null, start: null, end: null };
 // Which toggle-opened sections are open — so a live refresh's re-render doesn't
@@ -1278,20 +1319,53 @@ function shouldRestoreCtxFocus() {
   if (!session) return true;
   return active === document.body || session.contains(active);
 }
-function onCtxAttach(ctx, input) {
-  for (const f of input.files) { const p = f.path || f.name; if (p && !_ctxAttach[ctx].includes(p)) _ctxAttach[ctx].push(p); }
+async function onCtxAttach(ctx, input) {
+  const files = Array.from(input.files || []);
+  const attachNonce = _ctxAttachNonce;
   input.value = "";
+  if (!files.length) return;
+  _ctxAttachError[ctx] = "";
+  _ctxUploading[ctx] = (_ctxUploading[ctx] || 0) + files.length;
   renderCtxChips(ctx);
+  for (const f of files) {
+    try {
+      const saved = await uploadAttachmentFile(f);
+      if (attachNonce !== _ctxAttachNonce) continue;
+      pushAttachmentRecord(_ctxAttach[ctx], saved);
+    } catch (e) {
+      if (attachNonce === _ctxAttachNonce) _ctxAttachError[ctx] = "Upload failed";
+    } finally {
+      if (attachNonce === _ctxAttachNonce) {
+        _ctxUploading[ctx] = Math.max(0, (_ctxUploading[ctx] || 0) - 1);
+        renderCtxChips(ctx);
+      }
+    }
+  }
 }
 function removeCtxAttach(ctx, idx) { _ctxAttach[ctx].splice(idx, 1); renderCtxChips(ctx); }
+function clearCtxAttachError(ctx) {
+  _ctxAttachError[ctx] = "";
+  renderCtxChips(ctx);
+}
+function setCtxSubmitDisabled(ctx) {
+  const sec = _ctxTask ? document.getElementById(ctx+"Section_"+_ctxTask) : null;
+  const btn = sec ? sec.querySelector(".reply-row button") : null;
+  if (btn) btn.disabled = (_ctxUploading[ctx] || 0) > 0 || !!_ctxAttachError[ctx];
+}
 function renderCtxChips(ctx) {
   const chips = document.getElementById(ctx+"AttachChips");
   const hint = document.getElementById(ctx+"AttachHint");
   if (!chips) return;
-  if (hint) hint.textContent = _ctxAttach[ctx].length ? "" : "No files";
-  chips.innerHTML = _ctxAttach[ctx].map((p, i) => {
-    const name = p.split("/").pop() || p;
-    return '<div class="attach-chip" title="'+esc(p)+'"><span>'+esc(name)+'</span><span class="rm" onclick="removeCtxAttach(\''+ctx+'\','+i+')">×</span></div>';
+  setCtxSubmitDisabled(ctx);
+  if (hint) {
+    if ((_ctxUploading[ctx] || 0) > 0) hint.textContent = "Uploading…";
+    else if (_ctxAttachError[ctx]) hint.innerHTML = esc(_ctxAttachError[ctx]) + ' <button type="button" class="attach-clear" onclick="clearCtxAttachError(\''+ctx+'\')">Continue without failed file</button>';
+    else hint.textContent = _ctxAttach[ctx].length ? "" : "No files";
+  }
+  chips.innerHTML = _ctxAttach[ctx].map((a, i) => {
+    const name = attachmentName(a);
+    const path = attachmentPath(a);
+    return '<div class="attach-chip" title="'+esc(path || name)+'"><span>'+esc(name)+'</span><span class="rm" onclick="removeCtxAttach(\''+ctx+'\','+i+')">×</span></div>';
   }).join("");
 }
 
@@ -1308,10 +1382,13 @@ function toggleRetry(id) {
 async function submitRetry(id) {
   const ta = document.getElementById("retryText");
   const steer = ta ? ta.value.trim() : "";
+  if ((_ctxUploading.retry || 0) > 0) { hmAlert("Wait for attachments to finish uploading."); return; }
+  if (_ctxAttachError.retry) { hmAlert("Try attaching failed files again before retrying."); return; }
   const attachments = _ctxAttach.retry.slice();
   await api("/tasks/"+id+"/retry", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ steer, attachments }) });
   _ctxAttach.retry = [];
+  _ctxAttachError.retry = "";
   _ctxDraft.retry = "";
   refresh();
 }
@@ -1329,12 +1406,13 @@ async function submitSteer(id) {
 async function replyTask(id) {
   const el = document.getElementById("replyText");
   let text = el ? el.value.trim() : "";
+  if ((_ctxUploading.reply || 0) > 0) { hmAlert("Wait for attachments to finish uploading."); return; }
+  if (_ctxAttachError.reply) { hmAlert("Try attaching failed files again before replying."); return; }
   const attachments = _ctxAttach.reply.slice();
   if (!text && !attachments.length) { el && el.focus(); return; }
-  if (attachments.length) text += (text ? "\n\n" : "") + "Attached files:\n" + attachments.map(p => "- " + p).join("\n");
   el.disabled = true;
-  const r = await api("/tasks/"+id+"/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
-  if (r && r.ok) { _ctxAttach.reply = []; _ctxDraft.reply = ""; if (el) el.value = ""; refresh(); selectTask(id); }
+  const r = await api("/tasks/"+id+"/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, attachments }) });
+  if (r && r.ok) { _ctxAttach.reply = []; _ctxAttachError.reply = ""; _ctxDraft.reply = ""; if (el) el.value = ""; refresh(); selectTask(id); }
   else { hmAlert(r?.error || "Failed to send reply"); el.disabled = false; }
 }
 
@@ -2597,26 +2675,50 @@ function onProjectSelect() {
   // Legacy hook — no-op now that we use the search dropdown
 }
 
-let _attachPaths = [];
-function onAttachFiles(input) {
-  for (const f of input.files) {
-    const p = f.path || f.name;  // Tauri exposes .path; fallback to name
-    if (p && !_attachPaths.includes(p)) _attachPaths.push(p);
-  }
+let _attachments = [];
+let _attachUploading = 0;
+let _attachError = "";
+async function onAttachFiles(input) {
+  const files = Array.from(input.files || []);
   input.value = "";  // allow re-selecting the same file
+  if (!files.length) return;
+  _attachError = "";
+  _attachUploading += files.length;
   renderAttachChips();
+  for (const f of files) {
+    try {
+      pushAttachmentRecord(_attachments, await uploadAttachmentFile(f));
+    } catch (e) {
+      _attachError = "Upload failed";
+    } finally {
+      _attachUploading = Math.max(0, _attachUploading - 1);
+      renderAttachChips();
+    }
+  }
 }
 function removeAttach(idx) {
-  _attachPaths.splice(idx, 1);
+  _attachments.splice(idx, 1);
   renderAttachChips();
+}
+function clearAttachError() {
+  _attachError = "";
+  renderAttachChips();
+}
+function setAttachmentSubmitDisabled() {
+  const btn = document.querySelector("#taskForm .create");
+  if (btn) btn.disabled = _attachUploading > 0 || !!_attachError;
 }
 function renderAttachChips() {
   const chips = document.getElementById("t_attach_chips");
   const hint = document.getElementById("t_attach_hint");
-  hint.textContent = _attachPaths.length ? "" : "No files selected";
-  chips.innerHTML = _attachPaths.map((p, i) => {
-    const name = p.split("/").pop() || p;
-    return '<div class="attach-chip" title="'+esc(p)+'"><span>'+esc(name)+'</span><span class="rm" onclick="removeAttach('+i+')">×</span></div>';
+  setAttachmentSubmitDisabled();
+  if (_attachUploading > 0) hint.textContent = "Uploading…";
+  else if (_attachError) hint.innerHTML = esc(_attachError) + ' <button type="button" class="attach-clear" onclick="clearAttachError()">Continue without failed file</button>';
+  else hint.textContent = _attachments.length ? "" : "No files selected";
+  chips.innerHTML = _attachments.map((a, i) => {
+    const name = attachmentName(a);
+    const path = attachmentPath(a);
+    return '<div class="attach-chip" title="'+esc(path || name)+'"><span>'+esc(name)+'</span><span class="rm" onclick="removeAttach('+i+')">×</span></div>';
   }).join("");
 }
 
@@ -3153,14 +3255,16 @@ async function createTask() {
   const projName = selectedProjectName || null;
   const sel = modelById[document.getElementById("t_model").value] || { modelId: null, fast: false };
   if (!description || !projectPath) { err.textContent = "Description and project path are required."; return; }
-  if (_attachPaths.length) description += "\n\nAttached files:\n" + _attachPaths.map(p => "- " + p).join("\n");
+  if (_attachUploading > 0) { err.textContent = "Wait for attachments to finish uploading."; return; }
+  if (_attachError) { err.textContent = "Try attaching failed files again before creating the task."; return; }
+  const attachments = _attachments.slice();
   try {
     // Title optional — omit when blank so the daemon derives it from the instructions.
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ title: title || undefined, description, projectPath, project: projName || "console", model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent" }) });
+      body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: projName || "console", model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent" }) });
     if (!t || !t._id) { err.textContent = "Create failed."; return; }
     document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = "";
-    _attachPaths = []; renderAttachChips();
+    _attachments = []; _attachError = ""; _attachUploading = 0; renderAttachChips();
     toggleForm("taskForm"); refresh();
   } catch (e2) { err.textContent = String(e2); }
 }

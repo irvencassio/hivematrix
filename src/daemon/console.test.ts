@@ -283,6 +283,61 @@ test("server retry/reply routes format structured attachments server-side", () =
   assert.match(server, /renderAttachmentBlock\(attachments\)/);
 });
 
+test("server task creation formats structured attachments into the description", () => {
+  const server = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+
+  assert.match(server, /const attachments = normalizeTaskAttachments\(Array\.isArray\(body\.attachments\)/);
+  assert.match(server, /const description = typeof body\.description === "string" \? body\.description : ""/);
+  assert.match(server, /body\.description = appendAttachmentBlock\(description, attachments\)/);
+});
+
+test("console uploads selected task files before creating a task", () => {
+  const js = extractScript(CONSOLE_HTML);
+
+  assert.doesNotMatch(js, /f\.path \|\| f\.name/, "browser File.path fallback should not be the attachment contract");
+  assert.match(js, /async function uploadAttachmentFile\(file\)/);
+  assert.match(js, /api\("\/uploads", \{ method:"POST"/);
+  assert.match(js, /filename: file\.name \|\| "upload"/);
+  assert.match(js, /dataBase64/);
+  assert.match(js, /let _attachments = \[\]/);
+  assert.match(js, /let _attachUploading = 0/);
+  assert.match(js, /function setAttachmentSubmitDisabled\(/);
+  assert.match(js, /btn\.disabled = _attachUploading > 0 \|\| !!_attachError/);
+  assert.match(js, /if \(_attachError\) \{ err\.textContent = "Try attaching failed files again before creating the task\."; return; \}/);
+  assert.match(js, /const attachments = _attachments\.slice\(\)/);
+  assert.match(js, /JSON\.stringify\(\{ title: title \|\| undefined, description, attachments,/);
+});
+
+test("console sends reply and retry attachments as structured records", () => {
+  const js = extractScript(CONSOLE_HTML);
+
+  assert.match(js, /const attachments = _ctxAttach\.retry\.slice\(\)/);
+  assert.match(js, /if \(_ctxAttachError\.retry\) \{ hmAlert\("Try attaching failed files again before retrying\."\); return; \}/);
+  assert.match(js, /body: JSON\.stringify\(\{ steer, attachments \}\)/);
+  assert.match(js, /const attachments = _ctxAttach\.reply\.slice\(\)/);
+  assert.match(js, /if \(_ctxAttachError\.reply\) \{ hmAlert\("Try attaching failed files again before replying\."\); return; \}/);
+  assert.match(js, /body: JSON\.stringify\(\{ text, attachments \}\)/);
+  assert.doesNotMatch(js, /Attached files:\\n" \+ attachments\.map\(p => "- " \+ p\)\.join\("\\n"\)/);
+});
+
+test("console ignores late reply/retry uploads after switching tasks", () => {
+  const js = extractScript(CONSOLE_HTML);
+
+  assert.match(js, /let _ctxAttachNonce = 0/);
+  assert.match(js, /_ctxAttachNonce \+= 1/);
+  assert.match(js, /const attachNonce = _ctxAttachNonce/);
+  assert.match(js, /if \(attachNonce !== _ctxAttachNonce\) continue/);
+  assert.match(js, /if \(attachNonce === _ctxAttachNonce\) \{/);
+});
+
+test("console can clear failed optional attachment uploads", () => {
+  const js = extractScript(CONSOLE_HTML);
+
+  assert.match(js, /function clearAttachError\(\)/);
+  assert.match(js, /function clearCtxAttachError\(ctx\)/);
+  assert.match(js, /Continue without failed file/);
+});
+
 test("frontier usage panel renders a separate Codex usage section", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /codexSubscription/);
