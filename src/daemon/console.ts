@@ -740,7 +740,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="metrics"></div></details>
     <details class="ctx-sec" id="usageSec"><summary>Frontier Usage <button id="usageRefresh" class="usage-refresh" title="Refresh Claude/Codex usage" onclick="event.stopPropagation();refreshUsageNow()">↻</button></summary>
     <div id="usage"><div class="muted">No frontier usage yet.</div></div></details>
-    <details class="ctx-sec" id="obsSec"><summary>Observability <label class="obs-costtgl" title="Show cost (frontier only)" onclick="event.stopPropagation()"><input type="checkbox" id="obsCost" onchange="toggleObsCost()"> cost</label></summary>
+    <details class="ctx-sec" id="obsSec"><summary>Observability</summary>
+    <label class="obs-costtgl" title="Show cost (frontier only)"><input type="checkbox" id="obsCost" onchange="toggleObsCost()"> cost</label>
     <div id="observability"><div class="muted">No task telemetry yet.</div></div></details>
     <details class="ctx-sec" id="connSec" open><summary>Connectivity</summary>
     <div id="conn"></div></details>
@@ -1321,7 +1322,7 @@ async function submitSteer(id) {
   if (!message) { ta && ta.focus(); return; }
   ta.disabled = true;
   const r = await api("/tasks/"+id+"/steer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) });
-  if (r && r.ok) { _ctxDraft.steer = ""; refresh(); selectTask(id); }
+  if (r && r.ok) { _ctxDraft.steer = ""; if (ta) ta.value = ""; refresh(); selectTask(id); }
   else { hmAlert(r?.error || "Failed to steer task"); ta.disabled = false; }
 }
 
@@ -1333,7 +1334,7 @@ async function replyTask(id) {
   if (attachments.length) text += (text ? "\n\n" : "") + "Attached files:\n" + attachments.map(p => "- " + p).join("\n");
   el.disabled = true;
   const r = await api("/tasks/"+id+"/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
-  if (r && r.ok) { _ctxAttach.reply = []; _ctxDraft.reply = ""; refresh(); selectTask(id); }
+  if (r && r.ok) { _ctxAttach.reply = []; _ctxDraft.reply = ""; if (el) el.value = ""; refresh(); selectTask(id); }
   else { hmAlert(r?.error || "Failed to send reply"); el.disabled = false; }
 }
 
