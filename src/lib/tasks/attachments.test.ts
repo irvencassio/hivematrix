@@ -48,6 +48,14 @@ test("normalizeTaskAttachments treats relative record paths as unavailable", () 
   assert.doesNotMatch(block, /path: photo\.png/);
 });
 
+test("normalizeTaskAttachments accepts raw JSON arrays and ignores junk values", () => {
+  const input: unknown[] = [42, { filename: "shot.png", path: "/tmp/shot.png" }, { path: false }];
+
+  assert.deepEqual(normalizeTaskAttachments(input), [
+    { filename: "shot.png", path: "/tmp/shot.png" },
+  ]);
+});
+
 test("normalizeTaskAttachments de-duplicates repeated paths", () => {
   assert.deepEqual(
     normalizeTaskAttachments([

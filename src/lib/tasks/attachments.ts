@@ -7,6 +7,7 @@ export interface TaskAttachmentRecord {
 }
 
 export type TaskAttachmentInput = string | TaskAttachmentRecord | null | undefined;
+export type TaskAttachmentInputList = TaskAttachmentInput | readonly unknown[];
 
 function isAbsolutePath(value: string): boolean {
   return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
@@ -16,7 +17,7 @@ function cleanString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function normalizeOne(input: TaskAttachmentInput): TaskAttachmentRecord | null {
+function normalizeOne(input: unknown): TaskAttachmentRecord | null {
   if (!input) return null;
   if (typeof input === "string") {
     const value = input.trim();
@@ -24,17 +25,19 @@ function normalizeOne(input: TaskAttachmentInput): TaskAttachmentRecord | null {
     if (isAbsolutePath(value)) return { path: value, filename: basename(value) || value };
     return { filename: value };
   }
+  if (typeof input !== "object") return null;
 
-  const path = cleanString(input.path);
-  const filename = cleanString(input.filename) || (path ? basename(path) : "");
+  const record = input as TaskAttachmentRecord;
+  const path = cleanString(record.path);
+  const filename = cleanString(record.filename) || (path ? basename(path) : "");
   const out: TaskAttachmentRecord = {};
   if (filename) out.filename = filename;
   if (path && isAbsolutePath(path)) out.path = path;
-  if (typeof input.bytes === "number" && Number.isFinite(input.bytes)) out.bytes = input.bytes;
+  if (typeof record.bytes === "number" && Number.isFinite(record.bytes)) out.bytes = record.bytes;
   return out.filename || out.path ? out : null;
 }
 
-export function normalizeTaskAttachments(input: TaskAttachmentInput | TaskAttachmentInput[]): TaskAttachmentRecord[] {
+export function normalizeTaskAttachments(input: TaskAttachmentInputList): TaskAttachmentRecord[] {
   const values = Array.isArray(input) ? input : [input];
   const seen = new Set<string>();
   const out: TaskAttachmentRecord[] = [];
@@ -49,7 +52,7 @@ export function normalizeTaskAttachments(input: TaskAttachmentInput | TaskAttach
   return out;
 }
 
-export function renderAttachmentBlock(input: TaskAttachmentInput | TaskAttachmentInput[]): string {
+export function renderAttachmentBlock(input: TaskAttachmentInputList): string {
   const attachments = normalizeTaskAttachments(input);
   if (!attachments.length) return "";
   const lines = ["Attached files:"];
@@ -67,13 +70,13 @@ export function renderAttachmentBlock(input: TaskAttachmentInput | TaskAttachmen
   return lines.join("\n");
 }
 
-export function appendAttachmentBlock(text: string, input: TaskAttachmentInput | TaskAttachmentInput[]): string {
+export function appendAttachmentBlock(text: string, input: TaskAttachmentInputList): string {
   const block = renderAttachmentBlock(input);
   if (!block) return text;
   return `${text.trimEnd()}${text.trim() ? "\n\n" : ""}${block}`;
 }
 
-export function prependAttachmentBlock(text: string, input: TaskAttachmentInput | TaskAttachmentInput[]): string {
+export function prependAttachmentBlock(text: string, input: TaskAttachmentInputList): string {
   const block = renderAttachmentBlock(input);
   if (!block) return text;
   return `${block}${text.trim() ? "\n\n" : ""}${text}`;
