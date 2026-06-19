@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { CONSOLE_HTML } from "./console";
 
 /**
@@ -269,6 +270,16 @@ test("console can steer any live run, gated to in-progress tasks", () => {
   // Its draft survives live refreshes like reply/retry do.
   assert.ok(js.includes("onCtxDraft(\\'steer\\',this)"), "steer textarea preserves its draft");
   assert.match(js, /_ctxDraft\.steer = ""/);
+});
+
+test("server retry/reply routes format structured attachments server-side", () => {
+  const server = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+
+  assert.match(server, /@\/lib\/tasks\/attachments/);
+  assert.match(server, /normalizeTaskAttachments/);
+  assert.match(server, /appendAttachmentBlock/);
+  assert.match(server, /appendReplyContinuation\(String\(cur\.description \?\? ""\), text, attachments\)/);
+  assert.match(server, /renderAttachmentBlock\(attachments\)/);
 });
 
 test("frontier usage panel renders a separate Codex usage section", () => {

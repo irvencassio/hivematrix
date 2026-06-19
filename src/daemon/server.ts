@@ -1947,7 +1947,9 @@ export function createDaemonServer() {
         const tid = replyMatch[1];
         const body = await parseBody(req) as Record<string, unknown>;
         const text = String(body.text ?? "").trim();
-        if (!text) { json(res, 400, { error: "text is required" }); return; }
+        const { normalizeTaskAttachments, appendAttachmentBlock } = await import("@/lib/tasks/attachments");
+        const attachments = normalizeTaskAttachments(Array.isArray(body.attachments) ? body.attachments as unknown[] : []);
+        if (!text && !attachments.length) { json(res, 400, { error: "text or attachment is required" }); return; }
         const { getPendingStuck, resolveStuck } = await import("@/lib/orchestrator/stuck");
         const pending = getPendingStuck().filter(r => r.taskId === tid);
         if (!pending.length) {
@@ -1965,7 +1967,7 @@ export function createDaemonServer() {
             return;
           }
           await Task.findByIdAndUpdate(tid, {
-            description: appendReplyContinuation(String(cur.description ?? ""), text),
+            description: appendReplyContinuation(String(cur.description ?? ""), text, attachments),
             status: "backlog",
             error: null,
             agentPid: null,
@@ -1979,7 +1981,8 @@ export function createDaemonServer() {
         }
         // Resolve the most-recent pending request.
         const req2 = pending.sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
-        const ok = await resolveStuck(tid, req2.timestamp, "reply", "console", text);
+        const resolvedText = appendAttachmentBlock(text, attachments);
+        const ok = await resolveStuck(tid, req2.timestamp, "reply", "console", resolvedText);
         if (!ok) { json(res, 409, { error: "Already resolved" }); return; }
         // Clear the needs_input reviewState so the board stops flagging it.
         const { Task } = await import("@/lib/db");
@@ -2016,8 +2019,8 @@ export function createDaemonServer() {
           // task's instructions so the rerun is steered, not a blind repeat.
           const body = await parseBody(req) as Record<string, unknown>;
           const steer = String(body.steer ?? "").trim();
-          const attachments = Array.isArray(body.attachments)
-            ? (body.attachments as unknown[]).map(String).map((s) => s.trim()).filter(Boolean) : [];
+          const { normalizeTaskAttachments, renderAttachmentBlock } = await import("@/lib/tasks/attachments");
+          const attachments = normalizeTaskAttachments(Array.isArray(body.attachments) ? body.attachments as unknown[] : []);
           const updates: Record<string, unknown> = {
             status: "backlog", error: null, agentPid: null, startedAt: null, completedAt: null, reviewState: null,
           };
@@ -2026,7 +2029,7 @@ export function createDaemonServer() {
             if (!cur) { json(res, 404, { error: "Not found" }); return; }
             let block = "\n\n--- Operator guidance (retry) ---";
             if (steer) block += "\n" + steer;
-            if (attachments.length) block += "\nAttached files:\n" + attachments.map((p) => "- " + p).join("\n");
+            if (attachments.length) block += "\n" + renderAttachmentBlock(attachments);
             updates.description = (cur.description ?? "") + block;
           }
           const t = await Task.findByIdAndUpdate(tid, updates);
