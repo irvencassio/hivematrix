@@ -166,12 +166,11 @@ test("Features tab lists optional capabilities with on/off toggles", () => {
   assert.match(js, /\/settings\/features.*method: "POST"/s, "toggles via POST");
 });
 
-test("Mixed-mode role models hide Thinking/Coding when the frontier provider is Codex", () => {
+test("Mixed-mode role models keep Thinking/Coding visible when the frontier provider is Codex", () => {
   const js = extractScript(CONSOLE_HTML);
-  // No more redundant disabled "Codex (provider override)" rows — they're hidden.
-  assert.match(js, /fRows\.style\.display = codex \? "none"/);
-  assert.match(js, /s_role_codex_note/);
-  assert.doesNotMatch(js, /Codex \(provider override\)/, "duplicate-looking override rows removed");
+  assert.doesNotMatch(js, /fRows\.style\.display = codex \? "none"/);
+  assert.doesNotMatch(js, /s_role_codex_note/);
+  assert.match(js, /roleModelOptions/);
 });
 
 test("right-panel sections are collapsible <details> with persisted open state", () => {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildAvailableModels, CLAUDE_OPUS_ID, CLAUDE_FABLE_ID, CODEX_NEWEST_ID } from "./available";
+import { buildAvailableModels, buildRoleModelOptions, CLAUDE_OPUS_ID, CLAUDE_SONNET_ID, CODEX_NEWEST_ID } from "./available";
 import type { BackendStatus } from "./backends";
 
 function backends(local: boolean, claude: boolean, codex: boolean): BackendStatus[] {
@@ -23,11 +23,12 @@ test("local model carries the concrete configured id", () => {
   assert.match(m.name, /qwen\/qwen3\.6-27b/);
 });
 
-test("claude backend yields Opus + Fable with pinned ids", () => {
+test("claude backend yields Opus + Sonnet with pinned ids", () => {
   const ms = buildAvailableModels(backends(false, true, false));
   const byId = Object.fromEntries(ms.map((m) => [m.id, m.modelId]));
   assert.equal(byId["claude-opus"], CLAUDE_OPUS_ID);
-  assert.equal(byId["claude-fable"], CLAUDE_FABLE_ID);
+  assert.equal(byId["claude-sonnet"], CLAUDE_SONNET_ID);
+  assert.deepEqual(Object.keys(byId), ["claude-opus", "claude-sonnet", "cloud-only"]);
 });
 
 test("codex backend yields newest + fast variant on the same model id", () => {
@@ -57,4 +58,26 @@ test("Cloud-only appears with any frontier backend, no local required", () => {
 test("Cloud-only model id is the cloud-only sentinel", () => {
   const m = buildAvailableModels(backends(false, true, false)).find((x) => x.id === "cloud-only");
   assert.equal(m?.modelId, "cloud-only");
+});
+
+test("role options expose Coding choices across Claude, Codex, and local Qwen", () => {
+  const options = buildRoleModelOptions(backends(true, true, true));
+  const coding = options.coding.map((m) => m.modelId);
+  assert.deepEqual(coding, [
+    "claude-opus-4-8",
+    "claude-sonnet-4-6",
+    "codex:gpt-5.5",
+    "codex:gpt-5.3-codex-spark",
+    "qwen/qwen3.6-27b",
+  ]);
+});
+
+test("role options expose Operational escape hatches without making them the default", () => {
+  const options = buildRoleModelOptions(backends(true, true, true));
+  const operational = options.operational.map((m) => m.modelId);
+  assert.deepEqual(operational, [
+    "qwen/qwen3.6-27b",
+    "codex:gpt-5.3-codex-spark",
+    "claude-sonnet-4-6",
+  ]);
 });

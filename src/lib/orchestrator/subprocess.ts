@@ -358,7 +358,7 @@ export async function spawnAgent(
     const { routeByRole } = await import("@/lib/routing/router");
     const { resolveModelId } = await import("@/lib/routing/model-resolver");
     const route = routeByRole("code-critical", getConnectivityPolicy());
-    const resolved = resolveModelId(route.tier);
+    const resolved = resolveModelId(route.tier, { noLocalOverrides: true });
     onEvent(taskId, { type: "log", content: `[mixed] routed code-critical → ${route.tier}${route.frontierReviewDebt ? " (frontier review queued)" : ""} → ${resolved ?? "unavailable"}` });
     if (route.frontierReviewDebt) {
       // Record the debt so it can be replayed as a frontier review when cloud-ok returns.

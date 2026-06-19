@@ -1,6 +1,6 @@
 # HiveMatrix Model Routing Reference
 
-Date: 2026-06-13
+Date: 2026-06-19
 Status: Canonical reference. Source of truth = `src/lib/connectivity/policy.ts`
 (role→tier tables) + `src/lib/routing/model-resolver.ts` (tier→model id) +
 `src/lib/routing/router.ts` (noLocal / frontier-review-debt).
@@ -37,8 +37,23 @@ So, answering the common question directly:
 - **Final/critical coding → Claude Sonnet (frontier).**
 - **Operational tasks (bulk coding, file ops, extraction, cheap web) → local Qwen**, even when the cloud is up. This is deliberate: keep the expensive frontier for judgement-heavy work, run the high-volume grind locally.
 
-If `frontierProvider: "codex"` is set in config, the two frontier tiers resolve
-to `codex:gpt-5.5-codex` instead of Claude.
+If `frontierProvider: "codex"` is set in config, the default frontier tiers
+resolve to:
+
+- Thinking: `codex:gpt-5.5`
+- Coding: `codex:gpt-5.3-codex-spark`
+
+The provider is a default-family hint, not a lock. Settings → Models can
+override each Mixed-mode role independently:
+
+| Role | Default | Allowed override families |
+|------|---------|---------------------------|
+| Thinking | Opus or GPT-5.5 | Opus, Sonnet, GPT-5.5, Spark |
+| Coding | Sonnet or Spark | Opus, Sonnet, GPT-5.5, Spark, local Qwen |
+| Operational | local Qwen | local Qwen, Spark, Sonnet |
+
+Cloud-only still enforces no-local: a local Qwen Coding override is ignored
+there so the posture never silently spawns a local model.
 
 ## Without frontier (Local or Cloud-unreachable: `local-only` / `offline`)
 
@@ -89,7 +104,8 @@ not downgraded to local (`router.ts` `RouteOptions.noLocal`).
 {
   "frontierProvider": "claude",          // or "codex"
   "thinkModel": "claude-opus-4-8",       // optional override for think tier
-  "frontierModel": "claude-sonnet-4-6",  // optional override for code-critical
+  "frontierModel": "claude-sonnet-4-6",  // optional override for code-critical; can be Opus/Sonnet/GPT-5.5/Spark/Qwen in Mixed
+  "operationalModel": "qwen/qwen3.6-27b", // optional override for local-secondary; can be Qwen/Spark/Sonnet
   "qwen": {
     "location": "local",                 // local | lan | public
     "primary":   { "modelId": "...", "endpoint": "http://localhost:8080", "provider": "mlx", "contextLimit": 131072 },

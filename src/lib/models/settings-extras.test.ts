@@ -46,11 +46,11 @@ test("wallpaper opacity defaults to 82 and clamps to 0–100", () => {
 test("role models default empty, round-trip per role, and clear back to default", () => {
   assert.deepEqual(s.getRoleModels(), { thinking: "", coding: "", operational: "" });
   s.setRoleModel("thinking", "claude-opus-4-8");
-  s.setRoleModel("coding", "claude-fable-5");
+  s.setRoleModel("coding", "claude-sonnet-4-6");
   s.setRoleModel("operational", "qwen3-coder-30b");
   assert.deepEqual(s.getRoleModels(), {
     thinking: "claude-opus-4-8",
-    coding: "claude-fable-5",
+    coding: "claude-sonnet-4-6",
     operational: "qwen3-coder-30b",
   });
   // blank clears just that role back to the resolver default

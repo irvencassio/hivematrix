@@ -11,8 +11,9 @@ import { detectBackends, type BackendStatus, type BackendId } from "./backends";
 
 // Pinned current frontier model IDs (2026-06).
 export const CLAUDE_OPUS_ID = "claude-opus-4-8";   // Opus 4.8
-export const CLAUDE_FABLE_ID = "claude-fable-5";   // Fable 5 (latest "F")
+export const CLAUDE_SONNET_ID = "claude-sonnet-4-6"; // Sonnet 4.6
 export const CODEX_NEWEST_ID = "codex:gpt-5.5"; // GPT-5.5 (the -codex variants are API-key-only, rejected on ChatGPT subscriptions)
+export const CODEX_SPARK_ID = "codex:gpt-5.3-codex-spark"; // Spark has a separate Codex usage pool
 export const MIXED_ID = "mixed";
 export const CLOUD_ONLY_ID = "cloud-only";
 
@@ -43,12 +44,13 @@ export function buildAvailableModels(backends: BackendStatus[] = detectBackends(
   const claude = by("claude");
   if (claude?.configured) {
     models.push({ id: "claude-opus", name: "Claude Opus 4.8 (claude-opus-4-8)", modelId: CLAUDE_OPUS_ID, backend: "claude" });
-    models.push({ id: "claude-fable", name: "Claude Fable 5 (claude-fable-5)", modelId: CLAUDE_FABLE_ID, backend: "claude" });
+    models.push({ id: "claude-sonnet", name: "Claude Sonnet 4.6 (claude-sonnet-4-6)", modelId: CLAUDE_SONNET_ID, backend: "claude" });
   }
 
   const codex = by("codex");
   if (codex?.configured) {
     models.push({ id: "codex", name: "Codex — GPT-5.5 (gpt-5.5)", modelId: CODEX_NEWEST_ID, backend: "codex" });
+    models.push({ id: "codex-spark", name: "Codex — GPT-5.3 Spark", modelId: CODEX_SPARK_ID, backend: "codex", note: "separate day-to-day coding pool" });
     models.push({ id: "codex-fast", name: "Codex — GPT-5.5, fast mode", modelId: CODEX_NEWEST_ID, backend: "codex", fast: true, note: "lower reasoning effort, faster" });
   }
 
@@ -217,6 +219,44 @@ export interface RoleModels {
   coding: string;
   /** Bulk execution/file ops — local-secondary tier (on-device in Mixed mode). */
   operational: string;
+}
+
+export interface RoleModelOption {
+  modelId: string;
+  name: string;
+  backend: BackendId;
+  note?: string;
+}
+
+export interface RoleModelOptions {
+  thinking: RoleModelOption[];
+  coding: RoleModelOption[];
+  operational: RoleModelOption[];
+}
+
+function roleOption(modelId: string, name: string, backend: BackendId, note?: string): RoleModelOption {
+  return { modelId, name, backend, note };
+}
+
+export function buildRoleModelOptions(backends: BackendStatus[] = detectBackends()): RoleModelOptions {
+  const by = (id: BackendId) => backends.find((b) => b.id === id);
+  const local = by("local");
+  const claude = by("claude");
+  const codex = by("codex");
+
+  const localOption = local?.configured && local.modelId
+    ? roleOption(local.modelId, `Local — ${local.modelId}`, "local", "runs on this Mac")
+    : null;
+  const opus = claude?.configured ? roleOption(CLAUDE_OPUS_ID, "Claude Opus 4.8", "claude") : null;
+  const sonnet = claude?.configured ? roleOption(CLAUDE_SONNET_ID, "Claude Sonnet 4.6", "claude") : null;
+  const gpt55 = codex?.configured ? roleOption(CODEX_NEWEST_ID, "Codex GPT-5.5", "codex") : null;
+  const spark = codex?.configured ? roleOption(CODEX_SPARK_ID, "Codex GPT-5.3 Spark", "codex", "separate coding pool") : null;
+
+  return {
+    thinking: [opus, sonnet, gpt55, spark].filter((m): m is RoleModelOption => m !== null),
+    coding: [opus, sonnet, gpt55, spark, localOption].filter((m): m is RoleModelOption => m !== null),
+    operational: [localOption, spark, sonnet].filter((m): m is RoleModelOption => m !== null),
+  };
 }
 
 export function getRoleModels(): RoleModels {

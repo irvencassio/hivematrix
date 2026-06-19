@@ -35,6 +35,8 @@ export const MODEL_SHORT_NAMES: Record<string, string> = {
   "claude-opus-4-8": "Opus",
   "claude-sonnet-4-6": "Sonnet",
   "claude-haiku-4-5-20251001": "Haiku",
+  "codex:gpt-5.5": "Codex 5.5",
+  "codex:gpt-5.3-codex-spark": "Spark",
   "gemini-3.1-flash-image-preview": "Nano Banana",
   "codex:gpt-5.4": "ChatGPT",
   "codex:gpt-5.4-computer-use": "Codex CU",

@@ -442,7 +442,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <div class="row" style="align-items:center;gap:8px">
           <select id="s_frontier_provider" onchange="saveFrontierProvider()" style="width:auto">
             <option value="claude">Claude (Sonnet / Opus)</option>
-            <option value="codex">Codex (GPT-5.5)</option>
+            <option value="codex">Codex (GPT-5.5 / Spark)</option>
           </select>
         </div>
         <div class="muted" style="font-size:11px;margin-top:2px">Which provider handles the frontier tier in Mixed and Cloud-only modes.</div>
@@ -457,7 +457,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
           <div class="role-row"><span class="role-name">⌨️ Coding <span class="muted">critical implementation · UI</span></span>
             <select id="s_role_coding" onchange="saveRoleModel('coding', this.value)"></select></div>
         </div>
-        <div id="s_role_codex_note" class="muted" style="display:none;font-size:11px;margin-bottom:8px">🧠 Thinking &amp; ⌨️ Coding both run on <b>Codex</b> — set by Frontier provider above.</div>
         <div class="role-row"><span class="role-name">⚙️ Operational <span class="muted">bulk execution · file ops (on-device)</span></span>
           <select id="s_role_operational" onchange="saveRoleModel('operational', this.value)"></select></div>
       </div>
@@ -1436,7 +1435,7 @@ const OBS_LABELS = { "anthropic": "Claude", "openai-codex": "Codex", "local-qwen
 function obsProvider(model) {
   const m = (model || "").toLowerCase().trim();
   if (/^(codex|chatgpt)/.test(m) || /^(gpt|o[0-9])/.test(m)) return "Codex";
-  if (/^(claude|opus|sonnet|haiku|fable)/.test(m)) return "Claude";
+  if (/^(claude|opus|sonnet|haiku)/.test(m)) return "Claude";
   if (/(qwen|mistral|llama|mlx|local|deepseek|gemma|phi|nan)/.test(m)) return "Qwen (local)";
   return "—";
 }
@@ -1460,7 +1459,7 @@ function executionProviderLabel(model) {
   const m = (model || "").toLowerCase().trim();
   if (!m) return "—";
   if (/^(codex|chatgpt)/.test(m) || /^(gpt|o[0-9])/.test(m)) return "ChatGPT/Codex";
-  if (/^(claude|opus|sonnet|haiku|fable)/.test(m)) return "Claude";
+  if (/^(claude|opus|sonnet|haiku)/.test(m)) return "Claude";
   if (/(qwen|mistral|llama|mlx|local|deepseek|gemma|phi)/.test(m)) return "Qwen/local";
   if (/(nano|banana|mflux|image)/.test(m)) return "Image";
   return "Other";
@@ -2769,35 +2768,24 @@ function renderRoleModels() {
   const mixedAvailable = models.available.some(m => m.id === "mixed");
   wrap.style.display = mixedAvailable ? "" : "none";
   if (!mixedAvailable) return;
-  const frontier = models.available.filter(m => m.backend === "claude");
-  const local = models.available.filter(m => m.backend === "local");
   const rm = models.roleModels || { thinking: "", coding: "", operational: "" };
-  const codex = (models.frontierProvider || "claude") === "codex";
-  const fill = (id, list, defLabel, selected, disabled) => {
+  const opts = models.roleModelOptions || { thinking: [], coding: [], operational: [] };
+  const provider = models.frontierProvider || "claude";
+  const fill = (id, list, defLabel, selected) => {
     const sel = document.getElementById(id);
     if (!sel) return;
     const opts = ['<option value="">' + esc(defLabel) + '</option>']
-      .concat(list.map(m => '<option value="' + esc(m.modelId) + '"' + (m.modelId === selected ? ' selected' : '') + '>' + esc(m.name) + '</option>'));
+      .concat(list.map(m => '<option value="' + esc(m.modelId) + '"' + (m.modelId === selected ? ' selected' : '') + '>' + esc(m.name) + (m.note ? ' — ' + esc(m.note) : '') + '</option>'));
     // Selected override that isn't in the catalog (e.g. a hand-set id) still shows.
     if (selected && !list.some(m => m.modelId === selected)) opts.push('<option value="' + esc(selected) + '" selected>' + esc(selected) + '</option>');
     sel.innerHTML = opts.join("");
     sel.value = selected || "";
-    sel.disabled = !!disabled;
-    sel.title = disabled ? "Frontier provider is set to Codex — Claude role models are ignored. Switch provider to Claude to use these." : "";
+    sel.disabled = false;
+    sel.title = "";
   };
-  // When the frontier provider is Codex, Thinking + Coding both run on Codex
-  // (set by the provider dropdown above) — so hide those rows entirely instead
-  // of showing redundant disabled override selects. Only the
-  // local Operational role stays meaningful. With Claude, show all three.
-  const fRows = document.getElementById("s_role_frontier_rows");
-  const note = document.getElementById("s_role_codex_note");
-  if (fRows) fRows.style.display = codex ? "none" : "";
-  if (note) note.style.display = codex ? "" : "none";
-  if (!codex) {
-    fill("s_role_thinking", frontier, "Default — Opus 4.8", rm.thinking, false);
-    fill("s_role_coding", frontier, "Default — Sonnet 4.6", rm.coding, false);
-  }
-  fill("s_role_operational", local, "Default — local Qwen", rm.operational, false);
+  fill("s_role_thinking", opts.thinking || [], provider === "codex" ? "Default — Codex GPT-5.5" : "Default — Opus 4.8", rm.thinking);
+  fill("s_role_coding", opts.coding || [], provider === "codex" ? "Default — Codex Spark" : "Default — Sonnet 4.6", rm.coding);
+  fill("s_role_operational", opts.operational || [], "Default — local Qwen", rm.operational);
 }
 
 async function saveRoleModel(role, modelId) {

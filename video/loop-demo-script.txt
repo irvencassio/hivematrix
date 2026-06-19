@@ -1,0 +1,29 @@
+Claude Code can run on a loop. You write one prompt, and Claude keeps
+working on it — iterating, judging its own output, fixing what's weak,
+until the task is genuinely done. Here's what that looks like.
+
+I'm asking Claude to build a Snake game in a single HTML file. Then I'm
+telling it to open the file in a browser, screenshot it, decide what's
+weak, and iterate. No interval — it self-paces. Claude decides when
+to stop.
+
+Iteration one: basic Snake. It works, but there's no scoring, no sound,
+no game-over screen. Claude takes a screenshot, sees the same thing,
+and starts the next pass.
+
+Iteration two: scoring and a game-over screen. Iteration three: eat
+sounds, particle effects on food. Iteration four: a speed curve so the
+game gets harder over time. Iteration five: high-score persistence in
+local storage.
+
+What you just watched is the loop deciding what to do next. Not me.
+That's the part worth taking away — anywhere you'd normally babysit
+Claude, refining a design, polishing copy, hardening a flaky test,
+chasing a bug — slash-loop lets you walk away.
+
+Two forms. Slash-loop with a prompt and no interval means Claude
+self-paces. Slash-loop with an interval — like five minutes — runs the
+same command on a schedule. Use the first for open-ended improvement.
+Use the second for polling.
+
+That's it. One command, one walk-away workflow.

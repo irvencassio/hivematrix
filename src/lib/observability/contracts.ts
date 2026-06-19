@@ -19,7 +19,7 @@ export function providerForModel(model: string | null | undefined): Provider {
   const m = (model ?? "").toLowerCase().trim();
   if (!m) return "other";
   if (/^(codex|chatgpt)/.test(m) || /^(gpt|o[0-9])/.test(m)) return "openai-codex";
-  if (/^(claude|opus|sonnet|haiku|fable)/.test(m)) return "anthropic";
+  if (/^(claude|opus|sonnet|haiku)/.test(m)) return "anthropic";
   if (/(qwen|mistral|llama|mlx|local|deepseek|gemma|phi|nan)/.test(m)) return "local-qwen";
   return "other";
 }

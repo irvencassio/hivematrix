@@ -14,11 +14,14 @@ import { join } from "path";
 import { homedir } from "os";
 import type { ModelTier } from "@/lib/connectivity/policy";
 import { getQwenProfile } from "@/lib/config/qwen-profile";
+import { CLAUDE_OPUS_ID, CLAUDE_SONNET_ID, CODEX_NEWEST_ID, CODEX_SPARK_ID } from "@/lib/models/available";
 
-const DEFAULT_FRONTIER = "claude-sonnet-4-6"; // Q3: Claude is the shipped default
-const DEFAULT_FRONTIER_PREMIUM = "claude-opus-4-8"; // think/planning → Opus
-const DEFAULT_FRONTIER_CODEX = "codex:gpt-5.5"; // Codex provider alternative (plain gpt-5.5: the -codex variants are API-key-only, rejected on ChatGPT subscriptions)
 const NANO_BANANA = "nano-banana";
+
+export interface ResolveModelOptions {
+  /** Ignore local/non-frontier role overrides, used by Cloud-only posture. */
+  noLocalOverrides?: boolean;
+}
 
 function readConfig(): Record<string, unknown> {
   try {
@@ -28,23 +31,27 @@ function readConfig(): Record<string, unknown> {
   }
 }
 
+function isFrontierOverride(modelId: string): boolean {
+  return /^(claude-|codex:|gpt-|o[0-9])/i.test(modelId);
+}
+
 /**
  * Concrete model ID for a tier, or null if no model is configured for it.
  * `unavailable` always returns null (caller should queue/skip).
  */
-export function resolveModelId(tier: ModelTier): string | null {
+export function resolveModelId(tier: ModelTier, options: ResolveModelOptions = {}): string | null {
   switch (tier) {
     case "frontier-premium": {
       const cfg = readConfig();
-      if (cfg.frontierProvider === "codex") return DEFAULT_FRONTIER_CODEX;
       const m = (cfg.thinkModel as string | undefined)?.trim();
-      return m || DEFAULT_FRONTIER_PREMIUM;
+      if (m && (!options.noLocalOverrides || isFrontierOverride(m))) return m;
+      return cfg.frontierProvider === "codex" ? CODEX_NEWEST_ID : CLAUDE_OPUS_ID;
     }
     case "frontier": {
       const cfg = readConfig();
-      if (cfg.frontierProvider === "codex") return DEFAULT_FRONTIER_CODEX;
       const fav = (cfg.frontierModel as string | undefined)?.trim();
-      return fav || DEFAULT_FRONTIER;
+      if (fav && (!options.noLocalOverrides || isFrontierOverride(fav))) return fav;
+      return cfg.frontierProvider === "codex" ? CODEX_SPARK_ID : CLAUDE_SONNET_ID;
     }
     case "local-primary": {
       const profile = getQwenProfile();

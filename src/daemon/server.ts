@@ -268,7 +268,7 @@ export function createDaemonServer() {
       // GET /models — backends, available models, default, version (for Settings + New Task)
       if (req.method === "GET" && urlPath === "/models") {
         const { detectBackends } = await import("@/lib/models/backends");
-        const { buildAvailableModels, getDefaultModel, getThemeSettings } = await import("@/lib/models/available");
+        const { buildAvailableModels, buildRoleModelOptions, getDefaultModel, getThemeSettings } = await import("@/lib/models/available");
         const { versionInfo } = await import("@/lib/version");
         const backends = detectBackends();
         const available = buildAvailableModels(backends);
@@ -287,6 +287,7 @@ export function createDaemonServer() {
           autoUpdate: getAutoUpdate(),
           frontierProvider: getFrontierProvider(),
           roleModels: getRoleModels(),
+          roleModelOptions: buildRoleModelOptions(backends),
         });
         return;
       }
