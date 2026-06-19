@@ -277,8 +277,9 @@ test("server retry/reply routes format structured attachments server-side", () =
 
   assert.match(server, /@\/lib\/tasks\/attachments/);
   assert.match(server, /normalizeTaskAttachments/);
-  assert.match(server, /appendAttachmentBlock/);
+  assert.match(server, /prependAttachmentBlock/);
   assert.match(server, /appendReplyContinuation\(String\(cur\.description \?\? ""\), text, attachments\)/);
+  assert.match(server, /resolveStuck\(tid, req2\.timestamp, "reply", "console", prependAttachmentBlock\(text, attachments\)\)/);
   assert.match(server, /renderAttachmentBlock\(attachments\)/);
 });
 

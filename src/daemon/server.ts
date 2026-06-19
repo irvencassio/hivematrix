@@ -1947,7 +1947,7 @@ export function createDaemonServer() {
         const tid = replyMatch[1];
         const body = await parseBody(req) as Record<string, unknown>;
         const text = String(body.text ?? "").trim();
-        const { normalizeTaskAttachments, appendAttachmentBlock } = await import("@/lib/tasks/attachments");
+        const { normalizeTaskAttachments, prependAttachmentBlock } = await import("@/lib/tasks/attachments");
         const attachments = normalizeTaskAttachments(Array.isArray(body.attachments) ? body.attachments as unknown[] : []);
         if (!text && !attachments.length) { json(res, 400, { error: "text or attachment is required" }); return; }
         const { getPendingStuck, resolveStuck } = await import("@/lib/orchestrator/stuck");
@@ -1981,8 +1981,7 @@ export function createDaemonServer() {
         }
         // Resolve the most-recent pending request.
         const req2 = pending.sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
-        const resolvedText = appendAttachmentBlock(text, attachments);
-        const ok = await resolveStuck(tid, req2.timestamp, "reply", "console", resolvedText);
+        const ok = await resolveStuck(tid, req2.timestamp, "reply", "console", prependAttachmentBlock(text, attachments));
         if (!ok) { json(res, 409, { error: "Already resolved" }); return; }
         // Clear the needs_input reviewState so the board stops flagging it.
         const { Task } = await import("@/lib/db");

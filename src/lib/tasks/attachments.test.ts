@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   appendAttachmentBlock,
   normalizeTaskAttachments,
+  prependAttachmentBlock,
   renderAttachmentBlock,
 } from "./attachments";
 
@@ -78,4 +79,13 @@ test("appendAttachmentBlock joins text and attachment guidance with one blank li
       "Use the absolute path above to read each attachment from disk. Do not search for the original filename in the working directory.",
     ].join("\n"),
   );
+});
+
+test("prependAttachmentBlock keeps paths before long reply text", () => {
+  const longReply = "x".repeat(3000);
+  const text = prependAttachmentBlock(longReply, [{ filename: "shot.png", path: "/tmp/shot.png" }]);
+
+  assert.match(text.slice(0, 2000), /^Attached files:\n- shot\.png\n  path: \/tmp\/shot\.png/);
+  assert.match(text.slice(0, 2000), /Use the absolute path above to read each attachment from disk/);
+  assert.ok(text.endsWith(longReply));
 });

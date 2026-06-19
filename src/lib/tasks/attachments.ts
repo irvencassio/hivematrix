@@ -72,3 +72,9 @@ export function appendAttachmentBlock(text: string, input: TaskAttachmentInput |
   if (!block) return text;
   return `${text.trimEnd()}${text.trim() ? "\n\n" : ""}${block}`;
 }
+
+export function prependAttachmentBlock(text: string, input: TaskAttachmentInput | TaskAttachmentInput[]): string {
+  const block = renderAttachmentBlock(input);
+  if (!block) return text;
+  return `${block}${text.trim() ? "\n\n" : ""}${text}`;
+}
