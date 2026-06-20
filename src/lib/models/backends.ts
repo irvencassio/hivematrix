@@ -15,6 +15,7 @@ import { findBinary, CLAUDE_BINARY_SEARCH_PATHS, CODEX_BINARY_SEARCH_PATHS } fro
 import { getQwenProfile } from "@/lib/config/qwen-profile";
 import { getLocalModelConfig } from "@/lib/config/constants";
 import { readCachedLocalModelHealth } from "@/lib/local-model/health";
+import { getLocalEngineConfig } from "./local-engine";
 
 export type BackendId = "local" | "claude" | "codex";
 
@@ -33,21 +34,28 @@ export interface BackendStatus {
 export function detectBackends(): BackendStatus[] {
   const out: BackendStatus[] = [];
 
-  // Local server (LM Studio) — configured when a Qwen profile or localModel is set.
+  // Local server — engine label reflects the configured local engine
+  // (Rapid-MLX is the chosen default; LM Studio / Ollama remain alternates).
   const qwen = getQwenProfile();
   const local = getLocalModelConfig();
+  const engine = getLocalEngineConfig().engine;
+  const engineName = engine === "rapid-mlx" ? "Rapid-MLX" : engine === "ollama" ? "Ollama" : "LM Studio";
   const localModelId = qwen?.primary.modelId ?? local?.modelName ?? null;
-  const localEndpoint = qwen?.primary.endpoint ?? local?.endpoint ?? "http://localhost:1234/v1";
+  const localEndpoint = qwen?.primary.endpoint ?? local?.endpoint
+    ?? (engine === "rapid-mlx" ? "http://127.0.0.1:8000/v1" : "http://localhost:1234/v1");
   const health = readCachedLocalModelHealth();
   const localConfigured = !!localModelId;
   out.push({
     id: "local",
-    name: "Local server (LM Studio)",
+    name: `Local server (${engineName})`,
     configured: localConfigured,
     detail: localConfigured
       ? `${localModelId} @ ${localEndpoint}${health?.ready ? " (healthy)" : ""}`
       : "no local model configured",
-    connect: localConfigured ? undefined : "Run LM Studio, load a model, and set config.qwen.primary (modelId + endpoint).",
+    connect: localConfigured ? undefined
+      : engine === "rapid-mlx"
+        ? "Start Rapid-MLX (rapid-mlx serve <model> --no-thinking) and set config.qwen.primary (modelId + endpoint)."
+        : "Run the local server, load a model, and set config.qwen.primary (modelId + endpoint).",
     endpoint: localConfigured ? localEndpoint : undefined,
     modelId: localModelId ?? undefined,
   });
