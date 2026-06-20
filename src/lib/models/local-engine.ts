@@ -176,3 +176,23 @@ export function stopLocalEngine(): void {
   for (const proc of _procs.values()) { try { proc.kill(); } catch { /* ignore */ } }
   _procs.clear();
 }
+
+export interface TierStatus { key: TierKey; alias: string; port: number; healthy: boolean; }
+export interface LocalEngineStatus {
+  engine: LocalEngineKind;
+  /** True when at least the primary (fast) tier is reachable — i.e. local is usable. */
+  up: boolean;
+  tiers: TierStatus[];
+}
+
+/** Live health of the local engine + each tier (probes each tier's port). Used
+ * for the "Rapid-MLX up?" status in the console. Never throws. */
+export async function localEngineStatus(cfg: LocalEngineConfig = getLocalEngineConfig()): Promise<LocalEngineStatus> {
+  const tiers = await Promise.all(
+    cfg.tiers.map(async (t): Promise<TierStatus> => ({
+      key: t.key, alias: t.alias, port: t.port, healthy: await isHealthy(t.port),
+    })),
+  );
+  const fast = tiers.find((t) => t.key === "fast");
+  return { engine: cfg.engine, up: fast ? fast.healthy : tiers.some((t) => t.healthy), tiers };
+}

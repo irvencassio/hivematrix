@@ -269,13 +269,16 @@ export function createDaemonServer() {
       if (req.method === "GET" && urlPath === "/models") {
         const { detectBackends } = await import("@/lib/models/backends");
         const { buildAvailableModels, buildRoleModelOptions, getDefaultModel, getThemeSettings } = await import("@/lib/models/available");
+        const { localEngineStatus } = await import("@/lib/models/local-engine");
         const { versionInfo } = await import("@/lib/version");
         const backends = detectBackends();
         const available = buildAvailableModels(backends);
         const theme = getThemeSettings();
+        const localEngine = await localEngineStatus();
         const { getLocation, getAutoUpdate, getAppIconChoice, getFrontierProvider, getRoleModels } = await import("@/lib/models/available");
         json(res, 200, {
           backends,
+          localEngine,
           available,
           defaultModel: getDefaultModel(available),
           version: versionInfo(),

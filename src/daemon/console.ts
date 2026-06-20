@@ -2425,6 +2425,20 @@ function cancelForm(id) { document.getElementById(id).classList.remove("open"); 
 let models = null;            // { backends, available, defaultModel, version }
 const modelById = {};         // UiModel.id → {modelId, fast}
 
+// Live status of the local inference engine (Rapid-MLX) + each tier, so you can
+// see at a glance that local is up and serving everything.
+function renderLocalEngine(le) {
+  if (!le) return "";
+  const name = le.engine === "rapid-mlx" ? "Rapid-MLX" : le.engine === "ollama" ? "Ollama" : "LM Studio";
+  const tiers = (le.tiers || []).map(t =>
+    (t.healthy ? '<span style="color:var(--ok)">●</span>' : '<span style="color:var(--muted)">○</span>')
+    + ' ' + esc(t.key) + ' — ' + esc(t.alias) + ' :' + t.port + (t.healthy ? '' : ' (not running)')
+  ).join(' &nbsp;&nbsp; ');
+  return '<div class="backend"><span class="nm">Local engine — ' + name + '</span>'
+    + '<span class="st ' + (le.up ? 'ok' : 'no') + '">' + (le.up ? '✓ running' : 'not running') + '</span></div>'
+    + (tiers ? '<div class="muted" style="font-size:11px;margin:2px 0 6px 2px">' + tiers + '</div>' : '');
+}
+
 function applyTheme(theme, hasWallpaper) {
   const root = document.documentElement;
   let resolved = theme;
@@ -2741,7 +2755,8 @@ function openSettings() {
   document.getElementById("s_backends").innerHTML = models.backends.map(b =>
     '<div class="backend"><span class="nm">'+esc(b.name)+'</span>'
     + '<span class="st '+(b.configured?'ok':'no')+'">'+(b.configured?'✓ '+esc(b.detail):'not set up')+'</span>'
-    + (b.configured?'':'<span class="muted" style="flex:1"> — '+esc(b.connect||'')+'</span>')+'</div>').join("");
+    + (b.configured?'':'<span class="muted" style="flex:1"> — '+esc(b.connect||'')+'</span>')+'</div>').join("")
+    + renderLocalEngine(models.localEngine);
   const local = models.backends.find(b => b.id === "local");
   document.getElementById("s_endpoint").value = (local && local.endpoint) || "http://localhost:1234/v1";
   const v = models.version || {};
