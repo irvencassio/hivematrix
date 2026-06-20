@@ -2432,7 +2432,8 @@ function renderLocalEngine(le) {
   const name = le.engine === "rapid-mlx" ? "Rapid-MLX" : le.engine === "ollama" ? "Ollama" : "LM Studio";
   const tiers = (le.tiers || []).map(t =>
     (t.healthy ? '<span style="color:var(--ok)">●</span>' : '<span style="color:var(--muted)">○</span>')
-    + ' ' + esc(t.key) + ' — ' + esc(t.alias) + ' :' + t.port + (t.healthy ? '' : ' (not running)')
+    + ' ' + esc(t.key) + ' — ' + esc(t.alias) + ' :' + t.port
+    + ' · reasoning ' + (t.reasoning ? 'on' : 'off') + (t.healthy ? '' : ' · not running')
   ).join(' &nbsp;&nbsp; ');
   return '<div class="backend"><span class="nm">Local engine — ' + name + '</span>'
     + '<span class="st ' + (le.up ? 'ok' : 'no') + '">' + (le.up ? '✓ running' : 'not running') + '</span></div>'

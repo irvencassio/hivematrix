@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { detectBackends, type BackendStatus, type BackendId } from "./backends";
+import { getLocalEngineConfig } from "./local-engine";
 
 // Pinned current frontier model IDs (2026-06).
 export const CLAUDE_OPUS_ID = "claude-opus-4-8";   // Opus 4.8
@@ -39,6 +40,21 @@ export function buildAvailableModels(backends: BackendStatus[] = detectBackends(
       backend: "local",
       note: "runs entirely on your machine",
     });
+    // Two-tier Rapid-MLX: when the local model IS the fast tier, also offer the
+    // coding tier (27B-dense) as a selectable local model — it routes to its own
+    // port via resolveProvider.
+    const le = getLocalEngineConfig();
+    const fast = le.tiers.find((t) => t.key === "fast");
+    const coding = le.tiers.find((t) => t.key === "coding");
+    if (le.engine === "rapid-mlx" && fast && coding && local.modelId === fast.alias && coding.alias !== fast.alias) {
+      models.push({
+        id: "local-coding",
+        name: `Local coding — ${coding.alias}`,
+        modelId: coding.alias,
+        backend: "local",
+        note: "on-device 27B-dense — higher coding quality, slower",
+      });
+    }
   }
 
   const claude = by("claude");
