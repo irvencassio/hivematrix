@@ -101,6 +101,13 @@ async def run(host: str, port: int):
     await site.start()
     bound = site._server.sockets[0].getsockname()[1]
     print(f"REALTIME_READY {bound}", flush=True)
+    # Warm the cloned-voice TTS model in the background (off the event loop) so the
+    # first reply isn't cold — by the time STT+LLM produce text, the model is hot.
+    try:
+        from tts import warmup as _tts_warmup
+        asyncio.create_task(asyncio.to_thread(_tts_warmup, os.environ.get("HIVE_RT_TTS_QUALITY", "fast")))
+    except Exception:
+        pass
     await asyncio.Event().wait()
 
 

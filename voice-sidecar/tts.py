@@ -90,6 +90,41 @@ def _synthesize_say(text: str, out_path: str, voice: str | None, rate: int) -> s
     return out_path
 
 
+# In-process cache of the loaded cloned-voice model. mlx-audio's generate_audio
+# reloads the model from disk on EVERY call; in a long-lived process (the realtime
+# server) that reload dominates per-turn latency. Loading once and reusing the
+# nn.Module — generate_audio accepts a pre-loaded model and skips the reload —
+# turns each turn from "reload + synth" into just "synth". `warmup()` primes it.
+_CLONE_MODELS: dict = {}
+
+
+def _clone_model(model_id: str):
+    m = _CLONE_MODELS.get(model_id)
+    if m is None:
+        from mlx_audio.tts.utils import load_model
+        m = load_model(model_path=model_id)
+        _CLONE_MODELS[model_id] = m
+    return m
+
+
+def warmup(quality: str = "fast", lang: str = "en") -> None:
+    """Preload the cloned-voice model + run one throwaway synthesis so the first
+    real turn isn't cold. Best-effort; never raises."""
+    try:
+        if not has_voice_profile():
+            return  # 'say' engine has no model to warm
+        out = os.path.join(tempfile.gettempdir(), f"tts-warmup-{uuid.uuid4().hex}.wav")
+        try:
+            synthesize("Ready.", out, quality=quality, lang=lang)
+        finally:
+            try:
+                os.remove(out)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
 def _synthesize_cloned(text: str, out_path: str, ref_audio: str,
                        quality: str = DEFAULT_QUALITY, lang: str = "en") -> str:
     # mlx-audio is heavy (transformers/mlx-lm) — import only when actually cloning.
@@ -98,7 +133,7 @@ def _synthesize_cloned(text: str, out_path: str, ref_audio: str,
     out_dir = os.path.dirname(out_path) or "."
     prefix = os.path.splitext(os.path.basename(out_path))[0]
     generate_audio(
-        text=text, model=tier["model"], ref_audio=ref_audio,
+        text=text, model=_clone_model(tier["model"]), ref_audio=ref_audio,
         output_path=out_dir, file_prefix=prefix, audio_format="wav", verbose=False,
         lang_code=lang, **tier["params"],
     )
