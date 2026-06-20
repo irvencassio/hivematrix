@@ -2514,9 +2514,15 @@ async function loadModels() {
   if (!models) return;
   applyTheme(models.theme || "system", !!models.hasWallpaper);
   for (const m of models.available) modelById[m.id] = { modelId: m.modelId, fast: !!m.fast };
-  // Populate the New Task dropdown
+  // Populate the New Task dropdown, grouped intent-first.
   const sel = document.getElementById("t_model");
-  sel.innerHTML = models.available.map(m => '<option value="'+esc(m.id)+'">'+esc(m.name)+(m.note?' — '+esc(m.note):'')+'</option>').join("")
+  const catOf = m => m.backend === "mixed" ? "Recommended" : m.backend === "local" ? "Local (on-device)" : "Cloud frontier";
+  const order = ["Recommended", "Local (on-device)", "Cloud frontier"];
+  const groups = {};
+  for (const m of models.available) { (groups[catOf(m)] = groups[catOf(m)] || []).push(m); }
+  const opt = m => '<option value="'+esc(m.id)+'">'+esc(m.name)+(m.note?' — '+esc(m.note):'')+'</option>';
+  sel.innerHTML = order.filter(g => groups[g]).map(g =>
+    '<optgroup label="'+g+'">'+groups[g].map(opt).join("")+'</optgroup>').join("")
     || '<option value="">(no models configured)</option>';
   // Default selection
   const def = models.available.find(m => m.modelId === models.defaultModel || m.id === models.defaultModel);
