@@ -31,6 +31,24 @@ VOXCPM_MODEL = "mlx-community/VoxCPM2-bf16"
 KOKORO_MODEL = "mlx-community/Kokoro-82M-bf16"
 KOKORO_VOICE = os.environ.get("HIVE_KOKORO_VOICE", "af_heart")
 
+
+def _ensure_espeak_env() -> None:
+    """Point phonemizer at the pip-shipped espeak-ng lib (espeakng-loader) so
+    Kokoro's G2P works with NO system espeak-ng install. Must run before misaki's
+    espeak submodule imports (it binds the library at import). No-op if a library
+    is already configured, or the loader isn't installed (then Kokoro falls back)."""
+    if os.environ.get("PHONEMIZER_ESPEAK_LIBRARY"):
+        return
+    try:
+        import espeakng_loader
+        os.environ["PHONEMIZER_ESPEAK_LIBRARY"] = espeakng_loader.get_library_path()
+        os.environ.setdefault("ESPEAK_DATA_PATH", espeakng_loader.get_data_path())
+    except Exception:
+        pass
+
+
+_ensure_espeak_env()
+
 # Cloned-voice quality tiers (operator-tuned: VoxCPM2, cfg=3.0, temp=0.5).
 CLONE_TIERS = {
     "high": {"model": VOXCPM_MODEL, "params": {"ddpm_steps": 32, "cfg_scale": 3.0, "temperature": 0.5}},
