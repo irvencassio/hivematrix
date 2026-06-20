@@ -162,6 +162,18 @@ export function setAutoUpdate(on: boolean): void {
   writeConfig(cfg);
 }
 
+export type AppIconChoice = "dark-green" | "white";
+
+export function getAppIconChoice(): AppIconChoice {
+  return readConfig().appIconChoice === "white" ? "white" : "dark-green";
+}
+
+export function setAppIconChoice(choice: AppIconChoice): void {
+  const cfg = readConfig();
+  cfg.appIconChoice = choice;
+  writeConfig(cfg);
+}
+
 export function setTheme(theme: ThemeMode): void {
   const cfg = readConfig();
   cfg.theme = theme;

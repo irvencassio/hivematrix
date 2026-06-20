@@ -428,8 +428,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <div class="overlay" id="settingsOverlay">
   <div class="modal">
     <h1>Settings <span class="x" onclick="closeSettings()">✕</span></h1>
-    <div class="tabs"><div class="tab active" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-bees" onclick="switchSettingsTab('bees')">Bees</div><div class="tab" id="tab-projects" onclick="switchSettingsTab('projects')">Projects</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">General</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-about" onclick="switchSettingsTab('about')">About</div></div>
-    <div id="settingsModels">
+    <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-bees" onclick="switchSettingsTab('bees')">Bees</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div></div>
+    <div id="settingsModels" style="display:none">
       <label class="flbl">Default model</label>
       <select id="s_default" style="width:100%"></select>
       <div class="row" style="margin:8px 0"><button class="create" onclick="saveDefault()">Save default</button></div>
@@ -523,6 +523,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
           <option value="matrix">Matrix</option>
         </select>
       </div>
+      <div class="row" style="align-items:center; gap:10px; margin-top:8px">
+        <span class="muted">App icon</span>
+        <select id="s_app_icon" onchange="saveAppIconChoice()" style="width:auto">
+          <option value="dark-green">Dark green</option>
+          <option value="white">White</option>
+        </select>
+      </div>
+      <div id="app_icon_status" class="muted" style="font-size:11px;margin-top:3px;min-height:16px"></div>
       <label class="flbl" style="margin-top:10px">Wallpaper</label>
       <div id="wallpaper_preview" style="display:none;margin-bottom:6px">
         <img id="wallpaper_preview_img" style="width:100%;max-height:160px;object-fit:cover;border-radius:6px;border:1px solid var(--border)" />
@@ -566,7 +574,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="muted" style="font-size:11px;margin:6px 0 10px">Off by default. Turn on only the advanced capabilities you want.</div>
       <div id="s_features"></div>
     </div>
-    <div id="settingsAbout" style="display:none">
+    <div id="settingsAbout">
       <h2 style="margin-top:4px">HiveMatrix</h2>
       <div class="muted" style="font-size:12px;margin-bottom:12px">The autonomous business operator.</div>
       <div class="kv">
@@ -2739,6 +2747,9 @@ function openSettings() {
   const v = models.version || {};
   document.getElementById("s_version").textContent = "HiveMatrix v" + (v.version||"?") + " · build " + (v.build||"?") + " · " + (v.date||"?");
   document.getElementById("s_theme").value = models.theme || "system";
+  document.getElementById("s_app_icon").value = models.appIconChoice || "dark-green";
+  const iconStatus = document.getElementById("app_icon_status");
+  if (iconStatus) iconStatus.textContent = "";
   document.getElementById("s_token").value = HM_TOKEN || "(load the local console to see the token)";
   // Wallpaper: reflect the current image + path so settings shows what's active.
   const hasWp = !!models.hasWallpaper;
@@ -2813,13 +2824,12 @@ async function saveAutoUpdate() {
 }
 
 function switchSettingsTab(tab) {
-  const tabs = ["models", "bees", "projects", "general", "remote", "features", "about"];
-  const panels = { models: "settingsModels", bees: "settingsBees", projects: "settingsProjects", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout" };
+  const tabs = ["about", "features", "general", "models", "bees", "remote"];
+  const panels = { models: "settingsModels", bees: "settingsBees", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout" };
   for (const t of tabs) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "projects") renderSettingsProjects();
   if (tab === "bees") { renderSettingsBees(); renderSafeSenders(); }
   if (tab === "features") renderFeatures();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -3146,6 +3156,20 @@ async function saveTheme() {
   // The panel-translucency slider applies to the Matrix rain too, so reveal it here.
   const hasWp = !!(models && models.hasWallpaper);
   document.getElementById("wallpaper_opacity_row").style.display = (hasWp || theme === "matrix") ? "" : "none";
+}
+async function saveAppIconChoice() {
+  const appIconChoice = document.getElementById("s_app_icon").value;
+  const statusEl = document.getElementById("app_icon_status");
+  if (statusEl) {
+    statusEl.style.color = "var(--accent)";
+    statusEl.textContent = "Saving...";
+  }
+  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ appIconChoice }) });
+  await loadModels();
+  if (statusEl) {
+    statusEl.style.color = "var(--ok)";
+    statusEl.textContent = "Saved. Reopen HiveMatrix to update the Dock icon.";
+  }
 }
 async function saveWallpaperPath() {
   const wallpaperPath = document.getElementById("s_wallpaper").value.trim();

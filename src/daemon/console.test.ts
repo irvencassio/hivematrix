@@ -143,7 +143,20 @@ test("settings has an About tab with version/build/date and update status", () =
 
 test("settings tabs are in a defined order ending with About", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /\["models", "bees", "projects", "general", "remote", "features", "about"\]/);
+  assert.match(js, /\["about", "features", "general", "models", "bees", "remote"\]/);
+  assert.match(CONSOLE_HTML, /id="tab-about"[^>]*>About<\/div><div class="tab" id="tab-features"[^>]*>Features<\/div><div class="tab" id="tab-general"[^>]*>Personalization<\/div><div class="tab" id="tab-models"[^>]*>Models<\/div><div class="tab" id="tab-bees"[^>]*>Bees<\/div><div class="tab" id="tab-remote"[^>]*>Remote<\/div>/);
+  assert.doesNotMatch(CONSOLE_HTML, /id="tab-projects"/, "Projects is no longer a Settings tab");
+});
+
+test("Personalization settings include app icon choice", () => {
+  assert.match(CONSOLE_HTML, /id="settingsGeneral"/);
+  assert.match(CONSOLE_HTML, /App icon/);
+  assert.match(CONSOLE_HTML, /id="s_app_icon"/);
+  assert.match(CONSOLE_HTML, /value="dark-green">Dark green<\/option>/);
+  assert.match(CONSOLE_HTML, /value="white">White<\/option>/);
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /async function saveAppIconChoice\(/);
+  assert.match(js, /appIconChoice/);
 });
 
 test("in-app Talk button is gated by the voice feature flag", () => {

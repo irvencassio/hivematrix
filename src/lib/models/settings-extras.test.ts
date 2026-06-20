@@ -29,6 +29,14 @@ test("autoUpdate defaults off and round-trips", () => {
   assert.equal(s.getAutoUpdate(), false);
 });
 
+test("app icon choice defaults to dark-green and round-trips known values", () => {
+  assert.equal(s.getAppIconChoice(), "dark-green");
+  s.setAppIconChoice("white");
+  assert.equal(s.getAppIconChoice(), "white");
+  s.setAppIconChoice("dark-green");
+  assert.equal(s.getAppIconChoice(), "dark-green");
+});
+
 test("wallpaper opacity defaults to 82 and clamps to 0–100", () => {
   assert.equal(s.getThemeSettings().wallpaperOpacity, 82);
   s.setWallpaperOpacity(10);

@@ -1,17 +1,48 @@
 #!/usr/bin/env python3
-"""Generate HiveMatrix icon asset sets from the rendered 1024 masters."""
-import os, subprocess, sys
-from PIL import Image
+"""Generate HiveMatrix icon asset sets from the SVG masters."""
+import os, shutil, subprocess
+from PIL import Image, ImageDraw
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "out")
+REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
+TAURI_ICONS = os.path.join(REPO, "src-tauri", "icons")
 os.makedirs(OUT, exist_ok=True)
+os.makedirs(TAURI_ICONS, exist_ok=True)
 
-ios_master = Image.open(os.path.join(HERE, "icon-ios-master.svg.png")).convert("RGBA")
-mac_master = Image.open(os.path.join(HERE, "icon-macos-master.svg.png")).convert("RGBA")
+def render_svg(svg_name):
+    svg = os.path.join(HERE, svg_name)
+    png = os.path.join(HERE, f"{svg_name}.png")
+    if os.path.exists(png) and os.path.getmtime(png) >= os.path.getmtime(svg):
+        return png
+    tmp = os.path.join(OUT, "_render")
+    if os.path.exists(tmp):
+        shutil.rmtree(tmp)
+    os.makedirs(tmp, exist_ok=True)
+    subprocess.run(["qlmanage", "-t", "-s", "1024", "-o", tmp, svg], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    rendered = os.path.join(tmp, f"{svg_name}.png")
+    if not os.path.exists(rendered):
+        raise RuntimeError(f"qlmanage did not render {svg_name}")
+    shutil.copy2(rendered, png)
+    return png
 
 def resize(img, size):
     return img.resize((size, size), Image.LANCZOS)
+
+def apply_squircle_alpha(img):
+    scale = 4
+    mask = Image.new("L", (img.width * scale, img.height * scale), 0)
+    draw = ImageDraw.Draw(mask)
+    radius = round(img.width * 0.225) * scale
+    draw.rounded_rectangle((0, 0, img.width * scale, img.height * scale), radius=radius, fill=255)
+    mask = mask.resize(img.size, Image.LANCZOS)
+    out = img.copy()
+    out.putalpha(mask)
+    return out
+
+ios_master = Image.open(render_svg("icon-ios-master.svg")).convert("RGBA")
+mac_master = apply_squircle_alpha(Image.open(render_svg("icon-macos-master.svg")).convert("RGBA"))
+white_master = apply_squircle_alpha(Image.open(render_svg("icon-macos-white.svg")).convert("RGBA"))
 
 # --- iOS: 1024, NO alpha (App Store requirement) ---
 ios = resize(ios_master, 1024).convert("RGB")
@@ -37,6 +68,9 @@ png_sizes = {
 for name, size in png_sizes.items():
     resize(mac_master, size).save(os.path.join(OUT, name))
 
+resize(mac_master, 512).save(os.path.join(OUT, "app-icon-dark-green.png"))
+resize(white_master, 512).save(os.path.join(OUT, "app-icon-white.png"))
+
 # --- Windows .ico (multi-size) ---
 resize(mac_master, 256).save(
     os.path.join(OUT, "icon.ico"),
@@ -61,3 +95,7 @@ print("done ->", OUT)
 for f in sorted(os.listdir(OUT)):
     if not f.endswith(".iconset"):
         print("  ", f)
+
+for name in list(png_sizes.keys()) + ["icon.ico", "icon.icns", "app-icon-dark-green.png", "app-icon-white.png"]:
+    shutil.copy2(os.path.join(OUT, name), os.path.join(TAURI_ICONS, name))
+print("copied desktop icons ->", TAURI_ICONS)

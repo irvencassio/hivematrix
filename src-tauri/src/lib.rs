@@ -25,6 +25,71 @@ use tauri::Manager;
 
 const DAEMON_PORT: u16 = 3747;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AppIconChoice {
+    DarkGreen,
+    White,
+}
+
+fn app_icon_choice_from_config_text(text: &str) -> AppIconChoice {
+    serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|config| config.get("appIconChoice").and_then(|choice| choice.as_str()).map(str::to_owned))
+        .map(|choice| if choice == "white" { AppIconChoice::White } else { AppIconChoice::DarkGreen })
+        .unwrap_or(AppIconChoice::DarkGreen)
+}
+
+fn app_icon_choice_from_config_file() -> AppIconChoice {
+    let home = match std::env::var("HOME") {
+        Ok(home) => home,
+        Err(_) => return AppIconChoice::DarkGreen,
+    };
+    std::fs::read_to_string(std::path::Path::new(&home).join(".hivematrix/config.json"))
+        .map(|text| app_icon_choice_from_config_text(&text))
+        .unwrap_or(AppIconChoice::DarkGreen)
+}
+
+fn app_icon_resource_name(choice: AppIconChoice) -> &'static str {
+    match choice {
+        AppIconChoice::DarkGreen => "icons/app-icon-dark-green.png",
+        AppIconChoice::White => "icons/app-icon-white.png",
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn apply_runtime_dock_icon(app: &tauri::App) {
+    use objc2::{AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    let icon_name = app_icon_resource_name(app_icon_choice_from_config_file());
+    let icon_path = match app.path().resource_dir() {
+        Ok(dir) => dir.join(icon_name),
+        Err(e) => {
+            log::warn!("dock icon: resource_dir unavailable: {e}");
+            return;
+        }
+    };
+    let bytes = match std::fs::read(&icon_path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            log::warn!("dock icon: failed to read {icon_path:?}: {e}");
+            return;
+        }
+    };
+    let mtm = unsafe { MainThreadMarker::new_unchecked() };
+    let data = NSData::with_bytes(&bytes);
+    let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) else {
+        log::warn!("dock icon: failed to decode PNG {icon_path:?}");
+        return;
+    };
+    let ns_app = NSApplication::sharedApplication(mtm);
+    unsafe { ns_app.setApplicationIconImage(Some(&image)); }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apply_runtime_dock_icon(_app: &tauri::App) {}
+
 /// Holds the transient first-run daemon child (if we spawned one) so it can be
 /// reaped on app exit.
 struct DaemonChild(Mutex<Option<Child>>);
@@ -181,6 +246,8 @@ pub fn run() {
                     .build(),
             )?;
 
+            apply_runtime_dock_icon(app);
+
             // Ensure a daemon is up so the webview's health-poll redirects.
             if daemon_health_ok() {
                 log::info!("daemon already healthy on :{DAEMON_PORT}");
@@ -210,4 +277,33 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_icon_choice_defaults_to_dark_green_for_missing_or_invalid_config() {
+        assert_eq!(app_icon_choice_from_config_text(""), AppIconChoice::DarkGreen);
+        assert_eq!(app_icon_choice_from_config_text("{}"), AppIconChoice::DarkGreen);
+        assert_eq!(
+            app_icon_choice_from_config_text(r#"{"appIconChoice":"purple"}"#),
+            AppIconChoice::DarkGreen
+        );
+    }
+
+    #[test]
+    fn app_icon_choice_reads_white_from_config() {
+        assert_eq!(
+            app_icon_choice_from_config_text(r#"{"appIconChoice":"white"}"#),
+            AppIconChoice::White
+        );
+    }
+
+    #[test]
+    fn app_icon_choice_maps_to_bundled_resource_names() {
+        assert_eq!(app_icon_resource_name(AppIconChoice::DarkGreen), "icons/app-icon-dark-green.png");
+        assert_eq!(app_icon_resource_name(AppIconChoice::White), "icons/app-icon-white.png");
+    }
 }

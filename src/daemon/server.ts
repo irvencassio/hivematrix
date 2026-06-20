@@ -273,7 +273,7 @@ export function createDaemonServer() {
         const backends = detectBackends();
         const available = buildAvailableModels(backends);
         const theme = getThemeSettings();
-        const { getLocation, getAutoUpdate, getFrontierProvider, getRoleModels } = await import("@/lib/models/available");
+        const { getLocation, getAutoUpdate, getAppIconChoice, getFrontierProvider, getRoleModels } = await import("@/lib/models/available");
         json(res, 200, {
           backends,
           available,
@@ -285,6 +285,7 @@ export function createDaemonServer() {
           wallpaperOpacity: theme.wallpaperOpacity,
           location: getLocation(),
           autoUpdate: getAutoUpdate(),
+          appIconChoice: getAppIconChoice(),
           frontierProvider: getFrontierProvider(),
           roleModels: getRoleModels(),
           roleModelOptions: buildRoleModelOptions(backends),
@@ -349,6 +350,7 @@ export function createDaemonServer() {
         if (typeof body.wallpaperOpacity === "number") m.setWallpaperOpacity(body.wallpaperOpacity);
         if (typeof body.location === "string") m.setLocation(body.location);
         if (typeof body.autoUpdate === "boolean") m.setAutoUpdate(body.autoUpdate);
+        if (body.appIconChoice === "dark-green" || body.appIconChoice === "white") m.setAppIconChoice(body.appIconChoice);
         if (body.frontierProvider === "claude" || body.frontierProvider === "codex") m.setFrontierProvider(body.frontierProvider);
         if (body.roleModel && typeof body.roleModel === "object") {
           const rm = body.roleModel as { role?: unknown; modelId?: unknown };
@@ -360,7 +362,8 @@ export function createDaemonServer() {
         const theme = m.getThemeSettings();
         json(res, 200, { ok: true, defaultModel: m.getDefaultModel(available), theme: theme.theme,
           hasWallpaper: !!theme.wallpaperPath, wallpaperPath: theme.wallpaperPath,
-          wallpaperOpacity: theme.wallpaperOpacity, location: m.getLocation(), autoUpdate: m.getAutoUpdate() });
+          wallpaperOpacity: theme.wallpaperOpacity, location: m.getLocation(), autoUpdate: m.getAutoUpdate(),
+          appIconChoice: m.getAppIconChoice() });
         return;
       }
 

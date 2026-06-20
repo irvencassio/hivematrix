@@ -42,7 +42,9 @@
     "createUpdaterArtifacts": true,
     "resources": {
       "../dist/daemon": "daemon",
-      "../desktopbee-helper/DesktopBeeHelper.app": "DesktopBeeHelper.app"
+      "../desktopbee-helper/DesktopBeeHelper.app": "DesktopBeeHelper.app",
+      "icons/app-icon-dark-green.png": "icons/app-icon-dark-green.png",
+      "icons/app-icon-white.png": "icons/app-icon-white.png"
     },
     "icon": [
       "icons/32x32.png",
