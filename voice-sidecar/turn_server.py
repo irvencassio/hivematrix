@@ -22,7 +22,7 @@ from aiohttp import web
 
 from stt import transcribe
 from llm import LocalLLM
-from tts import synthesize, has_voice_profile
+from tts import synthesize
 
 
 def _one_turn(audio_b64: str, lang: str) -> dict:
@@ -77,9 +77,7 @@ async def handle_turn(request: web.Request) -> web.Response:
 def _warm() -> None:
     """Preload STT + TTS so the first real turn isn't cold."""
     try:
-        if not has_voice_profile():
-            return
-        wav = synthesize("Ready.", quality="fast", lang="en")  # warms the cloned TTS
+        wav = synthesize("Ready.", quality="fast", lang="en")  # warms Kokoro (live TTS)
         try:
             transcribe(wav)  # warms Whisper STT
         except Exception:

@@ -1,18 +1,22 @@
 """Text-to-speech for the VoiceBee sidecar.
 
-Engines behind one `synthesize()` seam, auto-selected once a voice profile exists
-(~/.hivematrix/voice/profile.wav, recorded via record_voice.py):
+Engines behind one `synthesize()` seam, selected by *intent* (the `quality` arg):
 
-- **say** (bootstrap): macOS `say`. No profile / forced fallback.
-- **cloned**: VoxCPM2 via mlx-audio, zero-shot from the reference (auto-transcribed
-  by whisper). Two quality tiers — the operator chose VoxCPM2 with steps=32 as the
-  closest clone:
-    high  → steps=32  (~4.6s)  best fidelity; for produced audio (voice notes, video)
-    fast  → steps=8   (~2.5s)  same timbre, lower latency; for the live talk loop
+- **kokoro** (interactive / live Talk, `quality="fast"`): Kokoro-82M via mlx-audio.
+  A fast, natural, FIXED voice (not cloned) — ~0.1s/reply once warm. The live path
+  is "latency-first, voice identity irrelevant" (the clone is for produced audio),
+  so Talk uses Kokoro. Set the voice with HIVE_KOKORO_VOICE (default af_heart).
+- **cloned** (produced audio, `quality="high"`): VoxCPM2 via mlx-audio, zero-shot
+  from the operator's reference (~/.hivematrix/voice/profile.wav). The persona
+  voice for voice notes + the video factory. steps=32 best fidelity.
+- **say** (bootstrap): macOS `say`. No profile, no Kokoro, or forced fallback.
 
-Callers just call `synthesize(text)` (defaults to `high`); live drivers pass
-`quality="fast"`. `HIVE_TTS_ENGINE=say|cloned` env var force-overrides selection
-(used by the fast headless tests so they don't load the clone model).
+Callers just call `synthesize(text)` (defaults to `high` → cloned); live drivers
+pass `quality="fast"` (→ Kokoro). `HIVE_TTS_ENGINE=say|cloned|kokoro` force-overrides
+selection (the fast headless tests force `say` so they load no model).
+
+NB: Chatterbox-Turbo was evaluated (2026-06-20) and is BROKEN in this mlx-audio
+build — it ignores the input text and parrots the reference clip. Do not use it.
 """
 import os
 import subprocess
@@ -21,6 +25,11 @@ import uuid
 
 SAMPLE_RATE = 16000
 VOXCPM_MODEL = "mlx-community/VoxCPM2-bf16"
+
+# Kokoro: fast non-cloning TTS for the interactive Talk loop. Voice is configurable
+# (af_heart = warm female; am_michael/am_adam male; bf_emma British …) via env.
+KOKORO_MODEL = "mlx-community/Kokoro-82M-bf16"
+KOKORO_VOICE = os.environ.get("HIVE_KOKORO_VOICE", "af_heart")
 
 # Cloned-voice quality tiers (operator-tuned: VoxCPM2, cfg=3.0, temp=0.5).
 CLONE_TIERS = {
@@ -60,8 +69,23 @@ def synthesize(text: str, out_path: str | None = None, voice: str | None = None,
         raise ValueError("synthesize: empty text")
 
     if engine is None:
-        engine = os.environ.get("HIVE_TTS_ENGINE") or (
-            "cloned" if (ref_audio or has_voice_profile()) else "say")
+        forced = os.environ.get("HIVE_TTS_ENGINE")
+        if forced:
+            engine = forced
+        elif quality == "fast":
+            engine = "kokoro"  # interactive Talk: fast generic voice
+        elif ref_audio or has_voice_profile():
+            engine = "cloned"  # produced audio: the persona clone
+        else:
+            engine = "say"
+    if engine == "kokoro":
+        try:
+            return _synthesize_kokoro(clean, _out_path(out_path), voice, lang)
+        except Exception:
+            # Kokoro made no audio (short-phrase quirk) or is unavailable — fall back
+            # to macOS `say`. It's instant, so the fast path stays fast (the clone
+            # would add ~2.5s for what is usually a tiny phrase).
+            engine = "say"
     if engine == "cloned":
         return _synthesize_cloned(clean, _out_path(out_path), ref_audio or voice_profile_path(), quality, lang)
     return _synthesize_say(clean, _out_path(out_path), voice, rate)
@@ -107,12 +131,72 @@ def _clone_model(model_id: str):
     return m
 
 
+def _kokoro_model():
+    m = _CLONE_MODELS.get("__kokoro__")
+    if m is None:
+        from mlx_audio.tts.utils import load_model
+        m = load_model(model_path=KOKORO_MODEL)
+        _CLONE_MODELS["__kokoro__"] = m
+    return m
+
+
+def _synthesize_kokoro(text: str, out_path: str, voice: str | None, lang: str = "en") -> str:
+    """Fast non-cloning synthesis (Kokoro-82M). ~0.1s/reply once warm.
+
+    Raises if Kokoro produces no audio (it silently emits nothing for some short
+    phrases, e.g. "Sure thing.") so the caller can fall back to a working engine.
+    """
+    import glob
+    from mlx_audio.tts.generate import generate_audio
+    out_dir = os.path.dirname(out_path) or "."
+    prefix = os.path.splitext(os.path.basename(out_path))[0]
+    # The voice prefix (af_/am_/bf_ …) selects language+speaker; no lang_code needed.
+    generate_audio(
+        text=text, model=_kokoro_model(), voice=voice or KOKORO_VOICE,
+        output_path=out_dir, file_prefix=prefix, audio_format="wav", verbose=False,
+    )
+    if os.path.exists(out_path):
+        return out_path
+    # generate_audio chunks long text into {prefix}_000.wav, _001 … Take them in
+    # order; concatenate if it split into several. Empty → raise (no audio made).
+    parts = sorted(glob.glob(os.path.join(out_dir, f"{prefix}_*.wav")))
+    if not parts:
+        raise RuntimeError("kokoro produced no audio")
+    if len(parts) == 1:
+        os.replace(parts[0], out_path)
+        return out_path
+    _concat_wavs(parts, out_path)
+    for p in parts:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    return out_path
+
+
+def _concat_wavs(parts: list[str], out_path: str) -> None:
+    """Concatenate same-format WAV chunks into out_path (stdlib wave)."""
+    import wave
+    with wave.open(parts[0]) as w0:
+        params = w0.getparams()
+        frames = [w0.readframes(w0.getnframes())]
+    for p in parts[1:]:
+        with wave.open(p) as w:
+            frames.append(w.readframes(w.getnframes()))
+    with wave.open(out_path, "w") as out:
+        out.setparams(params)
+        for fr in frames:
+            out.writeframes(fr)
+
+
 def warmup(quality: str = "fast", lang: str = "en") -> None:
-    """Preload the cloned-voice model + run one throwaway synthesis so the first
-    real turn isn't cold. Best-effort; never raises."""
+    """Preload the engine that `quality` selects + run one throwaway synthesis so
+    the first real turn isn't cold. `fast` warms Kokoro (the live path); `high`
+    warms the clone. Best-effort; never raises."""
     try:
-        if not has_voice_profile():
-            return  # 'say' engine has no model to warm
+        # 'fast' warms Kokoro even with no profile; 'high'/cloned needs a profile.
+        if quality != "fast" and not has_voice_profile():
+            return
         out = os.path.join(tempfile.gettempdir(), f"tts-warmup-{uuid.uuid4().hex}.wav")
         try:
             synthesize("Ready.", out, quality=quality, lang=lang)

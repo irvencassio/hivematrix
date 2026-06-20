@@ -32,6 +32,11 @@ SYSTEM_PROMPT = (
     "spoken immediately. No markdown, no lists, no emojis."
 )
 
+# Spoken replies are 1–2 short sentences, so cap generation tight. This also bounds
+# worst-case latency: an unbounded budget let a runaway turn burn ~30s and still
+# return empty (reasoning ate the budget). 160 tokens ≈ plenty for spoken output.
+SPOKEN_MAX_TOKENS = 160
+
 _THINK_RE = re.compile(r"<think>.*?</think>", re.S)
 
 # Qwen 3.6 is a reasoning model. In LM Studio its reasoning lands in a separate
@@ -80,10 +85,15 @@ def _get_recent_emails(limit: int = 5) -> str:
         'end tell'
     )
     try:
-        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=30)
+        # Bounded so a spurious tool call (small models sometimes invoke this for
+        # non-email questions) or a slow Mail launch can't stall the spoken turn
+        # for 30s. A real inbox read returns well within this.
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=12)
         if r.returncode != 0:
             return f"Could not read email: {(r.stderr or '').strip()[:160]}"
         return r.stdout.strip() or "No recent emails in the inbox."
+    except subprocess.TimeoutExpired:
+        return "The mail app did not respond in time."
     except Exception as e:  # noqa: BLE001 — never break the turn
         return f"Could not read email: {e}"
 
@@ -110,7 +120,7 @@ class LocalLLM:
             messages += history
         messages.append({"role": "user", "content": user_text})
         resp = self.client.chat.completions.create(
-            model=self.model, messages=messages, max_tokens=512, temperature=0.4,
+            model=self.model, messages=messages, max_tokens=SPOKEN_MAX_TOKENS, temperature=0.4,
             extra_body=THINKING_OFF,
         )
         content = resp.choices[0].message.content or ""
@@ -129,7 +139,7 @@ class LocalLLM:
         messages.append({"role": "user", "content": user_text})
         try:
             first = self.client.chat.completions.create(
-                model=self.model, messages=messages, max_tokens=512, temperature=0.4,
+                model=self.model, messages=messages, max_tokens=SPOKEN_MAX_TOKENS, temperature=0.4,
                 tools=TOOLS, tool_choice="auto", extra_body=THINKING_OFF,
             )
         except Exception:  # noqa: BLE001 — server without tool support → plain reply
@@ -137,7 +147,11 @@ class LocalLLM:
         msg = first.choices[0].message
         calls = getattr(msg, "tool_calls", None)
         if not calls:
-            return _THINK_RE.sub("", msg.content or "").strip()
+            # No tool needed. If the model produced spoken content, use it; if it
+            # came back empty (reasoning ate the budget, or a stray empty turn),
+            # fall back to a plain reply so the user never hears silence.
+            text = _THINK_RE.sub("", msg.content or "").strip()
+            return text or self.respond(user_text, system, history)
         messages.append({
             "role": "assistant", "content": msg.content or "",
             "tool_calls": [{"id": c.id, "type": "function",
@@ -152,10 +166,19 @@ class LocalLLM:
             messages.append({"role": "tool", "tool_call_id": c.id,
                              "content": _run_tool(c.function.name, args)})
         final = self.client.chat.completions.create(
-            model=self.model, messages=messages, max_tokens=512, temperature=0.4,
+            model=self.model, messages=messages, max_tokens=SPOKEN_MAX_TOKENS, temperature=0.4,
             extra_body=THINKING_OFF,
         )
-        return _THINK_RE.sub("", final.choices[0].message.content or "").strip()
+        text = _THINK_RE.sub("", final.choices[0].message.content or "").strip()
+        # The post-tool summary occasionally comes back empty too — summarize the
+        # tool result with a plain (toolless) reply rather than speak nothing.
+        if not text:
+            tool_context = "\n".join(m["content"] for m in messages if m.get("role") == "tool")
+            text = self.respond(
+                f"{user_text}\n\n(Information retrieved:\n{tool_context}\n)\nAnswer the user aloud.",
+                system, history,
+            )
+        return text
 
     def respond_stream(self, user_text: str, system: str = SYSTEM_PROMPT,
                        history: list[dict] | None = None):
@@ -165,7 +188,7 @@ class LocalLLM:
             messages += history
         messages.append({"role": "user", "content": user_text})
         stream = self.client.chat.completions.create(
-            model=self.model, messages=messages, max_tokens=512, temperature=0.4,
+            model=self.model, messages=messages, max_tokens=SPOKEN_MAX_TOKENS, temperature=0.4,
             extra_body=THINKING_OFF, stream=True,
         )
         for chunk in stream:

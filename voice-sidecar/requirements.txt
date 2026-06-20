@@ -6,7 +6,18 @@
 
 mlx-whisper==0.4.3      # local streaming STT on Apple Silicon (MLX)
 sounddevice==0.5.5      # mic capture for the talk.py / live.py Mac demos
-mlx-audio==0.4.4        # cloned-voice TTS (Chatterbox zero-shot) on Apple Silicon
+mlx-audio==0.4.4        # MLX TTS engines: Kokoro (fast live) + VoxCPM2 (cloned)
+
+# Kokoro-82M text processing (the fast interactive Talk voice). misaki is the G2P
+# front-end; it needs num2words + spaCy (+ the en_core_web_sm model) for English,
+# and phonemizer for out-of-dictionary words. cp314 wheels exist for all of these.
+# NOTE: phonemizer needs the espeak-ng SYSTEM library at runtime (brew install
+# espeak-ng on dev; must be bundled/installed for shipped DMG users — see #4c).
+misaki==0.7.4
+num2words==0.5.14
+spacy==3.8.13
+phonemizer==3.3.0
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 
 # Realtime voice (P5 — the iOS WebRTC client). The [webrtc] extra adds aiortc +
 # PyAV + pylibsrtp + opencv (P2P SmallWebRTC transport, no cloud SFU); [silero]
