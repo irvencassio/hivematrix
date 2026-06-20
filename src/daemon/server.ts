@@ -1280,6 +1280,18 @@ export function createDaemonServer() {
         const body = await parseBody(req) as Record<string, unknown>;
         const audioB64 = typeof body.audioBase64 === "string" ? body.audioBase64 : "";
         if (!audioB64) { json(res, 400, { error: "audioBase64 is required" }); return; }
+        const lang = typeof body.lang === "string" ? body.lang : "en";
+        // Fast path: relay to the persistent worker (STT + TTS kept warm across
+        // turns — no per-turn model reload). Falls back to turn_cli.py below if
+        // the worker can't be started.
+        try {
+          const { relayTurn } = await import("@/lib/voice/turn-server");
+          const r = await relayTurn(audioB64, lang);
+          json(res, 200, { transcript: r.transcript, reply: r.reply, audioBase64: r.audioBase64 });
+          return;
+        } catch (e) {
+          console.error(`[turn] warm worker failed, falling back to per-turn: ${e instanceof Error ? e.message : String(e)}`);
+        }
         const { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync } = await import("fs");
         const { generateId } = await import("@/lib/db");
         const { execFile } = await import("child_process");
@@ -1289,7 +1301,6 @@ export function createDaemonServer() {
         const inPath = join(tmp, `${id}.webm`);
         const outPath = join(tmp, `${id}-reply.m4a`);
         writeFileSync(inPath, Buffer.from(audioB64, "base64"));
-        const lang = typeof body.lang === "string" ? body.lang : "en";
         await new Promise<void>((resolve) => {
           execFile(rt.python, [join(rt.scriptsDir, "turn_cli.py"), inPath, outPath, "--lang", lang], { cwd: rt.scriptsDir, timeout: 120_000, env: { ...process.env, ...voiceLlmEnv(), PATH: buildCliPath() } }, (err, stdout, stderr) => {
             if (err) { json(res, 500, { error: ((stderr || err.message || "").trim()).slice(-300) }); resolve(); return; }
