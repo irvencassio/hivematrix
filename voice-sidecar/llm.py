@@ -25,11 +25,17 @@ from openai import OpenAI
 DEFAULT_BASE_URL = os.environ.get("HIVE_LLM_BASE_URL", "http://localhost:1234/v1")
 DEFAULT_MODEL = os.environ.get("HIVE_LLM_MODEL", "qwen/qwen3.6-27b")
 
-# Spoken-style: short, no markdown — this text goes straight to TTS.
+# Spoken-style: short, no markdown — this text goes straight to TTS. The tool
+# guidance is explicit because a small model otherwise over-calls the email tool
+# for unrelated questions (time, calendar, weather), stalling the spoken turn.
 SYSTEM_PROMPT = (
     "You are the user's voice assistant speaking aloud. Reply in one or two short, "
     "natural spoken sentences, and make the FIRST sentence brief so it can be "
-    "spoken immediately. No markdown, no lists, no emojis."
+    "spoken immediately. No markdown, no lists, no emojis.\n"
+    "Only call a tool when the user explicitly asks about that exact thing. The "
+    "email tool is ONLY for questions about their email, inbox, or mail messages. "
+    "For anything else — the time, date, weather, calendar, math, or general "
+    "questions — just answer directly and do NOT call any tool."
 )
 
 # Spoken replies are 1–2 short sentences, so cap generation tight. This also bounds
@@ -56,8 +62,10 @@ TOOLS = [{
     "type": "function",
     "function": {
         "name": "get_recent_emails",
-        "description": "Get the user's most recent inbox emails (sender + subject). "
-                       "Use when the user asks about their email, inbox, or recent messages.",
+        "description": "Read the user's most recent INBOX EMAILS (sender + subject). "
+                       "Call this ONLY when the user explicitly asks about their email, "
+                       "inbox, or mail. Do NOT call it for the time, date, calendar, "
+                       "weather, or any non-email question — answer those directly.",
         "parameters": {
             "type": "object",
             "properties": {"limit": {"type": "integer", "description": "How many recent emails (default 5, max 15)"}},
@@ -104,6 +112,18 @@ def _run_tool(name: str, args: dict) -> str:
     return f"Unknown tool: {name}"
 
 
+# Deterministic gate: only OFFER the email tool when the user actually mentions
+# email. The small local model can't reliably decide on its own — at any
+# temperature it fires the tool on unrelated questions (time/calendar/math) 50–75%
+# of the time, stalling the spoken turn. A keyword pre-check is 100% predictable;
+# the trade is that an email ask with no email keyword won't reach the tool.
+_EMAIL_RE = re.compile(r"\b(e-?mails?|inbox|mailbox|mail)\b", re.I)
+
+
+def _mentions_email(text: str) -> bool:
+    return bool(_EMAIL_RE.search(text or ""))
+
+
 class LocalLLM:
     def __init__(self, base_url: str | None = None, model: str | None = None,
                  api_key: str | None = None):
@@ -130,9 +150,12 @@ class LocalLLM:
 
     def respond_with_tools(self, user_text: str, system: str = SYSTEM_PROMPT,
                            history: list[dict] | None = None) -> str:
-        """Like respond(), but the model may call a tool (e.g. read recent email)
-        first. One tool round-trip, then a spoken-style summary. Falls back to a
-        plain reply when the model doesn't call a tool or tools aren't supported."""
+        """Like respond(), but when the user asks about email the model may call a
+        tool (read recent email) first, then give a spoken-style summary. The tool
+        is only offered when the text mentions email (see _mentions_email) — every
+        other question goes straight to a plain reply, so no spurious tool stalls."""
+        if not _mentions_email(user_text):
+            return self.respond(user_text, system, history)
         messages: list[dict] = [{"role": "system", "content": system}]
         if history:
             messages += history
