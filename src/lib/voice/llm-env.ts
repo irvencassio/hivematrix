@@ -11,6 +11,7 @@
  */
 
 import { getQwenProfile } from "@/lib/config/qwen-profile";
+import { getLocalEngineConfig, localTargetForRole } from "@/lib/models/local-engine";
 
 /** OpenAI-compatible base URL for an endpoint: append /v1 unless already versioned. */
 export function openAiBaseUrl(endpoint: string): string {
@@ -25,6 +26,14 @@ export function openAiBaseUrl(endpoint: string): string {
  * paired. Empty object when no local profile exists.
  */
 export function voiceLlmEnv(): Record<string, string> {
+  // Voice uses the FAST/operational local tier. Prefer the local-engine config
+  // (Rapid-MLX, the chosen engine — reasoning off); fall back to the Qwen
+  // profile for legacy/other local servers.
+  const le = getLocalEngineConfig();
+  if (le.engine === "rapid-mlx") {
+    const t = localTargetForRole("operational", le);
+    if (t) return { HIVE_LLM_BASE_URL: t.endpoint, HIVE_LLM_MODEL: t.model, HIVE_LLM_API_KEY: "local" };
+  }
   const profile = getQwenProfile();
   if (!profile) return {};
   const model = profile.secondary ?? profile.primary;
