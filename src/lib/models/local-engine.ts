@@ -97,6 +97,12 @@ export function tierBaseUrl(tier: LocalTier): string {
   return `http://127.0.0.1:${tier.port}/v1`;
 }
 
+/** The tier whose alias equals this model id, or null (used to route a chosen
+ * local model to the right Rapid-MLX port). */
+export function tierForAlias(alias: string, cfg: LocalEngineConfig = getLocalEngineConfig()): LocalTier | null {
+  return cfg.tiers.find((t) => t.alias === alias) ?? null;
+}
+
 /** Resolve a role to its tier's endpoint + model, or null if unmapped. */
 export function localTargetForRole(
   role: RoleKey,

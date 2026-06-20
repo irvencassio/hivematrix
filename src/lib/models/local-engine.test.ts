@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  getLocalEngineConfig, buildServeArgs, localTargetForRole, tierBaseUrl, DEFAULT_TIERS,
+  getLocalEngineConfig, buildServeArgs, localTargetForRole, tierBaseUrl, tierForAlias, DEFAULT_TIERS,
 } from "./local-engine";
 
 test("defaults: rapid-mlx engine, fast + coding tiers, reasoning OFF", () => {
@@ -48,4 +48,11 @@ test("roles map to tiers: operational→fast, coding/thinking→coding", () => {
 
 test("tierBaseUrl uses loopback + port", () => {
   assert.equal(tierBaseUrl(DEFAULT_TIERS[1]), "http://127.0.0.1:8001/v1");
+});
+
+test("tierForAlias maps a model id to its tier (for endpoint routing)", () => {
+  const c = getLocalEngineConfig({});
+  assert.equal(tierForAlias("qwen3.6-35b-4bit", c)!.port, 8000);
+  assert.equal(tierForAlias("qwen3.6-27b-4bit", c)!.port, 8001);
+  assert.equal(tierForAlias("claude-opus-4-8", c), null);
 });
