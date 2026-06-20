@@ -13,8 +13,10 @@ script is run standalone (e.g. talk.py) with nothing in the environment.
 
 Keeping the loop local honors the Q12 "local-first" posture; no cloud call.
 """
+import json
 import os
 import re
+import subprocess
 
 from openai import OpenAI
 
@@ -41,6 +43,56 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.S)
 # model settings (or load a non-thinking model). Latency, not code, is the gate.
 THINKING_OFF = {"chat_template_kwargs": {"enable_thinking": False}}
 
+# --- Tools the spoken assistant can call (first one: read recent email). The
+# sidecar runs on the Mac, so it reads Mail directly via osascript — the same
+# surface MailBee uses. (Sending/safety-gated actions should route through the
+# daemon's MailBee; reading is safe to do here.) ---
+TOOLS = [{
+    "type": "function",
+    "function": {
+        "name": "get_recent_emails",
+        "description": "Get the user's most recent inbox emails (sender + subject). "
+                       "Use when the user asks about their email, inbox, or recent messages.",
+        "parameters": {
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "description": "How many recent emails (default 5, max 15)"}},
+        },
+    },
+}]
+
+
+def _get_recent_emails(limit: int = 5) -> str:
+    try:
+        limit = max(1, min(int(limit or 5), 15))
+    except (TypeError, ValueError):
+        limit = 5
+    script = (
+        'tell application "Mail"\n'
+        '  set out to ""\n'
+        '  set msgs to messages of inbox\n'
+        f'  set lim to {limit}\n'
+        '  if (count of msgs) < lim then set lim to (count of msgs)\n'
+        '  repeat with i from 1 to lim\n'
+        '    set m to item i of msgs\n'
+        '    set out to out & (sender of m) & " — " & (subject of m) & linefeed\n'
+        '  end repeat\n'
+        '  return out\n'
+        'end tell'
+    )
+    try:
+        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            return f"Could not read email: {(r.stderr or '').strip()[:160]}"
+        return r.stdout.strip() or "No recent emails in the inbox."
+    except Exception as e:  # noqa: BLE001 — never break the turn
+        return f"Could not read email: {e}"
+
+
+def _run_tool(name: str, args: dict) -> str:
+    if name == "get_recent_emails":
+        return _get_recent_emails(args.get("limit", 5))
+    return f"Unknown tool: {name}"
+
 
 class LocalLLM:
     def __init__(self, base_url: str | None = None, model: str | None = None,
@@ -65,6 +117,45 @@ class LocalLLM:
         # Reasoning (if any) is in message.reasoning_content; ignore it for TTS.
         # Defensively strip any inline <think> block too.
         return _THINK_RE.sub("", content).strip()
+
+    def respond_with_tools(self, user_text: str, system: str = SYSTEM_PROMPT,
+                           history: list[dict] | None = None) -> str:
+        """Like respond(), but the model may call a tool (e.g. read recent email)
+        first. One tool round-trip, then a spoken-style summary. Falls back to a
+        plain reply when the model doesn't call a tool or tools aren't supported."""
+        messages: list[dict] = [{"role": "system", "content": system}]
+        if history:
+            messages += history
+        messages.append({"role": "user", "content": user_text})
+        try:
+            first = self.client.chat.completions.create(
+                model=self.model, messages=messages, max_tokens=512, temperature=0.4,
+                tools=TOOLS, tool_choice="auto", extra_body=THINKING_OFF,
+            )
+        except Exception:  # noqa: BLE001 — server without tool support → plain reply
+            return self.respond(user_text, system, history)
+        msg = first.choices[0].message
+        calls = getattr(msg, "tool_calls", None)
+        if not calls:
+            return _THINK_RE.sub("", msg.content or "").strip()
+        messages.append({
+            "role": "assistant", "content": msg.content or "",
+            "tool_calls": [{"id": c.id, "type": "function",
+                            "function": {"name": c.function.name, "arguments": c.function.arguments}}
+                           for c in calls],
+        })
+        for c in calls:
+            try:
+                args = json.loads(c.function.arguments or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                args = {}
+            messages.append({"role": "tool", "tool_call_id": c.id,
+                             "content": _run_tool(c.function.name, args)})
+        final = self.client.chat.completions.create(
+            model=self.model, messages=messages, max_tokens=512, temperature=0.4,
+            extra_body=THINKING_OFF,
+        )
+        return _THINK_RE.sub("", final.choices[0].message.content or "").strip()
 
     def respond_stream(self, user_text: str, system: str = SYSTEM_PROMPT,
                        history: list[dict] | None = None):

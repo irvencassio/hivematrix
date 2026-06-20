@@ -30,7 +30,7 @@ def main() -> int:
         print(json.dumps({"transcript": "", "reply": ""}))
         return 0
 
-    reply = LocalLLM().respond(transcript)
+    reply = LocalLLM().respond_with_tools(transcript)
     if reply.strip():
         wav = synthesize(reply, quality="fast", lang=a.lang)
         ext = os.path.splitext(a.out)[1].lower()
