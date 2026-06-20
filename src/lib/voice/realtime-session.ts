@@ -57,16 +57,72 @@ function readConfig(): unknown {
   }
 }
 
-/** ICE servers handed to the client (GET /voice/rtc/config). */
-export function realtimeIceServers(): IceServer[] {
+// --- Cloudflare Realtime TURN: mint short-lived ICE credentials from a TURN Key
+// (TURN_KEY_ID + TURN_API_TOKEN, via env or ~/.hivematrix/config.json). Both the
+// iOS client (GET /voice/rtc/config) and the aiortc server (HIVE_TURN_*) need
+// relay candidates to connect off-LAN. Cached until shortly before expiry; falls
+// back to a static `turn` config block, else STUN-only. ---
+interface TurnKey { keyId: string; token: string; }
+
+function turnKeyCreds(): TurnKey | null {
+  const cfg = readConfig() as Record<string, unknown>;
+  const keyId = (process.env.TURN_KEY_ID || (cfg.turnKeyId as string) || "").trim();
+  const token = (process.env.TURN_API_TOKEN || (cfg.turnApiToken as string) || "").trim();
+  return keyId && token ? { keyId, token } : null;
+}
+
+let _iceCache: { servers: IceServer[]; exp: number } | null = null;
+
+async function mintCloudflareIce(creds: TurnKey, ttl: number): Promise<IceServer[]> {
+  const r = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${creds.keyId}/credentials/generate-ice-servers`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${creds.token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ ttl }),
+  });
+  if (!r.ok) throw new Error(`cloudflare turn ${r.status}`);
+  const data = await r.json() as { iceServers?: unknown };
+  const list = Array.isArray(data.iceServers) ? data.iceServers : data.iceServers ? [data.iceServers] : [];
+  return list.map((s) => {
+    const o = s as Record<string, unknown>;
+    const urls = Array.isArray(o.urls) ? (o.urls as string[]) : typeof o.urls === "string" ? [o.urls] : [];
+    const out: IceServer = { urls };
+    if (typeof o.username === "string") out.username = o.username;
+    if (typeof o.credential === "string") out.credential = o.credential;
+    return out;
+  }).filter((s) => (Array.isArray(s.urls) ? s.urls.length : !!s.urls));
+}
+
+/** ICE servers for the client AND the aiortc server. Cloudflare-minted (cached)
+ * when a TURN Key is configured, else the static `turn` config / STUN-only. */
+async function getIceServers(): Promise<IceServer[]> {
+  const creds = turnKeyCreds();
+  if (creds) {
+    const now = Date.now();
+    if (_iceCache && _iceCache.exp > now) return _iceCache.servers;
+    try {
+      const ttl = 86400; // 24h
+      const servers = await mintCloudflareIce(creds, ttl);
+      if (servers.length) {
+        _iceCache = { servers, exp: now + ttl * 800 }; // refresh at ~80% of TTL (ms)
+        return servers;
+      }
+    } catch (e) {
+      console.error(`[turn] Cloudflare mint failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
   return parseTurnConfig(readConfig());
 }
 
+/** ICE servers handed to the client (GET /voice/rtc/config). */
+export async function realtimeIceServers(): Promise<IceServer[]> {
+  return getIceServers();
+}
+
 /** HIVE_TURN_* env so the Python (aiortc) side gathers relay candidates too. */
-function turnEnv(): Record<string, string> {
-  const turn = realtimeIceServers().find((s) => {
+async function turnEnv(): Promise<Record<string, string>> {
+  const turn = (await getIceServers()).find((s) => {
     const u = Array.isArray(s.urls) ? s.urls[0] : s.urls;
-    return u.startsWith("turn:");
+    return typeof u === "string" && u.startsWith("turn");
   });
   if (!turn) return {};
   const urls = Array.isArray(turn.urls) ? turn.urls.join(",") : turn.urls;
@@ -88,11 +144,12 @@ export function ensureRealtimeServer(): Promise<number> {
   return _starting;
 }
 
-function startServer(): Promise<number> {
+async function startServer(): Promise<number> {
   const rt = voiceRuntime();
-  if (!rt) return Promise.reject(new Error("voice runtime not available — enable Voice in Settings"));
+  if (!rt) throw new Error("voice runtime not available — enable Voice in Settings");
+  const tEnv = await turnEnv();
   return new Promise<number>((resolve, reject) => {
-    const env = { ...process.env, ...voiceLlmEnv(), ...turnEnv(), PATH: buildCliPath() };
+    const env = { ...process.env, ...voiceLlmEnv(), ...tEnv, PATH: buildCliPath() };
     const proc = spawn(rt.python, [join(rt.scriptsDir, "realtime_server.py"), "--port", "0"], { cwd: rt.scriptsDir, env });
     let resolved = false;
     const onLine = (d: Buffer) => {

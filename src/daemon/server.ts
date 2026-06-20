@@ -1324,7 +1324,7 @@ export function createDaemonServer() {
         const { isFeatureEnabled } = await import("@/lib/config/features");
         if (!isFeatureEnabled("voice")) { json(res, 403, { error: "voice feature is off — enable it in Settings → Features" }); return; }
         const { realtimeIceServers } = await import("@/lib/voice/realtime-session");
-        json(res, 200, { iceServers: realtimeIceServers() });
+        json(res, 200, { iceServers: await realtimeIceServers() });
         return;
       }
 
