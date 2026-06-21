@@ -133,7 +133,7 @@ async function download(url, outPath) {
 }
 
 /** Full one-shot: script/text/audio → rendered MP4 on disk. */
-export async function makeAvatarVideo({ scriptText, audioPath, avatarId, voiceId, avatarStyle, width, height, outPath, pollSeconds, key }) {
+export async function makeAvatarVideo({ scriptText, audioPath, avatarId, voiceId, avatarStyle, speed, width, height, outPath, pollSeconds, key }) {
   let voice;
   if (audioPath) {
     process.stderr.write(`  [heygen] uploading audio asset ${audioPath}…\n`);
@@ -142,6 +142,8 @@ export async function makeAvatarVideo({ scriptText, audioPath, avatarId, voiceId
   } else {
     if (!voiceId) throw new Error("--voice <voice_id> is required for the text→speech path (or pass --audio)");
     voice = { type: "text", input_text: scriptText, voice_id: voiceId };
+    // HeyGen TTS tempo: 1.0 = native, <1 slower, >1 faster (range ~0.5–1.5).
+    if (speed && speed !== 1) voice.speed = speed;
   }
   process.stderr.write(`  [heygen] generating (avatar ${avatarId})…\n`);
   const videoId = await generateAvatarVideo({ avatarId, avatarStyle, voice, width, height, key });
@@ -192,6 +194,7 @@ async function main() {
   const out = await makeAvatarVideo({
     scriptText, audioPath, avatarId, voiceId,
     avatarStyle: flag("--avatar-style", "normal"),
+    speed: flag("--speed") ? parseFloat(flag("--speed")) : undefined,
     width: parseInt(flag("--width", "1280"), 10),
     height: parseInt(flag("--height", "720"), 10),
     outPath, pollSeconds: parseInt(flag("--poll-seconds", "600"), 10),

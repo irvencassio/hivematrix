@@ -33,21 +33,26 @@ function sidecarDir() {
   throw new Error("voice-sidecar venv not found (set HIVE_VOICE_SIDECAR)");
 }
 
-function configAvatarId() {
+function heygenConfig() {
   try {
-    const cfg = JSON.parse(rf(join(homedir(), ".hivematrix", "config.json"), "utf-8"));
-    return cfg?.heygen?.avatarId || null;
-  } catch { return null; }
+    return JSON.parse(rf(join(homedir(), ".hivematrix", "config.json"), "utf-8"))?.heygen || {};
+  } catch { return {}; }
 }
+const hg = heygenConfig();
 
 const args = process.argv.slice(2);
 const flag = (name, def = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : def; };
+const has = (name) => args.includes(name);
 const lang = flag("--lang", "en");
 const topic = flag("--topic");
 const text = flag("--text");
 const seconds = flag("--seconds", "60");
-const avatarId = flag("--avatar", configAvatarId());
-const voiceId = flag("--voice"); // optional: HeyGen TTS instead of cloned narration
+const avatarId = flag("--avatar", hg.avatarId || null);
+// Voice: default to the configured HeyGen voice (heygen.voiceId). `--cloned`
+// forces the local VoxCPM clone instead (narration uploaded via --audio).
+const cloned = has("--cloned");
+const voiceId = cloned ? null : flag("--voice", hg.voiceId || null);
+const speed = flag("--speed") ? parseFloat(flag("--speed")) : (typeof hg.voiceSpeed === "number" ? hg.voiceSpeed : undefined);
 
 const positionals = [];
 for (let i = 0; i < args.length; i++) { if (args[i].startsWith("--")) { i++; continue; } positionals.push(args[i]); }
@@ -83,19 +88,20 @@ if (topic) {
 if (scriptText) writeFileSync(scriptTxt, scriptText);
 console.log(`  script: ${(scriptText || "").slice(0, 90)}…`);
 
-// 2. Cloned-voice narration (skipped when --voice forces HeyGen TTS).
+// 2. Local cloned-voice narration — only when there's no HeyGen voice (i.e.
+// `--cloned`, or no heygen.voiceId configured). Otherwise HeyGen TTS speaks.
 let audioPath = null;
 if (!voiceId) {
   audioPath = join(OUT, "avatar-narration.wav");
-  console.log(`→ narration (cloned voice, lang=${lang})…`);
+  console.log(`→ narration (local cloned voice, lang=${lang})…`);
   execFileSync(py, [join(sc, "synth_cli.py"), "--text-file", scriptTxt, "--out", audioPath, "--quality", "high", "--lang", lang],
     { cwd: sc, stdio: "inherit" });
 }
 
-// 3. HeyGen avatar render (lip-syncs to our narration, or HeyGen TTS via --voice).
-console.log(`→ HeyGen avatar render (avatar ${avatarId})…`);
+// 3. HeyGen avatar render — HeyGen TTS (voiceId + speed) or lip-sync to our audio.
+console.log(`→ HeyGen avatar render (avatar ${avatarId}${voiceId ? `, voice ${voiceId}${speed ? ` @${speed}x` : ""}` : ", cloned audio"})…`);
 const out = await makeAvatarVideo({
-  scriptText, audioPath, avatarId, voiceId,
+  scriptText, audioPath, avatarId, voiceId, speed,
   width: 1280, height: 720, outPath: outMp4, pollSeconds: 600,
 });
 console.log(out);
