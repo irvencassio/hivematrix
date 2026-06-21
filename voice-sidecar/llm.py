@@ -62,13 +62,15 @@ TOOLS = [{
     "type": "function",
     "function": {
         "name": "get_recent_emails",
-        "description": "Read the user's most recent INBOX EMAILS (sender + subject). "
-                       "Call this ONLY when the user explicitly asks about their email, "
-                       "inbox, or mail. Do NOT call it for the time, date, calendar, "
-                       "weather, or any non-email question — answer those directly.",
+        "description": "Read the user's recent INBOX EMAILS — returns the sender, subject, "
+                       "date, and a content preview for each. Use for ANY email question: how "
+                       "many, who the senders are, the subjects, or reading/summarizing a recent "
+                       "email. Use limit=1 for 'the last/latest email', a larger limit to list "
+                       "several. Call ONLY for email/inbox/mail questions; answer the time, date, "
+                       "calendar, weather, and other non-email questions directly without it.",
         "parameters": {
             "type": "object",
-            "properties": {"limit": {"type": "integer", "description": "How many recent emails (default 5, max 15)"}},
+            "properties": {"limit": {"type": "integer", "description": "How many recent emails (default 5, max 15). Use 1 for the latest email."}},
         },
     },
 }]
@@ -79,6 +81,10 @@ def _get_recent_emails(limit: int = 5) -> str:
         limit = max(1, min(int(limit or 5), 15))
     except (TypeError, ValueError):
         limit = 5
+    # Sender + subject + date + a content preview per message, so the model can
+    # answer "how many", "who are the senders", "what's the subject", AND "read /
+    # summarize the last email" from one call. Body is truncated (spoken replies
+    # summarize, never read verbatim) to keep the osascript fast.
     script = (
         'tell application "Mail"\n'
         '  set out to ""\n'
@@ -87,7 +93,17 @@ def _get_recent_emails(limit: int = 5) -> str:
         '  if (count of msgs) < lim then set lim to (count of msgs)\n'
         '  repeat with i from 1 to lim\n'
         '    set m to item i of msgs\n'
-        '    set out to out & (sender of m) & " — " & (subject of m) & linefeed\n'
+        '    set theBody to ""\n'
+        '    try\n'
+        '      set theBody to content of m\n'
+        '    end try\n'
+        '    if (count of characters of theBody) > 400 then set theBody to (text 1 thru 400 of theBody) & "..."\n'
+        '    set out to out & "[" & i & "] From: " & (sender of m) & linefeed\n'
+        '    set out to out & "Subject: " & (subject of m) & linefeed\n'
+        '    try\n'
+        '      set out to out & "Date: " & ((date received of m) as string) & linefeed\n'
+        '    end try\n'
+        '    set out to out & "Preview: " & theBody & linefeed & "----" & linefeed\n'
         '  end repeat\n'
         '  return out\n'
         'end tell'
@@ -99,7 +115,8 @@ def _get_recent_emails(limit: int = 5) -> str:
         r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=12)
         if r.returncode != 0:
             return f"Could not read email: {(r.stderr or '').strip()[:160]}"
-        return r.stdout.strip() or "No recent emails in the inbox."
+        out = r.stdout.strip()
+        return re.sub(r"\n{3,}", "\n\n", out) if out else "No recent emails in the inbox."
     except subprocess.TimeoutExpired:
         return "The mail app did not respond in time."
     except Exception as e:  # noqa: BLE001 — never break the turn
@@ -115,9 +132,15 @@ def _run_tool(name: str, args: dict) -> str:
 # Deterministic gate: only OFFER the email tool when the user actually mentions
 # email. The small local model can't reliably decide on its own — at any
 # temperature it fires the tool on unrelated questions (time/calendar/math) 50–75%
-# of the time, stalling the spoken turn. A keyword pre-check is 100% predictable;
-# the trade is that an email ask with no email keyword won't reach the tool.
-_EMAIL_RE = re.compile(r"\b(e-?mails?|inbox|mailbox|mail)\b", re.I)
+# of the time, stalling the spoken turn. A keyword pre-check is 100% predictable.
+# Cover the natural email phrasings — not just "email/inbox/mail" but "senders",
+# "messages", and "who sent/emailed me" — so asks like "list the senders" or "read
+# the last message" reach the tool. None of these match time/calendar/weather/math.
+_EMAIL_RE = re.compile(
+    r"\b(e-?mails?|inbox|mailbox|mail|senders?|messages?|correspondence|"
+    r"who\s+(?:sent|e-?mailed|wrote|messaged)(?:\s+me)?)\b",
+    re.I,
+)
 
 
 def _mentions_email(text: str) -> bool:
