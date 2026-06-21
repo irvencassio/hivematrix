@@ -72,7 +72,9 @@ export async function listVoices(key) {
 /** Upload a local audio file as a HeyGen asset → asset_id (for the cloned-voice path). */
 export async function uploadAudioAsset(path, key = apiKey()) {
   const bytes = readFileSync(path);
-  const contentType = path.endsWith(".mp3") ? "audio/mpeg" : "audio/wav";
+  // HeyGen sniffs the bytes and rejects a mismatched header — RIFF WAV is
+  // detected as audio/x-wav (not audio/wav), so match that for .wav uploads.
+  const contentType = path.endsWith(".mp3") ? "audio/mpeg" : "audio/x-wav";
   const r = await fetch(`${UPLOAD}/v1/asset`, {
     method: "POST",
     headers: { "X-Api-Key": key, "Content-Type": contentType },
