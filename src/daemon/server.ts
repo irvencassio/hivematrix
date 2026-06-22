@@ -1407,6 +1407,11 @@ export function createDaemonServer() {
               }
             })();
           }
+          // Voice skill picker: answer "what skills do I have / use the X skill"
+          // deterministically, overriding the LLM reply.
+          const { skillTurnOverride } = await import("@/lib/voice/skill-turn");
+          const ov = await skillTurnOverride(r.transcript || "");
+          if (ov) { json(res, 200, { transcript: r.transcript, ...ov }); return; }
           json(res, 200, { transcript: r.transcript, reply: r.reply, audioBase64: r.audioBase64 });
           return;
         } catch (e) {
@@ -1426,9 +1431,16 @@ export function createDaemonServer() {
             if (err) { json(res, 500, { error: ((stderr || err.message || "").trim()).slice(-300) }); resolve(); return; }
             let meta: { transcript?: string; reply?: string } = {};
             try { meta = JSON.parse((stdout.trim().split("\n").pop()) || "{}"); } catch { /* ignore */ }
-            const replyB64 = existsSync(outPath) ? readFileSync(outPath).toString("base64") : "";
-            json(res, 200, { transcript: meta.transcript ?? "", reply: meta.reply ?? "", audioBase64: replyB64 });
-            resolve();
+            void (async () => {
+              try {
+                const { skillTurnOverride } = await import("@/lib/voice/skill-turn");
+                const ov = await skillTurnOverride(meta.transcript ?? "");
+                if (ov) { json(res, 200, { transcript: meta.transcript ?? "", ...ov }); resolve(); return; }
+              } catch { /* fall through */ }
+              const replyB64 = existsSync(outPath) ? readFileSync(outPath).toString("base64") : "";
+              json(res, 200, { transcript: meta.transcript ?? "", reply: meta.reply ?? "", audioBase64: replyB64 });
+              resolve();
+            })();
           });
         });
         try { unlinkSync(inPath); } catch { /* ignore */ }
