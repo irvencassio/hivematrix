@@ -21,7 +21,7 @@ import tempfile
 from aiohttp import web
 
 from stt import transcribe
-from llm import LocalLLM
+from llm import LocalLLM, is_uncertain, wants_task
 from tts import synthesize
 
 
@@ -34,8 +34,9 @@ def _one_turn(audio_b64: str, lang: str) -> dict:
     try:
         transcript = transcribe(inp)
         if not transcript.strip():
-            return {"transcript": "", "reply": "", "audioBase64": ""}
+            return {"transcript": "", "reply": "", "audioBase64": "", "escalated": False}
         reply = LocalLLM().respond_with_tools(transcript)
+        escalated = is_uncertain(reply) or wants_task(transcript)
         audio_out = ""
         if reply.strip():
             wav = synthesize(reply, quality="fast", lang=lang)
@@ -48,7 +49,7 @@ def _one_turn(audio_b64: str, lang: str) -> dict:
                 src = wav  # fall back to WAV if afconvert is unavailable
             with open(src, "rb") as f:
                 audio_out = base64.b64encode(f.read()).decode()
-        return {"transcript": transcript, "reply": reply, "audioBase64": audio_out}
+        return {"transcript": transcript, "reply": reply, "audioBase64": audio_out, "escalated": escalated}
     finally:
         try:
             for f in os.listdir(work):

@@ -53,7 +53,7 @@ async function startServer(): Promise<number> {
   });
 }
 
-export interface TurnResult { transcript: string; reply: string; audioBase64: string; }
+export interface TurnResult { transcript: string; reply: string; audioBase64: string; escalated: boolean; }
 
 /** Relay one push-to-talk turn to the warm worker. */
 export async function relayTurn(audioBase64: string, lang: string): Promise<TurnResult> {
@@ -65,7 +65,7 @@ export async function relayTurn(audioBase64: string, lang: string): Promise<Turn
   });
   const data = (await r.json()) as Partial<TurnResult> & { error?: string };
   if (!r.ok) throw new Error(data.error || `turn worker ${r.status}`);
-  return { transcript: data.transcript || "", reply: data.reply || "", audioBase64: data.audioBase64 || "" };
+  return { transcript: data.transcript || "", reply: data.reply || "", audioBase64: data.audioBase64 || "", escalated: (data as Record<string, unknown>).escalated === true };
 }
 
 /** Stop the turn worker (e.g. when the Voice feature is disabled). */

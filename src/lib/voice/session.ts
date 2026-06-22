@@ -92,10 +92,12 @@ export function deriveVoiceTitle(session: VoiceSession): string {
 }
 
 /** Render the conversation transcript as a task description. */
-export function buildVoiceTaskDescription(session: VoiceSession): string {
+export function buildVoiceTaskDescription(session: VoiceSession, escalated?: boolean): string {
   const who = session.handle ? `${session.surface} · ${session.handle}` : session.surface;
   const header = [
-    `Voice session (${who}) — transcript follows. Treat the user's spoken words as the request.`,
+    escalated
+      ? `Voice session (${who}) — task created from voice. Complete the user's request below.`
+      : `Voice session (${who}) — transcript follows. Treat the user's spoken words as the request.`,
     "",
     "--- Transcript ---",
   ];
@@ -124,6 +126,6 @@ export function routeVoiceSession(session: VoiceSession, opts: VoiceRouteOptions
   return {
     kind: "task",
     title: deriveVoiceTitle(session),
-    description: buildVoiceTaskDescription(session),
+    description: buildVoiceTaskDescription(session, opts.escalated),
   };
 }

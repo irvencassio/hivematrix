@@ -35,7 +35,10 @@ SYSTEM_PROMPT = (
     "Only call a tool when the user explicitly asks about that exact thing. The "
     "email tool is ONLY for questions about their email, inbox, or mail messages. "
     "For anything else — the time, date, weather, calendar, math, or general "
-    "questions — just answer directly and do NOT call any tool."
+    "questions — just answer directly and do NOT call any tool.\n"
+    "If the user asks you to remind them of something, follow up on something, add "
+    "a task, or create a note, reply with exactly: 'Got it — I've added that to "
+    "your HiveMatrix tasks.' Do not try to set the reminder yourself."
 )
 
 # Spoken replies are 1–2 short sentences, so cap generation tight. This also bounds
@@ -44,6 +47,44 @@ SYSTEM_PROMPT = (
 SPOKEN_MAX_TOKENS = 160
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.S)
+
+# Phrases that signal the model couldn't answer — triggers task escalation to HiveMatrix.
+_UNCERTAIN_RE = re.compile(
+    r"\b(i(?:'m| am) not (?:sure|certain)|i don't know|i have no (?:information|idea)|"
+    r"i don't have (?:information|access|that information)|i can't (?:answer|help with that)|"
+    r"i(?:'m| am) unable to (?:answer|help)|i cannot (?:answer|help with)|"
+    r"beyond my (?:knowledge|capabilities)|i lack (?:the )?(?:information|knowledge)|"
+    r"not (?:something i|able to) (?:know|answer))\b",
+    re.I,
+)
+
+
+def is_uncertain(reply: str) -> bool:
+    """True when the spoken reply signals the model couldn't answer the question."""
+    return bool(_UNCERTAIN_RE.search(reply or ""))
+
+
+# Phrases in the user's OWN words that mean "please create a task / reminder".
+# Checked against the TRANSCRIPT (not the reply) — escalation fires even when the
+# model successfully acknowledged the request.
+_TASK_TRIGGER_RE = re.compile(
+    r"\b("
+    r"remind\s+me|reminder\s+(?:to|about|for)|"
+    r"remember\s+to|make\s+a\s+note|note\s+to\s+(?:self|me)|"
+    r"don'?t\s+forget|"
+    r"follow[\s-]up|"
+    r"add\s+(?:this\s+)?to\s+(?:my\s+)?(?:tasks?|to[- ]?do|list)|"
+    r"create\s+(?:a\s+)?(?:task|reminder|to[- ]?do)|"
+    r"new\s+task|"
+    r"put\s+(?:this\s+)?on\s+(?:my\s+)?(?:list|tasks?)"
+    r")\b",
+    re.I,
+)
+
+
+def wants_task(transcript: str) -> bool:
+    """True when the user's spoken words explicitly request a task or reminder."""
+    return bool(_TASK_TRIGGER_RE.search(transcript or ""))
 
 # Qwen 3.6 is a reasoning model. In LM Studio its reasoning lands in a separate
 # `reasoning_content` field and the spoken answer in `content` — but the reasoning

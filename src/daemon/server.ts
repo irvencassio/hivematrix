@@ -1287,6 +1287,41 @@ export function createDaemonServer() {
         try {
           const { relayTurn } = await import("@/lib/voice/turn-server");
           const r = await relayTurn(audioB64, lang);
+          if (r.escalated && r.transcript) {
+            void (async () => {
+              try {
+                const { routeVoiceSession } = await import("@/lib/voice/session");
+                const { Task, generateId } = await import("@/lib/db");
+                const { DEFAULT_TASK_PROJECT } = await import("@/lib/routing/project-constants");
+                const sessionId = generateId();
+                const voiceSession = {
+                  sessionId,
+                  surface: "ios" as const,
+                  startedAt: new Date().toISOString(),
+                  turns: [
+                    { role: "user" as const, text: r.transcript },
+                    ...(r.reply ? [{ role: "assistant" as const, text: r.reply }] : []),
+                  ],
+                };
+                const route = routeVoiceSession(voiceSession, { escalated: true });
+                if (route.kind === "task") {
+                  const task = await Task.create({
+                    _id: generateId(),
+                    title: route.title,
+                    description: route.description,
+                    project: DEFAULT_TASK_PROJECT,
+                    status: "backlog",
+                    executor: "agent",
+                    source: "voice",
+                    output: { voice: { sessionId, surface: "ios" } },
+                  });
+                  broadcast("tasks:created", { taskId: task._id });
+                }
+              } catch (e) {
+                console.error(`[turn] escalation task failed: ${e instanceof Error ? e.message : e}`);
+              }
+            })();
+          }
           json(res, 200, { transcript: r.transcript, reply: r.reply, audioBase64: r.audioBase64 });
           return;
         } catch (e) {
