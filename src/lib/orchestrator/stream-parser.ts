@@ -177,9 +177,16 @@ export class StreamParser {
         return out;
       }
 
-      // System init
+      // System init — carries the session_id at the START of the run. Emit it as
+      // a `session` event so steering works mid-run (otherwise sessionId is only
+      // captured from the final `result` event, i.e. never in time to steer).
       if (data.type === "system" && data.subtype === "init") {
-        return [{ type: "init", model: data.model ?? "unknown" }];
+        const out: StreamEvent[] = [];
+        if (typeof data.session_id === "string" && data.session_id) {
+          out.push({ type: "session", sessionId: data.session_id });
+        }
+        out.push({ type: "init", model: data.model ?? "unknown" });
+        return out;
       }
 
       // Error events
