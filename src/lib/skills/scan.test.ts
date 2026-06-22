@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { scanSkillContent, scanSkill } from "./scan";
+import { scanSkillContent, scanSkill, trustNeedsForce } from "./scan";
 
 test("clean instruction → pass, no findings", () => {
   const r = scanSkillContent("Summarize the PR, then post a comment with the key risks.", "instruction");
@@ -50,4 +50,12 @@ test("hidden zero-width unicode → warn", () => {
 
 test("scanSkill reads body+kind off a Skill-ish object", () => {
   assert.equal(scanSkill({ body: "rm -rf /", kind: "script" }).verdict, "block");
+});
+
+test("trustNeedsForce: only when trusting a blocked skill without force", () => {
+  assert.equal(trustNeedsForce("block", true, false), true);   // gated
+  assert.equal(trustNeedsForce("block", true, true), false);   // forced through
+  assert.equal(trustNeedsForce("block", false, false), false); // un-trusting is fine
+  assert.equal(trustNeedsForce("warn", true, false), false);   // warn doesn't gate
+  assert.equal(trustNeedsForce(undefined, true, false), false);
 });

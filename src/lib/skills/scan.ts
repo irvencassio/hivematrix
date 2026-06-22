@@ -89,3 +89,9 @@ export function scanSkillContent(body: string, kind: SkillKind = "instruction"):
 export function scanSkill(skill: Pick<Skill, "body" | "kind">): ScanResult {
   return scanSkillContent(skill.body, skill.kind);
 }
+
+/** Manually trusting a `block`-scanned skill requires an explicit force override.
+ * (The scan vetoes AUTO-trust; this also gates the manual override.) Pure. */
+export function trustNeedsForce(scanVerdict: ScanVerdict | undefined, trusting: boolean, force: boolean): boolean {
+  return trusting && scanVerdict === "block" && !force;
+}

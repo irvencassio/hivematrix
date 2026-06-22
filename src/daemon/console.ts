@@ -1725,10 +1725,15 @@ async function exportSkill() {
     }
   } catch (e) { if (res) res.textContent = 'Export failed.'; }
 }
-async function trustSkill() {
+async function trustSkill(force) {
   const name = selectedSkill(); if (!name) return;
   try {
-    await api('/skills/' + encodeURIComponent(name) + '/trust', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trusted: true }) });
+    const r = await api('/skills/' + encodeURIComponent(name) + '/trust', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trusted: true, force: force === true }) });
+    if (r && r.requiresForce) {
+      const ok = await hmConfirm('⛔ "' + name + '" scanned as BLOCKED (risky content). Trust it anyway?', { okLabel: 'Trust anyway' });
+      if (ok) return trustSkill(true);
+      return;
+    }
     renderSkills();
   } catch (e) { /* ignore */ }
 }

@@ -1716,10 +1716,20 @@ export function createDaemonServer() {
       // POST /skills/:name/trust — { trusted } approve/revoke an imported skill.
       const skillTrustMatch = urlPath.match(/^\/skills\/([^/]+)\/trust$/);
       if (req.method === "POST" && skillTrustMatch) {
-        const { setSkillTrusted } = await import("@/lib/skills/store");
+        const { setSkillTrusted, readSkill } = await import("@/lib/skills/store");
+        const { trustNeedsForce } = await import("@/lib/skills/scan");
         const body = await parseBody(req) as Record<string, unknown>;
-        const ok = await setSkillTrusted(decodeURIComponent(skillTrustMatch[1]), body.trusted !== false);
-        json(res, ok ? 200 : 404, { ok, trusted: body.trusted !== false });
+        const name = decodeURIComponent(skillTrustMatch[1]);
+        const trusting = body.trusted !== false;
+        const skill = await readSkill(name);
+        // Refuse to trust a scan-BLOCKED skill without an explicit force override.
+        if (trusting && skill && trustNeedsForce(skill.scanVerdict, true, body.force === true)) {
+          json(res, 409, { ok: false, requiresForce: true, scanVerdict: "block",
+            error: `"${name}" scanned as BLOCKED — re-confirm with force to trust it anyway` });
+          return;
+        }
+        const ok = await setSkillTrusted(name, trusting);
+        json(res, ok ? 200 : 404, { ok, trusted: trusting });
         return;
       }
 
