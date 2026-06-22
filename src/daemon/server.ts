@@ -1642,18 +1642,23 @@ export function createDaemonServer() {
         }
         const { parseSkillFile } = await import("@/lib/skills/contracts");
         const { upsertSkill } = await import("@/lib/skills/store");
+        const { scanSkillContent } = await import("@/lib/skills/scan");
         const parsed = parseSkillFile(content);
         const name = parsed?.name ?? (typeof body.name === "string" ? body.name : "imported-skill");
+        const skillBody = parsed?.body ?? content;
+        const scan = scanSkillContent(skillBody, parsed?.kind ?? "instruction");
         const result = await upsertSkill({
           name,
           description: parsed?.description ?? "Imported skill",
           tags: parsed?.tags,
-          body: parsed?.body ?? content,
+          body: skillBody,
           source,
           compat: parsed?.compat,
+          kind: parsed?.kind,
           trusted: false, // review before agents see it
+          scanVerdict: scan.verdict,
         });
-        json(res, result.created || result.refined ? 201 : 200, { ...result, name, trusted: false });
+        json(res, result.created || result.refined ? 201 : 200, { ...result, name, trusted: false, scan });
         return;
       }
 
@@ -1664,6 +1669,17 @@ export function createDaemonServer() {
         const body = await parseBody(req) as Record<string, unknown>;
         const ok = await setSkillTrusted(decodeURIComponent(skillTrustMatch[1]), body.trusted !== false);
         json(res, ok ? 200 : 404, { ok, trusted: body.trusted !== false });
+        return;
+      }
+
+      // GET /skills/:name/scan — re-run the content scanner (findings + verdict).
+      const skillScanMatch = urlPath.match(/^\/skills\/([^/]+)\/scan$/);
+      if (req.method === "GET" && skillScanMatch) {
+        const { readSkill } = await import("@/lib/skills/store");
+        const { scanSkill } = await import("@/lib/skills/scan");
+        const skill = await readSkill(decodeURIComponent(skillScanMatch[1]));
+        if (!skill) { json(res, 404, { error: "skill not found" }); return; }
+        json(res, 200, scanSkill(skill));
         return;
       }
 

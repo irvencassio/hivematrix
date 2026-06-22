@@ -1688,7 +1688,10 @@ function updateSkillMeta() {
   if (!s) { meta.textContent = ''; if (trustBtn) trustBtn.style.display = 'none'; return; }
   const untrusted = s.trusted === false;
   const prov = (s.scope ? '<span style="color:var(--muted)">[' + esc(s.scope) + (s.signed ? ' ✓signed' : '') + ']</span> ' : '');
-  meta.innerHTML = (untrusted ? '<span style="color:var(--warn)">⚠ untrusted (imported — review before agents use it)</span> · ' : '')
+  const scan = s.scan === 'block' ? '<span style="color:var(--err,#e5534b)">⛔ scan: blocked (do not run)</span> · '
+    : s.scan === 'warn' ? '<span style="color:var(--warn)">⚠ scan: review</span> · ' : '';
+  meta.innerHTML = scan
+    + (untrusted ? '<span style="color:var(--warn)">⚠ untrusted (imported — review before agents use it)</span> · ' : '')
     + prov
     + 'runs on: ' + esc((s.compat && s.compat.length ? s.compat : ['all']).join(', '))
     + (s.hasInput ? ' · takes input' : '')
@@ -1773,6 +1776,7 @@ async function searchTaskSkills() {
 }
 function skillPickRow(s) {
   const badges = (s.kind === 'script' ? '<span class="muted">[cmd]</span> ' : '')
+    + (s.scan === 'block' ? '<span style="color:var(--err,#e5534b)" title="scan blocked — do not run">⛔</span> ' : '')
     + (s.scope ? '<span class="muted">[' + esc(s.scope) + (s.signed ? ' ✓' : '') + ']</span> ' : '')
     + (s.trusted === false ? '<span style="color:var(--warn)" title="untrusted — approve in Skills panel">⚠</span> ' : '')
     + (s.useCount > 0 ? '<span class="muted">' + s.useCount + '×</span>' : '');
@@ -1864,7 +1868,11 @@ async function importSkillPrompt() {
     _skillFileContent = null;
     const d = await api('/skills/import',
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (res) res.textContent = 'Imported skill: ' + esc((d && d.name) || '?');
+    const v = d && d.scan && d.scan.verdict;
+    const scanNote = v === 'block' ? ' — ⛔ scan BLOCKED (' + ((d.scan.findings || []).map(f => f.rule).join(', ')) + '); review before trusting'
+      : v === 'warn' ? ' — ⚠ scan flagged: ' + ((d.scan.findings || []).map(f => f.rule).join(', '))
+      : ' (scan: clean)';
+    if (res) res.innerHTML = 'Imported (untrusted): ' + esc((d && d.name) || '?') + esc(scanNote);
     renderSkills();
   } catch (e) { if (res) res.textContent = 'Import failed.'; }
 }

@@ -10,7 +10,7 @@ import { join } from "path";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import {
   renderSkillFile, parseSkillFile, skillFilename, skillSlug, skillHasInput,
-  type Skill, type SkillIndexEntry, type SkillHarness, type SkillKind, type SkillInterpreter, type SkillScope,
+  type Skill, type SkillIndexEntry, type SkillHarness, type SkillKind, type SkillInterpreter, type SkillScope, type ScanVerdict,
 } from "./contracts";
 
 const READ_TIMEOUT_MS = 3_000;
@@ -52,6 +52,7 @@ export async function listSkills(): Promise<SkillIndexEntry[]> {
       name: skill.name, description: skill.description, tags: skill.tags,
       useCount: skill.useCount, compat: skill.compat, hasInput: skillHasInput(skill.body),
       trusted: skill.trusted, kind: skill.kind, scope: skill.scope, signed: !!skill.signature,
+      scan: skill.scanVerdict,
     });
   }
   // Most-used first (proven skills surface), then alphabetical.
@@ -93,6 +94,7 @@ export interface UpsertSkillInput {
   scope?: SkillScope;
   signedBy?: string;
   signature?: string;
+  scanVerdict?: ScanVerdict;
   now?: string;
 }
 
@@ -129,6 +131,7 @@ export async function upsertSkill(input: UpsertSkillInput): Promise<UpsertSkillR
       scope: input.scope ?? existing.scope,
       signedBy: input.signedBy ?? existing.signedBy,
       signature: input.signature ?? existing.signature,
+      scanVerdict: input.scanVerdict ?? existing.scanVerdict,
     };
     result = { created: false, refined: bodyChanged, path };
   } else {
@@ -150,6 +153,7 @@ export async function upsertSkill(input: UpsertSkillInput): Promise<UpsertSkillR
       scope: input.scope,
       signedBy: input.signedBy,
       signature: input.signature,
+      scanVerdict: input.scanVerdict,
     };
     result = { created: true, refined: false, path };
   }

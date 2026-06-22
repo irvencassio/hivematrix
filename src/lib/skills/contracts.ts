@@ -27,6 +27,12 @@ export type SkillScope = (typeof SKILL_SCOPES)[number];
 export function coerceScope(v: string | undefined): SkillScope | undefined {
   return (SKILL_SCOPES as readonly string[]).includes(v ?? "") ? (v as SkillScope) : undefined;
 }
+
+/** Content-scan verdict (scan-on-install). Defined here so contracts has no cycle. */
+export type ScanVerdict = "pass" | "warn" | "block";
+export function coerceVerdict(v: string | undefined): ScanVerdict | undefined {
+  return v === "pass" || v === "warn" || v === "block" ? v : undefined;
+}
 export const SKILL_INTERPRETERS = ["bash", "sh", "node", "python3", "python"] as const;
 export type SkillInterpreter = (typeof SKILL_INTERPRETERS)[number];
 
@@ -65,6 +71,8 @@ export interface Skill {
   signedBy?: string;
   /** Base64 Ed25519 signature over the skill's canonical content. */
   signature?: string;
+  /** Last scan-on-install verdict (pass/warn/block). */
+  scanVerdict?: ScanVerdict;
 }
 
 /** One line per skill for an index/listing (cheap — frontmatter only). */
@@ -81,6 +89,7 @@ export interface SkillIndexEntry {
   /** Provenance (optional): sharing scope + whether it carries a signature. */
   scope?: SkillScope;
   signed?: boolean;
+  scan?: ScanVerdict;
 }
 
 /** A skill is harness-agnostic if compat is empty or contains "all". */
@@ -138,6 +147,7 @@ export function renderSkillFile(skill: Skill): string {
     ...(skill.scope ? [`scope: ${skill.scope}`] : []),
     ...(skill.signedBy ? [`signedBy: ${skill.signedBy}`] : []),
     ...(skill.signature ? [`signature: ${skill.signature}`] : []),
+    ...(skill.scanVerdict ? [`scanVerdict: ${skill.scanVerdict}`] : []),
     "---",
   ].join("\n");
   return `${fm}\n\n${skill.body.trim()}\n`;
@@ -174,6 +184,7 @@ export function parseSkillFile(content: string): Skill | null {
     scope: coerceScope(fm.scope),
     signedBy: fm.signedBy || undefined,
     signature: fm.signature || undefined,
+    scanVerdict: coerceVerdict(fm.scanVerdict),
   };
 }
 

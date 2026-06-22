@@ -17,6 +17,7 @@ import { homedir } from "os";
 import { renderSkillFile, parseSkillFile, skillSlug, type SkillScope } from "./contracts";
 import { readAllSkills, readSkill, upsertSkill } from "./store";
 import { parseSkillSources, scopeTrustDecision, shouldImport, type SkillSource } from "./scopes";
+import { scanSkill } from "./scan";
 import {
   loadOrCreateSigningKey, readSigningPublicKey, trustedSignerKeys, skillSignerTrusted, signSkill,
 } from "./signing";
@@ -130,11 +131,13 @@ export async function gitSyncSkills(opts: { direction?: "pull" | "push" | "both"
           if (!shouldImport(slug, src.scope, seen)) continue; // a more-local scope already has it
           seen.set(slug, src.scope);
           const sigValid = skillSignerTrusted(skill, trusted);
-          const trust = scopeTrustDecision({ scope: src.scope, signatureValid: sigValid });
+          const verdict = scanSkill(skill).verdict;
+          // A blocked scan vetoes auto-trust even for personal/signed skills.
+          const trust = verdict !== "block" && scopeTrustDecision({ scope: src.scope, signatureValid: sigValid });
           const res = await upsertSkill({
             name: skill.name, description: skill.description, tags: skill.tags, body: skill.body,
             source: `sync:${src.scope}`, compat: skill.compat, kind: skill.kind, interpreter: skill.interpreter,
-            trusted: trust, scope: src.scope, signedBy: skill.signedBy, signature: skill.signature,
+            trusted: trust, scope: src.scope, signedBy: skill.signedBy, signature: skill.signature, scanVerdict: verdict,
           });
           if (res.created) r.imported++; else if (res.refined) r.refined++;
           if (!trust) r.quarantined++;
@@ -176,6 +179,11 @@ export async function publishSkill(name: string, scope: SkillScope, opts: { onLo
   if (!src) return { ok: false, scope, pushed: false, reason: `no ${scope} source configured (skillsSync.sources)` };
   const skill = await readSkill(name);
   if (!skill) return { ok: false, scope, pushed: false, reason: "skill not found" };
+
+  const scan = scanSkill(skill);
+  if (scan.verdict === "block") {
+    return { ok: false, scope, pushed: false, reason: `scan blocked publish: ${scan.findings.map((f) => f.rule).join(", ")}` };
+  }
 
   const key = loadOrCreateSigningKey();
   const { signedBy, signature } = signSkill(skill, key.privateKeyPem, key.publicKeyPem);
