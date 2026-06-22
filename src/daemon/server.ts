@@ -1336,6 +1336,21 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /voice/skills — deterministic voice skill picker. Body { text }
+      // (a transcript). Detects "what skills do I have / find a skill for X / use
+      // the Y skill" and returns a spoken reply (no LLM). handled:false → let the
+      // normal voice turn answer. Voice clients call this before/around the LLM.
+      if (req.method === "POST" && urlPath === "/voice/skills") {
+        const { detectSkillIntent, buildSkillVoiceReply } = await import("@/lib/voice/skill-intent");
+        const { listSkills } = await import("@/lib/skills/store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const text = typeof body.text === "string" ? body.text : "";
+        const intent = detectSkillIntent(text);
+        if (intent.kind === "none") { json(res, 200, { handled: false }); return; }
+        json(res, 200, { intent, ...buildSkillVoiceReply(intent, await listSkills()) });
+        return;
+      }
+
       // POST /voice/turn — one in-app push-to-talk turn, gated by the `voice`
       // feature flag. Recorded audio (base64) → STT → local LLM → cloned-voice
       // TTS via the sidecar; returns the transcript, reply text, and reply audio.
