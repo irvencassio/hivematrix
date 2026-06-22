@@ -1589,6 +1589,28 @@ export function createDaemonServer() {
         json(res, 200, { skills: rankSkills(await listSkills(), (q.q ?? "").trim()) });
         return;
       }
+      // GET /skills/browse?scope=team — list a scope's shared skills WITHOUT
+      // importing (browse-before-import), annotated with signed/scan/in-library.
+      if (req.method === "GET" && urlPath === "/skills/browse") {
+        const { browseSource } = await import("@/lib/skills/sync");
+        const { coerceScope } = await import("@/lib/skills/contracts");
+        const q = parseQueryString(req.url ?? "");
+        const scope = coerceScope((q.scope ?? "").trim());
+        if (!scope) { json(res, 400, { error: "scope must be personal|team|org|public" }); return; }
+        json(res, 200, await browseSource(scope));
+        return;
+      }
+      // POST /skills/import-remote — cherry-pick one skill from a scope's repo.
+      if (req.method === "POST" && urlPath === "/skills/import-remote") {
+        const { importRemoteSkill } = await import("@/lib/skills/sync");
+        const { coerceScope } = await import("@/lib/skills/contracts");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const scope = coerceScope(typeof body.scope === "string" ? body.scope : undefined);
+        const name = typeof body.name === "string" ? body.name.trim() : "";
+        if (!scope || !name) { json(res, 400, { error: "scope and name are required" }); return; }
+        json(res, 200, await importRemoteSkill(scope, name));
+        return;
+      }
       // GET /skills/sources — configured tiered scopes + the operator's signer id.
       if (req.method === "GET" && urlPath === "/skills/sources") {
         const { getSkillSources } = await import("@/lib/skills/sync");

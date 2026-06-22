@@ -801,11 +801,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
       <button class="addbtn" onclick="syncSkills()" title="Git-sync all scopes + write skills into Claude/Codex/Qwen dirs">⇄ Sync &amp; fan-out</button>
       <button class="addbtn" onclick="loadSkillPrune()" title="Find skills you no longer use">Unused…</button>
-      <select id="publishScope" style="width:auto" title="Scope to publish the selected skill to">
+      <select id="publishScope" style="width:auto" title="Scope to browse / publish to">
         <option value="team">team</option><option value="org">org</option><option value="public">public</option>
       </select>
+      <button class="addbtn" onclick="browseShared()" title="Browse skills shared to this scope, before importing">Browse shared…</button>
       <button class="addbtn" onclick="publishSkillUI()" title="Sign and publish the selected skill to the chosen scope">Publish</button>
     </div>
+    <div id="skillBrowse" style="font-size:11px;margin-top:4px"></div>
     <div class="muted" id="skillSyncStatus" style="font-size:11px;margin-top:4px"></div>
     <div id="skillPrune" style="font-size:11px;margin-top:4px"></div></details>
     <details class="ctx-sec" id="commandsSec"><summary>Commands</summary>
@@ -1792,6 +1794,36 @@ function pickTaskSkill(name) {
     ta.value = ta.value.trim() ? (ta.value.trim() + '\n\n' + ref) : ref;
   }
   toggleTaskSkillPicker();
+}
+async function browseShared() {
+  const scope = (document.getElementById('publishScope') || {}).value || 'team';
+  const box = document.getElementById('skillBrowse');
+  if (!box) return;
+  box.textContent = 'Browsing ' + scope + '…';
+  try {
+    const r = await api('/skills/browse?scope=' + encodeURIComponent(scope));
+    if (!r.configured) { box.innerHTML = '<div class="muted">No ' + esc(scope) + ' source configured (skillsSync.sources).</div>'; return; }
+    const e = r.entries || [];
+    if (!e.length) { box.innerHTML = '<div class="muted">No skills shared to ' + esc(scope) + (r.error ? ' (' + esc(r.error) + ')' : '') + '.</div>'; return; }
+    box.innerHTML = '<div class="muted" style="margin:2px 0">Shared to ' + esc(scope) + ' (' + e.length + '):</div>' + e.map(function(x) {
+      var badges = (x.kind === 'script' ? '<span class="muted">[cmd]</span> ' : '')
+        + (x.signed ? '<span class="muted" title="signed">✓</span> ' : '')
+        + (x.scanVerdict === 'block' ? '<span style="color:var(--err,#e5534b)" title="scan blocked">⛔</span> ' : (x.scanVerdict === 'warn' ? '<span style="color:var(--warn)" title="scan: review">⚠</span> ' : ''));
+      var action = x.inLibrary ? '<span class="muted">in library</span>'
+        : '<button class="addbtn" onclick="importSharedSkill(\'' + esc(x.scope) + '\',\'' + esc(x.name).replace(/'/g, '&#39;') + '\')">Import</button>';
+      return '<div class="row" style="gap:6px;align-items:center"><span style="flex:1"><b>' + esc(x.name) + '</b> ' + badges + '<span class="muted">— ' + esc(x.description || '') + '</span></span>' + action + '</div>';
+    }).join('');
+  } catch (err) { box.innerHTML = '<div class="muted">browse failed</div>'; }
+}
+async function importSharedSkill(scope, name) {
+  try {
+    const r = await api('/skills/import-remote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: scope, name: name }) });
+    if (r && r.ok && r.trusted === false) {
+      await hmAlert('Imported "' + name + '" — landed UNTRUSTED' + (r.scanVerdict === 'block' ? ' (⛔ scan blocked)' : '') + '. Review it in the Skills list and Trust to activate.');
+    }
+    browseShared();
+    renderSkills();
+  } catch (e) { /* ignore */ }
 }
 async function publishSkillUI() {
   const name = selectedSkill(); if (!name) return;

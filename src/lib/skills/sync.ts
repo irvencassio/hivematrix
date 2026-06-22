@@ -14,7 +14,7 @@ import { promisify } from "util";
 import { promises as fs, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { renderSkillFile, parseSkillFile, skillSlug, type SkillScope } from "./contracts";
+import { renderSkillFile, parseSkillFile, skillSlug, type SkillScope, type Skill, type ScanVerdict } from "./contracts";
 import { readAllSkills, readSkill, upsertSkill } from "./store";
 import { parseSkillSources, scopeTrustDecision, shouldImport, type SkillSource } from "./scopes";
 import { scanSkill } from "./scan";
@@ -204,4 +204,80 @@ export async function publishSkill(name: string, scope: SkillScope, opts: { onLo
     });
     return { ok: true, scope, signedBy, pushed };
   } catch (e) { return { ok: false, scope, pushed: false, reason: (e as Error).message }; }
+}
+
+// --- Browse-before-import: look at a scope's catalog without pulling it all ---
+
+export interface CatalogEntry {
+  scope: SkillScope;
+  name: string;
+  slug: string;
+  description: string;
+  kind: Skill["kind"];
+  signed: boolean;
+  scanVerdict: ScanVerdict;
+  inLibrary: boolean; // already present in the local brain store
+}
+
+/** Pure: turn parsed remote skills into a catalog, annotated vs the local set. */
+export function buildCatalog(scope: SkillScope, skills: Skill[], localSlugs: Set<string>): CatalogEntry[] {
+  return skills
+    .map((s) => ({
+      scope,
+      name: s.name,
+      slug: skillSlug(s.name),
+      description: s.description,
+      kind: s.kind,
+      signed: !!s.signature,
+      scanVerdict: scanSkill(s).verdict,
+      inLibrary: localSlugs.has(skillSlug(s.name)),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export interface BrowseResult { configured: boolean; scope: SkillScope; entries: CatalogEntry[]; error?: string }
+
+/** Clone/refresh a scope's repo and list its skills WITHOUT importing them. */
+export async function browseSource(scope: SkillScope, opts: { onLog?: Logger } = {}): Promise<BrowseResult> {
+  const onLog = opts.onLog ?? noop;
+  const src = getSkillSources().find((s) => s.scope === scope);
+  if (!src) return { configured: false, scope, entries: [] };
+  if (!(await ensureRepoClone(src, onLog))) return { configured: true, scope, entries: [], error: "clone failed" };
+  await git(src.dir, ["pull", "--rebase", "--autostash"], onLog);
+
+  const skills: Skill[] = [];
+  for (const f of await collectSkillFiles(src.dir)) {
+    try { const s = parseSkillFile(await fs.readFile(f, "utf-8")); if (s) skills.push(s); } catch { /* skip */ }
+  }
+  const localSlugs = new Set((await readAllSkills()).map((s) => skillSlug(s.name)));
+  return { configured: true, scope, entries: buildCatalog(scope, skills, localSlugs) };
+}
+
+export interface ImportRemoteResult { ok: boolean; name: string; trusted: boolean; scanVerdict?: ScanVerdict; reason?: string }
+
+/** Import ONE skill from a scope's repo into the brain store (cherry-pick). */
+export async function importRemoteSkill(scope: SkillScope, name: string, opts: { onLog?: Logger } = {}): Promise<ImportRemoteResult> {
+  const onLog = opts.onLog ?? noop;
+  const src = getSkillSources().find((s) => s.scope === scope);
+  if (!src) return { ok: false, name, trusted: false, reason: `no ${scope} source configured` };
+  if (!(await ensureRepoClone(src, onLog))) return { ok: false, name, trusted: false, reason: "clone failed" };
+
+  const slug = skillSlug(name);
+  let raw: string | null = null;
+  for (const candidate of [join(src.dir, `${slug}.md`), join(src.dir, slug, "SKILL.md")]) {
+    try { raw = await fs.readFile(candidate, "utf-8"); break; } catch { /* try next */ }
+  }
+  const skill = raw ? parseSkillFile(raw) : null;
+  if (!skill) return { ok: false, name, trusted: false, reason: "skill not found in scope" };
+
+  const trusted = trustedSignerKeys(readConfig(), readSigningPublicKey() ?? undefined);
+  const verdict = scanSkill(skill).verdict;
+  const sigValid = skillSignerTrusted(skill, trusted);
+  const trust = verdict !== "block" && scopeTrustDecision({ scope, signatureValid: sigValid });
+  await upsertSkill({
+    name: skill.name, description: skill.description, tags: skill.tags, body: skill.body,
+    source: `import:${scope}`, compat: skill.compat, kind: skill.kind, interpreter: skill.interpreter,
+    trusted: trust, scope, signedBy: skill.signedBy, signature: skill.signature, scanVerdict: verdict,
+  });
+  return { ok: true, name: skill.name, trusted: trust, scanVerdict: verdict };
 }
