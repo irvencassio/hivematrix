@@ -952,6 +952,20 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /brain/hygiene — corpus stale + duplicate/near-duplicate report.
+      // ?staleDays=180&threshold=0.85 optional.
+      if (req.method === "GET" && urlPath === "/brain/hygiene") {
+        const { scanBrainHygiene } = await import("@/lib/brain/hygiene");
+        const q = parseQueryString(req.url ?? "");
+        const staleDays = Number.parseInt(q.staleDays ?? "", 10);
+        const threshold = Number.parseFloat(q.threshold ?? "");
+        json(res, 200, await scanBrainHygiene({
+          staleDays: Number.isFinite(staleDays) && staleDays > 0 ? staleDays : undefined,
+          threshold: Number.isFinite(threshold) && threshold > 0 ? threshold : undefined,
+        }));
+        return;
+      }
+
       // POST /brain/summarize — create an agent task that writes a "what shifted"
       // weekly digest of recently-changed brain docs. Body: { sinceDays? }.
       if (req.method === "POST" && urlPath === "/brain/summarize") {
