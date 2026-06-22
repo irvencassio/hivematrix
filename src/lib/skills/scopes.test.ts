@@ -24,6 +24,18 @@ test("parseSkillSources: sources[] sorted personal-first; bad entries dropped", 
   assert.equal(s.find((x) => x.scope === "team")!.branch, "dev");
 });
 
+test("parseSkillSources: a registry source (indexUrl) is kind 'registry'", () => {
+  const s = parseSkillSources({ skillsSync: { sources: [
+    { scope: "public", indexUrl: "https://reg.example/index.json" },
+    { scope: "team", repoUrl: "git@x:acme/s.git" },
+  ] } });
+  const pub = s.find((x) => x.scope === "public")!;
+  const team = s.find((x) => x.scope === "team")!;
+  assert.equal(pub.kind, "registry");
+  assert.equal(pub.indexUrl, "https://reg.example/index.json");
+  assert.equal(team.kind, "git");
+});
+
 test("scopeTrustDecision: personal trusted; team/org need signature; public never", () => {
   assert.equal(scopeTrustDecision({ scope: "personal", signatureValid: false }), true);
   assert.equal(scopeTrustDecision({ scope: "team", signatureValid: true }), true);

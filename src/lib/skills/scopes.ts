@@ -22,9 +22,14 @@ export function scopeRank(scope: SkillScope): number {
 
 export interface SkillSource {
   scope: SkillScope;
+  /** "git" (clone/pull a repo) or "registry" (fetch a JSON index of SKILL.md URLs). */
+  kind: "git" | "registry";
+  /** git source: clone URL + local cache dir. */
   repoUrl: string;
   branch: string;
   dir: string;
+  /** registry source: URL returning { skills: [{ name, description, kind?, url }] }. */
+  indexUrl?: string;
 }
 
 function expandHome(p: string): string {
@@ -48,20 +53,24 @@ export function parseSkillSources(config: Record<string, unknown>): SkillSource[
   for (const r of rawSources) {
     const o = (r ?? {}) as Record<string, unknown>;
     const scope = coerceScope(typeof o.scope === "string" ? o.scope : undefined);
+    if (!scope) continue;
+    const indexUrl = typeof o.indexUrl === "string" ? o.indexUrl.trim() : "";
     const repoUrl = typeof o.repoUrl === "string" ? o.repoUrl.trim() : "";
-    if (!scope || !repoUrl) continue;
-    out.push({
-      scope,
-      repoUrl,
-      branch: typeof o.branch === "string" && o.branch ? o.branch : "main",
-      dir: expandHome(typeof o.dir === "string" && o.dir ? o.dir : defaultDir(scope)),
-    });
+    if (indexUrl) {
+      out.push({ scope, kind: "registry", indexUrl, repoUrl: "", branch: "main",
+        dir: expandHome(typeof o.dir === "string" && o.dir ? o.dir : defaultDir(scope)) });
+    } else if (repoUrl) {
+      out.push({ scope, kind: "git", repoUrl,
+        branch: typeof o.branch === "string" && o.branch ? o.branch : "main",
+        dir: expandHome(typeof o.dir === "string" && o.dir ? o.dir : defaultDir(scope)) });
+    }
   }
 
   // Back-compat: a bare repoUrl with no sources[] is the personal source.
   if (out.length === 0 && typeof sync.repoUrl === "string" && sync.repoUrl.trim()) {
     out.push({
       scope: "personal",
+      kind: "git",
       repoUrl: sync.repoUrl.trim(),
       branch: typeof sync.branch === "string" && sync.branch ? sync.branch : "main",
       dir: expandHome(typeof sync.dir === "string" && sync.dir ? sync.dir : join(homedir(), ".hivematrix", "skills-repo")),

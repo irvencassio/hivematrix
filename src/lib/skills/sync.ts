@@ -118,6 +118,7 @@ export async function gitSyncSkills(opts: { direction?: "pull" | "push" | "both"
   const seen = new Map<string, SkillScope>(); // slug → winning scope (personal first)
 
   for (const src of sources) {
+    if (src.kind !== "git") continue; // registry sources are browse/import-on-demand, not bulk-synced
     const r: ScopeSyncResult = { scope: src.scope, imported: 0, refined: 0, quarantined: 0, pushed: false };
     if (!(await ensureRepoClone(src, log))) { summary.perScope.push(r); continue; }
 
@@ -177,6 +178,7 @@ export async function publishSkill(name: string, scope: SkillScope, opts: { onLo
   }
   const src = getSkillSources().find((x) => x.scope === scope);
   if (!src) return { ok: false, scope, pushed: false, reason: `no ${scope} source configured (skillsSync.sources)` };
+  if (src.kind !== "git") return { ok: false, scope, pushed: false, reason: `${scope} is a registry source (read-only); cannot publish` };
   const skill = await readSkill(name);
   if (!skill) return { ok: false, scope, pushed: false, reason: "skill not found" };
 
@@ -214,9 +216,32 @@ export interface CatalogEntry {
   slug: string;
   description: string;
   kind: Skill["kind"];
-  signed: boolean;
-  scanVerdict: ScanVerdict;
+  /** Known for git sources (we have the file); undefined for registry until import. */
+  signed?: boolean;
+  scanVerdict?: ScanVerdict;
   inLibrary: boolean; // already present in the local brain store
+}
+
+/** A registry index entry: { name, description, kind?, url } (url → raw SKILL.md). */
+export interface RegistryEntry { name: string; description?: string; kind?: Skill["kind"]; url: string }
+
+/** Pure: build a catalog from a registry index (scan/signed unknown until import). */
+export function catalogFromIndex(scope: SkillScope, entries: RegistryEntry[], localSlugs: Set<string>): CatalogEntry[] {
+  return entries
+    .filter((e) => e && typeof e.name === "string" && typeof e.url === "string")
+    .map((e) => ({
+      scope, name: e.name, slug: skillSlug(e.name),
+      description: e.description ?? "", kind: (e.kind === "script" ? "script" : "instruction") as Skill["kind"],
+      inLibrary: localSlugs.has(skillSlug(e.name)),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function fetchRegistryIndex(indexUrl: string): Promise<RegistryEntry[]> {
+  const r = await fetch(indexUrl, { signal: AbortSignal.timeout(15_000) });
+  if (!r.ok) throw new Error(`index fetch HTTP ${r.status}`);
+  const data = await r.json() as { skills?: unknown };
+  return Array.isArray(data.skills) ? data.skills as RegistryEntry[] : [];
 }
 
 /** Pure: turn parsed remote skills into a catalog, annotated vs the local set. */
@@ -242,14 +267,21 @@ export async function browseSource(scope: SkillScope, opts: { onLog?: Logger } =
   const onLog = opts.onLog ?? noop;
   const src = getSkillSources().find((s) => s.scope === scope);
   if (!src) return { configured: false, scope, entries: [] };
+  const localSlugs = new Set((await readAllSkills()).map((s) => skillSlug(s.name)));
+
+  if (src.kind === "registry") {
+    try {
+      const entries = await fetchRegistryIndex(src.indexUrl!);
+      return { configured: true, scope, entries: catalogFromIndex(scope, entries, localSlugs) };
+    } catch (e) { return { configured: true, scope, entries: [], error: (e as Error).message }; }
+  }
+
   if (!(await ensureRepoClone(src, onLog))) return { configured: true, scope, entries: [], error: "clone failed" };
   await git(src.dir, ["pull", "--rebase", "--autostash"], onLog);
-
   const skills: Skill[] = [];
   for (const f of await collectSkillFiles(src.dir)) {
     try { const s = parseSkillFile(await fs.readFile(f, "utf-8")); if (s) skills.push(s); } catch { /* skip */ }
   }
-  const localSlugs = new Set((await readAllSkills()).map((s) => skillSlug(s.name)));
   return { configured: true, scope, entries: buildCatalog(scope, skills, localSlugs) };
 }
 
@@ -260,12 +292,22 @@ export async function importRemoteSkill(scope: SkillScope, name: string, opts: {
   const onLog = opts.onLog ?? noop;
   const src = getSkillSources().find((s) => s.scope === scope);
   if (!src) return { ok: false, name, trusted: false, reason: `no ${scope} source configured` };
-  if (!(await ensureRepoClone(src, onLog))) return { ok: false, name, trusted: false, reason: "clone failed" };
 
   const slug = skillSlug(name);
   let raw: string | null = null;
-  for (const candidate of [join(src.dir, `${slug}.md`), join(src.dir, slug, "SKILL.md")]) {
-    try { raw = await fs.readFile(candidate, "utf-8"); break; } catch { /* try next */ }
+  if (src.kind === "registry") {
+    try {
+      const entry = (await fetchRegistryIndex(src.indexUrl!)).find((e) => skillSlug(e.name) === slug);
+      if (!entry) return { ok: false, name, trusted: false, reason: "not found in registry index" };
+      const r = await fetch(entry.url, { signal: AbortSignal.timeout(15_000) });
+      if (!r.ok) return { ok: false, name, trusted: false, reason: `fetch HTTP ${r.status}` };
+      raw = await r.text();
+    } catch (e) { return { ok: false, name, trusted: false, reason: (e as Error).message }; }
+  } else {
+    if (!(await ensureRepoClone(src, onLog))) return { ok: false, name, trusted: false, reason: "clone failed" };
+    for (const candidate of [join(src.dir, `${slug}.md`), join(src.dir, slug, "SKILL.md")]) {
+      try { raw = await fs.readFile(candidate, "utf-8"); break; } catch { /* try next */ }
+    }
   }
   const skill = raw ? parseSkillFile(raw) : null;
   if (!skill) return { ok: false, name, trusted: false, reason: "skill not found in scope" };
