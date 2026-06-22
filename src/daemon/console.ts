@@ -2453,6 +2453,39 @@ function renderLocalEngine(le, cap) {
     + foot;
 }
 
+// One-click provisioner: sizes Rapid-MLX to this Mac, installs it, pulls the
+// models that fit, writes config. Shown only when the Mac can run local.
+function renderProvisionUI(cap) {
+  if (!cap || !cap.localCapable) return "";
+  const profile = (cap.recommendedTiers || []).join(" + ");
+  return '<div style="margin:6px 0 4px 2px">'
+    + '<button id="provisionBtn" class="create" onclick="provisionLocalEngine()" style="font-size:12px">Provision local engine</button>'
+    + '<span class="muted" style="font-size:11px;margin-left:8px">Installs Rapid-MLX + pulls ' + esc(profile) + ' for this Mac.</span>'
+    + '<div id="provisionLog" style="margin-top:4px"></div></div>';
+}
+
+async function provisionLocalEngine() {
+  const btn = document.getElementById("provisionBtn");
+  if (btn) btn.disabled = true;
+  try { await api("/local-engine/provision", { method: "POST" }); } catch (e) {}
+  pollProvision();
+}
+
+async function pollProvision() {
+  let r;
+  try { r = await api("/local-engine/provision"); } catch (e) { return; }
+  const s = (r && r.status) || {};
+  const el = document.getElementById("provisionLog");
+  if (el) {
+    const log = (s.log || []).join("\n");
+    const tail = s.phase === "error" ? "\n✗ " + (s.error || "failed") : s.phase === "done" ? "\n✓ done — restart the daemon to serve the new tiers" : "";
+    el.innerHTML = '<pre class="muted" style="font-size:11px;white-space:pre-wrap;max-height:160px;overflow:auto;margin:2px 0">' + esc(log + tail) + "</pre>";
+  }
+  if (s.phase === "running") { setTimeout(pollProvision, 1500); return; }
+  const btn = document.getElementById("provisionBtn");
+  if (btn) btn.disabled = false;
+}
+
 function applyTheme(theme, hasWallpaper) {
   const root = document.documentElement;
   let resolved = theme;
@@ -2776,7 +2809,8 @@ function openSettings() {
     '<div class="backend"><span class="nm">'+esc(b.name)+'</span>'
     + '<span class="st '+(b.configured?'ok':'no')+'">'+(b.configured?'✓ '+esc(b.detail):'not set up')+'</span>'
     + (b.configured?'':'<span class="muted" style="flex:1"> — '+esc(b.connect||'')+'</span>')+'</div>').join("")
-    + renderLocalEngine(models.localEngine, models.localEngineCapability);
+    + renderLocalEngine(models.localEngine, models.localEngineCapability)
+    + renderProvisionUI(models.localEngineCapability);
   const local = models.backends.find(b => b.id === "local");
   document.getElementById("s_endpoint").value = (local && local.endpoint) || "http://localhost:1234/v1";
   const v = models.version || {};

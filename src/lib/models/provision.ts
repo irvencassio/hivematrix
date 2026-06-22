@@ -1,0 +1,150 @@
+/**
+ * Local-engine provisioning — the install side of the hardware-aware story.
+ *
+ * Sizes Rapid-MLX to THIS Mac (via localEngineCapability), installs the engine
+ * if missing, pulls only the model tiers that fit in RAM, and writes the
+ * matching `localEngine` block into config.json. Exposed as:
+ *   • planLocalEngine()       — pure, what WOULD be provisioned (for the UI/CLI)
+ *   • provisionLocalEngine()  — perform it, streaming progress via onLog
+ *   • a singleton job tracker (start/get) so the daemon can run it in the
+ *     background behind a one-click button and poll status.
+ *
+ * Installs/pulls run as child processes so this works in the bundled app (no
+ * tsx / repo scripts required at runtime).
+ */
+
+import { spawn } from "child_process";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+import {
+  localEngineCapability, probeHardware, DEFAULT_TIERS, resolveRapidBinary,
+  type LocalTier, type TierKey, type HardwareProbe,
+} from "./local-engine";
+
+export interface ProvisionPlan {
+  arch: string;
+  ramGB: number;
+  localCapable: boolean;
+  recommendedTiers: TierKey[];
+  /** Resolved tier definitions to serve resident (alias/port/reasoning). */
+  tiers: LocalTier[];
+  reason?: string;
+}
+
+function configPath(): string {
+  const dir = join(homedir(), ".hivematrix");
+  mkdirSync(dir, { recursive: true });
+  return join(dir, "config.json");
+}
+function readConfig(): Record<string, unknown> {
+  try { return JSON.parse(readFileSync(configPath(), "utf-8")); } catch { return {}; }
+}
+
+/** Pure: what this Mac should run, as resolved LocalTier objects. */
+export function planLocalEngine(env: Partial<HardwareProbe> = {}): ProvisionPlan {
+  const cap = localEngineCapability(env);
+  const tiers = cap.recommendedTiers
+    .map((k) => DEFAULT_TIERS.find((d) => d.key === k))
+    .filter((t): t is LocalTier => !!t);
+  return {
+    arch: cap.arch, ramGB: cap.ramGB,
+    localCapable: cap.localCapable,
+    recommendedTiers: cap.recommendedTiers,
+    tiers, reason: cap.reason,
+  };
+}
+
+type Logger = (line: string) => void;
+
+function run(cmd: string, args: string[], onLog: Logger): Promise<void> {
+  return new Promise((resolve, reject) => {
+    onLog(`$ ${cmd} ${args.join(" ")}`);
+    const p = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const onData = (b: Buffer) => b.toString().split("\n").filter((l) => l.trim()).forEach(onLog);
+    p.stdout.on("data", onData);
+    p.stderr.on("data", onData);
+    p.on("error", reject);
+    p.on("exit", (code) => code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}`)));
+  });
+}
+
+/** Install Rapid-MLX into a stable venv; return the binary path. */
+async function ensureRapidBinary(onLog: Logger): Promise<string> {
+  const existing = resolveRapidBinary();
+  if (existing) { onLog(`rapid-mlx found at ${existing}`); return existing; }
+  const venv = join(homedir(), ".hivematrix", "rapidmlx", ".venv");
+  const bin = join(venv, "bin", "rapid-mlx");
+  onLog("installing rapid-mlx (venv + pip)…");
+  await run("python3", ["-m", "venv", venv], onLog);
+  await run(join(venv, "bin", "pip"), ["install", "--upgrade", "pip", "rapid-mlx"], onLog);
+  const localBin = join(homedir(), ".local", "bin");
+  mkdirSync(localBin, { recursive: true });
+  try { await run("ln", ["-sf", bin, join(localBin, "rapid-mlx")], onLog); } catch { /* best effort */ }
+  return bin;
+}
+
+/** Perform provisioning: install engine, pull fitting models, write config. */
+export async function provisionLocalEngine(opts: { onLog?: Logger; env?: Partial<HardwareProbe> } = {}): Promise<ProvisionPlan> {
+  const onLog = opts.onLog ?? (() => {});
+  const plan = planLocalEngine(opts.env);
+  const cfg = readConfig();
+
+  if (!plan.localCapable) {
+    onLog(plan.reason ?? "This Mac can't run a local model — cloud-only.");
+    cfg.localEngine = { engine: "rapid-mlx", binary: null, tiers: [] };
+    writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+    onLog("Wrote cloud-only localEngine block.");
+    return plan;
+  }
+
+  onLog(`Provisioning for ${Math.round(plan.ramGB)} GB ${plan.arch}: ${plan.recommendedTiers.join(" + ")} resident.`);
+  const bin = await ensureRapidBinary(onLog);
+  for (const t of plan.tiers) {
+    onLog(`pulling ${t.alias}…`);
+    await run(bin, ["pull", t.alias], onLog);
+  }
+  cfg.localEngine = { engine: "rapid-mlx", binary: bin, tiers: plan.tiers };
+  writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+  onLog("Wrote localEngine config. Restart the daemon to serve the configured tiers.");
+  return plan;
+}
+
+// --- Background job tracker (one provision at a time) ----------------------
+
+export type ProvisionPhase = "idle" | "running" | "done" | "error";
+export interface ProvisionStatus {
+  phase: ProvisionPhase;
+  log: string[];
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  plan: ProvisionPlan | null;
+}
+
+const MAX_LOG = 200;
+const _state: ProvisionStatus = { phase: "idle", log: [], startedAt: null, finishedAt: null, error: null, plan: null };
+
+export function getProvisionStatus(): ProvisionStatus {
+  return { ..._state, log: [..._state.log] };
+}
+
+/** Start a background provision (idempotent: no-op if already running). */
+export function startProvision(now: () => string = () => new Date().toISOString()): ProvisionStatus {
+  if (_state.phase === "running") return getProvisionStatus();
+  _state.phase = "running";
+  _state.log = [];
+  _state.error = null;
+  _state.finishedAt = null;
+  _state.startedAt = now();
+  _state.plan = planLocalEngine();
+  const onLog = (line: string) => {
+    _state.log.push(line);
+    if (_state.log.length > MAX_LOG) _state.log.splice(0, _state.log.length - MAX_LOG);
+  };
+  provisionLocalEngine({ onLog })
+    .then((plan) => { _state.plan = plan; _state.phase = "done"; })
+    .catch((e) => { _state.error = e?.message ?? String(e); _state.phase = "error"; })
+    .finally(() => { _state.finishedAt = now(); });
+  return getProvisionStatus();
+}

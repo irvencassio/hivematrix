@@ -681,6 +681,19 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /local-engine/provision — provisioning plan (what fits this Mac) + job status.
+      if (req.method === "GET" && urlPath === "/local-engine/provision") {
+        const { planLocalEngine, getProvisionStatus } = await import("@/lib/models/provision");
+        json(res, 200, { plan: planLocalEngine(), status: getProvisionStatus() });
+        return;
+      }
+      // POST /local-engine/provision — start a background provision (install + pull + write config).
+      if (req.method === "POST" && urlPath === "/local-engine/provision") {
+        const { startProvision } = await import("@/lib/models/provision");
+        json(res, 202, startProvision());
+        return;
+      }
+
       // GET /messagebee — channel status (enabled, chat.db readable, allowlist)
       if (req.method === "GET" && urlPath === "/messagebee") {
         const { isChannelEnabled, listIdentities } = await import("@/lib/messagebee/store");
@@ -924,6 +937,47 @@ export function createDaemonServer() {
         });
         broadcast("tasks:created", { taskId: task._id });
         json(res, 201, { task, docPath });
+        return;
+      }
+
+      // GET /brain/links — `[[wikilink]]` graph. ?doc=NAME → forward+backlinks
+      // for one doc; otherwise the whole graph (nodes with their links).
+      if (req.method === "GET" && urlPath === "/brain/links") {
+        const { buildLinkGraph, linksForDoc } = await import("@/lib/brain/links");
+        const q = parseQueryString(req.url ?? "");
+        const graph = await buildLinkGraph();
+        const doc = (q.doc ?? "").trim();
+        if (doc) { json(res, 200, { doc, ...linksForDoc(doc, graph) }); return; }
+        json(res, 200, { nodes: graph.nodes });
+        return;
+      }
+
+      // POST /brain/summarize — create an agent task that writes a "what shifted"
+      // weekly digest of recently-changed brain docs. Body: { sinceDays? }.
+      if (req.method === "POST" && urlPath === "/brain/summarize") {
+        const { recentBrainDocs, weeklyDigestFilename, buildBrainDigestTaskDescription } = await import("@/lib/brain/summary");
+        const { configuredBrainRootDir, defaultBrainRootDir } = await import("@/lib/brain/settings");
+        const { Task, generateId } = await import("@/lib/db");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const sinceDays = typeof body.sinceDays === "number" && body.sinceDays > 0 ? Math.floor(body.sinceDays) : 7;
+        const docs = await recentBrainDocs({ sinceDays });
+        const root = configuredBrainRootDir() ?? defaultBrainRootDir();
+        const dateStr = new Date().toISOString().slice(0, 10);
+        const docPath = `${root}/digests/${weeklyDigestFilename(dateStr)}`;
+        const task = await Task.create({
+          _id: generateId(),
+          title: `[brain digest] last ${sinceDays}d (${docs.length} docs)`,
+          description: buildBrainDigestTaskDescription({ docs, docPath, sinceDays }),
+          project: "ops",
+          projectPath: process.cwd(),
+          profile: "researcher",
+          status: "backlog",
+          executor: "agent",
+          source: "brain-digest",
+          output: { brainDigest: { sinceDays, docCount: docs.length, docPath } },
+        });
+        broadcast("tasks:created", { taskId: task._id });
+        json(res, 201, { task, docPath, docCount: docs.length });
         return;
       }
 

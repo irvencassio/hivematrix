@@ -170,6 +170,7 @@ export function brainSearchRoutingPrompt(port = daemonPort()): string {
     `  curl -s "http://127.0.0.1:${port}/brain/search?q=YOUR+QUERY" \\`,
     `    -H "Authorization: Bearer $(cat ~/.hivematrix/auth-token)"`,
     'It returns JSON with a "hits" array (each {path, score, snippet}); the path is relative to the brain root. Read the full doc if a hit looks relevant.',
+    `To find related docs a doc links to / is linked from (the [[wikilink]] graph): curl -s "http://127.0.0.1:${port}/brain/links?doc=DOC-NAME" -H "Authorization: Bearer $(cat ~/.hivematrix/auth-token)" → {links, backlinks}.`,
     'Reusable SKILLS (recipes distilled from past work) live under the brain root\'s skills/ folder and are included in brain_search results — before solving a recurring task, search for an applicable skill and follow it.',
   ].join("\n");
 }
