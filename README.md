@@ -20,14 +20,15 @@ launchd ─▶ Hive daemon (Node, :3747) ──┬─ scheduler + directive run 
    console (SPA, served at / )  ◀───────┘
    Tauri .app shell  ◀── loads the console
    DesktopBee helper (.app, :3748) ◀── AX / CGEvent / capture / AppleScript, approval-gated
-   LM Studio (:1234) ◀── Qwen 3.6 27B (MLX 8-bit), local model
+   Rapid-MLX (:8000 fast · :8001 coding) ◀── Qwen3.6 4-bit tiers (LM Studio/Ollama also work)
 ```
 
 ## Prerequisites
 
 - macOS 12+ (built/run on Apple Silicon, M-series)
 - Node 22 (`nvm` ok); for the app shell: Rust + `cargo-tauri`, Xcode
-- [LM Studio](https://lmstudio.ai) with a Qwen model loaded (local model plane)
+- Local model plane: **Rapid-MLX** (the on-device engine; LM Studio / Ollama are
+  drop-in OpenAI-compatible alternates). The daemon sizes + serves it per machine.
 - For signed builds: a Developer ID Application cert + a notarytool keychain
   profile (see [docs/UPDATE-CHANNEL.md](docs/UPDATE-CHANNEL.md))
 
@@ -49,11 +50,22 @@ npx tsx src/daemon/index.ts         # serves http://127.0.0.1:3747
 Open the operator console at **http://127.0.0.1:3747/** (board · session ·
 context/brain, with live soak/health + a setup checklist).
 
-### Local model (Qwen via LM Studio)
+### Local model (Rapid-MLX two-tier)
 
-Load **Qwen 3.6 27B (MLX 8-bit)** in LM Studio (server on :1234, no TTL so it
-stays resident), point `~/.hivematrix/config.json` at it (see
-[QWEN-LOCAL-PROFILE.md](QWEN-LOCAL-PROFILE.md)), then prove readiness:
+The local plane is **Rapid-MLX** serving two resident Qwen3.6 4-bit tiers —
+`fast` (35B-A3B, :8000, reasoning off) for daily/agentic/voice and `coding`
+(27B-dense, :8001) for hard coding — sized to the machine's RAM. Provision it
+for this Mac (installs the engine + pulls only the tiers that fit, writes
+`~/.hivematrix/config.json` `localEngine`):
+
+```bash
+npx tsx scripts/provision-local-engine.mts            # plan (dry run)
+npx tsx scripts/provision-local-engine.mts --apply    # install + pull + configure
+```
+
+Canonical reference: [docs/MODEL-ROUTING.md](docs/MODEL-ROUTING.md). LM Studio /
+Ollama remain valid alternates (`localEngine.engine`). To prove a configured
+local model is ready:
 
 ```bash
 npx tsx scripts/qwen-readiness.mts   # 6-check readiness gate + eval suite
