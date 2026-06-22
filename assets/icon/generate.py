@@ -29,16 +29,25 @@ def render_svg(svg_name):
 def resize(img, size):
     return img.resize((size, size), Image.LANCZOS)
 
-def apply_squircle_alpha(img):
+def apply_squircle_alpha(img, content_ratio=0.805, radius_ratio=0.2237):
+    # Inset the squircle inside a TRANSPARENT canvas so the glyph fills ~80.5% of
+    # the tile (Apple's content-area ratio) with margin on each side. Without this
+    # the art bleeds edge-to-edge and macOS renders the icon visibly larger than
+    # its neighbors (which all sit inset). iOS keeps the full-bleed master.
+    w, h = img.width, img.height
+    content = round(w * content_ratio)
+    margin = (w - content) // 2
+    art = img.convert("RGBA").resize((content, content), Image.LANCZOS)
     scale = 4
-    mask = Image.new("L", (img.width * scale, img.height * scale), 0)
+    mask = Image.new("L", (content * scale, content * scale), 0)
     draw = ImageDraw.Draw(mask)
-    radius = round(img.width * 0.225) * scale
-    draw.rounded_rectangle((0, 0, img.width * scale, img.height * scale), radius=radius, fill=255)
-    mask = mask.resize(img.size, Image.LANCZOS)
-    out = img.copy()
-    out.putalpha(mask)
-    return out
+    radius = round(content * radius_ratio) * scale
+    draw.rounded_rectangle((0, 0, content * scale, content * scale), radius=radius, fill=255)
+    mask = mask.resize((content, content), Image.LANCZOS)
+    art.putalpha(mask)
+    canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    canvas.paste(art, (margin, margin), art)
+    return canvas
 
 ios_master = Image.open(render_svg("icon-ios-master.svg")).convert("RGBA")
 mac_master = apply_squircle_alpha(Image.open(render_svg("icon-macos-master.svg")).convert("RGBA"))

@@ -25,10 +25,11 @@ if alpha:
   bbox = [min(xs), min(ys), max(xs) + 1, max(ys) + 1]
 else:
   bbox = None
+tileTop = pix[w // 2, bbox[1] + max(4, h // 40)] if bbox else None
 print(json.dumps({
   "size": [w, h],
   "corner": pix[0, 0],
-  "topCenter": pix[w // 2, max(1, h // 16)],
+  "tileTop": tileTop,
   "center": pix[w // 2, h // 2],
   "bbox": bbox
 }))
@@ -36,18 +37,27 @@ print(json.dumps({
   return JSON.parse(execFileSync(python, ["-c", script, path], { encoding: "utf8" }));
 }
 
-test("desktop app icon is full-bleed with transparent rounded corners", () => {
+// The glyph must be INSET inside the tile (~Apple's 0.805 content ratio) with a
+// transparent margin — not full-bleed — so macOS doesn't render it larger than
+// neighboring app icons.
+test("desktop app icon is inset (not full-bleed) with transparent corners", () => {
   const icon = inspectPng(join(root, "src-tauri/icons/icon.png"));
   assert.deepEqual(icon.size, [512, 512]);
   assert.equal(icon.corner[3], 0, "corner should be transparent, not a white matte");
-  assert.deepEqual(icon.bbox, [0, 0, 512, 512], "non-transparent icon footprint should fill the image");
+  const [x0, y0, x1, y1] = icon.bbox;
+  const ratio = (x1 - x0) / icon.size[0];
+  assert.ok(ratio > 0.74 && ratio < 0.86, `glyph should fill ~0.805 of the canvas (got ${ratio.toFixed(3)})`);
+  assert.ok(x0 > 20 && y0 > 20, "glyph should sit inside a transparent margin");
 });
 
-test("white alternate runtime icon exists", () => {
+test("white alternate runtime icon exists and is inset with a white tile", () => {
   const path = join(root, "src-tauri/icons/app-icon-white.png");
   assert.equal(existsSync(path), true, "white alternate icon must be bundled");
   const icon = inspectPng(path);
   assert.deepEqual(icon.size, [512, 512]);
-  assert.equal(icon.corner[3], 0, "corner should be transparent");
-  assert.ok(icon.topCenter[0] > 245 && icon.topCenter[1] > 245 && icon.topCenter[2] > 245, "background should be white");
+  assert.equal(icon.corner[3], 0, "corner should be transparent (inset, not full-bleed)");
+  assert.ok(
+    icon.tileTop[3] > 245 && icon.tileTop[0] > 245 && icon.tileTop[1] > 245 && icon.tileTop[2] > 245,
+    "tile interior should be opaque white",
+  );
 });

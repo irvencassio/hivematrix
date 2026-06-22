@@ -6,8 +6,8 @@
       <stop offset="100%" stop-color="#1fd23f" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="hex" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#86ff95"/>
-      <stop offset="1" stop-color="#17b333"/>
+      <stop offset="0" stop-color="#2faf4a"/>
+      <stop offset="1" stop-color="#0c7a25"/>
     </linearGradient>
     <clipPath id="squircle">
       <rect x="0" y="0" width="1024" height="1024" rx="230" ry="230"/>
