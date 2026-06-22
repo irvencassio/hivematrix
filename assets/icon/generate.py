@@ -53,9 +53,14 @@ ios_master = Image.open(render_svg("icon-ios-master.svg")).convert("RGBA")
 mac_master = apply_squircle_alpha(Image.open(render_svg("icon-macos-master.svg")).convert("RGBA"))
 white_master = apply_squircle_alpha(Image.open(render_svg("icon-macos-white.svg")).convert("RGBA"))
 
-# --- iOS: 1024, NO alpha (App Store requirement) ---
+# --- iOS: 1024, NO alpha (App Store requirement), full-bleed (iOS rounds it) ---
 ios = resize(ios_master, 1024).convert("RGB")
 ios.save(os.path.join(OUT, "AppIcon.png"))
+# iOS white alternate icon — same white master as macOS, but full-bleed (no
+# squircle inset) since iOS masks it itself. Keeps the iOS white icon in sync
+# with icon-macos-white.svg (darker green) instead of a stale hand-placed file.
+ios_white = resize(Image.open(render_svg("icon-macos-white.svg")).convert("RGBA"), 1024).convert("RGB")
+ios_white.save(os.path.join(OUT, "AppIconWhite.png"))
 
 # --- Desktop PNGs (from rounded mac master, keep alpha) ---
 png_sizes = {
@@ -108,3 +113,13 @@ for f in sorted(os.listdir(OUT)):
 for name in list(png_sizes.keys()) + ["icon.ico", "icon.icns", "app-icon-dark-green.png", "app-icon-white.png"]:
     shutil.copy2(os.path.join(OUT, name), os.path.join(TAURI_ICONS, name))
 print("copied desktop icons ->", TAURI_ICONS)
+
+# Push the iOS white alternate icon into the sibling hivematrix-ios repo (if present)
+# so selecting "white" looks the same on iPhone/iPad as on the Mac.
+IOS_WHITE_DST = os.path.abspath(os.path.join(
+    REPO, "..", "hivematrix-ios", "HiveMatrix", "Assets.xcassets", "AppIconWhite.appiconset", "AppIconWhite.png"))
+if os.path.isdir(os.path.dirname(IOS_WHITE_DST)):
+    shutil.copy2(os.path.join(OUT, "AppIconWhite.png"), IOS_WHITE_DST)
+    print("copied iOS white icon ->", IOS_WHITE_DST)
+else:
+    print("iOS repo not found; skipped iOS white icon copy")
