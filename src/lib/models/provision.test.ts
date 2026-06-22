@@ -1,6 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { planLocalEngine, getProvisionStatus } from "./provision";
+import { planLocalEngine, getProvisionStatus, pythonVersionOk } from "./provision";
+
+test("pythonVersionOk: 3.13+ required (rapid-mlx has no 3.9 wheel)", () => {
+  assert.equal(pythonVersionOk("3.9"), false);   // the target Mac's system python
+  assert.equal(pythonVersionOk("3.12"), false);
+  assert.equal(pythonVersionOk("3.13"), true);
+  assert.equal(pythonVersionOk("3.14"), true);    // the bundled interpreter
+  assert.equal(pythonVersionOk("4.0"), true);
+  assert.equal(pythonVersionOk(""), false);       // unknown
+});
 
 test("planLocalEngine: 48 GB → one resident tier (fast) resolved to a serve target", () => {
   const plan = planLocalEngine({ arch: "arm64", ramGB: 48 });

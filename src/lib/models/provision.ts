@@ -13,7 +13,8 @@
  * tsx / repo scripts required at runtime).
  */
 
-import { spawn } from "child_process";
+import { spawn, execFile } from "child_process";
+import { promisify } from "util";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -21,6 +22,24 @@ import {
   localEngineCapability, probeHardware, DEFAULT_TIERS, resolveRapidBinary,
   type LocalTier, type TierKey, type HardwareProbe,
 } from "./local-engine";
+import { provisioningPython } from "@/lib/voice/provision";
+
+const execFileP = promisify(execFile);
+
+/** rapid-mlx needs Python 3.13+ (no wheels for 3.9). Pure. */
+export function pythonVersionOk(version: string): boolean {
+  const m = version.match(/^(\d+)\.(\d+)/);
+  if (!m) return false;
+  const major = Number(m[1]), minor = Number(m[2]);
+  return major > 3 || (major === 3 && minor >= 13);
+}
+
+async function pythonVersion(py: string): Promise<string> {
+  try {
+    const { stdout } = await execFileP(py, ["-c", "import sys;print('%d.%d' % sys.version_info[:2])"], { timeout: 10_000 });
+    return stdout.trim();
+  } catch { return ""; }
+}
 
 export interface ProvisionPlan {
   arch: string;
@@ -73,10 +92,17 @@ function run(cmd: string, args: string[], onLog: Logger): Promise<void> {
 async function ensureRapidBinary(onLog: Logger): Promise<string> {
   const existing = resolveRapidBinary();
   if (existing) { onLog(`rapid-mlx found at ${existing}`); return existing; }
+  // Use a modern interpreter — the bundled 3.14 in the app, NOT the Mac's system
+  // python3 (often 3.9), which has no rapid-mlx wheel.
+  const py = provisioningPython();
+  const ver = await pythonVersion(py);
+  if (!pythonVersionOk(ver)) {
+    throw new Error(`rapid-mlx needs Python 3.13+, but the provisioning interpreter is ${ver || "unknown"} (${py}). Install Python 3.13+ (e.g. \`brew install python@3.13\`) and set HIVE_PYTHON to it, or run from the bundled app, then retry.`);
+  }
   const venv = join(homedir(), ".hivematrix", "rapidmlx", ".venv");
   const bin = join(venv, "bin", "rapid-mlx");
-  onLog("installing rapid-mlx (venv + pip)…");
-  await run("python3", ["-m", "venv", venv], onLog);
+  onLog(`installing rapid-mlx with Python ${ver} (${py})…`);
+  await run(py, ["-m", "venv", "--clear", venv], onLog); // --clear recreates a stale/wrong-version venv
   await run(join(venv, "bin", "pip"), ["install", "--upgrade", "pip", "rapid-mlx"], onLog);
   const localBin = join(homedir(), ".local", "bin");
   mkdirSync(localBin, { recursive: true });
