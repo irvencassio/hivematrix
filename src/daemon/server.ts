@@ -1581,6 +1581,17 @@ export function createDaemonServer() {
         json(res, 200, { candidates: stalePruneCandidates(await readAllSkills()) });
         return;
       }
+      // GET /skills/sources — configured tiered scopes + the operator's signer id.
+      if (req.method === "GET" && urlPath === "/skills/sources") {
+        const { getSkillSources } = await import("@/lib/skills/sync");
+        const { readSigningPublicKey, keyFingerprint } = await import("@/lib/skills/signing");
+        const pub = readSigningPublicKey();
+        json(res, 200, {
+          sources: getSkillSources().map((s) => ({ scope: s.scope, repoUrl: s.repoUrl, branch: s.branch })),
+          signerId: pub ? keyFingerprint(pub) : null,
+        });
+        return;
+      }
 
       // POST /skills — create a skill (operator → trusted). kind: instruction|script.
       if (req.method === "POST" && urlPath === "/skills") {
@@ -1645,6 +1656,19 @@ export function createDaemonServer() {
         const body = await parseBody(req) as Record<string, unknown>;
         const ok = await setSkillTrusted(decodeURIComponent(skillTrustMatch[1]), body.trusted !== false);
         json(res, ok ? 200 : 404, { ok, trusted: body.trusted !== false });
+        return;
+      }
+
+      // POST /skills/:name/publish — sign + push a skill to a scope's repo.
+      const skillPublishMatch = urlPath.match(/^\/skills\/([^/]+)\/publish$/);
+      if (req.method === "POST" && skillPublishMatch) {
+        const { publishSkill } = await import("@/lib/skills/sync");
+        const { coerceScope } = await import("@/lib/skills/contracts");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const scope = coerceScope(typeof body.scope === "string" ? body.scope : undefined);
+        if (!scope) { json(res, 400, { error: "scope must be personal|team|org|public" }); return; }
+        const result = await publishSkill(decodeURIComponent(skillPublishMatch[1]), scope);
+        json(res, result.ok ? 200 : 400, result);
         return;
       }
 

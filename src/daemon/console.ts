@@ -792,8 +792,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="muted" id="skillResult" style="font-size:12px;margin-top:4px"></div>
     <pre id="skillView" style="display:none;max-height:200px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap"></pre>
     <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
-      <button class="addbtn" onclick="syncSkills()" title="Git-sync your skill set + write skills into Claude/Codex/Qwen dirs">⇄ Sync &amp; fan-out</button>
+      <button class="addbtn" onclick="syncSkills()" title="Git-sync all scopes + write skills into Claude/Codex/Qwen dirs">⇄ Sync &amp; fan-out</button>
       <button class="addbtn" onclick="loadSkillPrune()" title="Find skills you no longer use">Unused…</button>
+      <select id="publishScope" style="width:auto" title="Scope to publish the selected skill to">
+        <option value="team">team</option><option value="org">org</option><option value="public">public</option>
+      </select>
+      <button class="addbtn" onclick="publishSkillUI()" title="Sign and publish the selected skill to the chosen scope">Publish</button>
     </div>
     <div class="muted" id="skillSyncStatus" style="font-size:11px;margin-top:4px"></div>
     <div id="skillPrune" style="font-size:11px;margin-top:4px"></div></details>
@@ -1676,7 +1680,9 @@ function updateSkillMeta() {
   const s = _skills.find(x => x.name === sel.value);
   if (!s) { meta.textContent = ''; if (trustBtn) trustBtn.style.display = 'none'; return; }
   const untrusted = s.trusted === false;
+  const prov = (s.scope ? '<span style="color:var(--muted)">[' + esc(s.scope) + (s.signed ? ' ✓signed' : '') + ']</span> ' : '');
   meta.innerHTML = (untrusted ? '<span style="color:var(--warn)">⚠ untrusted (imported — review before agents use it)</span> · ' : '')
+    + prov
     + 'runs on: ' + esc((s.compat && s.compat.length ? s.compat : ['all']).join(', '))
     + (s.hasInput ? ' · takes input' : '')
     + (s.description ? ' — ' + esc(s.description) : '');
@@ -1728,12 +1734,26 @@ async function syncSkills() {
     const r = await api('/skills/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction: 'both' }) });
     const s = r.sync || {}; const f = r.fanout || [];
     const fan = f.map(t => t.id + ':' + t.written).join(' ');
+    const per = (s.perScope || []).map(p => p.scope + ' +' + (p.imported||0) + (p.quarantined ? ' (' + p.quarantined + ' to approve)' : '')).join(', ');
     const msg = s.configured
-      ? ('synced (imported ' + (s.imported||0) + ', refined ' + (s.refined||0) + (s.pushed ? ', pushed' : '') + ') · fan-out ' + fan)
-      : ('no git repo configured (set skillsSync.repoUrl) · fan-out ' + fan);
+      ? ('synced [' + per + '] · fan-out ' + fan)
+      : ('no sources configured (skillsSync.sources) · fan-out ' + fan);
     if (el) el.textContent = msg + ((s.errors && s.errors.length) ? ' · ' + s.errors.length + ' error(s)' : '');
     renderSkills();
   } catch (e) { if (el) el.textContent = 'sync failed'; }
+}
+async function publishSkillUI() {
+  const name = selectedSkill(); if (!name) return;
+  const scope = (document.getElementById('publishScope') || {}).value || 'team';
+  const el = document.getElementById('skillSyncStatus');
+  const ok = await hmConfirm('Sign and publish "' + name + '" to the ' + scope + ' scope? This pushes it to that scope\'s git repo.', { okLabel: 'Publish' });
+  if (!ok) return;
+  if (el) el.textContent = 'Publishing…';
+  try {
+    const r = await api('/skills/' + encodeURIComponent(name) + '/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope }) });
+    if (el) el.textContent = r.ok ? ('published to ' + scope + (r.pushed ? ' (pushed)' : ' (committed)') + ' · signed ' + (r.signedBy||'')) : ('publish failed: ' + (r.reason || 'error'));
+    renderSkills();
+  } catch (e) { if (el) el.textContent = 'publish failed'; }
 }
 async function loadSkillPrune() {
   const box = document.getElementById('skillPrune');

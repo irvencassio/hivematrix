@@ -38,8 +38,13 @@ async function main() {
   const direction = has("--pull") ? "pull" : has("--push") ? "push" : "both";
   line(`git sync (${direction})…`);
   const s = await gitSyncSkills({ direction, onLog: line });
-  if (!s.configured) { line("No skillsSync.repoUrl configured in ~/.hivematrix/config.json."); }
-  else line(`imported ${s.imported}, refined ${s.refined}${s.pushed ? ", pushed" : ""}${s.errors.length ? `, ${s.errors.length} error(s)` : ""}`);
+  if (!s.configured) { line("No skill sources configured (skillsSync.sources or skillsSync.repoUrl) in ~/.hivematrix/config.json."); }
+  else {
+    for (const p of s.perScope) {
+      line(`  ${p.scope}: imported ${p.imported}, refined ${p.refined}${p.quarantined ? `, quarantined ${p.quarantined}` : ""}${p.pushed ? ", pushed" : ""}`);
+    }
+    if (s.errors.length) line(`  ${s.errors.length} error(s)`);
+  }
 
   line("Fanning out to harness dirs…");
   for (const r of await fanOutSkills(await readAllSkills())) {

@@ -20,6 +20,13 @@ export type SkillHarness = (typeof SKILL_HARNESSES)[number] | "all";
  * code) only run when TRUSTED.
  */
 export type SkillKind = "instruction" | "script";
+
+/** Sharing scope a skill came from / is published to. Precedence: personal first. */
+export const SKILL_SCOPES = ["personal", "team", "org", "public"] as const;
+export type SkillScope = (typeof SKILL_SCOPES)[number];
+export function coerceScope(v: string | undefined): SkillScope | undefined {
+  return (SKILL_SCOPES as readonly string[]).includes(v ?? "") ? (v as SkillScope) : undefined;
+}
 export const SKILL_INTERPRETERS = ["bash", "sh", "node", "python3", "python"] as const;
 export type SkillInterpreter = (typeof SKILL_INTERPRETERS)[number];
 
@@ -52,6 +59,12 @@ export interface Skill {
   kind: SkillKind;
   /** For script skills: the interpreter (bash/node/python3). */
   interpreter: SkillInterpreter;
+  /** Sharing scope this skill came from (personal/team/org/public). */
+  scope?: SkillScope;
+  /** Signer key fingerprint (provenance) — set when the skill was signed. */
+  signedBy?: string;
+  /** Base64 Ed25519 signature over the skill's canonical content. */
+  signature?: string;
 }
 
 /** One line per skill for an index/listing (cheap — frontmatter only). */
@@ -65,6 +78,9 @@ export interface SkillIndexEntry {
   hasInput: boolean;
   trusted: boolean;
   kind: SkillKind;
+  /** Provenance (optional): sharing scope + whether it carries a signature. */
+  scope?: SkillScope;
+  signed?: boolean;
 }
 
 /** A skill is harness-agnostic if compat is empty or contains "all". */
@@ -119,6 +135,9 @@ export function renderSkillFile(skill: Skill): string {
     `trusted: ${skill.trusted}`,
     `kind: ${skill.kind}`,
     `interpreter: ${skill.interpreter}`,
+    ...(skill.scope ? [`scope: ${skill.scope}`] : []),
+    ...(skill.signedBy ? [`signedBy: ${skill.signedBy}`] : []),
+    ...(skill.signature ? [`signature: ${skill.signature}`] : []),
     "---",
   ].join("\n");
   return `${fm}\n\n${skill.body.trim()}\n`;
@@ -152,6 +171,9 @@ export function parseSkillFile(content: string): Skill | null {
     trusted: fm.trusted !== "false", // default true (existing skills) unless explicitly false
     kind: fm.kind === "script" ? "script" : "instruction",
     interpreter: coerceInterpreter(fm.interpreter),
+    scope: coerceScope(fm.scope),
+    signedBy: fm.signedBy || undefined,
+    signature: fm.signature || undefined,
   };
 }
 

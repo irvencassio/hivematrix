@@ -10,7 +10,7 @@ import { join } from "path";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import {
   renderSkillFile, parseSkillFile, skillFilename, skillSlug, skillHasInput,
-  type Skill, type SkillIndexEntry, type SkillHarness, type SkillKind, type SkillInterpreter,
+  type Skill, type SkillIndexEntry, type SkillHarness, type SkillKind, type SkillInterpreter, type SkillScope,
 } from "./contracts";
 
 const READ_TIMEOUT_MS = 3_000;
@@ -51,7 +51,7 @@ export async function listSkills(): Promise<SkillIndexEntry[]> {
     if (skill) out.push({
       name: skill.name, description: skill.description, tags: skill.tags,
       useCount: skill.useCount, compat: skill.compat, hasInput: skillHasInput(skill.body),
-      trusted: skill.trusted, kind: skill.kind,
+      trusted: skill.trusted, kind: skill.kind, scope: skill.scope, signed: !!skill.signature,
     });
   }
   // Most-used first (proven skills surface), then alphabetical.
@@ -89,6 +89,10 @@ export interface UpsertSkillInput {
   trusted?: boolean;
   kind?: SkillKind;
   interpreter?: SkillInterpreter;
+  /** Provenance (set by scoped sync / publish). */
+  scope?: SkillScope;
+  signedBy?: string;
+  signature?: string;
   now?: string;
 }
 
@@ -122,6 +126,9 @@ export async function upsertSkill(input: UpsertSkillInput): Promise<UpsertSkillR
       body: bodyChanged ? input.body : existing.body,
       updatedAt: now,
       revisions: bodyChanged ? existing.revisions + 1 : existing.revisions,
+      scope: input.scope ?? existing.scope,
+      signedBy: input.signedBy ?? existing.signedBy,
+      signature: input.signature ?? existing.signature,
     };
     result = { created: false, refined: bodyChanged, path };
   } else {
@@ -140,6 +147,9 @@ export async function upsertSkill(input: UpsertSkillInput): Promise<UpsertSkillR
       trusted: input.trusted !== false, // default trusted; import passes false
       kind: input.kind === "script" ? "script" : "instruction",
       interpreter: input.interpreter ?? "bash",
+      scope: input.scope,
+      signedBy: input.signedBy,
+      signature: input.signature,
     };
     result = { created: true, refined: false, path };
   }
