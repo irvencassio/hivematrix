@@ -790,7 +790,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     </div>
     <div class="muted" id="skillMeta" style="font-size:11px;margin-top:4px"></div>
     <div class="muted" id="skillResult" style="font-size:12px;margin-top:4px"></div>
-    <pre id="skillView" style="display:none;max-height:200px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap"></pre></details>
+    <pre id="skillView" style="display:none;max-height:200px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap"></pre>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+      <button class="addbtn" onclick="syncSkills()" title="Git-sync your skill set + write skills into Claude/Codex/Qwen dirs">⇄ Sync &amp; fan-out</button>
+      <button class="addbtn" onclick="loadSkillPrune()" title="Find skills you no longer use">Unused…</button>
+    </div>
+    <div class="muted" id="skillSyncStatus" style="font-size:11px;margin-top:4px"></div>
+    <div id="skillPrune" style="font-size:11px;margin-top:4px"></div></details>
     <details class="ctx-sec" id="commandsSec"><summary>Commands</summary>
     <div class="command-shell">
       <div class="command-head">
@@ -1713,6 +1719,41 @@ async function deleteSkillUI() {
   const ok = await hmConfirm('Delete skill "' + name + '"? This removes the file from the brain.', { okLabel: 'Delete' });
   if (!ok) return;
   try { await api('/skills/' + encodeURIComponent(name), { method: 'DELETE' }); renderSkills(); }
+  catch (e) { /* ignore */ }
+}
+async function syncSkills() {
+  const el = document.getElementById('skillSyncStatus');
+  if (el) el.textContent = 'Syncing…';
+  try {
+    const r = await api('/skills/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction: 'both' }) });
+    const s = r.sync || {}; const f = r.fanout || [];
+    const fan = f.map(t => t.id + ':' + t.written).join(' ');
+    const msg = s.configured
+      ? ('synced (imported ' + (s.imported||0) + ', refined ' + (s.refined||0) + (s.pushed ? ', pushed' : '') + ') · fan-out ' + fan)
+      : ('no git repo configured (set skillsSync.repoUrl) · fan-out ' + fan);
+    if (el) el.textContent = msg + ((s.errors && s.errors.length) ? ' · ' + s.errors.length + ' error(s)' : '');
+    renderSkills();
+  } catch (e) { if (el) el.textContent = 'sync failed'; }
+}
+async function loadSkillPrune() {
+  const box = document.getElementById('skillPrune');
+  if (!box) return;
+  box.textContent = 'Checking…';
+  try {
+    const r = await api('/skills/prune');
+    const c = r.candidates || [];
+    if (!c.length) { box.textContent = 'No unused skills — library is lean.'; return; }
+    box.innerHTML = '<div class="muted" style="margin:2px 0">Unused (' + c.length + '):</div>' + c.map(x =>
+      '<div class="row" style="gap:6px;align-items:center">'
+      + '<span style="flex:1">' + esc(x.name) + ' <span class="muted">— ' + esc(x.reason) + ', ' + x.ageDays + 'd</span></span>'
+      + '<button class="addbtn" onclick="archiveSkill(\'' + esc(x.name).replace(/'/g, "&#39;") + '\')">Archive</button></div>'
+    ).join('');
+  } catch (e) { box.textContent = 'prune check failed'; }
+}
+async function archiveSkill(name) {
+  const ok = await hmConfirm('Archive (delete) skill "' + name + '"? Removes it from the brain library and harness dirs on next sync.', { okLabel: 'Archive' });
+  if (!ok) return;
+  try { await api('/skills/' + encodeURIComponent(name), { method: 'DELETE' }); loadSkillPrune(); renderSkills(); }
   catch (e) { /* ignore */ }
 }
 async function runSkill() {

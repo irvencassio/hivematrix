@@ -1538,6 +1538,50 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /skills/sync — sync config + fan-out targets + prune candidate count.
+      if (req.method === "GET" && urlPath === "/skills/sync") {
+        const { getSkillsSyncConfig } = await import("@/lib/skills/sync");
+        const { harnessTargets } = await import("@/lib/skills/fanout");
+        const { stalePruneCandidates } = await import("@/lib/skills/prune");
+        const { readAllSkills } = await import("@/lib/skills/store");
+        const cfg = getSkillsSyncConfig();
+        const all = await readAllSkills();
+        json(res, 200, {
+          configured: !!cfg,
+          repoUrl: cfg?.repoUrl ?? null,
+          targets: harnessTargets().map((t) => ({ id: t.id, dir: t.dir })),
+          pruneCandidateCount: stalePruneCandidates(all).length,
+          skillCount: all.length,
+        });
+        return;
+      }
+      // POST /skills/sync — git pull/push the personal skill repo, then fan out.
+      if (req.method === "POST" && urlPath === "/skills/sync") {
+        const { gitSyncSkills } = await import("@/lib/skills/sync");
+        const { fanOutSkills } = await import("@/lib/skills/fanout");
+        const { readAllSkills } = await import("@/lib/skills/store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const direction = body.direction === "pull" || body.direction === "push" ? body.direction : "both";
+        const sync = await gitSyncSkills({ direction });
+        const fanout = await fanOutSkills(await readAllSkills());
+        json(res, 200, { sync, fanout });
+        return;
+      }
+      // POST /skills/fanout — write trusted skills into the harness dirs (no git).
+      if (req.method === "POST" && urlPath === "/skills/fanout") {
+        const { fanOutSkills } = await import("@/lib/skills/fanout");
+        const { readAllSkills } = await import("@/lib/skills/store");
+        json(res, 200, { fanout: await fanOutSkills(await readAllSkills()) });
+        return;
+      }
+      // GET /skills/prune — skills that have gone cold (idle/never-used).
+      if (req.method === "GET" && urlPath === "/skills/prune") {
+        const { stalePruneCandidates } = await import("@/lib/skills/prune");
+        const { readAllSkills } = await import("@/lib/skills/store");
+        json(res, 200, { candidates: stalePruneCandidates(await readAllSkills()) });
+        return;
+      }
+
       // POST /skills — create a skill (operator → trusted). kind: instruction|script.
       if (req.method === "POST" && urlPath === "/skills") {
         const { upsertSkill } = await import("@/lib/skills/store");

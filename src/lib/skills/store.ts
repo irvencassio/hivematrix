@@ -58,6 +58,26 @@ export async function listSkills(): Promise<SkillIndexEntry[]> {
   return out.sort((a, b) => b.useCount - a.useCount || a.name.localeCompare(b.name));
 }
 
+/** Full skills (not just the index) — bounded, timed. For fan-out + prune, which
+ * need `body` and `lastUsedAt` that the index entry omits. */
+export async function readAllSkills(): Promise<Skill[]> {
+  const dir = skillsDir();
+  if (!dir) return [];
+  let names: string[];
+  try {
+    names = (await fs.readdir(dir)).filter((f) => f.endsWith(".md")).slice(0, MAX_SKILLS);
+  } catch {
+    return [];
+  }
+  const out: Skill[] = [];
+  for (const file of names) {
+    const raw = await readWithTimeout(join(dir, file));
+    const skill = raw ? parseSkillFile(raw) : null;
+    if (skill) out.push(skill);
+  }
+  return out;
+}
+
 export interface UpsertSkillInput {
   name: string;
   description: string;
