@@ -153,6 +153,67 @@ export async function buildBrainMemoryBundle(options: BrainMemoryBundleOptions =
   return bundle.length > bundleMaxChars ? `${bundle.slice(0, bundleMaxChars)}\n...` : bundle;
 }
 
+async function listDirWithTimeout(
+  path: string,
+  opts: { dirsOnly?: boolean; timeoutMs?: number } = {},
+): Promise<string[]> {
+  const timeoutMs = opts.timeoutMs ?? BRAIN_READ_TIMEOUT_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); });
+  const read = fs.readdir(path, { withFileTypes: true })
+    .then((ents) => ents
+      .filter((e) => (opts.dirsOnly ? e.isDirectory() : e.isFile()))
+      .map((e) => e.name)
+      .filter((n) => !n.startsWith(".")))
+    .catch(() => null);
+  try {
+    return (await Promise.race([read, timeout])) ?? [];
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * A lightweight, always-on INDEX of the brain — the list of active projects and
+ * their most-recent docs (filenames only, no content). Front-loaded into every
+ * agent run so the model KNOWS the operator's projects/decisions exist and will
+ * reach for `brain_search` to read them — instead of answering blind. This is
+ * the cheap counterpart to `buildBrainMemoryBundle` (which loads full content
+ * only for the canonical project). Bounded + time-limited (Drive-stall safe).
+ */
+export async function buildBrainIndexBlock(options: {
+  brainRootDir?: string;
+  maxProjects?: number;
+  maxDocsPerProject?: number;
+} = {}): Promise<string> {
+  const brainRootDir = getBrainRootDir(options.brainRootDir);
+  if (!brainRootDir) return "";
+  const maxProjects = options.maxProjects ?? 12;
+  const maxDocs = options.maxDocsPerProject ?? 6;
+  const projectsRoot = join(brainRootDir, "projects");
+  const projects = (await listDirWithTimeout(projectsRoot, { dirsOnly: true })).sort().slice(0, maxProjects);
+  if (projects.length === 0) return "";
+
+  const lines: string[] = [];
+  for (const proj of projects) {
+    // date-prefixed filenames sort newest-last; show the most recent N.
+    const docs = (await listDirWithTimeout(join(projectsRoot, proj)))
+      .filter((n) => n.endsWith(".md") || n.endsWith(".html"))
+      .sort()
+      .slice(-maxDocs)
+      .reverse();
+    if (docs.length === 0) continue;
+    lines.push(`  ${proj}/: ${docs.join(", ")}`);
+  }
+  if (lines.length === 0) return "";
+
+  return `\n\n--- Brain Index (durable memory — the operator's projects & decisions live here) ---\n`
+    + `Active projects under ${shortenHome(projectsRoot)} and their recent docs:\n`
+    + `${lines.join("\n")}\n`
+    + `ALWAYS consult relevant brain docs (via brain_search / GET /brain/search?q=...) before answering `
+    + `questions about projects, decisions, or prior work — do not answer from assumption when the brain may hold the answer.`;
+}
+
 function hiveBrainScaffold(brainRootDir?: string): Array<{ path: string; content: string }> {
   const root = scaffoldRootDisplay(brainRootDir);
   return [

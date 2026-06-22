@@ -16,7 +16,7 @@ import { availableBeeTools, capabilityRoutingGuide } from "./bee-tools";
 import { listSkills } from "@/lib/skills/store";
 import { formatSkillIndex, skillRunsOn } from "@/lib/skills/contracts";
 import { getAgentProfile } from "@/lib/config/agent-profiles";
-import { buildBrainMemoryBundle } from "@/lib/brain/memory-bundle";
+import { buildBrainMemoryBundle, buildBrainIndexBlock } from "@/lib/brain/memory-bundle";
 import { brainDocPolicyText } from "@/lib/brain/settings";
 import { resolveThinkingMode } from "@/lib/config/budget-policy";
 
@@ -96,6 +96,9 @@ async function buildSystemPrompt(projectPath: string, agentType: string, thinkin
     role: agentType,
     bee: projectName.toLowerCase() === "hive" ? "managerbee" : undefined,
   });
+  // Always front-load the brain INDEX (projects + recent docs), so the model
+  // knows the operator's brain exists and reaches for brain_search.
+  const brainIndex = await buildBrainIndexBlock();
 
   // Add project directory context for profiles with tools
   if (profile.tools.length > 0) {
@@ -104,6 +107,9 @@ async function buildSystemPrompt(projectPath: string, agentType: string, thinkin
 
   if (memoryBundle) {
     prompt += memoryBundle;
+  }
+  if (brainIndex) {
+    prompt += brainIndex;
   }
 
   // Inject the repo's AGENTS.md (the converged conventions standard) so the local

@@ -195,7 +195,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "brain_search",
       description:
-        "Brain: search durable memory (the brain docs / knowledge base stored under the brain root) for documents relevant to a query. Use this to recall things written down earlier — past decisions, analyses, playbooks, runbooks, references — instead of assuming they aren't available. Returns the top matching docs with a relevance score and a snippet; read the full file (read_file) for detail.",
+        "Brain: search durable memory (the brain docs / knowledge base stored under the brain root) for documents relevant to a query. ALWAYS use this before answering questions about projects, decisions, or prior work — the operator's context lives here, not just in the conversation. Recall things written down earlier (past decisions, analyses, playbooks, runbooks, references) instead of assuming they aren't available. Returns the top matching docs with a relevance score and a snippet; read the full file (read_file) for detail.",
       parameters: {
         type: "object",
         properties: {

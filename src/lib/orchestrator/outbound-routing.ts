@@ -166,7 +166,7 @@ export function beeToolsRoutingPrompt(port = daemonPort()): string {
 export function brainSearchRoutingPrompt(port = daemonPort()): string {
   return [
     "--- Durable Memory / Brain Search (HiveMatrix) ---",
-    "Before assuming something isn't written down, search the brain (durable memory: past decisions, analyses, playbooks, runbooks, references). Use your Bash tool:",
+    "ALWAYS search the brain before answering questions about projects, decisions, or prior work — the operator's context lives in durable memory (past decisions, analyses, playbooks, runbooks, references), not just in this conversation. Don't answer from assumption when the brain may hold the answer. Use your Bash tool:",
     `  curl -s "http://127.0.0.1:${port}/brain/search?q=YOUR+QUERY" \\`,
     `    -H "Authorization: Bearer $(cat ~/.hivematrix/auth-token)"`,
     'It returns JSON with a "hits" array (each {path, score, snippet}); the path is relative to the brain root. Read the full doc if a hit looks relevant.',

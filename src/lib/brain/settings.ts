@@ -60,6 +60,7 @@ export function brainDocPolicyText(brainRootDir?: string | null): string {
   const root = shortenHome(preferredBrainRootDir(brainRootDir));
   return [
     `- A "brain doc" is a durable memory markdown document stored under \`${root}\`.`,
+    `- Consult existing brain docs (via brain_search) before answering questions about projects, decisions, or prior work — the operator's context lives there.`,
     `- When creating or updating durable memory, write it under \`${root}\` and create subdirectories as needed to keep docs organized.`,
     `- In prompts, "brain doc" usually refers to a file somewhere under \`${root}\`.`,
   ].join("\n");

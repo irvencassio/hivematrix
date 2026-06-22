@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { buildBrainMemoryBundle, ensureHiveBrainScaffold, hiveProjectBrainDir } from "./memory-bundle";
+import { buildBrainMemoryBundle, buildBrainIndexBlock, ensureHiveBrainScaffold, hiveProjectBrainDir } from "./memory-bundle";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -24,6 +24,31 @@ test("ensureHiveBrainScaffold seeds the canonical Hive brain structure", async (
   assert.ok(!created.some((path) => path.endsWith("/bees/tubebee.md")));
   assert.ok(!created.some((path) => path.endsWith("/bees/voicebee.md")));
   assert.match(agentBrief, new RegExp(escapeRegExp(brainRoot)));
+});
+
+test("buildBrainIndexBlock lists projects + recent docs and directs the agent to search", async () => {
+  const brainRoot = mkdtempSync(join(tmpdir(), "hive-brain-"));
+  const projHive = join(brainRoot, "projects", "hive");
+  const projCanopy = join(brainRoot, "projects", "canopy");
+  mkdirSync(projHive, { recursive: true });
+  mkdirSync(projCanopy, { recursive: true });
+  writeFileSync(join(projHive, "2026-06-16-restart.md"), "# Restart");
+  writeFileSync(join(projHive, "2026-06-20-rapidmlx.html"), "<h1>RapidMLX</h1>");
+  writeFileSync(join(projCanopy, "2026-06-01-plan.md"), "# Plan");
+
+  const block = await buildBrainIndexBlock({ brainRootDir: brainRoot });
+  assert.match(block, /Brain Index/);
+  assert.match(block, /hive\/:/);
+  assert.match(block, /canopy\/:/);
+  assert.match(block, /2026-06-20-rapidmlx\.html/);
+  // newest-first within a project
+  assert.ok(block.indexOf("2026-06-20-rapidmlx.html") < block.indexOf("2026-06-16-restart.md"));
+  assert.match(block, /ALWAYS consult/);
+});
+
+test("buildBrainIndexBlock returns empty when there are no projects", async () => {
+  const brainRoot = mkdtempSync(join(tmpdir(), "hive-brain-"));
+  assert.equal(await buildBrainIndexBlock({ brainRootDir: brainRoot }), "");
 });
 
 test("buildBrainMemoryBundle assembles canonical docs and matching recap excerpts", async () => {

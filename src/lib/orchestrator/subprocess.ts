@@ -512,6 +512,19 @@ export async function spawnAgent(
   args.push("--append-system-prompt", brainRouting);
   overheadBytes.agentGuide += Buffer.byteLength(brainRouting);
 
+  // Always front-load the brain INDEX (projects + recent docs) so EVERY task —
+  // not just missions — knows the operator's brain exists and consults it. This
+  // is the cheap, list-only counterpart to the full memory bundle below (which
+  // stays mission-gated). Bounded + Drive-stall safe.
+  try {
+    const { buildBrainIndexBlock } = await import("@/lib/brain/memory-bundle");
+    const brainIndex = await buildBrainIndexBlock();
+    if (brainIndex) {
+      args.push("--append-system-prompt", brainIndex);
+      overheadBytes.agentGuide += Buffer.byteLength(brainIndex);
+    }
+  } catch { /* non-critical — don't block spawn */ }
+
   // Capability parity: web / browser / desktop / terminal via /bee/<tool>.
   const beeRouting = beeToolsRoutingPrompt();
   args.push("--append-system-prompt", beeRouting);
