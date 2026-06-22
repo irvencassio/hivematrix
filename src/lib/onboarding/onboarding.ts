@@ -20,6 +20,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { findBinary, CLAUDE_BINARY_SEARCH_PATHS, CODEX_BINARY_SEARCH_PATHS } from "@/lib/config/binary-detection";
 import { resolveMemorySettings } from "@/lib/brain/settings";
+import { localEngineCapability } from "@/lib/models/local-engine";
 
 export type StepState = "done" | "incomplete";
 
@@ -81,24 +82,40 @@ export function getOnboardingStatus(opts: {
     remediation: cfg ? undefined : "Create ~/.hivematrix/config.json (the onboarding flow writes it).",
   });
 
-  // local-model (Qwen) — satisfied by a configured local model OR an explicit
-  // cloud-only posture (where the absence of a local model is intentional).
+  // local-model — satisfied by a configured Rapid-MLX localEngine, a legacy
+  // local model (LM Studio/Qwen profile), OR an explicit cloud-only posture
+  // (where the absence of a local model is intentional). On a machine that
+  // can't run a local model, cloud-only is the expected, satisfied state.
   const qwen = cfg?.qwen as Record<string, unknown> | undefined;
-  const modelConfigured = !!(qwen && (qwen.primary as Record<string, unknown>)?.modelId) ||
+  const localEngine = cfg?.localEngine as Record<string, unknown> | undefined;
+  const engineTiers = Array.isArray(localEngine?.tiers) ? (localEngine!.tiers as unknown[]) : [];
+  const engineConfigured = engineTiers.length > 0;
+  const legacyConfigured = !!(qwen && (qwen.primary as Record<string, unknown>)?.modelId) ||
     !!(cfg?.localModel as Record<string, unknown>)?.modelName;
-  const cloudOnly = cfg?.runMode === "cloud-only";
+  const modelConfigured = engineConfigured || legacyConfigured;
+  const cap = localEngineCapability();
+  // cloud-only by explicit posture, OR because the hardware can't run local.
+  const cloudOnly = cfg?.runMode === "cloud-only" || !cap.localCapable;
   const localOk = modelConfigured || cloudOnly;
+  const engineModel = engineConfigured
+    ? (engineTiers.map((t) => (t as Record<string, unknown>)?.alias).filter(Boolean).join(" + ") || "rapid-mlx")
+    : null;
   steps.push({
     id: "local-model",
-    title: "Local model (Qwen)",
+    title: "Local model (Rapid-MLX)",
     required: true,
     state: localOk ? "done" : "incomplete",
-    detail: modelConfigured
-      ? `model: ${(qwen?.primary as Record<string, unknown>)?.modelId ?? (cfg?.localModel as Record<string, unknown>)?.modelName}`
-      : cloudOnly
-        ? "cloud-only mode — no local model required"
-        : "no local model configured",
-    remediation: localOk ? undefined : "Pick a local model endpoint (or choose cloud-only) in the setup wizard's Local model step.",
+    detail: engineModel
+      ? `Rapid-MLX tiers: ${engineModel}`
+      : legacyConfigured
+        ? `model: ${(qwen?.primary as Record<string, unknown>)?.modelId ?? (cfg?.localModel as Record<string, unknown>)?.modelName}`
+        : !cap.localCapable
+          ? `cloud-only — ${cap.reason ?? "this Mac can't run a local model"}`
+          : cloudOnly
+            ? "cloud-only mode — no local model required"
+            : "no local model configured",
+    remediation: localOk ? undefined
+      : `Run the provisioner to size + install the local engine for this Mac (recommended: ${cap.recommendedTiers.join(" + ") || "cloud-only"}): npx tsx scripts/provision-local-engine.mts --apply`,
   });
 
   // daemon (launchd)

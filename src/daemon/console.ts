@@ -2427,17 +2427,30 @@ const modelById = {};         // UiModel.id → {modelId, fast}
 
 // Live status of the local inference engine (Rapid-MLX) + each tier, so you can
 // see at a glance that local is up and serving everything.
-function renderLocalEngine(le) {
+function renderLocalEngine(le, cap) {
   if (!le) return "";
   const name = le.engine === "rapid-mlx" ? "Rapid-MLX" : le.engine === "ollama" ? "Ollama" : "LM Studio";
-  const tiers = (le.tiers || []).map(t =>
-    (t.healthy ? '<span style="color:var(--ok)">●</span>' : '<span style="color:var(--muted)">○</span>')
-    + ' ' + esc(t.key) + ' — ' + esc(t.alias) + ' :' + t.port
-    + ' · reasoning ' + (t.reasoning ? 'on' : 'off') + (t.healthy ? '' : ' · not running')
-  ).join(' &nbsp;&nbsp; ');
+  const capByKey = {};
+  if (cap && cap.tiers) for (const t of cap.tiers) capByKey[t.key] = t;
+  const tiers = (le.tiers || []).map(t => {
+    const c = capByKey[t.key];
+    const grey = c && !c.residentCapable; // hardware can't keep this tier resident
+    const body = (t.healthy ? '<span style="color:var(--ok)">●</span>' : '<span style="color:var(--muted)">○</span>')
+      + ' ' + esc(t.key) + ' — ' + esc(t.alias) + ' :' + t.port
+      + ' · reasoning ' + (t.reasoning ? 'on' : 'off') + (t.healthy ? '' : ' · not running')
+      + (grey && c.reason ? ' · <span style="color:#c8922b">' + esc(c.reason) + '</span>' : '');
+    return grey ? '<span style="opacity:.5" title="' + esc(c.reason || '') + '">' + body + '</span>' : body;
+  }).join(' &nbsp;&nbsp; ');
+  let foot = '';
+  if (cap && !cap.localCapable) {
+    foot = '<div class="muted" style="font-size:11px;color:#c8922b;margin:2px 0 6px 2px">' + esc(cap.reason || 'Local models unavailable on this Mac — running cloud-only.') + '</div>';
+  } else if (cap && cap.recommendedTiers && cap.recommendedTiers.length) {
+    foot = '<div class="muted" style="font-size:11px;margin:2px 0 6px 2px">Recommended for this Mac (' + Math.round(cap.ramGB || 0) + ' GB): <b>' + esc(cap.recommendedTiers.join(' + ')) + '</b> resident.</div>';
+  }
   return '<div class="backend"><span class="nm">Local engine — ' + name + '</span>'
     + '<span class="st ' + (le.up ? 'ok' : 'no') + '">' + (le.up ? '✓ running' : 'not running') + '</span></div>'
-    + (tiers ? '<div class="muted" style="font-size:11px;margin:2px 0 6px 2px">' + tiers + '</div>' : '');
+    + (tiers ? '<div class="muted" style="font-size:11px;margin:2px 0 6px 2px">' + tiers + '</div>' : '')
+    + foot;
 }
 
 function applyTheme(theme, hasWallpaper) {
@@ -2763,7 +2776,7 @@ function openSettings() {
     '<div class="backend"><span class="nm">'+esc(b.name)+'</span>'
     + '<span class="st '+(b.configured?'ok':'no')+'">'+(b.configured?'✓ '+esc(b.detail):'not set up')+'</span>'
     + (b.configured?'':'<span class="muted" style="flex:1"> — '+esc(b.connect||'')+'</span>')+'</div>').join("")
-    + renderLocalEngine(models.localEngine);
+    + renderLocalEngine(models.localEngine, models.localEngineCapability);
   const local = models.backends.find(b => b.id === "local");
   document.getElementById("s_endpoint").value = (local && local.endpoint) || "http://localhost:1234/v1";
   const v = models.version || {};

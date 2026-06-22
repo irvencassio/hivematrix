@@ -14,7 +14,7 @@
 import { spawn, type ChildProcess } from "child_process";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { homedir, arch as osArch, totalmem } from "os";
 
 export type LocalEngineKind = "rapid-mlx" | "lmstudio" | "ollama";
 export type TierKey = "fast" | "coding";
@@ -189,6 +189,87 @@ export interface LocalEngineStatus {
   /** True when at least the primary (fast) tier is reachable — i.e. local is usable. */
   up: boolean;
   tiers: TierStatus[];
+}
+
+// --- Hardware-aware tier capability ---------------------------------------
+// Which local tiers THIS Mac can run, and which can stay resident together.
+// Mirrors config/features.ts `featureCapability` (arm64 + RAM gate) but extended
+// for the two resident tiers, so the installer/UI can size the engine to the
+// machine and grey out what won't fit. Pure (env injectable) for tests.
+
+export interface HardwareProbe { arch: string; ramGB: number }
+
+export function probeHardware(): HardwareProbe {
+  return { arch: osArch(), ramGB: totalmem() / 1e9 };
+}
+
+/** Resident 4-bit footprint per tier (weights + KV/overhead), GB. From the
+ * locked local-model architecture doc (M5 Max measurements): 35B-A3B ~20, 27B
+ * dense ~15. */
+export const TIER_FOOTPRINT_GB: Record<TierKey, number> = { fast: 20, coding: 15 };
+/** RAM that must stay free for macOS + the daemon + the voice sidecar. */
+const HEADROOM_GB = 14;
+
+export interface TierCapability {
+  key: TierKey;
+  /** Can this Mac run the tier at all (even as the only / on-demand model)? */
+  capable: boolean;
+  /** Can it stay resident alongside the other recommended tier(s)? */
+  residentCapable: boolean;
+  reason?: string;
+}
+
+export interface LocalEngineCapability {
+  arch: string;
+  ramGB: number;
+  /** arm64 + enough RAM for at least one tier. False → run cloud-only. */
+  localCapable: boolean;
+  tiers: TierCapability[];
+  /** Tier keys recommended to serve resident by default on this hardware. */
+  recommendedTiers: TierKey[];
+  /** Set when localCapable is false (why local is unavailable). */
+  reason?: string;
+}
+
+const ALL_TIER_KEYS: TierKey[] = ["fast", "coding"];
+
+/** Compute which tiers this Mac can run + the recommended resident profile. */
+export function localEngineCapability(env: Partial<HardwareProbe> = {}): LocalEngineCapability {
+  const arch = env.arch ?? osArch();
+  const ramGB = env.ramGB ?? totalmem() / 1e9;
+  const gb = Math.round(ramGB);
+  const isArm = arch === "arm64";
+
+  const tiers: TierCapability[] = ALL_TIER_KEYS.map((key) => {
+    if (!isArm) return { key, capable: false, residentCapable: false, reason: "Requires an Apple Silicon Mac" };
+    const need = TIER_FOOTPRINT_GB[key] + HEADROOM_GB;
+    if (ramGB < need) return { key, capable: false, residentCapable: false, reason: `Needs ~${need} GB RAM (this Mac has ${gb} GB)` };
+    return { key, capable: true, residentCapable: false }; // residentCapable resolved below
+  });
+
+  const capableKeys = tiers.filter((t) => t.capable).map((t) => t.key);
+  const bothFootprint = TIER_FOOTPRINT_GB.fast + TIER_FOOTPRINT_GB.coding + HEADROOM_GB; // 49 GB
+  const bothResident = isArm && capableKeys.length === 2 && ramGB >= bothFootprint;
+
+  let recommendedTiers: TierKey[];
+  if (bothResident) recommendedTiers = ["fast", "coding"];
+  else if (capableKeys.includes("fast")) recommendedTiers = ["fast"]; // fast is the daily/voice driver
+  else if (capableKeys.includes("coding")) recommendedTiers = ["coding"];
+  else recommendedTiers = [];
+
+  for (const t of tiers) {
+    t.residentCapable = recommendedTiers.includes(t.key);
+    if (t.capable && !t.residentCapable && !t.reason) {
+      t.reason = `Available on-demand — needs ~${bothFootprint} GB RAM to stay resident with the ${recommendedTiers.join("+")} tier (this Mac has ${gb} GB)`;
+    }
+  }
+
+  const localCapable = recommendedTiers.length > 0;
+  const reason = localCapable ? undefined
+    : isArm ? `Needs ~${TIER_FOOTPRINT_GB.coding + HEADROOM_GB} GB RAM for a local model (this Mac has ${gb} GB) — running cloud-only`
+            : "Requires an Apple Silicon Mac — running cloud-only";
+
+  return { arch, ramGB, localCapable, tiers, recommendedTiers, reason };
 }
 
 /** Live health of the local engine + each tier (probes each tier's port). Used

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   getLocalEngineConfig, buildServeArgs, localTargetForRole, tierBaseUrl, tierForAlias, DEFAULT_TIERS,
+  localEngineCapability,
 } from "./local-engine";
 
 test("defaults: rapid-mlx engine, fast + coding tiers, reasoning OFF", () => {
@@ -55,4 +56,44 @@ test("tierForAlias maps a model id to its tier (for endpoint routing)", () => {
   assert.equal(tierForAlias("qwen3.6-35b-4bit", c)!.port, 8000);
   assert.equal(tierForAlias("qwen3.6-27b-4bit", c)!.port, 8001);
   assert.equal(tierForAlias("claude-opus-4-8", c), null);
+});
+
+test("capability: non-Apple-Silicon → cloud-only, no tiers", () => {
+  const cap = localEngineCapability({ arch: "x64", ramGB: 64 });
+  assert.equal(cap.localCapable, false);
+  assert.deepEqual(cap.recommendedTiers, []);
+  assert.ok(cap.tiers.every((t) => !t.capable && /Apple Silicon/.test(t.reason ?? "")));
+  assert.match(cap.reason ?? "", /Apple Silicon/);
+});
+
+test("capability: 16 GB → cloud-only (neither tier fits with headroom)", () => {
+  const cap = localEngineCapability({ arch: "arm64", ramGB: 16 });
+  assert.equal(cap.localCapable, false);
+  assert.deepEqual(cap.recommendedTiers, []);
+  assert.match(cap.reason ?? "", /local model/);
+});
+
+test("capability: 32 GB → coding tier only resident (35B needs ~34 GB)", () => {
+  const cap = localEngineCapability({ arch: "arm64", ramGB: 32 });
+  assert.equal(cap.localCapable, true);
+  assert.deepEqual(cap.recommendedTiers, ["coding"]);
+  assert.equal(cap.tiers.find((t) => t.key === "fast")!.capable, false);
+  assert.equal(cap.tiers.find((t) => t.key === "coding")!.residentCapable, true);
+});
+
+test("capability: 48 GB → one tier resident (fast), coding available on-demand only", () => {
+  const cap = localEngineCapability({ arch: "arm64", ramGB: 48 });
+  assert.equal(cap.localCapable, true);
+  assert.deepEqual(cap.recommendedTiers, ["fast"]);
+  const coding = cap.tiers.find((t) => t.key === "coding")!;
+  assert.equal(coding.capable, true);          // runnable on demand
+  assert.equal(coding.residentCapable, false); // but not resident alongside fast
+  assert.match(coding.reason ?? "", /on-demand/);
+});
+
+test("capability: 64 GB → both tiers resident", () => {
+  const cap = localEngineCapability({ arch: "arm64", ramGB: 64 });
+  assert.equal(cap.localCapable, true);
+  assert.deepEqual(cap.recommendedTiers, ["fast", "coding"]);
+  assert.ok(cap.tiers.every((t) => t.capable && t.residentCapable));
 });
