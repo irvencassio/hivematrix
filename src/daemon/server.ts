@@ -1581,6 +1581,14 @@ export function createDaemonServer() {
         json(res, 200, { candidates: stalePruneCandidates(await readAllSkills()) });
         return;
       }
+      // GET /skills/search?q= — ranked skill picker (fuzzy over name/desc/tags).
+      if (req.method === "GET" && urlPath === "/skills/search") {
+        const { listSkills } = await import("@/lib/skills/store");
+        const { rankSkills } = await import("@/lib/skills/search");
+        const q = parseQueryString(req.url ?? "");
+        json(res, 200, { skills: rankSkills(await listSkills(), (q.q ?? "").trim()) });
+        return;
+      }
       // GET /skills/sources — configured tiered scopes + the operator's signer id.
       if (req.method === "GET" && urlPath === "/skills/sources") {
         const { getSkillSources } = await import("@/lib/skills/sync");

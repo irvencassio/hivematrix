@@ -712,6 +712,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="form" id="taskForm">
       <input id="t_title" placeholder="Title (optional — derived from instructions)" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
+      <div class="row" style="gap:6px;margin-top:2px">
+        <button type="button" class="addbtn" onclick="toggleTaskSkillPicker()" title="Pick an installed skill or command to use — no need to remember names">＋ Use a skill</button>
+      </div>
+      <div id="t_skill_picker" style="display:none">
+        <input id="t_skill_q" placeholder="Search your skills & commands…" oninput="searchTaskSkills()" style="width:100%;margin-top:4px" />
+        <div id="t_skill_results" style="max-height:170px;overflow:auto;margin-top:4px"></div>
+      </div>
       <label class="flbl">Project</label>
       <div id="t_project_wrapper" class="project-search">
         <input id="t_project_search" type="text" placeholder="Search projects…" oninput="filterProjectDropdown()" onfocus="openProjectDropdown()" />
@@ -1741,6 +1748,46 @@ async function syncSkills() {
     if (el) el.textContent = msg + ((s.errors && s.errors.length) ? ' · ' + s.errors.length + ' error(s)' : '');
     renderSkills();
   } catch (e) { if (el) el.textContent = 'sync failed'; }
+}
+function toggleTaskSkillPicker() {
+  const box = document.getElementById('t_skill_picker');
+  if (!box) return;
+  const show = box.style.display === 'none';
+  box.style.display = show ? '' : 'none';
+  if (show) {
+    const q = document.getElementById('t_skill_q');
+    if (q) { q.value = ''; q.focus(); }
+    searchTaskSkills();
+  }
+}
+async function searchTaskSkills() {
+  const q = (document.getElementById('t_skill_q') || {}).value || '';
+  const box = document.getElementById('t_skill_results');
+  if (!box) return;
+  try {
+    const r = await api('/skills/search?q=' + encodeURIComponent(q));
+    const list = r.skills || [];
+    if (!list.length) { box.innerHTML = '<div class="muted" style="font-size:11px">No matching skills. Import or create one in the Skills panel.</div>'; return; }
+    box.innerHTML = list.slice(0, 40).map(skillPickRow).join('');
+  } catch (e) { box.innerHTML = '<div class="muted" style="font-size:11px">search failed</div>'; }
+}
+function skillPickRow(s) {
+  const badges = (s.kind === 'script' ? '<span class="muted">[cmd]</span> ' : '')
+    + (s.scope ? '<span class="muted">[' + esc(s.scope) + (s.signed ? ' ✓' : '') + ']</span> ' : '')
+    + (s.trusted === false ? '<span style="color:var(--warn)" title="untrusted — approve in Skills panel">⚠</span> ' : '')
+    + (s.useCount > 0 ? '<span class="muted">' + s.useCount + '×</span>' : '');
+  const nm = esc(s.name).replace(/'/g, '&#39;');
+  return '<div style="padding:4px 6px;border-radius:6px;cursor:pointer" onmouseover="this.style.background=\'var(--panel-2)\'" onmouseout="this.style.background=\'\'" onclick="pickTaskSkill(\'' + nm + '\')">'
+    + '<b>' + esc(s.name) + '</b> ' + badges
+    + '<div class="muted" style="font-size:11px">' + esc(s.description || '') + '</div></div>';
+}
+function pickTaskSkill(name) {
+  const ta = document.getElementById('t_desc');
+  if (ta) {
+    const ref = 'Use the "' + name + '" skill.';
+    ta.value = ta.value.trim() ? (ta.value.trim() + '\n\n' + ref) : ref;
+  }
+  toggleTaskSkillPicker();
 }
 async function publishSkillUI() {
   const name = selectedSkill(); if (!name) return;
