@@ -14,6 +14,9 @@
  * Usage:
  *   node heygen.mjs --list-avatars                 # discover avatar_id values
  *   node heygen.mjs --list-voices [--match Irv]    # discover voice_id values
+ *   node heygen.mjs --list-agent-styles [--tag news]
+ *   node heygen.mjs --agent --script script.txt [--style <id>] [--orientation landscape] out.mp4
+ *   node heygen.mjs --agent-prompt "Create a portal-style market update" --agent out.mp4
  *   node heygen.mjs --script script.txt --avatar <id> --voice <id> [out.mp4]
  *   node heygen.mjs --text "Hello world" --avatar <id> --voice <id> out.mp4
  *   node heygen.mjs --audio narration.wav --avatar <id> out.mp4   # cloned voice
@@ -67,6 +70,133 @@ export async function listAvatars(key) {
 export async function listVoices(key) {
   const j = await hg("/v2/voices", { key });
   return j?.data?.voices ?? [];
+}
+
+function nonBlank(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+export function buildVideoAgentPrompt({ agentPrompt, prompt, scriptText, creativeBrief } = {}) {
+  const explicit = nonBlank(agentPrompt) || nonBlank(prompt);
+  if (explicit) return explicit;
+
+  const brief = nonBlank(creativeBrief);
+  const script = nonBlank(scriptText);
+  if (!brief && !script) throw new Error("Video Agent prompt requires --agent-prompt, --text, --script, or --creative-brief");
+
+  const parts = [
+    "Create a polished presenter video in HeyGen's native creative style.",
+    "Use confident pacing, clean visuals, animated text cards, varied scene layouts, smooth transitions, and a portal-quality edit.",
+    "Add short section cards for key ideas and end with a crisp closing CTA when appropriate.",
+  ];
+  if (brief) parts.push(`Creative brief:\n${brief}`);
+  if (script) parts.push(`Script:\n${script}`);
+  return parts.join("\n\n");
+}
+
+export function buildVideoAgentPayload(options = {}) {
+  const payload = {
+    prompt: buildVideoAgentPrompt(options),
+  };
+
+  const avatarId = nonBlank(options.avatarId || options.avatar_id);
+  const voiceId = nonBlank(options.voiceId || options.voice_id);
+  const styleId = nonBlank(options.styleId || options.style_id || options.style);
+  const orientation = nonBlank(options.orientation);
+  const callbackUrl = nonBlank(options.callbackUrl || options.callback_url);
+  const callbackId = nonBlank(options.callbackId || options.callback_id);
+  const files = Array.isArray(options.files)
+    ? options.files.filter((file) => typeof file === "string" ? file.trim() : file)
+    : undefined;
+
+  if (avatarId) payload.avatar_id = avatarId;
+  if (voiceId) payload.voice_id = voiceId;
+  if (styleId) payload.style_id = styleId;
+  if (orientation) payload.orientation = orientation;
+  if (files?.length) payload.files = files;
+  if (callbackUrl) payload.callback_url = callbackUrl;
+  if (callbackId) payload.callback_id = callbackId;
+  return payload;
+}
+
+export function buildVideoAgentStylesPath({ tag, limit, token } = {}) {
+  const params = new URLSearchParams();
+  const cleanTag = nonBlank(tag);
+  const cleanToken = nonBlank(token);
+  if (cleanTag) params.set("tag", cleanTag);
+  if (limit !== undefined && limit !== null && `${limit}`.trim()) params.set("limit", `${limit}`.trim());
+  if (cleanToken) params.set("token", cleanToken);
+  const query = params.toString();
+  return `/v3/video-agents/styles${query ? `?${query}` : ""}`;
+}
+
+export function extractVideoAgentSession(response) {
+  const data = response?.data ?? response ?? {};
+  const sessionId = data.session_id || data.sessionId;
+  if (!sessionId) throw new Error(`No session_id in response: ${JSON.stringify(response)}`);
+  return {
+    sessionId,
+    status: data.status,
+    videoId: data.video_id || data.videoId,
+  };
+}
+
+export function extractCompletedVideoUrl(response) {
+  const data = response?.data ?? response ?? {};
+  if (data.status === "failed") {
+    const error = data.failure_message || data.error?.message || data.error || data.message || data;
+    throw new Error(`HeyGen Video Agent render failed: ${typeof error === "string" ? error : JSON.stringify(error)}`);
+  }
+  if (data.status === "completed" && data.video_url) return data.video_url;
+  return null;
+}
+
+export async function listVideoAgentStyles({ tag, limit, token, key } = {}) {
+  const j = await hg(buildVideoAgentStylesPath({ tag, limit, token }), { key });
+  return j?.data?.styles ?? j?.data ?? [];
+}
+
+export async function createVideoAgentSession(options = {}) {
+  const j = await hg("/v3/video-agents", {
+    method: "POST",
+    key: options.key,
+    body: buildVideoAgentPayload(options),
+  });
+  return extractVideoAgentSession(j);
+}
+
+export async function waitForVideoAgent(sessionId, { pollSeconds = 600, key } = {}) {
+  const deadline = Date.now() + pollSeconds * 1000;
+  let lastAgentStatus = "";
+  let lastVideoStatus = "";
+  let videoId;
+
+  while (Date.now() < deadline) {
+    if (!videoId) {
+      const j = await hg(`/v3/video-agents/${encodeURIComponent(sessionId)}`, { key });
+      const data = j?.data ?? {};
+      if (data.status && data.status !== lastAgentStatus) {
+        lastAgentStatus = data.status;
+        process.stderr.write(`  [heygen-agent] session: ${data.status}\n`);
+      }
+      if (data.status === "failed") throw new Error(`HeyGen Video Agent session failed: ${JSON.stringify(data.error || data)}`);
+      videoId = data.video_id || data.videoId;
+    }
+
+    if (videoId) {
+      const j = await hg(`/v3/videos/${encodeURIComponent(videoId)}`, { key });
+      const data = j?.data ?? {};
+      if (data.status && data.status !== lastVideoStatus) {
+        lastVideoStatus = data.status;
+        process.stderr.write(`  [heygen-agent] video: ${data.status}\n`);
+      }
+      const url = extractCompletedVideoUrl(j);
+      if (url) return url;
+    }
+
+    await sleep(5000);
+  }
+  throw new Error(`HeyGen Video Agent timed out after ${pollSeconds}s (session_id ${sessionId}${videoId ? `, video_id ${videoId}` : ""})`);
 }
 
 /** Upload a local audio file as a HeyGen asset → asset_id (for the cloned-voice path). */
@@ -152,6 +282,16 @@ export async function makeAvatarVideo({ scriptText, audioPath, avatarId, voiceId
   return download(url, outPath);
 }
 
+/** Full one-shot: prompt/script -> Video Agent render -> MP4 on disk. */
+export async function makeVideoAgentVideo(options = {}) {
+  process.stderr.write("  [heygen-agent] creating video agent session...\n");
+  const session = await createVideoAgentSession(options);
+  const url = await waitForVideoAgent(session.sessionId, { pollSeconds: options.pollSeconds, key: options.key });
+  const outPath = options.outPath || "heygen-agent-out.mp4";
+  process.stderr.write(`  [heygen-agent] downloading -> ${outPath}\n`);
+  return download(url, outPath);
+}
+
 // --- CLI ---
 function flag(name, def) {
   const i = process.argv.indexOf(name);
@@ -178,6 +318,18 @@ async function main() {
     for (const v of filtered.slice(0, 60)) console.log(`  ${v.voice_id}\t${v.name || v.display_name || ""}\t${v.language || ""}\t${v.gender || ""}`);
     return;
   }
+  if (has("--list-agent-styles")) {
+    const styles = await listVideoAgentStyles({
+      tag: flag("--tag"),
+      limit: flag("--limit") ? parseInt(flag("--limit"), 10) : undefined,
+      token: flag("--token"),
+    });
+    const rows = Array.isArray(styles) ? styles : styles?.styles ?? [];
+    console.log(`VIDEO AGENT STYLES (${rows.length}):`);
+    for (const s of rows) console.log(`  ${s.style_id || s.id}\t${s.name || s.title || ""}\t${Array.isArray(s.tags) ? s.tags.join(",") : s.tag || ""}`);
+    if (!Array.isArray(styles) && styles?.token) console.log(`NEXT TOKEN: ${styles.token}`);
+    return;
+  }
 
   const scriptFile = flag("--script");
   const text = flag("--text");
@@ -186,9 +338,31 @@ async function main() {
   const voiceId = flag("--voice");
   const outPath = process.argv.find((a, i) => i >= 2 && a.endsWith(".mp4") && process.argv[i - 1] !== "--avatar") || "heygen-out.mp4";
 
+  const readScriptText = () => {
+    let scriptText = text;
+    if (!scriptText && scriptFile) scriptText = readFileSync(scriptFile, "utf-8").trim();
+    return scriptText;
+  };
+
+  if (has("--agent")) {
+    const scriptText = readScriptText();
+    const out = await makeVideoAgentVideo({
+      agentPrompt: flag("--agent-prompt"),
+      scriptText,
+      creativeBrief: flag("--creative-brief"),
+      avatarId,
+      voiceId,
+      styleId: flag("--style"),
+      orientation: flag("--orientation"),
+      outPath,
+      pollSeconds: parseInt(flag("--poll-seconds", "600"), 10),
+    });
+    console.log(out);
+    return;
+  }
+
   if (!avatarId) { console.error("error: --avatar <avatar_id> is required (run --list-avatars to find it)"); process.exit(1); }
-  let scriptText = text;
-  if (!scriptText && scriptFile) scriptText = readFileSync(scriptFile, "utf-8").trim();
+  const scriptText = readScriptText();
   if (!audioPath && !scriptText) { console.error("error: provide --script <file>, --text \"...\", or --audio <wav>"); process.exit(1); }
 
   const out = await makeAvatarVideo({

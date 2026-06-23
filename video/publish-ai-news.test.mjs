@@ -16,12 +16,30 @@ test("buildPipelineCommands stops after news generation for dry-run", () => {
   assert.deepEqual(commands[0].args.slice(0, 3), ["news-script.mjs", "--script-out", paths.script]);
 });
 
-test("buildPipelineCommands wires news, avatar render, and upload", () => {
+test("buildPipelineCommands defaults to HeyGen Video Agent creative render", () => {
   const paths = defaultOutPaths(new Date("2026-06-22T12:00:00Z"));
-  const commands = buildPipelineCommands({ paths, privacy: "private", kind: "avatar" });
+  const commands = buildPipelineCommands({
+    paths,
+    privacy: "private",
+    style: "style_cinematic",
+    orientation: "landscape",
+    creativeBrief: "Use sharp animated text cards between stories.",
+  });
   assert.equal(commands.length, 3);
   assert.equal(commands[0].args[0], "news-script.mjs");
-  assert.deepEqual(commands[1].args, ["make-avatar.mjs", paths.script, paths.video]);
+  assert.deepEqual(commands[1].args, [
+    "make-avatar.mjs",
+    paths.script,
+    paths.video,
+    "--mode",
+    "agent",
+    "--style",
+    "style_cinematic",
+    "--orientation",
+    "landscape",
+    "--creative-brief",
+    "Use sharp animated text cards between stories.",
+  ]);
   assert.deepEqual(commands[2].args, [
     "publish.mjs",
     paths.video,
@@ -34,6 +52,13 @@ test("buildPipelineCommands wires news, avatar render, and upload", () => {
     "--privacy",
     "private",
     "--kind",
-    "avatar",
+    "agent-avatar",
   ]);
+});
+
+test("buildPipelineCommands can keep the old direct avatar render", () => {
+  const paths = defaultOutPaths(new Date("2026-06-22T12:00:00Z"));
+  const commands = buildPipelineCommands({ paths, renderMode: "direct", privacy: "private", kind: "avatar" });
+  assert.deepEqual(commands[1].args, ["make-avatar.mjs", paths.script, paths.video, "--mode", "direct"]);
+  assert.deepEqual(commands[2].args.slice(-2), ["--kind", "avatar"]);
 });

@@ -31,13 +31,19 @@ export function defaultOutPaths(date = new Date()) {
 export function buildPipelineCommands({
   paths,
   privacy = "unlisted",
-  kind = "avatar",
+  kind,
   dryRun = false,
   skipRender = false,
   skipUpload = false,
   source = "auto",
   writer = "auto",
+  renderMode = "agent",
+  style,
+  orientation = "landscape",
+  creativeBrief,
 } = {}) {
+  const mode = renderMode === "direct" ? "direct" : "agent";
+  const uploadKind = kind ?? (mode === "agent" ? "agent-avatar" : "avatar");
   const commands = [{
     label: "news",
     args: [
@@ -52,7 +58,15 @@ export function buildPipelineCommands({
     ],
   }];
   if (dryRun) return commands;
-  if (!skipRender) commands.push({ label: "render", args: ["make-avatar.mjs", paths.script, paths.video] });
+  if (!skipRender) {
+    const renderArgs = ["make-avatar.mjs", paths.script, paths.video, "--mode", mode];
+    if (mode === "agent") {
+      if (style) renderArgs.push("--style", style);
+      if (orientation) renderArgs.push("--orientation", orientation);
+      if (creativeBrief) renderArgs.push("--creative-brief", creativeBrief);
+    }
+    commands.push({ label: "render", args: renderArgs });
+  }
   if (!skipUpload) {
     commands.push({
       label: "upload",
@@ -63,7 +77,7 @@ export function buildPipelineCommands({
         "--description-file", paths.description,
         "--tags-file", paths.tags,
         "--privacy", privacy,
-        "--kind", kind,
+        "--kind", uploadKind,
       ],
     });
   }
@@ -81,9 +95,13 @@ function parseArgs(argv) {
   return {
     paths,
     privacy: flag("--privacy", "unlisted"),
-    kind: flag("--kind", "avatar"),
+    kind: flag("--kind"),
     source: flag("--source", "auto"),
     writer: flag("--writer", "auto"),
+    renderMode: flag("--render-mode", flag("--mode", "agent")),
+    style: flag("--style"),
+    orientation: flag("--orientation", "landscape"),
+    creativeBrief: flag("--creative-brief"),
     dryRun: has("--dry-run"),
     skipRender: has("--skip-render"),
     skipUpload: has("--skip-upload"),
@@ -117,4 +135,3 @@ async function main() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((err) => { console.error(err.message || err); process.exit(1); });
 }
-

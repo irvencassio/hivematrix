@@ -7,6 +7,7 @@ test("normalizeKind coerces unknown/blank to faceless, keeps known", () => {
   assert.equal(normalizeKind("presenter"), "presenter");
   assert.equal(normalizeKind("SCREEN"), "screen");
   assert.equal(normalizeKind("avatar"), "avatar");
+  assert.equal(normalizeKind("agent-avatar"), "agent-avatar");
   assert.equal(normalizeKind("nonsense"), "faceless");
   assert.equal(normalizeKind(""), "faceless");
   assert.equal(normalizeKind(undefined), "faceless");

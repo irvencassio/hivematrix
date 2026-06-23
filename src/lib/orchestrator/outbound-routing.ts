@@ -90,10 +90,10 @@ export function videoRoutingPrompt(): string {
   const port = daemonPort();
   return [
     "--- Video creation (video factory) ---",
-    "To make a narrated, captioned video (how-to or explainer) in the operator's cloned voice, POST to the local daemon — do NOT try to render video yourself:",
+    "To make a polished, portal-like creative video with HeyGen Video Agent scene composition, animated text cards, transitions, and pacing, POST to the local daemon — do NOT try to render video yourself:",
     `  curl -s -X POST "http://127.0.0.1:${port}/video/make" -H "Content-Type: application/json" \\`,
-    `    --data '{"topic":"WHAT THE VIDEO IS ABOUT","lang":"en","title":"TITLE","seconds":30}'`,
-    'Use "script" instead of "topic" to supply the exact narration. The JSON response includes the output mp4 "path". Rendering takes about a minute.',
+    `    --data '{"topic":"WHAT THE VIDEO IS ABOUT","renderMode":"agent","lang":"en","seconds":45,"orientation":"landscape","creativeBrief":"Add short animated text cards between the main points and use energetic portal-style pacing."}'`,
+    'Use "script" instead of "topic" to supply exact source narration. Omit "renderMode":"agent" only for local cloned-voice how-to renders with screen footage. The JSON response includes the output mp4 "path".',
   ].join("\n");
 }
 

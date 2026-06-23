@@ -11,7 +11,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { YT_DIR, LEDGER } from "./yt-paths.mjs";
 
 /** The presentation styles we compare. "faceless" = narration over bg/screen. */
-export const KNOWN_KINDS = ["faceless", "screen", "presenter", "avatar"];
+export const KNOWN_KINDS = ["faceless", "screen", "presenter", "avatar", "agent-avatar"];
 
 /** Coerce an arbitrary --kind into a known label (default "faceless"). */
 export function normalizeKind(k) {

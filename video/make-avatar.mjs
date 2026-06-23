@@ -7,6 +7,7 @@
  * avatar to our audio — so the voice asset never leaves the Mac.
  *
  *   node make-avatar.mjs <script.txt> [out.mp4] [--avatar <id>] [--lang en]
+ *   node make-avatar.mjs <script.txt> [out.mp4] --mode agent [--style <style_id>]
  *   node make-avatar.mjs --topic "this week in AI" [out.mp4] [--seconds 60]
  *   node make-avatar.mjs --text "Hello, this is the weekly update." [out.mp4]
  *
@@ -20,7 +21,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readFileSync as rf 
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeAvatarVideo } from "./heygen.mjs";
+import { makeAvatarVideo, makeVideoAgentVideo } from "./heygen.mjs";
 
 const VIDEO_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(VIDEO_DIR, "..");
@@ -43,40 +44,79 @@ const hg = heygenConfig();
 const args = process.argv.slice(2);
 const flag = (name, def = null) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : def; };
 const has = (name) => args.includes(name);
+const valueFlags = new Set([
+  "--lang", "--topic", "--text", "--seconds", "--avatar", "--voice", "--speed",
+  "--mode", "--style", "--orientation", "--creative-brief", "--agent-prompt",
+]);
 const lang = flag("--lang", "en");
 const topic = flag("--topic");
 const text = flag("--text");
 const seconds = flag("--seconds", "60");
+const mode = has("--agent") ? "agent" : flag("--mode", "direct");
+const agentMode = mode === "agent";
 const avatarId = flag("--avatar", hg.avatarId || null);
 // Voice: default to the configured HeyGen voice (heygen.voiceId). `--cloned`
 // forces the local VoxCPM clone instead (narration uploaded via --audio).
 const cloned = has("--cloned");
 const voiceId = cloned ? null : flag("--voice", hg.voiceId || null);
 const speed = flag("--speed") ? parseFloat(flag("--speed")) : (typeof hg.voiceSpeed === "number" ? hg.voiceSpeed : undefined);
+const styleId = flag("--style", hg.styleId || null);
+const orientation = flag("--orientation", "landscape");
+const creativeBrief = flag("--creative-brief", hg.creativeBrief || null);
+const agentPrompt = flag("--agent-prompt");
 
 const positionals = [];
-for (let i = 0; i < args.length; i++) { if (args[i].startsWith("--")) { i++; continue; } positionals.push(args[i]); }
+for (let i = 0; i < args.length; i++) {
+  if (args[i].startsWith("--")) {
+    if (valueFlags.has(args[i])) i++;
+    continue;
+  }
+  positionals.push(args[i]);
+}
 const scriptPath = topic || text ? null : positionals[0];
 const outMp4 = positionals.find((p) => p.endsWith(".mp4")) || join(OUT, "avatar.mp4");
 
-if (!avatarId) {
+if (!agentMode && !avatarId) {
   console.error("error: no avatar id. Pass --avatar <id> or set heygen.avatarId in ~/.hivematrix/config.json (run `node heygen.mjs --list-avatars`).");
   process.exit(2);
 }
-if (!topic && !text && !scriptPath) {
+if (!topic && !text && !scriptPath && !(agentMode && (agentPrompt || creativeBrief))) {
   console.error("usage: node make-avatar.mjs <script.txt> [out.mp4] [--avatar id] [--lang en]\n" +
     "   or: node make-avatar.mjs --topic \"...\" [out.mp4] [--seconds 60]\n" +
+    "   or: node make-avatar.mjs <script.txt> [out.mp4] --mode agent [--style style_id]\n" +
     "   or: node make-avatar.mjs --text \"...\" [out.mp4]");
   process.exit(2);
 }
 
 mkdirSync(OUT, { recursive: true });
-const sc = sidecarDir();
-const py = join(sc, ".venv", "bin", "python");
 const scriptTxt = join(OUT, "avatar-script.txt");
 
 // 1. Resolve the script.
 let scriptText = text;
+if (agentMode) {
+  if (!scriptText && scriptPath) scriptText = readFileSync(scriptPath, "utf-8").trim();
+  if (scriptText) writeFileSync(scriptTxt, scriptText);
+  const agentCreativeBrief = [creativeBrief, topic ? `Topic: ${topic}` : null].filter(Boolean).join("\n\n") || null;
+  console.log(`  ${scriptText ? `script: ${scriptText.slice(0, 90)}…` : `topic: ${topic || agentPrompt || agentCreativeBrief}`}`);
+  console.log(`→ HeyGen Video Agent creative render${styleId ? ` (style ${styleId})` : ""}…`);
+  const out = await makeVideoAgentVideo({
+    scriptText,
+    prompt: agentPrompt,
+    avatarId,
+    voiceId,
+    styleId,
+    orientation,
+    creativeBrief: agentCreativeBrief,
+    outPath: outMp4,
+    pollSeconds: 900,
+  });
+  console.log(out);
+  process.exit(0);
+}
+
+const sc = sidecarDir();
+const py = join(sc, ".venv", "bin", "python");
+
 if (topic) {
   console.log(`→ drafting script (topic, lang=${lang})…`);
   execFileSync(py, [join(sc, "script_gen.py"), "--topic", topic, "--lang", lang, "--seconds", seconds, "--out", scriptTxt],

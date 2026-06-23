@@ -24,9 +24,37 @@ test("buildMakeArgs — presenter clip is appended as --presenter", () => {
   );
 });
 
+test("buildMakeArgs — agent render mode uses HeyGen avatar script and creative flags", () => {
+  assert.deepEqual(
+    buildMakeArgs({
+      scriptFile: "/tmp/s.txt",
+      out: "/tmp/o.mp4",
+      renderMode: "agent",
+      style: "style_cinematic",
+      orientation: "landscape",
+      creativeBrief: "Insert animated text cards between points.",
+    }),
+    [
+      "make-avatar.mjs",
+      "/tmp/s.txt",
+      "/tmp/o.mp4",
+      "--mode",
+      "agent",
+      "--style",
+      "style_cinematic",
+      "--orientation",
+      "landscape",
+      "--creative-brief",
+      "Insert animated text cards between points.",
+    ],
+  );
+});
+
 test("videoRoutingPrompt points the agent at the local /video/make endpoint", () => {
   const p = videoRoutingPrompt();
   assert.match(p, /\/video\/make/);
   assert.match(p, /"topic"/);
+  assert.match(p, /"renderMode":"agent"/);
+  assert.match(p, /HeyGen Video Agent/);
   assert.match(p, /do NOT try to render video yourself/);
 });

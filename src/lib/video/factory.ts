@@ -34,20 +34,29 @@ export interface VideoMakeOptions {
   screen?: string;       // screen-recording footage path
   music?: string;        // music bed path
   presenter?: string;    // webcam presenter clip path (PIP)
+  renderMode?: "local" | "agent";
+  style?: string;
+  orientation?: "landscape" | "portrait";
+  creativeBrief?: string;
 }
 
 /** Build the argv passed to `node` (make.mjs + flags). Pure → unit-tested. */
 export function buildMakeArgs(o: VideoMakeOptions): string[] {
-  const args = ["make.mjs"];
+  const creativeAgent = o.renderMode === "agent";
+  const args = [creativeAgent ? "make-avatar.mjs" : "make.mjs"];
   if (o.scriptFile) args.push(o.scriptFile);
   args.push(o.out);
+  if (creativeAgent) args.push("--mode", "agent");
   if (o.topic) args.push("--topic", o.topic);
   if (o.seconds) args.push("--seconds", String(o.seconds));
   if (o.lang) args.push("--lang", o.lang);
-  if (o.title) args.push("--title", o.title);
-  if (o.screen) args.push("--screen", o.screen);
-  if (o.music) args.push("--music", o.music);
-  if (o.presenter) args.push("--presenter", o.presenter);
+  if (!creativeAgent && o.title) args.push("--title", o.title);
+  if (!creativeAgent && o.screen) args.push("--screen", o.screen);
+  if (!creativeAgent && o.music) args.push("--music", o.music);
+  if (!creativeAgent && o.presenter) args.push("--presenter", o.presenter);
+  if (creativeAgent && o.style) args.push("--style", o.style);
+  if (creativeAgent && o.orientation) args.push("--orientation", o.orientation);
+  if (creativeAgent && o.creativeBrief) args.push("--creative-brief", o.creativeBrief);
   return args;
 }
 

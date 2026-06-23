@@ -78,7 +78,7 @@ The daily AI-news path is:
 # Verify headline/script generation without HeyGen spend or YouTube upload.
 node publish-ai-news.mjs --dry-run
 
-# Full run: HN/NewsAPI headlines → presenter script → HeyGen avatar → YouTube.
+# Full run: HN/NewsAPI headlines → presenter script → HeyGen Video Agent → YouTube.
 node publish-ai-news.mjs --privacy unlisted
 ```
 
@@ -87,6 +87,26 @@ filtering for AI terms. If `NEWSAPI_KEY` or `~/.hivematrix/config.json`
 `newsapi.apiKey` exists, `--source auto` can use NewsAPI. If `ANTHROPIC_API_KEY`
 or `providers.anthropic.apiKey` exists, `--writer auto` asks Claude for the
 script; otherwise it writes a deterministic presenter script.
+
+By default, the AI-news runner uses HeyGen Video Agent (`--render-mode agent`)
+because that is the API path closest to the native HeyGen portal: HeyGen chooses
+scene composition, pacing, transitions, animated text cards, and the overall
+style treatment from the prompt. The older direct avatar renderer is still
+available when you need predictable talking-head output:
+
+```sh
+# Browse portal-like style presets before rendering.
+node heygen.mjs --list-agent-styles --tag cinematic
+
+# Creative / portal-like output with a selected style.
+node publish-ai-news.mjs \
+  --style style_noir_detective \
+  --creative-brief "Use bold animated text cards between stories and energetic YouTube pacing." \
+  --privacy unlisted
+
+# Old deterministic avatar mode.
+node publish-ai-news.mjs --render-mode direct --privacy unlisted
+```
 
 Useful controls:
 
@@ -97,6 +117,28 @@ Useful controls:
 | `--skip-upload` | render the avatar MP4 but do not upload |
 | `--source hn\|newsapi\|auto` | choose headline source |
 | `--writer template\|anthropic\|auto` | choose script writer |
+| `--render-mode agent\|direct` | choose portal-like HeyGen Video Agent or direct talking-head avatar render |
+| `--style <style_id>` | apply a HeyGen Video Agent style preset |
+| `--orientation landscape\|portrait` | choose Video Agent output shape |
+| `--creative-brief "..."` | steer text cards, pacing, transitions, and visual treatment |
+
+## HeyGen creative vs direct mode
+
+Use Video Agent mode for the highest-quality creative output:
+
+```sh
+node make-avatar.mjs script.txt out/creative.mp4 \
+  --mode agent \
+  --style style_noir_detective \
+  --creative-brief "Make this feel like a native HeyGen portal render with animated section cards, varied scene layouts, and a closing CTA."
+```
+
+Use direct mode for exact avatar/script control or cloned-voice lip sync:
+
+```sh
+node make-avatar.mjs script.txt out/direct.mp4 --mode direct --avatar <avatar_id> --voice <voice_id>
+node make-avatar.mjs script.txt out/cloned.mp4 --mode direct --avatar <avatar_id> --cloned
+```
 
 ## Measuring what works (P4.8)
 
@@ -108,7 +150,9 @@ node analytics.mjs   # per-kind table: avg views/likes/comments + engagement rat
 ```
 
 Only kinds logged via `--kind` are comparable. Engagement = views/likes/comments
-today; watch-time **retention** is the next layer (YouTube Analytics API).
+today; watch-time **retention** is the next layer (YouTube Analytics API). The
+creative Video Agent lane logs as `agent-avatar`, while the older direct
+talking-head lane logs as `avatar`.
 
 ## Status
 
