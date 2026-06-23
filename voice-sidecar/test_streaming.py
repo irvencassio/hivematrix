@@ -2,8 +2,8 @@
 
 1. iter_sentences chunks correctly (pure).
 2. stream_turn produces first audio BEFORE the reply finishes — i.e. TTFA < total
-   — using real STT + real TTS but a STUBBED, deliberately-slow token stream (no
-   live model). Run: .venv/bin/python test_streaming.py
+   — using stubbed command STT + real TTS but a STUBBED, deliberately-slow token
+   stream (no live model). Run: .venv/bin/python test_streaming.py
 """
 import os
 os.environ.setdefault("HIVE_TTS_ENGINE", "say")  # keep tests fast + deterministic
@@ -13,6 +13,11 @@ import sys
 import tempfile
 import time
 import uuid
+
+os.environ.setdefault(
+    "HIVE_STT_COMMAND",
+    f"{sys.executable} -c \"print('tell me about paris')\"",
+)
 
 from streaming import iter_sentences
 from stream_turn import stream_turn

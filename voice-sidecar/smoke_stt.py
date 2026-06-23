@@ -1,28 +1,22 @@
 #!/usr/bin/env python3
 """STT smoke test for the VoiceBee sidecar.
 
-Transcribes an audio file with mlx-whisper (local, Apple Silicon / MLX). Proves
-the STT half of the pipeline works on the base Python with no live mic — the
-first reliability gate for Phase 2. Usage:
+Transcribes an audio file with the configured HIVE_STT_COMMAND. Proves the STT
+half of the pipeline works on the base Python with no live mic. Usage:
 
     .venv/bin/python smoke_stt.py <audio-file>        # aiff/wav/m4a/mp3
-
-Swap MODEL to "mlx-community/whisper-large-v3" for production-grade accuracy;
-"whisper-tiny" keeps the smoke fast.
 """
 import sys
 import time
 
-import mlx_whisper
-
-MODEL = "mlx-community/whisper-tiny"
+from stt import backend_label, transcribe
 
 
 def main(path: str) -> int:
     start = time.time()
-    result = mlx_whisper.transcribe(path, path_or_hf_repo=MODEL)
-    print(result["text"].strip())
-    print(f"[{MODEL}] {time.time() - start:.2f}s", file=sys.stderr)
+    result = transcribe(path)
+    print(result.strip())
+    print(f"[{backend_label()}] {time.time() - start:.2f}s", file=sys.stderr)
     return 0
 
 

@@ -458,6 +458,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <select id="projectSel" style="max-width:200px">
       <option value="">(all projects)</option>
     </select>
+    <button class="gear" id="projectRescanBtn" title="Re-scan projects" onclick="refreshProjects()">↻</button>
   </div>
   <div class="hzone mode" style="margin-left:auto">
     <span class="hgroup" title="Connectivity — the select is your preference; the pill is the current effective mode (e.g. what (auto) resolved to)">
@@ -819,7 +820,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
             <span class="project-sort-btn" data-sort="name" onclick="sortProjectsDropdown('name')">Name A–Z</span>
           </div>
           <div id="t_project_list" class="project-list"></div>
-          <div id="t_project_empty" class="project-empty hidden">No projects found</div>
+          <div id="t_project_empty" class="project-empty hidden">No projects found <button class="copybtn" id="t_project_rescan" onclick="refreshProjects()">↻ Re-scan</button></div>
         </div>
       </div>
       <input id="t_path" placeholder="Project path (working dir)" value="/tmp" />

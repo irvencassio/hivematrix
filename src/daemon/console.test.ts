@@ -148,6 +148,13 @@ test("settings tabs are in a defined order ending with About", () => {
   assert.doesNotMatch(CONSOLE_HTML, /id="tab-projects"/, "Projects is no longer a Settings tab");
 });
 
+test("project selectors expose a visible re-scan action", () => {
+  assert.match(CONSOLE_HTML, /id="projectRescanBtn"[^>]*onclick="refreshProjects\(\)"/, "header project rescan button present");
+  assert.match(CONSOLE_HTML, /id="t_project_rescan"[^>]*onclick="refreshProjects\(\)"/, "empty dropdown rescan button present");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /async function refreshProjects\(\)[\s\S]*loadProjects\(true\)/, "refresh bypasses the project cache");
+});
+
 test("Personalization settings include app icon choice", () => {
   assert.match(CONSOLE_HTML, /id="settingsGeneral"/);
   assert.match(CONSOLE_HTML, /App icon/);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persistent push-to-talk worker. Keeps the STT (Whisper) and cloned-voice TTS
+"""Persistent push-to-talk worker. Keeps STT and cloned-voice TTS
 (VoxCPM) models warm across turns, so each Talk turn is just transcribe + LLM +
 synth — NO per-turn model reload (the old turn_cli.py spawned fresh every turn,
 reloading both models). The daemon's /voice/turn relays one turn here.
@@ -82,7 +82,7 @@ def _warm() -> None:
     try:
         wav = synthesize("Ready.", quality="fast", lang="en")  # warms Kokoro (live TTS)
         try:
-            transcribe(wav)  # warms Whisper STT
+            transcribe(wav)  # warms STT when the configured backend needs it
         except Exception:
             pass
         try:

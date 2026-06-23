@@ -9,8 +9,7 @@ import sys
 from huggingface_hub import snapshot_download
 
 REPOS = [
-    "mlx-community/whisper-large-v3-turbo",  # STT
-    "mlx-community/VoxCPM2-bf16",            # cloned-voice TTS
+    "mlx-community/VoxCPM2-bf16",  # cloned-voice TTS
 ]
 
 

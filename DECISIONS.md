@@ -908,7 +908,7 @@ but scope-wall forbade the code (`projects/hive/bees/voicebee.md`, component map
 
 **Decision A — VoiceBee un-deferred** from "designs kept, no code" to an active
 **local-first** voice lane (mirrors the Q8/Q9 MessageBee/MailBee un-defer):
-mlx-whisper STT → Hive LLM → cloned-voice TTS (F5-TTS/Chatterbox) orchestrated by
+configured STT command → Hive LLM → cloned-voice TTS (F5-TTS/Chatterbox) orchestrated by
 Pipecat. Two surfaces — **conversation mode** (Mac/iPhone mic, fully local) and
 **phone-answer mode** (Twilio/Telnyx SIP trunk → local pipeline). Hive stays the
 control plane; voice notes/calls land as task artifacts. The only external seam is

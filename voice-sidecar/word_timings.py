@@ -1,19 +1,44 @@
 #!/usr/bin/env python3
 """Word-level timestamps for caption sync (Phase 4 video factory).
 
-Transcribes narration audio with mlx-whisper and emits word timings as JSON, for
+Uses HIVE_WORD_TIMINGS_COMMAND when configured. The command should print JSON for
 the Remotion captions track:  {"text", "duration", "words": [{word,start,end}]}.
+Without that command, falls back to transcript-only output from HIVE_STT_COMMAND.
 
     python word_timings.py narration.wav [out.json] [--lang it]
 """
 import argparse
 import json
 import os
+import shlex
+import subprocess
 import sys
 
-import mlx_whisper
+from stt import transcribe
 
-MODEL = os.environ.get("HIVE_STT_MODEL", "mlx-community/whisper-large-v3-turbo")
+
+def _run_word_timing_command(audio_path: str, lang: str | None) -> dict | None:
+    raw = os.environ.get("HIVE_WORD_TIMINGS_COMMAND", "").strip()
+    if not raw:
+        return None
+    cmd = raw.format(audio=shlex.quote(audio_path), lang=shlex.quote(lang or ""))
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"word timing command failed ({result.returncode}): {detail[-500:]}")
+    parsed = json.loads(result.stdout or "{}")
+    return {
+        "text": str(parsed.get("text") or "").strip(),
+        "duration": float(parsed.get("duration") or 0.0),
+        "words": parsed.get("words") if isinstance(parsed.get("words"), list) else [],
+    }
 
 
 def main() -> int:
@@ -23,22 +48,9 @@ def main() -> int:
     ap.add_argument("--lang", default=None, help="force a language (e.g. 'it'); default auto-detect")
     a = ap.parse_args()
 
-    kwargs = {"path_or_hf_repo": MODEL, "word_timestamps": True}
-    if a.lang:
-        kwargs["language"] = a.lang
-    r = mlx_whisper.transcribe(a.audio, **kwargs)
-
-    words = []
-    for seg in r.get("segments", []):
-        for w in seg.get("words", []):
-            token = (w.get("word") or "").strip()
-            if token:
-                words.append({"word": token,
-                              "start": round(float(w["start"]), 3),
-                              "end": round(float(w["end"]), 3)})
-    data = {"text": (r.get("text") or "").strip(),
-            "duration": words[-1]["end"] if words else 0.0,
-            "words": words}
+    data = _run_word_timing_command(a.audio, a.lang)
+    if data is None:
+        data = {"text": transcribe(a.audio), "duration": 0.0, "words": []}
     payload = json.dumps(data)
     if a.out:
         with open(a.out, "w") as f:

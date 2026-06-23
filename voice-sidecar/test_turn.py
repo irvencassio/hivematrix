@@ -1,7 +1,7 @@
 """Headless proof of the VoiceBee turn loop (P2.2).
 
-Drives audio in → real STT (mlx-whisper) → STUBBED LLM → real TTS (say), with no
-mic and no live model. Proves the loop wiring end-to-end. Run:
+Drives audio in → stubbed command STT → STUBBED LLM → real TTS (say), with no mic
+and no live model. Proves the loop wiring end-to-end. Run:
 
     .venv/bin/python test_turn.py
 """
@@ -12,6 +12,11 @@ import subprocess
 import sys
 import tempfile
 import uuid
+
+os.environ.setdefault(
+    "HIVE_STT_COMMAND",
+    f"{sys.executable} -c \"print('what is two plus two')\"",
+)
 
 from turn import run_turn
 
@@ -34,7 +39,6 @@ def main() -> int:
     result = run_turn(audio_in, stub_respond)
 
     assert result.transcript, "STT produced no transcript"
-    # whisper may normalize "two" -> "2"; assert on the stable token.
     assert "plus" in captured.get("transcript", "").lower(), \
         f"transcript did not reach the LLM: {captured.get('transcript')!r}"
     assert result.reply == "Two plus two is four.", f"unexpected reply: {result.reply!r}"

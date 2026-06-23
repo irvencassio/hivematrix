@@ -1,6 +1,6 @@
 /**
  * Push-to-talk worker manager. The old /voice/turn spawned turn_cli.py fresh
- * every turn, so STT (Whisper) and the cloned-voice TTS (VoxCPM) reloaded on
+ * every turn, so STT and the cloned-voice TTS (VoxCPM) reloaded on
  * EVERY turn — the dominant Talk latency. This keeps one long-lived
  * voice-sidecar/turn_server.py alive with both models warm; /voice/turn relays a
  * single turn to it (transcribe + LLM + synth, no reload).

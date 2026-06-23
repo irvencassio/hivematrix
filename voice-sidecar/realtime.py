@@ -1,7 +1,7 @@
 """Realtime voice pipeline (P5.1) — the server half of the iOS live client.
 
 A Pipecat pipeline over peer-to-peer **SmallWebRTC** (no cloud SFU): the client's
-mic audio → Silero VAD → MLX-Whisper STT → local LLM (the daemon's configured
+mic audio → Silero VAD → local STT → local LLM (the daemon's configured
 model) → cloned-voice VoxCPM2 TTS → back to the client. Pipecat owns turn-taking
 and native barge-in; the iOS client supplies hardware echo cancellation. The
 daemon relays WebRTC signaling (SDP/ICE) between the iOS client and this process
@@ -39,7 +39,7 @@ from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.utils.time import time_now_iso8601
 
-from stt import transcribe, DEFAULT_MODEL as STT_WHISPER_MODEL
+from stt import backend_label, transcribe
 from tts import synthesize, VOXCPM_MODEL
 
 # Spoken-style system prompt (mirrors llm.py): short, no markdown — goes to TTS.
@@ -58,18 +58,18 @@ LLM_BASE_URL = os.environ.get("HIVE_LLM_BASE_URL", "http://localhost:1234/v1")
 LLM_MODEL = os.environ.get("HIVE_LLM_MODEL", "qwen/qwen3.6-27b")
 LLM_API_KEY = os.environ.get("HIVE_LLM_API_KEY", "local")
 
-STT_RATE = 16000   # mlx-whisper expects 16 kHz mono
+STT_RATE = int(os.environ.get("HIVE_STT_SAMPLE_RATE", "16000"))
 TTS_RATE = 24000   # VoxCPM2 output rate (frames are also self-describing)
 
 
-class MLXWhisperSTT(SegmentedSTTService):
-    """Batch STT per VAD-segmented utterance via local mlx-whisper. The base
+class CommandSTT(SegmentedSTTService):
+    """Batch STT per VAD-segmented utterance via the configured local command. The base
     buffers audio between VAD start/stop and hands us the whole utterance."""
 
     def __init__(self, **kwargs):
         super().__init__(
             sample_rate=STT_RATE,
-            settings=STTSettings(model=STT_WHISPER_MODEL, language="en"),
+            settings=STTSettings(model=backend_label(), language="en"),
             **kwargs,
         )
 
@@ -147,7 +147,7 @@ def build_transport(connection: SmallWebRTCConnection) -> SmallWebRTCTransport:
 
 def build_pipeline(transport: SmallWebRTCTransport, tts_quality: str = "fast"):
     """Assemble the realtime pipeline + task. Returns (task, runner)."""
-    stt = MLXWhisperSTT()
+    stt = CommandSTT()
     llm = OpenAILLMService(model=LLM_MODEL, base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
     tts = VoxCPMTTS(quality=tts_quality)
 

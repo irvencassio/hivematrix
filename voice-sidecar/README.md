@@ -7,25 +7,28 @@ Per the VoiceBee design, **this sidecar owns the realtime audio loop** (VAD → 
 
 ## Environment
 
-Runs on the **base system Python** (3.14+ — validated; mlx-whisper + Pipecat both
-ship 3.14 wheels). The `.venv` is this app's isolated dependency folder, built
-from that base Python — not a separate or legacy interpreter.
+Runs on the **base system Python** (3.14+). The `.venv` is this app's isolated
+dependency folder, built from that base Python — not a separate or legacy
+interpreter.
 
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-Requires `ffmpeg` on PATH (whisper decodes audio through it) — `brew install ffmpeg`.
+STT is provided by a local command. Set `HIVE_STT_COMMAND` to a command that
+prints transcript text to stdout. HiveMatrix appends the audio path unless the
+command includes an `{audio}` placeholder.
 
 ## Smoke test (STT, no mic)
 
 ```sh
+export HIVE_STT_COMMAND='your-transcriber {audio}'
 say -o /tmp/t.aiff "the quick brown fox"
-.venv/bin/python smoke_stt.py /tmp/t.aiff      # -> "The quick brown fox"
+.venv/bin/python smoke_stt.py /tmp/t.aiff
 ```
 
-First run downloads the whisper model from Hugging Face; later runs are warm.
+The exact transcript depends on the configured backend.
 
 ## Turn loop (headless, no mic)
 
@@ -34,14 +37,14 @@ The single-exchange loop (audio→STT→LLM→TTS→audio) is built as composabl
 live model:
 
 ```sh
-.venv/bin/python test_turn.py    # real STT + real TTS, stubbed LLM
+.venv/bin/python test_turn.py    # stubbed command STT + real TTS, stubbed LLM
 ```
 
 Defaults target the operator's local server (LM Studio, `qwen/qwen3.6-27b` at
 `localhost:1234/v1`); override with `HIVE_LLM_BASE_URL` / `HIVE_LLM_MODEL`.
 
-**Validated against the real model:** "capital of France?" → STT (large-v3-turbo)
-→ Qwen 3.6 27B → *"The capital of France is Paris."* → WAV out.
+**Validated flow:** "capital of France?" → STT → Qwen 3.6 27B → *"The capital
+of France is Paris."* → WAV out.
 
 ### Latency (P2.3)
 
@@ -54,7 +57,7 @@ Reasoning **OFF**, measured blocking turn (M-series, 128 GB):
 
 | stage | time |
 |---|---|
-| STT (whisper-large-v3-turbo) | 0.49s |
+| STT (configured command) | backend-dependent |
 | LLM (Qwen 3.6 27B) | 0.98s |
 | TTS (`say`) | 0.83s |
 | **total** | **2.30s** |
@@ -94,9 +97,9 @@ engine when the profile exists).
 .venv/bin/python talk.py --demo "say hello in my voice"
 ```
 
-Engine: **VoxCPM2** (`mlx-community/VoxCPM2-bf16`) via mlx-audio, zero-shot from the
-reference (auto-transcribed by whisper — no transcript needed). Operator-tuned to
-cfg=3.0, temp=0.5. Two **quality tiers** (`synthesize(..., quality=)`):
+Engine: **VoxCPM2** (`mlx-community/VoxCPM2-bf16`) via mlx-audio, zero-shot from
+the reference. Operator-tuned to cfg=3.0, temp=0.5. Two **quality tiers**
+(`synthesize(..., quality=)`):
 
 | tier | steps | warm | used for |
 |---|---|---|---|
@@ -109,8 +112,8 @@ Force an engine with `HIVE_TTS_ENGINE=say|cloned`. Remove
 
 ## Status
 
-- [x] Python 3.14 base + venv; `mlx-whisper` + `pipecat-ai` install & import
-- [x] STT round-trip verified (`smoke_stt.py`)
+- [x] Python 3.14 base + venv; `pipecat-ai` install & import
+- [x] Command-backed STT seam (`stt.py` / `smoke_stt.py`)
 - [x] Turn loop STT→LLM→TTS, headless test (`turn.py` / `test_turn.py`)
 - [x] Streaming turn (`streaming.py` / `stream_turn.py` / `test_streaming.py`)
 - [x] Mac mic demo (`talk.py`) — push-to-talk, talk-to-it loop (user validates live)

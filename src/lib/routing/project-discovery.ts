@@ -95,6 +95,7 @@ function scanGitRepos(): Map<string, string> {
 
       try {
         const resolved = realpathSync(repoRoot);
+        if (!isDiscoverableProjectPath(resolved)) continue;
         paths.set(projectIdentityKey(resolved), resolved);
       } catch {
         // skip
@@ -125,6 +126,7 @@ function scanClaudeCodeHistory(): Map<string, string> {
       if (existsSync(join(projectDir, "conversations"))) {
         try {
           const resolved = realpathSync(projectDir);
+          if (!isDiscoverableProjectPath(resolved)) continue;
           paths.set(projectIdentityKey(resolved), resolved);
         } catch {
           // skip
@@ -147,6 +149,7 @@ function scanClaudeCodeHistory(): Map<string, string> {
       if (projectRoot && !projectRoot.startsWith(home + "/.claude")) {
         try {
           const resolved = realpathSync(resolve(projectRoot));
+          if (!isDiscoverableProjectPath(resolved)) continue;
           paths.set(projectIdentityKey(resolved), resolved);
         } catch {
           // skip
@@ -185,9 +188,10 @@ function scanVSCodeRecents(): Map<string, string> {
         const uri = v?.path as string | undefined;
         if (uri && uri.startsWith("/")) {
           const decoded = decodeURIComponent(uri);
-          if (existsSync(decoded) && !isProjectContainerPath(decoded)) {
+          if (existsSync(decoded) && isDiscoverableProjectPath(decoded)) {
             try {
               const resolved = realpathSync(resolve(decoded));
+              if (!isDiscoverableProjectPath(resolved)) continue;
               paths.set(projectIdentityKey(resolved), resolved);
             } catch {
               // skip
@@ -215,9 +219,10 @@ function scanVSCodeRecents(): Map<string, string> {
       const uri = entry?.folderUri || entry?.workspace?.configPath || "";
       if (uri.startsWith("file://")) {
         const decoded = decodeURIComponent(uri.replace("file://", ""));
-        if (existsSync(decoded) && !isProjectContainerPath(decoded)) {
+        if (existsSync(decoded) && isDiscoverableProjectPath(decoded)) {
           try {
             const resolved = realpathSync(resolve(decoded));
+            if (!isDiscoverableProjectPath(resolved)) continue;
             paths.set(projectIdentityKey(resolved), resolved);
           } catch {
             // skip
@@ -238,10 +243,40 @@ function projectIdentityKey(path: string): string {
   return path.toLowerCase();
 }
 
+function isDiscoverableProjectPath(path: string): boolean {
+  return !isProjectContainerPath(path);
+}
+
 function isProjectContainerPath(path: string): boolean {
-  // Skip home dir itself, temp dirs, Downloads, etc.
-  const skip = [homedir(), "/tmp", "/var", "/usr", "/System"];
-  return skip.some((s) => path === s || path.startsWith(s + "/"));
+  const home = homedir();
+  const paths = pathVariants(path);
+  const homePaths = pathVariants(home);
+  if (paths.some((p) => homePaths.includes(p))) return true;
+
+  const trashPaths = pathVariants(join(home, ".Trash"));
+  if (paths.some((p) => trashPaths.some((trash) => isSameOrDescendant(p, trash)))) return true;
+
+  // Paths under the user's home are valid project candidates unless they were
+  // rejected above. This keeps VS Code recents under $HOME from being filtered.
+  if (paths.some((p) => homePaths.some((h) => isSameOrDescendant(p, h)))) return false;
+
+  // Outside home, skip broad system/container trees.
+  const skipTrees = ["/tmp", "/private/tmp", "/var", "/private/var", "/usr", "/System"];
+  return paths.some((p) => skipTrees.some((s) => isSameOrDescendant(p, s)));
+}
+
+function pathVariants(path: string): string[] {
+  const variants = new Set([resolve(path)]);
+  try {
+    variants.add(realpathSync(path));
+  } catch {
+    // Non-existent path; resolved form is enough for prefix checks.
+  }
+  return [...variants];
+}
+
+function isSameOrDescendant(path: string, parent: string): boolean {
+  return path === parent || path.startsWith(parent.endsWith("/") ? parent : parent + "/");
 }
 
 function deriveProjectName(projectPath: string): string {

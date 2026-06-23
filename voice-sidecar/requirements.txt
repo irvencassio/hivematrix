@@ -4,7 +4,6 @@
 # The .venv is this app's isolated dependency folder, not a separate/legacy
 # Python — it always runs on whatever the base `python3` is.
 
-mlx-whisper==0.4.3      # local streaming STT on Apple Silicon (MLX)
 sounddevice==0.5.5      # mic capture for the talk.py / live.py Mac demos
 mlx-audio==0.4.4        # MLX TTS engines: Kokoro (fast live) + VoxCPM2 (cloned)
 
