@@ -43,6 +43,16 @@ test("outboundHttpRoutingPrompt names the endpoints, the token, and gates SENDIN
   assert.match(p, /data-urlencode/);
 });
 
+test("outboundHttpRoutingPrompt affirms the capability and forbids the 'no SMS tool / send it yourself' denial", () => {
+  // Regression: a Claude-harness task that should have texted a result instead
+  // said "No SMS tool available in this setup" and told the user to send it
+  // themselves — a false denial of an existing, allowlisted MessageBee channel.
+  const p = outboundHttpRoutingPrompt("3999");
+  assert.match(p, /You CAN send email and SMS\/iMessage/i);
+  assert.match(p, /NEVER tell the user that no email\/SMS tool is available/i);
+  assert.match(p, /send it themselves/i);
+});
+
 test("outboundHttpRoutingPrompt covers email management, attachments, and forbids interactive auth", () => {
   const p = outboundHttpRoutingPrompt("3999");
   // Managing email = local Apple Mail, never a Gmail MCP.

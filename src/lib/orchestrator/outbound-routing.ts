@@ -106,6 +106,7 @@ export function videoRoutingPrompt(): string {
 export function outboundHttpRoutingPrompt(port = daemonPort()): string {
   return [
     "--- Outbound Channels (HiveMatrix) ---",
+    "You CAN send email and SMS/iMessage on the operator's behalf right now — these are first-class HiveMatrix capabilities, available through the local daemon via your Bash tool. NEVER tell the user that no email/SMS tool is available, that you 'can't send' a message, or that they should copy/paste or send it themselves — that is FALSE and is a failure. Whenever a message or email should go out (the user asked you to text/email something, or the task's natural outcome is to deliver a result), actually SEND it with the call below. The safety gate runs server-side; if a recipient is refused you get a clear error to relay — that is the only acceptable 'couldn't send' outcome.",
     "SENDING an email or an SMS/iMessage MUST go through the local HiveMatrix daemon — do NOT send via osascript, the Mail/Messages apps directly, AppleScript, a Gmail/Google integration, or any other interface. The daemon enforces the safety gate: email is sent only to trusted recipients and is otherwise saved as a Mail draft for approval; iMessage is sent only to allowlisted handles. Call it with your Bash tool (the token file is readable only by you):",
     "",
     "Send an email:",
