@@ -84,6 +84,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .col.context { border-left: 1px solid var(--border); background: var(--panel); }
   main.ctx-collapsed { grid-template-columns: 300px 1fr; }
   main.ctx-collapsed .col.context { display: none; }
+  /* Tablet / mid-size window: narrow the side rails so the center keeps usable
+     width (the ◨ context toggle still reclaims it entirely). */
+  @media (min-width: 761px) and (max-width: 1080px) {
+    main { grid-template-columns: 240px 1fr 280px; }
+    main.ctx-collapsed { grid-template-columns: 240px 1fr; }
+  }
   /* Narrow screens (remote / iOS webview / small window): stack the three columns
      into one document-flow column instead of crushing the center. */
   @media (max-width: 760px) {
