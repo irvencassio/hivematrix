@@ -447,6 +447,17 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /observability/series?window=24h|7d|30d — time-bucketed telemetry +
+      // per-provider cache rollups for the dashboard (all three providers).
+      if (req.method === "GET" && urlPath === "/observability/series") {
+        const { observabilitySeries } = await import("@/lib/observability/series");
+        const sq = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+        const w = sq.get("window");
+        const window = w === "24h" || w === "30d" ? w : "7d";
+        json(res, 200, observabilitySeries(window));
+        return;
+      }
+
       // GET /update/check — query the configured release channel for an update
       if (req.method === "GET" && urlPath === "/update/check") {
         const { checkUpdateStatus } = await import("@/lib/updater/daemon-update");
@@ -1552,6 +1563,10 @@ export function createDaemonServer() {
             seconds: typeof body.seconds === "number" ? body.seconds : undefined,
             screen: typeof body.screen === "string" ? body.screen : undefined,
             presenter: typeof body.presenter === "string" ? body.presenter : undefined,
+            renderMode: body.renderMode === "agent" ? "agent" : undefined,
+            style: typeof body.style === "string" ? body.style : undefined,
+            orientation: body.orientation === "portrait" || body.orientation === "landscape" ? body.orientation : undefined,
+            creativeBrief: typeof body.creativeBrief === "string" ? body.creativeBrief : undefined,
           });
           json(res, 201, { ok: true, path: r.path });
         } catch (e) {

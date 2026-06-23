@@ -105,6 +105,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .ctx-sec > summary::-webkit-details-marker { display: none; }
   .ctx-sec > summary::before { content: '▾ '; color: var(--muted); }
   .ctx-sec:not([open]) > summary::before { content: '▸ '; }
+  .mdl-grp { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 12px 0 4px; }
+  .mdl-grp:first-child { margin-top: 2px; }
   .appr-wrap { margin: 0 0 6px; }
   .appr-head { font-size: 14px; font-weight: 700; margin: 4px 0 8px; color: var(--accent); display: flex; align-items: center; gap: 7px; }
   .appr-head .cnt { background: var(--accent); color: #1a1205; border-radius: 11px; padding: 0 7px; font-size: 11px; font-weight: 700; }
@@ -181,8 +183,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-bar-fill.hi  { background: #e05b2c; }
   .usage-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:20px; }
   .usage-head h2 { margin:0 0 10px; }
-  .obs-costtgl { font-size:11px; color:var(--muted); display:flex; align-items:center; gap:4px; cursor:pointer; }
-  .obs-costtgl input { width:auto; }
   .obs-split { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
   .obs-split .opill { font-size:11px; padding:2px 8px; border-radius:20px; border:1px solid var(--border); background:var(--panel-2); color:var(--muted); }
   .obs-split .opill.local { color:var(--ok); border-color:rgba(54,211,153,.4); }
@@ -201,6 +201,28 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .exec-cell .ek { display:block; font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:1px; }
   .exec-cell .ev { display:block; color:var(--text); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .exec-cell.wide { grid-column:1 / -1; }
+  /* Observability dashboard (Settings tab) */
+  .obs-win { display:inline-flex; border:1px solid var(--border); border-radius:7px; overflow:hidden; }
+  .obs-win button { border:0; background:var(--panel-2); color:var(--muted); font-size:11px; padding:3px 9px; cursor:pointer; }
+  .obs-win button + button { border-left:1px solid var(--border); }
+  .obs-win button.on { background:var(--accent-2); color:#fff; }
+  .obs-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; margin:4px 0 14px; }
+  .obs-kpi { border:1px solid var(--border); border-radius:8px; padding:9px 11px; background:var(--panel-2); }
+  .obs-kpi .v { font-size:18px; font-weight:700; color:var(--text); }
+  .obs-kpi .l { font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin-top:1px; }
+  .obs-chart { border:1px solid var(--border); border-radius:8px; padding:10px 12px; background:var(--panel-2); margin-bottom:12px; }
+  .obs-chart h4 { margin:0 0 2px; font-size:12px; color:var(--text); font-weight:600; }
+  .obs-chart .sub { font-size:10px; color:var(--muted); margin-bottom:8px; }
+  .obs-chart svg { width:100%; height:auto; display:block; }
+  .obs-legend { display:flex; flex-wrap:wrap; gap:12px; margin-top:8px; font-size:11px; color:var(--muted); }
+  .obs-legend span { display:inline-flex; align-items:center; gap:5px; }
+  .obs-legend i { width:10px; height:10px; border-radius:2px; display:inline-block; }
+  .obs-cacherow { display:grid; grid-template-columns:84px 1fr auto; align-items:center; gap:10px; padding:7px 0; border-top:1px solid var(--border); font-size:12px; }
+  .obs-cacherow:first-child { border-top:0; }
+  .obs-cacherow .cprov { font-weight:600; color:var(--text); }
+  .obs-cacherow .cbar { height:8px; border-radius:4px; background:var(--border); overflow:hidden; }
+  .obs-cacherow .cbar > i { display:block; height:100%; border-radius:4px; }
+  .obs-cacherow .cnum { font-size:11px; color:var(--muted); white-space:nowrap; }
   /* Command meta chips + inspect/run controls (reused by the unified detail panel) */
   .command-chip { min-width:0; max-width:100%; display:inline-block; border:1px solid var(--border); background:var(--panel); color:var(--muted); border-radius:999px; padding:2px 7px; font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .command-chip.primary { color:var(--accent-2); border-color:color-mix(in srgb, var(--accent-2) 42%, var(--border)); }
@@ -471,6 +493,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </select>
       <span class="pill" id="modePill">…</span>
     </span>
+    <span class="usage-pill" id="localPill" style="display:none" title="">🧠 local</span>
     <span class="usage-pill" id="usagePill" style="display:none" title="">⚡ —</span>
     <span class="update-pill" id="updatePill" style="display:none" onclick="applyUpdate()" title="Click to install and restart">⬆ Update</span>
     <span class="hsep"></span>
@@ -486,7 +509,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <div class="overlay" id="settingsOverlay">
   <div class="modal">
     <h1>Settings <span class="x" onclick="closeSettings()">✕</span></h1>
-    <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-bees" onclick="switchSettingsTab('bees')">Bees</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div></div>
+    <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-observability" onclick="switchSettingsTab('observability')">Observability</div><div class="tab" id="tab-bees" onclick="switchSettingsTab('bees')">Bees</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div></div>
     <div id="settingsModels" style="display:none">
       <label class="flbl">Default model</label>
       <select id="s_default" style="width:100%" onchange="saveDefault()"></select>
@@ -520,6 +543,21 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 
       <label class="flbl" style="margin-top:16px">Local server endpoint</label>
       <input id="s_endpoint" placeholder="http://localhost:1234/v1" style="width:100%" onchange="saveEndpoint()" />
+    </div>
+    <div id="settingsObservability" style="display:none">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">
+        <label class="flbl" style="margin:0">Observability</label>
+        <div class="row" style="gap:6px;align-items:center">
+          <span class="obs-win" id="obs_win">
+            <button data-w="24h" onclick="setObsWindow('24h')">24h</button>
+            <button data-w="7d" class="on" onclick="setObsWindow('7d')">7d</button>
+            <button data-w="30d" onclick="setObsWindow('30d')">30d</button>
+          </span>
+          <button class="copybtn" onclick="renderObsDashboard()">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="muted" style="font-size:11px;margin-bottom:10px">Tokens, tasks, latency and prompt-cache across Claude, Codex (ChatGPT) and local Qwen. All on-device.</div>
+      <div id="obsDash"><div class="muted">Loading…</div></div>
     </div>
     <div id="settingsRemote" style="display:none">
       <div class="remote-status"><span class="dot" id="s_remote_dot"></span><span id="s_remote_label">…</span></div>
@@ -644,6 +682,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <button class="sm" id="ab_update_btn" style="display:none" onclick="applyUpdate()">⬆ Install update</button>
       </div>
       <div class="vinfo" id="s_version">…</div>
+      <label class="flbl" style="margin-top:18px">Setup</label>
+      <div id="ab_setup" class="muted" style="font-size:12px">…</div>
+      <label class="flbl" style="margin-top:18px">Soak / Health</label>
+      <div id="metrics"></div>
     </div>
     <div id="settingsProjects" style="display:none">
       <div class="kv"><span class="k">discovered</span><span id="s_proj_count">…</span></div>
@@ -845,12 +887,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="approvals"></div>
     <details class="ctx-sec" id="setupSec" open><summary id="setupSummary">Setup</summary>
     <div id="onboarding"></div></details>
-    <details class="ctx-sec" id="healthSec"><summary>Soak / Health</summary>
-    <div id="metrics"></div></details>
-    <details class="ctx-sec" id="usageSec"><summary>Frontier Usage <button id="usageRefresh" class="usage-refresh" title="Refresh Claude/Codex usage" onclick="event.stopPropagation();refreshUsageNow()">↻</button></summary>
+    <details class="ctx-sec" id="modelsSec" open><summary>Models <button id="usageRefresh" class="usage-refresh" title="Refresh model status &amp; usage" onclick="event.stopPropagation();refreshModelsNow()">↻</button></summary>
+    <div id="modelStatus"></div>
     <div id="usage"><div class="muted">No frontier usage yet.</div></div></details>
     <details class="ctx-sec" id="obsSec"><summary>Observability</summary>
-    <label class="obs-costtgl" title="Show cost (frontier only)"><input type="checkbox" id="obsCost" onchange="toggleObsCost()"> cost</label>
     <div id="observability"><div class="muted">No task telemetry yet.</div></div></details>
     <details class="ctx-sec" id="connSec" open><summary>Connectivity</summary>
     <div id="conn"></div></details>
@@ -1545,8 +1585,10 @@ function toggleReply(id) {
 }
 
 // --- Observability (per-task telemetry + totals) ---
-let _obsCost = false;
+let _obsWindow = "7d";
 const OBS_LABELS = { "anthropic": "Claude", "openai-codex": "Codex", "local-qwen": "Qwen (local)", "other": "other" };
+const OBS_COLORS = { "anthropic": "#c8794f", "openai-codex": "#10a37f", "local-qwen": "#7a5cff", "other": "#8a93a6" };
+const OBS_ORDER = { "anthropic": 0, "openai-codex": 1, "local-qwen": 2, "other": 3 };
 function obsProvider(model) {
   const m = (model || "").toLowerCase().trim();
   if (/^(codex|chatgpt)/.test(m) || /^(gpt|o[0-9])/.test(m)) return "Codex";
@@ -1659,12 +1701,6 @@ function fmtMs(ms) {
 }
 function fmtNum(n) { return n == null ? "—" : Number(n).toLocaleString(); }
 
-function toggleObsCost() {
-  _obsCost = !!document.getElementById("obsCost").checked;
-  try { localStorage.setItem("hm_obs_cost", _obsCost ? "1" : "0"); } catch (e) { /* */ }
-  renderObservability();
-  if (state.selected) selectTask(state.selected);
-}
 
 // Per-task telemetry strip from the task's own data (no extra fetch). Honors the
 // "unavailable not zero" rule: Codex tasks with 0/0 tokens show "—".
@@ -1687,7 +1723,6 @@ function taskTelemetryStrip(t, out) {
     ["tok/s", tps != null ? tps : "—"],
     ["turns", out.turns != null ? out.turns : "—"],
   ];
-  if (_obsCost && prov === "Claude" && out.cost) cells.push(["cost", "$" + Number(out.cost).toFixed(3)]);
   return '<div class="obs-strip">' + cells.map(c =>
     '<span class="obs-cell"><b>' + esc(String(c[1])) + '</b>' + esc(c[0]) + '</span>').join("") + '</div>';
 }
@@ -1699,24 +1734,156 @@ async function renderObservability() {
   try { data = await api("/observability?limit=1"); } catch (e) { return; }
   if (!data || !data.totals) return;
   const t = data.totals;
-  if (!t.runs) { el.innerHTML = '<div class="muted">No task telemetry yet.</div>'; return; }
-  let html = '<div class="obs-split">'
+  if (!t.runs) { el.innerHTML = '<div class="muted">No task telemetry yet. <button class="linklike" onclick="openObsDashboard()">Open dashboard</button></div>'; return; }
+  let html = '<div style="margin-bottom:6px"><button class="linklike" onclick="openObsDashboard()">↗ Full dashboard — graphs &amp; cache</button></div>'
+    + '<div class="obs-split">'
     + '<span class="opill">' + t.split.frontier + ' frontier</span>'
     + '<span class="opill local">' + t.split.local + ' local</span>'
     + '<span class="opill">' + fmtNum(t.tokens.total) + ' tok</span>'
-    + (_obsCost && t.costUsd != null ? '<span class="opill">$' + t.costUsd.toFixed(2) + '</span>' : '')
     + '</div>';
-  html += '<table class="obs-tbl"><tr><th>provider</th><th>runs</th><th>tok in/out</th><th>p50</th><th>p95</th>'
-    + (_obsCost ? '<th>cost</th>' : '') + '</tr>';
+  html += '<table class="obs-tbl"><tr><th>provider</th><th>runs</th><th>tok in/out</th><th>p50</th><th>p95</th></tr>';
   for (const p of t.byProvider) {
     const label = OBS_LABELS[p.key] || p.key;
     html += '<tr><td>' + esc(label) + '</td><td>' + p.runs + '</td>'
       + '<td>' + fmtNum(p.inputTokens) + ' / ' + fmtNum(p.outputTokens) + '</td>'
       + '<td>' + fmtMs(p.latencyP50Ms) + '</td><td>' + fmtMs(p.latencyP95Ms) + '</td>'
-      + (_obsCost ? '<td>' + (p.costUsd != null ? '$' + p.costUsd.toFixed(2) : '—') + '</td>' : '')
       + '</tr>';
   }
   html += '</table>';
+  el.innerHTML = html;
+}
+
+// --- Observability dashboard (full-width Settings tab) ---------------------
+function openObsDashboard() { openSettings(); switchSettingsTab("observability"); }
+function setObsWindow(w) { _obsWindow = w; renderObsDashboard(); }
+function obsKpi(v, l) { return '<div class="obs-kpi"><div class="v">' + esc(String(v)) + '</div><div class="l">' + esc(l) + '</div></div>'; }
+
+// Compact number for axes/tooltips (12.3k, 4.1M).
+function obsShort(v) {
+  v = Math.round(v || 0);
+  if (v >= 1e9) return (v / 1e9).toFixed(1).replace(/\.0$/, "") + "B";
+  if (v >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+  if (v >= 1e3) return (v / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
+  return String(v);
+}
+// Round an axis max up to a clean 1/2/5 x 10^n value.
+function obsNiceMax(v) {
+  if (!(v > 0)) return 1;
+  const pow = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / pow;
+  const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+  return step * pow;
+}
+function obsBucketLabel(t, unit) {
+  if (unit === "hour") return (t || "").slice(11, 13) + ":00";
+  return (t || "").slice(5); // MM-DD
+}
+function obsLegend(providers) {
+  return '<div class="obs-legend">' + providers.map(function (pr) {
+    return '<span><i style="background:' + (OBS_COLORS[pr] || OBS_COLORS.other) + '"></i>' + esc(OBS_LABELS[pr] || pr) + '</span>';
+  }).join("") + '</div>';
+}
+
+// Dependency-free stacked-bar SVG: one bar per time bucket, stacked by provider.
+function obsStackedBars(points, providers, valueFn, unit) {
+  const W = 720, H = 150, padL = 44, padR = 10, padT = 10, padB = 22;
+  const n = points.length || 1;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const totals = points.map(function (p) { return providers.reduce(function (s, pr) { return s + (valueFn(p, pr) || 0); }, 0); });
+  const niceMax = obsNiceMax(Math.max.apply(null, [1].concat(totals)));
+  const bw = plotW / n;
+  const barW = Math.max(1, Math.min(bw - 2, bw * 0.78));
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
+  for (let g = 0; g <= 2; g++) {
+    const val = niceMax * g / 2;
+    const y = padT + plotH - (val / niceMax) * plotH;
+    svg += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" style="stroke:var(--border)" stroke-width="1"/>';
+    svg += '<text x="' + (padL - 6) + '" y="' + (y + 3).toFixed(1) + '" text-anchor="end" font-size="9" style="fill:var(--muted)">' + esc(obsShort(val)) + '</text>';
+  }
+  for (let i = 0; i < n; i++) {
+    const p = points[i];
+    let acc = 0;
+    const x = padL + i * bw + (bw - barW) / 2;
+    for (const pr of providers) {
+      const v = valueFn(p, pr) || 0;
+      if (v <= 0) continue;
+      const h = (v / niceMax) * plotH;
+      const y = padT + plotH - acc - h;
+      svg += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + Math.max(0.6, h).toFixed(1) + '" fill="' + (OBS_COLORS[pr] || OBS_COLORS.other) + '"><title>' + esc((OBS_LABELS[pr] || pr) + " · " + obsBucketLabel(p.t, unit) + ": " + obsShort(v)) + '</title></rect>';
+      acc += h;
+    }
+  }
+  const idxs = n <= 1 ? [0] : [0, Math.floor(n / 2), n - 1];
+  for (const i of idxs) {
+    const x = padL + i * bw + bw / 2;
+    svg += '<text x="' + x.toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="9" style="fill:var(--muted)">' + esc(obsBucketLabel(points[i].t, unit)) + '</text>';
+  }
+  return svg + '</svg>';
+}
+
+async function renderObsDashboard() {
+  const el = document.getElementById("obsDash");
+  if (!el) return;
+  document.querySelectorAll("#obs_win button").forEach(function (b) { b.classList.toggle("on", b.dataset.w === _obsWindow); });
+  el.innerHTML = '<div class="muted">Loading…</div>';
+  let s, detail;
+  try {
+    const r = await Promise.all([api("/observability/series?window=" + _obsWindow), api("/observability?limit=1")]);
+    s = r[0]; detail = r[1];
+  } catch (e) { el.innerHTML = '<div class="muted">Could not load telemetry.</div>'; return; }
+  if (!s || !s.totals || !s.totals.runs) { el.innerHTML = '<div class="muted">No tasks ran in this window yet.</div>'; return; }
+
+  const providers = (s.providers || []).slice().sort(function (a, b) { return (OBS_ORDER[a] ?? 9) - (OBS_ORDER[b] ?? 9); });
+  const tot = s.totals;
+
+  let html = '<div class="obs-cards">'
+    + obsKpi(fmtNum(tot.runs), "tasks")
+    + obsKpi(obsShort(tot.tokens.input), "input tok")
+    + obsKpi(obsShort(tot.tokens.output), "output tok")
+    + obsKpi(obsShort(tot.tokens.total), "total tok")
+    + '</div>';
+
+  html += '<div class="obs-chart"><h4>Tokens over time</h4><div class="sub">input + output, stacked by provider</div>'
+    + obsStackedBars(s.points, providers, function (p, pr) { const c = p.byProvider[pr]; return c ? c.inputTokens + c.outputTokens : 0; }, s.unit)
+    + obsLegend(providers) + '</div>';
+
+  html += '<div class="obs-chart"><h4>Tasks over time</h4><div class="sub">runs per ' + (s.unit === "hour" ? "hour" : "day") + ', stacked by provider</div>'
+    + obsStackedBars(s.points, providers, function (p, pr) { const c = p.byProvider[pr]; return c ? c.runs : 0; }, s.unit)
+    + obsLegend(providers) + '</div>';
+
+  html += '<div class="obs-chart"><h4>Prompt cache</h4><div class="sub">cached input reuse — Claude &amp; Codex cache prompts; local Qwen runs on-device</div>';
+  const crows = (s.cache || []).slice().sort(function (a, b) { return (OBS_ORDER[a.provider] ?? 9) - (OBS_ORDER[b.provider] ?? 9); });
+  if (!crows.length) html += '<div class="muted">No cache data.</div>';
+  for (const c of crows) {
+    const label = OBS_LABELS[c.provider] || c.provider;
+    if (!c.supported) {
+      html += '<div class="obs-cacherow"><span class="cprov">' + esc(label) + '</span>'
+        + '<span class="muted" style="font-size:11px">on-device — no prompt cache</span><span class="cnum"></span></div>';
+      continue;
+    }
+    const pct = c.hitRatePct != null ? c.hitRatePct : 0;
+    const col = pct >= 50 ? "var(--ok,#4caf50)" : pct >= 20 ? "#f0a500" : "#e05b2c";
+    const written = c.cacheCreationTokens > 0 ? " · " + obsShort(c.cacheCreationTokens) + " written" : "";
+    html += '<div class="obs-cacherow">'
+      + '<span class="cprov">' + esc(label) + '</span>'
+      + '<span class="cbar"><i style="width:' + Math.min(100, pct).toFixed(0) + '%;background:' + col + '"></i></span>'
+      + '<span class="cnum">' + (c.hitRatePct != null ? c.hitRatePct.toFixed(0) + "% hit" : "—") + " · " + obsShort(c.cacheReadTokens) + " read" + written + '</span>'
+      + '</div>';
+  }
+  html += '</div>';
+
+  if (detail && detail.totals && detail.totals.byProvider && detail.totals.byProvider.length) {
+    html += '<div class="obs-chart"><h4>By provider</h4><div class="sub">recent runs · latency percentiles · throughput</div>'
+      + '<table class="obs-tbl"><tr><th>provider</th><th>runs</th><th>tok in/out</th><th>p50</th><th>p95</th><th>tok/s</th></tr>';
+    for (const p of detail.totals.byProvider) {
+      html += '<tr><td>' + esc(OBS_LABELS[p.key] || p.key) + '</td><td>' + p.runs + '</td>'
+        + '<td>' + fmtNum(p.inputTokens) + ' / ' + fmtNum(p.outputTokens) + '</td>'
+        + '<td>' + fmtMs(p.latencyP50Ms) + '</td><td>' + fmtMs(p.latencyP95Ms) + '</td>'
+        + '<td>' + (p.avgTokensPerSec != null ? p.avgTokensPerSec : "—") + '</td></tr>';
+    }
+    html += '</table></div>';
+  }
+
   el.innerHTML = html;
 }
 
@@ -2224,7 +2391,16 @@ function renderOnboarding() {
   const sum = document.getElementById("setupSummary");
   if (sec && sum) {
     sum.textContent = o.requiredComplete ? "Setup ✓" : "Setup";
-    if (o.requiredComplete && !sec.dataset.autocollapsed) { sec.open = false; sec.dataset.autocollapsed = "1"; }
+    // Once required setup is complete, the wizard is just a wall of green checks —
+    // drop it off the rail entirely. It still lives on under Settings → About.
+    sec.style.display = o.requiredComplete ? "none" : "";
+  }
+  const abSetup = document.getElementById("ab_setup");
+  if (abSetup) {
+    const remaining = o.steps.filter(s => s.required && s.state !== "done").length;
+    abSetup.textContent = o.requiredComplete
+      ? "✓ Required setup complete."
+      : remaining + " required step" + (remaining === 1 ? "" : "s") + " remaining — see the Setup panel on the dashboard.";
   }
 }
 
@@ -2650,11 +2826,85 @@ async function checkUsage(forceRefresh) {
   } catch (e) { /* transient */ }
 }
 
-async function refreshUsageNow() {
+// Local engine + embeddings status for the "Models" panel. Local-engine tier
+// detail comes from the (already-loaded) global models object; the serving supervisor
+// and embeddings status are cheap polls. Also drives the header "local" pill.
+async function checkModels() {
+  const el = document.getElementById("modelStatus");
+  if (!el || !models) return;
+  let serving = null, emb = null;
+  try { [serving, emb] = await Promise.all([api("/local-model/status"), api("/embeddings")]); } catch (e) { /* transient */ }
+
+  const le = models.localEngine, cap = models.localEngineCapability;
+  let html = "";
+
+  // — Local (on-device) —
+  if (le || (cap && !cap.localCapable)) {
+    html += '<div class="mdl-grp">Local · on-device</div>';
+    html += renderLocalEngine(le, cap) || "";
+    if (serving && serving.managed) {
+      const bits = [];
+      if (serving.modelId) bits.push(esc(serving.modelId));
+      if (serving.restarts) bits.push(serving.restarts + " restart" + (serving.restarts === 1 ? "" : "s"));
+      if (serving.lastError) bits.push('<span style="color:var(--err)">' + esc(serving.lastError) + '</span>');
+      if (bits.length) html += '<div class="muted" style="font-size:11px;margin:2px 0 6px 2px">' + bits.join(" · ") + '</div>';
+    }
+  }
+
+  // — Embeddings (shared with Brainpower) —
+  if (emb) {
+    html += '<div class="mdl-grp">Embeddings <span style="font-weight:400;text-transform:none;letter-spacing:0">· shared with Brainpower</span></div>';
+    if (emb.model) {
+      const dot = emb.enabled ? '<span style="color:var(--ok)">●</span>' : '<span style="color:var(--muted)">○</span>';
+      html += '<div class="backend"><span class="nm">' + dot + " " + esc(emb.model) + '</span>'
+        + '<span class="st ' + (emb.enabled ? "ok" : "no") + '">' + (emb.enabled ? "✓ on" : "off") + '</span></div>'
+        + '<div class="muted" style="font-size:11px;margin:2px 0 6px 2px">'
+        + esc((emb.indexedDocs || 0) + " doc" + (emb.indexedDocs === 1 ? "" : "s") + " indexed")
+        + (emb.endpoint ? " · " + esc(emb.endpoint) : "")
+        + (emb.enabled ? ' &nbsp; <button class="linklike" onclick="reindexEmbeddings()">Reindex</button>' : "")
+        + '</div>';
+    } else {
+      html += '<div class="muted" style="font-size:11px;margin:2px 0 6px 2px">Not configured — set <code>embeddings</code> in ~/.hivematrix/config.json (shares Brainpower\'s qwen3-embedding model over the same brain).</div>';
+    }
+  }
+
+  // — Frontier (cloud) — the bars below (#usage) are filled by checkUsage().
+  html += '<div class="mdl-grp">Frontier · cloud</div>';
+  el.innerHTML = html;
+
+  // Header pill — at-a-glance "is the local engine running".
+  const pill = document.getElementById("localPill");
+  if (pill) {
+    if (le && (!cap || cap.localCapable)) {
+      const up = !!le.up;
+      const live = (le.tiers || []).filter(t => t.healthy).map(t => t.key);
+      pill.textContent = up ? "🧠 local ●" : "🧠 local ○";
+      pill.style.display = "";
+      pill.title = up
+        ? "Local engine running" + (live.length ? " — " + live.join(", ") : "")
+        : "Local engine not running";
+    } else {
+      pill.style.display = "none";
+    }
+  }
+}
+
+async function reindexEmbeddings() {
+  hmToast("Reindexing brain…", "ok");
+  try {
+    const r = await api("/embeddings/reindex", { method: "POST" });
+    if (r && r.error) hmToast(r.error, "err");
+    else hmToast("Reindexed " + (r?.indexed || 0) + " doc(s)" + (r?.pruned ? ", pruned " + r.pruned : ""), "ok");
+  } catch (e) { hmToast("Reindex failed", "err"); }
+  checkModels();
+}
+
+async function refreshModelsNow() {
   const btn = document.getElementById("usageRefresh");
   if (btn) { btn.disabled = true; btn.textContent = "…"; }
   try {
-    await checkUsage(true);
+    await loadModels();                          // refresh local-engine tier health
+    await Promise.all([checkModels(), checkUsage(true)]);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "↻"; }
   }
@@ -2668,7 +2918,7 @@ async function runClaudeAuthLogin() {
     if (!r || !r.ok) {
       await hmAlert(r?.detail || r?.error || "Could not start Claude auth login.");
     } else {
-      await hmAlert("Terminal opened for Claude login. Complete it there, then click the Frontier Usage refresh button.");
+      await hmAlert("Terminal opened for Claude login. Complete it there, then click the Models panel refresh button.");
     }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "Run Claude login"; }
@@ -2867,6 +3117,8 @@ async function loadModels() {
   // Default selection
   const def = models.available.find(m => m.modelId === models.defaultModel || m.id === models.defaultModel);
   if (def) sel.value = def.id;
+  // Refresh the Models panel now that local-engine tier health is loaded.
+  checkModels();
 }
 
 // --- Projects ---
@@ -3190,14 +3442,15 @@ async function saveAutoUpdate() {
 }
 
 function switchSettingsTab(tab) {
-  const tabs = ["about", "features", "general", "models", "bees", "remote"];
-  const panels = { models: "settingsModels", bees: "settingsBees", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout" };
+  const tabs = ["about", "features", "general", "models", "observability", "bees", "remote"];
+  const panels = { models: "settingsModels", observability: "settingsObservability", bees: "settingsBees", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout" };
   for (const t of tabs) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
   if (tab === "bees") { renderSettingsBees(); renderSafeSenders(); }
   if (tab === "features") renderFeatures();
+  if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
 }
 
@@ -3748,8 +4001,6 @@ function connectSSE() {
 
 if (requireToken()) {
   loadModels();
-  try { _obsCost = localStorage.getItem("hm_obs_cost") === "1"; } catch (e) { /* */ }
-  { const cb = document.getElementById("obsCost"); if (cb) cb.checked = _obsCost; }
   wireCtxSections();
   loadProjects();
   refresh();
@@ -3759,7 +4010,9 @@ if (requireToken()) {
   checkUpdate();
   setInterval(checkUpdate, 5 * 60 * 1000);
   checkUsage();
+  checkModels();
   setInterval(checkUsage, 30 * 1000);
+  setInterval(checkModels, 30 * 1000);
 }
 </script>
 </body>
