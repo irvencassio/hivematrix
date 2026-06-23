@@ -79,12 +79,14 @@ async function runCommand(intent: CommandIntent): Promise<{ reply: string; taskI
       if (!text) return null;
       const { Task, generateId } = await import("@/lib/db");
       const { DEFAULT_TASK_PROJECT } = await import("@/lib/routing/project-constants");
+      const { homedir } = await import("os");
       const title = text.length > 60 ? text.slice(0, 57).trimEnd() + "…" : text;
       const task = await Task.create({
         _id: generateId(),
         title,
         description: text,
         project: DEFAULT_TASK_PROJECT,
+        projectPath: homedir(),
         status: "backlog",
         executor: "agent",
         source: "voice",
