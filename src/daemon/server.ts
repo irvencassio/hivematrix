@@ -1412,6 +1412,11 @@ export function createDaemonServer() {
           const { skillTurnOverride } = await import("@/lib/voice/skill-turn");
           const ov = await skillTurnOverride(r.transcript || "");
           if (ov) { json(res, 200, { transcript: r.transcript, ...ov }); return; }
+          // Voice command layer ("Jarvis"): drive the board / approvals / directives /
+          // tasks / connectivity by voice, overriding the conversational reply.
+          const { commandTurnOverride } = await import("@/lib/voice/command-turn");
+          const cmd = await commandTurnOverride(r.transcript || "");
+          if (cmd) { json(res, 200, { transcript: r.transcript, ...cmd }); return; }
           json(res, 200, { transcript: r.transcript, reply: r.reply, audioBase64: r.audioBase64 });
           return;
         } catch (e) {
