@@ -16,6 +16,7 @@ import { generateHookSettings, cleanupHookFiles } from "./approval";
 import { spawnGenericAgent } from "./generic-agent";
 import { spawnCodexAgent } from "./codex-agent";
 import { outboundHttpRoutingPrompt, brainSearchRoutingPrompt, beeToolsRoutingPrompt } from "./outbound-routing";
+import { prepareOutboundMcp } from "./outbound-mcp";
 import { spawnImageAgent } from "./image-agent";
 import { getAgentProfile } from "@/lib/config/agent-profiles";
 import { isCodexModel, isNanoBananaModel } from "@/lib/models/catalog";
@@ -453,7 +454,12 @@ export async function spawnAgent(
   generateHookSettings(taskId, projectPath);
 
   const isOps = project ? NO_REPO_LOCK_PROJECTS.has(project) : false;
-  const tools = isOps ? getOpsAllowedTools() : ALLOWED_TOOLS;
+  // First-class outbound tools (MessageBee/MailBee) via a bundled MCP server, so
+  // SENDING is a real tool call the harness can't talk itself out of (it once
+  // claimed "No SMS tool available" and punted). The server proxies the same
+  // trust-gated daemon endpoints; auto-approve them since the gate is server-side.
+  const outboundMcp = prepareOutboundMcp(process.env.HIVEMATRIX_PORT ?? "3747");
+  const tools = [...(isOps ? getOpsAllowedTools() : ALLOWED_TOOLS), ...outboundMcp.toolNames];
 
   // Prepend workflow skill prefix if applicable
   const prefix = resolvePromptPrefix(workflow, workflowStepIndex).trimEnd();
@@ -488,6 +494,10 @@ export async function spawnAgent(
     fastMode,
     resumeSessionId,
   });
+
+  // Register the outbound MCP server (merges with any user-configured servers —
+  // no --strict-mcp-config). Pairs with the tool names already in `tools`.
+  args.push("--mcp-config", outboundMcp.configPath);
 
   // Inject the Hive agent guide so agents know how to manage projects
   const agentGuide = loadAgentGuide();
