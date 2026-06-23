@@ -90,7 +90,7 @@ export async function uploadAudioAsset(path, key = apiKey()) {
  * voice_id} (HeyGen TTS) or {type:"audio", audio_asset_id} (our cloned narration).
  * Returns the video_id to poll.
  */
-export async function generateAvatarVideo({ avatarId, avatarStyle = "normal", voice, width = 1280, height = 720, key }) {
+export async function generateAvatarVideo({ avatarId, avatarStyle = "normal", voice, width = 1920, height = 1080, key }) {
   const j = await hg("/v2/video/generate", {
     method: "POST",
     key,
@@ -195,8 +195,8 @@ async function main() {
     scriptText, audioPath, avatarId, voiceId,
     avatarStyle: flag("--avatar-style", "normal"),
     speed: flag("--speed") ? parseFloat(flag("--speed")) : undefined,
-    width: parseInt(flag("--width", "1280"), 10),
-    height: parseInt(flag("--height", "720"), 10),
+    width: parseInt(flag("--width", "1920"), 10),
+    height: parseInt(flag("--height", "1080"), 10),
     outPath, pollSeconds: parseInt(flag("--poll-seconds", "600"), 10),
   });
   console.log(out);

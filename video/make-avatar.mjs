@@ -102,6 +102,6 @@ if (!voiceId) {
 console.log(`→ HeyGen avatar render (avatar ${avatarId}${voiceId ? `, voice ${voiceId}${speed ? ` @${speed}x` : ""}` : ", cloned audio"})…`);
 const out = await makeAvatarVideo({
   scriptText, audioPath, avatarId, voiceId, speed,
-  width: 1280, height: 720, outPath: outMp4, pollSeconds: 600,
+  width: 1920, height: 1080, outPath: outMp4, pollSeconds: 600,
 });
 console.log(out);
