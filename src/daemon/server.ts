@@ -1416,7 +1416,11 @@ export function createDaemonServer() {
           // tasks / connectivity by voice, overriding the conversational reply.
           const { commandTurnOverride } = await import("@/lib/voice/command-turn");
           const cmd = await commandTurnOverride(r.transcript || "");
-          if (cmd) { json(res, 200, { transcript: r.transcript, ...cmd }); return; }
+          if (cmd) {
+            if (cmd.command.taskId) broadcast("tasks:created", { taskId: cmd.command.taskId });
+            json(res, 200, { transcript: r.transcript, ...cmd });
+            return;
+          }
           json(res, 200, { transcript: r.transcript, reply: r.reply, audioBase64: r.audioBase64 });
           return;
         } catch (e) {

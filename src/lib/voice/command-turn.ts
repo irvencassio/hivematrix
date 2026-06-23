@@ -21,7 +21,7 @@ import { synthesizeSpeech } from "./tts";
 export interface CommandTurnOverride {
   reply: string;
   audioBase64: string;
-  command: { kind: CommandIntent["kind"]; detail?: string };
+  command: { kind: CommandIntent["kind"]; detail?: string; taskId?: string };
 }
 
 /** Resolve a detected command to a spoken answer, performing any action. null =
@@ -30,50 +30,49 @@ export async function commandTurnOverride(transcript: string): Promise<CommandTu
   const intent = detectCommandIntent(transcript || "");
   if (intent.kind === "none") return null;
 
-  let reply: string | null = null;
+  let result: { reply: string; taskId?: string } | null = null;
   let detail: string | undefined;
   try {
-    reply = await runCommand(intent);
+    result = await runCommand(intent);
   } catch (e) {
     console.error(`[voice-cmd] ${intent.kind} failed: ${e instanceof Error ? e.message : e}`);
     return null; // fall through to the conversational reply on any failure
   }
-  if (reply == null) return null;
+  if (result == null) return null;
 
   let audioBase64 = "";
   try {
-    const tts = await synthesizeSpeech(reply);
+    const tts = await synthesizeSpeech(result.reply);
     audioBase64 = readFileSync(tts.path).toString("base64");
   } catch { /* speak-less fallback: the client shows the text reply */ }
 
-  return { reply, audioBase64, command: { kind: intent.kind, detail } };
+  return { reply: result.reply, audioBase64, command: { kind: intent.kind, detail, taskId: result.taskId } };
 }
 
-async function runCommand(intent: CommandIntent): Promise<string | null> {
+async function runCommand(intent: CommandIntent): Promise<{ reply: string; taskId?: string } | null> {
+  const r = (reply: string, taskId?: string) => ({ reply, taskId });
   switch (intent.kind) {
     case "board": {
       const { Task } = await import("@/lib/db");
-      return boardReply(Task.countByStatus());
+      return r(boardReply(Task.countByStatus()));
     }
     case "approvalsList": {
       const { buildApprovalQueue } = await import("@/lib/approvals/queue");
-      return approvalsReply(buildApprovalQueue().map((i) => ({ title: i.title, kind: i.kind })));
+      return r(approvalsReply(buildApprovalQueue().map((i) => ({ title: i.title, kind: i.kind }))));
     }
     case "approve":
     case "deny": {
       const { buildApprovalQueue } = await import("@/lib/approvals/queue");
       const { resolveApproval } = await import("@/lib/orchestrator/approval");
-      // Resolve the oldest actionable (non-stuck) approval — the natural "the one
-      // you just told me about" target for a voice "approve it".
       const item = buildApprovalQueue().find((i) => i.kind !== "stuck");
-      if (!item) return noApprovalToResolveReply();
+      if (!item) return r(noApprovalToResolveReply());
       const decision = intent.kind === "approve" ? "approve" : "denied";
       await resolveApproval(item.taskId, item.timestamp, decision, "voice");
-      return resolvedReply(intent.kind === "approve" ? "approve" : "deny", item.title);
+      return r(resolvedReply(intent.kind === "approve" ? "approve" : "deny", item.title));
     }
     case "directives": {
       const { listDirectives } = await import("@/lib/orchestrator/directive-store");
-      return directivesReply(listDirectives().map((d) => ({ goal: d.goal, status: d.status })));
+      return r(directivesReply(listDirectives().map((d) => ({ goal: d.goal, status: d.status }))));
     }
     case "createTask": {
       const text = (intent.taskText || "").trim();
@@ -81,7 +80,7 @@ async function runCommand(intent: CommandIntent): Promise<string | null> {
       const { Task, generateId } = await import("@/lib/db");
       const { DEFAULT_TASK_PROJECT } = await import("@/lib/routing/project-constants");
       const title = text.length > 60 ? text.slice(0, 57).trimEnd() + "…" : text;
-      await Task.create({
+      const task = await Task.create({
         _id: generateId(),
         title,
         description: text,
@@ -90,17 +89,17 @@ async function runCommand(intent: CommandIntent): Promise<string | null> {
         executor: "agent",
         source: "voice",
       });
-      return createdTaskReply(title);
+      return r(createdTaskReply(title), task._id);
     }
     case "connectivity": {
       const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
-      return connectivityReply(getConnectivityPolicy().mode);
+      return r(connectivityReply(getConnectivityPolicy().mode));
     }
     case "setConnectivity": {
       const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
       const mode = intent.mode ?? "auto";
       getConnectivityPolicy().setManualOverride(mode === "auto" ? null : mode, "voice command");
-      return setConnectivityReply(mode);
+      return r(setConnectivityReply(mode));
     }
     default:
       return null;

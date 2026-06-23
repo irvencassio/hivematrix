@@ -28,11 +28,15 @@ DEFAULT_MODEL = os.environ.get("HIVE_LLM_MODEL", "qwen/qwen3.6-27b")
 # Spoken-style: short, no markdown — this text goes straight to TTS. The tool
 # guidance is explicit because a small model otherwise over-calls the email tool
 # for unrelated questions (time, calendar, weather), stalling the spoken turn.
+_APP_VERSION = os.environ.get("HIVE_APP_VERSION", "")
+_VERSION_LINE = f"The current HiveMatrix app version is {_APP_VERSION}. " if _APP_VERSION else ""
+
 SYSTEM_PROMPT = (
     "You are the user's voice assistant speaking aloud. Reply in one or two short, "
     "natural spoken sentences, and make the FIRST sentence brief so it can be "
     "spoken immediately. No markdown, no lists, no emojis.\n"
-    "Only call a tool when the user explicitly asks about that exact thing. The "
+    + _VERSION_LINE
+    + "Only call a tool when the user explicitly asks about that exact thing. The "
     "email tool is ONLY for questions about their email, inbox, or mail messages. "
     "For anything else — the time, date, weather, calendar, math, or general "
     "questions — just answer directly and do NOT call any tool.\n"

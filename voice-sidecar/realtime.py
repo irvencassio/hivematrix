@@ -43,10 +43,13 @@ from stt import transcribe, DEFAULT_MODEL as STT_WHISPER_MODEL
 from tts import synthesize, VOXCPM_MODEL
 
 # Spoken-style system prompt (mirrors llm.py): short, no markdown — goes to TTS.
+_APP_VERSION = os.environ.get("HIVE_APP_VERSION", "")
+_VERSION_LINE = f" The current HiveMatrix app version is {_APP_VERSION}." if _APP_VERSION else ""
 SYSTEM_PROMPT = (
     "You are the user's voice assistant speaking aloud. Reply in one or two short, "
     "natural spoken sentences, and make the FIRST sentence brief so it can be "
     "spoken immediately. No markdown, no lists, no emojis."
+    + _VERSION_LINE
 )
 
 # Local model — same env contract as llm.py, populated by the daemon from the
