@@ -3204,10 +3204,10 @@ function switchSettingsTab(tab) {
 async function renderFeatures() {
   const el = document.getElementById("s_features");
   el.innerHTML = '<div class="muted">Loading…</div>';
-  const r = await api("/settings/features");
+  const [r, auto] = await Promise.all([api("/settings/features"), api("/settings/voice/auto-approval")]);
   const features = (r && r.features) || [];
   if (!features.length) { el.innerHTML = '<div class="muted">No optional features.</div>'; return; }
-  el.innerHTML = features.map(f => {
+  const featureRows = features.map(f => {
     const on = f.enabled === true;
     const incapable = f.capable === false;
     const reason = (incapable && f.reason) ? ' <span style="color:var(--accent-2)">— ' + esc(f.reason) + '</span>' : '';
@@ -3220,12 +3220,29 @@ async function renderFeatures() {
       + control
       + '</div>';
   }).join('');
+  const policy = (auto && auto.policy) || {};
+  const checkpointAuto = policy.enabled === true && policy.allowCheckpoints === true;
+  const autoRow = '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
+    + '<div style="flex:1"><div style="font-weight:600">Voice auto-approval</div>'
+    + '<div class="muted" style="font-size:11px;margin-top:2px">Allows Talk to approve non-content directive checkpoints. Content, external, stuck, and tool approvals stay manual.</div></div>'
+    + '<button class="reply-toggle' + (checkpointAuto ? ' active' : '') + '" onclick="toggleAutoApproval(' + (!checkpointAuto) + ')">' + (checkpointAuto ? 'On' : 'Off') + '</button>'
+    + '</div>';
+  el.innerHTML = featureRows + autoRow;
 }
 
 async function toggleFeature(key, enabled) {
   await api("/settings/features", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, enabled }) });
   renderFeatures();
   initVoiceFeature();
+}
+
+async function toggleAutoApproval(enabled) {
+  await api("/settings/voice/auto-approval", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled, allowCheckpoints: enabled, allowLowRiskTools: false }),
+  });
+  renderFeatures();
 }
 
 // ── In-app push-to-talk (Voice feature) ───────────────────────────────

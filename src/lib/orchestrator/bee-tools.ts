@@ -16,6 +16,7 @@
 import { getConnectivityPolicy, type CapabilityId } from "@/lib/connectivity/policy";
 import type { ChatTool } from "./tool-bridge";
 import { readToken } from "@/lib/auth/token";
+import { defaultTermBeeProvider } from "@/lib/termbee/provider";
 
 /** Tool name → the connectivity capability that gates it. */
 const BEE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
@@ -109,7 +110,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "termbee_session",
       description:
-        "TermBee: manage persistent terminal sessions (real shells that keep their cwd/env across commands). action=create starts a session (optional cwd), list shows sessions, kill ends one. Use a session to run a multi-step build/repo workflow. Available in every connectivity mode (works offline).",
+        "TermBee: manage Canopy-backed persistent terminal sessions when Canopy is available, with a local shell fallback for local work. action=create starts a session (optional cwd), list shows sessions, kill ends local fallback sessions. Use a session to run a multi-step build/repo workflow without passing credentials through tool args.",
       parameters: {
         type: "object",
         properties: {
@@ -126,7 +127,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "termbee_run",
       description:
-        "TermBee: run a shell command in a persistent session and get its combined output + exit code. Creates the session on demand if it doesn't exist. State persists between calls (e.g. cd, exported vars).",
+        "TermBee: run a shell command in a Canopy-backed persistent session when Canopy is available, returning combined output + exit code; falls back to a local shell only when Canopy is unavailable. Creates the session on demand if it doesn't exist. Do not pass passwords or secrets in commands/tool args.",
       parameters: {
         type: "object",
         properties: {
@@ -279,7 +280,7 @@ const CAPABILITY_ROUTING_LINES: Record<string, string> = {
   webbee_search: "Read or search the live web → **webbee_search**.",
   browserbee_run: "Drive a logged-in or multi-step browser workflow (e.g. LinkedIn, web apps) → **browserbee_run**.",
   desktopbee_action: "Control a native macOS app → **desktopbee_action**.",
-  termbee_run: "Run shell commands in a persistent terminal → **termbee_run**.",
+  termbee_run: "Run shell commands in a Canopy-backed persistent terminal with local fallback → **termbee_run**.",
   brain_search: "Recall a stored document / brain doc / past decision → **brain_search** (search durable memory before assuming it isn't written down).",
   code_graph: "Find where a symbol is defined + every place it's used → **code_graph** (exact, deterministic — use it to verify you found ALL usages of anything you changed, not just the obvious ones).",
 };
@@ -520,22 +521,21 @@ export async function executeMessageBeeSend(args: Record<string, unknown>, io?: 
 }
 
 async function executeTermBeeSession(args: Record<string, unknown>): Promise<string> {
-  const { createSession, listSessions, killSession } = await import("@/lib/termbee/session");
   const action = args.action as string;
   if (action === "create") {
-    const id = createSession({
+    const id = await defaultTermBeeProvider.createSession({
       id: typeof args.sessionId === "string" ? args.sessionId : undefined,
       cwd: typeof args.cwd === "string" ? args.cwd : undefined,
     });
     return `TermBee session created: ${id}`;
   }
   if (action === "list") {
-    const s = listSessions();
+    const s = await defaultTermBeeProvider.listSessions();
     return s.length ? s.map((x) => `${x.id} (cwd=${x.cwd}, alive=${x.alive})`).join("\n") : "(no sessions)";
   }
   if (action === "kill") {
     const id = typeof args.sessionId === "string" ? args.sessionId : "";
-    return killSession(id) ? `Killed ${id}` : `No such session ${id}`;
+    return await defaultTermBeeProvider.killSession(id) ? `Killed ${id}` : `No such local fallback session ${id}`;
   }
   return `Error: action must be create | list | kill`;
 }
@@ -544,9 +544,8 @@ async function executeTermBeeRun(args: Record<string, unknown>): Promise<string>
   const sessionId = typeof args.sessionId === "string" ? args.sessionId.trim() : "";
   const command = typeof args.command === "string" ? args.command : "";
   if (!sessionId || !command) return "Error: sessionId and command are required";
-  const { runCommand } = await import("@/lib/termbee/session");
   const timeoutMs = typeof args.timeoutMs === "number" ? args.timeoutMs : undefined;
-  const r = await runCommand(sessionId, command, timeoutMs);
+  const r = await defaultTermBeeProvider.runCommand(sessionId, command, timeoutMs);
   const status = r.timedOut ? "(timed out)" : `(exit ${r.exitCode})`;
   return `${r.output}\n${status}`.slice(0, 16_000);
 }

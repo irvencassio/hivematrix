@@ -3,6 +3,7 @@ import { join } from "path";
 import { Task } from "@/lib/db";
 import { broadcast } from "@/lib/ws/broadcaster";
 import { notifySuperwhisperPermissionRequest } from "@/lib/integrations/superwhisper-hive";
+import { classifyAutoApprovalRequest, evaluateAutoApprovalPolicy, getAutoApprovalPolicy } from "@/lib/voice/auto-approval-policy";
 
 const APPROVALS_DIR = join(process.env.HOME!, ".hivematrix", "approvals");
 const HOOKS_DIR = join(process.env.HOME!, ".hivematrix", "hooks");
@@ -344,7 +345,36 @@ export function requestCheckpointApproval(opts: { id: string; gate: string; goal
     writeFileSync(requestFile, JSON.stringify(request), { flag: "wx" });
   } catch {
     // Another tick already wrote it — first-write-wins.
+    return;
   }
+  maybeAutoApproveRequest(request, decisionFile);
+}
+
+function maybeAutoApproveRequest(request: ApprovalRequest, decisionFile: string): void {
+  const decision = evaluateAutoApprovalPolicy(getAutoApprovalPolicy(), {
+    category: classifyAutoApprovalRequest(request),
+    toolName: request.tool,
+  });
+  if (!decision.allowed) return;
+  try {
+    writeFileSync(decisionFile, "approve", { flag: "wx" });
+  } catch {
+    return;
+  }
+  broadcast({
+    type: "approval:resolved",
+    taskId: request.taskId,
+    timestamp: request.timestamp,
+    decision: "approve",
+  });
+  broadcast({
+    type: "task:log",
+    taskId: request.taskId,
+    log: {
+      type: "text",
+      content: `Approval granted via voice-auto (${decision.reason})`,
+    },
+  });
 }
 
 /** Read a resolved checkpoint decision, or null if still pending. */

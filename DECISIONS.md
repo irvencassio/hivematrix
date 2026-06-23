@@ -154,6 +154,13 @@ catalog + COMPONENT-MAP updated. **Provers:** `src/lib/termbee/*.test.ts`
 (marker parsing + a real multi-step session: cd persists, command output across
 turns, runs offline).
 
+**Update (2026-06-23).** TermBee remains the HiveMatrix terminal contract, but
+Canopy is now the preferred provider when its agent bridge is available. The
+direct in-process shell manager remains as a local fallback for local work. This
+keeps the `termbee_*` tool contract stable while moving credential/profile-aware
+terminal work toward Canopy's Keychain-backed profiles, approval policy, and
+agent audit/command logs.
+
 ---
 
 ## Q11 — TraderBee un-deferred (market-data watch + alerts) + env-var key pattern

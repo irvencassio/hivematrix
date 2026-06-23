@@ -332,6 +332,24 @@ export function createDaemonServer() {
         json(res, 200, { features: flags });
         return;
       }
+      // GET/POST /settings/voice/auto-approval — conservative voice approval policy.
+      if (req.method === "GET" && urlPath === "/settings/voice/auto-approval") {
+        const { getAutoApprovalPolicy } = await import("@/lib/voice/auto-approval-policy");
+        json(res, 200, { policy: getAutoApprovalPolicy() });
+        return;
+      }
+      if (req.method === "POST" && urlPath === "/settings/voice/auto-approval") {
+        const { setAutoApprovalPolicy } = await import("@/lib/voice/auto-approval-policy");
+        const body = await parseBody(req) as Record<string, unknown>;
+        json(res, 200, {
+          policy: setAutoApprovalPolicy({
+            enabled: body.enabled === true,
+            allowCheckpoints: body.allowCheckpoints === true,
+            allowLowRiskTools: body.allowLowRiskTools === true,
+          }),
+        });
+        return;
+      }
 
       // GET /ado — Azure DevOps status (flag on? org configured? auth ready?).
       if (req.method === "GET" && urlPath === "/ado") {

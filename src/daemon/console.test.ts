@@ -81,6 +81,13 @@ test("desktop console surfaces the founder-in-the-loop approval queue (parity wi
   assert.match(js, /renderApprovals\(\);/, "rendered on every refresh tick");
 });
 
+test("settings surfaces conservative voice auto-approval controls", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /\/settings\/voice\/auto-approval/, "loads and saves voice auto-approval policy");
+  assert.match(js, /function toggleAutoApproval\(/, "has a settings toggle handler");
+  assert.match(js, /Content, external, stuck, and tool approvals stay manual/, "documents manual approval boundaries");
+});
+
 test("main screen usage shows no dollar amounts (counts/tokens only)", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.doesNotMatch(js, /HiveMatrix spend/, "no spend tooltip");

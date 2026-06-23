@@ -252,7 +252,7 @@ Hive is the control plane for Bee workers.
 - Legacy role and project playbooks remain readable until their contents are migrated into the canonical structure.
 - ManagerBee is the first Bee that should consume the shared brain-memory bundle, because it coordinates strategy, planning, review, and task execution.
 - TubeBee should consume shared browser, web, and brain capabilities instead of owning a separate runtime story.
-- TermBee is the terminal capability contract; Canopy is the current provider behind it.
+- TermBee is the terminal capability contract; Canopy is the preferred provider behind it, with HiveMatrix's direct local shell as fallback.
 `,
     },
     {
@@ -365,7 +365,7 @@ BrainBee is Hive's dedicated durable-memory worker. It curates the canonical bra
       content: `# TermBee
 
 - Define Hive's terminal, repo, and session contract.
-- Treat Canopy as the current provider behind this capability surface.
+- Treat Canopy as the preferred provider behind this capability surface; direct local shell is fallback only.
 - Keep terminal execution distinct from browser, web, and voice layers while sharing the same mission and memory substrate.
 `,
     },

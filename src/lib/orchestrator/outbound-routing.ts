@@ -153,7 +153,7 @@ export function beeToolsRoutingPrompt(port = daemonPort()): string {
     '- Fresh web search/answer with citations → tool `webbee_search`, args {"query":"..."}',
     '- Logged-in or multi-step browser workflow (e.g. LinkedIn) → tool `browserbee_run`, args {"objective":"...","startUrl":"https://..."}',
     '- Native macOS app control → tool `desktopbee_action`, args {"action":"desktop.script.run","params":{...}}',
-    '- Persistent terminal command → tool `termbee_run`, args {"sessionId":"s1","command":"..."}',
+    '- Persistent terminal command → tool `termbee_run`, args {"sessionId":"s1","command":"..."}; this is Canopy-backed when Canopy is running, with local fallback only for local work. Do NOT pass passwords or secrets in the command or args — use configured profiles/Keychain-backed tools instead.',
     '- Find a symbol\'s definition + EVERY usage (deterministic — verify you changed all call sites) → tool `code_graph`, args {"symbol":"...","path":"/repo"}',
     'Response is JSON {"ok","result"}; relay "result". An unavailable lane (wrong connectivity mode) returns an actionable error — surface it, don\'t work around it. For complex args, write the JSON to a temp file and curl -d @/tmp/args.json.',
   ].join("\n");

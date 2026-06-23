@@ -94,6 +94,8 @@ test("beeToolsRoutingPrompt routes web/browser/desktop/terminal through /bee/<to
   assert.match(p, /browserbee_run/);
   assert.match(p, /desktopbee_action/);
   assert.match(p, /termbee_run/);
+  assert.match(p, /Canopy-backed/i);
+  assert.match(p, /Do NOT pass passwords or secrets/i);
   assert.match(p, /127\.0\.0\.1:3999/);
   assert.match(p, /do NOT improvise/i);
 });

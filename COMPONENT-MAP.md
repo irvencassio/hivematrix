@@ -37,7 +37,7 @@ Qwen-Agent: optional compatibility adapter only, never an orchestrator.
 
 ## Embedded capability + channel lanes
 
-- TermBee (Q10; embedded) — persistent terminal sessions (real shells in-process, no node-pty/tmux dep); run/scrollback/kill; available in every connectivity mode (offline workhorse); exposed to the agent as termbee_session/termbee_run
+- TermBee (Q10; contract) — persistent terminal sessions; Canopy-backed when Canopy's agent bridge is available (profiles/Keychain/approvals/logs), with HiveMatrix's in-process local shell kept as a local fallback; exposed to the agent as termbee_session/termbee_run
 - BrowserBee — one local browser controller; Keychain, sessions, reauth, audit
 - WebBee — read-only public web; disabled in offline
 - DesktopBee (Q1; ComputerBee name retired) — Swift helper daemon; AppleScript-first → AX semantic actions → vision last resort; approval-gated; audited

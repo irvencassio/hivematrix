@@ -11,9 +11,14 @@ process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
 const { requestCheckpointApproval, readCheckpointDecision, getPendingApprovals, resolveApproval } =
   await import("./approval");
+const { setAutoApprovalPolicy } = await import("@/lib/voice/auto-approval-policy");
 
 test.after(() => {
   rmSync(TMP, { recursive: true, force: true });
+});
+
+test.afterEach(() => {
+  setAutoApprovalPolicy({ enabled: false, allowCheckpoints: false, allowLowRiskTools: false });
 });
 
 test("checkpoint approval round-trips through the shared approval store", async () => {
@@ -46,4 +51,16 @@ test("a denied checkpoint reads back as denied", async () => {
   await resolveApproval(runId, "checkpoint-completion", "denied", "dashboard");
   assert.equal(readCheckpointDecision(runId, "completion"), "denied");
   assert.ok(existsSync(join(TMP, ".hivematrix", "approvals", `${runId}-checkpoint-completion.decision`)));
+});
+
+test("checkpoint auto-approval resolves only non-content checkpoints", () => {
+  setAutoApprovalPolicy({ enabled: true, allowCheckpoints: true });
+
+  requestCheckpointApproval({ id: "run_auto_1", gate: "plan", goal: "Plan", summary: "ready" });
+  requestCheckpointApproval({ id: "task_content_auto_1", gate: "content", goal: "Publish", summary: "draft" });
+
+  assert.equal(readCheckpointDecision("run_auto_1", "plan"), "approve");
+  assert.equal(readCheckpointDecision("task_content_auto_1", "content"), null);
+  assert.ok(!getPendingApprovals().some((p) => p.taskId === "run_auto_1"));
+  assert.ok(getPendingApprovals().some((p) => p.taskId === "task_content_auto_1"));
 });

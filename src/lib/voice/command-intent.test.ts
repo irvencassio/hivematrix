@@ -17,9 +17,22 @@ test("detects approvals query vs approve/deny command", () => {
   assert.equal(detectCommandIntent("any pending approvals").kind, "approvalsList");
   assert.equal(detectCommandIntent("what needs my approval").kind, "approvalsList");
   assert.equal(detectCommandIntent("approve it").kind, "approve");
-  assert.equal(detectCommandIntent("approve the first one").kind, "approve");
+  assert.deepEqual(detectCommandIntent("approve the first one"), { kind: "approve", ordinal: 1 });
+  assert.deepEqual(detectCommandIntent("approve the second one"), { kind: "approve", ordinal: 2 });
   assert.equal(detectCommandIntent("deny that").kind, "deny");
   assert.equal(detectCommandIntent("reject it").kind, "deny");
+});
+
+test("detects Jarvis V2 operator intents", () => {
+  assert.equal(detectCommandIntent("good morning").kind, "briefing");
+  assert.equal(detectCommandIntent("brief me").kind, "briefing");
+  assert.equal(detectCommandIntent("usage").kind, "usage");
+  assert.equal(detectCommandIntent("show analytics").kind, "analytics");
+  assert.equal(detectCommandIntent("retry failed task").kind, "retryFailedTask");
+  assert.deepEqual(detectCommandIntent("set task abc123 to qwen"), { kind: "setTaskModel", taskRef: "abc123", model: "qwen" });
+  assert.deepEqual(detectCommandIntent("start directive inbox sweep"), { kind: "startDirective", directiveText: "inbox sweep" });
+  assert.deepEqual(detectCommandIntent("pause directive release watcher"), { kind: "pauseDirective", directiveText: "release watcher" });
+  assert.equal(detectCommandIntent("trigger release verification").kind, "triggerReleaseVerification");
 });
 
 test("detects create-task and extracts the text", () => {

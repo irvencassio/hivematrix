@@ -18,6 +18,14 @@ export type CommandKind =
   | "approve"          // "approve it / approve the first one" — resolve latest
   | "deny"             // "deny that / reject it"
   | "directives"       // "what are my directives"
+  | "briefing"          // "good morning / brief me" — operator standup
+  | "usage"             // "usage" — frontier usage summary
+  | "analytics"         // "analytics" — metrics summary
+  | "retryFailedTask"   // "retry failed task" — retry latest failed task
+  | "setTaskModel"      // "set task abc to qwen" — update task model
+  | "startDirective"    // "start directive X" — activate directive
+  | "pauseDirective"    // "pause directive X" — pause directive
+  | "triggerReleaseVerification" // "trigger release verification"
   | "createTask"       // "create a task to <X>" / "remind me to <X>"
   | "connectivity"     // "are we online / connectivity status"
   | "setConnectivity"  // "go offline / cloud only / go local / auto"
@@ -27,14 +35,93 @@ export interface CommandIntent {
   kind: CommandKind;
   taskText?: string;   // createTask
   mode?: ConnMode;     // setConnectivity
+  ordinal?: number;    // approve / deny target, 1-based
+  taskRef?: string;    // setTaskModel target
+  model?: string;      // setTaskModel model id / alias
+  directiveText?: string; // startDirective / pauseDirective target
 }
 
 const clean = (s: string) => s.replace(/[.?!,\s]+$/g, "").trim();
+
+const ORDINAL_WORDS: Array<[string, number]> = [
+  ["first", 1],
+  ["second", 2],
+  ["third", 3],
+  ["fourth", 4],
+  ["fifth", 5],
+  ["sixth", 6],
+  ["seventh", 7],
+  ["eighth", 8],
+  ["ninth", 9],
+  ["tenth", 10],
+];
+
+const CARDINAL_WORDS: Array<[string, number]> = [
+  ["one", 1],
+  ["two", 2],
+  ["three", 3],
+  ["four", 4],
+  ["five", 5],
+  ["six", 6],
+  ["seven", 7],
+  ["eight", 8],
+  ["nine", 9],
+  ["ten", 10],
+];
+
+export function parseOrdinal(text: string): number | undefined {
+  const t = (text || "").toLowerCase();
+  for (const [word, value] of ORDINAL_WORDS) {
+    if (new RegExp(`\\b${word}\\b`).test(t)) return value;
+  }
+  const numeric = t.match(/\b(?:number|option|item)?\s*([1-9][0-9]*)(?:st|nd|rd|th)?\b/);
+  if (numeric) return Number(numeric[1]);
+  for (const [word, value] of CARDINAL_WORDS) {
+    if (new RegExp(`\\b(?:number|option|item)\\s+${word}\\b`).test(t)) return value;
+  }
+  return undefined;
+}
 
 /** Detect a system command in a spoken utterance. Pure; order = specific first. */
 export function detectCommandIntent(text: string): CommandIntent {
   const t = (text || "").toLowerCase().trim();
   if (!t) return { kind: "none" };
+  const orig = (text || "").trim();
+
+  // --- Jarvis V2 operator intents ---
+  if (/\b(good morning|brief me|briefing|morning briefing|what needs me|what needs my attention|standup|status briefing)\b/.test(t)) {
+    return { kind: "briefing" };
+  }
+  if (/^(usage|frontier usage|model usage)$/.test(t) || /\b(usage|spend|token|tokens|cost)\s+(status|summary|report)?\b/.test(t)) {
+    return { kind: "usage" };
+  }
+  if (/^(analytics|metrics)$/.test(t) || /\b(show|open|read|summarize)\s+(analytics|metrics)\b/.test(t)) {
+    return { kind: "analytics" };
+  }
+  if (/\bretry\b.*\bfailed\s+task\b/.test(t) || /\b(retry|rerun)\s+(the\s+)?last\s+failed\b/.test(t)) {
+    return { kind: "retryFailedTask" };
+  }
+  const setTaskModel = orig.match(/\bset\s+task\s+([^\s]+)(?:\s+model)?\s+(?:to|as|on)\s+([^\s.?!,]+)\b/i)
+    ?? orig.match(/\buse\s+([^\s.?!,]+)\s+for\s+task\s+([^\s]+)\b/i);
+  if (setTaskModel) {
+    const useForm = /^use\b/i.test(setTaskModel[0]);
+    return {
+      kind: "setTaskModel",
+      taskRef: clean(useForm ? setTaskModel[2] : setTaskModel[1]),
+      model: clean(useForm ? setTaskModel[1] : setTaskModel[2]),
+    };
+  }
+  const directiveAction = orig.match(/\b(start|resume|activate|pause|stop|sleep)\s+(?:the\s+)?directive\s+(.+)$/i);
+  if (directiveAction && clean(directiveAction[2])) {
+    const action = directiveAction[1].toLowerCase();
+    return {
+      kind: action === "pause" || action === "stop" || action === "sleep" ? "pauseDirective" : "startDirective",
+      directiveText: clean(directiveAction[2]),
+    };
+  }
+  if (/\b(trigger|run|start|queue)\b.*\brelease\s+verification\b/.test(t) || /\brelease:verify\b/.test(t)) {
+    return { kind: "triggerReleaseVerification" };
+  }
 
   // --- Connectivity SET (verbs) — before the query form ---
   if (/\b(go|switch to|set)\b.*\boffline\b/.test(t) || /^offline$/.test(t)) return { kind: "setConnectivity", mode: "offline" };
@@ -47,7 +134,6 @@ export function detectCommandIntent(text: string): CommandIntent {
 
   // --- Create task / reminder (verb forms). Match case-insensitively but extract
   // the task text from the ORIGINAL string so the title keeps its capitalization.
-  const orig = (text || "").trim();
   const taskMatch = orig.match(/\b(?:create|add|make|new|start|open|queue)\s+(?:a\s+|an\s+|another\s+)?task\b(?:\s+(?:to|that|for|about|:|-))?\s*(.+)$/i);
   if (taskMatch && clean(taskMatch[1])) return { kind: "createTask", taskText: clean(taskMatch[1]) };
   const remind = orig.match(/\b(?:remind me to|remember to|have the team|get someone to|make sure to)\s+(.+)$/i);
@@ -61,8 +147,12 @@ export function detectCommandIntent(text: string): CommandIntent {
       || /^approvals?\??$/.test(t)) {
     return { kind: "approvalsList" };
   }
-  if (/\b(deny|reject|decline|disapprove)\b/.test(t)) return { kind: "deny" };
-  if (/\bapprove\b/.test(t)) return { kind: "approve" };
+  if (/\b(deny|reject|decline|disapprove)\b/.test(t)) {
+    return { kind: "deny", ordinal: parseOrdinal(t) };
+  }
+  if (/\bapprove\b/.test(t)) {
+    return { kind: "approve", ordinal: parseOrdinal(t) };
+  }
 
   // --- Directives / standing goals ---
   if (/\b(directives?|standing goals?|what.*standing|what are you watching)\b/.test(t)) return { kind: "directives" };

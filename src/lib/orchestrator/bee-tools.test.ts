@@ -38,6 +38,13 @@ test("all bee tools are defined with required schemas", () => {
   }
 });
 
+test("TermBee tool descriptions identify Canopy as the preferred provider", () => {
+  const termRun = BEE_TOOL_DEFINITIONS.find((t) => t.function.name === "termbee_run");
+  const termSession = BEE_TOOL_DEFINITIONS.find((t) => t.function.name === "termbee_session");
+  assert.match(termRun?.function.description ?? "", /Canopy-backed/i);
+  assert.match(termSession?.function.description ?? "", /Canopy-backed/i);
+});
+
 test("cloud-ok advertises every lane (web, browser, desktop, term, mail, message, brain, skill, digest)", () => {
   assert.deepEqual(names(availableBeeTools(cloud())),
     ["brain_search", "browserbee_run", "code_graph", "desktopbee_action", "digest_url", "mailbee_draft", "mailbee_send", "messagebee_send", "skill_used", "termbee_run", "termbee_session", "webbee_search"]);
