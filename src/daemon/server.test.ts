@@ -51,8 +51,9 @@ test("command launcher sends its own visible project path", () => {
   assert.match(CONSOLE_HTML, /id="commandPath"/);
   assert.match(CONSOLE_HTML, /getElementById\('commandPath'\)/);
   assert.match(CONSOLE_HTML, /const projectPath = \(\(document\.getElementById\('commandPath'\) \|\| \{\}\)\.value \|\| '\$HOME'\)\.trim\(\) \|\| '\$HOME';/);
-  const runCommand = CONSOLE_HTML.match(/async function runCommand\(\) \{[\s\S]*?async function importLocalSkills/);
-  assert.ok(runCommand, "runCommand block should be present");
+  // The command runner uses its own project path field, never the New Task path.
+  const runCommand = CONSOLE_HTML.match(/async function runSelectedCommand\(\) \{[\s\S]*?\n\}/);
+  assert.ok(runCommand, "runSelectedCommand block should be present");
   assert.doesNotMatch(runCommand![0], /t_path/);
   assert.match(CONSOLE_HTML, /projectPath:\s*projectPath/);
 });

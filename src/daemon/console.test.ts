@@ -411,26 +411,55 @@ function extractExecutionHelpers(html: string): {
   return factory();
 }
 
-test("command launcher renders as a compact command shell", () => {
-  assert.match(CONSOLE_HTML, /class="command-shell"/, "command shell wrapper present");
-  assert.match(CONSOLE_HTML, /class="command-head"/, "command header present");
-  assert.match(CONSOLE_HTML, /class="command-grid"/, "command controls grouped in a grid");
-  assert.match(CONSOLE_HTML, /class="command-status"/, "command status callout present");
-  assert.match(CONSOLE_HTML, /class="command-view"/, "command inspect panel present");
+test("skills & commands render in one unified, searchable section", () => {
+  // Skills and Commands are a single section over both catalogs (lib skills +
+  // local commands), with a live-search list and a per-item detail panel —
+  // replacing the old dropdown-plus-button-wall.
+  assert.match(CONSOLE_HTML, /id="skillsSec"[^>]*><summary>Skills &amp; Commands<\/summary>/, "unified section present");
+  assert.match(CONSOLE_HTML, /id="skQuery"/, "live search input present");
+  assert.match(CONSOLE_HTML, /id="skList" class="sk-list"/, "catalog list present");
+  assert.match(CONSOLE_HTML, /id="skDetail" class="sk-detail"/, "detail panel present");
+  // Imports are unified into one Add modal with source tabs.
+  assert.match(CONSOLE_HTML, /id="addSkillOverlay"/, "unified Add modal present");
+  assert.match(CONSOLE_HTML, /onclick="addTab\('shared'\)"/, "Add modal has a shared-scope source tab");
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /function renderCommandStatus\(/, "status rendering helper present");
+  assert.match(js, /function renderSkillCatalog\(/, "catalog loader present");
   assert.match(js, /function commandMetaChips\(/, "metadata chips helper present");
   assert.match(js, /catalog: local profile catalog/, "command inspect copy is provider-neutral");
   assert.doesNotMatch(js, /catalog: Claude local profile/, "command inspect copy does not overclaim Claude execution");
-  assert.doesNotMatch(CONSOLE_HTML, /id="commandMeta" style=/, "command metadata no longer relies on inline style");
+  // The old separate Commands section / dropdown is gone.
+  assert.doesNotMatch(CONSOLE_HTML, /id="commandsSec"/, "no separate Commands section");
+  assert.doesNotMatch(CONSOLE_HTML, /id="skillSelect"/, "no bare skill dropdown");
 });
 
-test("command launcher contains long metadata inside the context column", () => {
-  assert.match(CONSOLE_HTML, /\.command-shell \{[^}]*min-width:0;[^}]*max-width:100%;/);
-  assert.match(CONSOLE_HTML, /\.command-grid \{[^}]*min-width:0;/);
-  assert.match(CONSOLE_HTML, /\.command-grid > \* \{[^}]*min-width:0;/);
-  assert.match(CONSOLE_HTML, /\.command-meta \{[^}]*min-width:0;[^}]*overflow:hidden;/);
+test("unified skills section contains long metadata inside the context column", () => {
+  // The list rows and chips must not overflow the narrow context column.
+  assert.match(CONSOLE_HTML, /\.sk-list \{[^}]*overflow:auto;/);
+  assert.match(CONSOLE_HTML, /\.sk-row \.sk-desc \{[^}]*overflow:hidden;[^}]*text-overflow:ellipsis;/);
   assert.match(CONSOLE_HTML, /\.command-chip \{[^}]*min-width:0;[^}]*max-width:100%;[^}]*display:inline-block;/);
+});
+
+test("header is grouped into zones with a theme toggle and grouped connectivity", () => {
+  assert.match(CONSOLE_HTML, /class="hzone"/, "header uses zones");
+  assert.match(CONSOLE_HTML, /class="hgroup"[\s\S]*id="modeSel"[\s\S]*id="modePill"/, "connectivity select + effective-mode pill grouped as one unit");
+  assert.match(CONSOLE_HTML, /id="themeToggle"[^>]*onclick="toggleThemeQuick\(\)"/, "header has a quick theme toggle");
+  assert.match(CONSOLE_HTML, /@media \(max-width: 760px\)[\s\S]*\.hlabel \{ display: none/, "header labels hide on narrow widths");
+});
+
+test("settings auto-save with toast feedback and open on Models", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(CONSOLE_HTML, /id="s_default"[^>]*onchange="saveDefault\(\)"/, "default model auto-saves on change");
+  assert.match(CONSOLE_HTML, /id="s_endpoint"[^>]*onchange="saveEndpoint\(\)"/, "endpoint auto-saves on change");
+  assert.doesNotMatch(CONSOLE_HTML, /onclick="saveDefault\(\)"/, "no separate Save-default button");
+  assert.doesNotMatch(CONSOLE_HTML, /onclick="saveEndpoint\(\)"/, "no separate Save-endpoint button");
+  assert.match(js, /function hmToast\(/, "toast helper present");
+  assert.match(js, /function openSettings\(\)[\s\S]*switchSettingsTab\("models"\)/, "settings lands on Models, not About");
+});
+
+test("center column shows an overview when no task is selected", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function renderOverview\(/, "overview renderer present");
+  assert.match(js, /else renderOverview\(\)/, "refresh shows the overview when nothing is selected");
 });
 
 test("execution provenance covers Claude, ChatGPT/Codex, and Qwen/local modes", () => {

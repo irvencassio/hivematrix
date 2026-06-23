@@ -128,6 +128,29 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     letter-spacing: .5px; margin: 2px 0 3px; }
   .gear { cursor: pointer; color: var(--muted); font-size: 16px; background: none; border: 0; }
   .gear:hover { color: var(--accent); }
+  /* Header zones: brand · scope · actions, grouped + responsive */
+  .hzone { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .hgroup { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+  .hsep { width: 1px; align-self: stretch; background: var(--border); margin: 5px 2px; }
+  @media (max-width: 760px) {
+    header { flex-wrap: wrap; height: auto; padding: 6px 10px; row-gap: 6px; }
+    .hlabel { display: none; }
+    header .mode, .hzone { flex-wrap: wrap; }
+  }
+  /* Toast (consistent save feedback) */
+  #toastHost { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
+  .toast { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; padding: 7px 14px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.25); opacity: 0; transform: translateY(8px); transition: opacity .18s, transform .18s; }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.ok { border-left-color: var(--ok); } .toast.err { border-left-color: var(--err); }
+  /* Center overview — shown when no task is selected (replaces the bare empty state) */
+  .overview { max-width: 540px; margin: 28px auto 0; padding: 0 12px; }
+  .ov-head { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; }
+  .ov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px; }
+  .ov-card { border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); padding: 12px 8px; text-align: center; }
+  .ov-card.warn { border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); }
+  .ov-num { font-size: 22px; font-weight: 700; line-height: 1; }
+  .ov-lbl { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .ov-hint { color: var(--muted); font-size: 12px; text-align: center; margin-top: 20px; }
   .usage-pill { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
     border-radius: 999px; padding: 3px 11px; font-size: 11px; font-weight: 600; white-space: nowrap; cursor: default; }
   .usage-breakdown { font-size: 11px; }
@@ -162,30 +185,41 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .exec-cell .ek { display:block; font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:1px; }
   .exec-cell .ev { display:block; color:var(--text); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .exec-cell.wide { grid-column:1 / -1; }
-  .command-shell { min-width:0; max-width:100%; border:1px solid var(--border); border-radius:8px; background:var(--panel-2); overflow:hidden; margin-bottom:8px; }
-  .command-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border-bottom:1px solid var(--border); }
-  .command-title { min-width:0; }
-  .command-title b { display:block; font-size:12px; line-height:1.2; }
-  .command-title span { display:block; font-size:10.5px; color:var(--muted); line-height:1.25; margin-top:2px; }
-  .command-import { flex:none; border:1px solid var(--border); background:var(--panel); color:var(--accent); border-radius:6px; padding:4px 7px; font-size:11px; font-weight:700; cursor:pointer; }
-  .command-import:hover { border-color:var(--accent); }
-  .command-grid { min-width:0; padding:10px; display:grid; gap:8px; }
-  .command-grid > * { min-width:0; }
-  .command-grid select, .command-grid input { width:100%; margin:0; }
-  .command-meta { display:flex; flex-wrap:wrap; gap:4px; min-height:22px; min-width:0; overflow:hidden; align-items:center; }
+  /* Command meta chips + inspect/run controls (reused by the unified detail panel) */
   .command-chip { min-width:0; max-width:100%; display:inline-block; border:1px solid var(--border); background:var(--panel); color:var(--muted); border-radius:999px; padding:2px 7px; font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .command-chip.primary { color:var(--accent-2); border-color:color-mix(in srgb, var(--accent-2) 42%, var(--border)); }
-  .command-project-row { display:grid; grid-template-columns:minmax(86px,.72fr) minmax(0,1.28fr); gap:6px; }
-  .command-actions { display:flex; gap:6px; }
-  .command-actions button { border-radius:6px; padding:6px 10px; font-size:12px; font-weight:700; cursor:pointer; }
   .command-run { background:var(--accent); color:var(--create-btn-text); border:0; flex:1; }
-  .command-view-btn { background:var(--panel); color:var(--text); border:1px solid var(--border); }
-  .command-status { display:none; margin:0 10px 10px; padding:7px 9px; border:1px solid var(--border); border-radius:7px; font-size:11.5px; color:var(--muted); background:var(--panel); }
-  .command-status.show { display:block; }
-  .command-status.ok { color:var(--ok); border-color:color-mix(in srgb, var(--ok) 45%, var(--border)); }
-  .command-status.busy { color:var(--accent-2); border-color:color-mix(in srgb, var(--accent-2) 45%, var(--border)); }
-  .command-status.err { color:var(--err); border-color:color-mix(in srgb, var(--err) 45%, var(--border)); }
   .command-view { display:none; max-height:200px; overflow:auto; font-size:11px; background:var(--code-bg); color:var(--code-text); padding:8px; border-radius:6px; margin:0 10px 10px; white-space:pre-wrap; }
+  /* Unified Skills & Commands section */
+  .sk-toolbar { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+  .sk-toolbar input { flex:1; min-width:80px; margin:0; }
+  .sk-toolbar .addbtn { width:auto; flex:none; margin-bottom:0; white-space:nowrap; }
+  .sk-list { max-height:230px; overflow:auto; border:1px solid var(--border); border-radius:8px; background:var(--panel-2); }
+  .sk-list:empty { display:none; }
+  .sk-row { padding:6px 8px; border-bottom:1px solid var(--border); cursor:pointer; }
+  .sk-row:last-child { border-bottom:0; }
+  .sk-row:hover { background:var(--panel); }
+  .sk-row.sel { background:color-mix(in srgb, var(--accent) 16%, var(--panel-2)); }
+  .sk-row b { font-size:12px; }
+  .sk-row .sk-desc { color:var(--muted); font-size:11px; line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sk-badge { display:inline-block; font-size:10px; color:var(--muted); border:1px solid var(--border); border-radius:999px; padding:0 5px; margin-left:4px; white-space:nowrap; }
+  .sk-badge.src { color:var(--accent-2); border-color:color-mix(in srgb, var(--accent-2) 42%, var(--border)); }
+  .sk-badge.warn { color:var(--warn); border-color:color-mix(in srgb, var(--warn) 45%, var(--border)); }
+  .sk-badge.err { color:var(--err); border-color:color-mix(in srgb, var(--err) 45%, var(--border)); }
+  .sk-detail { margin-top:8px; border:1px solid var(--border); border-radius:8px; background:var(--panel-2); padding:9px 10px; }
+  .sk-detail .sk-dmeta { font-size:11px; color:var(--muted); margin:4px 0; }
+  .sk-detail input, .sk-detail select { margin:0; }
+  .sk-detail .sk-run-row { display:flex; gap:6px; margin-top:8px; }
+  .sk-detail .sk-run-row .create, .sk-detail .sk-run-row .command-run { flex:1; }
+  .sk-proj-row { display:grid; grid-template-columns:minmax(86px,.72fr) minmax(0,1.28fr); gap:6px; margin-top:6px; }
+  .sk-more { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; padding-top:8px; border-top:1px solid var(--border); }
+  .sk-more button { font-size:11px; }
+  /* The .addbtn default is full-width; keep it inline inside skill controls/rows. */
+  .sk-run-row .addbtn, .sk-more .addbtn, #addShared .addbtn, #skPrune .addbtn, #addSkillOverlay .addbtn { width:auto; flex:none; margin-bottom:0; }
+  .sk-tabs { display:flex; gap:4px; margin-bottom:10px; }
+  .sk-tab { flex:1; text-align:center; padding:6px 4px; font-size:12px; border:1px solid var(--border); border-radius:6px; cursor:pointer; color:var(--muted); }
+  .sk-tab.active { color:var(--accent-2); border-color:color-mix(in srgb, var(--accent-2) 45%, var(--border)); background:var(--panel); }
+  .linklike { background:none; border:0; color:var(--muted); text-decoration:underline; cursor:pointer; font-size:11px; padding:0; }
   .usage-refresh { border:1px solid var(--border); background:var(--panel-2); color:var(--muted);
     width:24px; height:24px; border-radius:6px; cursor:pointer; line-height:1; font-size:13px; }
   .usage-refresh:hover { color:var(--text); border-color:var(--text); }
@@ -399,31 +433,38 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <body>
 <canvas id="matrixRain" aria-hidden="true"></canvas>
 <header>
-  <span class="logo">HiveMatrix</span>
-  <span class="live" id="live">● live</span>
-  <span style="display:flex;align-items:center;gap:8px">
-    <span class="muted">project</span>
-    <select id="projectSel" style="max-width:220px">
+  <div class="hzone">
+    <span class="logo">HiveMatrix</span>
+    <span class="live" id="live">● live</span>
+  </div>
+  <div class="hzone">
+    <span class="muted hlabel">project</span>
+    <select id="projectSel" style="max-width:200px">
       <option value="">(all projects)</option>
     </select>
-  </span>
-  <span class="mode">
-    <span class="muted">connectivity</span>
-    <select id="modeSel">
-      <option value="">(auto)</option>
-      <option value="cloud-ok">cloud-ok</option>
-      <option value="local-only">local-only</option>
-      <option value="offline">offline</option>
-    </select>
-    <span class="pill" id="modePill">…</span>
+  </div>
+  <div class="hzone mode" style="margin-left:auto">
+    <span class="hgroup" title="Connectivity — the select is your preference; the pill is the current effective mode (e.g. what (auto) resolved to)">
+      <span class="muted hlabel">connectivity</span>
+      <select id="modeSel">
+        <option value="">(auto)</option>
+        <option value="cloud-ok">cloud-ok</option>
+        <option value="local-only">local-only</option>
+        <option value="offline">offline</option>
+      </select>
+      <span class="pill" id="modePill">…</span>
+    </span>
     <span class="usage-pill" id="usagePill" style="display:none" title="">⚡ —</span>
     <span class="update-pill" id="updatePill" style="display:none" onclick="applyUpdate()" title="Click to install and restart">⬆ Update</span>
-    <span class="muted" id="talkStatus" style="display:none;font-size:11px;margin-right:6px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+    <span class="hsep"></span>
+    <span class="muted" id="talkStatus" style="display:none;font-size:11px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
     <button class="gear" id="talkBtn" style="display:none" title="Push to talk" onclick="toggleTalk()">🎤 Talk</button>
+    <button class="gear" id="themeToggle" title="Toggle light / dark theme" onclick="toggleThemeQuick()">🌗</button>
     <button class="gear ctx-toggle" id="ctxToggle" title="Hide / show the right panel" onclick="toggleContext()">◨</button>
     <button class="gear" title="Settings" onclick="openSettings()">⚙</button>
-  </span>
+  </div>
 </header>
+<div id="toastHost"></div>
 
 <div class="overlay" id="settingsOverlay">
   <div class="modal">
@@ -431,8 +472,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-bees" onclick="switchSettingsTab('bees')">Bees</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div></div>
     <div id="settingsModels" style="display:none">
       <label class="flbl">Default model</label>
-      <select id="s_default" style="width:100%"></select>
-      <div class="row" style="margin:8px 0"><button class="create" onclick="saveDefault()">Save default</button></div>
+      <select id="s_default" style="width:100%" onchange="saveDefault()"></select>
 
       <label class="flbl" style="margin-top:14px">Backends</label>
       <div id="s_backends"></div>
@@ -462,8 +502,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </div>
 
       <label class="flbl" style="margin-top:16px">Local server endpoint</label>
-      <div class="row"><input id="s_endpoint" placeholder="http://localhost:1234/v1" style="flex:1" />
-        <button class="create" onclick="saveEndpoint()">Save</button></div>
+      <input id="s_endpoint" placeholder="http://localhost:1234/v1" style="width:100%" onchange="saveEndpoint()" />
     </div>
     <div id="settingsRemote" style="display:none">
       <div class="remote-status"><span class="dot" id="s_remote_dot"></span><span id="s_remote_label">…</span></div>
@@ -627,6 +666,42 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Add skills (unified import: URL/file · shared scope · local folders). -->
+<div class="overlay" id="addSkillOverlay">
+  <div class="modal" style="width:480px">
+    <h1>Add skills <span class="x" onclick="closeAddSkills()">✕</span></h1>
+    <div class="sk-tabs">
+      <span class="sk-tab active" id="addTab_url" onclick="addTab('url')">URL / file</span>
+      <span class="sk-tab" id="addTab_shared" onclick="addTab('shared')">Shared scope</span>
+      <span class="sk-tab" id="addTab_local" onclick="addTab('local')">Local folders</span>
+    </div>
+    <div class="sk-pane" id="addPane_url">
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Import a shared skill from a raw <code>SKILL.md</code> URL, or browse to a local markdown file. Imported skills land untrusted until you review and trust them.</div>
+      <input class="dialog-input" id="addUrl" placeholder="https://…/SKILL.md" />
+      <div class="row" style="gap:6px;margin-top:8px">
+        <button class="cancel" onclick="document.getElementById('skillFileInput').click()">Browse file…</button>
+        <button class="ok" style="margin-left:auto" onclick="doImportUrl()">Import</button>
+      </div>
+      <div class="muted" id="addUrlFile" style="font-size:11px;margin-top:4px"></div>
+    </div>
+    <div class="sk-pane" id="addPane_shared" style="display:none">
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Browse skills already shared to a scope, preview them, and import the ones you want.</div>
+      <div class="row" style="gap:6px">
+        <select id="addScope" style="flex:1">
+          <option value="personal">personal</option><option value="team" selected>team</option><option value="org">org</option><option value="public">public</option>
+        </select>
+        <button class="ok" onclick="doBrowseShared()">Browse</button>
+      </div>
+      <div id="addShared" style="margin-top:8px;max-height:240px;overflow:auto"></div>
+    </div>
+    <div class="sk-pane" id="addPane_local" style="display:none">
+      <div class="muted" style="font-size:12px">Bulk-import the folder skills from your local harness profiles (Claude / Codex / Qwen) into the brain library so they can be shared and run as skills.</div>
+      <button class="ok" style="margin-top:10px" onclick="doImportLocal()">Import local folder skills</button>
+    </div>
+    <div class="muted" id="addStatus" style="font-size:11px;margin-top:10px"></div>
+  </div>
+</div>
+
 <!-- MessageBee guided setup. -->
 <div class="overlay" id="mbOverlay">
   <div class="modal" style="width:460px">
@@ -782,67 +857,18 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="err" id="de_err"></div>
     </div>
     <div id="directives"></div></details>
-    <details class="ctx-sec" id="skillsSec" open><summary>Skills</summary>
-    <div class="row" style="gap:6px">
-      <select id="skillSelect" onchange="updateSkillMeta()" style="flex:1;min-width:120px"></select>
-      <button class="addbtn" onclick="importSkillPrompt()" title="Import a shared skill from a URL">⇩ Import</button>
+    <details class="ctx-sec" id="skillsSec" open><summary>Skills &amp; Commands</summary>
+    <div class="sk-toolbar">
+      <input id="skQuery" placeholder="Search skills &amp; commands…" oninput="renderSkillList()" />
+      <button class="addbtn" onclick="openAddSkills()" title="Import a skill from a URL, a file, a shared scope, or your local folders">＋ Add</button>
+      <button class="addbtn" onclick="syncSkills()" title="Git-sync all scopes + write skills into the Claude/Codex/Qwen dirs">⇄ Sync</button>
     </div>
-    <input id="skillInput" placeholder="Text input for the skill (optional)" style="margin-top:6px" />
-    <div class="row" style="gap:6px;flex-wrap:wrap">
-      <button class="create" onclick="runSkill()">Run</button>
-      <button class="addbtn" onclick="viewSkill()" title="View / verify the skill">View</button>
-      <button class="addbtn" onclick="exportSkill()" title="Copy the shareable skill markdown">Copy</button>
-      <button class="addbtn" id="skillTrustBtn" onclick="trustSkill()" title="Approve an imported skill so agents may use it" style="display:none">Trust</button>
-      <button class="addbtn" onclick="deleteSkillUI()" title="Delete this skill">🗑</button>
-    </div>
-    <div class="muted" id="skillMeta" style="font-size:11px;margin-top:4px"></div>
-    <div class="muted" id="skillResult" style="font-size:12px;margin-top:4px"></div>
-    <pre id="skillView" style="display:none;max-height:200px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap"></pre>
-    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
-      <button class="addbtn" onclick="syncSkills()" title="Git-sync all scopes + write skills into Claude/Codex/Qwen dirs">⇄ Sync &amp; fan-out</button>
-      <button class="addbtn" onclick="loadSkillPrune()" title="Find skills you no longer use">Unused…</button>
-      <select id="publishScope" style="width:auto" title="Scope to browse / publish to">
-        <option value="team">team</option><option value="org">org</option><option value="public">public</option>
-      </select>
-      <button class="addbtn" onclick="browseShared()" title="Browse skills shared to this scope, before importing">Browse shared…</button>
-      <button class="addbtn" onclick="publishSkillUI()" title="Sign and publish the selected skill to the chosen scope">Publish</button>
-    </div>
-    <div id="skillBrowse" style="font-size:11px;margin-top:4px"></div>
-    <div class="muted" id="skillSyncStatus" style="font-size:11px;margin-top:4px"></div>
-    <div id="skillPrune" style="font-size:11px;margin-top:4px"></div></details>
-    <details class="ctx-sec" id="commandsSec"><summary>Commands</summary>
-    <div class="command-shell">
-      <div class="command-head">
-        <div class="command-title"><b>Run command</b><span>Local profile command or folder skill</span></div>
-        <button class="command-import" onclick="importLocalSkills()" title="Bulk-import your local folder skills into the brain library">Import skills</button>
-      </div>
-      <div class="command-grid">
-        <div>
-          <label class="flbl">Command</label>
-          <select id="commandSelect" onchange="updateCommandMeta()"></select>
-        </div>
-        <div id="commandMeta" class="command-meta"></div>
-        <div>
-          <label class="flbl">Arguments</label>
-          <input id="commandArgs" placeholder="Optional arguments" />
-        </div>
-        <div>
-          <label class="flbl">Project</label>
-          <div class="command-project-row">
-            <select id="commandProject" onchange="onCommandProjectChange()">
-              <option value="">Manual path</option>
-            </select>
-            <input id="commandPath" placeholder="Project path under $HOME" value="$HOME" />
-          </div>
-        </div>
-        <div class="command-actions">
-          <button class="command-run" onclick="runCommand()">Run</button>
-          <button class="command-view-btn" onclick="viewCommand()" title="View invoke name, source path, allowed-tools">Inspect</button>
-        </div>
-      </div>
-      <div id="commandResult" class="command-status"></div>
-      <pre id="commandView" class="command-view"></pre>
-    </div></details>
+    <div id="skList" class="sk-list"></div>
+    <div id="skDetail" class="sk-detail" style="display:none"></div>
+    <div class="muted" id="skStatus" style="font-size:11px;margin-top:6px"></div>
+    <div id="skPrune" style="font-size:11px;margin-top:4px"></div>
+    <div style="margin-top:6px"><button class="linklike" onclick="loadSkillPrune()">Find unused skills…</button></div>
+    </details>
     <details class="ctx-sec" id="mcpSec"><summary>MCP Servers</summary>
     <div id="mcp"></div></details>
   </section>
@@ -885,6 +911,50 @@ async function api(path, opts) {
   return r.json();
 }
 function esc(s){ return (s==null?"":String(s)).replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+// Lightweight toast — consistent "it saved" feedback for auto-saving settings.
+function hmToast(message, kind) {
+  let host = document.getElementById("toastHost");
+  if (!host) { host = document.createElement("div"); host.id = "toastHost"; document.body.appendChild(host); }
+  const t = document.createElement("div");
+  t.className = "toast" + (kind ? " " + kind : "");
+  t.textContent = message;
+  host.appendChild(t);
+  requestAnimationFrame(() => t.classList.add("show"));
+  setTimeout(() => { t.classList.remove("show"); setTimeout(() => t.remove(), 220); }, 1800);
+}
+// Header quick theme toggle — flips light/dark and persists (matrix/system stay in Settings).
+async function toggleThemeQuick() {
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  try {
+    models = await api("/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: next }) }) || models;
+    applyTheme(next, !!(models && models.hasWallpaper));
+    const sel = document.getElementById("s_theme"); if (sel) sel.value = next;
+    hmToast("Theme: " + next, "ok");
+  } catch (e) { hmToast("Couldn't change theme", "err"); }
+}
+// Center overview — at-a-glance board state when no task is selected, instead of
+// leaving the widest column empty.
+function renderOverview() {
+  if (state.selected) return;
+  const el = document.getElementById("session");
+  if (!el) return;
+  const statusToLane = {}; LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
+  const counts = {}; LANE_DEFS.forEach(L => counts[L.key] = 0);
+  const filtered = state.selectedProject ? state.tasks.filter(t => t.project === state.selectedProject) : state.tasks;
+  for (const t of filtered) { const k = statusToLane[t.status]; if (k) counts[k]++; }
+  const dirActive = (state.directives || []).filter(d => d.status === "active").length;
+  const appr = (state.approvals || []).length;
+  const card = (label, val, cls) => '<div class="ov-card ' + (cls || "") + '"><div class="ov-num">' + val + '</div><div class="ov-lbl">' + esc(label) + '</div></div>';
+  el.innerHTML = '<div class="overview">'
+    + '<div class="ov-head">Overview' + (state.selectedProject ? " · " + esc(state.selectedProject) : "") + '</div>'
+    + '<div class="ov-grid">' + LANE_DEFS.map(L => card(L.label, counts[L.key])).join("") + '</div>'
+    + '<div class="ov-grid" style="margin-top:8px">'
+    + card("active directives", dirActive)
+    + card("pending approvals", appr, appr ? "warn" : "")
+    + '</div>'
+    + '<div class="ov-hint">Select a task to inspect its session — or ＋ New task to start one.</div>'
+    + '</div>';
+}
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -960,7 +1030,8 @@ async function onSkillFileBrowsed(input) {
   if (!file) return;
   try {
     _skillFileContent = await file.text();
-    document.getElementById('dialogInput').value = file.name;
+    const f = document.getElementById('addUrlFile'); if (f) f.textContent = 'File ready to import: ' + file.name;
+    const u = document.getElementById('addUrl'); if (u) u.value = '';
   } catch (e) { _skillFileContent = null; }
   input.value = '';
 }
@@ -1266,7 +1337,7 @@ async function taskAction(id, action) {
 }
 async function deleteTask(id) {
   await api("/tasks/"+id, { method: "DELETE" });
-  if (state.selected === id) { state.selected = null; document.getElementById("session").innerHTML = '<div class="session-empty">Select a task to inspect its session.</div>'; }
+  if (state.selected === id) { state.selected = null; renderOverview(); }
   refresh();
 }
 async function archiveCompleted() {
@@ -1655,97 +1726,191 @@ function renderConn() {
 }
 
 // --- Skills launcher (dropdown + text input + import) -----------------------
-let _skills = [];
-async function renderSkills() {
+// --- Unified Skills & Commands catalog --------------------------------------
+// One section over two catalogs: brain-library skills (/skills, run via
+// /skills/:name/run) and local profile commands + folder skills (/commands, run
+// via /commands/run). A live-search list + a per-item detail panel replace the
+// old dropdown-plus-button-wall; import paths are unified into the Add modal.
+let _skills = [];        // brain-library skills (/skills)
+let _commands = [];      // local profile commands + folder skills (/commands)
+let _cmdProjects = [];   // cached project list for the command project picker
+let _skSel = '';         // selected catalog key: "lib:<name>" or "local:<invokeName>"
+let _addSrc = 'url';     // active Add-modal source tab
+
+async function renderSkillCatalog() {
   try {
-    const d = await api('/skills');
-    _skills = (d && d.skills) || [];
-    const sel = document.getElementById('skillSelect');
-    if (!sel) return;
-    const prev = sel.value;
-    if (!_skills.length) {
-      sel.innerHTML = '<option value="">(no skills yet)</option>';
-    } else {
-      const opt = s => '<option value="' + esc(s.name) + '">' + esc(s.name)
-        + (s.useCount ? ' (' + s.useCount + '×)' : '') + (s.hasInput ? ' ✎' : '') + '</option>';
-      const scripts = _skills.filter(s => s.kind === 'script');
-      const recipes = _skills.filter(s => s.kind !== 'script');
-      let html = '';
-      if (scripts.length) html += '<optgroup label="⚙ Ops / scripts">' + scripts.map(opt).join('') + '</optgroup>';
-      if (recipes.length) html += '<optgroup label="Skills">' + recipes.map(opt).join('') + '</optgroup>';
-      sel.innerHTML = html;
-    }
-    if (prev) sel.value = prev;
-    updateSkillMeta();
+    const [a, b] = await Promise.all([api('/skills'), api('/commands')]);
+    _skills = (a && a.skills) || [];
+    _commands = (b && b.commands) || [];
   } catch (e) { /* transient */ }
+  renderSkillList();
+  renderSkillDetail();
 }
-function updateSkillMeta() {
-  const sel = document.getElementById('skillSelect');
-  const meta = document.getElementById('skillMeta');
-  const trustBtn = document.getElementById('skillTrustBtn');
-  const view = document.getElementById('skillView');
-  if (view) view.style.display = 'none';
-  if (!sel || !meta) return;
-  const s = _skills.find(x => x.name === sel.value);
-  if (!s) { meta.textContent = ''; if (trustBtn) trustBtn.style.display = 'none'; return; }
-  const untrusted = s.trusted === false;
-  const prov = (s.scope ? '<span style="color:var(--muted)">[' + esc(s.scope) + (s.signed ? ' ✓signed' : '') + ']</span> ' : '');
-  const scan = s.scan === 'block' ? '<span style="color:var(--err,#e5534b)">⛔ scan: blocked (do not run)</span> · '
+function skCatalog() {
+  const lib = _skills.map(s => ({
+    source: 'lib', key: 'lib:' + s.name, name: s.name, description: s.description || '',
+    kind: s.kind, scope: s.scope, signed: s.signed, trusted: s.trusted, scan: s.scan,
+    compat: s.compat, hasInput: s.hasInput, useCount: s.useCount || 0, raw: s,
+  }));
+  const loc = _commands.map(c => ({
+    source: 'local', key: 'local:' + c.invokeName, name: c.displayName || c.invokeName,
+    description: c.description || '', kind: c.kind, invokeName: c.invokeName, useCount: 0, raw: c,
+  }));
+  return lib.concat(loc);
+}
+function skBadges(it) {
+  let b = '<span class="sk-badge src">'
+    + (it.source === 'local' ? (it.kind === 'skill' ? 'folder' : 'command') : (it.kind === 'script' ? 'ops' : 'skill'))
+    + '</span>';
+  if (it.scope) b += '<span class="sk-badge">' + esc(it.scope) + (it.signed ? ' ✓' : '') + '</span>';
+  if (it.scan === 'block') b += '<span class="sk-badge err" title="scan blocked — do not run">⛔</span>';
+  else if (it.scan === 'warn') b += '<span class="sk-badge warn" title="scan: review">⚠</span>';
+  if (it.trusted === false) b += '<span class="sk-badge warn" title="untrusted — trust before agents use it">untrusted</span>';
+  if (it.useCount > 0) b += '<span class="sk-badge">' + it.useCount + '×</span>';
+  return b;
+}
+function renderSkillList() {
+  const box = document.getElementById('skList');
+  if (!box) return;
+  const q = ((document.getElementById('skQuery') || {}).value || '').toLowerCase().trim();
+  let items = skCatalog();
+  if (q) {
+    const terms = q.split(/\s+/).filter(Boolean);
+    items = items.filter(it => {
+      const hay = (it.name + ' ' + it.description + ' ' + (it.kind || '')).toLowerCase();
+      return terms.every(t => hay.includes(t));
+    });
+  }
+  items.sort((x, y) => (y.useCount - x.useCount) || x.name.localeCompare(y.name));
+  if (!items.length) {
+    box.innerHTML = '<div class="muted" style="font-size:11px;padding:8px">No skills or commands' + (q ? ' match.' : ' yet — use ＋ Add to import.') + '</div>';
+    return;
+  }
+  box.innerHTML = items.slice(0, 60).map(it => {
+    const k = it.key.replace(/'/g, '&#39;');
+    return '<div class="sk-row' + (it.key === _skSel ? ' sel' : '') + '" onclick="selectSkill(\'' + k + '\')">'
+      + '<div><b>' + esc(it.name) + '</b>' + skBadges(it) + '</div>'
+      + (it.description ? '<div class="sk-desc">' + esc(it.description) + '</div>' : '')
+      + '</div>';
+  }).join('');
+}
+function selectSkill(key) {
+  _skSel = (_skSel === key) ? '' : key; // click selected row again to collapse
+  renderSkillList();
+  renderSkillDetail();
+}
+function skSelected() { return skCatalog().find(it => it.key === _skSel) || null; }
+function renderSkillDetail() {
+  const d = document.getElementById('skDetail');
+  if (!d) return;
+  const it = skSelected();
+  if (!it) { d.style.display = 'none'; d.innerHTML = ''; return; }
+  d.style.display = '';
+  d.innerHTML = it.source === 'local' ? localDetailHtml(it) : libDetailHtml(it);
+  if (it.source === 'local') populateCommandProjects(_cmdProjects);
+}
+function libMetaLine(s) {
+  const scan = s.scan === 'block' ? '<span style="color:var(--err)">⛔ scan: blocked (do not run)</span> · '
     : s.scan === 'warn' ? '<span style="color:var(--warn)">⚠ scan: review</span> · ' : '';
-  meta.innerHTML = scan
-    + (untrusted ? '<span style="color:var(--warn)">⚠ untrusted (imported — review before agents use it)</span> · ' : '')
-    + prov
+  const untrusted = s.trusted === false ? '<span style="color:var(--warn)">⚠ untrusted (review before agents use it)</span> · ' : '';
+  const prov = s.scope ? '[' + esc(s.scope) + (s.signed ? ' ✓signed' : '') + '] ' : '';
+  return scan + untrusted + prov
     + 'runs on: ' + esc((s.compat && s.compat.length ? s.compat : ['all']).join(', '))
-    + (s.hasInput ? ' · takes input' : '')
-    + (s.description ? ' — ' + esc(s.description) : '');
-  if (trustBtn) trustBtn.style.display = untrusted ? '' : 'none';
+    + (s.hasInput ? ' · takes input' : '');
 }
-function selectedSkill() { const sel = document.getElementById('skillSelect'); return sel && sel.value ? sel.value : ''; }
+function libDetailHtml(it) {
+  const s = it.raw;
+  const untrusted = s.trusted === false;
+  return '<div><b>' + esc(it.name) + '</b>' + skBadges(it) + '</div>'
+    + '<div class="sk-dmeta">' + libMetaLine(s) + '</div>'
+    + (s.hasInput ? '<input id="skInput" placeholder="Text input for the skill (optional)" />' : '')
+    + '<div class="sk-run-row">'
+    + '<button class="create" onclick="runSelectedSkill()">Run</button>'
+    + '<button class="addbtn" onclick="viewSkill()" title="View the skill markdown">View</button>'
+    + '</div>'
+    + '<pre id="skViewPane" style="display:none;max-height:200px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap"></pre>'
+    + '<div class="sk-more">'
+    + '<button class="addbtn" onclick="copySkill()" title="Copy the shareable skill markdown">Copy</button>'
+    + '<select id="skPubScope" style="width:auto" title="Scope to publish to"><option value="personal">personal</option><option value="team" selected>team</option><option value="org">org</option><option value="public">public</option></select>'
+    + '<button class="addbtn" onclick="publishSelected()" title="Sign &amp; publish to the chosen scope">Publish</button>'
+    + (untrusted ? '<button class="addbtn" onclick="trustSelected()" title="Approve so agents may use it">Trust</button>' : '')
+    + '<button class="addbtn" onclick="deleteSelected()" title="Delete this skill">🗑 Delete</button>'
+    + '</div>';
+}
+function localDetailHtml(it) {
+  const c = it.raw;
+  return '<div><b>' + esc(it.name) + '</b>' + skBadges(it) + '</div>'
+    + '<div class="sk-dmeta">' + commandMetaChips(c) + '</div>'
+    + '<input id="cmdArgs" placeholder="Optional arguments" />'
+    + '<div class="sk-proj-row">'
+    + '<select id="commandProject" onchange="onCommandProjectChange()"><option value="">Manual path</option></select>'
+    + '<input id="commandPath" placeholder="Project path under $HOME" value="$HOME" />'
+    + '</div>'
+    + '<div class="sk-run-row">'
+    + '<button class="command-run create" onclick="runSelectedCommand()">Run</button>'
+    + '<button class="addbtn" onclick="inspectCommand()" title="View invoke name, source path, allowed-tools">Inspect</button>'
+    + '</div>'
+    + '<pre id="cmdViewPane" class="command-view" style="margin:6px 0 0"></pre>';
+}
+// --- lib-skill actions (operate on the selected catalog item) ---------------
 async function viewSkill() {
-  const name = selectedSkill(); if (!name) return;
-  const view = document.getElementById('skillView');
+  const it = skSelected(); if (!it || it.source !== 'lib') return;
+  const view = document.getElementById('skViewPane');
   try {
-    const d = await api('/skills/' + encodeURIComponent(name));
+    const d = await api('/skills/' + encodeURIComponent(it.name));
     if (view && d && d.markdown) { view.textContent = d.markdown; view.style.display = 'block'; }
   } catch (e) { /* ignore */ }
 }
-async function exportSkill() {
-  const name = selectedSkill(); if (!name) return;
-  const res = document.getElementById('skillResult');
+async function copySkill() {
+  const it = skSelected(); if (!it || it.source !== 'lib') return;
+  const res = document.getElementById('skStatus');
   try {
-    const d = await api('/skills/' + encodeURIComponent(name));
+    const d = await api('/skills/' + encodeURIComponent(it.name));
     const md = (d && d.markdown) || '';
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(md);
       if (res) res.textContent = 'Copied shareable skill markdown to clipboard.';
     } else {
-      const view = document.getElementById('skillView');
+      const view = document.getElementById('skViewPane');
       if (view) { view.textContent = md; view.style.display = 'block'; }
-      if (res) res.textContent = 'Copy the markdown below to share.';
+      if (res) res.textContent = 'Copy the markdown above to share.';
     }
-  } catch (e) { if (res) res.textContent = 'Export failed.'; }
+  } catch (e) { if (res) res.textContent = 'Copy failed.'; }
 }
-async function trustSkill(force) {
-  const name = selectedSkill(); if (!name) return;
+async function trustSelected(force) {
+  const it = skSelected(); if (!it || it.source !== 'lib') return;
   try {
-    const r = await api('/skills/' + encodeURIComponent(name) + '/trust', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trusted: true, force: force === true }) });
+    const r = await api('/skills/' + encodeURIComponent(it.name) + '/trust', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trusted: true, force: force === true }) });
     if (r && r.requiresForce) {
-      const ok = await hmConfirm('⛔ "' + name + '" scanned as BLOCKED (risky content). Trust it anyway?', { okLabel: 'Trust anyway' });
-      if (ok) return trustSkill(true);
+      const ok = await hmConfirm('⛔ "' + it.name + '" scanned as BLOCKED (risky content). Trust it anyway?', { okLabel: 'Trust anyway' });
+      if (ok) return trustSelected(true);
       return;
     }
-    renderSkills();
+    await renderSkillCatalog();
   } catch (e) { /* ignore */ }
 }
-async function deleteSkillUI() {
-  const name = selectedSkill(); if (!name) return;
-  const ok = await hmConfirm('Delete skill "' + name + '"? This removes the file from the brain.', { okLabel: 'Delete' });
+async function deleteSelected() {
+  const it = skSelected(); if (!it || it.source !== 'lib') return;
+  const ok = await hmConfirm('Delete skill "' + it.name + '"? This removes the file from the brain.', { okLabel: 'Delete' });
   if (!ok) return;
-  try { await api('/skills/' + encodeURIComponent(name), { method: 'DELETE' }); renderSkills(); }
+  try { await api('/skills/' + encodeURIComponent(it.name), { method: 'DELETE' }); _skSel = ''; await renderSkillCatalog(); }
   catch (e) { /* ignore */ }
 }
+async function publishSelected() {
+  const it = skSelected(); if (!it || it.source !== 'lib') return;
+  const scope = (document.getElementById('skPubScope') || {}).value || 'team';
+  const res = document.getElementById('skStatus');
+  const ok = await hmConfirm('Sign and publish "' + it.name + '" to the ' + scope + ' scope? This pushes it to that scope\'s git repo.', { okLabel: 'Publish' });
+  if (!ok) return;
+  if (res) res.textContent = 'Publishing…';
+  try {
+    const r = await api('/skills/' + encodeURIComponent(it.name) + '/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope }) });
+    if (res) res.textContent = r.ok ? ('Published to ' + scope + (r.pushed ? ' (pushed)' : ' (committed)') + ' · signed ' + (r.signedBy || '')) : ('Publish failed: ' + (r.reason || 'error'));
+    await renderSkillCatalog();
+  } catch (e) { if (res) res.textContent = 'Publish failed.'; }
+}
 async function syncSkills() {
-  const el = document.getElementById('skillSyncStatus');
+  const el = document.getElementById('skStatus');
   if (el) el.textContent = 'Syncing…';
   try {
     const r = await api('/skills/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction: 'both' }) });
@@ -1756,7 +1921,7 @@ async function syncSkills() {
       ? ('synced [' + per + '] · fan-out ' + fan)
       : ('no sources configured (skillsSync.sources) · fan-out ' + fan);
     if (el) el.textContent = msg + ((s.errors && s.errors.length) ? ' · ' + s.errors.length + ' error(s)' : '');
-    renderSkills();
+    await renderSkillCatalog();
   } catch (e) { if (el) el.textContent = 'sync failed'; }
 }
 function toggleTaskSkillPicker() {
@@ -1800,51 +1965,79 @@ function pickTaskSkill(name) {
   }
   toggleTaskSkillPicker();
 }
-async function browseShared() {
-  const scope = (document.getElementById('publishScope') || {}).value || 'team';
-  const box = document.getElementById('skillBrowse');
-  if (!box) return;
-  box.textContent = 'Browsing ' + scope + '…';
+// --- run helpers (route by the selected item's source) ----------------------
+async function runSelectedSkill() {
+  const it = skSelected(); if (!it || it.source !== 'lib') return;
+  const input = (document.getElementById('skInput') || {}).value || '';
+  const res = document.getElementById('skStatus');
+  if (res) res.textContent = 'Launching…';
   try {
-    const r = await api('/skills/browse?scope=' + encodeURIComponent(scope));
-    if (!r.configured) { box.innerHTML = '<div class="muted">No ' + esc(scope) + ' source configured (skillsSync.sources).</div>'; return; }
-    const e = r.entries || [];
-    if (!e.length) { box.innerHTML = '<div class="muted">No skills shared to ' + esc(scope) + (r.error ? ' (' + esc(r.error) + ')' : '') + '.</div>'; return; }
-    box.innerHTML = '<div class="muted" style="margin:2px 0">Shared to ' + esc(scope) + ' (' + e.length + '):</div>' + e.map(function(x) {
-      var badges = (x.kind === 'script' ? '<span class="muted">[cmd]</span> ' : '')
-        + (x.signed ? '<span class="muted" title="signed">✓</span> ' : '')
-        + (x.scanVerdict === 'block' ? '<span style="color:var(--err,#e5534b)" title="scan blocked">⛔</span> ' : (x.scanVerdict === 'warn' ? '<span style="color:var(--warn)" title="scan: review">⚠</span> ' : ''));
-      var action = x.inLibrary ? '<span class="muted">in library</span>'
-        : '<button class="addbtn" onclick="importSharedSkill(\'' + esc(x.scope) + '\',\'' + esc(x.name).replace(/'/g, '&#39;') + '\')">Import</button>';
-      return '<div class="row" style="gap:6px;align-items:center"><span style="flex:1"><b>' + esc(x.name) + '</b> ' + badges + '<span class="muted">— ' + esc(x.description || '') + '</span></span>' + action + '</div>';
-    }).join('');
-  } catch (err) { box.innerHTML = '<div class="muted">browse failed</div>'; }
+    const d = await api('/skills/' + encodeURIComponent(it.name) + '/run',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input }) });
+    if (d && d.kind === 'script' && d.runId) {
+      if (res) res.textContent = 'Running script… (deterministic)';
+      pollScriptRun(d.runId);
+    } else if (d && d.task) {
+      if (res) res.textContent = 'Launched skill task ' + (d.task._id || d.task.id || '') + ' — see the board.';
+      refresh();
+    } else if (res) { res.textContent = (d && d.error) || 'Launched.'; }
+  } catch (e) { if (res) res.textContent = 'Error launching skill.'; }
 }
-async function importSharedSkill(scope, name) {
+async function pollScriptRun(runId) {
+  const view = document.getElementById('skViewPane');
+  const res = document.getElementById('skStatus');
+  for (let i = 0; i < 900; i++) { // up to ~15 min for long builds/releases
+    try {
+      const d = await api('/skills/runs/' + encodeURIComponent(runId));
+      if (view && d) { view.textContent = d.log || ''; view.style.display = 'block'; view.scrollTop = view.scrollHeight; }
+      if (d && d.status === 'done') { if (res) res.textContent = 'Script finished (exit ' + d.exitCode + ').'; return; }
+    } catch (e) { /* transient */ }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+}
+async function runSelectedCommand() {
+  const it = skSelected(); if (!it || it.source !== 'local') return;
+  const c = it.raw;
+  const args = (document.getElementById('cmdArgs') || {}).value || '';
+  const projectPath = ((document.getElementById('commandPath') || {}).value || '$HOME').trim() || '$HOME';
+  const res = document.getElementById('skStatus');
+  if (res) res.textContent = 'Launching /' + c.invokeName + '…';
   try {
-    const r = await api('/skills/import-remote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: scope, name: name }) });
-    if (r && r.ok && r.trusted === false) {
-      await hmAlert('Imported "' + name + '" — landed UNTRUSTED' + (r.scanVerdict === 'block' ? ' (⛔ scan blocked)' : '') + '. Review it in the Skills list and Trust to activate.');
-    }
-    browseShared();
-    renderSkills();
-  } catch (e) { /* ignore */ }
+    const d = await api('/commands/run',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: c.invokeName, args: args, projectPath: projectPath }) });
+    if (d && d.task) { if (res) res.textContent = 'Launched /' + c.invokeName + ' — see the board.'; refresh(); }
+    else if (res) { res.textContent = (d && d.error) || 'Launched.'; }
+  } catch (e) { if (res) res.textContent = 'Error launching command.'; }
 }
-async function publishSkillUI() {
-  const name = selectedSkill(); if (!name) return;
-  const scope = (document.getElementById('publishScope') || {}).value || 'team';
-  const el = document.getElementById('skillSyncStatus');
-  const ok = await hmConfirm('Sign and publish "' + name + '" to the ' + scope + ' scope? This pushes it to that scope\'s git repo.', { okLabel: 'Publish' });
-  if (!ok) return;
-  if (el) el.textContent = 'Publishing…';
-  try {
-    const r = await api('/skills/' + encodeURIComponent(name) + '/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope }) });
-    if (el) el.textContent = r.ok ? ('published to ' + scope + (r.pushed ? ' (pushed)' : ' (committed)') + ' · signed ' + (r.signedBy||'')) : ('publish failed: ' + (r.reason || 'error'));
-    renderSkills();
-  } catch (e) { if (el) el.textContent = 'publish failed'; }
+function inspectCommand() {
+  const it = skSelected(); if (!it || it.source !== 'local') return;
+  const c = it.raw;
+  const view = document.getElementById('cmdViewPane');
+  if (!view) return;
+  view.textContent = 'invoke: /' + c.invokeName + '\nkind: ' + c.kind
+    + '\ncatalog: local profile catalog'
+    + '\nsource: ' + c.sourcePath
+    + (c.allowedTools ? '\nallowed-tools: ' + c.allowedTools : '')
+    + (c.model ? '\nmodel: ' + c.model : '');
+  view.style.display = 'block';
 }
+// Meta chips for a local command (reused by the detail panel).
+function commandMetaChips(c) {
+  if (!c) return '<span class="command-chip">No command selected</span>';
+  const chips = [
+    ["primary", c.kind === "skill" ? "folder skill" : "slash command"],
+    ["", "/" + c.invokeName],
+  ];
+  if (c.model) chips.push(["", "model " + c.model]);
+  if (c.argumentHint) chips.push(["", "args " + c.argumentHint]);
+  if (c.hasBundledFiles) chips.push(["", String(c.bundledFileCount || 0) + " bundled"]);
+  if (c.description) chips.push(["", c.description]);
+  return chips.map(([cls, text]) => '<span class="command-chip' + (cls ? ' ' + cls : '')
+    + '" title="' + esc(text) + '">' + esc(text) + '</span>').join("");
+}
+// --- prune (unused skills) --------------------------------------------------
 async function loadSkillPrune() {
-  const box = document.getElementById('skillPrune');
+  const box = document.getElementById('skPrune');
   if (!box) return;
   box.textContent = 'Checking…';
   try {
@@ -1861,156 +2054,84 @@ async function loadSkillPrune() {
 async function archiveSkill(name) {
   const ok = await hmConfirm('Archive (delete) skill "' + name + '"? Removes it from the brain library and harness dirs on next sync.', { okLabel: 'Archive' });
   if (!ok) return;
-  try { await api('/skills/' + encodeURIComponent(name), { method: 'DELETE' }); loadSkillPrune(); renderSkills(); }
+  try { await api('/skills/' + encodeURIComponent(name), { method: 'DELETE' }); loadSkillPrune(); await renderSkillCatalog(); }
   catch (e) { /* ignore */ }
 }
-async function runSkill() {
-  const sel = document.getElementById('skillSelect');
-  if (!sel || !sel.value) return;
-  const input = (document.getElementById('skillInput') || {}).value || '';
-  const res = document.getElementById('skillResult');
-  if (res) res.textContent = 'Launching…';
-  try {
-    const d = await api('/skills/' + encodeURIComponent(sel.value) + '/run',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input }) });
-    if (d && d.kind === 'script' && d.runId) {
-      if (res) res.textContent = 'Running script… (deterministic)';
-      pollScriptRun(d.runId);
-    } else if (d && d.task) {
-      if (res) res.textContent = 'Launched skill task ' + (d.task._id || d.task.id || '') + ' — see the board.';
-      refresh();
-    } else if (res) { res.textContent = (d && d.error) || 'Launched.'; }
-  } catch (e) { if (res) res.textContent = 'Error launching skill.'; }
-}
-async function pollScriptRun(runId) {
-  const view = document.getElementById('skillView');
-  const res = document.getElementById('skillResult');
-  for (let i = 0; i < 900; i++) { // up to ~15 min for long builds/releases
-    try {
-      const d = await api('/skills/runs/' + encodeURIComponent(runId));
-      if (view && d) { view.textContent = d.log || ''; view.style.display = 'block'; view.scrollTop = view.scrollHeight; }
-      if (d && d.status === 'done') { if (res) res.textContent = 'Script finished (exit ' + d.exitCode + ').'; return; }
-    } catch (e) { /* transient */ }
-    await new Promise(r => setTimeout(r, 1000));
-  }
-}
-async function importSkillPrompt() {
+// --- Add skills modal (unified import: URL/file · shared scope · local) ------
+function openAddSkills() {
   _skillFileContent = null;
-  const val = await hmPrompt('Skill URL (raw markdown / SKILL.md) or Browse to a local file:', '', { browse: true });
-  if (!val && !_skillFileContent) return;
-  const res = document.getElementById('skillResult');
-  if (res) res.textContent = 'Importing…';
+  const f = document.getElementById('addUrlFile'); if (f) f.textContent = '';
+  const u = document.getElementById('addUrl'); if (u) u.value = '';
+  const st = document.getElementById('addStatus'); if (st) st.textContent = '';
+  const sh = document.getElementById('addShared'); if (sh) sh.innerHTML = '';
+  addTab('url');
+  document.getElementById('addSkillOverlay').classList.add('open');
+}
+function closeAddSkills() { document.getElementById('addSkillOverlay').classList.remove('open'); }
+function addTab(src) {
+  _addSrc = src;
+  ['url', 'shared', 'local'].forEach(s => {
+    const tab = document.getElementById('addTab_' + s); if (tab) tab.classList.toggle('active', s === src);
+    const pane = document.getElementById('addPane_' + s); if (pane) pane.style.display = (s === src) ? '' : 'none';
+  });
+}
+async function doImportUrl() {
+  const url = ((document.getElementById('addUrl') || {}).value || '').trim();
+  if (!url && !_skillFileContent) return;
+  const st = document.getElementById('addStatus'); if (st) st.textContent = 'Importing…';
   try {
-    const body = _skillFileContent ? { content: _skillFileContent } : { url: val };
+    const body = _skillFileContent ? { content: _skillFileContent } : { url };
     _skillFileContent = null;
-    const d = await api('/skills/import',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await api('/skills/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const v = d && d.scan && d.scan.verdict;
-    const scanNote = v === 'block' ? ' — ⛔ scan BLOCKED (' + ((d.scan.findings || []).map(f => f.rule).join(', ')) + '); review before trusting'
+    const note = v === 'block' ? ' — ⛔ scan BLOCKED (' + ((d.scan.findings || []).map(f => f.rule).join(', ')) + '); review before trusting'
       : v === 'warn' ? ' — ⚠ scan flagged: ' + ((d.scan.findings || []).map(f => f.rule).join(', '))
       : ' (scan: clean)';
-    if (res) res.innerHTML = 'Imported (untrusted): ' + esc((d && d.name) || '?') + esc(scanNote);
-    renderSkills();
-  } catch (e) { if (res) res.textContent = 'Import failed.'; }
+    if (st) st.innerHTML = 'Imported (untrusted): ' + esc((d && d.name) || '?') + esc(note);
+    const ff = document.getElementById('addUrlFile'); if (ff) ff.textContent = '';
+    await renderSkillCatalog();
+  } catch (e) { if (st) st.textContent = 'Import failed.'; }
 }
-
-// --- Commands launcher (local profile slash commands + folder skills) --------
-let _commands = [];
-async function renderCommands() {
+async function doBrowseShared() {
+  const scope = (document.getElementById('addScope') || {}).value || 'team';
+  const box = document.getElementById('addShared');
+  if (!box) return;
+  box.textContent = 'Browsing ' + scope + '…';
   try {
-    const d = await api('/commands');
-    _commands = (d && d.commands) || [];
-    const sel = document.getElementById('commandSelect');
-    if (!sel) return;
-    const prev = sel.value;
-    if (!_commands.length) {
-      sel.innerHTML = '<option value="">(no local commands found)</option>';
-    } else {
-      const opt = c => '<option value="' + esc(c.invokeName) + '">' + esc(c.displayName)
-        + (c.hasBundledFiles ? ' ⊕' : '') + '</option>';
-      const cmds = _commands.filter(c => c.kind === 'command');
-      const skills = _commands.filter(c => c.kind === 'skill');
-      let html = '';
-      if (cmds.length) html += '<optgroup label="Commands">' + cmds.map(opt).join('') + '</optgroup>';
-      if (skills.length) html += '<optgroup label="Skills">' + skills.map(opt).join('') + '</optgroup>';
-      sel.innerHTML = html;
+    const r = await api('/skills/browse?scope=' + encodeURIComponent(scope));
+    if (!r.configured) { box.innerHTML = '<div class="muted">No ' + esc(scope) + ' source configured (skillsSync.sources).</div>'; return; }
+    const e = r.entries || [];
+    if (!e.length) { box.innerHTML = '<div class="muted">No skills shared to ' + esc(scope) + (r.error ? ' (' + esc(r.error) + ')' : '') + '.</div>'; return; }
+    box.innerHTML = '<div class="muted" style="margin:2px 0">Shared to ' + esc(scope) + ' (' + e.length + '):</div>' + e.map(function(x) {
+      var badges = (x.kind === 'script' ? '<span class="sk-badge src">ops</span> ' : '')
+        + (x.signed ? '<span class="sk-badge" title="signed">✓</span> ' : '')
+        + (x.scanVerdict === 'block' ? '<span class="sk-badge err" title="scan blocked">⛔</span> ' : (x.scanVerdict === 'warn' ? '<span class="sk-badge warn" title="scan: review">⚠</span> ' : ''));
+      var action = x.inLibrary ? '<span class="muted">in library</span>'
+        : '<button class="addbtn" onclick="importSharedSkill(\'' + esc(x.scope) + '\',\'' + esc(x.name).replace(/'/g, '&#39;') + '\')">Import</button>';
+      return '<div class="row" style="gap:6px;align-items:center;padding:3px 0"><span style="flex:1"><b>' + esc(x.name) + '</b> ' + badges + '<span class="muted">— ' + esc(x.description || '') + '</span></span>' + action + '</div>';
+    }).join('');
+  } catch (err) { box.innerHTML = '<div class="muted">browse failed</div>'; }
+}
+async function importSharedSkill(scope, name) {
+  const st = document.getElementById('addStatus');
+  try {
+    const r = await api('/skills/import-remote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: scope, name: name }) });
+    if (r && r.ok && r.trusted === false && st) {
+      st.textContent = 'Imported "' + name + '" — UNTRUSTED' + (r.scanVerdict === 'block' ? ' (⛔ scan blocked)' : '') + '. Trust it in the list to activate.';
     }
-    if (prev) sel.value = prev;
-    updateCommandMeta();
-  } catch (e) { /* transient */ }
+    doBrowseShared();
+    await renderSkillCatalog();
+  } catch (e) { /* ignore */ }
 }
-function selectedCommand() {
-  const sel = document.getElementById('commandSelect');
-  return sel ? _commands.find(c => c.invokeName === sel.value) : null;
-}
-function commandMetaChips(c) {
-  if (!c) return '<span class="command-chip">No command selected</span>';
-  const chips = [
-    ["primary", c.kind === "skill" ? "folder skill" : "slash command"],
-    ["", "/" + c.invokeName],
-  ];
-  if (c.model) chips.push(["", "model " + c.model]);
-  if (c.argumentHint) chips.push(["", "args " + c.argumentHint]);
-  if (c.hasBundledFiles) chips.push(["", String(c.bundledFileCount || 0) + " bundled"]);
-  if (c.description) chips.push(["", c.description]);
-  return chips.map(([cls, text]) => '<span class="command-chip' + (cls ? ' ' + cls : '')
-    + '" title="' + esc(text) + '">' + esc(text) + '</span>').join("");
-}
-function renderCommandStatus(kind, text) {
-  const res = document.getElementById('commandResult');
-  if (!res) return;
-  res.className = 'command-status show' + (kind ? ' ' + kind : '');
-  res.textContent = text || '';
-}
-function clearCommandStatus() {
-  const res = document.getElementById('commandResult');
-  if (!res) return;
-  res.className = 'command-status';
-  res.textContent = '';
-}
-function updateCommandMeta() {
-  const meta = document.getElementById('commandMeta');
-  const view = document.getElementById('commandView');
-  if (view) view.style.display = 'none';
-  if (!meta) return;
-  const c = selectedCommand();
-  meta.innerHTML = commandMetaChips(c);
-  clearCommandStatus();
-}
-function viewCommand() {
-  const c = selectedCommand();
-  const view = document.getElementById('commandView');
-  if (!c || !view) return;
-  view.textContent = 'invoke: /' + c.invokeName + '\nkind: ' + c.kind
-    + '\ncatalog: local profile catalog'
-    + '\nsource: ' + c.sourcePath
-    + (c.allowedTools ? '\nallowed-tools: ' + c.allowedTools : '')
-    + (c.model ? '\nmodel: ' + c.model : '');
-  view.style.display = 'block';
-}
-async function runCommand() {
-  const c = selectedCommand();
-  if (!c) return;
-  const args = (document.getElementById('commandArgs') || {}).value || '';
-  const projectPath = ((document.getElementById('commandPath') || {}).value || '$HOME').trim() || '$HOME';
-  renderCommandStatus('busy', 'Launching /' + c.invokeName + '...');
+async function doImportLocal() {
+  const st = document.getElementById('addStatus'); if (st) st.textContent = 'Importing local skills…';
   try {
-    const d = await api('/commands/run',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: c.invokeName, args: args, projectPath: projectPath }) });
-    if (d && d.task) { renderCommandStatus('ok', 'Launched /' + c.invokeName + ' — see the board.'); refresh(); }
-    else { renderCommandStatus(d && d.error ? 'err' : 'ok', (d && d.error) || 'Launched.'); }
-  } catch (e) { renderCommandStatus('err', 'Error launching command.'); }
-}
-async function importLocalSkills() {
-  renderCommandStatus('busy', 'Importing local skills...');
-  try {
-    const d = await api('/skills/import-local',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-    renderCommandStatus('ok', 'Imported ' + (d.imported || 0) + ', refined ' + (d.refined || 0)
+    const d = await api('/skills/import-local', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    if (st) st.textContent = 'Imported ' + (d.imported || 0) + ', refined ' + (d.refined || 0)
       + ', skipped ' + (d.skipped || 0)
-      + (d.withAssets ? ' · ' + d.withAssets + ' had bundled assets (text only)' : '') + '.');
-    renderSkills();
-  } catch (e) { renderCommandStatus('err', 'Import failed.'); }
+      + (d.withAssets ? ' · ' + d.withAssets + ' had bundled assets (text only)' : '') + '.';
+    await renderSkillCatalog();
+  } catch (e) { if (st) st.textContent = 'Import failed.'; }
 }
 
 // --- MCP servers (status + restart) -----------------------------------------
@@ -2368,9 +2489,12 @@ async function refresh() {
     ]);
     state.tasks = tasks; state.directives = directives; state.conn = conn; state.metrics = metrics; state.onboarding = onboarding;
     state.approvals = (appr && appr.approvals) || [];
-    renderBoard(); renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
-    renderApprovals(); renderSkills(); renderCommands(); renderMcp(); renderObservability();
-    if (state.selected) selectTask(state.selected);
+    renderBoard();
+    // Center column: drive it right after the board so a later panel error can't
+    // leave it stale. selectTask re-fetches the open task; otherwise show overview.
+    if (state.selected) selectTask(state.selected); else renderOverview();
+    renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
+    renderApprovals(); renderSkillCatalog(); renderMcp(); renderObservability();
   } catch (e) { /* transient */ }
   // Check for updates on every tick (cheap — daemon caches ~60s). Tied to
   // refresh so it fires on SSE activity too, not just a slow background timer
@@ -2812,6 +2936,7 @@ function syncCommandProject(name, path) {
 }
 
 function populateCommandProjects(projects) {
+  if (projects && projects.length) _cmdProjects = projects; // cache for the detail panel
   const sel = document.getElementById("commandProject");
   if (!sel) return;
   const pathInput = document.getElementById("commandPath");
@@ -2954,6 +3079,7 @@ function renderAttachChips() {
 
 function openSettings() {
   document.getElementById("settingsOverlay").classList.add("open");
+  switchSettingsTab("models"); // land on the most-used config, not About
   if (!models) return;
   const sd = document.getElementById("s_default");
   sd.innerHTML = models.available.map(m => '<option value="'+esc(m.modelId)+'">'+esc(m.name)+'</option>').join("");
@@ -3025,6 +3151,7 @@ async function saveRoleModel(role, modelId) {
   await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ roleModel: { role, modelId } }) });
   await loadModels();   // refreshes the global models object (incl. roleModels)
   renderRoleModels();
+  hmToast(role + " model saved", "ok");
 }
 function onOpacityInput(v) {
   document.getElementById("s_wp_opacity_val").textContent = v + "%";
@@ -3378,6 +3505,7 @@ async function saveTheme() {
   // The panel-translucency slider applies to the Matrix rain too, so reveal it here.
   const hasWp = !!(models && models.hasWallpaper);
   document.getElementById("wallpaper_opacity_row").style.display = (hasWp || theme === "matrix") ? "" : "none";
+  hmToast("Theme: " + theme, "ok");
 }
 async function saveAppIconChoice() {
   const appIconChoice = document.getElementById("s_app_icon").value;
@@ -3472,16 +3600,19 @@ async function saveDefault() {
   const modelId = document.getElementById("s_default").value;
   await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ defaultModel: modelId }) });
   await loadModels();
+  hmToast("Default model saved", "ok");
 }
 async function saveFrontierProvider() {
   const frontierProvider = document.getElementById("s_frontier_provider").value;
   await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ frontierProvider }) });
   await loadModels();
+  hmToast("Frontier provider saved", "ok");
 }
 async function saveEndpoint() {
   const localEndpoint = document.getElementById("s_endpoint").value.trim();
   await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ localEndpoint }) });
   await loadModels();
+  hmToast("Endpoint saved", "ok");
 }
 
 async function createTask() {
