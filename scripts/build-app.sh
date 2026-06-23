@@ -18,6 +18,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 NOTARY_PROFILE="hivematrix"
+NOTARY_APPLE_ID="cassio.irv@gmail.com"
+NOTARY_TEAM_ID="8B3CHTY93V"   # Developer ID Application: Irven Cassio
+NOTARY_ARGS=(
+  --apple-id "$NOTARY_APPLE_ID"
+  --team-id "$NOTARY_TEAM_ID"
+  --keychain-profile "$NOTARY_PROFILE"
+)
 # shellcheck disable=SC1090
 source "$HOME/.cargo/env"
 
@@ -65,7 +72,7 @@ else
 fi
 
 echo "==> Submitting to Apple notary service (a few minutes)…"
-xcrun notarytool submit "$TARGET" --keychain-profile "$NOTARY_PROFILE" --wait
+xcrun notarytool submit "$TARGET" "${NOTARY_ARGS[@]}" --wait
 
 echo "==> Stapling…"
 # Staple the real bundle (.app), and the .dmg too if present.

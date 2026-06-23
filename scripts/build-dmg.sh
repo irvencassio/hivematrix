@@ -16,6 +16,14 @@ cd "$(dirname "$0")/.."
 
 VERSION="${1:-0.1.0}"
 IDENTITY="Developer ID Application: Irven Cassio (8B3CHTY93V)"
+NOTARY_APPLE_ID="cassio.irv@gmail.com"
+NOTARY_TEAM_ID="8B3CHTY93V"   # Developer ID Application: Irven Cassio
+NOTARY_PROFILE="hivematrix"
+NOTARY_ARGS=(
+  --apple-id "$NOTARY_APPLE_ID"
+  --team-id "$NOTARY_TEAM_ID"
+  --keychain-profile "$NOTARY_PROFILE"
+)
 APP="src-tauri/target/release/bundle/macos/HiveMatrix.app"
 STAGE="$(mktemp -d)/dmg"
 OUT="src-tauri/target/release/bundle/HiveMatrix-${VERSION}.dmg"
@@ -35,7 +43,7 @@ echo "==> Signing the .dmg"
 codesign --force --sign "$IDENTITY" --timestamp "$OUT"
 
 echo "==> Notarizing (waits for Apple)"
-xcrun notarytool submit "$OUT" --keychain-profile hivematrix --wait
+xcrun notarytool submit "$OUT" "${NOTARY_ARGS[@]}" --wait
 
 echo "==> Stapling + verifying"
 xcrun stapler staple "$OUT"
