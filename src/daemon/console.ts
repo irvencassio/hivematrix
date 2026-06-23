@@ -84,6 +84,16 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .col.context { border-left: 1px solid var(--border); background: var(--panel); }
   main.ctx-collapsed { grid-template-columns: 300px 1fr; }
   main.ctx-collapsed .col.context { display: none; }
+  /* Narrow screens (remote / iOS webview / small window): stack the three columns
+     into one document-flow column instead of crushing the center. */
+  @media (max-width: 760px) {
+    body { height: auto; overflow: auto; }
+    main, main.ctx-collapsed { grid-template-columns: 1fr; height: auto; }
+    .col { height: auto; max-height: none; }
+    .col.board { border-right: 0; border-bottom: 1px solid var(--border); }
+    .col.context { border-left: 0; border-top: 1px solid var(--border); }
+    .session { min-height: 180px; }
+  }
   .ctx-sec { margin: 0; }
   .ctx-sec > summary { cursor: pointer; list-style: none; font-size: 14px; font-weight: 600; margin: 20px 0 6px; color: var(--text); }
   .ctx-sec > summary::-webkit-details-marker { display: none; }
