@@ -56,6 +56,48 @@ node publish.mjs out/howto.mp4 --meta out/meta.json --privacy unlisted
 2. Create an OAuth client ID, type **Desktop app**; download the JSON.
 3. Save to `~/.hivematrix/youtube/client_secret.json`. First `publish.mjs` run authorizes in the browser; the token caches for next time. `analytics.mjs` needs read access — if the cached token is upload-only it re-authorizes once.
 
+Compatibility commands from the setup runbook are also available:
+
+```sh
+node youtube-auth.mjs
+node youtube-upload.mjs out/howto.mp4 \
+  --title "HiveMatrix demo" \
+  --description "A short HiveMatrix update." \
+  --tags "AI,HiveMatrix" \
+  --privacy unlisted
+```
+
+`youtube-upload.mjs` delegates to `publish.mjs`, so uploads are still written to
+the local ledger for later analytics.
+
+## AI news avatar pipeline
+
+The daily AI-news path is:
+
+```sh
+# Verify headline/script generation without HeyGen spend or YouTube upload.
+node publish-ai-news.mjs --dry-run
+
+# Full run: HN/NewsAPI headlines → presenter script → HeyGen avatar → YouTube.
+node publish-ai-news.mjs --privacy unlisted
+```
+
+`news-script.mjs` works without a news key by reading Hacker News top stories and
+filtering for AI terms. If `NEWSAPI_KEY` or `~/.hivematrix/config.json`
+`newsapi.apiKey` exists, `--source auto` can use NewsAPI. If `ANTHROPIC_API_KEY`
+or `providers.anthropic.apiKey` exists, `--writer auto` asks Claude for the
+script; otherwise it writes a deterministic presenter script.
+
+Useful controls:
+
+| flag | meaning |
+|---|---|
+| `--dry-run` | stop after writing script/title/description/tags/headlines |
+| `--skip-render` | reuse the date-stamped MP4 already in `video/out` |
+| `--skip-upload` | render the avatar MP4 but do not upload |
+| `--source hn\|newsapi\|auto` | choose headline source |
+| `--writer template\|anthropic\|auto` | choose script writer |
+
 ## Measuring what works (P4.8)
 
 Tag each upload with how it was made, then compare:

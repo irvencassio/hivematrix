@@ -3,6 +3,7 @@
  *
  *   node publish.mjs <video.mp4> --meta out/meta.json [--privacy unlisted|private|public]
  *   node publish.mjs <video.mp4> --title "..." --description "..." --tags "a,b,c" [--kind presenter]
+ *   node publish.mjs <video.mp4> --title-file title.txt --description-file desc.txt --tags-file tags.txt
  *
  * --kind (faceless|screen|presenter|avatar) records the presentation style in
  * the upload ledger so analytics.mjs can compare them later (P4.8).
@@ -24,6 +25,16 @@ function arg(name, def = null) {
   return i >= 0 ? process.argv[i + 1] : def;
 }
 
+function fileArg(name) {
+  const path = arg(name);
+  if (!path) return null;
+  if (!existsSync(path)) {
+    console.error(`${name} file not found: ${path}`);
+    process.exit(2);
+  }
+  return readFileSync(path, "utf-8").trim();
+}
+
 async function main() {
   const video = process.argv[2];
   if (!video || video.startsWith("--") || !existsSync(video)) {
@@ -31,7 +42,9 @@ async function main() {
     process.exit(2);
   }
 
-  let title = arg("--title"), description = arg("--description", ""), tags = (arg("--tags", "") || "").split(",").filter(Boolean);
+  let title = arg("--title") || fileArg("--title-file");
+  let description = arg("--description") ?? fileArg("--description-file") ?? "";
+  let tags = (arg("--tags") ?? fileArg("--tags-file") ?? "").split(/[,\n]/).map((t) => t.trim()).filter(Boolean);
   const metaFile = arg("--meta");
   if (metaFile && existsSync(metaFile)) {
     const m = JSON.parse(readFileSync(metaFile, "utf-8"));
