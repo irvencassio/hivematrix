@@ -97,12 +97,12 @@ test("main screen usage shows no dollar amounts (counts/tokens only)", () => {
   assert.match(js, /pill\.textContent = "⚡ " \+ \(u\.taskCount/, "pill fallback is task count");
 });
 
-test("observability cost is opt-in (off by default), not on the main board", () => {
+test("observability does not surface cost (Claude-only, removed)", () => {
   const js = extractScript(CONSOLE_HTML);
-  // Cost figures only render when the _obsCost toggle is on.
-  assert.match(js, /let _obsCost = false/, "cost defaults off");
-  assert.match(js, /_obsCost && /, "cost rendering gated behind the toggle");
-  assert.match(js, /hm_obs_cost/, "toggle persisted");
+  // Cost is reported only by Claude (not Codex/local), so it was removed from the UI.
+  assert.doesNotMatch(js, /_obsCost/, "cost toggle state removed");
+  assert.doesNotMatch(js, /hm_obs_cost/, "cost persistence removed");
+  assert.doesNotMatch(CONSOLE_HTML, /obs-costtgl/, "cost toggle control removed");
 });
 
 test("needs_input reply window stands out and uses a clear 'Reply' button", () => {
@@ -150,8 +150,8 @@ test("settings has an About tab with version/build/date and update status", () =
 
 test("settings tabs are in a defined order ending with About", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /\["about", "features", "general", "models", "bees", "remote"\]/);
-  assert.match(CONSOLE_HTML, /id="tab-about"[^>]*>About<\/div><div class="tab" id="tab-features"[^>]*>Features<\/div><div class="tab" id="tab-general"[^>]*>Personalization<\/div><div class="tab" id="tab-models"[^>]*>Models<\/div><div class="tab" id="tab-bees"[^>]*>Bees<\/div><div class="tab" id="tab-remote"[^>]*>Remote<\/div>/);
+  assert.match(js, /\["about", "features", "general", "models", "observability", "bees", "remote"\]/);
+  assert.match(CONSOLE_HTML, /id="tab-about"[^>]*>About<\/div><div class="tab" id="tab-features"[^>]*>Features<\/div><div class="tab" id="tab-general"[^>]*>Personalization<\/div><div class="tab" id="tab-models"[^>]*>Models<\/div><div class="tab" id="tab-observability"[^>]*>Observability<\/div><div class="tab" id="tab-bees"[^>]*>Bees<\/div><div class="tab" id="tab-remote"[^>]*>Remote<\/div>/);
   assert.doesNotMatch(CONSOLE_HTML, /id="tab-projects"/, "Projects is no longer a Settings tab");
 });
 
@@ -202,19 +202,19 @@ test("Mixed-mode role models keep Thinking/Coding visible when the frontier prov
 
 test("right-panel sections are collapsible <details> with persisted open state", () => {
   // Each context section is a <details class="ctx-sec"> so the long panel can be tidied.
-  for (const id of ["healthSec", "usageSec", "obsSec", "connSec", "dirSec", "skillsSec", "mcpSec"]) {
+  for (const id of ["modelsSec", "obsSec", "connSec", "dirSec", "skillsSec", "mcpSec"]) {
     assert.match(CONSOLE_HTML, new RegExp('<details class="ctx-sec" id="' + id + '"'), id + " is a collapsible section");
   }
   // Actionable sections default open; info-heavy ones default collapsed.
   assert.match(CONSOLE_HTML, /id="connSec" open/);
   assert.match(CONSOLE_HTML, /id="skillsSec" open/);
-  assert.doesNotMatch(CONSOLE_HTML, /id="usageSec" open/, "info sections default collapsed");
+  assert.doesNotMatch(CONSOLE_HTML, /id="obsSec" open/, "info sections default collapsed");
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /function wireCtxSections\(/);
   assert.match(js, /hm_sec_/, "per-section open state persisted");
   assert.match(js, /wireCtxSections\(\);/, "wired on init");
   // In-summary controls don't toggle the section.
-  assert.match(CONSOLE_HTML, /event\.stopPropagation\(\);refreshUsageNow\(\)/);
+  assert.match(CONSOLE_HTML, /event\.stopPropagation\(\);refreshModelsNow\(\)/);
 });
 
 test("console surfaces observability: per-task strip + totals across providers", () => {
@@ -379,10 +379,10 @@ test("frontier usage panel renders a separate Codex usage section", () => {
   assert.match(js, /renderCodexBar/);
 });
 
-test("frontier usage panel has a manual refresh that bypasses cached auth state", () => {
+test("models panel has a manual refresh that bypasses cached auth state", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(CONSOLE_HTML, /usageRefresh/);
-  assert.match(js, /function refreshUsageNow/);
+  assert.match(js, /function refreshModelsNow/);
   assert.match(js, /checkUsage\(true\)/);
   assert.match(js, /\/usage\?refresh=1/);
 });
