@@ -42,7 +42,11 @@ SYSTEM_PROMPT = (
     "questions — just answer directly and do NOT call any tool.\n"
     "If the user asks you to remind them of something, follow up on something, add "
     "a task, or create a note, reply with exactly: 'Got it — I've added that to "
-    "your HiveMatrix tasks.' Do not try to set the reminder yourself."
+    "your HiveMatrix tasks.' Do not try to set the reminder yourself.\n"
+    "If the user asks you to research something, look something up, search the web, "
+    "fetch the news, or check the app's repo, build, or pull requests — work you "
+    "can't do live — do NOT refuse and do NOT say you lack access; HiveMatrix will "
+    "pick it up. Just say you're looking into it."
 )
 
 # Spoken replies are 1–2 short sentences, so cap generation tight. This also bounds
@@ -89,6 +93,75 @@ _TASK_TRIGGER_RE = re.compile(
 def wants_task(transcript: str) -> bool:
     """True when the user's spoken words explicitly request a task or reminder."""
     return bool(_TASK_TRIGGER_RE.search(transcript or ""))
+
+
+# A canned "I can't do that" refusal from the local model. The small voice model
+# answers fast Q&A + email but can't research, browse, or query the repo/build,
+# so for those asks it tends to decline ("I cannot perform external research",
+# "I don't have access to external tools"). HiveMatrix's full agent CAN do them,
+# so a refusal is our cue to hand off — and to speak an acknowledgment, never the
+# refusal itself. Two checks: a refusal OPENER (refusals lead with it) plus a few
+# distinctive phrases that signal a refusal anywhere in the reply.
+# NOTE: a bare leading "I can't"/"I cannot" is NOT a refusal opener on its own
+# ("I can't wait to help!") — those are caught below only when a capability verb
+# follows. The opener covers the unambiguous declines.
+_REFUSAL_OPENER_RE = re.compile(
+    r"^\W*(i (?:am not able to|am unable to|don'?t have|do not have)|"
+    r"unfortunately,?\s+i|i'?m (?:not able|unable|afraid)|"
+    r"as an?\s+(?:ai|language model|assistant))",
+    re.I,
+)
+_REFUSAL_ANYWHERE_RE = re.compile(
+    r"\b(i don'?t have access to|i don'?t have (?:real-?time|the ability)|"
+    r"i can'?t (?:access|create|perform|look\s+up|check|browse|search|fetch|retrieve)|"
+    r"i cannot (?:access|perform|browse|search|look\s+up|fetch|retrieve)|"
+    r"you'?ll need to (?:check|do|compile|provide|look))\b",
+    re.I,
+)
+
+
+def is_refusal(reply: str) -> bool:
+    """True when the spoken reply is a canned 'I can't do that' refusal."""
+    r = reply or ""
+    return bool(_REFUSAL_OPENER_RE.search(r) or _REFUSAL_ANYWHERE_RE.search(r))
+
+
+# The user's words asking for work the local voice model can't do live — research,
+# web/news lookups, repo/build/PR queries. Checked against the TRANSCRIPT so the
+# handoff fires even if the model confidently (and wrongly) answers instead of
+# refusing. HiveMatrix's full agent has web search, brain search, and code-graph.
+_RESEARCH_TRIGGER_RE = re.compile(
+    r"\b("
+    r"research|investigate|look\s+(?:up|into)|dig\s+into|find\s+out|"
+    r"search\s+(?:for|online|the\s+web)|google\s+(?:it|for|this|that)?|"
+    r"latest\s+news|today'?s\s+news|news\s+(?:items?|today|stories|headlines)|"
+    r"pull\s+request|pr\s+(?:number|request)|last\s+build|latest\s+build|"
+    r"give\s+(?:me\s+)?an?\s+assessment|assess\s+(?:whether|if|the|how)"
+    r")\b",
+    re.I,
+)
+
+
+def needs_research(transcript: str) -> bool:
+    """True when the user asks for research / a lookup the local model can't do."""
+    return bool(_RESEARCH_TRIGGER_RE.search(transcript or ""))
+
+
+# Spoken acknowledgment for a handoff — short, honest (the escalated task runs the
+# full agent in the background), and mirrors the reminder acknowledgment's tone.
+ESCALATION_ACK = "Got it — I'm looking into that now and I've added it to your HiveMatrix tasks."
+
+
+def resolve_escalation(transcript: str, reply: str) -> tuple[bool, str]:
+    """Decide whether a spoken turn escalates to a full HiveMatrix agent task, and
+    pick the reply to speak. A handoff fires when the model couldn't answer
+    (is_uncertain / is_refusal) or the user asked for capability the local model
+    lacks (needs_research) — in those cases we speak ESCALATION_ACK instead of the
+    model's refusal. An explicit reminder/task ask (wants_task) still escalates but
+    keeps the model's own acknowledgment. Returns (escalated, spoken_reply)."""
+    handoff = is_uncertain(reply) or is_refusal(reply) or needs_research(transcript)
+    escalated = handoff or wants_task(transcript)
+    return escalated, (ESCALATION_ACK if handoff else reply)
 
 # Qwen 3.6 is a reasoning model. In LM Studio its reasoning lands in a separate
 # `reasoning_content` field and the spoken answer in `content` — but the reasoning

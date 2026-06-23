@@ -13,7 +13,7 @@ import os
 import subprocess
 import sys
 
-from llm import LocalLLM
+from llm import LocalLLM, resolve_escalation
 from stt import transcribe
 from tts import synthesize
 
@@ -31,6 +31,8 @@ def main() -> int:
         return 0
 
     reply = LocalLLM().respond_with_tools(transcript)
+    # Match turn_server: speak an acknowledgment (not a refusal) when escalating.
+    escalated, reply = resolve_escalation(transcript, reply)
     if reply.strip():
         wav = synthesize(reply, quality="fast", lang=a.lang)
         ext = os.path.splitext(a.out)[1].lower()
@@ -44,7 +46,7 @@ def main() -> int:
             except OSError:
                 pass
 
-    print(json.dumps({"transcript": transcript, "reply": reply}))
+    print(json.dumps({"transcript": transcript, "reply": reply, "escalated": escalated}))
     return 0
 
 

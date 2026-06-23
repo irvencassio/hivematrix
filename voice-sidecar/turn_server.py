@@ -21,7 +21,7 @@ import tempfile
 from aiohttp import web
 
 from stt import transcribe
-from llm import LocalLLM, is_uncertain, wants_task
+from llm import LocalLLM, resolve_escalation
 from tts import synthesize
 
 
@@ -36,7 +36,9 @@ def _one_turn(audio_b64: str, lang: str) -> dict:
         if not transcript.strip():
             return {"transcript": "", "reply": "", "audioBase64": "", "escalated": False}
         reply = LocalLLM().respond_with_tools(transcript)
-        escalated = is_uncertain(reply) or wants_task(transcript)
+        # Hand off to a full HiveMatrix agent task when the local model can't do the
+        # ask (research, web/repo lookups) — and speak an acknowledgment, not a refusal.
+        escalated, reply = resolve_escalation(transcript, reply)
         audio_out = ""
         if reply.strip():
             wav = synthesize(reply, quality="fast", lang=lang)
