@@ -351,6 +351,51 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET/POST /settings/briefing — proactive morning briefing (enabled + hour).
+      if (req.method === "GET" && urlPath === "/settings/briefing") {
+        const { getMorningBriefingConfig } = await import("@/lib/briefing/morning-briefing");
+        const { getApnsConfig, listApnsDevices } = await import("@/lib/notify/apns");
+        json(res, 200, { briefing: getMorningBriefingConfig(), apnsConfigured: getApnsConfig() !== null, devices: listApnsDevices().length });
+        return;
+      }
+      if (req.method === "POST" && urlPath === "/settings/briefing") {
+        const { setMorningBriefingConfig } = await import("@/lib/briefing/morning-briefing");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const patch: Record<string, unknown> = {};
+        if ("enabled" in body) patch.enabled = body.enabled === true;
+        if (typeof body.hour === "number") patch.hour = body.hour;
+        json(res, 200, { briefing: setMorningBriefingConfig(patch) });
+        return;
+      }
+      // POST /briefing/test — deliver the briefing right now (verify push wiring).
+      if (req.method === "POST" && urlPath === "/briefing/test") {
+        const { runBriefingNow } = await import("@/lib/briefing/morning-briefing");
+        json(res, 200, await runBriefingNow());
+        return;
+      }
+
+      // POST /devices/register — iOS app registers its APNs device token.
+      if (req.method === "POST" && urlPath === "/devices/register") {
+        const { registerApnsDevice } = await import("@/lib/notify/apns");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const token = typeof body.token === "string" ? body.token.trim() : "";
+        if (!token) { json(res, 400, { error: "token required" }); return; }
+        const env = body.env === "production" || body.env === "sandbox" ? body.env : undefined;
+        const devices = registerApnsDevice({ token, env, platform: typeof body.platform === "string" ? body.platform : "ios" });
+        json(res, 200, { devices: devices.length });
+        return;
+      }
+      // POST /devices/unregister — drop a device token (logout / token rotation).
+      if (req.method === "POST" && urlPath === "/devices/unregister") {
+        const { unregisterApnsDevice } = await import("@/lib/notify/apns");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const token = typeof body.token === "string" ? body.token.trim() : "";
+        if (!token) { json(res, 400, { error: "token required" }); return; }
+        const devices = unregisterApnsDevice(token);
+        json(res, 200, { devices: devices.length });
+        return;
+      }
+
       // GET /ado — Azure DevOps status (flag on? org configured? auth ready?).
       if (req.method === "GET" && urlPath === "/ado") {
         const { adoStatus } = await import("@/lib/ado/mcp");

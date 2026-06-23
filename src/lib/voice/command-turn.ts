@@ -50,6 +50,26 @@ export interface CommandTurnDeps {
 
 const contextStore = new RollingCommandContextStore();
 
+/**
+ * Gather the operator standup and render it to one spoken/notifiable string.
+ * Shared by the "good morning" voice command and the scheduled morning push so
+ * both read the same data and phrasing.
+ */
+export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<string> {
+  const [approvals, directives, failedTasks, usage] = await Promise.all([
+    approvalQueue(deps),
+    listDirectives(deps),
+    listFailedTasks(deps),
+    getUsage(deps),
+  ]);
+  return buildVoiceBriefing({
+    approvals: approvals.map((item) => ({ title: item.title, kind: item.kind })),
+    failedTasks: failedTasks.map((task) => ({ title: task.title })),
+    directives: directives.map((d) => ({ goal: d.goal, status: d.status })),
+    usage,
+  });
+}
+
 /** Resolve a detected command to a spoken answer, performing any action. */
 export async function commandTurnOverride(transcript: string, deps: CommandTurnDeps = {}): Promise<CommandTurnOverride | null> {
   const intent = detectCommandIntent(transcript || "");
@@ -103,18 +123,7 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
       return r(directivesReply(directives.map((d) => ({ goal: d.goal, status: d.status }))));
     }
     case "briefing": {
-      const [approvals, directives, failedTasks, usage] = await Promise.all([
-        approvalQueue(deps),
-        listDirectives(deps),
-        listFailedTasks(deps),
-        getUsage(deps),
-      ]);
-      return r(buildVoiceBriefing({
-        approvals: approvals.map((item) => ({ title: item.title, kind: item.kind })),
-        failedTasks: failedTasks.map((task) => ({ title: task.title })),
-        directives: directives.map((d) => ({ goal: d.goal, status: d.status })),
-        usage,
-      }));
+      return r(await composeBriefing(deps));
     }
     case "usage": {
       return r(usageReply(await getUsage(deps)));

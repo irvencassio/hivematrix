@@ -110,6 +110,12 @@ async function main(): Promise<void> {
   const { startNotifyLoop } = await import("@/lib/notify/notify-loop");
   startNotifyLoop();
 
+  // Proactive morning briefing: once a day at the configured hour, push the
+  // operator standup (overnight runs, pending approvals, failures) to registered
+  // iOS devices via APNs, falling back to notify(). Self-gates on config.
+  const { startMorningBriefingLoop } = await import("@/lib/briefing/morning-briefing");
+  startMorningBriefingLoop();
+
   // ManagerBee heartbeat: fold scheduler diagnostics + directive/run state +
   // pending escalations into a control-plane report, cached + broadcast.
   const { startManagerBeeHeartbeat } = await import("@/lib/managerbee/heartbeat");

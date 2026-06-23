@@ -3457,7 +3457,7 @@ function switchSettingsTab(tab) {
 async function renderFeatures() {
   const el = document.getElementById("s_features");
   el.innerHTML = '<div class="muted">Loading…</div>';
-  const [r, auto] = await Promise.all([api("/settings/features"), api("/settings/voice/auto-approval")]);
+  const [r, auto, brief] = await Promise.all([api("/settings/features"), api("/settings/voice/auto-approval"), api("/settings/briefing")]);
   const features = (r && r.features) || [];
   if (!features.length) { el.innerHTML = '<div class="muted">No optional features.</div>'; return; }
   const featureRows = features.map(f => {
@@ -3480,7 +3480,31 @@ async function renderFeatures() {
     + '<div class="muted" style="font-size:11px;margin-top:2px">Allows Talk to approve non-content directive checkpoints. Content, external, stuck, and tool approvals stay manual.</div></div>'
     + '<button class="reply-toggle' + (checkpointAuto ? ' active' : '') + '" onclick="toggleAutoApproval(' + (!checkpointAuto) + ')">' + (checkpointAuto ? 'On' : 'Off') + '</button>'
     + '</div>';
-  el.innerHTML = featureRows + autoRow;
+  const b = (brief && brief.briefing) || {};
+  const briefOn = b.enabled === true;
+  const briefHour = typeof b.hour === 'number' ? b.hour : 8;
+  const apnsNote = (brief && brief.apnsConfigured)
+    ? ((brief.devices || 0) + ' device' + (brief.devices === 1 ? '' : 's') + ' registered')
+    : 'APNs not set up — falls back to iMessage/Telegram/email';
+  const hourOpts = Array.from({length:24}, (_,h) => '<option value="'+h+'"'+(h===briefHour?' selected':'')+'>'+String(h).padStart(2,'0')+':00</option>').join('');
+  const briefRow = '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
+    + '<div style="flex:1"><div style="font-weight:600">Morning briefing</div>'
+    + '<div class="muted" style="font-size:11px;margin-top:2px">Pushes a daily standup (pending approvals, failures, active directives, usage) to your phone. ' + esc(apnsNote) + '.</div></div>'
+    + '<div class="row" style="gap:8px;align-items:center">'
+    + '<select onchange="setBriefingHour(this.value)" ' + (briefOn ? '' : 'disabled ') + 'style="padding:4px 6px">' + hourOpts + '</select>'
+    + '<button class="reply-toggle' + (briefOn ? ' active' : '') + '" onclick="toggleBriefing(' + (!briefOn) + ')">' + (briefOn ? 'On' : 'Off') + '</button>'
+    + '</div></div>';
+  el.innerHTML = featureRows + autoRow + briefRow;
+}
+
+async function toggleBriefing(enabled) {
+  await api("/settings/briefing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) });
+  renderFeatures();
+}
+
+async function setBriefingHour(hour) {
+  await api("/settings/briefing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hour: Number(hour) }) });
+  renderFeatures();
 }
 
 async function toggleFeature(key, enabled) {
