@@ -11,10 +11,13 @@
  */
 
 import { spawn, type ChildProcess } from "child_process";
+import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
+import { randomBytes } from "crypto";
 import { buildCliPath } from "@/lib/config/binary-detection";
 import { voiceRuntime } from "./runtime";
 import { voiceLlmEnv } from "./llm-env";
+import { voiceOutputDir } from "./tts";
 
 let _proc: ChildProcess | null = null;
 let _port: number | null = null;
@@ -95,6 +98,22 @@ export async function relaySynth(text: string, lang: string): Promise<string> {
   const data = (await r.json()) as { audioBase64?: string; error?: string };
   if (!r.ok) throw new Error(data.error || `synth worker ${r.status}`);
   return data.audioBase64 || "";
+}
+
+/**
+ * Synthesize `text` in the warm live voice (Kokoro) and write it to a .m4a under
+ * the voice uploads dir, returning the file path — for callers that attach a file
+ * (iMessage voice notes) or read it back. Throws if no audio was produced (e.g.
+ * the voice runtime is unavailable) so callers fall back to text.
+ */
+export async function synthesizeLiveVoice(text: string, lang = "en"): Promise<string> {
+  const b64 = await relaySynth(text, lang);
+  if (!b64) throw new Error("live voice produced no audio");
+  const dir = voiceOutputDir();
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `voice-live-${randomBytes(6).toString("hex")}.m4a`);
+  writeFileSync(path, Buffer.from(b64, "base64"));
+  return path;
 }
 
 /** Stop the turn worker (e.g. when the Voice feature is disabled). */

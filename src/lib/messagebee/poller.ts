@@ -96,16 +96,17 @@ async function notifyCompletedResults(): Promise<void> {
     if (!result) continue;
 
     // Voice reply: if the sender asked for a spoken result, synth the summary to
-    // a voice note (.m4a) and send that instead of text. Falls back to text on
-    // any TTS failure so a result is never dropped. (P1.7 — bootstrap `say`
-    // engine; cloned voice swaps in behind synthesizeSpeech.)
+    // a voice note (.m4a) and send that instead of text. Uses the same warm live
+    // voice (Kokoro) as the iOS Talk surface so HiveMatrix sounds consistent —
+    // the cloned persona is reserved for produced narration. Falls back to text
+    // on any TTS failure so a result is never dropped.
     let body = result;
     let attachments: string[] = [];
     if (wantsVoiceReply(typeof task.description === "string" ? task.description : "")) {
       try {
-        const { synthesizeSpeech } = await import("@/lib/voice/tts");
-        const audio = await synthesizeSpeech(result.slice(0, 1500));
-        attachments = [audio.path];
+        const { synthesizeLiveVoice } = await import("@/lib/voice/turn-server");
+        const path = await synthesizeLiveVoice(result.slice(0, 1500));
+        attachments = [path];
         body = ""; // send a clean voice note, no caption
       } catch (err) {
         recordError(`voice reply TTS failed, falling back to text: ${err instanceof Error ? err.message : String(err)}`);

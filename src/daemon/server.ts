@@ -1508,19 +1508,8 @@ export function createDaemonServer() {
           // Re-voice deterministic overrides in the SAME warm live voice (Kokoro)
           // as the conversational reply — one consistent Talk voice. The cloned
           // persona is reserved for produced narration, not the Talk surface.
-          const { relaySynth } = await import("@/lib/voice/turn-server");
-          const speak = async (replyText: string): Promise<string> => {
-            const b64 = await relaySynth(replyText, lang);
-            if (!b64) return "";
-            const { voiceOutputDir } = await import("@/lib/voice/tts");
-            const { mkdirSync, writeFileSync } = await import("fs");
-            const { randomBytes } = await import("crypto");
-            const dir = voiceOutputDir();
-            mkdirSync(dir, { recursive: true });
-            const p = join(dir, `voice-talk-${randomBytes(6).toString("hex")}.m4a`);
-            writeFileSync(p, Buffer.from(b64, "base64"));
-            return p;
-          };
+          const { synthesizeLiveVoice } = await import("@/lib/voice/turn-server");
+          const speak = (replyText: string): Promise<string> => synthesizeLiveVoice(replyText, lang);
           // Voice skill picker: answer "what skills do I have / use the X skill"
           // deterministically, overriding the LLM reply.
           const { skillTurnOverride } = await import("@/lib/voice/skill-turn");
