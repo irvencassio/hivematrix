@@ -239,13 +239,34 @@ export async function resolveVideoDraft(id: string, reply: string): Promise<{ de
   return { decision, reply: decisionReply(decision, draft.title) };
 }
 
+/** Render config (config.json `heygen`): which HeyGen path Approve renders through.
+ *   renderMode "agent" (default) → Video Agent (/v3/video-agents): slides, on-screen
+ *     annotations, B-roll, transitions — the creative look. Uses `styleId`.
+ *   renderMode "avatar"          → basic talking avatar (/v2/video/generate): 1080p,
+ *     lip-synced to the cloned voice, no slides.
+ * Pinning these here is how the creative output is MAINTAINED — every Approve renders
+ * the same recipe, not a one-off CLI run. */
+function renderConfig(): { mode: string; styleId: string } {
+  try {
+    const cfg = JSON.parse(readFileSync(join(homedir(), ".hivematrix", "config.json"), "utf-8"));
+    const h = (cfg?.heygen ?? {}) as { renderMode?: string; styleId?: string };
+    return { mode: (h.renderMode || "agent").trim(), styleId: (h.styleId || "").trim() };
+  } catch { return { mode: "agent", styleId: "" }; }
+}
+
 async function renderAndPublish(id: string): Promise<void> {
   const draft = getDraft(id);
   if (!draft) return;
   const dir = videoProjectDir();
   if (!dir) throw new Error("video project not found");
-  // Render the approved script to an avatar MP4 (HeyGen, ~$0.05/sec).
-  await runNode(dir, ["make-avatar.mjs", draft.paths.script, draft.paths.video]);
+  // Render the approved script to a HeyGen MP4 (~$0.05/sec). Default = Video Agent
+  // (creative: slides + annotations + B-roll); config can pin "avatar" for the
+  // plain cloned-voice path.
+  const rc = renderConfig();
+  const renderArgs = rc.mode === "agent"
+    ? ["make-avatar.mjs", draft.paths.script, draft.paths.video, "--mode", "agent", ...(rc.styleId ? ["--style", rc.styleId] : [])]
+    : ["make-avatar.mjs", draft.paths.script, draft.paths.video];
+  await runNode(dir, renderArgs);
   // Publish to YouTube and capture the URL from stdout.
   const { stdout } = await runNode(dir, [
     "publish.mjs", draft.paths.video,

@@ -88,6 +88,8 @@ export function buildVideoAgentPrompt({ agentPrompt, prompt, scriptText, creativ
     "Create a polished presenter video in HeyGen's native creative style.",
     "Use confident pacing, clean visuals, animated text cards, varied scene layouts, smooth transitions, and a portal-quality edit.",
     "Add short section cards for key ideas and end with a crisp closing CTA when appropriate.",
+    // Accuracy guard: the script is the source of truth (this is often a news brief).
+    "Do NOT invent statistics, percentages, numbers, dates, or chart data. Any on-screen figure or chart must come directly from the script text; if the script gives no number for a point, use a qualitative text card instead of a fabricated stat.",
   ];
   if (brief) parts.push(`Creative brief:\n${brief}`);
   if (script) parts.push(`Script:\n${script}`);
