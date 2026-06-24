@@ -376,6 +376,13 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /releases — browsable changelog (version · date · one-line note).
+      if (req.method === "GET" && urlPath === "/releases") {
+        const { CHANGELOG } = await import("@/lib/version/changelog");
+        json(res, 200, { releases: CHANGELOG });
+        return;
+      }
+
       // POST /devices/register — iOS app registers its APNs device token.
       if (req.method === "POST" && urlPath === "/devices/register") {
         const { registerApnsDevice } = await import("@/lib/notify/apns");

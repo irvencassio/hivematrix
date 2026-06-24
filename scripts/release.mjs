@@ -76,6 +76,26 @@ const nextVerTs = verTs.replace(/(VERSION\s*=\s*)["'][^"']*["']/, `$1"${version}
 if (nextVerTs === verTs) die("could not bump VERSION in src/lib/version.ts");
 writeFileSync(verTsPath, nextVerTs);
 
+// Release notes: prepend this release to the changelog (the in-app Release notes
+// view reads changelog.ts via GET /releases; CHANGELOG.md is the human/GitHub copy).
+const today = new Date().toISOString().slice(0, 10);
+const noteEsc = note.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+const clogTsPath = join(repo, "src", "lib", "version", "changelog.ts");
+const clogTs = readFileSync(clogTsPath, "utf-8");
+const tsEntry = `  { version: "${version}", date: "${today}", note: "${noteEsc}" },\n`;
+const nextClogTs = clogTs.replace(/(export const CHANGELOG: ReleaseNote\[\] = \[\n)/, `$1${tsEntry}`);
+if (nextClogTs === clogTs) die("could not prepend to changelog.ts");
+writeFileSync(clogTsPath, nextClogTs);
+
+const clogMdPath = join(repo, "CHANGELOG.md");
+if (existsSync(clogMdPath)) {
+  const md = readFileSync(clogMdPath, "utf-8");
+  const mdEntry = `## v${version} — ${today}\n\n${note || "_Maintenance release._"}\n\n`;
+  // Insert after the intro paragraph (first blank line following the title block).
+  const marker = md.indexOf("\n## ");
+  writeFileSync(clogMdPath, marker === -1 ? md.trimEnd() + "\n\n" + mdEntry : md.slice(0, marker + 1) + mdEntry + md.slice(marker + 1));
+}
+
 // ── 2. Sanity gates before publishing anything ──────────────────────────────
 step(2, "typecheck + scope-wall + tests");
 sh("npx tsc --noEmit");

@@ -1,0 +1,81 @@
+/**
+ * Release notes — the browsable changelog surfaced in the console (Release notes
+ * view) and GET /releases. SOURCE OF TRUTH for both; CHANGELOG.md is generated
+ * from this by scripts/gen-changelog.mjs. scripts/release.mjs prepends a new
+ * entry on each release. Newest first.
+ */
+
+export interface ReleaseNote {
+  version: string;
+  date: string; // YYYY-MM-DD
+  note: string; // one-line summary ('' = maintenance release)
+}
+
+export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.79", date: "2026-06-24", note: "console: edit drafted scripts in place (Edit the draft button), persistent reply-box resize, copy from Result" },
+  { version: "0.1.78", date: "2026-06-24", note: "writer-role model selection (frontier or lock-free) + retire weekly-news as a feature (video factory runs via a directive)" },
+  { version: "0.1.77", date: "2026-06-24", note: "video: AI-news script now written by the local model (was a canned template); full script shown at the review checkpoint; agents must review-before-render" },
+  { version: "0.1.76", date: "2026-06-24", note: "voice: escalated-task results now return to the open Talk session" },
+  { version: "0.1.75", date: "2026-06-23", note: "fix: voice message/text/email requests now escalate to a real task and get sent" },
+  { version: "0.1.74", date: "2026-06-23", note: "consistent live Kokoro voice across Talk + iMessage (warm /synth endpoint); cloned voice reserved for produced narration" },
+  { version: "0.1.73", date: "2026-06-23", note: "voice escalation + video review hardening + iOS demo fixes" },
+  { version: "0.1.72", date: "2026-06-23", note: "" },
+  { version: "0.1.71", date: "2026-06-23", note: "" },
+  { version: "0.1.70", date: "2026-06-23", note: "" },
+  { version: "0.1.69", date: "2026-06-23", note: "" },
+  { version: "0.1.68", date: "2026-06-23", note: "" },
+  { version: "0.1.67", date: "2026-06-23", note: "" },
+  { version: "0.1.66", date: "2026-06-23", note: "" },
+  { version: "0.1.65", date: "2026-06-23", note: "" },
+  { version: "0.1.63", date: "2026-06-22", note: "voice command layer + console UI overhaul + iOS voice redesign" },
+  { version: "0.1.62", date: "2026-06-22", note: "" },
+  { version: "0.1.61", date: "2026-06-22", note: "" },
+  { version: "0.1.60", date: "2026-06-22", note: "" },
+  { version: "0.1.59", date: "2026-06-22", note: "" },
+  { version: "0.1.58", date: "2026-06-22", note: "Voice: ask VoiceBee to remind you or add a task and it lands in HiveMatrix; unanswered questions escalate too" },
+  { version: "0.1.57", date: "2026-06-21", note: "Voice: ask VoiceBee to read an email, list senders, or summarize your inbox — not just count" },
+  { version: "0.1.56", date: "2026-06-20", note: "Voice: consistent ~1s spoken turns (email-tool gate) + Kokoro works out-of-the-box for new installs (espeak via pip)" },
+  { version: "0.1.55", date: "2026-06-20", note: "Voice: kill spurious email-tool stalls — every spoken turn is now consistently fast (~1s)" },
+  { version: "0.1.54", date: "2026-06-20", note: "Kokoro fast TTS for interactive Talk — ~1s voice turns (was several seconds on the cloned voice)" },
+  { version: "0.1.53", date: "2026-06-20", note: "Persistent push-to-talk voice worker — STT+TTS stay warm across turns (no per-turn model reload)" },
+  { version: "0.1.52", date: "2026-06-20", note: "grouped new-task model selector" },
+  { version: "0.1.51", date: "2026-06-20", note: "two-tier Rapid-MLX routing, coding-tier task selection, reasoning status" },
+  { version: "0.1.50", date: "2026-06-20", note: "Rapid-MLX local-engine + live status in Settings" },
+  { version: "0.1.49", date: "2026-06-20", note: "voice TTS cache+warmup, MailBee voice tool, selectable app icon" },
+  { version: "0.1.48", date: "2026-06-19", note: "voice TURN, Matrix theme, hex-flower icon, opacity slider" },
+  { version: "0.1.47", date: "2026-06-19", note: "role-model-overrides" },
+  { version: "0.1.46", date: "2026-06-19", note: "command layout hotfix" },
+  { version: "0.1.45", date: "2026-06-19", note: "attachment provider parity" },
+  { version: "0.1.44", date: "2026-06-19", note: "console input cleanup" },
+  { version: "0.1.43", date: "2026-06-17", note: "" },
+  { version: "0.1.42", date: "2026-06-17", note: "" },
+  { version: "0.1.41", date: "2026-06-17", note: "" },
+  { version: "0.1.40", date: "2026-06-17", note: "" },
+  { version: "0.1.39", date: "2026-06-16", note: "command launcher provenance UI" },
+  { version: "0.1.38", date: "2026-06-16", note: "feat: render result tables and Mermaid" },
+  { version: "0.1.37", date: "2026-06-16", note: "fix: daemon native runtime ABI" },
+  { version: "0.1.36", date: "2026-06-16", note: "fix: command launcher owns project context" },
+  { version: "0.1.35", date: "2026-06-16", note: "fix: command launches use selected home project path" },
+  { version: "0.1.34", date: "2026-06-16", note: "feat: /uploads endpoint (iOS attachments transfer real bytes to host); steer any in-progress task, not just Codex" },
+  { version: "0.1.33", date: "2026-06-15", note: "fix: MailBee never auto-replies a Gmail/MCP auth dead-end; task tells agent to attach files via Apple Mail send path, not Gmail" },
+  { version: "0.1.32", date: "2026-06-15", note: "fix: strip NUL bytes from spawn argv so AGENTS.md/CLAUDE.md with stray nulls can't crash task launch" },
+  { version: "0.1.31", date: "2026-06-15", note: "local commands & skills catalog" },
+  { version: "0.1.30", date: "2026-06-15", note: "" },
+  { version: "0.1.29", date: "2026-06-15", note: "" },
+  { version: "0.1.28", date: "2026-06-15", note: "" },
+  { version: "0.1.27", date: "2026-06-15", note: "" },
+  { version: "0.1.26", date: "2026-06-14", note: "" },
+  { version: "0.1.25", date: "2026-06-14", note: "" },
+  { version: "0.1.24", date: "2026-06-14", note: "" },
+  { version: "0.1.23", date: "2026-06-14", note: "" },
+  { version: "0.1.22", date: "2026-06-14", note: "" },
+  { version: "0.1.21", date: "2026-06-14", note: "" },
+  { version: "0.1.20", date: "2026-06-14", note: "" },
+  { version: "0.1.19", date: "2026-06-14", note: "" },
+  { version: "0.1.18", date: "2026-06-14", note: "collapsible console + ops script skills" },
+  { version: "0.1.17", date: "2026-06-13", note: "Claude auth login" },
+  { version: "0.1.16", date: "2026-06-13", note: "interaction fixes" },
+  { version: "0.1.15", date: "2026-06-13", note: "usage refresh" },
+  { version: "0.1.14", date: "2026-06-13", note: "focus and MailBee fixes" },
+  { version: "0.1.13", date: "2026-06-13", note: "updater fixes" },
+];

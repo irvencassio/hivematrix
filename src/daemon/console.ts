@@ -682,6 +682,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="row" style="margin-top:12px;gap:6px">
         <button class="create" onclick="checkUpdate(true)">↻ Check for updates</button>
         <button class="sm" id="ab_update_btn" style="display:none" onclick="applyUpdate()">⬆ Install update</button>
+        <button class="sm" onclick="openReleases()">📝 Release notes</button>
       </div>
       <div class="vinfo" id="s_version">…</div>
       <label class="flbl" style="margin-top:18px">Setup</label>
@@ -724,6 +725,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <button class="addbtn" id="dialogBrowse" style="display:none;margin-right:auto" onclick="document.getElementById('skillFileInput').click()">Browse…</button>
       <button class="ok" id="dialogOk" onclick="dialogResolve(true)">OK</button>
     </div>
+  </div>
+</div>
+
+<!-- Release notes — browsable changelog (GET /releases). -->
+<div class="overlay" id="releasesOverlay">
+  <div class="modal">
+    <h1>📝 Release notes<span class="x" onclick="closeReleases()">✕</span></h1>
+    <div id="releasesBody"><div class="muted">Loading…</div></div>
   </div>
 </div>
 
@@ -3425,6 +3434,24 @@ function openSettings() {
   loadTunnel();
 }
 function closeSettings() { document.getElementById("settingsOverlay").classList.remove("open"); }
+
+async function openReleases() {
+  const body = document.getElementById("releasesBody");
+  document.getElementById("releasesOverlay").classList.add("open");
+  body.innerHTML = '<div class="muted">Loading…</div>';
+  const r = await api("/releases");
+  const list = (r && r.releases) || [];
+  if (!list.length) { body.innerHTML = '<div class="muted">No release notes yet.</div>'; return; }
+  body.innerHTML = list.map(function(rel) {
+    const note = rel.note ? esc(rel.note) : '<span class="muted">Maintenance release.</span>';
+    return '<div style="padding:10px 0;border-top:1px solid var(--border)">'
+      + '<div class="row" style="justify-content:space-between;align-items:baseline;gap:10px">'
+      + '<span style="font-weight:600">v' + esc(rel.version) + '</span>'
+      + '<span class="muted" style="font-size:11px">' + esc(rel.date || '') + '</span></div>'
+      + '<div style="font-size:13px;margin-top:2px">' + note + '</div></div>';
+  }).join("");
+}
+function closeReleases() { document.getElementById("releasesOverlay").classList.remove("open"); }
 
 // Mixed-mode role models: thinking → frontier-premium, coding → frontier,
 // operational → local. Shown only when a Mixed posture is possible (local +
