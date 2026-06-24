@@ -3489,7 +3489,7 @@ async function renderFeatures() {
   const hourOpts = Array.from({length:24}, (_,h) => '<option value="'+h+'"'+(h===briefHour?' selected':'')+'>'+String(h).padStart(2,'0')+':00</option>').join('');
   const briefRow = '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
     + '<div style="flex:1"><div style="font-weight:600">Morning briefing</div>'
-    + '<div class="muted" style="font-size:11px;margin-top:2px">Pushes a daily standup (pending approvals, failures, active directives, usage) to your phone. ' + esc(apnsNote) + '.</div></div>'
+    + '<div class="muted" style="font-size:11px;margin-top:2px">Pushes a daily standup (pending approvals, failures, active directives, usage) to your phone. ' + esc(apnsNote) + '. <button class="linklike" onclick="sendTestBriefing(this)">Send test</button></div></div>'
     + '<div class="row" style="gap:8px;align-items:center">'
     + '<select onchange="setBriefingHour(this.value)" ' + (briefOn ? '' : 'disabled ') + 'style="padding:4px 6px">' + hourOpts + '</select>'
     + '<button class="reply-toggle' + (briefOn ? ' active' : '') + '" onclick="toggleBriefing(' + (!briefOn) + ')">' + (briefOn ? 'On' : 'Off') + '</button>'
@@ -3540,6 +3540,21 @@ async function toggleBriefing(enabled) {
 async function setBriefingHour(hour) {
   await api("/settings/briefing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hour: Number(hour) }) });
   renderFeatures();
+}
+
+async function sendTestBriefing(btn) {
+  if (btn) btn.disabled = true;
+  hmToast('Sending a test briefing…');
+  try {
+    const r = await api("/briefing/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+    if (r && r.pushed > 0) hmToast('Pushed to ' + r.pushed + ' device' + (r.pushed === 1 ? '' : 's') + ' via APNs.', 'ok');
+    else if (r && r.fellBack) hmToast('No device registered — sent via iMessage/Telegram/email instead.', 'ok');
+    else hmToast('Briefing built but not delivered (no push, no fallback channel).', 'err');
+  } catch (e) {
+    hmToast('Test briefing failed.', 'err');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function toggleFeature(key, enabled) {
