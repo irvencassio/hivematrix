@@ -4,7 +4,8 @@
 synth — NO per-turn model reload (the old turn_cli.py spawned fresh every turn,
 reloading both models). The daemon's /voice/turn relays one turn here.
 
-    POST /turn  {"audioBase64": "...", "lang": "en"}
+    POST /turn  {"audioBase64": "...", "lang": "en"}   # recorded audio → server STT
+    POST /turn  {"text": "...", "lang": "en"}          # on-device transcript, skips STT
       -> {"transcript": "...", "reply": "...", "audioBase64": "<m4a b64>"}
     GET  /health -> {"ok": true}
 
@@ -25,14 +26,18 @@ from llm import LocalLLM, resolve_escalation
 from tts import synthesize
 
 
-def _one_turn(audio_b64: str, lang: str) -> dict:
-    """Blocking: run one full turn against the warm models."""
+def _one_turn(audio_b64: str, lang: str, text: str | None = None) -> dict:
+    """Blocking: run one full turn against the warm models. When `text` is given
+    (on-device STT), use it directly and skip server-side transcription."""
     work = tempfile.mkdtemp(prefix="hm-turn-")
-    inp = os.path.join(work, "in.webm")  # extension advisory; ffmpeg sniffs content
-    with open(inp, "wb") as f:
-        f.write(base64.b64decode(audio_b64))
     try:
-        transcript = transcribe(inp)
+        if text is not None:
+            transcript = text
+        else:
+            inp = os.path.join(work, "in.webm")  # extension advisory; ffmpeg sniffs content
+            with open(inp, "wb") as f:
+                f.write(base64.b64decode(audio_b64))
+            transcript = transcribe(inp)
         if not transcript.strip():
             return {"transcript": "", "reply": "", "audioBase64": "", "escalated": False}
         reply = LocalLLM().respond_with_tools(transcript)
@@ -68,10 +73,12 @@ async def handle_turn(request: web.Request) -> web.Response:
         return web.json_response({"error": "expected JSON"}, status=400)
     audio_b64 = body.get("audioBase64") or ""
     lang = body.get("lang") or "en"
-    if not audio_b64:
-        return web.json_response({"error": "audioBase64 is required"}, status=400)
+    raw_text = body.get("text")
+    text = raw_text.strip() if isinstance(raw_text, str) else ""
+    if not text and not audio_b64:
+        return web.json_response({"error": "text or audioBase64 is required"}, status=400)
     try:
-        result = await asyncio.to_thread(_one_turn, audio_b64, lang)
+        result = await asyncio.to_thread(_one_turn, audio_b64, lang, text or None)
     except Exception as e:  # noqa: BLE001 — return a clean error, keep the worker alive
         return web.json_response({"error": (str(e) or "turn failed")[-300:]}, status=500)
     return web.json_response(result)
@@ -81,10 +88,13 @@ def _warm() -> None:
     """Preload STT + TTS so the first real turn isn't cold."""
     try:
         wav = synthesize("Ready.", quality="fast", lang="en")  # warms Kokoro (live TTS)
-        try:
-            transcribe(wav)  # warms STT when the configured backend needs it
-        except Exception:
-            pass
+        # Only warm STT when a backend is configured. On-device-STT clients send
+        # text and never touch server STT, so a missing HIVE_STT_COMMAND is normal.
+        if os.environ.get("HIVE_STT_COMMAND", "").strip():
+            try:
+                transcribe(wav)
+            except Exception:
+                pass
         try:
             os.remove(wav)
         except OSError:

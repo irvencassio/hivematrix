@@ -55,17 +55,26 @@ async function startServer(): Promise<number> {
 
 export interface TurnResult { transcript: string; reply: string; audioBase64: string; escalated: boolean; }
 
-/** Relay one push-to-talk turn to the warm worker. */
-export async function relayTurn(audioBase64: string, lang: string): Promise<TurnResult> {
+async function postTurn(body: Record<string, unknown>): Promise<TurnResult> {
   const port = await ensureTurnServer();
   const r = await fetch(`http://127.0.0.1:${port}/turn`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ audioBase64, lang }),
+    body: JSON.stringify(body),
   });
   const data = (await r.json()) as Partial<TurnResult> & { error?: string };
   if (!r.ok) throw new Error(data.error || `turn worker ${r.status}`);
   return { transcript: data.transcript || "", reply: data.reply || "", audioBase64: data.audioBase64 || "", escalated: (data as Record<string, unknown>).escalated === true };
+}
+
+/** Relay one push-to-talk turn (recorded audio → server STT) to the warm worker. */
+export function relayTurn(audioBase64: string, lang: string): Promise<TurnResult> {
+  return postTurn({ audioBase64, lang });
+}
+
+/** Relay one turn from an already-transcribed text (on-device STT) — skips STT. */
+export function relayTurnText(text: string, lang: string): Promise<TurnResult> {
+  return postTurn({ text, lang });
 }
 
 /** Stop the turn worker (e.g. when the Voice feature is disabled). */

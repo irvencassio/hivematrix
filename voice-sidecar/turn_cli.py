@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """One voice turn for the in-app push-to-talk surface (Phase 4 app integration).
 
-Input audio (any format ffmpeg reads) → STT → local LLM → cloned-voice TTS. Writes
-the reply audio to <out> and prints {"transcript", "reply"} as JSON. Uses the
-'fast' cloned tier for lower latency. The daemon's /voice/turn endpoint drives it.
+Input audio (any format ffmpeg reads) → STT → local LLM → cloned-voice TTS. Or pass
+a ready transcript with --text (on-device STT) to skip server STT. Writes the reply
+audio to <out> and prints {"transcript", "reply"} as JSON. Uses the 'fast' cloned
+tier for lower latency. The daemon's /voice/turn endpoint drives it.
 
-    python turn_cli.py input.webm reply.m4a [--lang en]
+    python turn_cli.py input.webm reply.m4a [--lang en]   # audio → server STT
+    python turn_cli.py reply.m4a --text "hello" [--lang en]  # on-device transcript
 """
 import argparse
 import json
@@ -20,12 +22,19 @@ from tts import synthesize
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("input")
+    ap.add_argument("input", nargs="?", default=None)
     ap.add_argument("out")
     ap.add_argument("--lang", default="en")
+    ap.add_argument("--text", default=None, help="ready transcript (skips server STT)")
     a = ap.parse_args()
 
-    transcript = transcribe(a.input)
+    if a.text is not None:
+        transcript = a.text.strip()
+    elif a.input:
+        transcript = transcribe(a.input)
+    else:
+        print(json.dumps({"error": "input audio or --text is required"}))
+        return 1
     if not transcript:
         print(json.dumps({"transcript": "", "reply": ""}))
         return 0

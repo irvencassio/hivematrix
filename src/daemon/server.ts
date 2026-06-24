@@ -1426,8 +1426,12 @@ export function createDaemonServer() {
       }
 
       // POST /voice/turn — one in-app push-to-talk turn, gated by the `voice`
-      // feature flag. Recorded audio (base64) → STT → local LLM → cloned-voice
-      // TTS via the sidecar; returns the transcript, reply text, and reply audio.
+      // feature flag. Two input modes:
+      //   { text }         — transcript from on-device STT (iOS Speech framework);
+      //                      skips server STT entirely (no Whisper/model needed).
+      //   { audioBase64 }  — recorded audio → server STT (only when a backend is
+      //                      configured via HIVE_STT_COMMAND).
+      // Either way: → local LLM → cloned-voice TTS; returns transcript, reply, audio.
       if (req.method === "POST" && urlPath === "/voice/turn") {
         const { isFeatureEnabled } = await import("@/lib/config/features");
         if (!isFeatureEnabled("voice")) { json(res, 403, { error: "voice feature is off — enable it in Settings → Features" }); return; }
@@ -1437,15 +1441,16 @@ export function createDaemonServer() {
         const rt = voiceRuntime();
         if (!rt) { json(res, 503, { error: "voice sidecar not available" }); return; }
         const body = await parseBody(req) as Record<string, unknown>;
+        const text = typeof body.text === "string" ? body.text.trim() : "";
         const audioB64 = typeof body.audioBase64 === "string" ? body.audioBase64 : "";
-        if (!audioB64) { json(res, 400, { error: "audioBase64 is required" }); return; }
+        if (!text && !audioB64) { json(res, 400, { error: "text or audioBase64 is required" }); return; }
         const lang = typeof body.lang === "string" ? body.lang : "en";
-        // Fast path: relay to the persistent worker (STT + TTS kept warm across
+        // Fast path: relay to the persistent worker (LLM + TTS kept warm across
         // turns — no per-turn model reload). Falls back to turn_cli.py below if
         // the worker can't be started.
         try {
-          const { relayTurn } = await import("@/lib/voice/turn-server");
-          const r = await relayTurn(audioB64, lang);
+          const { relayTurn, relayTurnText } = await import("@/lib/voice/turn-server");
+          const r = text ? await relayTurnText(text, lang) : await relayTurn(audioB64, lang);
           if (r.escalated && r.transcript) {
             void (async () => {
               try {
@@ -1509,9 +1514,13 @@ export function createDaemonServer() {
         const id = generateId();
         const inPath = join(tmp, `${id}.webm`);
         const outPath = join(tmp, `${id}-reply.m4a`);
-        writeFileSync(inPath, Buffer.from(audioB64, "base64"));
+        // Text turn: no audio to write — pass the transcript via --text (skips STT).
+        const cliArgs = text
+          ? [join(rt.scriptsDir, "turn_cli.py"), outPath, "--text", text, "--lang", lang]
+          : [join(rt.scriptsDir, "turn_cli.py"), inPath, outPath, "--lang", lang];
+        if (!text) writeFileSync(inPath, Buffer.from(audioB64, "base64"));
         await new Promise<void>((resolve) => {
-          execFile(rt.python, [join(rt.scriptsDir, "turn_cli.py"), inPath, outPath, "--lang", lang], { cwd: rt.scriptsDir, timeout: 120_000, env: { ...process.env, ...voiceLlmEnv(), PATH: buildCliPath() } }, (err, stdout, stderr) => {
+          execFile(rt.python, cliArgs, { cwd: rt.scriptsDir, timeout: 120_000, env: { ...process.env, ...voiceLlmEnv(), PATH: buildCliPath() } }, (err, stdout, stderr) => {
             if (err) { json(res, 500, { error: ((stderr || err.message || "").trim()).slice(-300) }); resolve(); return; }
             let meta: { transcript?: string; reply?: string } = {};
             try { meta = JSON.parse((stdout.trim().split("\n").pop()) || "{}"); } catch { /* ignore */ }
