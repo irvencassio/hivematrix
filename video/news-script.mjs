@@ -160,6 +160,33 @@ async function fetchStories({ source = "auto" } = {}) {
   return fetchHackerNewsStories();
 }
 
+// Write the script with the daemon's LOCAL model (Rapid-MLX/Qwen), OpenAI-compatible.
+// Reads HIVE_LLM_* (fed in by the daemon when it spawns this script — see
+// news-review.ts). Free + keyless; far better than the canned template.
+function resolveLocalLlm() {
+  const base = String(process.env.HIVE_LLM_BASE_URL || "").trim();
+  const model = String(process.env.HIVE_LLM_MODEL || "").trim();
+  if (!base || !model) return null;
+  return { base: base.replace(/\/+$/, ""), model, key: String(process.env.HIVE_LLM_API_KEY || "local") };
+}
+
+async function writeLocalScript(stories, { llm, date, brief }) {
+  const res = await fetch(`${llm.base}/chat/completions`, {
+    method: "POST",
+    signal: AbortSignal.timeout(60_000),
+    headers: { "content-type": "application/json", authorization: `Bearer ${llm.key}` },
+    body: JSON.stringify({
+      model: llm.model,
+      max_tokens: 700,
+      temperature: 0.6,
+      messages: [{ role: "user", content: buildAnthropicPrompt(stories, { date, brief }) }],
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error?.message || `local LLM HTTP ${res.status}`);
+  return String(data?.choices?.[0]?.message?.content || "").trim();
+}
+
 async function writeAnthropicScript(stories, { key, model, date, brief }) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -214,24 +241,35 @@ export async function generateNewsScript(options = {}) {
   const description = buildDescription(selected, { title });
   const tags = DEFAULT_TAGS.join(",");
 
+  // Writer selection (auto): real LLM first, canned template only as last resort.
+  //   anthropic  → raw Anthropic API key (best, costs a little)
+  //   local      → the daemon's local model via HIVE_LLM_* (free, keyless)
+  //   template   → canned filler — fallback ONLY when no model is reachable
   let script;
   const writer = options.writer || "auto";
   const anthropicKey = resolveAnthropicKey();
-  if ((writer === "auto" && anthropicKey) || writer === "anthropic") {
+  const localLlm = resolveLocalLlm();
+
+  if (writer === "anthropic" || (writer === "auto" && anthropicKey)) {
     if (!anthropicKey) throw new Error("No Anthropic API key found for --writer anthropic.");
     try {
-      script = await writeAnthropicScript(selected, {
-        key: anthropicKey,
-        model: options.model || "claude-sonnet-4-6",
-        date,
-        brief: options.brief || "",
-      });
+      script = await writeAnthropicScript(selected, { key: anthropicKey, model: options.model || "claude-sonnet-4-6", date, brief: options.brief || "" });
     } catch (err) {
       if (writer === "anthropic") throw err;
-      console.error(`Anthropic writer failed, falling back to template: ${err.message}`);
+      console.error(`Anthropic writer failed, trying local model: ${err.message}`);
     }
   }
-  if (!script) script = buildTemplateScript(selected, { date });
+  if (!script && (writer === "local" || writer === "auto")) {
+    if (!localLlm && writer === "local") throw new Error("No local model configured (HIVE_LLM_BASE_URL/HIVE_LLM_MODEL) for --writer local.");
+    if (localLlm) {
+      try {
+        script = await writeLocalScript(selected, { llm: localLlm, date, brief: options.brief || "" });
+      } catch (err) {
+        console.error(`Local writer failed, falling back to template: ${err.message}`);
+      }
+    }
+  }
+  if (!script || script.length < 80) script = buildTemplateScript(selected, { date });
   return { title, description, tags, headlines: selected, script };
 }
 

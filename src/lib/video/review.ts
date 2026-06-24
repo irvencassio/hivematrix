@@ -58,8 +58,13 @@ export function decisionReply(d: ReviewDecision, title: string): string {
   }
 }
 
-/** One-line preview/prompt shown on the review task (the "question" the operator answers). */
-export function reviewPrompt(scriptPreview: string): string {
-  const clip = scriptPreview.trim().replace(/\s+/g, " ").slice(0, 280);
-  return `Review this AI-news video script before it renders (HeyGen costs ~$0.05/sec, so I won't render until you say so):\n\n"${clip}${scriptPreview.length > 280 ? "…" : ""}"\n\nReply "approve" to render + publish, paste an edited script to use instead, give a short note (e.g. "cut the third story") to rework it, or "cancel".`;
+/** The review task body the operator answers. Shows the FULL script (so it can
+ * actually be reviewed), normalized to single spacing for readability. A safety
+ * cap keeps a runaway script from blowing up the task body, but a normal ~220-word
+ * script is shown in full. */
+export function reviewPrompt(script: string): string {
+  const full = script.trim().replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n");
+  const MAX = 4000; // generous — a 90s script is ~1300 chars; only truncates the pathological case
+  const shown = full.length > MAX ? `${full.slice(0, MAX).trimEnd()}…` : full;
+  return `Review this AI-news video script before it renders (HeyGen costs ~$0.05/sec, so I won't render until you say so):\n\n"${shown}"\n\nReply "approve" to render + publish, paste an edited script to use instead, give a short note (e.g. "cut the third story") to rework it, or "cancel".`;
 }

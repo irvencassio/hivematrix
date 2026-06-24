@@ -3,6 +3,20 @@
 Script → narrated, captioned how-to video — in your cloned voice, fully local
 (except optional YouTube upload). Phase 4 of the voice/video persona plan.
 
+> ## ⚠️ Agents: SCRIPT REVIEW IS MANDATORY AND COMES FIRST
+> If you're an agent asked to "make/create a video" (esp. the AI-news video), do NOT
+> ask about rendering, pipeline, or YouTube privacy up front, and do NOT render.
+> The render costs real money (HeyGen ~$0.05/sec) and rendering before the operator
+> has seen the script is the wrong order. Instead:
+> 1. **Prefer the built-in review flow:** `POST /video/news/draft` (AI-news) drafts the
+>    script with the local model and creates a **"Review video script"** task that shows
+>    the operator the FULL script and pauses. Use it instead of hand-rolling the pipeline.
+> 2. If you must run the scripts directly: generate the script, then **present the ENTIRE
+>    script text to the operator and wait for explicit approval** (approve / edit / rework /
+>    cancel). Only AFTER approval, render — and default to `--privacy unlisted`; don't
+>    interrogate the operator about privacy/pipeline before the script is approved.
+> The deterministic core is `src/lib/video/review.ts` + `news-review.ts`.
+
 ## Setup
 
 ```sh

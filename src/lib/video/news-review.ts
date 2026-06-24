@@ -37,12 +37,12 @@ function outPaths(dir: string, date: Date, id: string): VideoDraftPaths {
   };
 }
 
-async function runNode(dir: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+async function runNode(dir: string, args: string[], extraEnv: Record<string, string> = {}): Promise<{ stdout: string; stderr: string }> {
   return execFileP(process.execPath, args, {
     cwd: dir,
     timeout: RENDER_TIMEOUT_MS,
     maxBuffer: 10 * 1024 * 1024,
-    env: { ...process.env },
+    env: { ...process.env, ...extraEnv },
   });
 }
 
@@ -78,6 +78,9 @@ export async function draftNewsVideo(opts: DraftNewsOptions = {}): Promise<Video
   const paths = outPaths(dir, date, id);
   mkdirSync(join(dir, "out"), { recursive: true });
 
+  // Feed the daemon's local-model env (HIVE_LLM_*) to the writer so an auto draft
+  // uses the local LLM (free, substantive) instead of the canned template.
+  const { voiceLlmEnv } = await import("@/lib/voice/llm-env");
   await runNode(dir, [
     "news-script.mjs",
     "--script-out", paths.script,
@@ -88,7 +91,7 @@ export async function draftNewsVideo(opts: DraftNewsOptions = {}): Promise<Video
     "--source", opts.source ?? "auto",
     "--writer", opts.writer ?? "auto",
     "--date", date.toISOString(),
-  ]);
+  ], voiceLlmEnv());
 
   const script = existsSync(paths.script) ? readFileSync(paths.script, "utf-8").trim() : "";
   const title = existsSync(paths.title) ? readFileSync(paths.title, "utf-8").trim() : "AI News";

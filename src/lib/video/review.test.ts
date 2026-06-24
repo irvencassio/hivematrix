@@ -45,9 +45,17 @@ test("decisionReply phrasing per action", () => {
   assert.match(decisionReply({ action: "cancel" }, "x"), /Cancelled.*Nothing was rendered/);
 });
 
-test("reviewPrompt clips the script and explains the choices", () => {
-  const p = reviewPrompt("This is the script. ".repeat(40));
+test("reviewPrompt shows the full script and explains the choices", () => {
+  const script = "First story. ".repeat(15) + "And the sign-off.";
+  const p = reviewPrompt(script);
   assert.match(p, /Review this AI-news video script/);
   assert.match(p, /approve.*edited script.*cancel/s);
-  assert.ok(p.includes("…"), "long scripts are clipped with an ellipsis");
+  // The whole script is shown for review (not clipped at 280 chars).
+  assert.ok(p.includes("And the sign-off."), "the full script is included, not a short clip");
+  assert.ok(!p.includes("…"), "a normal-length script is not truncated");
+});
+
+test("reviewPrompt only truncates a pathologically long script", () => {
+  const p = reviewPrompt("word ".repeat(2000)); // ~10k chars
+  assert.ok(p.includes("…"), "an extreme script is capped");
 });
