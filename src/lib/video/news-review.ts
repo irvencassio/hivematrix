@@ -230,8 +230,11 @@ export async function resolveVideoDraft(id: string, reply: string): Promise<{ de
     .then(async () => { await closeTask(draft.taskId, "done"); })
     .catch(async (e) => {
       const msg = e instanceof Error ? e.message : String(e);
-      updateDraft(id, { status: "error", error: msg });
-      await failReviewTask(draft.taskId, msg); // back to review with the error surfaced
+      // Back to "review" (NOT "error") so the operator can simply approve again
+      // after fixing the cause (e.g. HeyGen credit) — the resolver only acts on
+      // drafts in "review" status, so "error" would make re-approve a no-op.
+      updateDraft(id, { status: "review", error: msg });
+      await failReviewTask(draft.taskId, msg); // task back to review with the error surfaced
     });
   return { decision, reply: decisionReply(decision, draft.title) };
 }
