@@ -77,6 +77,26 @@ export function relayTurnText(text: string, lang: string): Promise<TurnResult> {
   return postTurn({ text, lang });
 }
 
+/**
+ * Re-voice a piece of text with the warm worker's live voice (Kokoro) — used to
+ * speak deterministic command/skill/briefing replies in the SAME voice as the
+ * conversational reply, instead of the cloned persona. Throws on worker failure
+ * so callers can fall back.
+ */
+export async function relaySynth(text: string, lang: string): Promise<string> {
+  const clean = (text ?? "").trim();
+  if (!clean) return "";
+  const port = await ensureTurnServer();
+  const r = await fetch(`http://127.0.0.1:${port}/synth`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: clean, lang }),
+  });
+  const data = (await r.json()) as { audioBase64?: string; error?: string };
+  if (!r.ok) throw new Error(data.error || `synth worker ${r.status}`);
+  return data.audioBase64 || "";
+}
+
 /** Stop the turn worker (e.g. when the Voice feature is disabled). */
 export function stopTurnServer(): void {
   if (_proc && !_proc.killed) { try { _proc.kill(); } catch { /* ignore */ } }

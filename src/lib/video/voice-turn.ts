@@ -19,9 +19,16 @@ export interface VideoVoiceOverride {
   command: { kind: string; draftId?: string };
 }
 
+export interface VideoVoiceDeps {
+  /** Synthesize the spoken reply to an audio file, return its path. Default: the
+   * cloned voice; the /voice/turn caller injects the warm live (Kokoro) voice so
+   * Talk replies stay in one consistent voice. */
+  synthesize?: (text: string) => Promise<string>;
+}
+
 /** Resolve a video-review voice command to a spoken answer. null = not a video
  * command, fall through. Never throws. */
-export async function videoVoiceOverride(transcript: string): Promise<VideoVoiceOverride | null> {
+export async function videoVoiceOverride(transcript: string, deps: VideoVoiceDeps = {}): Promise<VideoVoiceOverride | null> {
   const intent = detectVideoVoiceIntent(transcript || "");
   if (intent.kind === "none") return null;
 
@@ -50,8 +57,8 @@ export async function videoVoiceOverride(transcript: string): Promise<VideoVoice
 
   let audioBase64 = "";
   try {
-    const tts = await synthesizeSpeech(reply);
-    audioBase64 = readFileSync(tts.path).toString("base64");
+    const path = deps.synthesize ? await deps.synthesize(reply) : (await synthesizeSpeech(reply)).path;
+    audioBase64 = path ? readFileSync(path).toString("base64") : "";
   } catch { /* speak-less fallback: the client shows the text reply */ }
 
   return { reply, audioBase64, command: { kind: `video-${intent.kind}`, draftId } };

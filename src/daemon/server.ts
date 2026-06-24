@@ -1505,19 +1505,35 @@ export function createDaemonServer() {
               }
             })();
           }
+          // Re-voice deterministic overrides in the SAME warm live voice (Kokoro)
+          // as the conversational reply — one consistent Talk voice. The cloned
+          // persona is reserved for produced narration, not the Talk surface.
+          const { relaySynth } = await import("@/lib/voice/turn-server");
+          const speak = async (replyText: string): Promise<string> => {
+            const b64 = await relaySynth(replyText, lang);
+            if (!b64) return "";
+            const { voiceOutputDir } = await import("@/lib/voice/tts");
+            const { mkdirSync, writeFileSync } = await import("fs");
+            const { randomBytes } = await import("crypto");
+            const dir = voiceOutputDir();
+            mkdirSync(dir, { recursive: true });
+            const p = join(dir, `voice-talk-${randomBytes(6).toString("hex")}.m4a`);
+            writeFileSync(p, Buffer.from(b64, "base64"));
+            return p;
+          };
           // Voice skill picker: answer "what skills do I have / use the X skill"
           // deterministically, overriding the LLM reply.
           const { skillTurnOverride } = await import("@/lib/voice/skill-turn");
-          const ov = await skillTurnOverride(r.transcript || "");
+          const ov = await skillTurnOverride(r.transcript || "", { synthesize: speak });
           if (ov) { json(res, 200, { transcript: r.transcript, ...ov }); return; }
           // Video script review by voice: "read me the script" / "approve the video".
           const { videoVoiceOverride } = await import("@/lib/video/voice-turn");
-          const vv = await videoVoiceOverride(r.transcript || "");
+          const vv = await videoVoiceOverride(r.transcript || "", { synthesize: speak });
           if (vv) { json(res, 200, { transcript: r.transcript, ...vv }); return; }
           // Voice command layer ("Jarvis"): drive the board / approvals / directives /
           // tasks / connectivity by voice, overriding the conversational reply.
           const { commandTurnOverride } = await import("@/lib/voice/command-turn");
-          const cmd = await commandTurnOverride(r.transcript || "");
+          const cmd = await commandTurnOverride(r.transcript || "", { synthesize: speak });
           if (cmd) {
             if (cmd.command.taskId) broadcast("tasks:created", { taskId: cmd.command.taskId });
             json(res, 200, { transcript: r.transcript, ...cmd });

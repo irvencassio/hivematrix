@@ -7,7 +7,13 @@ reloading both models). The daemon's /voice/turn relays one turn here.
     POST /turn  {"audioBase64": "...", "lang": "en"}   # recorded audio → server STT
     POST /turn  {"text": "...", "lang": "en"}          # on-device transcript, skips STT
       -> {"transcript": "...", "reply": "...", "audioBase64": "<m4a b64>"}
+    POST /synth {"text": "...", "lang": "en"}          # text → warm Kokoro voice only
+      -> {"audioBase64": "<m4a b64>"}
     GET  /health -> {"ok": true}
+
+The /synth endpoint is the SAME warm Kokoro voice as /turn, so the daemon can
+re-voice deterministic command/skill/briefing replies in one consistent Talk voice
+(not the cloned persona, which is reserved for produced narration).
 
 Prints `TURN_READY <port>` on stdout once the models are warm. LLM endpoint comes
 from HIVE_LLM_* (the daemon points it at the fast Rapid-MLX tier, reasoning off).
@@ -24,6 +30,22 @@ from aiohttp import web
 from stt import transcribe
 from llm import LocalLLM, resolve_escalation
 from tts import synthesize
+
+
+def _synth_to_m4a_b64(reply: str, lang: str, work: str) -> str:
+    """Synthesize `reply` with the warm live voice (Kokoro, quality='fast') and
+    return base64-encoded AAC/m4a — the format iOS already plays. Empty in → empty out."""
+    if not reply.strip():
+        return ""
+    wav = synthesize(reply, quality="fast", lang=lang)
+    m4a = os.path.join(work, "reply.m4a")
+    try:
+        subprocess.run(["afconvert", "-f", "m4af", "-d", "aac", wav, m4a], check=True)
+        src = m4a
+    except Exception:
+        src = wav  # fall back to WAV if afconvert is unavailable
+    with open(src, "rb") as f:
+        return base64.b64encode(f.read()).decode()
 
 
 def _one_turn(audio_b64: str, lang: str, text: str | None = None) -> dict:
@@ -44,18 +66,7 @@ def _one_turn(audio_b64: str, lang: str, text: str | None = None) -> dict:
         # Hand off to a full HiveMatrix agent task when the local model can't do the
         # ask (research, web/repo lookups) — and speak an acknowledgment, not a refusal.
         escalated, reply = resolve_escalation(transcript, reply)
-        audio_out = ""
-        if reply.strip():
-            wav = synthesize(reply, quality="fast", lang=lang)
-            m4a = os.path.join(work, "reply.m4a")
-            # Match the old /voice/turn output format (AAC/m4a) so iOS is unchanged.
-            try:
-                subprocess.run(["afconvert", "-f", "m4af", "-d", "aac", wav, m4a], check=True)
-                src = m4a
-            except Exception:
-                src = wav  # fall back to WAV if afconvert is unavailable
-            with open(src, "rb") as f:
-                audio_out = base64.b64encode(f.read()).decode()
+        audio_out = _synth_to_m4a_b64(reply, lang, work)  # same warm voice as /synth
         return {"transcript": transcript, "reply": reply, "audioBase64": audio_out, "escalated": escalated}
     finally:
         try:
@@ -84,6 +95,37 @@ async def handle_turn(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+def _synth_only(text: str, lang: str) -> dict:
+    """Blocking: voice `text` with the warm live voice, no STT/LLM."""
+    work = tempfile.mkdtemp(prefix="hm-synth-")
+    try:
+        return {"audioBase64": _synth_to_m4a_b64(text, lang, work)}
+    finally:
+        try:
+            for f in os.listdir(work):
+                os.remove(os.path.join(work, f))
+            os.rmdir(work)
+        except OSError:
+            pass
+
+
+async def handle_synth(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "expected JSON"}, status=400)
+    raw_text = body.get("text")
+    text = raw_text.strip() if isinstance(raw_text, str) else ""
+    lang = body.get("lang") or "en"
+    if not text:
+        return web.json_response({"error": "text is required"}, status=400)
+    try:
+        result = await asyncio.to_thread(_synth_only, text, lang)
+    except Exception as e:  # noqa: BLE001 — clean error, keep the worker alive
+        return web.json_response({"error": (str(e) or "synth failed")[-300:]}, status=500)
+    return web.json_response(result)
+
+
 def _warm() -> None:
     """Preload STT + TTS so the first real turn isn't cold."""
     try:
@@ -106,6 +148,7 @@ def _warm() -> None:
 async def run(host: str, port: int) -> None:
     app = web.Application(client_max_size=64 * 1024 * 1024)
     app.router.add_post("/turn", handle_turn)
+    app.router.add_post("/synth", handle_synth)
     app.router.add_get("/health", lambda _r: web.json_response({"ok": True}))
     runner = web.AppRunner(app)
     await runner.setup()
