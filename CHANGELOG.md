@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.81 — 2026-06-24
+
+video: editing a script now saves & stays in review (approve renders separately) + clear review controls; 'create an AI-news video' routes straight to draft/review
+
 ## v0.1.80 — 2026-06-24
 
 browsable Release notes in Settings (changelog of every version + summary), auto-updated each release
