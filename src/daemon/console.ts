@@ -3457,7 +3457,7 @@ function switchSettingsTab(tab) {
 async function renderFeatures() {
   const el = document.getElementById("s_features");
   el.innerHTML = '<div class="muted">Loading…</div>';
-  const [r, auto, brief] = await Promise.all([api("/settings/features"), api("/settings/voice/auto-approval"), api("/settings/briefing")]);
+  const [r, auto, brief, vsched] = await Promise.all([api("/settings/features"), api("/settings/voice/auto-approval"), api("/settings/briefing"), api("/settings/video-schedule")]);
   const features = (r && r.features) || [];
   if (!features.length) { el.innerHTML = '<div class="muted">No optional features.</div>'; return; }
   const featureRows = features.map(f => {
@@ -3494,7 +3494,42 @@ async function renderFeatures() {
     + '<select onchange="setBriefingHour(this.value)" ' + (briefOn ? '' : 'disabled ') + 'style="padding:4px 6px">' + hourOpts + '</select>'
     + '<button class="reply-toggle' + (briefOn ? ' active' : '') + '" onclick="toggleBriefing(' + (!briefOn) + ')">' + (briefOn ? 'On' : 'Off') + '</button>'
     + '</div></div>';
-  el.innerHTML = featureRows + autoRow + briefRow;
+  // Weekly AI-news video (drafts + pauses for review) + a "draft one now" action.
+  const vs = (vsched && vsched.schedule) || {};
+  const vOn = vs.enabled === true;
+  const vWeekday = typeof vs.weekday === 'number' ? vs.weekday : 1;
+  const vHour = typeof vs.hour === 'number' ? vs.hour : 8;
+  const vPriv = vs.privacy || 'unlisted';
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const dayOpts = days.map((d,i)=>'<option value="'+i+'"'+(i===vWeekday?' selected':'')+'>'+d+'</option>').join('');
+  const vHourOpts = Array.from({length:24},(_,h)=>'<option value="'+h+'"'+(h===vHour?' selected':'')+'>'+String(h).padStart(2,'0')+':00</option>').join('');
+  const privOpts = ['unlisted','private','public'].map(p=>'<option value="'+p+'"'+(p===vPriv?' selected':'')+'>'+p+'</option>').join('');
+  const videoRow = '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
+    + '<div style="flex:1"><div style="font-weight:600">Weekly AI-news video</div>'
+    + '<div class="muted" style="font-size:11px;margin-top:2px">Drafts a script weekly and pauses for your review — reply on the board to approve (renders + publishes), edit, or rework. <button class="linklike" onclick="draftVideoNow()">Draft one now</button></div></div>'
+    + '<div class="row" style="gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">'
+    + '<select onchange="setVideoSched(\'weekday\',this.value)" ' + (vOn?'':'disabled ') + 'style="padding:4px 6px">' + dayOpts + '</select>'
+    + '<select onchange="setVideoSched(\'hour\',this.value)" ' + (vOn?'':'disabled ') + 'style="padding:4px 6px">' + vHourOpts + '</select>'
+    + '<select onchange="setVideoSched(\'privacy\',this.value)" ' + (vOn?'':'disabled ') + 'style="padding:4px 6px" title="YouTube privacy on publish">' + privOpts + '</select>'
+    + '<button class="reply-toggle' + (vOn?' active':'') + '" onclick="toggleVideoSched(' + (!vOn) + ')">' + (vOn?'On':'Off') + '</button>'
+    + '</div></div>';
+  el.innerHTML = featureRows + autoRow + briefRow + videoRow;
+}
+
+async function toggleVideoSched(enabled) {
+  await api("/settings/video-schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) });
+  renderFeatures();
+}
+async function setVideoSched(field, value) {
+  const v = field === 'privacy' ? value : Number(value);
+  await api("/settings/video-schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [field]: v }) });
+  renderFeatures();
+}
+async function draftVideoNow() {
+  hmToast('Drafting the weekly AI-news script…');
+  const r = await api("/video/news/draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+  if (r && r.draft) { hmToast('Script ready: "' + (r.draft.title || 'video') + '" — review it on the board.', 'ok'); refresh(); }
+  else { hmToast((r && r.error) || 'Draft failed', 'err'); }
 }
 
 async function toggleBriefing(enabled) {

@@ -116,6 +116,12 @@ async function main(): Promise<void> {
   const { startMorningBriefingLoop } = await import("@/lib/briefing/morning-briefing");
   startMorningBriefingLoop();
 
+  // Weekly AI-news video: once a week at the configured day/hour, draft the script
+  // and pause at the review checkpoint (never renders/publishes unattended), then
+  // ping the operator that it's ready to review. Self-gates on config.
+  const { startWeeklyVideoLoop } = await import("@/lib/video/news-schedule");
+  startWeeklyVideoLoop();
+
   // ManagerBee heartbeat: fold scheduler diagnostics + directive/run state +
   // pending escalations into a control-plane report, cached + broadcast.
   const { startManagerBeeHeartbeat } = await import("@/lib/managerbee/heartbeat");
