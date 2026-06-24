@@ -1331,9 +1331,11 @@ function taskActionsHtml(t) {
           ? '<div class="reply-head">✋ Awaiting your reply</div>'
           : '<div class="reply-subhead">↩ Reply — your message is added and the task re-runs</div>')
       + q
-      + '<textarea id="replyText" class="reply-input" placeholder="'+(isOpen?'Type your reply…':'Reply to this task…')+'" rows="'+(isOpen?'3':'2')+'" oninput="onCtxDraft(\'reply\',this)"></textarea>'
+      + '<textarea id="replyText" class="reply-input" placeholder="'+(isOpen?'Type your reply…':'Reply to this task…')+'" rows="'+(isOpen?'7':'2')+'" oninput="onCtxDraft(\'reply\',this)"></textarea>'
       + attachPickerHtml('reply')
-      + '<div class="reply-row" style="margin-top:6px"><button class="reply-primary" onclick="replyTask(\''+t._id+'\')">Reply</button></div></div>';
+      + '<div class="reply-row" style="margin-top:6px">'
+      + (_replyEditSource ? '<button class="reply-toggle" onclick="loadDraftIntoReply()" title="Load the current draft into the box to edit in place — no copy-paste">✎ Edit the draft</button> ' : '')
+      + '<button class="reply-primary" onclick="replyTask(\''+t._id+'\')">Reply</button></div></div>';
   }
   return html;
 }
@@ -1350,6 +1352,7 @@ async function selectTask(id) {
     _ctxDraft = { retry: "", reply: "", steer: "" };
     _ctxFocus = { active: null, start: null, end: null };
     _ctxOpen = { retry: false, reply: false };
+    _ctxReplyHeight = "";
     _ctxTask = id;
   } else {
     syncCtxState();
@@ -1358,6 +1361,8 @@ async function selectTask(id) {
   const t = await api("/tasks/"+id);
   if (!t || !t._id) { state.selected = null; return; }
   const out = t.output ? (typeof t.output==="string"?JSON.parse(t.output):t.output) : {};
+  // The clean text the operator would edit: a review draft's script, else the result.
+  _replyEditSource = (typeof out.reviewScript === "string" && out.reviewScript) || (typeof out.summary === "string" && out.summary) || "";
   const logs = typeof t.logs === "string" ? (()=>{try{return JSON.parse(t.logs)}catch{return[]}})() : (t.logs||[]);
   const live = ["assigned","in_progress"].includes(t.status);
   const el = document.getElementById("session");
@@ -1376,7 +1381,7 @@ async function selectTask(id) {
     + taskTelemetryStrip(t, out)
     + '<h2>Description</h2><div class="desc md">'+mdToHtml(t.description||"")+'</div>'
     + (t.error?'<h2>Error</h2><div class="errbox">'+esc(t.error)+'</div>':'')
-    + (out.summary?'<h2>Result</h2><div class="desc md">'+mdToHtml(out.summary)+'</div>':'')
+    + (out.summary?'<h2>Result <button class="linklike" onclick="copyEditSource()" title="Copy this text">⧉ Copy</button></h2><div class="desc md">'+mdToHtml(out.summary)+'</div>':'')
     + '<h2>Session transcript</h2>'+renderTranscript(logs)
     + '</div>';
   const tr = el.querySelector(".transcript");
@@ -1419,6 +1424,12 @@ let _ctxAttachError = { retry: "", reply: "" };
 let _ctxAttachNonce = 0;
 let _ctxDraft = { retry: "", reply: "", steer: "" };
 let _ctxFocus = { active: null, start: null, end: null };
+// Manual reply-box resize height (px), preserved across the 5s re-render so a
+// dragged-taller editing box doesn't snap back. Cleared when switching tasks.
+let _ctxReplyHeight = "";
+// The current task's editable draft text (Result/reviewScript) — "Edit the draft"
+// loads this into the reply box so edits are in-place, not copy-paste.
+let _replyEditSource = "";
 // Which toggle-opened sections are open — so a live refresh's re-render doesn't
 // collapse the box mid-typing. (needs_input opens from task state, not this.)
 let _ctxOpen = { retry: false, reply: false };
@@ -1436,6 +1447,7 @@ function syncCtxState() {
   if (retry) _ctxDraft.retry = retry.value;
   if (reply) _ctxDraft.reply = reply.value;
   if (steer) _ctxDraft.steer = steer.value;
+  if (reply && reply.style.height) _ctxReplyHeight = reply.style.height; // keep a dragged-taller box
   const active = document.activeElement;
   if (active === retry) _ctxFocus = { active: "retry", start: retry.selectionStart, end: retry.selectionEnd };
   else if (active === reply) _ctxFocus = { active: "reply", start: reply.selectionStart, end: reply.selectionEnd };
@@ -1448,6 +1460,7 @@ function restoreCtxState() {
   if (retry) retry.value = _ctxDraft.retry;
   if (reply) reply.value = _ctxDraft.reply;
   if (steer) steer.value = _ctxDraft.steer;
+  if (reply && _ctxReplyHeight) reply.style.height = _ctxReplyHeight; // restore the dragged height
   // Re-apply the open state so a toggled reply/retry box stays open across the
   // re-render (otherwise it collapses mid-typing on the 5s refresh).
   const reopen = (ctx, secPrefix, btnPrefix) => {
@@ -1470,6 +1483,30 @@ function restoreCtxState() {
       try { restore.setSelectionRange(_ctxFocus.start, _ctxFocus.end); } catch { /* ignore */ }
     }
   }
+}
+// Load the current draft (review script / result) into the reply box so the
+// operator edits it IN PLACE and hits Reply — no copying out of the read-only
+// Result section. A long multi-line reply is classified as an edit server-side.
+function loadDraftIntoReply() {
+  const ta = document.getElementById("replyText");
+  if (!ta) return;
+  if (!_replyEditSource) { hmToast("Nothing to edit yet.", "err"); return; }
+  const sec = document.getElementById("replySection_" + _ctxTask);
+  if (sec) sec.classList.add("open");
+  _ctxOpen.reply = true;
+  ta.value = _replyEditSource;
+  _ctxDraft.reply = _replyEditSource;
+  ta.style.height = "340px"; _ctxReplyHeight = "340px";
+  ta.focus();
+  try { ta.setSelectionRange(0, 0); ta.scrollTop = 0; } catch { /* ignore */ }
+  hmToast("Draft loaded — edit it and hit Reply to use it as the new script.", "ok");
+}
+function copyEditSource() {
+  if (!_replyEditSource) return;
+  navigator.clipboard.writeText(_replyEditSource).then(
+    () => hmToast("Copied.", "ok"),
+    () => hmToast("Copy failed — select and ⌘C.", "err"),
+  );
 }
 function shouldRestoreCtxFocus() {
   const active = document.activeElement;

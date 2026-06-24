@@ -120,7 +120,9 @@ export async function draftNewsVideo(opts: DraftNewsOptions = {}): Promise<Video
       reviewState: "needs_input",
       executor: "video-review", // not an agent task — the scheduler won't run it
       source: "video",
-      output: { videoDraftId: id },
+      // reviewScript = the clean script (the console's "Edit the draft" loads this
+      // into the reply box so the operator edits in place, no copy-paste).
+      output: { videoDraftId: id, reviewScript: script },
     });
     taskId = (task as { _id?: string })._id;
   } catch { /* the draft still works via /video/drafts even if the task fails */ }
