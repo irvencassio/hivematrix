@@ -61,6 +61,24 @@ async function setTaskPrompt(taskId: string | undefined, prompt: string): Promis
   } catch { /* ignore */ }
 }
 
+/** Re-show a review task with an updated script: refresh the prompt AND the
+ * editable copy (output.reviewScript, which the console's "Edit the draft" loads),
+ * keeping it open for review. Used after an edit/rework so nothing renders yet. */
+async function refreshReviewTask(taskId: string | undefined, script: string): Promise<void> {
+  if (!taskId) return;
+  try {
+    const { Task } = await import("@/lib/db");
+    const t = await Task.findById(taskId);
+    const out = (t && typeof (t as { output?: unknown }).output === "object" && (t as { output?: Record<string, unknown> }).output) || {};
+    await Task.findByIdAndUpdate(taskId, {
+      description: reviewPrompt(script),
+      output: { ...out, reviewScript: script },
+      status: "review",
+      reviewState: "needs_input",
+    });
+  } catch { /* ignore */ }
+}
+
 export interface DraftNewsOptions {
   date?: Date;
   privacy?: string;   // youtube privacy on publish (default unlisted)
@@ -173,12 +191,21 @@ export async function resolveVideoDraft(id: string, reply: string): Promise<{ de
     const title = existsSync(draft.paths.title) ? readFileSync(draft.paths.title, "utf-8").trim() : draft.title;
     const newScript = existsSync(draft.paths.script) ? readFileSync(draft.paths.script, "utf-8").trim() : "";
     updateDraft(id, { revisions: draft.revisions + 1, title });
-    await setTaskPrompt(draft.taskId, reviewPrompt(newScript));
+    await refreshReviewTask(draft.taskId, newScript); // stays in review with the new draft
     return { decision, reply: decisionReply(decision, title) };
   }
 
-  // approve or edit → render + publish (gated spend), in the background.
-  if (decision.action === "edit" && decision.script) writeFileSync(draft.paths.script, decision.script);
+  // edit → SAVE the revised script and stay in review (no render/publish yet, no
+  // spend). The operator re-reads it and approves separately. This is the key fix:
+  // editing used to immediately render+publish, which surprised + spent money.
+  if (decision.action === "edit" && decision.script) {
+    writeFileSync(draft.paths.script, decision.script);
+    updateDraft(id, { revisions: draft.revisions + 1 });
+    await refreshReviewTask(draft.taskId, decision.script);
+    return { decision, reply: decisionReply(decision, draft.title) };
+  }
+
+  // approve → render + publish (the gated spend), in the background.
   updateDraft(id, { status: "rendering" });
   await closeTask(draft.taskId, "done");
   void renderAndPublish(id).catch((e) => {

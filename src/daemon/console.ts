@@ -854,6 +854,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   <section class="col board">
     <h2>Board <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></h2>
     <button class="addbtn" onclick="toggleForm('taskForm')">＋ New task</button>
+    <button class="addbtn" onclick="draftVideoNow()" title="Draft today's AI-news video script and pause for your review">🎬 AI-news video</button>
     <div class="form" id="taskForm">
       <input id="t_title" placeholder="Title (optional — derived from instructions)" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
@@ -1332,7 +1333,21 @@ function taskActionsHtml(t) {
   }
   // Reply box. needs_input → the fully-standout card (auto-open). Otherwise a
   // subtler "reply to continue" box (toggled open from the ↩ Reply button).
-  if (!steerable) {
+  if (!steerable && t.executor === "video-review") {
+    // Dedicated script-review controls: edit + Save (stays in review), Approve to
+    // render+publish, or Cancel. Explicit buttons so "submit" is unmissable and
+    // editing never silently renders.
+    html += '<div id="replySection_'+t._id+'" class="reply-section open needs">'
+      + '<div class="reply-head">🎬 Review the script</div>'
+      + '<div class="reply-subhead">Click <b>Edit script</b>, revise it, then <b>Save edits</b> (stays here to re-read) — or <b>Approve</b> to render + publish. A short note instead = rework.</div>'
+      + '<div class="reply-row" style="margin-bottom:6px"><button class="reply-toggle" onclick="loadDraftIntoReply()">✎ Edit script</button></div>'
+      + '<textarea id="replyText" class="reply-input" placeholder="Edit the script here (or type a short note like \'drop story 2\' to rework)…" rows="8" oninput="onCtxDraft(\'reply\',this)"></textarea>'
+      + '<div class="reply-row" style="margin-top:8px;gap:8px;flex-wrap:wrap">'
+      + '<button class="reply-primary" onclick="replyTask(\''+t._id+'\')">💾 Save edits / Send</button>'
+      + '<button onclick="videoReviewAction(\''+t._id+'\',\'approve\')">✅ Approve &amp; render</button>'
+      + '<button class="cancel" onclick="videoReviewAction(\''+t._id+'\',\'cancel\')">✕ Cancel</button>'
+      + '</div></div>';
+  } else if (!steerable) {
     const isOpen = t.reviewState === "needs_input";
     const q = t.pendingQuestion ? '<div class="reply-question">'+esc(t.pendingQuestion)+'</div>' : '';
     html += '<div id="replySection_'+t._id+'" class="reply-section'+(isOpen?' open needs':' subtle')+'">'
@@ -1619,6 +1634,18 @@ async function replyTask(id) {
   const r = await api("/tasks/"+id+"/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, attachments }) });
   if (r && r.ok) { _ctxAttach.reply = []; _ctxAttachError.reply = ""; _ctxDraft.reply = ""; if (el) el.value = ""; refresh(); selectTask(id); }
   else { hmAlert(r?.error || "Failed to send reply"); el.disabled = false; }
+}
+
+// One-click video-review decisions (approve renders + publishes — confirm first).
+async function videoReviewAction(id, action) {
+  if (action === "approve") {
+    if (!await hmConfirm("Approve this script? It renders the HeyGen avatar (~$0.05/sec) and publishes to YouTube.")) return;
+  } else if (action === "cancel") {
+    if (!await hmConfirm("Cancel this video draft? Nothing is rendered or published.")) return;
+  }
+  const r = await api("/tasks/"+id+"/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: action }) });
+  if (r && r.ok) { hmToast(action === "approve" ? "Approved — rendering + publishing in the background." : "Cancelled.", "ok"); refresh(); selectTask(id); }
+  else { hmAlert((r && r.error) || "Action failed"); }
 }
 
 function toggleReply(id) {
@@ -3452,6 +3479,21 @@ async function openReleases() {
   }).join("");
 }
 function closeReleases() { document.getElementById("releasesOverlay").classList.remove("open"); }
+
+// One-click AI-news video draft → creates the review task (full script + pause),
+// no general agent, no duplicate tasks. Same structured path the routing uses.
+async function draftVideoNow() {
+  hmToast("Drafting today's AI-news script…");
+  const r = await api("/video/news/draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+  if (r && (r.draft || r.taskId)) {
+    hmToast('Script ready — review it on the board (Edit the draft to revise).', "ok");
+    refresh();
+    const tid = r.taskId || (r.draft && r.draft.taskId);
+    if (tid) selectTask(tid);
+  } else {
+    hmToast((r && r.error) || "Draft failed", "err");
+  }
+}
 
 // Mixed-mode role models: thinking → frontier-premium, coding → frontier,
 // operational → local. Shown only when a Mixed posture is possible (local +

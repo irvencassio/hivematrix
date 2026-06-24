@@ -2354,6 +2354,22 @@ export function createDaemonServer() {
         const description = typeof body.description === "string" ? body.description : "";
         body.description = appendAttachmentBlock(description, attachments);
         delete body.attachments;
+        // "Make me an AI-news video" → route straight to the structured draft +
+        // review (one task with the full script + Edit-the-draft), instead of a
+        // general agent that would spawn a second review task plus a summary.
+        const { isAiNewsVideoRequest } = await import("@/lib/video/news-intent");
+        if (body.executor !== "video-review" && isAiNewsVideoRequest(description)) {
+          try {
+            const { draftNewsVideo } = await import("@/lib/video/news-review");
+            const draft = await draftNewsVideo({});
+            if (draft.taskId) broadcast("tasks:created", { taskId: draft.taskId });
+            json(res, 201, { routed: "video-review", taskId: draft.taskId, draftId: draft.id, title: draft.title });
+            return;
+          } catch (e) {
+            console.error(`[tasks] AI-news video route failed; creating a normal task: ${e instanceof Error ? e.message : e}`);
+            // fall through to a normal task
+          }
+        }
         // Title is optional — derive it from the instructions when absent/blank.
         const title = typeof body.title === "string" ? body.title.trim() : "";
         body.title = title || deriveTaskTitle(description);

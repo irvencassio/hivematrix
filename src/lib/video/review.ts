@@ -52,7 +52,7 @@ export function decisionReply(d: ReviewDecision, title: string): string {
   const t = title || "the video";
   switch (d.action) {
     case "approve": return `Approved — rendering and publishing "${t}".`;
-    case "edit": return `Got it — using your edited script for "${t}" and rendering now.`;
+    case "edit": return `Saved your edited script for "${t}". Re-read it above and reply "approve" to render + publish.`;
     case "regenerate": return `Reworking the script${d.feedback ? `: ${d.feedback}` : ""}. I'll send the new draft for review.`;
     case "cancel": return `Cancelled "${t}". Nothing was rendered or published.`;
   }
