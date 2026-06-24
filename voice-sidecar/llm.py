@@ -72,6 +72,25 @@ def is_uncertain(reply: str) -> bool:
     return bool(_UNCERTAIN_RE.search(reply or ""))
 
 
+# A "stall" reply: the local model PROMISED async work it has no tools to do
+# ("I'm looking into that", "let me check", "I'll find out") — a false promise.
+# The fix for the weather bug: treat these as a handoff so a real task spawns
+# (and we speak the honest ESCALATION_ACK) instead of dropping the promise.
+_STALL_RE = re.compile(
+    r"\b(i'?m\s+(?:looking|checking)\s+(?:into|on|up)|"
+    r"let\s+me\s+(?:look|check|find|see|pull|grab)|"
+    r"i'?ll\s+(?:look|check|find\s+out|get\s+(?:back|that|right)|pull|grab|see)|"
+    r"give\s+me\s+a\s+(?:moment|second|sec|minute)|one\s+(?:moment|second)|"
+    r"looking\s+that\s+up|checking\s+(?:on\s+)?that|hold\s+on\s+while\s+i)\b",
+    re.I,
+)
+
+
+def is_stall(reply: str) -> bool:
+    """True when the reply is a false promise to do async work the local model can't."""
+    return bool(_STALL_RE.search(reply or ""))
+
+
 # Phrases in the user's OWN words that mean "please create a task / reminder".
 # Checked against the TRANSCRIPT (not the reply) — escalation fires even when the
 # model successfully acknowledged the request.
@@ -136,7 +155,13 @@ _RESEARCH_TRIGGER_RE = re.compile(
     r"search\s+(?:for|online|the\s+web)|google\s+(?:it|for|this|that)?|"
     r"latest\s+news|today'?s\s+news|news\s+(?:items?|today|stories|headlines)|"
     r"pull\s+request|pr\s+(?:number|request)|last\s+build|latest\s+build|"
-    r"give\s+(?:me\s+)?an?\s+assessment|assess\s+(?:whether|if|the|how)"
+    r"give\s+(?:me\s+)?an?\s+assessment|assess\s+(?:whether|if|the|how)|"
+    # Real-time / external info the local model can't know — must hand off.
+    r"weather|forecast|temperature|how\s+(?:hot|cold|warm)|"
+    r"(?:will|is)\s+it\s+(?:rain|snow|going\s+to\s+rain|going\s+to\s+snow)|"
+    r"stock\s+price|share\s+price|price\s+of|market\s+(?:price|cap)|"
+    r"current\s+(?:weather|price|temperature|score|events?)|"
+    r"what\s+time\s+is\s+it|time\s+in\s+\w+|exchange\s+rate"
     r")\b",
     re.I,
 )
@@ -159,7 +184,7 @@ def resolve_escalation(transcript: str, reply: str) -> tuple[bool, str]:
     lacks (needs_research) — in those cases we speak ESCALATION_ACK instead of the
     model's refusal. An explicit reminder/task ask (wants_task) still escalates but
     keeps the model's own acknowledgment. Returns (escalated, spoken_reply)."""
-    handoff = is_uncertain(reply) or is_refusal(reply) or needs_research(transcript)
+    handoff = is_uncertain(reply) or is_refusal(reply) or is_stall(reply) or needs_research(transcript)
     escalated = handoff or wants_task(transcript)
     return escalated, (ESCALATION_ACK if handoff else reply)
 

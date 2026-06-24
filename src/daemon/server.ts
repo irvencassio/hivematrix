@@ -2386,21 +2386,30 @@ export function createDaemonServer() {
         const text = String(body.text ?? "").trim();
         // Video script review: a reply to a video-draft review task drives
         // approve / edit / regenerate / cancel — not the generic agent re-queue.
-        // (Empty reply = approve, so this runs before the text-required guard.)
+        let videoDraftId: string | undefined;
         try {
           const { Task } = await import("@/lib/db");
           const t = await Task.findById(tid);
           const rawOut = t ? (t as Record<string, unknown>).output : undefined;
           const parsed = typeof rawOut === "string" ? JSON.parse(rawOut) : rawOut;
-          const draftId = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).videoDraftId : undefined;
-          if (typeof draftId === "string" && draftId) {
+          const d = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).videoDraftId : undefined;
+          if (typeof d === "string" && d) videoDraftId = d;
+        } catch { /* detection failed → treat as a normal task */ }
+        if (videoDraftId) {
+          // Render + publish spends money + posts to YouTube — require an EXPLICIT
+          // word ("approve" / an edited script / "cancel"), never a blank submission.
+          if (!text) { json(res, 400, { error: "Reply \"approve\" to render + publish, paste an edited script, give a change to rework it, or \"cancel\"." }); return; }
+          try {
             const { resolveVideoDraft } = await import("@/lib/video/news-review");
-            const out = await resolveVideoDraft(draftId, text);
+            const out = await resolveVideoDraft(videoDraftId, text);
             broadcast("tasks:updated", { taskId: tid });
             json(res, 200, { ok: true, video: out?.decision.action ?? "ignored", reply: out?.reply });
-            return;
+          } catch (e) {
+            console.error(`[video-review] resolve failed: ${e instanceof Error ? e.message : e}`);
+            json(res, 500, { error: "video review action failed" });
           }
-        } catch { /* not a video-draft task → fall through to the generic reply path */ }
+          return;
+        }
         const { normalizeTaskAttachments, prependAttachmentBlock } = await import("@/lib/tasks/attachments");
         const attachments = normalizeTaskAttachments(Array.isArray(body.attachments) ? body.attachments as unknown[] : []);
         if (!text && !attachments.length) { json(res, 400, { error: "text or attachment is required" }); return; }

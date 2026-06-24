@@ -22,9 +22,11 @@ import { saveDraft, getDraft, updateDraft, type VideoDraft, type VideoDraftPaths
 const execFileP = promisify(execFile);
 const RENDER_TIMEOUT_MS = 900_000; // HeyGen render + upload can take minutes
 
-function outPaths(dir: string, date: Date): VideoDraftPaths {
+function outPaths(dir: string, date: Date, id: string): VideoDraftPaths {
   const stamp = date.toISOString().slice(0, 10);
-  const base = join(dir, "out", `ai-news-${stamp}`);
+  // Key the file base on the draft id too — two drafts on the same day must NOT
+  // share files, or a second draft would clobber the first's script/video.
+  const base = join(dir, "out", `ai-news-${stamp}-${id}`);
   return {
     script: `${base}-script.txt`,
     title: `${base}-title.txt`,
@@ -71,7 +73,9 @@ export async function draftNewsVideo(opts: DraftNewsOptions = {}): Promise<Video
   const dir = videoProjectDir();
   if (!dir) throw new Error("video project not found (set HIVE_VIDEO_DIR)");
   const date = opts.date ?? new Date();
-  const paths = outPaths(dir, date);
+  const { generateId, Task } = await import("@/lib/db");
+  const id = generateId();
+  const paths = outPaths(dir, date, id);
   mkdirSync(join(dir, "out"), { recursive: true });
 
   await runNode(dir, [
@@ -89,8 +93,6 @@ export async function draftNewsVideo(opts: DraftNewsOptions = {}): Promise<Video
   const script = existsSync(paths.script) ? readFileSync(paths.script, "utf-8").trim() : "";
   const title = existsSync(paths.title) ? readFileSync(paths.title, "utf-8").trim() : "AI News";
 
-  const { generateId, Task } = await import("@/lib/db");
-  const id = generateId();
   let taskId: string | undefined;
   try {
     const task = await Task.create({
