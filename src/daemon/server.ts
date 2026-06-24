@@ -24,7 +24,7 @@ import { dirname, join, resolve, sep } from "path";
 import { getDb } from "@/lib/db";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import type { ConnectivityMode } from "@/lib/connectivity/policy";
-import { setBroadcastFn } from "@/lib/ws/broadcaster";
+import { setBroadcastFn, setBroadcastEventFn } from "@/lib/ws/broadcaster";
 import { CONSOLE_HTML } from "./console";
 import { getOrCreateToken, tokenEquals, DAEMON_TOKEN_FILE } from "@/lib/auth/token";
 
@@ -158,6 +158,8 @@ export function createDaemonServer() {
 
   // Wire the internal broadcaster so scheduler/recovery can emit SSE events
   setBroadcastFn((payload) => broadcast("hive:event", payload));
+  // Named-event channel (e.g. voice:result) for in-process modules.
+  setBroadcastEventFn((event, data) => broadcast(event, data));
 
   // Broadcast mode changes over SSE
   policy.on("modeChange", (state) => {

@@ -116,6 +116,12 @@ async function main(): Promise<void> {
   const { startMorningBriefingLoop } = await import("@/lib/briefing/morning-briefing");
   startMorningBriefingLoop();
 
+  // Voice result return path: when a voice-escalated task finishes, speak the
+  // result (Kokoro) and push a voice:result SSE event so the open Talk screen
+  // gets the answer it was told was "being looked into".
+  const { startVoiceResultLoop } = await import("@/lib/voice/voice-result-loop");
+  startVoiceResultLoop();
+
   // Weekly AI-news video: once a week at the configured day/hour, draft the script
   // and pause at the review checkpoint (never renders/publishes unattended), then
   // ping the operator that it's ready to review. Self-gates on config.
