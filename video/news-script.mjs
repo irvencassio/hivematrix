@@ -94,12 +94,15 @@ export function buildTemplateScript(stories, { date = new Date() } = {}) {
   ].join(" ");
 }
 
-export function buildAnthropicPrompt(stories, { date = new Date() } = {}) {
+export function buildAnthropicPrompt(stories, { date = new Date(), brief = "" } = {}) {
   const sourceLines = stories
     .slice(0, 5)
     .map((story, i) => `${i + 1}. ${cleanTitle(story.title)} (${story.url})`)
     .join("\n");
-  return `You are a friendly AI news presenter. Write a 90-second spoken script, about 220 words, covering the top 3 AI news stories for ${dayLabel(date)}. Use natural conversational language, no bullet points, no markdown, and end with a brief sign-off. Stories:\n\n${sourceLines}`;
+  const direction = brief && brief.trim()
+    ? `\n\nIMPORTANT — additional direction from the editor (follow it): ${brief.trim()}`
+    : "";
+  return `You are a friendly AI news presenter. Write a 90-second spoken script, about 220 words, covering the top 3 AI news stories for ${dayLabel(date)}. Use natural conversational language, no bullet points, no markdown, and end with a brief sign-off. Stories:\n\n${sourceLines}${direction}`;
 }
 
 async function fetchJson(url, options) {
@@ -157,7 +160,7 @@ async function fetchStories({ source = "auto" } = {}) {
   return fetchHackerNewsStories();
 }
 
-async function writeAnthropicScript(stories, { key, model, date }) {
+async function writeAnthropicScript(stories, { key, model, date, brief }) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     signal: AbortSignal.timeout(45_000),
@@ -169,7 +172,7 @@ async function writeAnthropicScript(stories, { key, model, date }) {
     body: JSON.stringify({
       model,
       max_tokens: 1024,
-      messages: [{ role: "user", content: buildAnthropicPrompt(stories, { date }) }],
+      messages: [{ role: "user", content: buildAnthropicPrompt(stories, { date, brief }) }],
     }),
   });
   const data = await res.json().catch(() => ({}));
@@ -189,6 +192,7 @@ function parseArgs(argv) {
   return {
     source: flag("--source", "auto"),
     writer: flag("--writer", "auto"),
+    brief: flag("--brief", ""),
     model: flag("--model", "claude-sonnet-4-6"),
     limit: Number(flag("--limit", "3")) || 3,
     date: new Date(flag("--date", new Date().toISOString())),
@@ -220,6 +224,7 @@ export async function generateNewsScript(options = {}) {
         key: anthropicKey,
         model: options.model || "claude-sonnet-4-6",
         date,
+        brief: options.brief || "",
       });
     } catch (err) {
       if (writer === "anthropic") throw err;

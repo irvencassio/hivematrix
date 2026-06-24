@@ -1590,6 +1590,44 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /video/news/draft — draft the AI-news video script and PAUSE for human
+      // review (the checkpoint before the expensive HeyGen render). Creates a
+      // needs_input review task; the operator's Reply drives render/edit/regenerate/
+      // cancel. Gated by the `video` feature flag.
+      if (req.method === "POST" && urlPath === "/video/news/draft") {
+        const { isFeatureEnabled } = await import("@/lib/config/features");
+        if (!isFeatureEnabled("video")) { json(res, 403, { error: "video feature is off — enable it in Settings → Features" }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { draftNewsVideo } = await import("@/lib/video/news-review");
+        try {
+          const draft = await draftNewsVideo({
+            privacy: typeof body.privacy === "string" ? body.privacy : undefined,
+            source: typeof body.source === "string" ? body.source : undefined,
+            writer: typeof body.writer === "string" ? body.writer : undefined,
+          });
+          if (draft.taskId) broadcast("tasks:created", { taskId: draft.taskId });
+          json(res, 200, { draft });
+        } catch (e) { json(res, 500, { error: e instanceof Error ? e.message : String(e) }); }
+        return;
+      }
+      // GET /video/drafts — video script drafts + their review status.
+      if (req.method === "GET" && urlPath === "/video/drafts") {
+        const { listDrafts } = await import("@/lib/video/draft-store");
+        json(res, 200, { drafts: listDrafts() });
+        return;
+      }
+      // GET /video/drafts/:id — one draft + its current script text (review panel).
+      const videoDraftMatch = urlPath.match(/^\/video\/drafts\/([^/]+)$/);
+      if (req.method === "GET" && videoDraftMatch) {
+        const { getDraft } = await import("@/lib/video/draft-store");
+        const d = getDraft(videoDraftMatch[1]);
+        if (!d) { json(res, 404, { error: "not found" }); return; }
+        const { readFileSync, existsSync } = await import("fs");
+        const script = existsSync(d.paths.script) ? readFileSync(d.paths.script, "utf-8") : "";
+        json(res, 200, { draft: d, script });
+        return;
+      }
+
       // POST /video/make — agent/daemon-driven video creation, gated by the
       // `video` feature flag. Drives the out-of-process Node video factory
       // (topic→script→cloned-voice narration→captions→render). Long-running.
@@ -2324,6 +2362,23 @@ export function createDaemonServer() {
         const tid = replyMatch[1];
         const body = await parseBody(req) as Record<string, unknown>;
         const text = String(body.text ?? "").trim();
+        // Video script review: a reply to a video-draft review task drives
+        // approve / edit / regenerate / cancel — not the generic agent re-queue.
+        // (Empty reply = approve, so this runs before the text-required guard.)
+        try {
+          const { Task } = await import("@/lib/db");
+          const t = await Task.findById(tid);
+          const rawOut = t ? (t as Record<string, unknown>).output : undefined;
+          const parsed = typeof rawOut === "string" ? JSON.parse(rawOut) : rawOut;
+          const draftId = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).videoDraftId : undefined;
+          if (typeof draftId === "string" && draftId) {
+            const { resolveVideoDraft } = await import("@/lib/video/news-review");
+            const out = await resolveVideoDraft(draftId, text);
+            broadcast("tasks:updated", { taskId: tid });
+            json(res, 200, { ok: true, video: out?.decision.action ?? "ignored", reply: out?.reply });
+            return;
+          }
+        } catch { /* not a video-draft task → fall through to the generic reply path */ }
         const { normalizeTaskAttachments, prependAttachmentBlock } = await import("@/lib/tasks/attachments");
         const attachments = normalizeTaskAttachments(Array.isArray(body.attachments) ? body.attachments as unknown[] : []);
         if (!text && !attachments.length) { json(res, 400, { error: "text or attachment is required" }); return; }
