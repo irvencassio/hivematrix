@@ -46,7 +46,10 @@ SYSTEM_PROMPT = (
     "If the user asks you to research something, look something up, search the web, "
     "fetch the news, or check the app's repo, build, or pull requests — work you "
     "can't do live — do NOT refuse and do NOT say you lack access; HiveMatrix will "
-    "pick it up. Just say you're looking into it."
+    "pick it up. Just say you're looking into it.\n"
+    "If the user asks you to message, text, iMessage, email, or send something to "
+    "someone — work you can't do live — do NOT refuse and do NOT claim you sent it. "
+    "Just say you'll send it; HiveMatrix will deliver it."
 )
 
 # Spoken replies are 1–2 short sentences, so cap generation tight. This also bounds
@@ -172,21 +175,71 @@ def needs_research(transcript: str) -> bool:
     return bool(_RESEARCH_TRIGGER_RE.search(transcript or ""))
 
 
+# The user asking to SEND an outbound message — text / iMessage / SMS / email to
+# a person. The local voice model can't send, so this MUST hand off to a full
+# HiveMatrix agent task (which has the outbound SMS/email tools). Checked against
+# the TRANSCRIPT so the handoff fires even when the model "politely acknowledges"
+# (the bug: it said "added to your tasks" but nothing escalated, so no task spawned).
+#
+# Precise, not greedy: a bare comms NOUN must not fire ("what does my email say",
+# "do I have any messages" are reads, not sends). Four high-signal shapes instead:
+#   send <comms-noun>                  → "send a text", "send her an email"
+#   <comms-verb> as the imperative     → "message Joe", "can you text my wife"
+#   <comms-verb> ... to <recipient>    → "reply to Sam", "email to the team"
+#   tell <x> that / let <x> know       → relayed messages
+_OUTBOUND_SEND_RE = re.compile(
+    r"\bsend\s+(?:\w+\s+){0,2}"
+    r"(?:message|text|sms|imessage|i-?message|email|e-?mail|note|reply)\b", re.I,
+)
+_OUTBOUND_IMPERATIVE_RE = re.compile(
+    r"^(?:\W*(?:please|hey|ok|okay|yeah|go|now|can\s+you|could\s+you|would\s+you|"
+    r"will\s+you|i\s+need\s+you\s+to|i\s+want\s+you\s+to|i\s+want\s+to)\s+){0,4}"
+    r"(?:message|text|imessage|i-?message|email|e-?mail|ping|dm|shoot)\b", re.I,
+)
+_OUTBOUND_TO_RE = re.compile(
+    r"\b(?:message|text|email|e-?mail|reply|write|send)\s+(?:back\s+)?to\s+\w+", re.I,
+)
+_OUTBOUND_RELAY_RE = re.compile(
+    r"\b(?:tell\s+\w+\s+(?:that|to|i'?m|we'?re|about|the)|let\s+\w+\s+know)\b", re.I,
+)
+
+
+def wants_outbound(transcript: str) -> bool:
+    """True when the user asks to send a message/text/email to someone."""
+    t = transcript or ""
+    return bool(
+        _OUTBOUND_SEND_RE.search(t)
+        or _OUTBOUND_IMPERATIVE_RE.search(t)
+        or _OUTBOUND_TO_RE.search(t)
+        or _OUTBOUND_RELAY_RE.search(t)
+    )
+
+
 # Spoken acknowledgment for a handoff — short, honest (the escalated task runs the
 # full agent in the background), and mirrors the reminder acknowledgment's tone.
 ESCALATION_ACK = "Got it — I'm looking into that now and I've added it to your HiveMatrix tasks."
+OUTBOUND_ACK = "Got it — I'll send that for you. It's queued in your HiveMatrix tasks."
 
 
 def resolve_escalation(transcript: str, reply: str) -> tuple[bool, str]:
     """Decide whether a spoken turn escalates to a full HiveMatrix agent task, and
     pick the reply to speak. A handoff fires when the model couldn't answer
     (is_uncertain / is_refusal) or the user asked for capability the local model
-    lacks (needs_research) — in those cases we speak ESCALATION_ACK instead of the
-    model's refusal. An explicit reminder/task ask (wants_task) still escalates but
-    keeps the model's own acknowledgment. Returns (escalated, spoken_reply)."""
+    lacks (needs_research). Sending a message/text/email (wants_outbound) ALSO
+    escalates — the local model can't send, so a full agent task must spawn (else
+    we'd say "sent"/"added" with nothing in the queue). An explicit reminder/task
+    ask (wants_task) escalates but keeps the model's own acknowledgment.
+    Returns (escalated, spoken_reply)."""
     handoff = is_uncertain(reply) or is_refusal(reply) or is_stall(reply) or needs_research(transcript)
-    escalated = handoff or wants_task(transcript)
-    return escalated, (ESCALATION_ACK if handoff else reply)
+    outbound = wants_outbound(transcript)
+    escalated = handoff or outbound or wants_task(transcript)
+    if outbound:
+        spoken = OUTBOUND_ACK
+    elif handoff:
+        spoken = ESCALATION_ACK
+    else:
+        spoken = reply
+    return escalated, spoken
 
 # Qwen 3.6 is a reasoning model. In LM Studio its reasoning lands in a separate
 # `reasoning_content` field and the spoken answer in `content` — but the reasoning

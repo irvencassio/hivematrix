@@ -11,9 +11,11 @@ import sys
 
 from llm import (
     ESCALATION_ACK,
+    OUTBOUND_ACK,
     is_refusal,
     needs_research,
     resolve_escalation,
+    wants_outbound,
     wants_task,
 )
 
@@ -62,11 +64,14 @@ def main() -> int:
     check("plain qa does not escalate", not esc_ok)
     check("plain qa keeps reply", reply_ok == r_ok)
 
+    # "What time is it?" is treated as real-time info the local model can't reliably
+    # know (no clock in-prompt), so it hands off via needs_research — see
+    # _RESEARCH_TRIGGER_RE. (Math/general Q&A above still answers live.)
     t_time = "What time is it?"
     r_time = "It's about a quarter past three."
     esc_time, reply_time = resolve_escalation(t_time, r_time)
-    check("time qa does not escalate", not esc_time)
-    check("time qa keeps reply", reply_time == r_time)
+    check("time qa escalates (real-time lookup)", esc_time)
+    check("time qa speaks ack", reply_time == ESCALATION_ACK)
 
     # A friendly reply that merely contains "can't" mid-sentence must NOT be a refusal.
     check("not a refusal: enthusiasm", not is_refusal("I can't wait to help you with that!"))
@@ -79,6 +84,29 @@ def main() -> int:
     check("reminder escalates", esc_rem)
     check("reminder keeps model ack", reply_rem == r_rem)
     check("reminder is wants_task", wants_task(t_rem))
+
+    # --- Outbound messaging MUST escalate (the local model can't send), even when
+    # the model "politely acknowledged" — the bug was: said "added" but nothing spawned.
+    for t_out in [
+        "Message Joe that I'll be late.",
+        "Send a text to my wife saying I'm on my way.",
+        "Send her an email about the invoice.",
+        "Can you text my wife I'm running late?",
+        "Tell John that the meeting moved to three.",
+        "Let Dave know I'll be late.",
+        "Reply to Sam that it's approved.",
+        "Email Sarah the quarterly report.",
+    ]:
+        r_out = "Got it — I've added that to your HiveMatrix tasks."  # the model's (wrong) self-ack
+        esc_out, reply_out = resolve_escalation(t_out, r_out)
+        check(f"outbound escalates: {t_out}", esc_out)
+        check(f"outbound speaks send-ack: {t_out}", reply_out == OUTBOUND_ACK)
+        check(f"outbound is wants_outbound: {t_out}", wants_outbound(t_out))
+
+    # Reads about email/messages are NOT outbound — must not false-fire.
+    for t_read in ["What does my email say?", "Do I have any new messages?",
+                   "Read me my latest email.", "Send me the weather forecast."]:
+        check(f"read not outbound: {t_read}", not wants_outbound(t_read))
 
     if failures:
         print("FAIL:", ", ".join(failures))
