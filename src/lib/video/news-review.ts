@@ -78,9 +78,21 @@ export async function draftNewsVideo(opts: DraftNewsOptions = {}): Promise<Video
   const paths = outPaths(dir, date, id);
   mkdirSync(join(dir, "out"), { recursive: true });
 
-  // Feed the daemon's local-model env (HIVE_LLM_*) to the writer so an auto draft
-  // uses the local LLM (free, substantive) instead of the canned template.
+  // Pick the writer per the writer-role setting. Frontier (Claude) when chosen +
+  // online (news-script's auto path uses an Anthropic key if present, else local);
+  // a local pick or offline → the daemon's local model. Always feed HIVE_LLM_* so
+  // the local path/fallback works.
   const { voiceLlmEnv } = await import("@/lib/voice/llm-env");
+  let writerArgs: string[];
+  if (opts.writer) {
+    writerArgs = ["--writer", opts.writer]; // explicit override (e.g. a directive)
+  } else {
+    const { resolveWriterModel } = await import("@/lib/models/writer-role");
+    const w = resolveWriterModel();
+    writerArgs = w.provider === "anthropic" && w.modelId
+      ? ["--writer", "auto", "--model", w.modelId]
+      : ["--writer", "local"];
+  }
   await runNode(dir, [
     "news-script.mjs",
     "--script-out", paths.script,
@@ -89,7 +101,7 @@ export async function draftNewsVideo(opts: DraftNewsOptions = {}): Promise<Video
     "--tags-out", paths.tags,
     "--headlines-out", paths.headlines as string,
     "--source", opts.source ?? "auto",
-    "--writer", opts.writer ?? "auto",
+    ...writerArgs,
     "--date", date.toISOString(),
   ], voiceLlmEnv());
 

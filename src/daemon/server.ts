@@ -376,24 +376,6 @@ export function createDaemonServer() {
         return;
       }
 
-      // GET/POST /settings/video-schedule — weekly AI-news draft (enabled + weekday + hour + privacy).
-      if (req.method === "GET" && urlPath === "/settings/video-schedule") {
-        const { getVideoScheduleConfig } = await import("@/lib/video/news-schedule");
-        json(res, 200, { schedule: getVideoScheduleConfig() });
-        return;
-      }
-      if (req.method === "POST" && urlPath === "/settings/video-schedule") {
-        const { setVideoScheduleConfig } = await import("@/lib/video/news-schedule");
-        const body = await parseBody(req) as Record<string, unknown>;
-        const patch: Record<string, unknown> = {};
-        if ("enabled" in body) patch.enabled = body.enabled === true;
-        if (typeof body.weekday === "number") patch.weekday = body.weekday;
-        if (typeof body.hour === "number") patch.hour = body.hour;
-        if (typeof body.privacy === "string") patch.privacy = body.privacy;
-        json(res, 200, { schedule: setVideoScheduleConfig(patch) });
-        return;
-      }
-
       // POST /devices/register — iOS app registers its APNs device token.
       if (req.method === "POST" && urlPath === "/devices/register") {
         const { registerApnsDevice } = await import("@/lib/notify/apns");
@@ -442,7 +424,7 @@ export function createDaemonServer() {
         if (body.frontierProvider === "claude" || body.frontierProvider === "codex") m.setFrontierProvider(body.frontierProvider);
         if (body.roleModel && typeof body.roleModel === "object") {
           const rm = body.roleModel as { role?: unknown; modelId?: unknown };
-          if ((rm.role === "thinking" || rm.role === "coding" || rm.role === "operational") && typeof rm.modelId === "string") {
+          if ((rm.role === "thinking" || rm.role === "coding" || rm.role === "operational" || rm.role === "writer") && typeof rm.modelId === "string") {
             m.setRoleModel(rm.role, rm.modelId);
           }
         }

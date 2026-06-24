@@ -247,6 +247,10 @@ export interface RoleModels {
   coding: string;
   /** Bulk execution/file ops — local-secondary tier (on-device in Mixed mode). */
   operational: string;
+  /** Prose generation (video scripts, briefings, summaries, drafted messages).
+   * A frontier model id → frontier when cloud-ok; a local model id → locked to
+   * free/local; empty → default (frontier favorite when cloud-ok, else local). */
+  writer: string;
 }
 
 export interface RoleModelOption {
@@ -260,6 +264,7 @@ export interface RoleModelOptions {
   thinking: RoleModelOption[];
   coding: RoleModelOption[];
   operational: RoleModelOption[];
+  writer: RoleModelOption[];
 }
 
 function roleOption(modelId: string, name: string, backend: BackendId, note?: string): RoleModelOption {
@@ -284,6 +289,8 @@ export function buildRoleModelOptions(backends: BackendStatus[] = detectBackends
     thinking: [opus, sonnet, gpt55, spark].filter((m): m is RoleModelOption => m !== null),
     coding: [opus, sonnet, gpt55, spark, localOption].filter((m): m is RoleModelOption => m !== null),
     operational: [localOption, spark, sonnet].filter((m): m is RoleModelOption => m !== null),
+    // Writer: frontier for quality, or the local model to lock everything free.
+    writer: [sonnet, opus, gpt55, localOption].filter((m): m is RoleModelOption => m !== null),
   };
 }
 
@@ -294,12 +301,20 @@ export function getRoleModels(): RoleModels {
     thinking: str("thinkModel"),
     coding: str("frontierModel"),
     operational: str("operationalModel"),
+    writer: str("writerModel"),
   };
 }
 
+const ROLE_CONFIG_KEY: Record<keyof RoleModels, string> = {
+  thinking: "thinkModel",
+  coding: "frontierModel",
+  operational: "operationalModel",
+  writer: "writerModel",
+};
+
 /** Set one role's model override. Empty/blank clears it (reverts to default). */
 export function setRoleModel(role: keyof RoleModels, modelId: string): void {
-  const key = role === "thinking" ? "thinkModel" : role === "coding" ? "frontierModel" : "operationalModel";
+  const key = ROLE_CONFIG_KEY[role];
   const cfg = readConfig();
   const v = modelId.trim();
   if (v) cfg[key] = v; else delete cfg[key];
