@@ -60,6 +60,22 @@ async function setTaskPrompt(taskId: string | undefined, prompt: string): Promis
     await Task.findByIdAndUpdate(taskId, { description: prompt });
   } catch { /* ignore */ }
 }
+async function setTaskFields(taskId: string | undefined, fields: Record<string, unknown>): Promise<void> {
+  if (!taskId) return;
+  try {
+    const { Task } = await import("@/lib/db");
+    await Task.findByIdAndUpdate(taskId, fields);
+  } catch { /* ignore */ }
+}
+
+/** A render/publish that failed → return the task to review with the reason, so the
+ * operator can fix it (e.g. add HeyGen credit) and approve again, or cancel. */
+async function failReviewTask(taskId: string | undefined, errorMsg: string): Promise<void> {
+  const concise = /insufficient credit/i.test(errorMsg)
+    ? "Render failed: HeyGen is out of API credit. Add credit, then approve again — or cancel."
+    : `Render failed: ${errorMsg.replace(/\s+/g, " ").slice(0, 280)}`;
+  await setTaskFields(taskId, { status: "review", reviewState: "needs_input", error: concise });
+}
 
 /** Re-show a review task with an updated script: refresh the prompt AND the
  * editable copy (output.reviewScript, which the console's "Edit the draft" loads),
@@ -205,12 +221,18 @@ export async function resolveVideoDraft(id: string, reply: string): Promise<{ de
     return { decision, reply: decisionReply(decision, draft.title) };
   }
 
-  // approve → render + publish (the gated spend), in the background.
+  // approve → render + publish (the gated spend). Keep the task VISIBLE while it
+  // renders and reflect the outcome — don't optimistically close to done, or a
+  // failed render (e.g. HeyGen out of credit) vanishes with no feedback.
   updateDraft(id, { status: "rendering" });
-  await closeTask(draft.taskId, "done");
-  void renderAndPublish(id).catch((e) => {
-    updateDraft(id, { status: "error", error: e instanceof Error ? e.message : String(e) });
-  });
+  await setTaskFields(draft.taskId, { status: "in_progress", reviewState: null });
+  void renderAndPublish(id)
+    .then(async () => { await closeTask(draft.taskId, "done"); })
+    .catch(async (e) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      updateDraft(id, { status: "error", error: msg });
+      await failReviewTask(draft.taskId, msg); // back to review with the error surfaced
+    });
   return { decision, reply: decisionReply(decision, draft.title) };
 }
 
