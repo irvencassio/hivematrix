@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.83 — 2026-06-24
+
+video: Approve renders via HeyGen Video Agent by default (slides + annotations + B-roll); failed renders are re-approvable; accuracy guard against invented stats
+
 ## v0.1.82 — 2026-06-24
 
 video: render failures (e.g. HeyGen out of credit) now surface on the review task instead of silently closing — retry or cancel
