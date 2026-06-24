@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.82", date: "2026-06-24", note: "video: render failures (e.g. HeyGen out of credit) now surface on the review task instead of silently closing — retry or cancel" },
   { version: "0.1.81", date: "2026-06-24", note: "video: editing a script now saves & stays in review (approve renders separately) + clear review controls; 'create an AI-news video' routes straight to draft/review" },
   { version: "0.1.80", date: "2026-06-24", note: "browsable Release notes in Settings (changelog of every version + summary), auto-updated each release" },
   { version: "0.1.79", date: "2026-06-24", note: "console: edit drafted scripts in place (Edit the draft button), persistent reply-box resize, copy from Result" },

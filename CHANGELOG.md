@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.82 — 2026-06-24
+
+video: render failures (e.g. HeyGen out of credit) now surface on the review task instead of silently closing — retry or cancel
+
 ## v0.1.81 — 2026-06-24
 
 video: editing a script now saves & stays in review (approve renders separately) + clear review controls; 'create an AI-news video' routes straight to draft/review
