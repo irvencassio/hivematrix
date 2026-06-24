@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.80 — 2026-06-24
+
+browsable Release notes in Settings (changelog of every version + summary), auto-updated each release
+
 ## v0.1.79 — 2026-06-24
 
 console: edit drafted scripts in place (Edit the draft button), persistent reply-box resize, copy from Result

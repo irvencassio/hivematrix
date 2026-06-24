@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.80", date: "2026-06-24", note: "browsable Release notes in Settings (changelog of every version + summary), auto-updated each release" },
   { version: "0.1.79", date: "2026-06-24", note: "console: edit drafted scripts in place (Edit the draft button), persistent reply-box resize, copy from Result" },
   { version: "0.1.78", date: "2026-06-24", note: "writer-role model selection (frontier or lock-free) + retire weekly-news as a feature (video factory runs via a directive)" },
   { version: "0.1.77", date: "2026-06-24", note: "video: AI-news script now written by the local model (was a canned template); full script shown at the review checkpoint; agents must review-before-render" },
