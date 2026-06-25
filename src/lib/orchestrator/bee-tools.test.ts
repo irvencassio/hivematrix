@@ -13,10 +13,10 @@ function offline() { const p = new ConnectivityPolicy(); p.setManualOverride("of
 
 const names = (tools: { function: { name: string } }[]) => tools.map((t) => t.function.name).sort();
 
-test("isBeeTool recognizes the lanes (incl. outbound channels) and rejects others", () => {
+test("isBeeTool recognizes active lane tools and rejects removed browser aliases", () => {
   assert.equal(isBeeTool("hivematrix_browser"), true);
-  assert.equal(isBeeTool("webbee_search"), true);
-  assert.equal(isBeeTool("browserbee_run"), true);
+  assert.equal(isBeeTool("webbee_search"), false);
+  assert.equal(isBeeTool("browserbee_run"), false);
   assert.equal(isBeeTool("desktopbee_action"), true);
   assert.equal(isBeeTool("mailbee_send"), true);
   assert.equal(isBeeTool("mailbee_draft"), true);
@@ -87,18 +87,15 @@ test("executeBeeTool refuses an unknown bee tool", async () => {
   assert.match(out, /Unknown bee tool/);
 });
 
-test("executeBeeTool gates legacy webbee_search behind the connectivity capability", async () => {
-  // Force local-only on the singleton policy so the capability gate denies the legacy browser-read alias.
-  const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
-  const policy = getConnectivityPolicy();
-  const prev = policy.getState().manualOverride;
-  policy.setManualOverride("offline");
-  try {
-    const out = await executeBeeTool("webbee_search", { query: "x" }, { projectPath: "/tmp", project: "ops", requestedBy: "test" });
-    assert.match(out, /unavailable in the current connectivity mode/);
-  } finally {
-    policy.setManualOverride(prev);
-  }
+test("executeBeeTool rejects removed BrowserBee/WebBee aliases", async () => {
+  assert.match(
+    await executeBeeTool("webbee_search", { query: "x" }, { projectPath: "/tmp", project: "ops", requestedBy: "test" }),
+    /Unknown bee tool/,
+  );
+  assert.match(
+    await executeBeeTool("browserbee_run", { objective: "x" }, { projectPath: "/tmp", project: "ops", requestedBy: "test" }),
+    /Unknown bee tool/,
+  );
 });
 
 // ── Outbound safety: the trust/allowlist gate lives inside the tool ───────────

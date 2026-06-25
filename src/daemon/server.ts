@@ -750,7 +750,14 @@ export function createDaemonServer() {
         return;
       }
 
-      // GET /bees — status of every embedded/managed bee lane (Settings view)
+      // GET /lanes — status of every embedded/managed lane (Settings view)
+      if (req.method === "GET" && urlPath === "/lanes") {
+        const { listLaneServiceStatuses } = await import("@/lib/lanes/status");
+        json(res, 200, { lanes: await listLaneServiceStatuses() });
+        return;
+      }
+
+      // GET /bees — compatibility status for older clients.
       if (req.method === "GET" && urlPath === "/bees") {
         const { listBeeServiceStatuses } = await import("@/lib/bees/service-manager");
         json(res, 200, { bees: await listBeeServiceStatuses() });
@@ -2212,8 +2219,30 @@ export function createDaemonServer() {
         return;
       }
 
-      // POST /bees/:kind/autostart — enable+start or disable+stop a manageable
-      // (launchagent) bee. Body: { enabled: boolean }.
+      // POST /lanes/:kind/autostart — enable+start or disable+stop a manageable
+      // launchagent lane. Body: { enabled: boolean }.
+      const laneAutostartMatch = urlPath.match(/^\/lanes\/([a-z]+)\/autostart$/);
+      if (req.method === "POST" && laneAutostartMatch) {
+        const kind = laneAutostartMatch[1];
+        const body = await parseBody(req) as Record<string, unknown>;
+        const enabled = body.enabled === true;
+        const { setLaneAutoStart, getLaneRuntimeDescriptor } = await import("@/lib/lanes/status");
+        const desc = getLaneRuntimeDescriptor(kind);
+        if (!desc.manageable || desc.runtimeMode !== "launchagent") {
+          json(res, 400, { error: `${kind} is not a manageable launchagent lane` });
+          return;
+        }
+        try {
+          const next = setLaneAutoStart(kind, enabled);
+          if (!next) { json(res, 404, { error: `lane ${kind} not found` }); return; }
+          json(res, 200, { kind, enabled, settings: next });
+        } catch (e) {
+          json(res, 500, { error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
+      // POST /bees/:kind/autostart — compatibility alias for older clients.
       const beeAutostartMatch = urlPath.match(/^\/bees\/([a-z]+)\/autostart$/);
       if (req.method === "POST" && beeAutostartMatch) {
         const kind = beeAutostartMatch[1];

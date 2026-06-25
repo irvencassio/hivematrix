@@ -21,8 +21,6 @@ import { defaultTermBeeProvider } from "@/lib/termbee/provider";
 /** Tool name → the connectivity capability that gates it. */
 const BEE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
   hivematrix_browser: "browserbee",
-  webbee_search: "webbee",
-  browserbee_run: "browserbee",
   desktopbee_action: "desktopbee",
   termbee_session: "termbee",
   termbee_run: "termbee",
@@ -322,10 +320,6 @@ export async function executeBeeTool(
   switch (name) {
     case "hivematrix_browser":
       return executeBrowserLane(args, ctx);
-    case "webbee_search":
-      return executeBrowserLaneRead(args, ctx);
-    case "browserbee_run":
-      return executeBrowserBeeRun(args, ctx);
     case "desktopbee_action":
       return executeDesktopBeeAction(args);
     case "termbee_session":
@@ -571,11 +565,13 @@ async function executeBrowserLaneRead(args: Record<string, unknown>, ctx: BeeToo
 async function executeBrowserLane(args: Record<string, unknown>, ctx: BeeToolContext): Promise<string> {
   const mode = typeof args.mode === "string" ? args.mode.trim() : "";
   if (mode === "search" || mode === "read") {
-    const query = typeof args.query === "string" && args.query.trim()
-      ? args.query
-      : typeof args.url === "string" && args.url.trim()
-        ? `Read and summarize ${args.url}`
-        : "";
+    const url = typeof args.url === "string" ? args.url.trim() : "";
+    const prompt = typeof args.query === "string" ? args.query.trim() : "";
+    const query = url
+      ? prompt
+        ? `Read ${url} and answer: ${prompt}`
+        : `Read and summarize ${url}`
+      : prompt;
     return executeBrowserLaneRead({ ...args, query }, ctx);
   }
   if (mode === "open" || mode === "snapshot" || mode === "workflow") {

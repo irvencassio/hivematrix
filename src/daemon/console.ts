@@ -509,7 +509,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <div class="overlay" id="settingsOverlay">
   <div class="modal">
     <h1>Settings <span class="x" onclick="closeSettings()">✕</span></h1>
-    <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-observability" onclick="switchSettingsTab('observability')">Observability</div><div class="tab" id="tab-bees" onclick="switchSettingsTab('bees')">Bees</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div></div>
+    <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-observability" onclick="switchSettingsTab('observability')">Observability</div><div class="tab" id="tab-lanes" onclick="switchSettingsTab('lanes')">Lanes</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div></div>
     <div id="settingsModels" style="display:none">
       <label class="flbl">Default model</label>
       <select id="s_default" style="width:100%" onchange="saveDefault()"></select>
@@ -696,19 +696,19 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="row" style="margin-top:10px"><button class="create" onclick="refreshProjects()">↻ Re-scan</button></div>
       <div class="muted" style="font-size:11px;margin-top:8px">Projects discovered from git repos, Claude Code history, and VS Code recents. ★ = pre-selected (active project).</div>
     </div>
-    <div id="settingsBees" style="display:none">
+    <div id="settingsLanes" style="display:none">
       <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Embedded capability lanes</label>
-        <button class="copybtn" onclick="renderSettingsBees()">↻ Refresh</button>
+        <button class="copybtn" onclick="renderSettingsLanes()">↻ Refresh</button>
       </div>
-      <div id="s_bees" style="margin-top:8px"></div>
+      <div id="s_lanes" style="margin-top:8px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Safe senders</label>
         <button class="copybtn" onclick="renderSafeSenders()">↻</button>
       </div>
       <div id="s_safe_senders" style="margin-top:4px"></div>
-      <div class="muted" style="font-size:11px;margin-top:10px">Embedded lanes run inside the daemon and follow the connectivity mode. Launch-agent lanes (e.g. BrainBee) can be toggled on/off — that installs/removes their macOS LaunchAgent.</div>
+      <div class="muted" style="font-size:11px;margin-top:10px">Embedded lanes run inside the daemon and follow the connectivity mode. Launch-agent lanes, when present, can be toggled on/off — that installs/removes their macOS LaunchAgent.</div>
     </div>
   </div>
 </div>
@@ -3551,13 +3551,13 @@ async function saveAutoUpdate() {
 }
 
 function switchSettingsTab(tab) {
-  const tabs = ["about", "features", "general", "models", "observability", "bees", "remote"];
-  const panels = { models: "settingsModels", observability: "settingsObservability", bees: "settingsBees", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout" };
+  const tabs = ["about", "features", "general", "models", "observability", "lanes", "remote"];
+  const panels = { models: "settingsModels", observability: "settingsObservability", lanes: "settingsLanes", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout" };
   for (const t of tabs) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "bees") { renderSettingsBees(); renderSafeSenders(); }
+  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); }
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -3703,41 +3703,41 @@ function renderAbout() {
   set("ab_date", v.date || "?");
 }
 
-async function renderSettingsBees() {
-  const el = document.getElementById("s_bees");
+async function renderSettingsLanes() {
+  const el = document.getElementById("s_lanes");
   el.innerHTML = '<div class="muted">Loading…</div>';
-  const r = await api("/bees");
-  const bees = (r && r.bees) || [];
-  if (!bees.length) { el.innerHTML = '<div class="muted">No bee lanes registered.</div>'; return; }
-  el.innerHTML = bees.map(b => {
-    const dotColor = b.running ? (b.healthy === false ? "var(--accent-2)" : "var(--ok)") : "var(--muted)";
-    const stateTxt = b.runtimeMode === "planned" ? "planned"
-      : b.running ? (b.healthy === false ? "running (unhealthy)" : "running")
+  const r = await api("/lanes");
+  const lanes = (r && r.lanes) || [];
+  if (!lanes.length) { el.innerHTML = '<div class="muted">No lanes registered.</div>'; return; }
+  el.innerHTML = lanes.map(lane => {
+    const dotColor = lane.running ? (lane.healthy === false ? "var(--accent-2)" : "var(--ok)") : "var(--muted)";
+    const stateTxt = lane.runtimeMode === "planned" ? "planned"
+      : lane.running ? (lane.healthy === false ? "running (unhealthy)" : "running")
       : "stopped";
-    const modeBadge = '<span class="badge">'+esc(b.runtimeMode)+'</span>';
-    const healthBadge = b.healthy === true ? '<span class="badge" style="color:var(--ok)">healthy</span>'
-      : b.healthy === false ? '<span class="badge" style="color:var(--accent-2)">unhealthy</span>' : '';
-    // Toggle only for manageable launchagent bees.
-    const toggle = (b.manageable && b.runtimeMode === "launchagent")
-      ? '<button class="copybtn" onclick="toggleBee(\''+esc(b.kind)+'\','+(b.running?'false':'true')+')">'+(b.running?'Turn off':'Turn on')+'</button>'
-      : '<span class="muted" style="font-size:10px">'+(b.runtimeMode==="embedded"?'follows mode':'—')+'</span>';
-    const setupBtn = b.kind === 'mailbee' ? '<button class="copybtn" onclick="openMailBeeSetup()" style="margin-right:6px">Set up</button>'
-      : b.kind === 'messagebee' ? '<button class="copybtn" onclick="openMessageBeeSetup()" style="margin-right:6px">Set up</button>'
+    const modeBadge = '<span class="badge">'+esc(lane.runtimeMode)+'</span>';
+    const healthBadge = lane.healthy === true ? '<span class="badge" style="color:var(--ok)">healthy</span>'
+      : lane.healthy === false ? '<span class="badge" style="color:var(--accent-2)">unhealthy</span>' : '';
+    // Toggle only for manageable launchagent lanes.
+    const toggle = (lane.manageable && lane.runtimeMode === "launchagent")
+      ? '<button class="copybtn" onclick="toggleLane(\''+esc(lane.kind)+'\','+(lane.running?'false':'true')+')">'+(lane.running?'Turn off':'Turn on')+'</button>'
+      : '<span class="muted" style="font-size:10px">'+(lane.runtimeMode==="embedded"?'follows mode':'—')+'</span>';
+    const setupBtn = lane.kind === 'mail' ? '<button class="copybtn" onclick="openMailBeeSetup()" style="margin-right:6px">Set up</button>'
+      : lane.kind === 'message' ? '<button class="copybtn" onclick="openMessageBeeSetup()" style="margin-right:6px">Set up</button>'
       : '';
     return '<div class="card" style="cursor:default">'
-      + '<div class="t"><span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+dotColor+';margin-right:6px"></span>'+esc(b.name)+'</div>'
+      + '<div class="t"><span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+dotColor+';margin-right:6px"></span>'+esc(lane.name)+'</div>'
       + '<div class="m">'+modeBadge+healthBadge+'<span class="badge">'+esc(stateTxt)+'</span></div>'
-      + (b.summary?'<div class="muted" style="font-size:11px;margin-top:4px">'+esc(b.summary)+'</div>':'')
-      + (b.statusDetail?'<div class="muted" style="font-size:10px;margin-top:2px">'+esc(b.statusDetail)+'</div>':'')
+      + (lane.summary?'<div class="muted" style="font-size:11px;margin-top:4px">'+esc(lane.summary)+'</div>':'')
+      + (lane.statusDetail?'<div class="muted" style="font-size:10px;margin-top:2px">'+esc(lane.statusDetail)+'</div>':'')
       + '<div class="row" style="margin-top:6px;justify-content:flex-end">'+setupBtn+toggle+'</div>'
       + '</div>';
   }).join("");
 }
 
-async function toggleBee(kind, enable) {
-  const r = await api("/bees/"+kind+"/autostart", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ enabled: enable }) });
+async function toggleLane(kind, enable) {
+  const r = await api("/lanes/"+kind+"/autostart", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ enabled: enable }) });
   if (r && r.error) { hmAlert(r.error); }
-  setTimeout(renderSettingsBees, 800); // give launchctl a moment
+  setTimeout(renderSettingsLanes, 800); // give launchctl a moment
 }
 
 // --- Safe senders (MessageBee + MailBee) ------------------------------------

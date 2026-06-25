@@ -22,6 +22,14 @@ test("browser lane CLI maps search and run to hivematrix_browser payloads", () =
   });
 });
 
+test("browser lane CLI read keeps both the URL and the question", () => {
+  assert.deepEqual(parseBrowserLaneCli(["read", "https://example.com/pricing", "what changed?"]), {
+    command: "tool",
+    tool: "hivematrix_browser",
+    args: { mode: "read", url: "https://example.com/pricing", query: "what changed?" },
+  });
+});
+
 test("browser lane CLI accepts keychain references but rejects inline secrets", () => {
   assert.deepEqual(parseBrowserLaneCli([
     "auth",

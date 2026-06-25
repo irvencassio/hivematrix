@@ -63,6 +63,56 @@ test("readiness probe returns ready when required assertions pass", async () => 
   assert.deepEqual(events, ["probe.open", "probe.snapshot", "probe.assertions", "probe.close"]);
 });
 
+test("readiness probe matches selector assertions against structured page refs and labels", async () => {
+  const result = await runBrowserReadinessProbe({
+    site,
+    probe: {
+      id: "heygen-home",
+      siteId: "heygen",
+      name: "Home",
+      url: "https://app.heygen.com/home",
+      assertions: [
+        { kind: "selector", value: "button:create-video" },
+        { kind: "selector", value: "login-form.email" },
+      ],
+    },
+    adapter: adapter({
+      url: "https://app.heygen.com/home",
+      title: "HeyGen",
+      state: "authenticated",
+      actions: [{ ref: "button:create-video", kind: "button", text: "Create video" }],
+      forms: [{ ref: "login-form", purpose: "login", fields: [{ ref: "login-form.email", kind: "email", label: "Email" }] }],
+      text: "Dashboard",
+    }),
+  });
+
+  assert.equal(result.state.status, "ready");
+});
+
+test("readiness probe fails closed for visual assertions until visual backend is wired", async () => {
+  const result = await runBrowserReadinessProbe({
+    site,
+    probe: {
+      id: "heygen-home",
+      siteId: "heygen",
+      name: "Home",
+      url: "https://app.heygen.com/home",
+      assertions: [{ kind: "visual", value: "Create video button" }],
+    },
+    adapter: adapter({
+      url: "https://app.heygen.com/home",
+      title: "HeyGen",
+      state: "authenticated",
+      actions: [],
+      forms: [],
+      text: "Create video button",
+    }),
+  });
+
+  assert.equal(result.state.status, "probe_failed");
+  assert.deepEqual(result.failedAssertions.map((assertion) => assertion.value), ["Create video button"]);
+});
+
 test("readiness probe reports human required for CAPTCHA or two factor pages", async () => {
   const result = await runBrowserReadinessProbe({
     site,

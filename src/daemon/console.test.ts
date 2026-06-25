@@ -150,8 +150,8 @@ test("settings has an About tab with version/build/date and update status", () =
 
 test("settings tabs are in a defined order ending with About", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /\["about", "features", "general", "models", "observability", "bees", "remote"\]/);
-  assert.match(CONSOLE_HTML, /id="tab-about"[^>]*>About<\/div><div class="tab" id="tab-features"[^>]*>Features<\/div><div class="tab" id="tab-general"[^>]*>Personalization<\/div><div class="tab" id="tab-models"[^>]*>Models<\/div><div class="tab" id="tab-observability"[^>]*>Observability<\/div><div class="tab" id="tab-bees"[^>]*>Bees<\/div><div class="tab" id="tab-remote"[^>]*>Remote<\/div>/);
+  assert.match(js, /\["about", "features", "general", "models", "observability", "lanes", "remote"\]/);
+  assert.match(CONSOLE_HTML, /id="tab-about"[^>]*>About<\/div><div class="tab" id="tab-features"[^>]*>Features<\/div><div class="tab" id="tab-general"[^>]*>Personalization<\/div><div class="tab" id="tab-models"[^>]*>Models<\/div><div class="tab" id="tab-observability"[^>]*>Observability<\/div><div class="tab" id="tab-lanes"[^>]*>Lanes<\/div><div class="tab" id="tab-remote"[^>]*>Remote<\/div>/);
   assert.doesNotMatch(CONSOLE_HTML, /id="tab-projects"/, "Projects is no longer a Settings tab");
 });
 

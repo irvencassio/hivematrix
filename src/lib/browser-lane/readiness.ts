@@ -68,12 +68,28 @@ function assertionPasses(assertion: ReadinessAssertion, snapshot: PageSnapshot):
   switch (assertion.kind) {
     case "text":
     case "account_text":
-    case "selector":
-    case "visual":
       return snapshot.text.toLowerCase().includes(needle);
+    case "selector":
+      return selectorAssertionPasses(needle, snapshot);
+    case "visual":
+      return false;
     case "url_contains":
       return snapshot.url.toLowerCase().includes(needle);
   }
+}
+
+function selectorAssertionPasses(needle: string, snapshot: PageSnapshot): boolean {
+  const haystack: string[] = [];
+  for (const action of snapshot.actions) {
+    haystack.push(action.ref, action.kind, action.text ?? "", action.risk ?? "");
+  }
+  for (const form of snapshot.forms) {
+    haystack.push(form.ref, form.purpose);
+    for (const field of form.fields) {
+      haystack.push(field.ref, field.kind, field.label ?? "");
+    }
+  }
+  return haystack.some((value) => value.toLowerCase() === needle || value.toLowerCase().includes(needle));
 }
 
 export async function runBrowserReadinessProbe(input: BrowserReadinessRunInput): Promise<BrowserReadinessRunResult> {

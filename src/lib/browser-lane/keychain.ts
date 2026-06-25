@@ -1,9 +1,7 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 
 import { ContractValidationError } from "@/lib/central/contracts";
 
-const execFileAsync = promisify(execFile);
 const SERVICE_NAME = "HiveMatrix Browser Lane";
 
 export interface KeychainRunResult {
@@ -11,7 +9,7 @@ export interface KeychainRunResult {
   stderr: string;
 }
 
-export type KeychainRunner = (file: string, args: string[]) => Promise<KeychainRunResult>;
+export type KeychainRunner = (file: string, args: string[], opts?: { stdin?: string }) => Promise<KeychainRunResult>;
 
 export interface BrowserLaneCredentialInput {
   siteId: string;
@@ -62,8 +60,7 @@ export class BrowserLaneKeychain {
       "-a",
       input.account,
       "-w",
-      input.value,
-    ]);
+    ], { stdin: input.value });
   }
 
   async readSecret(account: string): Promise<string> {
@@ -96,7 +93,31 @@ function accountKey(siteId: string, kind: "username" | "password"): string {
   return `${normalized}:${kind}`;
 }
 
-async function defaultRunner(file: string, args: string[]): Promise<KeychainRunResult> {
-  const { stdout, stderr } = await execFileAsync(file, args, { encoding: "utf8" });
-  return { stdout, stderr };
+async function defaultRunner(file: string, args: string[], opts: { stdin?: string } = {}): Promise<KeychainRunResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      const err = new Error(stderr.trim() || `${file} exited with code ${code}`);
+      Object.assign(err, { stdout, stderr, code });
+      reject(err);
+    });
+
+    if (opts.stdin != null) {
+      child.stdin.end(`${opts.stdin}\n`);
+    } else {
+      child.stdin.end();
+    }
+  });
 }
