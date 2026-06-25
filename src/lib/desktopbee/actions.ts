@@ -1,5 +1,5 @@
 /**
- * DesktopBee action contract — the structured protocol HiveMatrix speaks to the
+ * Desktop Lane action contract — the structured protocol HiveMatrix speaks to the
  * native Swift helper daemon over a loopback API.
  *
  * Mirrors the Browser Lane/Canopy principle a third time: a signed native helper

@@ -27,7 +27,7 @@ authenticated requests). SSE passes the token as a query param.
 **Verified live:** `/metrics` no-token → 401, with token → 200, `/health` → 200,
 console carries the injected token, soak unaffected (56 runs / 0 failed).
 
-## F2 — DesktopBee helper API is unauthenticated  · HIGH · FIXED
+## F2 — Desktop Lane helper API is unauthenticated  · HIGH · FIXED
 
 The helper bound loopback but had no caller auth, and approval tiers were
 enforced only client-side.
@@ -103,4 +103,4 @@ if the helper is ever exposed beyond loopback.
 - **F7 INFO/accepted** — minimal HTTP parser; loopback-only bounds exposure.
 
 All code fixes verified live (daemon + helper auth, server-side approval, shell-
-escape block, allowlist) with the DesktopBee proof and soak still green.
+escape block, allowlist) with the Desktop Lane proof and soak still green.

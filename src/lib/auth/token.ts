@@ -5,7 +5,7 @@
  * gate the daemon API and the daemon↔helper channel so a malicious web page
  * (which can't read a cross-origin response and thus can't learn the token)
  * cannot forge authenticated requests, and only the daemon — which holds the
- * helper token file — can drive the DesktopBee helper.
+ * helper token file — can drive the Desktop Lane helper.
  */
 
 import { randomBytes } from "crypto";

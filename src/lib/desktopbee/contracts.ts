@@ -2,7 +2,7 @@ import type { TaskDoc } from "@/lib/db";
 import { ContractValidationError } from "@/lib/central/contracts";
 import { CODEX_COMPUTER_USE_MODEL_ID } from "@/lib/models/catalog";
 
-// DesktopBee (formerly ComputerBee — renamed Q1 decision).
+// Desktop Lane compatibility contracts; exported DesktopBee* symbols stay stable.
 // Swift helper daemon owns macOS Accessibility, CGEvent, ScreenCaptureKit, NSWorkspace, AppleScript.
 // Strategy order: AppleScript/JXA → AX semantic actions → vision last resort.
 

@@ -1,7 +1,7 @@
 /**
- * DesktopBee proof-workflow runner.
+ * Desktop Lane proof-workflow runner.
  *
- * Executes a recipe (an ordered list of DesktopBee actions) through the
+ * Executes a recipe (an ordered list of Desktop Lane actions) through the
  * approval-gated client, recording an audit trail: an AX-tree snapshot of the
  * target app before and after, plus per-step result + best-effort capture.
  * This is how a Phase 4 proof workflow runs — approval-gated, AX-audited,

@@ -1,5 +1,5 @@
 /**
- * TermBee contracts — pure helpers for the persistent terminal-session lane.
+ * Terminal Lane contracts — pure helpers for the persistent terminal-session lane.
  *
  * Sessions are real long-lived shells (no node-pty / tmux dependency); commands
  * are bracketed by a unique completion marker so we can read a command's full

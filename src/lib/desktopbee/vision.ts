@@ -1,5 +1,5 @@
 /**
- * DesktopBee vision plane (W2.2) — the orchestration layer.
+ * Desktop Lane vision plane (W2.2) — the orchestration layer.
  *
  * The live pipeline is: ScreenCaptureKit capture → Apple Vision OCR pre-pass →
  * Qwen3.6 multimodal grounding → CGEvent click/type, postcondition-verified,

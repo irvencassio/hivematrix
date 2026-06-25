@@ -1,7 +1,7 @@
 /**
- * HiveMatrix-side DesktopBee client.
+ * HiveMatrix-side Desktop Lane client.
  *
- * Dispatches DesktopBee actions to the native Swift helper over its loopback
+ * Dispatches Desktop Lane actions to the native Swift helper over its loopback
  * API, enforcing the approval tier first. Free-tier actions go straight
  * through; policy/approval-tier actions require the caller to have obtained
  * approval (or the lane policy to auto-approve) — otherwise the client refuses
@@ -38,7 +38,7 @@ export function desktopBeeHelperUrl(port = DEFAULT_HELPER_PORT): string {
 }
 
 /**
- * Dispatch a DesktopBee action. Returns the helper's response, or an
+ * Dispatch a Desktop Lane action. Returns the helper's response, or an
  * "approval required" response if the action is gated and not approved.
  */
 export async function dispatchDesktopBeeAction(

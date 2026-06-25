@@ -1,5 +1,5 @@
 /**
- * TermBee session manager — long-lived shell sessions the agent can drive across
+ * Terminal Lane session manager — long-lived shell sessions the agent can drive across
  * turns. Real shells (no native deps), one command at a time per session, output
  * read back via the completion marker. State (cwd, env, shell vars) persists
  * between commands, so a multi-step build behaves like a real terminal. Works in
