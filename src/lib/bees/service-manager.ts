@@ -65,9 +65,9 @@ interface BeeServicesConfigShape {
 
 const MANAGED_BEE_DESCRIPTORS: BeeServiceDescriptor[] = [
   {
-    // In HiveMatrix, MessageBee is an in-daemon poller (not a standalone Hive-1
+    // In HiveMatrix, Message Lane is an in-daemon poller (not a standalone Hive-1
     // launchagent). Status is derived from the iMessage channel state below;
-    // managed via the MessageBee Set up modal, so no Bees-panel toggle.
+    // managed via the Message Lane setup modal, so no launchctl toggle.
     kind: "messagebee",
     runtimeMode: "embedded",
     manageable: false,
@@ -206,7 +206,7 @@ export function buildLaunchAgentPlist(
 ): string {
   const descriptor = DESCRIPTOR_MAP.get(kind);
   if (!descriptor || !descriptor.distEntry) {
-    throw new Error(`Bee ${kind} does not support LaunchAgent generation`);
+    throw new Error(`Lane ${kind} does not support LaunchAgent generation`);
   }
 
   const runtime = typeof nodeRuntime === "string"
@@ -333,13 +333,13 @@ export function resolveNodeBin(): string {
 function ensureLaunchAgentPrereqs(kind: string, settings: BeeLaunchAgentSettings): { descriptor: BeeServiceDescriptor; nodeRuntime: NodeRuntimeSpec } {
   const descriptor = DESCRIPTOR_MAP.get(kind);
   if (!descriptor || descriptor.runtimeMode !== "launchagent") {
-    throw new Error(`Bee ${kind} is not launchagent-managed`);
+    throw new Error(`Lane ${kind} is not launchagent-managed`);
   }
   if (!settings.repoPath || !existsSync(settings.repoPath)) {
     throw new Error(`Repo path does not exist for ${kind}: ${settings.repoPath}`);
   }
   if (!descriptor.distEntry || !existsSync(join(settings.repoPath, descriptor.distEntry))) {
-    throw new Error(`Built entry missing for ${kind}. Run the Bee build first.`);
+    throw new Error(`Built entry missing for ${kind}. Run the lane build first.`);
   }
   if (!settings.plistLabel.trim()) {
     throw new Error(`Missing LaunchAgent label for ${kind}`);
@@ -639,7 +639,7 @@ export function setBeeAutoStart(kind: string, autoStart: boolean, repoPath?: str
 export function ensureBeeServiceLoaded(kind: string): boolean {
   const settings = resolveBeeLaunchAgentSettings(kind);
   if (!settings) {
-    throw new Error(`Bee ${kind} is not launchagent-managed`);
+    throw new Error(`Lane ${kind} is not launchagent-managed`);
   }
   if (!settings.autoStart) return false;
 
@@ -659,7 +659,7 @@ export function ensureBeeServiceLoaded(kind: string): boolean {
 export function restartBeeService(kind: string): void {
   const settings = resolveBeeLaunchAgentSettings(kind);
   if (!settings) {
-    throw new Error(`Bee ${kind} is not restartable`);
+    throw new Error(`Lane ${kind} is not restartable`);
   }
   writeLaunchAgent(kind, settings);
   try {

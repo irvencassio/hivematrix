@@ -17,7 +17,8 @@ bash scripts/build-dmg.sh 0.1.0   # drag-to-Applications DMG -> sign -> notarize
 ```
 `build-app.sh` runs `npm run build:daemon` first so Tauri bundles `dist/daemon/`
 as a resource, then signs the injected binaries (bundled **Node**,
-`better_sqlite3.node`, nested **DesktopBeeHelper.app**) with our Developer ID +
+`better_sqlite3.node`, and the Desktop Lane helper compatibility bundle,
+`DesktopBeeHelper.app`) with our Developer ID +
 hardened runtime + entitlements (`src-tauri/entitlements/`), then re-seals the
 outer app so notarization accepts the whole bundle.
 

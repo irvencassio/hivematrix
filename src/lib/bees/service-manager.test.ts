@@ -21,7 +21,7 @@ test("termbee and desktopbee are registered runtimes (not 'planned')", () => {
   assert.equal(getBeeRuntimeDescriptor("desktopbee").runtimeMode, "embedded");
 });
 
-test("buildLaunchAgentPlist emits a KeepAlive launch agent with the Bee label", () => {
+test("buildLaunchAgentPlist emits a KeepAlive launch agent with the compatibility label", () => {
   const plist = buildLaunchAgentPlist("inventorbee", {
     autoStart: true,
     repoPath: "/Users/example/inventorbee",
@@ -34,9 +34,9 @@ test("buildLaunchAgentPlist emits a KeepAlive launch agent with the Bee label", 
   assert.match(plist, /dist\/index\.js/);
 });
 
-test("MessageBee and MailBee are embedded channel pollers (not launchagents)", () => {
+test("Message and Mail lanes are embedded channel pollers (not launchagents)", () => {
   // In HiveMatrix both run in-daemon; status comes from the channel state, and
-  // they're managed via their Set up modals (no Bees-panel launchctl toggle).
+  // they're managed via their setup modals (no launchctl toggle).
   const message = getBeeRuntimeDescriptor("messagebee");
   const mail = getBeeRuntimeDescriptor("mailbee");
   assert.equal(message.runtimeMode, "embedded");
@@ -45,9 +45,9 @@ test("MessageBee and MailBee are embedded channel pollers (not launchagents)", (
   assert.equal(mail.manageable, false);
 });
 
-test("ManagerBee and BrainBee are embedded control-plane workers", () => {
+test("Manager and Memory lanes are embedded control-plane workers", () => {
   // W4.2: both run in-daemon (heartbeat + curation poller), like the other
-  // embedded Bees — no separate launchd repo to ship.
+  // embedded lanes — no separate launchd repo to ship.
   const manager = getBeeRuntimeDescriptor("managerbee");
   const brain = getBeeRuntimeDescriptor("brainbee");
   assert.equal(manager.runtimeMode, "embedded");

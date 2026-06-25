@@ -58,7 +58,7 @@ if [ -d "$DAEMON_DIR/python" ]; then
   done < <(find "$DAEMON_DIR/python/bin" -type f -perm -u+x -print0)
 fi
 
-echo "==> Signing DesktopBeeHelper.app (its own entitlements)"
+echo "==> Signing Desktop Lane helper (DesktopBeeHelper.app)"
 if [ -d "$HELPER" ]; then
   sign --entitlements "$HELPER_ENT" "$HELPER/Contents/MacOS/DesktopBeeHelper"
   sign --entitlements "$HELPER_ENT" "$HELPER"
