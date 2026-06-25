@@ -1427,6 +1427,8 @@ export function createDaemonServer() {
           assetPaths: Array.isArray(body.assetPaths) ? body.assetPaths.filter((p): p is string => typeof p === "string") : undefined,
           project: typeof body.project === "string" ? body.project : undefined,
         };
+        const parentDraftId = typeof body.parentDraftId === "string" ? body.parentDraftId : undefined;
+        const force = body.force === true;
         const { dispatchHeyGenVideoWorkflow } = await import("@/lib/video/heygen-workflow");
         const { seedHeyGenBrowserSite } = await import("@/lib/browser-lane/heygen");
         seedHeyGenBrowserSite(); // idempotent: ensure the site/probe/rule exist
@@ -1435,6 +1437,17 @@ export function createDaemonServer() {
             let projectPath: string;
             try { projectPath = normalizeHomeProjectPath(body.projectPath); }
             catch (e) { json(res, 400, { ok: false, error: `create requires a valid projectPath under $HOME: ${e instanceof Error ? e.message : String(e)}` }); return; }
+            // Dup guard: don't create a second portal child while one is pending,
+            // unless the caller forces it (e.g. an explicit retry).
+            if (parentDraftId) {
+              const { getDraft } = await import("@/lib/video/draft-store");
+              const { portalChildPending } = await import("@/lib/video/portal-completion");
+              const draft = getDraft(parentDraftId);
+              if (draft && portalChildPending(draft, force)) {
+                json(res, 200, { ok: true, result: { status: "portal_pending", taskId: draft.portalTaskId, draftId: parentDraftId, deduped: true } });
+                return;
+              }
+            }
             const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
             const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
             const result = await dispatchHeyGenVideoWorkflow(input, {
@@ -1455,9 +1468,16 @@ export function createDaemonServer() {
                   status: "backlog",
                   executor: "agent",
                   source: "browser-lane",
-                  output: { browserbeeRequest: envelope, coo: { ruleId: route.ruleId, capability: route.capability }, heygen: { title } },
+                  output: { browserbeeRequest: envelope, coo: { ruleId: route.ruleId, capability: route.capability }, heygen: { title, ...(parentDraftId ? { parentDraftId } : {}) } },
                 });
                 broadcast("tasks:created", { taskId: task._id });
+                // Link the child to the parent draft (→ portal_pending) when provided.
+                if (parentDraftId) {
+                  const { markPortalTaskCreated } = await import("@/lib/video/portal-completion");
+                  await markPortalTaskCreated(parentDraftId, task._id, {
+                    updateTask: async (id, fields) => { await Task.findByIdAndUpdate(id, fields); },
+                  });
+                }
                 return { id: task._id };
               },
             });
@@ -1469,6 +1489,31 @@ export function createDaemonServer() {
           }
         } catch (e) {
           json(res, 500, { ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
+      // POST /video/portal-complete — hand a HeyGen portal child task's result back
+      // to the parent video draft (final URL / local path / manual note, or a
+      // failed/cancelled outcome). Idempotent; never accepts/returns secrets and
+      // never falsely marks YouTube publishing done.
+      if (req.method === "POST" && urlPath === "/video/portal-complete") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        try {
+          const { applyHeyGenPortalCompletion } = await import("@/lib/video/portal-completion");
+          const { Task } = await import("@/lib/db");
+          const result = await applyHeyGenPortalCompletion(body, {
+            updateTask: async (id, fields) => { await Task.findByIdAndUpdate(id, fields); },
+          });
+          // Mark the child Browser Lane task terminal to match the outcome.
+          const childTaskId = typeof body.childTaskId === "string" ? body.childTaskId : undefined;
+          if (result.ok && childTaskId) {
+            const childStatus = body.childStatus === "failed" ? "failed" : body.childStatus === "cancelled" ? "cancelled" : "done";
+            try { await Task.findByIdAndUpdate(childTaskId, { status: childStatus, reviewState: null }); } catch { /* draft is the source of truth */ }
+          }
+          json(res, result.ok ? 200 : 404, result);
+        } catch (e) {
+          json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
         }
         return;
       }

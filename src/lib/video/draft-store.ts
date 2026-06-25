@@ -8,7 +8,19 @@ import { homedir } from "os";
 import { join } from "path";
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync } from "fs";
 
-export type DraftStatus = "review" | "rendering" | "published" | "cancelled" | "error";
+export type DraftStatus =
+  | "review"
+  | "rendering"
+  | "published"
+  | "cancelled"
+  | "error"
+  // HeyGen portal flow: a Browser Lane child task does the portal work and hands
+  // a result back. portal_pending = child created and running; portal_completed =
+  // a usable local video is ready for the existing publish path; needs_publish_input
+  // = only a HeyGen URL / manual note came back (no local file → not published).
+  | "portal_pending"
+  | "portal_completed"
+  | "needs_publish_input";
 
 export interface VideoDraftPaths {
   script: string;
@@ -32,6 +44,12 @@ export interface VideoDraft {
   revisions: number;   // how many regenerate loops
   youtubeUrl?: string;
   error?: string;
+  // HeyGen portal linkage / completion (metadata only — never secrets).
+  portalTaskId?: string;         // the Browser Lane child task doing the portal work
+  portalResolvedTaskId?: string; // child whose completion was applied (idempotency)
+  portalVideoUrl?: string;       // HeyGen final video URL (NOT a YouTube publish)
+  portalCompletedAt?: string;
+  manualCompletionNote?: string;
 }
 
 export function draftsDir(): string {
