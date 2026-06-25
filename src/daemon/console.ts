@@ -717,6 +717,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="coo_result" style="margin-top:8px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
+        <label class="flbl" style="margin:0">Browser Lane readiness</label>
+        <button class="copybtn" onclick="renderBrowserReadiness()">↻ Refresh</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin:4px 0 6px">Per-site auth/readiness with stale tracking. A daily sweep keeps it fresh; run one now to refresh before routing browser work.</div>
+      <div class="row" style="margin-top:4px"><button class="create" onclick="runBrowserReadiness()">Run readiness check</button></div>
+      <div id="browser_readiness" style="margin-top:8px"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
+      <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Safe senders</label>
         <button class="copybtn" onclick="renderSafeSenders()">↻</button>
       </div>
@@ -3570,7 +3578,7 @@ function switchSettingsTab(tab) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); }
+  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); renderBrowserReadiness(); }
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -3804,6 +3812,33 @@ function renderCooResult(result) {
   if (result.auditId) rows.push(row("auditId", result.auditId));
   if (result.taskId) rows.push(row("taskId", result.taskId));
   out.innerHTML = '<div class="card" style="cursor:default">'+rows.join("")+'</div>';
+}
+
+// --- Browser Lane readiness maintenance (operator) --------------------------
+async function renderBrowserReadiness() {
+  const el = document.getElementById("browser_readiness");
+  if (!el) return;
+  el.innerHTML = '<div class="muted">Loading…</div>';
+  const r = await api("/browser-lane/dashboard");
+  if (!r || !r.ok) { el.innerHTML = '<div class="muted">Readiness unavailable.</div>'; return; }
+  const t = r.totals || { byColor: {} };
+  const sites = r.sites || [];
+  const attention = sites.filter(s => ['orange','red','gray'].includes(s.readiness.color) || s.readiness.stale === true);
+  const m = (k,v) => '<div class="m" style="margin-top:2px"><span class="badge">'+esc(k)+'</span> '+esc(v)+'</div>';
+  const head = m("sites", t.sites || 0) + m("needs attention", t.needsAttention || 0) + m("stale", (t.stale || 0) + ' (older than ' + (r.staleAfterHours || 24) + 'h)');
+  const list = attention.slice(0,5).map(s => {
+    const stale = s.readiness.stale ? ' · stale' : '';
+    const trace = s.readiness.traceRunId ? ' · ' + esc(s.readiness.traceRunId) : '';
+    return '<div class="muted" style="font-size:11px">'+esc(s.displayName)+' — '+esc(s.readiness.status)+' ('+esc(s.readiness.color)+')'+stale+trace+'</div>';
+  }).join('');
+  el.innerHTML = '<div class="card" style="cursor:default">'+head+(list ? '<div style="margin-top:6px">'+list+'</div>' : '<div class="muted" style="font-size:11px;margin-top:6px">All sites fresh and ready.</div>')+'</div>';
+}
+async function runBrowserReadiness() {
+  const el = document.getElementById("browser_readiness");
+  if (el) el.innerHTML = '<div class="muted">Running readiness check…</div>';
+  const r = await api("/browser-lane/readiness/run", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ siteId: "all" }) });
+  if (!r || !r.ok) { if (el) el.innerHTML = '<div class="errbox">'+esc((r&&r.error)||'Readiness run failed')+'</div>'; return; }
+  renderBrowserReadiness(); // re-render the dashboard after the sweep
 }
 
 // --- Safe senders (Message Lane + Mail Lane) --------------------------------

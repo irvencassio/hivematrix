@@ -369,6 +369,22 @@ export function createDaemonServer() {
         json(res, 200, { briefing: setMorningBriefingConfig(patch) });
         return;
       }
+      // GET/POST /settings/browser-lane-readiness — scheduled readiness sweep config.
+      if (req.method === "GET" && urlPath === "/settings/browser-lane-readiness") {
+        const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
+        json(res, 200, { readiness: getBrowserLaneReadinessConfig() });
+        return;
+      }
+      if (req.method === "POST" && urlPath === "/settings/browser-lane-readiness") {
+        const { setBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const patch: Record<string, unknown> = {};
+        if ("enabled" in body) patch.enabled = body.enabled === true;
+        if (typeof body.hour === "number") patch.hour = body.hour;
+        if (typeof body.staleAfterHours === "number") patch.staleAfterHours = body.staleAfterHours;
+        json(res, 200, { readiness: setBrowserLaneReadinessConfig(patch) });
+        return;
+      }
       // POST /briefing/test — deliver the briefing right now (verify push wiring).
       if (req.method === "POST" && urlPath === "/briefing/test") {
         const { runBriefingNow } = await import("@/lib/briefing/morning-briefing");
@@ -1265,9 +1281,19 @@ export function createDaemonServer() {
       // and trace linkage, plus a roll-up of how many sites need attention.
       if (req.method === "GET" && urlPath === "/browser-lane/dashboard") {
         const { getBrowserLaneReadinessDashboard } = await import("@/lib/browser-lane/store");
+        const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
         const q = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
-        const dashboard = getBrowserLaneReadinessDashboard({ siteId: q.get("siteId") });
+        const dashboard = getBrowserLaneReadinessDashboard({ siteId: q.get("siteId"), staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours });
         json(res, 200, { ok: true, ...dashboard });
+        return;
+      }
+
+      // POST /browser-lane/readiness/run — run a readiness sweep now (all/one site).
+      if (req.method === "POST" && urlPath === "/browser-lane/readiness/run") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { runReadinessSweepNow } = await import("@/lib/browser-lane/readiness-schedule");
+        const summary = await runReadinessSweepNow({ siteId: typeof body.siteId === "string" ? body.siteId : "all" });
+        json(res, 200, { ok: true, summary });
         return;
       }
 
@@ -1420,10 +1446,12 @@ export function createDaemonServer() {
             // returns execution_unavailable without creating anything.
             const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
             const browserAvailable = getConnectivityPolicy().getCapability("browserbee").available;
+            const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
             const result = await dispatchCooTask(request, {
               create: true,
               projectPath: createProjectPath,
               browserAvailable,
+              staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours,
               createTask: async ({ workItem, projectPath: root, route }) => {
                 const { Task } = await import("@/lib/db");
                 const { buildBrowserBeeTaskDescription } = await import("@/lib/browser-lane/jobs");

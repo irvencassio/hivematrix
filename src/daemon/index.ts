@@ -116,6 +116,11 @@ async function main(): Promise<void> {
   const { startMorningBriefingLoop } = await import("@/lib/briefing/morning-briefing");
   startMorningBriefingLoop();
 
+  // Browser Lane readiness sweep: a daily, config-gated pass that refreshes
+  // per-site auth/readiness so COO dispatch has fresh state to gate on.
+  const { startBrowserLaneReadinessLoop } = await import("@/lib/browser-lane/readiness-schedule");
+  startBrowserLaneReadinessLoop();
+
   // Voice result return path: when a voice-escalated task finishes, speak the
   // result (Kokoro) and push a voice:result SSE event so the open Talk screen
   // gets the answer it was told was "being looked into".

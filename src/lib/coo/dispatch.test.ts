@@ -410,6 +410,50 @@ test("create proceeds for a non-authenticated browser route with no site (no aut
   assert.equal(called, 1);
 });
 
+function backdateRun(siteId: string) {
+  getDb().prepare("UPDATE browser_readiness_runs SET startedAt = ? WHERE siteId = ?").run("2020-01-01 00:00:00", siteId);
+}
+
+test("create is held (readiness_required) when a matched green site is STALE for an authenticated route", async () => {
+  browserRule(); // workflow.run → requiresLogin
+  seedReadySite(); // green
+  backdateRun("heygen"); // > 24h old → stale
+  let called = 0;
+  const result = await dispatchCooTask(
+    { text: "browser upload to site", domains: ["app.heygen.com"] },
+    { create: true, projectPath: "/Users/test/proj", browserAvailable: true, staleAfterHours: 24, createTask: async () => { called += 1; return { id: "no" }; } },
+  );
+  assert.equal(result.status, "readiness_required");
+  assert.equal(called, 0);
+  assert.equal(result.readiness?.stale, true);
+  assert.match(result.reason, /stale|readiness|attention/i);
+});
+
+test("create proceeds when a matched green site is FRESH for an authenticated route", async () => {
+  browserRule();
+  seedReadySite(); // green + just recorded → fresh
+  let called = 0;
+  const result = await dispatchCooTask(
+    { text: "browser upload to site", domains: ["app.heygen.com"] },
+    { create: true, projectPath: "/Users/test/proj", browserAvailable: true, staleAfterHours: 24, createTask: async () => { called += 1; return { id: "task_fresh" }; } },
+  );
+  assert.equal(result.status, "created");
+  assert.equal(called, 1);
+});
+
+test("a stale site does NOT block a non-authenticated browser route (no auth needed)", async () => {
+  upsertCooRoutingRule({ id: "r_open", name: "Open", priority: 50, intent: "browser", match: { phrases: ["open page"] }, lane: "browser", capability: "open" });
+  seedReadySite("example.com", "examplesite");
+  backdateRun("examplesite");
+  let called = 0;
+  const result = await dispatchCooTask(
+    { text: "open page at example", domains: ["example.com"] },
+    { create: true, projectPath: "/Users/test/proj", browserAvailable: true, staleAfterHours: 24, createTask: async () => { called += 1; return { id: "task_open" }; } },
+  );
+  assert.equal(result.status, "created");
+  assert.equal(called, 1);
+});
+
 test("execution_unavailable takes precedence over readiness when Browser Lane is off", async () => {
   browserRule();
   seedSite({ id: "heygen", domain: "app.heygen.com", status: "needs_reauth", color: "orange" });

@@ -49,8 +49,24 @@ test("briefing reports Browser Lane sites needing attention (counts + top sites,
 
 test("briefing gives an all-clear when no Browser Lane site needs attention", () => {
   const briefing = buildVoiceBriefing({
-    browserReadiness: { needsAttention: 0, byColor: { green: 3, yellow: 0, orange: 0, red: 0, gray: 0 }, topSites: [] },
+    browserReadiness: { needsAttention: 0, byColor: { green: 3, yellow: 0, orange: 0, red: 0, gray: 0 }, topSites: [], staleCount: 0, lastSweepAt: "2026-06-25T07:00:00.000Z" },
   });
   assert.match(briefing, /Browser Lane/);
   assert.match(briefing, /ready|all clear|no sites/i);
+});
+
+test("briefing mentions when readiness is stale and when it was last refreshed", () => {
+  const stale = buildVoiceBriefing({
+    browserReadiness: { needsAttention: 0, byColor: { green: 1, yellow: 0, orange: 0, red: 0, gray: 2 }, topSites: [], staleCount: 2, lastSweepAt: null },
+  });
+  assert.match(stale, /Browser Lane/);
+  assert.match(stale, /stale/i);
+  assert.doesNotMatch(stale, /password|cookie|secret/i);
+
+  const refreshed = buildVoiceBriefing({
+    browserReadiness: { needsAttention: 1, byColor: { green: 1, yellow: 0, orange: 1, red: 0, gray: 0 }, staleCount: 0, lastSweepAt: "2026-06-25T07:00:00.000Z",
+      topSites: [{ name: "HeyGen", color: "orange", status: "needs_reauth", siteId: "heygen", traceRunId: "trace-9" }] },
+  });
+  assert.match(refreshed, /refreshed|checked|last/i);
+  assert.match(refreshed, /HeyGen/);
 });

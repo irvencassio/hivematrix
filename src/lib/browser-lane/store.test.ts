@@ -205,3 +205,44 @@ test("matchBrowserSiteReadiness returns matched:false for an unknown domain", ()
   assert.equal(m.color, null);
   assert.equal(m.credentialRef, null);
 });
+
+test("dashboard marks a site stale when its latest run is older than the threshold", () => {
+  // heygen has a recent run (trace-9). Backdate it to 2 days ago → stale at 24h.
+  getDb().prepare("UPDATE browser_readiness_runs SET startedAt = ? WHERE siteId = 'heygen'")
+    .run("2020-01-01 00:00:00");
+  const dash = getBrowserLaneReadinessDashboard({ staleAfterHours: 24 });
+  const heygen = dash.sites.find((s) => s.id === "heygen");
+  assert.ok(heygen);
+  assert.equal(heygen.readiness.stale, true);
+  assert.ok((heygen.readiness.ageMs ?? 0) > 0);
+  assert.ok(heygen.readiness.lastRunAt);
+
+  // vercel never ran → also stale (no run).
+  const vercel = dash.sites.find((s) => s.id === "vercel");
+  assert.ok(vercel);
+  assert.equal(vercel.readiness.stale, true);
+  assert.equal(vercel.readiness.lastRunAt, null);
+
+  assert.equal(dash.totals.stale, 2);
+});
+
+test("dashboard treats a just-recorded run as fresh (not stale)", () => {
+  recordBrowserReadinessRun({ siteId: "heygen", status: "ready", color: "green", summary: "fresh", traceRunId: "trace-fresh" });
+  const dash = getBrowserLaneReadinessDashboard({ staleAfterHours: 24 });
+  const heygen = dash.sites.find((s) => s.id === "heygen");
+  assert.ok(heygen);
+  assert.equal(heygen.readiness.stale, false);
+});
+
+test("matchBrowserSiteReadiness reports stale + lastRunAt for a matched site", () => {
+  getDb().prepare("UPDATE browser_readiness_runs SET startedAt = ? WHERE siteId = 'heygen'")
+    .run("2020-01-01 00:00:00");
+  const m = matchBrowserSiteReadiness(["app.heygen.com"], { staleAfterHours: 24 });
+  assert.equal(m.matched, true);
+  assert.equal(m.stale, true);
+  assert.ok(m.lastRunAt);
+  // Fresh threshold (very large) → not stale.
+  recordBrowserReadinessRun({ siteId: "heygen", status: "ready", color: "green", summary: "fresh", traceRunId: "t" });
+  const fresh = matchBrowserSiteReadiness(["app.heygen.com"], { staleAfterHours: 24 });
+  assert.equal(fresh.stale, false);
+});

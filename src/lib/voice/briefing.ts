@@ -32,6 +32,8 @@ export interface BriefingBrowserReadiness {
   needsAttention: number;
   byColor: { green: number; yellow: number; orange: number; red: number; gray: number };
   topSites: BriefingBrowserSite[];
+  staleCount?: number;
+  lastSweepAt?: string | null;
 }
 
 export interface VoiceBriefingInput {
@@ -107,13 +109,25 @@ export function buildVoiceBriefing(input: VoiceBriefingInput): string {
  */
 export function browserReadinessReply(readiness: BriefingBrowserReadiness | null | undefined): string {
   if (!readiness) return "";
-  if (readiness.needsAttention <= 0) {
-    return "Browser Lane: all sites ready.";
+  const staleCount = readiness.staleCount ?? 0;
+  let line: string;
+  if (readiness.needsAttention > 0) {
+    const head = readiness.topSites.slice(0, 2).map((site) => {
+      const trace = site.traceRunId ? ` [${site.traceRunId}]` : ` [${site.siteId}]`;
+      return `${site.name} (${site.status})${trace}`;
+    });
+    const more = readiness.topSites.length > 2 ? `, and ${readiness.topSites.length - 2} more` : "";
+    line = `Browser Lane: ${plural(readiness.needsAttention, "site")} need attention: ${head.join("; ")}${more}`;
+  } else if (staleCount > 0) {
+    line = `Browser Lane: ${plural(staleCount, "site")} have stale readiness — run a readiness check`;
+  } else {
+    line = "Browser Lane: all sites ready";
   }
-  const head = readiness.topSites.slice(0, 2).map((site) => {
-    const trace = site.traceRunId ? ` [${site.traceRunId}]` : ` [${site.siteId}]`;
-    return `${site.name} (${site.status})${trace}`;
-  });
-  const more = readiness.topSites.length > 2 ? `, and ${readiness.topSites.length - 2} more` : "";
-  return `Browser Lane: ${plural(readiness.needsAttention, "site")} need attention: ${head.join("; ")}${more}.`;
+  // Freshness: when the daily sweep last refreshed readiness (UTC, minute-level).
+  if (readiness.lastSweepAt) {
+    const when = new Date(readiness.lastSweepAt);
+    const stamp = Number.isNaN(when.getTime()) ? readiness.lastSweepAt : `${when.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+    line += ` (readiness last refreshed ${stamp})`;
+  }
+  return `${line}.`;
 }

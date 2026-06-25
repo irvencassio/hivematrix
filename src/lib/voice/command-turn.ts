@@ -80,12 +80,16 @@ export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<strin
 async function getBrowserReadiness(deps: CommandTurnDeps): Promise<BriefingBrowserReadiness | null> {
   if (deps.getBrowserReadiness) return deps.getBrowserReadiness();
   try {
+    const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
     const { getBrowserLaneReadinessDashboard } = await import("@/lib/browser-lane/store");
-    const dash = getBrowserLaneReadinessDashboard();
+    const config = getBrowserLaneReadinessConfig();
+    const dash = getBrowserLaneReadinessDashboard({ staleAfterHours: config.staleAfterHours });
     const attention = dash.sites.filter((s) => ["red", "orange", "gray"].includes(s.readiness.color));
     return {
       needsAttention: attention.length,
       byColor: dash.totals.byColor,
+      staleCount: dash.totals.stale,
+      lastSweepAt: config.lastRunAt ?? null,
       topSites: attention.slice(0, 3).map((s) => ({
         name: s.displayName,
         color: s.readiness.color,

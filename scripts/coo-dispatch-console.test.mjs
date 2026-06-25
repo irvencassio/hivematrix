@@ -45,3 +45,21 @@ test("console exposes a COO Dispatch operator surface in the Lanes tab", () => {
   // Never render secret material in the operator surface.
   assert.doesNotMatch(segment, /password|credentialRef|cookie|\.secret\b/i);
 });
+
+test("console exposes a Browser Lane readiness maintenance block with a Run button", () => {
+  const console = read("src/daemon/console.ts");
+
+  // A readiness dashboard render + stale display + run-now control.
+  assert.match(console, /renderBrowserReadiness\(/);
+  assert.match(console, /runBrowserReadiness\(/);
+  assert.match(console, /api\("\/browser-lane\/readiness\/run"/);
+  assert.match(console, /api\("\/browser-lane\/dashboard"/);
+  assert.match(console, /Run readiness check/i);
+  // Stale state is surfaced.
+  assert.match(console, /stale/i);
+
+  // No secret material in the readiness block.
+  const start = console.indexOf("renderBrowserReadiness");
+  const segment = console.slice(start, start + 2500);
+  assert.doesNotMatch(segment, /password|credentialRef|cookie|\.secret\b/i);
+});

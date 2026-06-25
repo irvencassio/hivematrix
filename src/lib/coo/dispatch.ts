@@ -85,6 +85,8 @@ export interface CooDispatchResult {
 export interface CooDispatchOptions {
   /** Real execution project root for the prepared browser envelope (validated by the caller). */
   projectPath?: string | null;
+  /** Readiness staleness threshold in hours (default 24); the daemon passes the configured value. */
+  staleAfterHours?: number;
 }
 
 type LaneDispatchMode = "executable" | "approval_required" | "unsupported";
@@ -175,16 +177,20 @@ function buildBrowserWorkItem(
  * no-run all hold. A no-match is acceptable only for a non-authenticated route —
  * an authenticated workflow with no configured site is never assumed safe.
  */
-function evaluateReadiness(domains: string[], requiresLogin: boolean): CooDispatchReadiness {
-  const match = matchBrowserSiteReadiness(domains);
+function evaluateReadiness(domains: string[], requiresLogin: boolean, staleAfterHours?: number): CooDispatchReadiness {
+  const match = matchBrowserSiteReadiness(domains, { staleAfterHours });
   if (match.matched) {
-    const acceptable = match.color === "green";
-    return {
-      ...match,
-      requiresLogin,
-      acceptable,
-      warning: acceptable ? null : `Browser Lane site ${match.siteName ?? match.siteId} needs attention — ${match.status} (${match.color}). Resolve its readiness before running.`,
-    };
+    // Green is required; for an authenticated route the readiness must also be
+    // fresh (stale auth state is not trusted). Stale doesn't block a no-login route.
+    const staleBlocks = match.stale && requiresLogin;
+    const acceptable = match.color === "green" && !staleBlocks;
+    let warning: string | null = null;
+    if (match.color !== "green") {
+      warning = `Browser Lane site ${match.siteName ?? match.siteId} needs attention — ${match.status} (${match.color}). Resolve its readiness before running.`;
+    } else if (staleBlocks) {
+      warning = `Browser Lane site ${match.siteName ?? match.siteId} readiness is stale (last checked ${match.lastRunAt ?? "never"}). Run a readiness check before an authenticated workflow.`;
+    }
+    return { ...match, requiresLogin, acceptable, warning };
   }
   const acceptable = !requiresLogin;
   return {
@@ -236,7 +242,7 @@ export function dispatchCooRequest(request: CooDispatchRequest, options: CooDisp
     } else {
       status = "prepared";
       // Evaluate the target site's auth/readiness (warn now, gate at create time).
-      readiness = evaluateReadiness(request.domains ?? [], workItem.envelope.requiresLogin);
+      readiness = evaluateReadiness(request.domains ?? [], workItem.envelope.requiresLogin, options.staleAfterHours);
       const warn = readiness.warning ? ` ${readiness.warning}` : "";
       reason = `Prepared a ${laneDisplayName(route.lane)} work item for capability "${route.capability}" (rule "${route.ruleName}").${warn}`;
     }
@@ -281,13 +287,15 @@ export interface CooDispatchTaskOptions {
    * routing still succeeds, execution waits. No silent reroute to another lane.
    */
   browserAvailable?: boolean;
+  /** Readiness staleness threshold in hours (default 24). */
+  staleAfterHours?: number;
 }
 
 export async function dispatchCooTask(
   request: CooDispatchRequest,
   options: CooDispatchTaskOptions,
 ): Promise<CooDispatchResult> {
-  const base = dispatchCooRequest(request, { projectPath: options.projectPath ?? null });
+  const base = dispatchCooRequest(request, { projectPath: options.projectPath ?? null, staleAfterHours: options.staleAfterHours });
   // Only a prepared Browser-Lane result with a real project root may create a task.
   if (!options.create || base.status !== "prepared" || !base.workItem || !base.route) {
     return base;

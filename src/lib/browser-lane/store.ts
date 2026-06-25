@@ -359,18 +359,29 @@ export interface BrowserLaneDashboardSite {
     traceRunId: string | null;
     completedAt: string | null;
     startedAt: string | null;
+    lastRunAt: string | null;
+    ageMs: number | null;
+    stale: boolean;
   };
 }
 
 export interface BrowserLaneReadinessDashboard {
   lane: "browser";
   laneDisplayName: string;
+  staleAfterHours: number;
   totals: {
     sites: number;
     byColor: Record<BrowserReadinessColor, number>;
     needsAttention: number;
+    stale: number;
   };
   sites: BrowserLaneDashboardSite[];
+}
+
+export interface BrowserLaneReadinessQuery {
+  siteId?: string | null;
+  staleAfterHours?: number;
+  now?: Date;
 }
 
 interface DashboardRow extends BrowserSiteRow {
@@ -386,7 +397,10 @@ interface DashboardRow extends BrowserSiteRow {
   readinessStartedAt: string | null;
 }
 
-export function getBrowserLaneReadinessDashboard(filter: { siteId?: string | null } = {}): BrowserLaneReadinessDashboard {
+export function getBrowserLaneReadinessDashboard(filter: BrowserLaneReadinessQuery = {}): BrowserLaneReadinessDashboard {
+  const staleAfterHours = Number.isFinite(filter.staleAfterHours) ? Math.max(0, filter.staleAfterHours as number) : 24;
+  const nowMs = (filter.now ?? new Date()).getTime();
+  const staleThresholdMs = staleAfterHours * 3600 * 1000;
   const params: string[] = [];
   const where = filter.siteId && filter.siteId !== "all" ? "WHERE s._id = ?" : "";
   if (where) params.push(filter.siteId!);
@@ -419,6 +433,7 @@ export function getBrowserLaneReadinessDashboard(filter: { siteId?: string | nul
 
   const byColor: Record<BrowserReadinessColor, number> = { green: 0, yellow: 0, orange: 0, red: 0, gray: 0 };
   let needsAttention = 0;
+  let staleCount = 0;
 
   const sites = rows.map((row): BrowserLaneDashboardSite => {
     const site = rowToSite(row);
@@ -427,6 +442,13 @@ export function getBrowserLaneReadinessDashboard(filter: { siteId?: string | nul
     const color = (row.readinessColor as BrowserReadinessColor | null) ?? state.color;
     byColor[color] += 1;
     if (color === "orange" || color === "red") needsAttention += 1;
+    // Staleness: no run at all is stale; otherwise age of the latest run vs the
+    // threshold. SQLite datetime() is UTC, stored without a zone marker.
+    const lastRunAt = row.readinessStartedAt ?? null;
+    const lastRunMs = lastRunAt ? Date.parse(lastRunAt.replace(" ", "T") + "Z") : NaN;
+    const ageMs = Number.isFinite(lastRunMs) ? Math.max(0, nowMs - lastRunMs) : null;
+    const stale = lastRunAt == null || ageMs == null || ageMs > staleThresholdMs;
+    if (stale) staleCount += 1;
     return {
       id: site.id,
       displayName: site.displayName,
@@ -447,6 +469,9 @@ export function getBrowserLaneReadinessDashboard(filter: { siteId?: string | nul
         traceRunId: row.readinessTraceRunId ?? null,
         completedAt: row.readinessCompletedAt ?? null,
         startedAt: row.readinessStartedAt ?? null,
+        lastRunAt,
+        ageMs,
+        stale,
       },
     };
   });
@@ -454,7 +479,8 @@ export function getBrowserLaneReadinessDashboard(filter: { siteId?: string | nul
   return {
     lane: "browser",
     laneDisplayName: laneDisplayName("browser"),
-    totals: { sites: sites.length, byColor, needsAttention },
+    staleAfterHours,
+    totals: { sites: sites.length, byColor, needsAttention, stale: staleCount },
     sites,
   };
 }
@@ -472,6 +498,9 @@ export interface BrowserSiteReadinessMatch {
   status: BrowserReadinessStatus | null;
   credentialRef: string | null;
   traceRunId: string | null;
+  stale: boolean;
+  lastRunAt: string | null;
+  ageMs: number | null;
 }
 
 function readinessHost(value: string): string {
@@ -489,13 +518,17 @@ function hostsMatch(a: string, b: string): boolean {
   return a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`);
 }
 
-export function matchBrowserSiteReadiness(domains: string[]): BrowserSiteReadinessMatch {
+export function matchBrowserSiteReadiness(
+  domains: string[],
+  opts: { staleAfterHours?: number; now?: Date } = {},
+): BrowserSiteReadinessMatch {
   const none: BrowserSiteReadinessMatch = {
     matched: false, siteId: null, siteName: null, color: null, status: null, credentialRef: null, traceRunId: null,
+    stale: false, lastRunAt: null, ageMs: null,
   };
   const wanted = (domains ?? []).map(readinessHost).filter(Boolean);
   if (wanted.length === 0) return none;
-  const dashboard = getBrowserLaneReadinessDashboard();
+  const dashboard = getBrowserLaneReadinessDashboard({ staleAfterHours: opts.staleAfterHours, now: opts.now });
   for (const site of dashboard.sites) {
     const hosts = site.allowedDomains.map(readinessHost);
     if (wanted.some((w) => hosts.some((h) => hostsMatch(w, h)))) {
@@ -507,6 +540,9 @@ export function matchBrowserSiteReadiness(domains: string[]): BrowserSiteReadine
         status: site.readiness.status,
         credentialRef: site.credentialRef,
         traceRunId: site.readiness.traceRunId,
+        stale: site.readiness.stale,
+        lastRunAt: site.readiness.lastRunAt,
+        ageMs: site.readiness.ageMs,
       };
     }
   }
