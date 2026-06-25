@@ -11,6 +11,7 @@
     "scope-wall": "node scripts/scope-wall.mjs",
     "build:daemon": "node scripts/build-daemon.mjs",
     "verify:daemon-runtime": "node scripts/verify-daemon-runtime.mjs",
+    "verify:portal": "node --import tsx/esm scripts/verify-heygen-portal-pipeline.mjs",
     "release:verify": "tsx scripts/verify-autoupdate-release.mts"
   },
   "dependencies": {

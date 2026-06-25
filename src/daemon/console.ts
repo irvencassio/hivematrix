@@ -728,7 +728,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <label class="flbl" style="margin:0">HeyGen portal videos</label>
         <button class="copybtn" onclick="renderPortalVideos()">↻ Refresh</button>
       </div>
-      <div class="muted" style="font-size:11px;margin:4px 0 6px">HeyGen portal lifecycle: a Browser Lane task does the portal work; record its completion here, then publish a completed local video to YouTube without re-rendering.</div>
+      <div class="muted" style="font-size:11px;margin:4px 0 6px">HeyGen portal lifecycle: a Browser Lane task does the portal work; record its completion here, then publish a completed local video to YouTube without re-rendering. Runbook: docs/runbooks/heygen-portal-video-pipeline.md</div>
       <div id="portal_videos" style="margin-top:6px"></div>
       <details style="margin-top:8px"><summary class="muted" style="font-size:11px;cursor:pointer">Record portal completion</summary>
         <div style="margin-top:6px">
