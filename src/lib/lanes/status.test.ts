@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { BeeServiceStatus } from "@/lib/bees/service-manager";
+import type { LaneWorkerStatus } from "@/lib/lanes/service-manager";
 import { shapeLaneServiceStatuses } from "./status";
 
-function status(overrides: Partial<BeeServiceStatus> & Pick<BeeServiceStatus, "kind" | "name">): BeeServiceStatus {
+function status(overrides: Partial<LaneWorkerStatus> & Pick<LaneWorkerStatus, "kind" | "name">): LaneWorkerStatus {
   return {
     kind: overrides.kind,
     name: overrides.name,

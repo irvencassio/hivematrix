@@ -7,7 +7,7 @@ function read(path) {
 }
 
 test("service and build operator copy uses lane wording", () => {
-  const serviceManager = read("src/lib/bees/service-manager.ts");
+  const serviceManager = read("src/lib/lanes/service-manager.ts");
   const signingScript = read("scripts/sign-bundled-machos.sh");
   const releaseDoc = read("docs/RELEASE.md");
 

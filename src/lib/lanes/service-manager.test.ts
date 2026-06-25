@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildLaunchAgentPlist, getBeeRuntimeDescriptor, summarizeEmbeddedHealthDetail, embeddedHealthRoute } from "./service-manager";
+import { buildLaunchAgentPlist, getLaneWorkerRuntimeDescriptor, summarizeEmbeddedHealthDetail, embeddedHealthRoute } from "./service-manager";
 
 test("embeddedHealthRoute points at health routes the daemon actually serves", () => {
   // Regression: these embedded bees showed false "unhealthy / fetch failed" because
@@ -17,8 +17,8 @@ test("embeddedHealthRoute points at health routes the daemon actually serves", (
 test("termbee and desktopbee are registered runtimes (not 'planned')", () => {
   // Regression: both showed "planned · No runtime registered yet" because they
   // were absent from the descriptor map and fell through to the default.
-  assert.equal(getBeeRuntimeDescriptor("termbee").runtimeMode, "embedded");
-  assert.equal(getBeeRuntimeDescriptor("desktopbee").runtimeMode, "embedded");
+  assert.equal(getLaneWorkerRuntimeDescriptor("termbee").runtimeMode, "embedded");
+  assert.equal(getLaneWorkerRuntimeDescriptor("desktopbee").runtimeMode, "embedded");
 });
 
 test("buildLaunchAgentPlist emits a KeepAlive launch agent with the compatibility label", () => {
@@ -37,8 +37,8 @@ test("buildLaunchAgentPlist emits a KeepAlive launch agent with the compatibilit
 test("Message and Mail lanes are embedded channel pollers (not launchagents)", () => {
   // In HiveMatrix both run in-daemon; status comes from the channel state, and
   // they're managed via their setup modals (no launchctl toggle).
-  const message = getBeeRuntimeDescriptor("messagebee");
-  const mail = getBeeRuntimeDescriptor("mailbee");
+  const message = getLaneWorkerRuntimeDescriptor("messagebee");
+  const mail = getLaneWorkerRuntimeDescriptor("mailbee");
   assert.equal(message.runtimeMode, "embedded");
   assert.equal(message.manageable, false);
   assert.equal(mail.runtimeMode, "embedded");
@@ -48,8 +48,8 @@ test("Message and Mail lanes are embedded channel pollers (not launchagents)", (
 test("Manager and Memory lanes are embedded control-plane workers", () => {
   // W4.2: both run in-daemon (heartbeat + curation poller), like the other
   // embedded lanes — no separate launchd repo to ship.
-  const manager = getBeeRuntimeDescriptor("managerbee");
-  const brain = getBeeRuntimeDescriptor("brainbee");
+  const manager = getLaneWorkerRuntimeDescriptor("managerbee");
+  const brain = getLaneWorkerRuntimeDescriptor("brainbee");
   assert.equal(manager.runtimeMode, "embedded");
   assert.equal(manager.manageable, false);
   assert.equal(brain.runtimeMode, "embedded");
@@ -74,9 +74,9 @@ test("buildLaunchAgentPlist includes extra runtime environment variables", () =>
 });
 
 test("architecture reset exposes Browser Lane internals as embedded Hive capabilities", () => {
-  const webBee = getBeeRuntimeDescriptor("webbee");
-  const browserBee = getBeeRuntimeDescriptor("browserbee");
-  const unknown = getBeeRuntimeDescriptor("not-a-bee");
+  const webBee = getLaneWorkerRuntimeDescriptor("webbee");
+  const browserBee = getLaneWorkerRuntimeDescriptor("browserbee");
+  const unknown = getLaneWorkerRuntimeDescriptor("not-a-bee");
 
   assert.equal(webBee.runtimeMode, "embedded");
   assert.equal(webBee.manageable, false);

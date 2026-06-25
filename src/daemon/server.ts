@@ -2297,15 +2297,15 @@ export function createDaemonServer() {
         const kind = beeAutostartMatch[1];
         const body = await parseBody(req) as Record<string, unknown>;
         const enabled = body.enabled === true;
-        const { setBeeAutoStart, getBeeRuntimeDescriptor } = await import("@/lib/bees/service-manager");
-        const desc = getBeeRuntimeDescriptor(kind);
+        const { setLaneWorkerAutoStart, getLaneWorkerRuntimeDescriptor } = await import("@/lib/lanes/service-manager");
+        const desc = getLaneWorkerRuntimeDescriptor(kind);
         if (!desc.manageable || desc.runtimeMode !== "launchagent") {
-          json(res, 400, { error: `${kind} is not a manageable launchagent bee` });
+          json(res, 400, { error: `${kind} is not a manageable launchagent lane worker` });
           return;
         }
         try {
-          const next = setBeeAutoStart(kind, enabled);
-          if (!next) { json(res, 404, { error: `bee ${kind} not found` }); return; }
+          const next = setLaneWorkerAutoStart(kind, enabled);
+          if (!next) { json(res, 404, { error: `lane worker ${kind} not found` }); return; }
           json(res, 200, { kind, enabled, settings: next });
         } catch (e) {
           json(res, 500, { error: e instanceof Error ? e.message : String(e) });
@@ -2317,8 +2317,8 @@ export function createDaemonServer() {
       const beeRestartMatch = urlPath.match(/^\/bees\/([a-z]+)\/restart$/);
       if (req.method === "POST" && beeRestartMatch) {
         const kind = beeRestartMatch[1];
-        const { restartBeeService } = await import("@/lib/bees/service-manager");
-        try { restartBeeService(kind); json(res, 200, { kind, restarted: true }); }
+        const { restartLaneWorkerService } = await import("@/lib/lanes/service-manager");
+        try { restartLaneWorkerService(kind); json(res, 200, { kind, restarted: true }); }
         catch (e) { json(res, 400, { error: e instanceof Error ? e.message : String(e) }); }
         return;
       }

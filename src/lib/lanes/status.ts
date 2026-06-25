@@ -1,10 +1,10 @@
-import { listBeeServiceStatuses, setBeeAutoStart, getBeeRuntimeDescriptor, type BeeServiceStatus } from "@/lib/bees/service-manager";
+import { listLaneWorkerStatuses, setLaneWorkerAutoStart, getLaneWorkerRuntimeDescriptor, type LaneWorkerStatus } from "@/lib/lanes/service-manager";
 import { laneDisplayName, type LaneId } from "./contracts";
 
 export interface LaneServiceStatus {
   kind: string;
   name: string;
-  runtimeMode: BeeServiceStatus["runtimeMode"];
+  runtimeMode: LaneWorkerStatus["runtimeMode"];
   manageable: boolean;
   running: boolean;
   healthy: boolean | null;
@@ -24,10 +24,10 @@ const STATUS_KIND_TO_LANE: Record<string, LaneId> = {
 };
 
 export async function listLaneServiceStatuses(): Promise<LaneServiceStatus[]> {
-  return shapeLaneServiceStatuses(await listBeeServiceStatuses());
+  return shapeLaneServiceStatuses(await listLaneWorkerStatuses());
 }
 
-export function shapeLaneServiceStatuses(statuses: BeeServiceStatus[]): LaneServiceStatus[] {
+export function shapeLaneServiceStatuses(statuses: LaneWorkerStatus[]): LaneServiceStatus[] {
   const lanes = new Map<string, LaneServiceStatus>();
 
   for (const status of statuses) {
@@ -61,17 +61,17 @@ export function shapeLaneServiceStatuses(statuses: BeeServiceStatus[]): LaneServ
 }
 
 export function setLaneAutoStart(kind: string, enabled: boolean) {
-  const beeKind = laneKindToManagedBeeKind(kind);
-  if (!beeKind) return null;
-  return setBeeAutoStart(beeKind, enabled);
+  const workerKind = laneKindToManagedWorkerKind(kind);
+  if (!workerKind) return null;
+  return setLaneWorkerAutoStart(workerKind, enabled);
 }
 
 export function getLaneRuntimeDescriptor(kind: string) {
-  const beeKind = laneKindToManagedBeeKind(kind) ?? kind;
-  return getBeeRuntimeDescriptor(beeKind);
+  const workerKind = laneKindToManagedWorkerKind(kind) ?? kind;
+  return getLaneWorkerRuntimeDescriptor(workerKind);
 }
 
-function laneKindToManagedBeeKind(kind: string): string | null {
+function laneKindToManagedWorkerKind(kind: string): string | null {
   switch (kind) {
     case "mail":
       return "mailbee";
