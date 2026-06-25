@@ -725,6 +725,24 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="browser_readiness" style="margin-top:8px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
+        <label class="flbl" style="margin:0">HeyGen portal videos</label>
+        <button class="copybtn" onclick="renderPortalVideos()">↻ Refresh</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin:4px 0 6px">HeyGen portal lifecycle: a Browser Lane task does the portal work; record its completion here, then publish a completed local video to YouTube without re-rendering.</div>
+      <div id="portal_videos" style="margin-top:6px"></div>
+      <details style="margin-top:8px"><summary class="muted" style="font-size:11px;cursor:pointer">Record portal completion</summary>
+        <div style="margin-top:6px">
+          <input id="portal_parentDraftId" placeholder="Draft id (parentDraftId)" style="width:100%;box-sizing:border-box" />
+          <input id="portal_childTaskId" placeholder="Child task id (optional)" style="width:100%;box-sizing:border-box;margin-top:6px" />
+          <input id="portal_localVideoPath" placeholder="Local video path — e.g. ~/out/final.mp4 (publishable)" style="width:100%;box-sizing:border-box;margin-top:6px" />
+          <input id="portal_finalVideoUrl" placeholder="HeyGen video URL (manual — no local file)" style="width:100%;box-sizing:border-box;margin-top:6px" />
+          <input id="portal_manualCompletionNote" placeholder="Manual completion note (optional)" style="width:100%;box-sizing:border-box;margin-top:6px" />
+          <div class="row" style="margin-top:6px"><button class="create" onclick="submitPortalCompletion()">Record completion</button></div>
+          <div id="portal_complete_result" class="muted" style="font-size:11px;margin-top:4px"></div>
+        </div>
+      </details>
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
+      <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Safe senders</label>
         <button class="copybtn" onclick="renderSafeSenders()">↻</button>
       </div>
@@ -1366,6 +1384,7 @@ function taskActionsHtml(t) {
       + '<div class="reply-row" style="margin-top:8px;gap:8px;flex-wrap:wrap">'
       + '<button class="reply-primary" onclick="replyTask(\''+t._id+'\')">💾 Save edits / Send</button>'
       + '<button onclick="videoReviewAction(\''+t._id+'\',\'approve\')">✅ Approve &amp; render</button>'
+      + ((t.output && t.output.videoDraftId) ? '<button onclick="createPortalTask(\''+esc(t.output.videoDraftId)+'\')" title="Make this in the HeyGen portal instead — routes through Browser Lane readiness, then publish without re-rendering">🎬 HeyGen portal</button>' : '')
       + '<button class="cancel" onclick="videoReviewAction(\''+t._id+'\',\'cancel\')">✕ Cancel</button>'
       + '</div></div>';
   } else if (!steerable) {
@@ -3578,7 +3597,7 @@ function switchSettingsTab(tab) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); renderBrowserReadiness(); }
+  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); renderBrowserReadiness(); renderPortalVideos(); }
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -3839,6 +3858,69 @@ async function runBrowserReadiness() {
   const r = await api("/browser-lane/readiness/run", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ siteId: "all" }) });
   if (!r || !r.ok) { if (el) el.innerHTML = '<div class="errbox">'+esc((r&&r.error)||'Readiness run failed')+'</div>'; return; }
   renderBrowserReadiness(); // re-render the dashboard after the sweep
+}
+
+// --- HeyGen portal videos (operator) ----------------------------------------
+// Portal lifecycle: a Browser Lane child task does the portal work; the operator
+// records its completion, then publishes a completed LOCAL video to YouTube
+// without re-rendering. needs_publish_input stays manual (no local file).
+const PORTAL_STATES = ["portal_pending", "portal_completed", "needs_publish_input"];
+async function renderPortalVideos() {
+  const el = document.getElementById("portal_videos");
+  if (!el) return;
+  el.innerHTML = '<div class="muted">Loading…</div>';
+  const r = await api("/video/drafts");
+  const drafts = ((r && r.drafts) || []).filter(d => PORTAL_STATES.includes(d.status) || (d.status === "published" && d.portalCompletedAt));
+  if (!drafts.length) { el.innerHTML = '<div class="muted" style="font-size:11px">No HeyGen portal videos right now.</div>'; return; }
+  el.innerHTML = drafts.map(d => {
+    let action = '', note = '';
+    if (d.status === "portal_pending") {
+      note = 'Waiting on the portal task'+(d.portalTaskId ? ' ('+esc(d.portalTaskId)+')' : '')+'.';
+    } else if (d.status === "portal_completed") {
+      note = 'Ready to publish — uploads the existing local video, no re-render.';
+      action = '<button class="create" onclick="publishPortalDraft(\''+esc(d.id)+'\')">Publish to YouTube</button>';
+    } else if (d.status === "needs_publish_input") {
+      note = 'No local file — manual only.'+(d.portalVideoUrl ? ' HeyGen URL: '+esc(d.portalVideoUrl) : '')+(d.manualCompletionNote ? ' Note: '+esc(d.manualCompletionNote) : '');
+    } else if (d.status === "published") {
+      note = d.youtubeUrl ? 'Published: '+esc(d.youtubeUrl) : 'Published.';
+    }
+    return '<div class="card" style="cursor:default">'
+      + '<div class="t">'+esc(d.title)+' <span class="badge">'+esc(d.status)+'</span></div>'
+      + '<div class="muted" style="font-size:11px;margin-top:2px">'+note+'</div>'
+      + (action ? '<div class="row" style="margin-top:6px;justify-content:flex-end">'+action+'</div>' : '')
+      + '</div>';
+  }).join("");
+}
+async function publishPortalDraft(draftId) {
+  const r = await api("/video/publish-draft", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ draftId: draftId }) });
+  if (r && r.ok) { hmToast(r.alreadyPublished ? "Already published." : "Published to YouTube"+(r.youtubeUrl ? ": "+r.youtubeUrl : "")+".", "ok"); }
+  else { hmAlert((r && r.reason) || (r && r.error) || "Publish failed"); }
+  renderPortalVideos();
+}
+async function submitPortalCompletion() {
+  const out = document.getElementById("portal_complete_result");
+  const body = {
+    parentDraftId: (document.getElementById("portal_parentDraftId").value || "").trim(),
+    childTaskId: (document.getElementById("portal_childTaskId").value || "").trim() || undefined,
+    localVideoPath: (document.getElementById("portal_localVideoPath").value || "").trim() || undefined,
+    finalVideoUrl: (document.getElementById("portal_finalVideoUrl").value || "").trim() || undefined,
+    manualCompletionNote: (document.getElementById("portal_manualCompletionNote").value || "").trim() || undefined,
+  };
+  if (!body.parentDraftId) { if (out) out.innerHTML = '<span class="err">Draft id is required.</span>'; return; }
+  const r = await api("/video/portal-complete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  if (out) out.innerHTML = (r && r.ok) ? 'Recorded — draft is now '+esc(r.status)+'.' : '<span class="err">'+esc((r && r.reason) || (r && r.error) || "Failed")+'</span>';
+  renderPortalVideos();
+}
+async function createPortalTask(draftId) {
+  // Load the draft's script + title, then route through COO/Browser Lane readiness gates.
+  const d = await api("/video/drafts/"+encodeURIComponent(draftId));
+  const draft = d && d.draft; const script = (d && d.script) || "";
+  if (!draft || !script) { hmAlert("Draft has no script to send to the portal."); return; }
+  const r = await api("/video/heygen-workflow", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ script: script, title: draft.title, parentDraftId: draftId, create: true, projectPath: "~" }) });
+  if (r && r.ok) { hmToast("Portal task: "+esc((r.result && r.result.status) || "created")+".", "ok"); }
+  else { hmAlert((r && r.error) || "Create portal task failed"); }
+  renderPortalVideos();
 }
 
 // --- Safe senders (Message Lane + Mail Lane) --------------------------------
