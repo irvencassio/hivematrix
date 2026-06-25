@@ -17,6 +17,7 @@ const {
   unavailableVisionSeams,
 } = await import("./vision");
 const { writeVisionTrace } = await import("./trace");
+const { Artifact } = await import("@/lib/artifacts/store");
 
 _resetDbForTests();
 getDb();
@@ -122,4 +123,6 @@ test("writeVisionTrace stages the action trace as a task artifact", () => {
   const written = JSON.parse(readFileSync(out.path, "utf-8"));
   assert.equal(written.flow, "citrix-login");
   assert.equal(written.steps[0].grounding.via, "ocr");
+  const artifact = Artifact.findByFile("task", "task_vision_1", "desktopbee-trace-s1.json");
+  assert.equal(artifact?.title, "Desktop Lane action trace: citrix-login");
 });

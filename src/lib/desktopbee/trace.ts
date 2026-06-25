@@ -1,5 +1,5 @@
 /**
- * DesktopBee action-trace artifacts (W2.2).
+ * Desktop Lane action-trace artifacts (W2.2).
  *
  * A vision-plane flow's step-by-step trace (targets, grounding, capture refs,
  * postcondition verdicts) is written as a task-scoped artifact — the audit
@@ -49,7 +49,7 @@ export function writeVisionTrace(
     scope: "task",
     scopeId: taskId,
     filename,
-    title: `DesktopBee action trace: ${flowName}`,
+    title: `Desktop Lane action trace: ${flowName}`,
     mimeType: "application/json",
     sizeBytes: Buffer.byteLength(body),
     stem,

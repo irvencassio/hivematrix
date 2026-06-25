@@ -3,7 +3,7 @@
 // Accessibility (AXIsProcessTrusted) gates AX query/act and CGEvent input.
 // Screen Recording gates screen capture. Both are per-binary TCC grants; the
 // helper triggers the system prompt on demand and reports status so HiveMatrix
-// can surface "DesktopBee needs permission" in the console.
+// can surface "Desktop Lane needs permission" in the console.
 
 import Foundation
 import ApplicationServices

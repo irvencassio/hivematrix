@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  DesktopBee helper launchd agent.
+  Desktop Lane helper launchd agent.
   Render {{HELPER_APP}} to the absolute path of DesktopBeeHelper.app and
   {{HELPER_LOG}} to a log directory, then:
     cp rendered.plist ~/Library/LaunchAgents/com.hivematrix.desktopbee.helper.plist

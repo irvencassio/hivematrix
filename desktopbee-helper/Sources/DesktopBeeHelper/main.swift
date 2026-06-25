@@ -1,8 +1,8 @@
-// DesktopBee helper daemon.
+// Desktop Lane helper daemon.
 //
 // A signed, launchd-managed native helper that owns the dangerous macOS surface
 // (Accessibility, CGEvent, ScreenCaptureKit, NSWorkspace, AppleScript) behind a
-// loopback HTTP API. HiveMatrix speaks the structured DesktopBee action contract
+// loopback HTTP API. HiveMatrix speaks the structured Desktop Lane action contract
 // (src/lib/desktopbee/actions.ts) to it; nothing sensitive flows through prompts.
 //
 // This is the v1 skeleton: loopback HTTP server + the read-only surface
