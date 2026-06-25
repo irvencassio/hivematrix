@@ -26,6 +26,12 @@ test("console exposes a COO Dispatch operator surface in the Lanes tab", () => {
   // Create is gated to browser-safe prepared results only.
   assert.match(console, /status\s*===\s*"prepared"\s*&&[^\n]*lane\s*===\s*"browser"/);
 
+  // Create is ALSO gated on site readiness being acceptable.
+  assert.match(console, /readiness[^\n]*acceptable/);
+
+  // Site readiness is surfaced beside the prepared result.
+  assert.match(console, /readiness\.(siteName|color|status|traceRunId)/);
+
   // Surfaces the result fields the spec asks for.
   for (const field of ["status", "lane", "capability", "reason", "auditId", "taskId"]) {
     assert.ok(console.includes(field), `console should surface ${field}`);

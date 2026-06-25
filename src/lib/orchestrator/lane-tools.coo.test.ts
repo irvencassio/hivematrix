@@ -14,6 +14,7 @@ function offlinePolicy() { const p = new ConnectivityPolicy(); p.setManualOverri
 
 const { getDb, _resetDbForTests } = await import("@/lib/db");
 const { upsertCooRoutingRule } = await import("@/lib/coo/dispatch").then(() => import("@/lib/coo/store"));
+const { upsertBrowserSite, recordBrowserReadinessRun } = await import("@/lib/browser-lane/store");
 const { dispatchCooRequest, dispatchCooTask } = await import("@/lib/coo/dispatch");
 const {
   LANE_TOOL_DEFINITIONS,
@@ -34,8 +35,13 @@ after(() => {
 });
 
 beforeEach(() => {
-  getDb().exec("DELETE FROM coo_routing_rules; DELETE FROM coo_routing_rule_history; DELETE FROM coo_dispatch_audit;");
+  getDb().exec("DELETE FROM coo_routing_rules; DELETE FROM coo_routing_rule_history; DELETE FROM coo_dispatch_audit; DELETE FROM browser_sites; DELETE FROM browser_credentials; DELETE FROM browser_readiness_runs;");
 });
+
+function seedReadySite(domain = "app.heygen.com", id = "heygen") {
+  upsertBrowserSite({ id, displayName: id, homeUrl: `https://${domain}/home`, allowedDomains: [domain] });
+  recordBrowserReadinessRun({ siteId: id, status: "ready", color: "green", summary: "ready", traceRunId: `trace-${id}` });
+}
 
 const ctx = { projectPath: "/Users/test/proj", project: "proj", requestedBy: "test" };
 
@@ -102,6 +108,7 @@ test("executeCooDispatch prepares a Browser Lane result (no create)", async () =
 
 test("executeCooDispatch with create=true creates one task and reports taskId", async () => {
   browserRule();
+  seedReadySite();
   const out = await executeCooDispatch({ text: "upload to the browser", domains: ["app.heygen.com"], create: true }, ctx, directRunner);
   assert.match(out, /created/i);
   assert.match(out, /task_made_1/);
@@ -153,4 +160,27 @@ test("formatCooDispatchResult distinguishes routing success from execution_unava
   assert.match(out, /routing/i);
   assert.match(out, /unavailable|wait|connectivity/i);
   assert.doesNotMatch(out, /\bcreated\b/i); // must not claim a task was made
+});
+
+test("formatCooDispatchResult surfaces site readiness and a readiness_required hold", () => {
+  const readiness = { matched: true, siteId: "heygen", siteName: "HeyGen", color: "orange", status: "needs_reauth", credentialRef: "hivematrix.browser.heygen.primary", traceRunId: "trace-9", requiresLogin: true, acceptable: false, warning: "Browser Lane site HeyGen needs attention — needs_reauth (orange)." };
+  // Prepared but the site needs attention — readiness shown.
+  const prepared = formatCooDispatchResult({
+    status: "prepared", request: { text: "x" }, route: null, lane: "browser", capability: "workflow.run",
+    workItem: null, approval: null, readiness, reason: "Prepared.", auditId: "a1", taskId: null,
+  } as never);
+  assert.match(prepared, /HeyGen/);
+  assert.match(prepared, /needs_reauth|attention|reauth/i);
+
+  // Held at create time.
+  const held = formatCooDispatchResult({
+    status: "readiness_required", request: { text: "x" }, route: null, lane: "browser", capability: "workflow.run",
+    workItem: null, approval: null, readiness, reason: "auth/readiness needs attention — no task was made.", auditId: "a1", taskId: null,
+  } as never);
+  assert.match(held, /readiness[ _]required/i);
+  assert.match(held, /routing/i);
+  assert.match(held, /readiness|reauth|attention/i);
+  assert.doesNotMatch(held, /\bcreated\b/i);
+  // Never leak credential values (the ref pointer is allowed, secrets are not).
+  assert.doesNotMatch(prepared, /password|cookie|secret/i);
 });

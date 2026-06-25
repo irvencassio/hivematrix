@@ -459,6 +459,60 @@ export function getBrowserLaneReadinessDashboard(filter: { siteId?: string | nul
   };
 }
 
+// ------------------------------------------------------------------
+// Readiness match — given target domain(s), find the configured site and report
+// its readiness. Metadata only: site id/name, color/status, the non-secret
+// credentialRef pointer, and traceRunId. Never credential values or cookies.
+// ------------------------------------------------------------------
+export interface BrowserSiteReadinessMatch {
+  matched: boolean;
+  siteId: string | null;
+  siteName: string | null;
+  color: BrowserReadinessColor | null;
+  status: BrowserReadinessStatus | null;
+  credentialRef: string | null;
+  traceRunId: string | null;
+}
+
+function readinessHost(value: string): string {
+  const raw = value.trim().toLowerCase();
+  if (!raw) return "";
+  try {
+    return new URL(/^https?:\/\//.test(raw) ? raw : `https://${raw}`).hostname;
+  } catch {
+    return raw.replace(/^https?:\/\//, "").split("/")[0];
+  }
+}
+
+function hostsMatch(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  return a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`);
+}
+
+export function matchBrowserSiteReadiness(domains: string[]): BrowserSiteReadinessMatch {
+  const none: BrowserSiteReadinessMatch = {
+    matched: false, siteId: null, siteName: null, color: null, status: null, credentialRef: null, traceRunId: null,
+  };
+  const wanted = (domains ?? []).map(readinessHost).filter(Boolean);
+  if (wanted.length === 0) return none;
+  const dashboard = getBrowserLaneReadinessDashboard();
+  for (const site of dashboard.sites) {
+    const hosts = site.allowedDomains.map(readinessHost);
+    if (wanted.some((w) => hosts.some((h) => hostsMatch(w, h)))) {
+      return {
+        matched: true,
+        siteId: site.id,
+        siteName: site.displayName,
+        color: site.readiness.color,
+        status: site.readiness.status,
+        credentialRef: site.credentialRef,
+        traceRunId: site.readiness.traceRunId,
+      };
+    }
+  }
+  return none;
+}
+
 function rowToSite(row: BrowserSiteRow): BrowserSite {
   return normalizeBrowserSite({
     id: row._id,

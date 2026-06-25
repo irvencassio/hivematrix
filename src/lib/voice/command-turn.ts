@@ -19,7 +19,7 @@ import {
   resolveApprovalReference,
   type ContextApproval,
 } from "./command-context";
-import { buildVoiceBriefing, usageReply, type BriefingUsage } from "./briefing";
+import { buildVoiceBriefing, usageReply, type BriefingUsage, type BriefingBrowserReadiness } from "./briefing";
 import { synthesizeSpeech } from "./tts";
 import type { ApprovalQueueItem } from "@/lib/approvals/queue";
 import type { DirectiveRow } from "@/lib/orchestrator/directive-store";
@@ -46,6 +46,7 @@ export interface CommandTurnDeps {
   updateTaskModel?: (id: string, model: string) => Promise<{ title: string } | null>;
   getUsage?: () => Promise<BriefingUsage | null>;
   getMetrics?: () => Promise<Record<string, unknown>>;
+  getBrowserReadiness?: () => Promise<BriefingBrowserReadiness | null> | BriefingBrowserReadiness | null;
 }
 
 const contextStore = new RollingCommandContextStore();
@@ -56,18 +57,46 @@ const contextStore = new RollingCommandContextStore();
  * both read the same data and phrasing.
  */
 export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<string> {
-  const [approvals, directives, failedTasks, usage] = await Promise.all([
+  const [approvals, directives, failedTasks, usage, browserReadiness] = await Promise.all([
     approvalQueue(deps),
     listDirectives(deps),
     listFailedTasks(deps),
     getUsage(deps),
+    getBrowserReadiness(deps),
   ]);
   return buildVoiceBriefing({
     approvals: approvals.map((item) => ({ title: item.title, kind: item.kind })),
     failedTasks: failedTasks.map((task) => ({ title: task.title })),
     directives: directives.map((d) => ({ goal: d.goal, status: d.status })),
     usage,
+    browserReadiness,
   });
+}
+
+/**
+ * Browser Lane readiness for the briefing — counts the sites needing attention
+ * (red + orange + gray/unknown) and surfaces the top few. Metadata only.
+ */
+async function getBrowserReadiness(deps: CommandTurnDeps): Promise<BriefingBrowserReadiness | null> {
+  if (deps.getBrowserReadiness) return deps.getBrowserReadiness();
+  try {
+    const { getBrowserLaneReadinessDashboard } = await import("@/lib/browser-lane/store");
+    const dash = getBrowserLaneReadinessDashboard();
+    const attention = dash.sites.filter((s) => ["red", "orange", "gray"].includes(s.readiness.color));
+    return {
+      needsAttention: attention.length,
+      byColor: dash.totals.byColor,
+      topSites: attention.slice(0, 3).map((s) => ({
+        name: s.displayName,
+        color: s.readiness.color,
+        status: s.readiness.status,
+        siteId: s.id,
+        traceRunId: s.readiness.traceRunId,
+      })),
+    };
+  } catch {
+    return null; // briefing degrades gracefully if the dashboard is unavailable
+  }
 }
 
 /** Resolve a detected command to a spoken answer, performing any action. */

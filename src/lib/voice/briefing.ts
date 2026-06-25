@@ -20,11 +20,26 @@ export interface BriefingUsage {
   subscriptionPercentRemaining?: number | null;
 }
 
+export interface BriefingBrowserSite {
+  name: string;
+  color: string;
+  status: string;
+  siteId: string;
+  traceRunId: string | null;
+}
+
+export interface BriefingBrowserReadiness {
+  needsAttention: number;
+  byColor: { green: number; yellow: number; orange: number; red: number; gray: number };
+  topSites: BriefingBrowserSite[];
+}
+
 export interface VoiceBriefingInput {
   approvals?: BriefingApproval[];
   failedTasks?: BriefingTask[];
   directives?: BriefingDirective[];
   usage?: BriefingUsage | null;
+  browserReadiness?: BriefingBrowserReadiness | null;
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => (n === 1 ? `${n} ${one}` : `${n} ${many}`);
@@ -77,6 +92,28 @@ export function buildVoiceBriefing(input: VoiceBriefingInput): string {
     parts.push("No active directives.");
   }
 
+  const browserLine = browserReadinessReply(input.browserReadiness);
+  if (browserLine) parts.push(browserLine);
+
   parts.push(usageReply(input.usage));
   return parts.join(" ");
+}
+
+/**
+ * Compact Browser Lane readiness line. Reports how many sites need attention
+ * (red + orange + gray/unknown) and names the top few with their status + a
+ * siteId/traceRunId for troubleshooting. Metadata only — no secrets. Returns ""
+ * when no readiness data was gathered (so existing briefings are unchanged).
+ */
+export function browserReadinessReply(readiness: BriefingBrowserReadiness | null | undefined): string {
+  if (!readiness) return "";
+  if (readiness.needsAttention <= 0) {
+    return "Browser Lane: all sites ready.";
+  }
+  const head = readiness.topSites.slice(0, 2).map((site) => {
+    const trace = site.traceRunId ? ` [${site.traceRunId}]` : ` [${site.siteId}]`;
+    return `${site.name} (${site.status})${trace}`;
+  });
+  const more = readiness.topSites.length > 2 ? `, and ${readiness.topSites.length - 2} more` : "";
+  return `Browser Lane: ${plural(readiness.needsAttention, "site")} need attention: ${head.join("; ")}${more}.`;
 }

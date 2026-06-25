@@ -3780,8 +3780,11 @@ async function cooDispatchRun(create) {
 function renderCooResult(result) {
   const out = document.getElementById("coo_result");
   const createBtn = document.getElementById("coo_create_btn");
-  // The Create button is shown ONLY for a browser-safe prepared result.
-  const canCreate = result.status === "prepared" && result.lane === "browser";
+  // The Create button is shown ONLY for a browser-safe prepared result whose
+  // site readiness is acceptable (no readiness info, or readiness.acceptable).
+  const readiness = result.readiness || null;
+  const readyOk = !readiness || readiness.acceptable === true;
+  const canCreate = result.status === "prepared" && result.lane === "browser" && readyOk;
   if (createBtn) createBtn.style.display = canCreate ? "" : "none";
   const row = (k,v) => '<div class="m" style="margin-top:2px"><span class="badge">'+esc(k)+'</span> '+esc(v)+'</div>';
   const rows = [row("status", result.status)];
@@ -3789,6 +3792,15 @@ function renderCooResult(result) {
   if (result.capability) rows.push(row("capability", result.capability));
   if (result.route && result.route.ruleName) rows.push(row("rule", result.route.ruleName));
   if (result.reason) rows.push(row("reason", result.reason));
+  // Site readiness (metadata only — never any secret).
+  if (readiness) {
+    if (readiness.matched) {
+      rows.push(row("site readiness", (readiness.siteName || readiness.siteId) + ' — ' + readiness.status + ' (' + readiness.color + ')' + (readiness.acceptable ? '' : ' — needs attention')));
+      if (readiness.traceRunId) rows.push(row("readiness trace", readiness.traceRunId));
+    } else if (readiness.requiresLogin) {
+      rows.push(row("site readiness", 'no configured site matches this target — auth not confirmed'));
+    }
+  }
   if (result.auditId) rows.push(row("auditId", result.auditId));
   if (result.taskId) rows.push(row("taskId", result.taskId));
   out.innerHTML = '<div class="card" style="cursor:default">'+rows.join("")+'</div>';

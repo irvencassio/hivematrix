@@ -448,6 +448,19 @@ export function formatCooDispatchResult(result: CooDispatchResult): string {
   if (result.status === "execution_unavailable") {
     lines.push("Routing worked, but lane execution is unavailable right now — no task was queued. It waits for connectivity; nothing was silently rerouted.");
   }
+  if (result.status === "readiness_required") {
+    lines.push("Routing worked, but the target site's auth/readiness needs attention — no task was made. Resolve the site's readiness, then retry.");
+  }
+  // Surface site readiness (metadata only) whenever it was evaluated.
+  if (result.readiness) {
+    const r = result.readiness;
+    if (r.matched) {
+      const trace = r.traceRunId ? `, trace ${r.traceRunId}` : "";
+      lines.push(`Site readiness: ${r.siteName ?? r.siteId} — ${r.status} (${r.color})${r.acceptable ? "" : " — needs attention"}${trace}.`);
+    } else if (r.requiresLogin) {
+      lines.push("Site readiness: no configured Browser Lane site matches this target — auth can't be confirmed for an authenticated workflow.");
+    }
+  }
   if (result.status === "approval_required" && result.approval) {
     lines.push(`Approval required (no action taken): ${result.approval.trust}`);
   }

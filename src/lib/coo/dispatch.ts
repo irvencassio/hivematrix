@@ -6,6 +6,7 @@ import {
   parseBrowserBeeJobCreate,
   type BrowserBeeTaskRequestEnvelope,
 } from "@/lib/browser-lane/jobs";
+import { matchBrowserSiteReadiness, type BrowserSiteReadinessMatch } from "@/lib/browser-lane/store";
 import { resolveCooRouteFromRules, type CooResolvedRouteWithDisplay } from "./store";
 import type { CooRouteRequest } from "./routing-rules";
 
@@ -38,9 +39,22 @@ export type CooDispatchStatus =
   | "prepared"
   | "created"
   | "execution_unavailable"
+  | "readiness_required"
   | "approval_required"
   | "unsupported"
   | "needs_input";
+
+/**
+ * Browser Lane site/auth readiness for a browser route. Metadata only — the
+ * non-secret credentialRef pointer, never credential values or cookies.
+ * `acceptable` is whether create may proceed by readiness; `requiresLogin` marks
+ * an authenticated route (a no-match is not assumed safe for those).
+ */
+export interface CooDispatchReadiness extends BrowserSiteReadinessMatch {
+  requiresLogin: boolean;
+  acceptable: boolean;
+  warning: string | null;
+}
 
 export interface CooDispatchWorkItem {
   envelopeId: string;
@@ -62,6 +76,7 @@ export interface CooDispatchResult {
   capability: string | null;
   workItem: CooDispatchWorkItem | null;
   approval: CooDispatchApproval | null;
+  readiness: CooDispatchReadiness | null;
   reason: string;
   auditId: string | null;
   taskId: string | null;
@@ -154,6 +169,32 @@ function buildBrowserWorkItem(
   return { envelopeId: generateId(), lane: "browser", capability: route.capability, envelope };
 }
 
+/**
+ * Evaluate Browser Lane site/auth readiness for a prepared browser route.
+ * Acceptable = a matched site that is green (ready). orange/red/yellow/gray and
+ * no-run all hold. A no-match is acceptable only for a non-authenticated route —
+ * an authenticated workflow with no configured site is never assumed safe.
+ */
+function evaluateReadiness(domains: string[], requiresLogin: boolean): CooDispatchReadiness {
+  const match = matchBrowserSiteReadiness(domains);
+  if (match.matched) {
+    const acceptable = match.color === "green";
+    return {
+      ...match,
+      requiresLogin,
+      acceptable,
+      warning: acceptable ? null : `Browser Lane site ${match.siteName ?? match.siteId} needs attention — ${match.status} (${match.color}). Resolve its readiness before running.`,
+    };
+  }
+  const acceptable = !requiresLogin;
+  return {
+    ...match,
+    requiresLogin,
+    acceptable,
+    warning: acceptable ? null : "No configured Browser Lane site matches the target — auth can't be confirmed for an authenticated workflow. Add/verify the site before running.",
+  };
+}
+
 export function dispatchCooRequest(request: CooDispatchRequest, options: CooDispatchOptions = {}): CooDispatchResult {
   // Validate BEFORE any audit write — invalid input must not leave a trail.
   if (typeof request.text !== "string" || request.text.trim().length === 0) {
@@ -165,7 +206,7 @@ export function dispatchCooRequest(request: CooDispatchRequest, options: CooDisp
   if (!route) {
     const reason = "No enabled COO routing rule matched this request.";
     const auditId = recordCooDispatchAudit({ request, route: null, status: "no_match", workItemId: null, reason });
-    return { status: "no_match", request, route: null, lane: null, capability: null, workItem: null, approval: null, reason, auditId, taskId: null };
+    return { status: "no_match", request, route: null, lane: null, capability: null, workItem: null, approval: null, readiness: null, reason, auditId, taskId: null };
   }
 
   const policy = LANE_DISPATCH_POLICY[route.lane];
@@ -174,6 +215,7 @@ export function dispatchCooRequest(request: CooDispatchRequest, options: CooDisp
   let status: CooDispatchStatus;
   let workItem: CooDispatchWorkItem | null = null;
   let approval: CooDispatchApproval | null = null;
+  let readiness: CooDispatchReadiness | null = null;
   let reason: string;
 
   if (policy.mode === "unsupported") {
@@ -193,7 +235,10 @@ export function dispatchCooRequest(request: CooDispatchRequest, options: CooDisp
       reason = `${laneDisplayName(route.lane)} needs a target URL/domain, but none could be derived from the request.`;
     } else {
       status = "prepared";
-      reason = `Prepared a ${laneDisplayName(route.lane)} work item for capability "${route.capability}" (rule "${route.ruleName}").`;
+      // Evaluate the target site's auth/readiness (warn now, gate at create time).
+      readiness = evaluateReadiness(request.domains ?? [], workItem.envelope.requiresLogin);
+      const warn = readiness.warning ? ` ${readiness.warning}` : "";
+      reason = `Prepared a ${laneDisplayName(route.lane)} work item for capability "${route.capability}" (rule "${route.ruleName}").${warn}`;
     }
   }
 
@@ -205,7 +250,7 @@ export function dispatchCooRequest(request: CooDispatchRequest, options: CooDisp
     reason,
   });
 
-  return { status, request, route, lane: route.lane, capability: route.capability, workItem, approval, reason, auditId, taskId: null };
+  return { status, request, route, lane: route.lane, capability: route.capability, workItem, approval, readiness, reason, auditId, taskId: null };
 }
 
 // ------------------------------------------------------------------
@@ -253,6 +298,14 @@ export async function dispatchCooTask(
     const reason = `Routing succeeded (Browser Lane · ${base.capability}, rule "${base.route.ruleName}"), but Browser Lane workflow execution is unavailable right now — no task was created. It will run once connectivity is restored.`;
     if (base.auditId) updateCooDispatchAuditStatus(base.auditId, "execution_unavailable", reason);
     return { ...base, status: "execution_unavailable", reason };
+  }
+  // Readiness gating: hold creation unless the target site's auth/readiness is
+  // acceptable. Routing still succeeded — this is a distinct, honest hold.
+  if (base.readiness && !base.readiness.acceptable) {
+    const site = base.readiness.siteName ? ` (${base.readiness.siteName}: ${base.readiness.status})` : "";
+    const reason = `Routing succeeded (Browser Lane · ${base.capability}, rule "${base.route.ruleName}"), but the target site's auth/readiness needs attention${site} — no task was created. ${base.readiness.warning ?? ""}`.trim();
+    if (base.auditId) updateCooDispatchAuditStatus(base.auditId, "readiness_required", reason);
+    return { ...base, status: "readiness_required", reason };
   }
   if (!options.projectPath) {
     return { ...base, reason: `${base.reason} A real projectPath is required to create the task.` };

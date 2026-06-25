@@ -21,6 +21,7 @@ const {
   upsertBrowserSite,
   listBrowserSiteSummaries,
   getBrowserLaneReadinessDashboard,
+  matchBrowserSiteReadiness,
 } = await import("./store");
 
 before(() => {
@@ -168,4 +169,39 @@ test("readiness dashboard aggregates latest run, credential ref, and color rollu
   assert.equal(dashboard.totals.byColor.orange, 1);
   assert.equal(dashboard.totals.byColor.gray, 1);
   assert.equal(dashboard.totals.needsAttention, 1);
+});
+
+test("matchBrowserSiteReadiness matches a site by domain and returns metadata only", () => {
+  // heygen (orange/needs_reauth from the prior test) + vercel (gray/no-run).
+  const m = matchBrowserSiteReadiness(["app.heygen.com"]);
+  assert.equal(m.matched, true);
+  assert.equal(m.siteId, "heygen");
+  assert.equal(m.siteName, "HeyGen");
+  assert.equal(m.color, "orange");
+  assert.equal(m.status, "needs_reauth");
+  assert.equal(m.credentialRef, "hivematrix.browser.heygen.primary"); // pointer, not a secret
+  assert.equal(m.traceRunId, "trace-9");
+  // Never any secret material.
+  assert.equal("password" in m, false);
+  assert.equal("cookie" in m, false);
+  assert.equal("secret" in m, false);
+});
+
+test("matchBrowserSiteReadiness matches subdomains and reports gray for no-run sites", () => {
+  const sub = matchBrowserSiteReadiness(["www.app.heygen.com"]);
+  assert.equal(sub.matched, true);
+  assert.equal(sub.siteId, "heygen");
+
+  const vercel = matchBrowserSiteReadiness(["vercel.com"]);
+  assert.equal(vercel.matched, true);
+  assert.equal(vercel.color, "gray");
+  assert.equal(vercel.status, "unknown");
+});
+
+test("matchBrowserSiteReadiness returns matched:false for an unknown domain", () => {
+  const m = matchBrowserSiteReadiness(["no-such-site.example"]);
+  assert.equal(m.matched, false);
+  assert.equal(m.siteId, null);
+  assert.equal(m.color, null);
+  assert.equal(m.credentialRef, null);
 });

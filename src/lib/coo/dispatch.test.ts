@@ -9,6 +9,7 @@ process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
 const { getDb, _resetDbForTests } = await import("@/lib/db");
 const { upsertCooRoutingRule } = await import("./store");
+const { upsertBrowserSite, recordBrowserReadinessRun } = await import("@/lib/browser-lane/store");
 const {
   dispatchCooRequest,
   dispatchCooTask,
@@ -16,6 +17,15 @@ const {
   listCooDispatchAudit,
   getCooDispatchAudit,
 } = await import("./dispatch");
+
+/** Seed a Browser Lane site with a given latest-readiness color/status. */
+function seedSite(opts: { id: string; domain: string; status: string; color: string }) {
+  upsertBrowserSite({ id: opts.id, displayName: opts.id, homeUrl: `https://${opts.domain}/home`, allowedDomains: [opts.domain] });
+  recordBrowserReadinessRun({ siteId: opts.id, status: opts.status as never, color: opts.color as never, summary: opts.status, traceRunId: `trace-${opts.id}` });
+}
+function seedReadySite(domain = "app.heygen.com", id = "heygen") {
+  seedSite({ id, domain, status: "ready", color: "green" });
+}
 
 function countAuditRows(): number {
   return (getDb().prepare("SELECT COUNT(*) AS n FROM coo_dispatch_audit").get() as { n: number }).n;
@@ -46,7 +56,7 @@ after(() => {
 });
 
 beforeEach(() => {
-  getDb().exec("DELETE FROM coo_routing_rules; DELETE FROM coo_routing_rule_history; DELETE FROM coo_dispatch_audit;");
+  getDb().exec("DELETE FROM coo_routing_rules; DELETE FROM coo_routing_rule_history; DELETE FROM coo_dispatch_audit; DELETE FROM browser_sites; DELETE FROM browser_credentials; DELETE FROM browser_readiness_runs;");
 });
 
 test("browser route prepares a Browser Lane-ready work item", () => {
@@ -258,6 +268,7 @@ test("project label no longer falls back to the literal 'hive'", () => {
 
 test("browser prepared result creates exactly one task when create=true and returns taskId", async () => {
   browserRule();
+  seedReadySite();
   const calls: Array<{ projectPath: string; lane: string }> = [];
   const createTask = async (input: { workItem: { lane: string }; projectPath: string }) => {
     calls.push({ projectPath: input.projectPath, lane: input.workItem.lane });
@@ -314,6 +325,7 @@ test("create=true is blocked honestly when Browser Lane execution is unavailable
 
 test("create=true still creates when Browser Lane execution is available (browserAvailable:true)", async () => {
   browserRule();
+  seedReadySite();
   let called = 0;
   const createTask = async () => { called += 1; return { id: "task_ok_1" }; };
   const result = await dispatchCooTask(
@@ -323,6 +335,89 @@ test("create=true still creates when Browser Lane execution is available (browse
   assert.equal(result.status, "created");
   assert.equal(result.taskId, "task_ok_1");
   assert.equal(called, 1);
+});
+
+// ── Browser Lane readiness gating ─────────────────────────────────────
+
+test("prepare attaches readiness metadata/warning for a matched site (no secrets)", () => {
+  browserRule();
+  seedSite({ id: "heygen", domain: "app.heygen.com", status: "needs_reauth", color: "orange" });
+  const result = dispatchCooRequest({ text: "browser upload to site", domains: ["app.heygen.com"] });
+  assert.equal(result.status, "prepared"); // prepare is not blocked
+  assert.ok(result.readiness, "prepared browser result carries readiness");
+  assert.equal(result.readiness.matched, true);
+  assert.equal(result.readiness.siteId, "heygen");
+  assert.equal(result.readiness.color, "orange");
+  assert.equal(result.readiness.status, "needs_reauth");
+  assert.equal(result.readiness.acceptable, false);
+  assert.ok(result.readiness.warning && result.readiness.warning.length > 0);
+  assert.equal(result.readiness.credentialRef ?? null, null); // site seeded without a cred ref
+  assert.equal("password" in result.readiness, false);
+  assert.equal("cookie" in result.readiness, false);
+});
+
+const okCreator = async () => ({ id: "task_x" });
+
+test("create is held with readiness_required when the matched site needs reauth", async () => {
+  browserRule();
+  seedSite({ id: "heygen", domain: "app.heygen.com", status: "needs_reauth", color: "orange" });
+  let called = 0;
+  const result = await dispatchCooTask(
+    { text: "browser upload to site", domains: ["app.heygen.com"] },
+    { create: true, projectPath: "/Users/test/proj", browserAvailable: true, createTask: async () => { called += 1; return { id: "no" }; } },
+  );
+  assert.equal(result.status, "readiness_required");
+  assert.equal(result.taskId, null);
+  assert.equal(called, 0);
+  assert.match(result.reason, /readiness|reauth|attention/i);
+  const audit = getCooDispatchAudit(result.auditId!);
+  assert.equal(audit?.status, "readiness_required");
+});
+
+test("create is held when the matched site has unknown/no-run readiness (gray)", async () => {
+  browserRule();
+  upsertBrowserSite({ id: "vercel", displayName: "Vercel", homeUrl: "https://vercel.com/dashboard", allowedDomains: ["vercel.com"] }); // no run → gray
+  let called = 0;
+  const result = await dispatchCooTask(
+    { text: "browser upload to site", domains: ["vercel.com"] },
+    { create: true, projectPath: "/Users/test/proj", browserAvailable: true, createTask: async () => { called += 1; return { id: "no" }; } },
+  );
+  assert.equal(result.status, "readiness_required");
+  assert.equal(called, 0);
+});
+
+test("create is held for an authenticated route with no matching site (auth can't be confirmed)", async () => {
+  browserRule(); // capability workflow.run → requiresLogin
+  let called = 0;
+  const result = await dispatchCooTask(
+    { text: "browser upload to site", domains: ["unconfigured.example"] },
+    { create: true, projectPath: "/Users/test/proj", browserAvailable: true, createTask: async () => { called += 1; return { id: "no" }; } },
+  );
+  assert.equal(result.status, "readiness_required");
+  assert.equal(called, 0);
+  assert.match(result.reason, /no.*site|auth|confirm/i);
+});
+
+test("create proceeds for a non-authenticated browser route with no site (no auth needed)", async () => {
+  upsertCooRoutingRule({ id: "r_open", name: "Open page", priority: 50, intent: "browser", match: { phrases: ["open page"] }, lane: "browser", capability: "open" });
+  let called = 0;
+  const result = await dispatchCooTask(
+    { text: "open page at example", domains: ["example.com"] },
+    { create: true, projectPath: "/Users/test/proj", browserAvailable: true, createTask: async () => { called += 1; return { id: "task_open" }; } },
+  );
+  assert.equal(result.status, "created");
+  assert.equal(result.taskId, "task_open");
+  assert.equal(called, 1);
+});
+
+test("execution_unavailable takes precedence over readiness when Browser Lane is off", async () => {
+  browserRule();
+  seedSite({ id: "heygen", domain: "app.heygen.com", status: "needs_reauth", color: "orange" });
+  const result = await dispatchCooTask(
+    { text: "browser upload to site", domains: ["app.heygen.com"] },
+    { create: true, projectPath: "/Users/test/proj", browserAvailable: false, createTask: okCreator },
+  );
+  assert.equal(result.status, "execution_unavailable");
 });
 
 test("create=true never creates a task for approval_required / no_match / needs_input", async () => {

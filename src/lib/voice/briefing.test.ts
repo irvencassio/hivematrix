@@ -28,3 +28,29 @@ test("briefing speaks pending approvals, failed tasks, active directives, and us
   assert.match(briefing, /\$12\.35/);
   assert.match(briefing, /42%/);
 });
+
+test("briefing reports Browser Lane sites needing attention (counts + top sites, no secrets)", () => {
+  const briefing = buildVoiceBriefing({
+    browserReadiness: {
+      needsAttention: 2,
+      byColor: { green: 1, yellow: 0, orange: 1, red: 0, gray: 1 },
+      topSites: [
+        { name: "HeyGen", color: "orange", status: "needs_reauth", siteId: "heygen", traceRunId: "trace-9" },
+        { name: "Vercel", color: "gray", status: "unknown", siteId: "vercel", traceRunId: null },
+      ],
+    },
+  });
+  assert.match(briefing, /Browser Lane/);
+  assert.match(briefing, /2 sites? need attention|needs attention/i);
+  assert.match(briefing, /HeyGen/);
+  assert.match(briefing, /needs_reauth|reauth/i);
+  assert.doesNotMatch(briefing, /password|cookie|secret|credentialRef/i);
+});
+
+test("briefing gives an all-clear when no Browser Lane site needs attention", () => {
+  const briefing = buildVoiceBriefing({
+    browserReadiness: { needsAttention: 0, byColor: { green: 3, yellow: 0, orange: 0, red: 0, gray: 0 }, topSites: [] },
+  });
+  assert.match(briefing, /Browser Lane/);
+  assert.match(briefing, /ready|all clear|no sites/i);
+});
