@@ -75,7 +75,7 @@ export function buildDaemonPlist(opts: { nodeBin: string; daemonCjs: string; log
 `;
 }
 
-/** launchd plist for the DesktopBee Swift helper (the TCC-holding process). */
+/** launchd plist for the Desktop Lane Swift helper (the TCC-holding process). */
 export function buildHelperPlist(opts: { helperApp: string; logDir: string }): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

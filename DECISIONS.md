@@ -924,7 +924,7 @@ replies (extends the Q9 Mail Lane attachment pattern to Message Lane `send file`
 
 **Decision B — Video factory is a no-brand capability.** The script→video pipeline
 (Remotion + ffmpeg + Playwright screen-capture, cloned-voice voiceover) is a
-capability/workflow, **not** a new public Bee brand — same posture as the
+capability/workflow, **not** a new public lane brand — same posture as the
 YouTube-import-to-Browser-Lane recipe decision. Extends `content/pipeline.ts` + the `marketing`
 role. The AI avatar is **demoted to an optional component** (HeyGen, used sparingly
 for hero presenter shots only) per the 2026 trust-penalty evidence; default is
