@@ -39,6 +39,22 @@ test("the default registry includes the HeyGen portal video workflow", () => {
   assert.equal(heygen.capability, "workflow.run");
 });
 
+test("the default registry includes at least two workflows incl. the research brief", () => {
+  const reg = getWorkflowRegistry();
+  assert.ok(reg.list().length >= 2, "expected two or more registered workflows");
+  const brief = reg.get("content.research_brief");
+  assert.ok(brief, "content.research_brief should be registered");
+  assert.equal(brief.lane, "review");
+  assert.equal(brief.readiness.required, false); // no external side effect / gate
+  assert.equal(brief.runbook, "docs/runbooks/content-research-brief.md");
+});
+
+test("the registry matches the research brief workflow from natural-language phrases", () => {
+  const reg = getWorkflowRegistry();
+  assert.equal(reg.match({ text: "prepare a research brief on local AI video tools" })?.id, "content.research_brief");
+  assert.equal(reg.match({ text: "I need a content brief" })?.id, "content.research_brief");
+});
+
 test("the HeyGen workflow declares readiness, handoffs, domains, and a runbook", () => {
   const w = HEYGEN_PORTAL_VIDEO_WORKFLOW;
   assert.equal(w.readiness.required, true);

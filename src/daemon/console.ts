@@ -748,6 +748,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </div>
       <div class="muted" style="font-size:11px;margin:4px 0 6px">Registered repeatable workflows COO and the model can route to. Each links its runbook.</div>
       <div id="workflows_list" style="margin-top:6px"></div>
+      <div class="row" style="margin-top:8px;gap:6px;align-items:center">
+        <input id="brief_topic" placeholder="Research brief topic — e.g. AI video tools for solo founders" style="flex:1;box-sizing:border-box" />
+        <button class="create" onclick="prepareResearchBrief()">Prepare research brief</button>
+      </div>
+      <div id="brief_result" class="muted" style="font-size:11px;margin-top:4px"></div>
       <div class="muted" style="font-size:11px;margin:8px 0 4px">Recent runs</div>
       <div id="workflow_runs" style="margin-top:4px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
@@ -3962,6 +3967,18 @@ async function renderWorkflowRuns() {
     const blk = run.blocker ? ' — '+esc(run.blocker) : '';
     return '<div class="m" style="margin-top:2px"><span class="badge">'+esc(run.status)+'</span> '+esc(run.title)+(links?' ('+links+')':'')+yt+blk+'</div>';
   }).join("");
+}
+async function prepareResearchBrief() {
+  const out = document.getElementById("brief_result");
+  const topic = (document.getElementById("brief_topic").value || "").trim();
+  if (!topic) { if (out) out.innerHTML = '<span class="err">Enter a topic first.</span>'; return; }
+  if (out) out.innerHTML = '<span class="muted">Preparing brief…</span>';
+  const r = await api("/workflows/content.research_brief/prepare", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ topic: topic }) });
+  if (!r || !r.ok) { if (out) out.innerHTML = '<span class="err">'+esc((r && r.error) || "Prepare failed")+'</span>'; return; }
+  // Show the created run + a short preview of the markdown artifact (no secrets).
+  const preview = String(r.markdown || "").split("\n").slice(0, 4).join(" · ");
+  if (out) out.innerHTML = 'Brief ready (run '+esc(r.runId)+', '+esc((r.run && r.run.status) || "needs_review")+'): '+esc(preview);
+  renderWorkflowRuns();
 }
 
 // --- Safe senders (Message Lane + Mail Lane) --------------------------------

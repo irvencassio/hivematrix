@@ -351,6 +351,12 @@ test("dispatch leaves workflow null when nothing in the registry matches", () =>
   assert.equal(result.workflow, null);
 });
 
+test("dispatch surfaces the research brief workflow from natural-language text", () => {
+  const result = dispatchCooRequest({ text: "prepare a research brief on AI video tools" });
+  assert.equal(result.workflow?.id, "content.research_brief");
+  assert.equal(result.workflow?.runbook, "docs/runbooks/content-research-brief.md");
+});
+
 test("prepare attaches readiness metadata/warning for a matched site (no secrets)", () => {
   browserRule();
   seedSite({ id: "heygen", domain: "app.heygen.com", status: "needs_reauth", color: "orange" });

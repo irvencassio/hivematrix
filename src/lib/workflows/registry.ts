@@ -116,10 +116,11 @@ export function summarizeWorkflow(def: WorkflowDefinition): WorkflowSummary {
   return { id: def.id, name: def.name, lane: def.lane, runbook: def.runbook };
 }
 
-// Built-in workflows. Imported lazily-free (heygen-portal pulls only HeyGen constants).
+// Built-in workflows. Def-only modules (no runs store import) → no import cycle.
 import { HEYGEN_PORTAL_VIDEO_WORKFLOW } from "./heygen-portal";
+import { CONTENT_RESEARCH_BRIEF_WORKFLOW } from "./content-research-brief";
 
-export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [HEYGEN_PORTAL_VIDEO_WORKFLOW];
+export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [HEYGEN_PORTAL_VIDEO_WORKFLOW, CONTENT_RESEARCH_BRIEF_WORKFLOW];
 
 let singleton: WorkflowRegistry | null = null;
 export function getWorkflowRegistry(): WorkflowRegistry {

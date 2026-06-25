@@ -14,6 +14,10 @@ test("console exposes a Workflows panel backed by /workflows", () => {
   // Recent runs from the run ledger.
   assert.match(console, /renderWorkflowRuns\(/);
   assert.match(console, /api\("\/workflows\/runs"/);
+  // Prepare-research-brief control.
+  assert.match(console, /prepareResearchBrief\(/);
+  assert.match(console, /api\("\/workflows\/content\.research_brief\/prepare"/);
+  assert.match(console, /id="brief_topic"/);
 });
 
 test("the daemon declares the workflow endpoints", () => {

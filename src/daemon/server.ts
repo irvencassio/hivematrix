@@ -1585,13 +1585,35 @@ export function createDaemonServer() {
         return;
       }
 
-      // POST /workflows/:id/prepare — low-risk prepare for a workflow's handler
-      // (HeyGen only for now): routes through the existing dispatch, no create.
+      // POST /workflows/:id/prepare — low-risk prepare, dispatched by the workflow's
+      // handler marker. No external side effects beyond what the handler does.
       const workflowPrepareMatch = urlPath.match(/^\/workflows\/([^/]+)\/prepare$/);
       if (req.method === "POST" && workflowPrepareMatch) {
         const { getWorkflowRegistry, summarizeWorkflow } = await import("@/lib/workflows/registry");
         const wf = getWorkflowRegistry().get(decodeURIComponent(workflowPrepareMatch[1]));
         if (!wf) { json(res, 404, { ok: false, error: "Workflow not found." }); return; }
+
+        // content.research_brief: assemble a markdown brief from local context. Read-only.
+        if (wf.handler === "content-research-brief") {
+          const body = await parseBody(req) as Record<string, unknown>;
+          const topic = typeof body.topic === "string" ? body.topic.trim() : "";
+          if (!topic) { json(res, 400, { ok: false, error: "topic is required" }); return; }
+          try {
+            const { prepareContentResearchBrief } = await import("@/lib/workflows/content-research");
+            const { getWorkflowRun } = await import("@/lib/workflows/runs");
+            const out = await prepareContentResearchBrief({
+              topic,
+              audience: typeof body.audience === "string" ? body.audience : undefined,
+              objective: typeof body.objective === "string" ? body.objective : undefined,
+              sources: Array.isArray(body.sources) ? body.sources.filter((s): s is string => typeof s === "string") : undefined,
+            });
+            json(res, 200, { ok: true, workflow: out.workflow, runId: out.runId, markdown: out.markdown, run: getWorkflowRun(out.runId) });
+          } catch (e) {
+            json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
+          }
+          return;
+        }
+
         if (wf.handler !== "heygen-portal-video") { json(res, 400, { ok: false, error: `No prepare handler for workflow "${wf.id}".` }); return; }
         const body = await parseBody(req) as Record<string, unknown>;
         const script = typeof body.script === "string" ? body.script.trim() : "";
