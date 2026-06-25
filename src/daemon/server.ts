@@ -1384,6 +1384,38 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /coo/dispatch — route-to-execution bridge. Resolves the request to a
+      // lane/capability and returns a typed dispatch result: a Browser-Lane-ready
+      // work item for browser routes, an explicit approval requirement for
+      // channel/native lanes, or a clear no_match/unsupported/needs_input result.
+      // Never performs risky actions and never returns secret material.
+      if (req.method === "POST" && urlPath === "/coo/dispatch") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        try {
+          const { dispatchCooRequest } = await import("@/lib/coo/dispatch");
+          const result = dispatchCooRequest({
+            text: typeof body.text === "string" ? body.text : "",
+            domains: Array.isArray(body.domains) ? body.domains.filter((d): d is string => typeof d === "string") : undefined,
+            project: typeof body.project === "string" ? body.project : null,
+            workflow: typeof body.workflow === "string" ? body.workflow : null,
+            tags: Array.isArray(body.tags) ? body.tags.filter((t): t is string => typeof t === "string") : undefined,
+          });
+          json(res, 200, { ok: true, result });
+        } catch (e) {
+          json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
+      // GET /coo/dispatch/audit — append-only dispatch decision trail.
+      if (req.method === "GET" && urlPath === "/coo/dispatch/audit") {
+        const { listCooDispatchAudit } = await import("@/lib/coo/dispatch");
+        const q = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+        const limit = Number(q.get("limit") ?? "50");
+        json(res, 200, { ok: true, audit: listCooDispatchAudit(Number.isFinite(limit) ? limit : 50) });
+        return;
+      }
+
       const cooRuleHistoryMatch = urlPath.match(/^\/coo\/routing-rules\/([^/]+)\/history$/);
       if (req.method === "GET" && cooRuleHistoryMatch) {
         const { listCooRoutingRuleHistory } = await import("@/lib/coo/store");

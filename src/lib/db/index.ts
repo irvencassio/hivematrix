@@ -485,6 +485,24 @@ const MIGRATIONS: string[] = [
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_browser_trace_events_run ON browser_trace_events(traceRunId, createdAt);`,
+
+  // v19: COO route-to-execution audit trail. Append-only record of every
+  // dispatch decision. No secrets: requestText is the operator's intent and the
+  // bridge never resolves credential/cookie/Keychain material into a row.
+  `CREATE TABLE IF NOT EXISTS coo_dispatch_audit (
+      _id TEXT PRIMARY KEY,
+      requestText TEXT NOT NULL,
+      requestContext TEXT NOT NULL DEFAULT '{}',
+      ruleId TEXT,
+      ruleName TEXT,
+      lane TEXT,
+      capability TEXT,
+      status TEXT NOT NULL,
+      workItemId TEXT,
+      reason TEXT NOT NULL DEFAULT '',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_coo_dispatch_audit_created ON coo_dispatch_audit(createdAt);`,
 ];
 
 // ------------------------------------------------------------------
