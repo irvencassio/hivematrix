@@ -37,6 +37,7 @@ export type CooDispatchStatus =
   | "no_match"
   | "prepared"
   | "created"
+  | "execution_unavailable"
   | "approval_required"
   | "unsupported"
   | "needs_input";
@@ -228,6 +229,13 @@ export interface CooDispatchTaskOptions {
   /** Real execution project root (validated by the caller). Required to create a task. */
   projectPath?: string | null;
   createTask: CooTaskCreator;
+  /**
+   * Whether Browser Lane workflow execution is available right now (the caller
+   * reads this from the connectivity policy). Defaults to true. When false, a
+   * browser create is held as execution_unavailable instead of being created —
+   * routing still succeeds, execution waits. No silent reroute to another lane.
+   */
+  browserAvailable?: boolean;
 }
 
 export async function dispatchCooTask(
@@ -238,6 +246,13 @@ export async function dispatchCooTask(
   // Only a prepared Browser-Lane result with a real project root may create a task.
   if (!options.create || base.status !== "prepared" || !base.workItem || !base.route) {
     return base;
+  }
+  // Honest execution gating: route succeeded, but only create when Browser Lane
+  // workflow execution is actually available. No silent downgrade to another lane.
+  if (options.browserAvailable === false) {
+    const reason = `Routing succeeded (Browser Lane · ${base.capability}, rule "${base.route.ruleName}"), but Browser Lane workflow execution is unavailable right now — no task was created. It will run once connectivity is restored.`;
+    if (base.auditId) updateCooDispatchAuditStatus(base.auditId, "execution_unavailable", reason);
+    return { ...base, status: "execution_unavailable", reason };
   }
   if (!options.projectPath) {
     return { ...base, reason: `${base.reason} A real projectPath is required to create the task.` };
@@ -367,6 +382,10 @@ function rowToAudit(row: CooDispatchAuditRow): CooDispatchAuditEntry {
 
 function updateCooDispatchAuditTask(id: string, taskId: string, status: CooDispatchStatus): void {
   getDb().prepare("UPDATE coo_dispatch_audit SET taskId = ?, status = ? WHERE _id = ?").run(taskId, status, id);
+}
+
+function updateCooDispatchAuditStatus(id: string, status: CooDispatchStatus, reason: string): void {
+  getDb().prepare("UPDATE coo_dispatch_audit SET status = ?, reason = ? WHERE _id = ?").run(status, reason, id);
 }
 
 export function getCooDispatchAudit(id: string): CooDispatchAuditEntry | null {

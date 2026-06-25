@@ -26,7 +26,8 @@ test("offline: local workhorses work, image degrades, cloud work queues — noth
   assert.ok(r.capabilities.every((c) => ["works", "degraded", "queued"].includes(c.disposition)));
   assert.equal(r.allHonest, true);
   assert.match(r.summary, /Nothing silently fails/);
-  assert.equal(r.counts.works, 3);
+  assert.equal(by("coo-router").disposition, "works"); // routing is local; only execution waits
+  assert.equal(r.counts.works, 4);
   assert.equal(r.counts.degraded, 1);
   assert.equal(r.counts.queued, 4);
 });

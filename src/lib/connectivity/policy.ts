@@ -17,7 +17,7 @@ import { EventEmitter } from "events";
 
 export type ConnectivityMode = "cloud-ok" | "local-only" | "offline";
 
-export type CapabilityId = "frontier" | "local" | "webbee" | "browserbee" | "desktopbee" | "termbee" | "image" | "mailbee" | "messagebee" | "brain" | "codegraph";
+export type CapabilityId = "frontier" | "local" | "webbee" | "browserbee" | "desktopbee" | "termbee" | "image" | "mailbee" | "messagebee" | "brain" | "codegraph" | "coo_router";
 
 export interface CapabilityAvailability {
   available: boolean;
@@ -37,6 +37,7 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     messagebee: { available: true },
     brain:      { available: true },
     codegraph:  { available: true },
+    coo_router: { available: true },
   },
   "local-only": {
     frontier:   { available: false, reason: "Frontier APIs unavailable in local-only mode" },
@@ -51,6 +52,9 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     messagebee: { available: true },
     brain:      { available: true }, // local file reads of the brain root
     codegraph:  { available: true }, // local symbol search (grep/rg)
+    // COO routing resolves rules + prepares plans locally; only lane *execution*
+    // (e.g. Browser Lane workflow) is connectivity-gated, downstream of routing.
+    coo_router: { available: true },
   },
   "offline": {
     frontier:   { available: false, reason: "No network connectivity" },
@@ -66,6 +70,7 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     messagebee: { available: true },
     brain:      { available: true }, // brain docs are local files
     codegraph:  { available: true }, // local symbol search works offline
+    coo_router: { available: true }, // routing/preparation needs no network
   },
 };
 

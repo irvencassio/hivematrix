@@ -115,14 +115,14 @@ test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
   assert.ok(!names(availableLaneTools(local())).includes("digest_url"));
 });
 
-test("local-only drops web lanes but keeps Desktop Lane/Terminal Lane + outbound channels + brain/skill/codegraph", () => {
+test("local-only drops web lanes but keeps Desktop Lane/Terminal Lane + outbound channels + brain/skill/codegraph + COO routing", () => {
   assert.deepEqual(names(availableLaneTools(local())),
-    ["brain_search", "code_graph", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "terminal_run", "terminal_session"]);
+    ["brain_search", "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "terminal_run", "terminal_session"]);
 });
 
-test("offline keeps the offline workhorses + outbound channels + brain/skill/codegraph (all local)", () => {
+test("offline keeps the offline workhorses + outbound channels + brain/skill/codegraph + COO routing (all local)", () => {
   assert.deepEqual(names(availableLaneTools(offline())),
-    ["brain_search", "code_graph", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "terminal_run", "terminal_session"]);
+    ["brain_search", "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "terminal_run", "terminal_session"]);
 });
 
 test("capabilityRoutingGuide lists email/message/brain lanes in cloud, drops web lanes offline", () => {

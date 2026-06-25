@@ -1415,9 +1415,15 @@ export function createDaemonServer() {
         }
         try {
           if (body.create === true && createProjectPath) {
+            // Honest execution gating: only create a Browser Lane task when the
+            // browser workflow capability is available; otherwise dispatchCooTask
+            // returns execution_unavailable without creating anything.
+            const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
+            const browserAvailable = getConnectivityPolicy().getCapability("browserbee").available;
             const result = await dispatchCooTask(request, {
               create: true,
               projectPath: createProjectPath,
+              browserAvailable,
               createTask: async ({ workItem, projectPath: root, route }) => {
                 const { Task } = await import("@/lib/db");
                 const { buildBrowserBeeTaskDescription } = await import("@/lib/browser-lane/jobs");

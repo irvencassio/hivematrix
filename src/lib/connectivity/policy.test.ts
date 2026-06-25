@@ -12,6 +12,15 @@ test("defaults to cloud-ok", () => {
   assert.equal(p.canUseCloud(), true);
 });
 
+test("coo_router (COO routing) is available in every mode — routing is local work", () => {
+  const p = freshPolicy();
+  assert.equal(p.getCapability("coo_router").available, true); // cloud-ok
+  p.setManualOverride("local-only");
+  assert.equal(p.getCapability("coo_router").available, true);
+  p.setManualOverride("offline");
+  assert.equal(p.getCapability("coo_router").available, true);
+});
+
 test("manual override wins over probe failures", () => {
   const p = freshPolicy();
   p.setManualOverride("local-only");

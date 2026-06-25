@@ -23,7 +23,7 @@ import type { CooDispatchResult } from "@/lib/coo/dispatch";
 
 /** Tool name → the connectivity capability that gates it. */
 const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
-  coo_dispatch: "browserbee",
+  coo_dispatch: "coo_router",
   hivematrix_browser: "browserbee",
   desktop_action: "desktopbee",
   terminal_session: "termbee",
@@ -312,7 +312,7 @@ export function availableLaneTools(policy = getConnectivityPolicy()): ChatTool[]
 
 /** Intent → tool mapping, shown for one available lane. */
 const CAPABILITY_ROUTING_LINES: Record<string, string> = {
-  coo_dispatch: "Route a browser/site/workflow request through COO routing rules (Browser Lane is the canonical browser automation path) → **coo_dispatch** (prepare-only; create=true makes the routed Browser Lane task).",
+  coo_dispatch: "Route a browser/site/workflow request through COO routing rules (Browser Lane is the canonical browser automation path) → **coo_dispatch**. Routing + prepare work in every mode; create=true makes the routed Browser Lane task when browser execution is available, otherwise it reports the work is waiting for connectivity (it never silently reroutes).",
   mail_send: "Send an email → **mail_send** (sends to trusted recipients; drafts for approval otherwise). Save a draft only → **mail_draft**.",
   message_send: "Send an SMS / iMessage → **message_send** (allowlisted recipients only).",
   hivematrix_browser: "Read/search the live web or drive logged-in/multi-step browser workflows → **hivematrix_browser**.",
@@ -444,6 +444,9 @@ export function formatCooDispatchResult(result: CooDispatchResult): string {
   if (result.reason) lines.push(result.reason);
   if (result.status === "created" && result.taskId) {
     lines.push(`Created Browser Lane task ${result.taskId} — it runs on the board and its result appears as it completes.`);
+  }
+  if (result.status === "execution_unavailable") {
+    lines.push("Routing worked, but lane execution is unavailable right now — no task was queued. It waits for connectivity; nothing was silently rerouted.");
   }
   if (result.status === "approval_required" && result.approval) {
     lines.push(`Approval required (no action taken): ${result.approval.trust}`);

@@ -7,6 +7,11 @@ import test, { after, before, beforeEach } from "node:test";
 const TMP = mkdtempSync(join(tmpdir(), "hivematrix-coo-tool-"));
 process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
+const { ConnectivityPolicy } = await import("@/lib/connectivity/policy");
+const { availableLaneTools, capabilityRoutingGuide } = await import("./lane-tools");
+function localPolicy() { const p = new ConnectivityPolicy(); p.setManualOverride("local-only"); return p; }
+function offlinePolicy() { const p = new ConnectivityPolicy(); p.setManualOverride("offline"); return p; }
+
 const { getDb, _resetDbForTests } = await import("@/lib/db");
 const { upsertCooRoutingRule } = await import("@/lib/coo/dispatch").then(() => import("@/lib/coo/store"));
 const { dispatchCooRequest, dispatchCooTask } = await import("@/lib/coo/dispatch");
@@ -116,4 +121,36 @@ test("executeCooDispatch never creates a task for non-browser / no_match", async
 test("executeCooDispatch rejects empty objective text", async () => {
   const out = await executeCooDispatch({ text: "   " }, ctx, directRunner);
   assert.match(out, /required|provide|objective|text/i);
+});
+
+test("coo_dispatch is advertised in local-only and offline (routing is local)", () => {
+  const names = (tools: { function: { name: string } }[]) => tools.map((t) => t.function.name);
+  assert.ok(names(availableLaneTools(localPolicy())).includes("coo_dispatch"), "local-only should advertise coo_dispatch");
+  assert.ok(names(availableLaneTools(offlinePolicy())).includes("coo_dispatch"), "offline should advertise coo_dispatch");
+});
+
+test("capabilityRoutingGuide includes coo_dispatch locally with a route-now/execute-may-wait note", () => {
+  for (const guide of [capabilityRoutingGuide(localPolicy()), capabilityRoutingGuide(offlinePolicy())]) {
+    assert.match(guide, /coo_dispatch/);
+    assert.match(guide, /wait|prepare|connectivity|every mode/i);
+  }
+});
+
+test("formatCooDispatchResult distinguishes routing success from execution_unavailable", () => {
+  const out = formatCooDispatchResult({
+    status: "execution_unavailable",
+    request: { text: "x" },
+    route: { ruleId: "r", ruleName: "Browser workflow", lane: "browser", capability: "workflow.run", backendPolicy: "lane_owned_first", modelPosture: "mixed-local-first", riskTier: "external_side_effect", approvalPolicy: {}, verificationPolicy: {}, laneDisplayName: "Browser Lane" },
+    lane: "browser",
+    capability: "workflow.run",
+    workItem: null,
+    approval: null,
+    reason: "Routing succeeded but Browser Lane workflow execution is unavailable right now.",
+    auditId: "aud1",
+    taskId: null,
+  } as never);
+  assert.match(out, /execution[ _]unavailable/i);
+  assert.match(out, /routing/i);
+  assert.match(out, /unavailable|wait|connectivity/i);
+  assert.doesNotMatch(out, /\bcreated\b/i); // must not claim a task was made
 });

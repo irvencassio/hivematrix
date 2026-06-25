@@ -57,6 +57,15 @@ export function describeLocalPosture(mode: ConnectivityMode): LocalPostureReport
     { id: "desktopbee", label: "Desktop Lane", disposition: "works", action: "run_now", note: "Native desktop control works offline." },
     { id: "termbee", label: "Terminal Lane", disposition: "works", action: "run_now", note: "Terminal sessions work offline (the workhorse)." },
     {
+      id: "coo-router",
+      label: "COO routing",
+      disposition: "works",
+      action: "run_now",
+      note: cloud
+        ? "COO routing resolves requests and can create the routed Browser Lane task."
+        : "COO routing works locally — requests resolve to a lane and a plan is prepared; lane execution may queue, degrade, or require approval (e.g. Browser Lane workflows wait for connectivity, never silently rerouted).",
+    },
+    {
       id: "frontier",
       label: "Frontier models",
       disposition: cloud ? "works" : "queued",

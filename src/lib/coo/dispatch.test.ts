@@ -290,6 +290,41 @@ test("dispatchCooTask without create flag stays prepare-only (no task)", async (
   assert.equal(called, 0);
 });
 
+test("create=true is blocked honestly when Browser Lane execution is unavailable", async () => {
+  browserRule();
+  let called = 0;
+  const createTask = async () => { called += 1; return { id: "should-not-create" }; };
+  const result = await dispatchCooTask(
+    { text: "browser upload to site", domains: ["app.heygen.com"] },
+    { create: true, projectPath: "/Users/test/proj", createTask, browserAvailable: false },
+  );
+  assert.equal(result.status, "execution_unavailable");
+  assert.equal(result.taskId, null);
+  assert.equal(called, 0, "must not create a task when Browser Lane is unavailable");
+  // Routing still succeeded — the route + prepared work item are present.
+  assert.equal(result.lane, "browser");
+  assert.ok(result.workItem, "routing prepared a work item even though execution is unavailable");
+  assert.match(result.reason, /unavailable|connectivity|wait/i);
+
+  // Audit reflects the held state (no taskId).
+  const audit = getCooDispatchAudit(result.auditId!);
+  assert.equal(audit?.status, "execution_unavailable");
+  assert.equal(audit?.taskId, null);
+});
+
+test("create=true still creates when Browser Lane execution is available (browserAvailable:true)", async () => {
+  browserRule();
+  let called = 0;
+  const createTask = async () => { called += 1; return { id: "task_ok_1" }; };
+  const result = await dispatchCooTask(
+    { text: "browser upload to site", domains: ["app.heygen.com"] },
+    { create: true, projectPath: "/Users/test/proj", createTask, browserAvailable: true },
+  );
+  assert.equal(result.status, "created");
+  assert.equal(result.taskId, "task_ok_1");
+  assert.equal(called, 1);
+});
+
 test("create=true never creates a task for approval_required / no_match / needs_input", async () => {
   // approval-required lane
   upsertCooRoutingRule({ id: "r_mail", name: "mail", priority: 10, intent: "mail", match: { phrases: ["mail-it"] }, lane: "mail", capability: "mail.send" });
