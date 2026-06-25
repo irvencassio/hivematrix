@@ -51,7 +51,7 @@ The recovery story is **structural**, not best-effort:
 
 1. Disconnect networking, then reboot.
 2. **Expected:** daemon boots; connectivity policy resolves to `offline`/`local-only`;
-   `GET /posture` shows local Qwen + DesktopBee + TermBee `works`, frontier work
+   `GET /posture` shows local Qwen + Desktop Lane + Terminal Lane `works`, frontier work
    `queued`; license verifies locally (no phone-home).
 3. **Pass criteria:** the box is usable offline immediately after reboot.
 

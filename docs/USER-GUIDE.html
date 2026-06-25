@@ -79,7 +79,7 @@
 <div class="lead">
   <strong>HiveMatrix is a personal AI operations system.</strong> A headless daemon on your Mac runs <em>tasks</em> and
   long-running <em>directives</em> across a fleet of AI models — frontier (Claude, Codex/ChatGPT), a local model (Qwen),
-  or a router that mixes them — and gives those agents real capabilities through <strong>Bees</strong>: web search,
+  or a router that mixes them — and gives those agents real capabilities through <strong>capability lanes</strong>: web search,
   browser automation, and desktop control. You drive it from the desktop console or the iPhone app, locally or over a
   Cloudflare tunnel.
 </div>
@@ -88,7 +88,7 @@
 <ul class="toc">
   <li><a href="#bigpic">1 · The big picture</a></li>
   <li><a href="#models">2 · Models &amp; run modes</a></li>
-  <li><a href="#bees">3 · The Bees (capability lanes)</a></li>
+  <li><a href="#lanes">3 · Capability lanes</a></li>
   <li><a href="#connectivity">4 · Connectivity modes</a></li>
   <li><a href="#tasks">5 · Tasks</a></li>
   <li><a href="#directives">6 · Directives</a></li>
@@ -103,7 +103,7 @@
   <div class="card">
     <h3>Daemon</h3>
     <p>A headless background service (launchd, auto-restarts) bound to <code>127.0.0.1:3747</code>. It owns tasks,
-    directives, the model router, connectivity policy, approvals, memory, and the Bees. Everything else is a client of it.</p>
+    directives, the model router, connectivity policy, approvals, memory, and the capability lanes. Everything else is a client of it.</p>
   </div>
   <div class="card">
     <h3>Console &amp; iPhone app</h3>
@@ -116,10 +116,10 @@
     <strong>Qwen</strong> (local). A role-based router picks which one runs a given piece of work.</p>
   </div>
   <div class="card">
-    <h3>Bees</h3>
+    <h3>Capability lanes</h3>
     <p>Embedded capability lanes the agents can call: <strong>Browser Lane</strong> (web fetch/search + authenticated
-    browser), <strong>DesktopBee</strong> (desktop), plus internal <strong>BrainBee</strong> (memory) and
-    <strong>ManagerBee</strong> (coordination).</p>
+    browser), <strong>Desktop Lane</strong> (desktop), plus internal <strong>Memory Lane</strong> (memory) and
+    <strong>Manager Lane</strong> (coordination).</p>
   </div>
 </div>
 
@@ -145,12 +145,12 @@ split:</p>
   in Settings, or pick per-task in the New Task form.
 </div>
 
-<h2 id="bees"><span class="n">3</span>The Bees — capability lanes</h2>
-<p>Bees are how an agent does more than think. As of now they're wired into the <strong>local (Qwen) agent's tool
+<h2 id="lanes"><span class="n">3</span>Capability lanes</h2>
+<p>Capability lanes are how an agent does more than think. As of now they're wired into the <strong>local (Qwen) agent's tool
 loop</strong> too — so the local model can search the web, drive a browser, or control the desktop, each gated by the
 current connectivity mode.</p>
 <table>
-  <thead><tr><th>Bee</th><th>Does</th><th>Agent tool</th><th>Status here</th></tr></thead>
+  <thead><tr><th>Lane</th><th>Does</th><th>Agent tool</th><th>Status here</th></tr></thead>
   <tbody>
     <tr>
       <td><strong>Browser Lane</strong></td>
@@ -159,19 +159,19 @@ current connectivity mode.</p>
       <td><span class="tag on">embedded · running</span></td>
     </tr>
     <tr>
-      <td><strong>DesktopBee</strong></td>
+      <td><strong>Desktop Lane</strong></td>
       <td>Native macOS automation via a signed Swift helper: AppleScript → Accessibility actions → click/type as last resort</td>
       <td><code>desktopbee_action</code></td>
       <td><span class="tag on">helper on :3748</span></td>
     </tr>
     <tr>
-      <td><strong>BrainBee</strong></td>
-      <td>Memory compilation &amp; retrieval (internal; launch-agent lane, toggle in Settings → Bees)</td>
+      <td><strong>Memory Lane</strong></td>
+      <td>Memory compilation &amp; retrieval (internal; launch-agent lane, toggle in Settings → Capability Lanes)</td>
       <td>—</td>
       <td><span class="tag off">stopped</span></td>
     </tr>
     <tr>
-      <td><strong>ManagerBee</strong></td>
+      <td><strong>Manager Lane</strong></td>
       <td>Planning / routing / review coordination (internal)</td>
       <td>—</td>
       <td><span class="tag soon">planned</span></td>
@@ -180,23 +180,23 @@ current connectivity mode.</p>
 </table>
 <div class="callout warn">
   <strong>Availability follows connectivity.</strong> The Browser Lane web/authenticated modes need the internet, so they're
-  disabled in <em>local-only</em> and <em>offline</em> modes; DesktopBee works in every mode. An agent is only shown the lanes it can
+  disabled in <em>local-only</em> and <em>offline</em> modes; Desktop Lane works in every mode. An agent is only shown the lanes it can
   actually use right now. <strong>Authenticated browser work without a Codex subscription:</strong> by default the lane refuses (it needs the
   Codex Computer Use backing). Set <code>browserbee.desktopFallback: true</code> in <code>~/.hivematrix/config.json</code> to
-  let it degrade to a local DesktopBee-driven browser instead — lower reliability, but it keeps authenticated browser work
+  let it degrade to a local Desktop Lane-driven browser instead — lower reliability, but it keeps authenticated browser work
   running with no subscription.
 </div>
 <div class="callout info">
-  <strong>iMessage note.</strong> Sending iMessage <em>into</em> HiveMatrix is not available — MessageBee is deferred in
-  this generation (the old standalone Hive 1 MessageBee has been removed). Outbound notifications only.
+  <strong>iMessage note.</strong> Sending iMessage <em>into</em> HiveMatrix is not available — Message Lane inbound is deferred in
+  this generation (the old standalone Hive 1 message service has been removed). Outbound notifications only.
 </div>
 
 <h2 id="connectivity"><span class="n">4</span>Connectivity modes</h2>
 <p>The daemon always operates in one of three modes (auto-detected, or set manually in Settings → Connectivity):</p>
 <div class="grid3">
   <div class="card"><h3>cloud-ok</h3><p class="meta">Default. Frontier APIs reachable; every capability available.</p></div>
-  <div class="card"><h3>local-only</h3><p class="meta">LAN/loopback only. Frontier + Browser Lane off; Qwen + DesktopBee on.</p></div>
-  <div class="card"><h3>offline</h3><p class="meta">No network. Only the local model + DesktopBee on local apps.</p></div>
+  <div class="card"><h3>local-only</h3><p class="meta">LAN/loopback only. Frontier + Browser Lane off; Qwen + Desktop Lane on.</p></div>
+  <div class="card"><h3>offline</h3><p class="meta">No network. Only the local model + Desktop Lane on local apps.</p></div>
 </div>
 <p class="meta">Auto-degrades when frontier usage windows are exhausted (→ local-only) or the network is unreachable (→ offline),
 and restores automatically. A manual override always wins.</p>
@@ -246,7 +246,7 @@ Create one from the right-hand <span class="ui">＋ New directive</span> panel.<
 <div class="step"><b>3 · Background daemon (launchd)</b> Installs <code>~/Library/LaunchAgents/com.hivematrix.daemon.plist</code> so the daemon runs 24×7 and restarts on exit.</div>
 <div class="step"><b>4 · Brain memory plane</b> Canonical memory lives at <code>~/_GD/brain</code>. Agents read/curate it for durable context.</div>
 <div class="step"><b>5 · Frontier model access</b> Sign in to the <code>claude</code> and/or <code>codex</code> CLIs (subscriptions). Detected automatically and shown under Settings → Backends.</div>
-<div class="step"><b>6 · DesktopBee (desktop control)</b> Grant the Swift helper <strong>Accessibility</strong> and <strong>Screen Recording</strong> in System Settings → Privacy &amp; Security. (Rebuilding the helper can invalidate a prior grant — re-toggle it if DesktopBee shows no permission.)</div>
+<div class="step"><b>6 · Desktop Lane (desktop control)</b> Grant the Swift helper <strong>Accessibility</strong> and <strong>Screen Recording</strong> in System Settings → Privacy &amp; Security. (Rebuilding the helper can invalidate a prior grant — re-toggle it if the Desktop Lane shows no permission.)</div>
 
 <h2 id="settings"><span class="n">9</span>The Settings screen</h2>
 <p>Open with the <span class="ui">⚙</span> gear (top of the console). Four tabs:</p>
@@ -265,13 +265,13 @@ Create one from the right-hand <span class="ui">＋ New directive</span> panel.<
 filter; <span class="ui">↻ Re-scan</span> refreshes. ★ = the pre-selected active project whose path pre-fills New Task /
 New Directive.</p>
 
-<h3>Bees tab <span class="tag on">new</span></h3>
+<h3>Capability Lanes tab <span class="tag on">new</span></h3>
 <p>A live view of every capability lane: a status dot (green = running &amp; healthy, amber = running but unhealthy, grey =
 stopped), the runtime mode (<em>embedded</em> = runs in the daemon and follows connectivity; <em>launchagent</em> =
 separate service; <em>planned</em> = not yet wired), and health badges. <strong>Launch-agent lanes</strong> (e.g.
-BrainBee) have a <span class="ui">Turn on / Turn off</span> toggle that installs or removes their macOS LaunchAgent.
+Memory Lane) have a <span class="ui">Turn on / Turn off</span> toggle that installs or removes their macOS LaunchAgent.
 Embedded lanes can't be toggled — they follow the connectivity mode. The same view exists in the iPhone app under
-Settings → Bees.</p>
+Settings → Capability Lanes.</p>
 
 <h3>Connectivity (right panel)</h3>
 <p>Shows the current mode and lets you force <em>cloud-ok / local-only / offline</em> (or return to auto). Useful to go
@@ -282,8 +282,8 @@ private (local-only) or to test offline behavior.</p>
   <div><span class="k">Daemon</span><span><code>127.0.0.1:3747</code> (launchd: <code>com.hivematrix.daemon</code>)</span></div>
   <div><span class="k">Data</span><span><code>~/.hivematrix/hivematrix.db</code> (SQLite, WAL) · config <code>~/.hivematrix/config.json</code></span></div>
   <div><span class="k">Local model</span><span>LM Studio <code>:1234</code> · <code>qwen/qwen3.6-27b</code></span></div>
-  <div><span class="k">DesktopBee helper</span><span><code>127.0.0.1:3748</code></span></div>
-  <div><span class="k">Bees status</span><span><code>GET /bees</code> · toggle <code>POST /bees/:kind/autostart</code></span></div>
+  <div><span class="k">Desktop Lane helper</span><span><code>127.0.0.1:3748</code></span></div>
+  <div><span class="k">Capability lane status</span><span><code>GET /bees</code> · toggle <code>POST /bees/:kind/autostart</code></span></div>
   <div><span class="k">Models</span><span><code>GET /models</code> (backends + available + default)</span></div>
   <div><span class="k">Tunnel</span><span><code>GET /tunnel</code> · <code>POST /tunnel/start</code> · <code>/tunnel/start-named</code> · <code>/tunnel/qr</code></span></div>
   <div><span class="k">Brain memory</span><span><code>~/_GD/brain</code> (canonical)</span></div>
@@ -291,8 +291,8 @@ private (local-only) or to test offline behavior.</p>
 </div>
 
 <div class="footer">
-  HiveMatrix user guide · capabilities reflect daemon build 616 (2026-06-12). Models, Bees, and the Cloud-only run mode are
-  live; BrainBee is a toggleable launch-agent lane; ManagerBee is planned. iMessage ingestion (MessageBee) is deferred.
+  HiveMatrix user guide · capabilities reflect daemon build 616 (2026-06-12). Models, capability lanes, and the Cloud-only run mode are
+  live; Memory Lane is a toggleable launch-agent lane; Manager Lane is planned. iMessage ingestion (Message Lane) is deferred.
 </div>
 
 </div>

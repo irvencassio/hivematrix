@@ -1,7 +1,7 @@
 # HiveMatrix Release & Packaging
 
 The DMG is a complete appliance: it bundles the daemon runtime (Node + native
-addon), the DesktopBee helper, and a first-run wizard. A user installs the DMG,
+addon), the Desktop Lane helper, and a first-run wizard. A user installs the DMG,
 runs setup once, and the app self-supervises (launchd) and self-updates.
 
 ## One-time setup
@@ -87,5 +87,5 @@ to `/onboarding/*` (see `src/lib/onboarding/actions.ts`):
 - **daemon** — install + load the launchd agent pointing at the bundled daemon
   (refuses unless the app is in `/Applications` — translocation guard)
 - **frontier** — API keys or detected `claude`/`codex` CLI
-- **desktopbee** — install the helper launchd agent + open the Accessibility /
+- **desktop** — install the Desktop Lane helper launchd agent + open the Accessibility /
   Screen Recording panes

@@ -14,9 +14,9 @@ each section gates the next. Items marked **(live)** require the physical Mac.
 - [ ] `GET /health` returns `status: ok` with a version and `license` state.
 
 ## 2. Permissions (TCC)  **(live)**
-- [ ] **Full Disk Access** for the daemon — required to read `~/Library/Messages/chat.db` (MessageBee).
-- [ ] **Automation → Mail** — required for MailBee read/draft via AppleScript.
-- [ ] **Accessibility** + **Screen Recording** — required for DesktopBee (AX + capture/vision plane).
+- [ ] **Full Disk Access** for the daemon — required to read `~/Library/Messages/chat.db` (Message Lane).
+- [ ] **Automation → Mail** — required for Mail Lane read/draft via AppleScript.
+- [ ] **Accessibility** + **Screen Recording** — required for Desktop Lane (AX + capture/vision plane).
 - [ ] **Notifications** — for the desktop console and mobile pairing.
 
 ## 3. Local model lifecycle (local / mixed posture)  **(live)**
@@ -25,8 +25,8 @@ each section gates the next. Items marked **(live)** require the physical Mac.
 - [ ] Confirm `GET /local-model/status` shows the supervisor owns the server (launch → probe → relaunch-on-crash).
 
 ## 4. Channels (top priority — the control surface)
-- [ ] **MessageBee**: enable the imessage channel; add the founder's handle to the allowlist (`/messagebee/enable`, `/messagebee/identities`). Test-send to the phone. **(live)**
-- [ ] **MailBee**: enable email; set `mailbee.trustedDomains`; choose draft-for-approval (default) vs auto-send for trusted. **(live)**
+- [ ] **Message Lane**: enable the imessage channel; add the founder's handle to the allowlist (`/messagebee/enable`, `/messagebee/identities`). Test-send to the phone. **(live)**
+- [ ] **Mail Lane**: enable email; set `mailbee.trustedDomains`; choose draft-for-approval (default) vs auto-send for trusted. **(live)**
 - [ ] **Telegram** (optional): set the bot token + hard allowlist; `/notify/test` round-trips a button tap.
 - [ ] **notify plane**: configure targets (`/notify/config`) so stuck tasks / approvals escalate to the phone.
 
@@ -53,7 +53,7 @@ each section gates the next. Items marked **(live)** require the physical Mac.
 - [ ] Sanity-check `GET /diagnostics/bundle` returns operational signal (for "send diagnostics").
 
 ## 10. First directives
-- [ ] **Email triage** directive (MailBee → triage tasks).
+- [ ] **Email triage** directive (Mail Lane → triage tasks).
 - [ ] **Daily LinkedIn ritual** (`POST /linkedin/ritual`) — plan-checkpointed, approve-by-text.
 - [ ] **Morning brief** directive — what shipped / what's stuck / what needs you.
 - [ ] Run a content brief (`POST /content/brief`) end-to-end: brief → renditions → approve by text.
