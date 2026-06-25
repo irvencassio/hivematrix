@@ -133,7 +133,7 @@ def main() -> int:
             return
         if res.transcript:
             print(f"you: {res.transcript}")
-            print(f"bee: {' '.join(res.sentences)}")
+            print(f"assistant: {' '.join(res.sentences)}")
             if res.ttfa_s is not None:
                 print(f"     (first audio {res.ttfa_s:.1f}s)", flush=True)
         else:

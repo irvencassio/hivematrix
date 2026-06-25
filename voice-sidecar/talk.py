@@ -87,7 +87,7 @@ def run_demo(question: str) -> int:
         os.remove(aiff)
     except OSError:
         pass
-    print(f"bee: {' '.join(res.sentences) if res.sentences else '(empty — is reasoning OFF in LM Studio?)'}")
+    print(f"assistant: {' '.join(res.sentences) if res.sentences else '(empty — is reasoning OFF in LM Studio?)'}")
     if res.ttfa_s is not None:
         print(f"     (first audio {res.ttfa_s:.1f}s · total {res.total_s:.1f}s)")
     player.wait()
@@ -139,7 +139,7 @@ def main() -> int:
             print("…didn't catch that.")
             continue
         print(f"you: {res.transcript}")
-        print(f"bee: {' '.join(res.sentences)}")
+        print(f"assistant: {' '.join(res.sentences)}")
         ttfa = first_audio["t"]
         if ttfa is not None:
             print(f"     (first audio {ttfa:.1f}s · total {res.total_s:.1f}s)")

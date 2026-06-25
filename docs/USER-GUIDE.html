@@ -283,7 +283,7 @@ private (local-only) or to test offline behavior.</p>
   <div><span class="k">Data</span><span><code>~/.hivematrix/hivematrix.db</code> (SQLite, WAL) · config <code>~/.hivematrix/config.json</code></span></div>
   <div><span class="k">Local model</span><span>LM Studio <code>:1234</code> · <code>qwen/qwen3.6-27b</code></span></div>
   <div><span class="k">Desktop Lane helper</span><span><code>127.0.0.1:3748</code></span></div>
-  <div><span class="k">Capability lane status</span><span><code>GET /bees</code> · toggle <code>POST /bees/:kind/autostart</code></span></div>
+  <div><span class="k">Capability lane status</span><span><code>GET /lanes</code> · toggle <code>POST /lanes/:kind/autostart</code> <span style="color:var(--muted)">(compatibility aliases: <code>GET /bees</code>, <code>POST /bees/:kind/autostart</code>)</span></span></div>
   <div><span class="k">Models</span><span><code>GET /models</code> (backends + available + default)</span></div>
   <div><span class="k">Tunnel</span><span><code>GET /tunnel</code> · <code>POST /tunnel/start</code> · <code>/tunnel/start-named</code> · <code>/tunnel/qr</code></span></div>
   <div><span class="k">Brain memory</span><span><code>~/_GD/brain</code> (canonical)</span></div>

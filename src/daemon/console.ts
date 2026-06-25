@@ -3686,7 +3686,7 @@ async function toggleTalk() {
       if (res && res.error) { talkStatus(res.error, true); }
       else {
         if (res && res.audioBase64) { try { new Audio("data:audio/mp4;base64," + res.audioBase64).play(); } catch (e) {} }
-        talkStatus((res && res.transcript ? "you: " + res.transcript : "") + (res && res.reply ? "  ·  bee: " + res.reply : ""), true);
+        talkStatus((res && res.transcript ? "you: " + res.transcript : "") + (res && res.reply ? "  ·  assistant: " + res.reply : ""), true);
       }
     } catch (e) { talkStatus("voice turn failed", true); }
     btn.textContent = "🎤 Talk";
