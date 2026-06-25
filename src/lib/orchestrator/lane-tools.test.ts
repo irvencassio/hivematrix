@@ -67,7 +67,7 @@ test("executeLaneTool dispatches a legacy bee alias to its real handler", async 
 });
 
 test("all bee tools are defined with required schemas", () => {
-  assert.equal(LANE_TOOL_DEFINITIONS.length, 11);
+  assert.equal(LANE_TOOL_DEFINITIONS.length, 12);
   for (const t of LANE_TOOL_DEFINITIONS) {
     assert.equal(t.type, "function");
     assert.ok(t.function.name.length > 0);
@@ -107,7 +107,7 @@ test("Terminal Lane tool descriptions identify Canopy as the preferred provider"
 
 test("cloud-ok advertises every lane (web, browser, desktop, term, mail, message, brain, skill, digest)", () => {
   assert.deepEqual(names(availableLaneTools(cloud())),
-    ["brain_search", "code_graph", "desktop_action", "digest_url", "hivematrix_browser", "mail_draft", "mail_send", "message_send", "skill_used", "terminal_run", "terminal_session"]);
+    ["brain_search", "code_graph", "coo_dispatch", "desktop_action", "digest_url", "hivematrix_browser", "mail_draft", "mail_send", "message_send", "skill_used", "terminal_run", "terminal_session"]);
 });
 
 test("digest_url is web-gated: absent offline (no internet to fetch)", () => {

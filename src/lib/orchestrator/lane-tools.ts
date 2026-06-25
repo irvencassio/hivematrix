@@ -19,9 +19,11 @@ import { getConnectivityPolicy, type CapabilityId } from "@/lib/connectivity/pol
 import type { ChatTool } from "./tool-bridge";
 import { readToken } from "@/lib/auth/token";
 import { defaultTermBeeProvider } from "@/lib/termbee/provider";
+import type { CooDispatchResult } from "@/lib/coo/dispatch";
 
 /** Tool name → the connectivity capability that gates it. */
 const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
+  coo_dispatch: "browserbee",
   hivematrix_browser: "browserbee",
   desktop_action: "desktopbee",
   terminal_session: "termbee",
@@ -60,6 +62,24 @@ export function resolveLaneToolName(name: string): string {
 }
 
 export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "coo_dispatch",
+      description:
+        "COO router: route a browser/site/workflow request through the operator's COO routing rules instead of guessing a lane. Use this when a request should be handled by an authenticated or multi-step browser workflow and you want it routed by policy — Browser Lane is the canonical browser automation path. Prepare-only by default (returns the matched rule, lane, capability, and a Browser-Lane-ready plan). Set create=true to create the routed Browser Lane task and get its taskId. Only browser routes execute here; mail/message/desktop/terminal routes return approval_required and never act. Returns a structured status: prepared | created | no_match | needs_input | approval_required | unsupported.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "The objective / request to route (natural language)" },
+          domains: { type: "array", items: { type: "string" }, description: "Target site domain(s); the first becomes the Browser Lane start URL" },
+          project: { type: "string", description: "Optional project label for the routed work" },
+          create: { type: "boolean", description: "True to create the routed Browser Lane task (browser routes only); default false = prepare-only" },
+        },
+        required: ["text"],
+      },
+    },
+  },
   {
     type: "function",
     function: {
@@ -292,6 +312,7 @@ export function availableLaneTools(policy = getConnectivityPolicy()): ChatTool[]
 
 /** Intent → tool mapping, shown for one available lane. */
 const CAPABILITY_ROUTING_LINES: Record<string, string> = {
+  coo_dispatch: "Route a browser/site/workflow request through COO routing rules (Browser Lane is the canonical browser automation path) → **coo_dispatch** (prepare-only; create=true makes the routed Browser Lane task).",
   mail_send: "Send an email → **mail_send** (sends to trusted recipients; drafts for approval otherwise). Save a draft only → **mail_draft**.",
   message_send: "Send an SMS / iMessage → **message_send** (allowlisted recipients only).",
   hivematrix_browser: "Read/search the live web or drive logged-in/multi-step browser workflows → **hivematrix_browser**.",
@@ -346,6 +367,8 @@ export async function executeLaneTool(
   }
 
   switch (name) {
+    case "coo_dispatch":
+      return executeCooDispatch(args, ctx);
     case "hivematrix_browser":
       return executeBrowserLane(args, ctx);
     case "desktop_action":
@@ -370,6 +393,86 @@ export async function executeLaneTool(
       return executeCodeGraph(args, ctx);
     default:
       return `Error: Unknown lane tool "${name}"`;
+  }
+}
+
+// ── COO dispatch (router) ─────────────────────────────────────────────────────
+//
+// The model-facing entry to COO route-to-execution. It does NOT re-implement
+// routing — it calls the daemon's /coo/dispatch endpoint (which wraps
+// dispatchCooTask), so rules, approval posture, redaction, and task creation stay
+// in one place. Browser Lane is the canonical browser automation path; only
+// browser routes create a task here.
+
+export interface CooDispatchToolBody {
+  text: string;
+  domains?: string[];
+  project?: string | null;
+  create?: boolean;
+  projectPath?: string | null;
+}
+
+export type CooDispatchToolRunner = (body: CooDispatchToolBody) => Promise<CooDispatchResult>;
+
+function readDomainsArg(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((x): x is string => typeof x === "string").map((s) => s.trim()).filter(Boolean);
+  if (typeof value === "string") return value.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+  return [];
+}
+
+/** Default runner: loopback to the daemon's /coo/dispatch (single source of truth). */
+async function loopbackCooDispatch(body: CooDispatchToolBody): Promise<CooDispatchResult> {
+  const base = `http://127.0.0.1:${process.env.HIVEMATRIX_PORT ?? "3747"}`;
+  const token = readToken("auth-token") ?? "";
+  const res = await fetch(`${base}/coo/dispatch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const data = (await res.json()) as { ok?: boolean; result?: CooDispatchResult; error?: string };
+  if (!data.ok || !data.result) throw new Error(data.error ?? `HTTP ${res.status}`);
+  return data.result;
+}
+
+/** Render a dispatch result as a concise, secret-free model-facing string. */
+export function formatCooDispatchResult(result: CooDispatchResult): string {
+  const lane = result.lane ?? "—";
+  const cap = result.capability && result.capability !== "—" ? ` · ${result.capability}` : "";
+  const ruleName = result.route?.ruleName ? ` (rule "${result.route.ruleName}")` : "";
+  const lines = [`COO dispatch [${result.status}] → lane ${lane}${cap}${ruleName}`];
+  if (result.reason) lines.push(result.reason);
+  if (result.status === "created" && result.taskId) {
+    lines.push(`Created Browser Lane task ${result.taskId} — it runs on the board and its result appears as it completes.`);
+  }
+  if (result.status === "approval_required" && result.approval) {
+    lines.push(`Approval required (no action taken): ${result.approval.trust}`);
+  }
+  if (result.auditId) lines.push(`auditId: ${result.auditId}`);
+  return lines.join("\n");
+}
+
+export async function executeCooDispatch(
+  args: Record<string, unknown>,
+  ctx: LaneToolContext,
+  runner: CooDispatchToolRunner = loopbackCooDispatch,
+): Promise<string> {
+  const text = typeof args.text === "string" ? args.text.trim() : "";
+  if (!text) return "Error: 'text' (the objective/request to route) is required for coo_dispatch.";
+  const create = args.create === true;
+  const project = typeof args.project === "string" && args.project.trim() ? args.project.trim() : ctx.project;
+  try {
+    const result = await runner({
+      text,
+      domains: readDomainsArg(args.domains),
+      project,
+      create,
+      // A real task needs a real project root — use the task's own project path.
+      projectPath: create ? ctx.projectPath : undefined,
+    });
+    return formatCooDispatchResult(result);
+  } catch (err) {
+    return `Error: COO dispatch failed — ${err instanceof Error ? err.message : String(err)}`;
   }
 }
 

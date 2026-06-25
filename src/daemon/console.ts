@@ -704,6 +704,19 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="s_lanes" style="margin-top:8px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
+        <label class="flbl" style="margin:0">COO Dispatch</label>
+      </div>
+      <div class="muted" style="font-size:11px;margin:4px 0 8px">Route a request through your COO rules. Browser Lane is the canonical browser automation path; risky lanes (mail, message, desktop, terminal) return approval-required and never act here.</div>
+      <textarea id="coo_text" rows="2" placeholder="Objective — e.g. Upload today's script on the site" style="width:100%;box-sizing:border-box"></textarea>
+      <input id="coo_domains" placeholder="Target domain(s), comma-separated — e.g. app.heygen.com" style="width:100%;box-sizing:border-box;margin-top:6px" />
+      <input id="coo_project_path" placeholder="Project path (required to create a task) — e.g. ~/proj" style="width:100%;box-sizing:border-box;margin-top:6px" />
+      <div class="row" style="margin-top:6px;gap:6px">
+        <button class="copybtn" onclick="cooDispatchPrepare()">Prepare</button>
+        <button class="create" id="coo_create_btn" style="display:none" onclick="cooDispatchCreate()">Create Browser Lane task</button>
+      </div>
+      <div id="coo_result" style="margin-top:8px"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
+      <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Safe senders</label>
         <button class="copybtn" onclick="renderSafeSenders()">↻</button>
       </div>
@@ -3738,6 +3751,47 @@ async function toggleLane(kind, enable) {
   const r = await api("/lanes/"+kind+"/autostart", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ enabled: enable }) });
   if (r && r.error) { hmAlert(r.error); }
   setTimeout(renderSettingsLanes, 800); // give launchctl a moment
+}
+
+// --- COO Dispatch (operator) ------------------------------------------------
+// Prepare-only by default; the Create button appears only when the prepared
+// result is browser-safe. Talks to /coo/dispatch (same routing/approval/audit
+// path the model uses). Never renders secrets — the result carries none.
+let cooLastResult = null;
+function cooDispatchPrepare() { return cooDispatchRun(false); }
+function cooDispatchCreate() { return cooDispatchRun(true); }
+async function cooDispatchRun(create) {
+  const out = document.getElementById("coo_result");
+  const text = (document.getElementById("coo_text").value || "").trim();
+  if (!text) { out.innerHTML = '<div class="muted">Enter an objective first.</div>'; return; }
+  const domains = (document.getElementById("coo_domains").value || "").split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
+  const projectPath = (document.getElementById("coo_project_path").value || "").trim();
+  const body = { text: text, domains: domains };
+  if (create) {
+    if (!projectPath) { out.innerHTML = '<div class="errbox">A project path is required to create a task.</div>'; return; }
+    body.create = true; body.projectPath = projectPath;
+  }
+  out.innerHTML = '<div class="muted">'+(create?'Creating…':'Preparing…')+'</div>';
+  const r = await api("/coo/dispatch", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  if (!r || !r.ok || !r.result) { out.innerHTML = '<div class="errbox">'+esc((r&&r.error)||'Dispatch failed')+'</div>'; return; }
+  cooLastResult = r.result;
+  renderCooResult(r.result);
+}
+function renderCooResult(result) {
+  const out = document.getElementById("coo_result");
+  const createBtn = document.getElementById("coo_create_btn");
+  // The Create button is shown ONLY for a browser-safe prepared result.
+  const canCreate = result.status === "prepared" && result.lane === "browser";
+  if (createBtn) createBtn.style.display = canCreate ? "" : "none";
+  const row = (k,v) => '<div class="m" style="margin-top:2px"><span class="badge">'+esc(k)+'</span> '+esc(v)+'</div>';
+  const rows = [row("status", result.status)];
+  if (result.lane) rows.push(row("lane", result.lane));
+  if (result.capability) rows.push(row("capability", result.capability));
+  if (result.route && result.route.ruleName) rows.push(row("rule", result.route.ruleName));
+  if (result.reason) rows.push(row("reason", result.reason));
+  if (result.auditId) rows.push(row("auditId", result.auditId));
+  if (result.taskId) rows.push(row("taskId", result.taskId));
+  out.innerHTML = '<div class="card" style="cursor:default">'+rows.join("")+'</div>';
 }
 
 // --- Safe senders (Message Lane + Mail Lane) --------------------------------
