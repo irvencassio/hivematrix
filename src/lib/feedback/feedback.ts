@@ -2,7 +2,7 @@
  * Feedback collection — bugs and enhancement requests.
  *
  * A lightweight local backlog the founder fills from anywhere (a text to
- * MessageBee, the desktop console, or the mobile app) and triages on-box. Not a
+ * Message Lane, the desktop console, or the mobile app) and triages on-box. Not a
  * full issue tracker — just "capture it before it's forgotten", with counts the
  * UIs can render. DB-backed; everything stays local.
  */

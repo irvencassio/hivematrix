@@ -1,5 +1,5 @@
 /**
- * Text-to-speech for the voice persona (DECISIONS Q12 / VoiceBee).
+ * Text-to-speech for the voice persona (DECISIONS Q12 / Voice Lane).
  *
  * The engine is swappable behind `synthesizeSpeech()`. Today it uses macOS `say`
  * (built-in, zero setup) so the iMessage voice-reply pipeline works end-to-end
@@ -113,7 +113,7 @@ export async function synthesizeSpeech(text: string, opts: TtsOptions = {}): Pro
 
 /**
  * Detect an explicit request for a spoken/voice reply in inbound text. Used to
- * decide whether a MessageBee result is sent back as a voice note vs plain text.
+ * decide whether a Message Lane result is sent back as a voice note vs plain text.
  * Deliberately conservative — only triggers on a clear ask.
  */
 export function wantsVoiceReply(text: string): boolean {

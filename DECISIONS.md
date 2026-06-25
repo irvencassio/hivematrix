@@ -884,11 +884,11 @@ listed but unused.) Fixes:
 
 Verification: tsc clean, scope-wall 0, 620/620 tests, daemon bundles.
 
-## MailBee: agent reached for Gmail MCP instead of Apple Mail (2026-06-15)
+## Mail Lane: agent reached for Gmail MCP instead of Apple Mail (2026-06-15)
 
 Two operator reports: asked to "delete emails matching Run failed" and to email wallpaper
 files, HiveMatrix replied (by text/email) "run `/mcp` and authenticate claude.ai Gmail" —
-impossible in the headless daemon, and the wrong tool (MailBee = Apple Mail). Root causes +
+impossible in the headless daemon, and the wrong tool (Mail Lane = Apple Mail). Root causes +
 fixes:
 1. **Routing guidance only covered SENDING.** Added to `outboundHttpRoutingPrompt`:
    - "Reading & managing email" → drive local Apple Mail via osascript; do NOT use a Gmail/
@@ -896,7 +896,7 @@ fixes:
      and report count + criteria.
    - "Headless: never ask for interactive auth" → NEVER tell the user to run `/mcp`/`/login`
      or authenticate an MCP; use the local path or report the limitation.
-2. **MailBee couldn't attach files** (so "email me the wallpapers" reached for Gmail). Added
+2. **Mail Lane attachment path could not attach files** (so "email me the wallpapers" reached for Gmail). Added
    attachment support end-to-end: `applemail.ts` SEND_SCRIPT attaches via Apple Mail;
    `sendMail`/`draftMail` take `attachments[]`; `executeMailBeeSend/Draft` + the
    `mailbee_send`/`mailbee_draft` tool schemas accept `attachments`; `parseOutboundFields`
@@ -905,7 +905,7 @@ fixes:
 
 Verification: tsc clean, scope-wall 0, 626/626 tests, daemon bundles.
 
-## Q12 — VoiceBee un-deferred (voice ingress/egress lane) + video factory as a no-brand capability
+## Q12 — Voice Lane un-deferred (voice ingress/egress lane) + video factory as a no-brand capability
 
 Date closed: 2026-06-16. Phase 0 of the voice/video persona plan
 (brain: `projects/hive/plans/2026-06-16-voice-and-video-persona-strategy.md`).
@@ -913,14 +913,14 @@ Date closed: 2026-06-16. Phase 0 of the voice/video persona plan
 **Context.** The "virtual persona" strategy needs voice. Prior art kept the design
 but scope-wall forbade the code (`projects/hive/bees/voicebee.md`, component map).
 
-**Decision A — VoiceBee un-deferred** from "designs kept, no code" to an active
-**local-first** voice lane (mirrors the Q8/Q9 MessageBee/MailBee un-defer):
+**Decision A — Voice Lane un-deferred** from "designs kept, no code" to an active
+**local-first** voice lane (mirrors the Q8/Q9 Message Lane/Mail Lane un-defer):
 configured STT command → Hive LLM → cloned-voice TTS (F5-TTS/Chatterbox) orchestrated by
 Pipecat. Two surfaces — **conversation mode** (Mac/iPhone mic, fully local) and
 **phone-answer mode** (Twilio/Telnyx SIP trunk → local pipeline). Hive stays the
 control plane; voice notes/calls land as task artifacts. The only external seam is
 the phone number (a dumb pipe, not an AI vendor). First ship is iMessage voice
-replies (extends the Q9 MailBee attachment pattern to MessageBee `send file`).
+replies (extends the Q9 Mail Lane attachment pattern to Message Lane `send file`).
 
 **Decision B — Video factory is a no-brand capability.** The script→video pipeline
 (Remotion + ffmpeg + Playwright screen-capture, cloned-voice voiceover) is a
@@ -930,8 +930,8 @@ role. The AI avatar is **demoted to an optional component** (HeyGen, used sparin
 for hero presenter shots only) per the 2026 trust-penalty evidence; default is
 faceless screen + cloned voice. No `VideoBee`/`AvatarBee` brand is created.
 
-**Scope wall + COMPONENT-MAP amended** in this change: removed the VoiceBee
-hard-fail rule; `VoiceBee`/`voicebee` added to the no-new-brands allowlist; VoiceBee
+**Scope wall + COMPONENT-MAP amended** in this change: removed the Voice Lane
+hard-fail rule; `voicebee` compatibility id added to the no-new-brands allowlist; Voice Lane
 listed as a Q12 lane and dropped from the deferred list.
 
 **Persona identity (P0.4).** The virtual person is a **digital twin of the
@@ -939,5 +939,5 @@ founder** — the founder's own name, cloned voice, and (optional, sparing) like
 On-strategy with the authenticity thesis: the agent is the founder, scaled — not a
 separate branded assistant.
 
-Verification: scope-wall 0 violations (a `VoiceBee` string in src now passes); docs
+Verification: scope-wall 0 violations for the Voice Lane compatibility id; docs
 only — no runtime code yet (that's P1+).

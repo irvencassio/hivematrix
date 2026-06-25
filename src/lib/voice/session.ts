@@ -1,6 +1,6 @@
 /**
- * VoiceBee session contract — the control-plane side of live voice (DECISIONS
- * Q12). Per the prior VoiceBee design, the realtime audio loop runs in the
+ * Voice Lane session contract — the control-plane side of live voice (DECISIONS
+ * Q12). Per the prior Voice Lane design, the realtime audio loop runs in the
  * Pipecat sidecar (the runtime owns audio); Hive stays the control plane. When a
  * spoken conversation needs deeper work — or simply ends with a real request —
  * the sidecar hands the transcript here and HiveMatrix turns it into a task,

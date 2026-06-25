@@ -143,7 +143,7 @@ async function main(): Promise<void> {
   const { startEmbeddingsIndexer } = await import("@/lib/embeddings/indexer");
   startEmbeddingsIndexer();
 
-  // TraderBee: watch market data + fire threshold alerts (analysis/alerts ONLY —
+  // Market Insight Lane: watch market data + fire threshold alerts (analysis/alerts ONLY —
   // never trades). Self-gates on Alpaca data-API env keys + a non-empty watchlist.
   const { startTraderBeePoller } = await import("@/lib/traderbee/poller");
   startTraderBeePoller();
