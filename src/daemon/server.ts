@@ -1410,6 +1410,69 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /video/heygen-workflow — turn a script into a HeyGen Browser Lane
+      // video task, routed through COO dispatch so readiness/exec gates apply. A
+      // task is created only when HeyGen readiness is green + fresh; otherwise the
+      // exact readiness blocker is returned. Login/2FA/CAPTCHA/file-picker/preview/
+      // export are operator handoffs in the job — never automated.
+      if (req.method === "POST" && urlPath === "/video/heygen-workflow") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const script = typeof body.script === "string" ? body.script.trim() : "";
+        const title = typeof body.title === "string" ? body.title.trim() : "";
+        if (!script || !title) { json(res, 400, { ok: false, error: "script and title are required" }); return; }
+        const input = {
+          script,
+          title,
+          creativeNotes: typeof body.creativeNotes === "string" ? body.creativeNotes : undefined,
+          assetPaths: Array.isArray(body.assetPaths) ? body.assetPaths.filter((p): p is string => typeof p === "string") : undefined,
+          project: typeof body.project === "string" ? body.project : undefined,
+        };
+        const { dispatchHeyGenVideoWorkflow } = await import("@/lib/video/heygen-workflow");
+        const { seedHeyGenBrowserSite } = await import("@/lib/browser-lane/heygen");
+        seedHeyGenBrowserSite(); // idempotent: ensure the site/probe/rule exist
+        try {
+          if (body.create === true) {
+            let projectPath: string;
+            try { projectPath = normalizeHomeProjectPath(body.projectPath); }
+            catch (e) { json(res, 400, { ok: false, error: `create requires a valid projectPath under $HOME: ${e instanceof Error ? e.message : String(e)}` }); return; }
+            const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
+            const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
+            const result = await dispatchHeyGenVideoWorkflow(input, {
+              create: true,
+              projectPath,
+              browserAvailable: getConnectivityPolicy().getCapability("browserbee").available,
+              staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours,
+              persistTask: async ({ envelope, projectPath: root, route }) => {
+                const { Task } = await import("@/lib/db");
+                const { buildBrowserBeeTaskDescription } = await import("@/lib/browser-lane/jobs");
+                const description = buildBrowserBeeTaskDescription(envelope, { requestedProjectPath: root });
+                const task = await Task.create({
+                  title: envelope.title,
+                  description,
+                  project: envelope.project,
+                  projectPath: root,
+                  model: envelope.backingModel,
+                  status: "backlog",
+                  executor: "agent",
+                  source: "browser-lane",
+                  output: { browserbeeRequest: envelope, coo: { ruleId: route.ruleId, capability: route.capability }, heygen: { title } },
+                });
+                broadcast("tasks:created", { taskId: task._id });
+                return { id: task._id };
+              },
+            });
+            json(res, 200, { ok: true, result });
+          } else {
+            const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
+            const result = await dispatchHeyGenVideoWorkflow(input, { staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours });
+            json(res, 200, { ok: true, result });
+          }
+        } catch (e) {
+          json(res, 500, { ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
       // POST /coo/dispatch — route-to-execution bridge. Resolves the request to a
       // lane/capability and returns a typed dispatch result: a Browser-Lane-ready
       // work item for browser routes, an explicit approval requirement for
