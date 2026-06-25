@@ -1,12 +1,12 @@
 /**
- * Phase 4 gate proof: two approval-gated, AX-semantic DesktopBee workflows,
+ * Phase 4 gate proof: two approval-gated, AX-semantic Desktop Lane workflows,
  * with the action plan produced by the LOCAL Qwen model. Pure AX + CGEvent +
  * capture — NO AppleScript/Automation, NO frontier vision. Uses only the
  * granted Accessibility + Screen Recording permissions.
  *
  *   npx tsx scripts/desktopbee-proof.mts
  *
- * Requires: DesktopBee helper on :3748 (Accessibility + Screen Recording
+ * Requires: Desktop Lane helper on :3748 (Accessibility + Screen Recording
  * granted), LM Studio serving Qwen on :1234.
  *
  * Both recipes operate on a TextEdit document we create (safe, self-contained):
@@ -72,7 +72,7 @@ async function qwenPlan(goal: string): Promise<string> {
 }
 
 async function main() {
-  line("DesktopBee Phase 4 Proof — AX-semantic, approval-gated, Qwen-planned");
+  line("Desktop Lane Phase 4 Proof — AX-semantic, approval-gated, Qwen-planned");
   line("====================================================================");
   const health = await probeDesktopBeeHelper();
   if (!health) { line("✗ helper not reachable on :3748"); process.exit(1); }
@@ -84,8 +84,8 @@ async function main() {
   const dir = mkdtempSync(join(tmpdir(), "hm-desktopbee-"));
   const docPath = join(dir, "hivematrix-proof.txt");
   writeFileSync(docPath, "seed\n");
-  const TYPED = "HiveMatrix DesktopBee proof: AX-driven keyboard input.";
-  const SETVAL = "HiveMatrix DesktopBee proof: AX setValue on the text area.";
+  const TYPED = "HiveMatrix Desktop Lane proof: AX-driven keyboard input.";
+  const SETVAL = "HiveMatrix Desktop Lane proof: AX setValue on the text area.";
 
   let pass1 = false, pass2 = false;
 
