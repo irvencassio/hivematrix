@@ -2,10 +2,10 @@
 
 Date closed: 2026-06-11. All six reset questions are closed.
 
-## Q1 — DesktopBee naming
+## Q1 — Desktop Lane naming
 
-**Decision:** DesktopBee. ComputerBee name is retired everywhere.
-**Code:** `src/lib/desktopbee/` — all types use `DesktopBee*` prefix.
+**Decision:** Desktop Lane is the public capability name. ComputerBee is retired.
+**Code:** `src/lib/desktopbee/` remains the compatibility module; exported types still use the `DesktopBee*` prefix until the API surface can be renamed safely.
 
 ## Q2 — Local Qwen hardware
 
@@ -870,15 +870,15 @@ Review Lane, Memory Lane, and Browser Lane showed "unhealthy · fetch failed" th
 
 Verification: tsc clean, scope-wall 0, 619/619 tests (added embeddedHealthRoute guard), daemon bundles.
 
-## TermBee + DesktopBee showed "planned · No runtime registered" (2026-06-14)
+## Terminal Lane + Desktop Lane showed "planned · No runtime registered" (2026-06-14)
 
-Both are real, working lanes (TermBee in-process; DesktopBee = the Swift helper on :3748)
+Both are real, working lanes (Terminal Lane in-process; Desktop Lane = the Swift helper on :3748)
 but were ABSENT from the service-manager descriptor map, so they fell through to the
-default `runtimeMode: "planned"`. ("computerbee" — the retired DesktopBee name — was still
+default `runtimeMode: "planned"`. ("computerbee" — the retired ComputerBee compatibility name — was still
 listed but unused.) Fixes:
 - Added `termbee` (embedded; no health route → live with the daemon) and `desktopbee`
   (embedded) descriptors.
-- New daemon route `GET /desktopbee/health` pings the helper via probeDesktopBeeHelper →
+- New daemon route `GET /desktopbee/health` pings the Desktop Lane helper via probeDesktopBeeHelper →
   200 when up / 503 when unreachable; mapped `embeddedHealthRoute("desktopbee")` to it, so
   the lane status view shows Desktop Lane's real (green) health.
 
