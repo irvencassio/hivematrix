@@ -18,6 +18,11 @@ test("console exposes a Workflows panel backed by /workflows", () => {
   assert.match(console, /prepareResearchBrief\(/);
   assert.match(console, /api\("\/workflows\/content\.research_brief\/prepare"/);
   assert.match(console, /id="brief_topic"/);
+  // Proposed next actions + explicit execute.
+  assert.match(console, /renderWorkflowActions\(/);
+  assert.match(console, /executeWorkflowAction\(/);
+  assert.match(console, /\/workflows\/actions\/"/);
+  assert.match(console, /Proposed next actions/);
 });
 
 test("the daemon declares the workflow endpoints", () => {

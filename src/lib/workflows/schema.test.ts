@@ -29,3 +29,11 @@ test("workflow_runs + workflow_run_events tables exist with the expected columns
     assert.ok(events.includes(c), `workflow_run_events.${c} should exist`);
   }
 });
+
+test("workflow_actions table exists with the expected columns", () => {
+  const cols = columns("workflow_actions");
+  for (const c of ["sourceRunId", "targetWorkflowId", "title", "reason", "required_inputs_json", "suggested_inputs_json", "status", "resultRunId", "createdAt", "updatedAt"]) {
+    assert.ok(cols.includes(c), `workflow_actions.${c} should exist`);
+  }
+  assert.equal(cols.includes("password"), false);
+});

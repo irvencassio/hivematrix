@@ -9,7 +9,10 @@
 
 import { ContractValidationError } from "@/lib/central/contracts";
 import { createWorkflowRun, linkWorkflowRunArtifact, updateWorkflowRunStatus } from "./runs";
+import { proposeWorkflowAction } from "./actions";
 import { getWorkflowRegistry, summarizeWorkflow, type WorkflowSummary } from "./registry";
+
+const HEYGEN_TARGET = "heygen.portal_video_from_script";
 
 const WORKFLOW_ID = "content.research_brief";
 
@@ -88,6 +91,8 @@ export interface PrepareResearchBriefResult {
   sources: string[];
   openQuestions: string[];
   nextAction: string;
+  /** A durable, explicitly-executable proposal for the next workflow (model-facing). */
+  proposedAction: { id: string; targetWorkflowId: string; title: string } | null;
 }
 
 const NEXT_ACTION = "Review and refine, then draft a script for the HeyGen portal video workflow once approved.";
@@ -129,6 +134,25 @@ export async function prepareContentResearchBrief(input: ResearchBriefInput, dep
   linkWorkflowRunArtifact(run.id, "nextAction", NEXT_ACTION);
   updateWorkflowRunStatus(run.id, "needs_review", { currentStep: "brief ready for human review" });
 
+  // Propose (NOT execute) the next workflow: turn this brief into a HeyGen portal
+  // video. The script seed is a clearly-marked DRAFT, not a real `script` input, so
+  // executing the action will require the operator to supply a real script.
+  let proposedAction: PrepareResearchBriefResult["proposedAction"] = null;
+  if (getWorkflowRegistry().get(HEYGEN_TARGET)) {
+    const headline = markdown.split("\n").slice(0, 12).join(" ").replace(/\s+/g, " ").trim().slice(0, 400);
+    const action = proposeWorkflowAction({
+      sourceRunId: run.id,
+      targetWorkflowId: HEYGEN_TARGET,
+      title: `Video: ${topic}`,
+      reason: "Turn this research brief into a HeyGen portal video once it is approved.",
+      suggestedInputs: {
+        title: `Video: ${topic}`,
+        scriptDraft: `DRAFT (not final) — derived from the research brief: ${headline}`,
+      },
+    });
+    proposedAction = { id: action.id, targetWorkflowId: action.targetWorkflowId, title: action.title };
+  }
+
   return {
     workflow: summarizeWorkflow(getWorkflowRegistry().get(WORKFLOW_ID)!),
     runId: run.id,
@@ -136,5 +160,6 @@ export async function prepareContentResearchBrief(input: ResearchBriefInput, dep
     sources,
     openQuestions,
     nextAction: NEXT_ACTION,
+    proposedAction,
   };
 }

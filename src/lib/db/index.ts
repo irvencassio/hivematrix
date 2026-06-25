@@ -541,6 +541,24 @@ const MIGRATIONS: string[] = [
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_workflow_run_events_run ON workflow_run_events(runId, createdAt);`,
+
+  // v22: workflow action handoffs — a run can durably PROPOSE a next workflow, which
+  // an operator/model later executes explicitly. No secrets: suggested_inputs_json is
+  // key-redacted by the store.
+  `CREATE TABLE IF NOT EXISTS workflow_actions (
+      _id TEXT PRIMARY KEY,
+      sourceRunId TEXT NOT NULL,
+      targetWorkflowId TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      reason TEXT NOT NULL DEFAULT '',
+      required_inputs_json TEXT NOT NULL DEFAULT '[]',
+      suggested_inputs_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'proposed',
+      resultRunId TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflow_actions_source ON workflow_actions(sourceRunId, createdAt);`,
 ];
 
 // ------------------------------------------------------------------

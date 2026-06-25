@@ -1570,11 +1570,49 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /workflows/actions — recent proposed handoffs (for the console). Secret-free.
+      if (req.method === "GET" && urlPath === "/workflows/actions") {
+        const { listWorkflowActions } = await import("@/lib/workflows/actions");
+        const q = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+        json(res, 200, { actions: listWorkflowActions({ status: (q.get("status") as never) || "proposed" }) });
+        return;
+      }
+
+      // POST /workflows/actions/:id/execute — explicitly execute a proposed action.
+      // Routes through the registered handler; needs_input returns the exact missing fields.
+      const actionExecuteMatch = urlPath.match(/^\/workflows\/actions\/([^/]+)\/execute$/);
+      if (req.method === "POST" && actionExecuteMatch) {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { executeWorkflowAction } = await import("@/lib/workflows/actions");
+        const inputs = (body.inputs && typeof body.inputs === "object" && !Array.isArray(body.inputs)) ? body.inputs as Record<string, unknown> : body;
+        const out = await executeWorkflowAction(decodeURIComponent(actionExecuteMatch[1]), inputs);
+        const status = out.status === "invalid" ? 404 : out.status === "needs_input" ? 400 : out.ok ? 200 : 400;
+        json(res, status, out);
+        return;
+      }
+
+      const actionGetMatch = urlPath.match(/^\/workflows\/actions\/([^/]+)$/);
+      if (req.method === "GET" && actionGetMatch) {
+        const { getWorkflowAction } = await import("@/lib/workflows/actions");
+        const action = getWorkflowAction(decodeURIComponent(actionGetMatch[1]));
+        json(res, action ? 200 : 404, action ? { ok: true, action } : { ok: false, error: "Workflow action not found." });
+        return;
+      }
+
+      // GET /workflows/runs/:id/actions — proposed actions for a run.
+      const runActionsMatch = urlPath.match(/^\/workflows\/runs\/([^/]+)\/actions$/);
+      if (req.method === "GET" && runActionsMatch) {
+        const { listWorkflowActions } = await import("@/lib/workflows/actions");
+        json(res, 200, { actions: listWorkflowActions({ sourceRunId: decodeURIComponent(runActionsMatch[1]) }) });
+        return;
+      }
+
       const workflowRunMatch = urlPath.match(/^\/workflows\/runs\/([^/]+)$/);
       if (req.method === "GET" && workflowRunMatch) {
         const { getWorkflowRun } = await import("@/lib/workflows/runs");
+        const { listWorkflowActions } = await import("@/lib/workflows/actions");
         const run = getWorkflowRun(decodeURIComponent(workflowRunMatch[1]));
-        json(res, run ? 200 : 404, run ? { ok: true, run } : { ok: false, error: "Workflow run not found." });
+        json(res, run ? 200 : 404, run ? { ok: true, run, actions: listWorkflowActions({ sourceRunId: run.id }) } : { ok: false, error: "Workflow run not found." });
         return;
       }
 
@@ -1585,49 +1623,20 @@ export function createDaemonServer() {
         return;
       }
 
-      // POST /workflows/:id/prepare — low-risk prepare, dispatched by the workflow's
-      // handler marker. No external side effects beyond what the handler does.
+      // POST /workflows/:id/prepare — low-risk prepare, dispatched generically by the
+      // workflow's handler marker (prepareWorkflowById). needs_input returns exact
+      // missing fields. No external side effects beyond what the handler does.
       const workflowPrepareMatch = urlPath.match(/^\/workflows\/([^/]+)\/prepare$/);
       if (req.method === "POST" && workflowPrepareMatch) {
-        const { getWorkflowRegistry, summarizeWorkflow } = await import("@/lib/workflows/registry");
-        const wf = getWorkflowRegistry().get(decodeURIComponent(workflowPrepareMatch[1]));
-        if (!wf) { json(res, 404, { ok: false, error: "Workflow not found." }); return; }
-
-        // content.research_brief: assemble a markdown brief from local context. Read-only.
-        if (wf.handler === "content-research-brief") {
-          const body = await parseBody(req) as Record<string, unknown>;
-          const topic = typeof body.topic === "string" ? body.topic.trim() : "";
-          if (!topic) { json(res, 400, { ok: false, error: "topic is required" }); return; }
-          try {
-            const { prepareContentResearchBrief } = await import("@/lib/workflows/content-research");
-            const { getWorkflowRun } = await import("@/lib/workflows/runs");
-            const out = await prepareContentResearchBrief({
-              topic,
-              audience: typeof body.audience === "string" ? body.audience : undefined,
-              objective: typeof body.objective === "string" ? body.objective : undefined,
-              sources: Array.isArray(body.sources) ? body.sources.filter((s): s is string => typeof s === "string") : undefined,
-            });
-            json(res, 200, { ok: true, workflow: out.workflow, runId: out.runId, markdown: out.markdown, run: getWorkflowRun(out.runId) });
-          } catch (e) {
-            json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
-          }
-          return;
-        }
-
-        if (wf.handler !== "heygen-portal-video") { json(res, 400, { ok: false, error: `No prepare handler for workflow "${wf.id}".` }); return; }
         const body = await parseBody(req) as Record<string, unknown>;
-        const script = typeof body.script === "string" ? body.script.trim() : "";
-        const title = typeof body.title === "string" ? body.title.trim() : "";
-        if (!script || !title) { json(res, 400, { ok: false, error: "script and title are required" }); return; }
-        const { dispatchHeyGenVideoWorkflow } = await import("@/lib/video/heygen-workflow");
-        const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
-        const { seedHeyGenBrowserSite } = await import("@/lib/browser-lane/heygen");
-        seedHeyGenBrowserSite();
-        const result = await dispatchHeyGenVideoWorkflow(
-          { script, title, creativeNotes: typeof body.creativeNotes === "string" ? body.creativeNotes : undefined },
-          { staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours },
-        );
-        json(res, 200, { ok: true, workflow: summarizeWorkflow(wf), result });
+        const { prepareWorkflowById } = await import("@/lib/workflows/prepare");
+        try {
+          const out = await prepareWorkflowById(decodeURIComponent(workflowPrepareMatch[1]), body);
+          const status = out.status === "unsupported" ? (out.workflow ? 400 : 404) : out.status === "needs_input" ? 400 : 200;
+          json(res, status, { ok: out.ok, status: out.status, workflow: out.workflow, runId: out.runId, missing: out.missing, result: out.result, error: out.reason });
+        } catch (e) {
+          json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
         return;
       }
 

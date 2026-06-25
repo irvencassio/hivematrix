@@ -9,6 +9,7 @@ process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
 const { getDb, _resetDbForTests } = await import("@/lib/db");
 const { getWorkflowRun, findWorkflowRunByDraft } = await import("./runs");
+const { listWorkflowActions, getWorkflowAction } = await import("./actions");
 const { buildResearchBriefMarkdown, prepareContentResearchBrief } = await import("./content-research");
 
 before(() => { _resetDbForTests(); getDb(); });
@@ -74,4 +75,28 @@ test("prepareContentResearchBrief creates a run with a briefMarkdown artifact (n
 
 test("prepareContentResearchBrief requires a topic", async () => {
   await assert.rejects(() => prepareContentResearchBrief({ topic: "  " }, { search: fakeSearch }), /topic/i);
+});
+
+test("preparing a brief proposes a HeyGen action but does NOT auto-execute it", async () => {
+  const result = await prepareContentResearchBrief({ topic: "AI video tools" }, { search: fakeSearch });
+  // The result exposes the proposed next action (model-facing).
+  assert.ok(result.proposedAction, "result should include the proposed action");
+  assert.equal(result.proposedAction.targetWorkflowId, "heygen.portal_video_from_script");
+
+  const actions = listWorkflowActions({ sourceRunId: result.runId });
+  assert.equal(actions.length, 1);
+  const action = actions[0];
+  assert.equal(action.status, "proposed");           // not executed
+  assert.equal(action.resultRunId, null);             // nothing run yet
+  assert.match(action.title, /AI video tools/);
+  // The script seed is a clearly-marked DRAFT, never a real "script" input.
+  assert.equal(action.suggestedInputs.script, undefined);
+  assert.ok(action.suggestedInputs.scriptDraft || action.suggestedInputs.title);
+
+  // No HeyGen task / browser run was created during brief prep.
+  const heygenRuns = getDb().prepare("SELECT COUNT(*) AS n FROM workflow_runs WHERE workflowId = 'heygen.portal_video_from_script'").get() as { n: number };
+  assert.equal(heygenRuns.n, 0);
+
+  // The proposal carries no secrets.
+  assert.doesNotMatch(JSON.stringify(getWorkflowAction(action.id)), /password|cookie|secret|credentialRef|\btoken\b/i);
 });

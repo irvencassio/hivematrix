@@ -753,6 +753,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <button class="create" onclick="prepareResearchBrief()">Prepare research brief</button>
       </div>
       <div id="brief_result" class="muted" style="font-size:11px;margin-top:4px"></div>
+      <div class="muted" style="font-size:11px;margin:8px 0 4px">Proposed next actions</div>
+      <div id="workflow_actions" style="margin-top:4px"></div>
       <div class="muted" style="font-size:11px;margin:8px 0 4px">Recent runs</div>
       <div id="workflow_runs" style="margin-top:4px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
@@ -3611,7 +3613,7 @@ function switchSettingsTab(tab) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); renderBrowserReadiness(); renderPortalVideos(); renderWorkflows(); }
+  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); renderBrowserReadiness(); renderPortalVideos(); renderWorkflows(); renderWorkflowActions(); }
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -3976,9 +3978,42 @@ async function prepareResearchBrief() {
   const r = await api("/workflows/content.research_brief/prepare", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ topic: topic }) });
   if (!r || !r.ok) { if (out) out.innerHTML = '<span class="err">'+esc((r && r.error) || "Prepare failed")+'</span>'; return; }
   // Show the created run + a short preview of the markdown artifact (no secrets).
-  const preview = String(r.markdown || "").split("\n").slice(0, 4).join(" · ");
-  if (out) out.innerHTML = 'Brief ready (run '+esc(r.runId)+', '+esc((r.run && r.run.status) || "needs_review")+'): '+esc(preview);
-  renderWorkflowRuns();
+  const md = (r.result && r.result.markdown) || r.markdown || "";
+  const preview = String(md).split("\n").slice(0, 4).join(" · ");
+  if (out) out.innerHTML = 'Brief ready (run '+esc(r.runId)+'): '+esc(preview);
+  renderWorkflowRuns(); renderWorkflowActions();
+}
+// --- Workflow action handoffs (explicit execution) --------------------------
+async function renderWorkflowActions() {
+  const el = document.getElementById("workflow_actions");
+  if (!el) return;
+  const r = await api("/workflows/actions");
+  const actions = (r && r.actions) || [];
+  if (!actions.length) { el.innerHTML = '<div class="muted" style="font-size:11px">No proposed actions.</div>'; return; }
+  el.innerHTML = actions.slice(0, 8).map(a => {
+    const req = (a.requiredInputs || []).join(", ");
+    return '<div class="card" style="cursor:default">'
+      + '<div class="t">'+esc(a.title)+' <span class="badge">→ '+esc(a.targetWorkflowId)+'</span></div>'
+      + (a.reason ? '<div class="muted" style="font-size:11px;margin-top:2px">'+esc(a.reason)+'</div>' : '')
+      + (req ? '<div class="muted" style="font-size:11px;margin-top:2px">Required inputs: '+esc(req)+'</div>' : '')
+      + '<div class="row" style="margin-top:6px;justify-content:flex-end"><button class="create" onclick="executeWorkflowAction(\''+esc(a.id)+'\')">Execute</button></div>'
+      + '<div id="action_result_'+esc(a.id)+'" class="muted" style="font-size:11px;margin-top:4px"></div>'
+      + '</div>';
+  }).join("");
+}
+async function executeWorkflowAction(actionId) {
+  const out = document.getElementById("action_result_"+actionId);
+  const r = await api("/workflows/actions/"+encodeURIComponent(actionId)+"/execute", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ inputs: {} }) });
+  if (!r) { if (out) out.innerHTML = '<span class="err">Execute failed</span>'; return; }
+  if (r.status === "needs_input") {
+    if (out) out.innerHTML = '<span class="err">Needs input: '+esc((r.missing || []).join(", "))+'</span> — supply these and run the target workflow directly.';
+  } else if (r.ok) {
+    if (out) out.innerHTML = 'Executed → prepared'+(r.resultRunId ? ' (run '+esc(r.resultRunId)+')' : '')+'.';
+    renderWorkflowRuns();
+  } else {
+    if (out) out.innerHTML = '<span class="err">'+esc(r.reason || r.error || "Execute failed")+'</span>';
+  }
+  renderWorkflowActions();
 }
 
 // --- Safe senders (Message Lane + Mail Lane) --------------------------------
