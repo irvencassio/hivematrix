@@ -1,7 +1,7 @@
 /**
  * Alpaca market-DATA client. ONLY the data API (data.alpaca.markets) is ever
  * called — the trading API (orders, positions, account) is NEVER touched.
- * TraderBee reads quotes; it does not trade. Keys come from env vars; self-gates
+ * Market Insight Lane reads quotes; it does not trade. Keys come from env vars; self-gates
  * to null when absent. Free IEX data is sufficient for watch/alerts.
  */
 

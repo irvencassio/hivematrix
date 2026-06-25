@@ -1,6 +1,6 @@
 /**
- * TraderBee — market-data watch + alerts. ANALYSIS & ALERTS ONLY. This module
- * (and TraderBee as a whole) NEVER places trades, submits orders, or moves money;
+ * Market Insight Lane — market-data watch + alerts. ANALYSIS & ALERTS ONLY.
+ * Market Insight Lane NEVER places trades, submits orders, or moves money;
  * it only reads quotes and notifies. Pure types + alert evaluation here.
  */
 

@@ -1111,7 +1111,7 @@ export function createDaemonServer() {
         return;
       }
 
-      // GET /traderbee — watch/alert status (keys set? watchlist + last poll).
+      // GET /traderbee — Market Insight Lane watch/alert status (keys set? watchlist + last poll).
       // ANALYSIS & ALERTS ONLY — never trades.
       if (req.method === "GET" && urlPath === "/traderbee") {
         const { isTraderBeeConfigured } = await import("@/lib/traderbee/provider");
@@ -1137,7 +1137,7 @@ export function createDaemonServer() {
         json(res, 200, { removed: removeWatch(decodeURIComponent(tbDel[1])) });
         return;
       }
-      // POST /traderbee/poll — evaluate the watchlist now (manual trigger).
+      // POST /traderbee/poll — evaluate the Market Insight Lane watchlist now (manual trigger).
       if (req.method === "POST" && urlPath === "/traderbee/poll") {
         const { isTraderBeeConfigured } = await import("@/lib/traderbee/provider");
         if (!isTraderBeeConfigured()) {

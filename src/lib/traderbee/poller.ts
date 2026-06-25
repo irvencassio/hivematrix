@@ -1,5 +1,5 @@
 /**
- * TraderBee poll loop — fetch quotes for the watchlist, evaluate alert rules,
+ * Market Insight Lane poll loop — fetch quotes for the watchlist, evaluate alert rules,
  * notify on new crossings (deduped). DATA + ALERTS ONLY; never trades. Self-gates
  * on Alpaca keys + a non-empty watchlist.
  */

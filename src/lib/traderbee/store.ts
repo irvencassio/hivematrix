@@ -1,5 +1,5 @@
 /**
- * TraderBee watchlist + alert-dedup state — a small JSON file under ~/.hivematrix
+ * Market Insight Lane watchlist + alert-dedup state — a small JSON file under ~/.hivematrix
  * (no DB migration). Holds the watchlist (symbol + rules) and a fired-alert
  * ledger so an alert notifies once per crossing, not every poll.
  */
