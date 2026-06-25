@@ -1,16 +1,16 @@
 /**
- * Bee tools for the local (Qwen / generic) agent loop.
+ * Lane tools for the local (Qwen / generic) agent loop.
  *
- * The embedded capability lanes — WebBee (read-only web), BrowserBee
- * (stateful/authenticated browser workflows), and DesktopBee (native desktop
+ * The embedded capability lanes — Browser Lane (read-only web plus
+ * stateful/authenticated browser workflows) and Desktop Lane (native desktop
  * automation via the Swift helper) — are exposed here as OpenAI-style function
  * tools so the local executor can invoke them, the same way the Claude harness
  * would. Every call is gated by the ConnectivityPolicy capability matrix first:
  * a tool whose capability is unavailable in the current mode is neither
  * advertised (see `availableBeeTools`) nor dispatched (see `executeBeeTool`).
  *
- * Scope: no new Bee brands (COMPONENT-MAP.md scope wall) — this only wires the
- * three existing lanes into the local tool loop.
+ * Scope: Browser Lane is the public/model-facing browser surface. Legacy
+ * Legacy browser tool names remain accepted as aliases but are not advertised.
  */
 
 import { getConnectivityPolicy, type CapabilityId } from "@/lib/connectivity/policy";
@@ -20,6 +20,7 @@ import { defaultTermBeeProvider } from "@/lib/termbee/provider";
 
 /** Tool name → the connectivity capability that gates it. */
 const BEE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
+  hivematrix_browser: "browserbee",
   webbee_search: "webbee",
   browserbee_run: "browserbee",
   desktopbee_action: "desktopbee",
@@ -38,38 +39,30 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
   {
     type: "function",
     function: {
-      name: "webbee_search",
+      name: "hivematrix_browser",
       description:
-        "WebBee: read-only fresh public-web retrieval with citations. Use for current facts, news, prices, docs, or anything that may have changed recently. Returns an answer plus source citations. Disabled in offline mode.",
+        "Browser Lane: use this single browser tool for live web research, page reading, and logged-in or multi-step browser workflows. Modes search/read are read-only and should return citations; modes open/snapshot/workflow use the Browser Lane app/session layer for rendered pages, uploads, authenticated sites, screenshots, and human-required auth checkpoints. Prefer this over Chrome MCP/browser extensions unless the operator explicitly routes elsewhere.",
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string", description: "The question or search intent in natural language" },
+          mode: {
+            type: "string",
+            enum: ["search", "read", "open", "snapshot", "workflow"],
+            description: "search/read for public web, open/snapshot/workflow for rendered or authenticated browser work",
+          },
+          query: { type: "string", description: "The question or search intent for search/read modes" },
+          url: { type: "string", description: "The page URL for read/open/snapshot modes" },
+          objective: { type: "string", description: "What to accomplish for workflow mode" },
+          startUrl: { type: "string", description: "The http(s) URL to start from for workflow mode" },
+          requiresLogin: { type: "boolean", description: "True if the workflow needs an authenticated session" },
+          steps: { type: "array", items: { type: "string" }, description: "Optional ordered steps to follow" },
           freshness: {
             type: "string",
             enum: ["low", "medium", "high"],
             description: "How time-sensitive the answer is (default high)",
           },
         },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "browserbee_run",
-      description:
-        "BrowserBee: delegate a stateful or authenticated browser workflow (login required, multi-step navigation, form fill, rendered/JS interaction, screenshots). Creates a BrowserBee task that runs on the Codex Computer Use backing path; if no Codex auth is available and the operator enabled the DesktopBee fallback, it instead drives a desktop browser locally via DesktopBee. Use only when WebBee's read-only retrieval is insufficient.",
-      parameters: {
-        type: "object",
-        properties: {
-          objective: { type: "string", description: "What to accomplish in the browser" },
-          startUrl: { type: "string", description: "The http(s) URL to start from" },
-          requiresLogin: { type: "boolean", description: "True if the workflow needs an authenticated session" },
-          steps: { type: "array", items: { type: "string" }, description: "Optional ordered steps to follow" },
-        },
-        required: ["objective", "startUrl"],
+        required: ["mode"],
       },
     },
   },
@@ -277,8 +270,7 @@ export function availableBeeTools(policy = getConnectivityPolicy()): ChatTool[] 
 const CAPABILITY_ROUTING_LINES: Record<string, string> = {
   mailbee_send: "Send an email → **mailbee_send** (sends to trusted recipients; drafts for approval otherwise). Save a draft only → **mailbee_draft**.",
   messagebee_send: "Send an SMS / iMessage → **messagebee_send** (allowlisted recipients only).",
-  webbee_search: "Read or search the live web → **webbee_search**.",
-  browserbee_run: "Drive a logged-in or multi-step browser workflow (e.g. LinkedIn, web apps) → **browserbee_run**.",
+  hivematrix_browser: "Read/search the live web or drive logged-in/multi-step browser workflows → **hivematrix_browser**.",
   desktopbee_action: "Control a native macOS app → **desktopbee_action**.",
   termbee_run: "Run shell commands in a Canopy-backed persistent terminal with local fallback → **termbee_run**.",
   brain_search: "Recall a stored document / brain doc / past decision → **brain_search** (search durable memory before assuming it isn't written down).",
@@ -328,8 +320,10 @@ export async function executeBeeTool(
   }
 
   switch (name) {
+    case "hivematrix_browser":
+      return executeBrowserLane(args, ctx);
     case "webbee_search":
-      return executeWebBeeSearch(args, ctx);
+      return executeBrowserLaneRead(args, ctx);
     case "browserbee_run":
       return executeBrowserBeeRun(args, ctx);
     case "desktopbee_action":
@@ -550,28 +544,52 @@ async function executeTermBeeRun(args: Record<string, unknown>): Promise<string>
   return `${r.output}\n${status}`.slice(0, 16_000);
 }
 
-async function executeWebBeeSearch(args: Record<string, unknown>, ctx: BeeToolContext): Promise<string> {
+async function executeBrowserLaneRead(args: Record<string, unknown>, ctx: BeeToolContext): Promise<string> {
   const query = typeof args.query === "string" ? args.query.trim() : "";
   if (!query) return "Error: query is required";
   const freshness = (["low", "medium", "high"].includes(args.freshness as string)
     ? args.freshness
     : "high") as "low" | "medium" | "high";
 
-  const { requestWebBeeAnswer } = await import("@/lib/webbee/client");
+  const { requestBrowserLaneRead } = await import("@/lib/browser-lane/read-client");
   try {
-    const res = await requestWebBeeAnswer({ query, requestedBy: ctx.requestedBy, project: ctx.project, freshness });
-    if (!res.ok) return `Error: WebBee returned HTTP ${res.status}`;
-    const data = await res.json() as import("@/lib/webbee/client").WebBeeAnswerResult;
-    if (data.status === "failed") return `WebBee failed: ${data.errorCode ?? "unknown error"}`;
+    const res = await requestBrowserLaneRead({ query, requestedBy: ctx.requestedBy, project: ctx.project, freshness });
+    if (!res.ok) return `Error: Browser Lane returned HTTP ${res.status}`;
+    const data = await res.json() as import("@/lib/browser-lane/read-client").BrowserLaneReadResult;
+    if (data.status === "failed") return `Browser Lane failed: ${data.errorCode ?? "unknown error"}`;
     const cites = data.citations?.length
       ? "\n\nSources:\n" + data.citations.map((c, i) => `[${i + 1}] ${c.title} — ${c.url}`).join("\n")
       : "";
-    const esc = data.escalation?.needed ? `\n\n(WebBee suggests escalating to BrowserBee: ${data.escalation.reason ?? ""})` : "";
+    const esc = data.escalation?.needed ? `\n\n(Browser Lane suggests a rendered/authenticated workflow: ${data.escalation.reason ?? ""})` : "";
     return `${data.answer ?? "(no answer)"}${cites}${esc}`;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return `Error: WebBee service unreachable — ${msg}. Is the WebBee lane running (default http://127.0.0.1:4011)?`;
+    return `Error: Browser Lane read service unreachable — ${msg}. Is the Browser Lane read backend running (default http://127.0.0.1:4011)?`;
   }
+}
+
+async function executeBrowserLane(args: Record<string, unknown>, ctx: BeeToolContext): Promise<string> {
+  const mode = typeof args.mode === "string" ? args.mode.trim() : "";
+  if (mode === "search" || mode === "read") {
+    const query = typeof args.query === "string" && args.query.trim()
+      ? args.query
+      : typeof args.url === "string" && args.url.trim()
+        ? `Read and summarize ${args.url}`
+        : "";
+    return executeBrowserLaneRead({ ...args, query }, ctx);
+  }
+  if (mode === "open" || mode === "snapshot" || mode === "workflow") {
+    return executeBrowserBeeRun({
+      ...args,
+      objective: typeof args.objective === "string" && args.objective.trim()
+        ? args.objective
+        : `Open ${typeof args.url === "string" ? args.url : args.startUrl ?? "the requested page"}`,
+      startUrl: typeof args.startUrl === "string" && args.startUrl.trim()
+        ? args.startUrl
+        : args.url,
+    }, ctx);
+  }
+  return "Error: mode must be search | read | open | snapshot | workflow";
 }
 
 async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: BeeToolContext): Promise<string> {
@@ -582,7 +600,7 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: BeeToolC
     buildBrowserBeeTaskRequestEnvelope,
     resolveBrowserBeeBacking,
     readBrowserBeeDesktopFallbackEnabled,
-  } = await import("@/lib/browserbee/contracts");
+  } = await import("@/lib/browser-lane/jobs");
   const { CODEX_COMPUTER_USE_MODEL_ID } = await import("@/lib/models/catalog");
   const { readCodexAuthState } = await import("@/lib/usage/codex");
 
@@ -598,7 +616,7 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: BeeToolC
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return `Error: invalid BrowserBee request — ${msg}`;
+    return `Error: invalid Browser Lane request — ${msg}`;
   }
 
   // Decide which engine drives the browser. Codex Computer Use is preferred;
@@ -631,7 +649,7 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: BeeToolC
     backing: decision.backing,
     backingModel: model,
   });
-  const laneLabel = decision.backing === "desktop_fallback" ? "DesktopBee fallback — local model" : "Codex Computer Use";
+  const laneLabel = decision.backing === "desktop_fallback" ? "Desktop fallback — local model" : "Codex Computer Use";
 
   // Create the job through the daemon's task API (loopback, shared-secret auth).
   // The task's model selects the executor: Codex Computer Use for the default
@@ -651,17 +669,17 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: BeeToolC
         model,
         status: "backlog",
         executor: "agent",
-        source: "browserbee",
+        source: "browser-lane",
         output: { browserbeeRequest: envelope },
       }),
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) return `Error: failed to create BrowserBee task (HTTP ${res.status})`;
+    if (!res.ok) return `Error: failed to create Browser Lane task (HTTP ${res.status})`;
     const task = await res.json() as { _id?: string; title?: string };
-    return `Created BrowserBee task ${task._id ?? "?"}: "${task.title ?? payload.title}" (${laneLabel}). It runs independently — its result appears on the board as that task completes. There is no push notification; do not claim the user will be notified.`;
+    return `Created Browser Lane task ${task._id ?? "?"}: "${task.title ?? payload.title}" (${laneLabel}). It runs independently; its result appears on the board as that task completes.`;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return `Error creating BrowserBee task: ${msg}`;
+    return `Error creating Browser Lane task: ${msg}`;
   }
 }
 

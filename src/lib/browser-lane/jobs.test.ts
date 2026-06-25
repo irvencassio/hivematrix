@@ -10,7 +10,7 @@ import {
   parseBrowserBeeJobCreate,
   readBrowserBeeDesktopFallbackEnabled,
   resolveBrowserBeeBacking,
-} from "./contracts";
+} from "./jobs";
 
 test("parseBrowserBeeJobCreate normalizes defaults from the URL and risk posture", () => {
   const payload = parseBrowserBeeJobCreate({
@@ -27,12 +27,12 @@ test("parseBrowserBeeJobCreate normalizes defaults from the URL and risk posture
   assert.deepEqual(payload.allowedDomains, ["app.example.com"]);
   assert.equal(payload.artifactPolicy, "screenshots");
   assert.equal(payload.tracePolicy, "timeline");
-  assert.ok(payload.title.startsWith("BrowserBee:"));
+  assert.ok(payload.title.startsWith("Browser Lane:"));
 });
 
-test("buildBrowserBeeTaskDescription keeps BrowserBee distinct from WebBee", () => {
+test("buildBrowserBeeTaskDescription points agents at Browser Lane", () => {
   const payload = parseBrowserBeeJobCreate({
-    title: "BrowserBee LinkedIn triage",
+    title: "Browser Lane LinkedIn triage",
     project: "hive",
     startUrl: "https://www.linkedin.com/messaging/",
     objective: "Check recruiter messages and summarize urgent ones.",
@@ -47,8 +47,8 @@ test("buildBrowserBeeTaskDescription keeps BrowserBee distinct from WebBee", () 
     requestedProjectPath: "/Users/irvencassio/Hive",
   });
 
-  assert.match(description, /This task came from BrowserBee/);
-  assert.match(description, /If the work can be completed by WebBee/);
+  assert.match(description, /This task came from Browser Lane/);
+  assert.match(description, /Browser Lane read\/search mode/);
   assert.match(description, /Allowed domains: www\.linkedin\.com/);
   assert.match(description, /Execution steps:/);
   assert.match(description, /Success criteria:/);
@@ -56,7 +56,7 @@ test("buildBrowserBeeTaskDescription keeps BrowserBee distinct from WebBee", () 
 
 test("buildBrowserBeeJobSnapshot reads task-backed request metadata", () => {
   const payload = parseBrowserBeeJobCreate({
-    title: "BrowserBee CRM update",
+    title: "Browser Lane CRM update",
     project: "hive",
     startUrl: "https://crm.example.com/leads",
     objective: "Update a lead record.",
@@ -148,6 +148,7 @@ test("readBrowserBeeDesktopFallbackEnabled reads the opt-in flag, default off", 
   assert.equal(readBrowserBeeDesktopFallbackEnabled({}), false);
   assert.equal(readBrowserBeeDesktopFallbackEnabled({ browserbee: {} }), false);
   assert.equal(readBrowserBeeDesktopFallbackEnabled({ browserbee: { desktopFallback: true } }), true);
+  assert.equal(readBrowserBeeDesktopFallbackEnabled({ browserLane: { desktopFallback: true } }), true);
   assert.equal(readBrowserBeeDesktopFallbackEnabled({ browserbee: { desktopFallback: false } }), false);
 });
 
@@ -163,7 +164,7 @@ test("buildBrowserBeeDesktopFallbackDescription drives the browser via DesktopBe
     requestedProjectPath: "/Users/irvencassio/Hive",
   });
 
-  assert.match(description, /DesktopBee fallback backing/);
+  assert.match(description, /Desktop fallback backing/);
   assert.match(description, /desktopbee_action tool/);
   assert.match(description, /no Codex Computer Use engine/);
   // shared body is still present

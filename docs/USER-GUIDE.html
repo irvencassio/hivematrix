@@ -117,8 +117,8 @@
   </div>
   <div class="card">
     <h3>Bees</h3>
-    <p>Embedded capability lanes the agents can call: <strong>WebBee</strong> (web), <strong>BrowserBee</strong>
-    (browser), <strong>DesktopBee</strong> (desktop), plus internal <strong>BrainBee</strong> (memory) and
+    <p>Embedded capability lanes the agents can call: <strong>Browser Lane</strong> (web fetch/search + authenticated
+    browser), <strong>DesktopBee</strong> (desktop), plus internal <strong>BrainBee</strong> (memory) and
     <strong>ManagerBee</strong> (coordination).</p>
   </div>
 </div>
@@ -131,7 +131,7 @@ split:</p>
   <tbody>
     <tr><td><strong>Claude</strong> — Opus 4.8 / Sonnet 4.6</td><td>Claude Code (subscription)</td><td>Highest-quality reasoning, code, planning</td></tr>
     <tr><td><strong>Codex / ChatGPT</strong> — GPT-5.5</td><td>Codex CLI (subscription)</td><td>OpenAI-flavored coding; "fast mode" = lower effort</td></tr>
-    <tr><td><strong>Codex Computer Use</strong></td><td>Codex driving the screen</td><td>Mouse/keyboard/screenshot automation (also the BrowserBee backing path)</td></tr>
+    <tr><td><strong>Codex Computer Use</strong></td><td>Codex driving the screen</td><td>Mouse/keyboard/screenshot automation (also the Browser Lane backing path)</td></tr>
     <tr><td><strong>Nano Banana</strong></td><td>Cloud image model (mflux local fallback)</td><td>Image generation</td></tr>
     <tr><td><strong>Local Model</strong></td><td>Qwen 3.6 27B via LM Studio (on this Mac)</td><td>Runs 100% locally; private, no cloud</td></tr>
     <tr><td><strong>Mixed</strong></td><td>Router: frontier thinking + local bulk work</td><td>Best cost/quality blend when both are available</td></tr>
@@ -153,15 +153,9 @@ current connectivity mode.</p>
   <thead><tr><th>Bee</th><th>Does</th><th>Agent tool</th><th>Status here</th></tr></thead>
   <tbody>
     <tr>
-      <td><strong>WebBee</strong></td>
-      <td>Read-only fresh web retrieval with citations — current facts, news, prices, docs</td>
-      <td><code>webbee_search</code></td>
-      <td><span class="tag on">embedded · running</span></td>
-    </tr>
-    <tr>
-      <td><strong>BrowserBee</strong></td>
-      <td>Authenticated / stateful browser workflows (login, multi-step, forms, screenshots) — runs as a Codex Computer Use task. With no Codex auth, an opt-in <strong>DesktopBee fallback</strong> (<code>browserbee.desktopFallback</code>) lets the local model drive a desktop browser instead.</td>
-      <td><code>browserbee_run</code></td>
+      <td><strong>Browser Lane</strong></td>
+      <td>One browser/web lane: read-only fresh web retrieval with citations (current facts, news, prices, docs) <em>and</em> authenticated / stateful browser workflows (login, multi-step, forms, screenshots) — the authenticated path runs as a Codex Computer Use task. With no Codex auth, an opt-in <strong>Desktop Lane fallback</strong> (<code>browserbee.desktopFallback</code>) lets the local model drive a desktop browser instead. The COO routes to Browser Lane; the lane picks the backend.</td>
+      <td><code>hivematrix_browser</code></td>
       <td><span class="tag on">embedded · running</span></td>
     </tr>
     <tr>
@@ -185,9 +179,9 @@ current connectivity mode.</p>
   </tbody>
 </table>
 <div class="callout warn">
-  <strong>Availability follows connectivity.</strong> WebBee and BrowserBee need the internet, so they're disabled in
-  <em>local-only</em> and <em>offline</em> modes; DesktopBee works in every mode. An agent is only shown the lanes it can
-  actually use right now. <strong>BrowserBee without a Codex subscription:</strong> by default the lane refuses (it needs the
+  <strong>Availability follows connectivity.</strong> The Browser Lane web/authenticated modes need the internet, so they're
+  disabled in <em>local-only</em> and <em>offline</em> modes; DesktopBee works in every mode. An agent is only shown the lanes it can
+  actually use right now. <strong>Authenticated browser work without a Codex subscription:</strong> by default the lane refuses (it needs the
   Codex Computer Use backing). Set <code>browserbee.desktopFallback: true</code> in <code>~/.hivematrix/config.json</code> to
   let it degrade to a local DesktopBee-driven browser instead — lower reliability, but it keeps authenticated browser work
   running with no subscription.
@@ -201,7 +195,7 @@ current connectivity mode.</p>
 <p>The daemon always operates in one of three modes (auto-detected, or set manually in Settings → Connectivity):</p>
 <div class="grid3">
   <div class="card"><h3>cloud-ok</h3><p class="meta">Default. Frontier APIs reachable; every capability available.</p></div>
-  <div class="card"><h3>local-only</h3><p class="meta">LAN/loopback only. Frontier + WebBee + BrowserBee off; Qwen + DesktopBee on.</p></div>
+  <div class="card"><h3>local-only</h3><p class="meta">LAN/loopback only. Frontier + Browser Lane off; Qwen + DesktopBee on.</p></div>
   <div class="card"><h3>offline</h3><p class="meta">No network. Only the local model + DesktopBee on local apps.</p></div>
 </div>
 <p class="meta">Auto-degrades when frontier usage windows are exhausted (→ local-only) or the network is unreachable (→ offline),

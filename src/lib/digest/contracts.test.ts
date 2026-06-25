@@ -20,7 +20,7 @@ test("buildDigestTaskDescription includes the url, the exact write path, and fet
   const d = buildDigestTaskDescription({ url: "https://example.com/a", docPath: "/brain/digests/x.md", note: "focus on pricing" });
   assert.match(d, /https:\/\/example\.com\/a/);
   assert.match(d, /\/brain\/digests\/x\.md/);
-  assert.match(d, /webbee_search/);
+  assert.match(d, /hivematrix_browser/);
   assert.match(d, /write_file/);
   assert.match(d, /focus on pricing/);
 });

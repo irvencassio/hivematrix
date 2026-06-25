@@ -182,7 +182,7 @@ export async function executeTool(
       case "create_task":
         return await executeCreateTask(args, context);
       default: {
-        // Embedded capability lanes (WebBee / BrowserBee / DesktopBee) are
+        // Embedded capability lanes (Browser Lane / DesktopBee) are
         // resolved by the bee-tools module, which enforces the connectivity
         // policy gate before dispatching.
         const { isBeeTool, executeBeeTool } = await import("./bee-tools");

@@ -138,23 +138,24 @@ export function outboundHttpRoutingPrompt(port = daemonPort()): string {
 
 /**
  * Routing block giving the CLI agent parity with the local agent for the
- * remaining capability lanes (web / browser / desktop / terminal) via the
- * generic /bee/<tool> endpoint. The daemon enforces the same connectivity gate,
+ * remaining capability lanes (browser / desktop / terminal) via the stable
+ * lane endpoints. The daemon enforces the same connectivity gate,
  * so an unavailable lane returns a clear error rather than improvising.
  */
 export function beeToolsRoutingPrompt(port = daemonPort()): string {
   return [
     "--- More Capabilities (HiveMatrix lanes via loopback) ---",
     "For these, POST to the daemon's generic lane endpoint with your Bash tool — do NOT improvise with raw web requests, AppleScript, or ad-hoc browser scripting:",
-    `  curl -s -X POST "http://127.0.0.1:${port}/bee/<tool>" \\`,
+    `  curl -s -X POST "http://127.0.0.1:${port}/lane/browser" \\`,
     `    -H "Authorization: Bearer $(cat ~/.hivematrix/auth-token)" \\`,
     `    -H "Content-Type: application/json" -d '{"args": { ... }}'`,
     "Tools and their args:",
-    '- Fresh web search/answer with citations → tool `webbee_search`, args {"query":"..."}',
-    '- Logged-in or multi-step browser workflow (e.g. LinkedIn) → tool `browserbee_run`, args {"objective":"...","startUrl":"https://..."}',
-    '- Native macOS app control → tool `desktopbee_action`, args {"action":"desktop.script.run","params":{...}}',
-    '- Persistent terminal command → tool `termbee_run`, args {"sessionId":"s1","command":"..."}; this is Canopy-backed when Canopy is running, with local fallback only for local work. Do NOT pass passwords or secrets in the command or args — use configured profiles/Keychain-backed tools instead.',
-    '- Find a symbol\'s definition + EVERY usage (deterministic — verify you changed all call sites) → tool `code_graph`, args {"symbol":"...","path":"/repo"}',
+    '- Fresh web search/answer with citations → Browser Lane args {"mode":"search","query":"..."}',
+    '- Read a specific public URL → Browser Lane args {"mode":"read","url":"https://..."}',
+    '- Logged-in or multi-step browser workflow (e.g. LinkedIn) → Browser Lane args {"mode":"workflow","objective":"...","startUrl":"https://...","requiresLogin":true}',
+    `Other lane tools still use /bee/<tool>, e.g. desktop control → http://127.0.0.1:${port}/bee/desktopbee_action and terminal → http://127.0.0.1:${port}/bee/termbee_run.`,
+    '- Persistent terminal command is Canopy-backed when Canopy is running, with local fallback only for local work. Do NOT pass passwords or secrets in commands or args; use configured profiles/Keychain-backed tools instead.',
+    '- Find a symbol\'s definition + EVERY usage (deterministic) → /bee/code_graph args {"symbol":"...","path":"/repo"}',
     'Response is JSON {"ok","result"}; relay "result". An unavailable lane (wrong connectivity mode) returns an actionable error — surface it, don\'t work around it. For complex args, write the JSON to a temp file and curl -d @/tmp/args.json.',
   ].join("\n");
 }

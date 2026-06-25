@@ -26,7 +26,7 @@ export const BROWSERBEE_TRACE_POLICIES = ["none", "timeline", "timeline_and_scre
 export type BrowserBeeTracePolicy = (typeof BROWSERBEE_TRACE_POLICIES)[number];
 
 /**
- * Which engine actually drives the browser for a BrowserBee job.
+ * Which engine actually drives the browser for a Browser Lane job.
  *   codex_computer_use — the default: Codex Computer Use (frontier) drives the
  *     browser. Requires Codex subscription/API auth and network.
  *   desktop_fallback   — opt-in: the local model drives a desktop browser via
@@ -194,10 +194,10 @@ function normalizeUrl(value: string): string {
 
 function deriveJobTitle(input: { title: string | null; objective: string; siteLabel: string | null; startUrl: string }): string {
   if (input.title) return input.title;
-  if (input.siteLabel) return `BrowserBee: ${input.siteLabel}`;
+  if (input.siteLabel) return `Browser Lane: ${input.siteLabel}`;
   const host = new URL(input.startUrl).hostname.replace(/^www\./, "");
   const words = input.objective.split(/\s+/).slice(0, 5).join(" ");
-  return `BrowserBee: ${host}${words ? ` - ${words}` : ""}`.slice(0, 100);
+  return `Browser Lane: ${host}${words ? ` - ${words}` : ""}`.slice(0, 100);
 }
 
 function deriveApprovalMode(runMode: BrowserBeeRunMode, requiresLogin: boolean): BrowserBeeApprovalMode {
@@ -356,10 +356,10 @@ export function buildBrowserBeeTaskDescription(
   options: { requestedProjectPath: string },
 ): string {
   const sections = [
-    "This task came from BrowserBee.",
+    "This task came from Browser Lane.",
     "Treat it as a stateful browser workflow, not a generic fresh-public-web research request.",
-    "If the work can be completed by WebBee without login state, multi-step browser control, or rendered interaction, stop and note that the request should be rerouted.",
-    "Use the BrowserBee backing path via Codex Computer Use only within the approved domains and stated workflow scope.",
+    "If the work can be completed by Browser Lane read/search mode without login state, multi-step browser control, or rendered interaction, stop and note that the request should be rerouted.",
+    "Use the Browser Lane backing path via Codex Computer Use only within the approved domains and stated workflow scope.",
     "",
     ...buildBrowserBeeJobBodySections(payload, options),
     "",
@@ -373,8 +373,8 @@ export function buildBrowserBeeTaskDescription(
 }
 
 /**
- * Description for the opt-in DesktopBee fallback: the same job, but driven by
- * the local model through DesktopBee instead of Codex Computer Use. Used only
+ * Description for the opt-in Desktop fallback: the same job, but driven by
+ * the local model through Desktop Lane instead of Codex Computer Use. Used only
  * when Codex auth is unavailable and the operator has enabled the fallback.
  */
 export function buildBrowserBeeDesktopFallbackDescription(
@@ -382,9 +382,9 @@ export function buildBrowserBeeDesktopFallbackDescription(
   options: { requestedProjectPath: string },
 ): string {
   const sections = [
-    "This task came from BrowserBee, running on the DesktopBee fallback backing (no usable Codex auth).",
+    "This task came from Browser Lane, running on the Desktop fallback backing (no usable Codex auth).",
     "Treat it as a stateful browser workflow, not a generic fresh-public-web research request.",
-    "If the work can be completed by WebBee without login state, multi-step browser control, or rendered interaction, stop and note that the request should be rerouted.",
+    "If the work can be completed by Browser Lane read/search mode without login state, multi-step browser control, or rendered interaction, stop and note that the request should be rerouted.",
     "Drive the browser yourself with the desktopbee_action tool — there is no Codex Computer Use engine on this path.",
     "Prefer the most reliable strategy first: desktop.script.run (AppleScript) to open/navigate a browser → desktop.ax.query/desktop.ax.act on the browser's Accessibility tree → desktop.click/desktop.type by coordinate only as a last resort. Use desktop.capture to verify state.",
     "Stay within the approved domains and the stated workflow scope. Reuse an already-signed-in browser session rather than re-entering credentials; if login is required and no session exists, stop and report that human login is needed.",
@@ -411,20 +411,24 @@ export function buildBrowserBeeTaskRequestEnvelope(
     requestedProjectPath,
     backing,
     backingModel: options.backingModel ?? (backing === "desktop_fallback" ? "desktopbee" : CODEX_COMPUTER_USE_MODEL_ID),
-    createdVia: "browserbee.jobs",
+    createdVia: "browser-lane.jobs",
   };
 }
 
 /**
- * Whether the opt-in DesktopBee fallback is enabled. Off by default — the
- * operator must set `browserbee.desktopFallback: true` in
- * `~/.hivematrix/config.json` to allow BrowserBee to degrade to a local
- * DesktopBee-driven browser when Codex auth is missing.
+ * Whether the opt-in Desktop fallback is enabled. Off by default — the
+ * operator must set `browserLane.desktopFallback: true` in
+ * `~/.hivematrix/config.json` to allow Browser Lane to degrade to a local
+ * desktop-driven browser when Codex auth is missing.
  */
 export function readBrowserBeeDesktopFallbackEnabled(config: Record<string, unknown> = readHiveConfig()): boolean {
-  const bb = config.browserbee;
-  if (bb && typeof bb === "object" && !Array.isArray(bb)) {
-    return (bb as Record<string, unknown>).desktopFallback === true;
+  const browserLane = config.browserLane;
+  if (browserLane && typeof browserLane === "object" && !Array.isArray(browserLane)) {
+    return (browserLane as Record<string, unknown>).desktopFallback === true;
+  }
+  const legacy = config.browserbee;
+  if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
+    return (legacy as Record<string, unknown>).desktopFallback === true;
   }
   return false;
 }
@@ -436,7 +440,7 @@ export interface BrowserBeeBackingDecision {
 }
 
 /**
- * Decide which backing path a BrowserBee job should run on.
+ * Decide which backing path a Browser Lane job should run on.
  *
  * The Codex Computer Use model (gpt-5.4-computer-use) is ONLY available with an
  * OpenAI API-key Codex account — it returns HTTP 400 "not supported when using
@@ -464,7 +468,7 @@ export function resolveBrowserBeeBacking(input: {
     return {
       backing: null,
       reason:
-        `${why} Enable the DesktopBee fallback (set browserbee.desktopFallback=true in ` +
+        `${why} Enable the Desktop fallback (set browserLane.desktopFallback=true in ` +
         "~/.hivematrix/config.json) to drive a real desktop browser with the local model instead.",
     };
   }

@@ -1166,6 +1166,23 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /lane/browser — stable Browser Lane dispatch for CLI executors and
+      // external model adapters. Body: {args:{mode:"search|read|open|snapshot|workflow", ...}}.
+      if (req.method === "POST" && urlPath === "/lane/browser") {
+        const { executeBeeTool } = await import("@/lib/orchestrator/bee-tools");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const args = (body.args && typeof body.args === "object" && !Array.isArray(body.args))
+          ? body.args as Record<string, unknown>
+          : {};
+        const result = await executeBeeTool("hivematrix_browser", args, {
+          projectPath: typeof body.projectPath === "string" ? body.projectPath : process.cwd(),
+          project: typeof body.project === "string" ? body.project : "ops",
+          requestedBy: "cli",
+        });
+        json(res, result.startsWith("Error") ? 400 : 200, { ok: !result.startsWith("Error"), result });
+        return;
+      }
+
       // GET /desktopbee/health — pings the Swift helper (:3748). 200 when up so
       // the Bees view shows DesktopBee healthy; 503 when the helper is unreachable.
       if (req.method === "GET" && urlPath === "/desktopbee/health") {
@@ -1184,7 +1201,7 @@ export function createDaemonServer() {
       // job (e.g. LinkedIn) explains itself: is Codex auth present? is the
       // DesktopBee fallback enabled? what backing will actually run?
       if (req.method === "GET" && urlPath === "/browserbee/health") {
-        const { buildBrowserBeeHealthSnapshot, readBrowserBeeDesktopFallbackEnabled } = await import("@/lib/browserbee/contracts");
+        const { buildBrowserBeeHealthSnapshot, readBrowserBeeDesktopFallbackEnabled } = await import("@/lib/browser-lane/jobs");
         const { readCodexAuthState } = await import("@/lib/usage/codex");
         const { readHiveConfig } = await import("@/lib/brain/settings");
         const { Task } = await import("@/lib/db");
@@ -1202,6 +1219,44 @@ export function createDaemonServer() {
           },
         });
         json(res, 200, snapshot);
+        return;
+      }
+
+      // GET /browser-lane/health — public replacement for /browserbee/health.
+      if (req.method === "GET" && urlPath === "/browser-lane/health") {
+        const { buildBrowserBeeHealthSnapshot, readBrowserBeeDesktopFallbackEnabled } = await import("@/lib/browser-lane/jobs");
+        const { readCodexAuthState } = await import("@/lib/usage/codex");
+        const { readHiveConfig } = await import("@/lib/brain/settings");
+        const { Task } = await import("@/lib/db");
+        const tasks = await Task.find({ source: "browser-lane" });
+        const legacyTasks = await Task.find({ source: "browserbee" });
+        const auth = readCodexAuthState();
+        const ack = (readHiveConfig().browserLane as Record<string, unknown> | undefined)?.acknowledgedComputerUse === true
+          || (readHiveConfig().browserbee as Record<string, unknown> | undefined)?.acknowledgedComputerUse === true;
+        const snapshot = buildBrowserBeeHealthSnapshot({
+          tasks: [...tasks, ...legacyTasks].map((t) => ({ status: t.status as string, createdAt: t.createdAt as string })),
+          readiness: {
+            codexConfigured: auth.authMode === "subscription" || auth.authMode === "api-key",
+            codexAuthMode: auth.authMode,
+            acknowledgedComputerUse: ack,
+            desktopFallbackEnabled: readBrowserBeeDesktopFallbackEnabled(),
+            desktopBeeAvailable: policy.getCapability("desktopbee").available,
+          },
+        });
+        json(res, 200, { ...snapshot, bee: undefined, lane: "browser" });
+        return;
+      }
+
+      // POST /browser-lane/probe — readiness orchestration endpoint. The native
+      // app will back this with stored site/probe rows; until then it is explicit.
+      if (req.method === "POST" && urlPath === "/browser-lane/probe") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        json(res, 501, {
+          ok: false,
+          lane: "browser",
+          siteId: typeof body.siteId === "string" ? body.siteId : "all",
+          error: "Browser Lane readiness probes require the Browser Lane app/site registry; schema and contracts are installed.",
+        });
         return;
       }
 

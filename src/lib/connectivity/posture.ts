@@ -65,14 +65,14 @@ export function describeLocalPosture(mode: ConnectivityMode): LocalPostureReport
     },
     {
       id: "webbee",
-      label: "WebBee",
+      label: "Browser Lane Read",
       disposition: cloud ? "works" : "queued",
       action: cloud ? "run_now" : "wait_for_cloud",
       note: cloud ? "Fresh web retrieval available." : "Fresh web retrieval waits for connectivity; dependent work is deferred, not failed.",
     },
     {
       id: "browserbee",
-      label: "BrowserBee",
+      label: "Browser Lane Workflow",
       disposition: cloud ? "works" : "queued",
       action: cloud ? "run_now" : "wait_for_cloud",
       note: cloud ? "Authenticated browser workflows available." : "Browser workflows wait for connectivity unless the operator has explicitly enabled a local DesktopBee browser fallback.",

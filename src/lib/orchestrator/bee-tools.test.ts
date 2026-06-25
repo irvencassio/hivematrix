@@ -14,6 +14,7 @@ function offline() { const p = new ConnectivityPolicy(); p.setManualOverride("of
 const names = (tools: { function: { name: string } }[]) => tools.map((t) => t.function.name).sort();
 
 test("isBeeTool recognizes the lanes (incl. outbound channels) and rejects others", () => {
+  assert.equal(isBeeTool("hivematrix_browser"), true);
   assert.equal(isBeeTool("webbee_search"), true);
   assert.equal(isBeeTool("browserbee_run"), true);
   assert.equal(isBeeTool("desktopbee_action"), true);
@@ -29,7 +30,7 @@ test("isBeeTool recognizes the lanes (incl. outbound channels) and rejects other
 });
 
 test("all bee tools are defined with required schemas", () => {
-  assert.equal(BEE_TOOL_DEFINITIONS.length, 12);
+  assert.equal(BEE_TOOL_DEFINITIONS.length, 11);
   for (const t of BEE_TOOL_DEFINITIONS) {
     assert.equal(t.type, "function");
     assert.ok(t.function.name.length > 0);
@@ -47,7 +48,7 @@ test("TermBee tool descriptions identify Canopy as the preferred provider", () =
 
 test("cloud-ok advertises every lane (web, browser, desktop, term, mail, message, brain, skill, digest)", () => {
   assert.deepEqual(names(availableBeeTools(cloud())),
-    ["brain_search", "browserbee_run", "code_graph", "desktopbee_action", "digest_url", "mailbee_draft", "mailbee_send", "messagebee_send", "skill_used", "termbee_run", "termbee_session", "webbee_search"]);
+    ["brain_search", "code_graph", "desktopbee_action", "digest_url", "hivematrix_browser", "mailbee_draft", "mailbee_send", "messagebee_send", "skill_used", "termbee_run", "termbee_session"]);
 });
 
 test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
@@ -70,13 +71,15 @@ test("capabilityRoutingGuide lists email/message/brain lanes in cloud, drops web
   assert.match(cloudGuide, /mailbee_send/);
   assert.match(cloudGuide, /messagebee_send/);
   assert.match(cloudGuide, /brain_search/);
-  assert.match(cloudGuide, /webbee_search/);
+  assert.match(cloudGuide, /hivematrix_browser/);
+  assert.doesNotMatch(cloudGuide, /webbee_search/);
+  assert.doesNotMatch(cloudGuide, /browserbee_run/);
   assert.match(cloudGuide, /do not improvise/i);
 
   const offlineGuide = capabilityRoutingGuide(offline());
   assert.match(offlineGuide, /mailbee_send/);   // still routable offline
   assert.match(offlineGuide, /brain_search/);   // brain is local, still routable
-  assert.doesNotMatch(offlineGuide, /webbee_search/); // web lane gone offline
+  assert.doesNotMatch(offlineGuide, /hivematrix_browser/); // browser lane gone offline
 });
 
 test("executeBeeTool refuses an unknown bee tool", async () => {
@@ -84,8 +87,8 @@ test("executeBeeTool refuses an unknown bee tool", async () => {
   assert.match(out, /Unknown bee tool/);
 });
 
-test("executeBeeTool gates webbee_search behind the connectivity capability", async () => {
-  // Force local-only on the singleton policy so the capability gate denies WebBee.
+test("executeBeeTool gates legacy webbee_search behind the connectivity capability", async () => {
+  // Force local-only on the singleton policy so the capability gate denies the legacy browser-read alias.
   const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
   const policy = getConnectivityPolicy();
   const prev = policy.getState().manualOverride;

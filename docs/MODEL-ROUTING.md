@@ -16,7 +16,7 @@ concrete model id from config. Roles:
 | `think` | planning, review, architecture, directive planning |
 | `code-critical` | final implementation / UI — the code that ships |
 | `execute` | bulk coding, file ops, extraction — the operational workhorse |
-| `cheap-web` | WebBee summarization |
+| `cheap-web` | Browser Lane web summarization |
 | `image` | image generation |
 
 ## Mixed mode (the default — frontier reachable, `cloud-ok`)
@@ -93,10 +93,10 @@ not downgraded to local (`router.ts` `RouteOptions.noLocal`).
   throttle) now **wait for it** instead of failing — see
   `waitForServerReady` (serving.ts) + the pre-flight in
   `orchestrator/generic-agent.ts`. Up to ~45s; then a clear actionable error.
-- Embedded capability lanes that work with no cloud: **TermBee, DesktopBee,
-  MailBee, MessageBee** (all driven by local osascript / shells / chat.db). Web
-  lanes (WebBee, cloud BrowserBee) are disabled offline by the connectivity
-  matrix.
+- Lanes that work with no cloud: **Terminal Lane, Desktop Lane, Mail Lane,
+  Message Lane** (all driven by local osascript / shells / chat.db). The
+  **Browser Lane** web/authenticated modes need the internet, so they're
+  disabled offline by the connectivity matrix.
 
 ## Config knobs (`~/.hivematrix/config.json`)
 

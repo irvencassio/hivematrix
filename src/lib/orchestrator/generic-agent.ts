@@ -74,7 +74,7 @@ async function buildSystemPrompt(projectPath: string, agentType: string, thinkin
   const profile = getAgentProfile(agentType);
   let prompt = `${profile.systemPrompt}\n\n--- Brain Doc Policy ---\n${brainDocPolicyText()}`;
   // Chief-of-staff routing table: tell the agent which capability lane owns each
-  // intent (email → MailBee, browser → BrowserBee, …) so it dispatches to the
+  // intent (email → MailBee, browser → Browser Lane, …) so it dispatches to the
   // right tool instead of improvising. Reflects only currently-available lanes.
   const routingGuide = capabilityRoutingGuide();
   if (routingGuide) {
@@ -143,7 +143,7 @@ async function buildSystemPrompt(projectPath: string, agentType: string, thinkin
  * Get the tool definitions for a given agent profile.
  *
  * The profile's own allowlist filters the local file/shell tools, then the
- * embedded capability lanes (WebBee / BrowserBee / DesktopBee) are appended —
+ * embedded capability lanes (Browser Lane / DesktopBee) are appended —
  * but only the lanes the current connectivity mode permits, so the model is
  * never shown a tool it cannot use.
  */

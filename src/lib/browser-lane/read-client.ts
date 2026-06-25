@@ -1,6 +1,6 @@
-const DEFAULT_WEBBEE_BASE_URL = "http://127.0.0.1:4011";
+const DEFAULT_BROWSER_LANE_READ_BASE_URL = "http://127.0.0.1:4011";
 
-export interface WebBeeAnswerRequest {
+export interface BrowserLaneReadRequest {
   query: string;
   requestedBy: string;
   project: string;
@@ -14,7 +14,7 @@ export interface WebBeeAnswerRequest {
   allowBrowserEscalation?: boolean;
 }
 
-export interface WebBeeAnswerResult {
+export interface BrowserLaneReadResult {
   status: "completed" | "failed" | "needs_escalation";
   answer: string | null;
   citations: Array<{ title: string; url: string; retrievedAt: string }>;
@@ -23,19 +23,19 @@ export interface WebBeeAnswerResult {
   escalation: {
     needed: boolean;
     reason: string | null;
-    target?: "browserbee" | null;
+    target?: "browser_lane" | null;
   };
   artifacts: string[];
   errorCode?: string;
 }
 
-export function resolveWebBeeBaseUrl(): string {
-  const configured = process.env.WEBBEE_BASE_URL?.trim();
-  return (configured && configured.length > 0 ? configured : DEFAULT_WEBBEE_BASE_URL).replace(/\/$/, "");
+export function resolveBrowserLaneReadBaseUrl(): string {
+  const configured = process.env.BROWSER_LANE_READ_BASE_URL?.trim() ?? process.env.WEBBEE_BASE_URL?.trim();
+  return (configured && configured.length > 0 ? configured : DEFAULT_BROWSER_LANE_READ_BASE_URL).replace(/\/$/, "");
 }
 
-export async function requestWebBeeAnswer(request: WebBeeAnswerRequest): Promise<Response> {
-  return fetch(`${resolveWebBeeBaseUrl()}/answer`, {
+export async function requestBrowserLaneRead(request: BrowserLaneReadRequest): Promise<Response> {
+  return fetch(`${resolveBrowserLaneReadBaseUrl()}/answer`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

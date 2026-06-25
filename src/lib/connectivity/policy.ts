@@ -3,7 +3,7 @@
  *
  * Three modes:
  *   cloud-ok    — frontier APIs reachable; full capability set available
- *   local-only  — LAN/loopback only; no cloud; WebBee/BrowserBee disabled
+ *   local-only  — LAN/loopback only; no cloud; Browser Lane cloud paths disabled
  *   offline     — no network at all; only local-model, TermBee, DesktopBee on local apps
  *
  * Mode is determined by:
@@ -41,8 +41,8 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
   "local-only": {
     frontier:   { available: false, reason: "Frontier APIs unavailable in local-only mode" },
     local:      { available: true },
-    webbee:     { available: false, reason: "WebBee requires internet access" },
-    browserbee: { available: false, reason: "BrowserBee requires internet access in local-only mode" },
+    webbee:     { available: false, reason: "Browser Lane read/search requires internet access" },
+    browserbee: { available: false, reason: "Browser Lane workflow requires internet access in local-only mode" },
     desktopbee: { available: true },
     termbee:    { available: true },
     image:      { available: false, reason: "Nano Banana image generation requires cloud; local mflux fallback if configured" },

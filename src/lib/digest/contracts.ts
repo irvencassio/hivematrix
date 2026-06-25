@@ -1,7 +1,7 @@
 /**
  * On-demand digest — "drop in a link, get a summary saved to the brain for review"
  * (scenario #43, the article path the YouTube watcher doesn't cover). The agent
- * fetches the URL (WebBee/BrowserBee), summarizes, and writes a markdown brain doc
+ * fetches the URL through Browser Lane, summarizes, and writes a markdown brain doc
  * with the summary + source link. Pure helpers here; the task does the work.
  */
 
@@ -43,7 +43,7 @@ export function buildDigestTaskDescription(input: DigestTaskInput): string {
     `Digest this link for later review and save it to the knowledge base: ${input.url}`,
     "",
     "Steps:",
-    "1. Fetch the page content — use the webbee_search tool (or browserbee_run if it needs a logged-in/rendered page).",
+    "1. Fetch the page content — use hivematrix_browser with mode=read/search, or mode=workflow if it needs a logged-in/rendered page.",
     "2. Write a tight, information-dense summary: a 4-8 sentence overview, then 3-6 key takeaways as bullets.",
     `3. Save it as a markdown brain doc using write_file at exactly this path: ${input.docPath}`,
     "   The doc must start with a '# <title>' heading, then the summary, then a 'Source: <url>' line at the end.",

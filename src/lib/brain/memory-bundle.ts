@@ -221,15 +221,15 @@ function hiveBrainScaffold(brainRootDir?: string): Array<{ path: string; content
       path: "agent-brief.md",
       content: `# Hive Agent Brief
 
-Hive is the control plane for Bee workers.
+Hive is the control plane for capability lanes and focused workers.
 
 ## Operating rules
 
 - Keep Hive responsible for routing, approvals, policy, capability health, artifacts, traces, progress visibility, and memory assembly.
-- Keep Bees narrow. A Bee can own transport or capability execution, but it should not grow its own orchestration system.
-- Treat BrowserBee and WebBee as embedded Hive capability lanes, not sibling product stories.
+- Keep workers narrow. A worker can own transport or capability execution, but it should not grow its own orchestration system.
+- Treat Browser Lane as the single browser/web capability surface.
 - Treat AuthBee as an internal session plane, not a public Bee brand.
-- Treat TubeBee as a workflow layer that consumes shared Hive capabilities.
+- Treat video/channel workflows as layers that consume shared Hive capabilities.
 - Prefer durable updates to \`${root}\` over hidden session memory or repo-local notes when recording decisions.
 - Treat the worker contract in \`src/lib/central\` as the first canonical Bee protocol.
 `,
@@ -241,7 +241,7 @@ Hive is the control plane for Bee workers.
 - Step 1 worker contract lives in \`src/lib/central/contracts.ts\` and is adopted by the current central manager and worker routes.
 - Legacy compiled playbooks still live under \`${root}/hive/playbooks\` and remain a compatibility source during migration.
 - Mission recaps are written under \`${root}/sources/missions/recaps\` and can now be assembled into prompt memory bundles.
-- BrowserBee and WebBee remain active capability surfaces inside Hive, while AuthBee is now framed as an internal session/identity plane.
+- Browser Lane is the active browser/web capability surface inside Hive, while auth is framed as an internal session/identity plane.
 `,
     },
     {
@@ -251,7 +251,7 @@ Hive is the control plane for Bee workers.
 - Canonical durable Hive memory belongs under \`${root}/projects/hive\`.
 - Legacy role and project playbooks remain readable until their contents are migrated into the canonical structure.
 - ManagerBee is the first Bee that should consume the shared brain-memory bundle, because it coordinates strategy, planning, review, and task execution.
-- TubeBee should consume shared browser, web, and brain capabilities instead of owning a separate runtime story.
+- Video workflows should consume shared browser, web, and brain capabilities instead of owning a separate runtime story.
 - TermBee is the terminal capability contract; Canopy is the preferred provider behind it, with HiveMatrix's direct local shell as fallback.
 `,
     },
@@ -265,14 +265,14 @@ Hive is the control plane for Bee workers.
 `,
     },
     {
-      path: "bees/overview.md",
-      content: `# Bees Overview
+      path: "lanes/overview.md",
+      content: `# Lanes Overview
 
-Bees are narrow workers around Hive's control plane. Start with the first worker set:
+Lanes are narrow capability surfaces around Hive's control plane. Start with the first worker set:
 
 - MessageBee: message ingress and delivery semantics
 - MailBee: email ingress, drafting, and trust-aware normalization
-- WebBee: live read-only retrieval for fresh public information
+- Browser Lane: live read-only retrieval and authenticated/rendered browser workflows
 - ManagerBee: planning, orchestration, and execution coordination within Hive
 - BrainBee: memory maintenance, recap distillation, and playbook hygiene
 - InventorBee: governed capability invention for new Bees, MCPs, skills, and shared contracts
@@ -294,12 +294,13 @@ ManagerBee coordinates tasks that stay inside Hive's control plane: planning, ro
 `,
     },
     {
-      path: "bees/webbee.md",
-      content: `# WebBee
+      path: "lanes/browser.md",
+      content: `# Browser Lane
 
-- Operate as Hive's embedded read-only web lane for fresh public information.
-- Return citations, evidence, and normalized findings.
-- Do not become browser automation or mission orchestration.
+- Operate as Hive's embedded browser and web lane.
+- Use read/search mode for fresh public information with citations and evidence.
+- Use workflow mode for authentication, rendered state, clicks, uploads, screenshots, and traces.
+- Do not become mission orchestration.
 `,
     },
     {
@@ -334,15 +335,6 @@ BrainBee is Hive's dedicated durable-memory worker. It curates the canonical bra
 `,
     },
     {
-      path: "bees/browserbee.md",
-      content: `# BrowserBee
-
-- Operate as Hive's embedded browser lane when a site requires authentication, rendered state, or clicks.
-- Prefer isolated browser execution by default and attach to the user's real browser only when necessary.
-- Do not become the default path for public-web research that WebBee can answer more directly.
-`,
-    },
-    {
       path: "bees/cronbee.md",
       content: `# CronBee
 
@@ -356,7 +348,7 @@ BrainBee is Hive's dedicated durable-memory worker. It curates the canonical bra
       content: `# ComputerBee
 
 - Own approval-heavy native desktop automation for macOS app flows, dialogs, installers, and settings work.
-- Prefer BrowserBee or direct APIs when they are safer and more stable than desktop control.
+- Prefer Browser Lane or direct APIs when they are safer and more stable than desktop control.
 - Keep app scope, approvals, screenshots, and traces explicit.
 `,
     },

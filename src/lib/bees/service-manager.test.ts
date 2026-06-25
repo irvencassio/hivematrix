@@ -73,7 +73,7 @@ test("buildLaunchAgentPlist includes extra runtime environment variables", () =>
   assert.match(plist, /Hive Helper/);
 });
 
-test("architecture reset exposes WebBee as an embedded Hive capability", () => {
+test("architecture reset exposes Browser Lane internals as embedded Hive capabilities", () => {
   const webBee = getBeeRuntimeDescriptor("webbee");
   const browserBee = getBeeRuntimeDescriptor("browserbee");
   const unknown = getBeeRuntimeDescriptor("not-a-bee");

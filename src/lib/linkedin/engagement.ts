@@ -1,7 +1,7 @@
 /**
- * LinkedIn engagement (W5.3) — a daily ritual, not a new Bee.
+ * LinkedIn engagement (W5.3) — a daily ritual, not a product surface.
  *
- * It is a scheduled Directive whose work is a domain-locked BrowserBee
+ * It is a scheduled Directive whose work is a domain-locked Browser Lane
  * `site_ops` job: scan the feed/notifications, draft comments/replies in the
  * founder's voice, queue them for approval-by-text (W1.1), post on approve.
  * Every guardrail the workplan calls for is encoded here: navigation locked to
@@ -9,12 +9,12 @@
  * both the safety and the ToS posture), and a per-run plan checkpoint (W4.1) so
  * the morning run is signed off before it touches anything.
  *
- * This module is pure builders; the agent/BrowserBee executor and the live
+ * This module is pure builders; the Browser Lane executor and the live
  * post remain runtime concerns.
  */
 
 import { join } from "path";
-import { parseBrowserBeeJobCreate, type BrowserBeeJobCreatePayload } from "@/lib/browserbee/contracts";
+import { parseBrowserBeeJobCreate, type BrowserBeeJobCreatePayload } from "@/lib/browser-lane/jobs";
 import type { CreateDirectiveInput } from "@/lib/orchestrator/directive-store";
 
 export const LINKEDIN_DOMAINS = ["linkedin.com", "www.linkedin.com"];
@@ -32,7 +32,7 @@ export interface LinkedInEngagementOptions {
   maxDrafts?: number;
 }
 
-/** A validated, linkedin.com-locked, manual-approval BrowserBee job spec. */
+/** A validated, linkedin.com-locked, manual-approval Browser Lane job spec. */
 export function buildLinkedInEngagementJob(opts: LinkedInEngagementOptions = {}): BrowserBeeJobCreatePayload {
   const maxDrafts = opts.maxDrafts ?? 5;
   return parseBrowserBeeJobCreate({
@@ -80,7 +80,7 @@ export function buildLinkedInRitualDirective(opts: LinkedInRitualOptions = {}): 
   const project = opts.project ?? "hivematrix";
   const goal = [
     "LinkedIn daily engagement ritual.",
-    "Use the browserbee_run tool, domain-locked to linkedin.com, to scan the feed and notifications and draft comments/replies in the founder's voice.",
+    "Use the hivematrix_browser tool in workflow mode, domain-locked to linkedin.com, to scan the feed and notifications and draft comments/replies in the founder's voice.",
     "Do not post anything; queue every draft for approval-by-text and post only on approval.",
   ].join(" ");
 

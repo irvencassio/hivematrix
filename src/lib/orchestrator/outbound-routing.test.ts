@@ -87,11 +87,14 @@ test("brainSearchRoutingPrompt points at the /brain/search endpoint with auth", 
   assert.match(p, /durable memory|brain/i);
 });
 
-test("beeToolsRoutingPrompt routes web/browser/desktop/terminal through /bee/<tool>", () => {
+test("beeToolsRoutingPrompt routes browser through /lane/browser and keeps other lanes explicit", () => {
   const p = beeToolsRoutingPrompt("3999");
+  assert.match(p, /\/lane\/browser/);
   assert.match(p, /\/bee\/<tool>/);
-  assert.match(p, /webbee_search/);
-  assert.match(p, /browserbee_run/);
+  assert.match(p, /"mode":"search"/);
+  assert.match(p, /"mode":"workflow"/);
+  assert.doesNotMatch(p, /webbee_search/);
+  assert.doesNotMatch(p, /browserbee_run/);
   assert.match(p, /desktopbee_action/);
   assert.match(p, /termbee_run/);
   assert.match(p, /Canopy-backed/i);

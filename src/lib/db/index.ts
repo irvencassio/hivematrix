@@ -338,6 +338,153 @@ const MIGRATIONS: string[] = [
     CREATE INDEX IF NOT EXISTS idx_task_telemetry_task ON task_telemetry(taskId);
     CREATE INDEX IF NOT EXISTS idx_task_telemetry_created ON task_telemetry(createdAt);
     CREATE INDEX IF NOT EXISTS idx_task_telemetry_provider ON task_telemetry(provider);`,
+
+  // v18: Lane and Browser Lane control-plane schema. Secrets never live here:
+  // browser_credentials stores only Keychain credentialRef metadata.
+  `CREATE TABLE IF NOT EXISTS lane_providers (
+      _id TEXT PRIMARY KEY,
+      lane TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      displayName TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'unknown',
+      backendPolicy TEXT NOT NULL DEFAULT 'lane_owned_first',
+      metadata TEXT NOT NULL DEFAULT '{}',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_lane_providers_lane_provider ON lane_providers(lane, provider);
+
+    CREATE TABLE IF NOT EXISTS lane_capabilities (
+      _id TEXT PRIMARY KEY,
+      lane TEXT NOT NULL,
+      providerId TEXT,
+      name TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      inputSchema TEXT NOT NULL DEFAULT '{}',
+      outputSchema TEXT NOT NULL DEFAULT '{}',
+      permission TEXT NOT NULL DEFAULT 'auto',
+      sideEffect TEXT,
+      riskTier TEXT NOT NULL DEFAULT 'normal',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      metadata TEXT NOT NULL DEFAULT '{}',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_lane_capabilities_name ON lane_capabilities(name);
+    CREATE INDEX IF NOT EXISTS idx_lane_capabilities_lane ON lane_capabilities(lane, enabled);
+
+    CREATE TABLE IF NOT EXISTS coo_routing_rules (
+      _id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      priority INTEGER NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      intent TEXT NOT NULL,
+      match_json TEXT NOT NULL DEFAULT '{}',
+      constraints_json TEXT NOT NULL DEFAULT '{}',
+      lane TEXT NOT NULL,
+      capability TEXT NOT NULL,
+      backend_policy TEXT NOT NULL DEFAULT 'lane_owned_first',
+      model_posture TEXT NOT NULL DEFAULT 'mixed-local-first',
+      risk_tier TEXT NOT NULL DEFAULT 'normal',
+      approval_policy TEXT NOT NULL DEFAULT '{}',
+      verification_policy TEXT NOT NULL DEFAULT '{}',
+      notes TEXT NOT NULL DEFAULT '',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_coo_routing_enabled_priority ON coo_routing_rules(enabled, priority);
+    CREATE INDEX IF NOT EXISTS idx_coo_routing_lane ON coo_routing_rules(lane, capability);
+
+    CREATE TABLE IF NOT EXISTS coo_routing_rule_history (
+      _id TEXT PRIMARY KEY,
+      ruleId TEXT NOT NULL,
+      action TEXT NOT NULL,
+      before_json TEXT,
+      after_json TEXT,
+      actor TEXT NOT NULL DEFAULT 'hive',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_coo_routing_history_rule ON coo_routing_rule_history(ruleId, createdAt);
+
+    CREATE TABLE IF NOT EXISTS browser_sites (
+      _id TEXT PRIMARY KEY,
+      displayName TEXT NOT NULL,
+      homeUrl TEXT NOT NULL,
+      loginUrl TEXT,
+      allowedDomains TEXT NOT NULL DEFAULT '[]',
+      profileRef TEXT,
+      authStrategy TEXT NOT NULL DEFAULT 'manual_session',
+      status TEXT NOT NULL DEFAULT 'unknown',
+      notes TEXT NOT NULL DEFAULT '',
+      metadata TEXT NOT NULL DEFAULT '{}',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_browser_sites_status ON browser_sites(status);
+
+    CREATE TABLE IF NOT EXISTS browser_credentials (
+      _id TEXT PRIMARY KEY,
+      siteId TEXT NOT NULL,
+      credentialRef TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'keychain_password',
+      accountLabel TEXT,
+      allowedDomains TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'unknown',
+      lastVerifiedAt TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_credentials_ref ON browser_credentials(credentialRef);
+    CREATE INDEX IF NOT EXISTS idx_browser_credentials_site ON browser_credentials(siteId);
+
+    CREATE TABLE IF NOT EXISTS browser_readiness_probes (
+      _id TEXT PRIMARY KEY,
+      siteId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL,
+      assertions_json TEXT NOT NULL DEFAULT '[]',
+      requiresAuth INTEGER NOT NULL DEFAULT 1,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_browser_readiness_probes_site ON browser_readiness_probes(siteId, enabled);
+
+    CREATE TABLE IF NOT EXISTS browser_readiness_runs (
+      _id TEXT PRIMARY KEY,
+      siteId TEXT NOT NULL,
+      probeId TEXT,
+      status TEXT NOT NULL,
+      color TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      traceRunId TEXT,
+      startedAt TEXT NOT NULL DEFAULT (datetime('now')),
+      completedAt TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_browser_readiness_runs_site ON browser_readiness_runs(siteId, startedAt);
+
+    CREATE TABLE IF NOT EXISTS browser_trace_runs (
+      _id TEXT PRIMARY KEY,
+      siteId TEXT,
+      workflowId TEXT,
+      status TEXT NOT NULL DEFAULT 'running',
+      traceDir TEXT,
+      startedAt TEXT NOT NULL DEFAULT (datetime('now')),
+      completedAt TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_browser_trace_runs_site ON browser_trace_runs(siteId, startedAt);
+
+    CREATE TABLE IF NOT EXISTS browser_trace_events (
+      _id INTEGER PRIMARY KEY AUTOINCREMENT,
+      traceRunId TEXT NOT NULL,
+      event TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      screenshotPath TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_browser_trace_events_run ON browser_trace_events(traceRunId, createdAt);`,
 ];
 
 // ------------------------------------------------------------------
