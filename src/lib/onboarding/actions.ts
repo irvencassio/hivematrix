@@ -29,13 +29,13 @@ const HELPER_LABEL = "com.hivematrix.desktopbee.helper";
 function launchAgentsDir(): string { return join(homedir(), "Library", "LaunchAgents"); }
 function logDir(): string { return join(homedir(), "Library", "Logs", "HiveMatrix"); }
 
-/** TCC panes the DesktopBee helper needs; the wizard opens these. */
+/** TCC panes the Desktop Lane helper needs; the wizard opens these. */
 export const TCC_DEEP_LINKS = {
   accessibility: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
   screenRecording: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
-  // Full Disk Access — required for the daemon to read ~/Library/Messages/chat.db (MessageBee).
+  // Full Disk Access — required for the daemon to read ~/Library/Messages/chat.db (Message Lane).
   fullDiskAccess: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
-  // Automation — required to drive Apple Mail via osascript (MailBee).
+  // Automation — required to drive Apple Mail via osascript (Mail Lane).
   automation: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
 } as const;
 
@@ -215,7 +215,7 @@ export function installDaemonLaunchAgent(
 }
 
 /**
- * Install + load the DesktopBee helper launchd agent (the bundled
+ * Install + load the Desktop Lane helper launchd agent (the bundled
  * DesktopBeeHelper.app under the app's Resources) and return TCC deep-links the
  * wizard opens so the user can grant Accessibility + Screen Recording.
  */
@@ -225,7 +225,7 @@ export function installDesktopBeeHelper(
   const execPath = opts.execPath ?? process.execPath;
   const readiness = getBundleInstallReadiness(execPath);
   if (!readiness.appRoot) {
-    return { ok: false, detail: readiness.reason ?? "DesktopBee helper unavailable (not a packaged bundle)", data: { state: readiness.state } };
+    return { ok: false, detail: readiness.reason ?? "Desktop Lane helper unavailable (not a packaged bundle)", data: { state: readiness.state } };
   }
   const helperApp = join(readiness.appRoot, "Contents", "Resources", "DesktopBeeHelper.app");
   if (!existsSync(helperApp)) {
@@ -238,7 +238,7 @@ export function installDesktopBeeHelper(
   bootstrapLaunchAgent(HELPER_LABEL, plistPath, opts.exec ?? defaultExec);
   return {
     ok: true,
-    detail: "DesktopBee helper installed; grant Accessibility + Screen Recording",
+    detail: "Desktop Lane helper installed; grant Accessibility + Screen Recording",
     data: { plistPath, helperApp, deepLinks: TCC_DEEP_LINKS },
   };
 }
@@ -294,7 +294,7 @@ export async function probeOpenAiEndpoint(
 }
 
 /**
- * Guided MessageBee setup: enable the iMessage channel, allowlist a sender, and
+ * Guided Message Lane setup: enable the iMessage channel, allowlist a sender, and
  * report whether Full Disk Access (chat.db readability) is in place. Idempotent
  * and safe to re-run; returns the live state the wizard renders.
  */
@@ -324,9 +324,9 @@ export async function configureMessageBee(opts: {
   const ok = enabled && chatDbReadable && allowlisted > 0;
 
   let detail: string;
-  if (!chatDbReadable) detail = `Channel enabled, but MessageBee is not ready: ${chatDbProbe.detail}`;
+  if (!chatDbReadable) detail = `Channel enabled, but Message Lane is not ready: ${chatDbProbe.detail}`;
   else if (allowlisted === 0) detail = "Channel enabled and Messages readable — add an allowlisted sender to start driving it.";
-  else detail = "MessageBee ready: channel on, Messages readable, sender allowlisted.";
+  else detail = "Message Lane ready: channel on, Messages readable, sender allowlisted.";
 
   return {
     ok,
@@ -343,7 +343,7 @@ export async function configureMessageBee(opts: {
 }
 
 /**
- * Guided MailBee setup: enable the email channel, add a trusted sender, and
+ * Guided Mail Lane setup: enable the email channel, add a trusted sender, and
  * report whether Apple Mail is controllable (Automation permission). On enable,
  * advances the high-water mark to the newest message so the whole mailbox isn't
  * replayed into tasks. Idempotent; returns the live state the wizard renders.
@@ -382,7 +382,7 @@ export async function configureMailBee(opts: {
   if (!mailControllable) detail = "Grant Apple Mail Automation permission (open Mail, then approve), then re-run.";
   else if (!enabled) detail = "Mail controllable — enabling the channel…";
   else detail = trusted > 0
-    ? "MailBee ready: channel on, Mail controllable, trusted sender set."
+    ? "Mail Lane ready: channel on, Mail controllable, trusted sender set."
     : "Channel on and Mail controllable — add a trusted sender for auto-send (others are draft-for-approval).";
 
   return {

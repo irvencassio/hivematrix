@@ -30,6 +30,7 @@ test("enables the channel and allowlists a phone (formatting-insensitive)", asyn
   assert.equal((r.data as { enabled: boolean }).enabled, true);
   assert.ok(Array.isArray((r.data as { identities: unknown[] }).identities));
   assert.ok(typeof r.detail === "string" && r.detail.length > 0);
+  assert.doesNotMatch(r.detail, /MessageBee/);
   assert.ok((r.data as { deepLinks: { fullDiskAccess: string } }).deepLinks.fullDiskAccess.includes("Privacy_AllFiles"));
 });
 

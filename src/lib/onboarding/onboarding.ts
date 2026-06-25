@@ -12,7 +12,7 @@
  *   daemon        — launchd agent installed                         [required]
  *   brain         — brain memory root exists                        [required]
  *   frontier      — a frontier API key/auth is available            [optional]
- *   desktopbee    — native helper built + permissions granted       [optional]
+ *   desktopbee    — Desktop Lane helper built + permissions granted [optional]
  */
 
 import { existsSync, readFileSync } from "fs";
@@ -60,7 +60,7 @@ function launchdPlistPath(): string {
 /**
  * Compute onboarding status. `now` is injectable for deterministic timestamps;
  * `helperReachable`/`desktopPermissions` can be injected from a live probe of
- * the DesktopBee helper (the file checks alone can't see runtime TCC grants).
+ * the Desktop Lane helper (the file checks alone can't see runtime TCC grants).
  */
 export function getOnboardingStatus(opts: {
   now?: string;
@@ -165,27 +165,27 @@ export function getOnboardingStatus(opts: {
     remediation: hasFrontier ? undefined : "Optional: install the claude or codex CLI, or provide an ANTHROPIC_API_KEY/OPENAI_API_KEY for cloud-ok mode.",
   });
 
-  // desktopbee (optional)
+  // desktopbee (optional compatibility id) — Desktop Lane
   const perms = opts.desktopPermissions;
   const desktopOk = opts.helperBuilt === true && !!perms && perms.accessibility && perms.screenRecording;
-  let desktopDetail = "DesktopBee helper not built";
+  let desktopDetail = "Desktop Lane helper not built";
   if (opts.helperBuilt) {
     if (!perms) desktopDetail = "helper built; permission status unknown (helper not running)";
     else desktopDetail = `helper built; accessibility=${perms.accessibility} screenRecording=${perms.screenRecording}`;
   }
   steps.push({
     id: "desktopbee",
-    title: "DesktopBee (desktop control)",
+    title: "Desktop Lane (desktop control)",
     required: false,
     state: desktopOk ? "done" : "incomplete",
     detail: desktopDetail,
-    remediation: desktopOk ? undefined : "Optional: build desktopbee-helper and grant Accessibility + Screen Recording in System Settings.",
+    remediation: desktopOk ? undefined : "Optional: install the Desktop Lane helper and grant Accessibility + Screen Recording in System Settings.",
   });
 
-  // messagebee (optional) — SMS/iMessage control surface
+  // messagebee (optional compatibility id) — Message Lane SMS/iMessage control surface
   const mb = opts.messagebee;
   const messagebeeOk = !!mb && mb.enabled && mb.chatDbReadable;
-  let messagebeeDetail = "MessageBee disabled";
+  let messagebeeDetail = "Message Lane disabled";
   if (mb) {
     if (!mb.chatDbReadable) messagebeeDetail = mb.chatDbDetail ?? "Full Disk Access needed to read Messages (chat.db)";
     else if (!mb.enabled) messagebeeDetail = "chat.db readable; channel disabled";
@@ -193,17 +193,17 @@ export function getOnboardingStatus(opts: {
   }
   steps.push({
     id: "messagebee",
-    title: "MessageBee (text HiveMatrix)",
+    title: "Message Lane (text HiveMatrix)",
     required: false,
     state: messagebeeOk ? "done" : "incomplete",
     detail: messagebeeDetail,
-    remediation: messagebeeOk ? undefined : "Optional: grant Full Disk Access (to read Messages), enable the channel, and allowlist your phone in Settings → MessageBee.",
+    remediation: messagebeeOk ? undefined : "Optional: grant Full Disk Access (to read Messages), enable the channel, and allowlist your phone in Settings > Message Lane.",
   });
 
-  // mailbee (optional) — email watch + trust-gated drafting via Apple Mail
+  // mailbee (optional compatibility id) — Mail Lane email watch + trust-gated drafting via Apple Mail
   const ml = opts.mailbee;
   const mailbeeOk = !!ml && ml.enabled && ml.mailControllable;
-  let mailbeeDetail = "MailBee disabled";
+  let mailbeeDetail = "Mail Lane disabled";
   if (ml) {
     if (!ml.mailControllable) mailbeeDetail = "Mail.app automation permission needed";
     else if (!ml.enabled) mailbeeDetail = "Mail controllable; channel disabled";
@@ -211,11 +211,11 @@ export function getOnboardingStatus(opts: {
   }
   steps.push({
     id: "mailbee",
-    title: "MailBee (email watch)",
+    title: "Mail Lane (email watch)",
     required: false,
     state: mailbeeOk ? "done" : "incomplete",
     detail: mailbeeDetail,
-    remediation: mailbeeOk ? undefined : "Optional: grant HiveMatrix Automation control of Mail.app, enable the channel, and add trusted senders in Settings → MailBee.",
+    remediation: mailbeeOk ? undefined : "Optional: grant HiveMatrix Automation control of Mail.app, enable the channel, and add trusted senders in Settings > Mail Lane.",
   });
 
   const requiredComplete = steps.filter((s) => s.required).every((s) => s.state === "done");

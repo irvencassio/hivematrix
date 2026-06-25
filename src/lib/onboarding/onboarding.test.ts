@@ -75,6 +75,21 @@ test("desktopbee done only when helper built AND both permissions granted", () =
   assert.equal(step(base({ helperBuilt: true, desktopPermissions: { accessibility: true, screenRecording: true } }), "desktopbee").state, "done");
 });
 
+test("optional onboarding setup copy uses lane names", () => {
+  const status = withHome(() => {}, () => getOnboardingStatus({ now: "T" }));
+  const desktop = step(status, "desktopbee");
+  const message = step(status, "messagebee");
+  const mail = step(status, "mailbee");
+
+  assert.equal(desktop.title, "Desktop Lane (desktop control)");
+  assert.equal(message.title, "Message Lane (text HiveMatrix)");
+  assert.equal(mail.title, "Mail Lane (email watch)");
+
+  for (const s of [desktop, message, mail]) {
+    assert.doesNotMatch(`${s.title}\n${s.detail}\n${s.remediation ?? ""}`, /DesktopBee|MessageBee|MailBee/);
+  }
+});
+
 test("frontier step reflects env credentials", () => {
   const status = withHome(() => {}, () => {
     process.env.OPENAI_API_KEY = "sk-test";
