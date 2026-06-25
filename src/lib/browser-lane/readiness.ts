@@ -111,7 +111,14 @@ export async function runBrowserReadinessProbe(input: BrowserReadinessRunInput):
       probe,
       eventType: "probe.snapshot",
       message: `Snapshot ${snapshot.title || snapshot.url}`,
-      data: { url: snapshot.url, state: snapshot.state },
+      // Safe snapshot metadata only — never page text, field values, or secrets.
+      data: {
+        url: snapshot.url,
+        state: snapshot.state,
+        title: snapshot.title,
+        formCount: snapshot.forms.length,
+        actionCount: snapshot.actions.length,
+      },
     });
 
     const humanRequired = detectHumanRequirement(snapshot);

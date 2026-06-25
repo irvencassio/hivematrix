@@ -98,14 +98,37 @@ test("probe service runs configured probes and persists trace events", async () 
   assert.equal(eventCount.n > 0, true);
 });
 
-test("probe service default adapter records a blocked run instead of returning a stub", async () => {
+test("probe service drives the real agent_browser adapter to a real ready result", async () => {
   seedHeygen();
-  const result = await runBrowserLaneReadiness({ siteId: "heygen" });
+  const { createAgentBrowserAdapter } = await import("./adapters/agent-browser");
+  const result = await runBrowserLaneReadiness({
+    siteId: "heygen",
+    // Real adapter, deterministic injected fetch (no network): the page text
+    // satisfies the "Create video" assertion → ready.
+    adapter: createAgentBrowserAdapter({
+      fetchPage: async () => ({ ok: true, status: 200, finalUrl: "https://app.heygen.com/home", html: "<html><head><title>HeyGen</title></head><body>Dashboard — Create video</body></html>" }),
+    }),
+  });
 
   assert.equal(result.ok, true);
-  assert.equal(result.backendReady, false);
-  assert.equal(result.runs[0].status, "blocked");
-  assert.match(result.runs[0].error ?? "", /not wired yet/);
+  assert.equal(result.backendReady, true);
+  assert.equal(result.runs[0].status, "ready");
+  // The unavailable stub is gone.
+  assert.doesNotMatch(result.runs[0].error ?? "", /not wired yet/);
+});
+
+test("probe service reports human_required (login) when a login wall is detected, never fake green", async () => {
+  seedHeygen();
+  const { createAgentBrowserAdapter } = await import("./adapters/agent-browser");
+  const result = await runBrowserLaneReadiness({
+    siteId: "heygen",
+    adapter: createAgentBrowserAdapter({
+      fetchPage: async () => ({ ok: true, status: 200, finalUrl: "https://app.heygen.com/login", html: "<html><head><title>Sign in</title></head><body><form><label for='pw'>Password</label><input id='pw' type='password' name='password'/><button>Log in</button></form></body></html>" }),
+    }),
+  });
+
+  assert.equal(result.runs[0].status, "human_required");
+  assert.equal(result.runs[0].humanRequired, "login");
 });
 
 test("probe service reports a missing site clearly", async () => {

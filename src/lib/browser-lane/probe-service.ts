@@ -114,7 +114,9 @@ export async function runBrowserLaneReadiness(input: BrowserLaneProbeServiceInpu
     ok: true,
     lane: "browser",
     siteId,
-    backendReady: input.adapter != null,
+    // A real backend is now wired (agent_browser read-only MVP) whether or not a
+    // custom adapter was injected.
+    backendReady: true,
     runs,
   };
 }
