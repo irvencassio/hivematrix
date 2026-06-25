@@ -242,10 +242,25 @@ function isCentralTaskStatus(value: string): value is CentralTaskStatus {
   return (CENTRAL_TASK_STATUSES as readonly string[]).includes(value);
 }
 
+// Lane-native ids accepted on input and normalized to the persisted worker kind.
+// Part of the staged Bee→Lane migration: a lane-shaped producer can register or
+// lease as "message"/"mail"/… and central stores the existing kind value, so no
+// persisted data or old worker changes. The legacy kind strings stay canonical.
+const LANE_ALIAS_TO_WORKER_KIND: Record<string, WorkerKind> = {
+  message: "messagebee",
+  mail: "mailbee",
+  browser: "browserbee",
+  desktop: "desktopbee",
+  terminal: "termbee",
+  memory: "brainbee",
+  review: "managerbee",
+};
+
 function normalizeWorkerKind(value: unknown): WorkerKind {
   if (typeof value !== "string" || !value.trim()) return "generic";
   const normalized = value.trim().toLowerCase();
-  return isWorkerKind(normalized) ? normalized : "custom";
+  if (isWorkerKind(normalized)) return normalized;
+  return LANE_ALIAS_TO_WORKER_KIND[normalized] ?? "custom";
 }
 
 function normalizeDateString(value: unknown, fallback = new Date().toISOString()): string {
@@ -303,7 +318,7 @@ export function normalizeWorkerTokenEntry(value: unknown): WorkerTokenConfig | n
     tokenHash,
     createdAt: normalizeDateString(record.createdAt),
     scopes: scopes.length > 0 ? scopes : [...WORKER_TOKEN_SCOPES],
-    bee: normalizeWorkerKind(record.bee),
+    bee: normalizeWorkerKind(record.lane ?? record.bee),
     label: readString(record, "label", "worker token label", { required: false }) ?? hostname,
     capabilities: readStringArray(record, "capabilities"),
     metadata: readMetadata(record, "metadata"),
@@ -345,7 +360,7 @@ export function parseWorkerRegistration(
   return {
     hostname,
     label: readString(record, "label", "label", { required: false }) ?? hostname,
-    bee: normalizeWorkerKind(record.bee),
+    bee: normalizeWorkerKind(record.lane ?? record.bee),
     agentSlots: readNumber(record, "agentSlots", "agentSlots", { required: false, min: 0 }) ?? 4,
     runningTasks: readNumber(record, "runningTasks", "runningTasks", { required: false, min: 0 }) ?? 0,
     capabilities: readStringArray(record, "capabilities"),
@@ -378,7 +393,7 @@ export function parseCentralTaskCreate(body: unknown): CentralTaskCreatePayload 
     description: readString(record, "description", "description")!,
     project: readString(record, "project", "project")!,
     assignedWorker: readString(record, "assignedWorker", "assignedWorker")!,
-    bee: normalizeWorkerKind(record.bee),
+    bee: normalizeWorkerKind(record.lane ?? record.bee),
     model: readString(record, "model", "model", { required: false }) ?? "opus",
     budget: readNumber(record, "budget", "budget", { required: false, min: 0 }) ?? 5,
     workflow: readString(record, "workflow", "workflow", { required: false }) ?? null,

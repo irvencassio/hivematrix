@@ -41,6 +41,36 @@ test("parseWorkerRegistration normalizes optional bee metadata", () => {
   assert.deepEqual(registration.metadata, { region: "local" });
 });
 
+test("parseWorkerRegistration accepts lane-native kind values and normalizes to the persisted worker kind", () => {
+  // Lane-native value in the legacy `bee` field.
+  const viaBee = parseWorkerRegistration({
+    hostname: "lane-01", label: "Message Lane", bee: "message",
+    runningTasks: 0, agentSlots: 1, capabilities: [], softwareVersion: null, metadata: {},
+  });
+  assert.equal(viaBee.bee, "messagebee");
+
+  // Lane-native value in the new `lane` field, which takes precedence over `bee`.
+  const viaLane = parseWorkerRegistration({
+    hostname: "lane-02", label: "Mail Lane", lane: "mail",
+    runningTasks: 0, agentSlots: 1, capabilities: [], softwareVersion: null, metadata: {},
+  });
+  assert.equal(viaLane.bee, "mailbee");
+
+  // Legacy persisted kind strings still pass through unchanged.
+  const legacy = parseWorkerRegistration({
+    hostname: "old-01", label: "Old", bee: "browserbee",
+    runningTasks: 0, agentSlots: 1, capabilities: [], softwareVersion: null, metadata: {},
+  });
+  assert.equal(legacy.bee, "browserbee");
+
+  // An unknown string still falls back to custom (lane aliases don't widen this).
+  const unknown = parseWorkerRegistration({
+    hostname: "x", label: "x", bee: "not-a-lane",
+    runningTasks: 0, agentSlots: 1, capabilities: [], softwareVersion: null, metadata: {},
+  });
+  assert.equal(unknown.bee, "custom");
+});
+
 test("parseCentralTaskStatus accepts refs and worker events", () => {
   const status = parseCentralTaskStatus({
     status: "in_progress",
