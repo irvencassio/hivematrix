@@ -759,8 +759,8 @@ export function createDaemonServer() {
 
       // GET /bees — compatibility status for older clients.
       if (req.method === "GET" && urlPath === "/bees") {
-        const { listBeeServiceStatuses } = await import("@/lib/bees/service-manager");
-        json(res, 200, { bees: await listBeeServiceStatuses() });
+        const { listLaneServiceStatuses } = await import("@/lib/lanes/status");
+        json(res, 200, { bees: await listLaneServiceStatuses() });
         return;
       }
 
@@ -844,7 +844,7 @@ export function createDaemonServer() {
         return;
       }
 
-      // ManagerBee — control-plane heartbeat + diagnostics (W4.2)
+      // Review Lane — control-plane heartbeat + diagnostics (W4.2)
       if (req.method === "GET" && (urlPath === "/managerbee/status" || urlPath === "/api/managerbee/health")) {
         const { getManagerBeeStatus } = await import("@/lib/managerbee/heartbeat");
         const report = getManagerBeeStatus();
@@ -854,7 +854,7 @@ export function createDaemonServer() {
         return;
       }
 
-      // BrainBee — playbook-hygiene status (W4.2)
+      // Memory Lane — playbook-hygiene status (W4.2)
       if (req.method === "GET" && (urlPath === "/brainbee/status" || urlPath === "/api/brainbee/health")) {
         const { getBrainBeeStatus } = await import("@/lib/brainbee/poller");
         const status = getBrainBeeStatus();
@@ -1191,7 +1191,7 @@ export function createDaemonServer() {
       }
 
       // GET /desktopbee/health — pings the Swift helper (:3748). 200 when up so
-      // the Bees view shows DesktopBee healthy; 503 when the helper is unreachable.
+      // the Lanes view shows Desktop Lane healthy; 503 when the helper is unreachable.
       if (req.method === "GET" && urlPath === "/desktopbee/health") {
         const { probeDesktopBeeHelper } = await import("@/lib/desktopbee/client");
         const health = await probeDesktopBeeHelper().catch(() => null);

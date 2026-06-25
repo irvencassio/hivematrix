@@ -289,7 +289,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .dialog-actions .ok.danger { background: var(--err); color: #fff; }
   .dialog-actions .cancel { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
   .dialog-actions .cancel:hover { border-color: var(--text); color: var(--text); }
-  /* MessageBee guided setup */
+  /* Message Lane guided setup */
   .mb-step { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
   .mb-step .mb-mark { font-size: 13px; line-height: 1.4; }
   .mb-step .mb-mark.ok { color: var(--ok); } .mb-step .mb-mark.no { color: var(--err); }
@@ -653,7 +653,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <input id="s_location" placeholder="e.g. Cincinnati, OH" style="flex:1" />
         <button class="sm" onclick="saveLocation()">Save</button>
       </div>
-      <div class="muted" style="font-size:11px;margin-top:2px">Shared with location-aware tasks (weather, "near me", local time) — e.g. texts to MessageBee.</div>
+      <div class="muted" style="font-size:11px;margin-top:2px">Shared with location-aware tasks (weather, "near me", local time) — e.g. texts to Message Lane.</div>
 
       <label class="flbl" style="margin-top:16px">Updates</label>
       <div class="row" style="align-items:center;gap:8px">
@@ -772,10 +772,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   </div>
 </div>
 
-<!-- MessageBee guided setup. -->
+<!-- Message Lane guided setup. -->
 <div class="overlay" id="mbOverlay">
   <div class="modal" style="width:460px">
-    <h1>Set up MessageBee <span class="x" onclick="closeMessageBee()">✕</span></h1>
+    <h1>Set up Message Lane <span class="x" onclick="closeMessageBee()">✕</span></h1>
     <div class="muted" style="font-size:12px;margin-bottom:10px">Text HiveMatrix from your phone over iMessage/SMS. Three things get it running:</div>
     <div class="mb-step" id="mb_fda">
       <span class="mb-mark no" id="mb_fda_mark">○</span>
@@ -811,10 +811,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   </div>
 </div>
 
-<!-- MailBee guided setup. -->
+<!-- Mail Lane guided setup. -->
 <div class="overlay" id="mailOverlay">
   <div class="modal" style="width:460px">
-    <h1>Set up MailBee <span class="x" onclick="closeMailBee()">✕</span></h1>
+    <h1>Set up Mail Lane <span class="x" onclick="closeMailBee()">✕</span></h1>
     <div class="muted" style="font-size:12px;margin-bottom:10px">Watch email and draft/send replies via Apple Mail. Trusted senders auto-send; everyone else is draft-for-approval.</div>
     <div class="mb-step">
       <span class="mb-mark no" id="ml_auto_mark">○</span>
@@ -844,7 +844,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="err" id="ml_err"></div>
     <div class="dialog-actions" style="margin-top:12px">
       <button class="cancel" onclick="closeMailBee()">Close</button>
-      <button class="ok" onclick="submitMailBee()">Enable MailBee</button>
+      <button class="ok" onclick="submitMailBee()">Enable Mail Lane</button>
     </div>
     <div class="muted" id="ml_status" style="font-size:11px;margin-top:8px"></div>
   </div>
@@ -1733,11 +1733,11 @@ function executionRoleLabel(task, output) {
 }
 function executionCoordinatorLabel(task, output) {
   task = task || {}; output = output || {};
-  if (output.directivePhase || task.directiveId || output.runId) return "ManagerBee / directive";
+  if (output.directivePhase || task.directiveId || output.runId) return "Review Lane / directive";
   if (task.source === "command" || output.command) return "Command launcher";
   if (task.source === "skill" || output.skill) return "Skill launcher";
-  if (task.source === "messagebee") return "MessageBee";
-  if (task.source === "mailbee") return "MailBee";
+  if (task.source === "messagebee") return "Message Lane";
+  if (task.source === "mailbee") return "Mail Lane";
   if (task.source === "digest") return "Digest";
   return "Standalone task";
 }
@@ -2522,7 +2522,7 @@ const NO_INPUT_STEPS = ['config', 'daemon', 'desktopbee'];
 // First-run wizard: drive each incomplete step through its POST endpoint.
 async function wizardAction(id) {
   try {
-    // MessageBee / MailBee have their own guided modals.
+    // Message Lane / Mail Lane have their own guided modals.
     if (id === 'messagebee') { openMessageBeeSetup(); return; }
     if (id === 'mailbee') { openMailBeeSetup(); return; }
     let body = {};
@@ -2559,7 +2559,7 @@ async function wizardAction(id) {
   } catch (e) { await hmAlert('Setup failed: ' + e, 'Setup'); }
 }
 
-// --- MessageBee guided setup ------------------------------------------------
+// --- Message Lane guided setup ---------------------------------------------
 function mbStep() { return (state.onboarding && state.onboarding.steps || []).find(s => s.id === 'messagebee'); }
 async function openMessageBeeSetup() {
   document.getElementById('mb_err').textContent = '';
@@ -2654,7 +2654,7 @@ async function submitMessageBee() {
   } catch (e) { err.textContent = String(e); status.textContent = ''; }
 }
 
-// --- MailBee guided setup ---------------------------------------------------
+// --- Mail Lane guided setup -------------------------------------------------
 let _mlPollTimer = null;
 function openMailBeeSetup() {
   document.getElementById('ml_err').textContent = '';
@@ -3740,7 +3740,7 @@ async function toggleLane(kind, enable) {
   setTimeout(renderSettingsLanes, 800); // give launchctl a moment
 }
 
-// --- Safe senders (MessageBee + MailBee) ------------------------------------
+// --- Safe senders (Message Lane + Mail Lane) --------------------------------
 async function renderSafeSenders() {
   const el = document.getElementById("s_safe_senders");
   if (!el) return;
@@ -3772,7 +3772,7 @@ async function renderSafeSenders() {
     : "";
   el.innerHTML =
     '<div class="ss-section">'
-    + '<div class="ss-section-hd">MessageBee — iMessage / SMS</div>'
+    + '<div class="ss-section-hd">Message Lane — iMessage / SMS</div>'
     + chips(mbIds, "rmMbSender") + ignoredHtml
     + '<div class="row" style="margin-top:6px;gap:6px">'
     + '<input id="ss_mb_input" class="dialog-input" placeholder="+15551234567 or you@icloud.com" style="flex:1;margin:0"'
@@ -3781,7 +3781,7 @@ async function renderSafeSenders() {
     + '<div class="err" id="ss_mb_err" style="font-size:11px;margin-top:3px"></div>'
     + '</div>'
     + '<div class="ss-section">'
-    + '<div class="ss-section-hd">MailBee — Email</div>'
+    + '<div class="ss-section-hd">Mail Lane — Email</div>'
     + chips(mlIds, "rmMlSender")
     + '<div class="row" style="margin-top:6px;gap:6px">'
     + '<input id="ss_ml_input" class="dialog-input" placeholder="trusted@example.com" style="flex:1;margin:0"'

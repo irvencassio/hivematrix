@@ -155,6 +155,37 @@ test("settings tabs are in a defined order ending with About", () => {
   assert.doesNotMatch(CONSOLE_HTML, /id="tab-projects"/, "Projects is no longer a Settings tab");
 });
 
+test("settings lane setup surfaces use lane names instead of bee product names", () => {
+  assert.match(CONSOLE_HTML, /Set up Message Lane/);
+  assert.match(CONSOLE_HTML, /Set up Mail Lane/);
+  assert.match(CONSOLE_HTML, /Enable Mail Lane/);
+  assert.match(CONSOLE_HTML, /Message Lane — iMessage \/ SMS/);
+  assert.match(CONSOLE_HTML, /Mail Lane — Email/);
+
+  assert.doesNotMatch(CONSOLE_HTML, /Set up MessageBee/);
+  assert.doesNotMatch(CONSOLE_HTML, /Set up MailBee/);
+  assert.doesNotMatch(CONSOLE_HTML, /Enable MailBee/);
+  assert.doesNotMatch(CONSOLE_HTML, /MessageBee — iMessage \/ SMS/);
+  assert.doesNotMatch(CONSOLE_HTML, /MailBee — Email/);
+
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /return "Review Lane \/ directive"/);
+  assert.match(js, /return "Message Lane"/);
+  assert.match(js, /return "Mail Lane"/);
+  assert.doesNotMatch(js, /return "ManagerBee \/ directive"/);
+  assert.doesNotMatch(js, /return "MessageBee"/);
+  assert.doesNotMatch(js, /return "MailBee"/);
+});
+
+test("compatibility bees endpoint returns lane-shaped status", () => {
+  const server = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+
+  assert.match(server, /GET \/bees — compatibility status for older clients\./);
+  assert.match(server, /const \{ listLaneServiceStatuses \} = await import\("@\/lib\/lanes\/status"\);/);
+  assert.match(server, /json\(res, 200, \{ bees: await listLaneServiceStatuses\(\) \}\);/);
+  assert.doesNotMatch(server, /urlPath === "\/bees"[\s\S]{0,160}listBeeServiceStatuses/);
+});
+
 test("project selectors expose a visible re-scan action", () => {
   assert.match(CONSOLE_HTML, /id="projectRescanBtn"[^>]*onclick="refreshProjects\(\)"/, "header project rescan button present");
   assert.match(CONSOLE_HTML, /id="t_project_rescan"[^>]*onclick="refreshProjects\(\)"/, "empty dropdown rescan button present");

@@ -1,9 +1,8 @@
 import type { WorkerKind } from "@/lib/central/contracts";
 
-// HiveMatrix bee catalog — scoped per COMPONENT-MAP.md.
-// Active channel: MessageBee (Q8, SMS/iMessage). Removed: VoiceBee, TubeBee
-// (deferred), MailBee (deferred beyond notifications), ComputerBee (renamed
-// DesktopBee), AuthBee (internal session plane, no public brand).
+// HiveMatrix capability catalog — scoped per COMPONENT-MAP.md.
+// Public surfaces use lane names; internal worker kinds keep legacy identifiers
+// for compatibility with persisted tasks, routes, and module boundaries.
 
 export type BeeRole = "channel" | "capability" | "meta" | "workflow";
 
@@ -20,7 +19,7 @@ export interface BeeDefinition {
 const BEE_DEFINITIONS: BeeDefinition[] = [
   {
     kind: "messagebee",
-    name: "MessageBee",
+    name: "Message Lane",
     role: "channel",
     phase: 1,
     summary: "SMS/iMessage in and out. Reads Messages chat.db (Full Disk Access) and sends via osascript; allowlisted senders route to needs_input replies or new tasks.",
@@ -29,7 +28,7 @@ const BEE_DEFINITIONS: BeeDefinition[] = [
   },
   {
     kind: "mailbee",
-    name: "MailBee",
+    name: "Mail Lane",
     role: "channel",
     phase: 1,
     summary: "Email watch + trust-gated drafting via Apple Mail (osascript). Every inbound is trust-classified (prompt-injection + risky-attachment detection); auto-send only for trusted senders, else draft-for-approval.",
@@ -47,7 +46,7 @@ const BEE_DEFINITIONS: BeeDefinition[] = [
   },
   {
     kind: "managerbee",
-    name: "ManagerBee",
+    name: "Review Lane",
     role: "meta",
     phase: 1,
     summary: "Control-plane coordination for planning, routing, review, diagnostics, and worker setup.",
@@ -56,7 +55,7 @@ const BEE_DEFINITIONS: BeeDefinition[] = [
   },
   {
     kind: "brainbee",
-    name: "BrainBee",
+    name: "Memory Lane",
     role: "meta",
     phase: 1,
     summary: "Canonical memory compilation, retrieval hygiene, and durable playbook upkeep.",
@@ -74,7 +73,7 @@ const BEE_DEFINITIONS: BeeDefinition[] = [
   },
   {
     kind: "termbee",
-    name: "TermBee",
+    name: "Terminal Lane",
     role: "capability",
     phase: 1,
     summary: "Persistent terminal sessions the agent drives across turns (real shells, no native deps). Available in every connectivity mode — the offline workhorse.",
@@ -83,7 +82,7 @@ const BEE_DEFINITIONS: BeeDefinition[] = [
   },
   {
     kind: "desktopbee",
-    name: "DesktopBee",
+    name: "Desktop Lane",
     role: "capability",
     phase: 3,
     summary: "Approval-heavy native desktop automation via Swift helper: AppleScript-first → AX semantic → vision last resort.",

@@ -19,3 +19,12 @@ test("architecture reset keeps Browser Lane read/workflow as embedded Hive capab
   assert.equal(getBeeDefinition("authbee"), null);
   assert.equal(getBeeDefinition("tubebee"), null);
 });
+
+test("catalog display names follow the lane naming strategy", () => {
+  assert.equal(getBeeDefinition("messagebee")?.name, "Message Lane");
+  assert.equal(getBeeDefinition("mailbee")?.name, "Mail Lane");
+  assert.equal(getBeeDefinition("managerbee")?.name, "Review Lane");
+  assert.equal(getBeeDefinition("brainbee")?.name, "Memory Lane");
+  assert.equal(getBeeDefinition("termbee")?.name, "Terminal Lane");
+  assert.equal(getBeeDefinition("desktopbee")?.name, "Desktop Lane");
+});
