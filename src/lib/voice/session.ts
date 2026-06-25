@@ -12,6 +12,8 @@
  * call into it; nothing here touches audio, the network, or the DB.
  */
 
+import { buildVoiceBrowserLaneTask, detectVoiceBrowserLaneIntent } from "./browser-lane-intent";
+
 export type VoiceSurface = "mac" | "ios" | "phone";
 
 export interface VoiceTurn {
@@ -38,7 +40,8 @@ export interface VoiceRouteOptions {
 
 export type VoiceHandoff =
   | { kind: "none"; reason: string }
-  | { kind: "task"; title: string; description: string };
+  | { kind: "task"; title: string; description: string }
+  | { kind: "browserLaneTask"; task: import("./browser-lane-intent").VoiceBrowserLaneTask };
 
 export interface VoiceSessionInput {
   session: VoiceSession;
@@ -117,6 +120,19 @@ export function buildVoiceTaskDescription(session: VoiceSession, escalated?: boo
 export function routeVoiceSession(session: VoiceSession, opts: VoiceRouteOptions = {}): VoiceHandoff {
   const userTurns = session.turns.filter((t) => t.role === "user" && t.text.trim());
   if (userTurns.length === 0) return { kind: "none", reason: "no user utterances" };
+
+  for (const turn of userTurns) {
+    const intent = detectVoiceBrowserLaneIntent(turn.text);
+    if (intent) {
+      return {
+        kind: "browserLaneTask",
+        task: buildVoiceBrowserLaneTask(intent, {
+          titlePrefix: "Voice",
+          voice: { sessionId: session.sessionId, surface: session.surface, handle: session.handle },
+        }),
+      };
+    }
+  }
 
   const substantive = userTurns.some((t) => t.text.trim().split(/\s+/).length >= 3);
   if (!opts.escalated && !substantive) {

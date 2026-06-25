@@ -80,3 +80,22 @@ test("commandTurnOverride retries failed tasks, sets task model, updates directi
     "task:Release verification",
   ]);
 });
+
+test("commandTurnOverride queues explicit Browser Lane voice requests as Browser Lane tasks", async () => {
+  const created: Record<string, unknown>[] = [];
+  const out = await commandTurnOverride("Use browser lane to search Tesla Model S price", {
+    synthesize: async () => "",
+    createTask: async (payload) => {
+      created.push(payload);
+      return { _id: "task-browser", title: String(payload.title) };
+    },
+  });
+
+  assert.match(out?.reply ?? "", /queued Browser Lane/i);
+  assert.equal(out?.command.kind, "browserLaneTask");
+  assert.equal(out?.command.taskId, "task-browser");
+  assert.equal(created[0]?.source, "browser-lane");
+  assert.deepEqual((created[0]?.output as Record<string, unknown>)?.browserLaneVoice, {
+    args: { mode: "search", query: "Tesla Model S price" },
+  });
+});

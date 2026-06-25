@@ -21,6 +21,7 @@ import {
 } from "./command-context";
 import { buildVoiceBriefing, usageReply, type BriefingUsage, type BriefingBrowserReadiness, type BriefingWorkflowInbox } from "./briefing";
 import { synthesizeSpeech } from "./tts";
+import { buildVoiceBrowserLaneTask } from "./browser-lane-intent";
 import type { ApprovalQueueItem } from "@/lib/approvals/queue";
 import type { DirectiveRow } from "@/lib/orchestrator/directive-store";
 
@@ -224,6 +225,13 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
       });
       contextStore.update(sessionId, (ctx) => rememberLastTask(ctx, task._id));
       return r("I queued release verification.", task._id);
+    }
+    case "browserLaneTask": {
+      if (!intent.browserLane) return null;
+      const payload = buildVoiceBrowserLaneTask(intent.browserLane, { titlePrefix: "Voice" });
+      const task = await createTask(deps, { ...payload });
+      contextStore.update(sessionId, (ctx) => rememberLastTask(ctx, task._id));
+      return r(`I queued Browser Lane ${intent.browserLane.mode}.`, task._id);
     }
     case "createTask": {
       const text = (intent.taskText || "").trim();

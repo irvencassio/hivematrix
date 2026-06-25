@@ -10,6 +10,8 @@
  * and falls through to the conversational answer.
  */
 
+import { detectVoiceBrowserLaneIntent, type VoiceBrowserLaneIntent } from "./browser-lane-intent";
+
 export type ConnMode = "cloud-ok" | "local-only" | "offline" | "auto";
 
 export type CommandKind =
@@ -26,6 +28,7 @@ export type CommandKind =
   | "startDirective"    // "start directive X" — activate directive
   | "pauseDirective"    // "pause directive X" — pause directive
   | "triggerReleaseVerification" // "trigger release verification"
+  | "browserLaneTask"  // "use Browser Lane to search/read/open ..."
   | "createTask"       // "create a task to <X>" / "remind me to <X>"
   | "connectivity"     // "are we online / connectivity status"
   | "setConnectivity"  // "go offline / cloud only / go local / auto"
@@ -39,6 +42,7 @@ export interface CommandIntent {
   taskRef?: string;    // setTaskModel target
   model?: string;      // setTaskModel model id / alias
   directiveText?: string; // startDirective / pauseDirective target
+  browserLane?: VoiceBrowserLaneIntent;
 }
 
 const clean = (s: string) => s.replace(/[.?!,\s]+$/g, "").trim();
@@ -87,6 +91,9 @@ export function detectCommandIntent(text: string): CommandIntent {
   const t = (text || "").toLowerCase().trim();
   if (!t) return { kind: "none" };
   const orig = (text || "").trim();
+
+  const browserLane = detectVoiceBrowserLaneIntent(orig);
+  if (browserLane) return { kind: "browserLaneTask", browserLane };
 
   // --- Jarvis V2 operator intents ---
   if (/\b(good morning|brief me|briefing|morning briefing|what needs me|what needs my attention|standup|status briefing)\b/.test(t)) {

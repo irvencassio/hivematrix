@@ -41,6 +41,13 @@ test("detects create-task and extracts the text", () => {
   assert.deepEqual(detectCommandIntent("remind me to call the bank"), { kind: "createTask", taskText: "call the bank" });
 });
 
+test("detects explicit Browser Lane task requests", () => {
+  assert.deepEqual(detectCommandIntent("Use browser lane to search Tesla Model S price"), {
+    kind: "browserLaneTask",
+    browserLane: { mode: "search", query: "Tesla Model S price" },
+  });
+});
+
 test("detects connectivity query and set", () => {
   assert.equal(detectCommandIntent("are we online?").kind, "connectivity");
   assert.equal(detectCommandIntent("connectivity status").kind, "connectivity");

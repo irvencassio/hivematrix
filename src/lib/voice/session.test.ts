@@ -32,6 +32,16 @@ test("routeVoiceSession spawns a task for a substantive request", () => {
   if (r.kind === "task") assert.match(r.title, /summarize my unread email/);
 });
 
+test("routeVoiceSession creates Browser Lane handoff for explicit lane requests", () => {
+  const r = routeVoiceSession(session([{ role: "user", text: "Use browser lane to search Tesla Model S price" }]));
+  assert.equal(r.kind, "browserLaneTask");
+  if (r.kind === "browserLaneTask") {
+    assert.equal(r.task.source, "browser-lane");
+    assert.deepEqual(r.task.output.browserLaneVoice.args, { mode: "search", query: "Tesla Model S price" });
+    assert.match(r.task.description, /\/lane\/browser/);
+  }
+});
+
 test("routeVoiceSession skips empty or trivial exchanges", () => {
   assert.equal(routeVoiceSession(session([])).kind, "none");
   assert.equal(routeVoiceSession(session([{ role: "user", text: "thanks" }])).kind, "none");

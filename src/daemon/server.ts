@@ -1996,19 +1996,21 @@ export function createDaemonServer() {
         const parsed = parseVoiceSessionBody(await parseBody(req) as Record<string, unknown>);
         if ("error" in parsed) { json(res, 400, { error: parsed.error }); return; }
         const route = routeVoiceSession(parsed.session, { escalated: parsed.escalated });
-        if (route.kind !== "task") { json(res, 200, { created: false, reason: route.reason }); return; }
+        if (route.kind === "none") { json(res, 200, { created: false, reason: route.reason }); return; }
         const { sessionId, surface, handle } = parsed.session;
-        const task = await Task.create({
-          _id: generateId(),
-          title: route.title,
-          description: route.description,
-          project: DEFAULT_TASK_PROJECT,
-          projectPath: homedir(),
-          status: "backlog",
-          executor: "agent",
-          source: "voice",
-          output: { voice: { sessionId, surface, handle } },
-        });
+        const task = await Task.create(route.kind === "browserLaneTask"
+          ? { _id: generateId(), ...route.task, output: { ...route.task.output, voice: { sessionId, surface, handle } } }
+          : {
+              _id: generateId(),
+              title: route.title,
+              description: route.description,
+              project: DEFAULT_TASK_PROJECT,
+              projectPath: homedir(),
+              status: "backlog",
+              executor: "agent",
+              source: "voice",
+              output: { voice: { sessionId, surface, handle } },
+            });
         broadcast("tasks:created", { taskId: task._id });
         json(res, 201, { created: true, taskId: task._id });
         return;
@@ -2072,18 +2074,20 @@ export function createDaemonServer() {
                   ],
                 };
                 const route = routeVoiceSession(voiceSession, { escalated: true });
-                if (route.kind === "task") {
-                  const task = await Task.create({
-                    _id: generateId(),
-                    title: route.title,
-                    description: route.description,
-                    project: DEFAULT_TASK_PROJECT,
-                    projectPath: homedir(),
-                    status: "backlog",
-                    executor: "agent",
-                    source: "voice",
-                    output: { voice: { sessionId, surface: "ios" } },
-                  });
+                if (route.kind === "task" || route.kind === "browserLaneTask") {
+                  const task = await Task.create(route.kind === "browserLaneTask"
+                    ? { _id: generateId(), ...route.task, output: { ...route.task.output, voice: { sessionId, surface: "ios" } } }
+                    : {
+                        _id: generateId(),
+                        title: route.title,
+                        description: route.description,
+                        project: DEFAULT_TASK_PROJECT,
+                        projectPath: homedir(),
+                        status: "backlog",
+                        executor: "agent",
+                        source: "voice",
+                        output: { voice: { sessionId, surface: "ios" } },
+                      });
                   broadcast("tasks:created", { taskId: task._id });
                 }
               } catch (e) {
