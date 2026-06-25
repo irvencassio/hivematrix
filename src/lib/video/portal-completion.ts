@@ -88,7 +88,7 @@ export function portalReviewCopy(draft: VideoDraft): string {
     case "portal_pending":
       return `HeyGen portal task created${draft.portalTaskId ? ` (${draft.portalTaskId})` : ""} — waiting on portal completion.`;
     case "portal_completed":
-      return "HeyGen portal completed with a local video — ready to publish.";
+      return "HeyGen portal completed with a local video — ready to publish. Use Publish to YouTube (no re-render).";
     case "needs_publish_input":
       return `HeyGen portal completed${draft.portalVideoUrl ? ` (${draft.portalVideoUrl})` : ""} — needs manual publish input (no local file to publish).`;
     case "review":

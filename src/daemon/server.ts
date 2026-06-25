@@ -1518,6 +1518,24 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /video/publish-draft — publish-only path: upload a portal_completed
+      // draft's existing local MP4 to YouTube WITHOUT re-rendering through HeyGen.
+      // needs_publish_input (no local file) → 409; already published → idempotent 200.
+      if (req.method === "POST" && urlPath === "/video/publish-draft") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const draftId = typeof body.draftId === "string" ? body.draftId.trim() : "";
+        if (!draftId) { json(res, 400, { ok: false, error: "draftId is required" }); return; }
+        try {
+          const { publishDraftVideo } = await import("@/lib/video/news-review");
+          const result = await publishDraftVideo(draftId);
+          const status = result.ok ? 200 : result.code === "no_draft" ? 404 : 409;
+          json(res, status, result);
+        } catch (e) {
+          json(res, 500, { ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
       // POST /coo/dispatch — route-to-execution bridge. Resolves the request to a
       // lane/capability and returns a typed dispatch result: a Browser-Lane-ready
       // work item for browser routes, an explicit approval requirement for

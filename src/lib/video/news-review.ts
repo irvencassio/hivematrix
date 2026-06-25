@@ -254,6 +254,24 @@ function renderConfig(): { mode: string; styleId: string } {
   } catch { return { mode: "agent", styleId: "" }; }
 }
 
+/**
+ * Shared publish step (no render): upload an already-rendered local MP4 to YouTube
+ * via publish.mjs and return the captured URL. Used by both the API render+publish
+ * flow and the portal publish-only path so they never diverge.
+ */
+async function runPublish(run: (args: string[]) => Promise<{ stdout: string }>, draft: VideoDraft): Promise<string | undefined> {
+  const { stdout } = await run([
+    "publish.mjs", draft.paths.video,
+    "--title-file", draft.paths.title,
+    "--description-file", draft.paths.description,
+    "--tags-file", draft.paths.tags,
+    "--privacy", draft.privacy,
+    "--kind", "avatar",
+  ]);
+  const m = stdout.match(/https?:\/\/(?:youtu\.be|www\.youtube\.com)\/\S+/);
+  return m ? m[0] : undefined;
+}
+
 async function renderAndPublish(id: string): Promise<void> {
   const draft = getDraft(id);
   if (!draft) return;
@@ -268,14 +286,62 @@ async function renderAndPublish(id: string): Promise<void> {
     : ["make-avatar.mjs", draft.paths.script, draft.paths.video];
   await runNode(dir, renderArgs);
   // Publish to YouTube and capture the URL from stdout.
-  const { stdout } = await runNode(dir, [
-    "publish.mjs", draft.paths.video,
-    "--title-file", draft.paths.title,
-    "--description-file", draft.paths.description,
-    "--tags-file", draft.paths.tags,
-    "--privacy", draft.privacy,
-    "--kind", "avatar",
-  ]);
-  const m = stdout.match(/https?:\/\/(?:youtu\.be|www\.youtube\.com)\/\S+/);
-  updateDraft(id, { status: "published", youtubeUrl: m ? m[0] : undefined });
+  const youtubeUrl = await runPublish((args) => runNode(dir, args), draft);
+  updateDraft(id, { status: "published", youtubeUrl });
+}
+
+export interface PublishDraftDeps {
+  /** Run a `video/` script (default: out-of-process via the video project dir). */
+  runVideoScript?: (args: string[]) => Promise<{ stdout: string; stderr: string }>;
+  /** Check a local file exists (default: fs.existsSync). */
+  fileExists?: (path: string) => boolean;
+}
+
+export interface PublishDraftResult {
+  ok: boolean;
+  published: boolean;
+  draftId: string;
+  youtubeUrl?: string;
+  alreadyPublished?: boolean;
+  reason?: string;
+  code?: "no_draft" | "needs_publish_input" | "not_publishable" | "missing_video" | "no_project";
+}
+
+/**
+ * Publish-only path for a HeyGen portal-completed draft: upload its existing local
+ * MP4 to YouTube WITHOUT re-rendering through the HeyGen API. Never calls
+ * make-avatar.mjs. Idempotent for an already-published draft; refuses
+ * needs_publish_input (no local file) and anything not portal_completed.
+ */
+export async function publishDraftVideo(id: string, deps: PublishDraftDeps = {}): Promise<PublishDraftResult> {
+  const draft = getDraft(id);
+  if (!draft) return { ok: false, published: false, draftId: id, code: "no_draft", reason: "no video draft found" };
+
+  // Idempotent: already published → return the existing URL, no re-upload.
+  if (draft.status === "published" && draft.youtubeUrl) {
+    return { ok: true, published: true, alreadyPublished: true, draftId: id, youtubeUrl: draft.youtubeUrl };
+  }
+  if (draft.status === "needs_publish_input") {
+    return { ok: false, published: false, draftId: id, code: "needs_publish_input", reason: "This draft completed in the HeyGen portal with only a URL / manual note — there is no local file to publish. Provide a local video, or publish manually." };
+  }
+  if (draft.status !== "portal_completed") {
+    return { ok: false, published: false, draftId: id, code: "not_publishable", reason: `Draft is "${draft.status}", not portal_completed — nothing to publish-only.` };
+  }
+
+  const fileExists = deps.fileExists ?? existsSync;
+  if (!fileExists(draft.paths.video)) {
+    return { ok: false, published: false, draftId: id, code: "missing_video", reason: `The portal video file is missing: ${draft.paths.video}` };
+  }
+
+  // When a runner is injected (tests), the real project dir isn't needed.
+  let run = deps.runVideoScript;
+  if (!run) {
+    const dir = videoProjectDir();
+    if (!dir) return { ok: false, published: false, draftId: id, code: "no_project", reason: "video project not found (set HIVE_VIDEO_DIR)" };
+    run = (args) => runNode(dir, args);
+  }
+
+  const youtubeUrl = await runPublish(run, draft);
+  updateDraft(id, { status: "published", youtubeUrl });
+  return { ok: true, published: true, draftId: id, youtubeUrl };
 }
