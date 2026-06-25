@@ -154,7 +154,7 @@ current connectivity mode.</p>
   <tbody>
     <tr>
       <td><strong>Browser Lane</strong></td>
-      <td>One browser/web lane: read-only fresh web retrieval with citations (current facts, news, prices, docs) <em>and</em> authenticated / stateful browser workflows (login, multi-step, forms, screenshots) — the authenticated path runs as a Codex Computer Use task. With no Codex auth, an opt-in <strong>Desktop Lane fallback</strong> (<code>browserbee.desktopFallback</code>) lets the local model drive a desktop browser instead. The COO routes to Browser Lane; the lane picks the backend.</td>
+      <td>One browser/web lane: read-only fresh web retrieval with citations (current facts, news, prices, docs) <em>and</em> authenticated / stateful browser workflows (login, multi-step, forms, screenshots) — the authenticated path runs as a Codex Computer Use task. With no Codex auth, an opt-in <strong>Desktop Lane fallback</strong> (<code>browserLane.desktopFallback</code>) lets the local model drive a desktop browser instead. The COO routes to Browser Lane; the lane picks the backend.</td>
       <td><code>hivematrix_browser</code></td>
       <td><span class="tag on">embedded · running</span></td>
     </tr>
@@ -182,7 +182,7 @@ current connectivity mode.</p>
   <strong>Availability follows connectivity.</strong> The Browser Lane web/authenticated modes need the internet, so they're
   disabled in <em>local-only</em> and <em>offline</em> modes; Desktop Lane works in every mode. An agent is only shown the lanes it can
   actually use right now. <strong>Authenticated browser work without a Codex subscription:</strong> by default the lane refuses (it needs the
-  Codex Computer Use backing). Set <code>browserbee.desktopFallback: true</code> in <code>~/.hivematrix/config.json</code> to
+  Codex Computer Use backing). Set <code>browserLane.desktopFallback: true</code> in <code>~/.hivematrix/config.json</code> to
   let it degrade to a local Desktop Lane-driven browser instead — lower reliability, but it keeps authenticated browser work
   running with no subscription.
 </div>
