@@ -555,7 +555,7 @@ export function createDaemonServer() {
       if (req.method === "GET" && urlPath === "/onboarding") {
         const { getOnboardingStatus } = await import("@/lib/onboarding/onboarding");
         const { probeDesktopBeeHelper, dispatchDesktopBeeAction } = await import("@/lib/desktopbee/client");
-        // Live-probe the DesktopBee helper for build + permission state.
+        // Live-probe the Desktop Lane helper for build + permission state.
         let helperBuilt = false;
         let desktopPermissions: { accessibility: boolean; screenRecording: boolean } | null = null;
         const health = await probeDesktopBeeHelper().catch(() => null);
@@ -630,20 +630,20 @@ export function createDaemonServer() {
         return;
       }
 
-      // POST /onboarding/desktopbee — install helper agent + return TCC deep-links
+      // POST /onboarding/desktopbee — compatibility route for installing the Desktop Lane helper.
       if (req.method === "POST" && urlPath === "/onboarding/desktopbee") {
         const { installDesktopBeeHelper } = await import("@/lib/onboarding/actions");
         json(res, 200, installDesktopBeeHelper());
         return;
       }
-      // POST /onboarding/messagebee — enable the iMessage channel + allowlist a sender
+      // POST /onboarding/messagebee — compatibility route for Message Lane setup.
       if (req.method === "POST" && urlPath === "/onboarding/messagebee") {
         const body = await parseBody(req) as { enable?: boolean; phone?: string; displayName?: string };
         const { configureMessageBee } = await import("@/lib/onboarding/actions");
         json(res, 200, await configureMessageBee(body ?? {}));
         return;
       }
-      // POST /onboarding/mailbee — enable the email channel + add a trusted sender
+      // POST /onboarding/mailbee — compatibility route for Mail Lane setup.
       if (req.method === "POST" && urlPath === "/onboarding/mailbee") {
         const body = await parseBody(req) as { enable?: boolean; email?: string; displayName?: string };
         const { configureMailBee } = await import("@/lib/onboarding/actions");
@@ -1190,7 +1190,7 @@ export function createDaemonServer() {
         return;
       }
 
-      // GET /desktopbee/health — pings the Swift helper (:3748). 200 when up so
+      // GET /desktopbee/health — compatibility route that pings the Swift helper (:3748). 200 when up so
       // the Lanes view shows Desktop Lane healthy; 503 when the helper is unreachable.
       if (req.method === "GET" && urlPath === "/desktopbee/health") {
         const { probeDesktopBeeHelper } = await import("@/lib/desktopbee/client");
@@ -1199,14 +1199,14 @@ export function createDaemonServer() {
           ok: !!health,
           bee: "desktopbee",
           helperVersion: health?.version ?? null,
-          detail: health ? "helper running" : "DesktopBee helper unreachable on :3748",
+          detail: health ? "helper running" : "Desktop Lane helper unreachable on :3748",
         });
         return;
       }
 
-      // GET /browserbee/health — operator-facing readiness so a refused browser
+      // GET /browserbee/health — compatibility readiness so a refused browser
       // job (e.g. LinkedIn) explains itself: is Codex auth present? is the
-      // DesktopBee fallback enabled? what backing will actually run?
+      // Desktop Lane fallback enabled? what backing will actually run?
       if (req.method === "GET" && urlPath === "/browserbee/health") {
         const { buildBrowserBeeHealthSnapshot, readBrowserBeeDesktopFallbackEnabled } = await import("@/lib/browser-lane/jobs");
         const { readCodexAuthState } = await import("@/lib/usage/codex");

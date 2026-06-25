@@ -186,6 +186,13 @@ test("compatibility bees endpoint returns lane-shaped status", () => {
   assert.doesNotMatch(server, /urlPath === "\/bees"[\s\S]{0,160}listBeeServiceStatuses/);
 });
 
+test("daemon runtime diagnostics use lane names", () => {
+  const server = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+
+  assert.match(server, /Desktop Lane helper unreachable on :3748/);
+  assert.doesNotMatch(server, /DesktopBee helper unreachable/);
+});
+
 test("project selectors expose a visible re-scan action", () => {
   assert.match(CONSOLE_HTML, /id="projectRescanBtn"[^>]*onclick="refreshProjects\(\)"/, "header project rescan button present");
   assert.match(CONSOLE_HTML, /id="t_project_rescan"[^>]*onclick="refreshProjects\(\)"/, "empty dropdown rescan button present");

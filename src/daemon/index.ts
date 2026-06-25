@@ -90,12 +90,12 @@ async function main(): Promise<void> {
   const { startScheduler } = await import("@/lib/orchestrator/scheduler");
   startScheduler();
 
-  // Start the MessageBee poll loop (self-gates: no-ops unless the imessage
+  // Start the Message Lane poll loop (self-gates: no-ops unless the imessage
   // channel is enabled + chat.db is readable). SMS/iMessage in/out.
   const { startMessageBeePoller } = await import("@/lib/messagebee/poller");
   startMessageBeePoller();
 
-  // Start the MailBee poll loop (self-gates: no-ops unless the email channel is
+  // Start the Mail Lane poll loop (self-gates: no-ops unless the email channel is
   // enabled). Watches Apple Mail; trust-classifies inbound into triage tasks.
   const { startMailBeePoller } = await import("@/lib/mailbee/poller");
   startMailBeePoller();
@@ -122,12 +122,12 @@ async function main(): Promise<void> {
   const { startVoiceResultLoop } = await import("@/lib/voice/voice-result-loop");
   startVoiceResultLoop();
 
-  // ManagerBee heartbeat: fold scheduler diagnostics + directive/run state +
+  // Review Lane heartbeat: fold scheduler diagnostics + directive/run state +
   // pending escalations into a control-plane report, cached + broadcast.
   const { startManagerBeeHeartbeat } = await import("@/lib/managerbee/heartbeat");
   startManagerBeeHeartbeat();
 
-  // BrainBee poller: curate playbook files (dedup repeated retrospective rules)
+  // Memory Lane poller: curate playbook files (dedup repeated retrospective rules)
   // on a slow schedule. Self-gates when the brain root is unreachable.
   const { startBrainBeePoller } = await import("@/lib/brainbee/poller");
   startBrainBeePoller();
