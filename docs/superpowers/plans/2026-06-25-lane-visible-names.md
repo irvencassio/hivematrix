@@ -35,4 +35,4 @@
 - [x] Run `npm run typecheck`.
 - [x] Run `npm test`.
 - [x] Run `node scripts/scope-wall.mjs`.
-- [ ] Commit and push to `main`.
+- [x] Commit and push to `main`.
