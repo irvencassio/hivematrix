@@ -7,6 +7,7 @@ import {
   type BrowserBeeTaskRequestEnvelope,
 } from "@/lib/browser-lane/jobs";
 import { matchBrowserSiteReadiness, type BrowserSiteReadinessMatch } from "@/lib/browser-lane/store";
+import { getWorkflowRegistry, summarizeWorkflow, type WorkflowSummary } from "@/lib/workflows/registry";
 import { resolveCooRouteFromRules, type CooResolvedRouteWithDisplay } from "./store";
 import type { CooRouteRequest } from "./routing-rules";
 
@@ -77,6 +78,8 @@ export interface CooDispatchResult {
   workItem: CooDispatchWorkItem | null;
   approval: CooDispatchApproval | null;
   readiness: CooDispatchReadiness | null;
+  /** A registered workflow whose routing matches this request (id + runbook), or null. */
+  workflow: WorkflowSummary | null;
   reason: string;
   auditId: string | null;
   taskId: string | null;
@@ -207,12 +210,17 @@ export function dispatchCooRequest(request: CooDispatchRequest, options: CooDisp
     throw new CooDispatchValidationError("dispatch request text must be a non-empty string");
   }
 
+  // A registered workflow can be named even when no COO rule matches — discovery
+  // is independent of routing rules.
+  const matchedWorkflow = getWorkflowRegistry().match({ text: request.text, domains: request.domains, tags: request.tags });
+  const workflow = matchedWorkflow ? summarizeWorkflow(matchedWorkflow) : null;
+
   const route = resolveCooRouteFromRules(request);
 
   if (!route) {
     const reason = "No enabled COO routing rule matched this request.";
     const auditId = recordCooDispatchAudit({ request, route: null, status: "no_match", workItemId: null, reason });
-    return { status: "no_match", request, route: null, lane: null, capability: null, workItem: null, approval: null, readiness: null, reason, auditId, taskId: null };
+    return { status: "no_match", request, route: null, lane: null, capability: null, workItem: null, approval: null, readiness: null, workflow, reason, auditId, taskId: null };
   }
 
   const policy = LANE_DISPATCH_POLICY[route.lane];
@@ -256,7 +264,7 @@ export function dispatchCooRequest(request: CooDispatchRequest, options: CooDisp
     reason,
   });
 
-  return { status, request, route, lane: route.lane, capability: route.capability, workItem, approval, readiness, reason, auditId, taskId: null };
+  return { status, request, route, lane: route.lane, capability: route.capability, workItem, approval, readiness, workflow, reason, auditId, taskId: null };
 }
 
 // ------------------------------------------------------------------

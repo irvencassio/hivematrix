@@ -1536,6 +1536,47 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /workflows — the typed registry of repeatable business workflows
+      // (discovery metadata only: lane, readiness, handoffs, runbook). Secret-free.
+      if (req.method === "GET" && urlPath === "/workflows") {
+        const { getWorkflowRegistry } = await import("@/lib/workflows/registry");
+        json(res, 200, { workflows: getWorkflowRegistry().list() });
+        return;
+      }
+
+      // POST /workflows/:id/prepare — low-risk prepare for a workflow's handler
+      // (HeyGen only for now): routes through the existing dispatch, no create.
+      const workflowPrepareMatch = urlPath.match(/^\/workflows\/([^/]+)\/prepare$/);
+      if (req.method === "POST" && workflowPrepareMatch) {
+        const { getWorkflowRegistry, summarizeWorkflow } = await import("@/lib/workflows/registry");
+        const wf = getWorkflowRegistry().get(decodeURIComponent(workflowPrepareMatch[1]));
+        if (!wf) { json(res, 404, { ok: false, error: "Workflow not found." }); return; }
+        if (wf.handler !== "heygen-portal-video") { json(res, 400, { ok: false, error: `No prepare handler for workflow "${wf.id}".` }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        const script = typeof body.script === "string" ? body.script.trim() : "";
+        const title = typeof body.title === "string" ? body.title.trim() : "";
+        if (!script || !title) { json(res, 400, { ok: false, error: "script and title are required" }); return; }
+        const { dispatchHeyGenVideoWorkflow } = await import("@/lib/video/heygen-workflow");
+        const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
+        const { seedHeyGenBrowserSite } = await import("@/lib/browser-lane/heygen");
+        seedHeyGenBrowserSite();
+        const result = await dispatchHeyGenVideoWorkflow(
+          { script, title, creativeNotes: typeof body.creativeNotes === "string" ? body.creativeNotes : undefined },
+          { staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours },
+        );
+        json(res, 200, { ok: true, workflow: summarizeWorkflow(wf), result });
+        return;
+      }
+
+      // GET /workflows/:id — one workflow definition.
+      const workflowMatch = urlPath.match(/^\/workflows\/([^/]+)$/);
+      if (req.method === "GET" && workflowMatch) {
+        const { getWorkflowRegistry } = await import("@/lib/workflows/registry");
+        const wf = getWorkflowRegistry().get(decodeURIComponent(workflowMatch[1]));
+        json(res, wf ? 200 : 404, wf ? { ok: true, workflow: wf } : { ok: false, error: "Workflow not found." });
+        return;
+      }
+
       // POST /coo/dispatch — route-to-execution bridge. Resolves the request to a
       // lane/capability and returns a typed dispatch result: a Browser-Lane-ready
       // work item for browser routes, an explicit approval requirement for

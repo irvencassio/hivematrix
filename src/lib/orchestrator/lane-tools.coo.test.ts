@@ -98,6 +98,17 @@ test("formatCooDispatchResult renders each status and leaks no secrets", () => {
   }
 });
 
+test("formatCooDispatchResult surfaces a matched registered workflow (id + runbook)", () => {
+  const out = formatCooDispatchResult({
+    status: "prepared", request: { text: "x" }, route: null, lane: "browser", capability: "workflow.run",
+    workItem: null, approval: null, readiness: null,
+    workflow: { id: "heygen.portal_video_from_script", name: "HeyGen portal video from script", lane: "browser", runbook: "docs/runbooks/heygen-portal-video-pipeline.md" },
+    reason: "Prepared.", auditId: "a1", taskId: null,
+  } as never);
+  assert.match(out, /heygen\.portal_video_from_script/);
+  assert.match(out, /runbook|docs\/runbooks/i);
+});
+
 test("executeCooDispatch prepares a Browser Lane result (no create)", async () => {
   browserRule();
   const out = await executeCooDispatch({ text: "upload to the browser", domains: ["app.heygen.com"] }, ctx, directRunner);

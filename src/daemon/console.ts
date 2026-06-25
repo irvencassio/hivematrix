@@ -743,6 +743,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </details>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
+        <label class="flbl" style="margin:0">Workflows</label>
+        <button class="copybtn" onclick="renderWorkflows()">↻ Refresh</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin:4px 0 6px">Registered repeatable workflows COO and the model can route to. Each links its runbook.</div>
+      <div id="workflows_list" style="margin-top:6px"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
+      <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Safe senders</label>
         <button class="copybtn" onclick="renderSafeSenders()">↻</button>
       </div>
@@ -3597,7 +3604,7 @@ function switchSettingsTab(tab) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); renderBrowserReadiness(); renderPortalVideos(); }
+  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); renderBrowserReadiness(); renderPortalVideos(); renderWorkflows(); }
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -3921,6 +3928,24 @@ async function createPortalTask(draftId) {
   if (r && r.ok) { hmToast("Portal task: "+esc((r.result && r.result.status) || "created")+".", "ok"); }
   else { hmAlert((r && r.error) || "Create portal task failed"); }
   renderPortalVideos();
+}
+
+// --- Workflows registry (discovery) -----------------------------------------
+async function renderWorkflows() {
+  const el = document.getElementById("workflows_list");
+  if (!el) return;
+  el.innerHTML = '<div class="muted">Loading…</div>';
+  const r = await api("/workflows");
+  const workflows = (r && r.workflows) || [];
+  if (!workflows.length) { el.innerHTML = '<div class="muted" style="font-size:11px">No workflows registered.</div>'; return; }
+  el.innerHTML = workflows.map(w => {
+    const readiness = w.readiness && w.readiness.required ? 'requires '+esc((w.readiness.siteId||"site"))+' readiness (green/fresh)' : 'no readiness gate';
+    return '<div class="card" style="cursor:default">'
+      + '<div class="t">'+esc(w.name)+' <span class="badge">'+esc(w.lane)+'</span></div>'
+      + '<div class="muted" style="font-size:11px;margin-top:2px">'+esc(w.id)+' — '+readiness+'</div>'
+      + (w.runbook ? '<div class="muted" style="font-size:11px;margin-top:2px">Runbook: '+esc(w.runbook)+'</div>' : '')
+      + '</div>';
+  }).join("");
 }
 
 // --- Safe senders (Message Lane + Mail Lane) --------------------------------

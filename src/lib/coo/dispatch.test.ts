@@ -339,6 +339,18 @@ test("create=true still creates when Browser Lane execution is available (browse
 
 // ── Browser Lane readiness gating ─────────────────────────────────────
 
+test("dispatch identifies the matching registered workflow from the request domain", () => {
+  browserRule();
+  const result = dispatchCooRequest({ text: "make a heygen video", domains: ["app.heygen.com"] });
+  assert.equal(result.workflow?.id, "heygen.portal_video_from_script");
+  assert.equal(result.workflow?.runbook, "docs/runbooks/heygen-portal-video-pipeline.md");
+});
+
+test("dispatch leaves workflow null when nothing in the registry matches", () => {
+  const result = dispatchCooRequest({ text: "totally unrelated request with no workflow" });
+  assert.equal(result.workflow, null);
+});
+
 test("prepare attaches readiness metadata/warning for a matched site (no secrets)", () => {
   browserRule();
   seedSite({ id: "heygen", domain: "app.heygen.com", status: "needs_reauth", color: "orange" });
