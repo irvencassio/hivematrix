@@ -7,7 +7,7 @@
 
 import { generateId, getDb } from "@/lib/db";
 import { ContractValidationError } from "@/lib/central/contracts";
-import { appendWorkflowRunEvent } from "./runs";
+import { appendWorkflowRunEvent, getWorkflowRunRecord, isWorkflowRunReviewBlocked } from "./runs";
 import { getWorkflowRegistry } from "./registry";
 
 export type WorkflowActionStatus = "proposed" | "accepted" | "completed" | "refused" | "failed";
@@ -20,6 +20,8 @@ export interface WorkflowActionRecord {
   reason: string;
   requiredInputs: string[];
   suggestedInputs: Record<string, unknown>;
+  /** target input field → source-run artifact key, resolved fresh at execute time. */
+  sourceArtifactMap: Record<string, string>;
   status: WorkflowActionStatus;
   resultRunId: string | null;
   createdAt: string;
@@ -28,8 +30,8 @@ export interface WorkflowActionRecord {
 
 interface WorkflowActionRow {
   _id: string; sourceRunId: string; targetWorkflowId: string; title: string; reason: string;
-  required_inputs_json: string; suggested_inputs_json: string; status: WorkflowActionStatus;
-  resultRunId: string | null; createdAt: string; updatedAt: string;
+  required_inputs_json: string; suggested_inputs_json: string; source_artifact_map_json: string | null;
+  status: WorkflowActionStatus; resultRunId: string | null; createdAt: string; updatedAt: string;
 }
 
 const SECRET_KEY = /password|passwd|pwd|secret|token|cookie|session|credential|api[_-]?key|bearer|keychain/i;
@@ -51,10 +53,18 @@ function parseObject(value: string | null | undefined): Record<string, unknown> 
   try { const p = JSON.parse(value); return p && typeof p === "object" && !Array.isArray(p) ? p as Record<string, unknown> : {}; } catch { return {}; }
 }
 
+function parseStringMap(value: string | null | undefined): Record<string, string> {
+  const obj = parseObject(value);
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(obj)) if (typeof v === "string") out[k] = v;
+  return out;
+}
+
 function rowToAction(row: WorkflowActionRow): WorkflowActionRecord {
   return {
     id: row._id, sourceRunId: row.sourceRunId, targetWorkflowId: row.targetWorkflowId, title: row.title, reason: row.reason,
     requiredInputs: parseArray(row.required_inputs_json), suggestedInputs: parseObject(row.suggested_inputs_json),
+    sourceArtifactMap: parseStringMap(row.source_artifact_map_json),
     status: row.status, resultRunId: row.resultRunId, createdAt: row.createdAt, updatedAt: row.updatedAt,
   };
 }
@@ -66,6 +76,7 @@ export interface ProposeWorkflowActionInput {
   reason?: string;
   requiredInputs?: string[];
   suggestedInputs?: Record<string, unknown>;
+  sourceArtifactMap?: Record<string, string>;
 }
 
 export function proposeWorkflowAction(input: ProposeWorkflowActionInput): WorkflowActionRecord {
@@ -75,11 +86,12 @@ export function proposeWorkflowAction(input: ProposeWorkflowActionInput): Workfl
   const requiredInputs = input.requiredInputs ?? def.inputSchema.filter((f) => f.required).map((f) => f.name);
   const id = generateId();
   getDb().prepare(`
-    INSERT INTO workflow_actions (_id, sourceRunId, targetWorkflowId, title, reason, required_inputs_json, suggested_inputs_json, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'proposed')
+    INSERT INTO workflow_actions (_id, sourceRunId, targetWorkflowId, title, reason, required_inputs_json, suggested_inputs_json, source_artifact_map_json, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'proposed')
   `).run(
     id, input.sourceRunId, def.id, input.title, input.reason ?? "",
     JSON.stringify(requiredInputs), JSON.stringify(redact(input.suggestedInputs ?? {})),
+    JSON.stringify(input.sourceArtifactMap ?? {}),
   );
   appendWorkflowRunEvent(input.sourceRunId, "action.proposed", `Proposed next workflow "${def.id}": ${input.title}`, { targetWorkflowId: def.id, actionId: id });
   return getWorkflowAction(id)!;
@@ -112,8 +124,9 @@ export function updateWorkflowActionStatus(id: string, status: WorkflowActionSta
 
 export interface ExecuteWorkflowActionResult {
   ok: boolean;
-  status: "prepared" | "needs_input" | "unsupported" | "invalid";
+  status: "prepared" | "needs_input" | "unsupported" | "invalid" | "review_required";
   actionId: string;
+  sourceRunId?: string;
   missing?: string[];
   resultRunId?: string;
   result?: unknown;
@@ -146,12 +159,26 @@ export async function executeWorkflowAction(id: string, operatorInputs: Record<s
   const def = getWorkflowRegistry().get(action.targetWorkflowId);
   if (!def) return { ok: false, status: "unsupported", actionId: id, reason: "target workflow no longer registered" };
 
+  // Review gate: a downstream action from a review-required source run must not execute
+  // until the source run is approved. No target dispatch while blocked.
+  const sourceRun = getWorkflowRunRecord(action.sourceRunId);
+  if (sourceRun && isWorkflowRunReviewBlocked(sourceRun)) {
+    return { ok: false, status: "review_required", actionId: id, sourceRunId: action.sourceRunId, reason: `Source run "${action.sourceRunId}" (${sourceRun.status}) needs approval before this action can run.` };
+  }
+
   // Only the target's actual input fields satisfy requirements — a "scriptDraft"
   // suggestion never silently becomes "script".
   const fieldNames = new Set(def.inputSchema.map((f) => f.name));
   const suggested: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(action.suggestedInputs)) if (fieldNames.has(k)) suggested[k] = v;
-  const merged = { ...suggested, ...operatorInputs };
+  // Fresh source artifacts (e.g. a revised script) override stale suggestions.
+  const fresh: Record<string, unknown> = {};
+  if (sourceRun) {
+    for (const [inputName, artifactKey] of Object.entries(action.sourceArtifactMap)) {
+      if (fieldNames.has(inputName) && sourceRun.artifacts[artifactKey] !== undefined) fresh[inputName] = sourceRun.artifacts[artifactKey];
+    }
+  }
+  const merged = { ...suggested, ...fresh, ...operatorInputs };
 
   const missing = action.requiredInputs.filter((name) => !hasValue(merged[name]));
   if (missing.length) {

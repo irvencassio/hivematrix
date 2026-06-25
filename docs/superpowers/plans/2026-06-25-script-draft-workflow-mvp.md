@@ -5,18 +5,18 @@
 Design: `docs/superpowers/specs/2026-06-25-script-draft-workflow-mvp-design.md`. Builds on `1472db1`.
 
 ## Task 1 — Definition + registry [TDD]
-- [ ] RED: extend `src/lib/workflows/registry.test.ts` — `content.video_script_from_brief` registered + matched by phrase.
-- [ ] GREEN: `src/lib/workflows/video-script-def.ts` (def-only) + add to `BUILTIN_WORKFLOWS`.
+- [x] RED: extend `src/lib/workflows/registry.test.ts` — `content.video_script_from_brief` registered + matched by phrase.
+- [x] GREEN: `src/lib/workflows/video-script-def.ts` (def-only) + add to `BUILTIN_WORKFLOWS`.
 
 ## Task 2 — Prepare helper [TDD]
-- [ ] RED: `src/lib/workflows/video-script.test.ts` — buildVideoScript* deterministic + scrubbed; prepare with briefMarkdown → run + scriptMarkdown artifact (needs_review) + HeyGen proposal w/ real script+title; with sourceRunId loads brief; neither → error; no secrets.
-- [ ] GREEN: `src/lib/workflows/video-script.ts` (pure builders + prepareVideoScriptFromBrief) + add `content-video-script` case to `prepare.ts`.
+- [x] RED: `src/lib/workflows/video-script.test.ts` — buildVideoScript* deterministic + scrubbed; prepare with briefMarkdown → run + scriptMarkdown artifact (needs_review) + HeyGen proposal w/ real script+title; with sourceRunId loads brief; neither → error; no secrets.
+- [x] GREEN: `src/lib/workflows/video-script.ts` (pure builders + prepareVideoScriptFromBrief) + add `content-video-script` case to `prepare.ts`.
 
 ## Task 3 — Research brief handoff + chain [TDD]
-- [ ] RED: update `content-research.test.ts` — brief proposes `content.video_script_from_brief`; chain test (execute brief action → script run → script proposes HeyGen prepare-only, no Browser Lane task).
-- [ ] GREEN: `content-research.ts` proposes the script workflow.
+- [x] RED: update `content-research.test.ts` — brief proposes `content.video_script_from_brief`; chain test (execute brief action → script run → script proposes HeyGen prepare-only, no Browser Lane task).
+- [x] GREEN: `content-research.ts` proposes the script workflow.
 
 ## Task 4 — Console + cleanup + gates
-- [ ] Console "Prepare video script" control + source test.
-- [ ] Tick checkboxes in `docs/superpowers/plans/2026-06-25-workflow-action-handoff-mvp.md`.
-- [ ] `npm run typecheck`, `npm test`, `node scripts/scope-wall.mjs`, `npm run verify:portal` green. Commit + push to `main`.
+- [x] Console "Prepare video script" control + source test.
+- [x] Tick checkboxes in `docs/superpowers/plans/2026-06-25-workflow-action-handoff-mvp.md`.
+- [x] `npm run typecheck`, `npm test`, `node scripts/scope-wall.mjs`, `npm run verify:portal` green. Commit + push to `main`.

@@ -559,6 +559,15 @@ const MIGRATIONS: string[] = [
       updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_workflow_actions_source ON workflow_actions(sourceRunId, createdAt);`,
+
+  // v23: workflow review gate — durable review decisions on runs, and an artifact map
+  // on actions so execution pulls the CURRENT (revised) source artifacts. Additive;
+  // notes/values are secret-scrubbed by the store.
+  `ALTER TABLE workflow_runs ADD COLUMN reviewDecision TEXT;
+   ALTER TABLE workflow_runs ADD COLUMN reviewNote TEXT;
+   ALTER TABLE workflow_runs ADD COLUMN reviewedAt TEXT;
+   ALTER TABLE workflow_runs ADD COLUMN reviewedArtifacts_json TEXT;
+   ALTER TABLE workflow_actions ADD COLUMN source_artifact_map_json TEXT;`,
 ];
 
 // ------------------------------------------------------------------

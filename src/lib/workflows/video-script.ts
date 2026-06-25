@@ -161,8 +161,10 @@ export async function prepareVideoScriptFromBrief(input: VideoScriptInput, deps:
       sourceRunId: run.id,
       targetWorkflowId: HEYGEN_TARGET,
       title,
-      reason: "Once the draft script is approved, turn it into a HeyGen portal video.",
+      reason: "Requires script approval. Once the draft script is approved, turn it into a HeyGen portal video.",
       suggestedInputs: { title, script },
+      // Pull the CURRENT (possibly revised) script + title from this run at execute time.
+      sourceArtifactMap: { script: "scriptText", title: "title" },
     });
     proposedAction = { id: action.id, targetWorkflowId: action.targetWorkflowId, title: action.title };
   }

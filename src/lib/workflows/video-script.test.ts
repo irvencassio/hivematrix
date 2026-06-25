@@ -57,6 +57,11 @@ test("prepareVideoScriptFromBrief creates a needs_review run with a script artif
   assert.equal(a.status, "proposed");
   assert.ok(String(a.suggestedInputs.script).length > 0, "real script suggested");
   assert.ok(String(a.suggestedInputs.title).length > 0, "title suggested");
+  // It maps fresh source artifacts (revised script) onto the HeyGen inputs.
+  assert.equal(a.sourceArtifactMap.script, "scriptText");
+  assert.equal(a.sourceArtifactMap.title, "title");
+  // The proposal makes the approval requirement explicit.
+  assert.match(a.reason, /approv/i);
   // No secrets anywhere.
   assert.doesNotMatch(JSON.stringify(getWorkflowAction(a.id)), /password|cookie|secret|credentialRef|\btoken\b/i);
 });

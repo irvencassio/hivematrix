@@ -1599,6 +1599,38 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /workflows/runs/:id/review — approve / request_changes / reject a run. The
+      // review gate blocks downstream action execution until a run is approved.
+      const runReviewMatch = urlPath.match(/^\/workflows\/runs\/([^/]+)\/review$/);
+      if (req.method === "POST" && runReviewMatch) {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const decision = body.decision;
+        if (decision !== "approve" && decision !== "request_changes" && decision !== "reject") {
+          json(res, 400, { ok: false, error: "decision must be approve | request_changes | reject" }); return;
+        }
+        const { reviewWorkflowRun } = await import("@/lib/workflows/runs");
+        const run = reviewWorkflowRun(decodeURIComponent(runReviewMatch[1]), decision, {
+          note: typeof body.note === "string" ? body.note : undefined,
+          reviewedArtifacts: Array.isArray(body.reviewedArtifacts) ? body.reviewedArtifacts.filter((s): s is string => typeof s === "string") : undefined,
+        });
+        json(res, run ? 200 : 404, run ? { ok: true, run } : { ok: false, error: "Workflow run not found." });
+        return;
+      }
+
+      // POST /workflows/runs/:id/artifact — revise an allowlisted draft artifact.
+      const runArtifactMatch = urlPath.match(/^\/workflows\/runs\/([^/]+)\/artifact$/);
+      if (req.method === "POST" && runArtifactMatch) {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const key = typeof body.key === "string" ? body.key : "";
+        const ALLOWED = new Set(["scriptText", "scriptMarkdown"]);
+        if (!ALLOWED.has(key)) { json(res, 400, { ok: false, error: `artifact key must be one of: ${[...ALLOWED].join(", ")}` }); return; }
+        if (typeof body.value !== "string") { json(res, 400, { ok: false, error: "value must be a string" }); return; }
+        const { reviseWorkflowRunArtifact } = await import("@/lib/workflows/runs");
+        const run = reviseWorkflowRunArtifact(decodeURIComponent(runArtifactMatch[1]), key, body.value);
+        json(res, run ? 200 : 404, run ? { ok: true, run } : { ok: false, error: "Workflow run not found." });
+        return;
+      }
+
       // GET /workflows/runs/:id/actions — proposed actions for a run.
       const runActionsMatch = urlPath.match(/^\/workflows\/runs\/([^/]+)\/actions$/);
       if (req.method === "GET" && runActionsMatch) {

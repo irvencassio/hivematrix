@@ -28,6 +28,17 @@ test("console exposes a Workflows panel backed by /workflows", () => {
   assert.match(console, /api\("\/workflows\/content\.video_script_from_brief\/prepare"/);
   assert.match(console, /id="script_topic"/);
   assert.match(console, /requires review/i);
+  // Review gate controls: editable script revision + approve / request changes / reject.
+  assert.match(console, /saveScriptRevision\(/);
+  assert.match(console, /reviewWorkflowRun\(/);
+  assert.match(console, /\/review"/);
+  assert.match(console, /\/artifact"/);
+  assert.match(console, /Approve/);
+  assert.match(console, /Request changes/);
+  assert.match(console, /Reject/);
+  // Approved-and-ready model-facing copy + blocked execution.
+  assert.match(console, /Approved and ready/);
+  assert.match(console, /Review required/);
 });
 
 test("the daemon declares the workflow endpoints", () => {

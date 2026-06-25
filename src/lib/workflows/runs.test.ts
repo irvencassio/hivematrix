@@ -17,6 +17,10 @@ const {
   linkWorkflowRunArtifact,
   setWorkflowRunLinks,
   findWorkflowRunByDraft,
+  reviewWorkflowRun,
+  reviseWorkflowRunArtifact,
+  isWorkflowRunApproved,
+  isWorkflowRunReviewBlocked,
 } = await import("./runs");
 
 const HEYGEN = "heygen.portal_video_from_script";
@@ -87,4 +91,48 @@ test("findWorkflowRunByDraft returns the latest run for a draft", () => {
   // Same draft, two runs → latest by rowid wins even at same-second createdAt.
   assert.equal(findWorkflowRunByDraft("d1")?.id, second.id);
   assert.equal(findWorkflowRunByDraft("nope"), null);
+});
+
+test("a needs_review run is review-blocked until approved", () => {
+  const run = createWorkflowRun({ workflowId: HEYGEN, title: "r", status: "needs_review" });
+  assert.equal(isWorkflowRunApproved(run), false);
+  assert.equal(isWorkflowRunReviewBlocked(run), true);
+
+  const approved = reviewWorkflowRun(run.id, "approve", { note: "looks good" })!;
+  assert.equal(approved.status, "approved");
+  assert.equal(approved.reviewDecision, "approve");
+  assert.equal(approved.reviewNote, "looks good");
+  assert.ok(approved.reviewedAt);
+  assert.equal(isWorkflowRunApproved(approved), true);
+  assert.equal(isWorkflowRunReviewBlocked(approved), false);
+
+  const detail = getWorkflowRun(run.id);
+  assert.ok(detail?.events.some((e) => e.event === "review.approve"));
+});
+
+test("request_changes and reject keep the run blocked, and the note is secret-scrubbed", () => {
+  const a = createWorkflowRun({ workflowId: HEYGEN, title: "a", status: "needs_review" });
+  const changed = reviewWorkflowRun(a.id, "request_changes", { note: "tighten the hook; token=LEAK" })!;
+  assert.equal(changed.status, "changes_requested");
+  assert.equal(isWorkflowRunReviewBlocked(changed), true);
+  assert.doesNotMatch(JSON.stringify(changed), /LEAK/);
+
+  const b = createWorkflowRun({ workflowId: HEYGEN, title: "b", status: "needs_review" });
+  const rejected = reviewWorkflowRun(b.id, "reject", {})!;
+  assert.equal(rejected.status, "rejected");
+  assert.equal(isWorkflowRunReviewBlocked(rejected), true);
+});
+
+test("reviseWorkflowRunArtifact scrubs, keeps the original, logs an event, and touches only that key", () => {
+  const run = createWorkflowRun({ workflowId: HEYGEN, title: "r", status: "needs_review" });
+  linkWorkflowRunArtifact(run.id, "scriptText", "original narration");
+  linkWorkflowRunArtifact(run.id, "title", "Original title");
+
+  reviseWorkflowRunArtifact(run.id, "scriptText", "revised narration with token=LEAK inline");
+  const detail = getWorkflowRun(run.id);
+  assert.match(String(detail?.artifacts.scriptText), /revised narration/);
+  assert.doesNotMatch(String(detail?.artifacts.scriptText), /LEAK/);          // scrubbed value
+  assert.equal(detail?.artifacts.scriptText_original, "original narration");  // original kept
+  assert.equal(detail?.artifacts.title, "Original title");                    // unrelated artifact untouched
+  assert.ok(detail?.events.some((e) => e.event === "artifact.revised"));
 });

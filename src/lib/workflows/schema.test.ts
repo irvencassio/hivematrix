@@ -32,8 +32,15 @@ test("workflow_runs + workflow_run_events tables exist with the expected columns
 
 test("workflow_actions table exists with the expected columns", () => {
   const cols = columns("workflow_actions");
-  for (const c of ["sourceRunId", "targetWorkflowId", "title", "reason", "required_inputs_json", "suggested_inputs_json", "status", "resultRunId", "createdAt", "updatedAt"]) {
+  for (const c of ["sourceRunId", "targetWorkflowId", "title", "reason", "required_inputs_json", "suggested_inputs_json", "status", "resultRunId", "createdAt", "updatedAt", "source_artifact_map_json"]) {
     assert.ok(cols.includes(c), `workflow_actions.${c} should exist`);
   }
   assert.equal(cols.includes("password"), false);
+});
+
+test("workflow_runs has review-state columns", () => {
+  const cols = columns("workflow_runs");
+  for (const c of ["reviewDecision", "reviewNote", "reviewedAt", "reviewedArtifacts_json"]) {
+    assert.ok(cols.includes(c), `workflow_runs.${c} should exist`);
+  }
 });

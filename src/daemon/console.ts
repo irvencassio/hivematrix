@@ -3997,8 +3997,33 @@ async function prepareVideoScript() {
   const r = await api("/workflows/content.video_script_from_brief/prepare", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ topic: topic, briefMarkdown: "Drafting from the topic; no prior research brief." }) });
   if (!r || !r.ok) { if (out) out.innerHTML = '<span class="err">'+esc((r && r.error) || "Draft failed")+'</span>'; return; }
   const md = (r.result && r.result.markdown) || "";
-  const preview = String(md).split("\n").slice(0, 5).join(" · ");
-  if (out) out.innerHTML = 'Draft script ready — requires review (run '+esc(r.runId)+'): '+esc(preview);
+  // Editable draft + review controls. The script is a DRAFT requiring review before the
+  // proposed HeyGen action can run.
+  if (out) out.innerHTML =
+      '<div class="muted">Draft script ready — <b>requires review</b> (run '+esc(r.runId)+').</div>'
+    + '<textarea id="script_edit_'+esc(r.runId)+'" rows="6" style="width:100%;box-sizing:border-box;margin-top:4px">'+esc(md)+'</textarea>'
+    + '<div class="row" style="margin-top:4px;gap:6px;flex-wrap:wrap">'
+    + '<button class="copybtn" onclick="saveScriptRevision(\''+esc(r.runId)+'\')">Save revision</button>'
+    + '<button class="create" onclick="reviewWorkflowRun(\''+esc(r.runId)+'\',\'approve\')">Approve</button>'
+    + '<button class="copybtn" onclick="reviewWorkflowRun(\''+esc(r.runId)+'\',\'request_changes\')">Request changes</button>'
+    + '<button class="cancel" onclick="reviewWorkflowRun(\''+esc(r.runId)+'\',\'reject\')">Reject</button>'
+    + '</div><div id="script_review_'+esc(r.runId)+'" class="muted" style="font-size:11px;margin-top:2px"></div>';
+  renderWorkflowRuns(); renderWorkflowActions();
+}
+async function saveScriptRevision(runId) {
+  const ta = document.getElementById("script_edit_"+runId);
+  const note = document.getElementById("script_review_"+runId);
+  const value = ta ? ta.value : "";
+  const r = await api("/workflows/runs/"+encodeURIComponent(runId)+"/artifact", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ key: "scriptMarkdown", value: value }) });
+  if (note) note.innerHTML = (r && r.ok) ? 'Revision saved.' : '<span class="err">'+esc((r && r.error) || "Save failed")+'</span>';
+}
+async function reviewWorkflowRun(runId, decision) {
+  const note = document.getElementById("script_review_"+runId);
+  const r = await api("/workflows/runs/"+encodeURIComponent(runId)+"/review", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ decision: decision }) });
+  if (r && r.ok) {
+    const msg = decision === "approve" ? 'Approved and ready — the proposed HeyGen action can now run.' : decision === "reject" ? 'Rejected — the action stays blocked.' : 'Changes requested — the action stays blocked.';
+    if (note) note.innerHTML = msg;
+  } else { if (note) note.innerHTML = '<span class="err">'+esc((r && r.error) || "Review failed")+'</span>'; }
   renderWorkflowRuns(); renderWorkflowActions();
 }
 // --- Workflow action handoffs (explicit execution) --------------------------
@@ -4023,7 +4048,9 @@ async function executeWorkflowAction(actionId) {
   const out = document.getElementById("action_result_"+actionId);
   const r = await api("/workflows/actions/"+encodeURIComponent(actionId)+"/execute", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ inputs: {} }) });
   if (!r) { if (out) out.innerHTML = '<span class="err">Execute failed</span>'; return; }
-  if (r.status === "needs_input") {
+  if (r.status === "review_required") {
+    if (out) out.innerHTML = '<span class="err">Review required</span> — approve the source run ('+esc(r.sourceRunId || "")+') before this action can run.';
+  } else if (r.status === "needs_input") {
     if (out) out.innerHTML = '<span class="err">Needs input: '+esc((r.missing || []).join(", "))+'</span> — supply these and run the target workflow directly.';
   } else if (r.ok) {
     if (out) out.innerHTML = 'Executed → prepared'+(r.resultRunId ? ' (run '+esc(r.resultRunId)+')' : '')+'.';

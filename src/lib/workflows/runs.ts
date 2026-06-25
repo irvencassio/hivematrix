@@ -26,6 +26,10 @@ export interface WorkflowRunRecord {
   blocker: string | null;
   artifacts: Record<string, unknown>;
   runbook: string | null;
+  reviewDecision: string | null;
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  reviewedArtifacts: string[];
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
@@ -48,6 +52,7 @@ interface WorkflowRunRow {
   _id: string; workflowId: string; status: string; title: string; lane: string | null; capability: string | null;
   parentTaskId: string | null; draftId: string | null; childTaskId: string | null; currentStep: string | null;
   blocker: string | null; artifact_json: string; runbook: string | null; createdAt: string; updatedAt: string; completedAt: string | null;
+  reviewDecision: string | null; reviewNote: string | null; reviewedAt: string | null; reviewedArtifacts_json: string | null;
 }
 
 const SECRET_KEY = /password|passwd|pwd|secret|token|cookie|session|credential|api[_-]?key|bearer|keychain/i;
@@ -71,6 +76,18 @@ function parseObject(value: string | null | undefined): Record<string, unknown> 
   try { const p = JSON.parse(value); return p && typeof p === "object" && !Array.isArray(p) ? p as Record<string, unknown> : {}; }
   catch { return {}; }
 }
+function parseArray(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try { const p = JSON.parse(value); return Array.isArray(p) ? p.filter((x): x is string => typeof x === "string") : []; } catch { return []; }
+}
+
+/** Value-level secret scrub for free text being persisted (review notes, revised artifacts). */
+export function scrubSecretText(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+    .replace(/\b((?:set-)?cookie|password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|session)\b\s*[:=]\s*("[^"]*"|'[^']*'|\S+)/gi, "$1=[redacted]");
+}
 
 function rowToRun(row: WorkflowRunRow): WorkflowRunRecord {
   return {
@@ -78,6 +95,8 @@ function rowToRun(row: WorkflowRunRow): WorkflowRunRecord {
     lane: row.lane, capability: row.capability, parentTaskId: row.parentTaskId, draftId: row.draftId,
     childTaskId: row.childTaskId, currentStep: row.currentStep, blocker: row.blocker,
     artifacts: parseObject(row.artifact_json), runbook: row.runbook,
+    reviewDecision: row.reviewDecision ?? null, reviewNote: row.reviewNote ?? null,
+    reviewedAt: row.reviewedAt ?? null, reviewedArtifacts: parseArray(row.reviewedArtifacts_json),
     createdAt: row.createdAt, updatedAt: row.updatedAt, completedAt: row.completedAt,
   };
 }
@@ -179,4 +198,50 @@ export function linkWorkflowRunArtifact(id: string, key: string, value: unknown)
 
 export function findWorkflowRunByDraft(draftId: string, workflowId?: string): WorkflowRunRecord | null {
   return listWorkflowRuns({ draftId, workflowId, limit: 1 })[0] ?? null;
+}
+
+// ------------------------------------------------------------------
+// Review gate — a run can require human approval before its downstream actions run.
+// ------------------------------------------------------------------
+export type WorkflowReviewDecision = "approve" | "request_changes" | "reject";
+const REVIEW_DECISION_STATUS: Record<WorkflowReviewDecision, string> = {
+  approve: "approved",
+  request_changes: "changes_requested",
+  reject: "rejected",
+};
+const REVIEW_BLOCKED_STATUSES = new Set(["needs_review", "changes_requested", "rejected"]);
+
+export function isWorkflowRunApproved(run: WorkflowRunRecord): boolean {
+  return run.reviewDecision === "approve";
+}
+/** Downstream actions from this run must not execute while this is true. */
+export function isWorkflowRunReviewBlocked(run: WorkflowRunRecord): boolean {
+  return REVIEW_BLOCKED_STATUSES.has(run.status) && run.reviewDecision !== "approve";
+}
+
+export function reviewWorkflowRun(id: string, decision: WorkflowReviewDecision, opts: { note?: string; reviewedArtifacts?: string[] } = {}): WorkflowRunRecord | null {
+  if (!REVIEW_DECISION_STATUS[decision]) return null;
+  const status = REVIEW_DECISION_STATUS[decision];
+  const note = opts.note ? scrubSecretText(opts.note) : null;
+  getDb().prepare(`
+    UPDATE workflow_runs SET status = ?, reviewDecision = ?, reviewNote = ?, reviewedAt = datetime('now'), reviewedArtifacts_json = ?, updatedAt = datetime('now') WHERE _id = ?
+  `).run(status, decision, note, JSON.stringify(opts.reviewedArtifacts ?? []), id);
+  appendWorkflowRunEvent(id, `review.${decision}`, `Review: ${decision}`, { decision });
+  return getWorkflowRunRecord(id);
+}
+
+/**
+ * Replace an artifact value (e.g. a revised script), snapshotting the original once and
+ * logging the revision. Secret-scrubs string values. Touches only the given key.
+ */
+export function reviseWorkflowRunArtifact(id: string, key: string, value: unknown): WorkflowRunRecord | null {
+  const record = getWorkflowRunRecord(id);
+  if (!record) return null;
+  const next = { ...record.artifacts };
+  const originalKey = `${key}_original`;
+  if (next[key] !== undefined && next[originalKey] === undefined) next[originalKey] = next[key];
+  next[key] = typeof value === "string" ? scrubSecretText(value) : redact(value);
+  getDb().prepare("UPDATE workflow_runs SET artifact_json = ?, updatedAt = datetime('now') WHERE _id = ?").run(JSON.stringify(redactObject(next)), id);
+  appendWorkflowRunEvent(id, "artifact.revised", `Revised artifact "${key}"`, { key });
+  return getWorkflowRunRecord(id);
 }

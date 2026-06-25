@@ -8,7 +8,7 @@ const TMP = mkdtempSync(join(tmpdir(), "hivematrix-workflow-actions-"));
 process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
 const { getDb, _resetDbForTests } = await import("@/lib/db");
-const { createWorkflowRun } = await import("./runs");
+const { createWorkflowRun, reviewWorkflowRun, reviseWorkflowRunArtifact, linkWorkflowRunArtifact } = await import("./runs");
 const {
   proposeWorkflowAction,
   listWorkflowActions,
@@ -84,4 +84,49 @@ test("executing with sufficient inputs calls the registered handler path and com
   const after = getWorkflowAction(a.id);
   assert.equal(after?.status, "completed");
   assert.equal(after?.resultRunId, "target-run-1");
+});
+
+test("execution is blocked with review_required when the source run is needs_review and unapproved", async () => {
+  const run = createWorkflowRun({ workflowId: BRIEF, title: "script", status: "needs_review" });
+  const a = proposeWorkflowAction({ sourceRunId: run.id, targetWorkflowId: HEYGEN, title: "v", suggestedInputs: { title: "v", script: "real script" } });
+  let prepareCalls = 0;
+  const result = await executeWorkflowAction(a.id, {}, { prepare: async () => { prepareCalls += 1; return { ok: true, status: "prepared", workflow: null, runId: "x" }; } });
+  assert.equal(result.ok, false);
+  assert.equal(result.status, "review_required");
+  assert.equal(result.sourceRunId, run.id);
+  assert.equal(prepareCalls, 0, "must not dispatch the target while the source run is unapproved");
+  assert.equal(getWorkflowAction(a.id)?.status, "proposed");
+});
+
+test("approving the source run unlocks execution; rejecting keeps it blocked", async () => {
+  const run = createWorkflowRun({ workflowId: BRIEF, title: "script", status: "needs_review" });
+  const a = proposeWorkflowAction({ sourceRunId: run.id, targetWorkflowId: HEYGEN, title: "v", suggestedInputs: { title: "v", script: "real script" } });
+
+  // Reject → still blocked.
+  reviewWorkflowRun(run.id, "reject", {});
+  let blocked = await executeWorkflowAction(a.id, {}, { prepare: async () => ({ ok: true, status: "prepared", workflow: null }) });
+  assert.equal(blocked.status, "review_required");
+
+  // Approve → unlocked.
+  reviewWorkflowRun(run.id, "approve", {});
+  const ok = await executeWorkflowAction(a.id, {}, { prepare: async () => ({ ok: true, status: "prepared", workflow: null, runId: "done-1" }) });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.status, "prepared");
+});
+
+test("sourceArtifactMap pulls the CURRENT (revised) source artifact over the stale suggested input", async () => {
+  const run = createWorkflowRun({ workflowId: BRIEF, title: "script", status: "needs_review" });
+  linkWorkflowRunArtifact(run.id, "scriptText", "ORIGINAL script");
+  const a = proposeWorkflowAction({
+    sourceRunId: run.id, targetWorkflowId: HEYGEN, title: "Video", suggestedInputs: { title: "Video", script: "ORIGINAL script" },
+    sourceArtifactMap: { script: "scriptText", title: "title" },
+  });
+  // Operator revises the script, then approves.
+  reviseWorkflowRunArtifact(run.id, "scriptText", "REVISED script");
+  reviewWorkflowRun(run.id, "approve", {});
+
+  let seen: Record<string, unknown> = {};
+  const result = await executeWorkflowAction(a.id, {}, { prepare: async (_wid, inputs) => { seen = inputs; return { ok: true, status: "prepared", workflow: null, runId: "r" }; } });
+  assert.equal(result.ok, true);
+  assert.equal(seen.script, "REVISED script", "execution used the revised script, not the stale suggestion");
 });
