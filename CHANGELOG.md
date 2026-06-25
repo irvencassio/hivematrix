@@ -100,11 +100,11 @@ _Maintenance release._
 
 ## v0.1.58 — 2026-06-22
 
-Voice: ask VoiceBee to remind you or add a task and it lands in HiveMatrix; unanswered questions escalate too
+Voice: ask Voice Lane to remind you or add a task and it lands in HiveMatrix; unanswered questions escalate too
 
 ## v0.1.57 — 2026-06-21
 
-Voice: ask VoiceBee to read an email, list senders, or summarize your inbox — not just count
+Voice: ask Voice Lane to read an email, list senders, or summarize your inbox — not just count
 
 ## v0.1.56 — 2026-06-20
 
@@ -136,7 +136,7 @@ Rapid-MLX local-engine + live status in Settings
 
 ## v0.1.49 — 2026-06-20
 
-voice TTS cache+warmup, MailBee voice tool, selectable app icon
+voice TTS cache+warmup, Mail Lane voice tool, selectable app icon
 
 ## v0.1.48 — 2026-06-19
 
@@ -200,7 +200,7 @@ feat: /uploads endpoint (iOS attachments transfer real bytes to host); steer any
 
 ## v0.1.33 — 2026-06-15
 
-fix: MailBee never auto-replies a Gmail/MCP auth dead-end; task tells agent to attach files via Apple Mail send path, not Gmail
+fix: Mail Lane never auto-replies a Gmail/MCP auth dead-end; task tells agent to attach files via Apple Mail send path, not Gmail
 
 ## v0.1.32 — 2026-06-15
 
@@ -276,7 +276,7 @@ usage refresh
 
 ## v0.1.14 — 2026-06-13
 
-focus and MailBee fixes
+focus and Mail Lane fixes
 
 ## v0.1.13 — 2026-06-13
 
