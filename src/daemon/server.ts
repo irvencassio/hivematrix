@@ -1254,6 +1254,36 @@ export function createDaemonServer() {
         return;
       }
 
+      if (req.method === "GET" && urlPath === "/browser-lane/sites") {
+        const { listBrowserSiteSummaries } = await import("@/lib/browser-lane/store");
+        json(res, 200, { ok: true, lane: "browser", sites: listBrowserSiteSummaries() });
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/browser-lane/sites") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        try {
+          const { upsertBrowserSite } = await import("@/lib/browser-lane/store");
+          const site = upsertBrowserSite(body.site ?? body);
+          json(res, 200, { ok: true, lane: "browser", site });
+        } catch (e) {
+          json(res, 400, { ok: false, lane: "browser", error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/browser-lane/probes") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        try {
+          const { upsertBrowserReadinessProbe } = await import("@/lib/browser-lane/store");
+          const probe = upsertBrowserReadinessProbe(body.probe ?? body);
+          json(res, 200, { ok: true, lane: "browser", probe });
+        } catch (e) {
+          json(res, 400, { ok: false, lane: "browser", error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
       // POST /browser-lane/probe — readiness orchestration endpoint backed by
       // stored site/probe rows. The default adapter is honest when no browser
       // backend is wired yet: it records blocked runs instead of pretending.

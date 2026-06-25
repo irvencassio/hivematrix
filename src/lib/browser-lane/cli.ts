@@ -5,6 +5,9 @@ export type BrowserLaneCliCommand =
   | { command: "status" }
   | { command: "probe"; siteId: string }
   | { command: "open"; siteIdOrUrl: string }
+  | { command: "sites-list" }
+  | { command: "sites-add"; site: Record<string, unknown> }
+  | { command: "probes-add"; probe: Record<string, unknown> }
   | { command: "auth-set"; siteId: string; credentialRef: string; username?: string }
   | { command: "tool"; tool: "hivematrix_browser"; args: Record<string, unknown> };
 
@@ -29,6 +32,16 @@ function readFlag(argv: string[], flag: string): string | undefined {
   return undefined;
 }
 
+function readFlags(argv: string[], flag: string): string[] {
+  const values: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === flag && argv[i + 1]) values.push(argv[i + 1]);
+    if (arg.startsWith(`${flag}=`)) values.push(arg.slice(flag.length + 1));
+  }
+  return values.map((value) => value.trim()).filter(Boolean);
+}
+
 function requireValue(value: string | undefined, label: string): string {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) fail(`${label} is required`);
@@ -51,6 +64,41 @@ export function parseBrowserLaneCli(argv: string[]): BrowserLaneCliCommand {
       return { command: "probe", siteId: rest[0]?.trim() || "all" };
     case "open":
       return { command: "open", siteIdOrUrl: requireValue(rest[0], "site or URL") };
+    case "sites": {
+      const subcommand = rest[0];
+      if (subcommand === "list") return { command: "sites-list" };
+      if (subcommand !== "add") fail("sites command must be: hive browser sites list|add");
+      const siteId = requireValue(rest[1], "site id");
+      const credentialRef = readFlag(rest, "--credential-ref");
+      if (credentialRef && !credentialRef.startsWith("hivematrix.browser.")) fail("credential ref must start with hivematrix.browser.");
+      return {
+        command: "sites-add",
+        site: {
+          id: siteId,
+          displayName: requireValue(readFlag(rest, "--name"), "site name"),
+          homeUrl: requireValue(readFlag(rest, "--home-url"), "home URL"),
+          loginUrl: readFlag(rest, "--login-url") ?? null,
+          allowedDomains: readFlags(rest, "--domain"),
+          credentialRef: credentialRef ?? null,
+        },
+      };
+    }
+    case "probes": {
+      if (rest[0] !== "add") fail("probes command must be: hive browser probes add <site-id> <probe-id>");
+      const siteId = requireValue(rest[1], "site id");
+      const probeId = requireValue(rest[2], "probe id");
+      return {
+        command: "probes-add",
+        probe: {
+          id: probeId,
+          siteId,
+          name: requireValue(readFlag(rest, "--name"), "probe name"),
+          url: requireValue(readFlag(rest, "--url"), "probe URL"),
+          assertions: [{ kind: "text", value: requireValue(readFlag(rest, "--text"), "expected text"), optional: false }],
+          requiresAuth: true,
+        },
+      };
+    }
     case "search":
       return {
         command: "tool",
@@ -93,6 +141,9 @@ export function renderBrowserLaneHelp(): string {
     "Commands:",
     "  hive browser status",
     "  hive browser probe [site-id|all]",
+    "  hive browser sites list",
+    "  hive browser sites add <site-id> --name <name> --home-url <url> [--login-url <url>] [--domain domain] [--credential-ref ref]",
+    "  hive browser probes add <site-id> <probe-id> --name <name> --url <url> --text <expected-text>",
     "  hive browser open <site-id|url>",
     "  hive browser search <query>",
     "  hive browser read <url> [question]",

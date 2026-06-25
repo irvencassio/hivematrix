@@ -52,9 +52,68 @@ test("browser lane CLI accepts keychain references but rejects inline secrets", 
   );
 });
 
+test("browser lane CLI parses site maintenance commands without secrets", () => {
+  assert.deepEqual(parseBrowserLaneCli(["sites", "list"]), {
+    command: "sites-list",
+  });
+
+  assert.deepEqual(parseBrowserLaneCli([
+    "sites",
+    "add",
+    "heygen",
+    "--name",
+    "HeyGen",
+    "--home-url",
+    "https://app.heygen.com/home",
+    "--login-url",
+    "https://app.heygen.com/login",
+    "--domain",
+    "app.heygen.com",
+    "--credential-ref",
+    "hivematrix.browser.heygen.primary",
+  ]), {
+    command: "sites-add",
+    site: {
+      id: "heygen",
+      displayName: "HeyGen",
+      homeUrl: "https://app.heygen.com/home",
+      loginUrl: "https://app.heygen.com/login",
+      allowedDomains: ["app.heygen.com"],
+      credentialRef: "hivematrix.browser.heygen.primary",
+    },
+  });
+});
+
+test("browser lane CLI parses probe maintenance commands", () => {
+  assert.deepEqual(parseBrowserLaneCli([
+    "probes",
+    "add",
+    "heygen",
+    "heygen-home",
+    "--name",
+    "Home",
+    "--url",
+    "https://app.heygen.com/home",
+    "--text",
+    "Create video",
+  ]), {
+    command: "probes-add",
+    probe: {
+      id: "heygen-home",
+      siteId: "heygen",
+      name: "Home",
+      url: "https://app.heygen.com/home",
+      assertions: [{ kind: "text", value: "Create video", optional: false }],
+      requiresAuth: true,
+    },
+  });
+});
+
 test("browser lane help teaches the stable command names", () => {
   const help = renderBrowserLaneHelp();
   assert.match(help, /hive browser status/);
+  assert.match(help, /hive browser sites add/);
+  assert.match(help, /hive browser probes add/);
   assert.match(help, /hive browser run/);
   assert.doesNotMatch(help, /BrowserBee|WebBee/);
 });

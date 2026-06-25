@@ -53,6 +53,20 @@ export interface BrowserReadinessRunInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface BrowserSiteSummary {
+  id: string;
+  displayName: string;
+  homeUrl: string;
+  loginUrl: string | null;
+  allowedDomains: string[];
+  credentialRef: string | null;
+  authStrategy: BrowserSite["authStrategy"];
+  status: string;
+  probeCount: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 export function upsertBrowserSite(input: unknown): BrowserSite {
   const site = normalizeBrowserSite(input);
   const db = getDb();
@@ -118,6 +132,39 @@ export function listBrowserSites(filter: { siteId?: string | null } = {}): Brows
     ORDER BY s.displayName COLLATE NOCASE ASC
   `).all(...params) as BrowserSiteRow[];
   return rows.map(rowToSite);
+}
+
+export function listBrowserSiteSummaries(filter: { siteId?: string | null } = {}): BrowserSiteSummary[] {
+  const params: string[] = [];
+  const where = filter.siteId && filter.siteId !== "all" ? "WHERE s._id = ?" : "";
+  if (where) params.push(filter.siteId!);
+  const rows = getDb().prepare(`
+    SELECT
+      s.*,
+      c.credentialRef AS credentialRef,
+      (SELECT COUNT(*) FROM browser_readiness_probes p WHERE p.siteId = s._id AND p.enabled = 1) AS probeCount
+    FROM browser_sites s
+    LEFT JOIN browser_credentials c ON c.siteId = s._id
+    ${where}
+    GROUP BY s._id
+    ORDER BY s.displayName COLLATE NOCASE ASC
+  `).all(...params) as Array<BrowserSiteRow & { status: string; probeCount: number }>;
+  return rows.map((row) => {
+    const site = rowToSite(row);
+    return {
+      id: site.id,
+      displayName: site.displayName,
+      homeUrl: site.homeUrl,
+      loginUrl: site.loginUrl,
+      allowedDomains: site.allowedDomains,
+      credentialRef: site.credentialRef,
+      authStrategy: site.authStrategy,
+      status: row.status,
+      probeCount: Number(row.probeCount ?? 0),
+      createdAt: site.createdAt,
+      updatedAt: site.updatedAt,
+    };
+  });
 }
 
 export function upsertBrowserReadinessProbe(input: unknown): ReadinessProbe {

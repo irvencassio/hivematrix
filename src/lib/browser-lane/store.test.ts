@@ -14,6 +14,7 @@ const {
   recordBrowserReadinessRun,
   upsertBrowserReadinessProbe,
   upsertBrowserSite,
+  listBrowserSiteSummaries,
 } = await import("./store");
 
 before(() => {
@@ -76,4 +77,16 @@ test("browser lane store lists enabled readiness probes and records runs", () =>
   const row = getDb().prepare("SELECT * FROM browser_readiness_runs WHERE _id = ?").get(run.id) as { status: string; traceRunId: string };
   assert.equal(row.status, "ready");
   assert.equal(row.traceRunId, "trace-1");
+});
+
+test("browser lane store summaries include probe counts and no secret material", () => {
+  const summaries = listBrowserSiteSummaries();
+
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].id, "heygen");
+  assert.equal(summaries[0].probeCount, 1);
+  assert.equal(summaries[0].credentialRef, "hivematrix.browser.heygen.primary");
+  assert.equal("password" in summaries[0], false);
+  assert.equal("secret" in summaries[0], false);
+  assert.equal("token" in summaries[0], false);
 });

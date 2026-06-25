@@ -30,6 +30,35 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command.command === "sites-list") {
+    const res = await fetch(`${base}/browser-lane/sites`, { headers: { Authorization: `Bearer ${token}` } });
+    console.log(await res.text());
+    process.exitCode = res.ok ? 0 : 1;
+    return;
+  }
+
+  if (command.command === "sites-add") {
+    const res = await fetch(`${base}/browser-lane/sites`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ site: command.site }),
+    });
+    console.log(await res.text());
+    process.exitCode = res.ok ? 0 : 1;
+    return;
+  }
+
+  if (command.command === "probes-add") {
+    const res = await fetch(`${base}/browser-lane/probes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ probe: command.probe }),
+    });
+    console.log(await res.text());
+    process.exitCode = res.ok ? 0 : 1;
+    return;
+  }
+
   if (command.command === "open") {
     const res = await fetch(`${base}/lane/browser`, {
       method: "POST",
