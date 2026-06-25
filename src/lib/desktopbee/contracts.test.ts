@@ -24,12 +24,13 @@ test("parseDesktopBeeJobCreate normalizes defaults from app scope and risk postu
   assert.deepEqual(payload.allowedApps, ["Messages"]);
   assert.equal(payload.artifactPolicy, "screenshots");
   assert.equal(payload.tracePolicy, "timeline_and_screenshots");
-  assert.ok(payload.title.startsWith("DesktopBee:"));
+  assert.ok(payload.title.startsWith("Desktop Lane:"));
+  assert.doesNotMatch(payload.title, /DesktopBee/);
 });
 
-test("buildDesktopBeeTaskDescription keeps DesktopBee distinct from BrowserBee and API work", () => {
+test("buildDesktopBeeTaskDescription keeps Desktop Lane distinct from Browser Lane and API work", () => {
   const payload = parseDesktopBeeJobCreate({
-    title: "DesktopBee Messages triage",
+    title: "Desktop Lane Messages triage",
     project: "hive",
     primaryApp: "Messages",
     objective: "Review new Messages threads and summarize urgent ones.",
@@ -44,8 +45,10 @@ test("buildDesktopBeeTaskDescription keeps DesktopBee distinct from BrowserBee a
     requestedProjectPath: "/Users/irvencassio/Hive",
   });
 
-  assert.match(description, /This task came from DesktopBee/);
+  assert.match(description, /This task came from Desktop Lane/);
   assert.match(description, /If the workflow can be completed through a direct API/);
+  assert.match(description, /Browser Lane workflow/);
+  assert.doesNotMatch(description, /DesktopBee|BrowserBee/);
   assert.match(description, /Allowed apps: Messages, Finder/);
   assert.match(description, /Requires elevated permissions: yes/);
   assert.match(description, /Execution steps:/);
@@ -54,7 +57,7 @@ test("buildDesktopBeeTaskDescription keeps DesktopBee distinct from BrowserBee a
 
 test("buildDesktopBeeJobSnapshot reads task-backed request metadata", () => {
   const payload = parseDesktopBeeJobCreate({
-    title: "DesktopBee System Settings repair",
+    title: "Desktop Lane System Settings repair",
     project: "hive",
     primaryApp: "System Settings",
     objective: "Open privacy settings and inspect accessibility permissions.",

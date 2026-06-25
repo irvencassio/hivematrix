@@ -164,7 +164,7 @@ function normalizeEnum<T extends readonly string[]>(
 function deriveJobTitle(input: { title: string | null; primaryApp: string; objective: string }): string {
   if (input.title) return input.title;
   const words = input.objective.split(/\s+/).slice(0, 5).join(" ");
-  return `DesktopBee: ${input.primaryApp}${words ? ` - ${words}` : ""}`.slice(0, 100);
+  return `Desktop Lane: ${input.primaryApp}${words ? ` - ${words}` : ""}`.slice(0, 100);
 }
 
 function deriveApprovalMode(runMode: DesktopBeeRunMode, requiresElevatedPermissions: boolean): DesktopBeeApprovalMode {
@@ -246,10 +246,10 @@ export function parseDesktopBeeJobCreate(input: unknown): DesktopBeeJobCreatePay
 
 export function buildDesktopBeeTaskDescription(payload: DesktopBeeJobCreatePayload, options: { requestedProjectPath: string }): string {
   const sections = [
-    "This task came from DesktopBee.",
+    "This task came from Desktop Lane.",
     "Treat it as a native desktop automation workflow.",
     "Strategy order: AppleScript/JXA (scriptable apps) → AX-tree semantic actions → coordinate/vision last resort.",
-    "If the workflow can be completed through a direct API, file edit, or BrowserBee workflow, stop and reroute.",
+    "If the workflow can be completed through a direct API, file edit, or Browser Lane workflow, stop and reroute.",
     "",
     `Requested by: ${payload.requestedBy}`,
     `Target project: ${payload.project}`,
