@@ -32,7 +32,7 @@ Date closed: 2026-06-11. All six reset questions are closed.
 **Decision:** Mission is retired. The long-horizon autonomy unit is the **Directive** (standing objective + proven success criteria + trigger/budget policy + recoverable run loop). Mission tables are not ported.
 **Code:** `src/lib/db/index.ts` has `directives`, `runs`, `run_journal`, `directive_criteria` tables. No missions table.
 
-## Q7 — Cloud-only run mode + Bee lanes for the local agent
+## Q7 — Cloud-only run mode + capability lanes for the local agent
 
 Date closed: 2026-06-12.
 
@@ -48,13 +48,13 @@ a router preference (`routeByRole(role, policy, { noLocal })`), surfaced as the
 `src/lib/models/available.ts` (`CLOUD_ONLY_ID`), `src/lib/orchestrator/subprocess.ts`
 (`model === "cloud-only"` branch), `src/lib/orchestrator/directive-engine.ts`.
 
-**Decision B — Bee lanes available to the local (Qwen) agent.** The three
-existing embedded lanes — WebBee, BrowserBee, DesktopBee — are exposed to the
-local/generic agent tool loop as function tools (`webbee_search`,
-`browserbee_run`, `desktopbee_action`). No new brands. Each is gated by the
+**Decision B — capability lanes available to the local (Qwen) agent.** Browser Lane
+and Desktop Lane are exposed to the local/generic agent tool loop as compatibility
+function tools (`webbee_search`, `browserbee_run`, `desktopbee_action`). No new
+brands. Each is gated by the
 ConnectivityPolicy capability matrix: a lane disabled in the current mode is
-neither advertised to the model nor dispatched. BrowserBee jobs run as delegated
-Codex Computer Use tasks. DesktopBee acts are auto-approved at dispatch (Irv's
+neither advertised to the model nor dispatched. Browser Lane workflow jobs run as
+delegated Codex Computer Use tasks. Desktop Lane acts are auto-approved at dispatch (Irv's
 explicit posture), with the Swift helper's server-side gate retained as
 defence-in-depth.
 **Code:** `src/lib/orchestrator/bee-tools.ts`, wired via
@@ -65,22 +65,22 @@ defence-in-depth.
 
 ---
 
-## Q8 — MessageBee un-deferred (SMS/iMessage channel lane)
+## Q8 — Message Lane un-deferred (SMS/iMessage channel lane)
 
 Date closed: 2026-06-12.
 
-**Decision.** MessageBee moves from "deferred beyond notification egress" to an
+**Decision.** Message Lane moves from "deferred beyond notification egress" to an
 **active embedded channel lane** — the top channel priority for the autonomous
 business operator, because SMS/iMessage is the founder's control surface
 (approvals, `needs_input` replies, content sign-off by text). No standalone
 runtime and no new HTTP brand service: it runs **inside the daemon**, like the
-WebBee/BrowserBee/DesktopBee lanes (Q7-B pattern).
+Browser Lane and Desktop Lane capabilities (Q7-B pattern).
 
 **Mechanism (self-contained — no external `imessage` CLI).**
 - **Read:** poll `~/Library/Messages/chat.db` directly via better-sqlite3
   (read-only), high-water-marked by `message.ROWID`. Requires the daemon to hold
   **Full Disk Access** (a new optional onboarding step + System Settings
-  deep-link, mirroring the DesktopBee TCC pattern).
+  deep-link, mirroring the Desktop Lane TCC pattern).
 - **Send:** `osascript` AppleScript `tell application "Messages" … send` (built
   into macOS; recipient + text passed as `on run` argv to avoid escaping).
 - **Routing:** inbound from an **allowlisted** identity (`message_identities`)
@@ -100,14 +100,14 @@ non-allowlisted sender cannot trigger execution.
 
 ---
 
-## Q9 — MailBee un-deferred (email watch + trust-gated drafting)
+## Q9 — Mail Lane un-deferred (email watch + trust-gated drafting)
 
 Date closed: 2026-06-12.
 
-**Decision.** MailBee becomes an **active embedded channel lane** (the founder's
+**Decision.** Mail Lane becomes an **active embedded channel lane** (the founder's
 inbox, watched and triaged). Self-contained via **Apple Mail (osascript)** — no
 IMAP/SMTP creds, no OAuth; it reads/sends through accounts Mail.app already holds
-(Gmail + Outlook both work). Same daemon-embedded pattern as MessageBee (Q8).
+(Gmail + Outlook both work). Same daemon-embedded pattern as Message Lane (Q8).
 
 **The safety story (ported from Hive 1, the highest-value reusable asset).**
 Every inbound email is **trust-classified** before anything acts on it
@@ -120,7 +120,7 @@ gated to `trusted` senders; everything else drafts-for-approval.
 
 **Mechanism.** Read recent inbox messages via `osascript` (high-water by Mail
 message id), trust-classify, create a task (`source: "mailbee"`) carrying the
-trust assessment; the agent drafts a reply; approval (e.g. via MessageBee text,
+trust assessment; the agent drafts a reply; approval (e.g. via Message Lane text,
 W1.3) sends it. Allowlist + "trusted domains" live in `message_identities` /
 config (channel `email`). State in the v5 `message_channels`/`message_identities`
 tables.
@@ -132,11 +132,11 @@ Scope wall + COMPONENT-MAP amended. **Provers:** `src/lib/mailbee/*.test.ts`
 
 ---
 
-## Q10 — TermBee becomes an owned embedded lane
+## Q10 — Terminal Lane becomes an owned embedded lane
 
 Date closed: 2026-06-12.
 
-**Decision.** TermBee is no longer "Canopy provider" — it's a **HiveMatrix-owned
+**Decision.** Terminal Lane is no longer "Canopy provider" — it's a **HiveMatrix-owned
 embedded capability lane**: persistent terminal sessions the agent drives across
 turns. Self-contained — **real shells managed in-process** (no node-pty native
 addon, no tmux dependency); a per-command completion marker reads each command's
@@ -144,7 +144,7 @@ combined output + exit code back off the shared stdout stream. State (cwd, env,
 shell vars) persists between commands like a real terminal.
 
 **Availability: every connectivity mode** (cloud-ok / local-only / offline) —
-TermBee is the offline workhorse, so it's added to the ConnectivityPolicy matrix
+Terminal Lane is the offline workhorse, so it's added to the ConnectivityPolicy matrix
 as always-available.
 
 **Code:** `src/lib/termbee/` (contracts, session manager). Exposed to the agent
@@ -154,7 +154,7 @@ catalog + COMPONENT-MAP updated. **Provers:** `src/lib/termbee/*.test.ts`
 (marker parsing + a real multi-step session: cd persists, command output across
 turns, runs offline).
 
-**Update (2026-06-23).** TermBee remains the HiveMatrix terminal contract, but
+**Update (2026-06-23).** Terminal Lane remains the HiveMatrix terminal contract, but
 Canopy is now the preferred provider when its agent bridge is available. The
 direct in-process shell manager remains as a local fallback for local work. This
 keeps the `termbee_*` tool contract stable while moving credential/profile-aware
@@ -163,11 +163,11 @@ agent audit/command logs.
 
 ---
 
-## Q11 — TraderBee un-deferred (market-data watch + alerts) + env-var key pattern
+## Q11 — Market Insight Lane un-deferred (market-data watch + alerts) + env-var key pattern
 
 Date closed: 2026-06-14.
 
-**Decision A — TraderBee as a market-insight lane. ANALYSIS & ALERTS ONLY; it
+**Decision A — Market Insight Lane. ANALYSIS & ALERTS ONLY; it
 NEVER places trades, submits orders, or moves money.** Reads quotes from
 **Alpaca's DATA API only** (`data.alpaca.markets`; the trading API is never
 called). A watchlist + alert rules (above / below / pct_move) are evaluated on a
@@ -308,11 +308,11 @@ into an HTML brain doc with thumbnail + link, and notify.
 Data API (Google removed it). Decision: operator saves videos to a normal
 private/unlisted playlist; the watcher polls THAT via `playlistItems.list`. (The
 alternative — browser-scraping WL — was rejected: fragile + depends on the weak
-Codex/DesktopBee browser-auth path. COMPONENT-MAP's "TubeBee → BrowserBee recipe"
+Codex/Desktop Lane browser-auth path. COMPONENT-MAP's older YouTube-import recipe
 note is superseded for this case by the cleaner API path.)
 
-**Shape (scope-wall respected — no "TubeBee" brand).** Self-contained
-`src/lib/youtube/` module + a daemon poll loop (mirrors the MessageBee poller
+**Shape (scope-wall respected — no standalone YouTube-import brand).** Self-contained
+`src/lib/youtube/` module + a daemon poll loop (mirrors the Message Lane poller
 pattern), self-gated on config. Deterministic API poll + HTML render; the LLM only
 writes the summary text (a spawned `source:"youtube"` task), then a deterministic
 step renders + writes the doc + notifies once. First run seeds (marks existing
@@ -342,8 +342,8 @@ best-effort (scrapes captionTracks) and degrades to description-based summary.
    on first tick then pushes each newly-failed task to the founder's channels
    (set reassigned each tick → auto-prune/bound). Closes the 24×7 blind spot
    where a failed task/directive went unnoticed.
-3. **BrowserBee health endpoint.** `GET /browserbee/health` surfaces
-   `buildBrowserBeeHealthSnapshot` (codex auth mode, desktop-fallback enabled,
+3. **Browser Lane health endpoint.** `GET /browserbee/health` surfaces
+   the Browser Lane health snapshot (codex auth mode, desktop-fallback enabled,
    effective backing, job counts) so a refused LinkedIn/browser job explains
    itself instead of failing opaquely.
 
@@ -358,7 +358,7 @@ Verified the whole session's work holds together and surfaced the new signals:
 - **Failure-escalation noise filter:** `notifyFailures` now skips internal
   directive phase tasks (planner/reviewer/retrospective churn) — real work
   failures still escalate.
-- **loopHealth surfaced** in the ManagerBee control-plane report
+- **loopHealth surfaced** in the Review Lane control-plane report
   (`report.ts` → `selfImprovement`), so the self-improvement signal rides the
   heartbeat the operator already watches (console/iOS) instead of needing a
   separate poll. (eslint not installed locally — lint not run; not a regression.)
@@ -458,19 +458,19 @@ the scenarios are compositions of existing capabilities (channel Bees + Directiv
 + Content + Approval + Brain) plus this session's adds (outbound send, brain_search,
 embeddings, skills, YouTube watcher, failure escalation). **Genuine gaps (each needs
 a decision, not a guess):**
-1. **TraderBee market watch/alerts** (guide §M, "Proposed, not yet built") — analysis
+1. **Market Insight Lane market watch/alerts** (guide §M, "Proposed, not yet built") — analysis
    already works via the trader profile; live watch needs a quotes data source +
    watchlist + alert directive, and is a **new Bee brand → scope-wall proposal**.
 2. **Content publishing execution** — X/Twitter has no posting path (needs X API or
-   BrowserBee recipe); newsletter/email send is now possible via MailBee (this
-   session) but the content→MailBee send step isn't wired (in-scope follow-on).
+   Browser Lane workflow); newsletter/email send is now possible via Mail Lane (this
+   session) but the content→Mail Lane send step isn't wired (in-scope follow-on).
 3. **On-demand "digest this URL"** (#43 article path) — composable via a task today;
    a thin `POST /digest` would make it one-tap (low priority, no external dep).
 
 ## BUILD (2026-06-14) — on-demand digest (scenario #43, the article path)
 
 Built the one decision-free gap: `src/lib/digest/` + `POST /digest {url, note?}`
-(creates a `source:"digest"` task that fetches the page via WebBee/BrowserBee,
+(creates a `source:"digest"` task that fetches the page via Browser Lane,
 summarizes, and writes a markdown brain doc with the source link) + a `digest_url`
 bee tool (web-gated) so agents can digest links they encounter (e.g. in an email).
 Pairs with the YouTube watcher for "save anything for review." Provers:
@@ -508,7 +508,7 @@ set/unset per key (`src/lib/config/secrets.ts`).
 to drive skill launch / import / MCP status (the Next.js console — separate from
 this daemon work; all the endpoints above now back it). Owned-process MCP
 supervision (launchagent restart) for HTTP MCP servers HiveMatrix runs itself.
-Newsletter *send* still needs a recipient list + content→MailBee wiring.
+Newsletter *send* still needs a recipient list + content→Mail Lane wiring.
 
 ## BUILD (2026-06-14) — ADO feature flag + skill launcher UI
 
@@ -637,12 +637,12 @@ diagnostics/proofs/health/guard scripts into trusted bash script skills in
 Build sub-steps (build-app/dmg/sign/notary) left as release-internal, not standalone.
 
 **Problem.** We have a *model* router (role → tier) but no *capability* router
-(intent → Bee). Channel Bees are wired as inbound pollers + post-exit side-effects, not
+(intent → lane). Channel lanes are wired as inbound pollers + post-exit side-effects, not
 as outbound tools. A spawned agent has `bash/read/write/edit/search/list/create_task` +
 `webbee_search/browserbee_run/desktopbee_action/termbee_*` and **no** `mailbee_send`,
 `messagebee_send`, or LinkedIn action. So "send an email" reaches no Bee — the agent
 improvises with bash/osascript/WebFetch. Same root cause behind the LinkedIn failure
-(BrowserBee depends on Codex auth / DesktopBee fallback) and "how does it use brain docs"
+(Browser Lane depends on Codex auth / Desktop Lane fallback) and "how does it use brain docs"
 (no retrieval — memory bundle is pinned paths only).
 
 **Proposed scope (no new Bee brand — scope wall respected).**
@@ -662,9 +662,9 @@ future: embed Hermes as an alternate agent runtime behind the daemon (it can run
 Code as a subagent) to get its self-improvement loop + browser + RAG without losing our
 safety/offline/updater shell.
 
-**Provers (when scheduled).** "send email to X" routes to MailBee draft/send under trust
+**Provers (when scheduled).** "send email to X" routes to Mail Lane draft/send under trust
 gate (not bash); `brain_search` returns a doc not pinned in the directive; LinkedIn action
-path reports a clear actionable error when Codex/DesktopBee unavailable instead of silent
+path reports a clear actionable error when Codex/Desktop Lane unavailable instead of silent
 fallback.
 
 ## Console UI/UX — collapsible right panel, Setup auto-collapse, ops grouping (2026-06-14)
@@ -814,26 +814,26 @@ separator (`buildCodexExecArgs` extracted + unit-tested in codex-agent.ts).
 **Verification.** tsc clean, scope-wall 0, 616/616 tests (codex args + new console
 coverage), daemon bundles.
 
-## BrowserBee: Codex Computer Use unavailable on ChatGPT-subscription accounts (2026-06-14)
+## Browser Lane: Codex Computer Use unavailable on ChatGPT-subscription accounts (2026-06-14)
 
 **Investigation (LinkedIn "friend requests" task did nothing).** The parent agent created
-a BrowserBee child task (model `codex:gpt-5.4-computer-use`) and reported "browser running,
+a Browser Lane child task (model `codex:gpt-5.4-computer-use`) and reported "browser running,
 I'll be notified." The child FAILED in ~10s with HTTP 400:
 `"The 'gpt-5.4-computer-use' model is not supported when using Codex with a ChatGPT account."`
-So BrowserBee's default "Codex Computer Use" backing (which is just `codex exec -m
+So Browser Lane's default "Codex Computer Use" backing (which is just `codex exec -m
 gpt-5.4-computer-use` — no real browser harness) cannot run on a subscription Codex login.
 The failure was silent; the parent's "you'll be notified" was false (no such notification).
 (Confirmed the `--` arg fix works — the routing prompt showed as the user message, not an
 arg error. Secondary: browserbee tasks got `projectPath: /`.)
 
-**Fix.** `resolveBrowserBeeBacking` now treats ONLY `api-key` Codex auth as usable for the
+**Fix.** The Browser Lane backing resolver now treats ONLY `api-key` Codex auth as usable for the
 computer-use backing (was subscription|api-key). A subscription account routes to the
-DesktopBee fallback when enabled, else **refuses with a clear, actionable reason** instead
+Desktop Lane fallback when enabled, else **refuses with a clear, actionable reason** instead
 of creating a doomed task that 400s silently. The `browserbee_run` success message no longer
 implies a push notification. Tests updated.
 
 **Still open (operator choice):** to make browser tasks actually work on a subscription
-account, enable the DesktopBee fallback (`browserbee.desktopFallback=true`) so the local
+account, enable the Desktop Lane fallback (`browserbee.desktopFallback=true`) so the local
 model drives a real desktop browser via AppleScript/Accessibility — lower reliability, but
 the only working path without an OpenAI API key.
 
@@ -857,12 +857,12 @@ Verification: tsc clean, scope-wall 0, 618/618 tests, daemon bundles.
 
 ## Fix false "unhealthy / fetch failed" on embedded bees (2026-06-14)
 
-ManagerBee, BrainBee, BrowserBee showed "unhealthy · fetch failed" though they run fine
+Review Lane, Memory Lane, and Browser Lane showed "unhealthy · fetch failed" though they run fine
 (embedded in the daemon). Three-part bug in `service-manager` embedded health probe:
 1. **Wrong port** — built the URL with `process.env.PORT || "4000"`; the daemon listens on
    `HIVEMATRIX_PORT` (3747), so it hit :4000 (nothing there) → "fetch failed". Now uses
    `HIVEMATRIX_PORT ?? PORT ?? 3747`.
-2. **Wrong BrowserBee path** — probed `/api/browserbee/health` (404); the real route is
+2. **Wrong Browser Lane path** — probed `/api/browserbee/health` (404); the real route is
    `/browserbee/health`. Fixed (managerbee/brainbee `/api/*/health` aliases are correct).
 3. **No auth on the loopback probe** — those routes are token-gated (401 without it), but
    `checkHealth` sent no header. Now passes the daemon shared secret (`readToken`) on the
@@ -880,7 +880,7 @@ listed but unused.) Fixes:
   (embedded) descriptors.
 - New daemon route `GET /desktopbee/health` pings the helper via probeDesktopBeeHelper →
   200 when up / 503 when unreachable; mapped `embeddedHealthRoute("desktopbee")` to it, so
-  the Bees view shows DesktopBee's real (green) health.
+  the lane status view shows Desktop Lane's real (green) health.
 
 Verification: tsc clean, scope-wall 0, 620/620 tests, daemon bundles.
 
@@ -925,7 +925,7 @@ replies (extends the Q9 MailBee attachment pattern to MessageBee `send file`).
 **Decision B — Video factory is a no-brand capability.** The script→video pipeline
 (Remotion + ffmpeg + Playwright screen-capture, cloned-voice voiceover) is a
 capability/workflow, **not** a new public Bee brand — same posture as the
-TubeBee→BrowserBee-recipe decision. Extends `content/pipeline.ts` + the `marketing`
+YouTube-import-to-Browser-Lane recipe decision. Extends `content/pipeline.ts` + the `marketing`
 role. The AI avatar is **demoted to an optional component** (HeyGen, used sparingly
 for hero presenter shots only) per the 2026 trust-penalty evidence; default is
 faceless screen + cloned voice. No `VideoBee`/`AvatarBee` brand is created.
