@@ -187,8 +187,10 @@ current connectivity mode.</p>
   running with no subscription.
 </div>
 <div class="callout info">
-  <strong>iMessage note.</strong> Sending iMessage <em>into</em> HiveMatrix is not available — Message Lane inbound is deferred in
-  this generation (the old standalone Hive 1 message service has been removed). Outbound notifications only.
+  <strong>Message Lane (SMS/iMessage).</strong> Two-way. Turn on the iMessage channel (Settings → Message Lane) and grant
+  <strong>Full Disk Access</strong> so the in-daemon poller can read Messages <code>chat.db</code>: inbound texts from
+  <em>allowlisted</em> senders route to a reply or a new task, and the agent sends back out via <code>message_send</code>
+  (allowlisted recipients only). Non-allowlisted handles are ignored inbound and refused outbound.
 </div>
 
 <h2 id="connectivity"><span class="n">4</span>Connectivity modes</h2>
@@ -291,8 +293,8 @@ private (local-only) or to test offline behavior.</p>
 </div>
 
 <div class="footer">
-  HiveMatrix user guide · capabilities reflect daemon build 616 (2026-06-12). Models, capability lanes, and the Cloud-only run mode are
-  live; Memory Lane is a toggleable launch-agent lane; Manager Lane is planned. iMessage ingestion (Message Lane) is deferred.
+  HiveMatrix user guide · refreshed 2026-06-25 for lane-native naming. Models, capability lanes, and the Cloud-only run mode are
+  live; Memory Lane is a toggleable launch-agent lane; Manager Lane is planned. Message Lane is two-way (SMS/iMessage in and out, gated on the channel + Full Disk Access).
 </div>
 
 </div>
