@@ -72,6 +72,25 @@ function legacyPlaybooksDir(brainRootDir?: string): string {
   return join(getBrainRootDir(brainRootDir) ?? defaultBrainRootDir(), "hive", "playbooks");
 }
 
+function laneSlugForCompatibilityId(id: string): string {
+  const slug = slugify(id);
+  const aliases: Record<string, string> = {
+    authbee: "browser-session",
+    brainbee: "memory",
+    browserbee: "browser",
+    computerbee: "desktop",
+    cronbee: "scheduler",
+    desktopbee: "desktop",
+    inventorbee: "capability-design",
+    mailbee: "mail",
+    managerbee: "manager",
+    messagebee: "message",
+    termbee: "terminal",
+    webbee: "browser",
+  };
+  return aliases[slug] ?? slug.replace(/-?bee$/, "");
+}
+
 async function boundedRead(path: string, maxChars: number, mode: ReadMode = "head"): Promise<string> {
   const raw = await readWithTimeout(path);
   if (raw == null) return ""; // missing, unreadable, or timed out (cloud stall)
@@ -102,6 +121,21 @@ function readLegacyAccessLedger(project: string, brainRootDir: string, maxChars:
   );
 }
 
+async function readLanePlaybook(projectDir: string, id: string, maxChars: number): Promise<string> {
+  const legacyId = slugify(id);
+  const lane = laneSlugForCompatibilityId(id);
+  const primary = await boundedRead(join(projectDir, "lanes", `${lane}.md`), maxChars, "head");
+  if (primary) return primary;
+  return boundedRead(join(projectDir, "bees", `${legacyId}.md`), maxChars, "head");
+}
+
+async function readDomainPlaybook(projectDir: string, domain: string, maxChars: number): Promise<string> {
+  const slug = slugify(domain);
+  const primary = await boundedRead(join(projectDir, "lanes", "domains", `${slug}.md`), maxChars, "head");
+  if (primary) return primary;
+  return boundedRead(join(projectDir, "bees", "domains", `${slug}.md`), maxChars, "head");
+}
+
 export async function buildBrainMemoryBundle(options: BrainMemoryBundleOptions = {}): Promise<string> {
   const brainRootDir = getBrainRootDir(options.brainRootDir);
   if (!brainRootDir) return "";
@@ -123,14 +157,14 @@ export async function buildBrainMemoryBundle(options: BrainMemoryBundleOptions =
     sections.push(section("Known Issues", await boundedRead(join(projectDir, "known-issues.md"), sectionMaxChars, "head")));
     if (bee) {
       sections.push(
-        section(`Bee Playbook (${bee})`, await boundedRead(join(projectDir, "bees", `${bee}.md`), sectionMaxChars, "head"))
+        section(`Lane Playbook (${laneSlugForCompatibilityId(bee)})`, await readLanePlaybook(projectDir, bee, sectionMaxChars))
       );
     }
     if (domain) {
       sections.push(
         section(
           `Domain Playbook (${domain})`,
-          await boundedRead(join(projectDir, "bees", "domains", `${domain}.md`), sectionMaxChars, "head")
+          await readDomainPlaybook(projectDir, domain, sectionMaxChars)
         )
       );
     }
@@ -228,10 +262,10 @@ Hive is the control plane for capability lanes and focused workers.
 - Keep Hive responsible for routing, approvals, policy, capability health, artifacts, traces, progress visibility, and memory assembly.
 - Keep workers narrow. A worker can own transport or capability execution, but it should not grow its own orchestration system.
 - Treat Browser Lane as the single browser/web capability surface.
-- Treat AuthBee as an internal session plane, not a public Bee brand.
+- Treat authentication and session state as an internal plane, not a public capability brand.
 - Treat video/channel workflows as layers that consume shared Hive capabilities.
 - Prefer durable updates to \`${root}\` over hidden session memory or repo-local notes when recording decisions.
-- Treat the worker contract in \`src/lib/central\` as the first canonical Bee protocol.
+- Treat the worker contract in \`src/lib/central\` as the first canonical capability-worker protocol.
 `,
     },
     {
@@ -250,9 +284,9 @@ Hive is the control plane for capability lanes and focused workers.
 
 - Canonical durable Hive memory belongs under \`${root}/projects/hive\`.
 - Legacy role and project playbooks remain readable until their contents are migrated into the canonical structure.
-- ManagerBee is the first Bee that should consume the shared brain-memory bundle, because it coordinates strategy, planning, review, and task execution.
+- Manager Lane is the first lane that should consume the shared brain-memory bundle, because it coordinates strategy, planning, review, and task execution.
 - Video workflows should consume shared browser, web, and brain capabilities instead of owning a separate runtime story.
-- TermBee is the terminal capability contract; Canopy is the preferred provider behind it, with HiveMatrix's direct local shell as fallback.
+- Terminal Lane is the terminal capability contract; Canopy is the preferred provider behind it, with HiveMatrix's direct local shell as fallback.
 `,
     },
     {
@@ -260,7 +294,7 @@ Hive is the control plane for capability lanes and focused workers.
       content: `# Hive Known Issues
 
 - Brain centralization is in transition: some prompt context still arrives through repo-local instructions or CLI-native memory surfaces.
-- Most historical Bee guidance still exists as specs in \`${root}/hive/*.md\`, not yet as compact Bee playbooks under \`${root}/projects/hive/bees/\`.
+- Most historical capability guidance still exists as specs in \`${root}/hive/*.md\`, not yet as compact lane playbooks under \`${root}/projects/hive/lanes/\`.
 - Hive mission recap coverage for the \`hive\` project itself is still sparse, so early recap retrieval may return no excerpts.
 `,
     },
@@ -270,21 +304,21 @@ Hive is the control plane for capability lanes and focused workers.
 
 Lanes are narrow capability surfaces around Hive's control plane. Start with the first worker set:
 
-- MessageBee: message ingress and delivery semantics
-- MailBee: email ingress, drafting, and trust-aware normalization
+- Message Lane: message ingress and delivery semantics
+- Mail Lane: email ingress, drafting, and trust-aware normalization
 - Browser Lane: live read-only retrieval and authenticated/rendered browser workflows
-- ManagerBee: planning, orchestration, and execution coordination within Hive
-- BrainBee: memory maintenance, recap distillation, and playbook hygiene
-- InventorBee: governed capability invention for new Bees, MCPs, skills, and shared contracts
+- Manager Lane: planning, orchestration, and execution coordination within Hive
+- Memory Lane: memory maintenance, recap distillation, and playbook hygiene
+- Capability Design Lane: governed capability invention for new lanes, MCPs, skills, and shared contracts
 `,
     },
     {
-      path: "bees/managerbee.md",
-      content: `# ManagerBee
+      path: "lanes/manager.md",
+      content: `# Manager Lane
 
 ## Role
 
-ManagerBee coordinates tasks that stay inside Hive's control plane: planning, routing, worker assignment, review, and follow-through.
+Manager Lane coordinates tasks that stay inside Hive's control plane: planning, routing, worker assignment, review, and follow-through.
 
 ## Boundaries
 
@@ -304,39 +338,39 @@ ManagerBee coordinates tasks that stay inside Hive's control plane: planning, ro
 `,
     },
     {
-      path: "bees/brainbee.md",
-      content: `# BrainBee
+      path: "lanes/memory.md",
+      content: `# Memory Lane
 
 ## What It Is For
 
-BrainBee is Hive's dedicated durable-memory worker. It curates the canonical brain root at \`${root}\`, keeps the Hive scaffold in place, and prepares bounded memory bundles for Hive and other Bees.
+Memory Lane is Hive's dedicated durable-memory worker. It curates the canonical brain root at \`${root}\`, keeps the Hive scaffold in place, and prepares bounded memory bundles for Hive and other lanes.
 
 ## What It Should Do
 
 - Maintain the canonical durable memory structure under \`${root}\`.
-- Compile retrospectives into stable playbooks, decisions, access ledgers, and Bee notes.
+- Compile retrospectives into stable playbooks, decisions, access ledgers, and lane notes.
 - Detect stale, duplicated, or contradictory memory and surface cleanup targets.
-- Prepare bounded retrieval bundles for Hive planning, review, and Bee jobs.
+- Prepare bounded retrieval bundles for Hive planning, review, and lane jobs.
 
 ## How To Use It
 
-- Point Hive's Memory setting at the desired brain root. BrainBee should follow that setting automatically.
-- Use BrainBee jobs for scaffold repair, memory-root inspection, and bundle previews.
-- Treat BrainBee as the curator of durable memory, not as a general-purpose executor or planner.
+- Point Hive's Memory setting at the desired brain root. Memory Lane should follow that setting automatically.
+- Use Memory Lane jobs for scaffold repair, memory-root inspection, and bundle previews.
+- Treat Memory Lane as the curator of durable memory, not as a general-purpose executor or planner.
 `,
     },
     {
-      path: "bees/inventorbee.md",
-      content: `# InventorBee
+      path: "lanes/capability-design.md",
+      content: `# Capability Design Lane
 
-- Detect repeated capability gaps and decide whether Hive needs a new skill, MCP, Bee, or shared capability contract.
+- Detect repeated capability gaps and decide whether Hive needs a new skill, MCP, lane, or shared capability contract.
 - Prefer governed proposals, scaffolds, tests, and evaluation seeds before proposing any live runtime mutation.
 - Auto-apply only low-risk procedural additions; require review for auth, voice, browser, desktop, routing, or cross-repo runtime changes.
 `,
     },
     {
-      path: "bees/cronbee.md",
-      content: `# CronBee
+      path: "lanes/scheduler.md",
+      content: `# Scheduler Lane
 
 - Own schedule management, recurring triggers, and watcher-style task factories.
 - Create work through Hive's scheduler surfaces without owning execution outcomes.
@@ -344,8 +378,8 @@ BrainBee is Hive's dedicated durable-memory worker. It curates the canonical bra
 `,
     },
     {
-      path: "bees/computerbee.md",
-      content: `# ComputerBee
+      path: "lanes/desktop.md",
+      content: `# Desktop Lane
 
 - Own approval-heavy native desktop automation for macOS app flows, dialogs, installers, and settings work.
 - Prefer Browser Lane or direct APIs when they are safer and more stable than desktop control.
@@ -353,8 +387,8 @@ BrainBee is Hive's dedicated durable-memory worker. It curates the canonical bra
 `,
     },
     {
-      path: "bees/termbee.md",
-      content: `# TermBee
+      path: "lanes/terminal.md",
+      content: `# Terminal Lane
 
 - Define Hive's terminal, repo, and session contract.
 - Treat Canopy as the preferred provider behind this capability surface; direct local shell is fallback only.

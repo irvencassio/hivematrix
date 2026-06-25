@@ -14,15 +14,26 @@ test("ensureHiveBrainScaffold seeds the canonical Hive brain structure", async (
 
   const created = await ensureHiveBrainScaffold(brainRoot);
   const agentBrief = readFileSync(join(hiveProjectBrainDir(brainRoot), "agent-brief.md"), "utf-8");
+  const scaffoldText = created
+    .filter((path) => path.endsWith(".md"))
+    .map((path) => readFileSync(path, "utf-8"))
+    .join("\n\n");
 
   assert.ok(created.some((path) => path.endsWith("/agent-brief.md")));
-  assert.ok(created.some((path) => path.endsWith("/bees/managerbee.md")));
-  assert.ok(created.some((path) => path.endsWith("/bees/inventorbee.md")));
-  assert.ok(created.some((path) => path.endsWith("/bees/cronbee.md")));
-  // authbee, tubebee, voicebee removed from HiveMatrix v1 scaffold
-  assert.ok(!created.some((path) => path.endsWith("/bees/authbee.md")));
-  assert.ok(!created.some((path) => path.endsWith("/bees/tubebee.md")));
-  assert.ok(!created.some((path) => path.endsWith("/bees/voicebee.md")));
+  assert.ok(created.some((path) => path.endsWith("/lanes/manager.md")));
+  assert.ok(created.some((path) => path.endsWith("/lanes/capability-design.md")));
+  assert.ok(created.some((path) => path.endsWith("/lanes/scheduler.md")));
+  assert.ok(created.some((path) => path.endsWith("/lanes/desktop.md")));
+  assert.ok(created.some((path) => path.endsWith("/lanes/terminal.md")));
+  assert.ok(!created.some((path) => path.includes("/bees/")));
+  assert.match(scaffoldText, /Message Lane/);
+  assert.match(scaffoldText, /Mail Lane/);
+  assert.match(scaffoldText, /Manager Lane/);
+  assert.match(scaffoldText, /Memory Lane/);
+  assert.match(scaffoldText, /Desktop Lane/);
+  assert.match(scaffoldText, /Terminal Lane/);
+  assert.match(scaffoldText, /Capability Design Lane/);
+  assert.doesNotMatch(scaffoldText, /AuthBee|ManagerBee|BrainBee|TermBee|MessageBee|MailBee|InventorBee|new Bees|other Bees|Bee Playbook/);
   assert.match(agentBrief, new RegExp(escapeRegExp(brainRoot)));
 });
 
@@ -96,7 +107,8 @@ Worker contract landed cleanly.
   assert.match(bundle, /Brain Doc Policy/);
   assert.match(bundle, new RegExp(escapeRegExp(brainRoot)));
   assert.match(bundle, /Agent Brief/);
-  assert.match(bundle, /Bee Playbook \(managerbee\)/);
+  assert.match(bundle, /Lane Playbook \(manager\)/);
+  assert.doesNotMatch(bundle, /Bee Playbook|ManagerBee/);
   assert.match(bundle, /Known Issues/);
   // Directive reflections replace mission recaps in HiveMatrix — recap content not included
 });
