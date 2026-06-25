@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.84", date: "2026-06-25", note: "Bee-to-Lane rename: lane-native tools, services, config, central protocol, and refreshed guides" },
   { version: "0.1.83", date: "2026-06-24", note: "video: Approve renders via HeyGen Video Agent by default (slides + annotations + B-roll); failed renders are re-approvable; accuracy guard against invented stats" },
   { version: "0.1.82", date: "2026-06-24", note: "video: render failures (e.g. HeyGen out of credit) now surface on the review task instead of silently closing — retry or cancel" },
   { version: "0.1.81", date: "2026-06-24", note: "video: editing a script now saves & stays in review (approve renders separately) + clear review controls; 'create an AI-news video' routes straight to draft/review" },
