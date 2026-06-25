@@ -27,7 +27,7 @@ function status(overrides: Partial<BeeServiceStatus> & Pick<BeeServiceStatus, "k
   };
 }
 
-test("lane statuses collapse BrowserBee and WebBee into one Browser Lane", () => {
+test("lane statuses collapse browser read and workflow capabilities into one Browser Lane", () => {
   const lanes = shapeLaneServiceStatuses([
     status({ kind: "webbee", name: "Browser Lane Read", summary: "read/search", healthy: true }),
     status({ kind: "browserbee", name: "Browser Lane Workflow", summary: "workflow", healthy: false, statusDetail: "needs auth" }),

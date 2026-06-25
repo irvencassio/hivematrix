@@ -10,7 +10,7 @@
  *   execute      — bulk coding, file ops, extraction → local-secondary always (cheapest local)
  *   code-critical — final implementation, UI → frontier while headroom exists; else queue + local
  *   image        — image generation → Nano Banana in cloud-ok; mflux in local/offline
- *   cheap-web    — WebBee summarization → local-secondary always
+ *   cheap-web    — Browser Lane summarization → local-secondary always
  *
  * Frontier-review debt: when code-critical runs on local due to mode, a review
  * task is enqueued so it gets a frontier pass when cloud-ok is restored.

@@ -70,7 +70,7 @@ test("scenario 2: usage exhaustion → local-only — frontier blocked, local av
   assert.equal(caps.frontier.available, false);
   assert.equal(caps.local.available, true);
   assert.equal(caps.desktopbee.available, true);
-  assert.equal(caps.webbee.available, false, "WebBee disabled in local-only");
+  assert.equal(caps.webbee.available, false, "Browser Lane read capability disabled in local-only");
   assert.equal(caps.image.available, false, "Image requires cloud");
 
   // "Queued frontier work stays pending" — code-critical accrues debt
