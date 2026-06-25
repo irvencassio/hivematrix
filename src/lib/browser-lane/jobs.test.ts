@@ -166,7 +166,7 @@ test("buildBrowserBeeDesktopFallbackDescription drives the browser via Desktop L
   });
 
   assert.match(description, /Desktop fallback backing/);
-  assert.match(description, /desktopbee_action tool/);
+  assert.match(description, /desktop_action tool/);
   assert.match(description, /no Codex Computer Use engine/);
   assert.match(description, /Desktop Lane fallback/);
   assert.doesNotMatch(description, /DesktopBee/);

@@ -1,8 +1,8 @@
 /**
  * Outbound-channel bridge for the CLI executors (Claude Code, Codex).
  *
- * The local/generic (Qwen) agent gets first-class `mailbee_send` / `mailbee_draft`
- * / `messagebee_send` function tools (see bee-tools.ts). The Claude Code and Codex
+ * The local/generic (Qwen) agent gets first-class `mail_send` / `mail_draft`
+ * / `message_send` function tools (see bee-tools.ts). The Claude Code and Codex
  * harnesses run their OWN toolset and never see those — which is exactly why an
  * "send this email" task historically got improvised with osascript instead of
  * going through the Mail Lane.
@@ -153,7 +153,7 @@ export function beeToolsRoutingPrompt(port = daemonPort()): string {
     '- Fresh web search/answer with citations → Browser Lane args {"mode":"search","query":"..."}',
     '- Read a specific public URL → Browser Lane args {"mode":"read","url":"https://..."}',
     '- Logged-in or multi-step browser workflow (e.g. LinkedIn) → Browser Lane args {"mode":"workflow","objective":"...","startUrl":"https://...","requiresLogin":true}',
-    `Other lane tools still use /bee/<tool>, e.g. Desktop Lane control → http://127.0.0.1:${port}/bee/desktopbee_action and Terminal Lane command → http://127.0.0.1:${port}/bee/termbee_run.`,
+    `Other lane tools still use /bee/<tool>, e.g. Desktop Lane control → http://127.0.0.1:${port}/bee/desktop_action and Terminal Lane command → http://127.0.0.1:${port}/bee/terminal_run.`,
     '- Terminal Lane command is Canopy-backed when Canopy is running, with local fallback only for local work. Do NOT pass passwords or secrets in commands or args; use configured profiles/Keychain-backed tools instead.',
     '- Find a symbol\'s definition + EVERY usage (deterministic) → /bee/code_graph args {"symbol":"...","path":"/repo"}',
     'Response is JSON {"ok","result"}; relay "result". An unavailable lane (wrong connectivity mode) returns an actionable error — surface it, don\'t work around it. For complex args, write the JSON to a temp file and curl -d @/tmp/args.json.',

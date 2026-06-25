@@ -29,36 +29,39 @@ test("isBeeTool recognizes active lane tools and rejects removed browser aliases
   assert.equal(isBeeTool("read_file"), false);
 });
 
-test("resolveBeeToolName maps lane-native aliases to their canonical handler names", () => {
-  assert.equal(resolveBeeToolName("desktop_action"), "desktopbee_action");
-  assert.equal(resolveBeeToolName("terminal_session"), "termbee_session");
-  assert.equal(resolveBeeToolName("terminal_run"), "termbee_run");
-  assert.equal(resolveBeeToolName("mail_send"), "mailbee_send");
-  assert.equal(resolveBeeToolName("mail_draft"), "mailbee_draft");
-  assert.equal(resolveBeeToolName("message_send"), "messagebee_send");
-  // Canonical names and unknowns resolve to themselves.
-  assert.equal(resolveBeeToolName("mailbee_send"), "mailbee_send");
+test("resolveBeeToolName maps legacy bee ids to their lane-native handler names", () => {
+  assert.equal(resolveBeeToolName("desktopbee_action"), "desktop_action");
+  assert.equal(resolveBeeToolName("termbee_session"), "terminal_session");
+  assert.equal(resolveBeeToolName("termbee_run"), "terminal_run");
+  assert.equal(resolveBeeToolName("mailbee_send"), "mail_send");
+  assert.equal(resolveBeeToolName("mailbee_draft"), "mail_draft");
+  assert.equal(resolveBeeToolName("messagebee_send"), "message_send");
+  // Lane-native (advertised) names and unknowns resolve to themselves.
+  assert.equal(resolveBeeToolName("mail_send"), "mail_send");
   assert.equal(resolveBeeToolName("bash"), "bash");
   // Removed legacy browser ids are not re-introduced as aliases.
   assert.equal(resolveBeeToolName("browserbee_run"), "browserbee_run");
 });
 
-test("isBeeTool accepts lane-native aliases alongside the canonical ids", () => {
+test("isBeeTool accepts both the advertised lane ids and legacy bee aliases", () => {
   assert.equal(isBeeTool("mail_send"), true);
   assert.equal(isBeeTool("message_send"), true);
   assert.equal(isBeeTool("terminal_run"), true);
   assert.equal(isBeeTool("desktop_action"), true);
+  // Legacy bee ids still resolve for older persisted calls.
+  assert.equal(isBeeTool("mailbee_send"), true);
+  assert.equal(isBeeTool("desktopbee_action"), true);
   // Still rejects the removed browser ids and non-lane tools.
   assert.equal(isBeeTool("browserbee_run"), false);
   assert.equal(isBeeTool("bash"), false);
 });
 
-test("executeBeeTool dispatches a lane-native alias to its real handler", async () => {
-  // Empty args reach the mail handler (required-field error) rather than the
-  // "Unknown lane tool" path — proving the alias resolved to mailbee_send. When
-  // the lane is gated off it returns the capability error; neither is the
+test("executeBeeTool dispatches a legacy bee alias to its real handler", async () => {
+  // The legacy id reaches the mail handler (required-field error) rather than
+  // the "Unknown lane tool" path — proving mailbee_send resolved to mail_send.
+  // When the lane is gated off it returns the capability error; neither is the
   // unknown-tool error, so the alias resolution holds regardless of policy.
-  const out = await executeBeeTool("mail_send", {}, { projectPath: "/tmp", project: "p", requestedBy: "t" });
+  const out = await executeBeeTool("mailbee_send", {}, { projectPath: "/tmp", project: "p", requestedBy: "t" });
   assert.doesNotMatch(out, /Unknown lane tool/);
   assert.match(out, /required to send an email|unavailable in the current connectivity mode/);
 });
@@ -73,7 +76,7 @@ test("all bee tools are defined with required schemas", () => {
   }
 });
 
-test("lane tool descriptions use lane names while keeping compatibility tool ids", () => {
+test("lane tools advertise lane-native names and descriptions, not bee brands", () => {
   const prose = BEE_TOOL_DEFINITIONS.map((t) => JSON.stringify({
     description: t.function.description,
     parameters: t.function.parameters,
@@ -87,22 +90,24 @@ test("lane tool descriptions use lane names while keeping compatibility tool ids
   assert.doesNotMatch(prose, /TermBee/);
   assert.doesNotMatch(prose, /MailBee/);
   assert.doesNotMatch(prose, /MessageBee/);
-  assert.ok(BEE_TOOL_DEFINITIONS.some((t) => t.function.name === "desktopbee_action"));
-  assert.ok(BEE_TOOL_DEFINITIONS.some((t) => t.function.name === "termbee_run"));
-  assert.ok(BEE_TOOL_DEFINITIONS.some((t) => t.function.name === "mailbee_send"));
-  assert.ok(BEE_TOOL_DEFINITIONS.some((t) => t.function.name === "messagebee_send"));
+  assert.ok(BEE_TOOL_DEFINITIONS.some((t) => t.function.name === "desktop_action"));
+  assert.ok(BEE_TOOL_DEFINITIONS.some((t) => t.function.name === "terminal_run"));
+  assert.ok(BEE_TOOL_DEFINITIONS.some((t) => t.function.name === "mail_send"));
+  assert.ok(BEE_TOOL_DEFINITIONS.some((t) => t.function.name === "message_send"));
+  // The advertised surface no longer carries bee-branded ids.
+  assert.ok(!BEE_TOOL_DEFINITIONS.some((t) => /bee_|bee$/.test(t.function.name)));
 });
 
 test("Terminal Lane tool descriptions identify Canopy as the preferred provider", () => {
-  const termRun = BEE_TOOL_DEFINITIONS.find((t) => t.function.name === "termbee_run");
-  const termSession = BEE_TOOL_DEFINITIONS.find((t) => t.function.name === "termbee_session");
+  const termRun = BEE_TOOL_DEFINITIONS.find((t) => t.function.name === "terminal_run");
+  const termSession = BEE_TOOL_DEFINITIONS.find((t) => t.function.name === "terminal_session");
   assert.match(termRun?.function.description ?? "", /Canopy-backed/i);
   assert.match(termSession?.function.description ?? "", /Canopy-backed/i);
 });
 
 test("cloud-ok advertises every lane (web, browser, desktop, term, mail, message, brain, skill, digest)", () => {
   assert.deepEqual(names(availableBeeTools(cloud())),
-    ["brain_search", "code_graph", "desktopbee_action", "digest_url", "hivematrix_browser", "mailbee_draft", "mailbee_send", "messagebee_send", "skill_used", "termbee_run", "termbee_session"]);
+    ["brain_search", "code_graph", "desktop_action", "digest_url", "hivematrix_browser", "mail_draft", "mail_send", "message_send", "skill_used", "terminal_run", "terminal_session"]);
 });
 
 test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
@@ -112,18 +117,18 @@ test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
 
 test("local-only drops web lanes but keeps Desktop Lane/Terminal Lane + outbound channels + brain/skill/codegraph", () => {
   assert.deepEqual(names(availableBeeTools(local())),
-    ["brain_search", "code_graph", "desktopbee_action", "mailbee_draft", "mailbee_send", "messagebee_send", "skill_used", "termbee_run", "termbee_session"]);
+    ["brain_search", "code_graph", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "terminal_run", "terminal_session"]);
 });
 
 test("offline keeps the offline workhorses + outbound channels + brain/skill/codegraph (all local)", () => {
   assert.deepEqual(names(availableBeeTools(offline())),
-    ["brain_search", "code_graph", "desktopbee_action", "mailbee_draft", "mailbee_send", "messagebee_send", "skill_used", "termbee_run", "termbee_session"]);
+    ["brain_search", "code_graph", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "terminal_run", "terminal_session"]);
 });
 
 test("capabilityRoutingGuide lists email/message/brain lanes in cloud, drops web lanes offline", () => {
   const cloudGuide = capabilityRoutingGuide(cloud());
-  assert.match(cloudGuide, /mailbee_send/);
-  assert.match(cloudGuide, /messagebee_send/);
+  assert.match(cloudGuide, /mail_send/);
+  assert.match(cloudGuide, /message_send/);
   assert.match(cloudGuide, /brain_search/);
   assert.match(cloudGuide, /hivematrix_browser/);
   assert.doesNotMatch(cloudGuide, /webbee_search/);
@@ -131,7 +136,7 @@ test("capabilityRoutingGuide lists email/message/brain lanes in cloud, drops web
   assert.match(cloudGuide, /do not improvise/i);
 
   const offlineGuide = capabilityRoutingGuide(offline());
-  assert.match(offlineGuide, /mailbee_send/);   // still routable offline
+  assert.match(offlineGuide, /mail_send/);   // still routable offline
   assert.match(offlineGuide, /brain_search/);   // brain is local, still routable
   assert.doesNotMatch(offlineGuide, /hivematrix_browser/); // browser lane gone offline
 });

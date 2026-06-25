@@ -9,8 +9,10 @@
  * a tool whose capability is unavailable in the current mode is neither
  * advertised (see `availableBeeTools`) nor dispatched (see `executeBeeTool`).
  *
- * Scope: Browser Lane is the public/model-facing browser surface. Legacy
- * Legacy browser tool names remain accepted as aliases but are not advertised.
+ * Naming: tools are advertised under lane-native ids (desktop_action,
+ * terminal_run, mail_send, …). Legacy bee-branded ids are still accepted on
+ * dispatch via LANE_TOOL_ALIASES but never advertised; the removed browser ids
+ * (webbee_search/browserbee_run) are rejected outright.
  */
 
 import { getConnectivityPolicy, type CapabilityId } from "@/lib/connectivity/policy";
@@ -21,12 +23,12 @@ import { defaultTermBeeProvider } from "@/lib/termbee/provider";
 /** Tool name → the connectivity capability that gates it. */
 const BEE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
   hivematrix_browser: "browserbee",
-  desktopbee_action: "desktopbee",
-  termbee_session: "termbee",
-  termbee_run: "termbee",
-  mailbee_send: "mailbee",
-  mailbee_draft: "mailbee",
-  messagebee_send: "messagebee",
+  desktop_action: "desktopbee",
+  terminal_session: "termbee",
+  terminal_run: "termbee",
+  mail_send: "mailbee",
+  mail_draft: "mailbee",
+  message_send: "messagebee",
   brain_search: "brain",
   skill_used: "brain",
   digest_url: "webbee",
@@ -34,23 +36,22 @@ const BEE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
 };
 
 /**
- * Lane-shaped aliases → the canonical tool name that owns the handler.
+ * Legacy bee-branded tool ids → the lane-native name that now owns the handler.
  *
- * Part of the staged Bee→Lane protocol migration: the dispatcher accepts these
- * lane-native ids so a lane-shaped caller resolves to the same handler as the
- * existing bee-branded id. The model is still only *advertised* the canonical
- * names (see BEE_TOOL_DEFINITIONS) — flipping the advertised surface is a
- * separate, later step, since it changes what the model emits into persisted
- * turn history. (The browser tool is already de-branded as `hivematrix_browser`;
+ * The Bee→Lane rename flipped the *advertised* tool names (BEE_TOOL_DEFINITIONS)
+ * to lane-native ids. These aliases keep older callers working: a persisted tool
+ * call or a frontier harness that still emits `mailbee_send` (or POSTs
+ * `/bee/mailbee_send`) resolves to the lane handler. Removing the legacy ids is a
+ * later migration once nothing emits them. (The browser tool is `hivematrix_browser`;
  * its removed legacy ids `webbee_search`/`browserbee_run` stay rejected.)
  */
 const LANE_TOOL_ALIASES: Record<string, string> = {
-  desktop_action: "desktopbee_action",
-  terminal_session: "termbee_session",
-  terminal_run: "termbee_run",
-  mail_send: "mailbee_send",
-  mail_draft: "mailbee_draft",
-  message_send: "messagebee_send",
+  desktopbee_action: "desktop_action",
+  termbee_session: "terminal_session",
+  termbee_run: "terminal_run",
+  mailbee_send: "mail_send",
+  mailbee_draft: "mail_draft",
+  messagebee_send: "message_send",
 };
 
 /** Resolve an incoming tool name to its canonical handler name (or itself). */
@@ -92,7 +93,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
   {
     type: "function",
     function: {
-      name: "desktopbee_action",
+      name: "desktop_action",
       description:
         "Desktop Lane: native macOS desktop automation via the Swift helper. Prefer the most reliable strategy first: desktop.script.run (AppleScript/JXA) → desktop.ax.query/desktop.ax.act (Accessibility tree) → desktop.click/desktop.type (coordinates, last resort). Read actions (apps.list, ax.query, capture, permissions) are free; act/script actions run with approval auto-granted by policy.",
       parameters: {
@@ -124,7 +125,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
   {
     type: "function",
     function: {
-      name: "termbee_session",
+      name: "terminal_session",
       description:
         "Terminal Lane: manage Canopy-backed persistent terminal sessions when Canopy is available, with a local shell fallback for local work. action=create starts a session (optional cwd), list shows sessions, kill ends local fallback sessions. Use a session to run a multi-step build/repo workflow without passing credentials through tool args.",
       parameters: {
@@ -141,7 +142,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
   {
     type: "function",
     function: {
-      name: "termbee_run",
+      name: "terminal_run",
       description:
         "Terminal Lane: run a shell command in a Canopy-backed persistent session when Canopy is available, returning combined output + exit code; falls back to a local shell only when Canopy is unavailable. Creates the session on demand if it doesn't exist. Do not pass passwords or secrets in commands/tool args.",
       parameters: {
@@ -158,7 +159,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
   {
     type: "function",
     function: {
-      name: "mailbee_send",
+      name: "mail_send",
       description:
         "Mail Lane: send an email through Apple Mail — including file attachments. This is the ONLY correct way to send email; do NOT use bash/osascript, a Gmail/Google integration, or any other interface, and never ask the user to authenticate an external mail account. Safe by default: the email is sent only if the recipient is on the trusted allowlist (a known sender or a configured trusted domain); otherwise it is saved as a draft in Mail for human approval and NOT sent. Returns whether it was sent or drafted.",
       parameters: {
@@ -176,7 +177,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
   {
     type: "function",
     function: {
-      name: "mailbee_draft",
+      name: "mail_draft",
       description:
         "Mail Lane: compose an email (with optional file attachments) and save it to the Mail Drafts folder for human review (never sends). Use when you want a person to approve/edit before it goes out, regardless of recipient trust.",
       parameters: {
@@ -194,7 +195,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
   {
     type: "function",
     function: {
-      name: "messagebee_send",
+      name: "message_send",
       description:
         "Message Lane: send an SMS/iMessage through the macOS Messages app. This is the ONLY correct way to send a text — do not use bash/osascript. Safe by default: messages are sent only to allowlisted recipients; a non-allowlisted handle is refused with an actionable error.",
       parameters: {
@@ -291,11 +292,11 @@ export function availableBeeTools(policy = getConnectivityPolicy()): ChatTool[] 
 
 /** Intent → tool mapping, shown for one available lane. */
 const CAPABILITY_ROUTING_LINES: Record<string, string> = {
-  mailbee_send: "Send an email → **mailbee_send** (sends to trusted recipients; drafts for approval otherwise). Save a draft only → **mailbee_draft**.",
-  messagebee_send: "Send an SMS / iMessage → **messagebee_send** (allowlisted recipients only).",
+  mail_send: "Send an email → **mail_send** (sends to trusted recipients; drafts for approval otherwise). Save a draft only → **mail_draft**.",
+  message_send: "Send an SMS / iMessage → **message_send** (allowlisted recipients only).",
   hivematrix_browser: "Read/search the live web or drive logged-in/multi-step browser workflows → **hivematrix_browser**.",
-  desktopbee_action: "Control a native macOS app → **desktopbee_action**.",
-  termbee_run: "Run shell commands in a Canopy-backed persistent terminal with local fallback → **termbee_run**.",
+  desktop_action: "Control a native macOS app → **desktop_action**.",
+  terminal_run: "Run shell commands in a Canopy-backed persistent terminal with local fallback → **terminal_run**.",
   brain_search: "Recall a stored document / brain doc / past decision → **brain_search** (search durable memory before assuming it isn't written down).",
   code_graph: "Find where a symbol is defined + every place it's used → **code_graph** (exact, deterministic — use it to verify you found ALL usages of anything you changed, not just the obvious ones).",
 };
@@ -347,17 +348,17 @@ export async function executeBeeTool(
   switch (name) {
     case "hivematrix_browser":
       return executeBrowserLane(args, ctx);
-    case "desktopbee_action":
+    case "desktop_action":
       return executeDesktopBeeAction(args);
-    case "termbee_session":
+    case "terminal_session":
       return executeTermBeeSession(args);
-    case "termbee_run":
+    case "terminal_run":
       return executeTermBeeRun(args);
-    case "mailbee_send":
+    case "mail_send":
       return executeMailBeeSend(args);
-    case "mailbee_draft":
+    case "mail_draft":
       return executeMailBeeDraft(args);
-    case "messagebee_send":
+    case "message_send":
       return executeMessageBeeSend(args);
     case "brain_search":
       return executeBrainSearch(args);
@@ -677,7 +678,7 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: BeeToolC
 
   // Create the job through the daemon's task API (loopback, shared-secret auth).
   // The task's model selects the executor: Codex Computer Use for the default
-  // path, or the local model (which carries the desktopbee_action tool) for the
+  // path, or the local model (which carries the desktop_action tool) for the
   // fallback path.
   const base = `http://127.0.0.1:${process.env.HIVEMATRIX_PORT ?? "3747"}`;
   const token = readToken("auth-token") ?? "";

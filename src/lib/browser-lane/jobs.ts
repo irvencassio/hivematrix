@@ -385,7 +385,7 @@ export function buildBrowserBeeDesktopFallbackDescription(
     "This task came from Browser Lane, running on the Desktop fallback backing (no usable Codex auth).",
     "Treat it as a stateful browser workflow, not a generic fresh-public-web research request.",
     "If the work can be completed by Browser Lane read/search mode without login state, multi-step browser control, or rendered interaction, stop and note that the request should be rerouted.",
-    "Drive the browser yourself with the desktopbee_action tool — there is no Codex Computer Use engine on this path.",
+    "Drive the browser yourself with the desktop_action tool — there is no Codex Computer Use engine on this path.",
     "Prefer the most reliable strategy first: desktop.script.run (AppleScript) to open/navigate a browser → desktop.ax.query/desktop.ax.act on the browser's Accessibility tree → desktop.click/desktop.type by coordinate only as a last resort. Use desktop.capture to verify state.",
     "Stay within the approved domains and the stated workflow scope. Reuse an already-signed-in browser session rather than re-entering credentials; if login is required and no session exists, stop and report that human login is needed.",
     "",

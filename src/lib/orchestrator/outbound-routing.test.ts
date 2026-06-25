@@ -98,8 +98,8 @@ test("beeToolsRoutingPrompt routes browser through /lane/browser and keeps other
   assert.match(p, /"mode":"workflow"/);
   assert.doesNotMatch(p, /webbee_search/);
   assert.doesNotMatch(p, /browserbee_run/);
-  assert.match(p, /desktopbee_action/);
-  assert.match(p, /termbee_run/);
+  assert.match(p, /desktop_action/);
+  assert.match(p, /terminal_run/);
   assert.match(p, /Desktop Lane/);
   assert.match(p, /Terminal Lane/);
   assert.doesNotMatch(p, /DesktopBee/);
