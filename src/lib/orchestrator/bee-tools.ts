@@ -310,7 +310,7 @@ export async function executeBeeTool(
   ctx: BeeToolContext
 ): Promise<string> {
   const capId = BEE_TOOL_CAPABILITY[name];
-  if (!capId) return `Error: Unknown bee tool "${name}"`;
+  if (!capId) return `Error: Unknown lane tool "${name}"`;
 
   const cap = getConnectivityPolicy().getCapability(capId);
   if (!cap.available) {
@@ -341,7 +341,7 @@ export async function executeBeeTool(
     case "code_graph":
       return executeCodeGraph(args, ctx);
     default:
-      return `Error: Unknown bee tool "${name}"`;
+      return `Error: Unknown lane tool "${name}"`;
   }
 }
 

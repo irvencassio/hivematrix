@@ -102,19 +102,19 @@ test("capabilityRoutingGuide lists email/message/brain lanes in cloud, drops web
   assert.doesNotMatch(offlineGuide, /hivematrix_browser/); // browser lane gone offline
 });
 
-test("executeBeeTool refuses an unknown bee tool", async () => {
+test("executeBeeTool refuses an unknown lane tool", async () => {
   const out = await executeBeeTool("nopebee", {}, { projectPath: "/tmp", project: "ops", requestedBy: "test" });
-  assert.match(out, /Unknown bee tool/);
+  assert.match(out, /Unknown lane tool/);
 });
 
 test("executeBeeTool rejects removed BrowserBee/WebBee aliases", async () => {
   assert.match(
     await executeBeeTool("webbee_search", { query: "x" }, { projectPath: "/tmp", project: "ops", requestedBy: "test" }),
-    /Unknown bee tool/,
+    /Unknown lane tool/,
   );
   assert.match(
     await executeBeeTool("browserbee_run", { objective: "x" }, { projectPath: "/tmp", project: "ops", requestedBy: "test" }),
-    /Unknown bee tool/,
+    /Unknown lane tool/,
   );
 });
 

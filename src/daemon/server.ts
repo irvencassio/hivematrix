@@ -1141,7 +1141,7 @@ export function createDaemonServer() {
       if (req.method === "POST" && urlPath === "/traderbee/poll") {
         const { isTraderBeeConfigured } = await import("@/lib/traderbee/provider");
         if (!isTraderBeeConfigured()) {
-          json(res, 400, { error: "TraderBee not configured — set APCA_API_KEY_ID + APCA_API_SECRET_KEY env vars (data API only)" });
+          json(res, 400, { error: "Market Data Lane not configured — set APCA_API_KEY_ID + APCA_API_SECRET_KEY env vars (data API only)" });
           return;
         }
         const { pollOnce } = await import("@/lib/traderbee/poller");
@@ -1159,7 +1159,7 @@ export function createDaemonServer() {
       if (req.method === "POST" && beeMatch) {
         const tool = beeMatch[1];
         const { isBeeTool, executeBeeTool } = await import("@/lib/orchestrator/bee-tools");
-        if (!isBeeTool(tool)) { json(res, 404, { error: `unknown bee tool "${tool}"` }); return; }
+        if (!isBeeTool(tool)) { json(res, 404, { error: `unknown lane tool "${tool}"` }); return; }
         const body = await parseBody(req) as Record<string, unknown>;
         const args = (body.args && typeof body.args === "object" && !Array.isArray(body.args))
           ? body.args as Record<string, unknown>
