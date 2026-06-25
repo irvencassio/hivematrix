@@ -107,7 +107,7 @@ export function getDirective(id: string): DirectiveRow | null {
   return (getDb().prepare("SELECT * FROM directives WHERE _id = ?").get(id) as DirectiveRow | undefined) ?? null;
 }
 
-/** Every directive, newest first — used by ManagerBee for the control-plane report. */
+/** Every directive, newest first — used by Review Lane for the control-plane report. */
 export function listDirectives(): DirectiveRow[] {
   return getDb().prepare("SELECT * FROM directives ORDER BY createdAt DESC").all() as DirectiveRow[];
 }

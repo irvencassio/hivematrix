@@ -1,8 +1,8 @@
 /**
- * ManagerBee heartbeat: recompute the control-plane report on an interval,
+ * Review Lane heartbeat: recompute the control-plane report on an interval,
  * cache it for the status endpoint, and broadcast it so console/iOS clients
  * stay live. Embedded worker (runs in the daemon), same pattern as the
- * MessageBee/MailBee pollers — a guarded setInterval with an idempotent stop.
+ * Message Lane/Mail Lane pollers — a guarded setInterval with an idempotent stop.
  */
 
 import { broadcast } from "@/lib/ws/broadcaster";

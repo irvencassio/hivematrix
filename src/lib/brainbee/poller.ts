@@ -1,7 +1,7 @@
 /**
- * BrainBee poller: curate playbooks on a slow schedule. Embedded worker (runs
+ * Memory Lane poller: curate playbooks on a slow schedule. Embedded worker (runs
  * in the daemon), self-gating — no-ops when the brain root is unreachable.
- * Same guarded-setInterval shape as the MailBee poller, just a slower cadence.
+ * Same guarded-setInterval shape as the Mail Lane poller, just a slower cadence.
  */
 
 import { existsSync } from "fs";

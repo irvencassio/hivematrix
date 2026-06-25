@@ -1,9 +1,9 @@
 /**
- * BrainBee — playbook hygiene.
+ * Memory Lane — playbook hygiene.
  *
  * Directive retrospectives append rule deltas to playbook files
  * (hive/playbooks/{roles,projects}/*.md). Over many runs the same rule is
- * appended again and again across dated sections. BrainBee curates: it keeps
+ * appended again and again across dated sections. Memory Lane curates: it keeps
  * the first occurrence of each rule and drops later exact duplicates, then
  * prunes dated section headers left empty. Pure over file content so it is
  * trivially testable; the poller wraps it on a schedule.

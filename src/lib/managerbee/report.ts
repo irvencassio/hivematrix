@@ -1,7 +1,7 @@
 /**
- * ManagerBee — the control-plane heartbeat + diagnostics surface.
+ * Review Lane — the control-plane heartbeat + diagnostics surface.
  *
- * ManagerBee does not run work; it reports on the autonomy loop. It folds the
+ * Review Lane does not run work; it reports on the autonomy loop. It folds the
  * scheduler diagnostics, the directive/run state, and the pending-escalation
  * counts into one snapshot the console + iOS render and the heartbeat caches.
  * Pure read-over-state so it is cheap to call on every tick and in tests.
