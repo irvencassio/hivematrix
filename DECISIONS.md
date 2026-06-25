@@ -297,7 +297,7 @@ both hooks + both producers, so the loop is end-to-end:
   diagnosis, retrieval, self-improvement) are addressed and the loop now closes
   automatically.**
 
-## PROPOSAL/BUILD (2026-06-14) — YouTube playlist watcher (no new Bee brand)
+## PROPOSAL/BUILD (2026-06-14) — YouTube playlist watcher (no new public lane brand)
 
 Status: **Implemented 2026-06-14.** Owner: Irv.
 
@@ -454,13 +454,13 @@ index)**. Built `src/lib/embeddings/`:
 ## AUDIT (2026-06-14) — 102 user-guide scenarios vs current capability
 
 Brain doc `2026-06-14-scenario-coverage-audit.md`. **~94% already supported** —
-the scenarios are compositions of existing capabilities (channel Bees + Directives
+the scenarios are compositions of existing capabilities (channel lanes + Directives
 + Content + Approval + Brain) plus this session's adds (outbound send, brain_search,
 embeddings, skills, YouTube watcher, failure escalation). **Genuine gaps (each needs
 a decision, not a guess):**
 1. **Market Insight Lane market watch/alerts** (guide §M, "Proposed, not yet built") — analysis
    already works via the trader profile; live watch needs a quotes data source +
-   watchlist + alert directive, and is a **new Bee brand → scope-wall proposal**.
+   watchlist + alert directive, and is a **new capability-lane proposal**.
 2. **Content publishing execution** — X/Twitter has no posting path (needs X API or
    Browser Lane workflow); newsletter/email send is now possible via Mail Lane (this
    session) but the content→Mail Lane send step isn't wired (in-scope follow-on).
@@ -645,7 +645,7 @@ improvises with bash/osascript/WebFetch. Same root cause behind the LinkedIn fai
 (Browser Lane depends on Codex auth / Desktop Lane fallback) and "how does it use brain docs"
 (no retrieval — memory bundle is pinned paths only).
 
-**Proposed scope (no new Bee brand — scope wall respected).**
+**Proposed scope (no new public lane brand — scope wall respected).**
 1. **Outbound tools** (TOP PRIORITY) — `mailbee_send`/`mailbee_draft`, `messagebee_send`,
    and a LinkedIn/browser action path, added to `bee-tools.ts` + executed in
    `executeBeeTool()`, gated by `classifyMailTrust` + ConnectivityPolicy. Surfaced in
@@ -700,7 +700,7 @@ browser-rendered.
 updates, remote access all crammed under "Models"). Split into focused tabs and made two
 things first-class: per-role model selection in Mixed mode, and both Cloudflare tunnel modes.
 
-- **Tabbed reorg.** Settings tabs are now **Models | Remote | General | Projects | Bees**.
+- **Tabbed reorg.** Settings tabs are now **Models | Remote | General | Projects | Lanes**.
   - *Models*: default model, backends, frontier provider, Mixed-mode role models, local endpoint.
   - *Remote*: Cloudflare remote access (was buried in the Models tab).
   - *General*: appearance (theme/wallpaper/opacity), location, updates, version.
@@ -807,7 +807,7 @@ separator (`buildCodexExecArgs` extracted + unit-tested in codex-agent.ts).
   only the local Operational role stays. With Claude, all three show.
 - **About tab** added to Settings (version · build · released date · update status +
   Check-for-updates / Install buttons); version moved out of General.
-- **Settings tab order** defined: **Models · Bees · Projects · General · Remote · About**.
+- **Settings tab order** defined: **Models · Lanes · Projects · General · Remote · About**.
 - Skills launcher already exists (right context panel → "Skills" section: dropdown + Run);
   no change, just confirmed.
 
