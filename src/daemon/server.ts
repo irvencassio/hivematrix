@@ -1500,7 +1500,7 @@ export function createDaemonServer() {
         return;
       }
 
-      // POST /voice/session — the VoiceBee sidecar (which owns the realtime audio
+      // POST /voice/session — the Voice Lane sidecar (which owns the realtime audio
       // loop) hands a finished/escalated conversation here; routeVoiceSession
       // decides whether it becomes a Hive task ("voice notes → task artifacts").
       // The decision logic is pure + unit-tested in lib/voice/session.ts; this is

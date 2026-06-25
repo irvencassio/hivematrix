@@ -252,8 +252,8 @@ THINKING_OFF = {"chat_template_kwargs": {"enable_thinking": False}}
 
 # --- Tools the spoken assistant can call (first one: read recent email). The
 # sidecar runs on the Mac, so it reads Mail directly via osascript — the same
-# surface MailBee uses. (Sending/safety-gated actions should route through the
-# daemon's MailBee; reading is safe to do here.) ---
+# surface Mail Lane uses. (Sending/safety-gated actions should route through the
+# daemon's Mail Lane; reading is safe to do here.) ---
 TOOLS = [{
     "type": "function",
     "function": {
