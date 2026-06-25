@@ -1158,13 +1158,13 @@ export function createDaemonServer() {
       const beeMatch = urlPath.match(/^\/bee\/([a-z_]+)$/);
       if (req.method === "POST" && beeMatch) {
         const tool = beeMatch[1];
-        const { isBeeTool, executeBeeTool } = await import("@/lib/orchestrator/bee-tools");
-        if (!isBeeTool(tool)) { json(res, 404, { error: `unknown lane tool "${tool}"` }); return; }
+        const { isLaneTool, executeLaneTool } = await import("@/lib/orchestrator/lane-tools");
+        if (!isLaneTool(tool)) { json(res, 404, { error: `unknown lane tool "${tool}"` }); return; }
         const body = await parseBody(req) as Record<string, unknown>;
         const args = (body.args && typeof body.args === "object" && !Array.isArray(body.args))
           ? body.args as Record<string, unknown>
           : {};
-        const result = await executeBeeTool(tool, args, {
+        const result = await executeLaneTool(tool, args, {
           projectPath: typeof body.projectPath === "string" ? body.projectPath : process.cwd(),
           project: typeof body.project === "string" ? body.project : "ops",
           requestedBy: "cli",
@@ -1176,12 +1176,12 @@ export function createDaemonServer() {
       // POST /lane/browser — stable Browser Lane dispatch for CLI executors and
       // external model adapters. Body: {args:{mode:"search|read|open|snapshot|workflow", ...}}.
       if (req.method === "POST" && urlPath === "/lane/browser") {
-        const { executeBeeTool } = await import("@/lib/orchestrator/bee-tools");
+        const { executeLaneTool } = await import("@/lib/orchestrator/lane-tools");
         const body = await parseBody(req) as Record<string, unknown>;
         const args = (body.args && typeof body.args === "object" && !Array.isArray(body.args))
           ? body.args as Record<string, unknown>
           : {};
-        const result = await executeBeeTool("hivematrix_browser", args, {
+        const result = await executeLaneTool("hivematrix_browser", args, {
           projectPath: typeof body.projectPath === "string" ? body.projectPath : process.cwd(),
           project: typeof body.project === "string" ? body.project : "ops",
           requestedBy: "cli",
@@ -1483,7 +1483,7 @@ export function createDaemonServer() {
       if (req.method === "POST" && (urlPath === "/mailbee/send" || urlPath === "/mailbee/draft")) {
         const { parseOutboundFields } = await import("@/lib/orchestrator/outbound-routing");
         const fields = parseOutboundFields(req.headers["content-type"], await readRawBody(req));
-        const { executeMailBeeSend, executeMailBeeDraft } = await import("@/lib/orchestrator/bee-tools");
+        const { executeMailBeeSend, executeMailBeeDraft } = await import("@/lib/orchestrator/lane-tools");
         const args = { to: fields.to ?? "", subject: fields.subject ?? "", body: fields.body ?? "", attachments: fields.attachments ?? [] };
         const message = urlPath === "/mailbee/send"
           ? await executeMailBeeSend(args)
@@ -1494,7 +1494,7 @@ export function createDaemonServer() {
       if (req.method === "POST" && urlPath === "/messagebee/send") {
         const { parseOutboundFields } = await import("@/lib/orchestrator/outbound-routing");
         const fields = parseOutboundFields(req.headers["content-type"], await readRawBody(req));
-        const { executeMessageBeeSend } = await import("@/lib/orchestrator/bee-tools");
+        const { executeMessageBeeSend } = await import("@/lib/orchestrator/lane-tools");
         const message = await executeMessageBeeSend({ to: fields.to ?? "", text: fields.text ?? "", attachments: fields.attachments });
         json(res, message.startsWith("Error") ? 400 : 200, { ok: !message.startsWith("Error"), message });
         return;

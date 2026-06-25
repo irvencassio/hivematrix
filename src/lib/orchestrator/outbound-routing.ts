@@ -2,7 +2,7 @@
  * Outbound-channel bridge for the CLI executors (Claude Code, Codex).
  *
  * The local/generic (Qwen) agent gets first-class `mail_send` / `mail_draft`
- * / `message_send` function tools (see bee-tools.ts). The Claude Code and Codex
+ * / `message_send` function tools (see lane-tools.ts). The Claude Code and Codex
  * harnesses run their OWN toolset and never see those — which is exactly why an
  * "send this email" task historically got improvised with osascript instead of
  * going through the Mail Lane.

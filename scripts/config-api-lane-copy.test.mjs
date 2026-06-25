@@ -11,7 +11,7 @@ test("config and API-facing copy uses lane names", () => {
   const secrets = read("src/lib/config/secrets.ts");
   const profiles = read("src/lib/config/agent-profiles.ts");
   const server = read("src/daemon/server.ts");
-  const beeTools = read("src/lib/orchestrator/bee-tools.ts");
+  const beeTools = read("src/lib/orchestrator/lane-tools.ts");
 
   assert.match(features, /label: "Voice Lane"/);
   assert.doesNotMatch(features, /Voice \(VoiceBee\)/);

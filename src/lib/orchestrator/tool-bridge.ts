@@ -183,11 +183,11 @@ export async function executeTool(
         return await executeCreateTask(args, context);
       default: {
         // Embedded capability lanes (Browser Lane / Desktop Lane) are
-        // resolved by the bee-tools module, which enforces the connectivity
+        // resolved by the lane-tools module, which enforces the connectivity
         // policy gate before dispatching.
-        const { isBeeTool, executeBeeTool } = await import("./bee-tools");
-        if (isBeeTool(name)) {
-          return await executeBeeTool(name, args, {
+        const { isLaneTool, executeLaneTool } = await import("./lane-tools");
+        if (isLaneTool(name)) {
+          return await executeLaneTool(name, args, {
             projectPath,
             project: context?.parentProject ?? "ops",
             requestedBy: context?.parentTaskId ? `task:${context.parentTaskId}` : "hive",

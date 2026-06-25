@@ -12,7 +12,7 @@ import {
   parseSSEStream,
 } from "./openai-stream-adapter";
 import { TOOL_DEFINITIONS, executeTool, type ToolContext, type ChatTool } from "./tool-bridge";
-import { availableBeeTools, capabilityRoutingGuide } from "./bee-tools";
+import { availableLaneTools, capabilityRoutingGuide } from "./lane-tools";
 import { listSkills } from "@/lib/skills/store";
 import { formatSkillIndex, skillRunsOn } from "@/lib/skills/contracts";
 import { getAgentProfile } from "@/lib/config/agent-profiles";
@@ -152,7 +152,7 @@ function getProfileTools(agentType: string): ChatTool[] {
   const local = profile.tools.length === 0
     ? []
     : TOOL_DEFINITIONS.filter((t) => profile.tools.includes(t.function.name));
-  return [...local, ...availableBeeTools()];
+  return [...local, ...availableLaneTools()];
 }
 
 /**
