@@ -1254,16 +1254,14 @@ export function createDaemonServer() {
         return;
       }
 
-      // POST /browser-lane/probe — readiness orchestration endpoint. The native
-      // app will back this with stored site/probe rows; until then it is explicit.
+      // POST /browser-lane/probe — readiness orchestration endpoint backed by
+      // stored site/probe rows. The default adapter is honest when no browser
+      // backend is wired yet: it records blocked runs instead of pretending.
       if (req.method === "POST" && urlPath === "/browser-lane/probe") {
         const body = await parseBody(req) as Record<string, unknown>;
-        json(res, 501, {
-          ok: false,
-          lane: "browser",
-          siteId: typeof body.siteId === "string" ? body.siteId : "all",
-          error: "Browser Lane readiness probes require the Browser Lane app/site registry; schema and contracts are installed.",
-        });
+        const { runBrowserLaneReadiness } = await import("@/lib/browser-lane/probe-service");
+        const result = await runBrowserLaneReadiness({ siteId: typeof body.siteId === "string" ? body.siteId : "all" });
+        json(res, result.ok ? 200 : 404, result);
         return;
       }
 
