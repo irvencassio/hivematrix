@@ -77,11 +77,11 @@ test("prepareContentResearchBrief requires a topic", async () => {
   await assert.rejects(() => prepareContentResearchBrief({ topic: "  " }, { search: fakeSearch }), /topic/i);
 });
 
-test("preparing a brief proposes a HeyGen action but does NOT auto-execute it", async () => {
+test("preparing a brief proposes the SCRIPT workflow (not HeyGen) and does NOT auto-execute it", async () => {
   const result = await prepareContentResearchBrief({ topic: "AI video tools" }, { search: fakeSearch });
-  // The result exposes the proposed next action (model-facing).
+  // The brief now bridges to the script-development step.
   assert.ok(result.proposedAction, "result should include the proposed action");
-  assert.equal(result.proposedAction.targetWorkflowId, "heygen.portal_video_from_script");
+  assert.equal(result.proposedAction.targetWorkflowId, "content.video_script_from_brief");
 
   const actions = listWorkflowActions({ sourceRunId: result.runId });
   assert.equal(actions.length, 1);
@@ -89,14 +89,38 @@ test("preparing a brief proposes a HeyGen action but does NOT auto-execute it", 
   assert.equal(action.status, "proposed");           // not executed
   assert.equal(action.resultRunId, null);             // nothing run yet
   assert.match(action.title, /AI video tools/);
-  // The script seed is a clearly-marked DRAFT, never a real "script" input.
-  assert.equal(action.suggestedInputs.script, undefined);
-  assert.ok(action.suggestedInputs.scriptDraft || action.suggestedInputs.title);
+  // It carries the brief linkage so the script workflow can load it.
+  assert.equal(action.suggestedInputs.sourceRunId, result.runId);
 
-  // No HeyGen task / browser run was created during brief prep.
-  const heygenRuns = getDb().prepare("SELECT COUNT(*) AS n FROM workflow_runs WHERE workflowId = 'heygen.portal_video_from_script'").get() as { n: number };
-  assert.equal(heygenRuns.n, 0);
+  // Nothing downstream was created during brief prep.
+  const scriptRuns = getDb().prepare("SELECT COUNT(*) AS n FROM workflow_runs WHERE workflowId = 'content.video_script_from_brief'").get() as { n: number };
+  assert.equal(scriptRuns.n, 0);
 
-  // The proposal carries no secrets.
   assert.doesNotMatch(JSON.stringify(getWorkflowAction(action.id)), /password|cookie|secret|credentialRef|\btoken\b/i);
+});
+
+test("chain: execute brief→script action prepares a script run; the script proposes a HeyGen prepare with no Browser Lane task", async () => {
+  const { executeWorkflowAction } = await import("./actions");
+  const brief = await prepareContentResearchBrief({ topic: "AI video tools", audience: "solo founders" }, { search: fakeSearch });
+  assert.ok(brief.proposedAction);
+
+  // Execute the brief's proposed action → the SCRIPT workflow (generic handler path).
+  const scriptExec = await executeWorkflowAction(brief.proposedAction.id, {});
+  assert.equal(scriptExec.ok, true);
+  assert.equal(scriptExec.status, "prepared");
+  assert.ok(scriptExec.resultRunId, "a script run was created");
+  const scriptRun = getWorkflowRun(scriptExec.resultRunId);
+  assert.equal(scriptRun?.workflowId, "content.video_script_from_brief");
+  assert.equal(scriptRun?.status, "needs_review");
+
+  // The script run proposes HeyGen with a real script — executing it PREPARES (no needs_input).
+  const heygenAction = listWorkflowActions({ sourceRunId: scriptExec.resultRunId })[0];
+  assert.equal(heygenAction.targetWorkflowId, "heygen.portal_video_from_script");
+  const heygenExec = await executeWorkflowAction(heygenAction.id, {});
+  assert.equal(heygenExec.ok, true);
+  assert.equal(heygenExec.status, "prepared");
+
+  // Preparing the HeyGen action created NO Browser Lane task.
+  const tasks = getDb().prepare("SELECT COUNT(*) AS n FROM tasks WHERE source = 'browser-lane'").get() as { n: number };
+  assert.equal(tasks.n, 0);
 });

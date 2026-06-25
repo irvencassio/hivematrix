@@ -45,6 +45,24 @@ export async function prepareWorkflowById(workflowId: string, inputs: Record<str
       });
       return { ok: true, status: "prepared", workflow, runId: out.runId, result: { markdown: out.markdown, proposedAction: out.proposedAction } };
     }
+    case "content-video-script": {
+      const { prepareVideoScriptFromBrief } = await import("./video-script");
+      try {
+        const out = await prepareVideoScriptFromBrief({
+          topic: String(inputs.topic ?? ""),
+          audience: typeof inputs.audience === "string" ? inputs.audience : undefined,
+          objective: typeof inputs.objective === "string" ? inputs.objective : undefined,
+          briefMarkdown: typeof inputs.briefMarkdown === "string" ? inputs.briefMarkdown : undefined,
+          sourceRunId: typeof inputs.sourceRunId === "string" ? inputs.sourceRunId : undefined,
+          tone: typeof inputs.tone === "string" ? inputs.tone : undefined,
+          duration: typeof inputs.duration === "string" ? inputs.duration : undefined,
+        });
+        return { ok: true, status: "prepared", workflow, runId: out.runId, result: { markdown: out.markdown, isDraft: out.isDraft, proposedAction: out.proposedAction } };
+      } catch (e) {
+        // Missing brief source → needs_input on the brief inputs (no guessing).
+        return { ok: false, status: "needs_input", workflow, missing: ["briefMarkdown", "sourceRunId"], reason: e instanceof Error ? e.message : String(e) };
+      }
+    }
     case "heygen-portal-video": {
       const { dispatchHeyGenVideoWorkflow } = await import("@/lib/video/heygen-workflow");
       const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");

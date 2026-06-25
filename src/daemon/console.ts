@@ -753,6 +753,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <button class="create" onclick="prepareResearchBrief()">Prepare research brief</button>
       </div>
       <div id="brief_result" class="muted" style="font-size:11px;margin-top:4px"></div>
+      <div class="row" style="margin-top:6px;gap:6px;align-items:center">
+        <input id="script_topic" placeholder="Video script topic (uses local brief context if available)" style="flex:1;box-sizing:border-box" />
+        <button class="create" onclick="prepareVideoScript()">Prepare video script</button>
+      </div>
+      <div id="script_result" class="muted" style="font-size:11px;margin-top:4px"></div>
       <div class="muted" style="font-size:11px;margin:8px 0 4px">Proposed next actions</div>
       <div id="workflow_actions" style="margin-top:4px"></div>
       <div class="muted" style="font-size:11px;margin:8px 0 4px">Recent runs</div>
@@ -3981,6 +3986,19 @@ async function prepareResearchBrief() {
   const md = (r.result && r.result.markdown) || r.markdown || "";
   const preview = String(md).split("\n").slice(0, 4).join(" · ");
   if (out) out.innerHTML = 'Brief ready (run '+esc(r.runId)+'): '+esc(preview);
+  renderWorkflowRuns(); renderWorkflowActions();
+}
+async function prepareVideoScript() {
+  const out = document.getElementById("script_result");
+  const topic = (document.getElementById("script_topic").value || "").trim();
+  if (!topic) { if (out) out.innerHTML = '<span class="err">Enter a topic first.</span>'; return; }
+  if (out) out.innerHTML = '<span class="muted">Drafting script…</span>';
+  // Topic-only path: seed a minimal brief so the draft can be assembled. Approve/edit later.
+  const r = await api("/workflows/content.video_script_from_brief/prepare", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ topic: topic, briefMarkdown: "Drafting from the topic; no prior research brief." }) });
+  if (!r || !r.ok) { if (out) out.innerHTML = '<span class="err">'+esc((r && r.error) || "Draft failed")+'</span>'; return; }
+  const md = (r.result && r.result.markdown) || "";
+  const preview = String(md).split("\n").slice(0, 5).join(" · ");
+  if (out) out.innerHTML = 'Draft script ready — requires review (run '+esc(r.runId)+'): '+esc(preview);
   renderWorkflowRuns(); renderWorkflowActions();
 }
 // --- Workflow action handoffs (explicit execution) --------------------------

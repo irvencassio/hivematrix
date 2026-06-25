@@ -55,6 +55,22 @@ test("the registry matches the research brief workflow from natural-language phr
   assert.equal(reg.match({ text: "I need a content brief" })?.id, "content.research_brief");
 });
 
+test("the registry exposes the video script workflow", () => {
+  const reg = getWorkflowRegistry();
+  const script = reg.get("content.video_script_from_brief");
+  assert.ok(script, "content.video_script_from_brief should be registered");
+  assert.equal(script.lane, "review");
+  assert.equal(script.capability, "content.script");
+  assert.equal(script.handler, "content-video-script");
+  // topic required; brief sources optional (the either/or is enforced in the handler).
+  const required = script.inputSchema.filter((f) => f.required).map((f) => f.name);
+  assert.deepEqual(required, ["topic"]);
+  const fields = script.inputSchema.map((f) => f.name);
+  assert.ok(fields.includes("briefMarkdown"));
+  assert.ok(fields.includes("sourceRunId"));
+  assert.equal(reg.match({ text: "draft a video script from the brief" })?.id, "content.video_script_from_brief");
+});
+
 test("the HeyGen workflow declares readiness, handoffs, domains, and a runbook", () => {
   const w = HEYGEN_PORTAL_VIDEO_WORKFLOW;
   assert.equal(w.readiness.required, true);

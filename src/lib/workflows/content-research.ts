@@ -12,7 +12,7 @@ import { createWorkflowRun, linkWorkflowRunArtifact, updateWorkflowRunStatus } f
 import { proposeWorkflowAction } from "./actions";
 import { getWorkflowRegistry, summarizeWorkflow, type WorkflowSummary } from "./registry";
 
-const HEYGEN_TARGET = "heygen.portal_video_from_script";
+const SCRIPT_TARGET = "content.video_script_from_brief";
 
 const WORKFLOW_ID = "content.research_brief";
 
@@ -134,21 +134,17 @@ export async function prepareContentResearchBrief(input: ResearchBriefInput, dep
   linkWorkflowRunArtifact(run.id, "nextAction", NEXT_ACTION);
   updateWorkflowRunStatus(run.id, "needs_review", { currentStep: "brief ready for human review" });
 
-  // Propose (NOT execute) the next workflow: turn this brief into a HeyGen portal
-  // video. The script seed is a clearly-marked DRAFT, not a real `script` input, so
-  // executing the action will require the operator to supply a real script.
+  // Propose (NOT execute) the next workflow: draft a video script from this brief. The
+  // script workflow is the bridge to a HeyGen video — going straight to HeyGen would
+  // only return needs_input["script"]. The proposal carries the brief linkage.
   let proposedAction: PrepareResearchBriefResult["proposedAction"] = null;
-  if (getWorkflowRegistry().get(HEYGEN_TARGET)) {
-    const headline = markdown.split("\n").slice(0, 12).join(" ").replace(/\s+/g, " ").trim().slice(0, 400);
+  if (getWorkflowRegistry().get(SCRIPT_TARGET)) {
     const action = proposeWorkflowAction({
       sourceRunId: run.id,
-      targetWorkflowId: HEYGEN_TARGET,
-      title: `Video: ${topic}`,
-      reason: "Turn this research brief into a HeyGen portal video once it is approved.",
-      suggestedInputs: {
-        title: `Video: ${topic}`,
-        scriptDraft: `DRAFT (not final) — derived from the research brief: ${headline}`,
-      },
+      targetWorkflowId: SCRIPT_TARGET,
+      title: `Video script: ${topic}`,
+      reason: "Draft a video script from this research brief, then review it before recording.",
+      suggestedInputs: { topic, sourceRunId: run.id, audience: input.audience?.trim() || undefined, objective: input.objective?.trim() || undefined },
     });
     proposedAction = { id: action.id, targetWorkflowId: action.targetWorkflowId, title: action.title };
   }

@@ -119,8 +119,9 @@ export function summarizeWorkflow(def: WorkflowDefinition): WorkflowSummary {
 // Built-in workflows. Def-only modules (no runs store import) → no import cycle.
 import { HEYGEN_PORTAL_VIDEO_WORKFLOW } from "./heygen-portal";
 import { CONTENT_RESEARCH_BRIEF_WORKFLOW } from "./content-research-brief";
+import { VIDEO_SCRIPT_WORKFLOW } from "./video-script-def";
 
-export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [HEYGEN_PORTAL_VIDEO_WORKFLOW, CONTENT_RESEARCH_BRIEF_WORKFLOW];
+export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [HEYGEN_PORTAL_VIDEO_WORKFLOW, CONTENT_RESEARCH_BRIEF_WORKFLOW, VIDEO_SCRIPT_WORKFLOW];
 
 let singleton: WorkflowRegistry | null = null;
 export function getWorkflowRegistry(): WorkflowRegistry {
