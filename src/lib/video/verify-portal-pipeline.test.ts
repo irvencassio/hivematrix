@@ -29,7 +29,7 @@ test("dry-run exercises every pipeline phase and passes end-to-end", async () =>
   assert.equal(report.ok, true);
 
   const names = report.phases.map((p) => p.name);
-  for (const expected of ["seed", "draft", "readiness-gate", "portal-task", "completion", "publish-only", "needs-publish-refusal", "endpoint-wiring"]) {
+  for (const expected of ["seed", "draft", "readiness-gate", "portal-task", "completion", "publish-only", "needs-publish-refusal", "endpoint-wiring", "run-ledger"]) {
     assert.ok(names.includes(expected), `missing phase ${expected}`);
   }
 });

@@ -11,6 +11,9 @@ test("console exposes a Workflows panel backed by /workflows", () => {
   assert.match(console, /Workflows/);
   // Shows readiness + a runbook pointer.
   assert.match(console, /runbook/i);
+  // Recent runs from the run ledger.
+  assert.match(console, /renderWorkflowRuns\(/);
+  assert.match(console, /api\("\/workflows\/runs"/);
 });
 
 test("the daemon declares the workflow endpoints", () => {

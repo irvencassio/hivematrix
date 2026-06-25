@@ -15,6 +15,8 @@ import { dispatchHeyGenVideoWorkflow } from "./heygen-workflow";
 import { applyHeyGenPortalCompletion, markPortalTaskCreated } from "./portal-completion";
 import { publishDraftVideo } from "./news-review";
 import { getDraft, saveDraft, type VideoDraft } from "./draft-store";
+import { linkHeyGenPortalRunOnCompletion, linkHeyGenPortalRunOnDispatch, linkHeyGenPortalRunOnPublish } from "@/lib/workflows/heygen-run-link";
+import { findWorkflowRunByDraft } from "@/lib/workflows/runs";
 
 export interface PortalDryRunPhase { name: string; ok: boolean; detail: string }
 export interface PortalDryRunReport {
@@ -29,7 +31,7 @@ export interface PortalDryRunDeps {
   serverSource?: () => string;
 }
 
-const REQUIRED_ROUTES = ["/video/heygen-workflow", "/video/portal-complete", "/video/publish-draft", "/video/drafts"];
+const REQUIRED_ROUTES = ["/video/heygen-workflow", "/video/portal-complete", "/video/publish-draft", "/video/drafts", "/workflows/runs"];
 const PROJECT_PATH = process.env.HOME ?? process.cwd(); // scratch root the caller isolated
 
 function draft(id: string, status: string, extra: Record<string, unknown> = {}): VideoDraft {
@@ -86,7 +88,10 @@ export async function runHeyGenPortalDryRun(deps: PortalDryRunDeps = {}): Promis
     if (result.status !== "created") throw new Error(`expected created, got ${result.status}`);
     await markPortalTaskCreated(DRAFT_ID, createdId);
     if (getDraft(DRAFT_ID)?.status !== "portal_pending") throw new Error("draft did not move to portal_pending");
-    return `portal child task ${createdId} created; draft → portal_pending`;
+    // Open/transition the durable workflow run (same path the daemon uses).
+    linkHeyGenPortalRunOnDispatch(result, { draftId: DRAFT_ID, title: "Dry-run launch" });
+    if (findWorkflowRunByDraft(DRAFT_ID)?.status !== "portal_pending") throw new Error("workflow run did not open as portal_pending");
+    return `portal child task ${createdId} created; draft + workflow run → portal_pending`;
   });
 
   // 5. Portal completion with a fake local MP4 → portal_completed.
@@ -97,7 +102,9 @@ export async function runHeyGenPortalDryRun(deps: PortalDryRunDeps = {}): Promis
     );
     if (res.status !== "portal_completed") throw new Error(`expected portal_completed, got ${res.status}`);
     if (getDraft(DRAFT_ID)?.paths.video !== "/tmp/dryrun-final.mp4") throw new Error("local video path not bound");
-    return "completion bound the local video; draft → portal_completed";
+    linkHeyGenPortalRunOnCompletion(DRAFT_ID, { status: res.status });
+    if (findWorkflowRunByDraft(DRAFT_ID)?.status !== "portal_completed") throw new Error("workflow run did not move to portal_completed");
+    return "completion bound the local video; draft + workflow run → portal_completed";
   });
 
   // 6. Publish-only DRY RUN: shapes publish.mjs, records args, uploads nothing.
@@ -109,6 +116,7 @@ export async function runHeyGenPortalDryRun(deps: PortalDryRunDeps = {}): Promis
     if (!result.ok || !result.published) throw new Error(`publish-only failed: ${result.reason ?? result.code}`);
     if (!evidence.publishArgs.includes("publish.mjs")) throw new Error("publish-only did not invoke the publish step");
     if (evidence.publishArgs.includes("make-avatar.mjs")) throw new Error("publish-only must not re-render");
+    linkHeyGenPortalRunOnPublish(DRAFT_ID, result);
     return `publish.mjs shaped (dry-run, no upload); youtubeUrl=${result.youtubeUrl ?? "—"}`;
   });
 
@@ -130,6 +138,17 @@ export async function runHeyGenPortalDryRun(deps: PortalDryRunDeps = {}): Promis
     const missing = REQUIRED_ROUTES.filter((r) => !source.includes(`"${r}"`));
     if (missing.length) throw new Error(`daemon is missing routes: ${missing.join(", ")}`);
     return "all portal endpoints are wired in the daemon";
+  });
+
+  // 9. Workflow run ledger: the durable run transitioned to done with the artifact.
+  await run("run-ledger", async () => {
+    const ledgerRun = findWorkflowRunByDraft(DRAFT_ID);
+    if (!ledgerRun) throw new Error("no workflow run was recorded for the draft");
+    if (ledgerRun.status !== "done") throw new Error(`workflow run did not finish (status=${ledgerRun.status})`);
+    if (ledgerRun.childTaskId !== "dryrun-child-1") throw new Error("workflow run is not linked to the child task");
+    if (!ledgerRun.artifacts.youtubeUrl) throw new Error("workflow run is missing the YouTube artifact");
+    if (!ledgerRun.completedAt) throw new Error("workflow run has no completedAt");
+    return `workflow run ${ledgerRun.id} transitioned portal_pending → portal_completed → done`;
   });
 
   const ok = phases.every((p) => p.ok);

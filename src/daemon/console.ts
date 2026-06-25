@@ -748,6 +748,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </div>
       <div class="muted" style="font-size:11px;margin:4px 0 6px">Registered repeatable workflows COO and the model can route to. Each links its runbook.</div>
       <div id="workflows_list" style="margin-top:6px"></div>
+      <div class="muted" style="font-size:11px;margin:8px 0 4px">Recent runs</div>
+      <div id="workflow_runs" style="margin-top:4px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Safe senders</label>
@@ -3945,6 +3947,20 @@ async function renderWorkflows() {
       + '<div class="muted" style="font-size:11px;margin-top:2px">'+esc(w.id)+' — '+readiness+'</div>'
       + (w.runbook ? '<div class="muted" style="font-size:11px;margin-top:2px">Runbook: '+esc(w.runbook)+'</div>' : '')
       + '</div>';
+  }).join("");
+  renderWorkflowRuns();
+}
+async function renderWorkflowRuns() {
+  const el = document.getElementById("workflow_runs");
+  if (!el) return;
+  const r = await api("/workflows/runs");
+  const runs = (r && r.runs) || [];
+  if (!runs.length) { el.innerHTML = '<div class="muted" style="font-size:11px">No workflow runs yet.</div>'; return; }
+  el.innerHTML = runs.slice(0, 8).map(run => {
+    const links = [run.draftId ? 'draft '+esc(run.draftId) : '', run.childTaskId ? 'task '+esc(run.childTaskId) : ''].filter(Boolean).join(' · ');
+    const yt = run.artifacts && run.artifacts.youtubeUrl ? ' · '+esc(run.artifacts.youtubeUrl) : '';
+    const blk = run.blocker ? ' — '+esc(run.blocker) : '';
+    return '<div class="m" style="margin-top:2px"><span class="badge">'+esc(run.status)+'</span> '+esc(run.title)+(links?' ('+links+')':'')+yt+blk+'</div>';
   }).join("");
 }
 

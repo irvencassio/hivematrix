@@ -507,6 +507,40 @@ const MIGRATIONS: string[] = [
   // v20: link a dispatch audit row to the task it created (Browser Lane). Kept
   // separate from workItemId (the envelope id) so neither is overloaded.
   `ALTER TABLE coo_dispatch_audit ADD COLUMN taskId TEXT;`,
+
+  // v21: generic Workflow Run Ledger — durable run state, events, artifacts, and
+  // blockers for registered workflows. No secrets: artifact_json / metadata_json
+  // are key-redacted before write by the store.
+  `CREATE TABLE IF NOT EXISTS workflow_runs (
+      _id TEXT PRIMARY KEY,
+      workflowId TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'created',
+      title TEXT NOT NULL DEFAULT '',
+      lane TEXT,
+      capability TEXT,
+      parentTaskId TEXT,
+      draftId TEXT,
+      childTaskId TEXT,
+      currentStep TEXT,
+      blocker TEXT,
+      artifact_json TEXT NOT NULL DEFAULT '{}',
+      runbook TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+      completedAt TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflowId, createdAt);
+    CREATE INDEX IF NOT EXISTS idx_workflow_runs_draft ON workflow_runs(draftId);
+
+    CREATE TABLE IF NOT EXISTS workflow_run_events (
+      _id TEXT PRIMARY KEY,
+      runId TEXT NOT NULL,
+      event TEXT NOT NULL,
+      message TEXT NOT NULL DEFAULT '',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflow_run_events_run ON workflow_run_events(runId, createdAt);`,
 ];
 
 // ------------------------------------------------------------------

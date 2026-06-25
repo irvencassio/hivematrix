@@ -1481,6 +1481,11 @@ export function createDaemonServer() {
                 return { id: task._id };
               },
             });
+            // Record/transition the durable workflow run for this portal video.
+            try {
+              const { linkHeyGenPortalRunOnDispatch } = await import("@/lib/workflows/heygen-run-link");
+              linkHeyGenPortalRunOnDispatch(result, { draftId: parentDraftId, title });
+            } catch { /* the ledger is a nicety; the dispatch result is the source of truth */ }
             json(res, 200, { ok: true, result });
           } else {
             const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
@@ -1511,6 +1516,13 @@ export function createDaemonServer() {
             const childStatus = body.childStatus === "failed" ? "failed" : body.childStatus === "cancelled" ? "cancelled" : "done";
             try { await Task.findByIdAndUpdate(childTaskId, { status: childStatus, reviewState: null }); } catch { /* draft is the source of truth */ }
           }
+          // Transition the workflow run to match the completion outcome.
+          if (result.ok && typeof body.parentDraftId === "string") {
+            try {
+              const { linkHeyGenPortalRunOnCompletion } = await import("@/lib/workflows/heygen-run-link");
+              linkHeyGenPortalRunOnCompletion(body.parentDraftId, { status: result.status, childStatus: body.childStatus as never });
+            } catch { /* ledger is a nicety */ }
+          }
           json(res, result.ok ? 200 : 404, result);
         } catch (e) {
           json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
@@ -1528,6 +1540,12 @@ export function createDaemonServer() {
         try {
           const { publishDraftVideo } = await import("@/lib/video/news-review");
           const result = await publishDraftVideo(draftId);
+          if (result.ok && result.published) {
+            try {
+              const { linkHeyGenPortalRunOnPublish } = await import("@/lib/workflows/heygen-run-link");
+              linkHeyGenPortalRunOnPublish(draftId, result);
+            } catch { /* ledger is a nicety */ }
+          }
           const status = result.ok ? 200 : result.code === "no_draft" ? 404 : 409;
           json(res, status, result);
         } catch (e) {
@@ -1541,6 +1559,29 @@ export function createDaemonServer() {
       if (req.method === "GET" && urlPath === "/workflows") {
         const { getWorkflowRegistry } = await import("@/lib/workflows/registry");
         json(res, 200, { workflows: getWorkflowRegistry().list() });
+        return;
+      }
+
+      // GET /workflows/runs — durable run ledger across workflows. Secret-free.
+      if (req.method === "GET" && urlPath === "/workflows/runs") {
+        const { listWorkflowRuns } = await import("@/lib/workflows/runs");
+        const q = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+        json(res, 200, { runs: listWorkflowRuns({ workflowId: q.get("workflowId") ?? undefined, draftId: q.get("draftId") ?? undefined }) });
+        return;
+      }
+
+      const workflowRunMatch = urlPath.match(/^\/workflows\/runs\/([^/]+)$/);
+      if (req.method === "GET" && workflowRunMatch) {
+        const { getWorkflowRun } = await import("@/lib/workflows/runs");
+        const run = getWorkflowRun(decodeURIComponent(workflowRunMatch[1]));
+        json(res, run ? 200 : 404, run ? { ok: true, run } : { ok: false, error: "Workflow run not found." });
+        return;
+      }
+
+      const workflowRunsForMatch = urlPath.match(/^\/workflows\/([^/]+)\/runs$/);
+      if (req.method === "GET" && workflowRunsForMatch) {
+        const { listWorkflowRuns } = await import("@/lib/workflows/runs");
+        json(res, 200, { runs: listWorkflowRuns({ workflowId: decodeURIComponent(workflowRunsForMatch[1]) }) });
         return;
       }
 
