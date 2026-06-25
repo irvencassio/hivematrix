@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""STT smoke test for the VoiceBee sidecar.
+"""STT smoke test for the Voice Lane sidecar.
 
 Transcribes an audio file with the configured HIVE_STT_COMMAND. Proves the STT
 half of the pipeline works on the base Python with no live mic. Usage:

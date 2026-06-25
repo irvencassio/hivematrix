@@ -1,4 +1,4 @@
-"""Speech-to-text adapter for the VoiceBee sidecar.
+"""Speech-to-text adapter for the Voice Lane sidecar.
 
 HiveMatrix no longer vendors a fixed STT engine here. Instead, set
 HIVE_STT_COMMAND to a local command that writes the transcript to stdout. The

@@ -1,4 +1,4 @@
-"""Headless proof of the VoiceBee turn loop (P2.2).
+"""Headless proof of the Voice Lane turn loop (P2.2).
 
 Drives audio in → stubbed command STT → STUBBED LLM → real TTS (say), with no mic
 and no live model. Proves the loop wiring end-to-end. Run:

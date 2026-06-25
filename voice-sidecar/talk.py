@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Talk to your local VoiceBee from the Mac mic (P2.6 demo).
+"""Talk to your local Voice Lane from the Mac mic (P2.6 demo).
 
 Push-to-talk: Enter to start, speak, Enter to stop. Records from the default mic,
 runs the streaming turn (STT → Qwen → TTS), and plays the reply aloud — looping
@@ -99,7 +99,7 @@ def main() -> int:
 
     llm = LocalLLM()
     player = Player()
-    print("VoiceBee — talk to your local assistant (Qwen 3.6 27B). Ctrl-C to exit.")
+    print("Voice Lane — talk to your local assistant (Qwen 3.6 27B). Ctrl-C to exit.")
 
     while True:
         try:

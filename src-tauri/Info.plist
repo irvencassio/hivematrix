@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>HiveMatrix uses the microphone for VoiceBee push-to-talk and live voice conversations.</string>
+  <string>HiveMatrix uses the microphone for Voice Lane push-to-talk and live voice conversations.</string>
 </dict>
 </plist>

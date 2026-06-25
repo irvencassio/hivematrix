@@ -1,4 +1,4 @@
-"""Streaming VoiceBee turn — the key to "feels live".
+"""Streaming Voice Lane turn — the key to "feels live".
 
 Instead of waiting for the whole LLM reply before speaking, we stream the LLM,
 chunk it into sentences (streaming.iter_sentences), and TTS each sentence as soon

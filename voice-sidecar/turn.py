@@ -1,4 +1,4 @@
-"""One VoiceBee turn: audio in → STT → LLM → TTS → audio out.
+"""One Voice Lane turn: audio in → STT → LLM → TTS → audio out.
 
 This is the pure orchestration of a single spoken exchange, decoupled from any
 transport. The realtime Pipecat pipeline (pipeline.py) and the headless test

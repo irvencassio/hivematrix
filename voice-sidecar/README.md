@@ -1,7 +1,7 @@
-# VoiceBee sidecar
+# Voice Lane sidecar
 
 The realtime audio runtime for HiveMatrix live voice (Phase 2, DECISIONS Q12).
-Per the VoiceBee design, **this sidecar owns the realtime audio loop** (VAD → STT
+Per the Voice Lane design, **this sidecar owns the realtime audio loop** (VAD → STT
 → Hive LLM → TTS → playback); the HiveMatrix daemon stays the **control plane**
 (tools + session handoff via `POST /voice/session`).
 

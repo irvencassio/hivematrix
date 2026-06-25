@@ -148,7 +148,7 @@ def main() -> int:
     cancel = None      # its cancel Event
 
     mode = "barge-in" if args.barge_in else "half-duplex"
-    print(f"VoiceBee live ({mode}) — just start talking. Ctrl-C to exit.", flush=True)
+    print(f"Voice Lane live ({mode}) — just start talking. Ctrl-C to exit.", flush=True)
     started_at = time.time()
     with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=FRAME, callback=cb):
         while True:

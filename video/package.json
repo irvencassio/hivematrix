@@ -2,7 +2,7 @@
   "name": "hivematrix-video",
   "private": true,
   "version": "0.0.1",
-  "description": "VoiceBee video factory — programmatic how-to/explainer videos (Phase 4).",
+  "description": "Voice Lane video factory - programmatic how-to/explainer videos (Phase 4).",
   "scripts": {
     "studio": "remotion studio",
     "render": "remotion render"

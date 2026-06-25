@@ -4,7 +4,7 @@ An always-on, single-Mac **autonomous operations platform**. A headless daemon
 (launchd-supervised) runs directives — standing objectives that plan, execute,
 verify, reflect, and re-arm 24×7 — routing work between a frontier model and a
 local Qwen model under a connectivity policy, with a native desktop-control
-capability (DesktopBee), a signed/notarized app shell, and a self-update channel.
+capability (Desktop Lane), a signed/notarized app shell, and a self-update channel.
 
 Greenfield reset of Hive 1. The design is locked by [DECISIONS.md](DECISIONS.md)
 and a CI-enforced [COMPONENT-MAP.md](COMPONENT-MAP.md) scope wall.
@@ -19,7 +19,7 @@ launchd ─▶ Hive daemon (Node, :3747) ──┬─ scheduler + directive run 
                                         └─ SQLite (tasks/directives/runs) + verified-completion ledger
    console (SPA, served at / )  ◀───────┘
    Tauri .app shell  ◀── loads the console
-   DesktopBee helper (.app, :3748) ◀── AX / CGEvent / capture / AppleScript, approval-gated
+   Desktop Lane helper (.app, :3748) ◀── AX / CGEvent / capture / AppleScript, approval-gated
    Rapid-MLX (:8000 fast · :8001 coding) ◀── Qwen3.6 4-bit tiers (LM Studio/Ollama also work)
 ```
 
@@ -85,7 +85,7 @@ bash scripts/build-dmg.sh            # notarized drag-to-install .dmg (hdiutil, 
   `GET /onboarding`.
 - **Updates**: [docs/UPDATE-CHANNEL.md](docs/UPDATE-CHANNEL.md) — cutting a
   release, Ed25519 key rotation, PAT scoping for a private channel.
-- **DesktopBee**: native helper in `desktopbee-helper/` (`swift build`,
+- **Desktop Lane**: native helper in `desktopbee-helper/` (`swift build`,
   `bash build-app.sh`). Proof: `npx tsx scripts/desktopbee-proof.mts`.
 - **Soak**: `npx tsx scripts/seed-soak.mts` seeds recurring directives;
   `npx tsx scripts/soak-scenarios.mts` injects + verifies failure recovery.

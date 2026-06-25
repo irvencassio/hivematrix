@@ -57,15 +57,16 @@ For `cloud-ok` mode, provide a Claude/OpenAI key (`ANTHROPIC_API_KEY` /
 `OPENAI_API_KEY`, or `config.providers.openai`). Without it HiveMatrix runs
 **local-only** on Qwen — fully functional, just no frontier tier.
 
-## 6. DesktopBee — desktop control (optional)
+## 6. Desktop Lane — desktop control (optional)
 
 1. Build the helper bundle: `cd desktopbee-helper && bash build-app.sh` →
-   `DesktopBeeHelper.app` (signed, stable TCC identity).
+   Desktop Lane helper compatibility bundle: `DesktopBeeHelper.app` (signed,
+   stable TCC identity).
 2. Install its launchd agent (render
    `desktopbee-helper/launchd/com.hivematrix.desktopbee.helper.plist.template`).
 3. **Grant permissions** (one-time) in **System Settings ▸ Privacy & Security**:
-   - **Accessibility** → enable **DesktopBeeHelper**
-   - **Screen & System Audio Recording** → enable **DesktopBeeHelper**
+   - **Accessibility** → enable **Desktop Lane Helper**
+   - **Screen & System Audio Recording** → enable **Desktop Lane Helper**
 
    A launchd-supervised helper can't show the interactive prompt, so add the
    `.app` via the **＋** (point at `…/desktopbee-helper/DesktopBeeHelper.app`).

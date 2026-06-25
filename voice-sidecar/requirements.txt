@@ -1,4 +1,4 @@
-# VoiceBee sidecar — direct dependencies (Phase 2, DECISIONS Q12).
+# Voice Lane sidecar — direct dependencies (Phase 2, DECISIONS Q12).
 # Built on the base system Python (3.14+); create the env with:
 #   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 # The .venv is this app's isolated dependency folder, not a separate/legacy

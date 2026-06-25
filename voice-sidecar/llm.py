@@ -1,4 +1,4 @@
-"""LLM turn for the VoiceBee sidecar — calls HiveMatrix's LOCAL model over its
+"""LLM turn for the Voice Lane sidecar — calls HiveMatrix's LOCAL model over its
 OpenAI-compatible endpoint (the same local server the daemon routes to). All
 config is env-driven so it tracks whatever the operator has serving locally:
 

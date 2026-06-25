@@ -1,4 +1,4 @@
-"""Text-to-speech for the VoiceBee sidecar.
+"""Text-to-speech for the Voice Lane sidecar.
 
 Engines behind one `synthesize()` seam, selected by *intent* (the `quality` arg):
 
