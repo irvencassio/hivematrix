@@ -35,7 +35,7 @@ function asMailBeeOutput(output: Record<string, unknown>): MailBeeOutput {
 }
 
 /**
- * Self-defeating-reply guard. A headless MailBee agent has no human to complete
+ * Self-defeating-reply guard. A headless Mail Lane agent has no human to complete
  * an OAuth/MCP login, and its routing prompt forbids asking for one — yet a model
  * may still improvise "run /mcp to authenticate Gmail" instead of sending through
  * Apple Mail. Auto-emailing that to the sender is worse than not replying: it
@@ -90,7 +90,7 @@ export async function deliverTrustedMailBeeReply(
 
   const now = options.now ?? (() => new Date().toISOString());
   // Never auto-send a reply that asks the sender to authenticate Gmail/MCP or run
-  // /mcp — the agent improvised a dead end instead of using the MailBee send path.
+  // /mcp — the agent improvised a dead end instead of using the Mail Lane send path.
   // Hold it for human review (status stays "review", not "done").
   if (looksLikeAuthRequest(body)) {
     return {

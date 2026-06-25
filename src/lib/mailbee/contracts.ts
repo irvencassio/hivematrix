@@ -1,5 +1,5 @@
 /**
- * MailBee contracts — pure types + the trust-classification engine (ported from
+ * Mail Lane contracts — pure types + the trust-classification engine (ported from
  * Hive 1, the highest-value reusable ingress-safety asset). No zod; unit-tested.
  *
  * Every inbound email is untrusted input until classified. classifyMailTrust

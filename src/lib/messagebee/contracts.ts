@@ -1,5 +1,5 @@
 /**
- * MessageBee contracts — pure types + helpers for the SMS/iMessage channel lane
+ * Message Lane contracts — pure types + helpers for the SMS/iMessage channel lane
  * (Q8). No zod (HiveMatrix uses hand-rolled validation); all functions here are
  * side-effect-free and unit-tested.
  */

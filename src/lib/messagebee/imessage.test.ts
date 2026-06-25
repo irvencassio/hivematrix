@@ -16,7 +16,7 @@ import {
 
 test("send script uses the modern account/participant API, not the timing-out buddy/service one", () => {
   // Regression: `buddy … of service` hangs on recent macOS (AppleEvent -1712),
-  // so MessageBee replies silently never delivered.
+  // so Message Lane replies silently never delivered.
   assert.match(SEND_SCRIPT, /account whose service type = iMessage/);
   assert.match(SEND_SCRIPT, /participant targetHandle of targetAccount/);
   assert.doesNotMatch(SEND_SCRIPT, /buddy .* of targetService/);

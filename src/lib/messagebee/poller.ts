@@ -1,10 +1,10 @@
 /**
- * MessageBee poller — the loop that turns inbound texts into work and texts
+ * Message Lane poller — the loop that turns inbound texts into work and texts
  * needs_input questions back out.
  *
  * Inbound:  read chat.db since the high-water ROWID → route each message
  *           (allowlist gate) → resolve a waiting task or create a new one.
- * Outbound: any messagebee task that's waiting on its sender (needs_input) gets
+ * Outbound: any Message Lane task that's waiting on its sender (needs_input) gets
  *           its question texted to that sender once.
  *
  * Runs inside the daemon; gated by the channel being enabled + chat.db readable.
@@ -33,7 +33,7 @@ function taskHandle(task: TaskDoc | null): string | null {
   return mb?.handle ?? null;
 }
 
-/** Pending needs_input requests for messagebee tasks owned by a given sender. */
+/** Pending needs_input requests for Message Lane tasks owned by a given sender. */
 async function pendingInputForSender(handle: string): Promise<PendingInput[]> {
   const out: PendingInput[] = [];
   for (const stuck of getPendingStuck()) {

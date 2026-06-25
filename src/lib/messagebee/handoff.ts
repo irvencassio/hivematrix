@@ -1,5 +1,5 @@
 /**
- * MessageBee routing — pure decision logic for one inbound message.
+ * Message Lane routing — pure decision logic for one inbound message.
  *
  * An allowlisted sender's text either answers a task that's waiting on them
  * (needs_input) or starts a new task. A non-allowlisted sender is read-only:

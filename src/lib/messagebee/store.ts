@@ -1,5 +1,5 @@
 /**
- * MessageBee state over the v5 messaging tables (message_channels,
+ * Message Lane state over the v5 messaging tables (message_channels,
  * message_identities). One channel row ("imessage") holds enable/status + a
  * metadata blob with the read high-water mark and the set of needs_input
  * prompts already texted out. Identities are the sender allowlist.

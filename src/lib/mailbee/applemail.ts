@@ -1,5 +1,5 @@
 /**
- * MailBee I/O against Apple Mail — self-contained (no IMAP/SMTP, no OAuth). Uses
+ * Mail Lane I/O against Apple Mail — self-contained (no IMAP/SMTP, no OAuth). Uses
  * accounts Mail.app already holds (Gmail + Outlook both work).
  *
  *   read:  osascript queries the inbox for recent messages (id > high-water).

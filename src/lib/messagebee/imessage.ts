@@ -1,5 +1,5 @@
 /**
- * MessageBee I/O against macOS Messages — self-contained (no external CLI).
+ * Message Lane I/O against macOS Messages — self-contained (no external CLI).
  *
  *   read:  ~/Library/Messages/chat.db via better-sqlite3 (read-only), needs
  *          Full Disk Access for the daemon process.
@@ -145,12 +145,12 @@ export function currentMaxRowid(path = chatDbPath()): number {
 
 // Use the modern `account` + `participant` API. The legacy `buddy … of service`
 // lookup hangs on recent macOS (AppleEvent timed out / -1712), which is why
-// MessageBee replies silently never delivered. `with timeout` bounds it so a
+// Message Lane replies silently never delivered. `with timeout` bounds it so a
 // stuck Messages can't block the whole send for the default 2 minutes.
 // argv: handle, text, then 0+ attachment file paths. Text is sent only when
 // non-empty (so a voice note can be sent with no caption); each attachment is
 // sent as its own message via `send (POSIX file ...)` — the iMessage equivalent
-// of MailBee's attachment loop. Audio (.m4a) arrives as a playable bubble.
+// of Mail Lane's attachment loop. Audio (.m4a) arrives as a playable bubble.
 export const SEND_SCRIPT = `on run argv
   set targetHandle to item 1 of argv
   set targetMessage to item 2 of argv

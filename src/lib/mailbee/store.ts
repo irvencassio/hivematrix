@@ -1,6 +1,6 @@
 /**
- * MailBee state over the v5 messaging tables (channel = "email"). Mirrors the
- * MessageBee store: one channel row (enable/status + metadata high-water by Mail
+ * Mail Lane state over the v5 messaging tables (channel = "email"). Mirrors the
+ * Message Lane store: one channel row (enable/status + metadata high-water by Mail
  * message id) and identities as the trusted-sender allowlist. Plus a
  * config-driven trusted-domains list for the authenticatedDomain trust hint.
  */

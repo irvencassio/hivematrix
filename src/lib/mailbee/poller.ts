@@ -1,5 +1,5 @@
 /**
- * MailBee poller — watch the inbox and turn new mail into trust-classified
+ * Mail Lane poller — watch the inbox and turn new mail into trust-classified
  * triage tasks. Runs inside the daemon; gated by the channel being enabled.
  * Email is lower-frequency than SMS and Mail.app osascript is slow, so the
  * interval is generous.
