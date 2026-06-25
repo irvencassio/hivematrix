@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ConnectivityPolicy } from "@/lib/connectivity/policy";
 import {
-  isBeeTool, availableBeeTools, executeBeeTool, BEE_TOOL_DEFINITIONS,
+  isBeeTool, availableBeeTools, executeBeeTool, BEE_TOOL_DEFINITIONS, resolveBeeToolName,
   capabilityRoutingGuide, executeMailBeeSend, executeMailBeeDraft, executeMessageBeeSend,
   type MailBeeSendIO, type MessageBeeSendIO,
 } from "./bee-tools";
@@ -27,6 +27,40 @@ test("isBeeTool recognizes active lane tools and rejects removed browser aliases
   assert.equal(isBeeTool("code_graph"), true);
   assert.equal(isBeeTool("bash"), false);
   assert.equal(isBeeTool("read_file"), false);
+});
+
+test("resolveBeeToolName maps lane-native aliases to their canonical handler names", () => {
+  assert.equal(resolveBeeToolName("desktop_action"), "desktopbee_action");
+  assert.equal(resolveBeeToolName("terminal_session"), "termbee_session");
+  assert.equal(resolveBeeToolName("terminal_run"), "termbee_run");
+  assert.equal(resolveBeeToolName("mail_send"), "mailbee_send");
+  assert.equal(resolveBeeToolName("mail_draft"), "mailbee_draft");
+  assert.equal(resolveBeeToolName("message_send"), "messagebee_send");
+  // Canonical names and unknowns resolve to themselves.
+  assert.equal(resolveBeeToolName("mailbee_send"), "mailbee_send");
+  assert.equal(resolveBeeToolName("bash"), "bash");
+  // Removed legacy browser ids are not re-introduced as aliases.
+  assert.equal(resolveBeeToolName("browserbee_run"), "browserbee_run");
+});
+
+test("isBeeTool accepts lane-native aliases alongside the canonical ids", () => {
+  assert.equal(isBeeTool("mail_send"), true);
+  assert.equal(isBeeTool("message_send"), true);
+  assert.equal(isBeeTool("terminal_run"), true);
+  assert.equal(isBeeTool("desktop_action"), true);
+  // Still rejects the removed browser ids and non-lane tools.
+  assert.equal(isBeeTool("browserbee_run"), false);
+  assert.equal(isBeeTool("bash"), false);
+});
+
+test("executeBeeTool dispatches a lane-native alias to its real handler", async () => {
+  // Empty args reach the mail handler (required-field error) rather than the
+  // "Unknown lane tool" path — proving the alias resolved to mailbee_send. When
+  // the lane is gated off it returns the capability error; neither is the
+  // unknown-tool error, so the alias resolution holds regardless of policy.
+  const out = await executeBeeTool("mail_send", {}, { projectPath: "/tmp", project: "p", requestedBy: "t" });
+  assert.doesNotMatch(out, /Unknown lane tool/);
+  assert.match(out, /required to send an email|unavailable in the current connectivity mode/);
 });
 
 test("all bee tools are defined with required schemas", () => {

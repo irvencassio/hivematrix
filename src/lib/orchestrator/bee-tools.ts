@@ -33,6 +33,31 @@ const BEE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
   code_graph: "codegraph",
 };
 
+/**
+ * Lane-shaped aliases → the canonical tool name that owns the handler.
+ *
+ * Part of the staged Bee→Lane protocol migration: the dispatcher accepts these
+ * lane-native ids so a lane-shaped caller resolves to the same handler as the
+ * existing bee-branded id. The model is still only *advertised* the canonical
+ * names (see BEE_TOOL_DEFINITIONS) — flipping the advertised surface is a
+ * separate, later step, since it changes what the model emits into persisted
+ * turn history. (The browser tool is already de-branded as `hivematrix_browser`;
+ * its removed legacy ids `webbee_search`/`browserbee_run` stay rejected.)
+ */
+const LANE_TOOL_ALIASES: Record<string, string> = {
+  desktop_action: "desktopbee_action",
+  terminal_session: "termbee_session",
+  terminal_run: "termbee_run",
+  mail_send: "mailbee_send",
+  mail_draft: "mailbee_draft",
+  message_send: "messagebee_send",
+};
+
+/** Resolve an incoming tool name to its canonical handler name (or itself). */
+export function resolveBeeToolName(name: string): string {
+  return LANE_TOOL_ALIASES[name] ?? name;
+}
+
 export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
   {
     type: "function",
@@ -249,7 +274,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
 ];
 
 export function isBeeTool(name: string): boolean {
-  return name in BEE_TOOL_CAPABILITY;
+  return resolveBeeToolName(name) in BEE_TOOL_CAPABILITY;
 }
 
 /**
@@ -305,12 +330,14 @@ export interface BeeToolContext {
 
 /** Dispatch a bee tool call. Always enforces the capability gate first. */
 export async function executeBeeTool(
-  name: string,
+  rawName: string,
   args: Record<string, unknown>,
   ctx: BeeToolContext
 ): Promise<string> {
+  // Accept lane-native and legacy aliases, dispatching on the canonical name.
+  const name = resolveBeeToolName(rawName);
   const capId = BEE_TOOL_CAPABILITY[name];
-  if (!capId) return `Error: Unknown lane tool "${name}"`;
+  if (!capId) return `Error: Unknown lane tool "${rawName}"`;
 
   const cap = getConnectivityPolicy().getCapability(capId);
   if (!cap.available) {
