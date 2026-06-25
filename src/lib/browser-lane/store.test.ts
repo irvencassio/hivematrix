@@ -11,6 +11,11 @@ const { getDb, _resetDbForTests } = await import("@/lib/db");
 const {
   listBrowserSites,
   listEnabledReadinessProbes,
+  createBrowserTraceRun,
+  recordBrowserTraceEvent,
+  completeBrowserTraceRun,
+  getBrowserTraceRun,
+  listBrowserTraceRuns,
   recordBrowserReadinessRun,
   upsertBrowserReadinessProbe,
   upsertBrowserSite,
@@ -89,4 +94,32 @@ test("browser lane store summaries include probe counts and no secret material",
   assert.equal("password" in summaries[0], false);
   assert.equal("secret" in summaries[0], false);
   assert.equal("token" in summaries[0], false);
+});
+
+test("browser lane store lists trace runs and redacts event payload details", () => {
+  const traceRunId = createBrowserTraceRun({ siteId: "heygen", workflowId: "heygen-home", metadata: { source: "test" } });
+  recordBrowserTraceEvent({
+    traceRunId,
+    event: "probe.snapshot",
+    payload: {
+      message: "snapshot recorded",
+      nested: {
+        token: "abc123",
+        safe: "visible",
+      },
+      password: "super-secret",
+    },
+  });
+  completeBrowserTraceRun(traceRunId, "failed", { token: "nope", reason: "blocked" });
+
+  const traces = listBrowserTraceRuns();
+  assert.equal(traces[0].id, traceRunId);
+  assert.equal(traces[0].metadata.reason, "blocked");
+  assert.equal(traces[0].metadata.token, "[redacted]");
+
+  const detail = getBrowserTraceRun(traceRunId);
+  assert.ok(detail);
+  assert.equal(detail.events.length, 1);
+  assert.equal(detail.events[0].payload.password, "[redacted]");
+  assert.deepEqual(detail.events[0].payload.nested, { token: "[redacted]", safe: "visible" });
 });

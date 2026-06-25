@@ -109,11 +109,25 @@ test("browser lane CLI parses probe maintenance commands", () => {
   });
 });
 
+test("browser lane CLI parses trace inspection commands", () => {
+  assert.deepEqual(parseBrowserLaneCli(["trace", "list"]), {
+    command: "trace-list",
+  });
+  assert.deepEqual(parseBrowserLaneCli(["trace", "latest"]), {
+    command: "trace-latest",
+  });
+  assert.deepEqual(parseBrowserLaneCli(["trace", "show", "trace-123"]), {
+    command: "trace-show",
+    traceRunId: "trace-123",
+  });
+});
+
 test("browser lane help teaches the stable command names", () => {
   const help = renderBrowserLaneHelp();
   assert.match(help, /hive browser status/);
   assert.match(help, /hive browser sites add/);
   assert.match(help, /hive browser probes add/);
+  assert.match(help, /hive browser trace latest/);
   assert.match(help, /hive browser run/);
   assert.doesNotMatch(help, /BrowserBee|WebBee/);
 });

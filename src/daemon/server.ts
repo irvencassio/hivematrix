@@ -1284,6 +1284,27 @@ export function createDaemonServer() {
         return;
       }
 
+      if (req.method === "GET" && urlPath === "/browser-lane/traces") {
+        const { listBrowserTraceRuns } = await import("@/lib/browser-lane/store");
+        json(res, 200, { ok: true, lane: "browser", traces: listBrowserTraceRuns() });
+        return;
+      }
+
+      if (req.method === "GET" && urlPath === "/browser-lane/traces/latest") {
+        const { getLatestBrowserTraceRun } = await import("@/lib/browser-lane/store");
+        const trace = getLatestBrowserTraceRun();
+        json(res, trace ? 200 : 404, trace ? { ok: true, lane: "browser", trace } : { ok: false, lane: "browser", error: "No Browser Lane traces found." });
+        return;
+      }
+
+      const browserTraceMatch = urlPath.match(/^\/browser-lane\/traces\/([^/]+)$/);
+      if (req.method === "GET" && browserTraceMatch) {
+        const { getBrowserTraceRun } = await import("@/lib/browser-lane/store");
+        const trace = getBrowserTraceRun(decodeURIComponent(browserTraceMatch[1]));
+        json(res, trace ? 200 : 404, trace ? { ok: true, lane: "browser", trace } : { ok: false, lane: "browser", error: "Browser Lane trace not found." });
+        return;
+      }
+
       // POST /browser-lane/probe — readiness orchestration endpoint backed by
       // stored site/probe rows. The default adapter is honest when no browser
       // backend is wired yet: it records blocked runs instead of pretending.

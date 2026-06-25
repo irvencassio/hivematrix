@@ -59,6 +59,27 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command.command === "trace-list") {
+    const res = await fetch(`${base}/browser-lane/traces`, { headers: { Authorization: `Bearer ${token}` } });
+    console.log(await res.text());
+    process.exitCode = res.ok ? 0 : 1;
+    return;
+  }
+
+  if (command.command === "trace-latest") {
+    const res = await fetch(`${base}/browser-lane/traces/latest`, { headers: { Authorization: `Bearer ${token}` } });
+    console.log(await res.text());
+    process.exitCode = res.ok ? 0 : 1;
+    return;
+  }
+
+  if (command.command === "trace-show") {
+    const res = await fetch(`${base}/browser-lane/traces/${encodeURIComponent(command.traceRunId)}`, { headers: { Authorization: `Bearer ${token}` } });
+    console.log(await res.text());
+    process.exitCode = res.ok ? 0 : 1;
+    return;
+  }
+
   if (command.command === "open") {
     const res = await fetch(`${base}/lane/browser`, {
       method: "POST",

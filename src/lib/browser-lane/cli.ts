@@ -8,6 +8,9 @@ export type BrowserLaneCliCommand =
   | { command: "sites-list" }
   | { command: "sites-add"; site: Record<string, unknown> }
   | { command: "probes-add"; probe: Record<string, unknown> }
+  | { command: "trace-list" }
+  | { command: "trace-latest" }
+  | { command: "trace-show"; traceRunId: string }
   | { command: "auth-set"; siteId: string; credentialRef: string; username?: string }
   | { command: "tool"; tool: "hivematrix_browser"; args: Record<string, unknown> };
 
@@ -99,6 +102,13 @@ export function parseBrowserLaneCli(argv: string[]): BrowserLaneCliCommand {
         },
       };
     }
+    case "trace": {
+      const subcommand = rest[0];
+      if (subcommand === "list") return { command: "trace-list" };
+      if (subcommand === "latest") return { command: "trace-latest" };
+      if (subcommand === "show") return { command: "trace-show", traceRunId: requireValue(rest[1], "trace run id") };
+      fail("trace command must be: hive browser trace list|latest|show");
+    }
     case "search":
       return {
         command: "tool",
@@ -144,6 +154,9 @@ export function renderBrowserLaneHelp(): string {
     "  hive browser sites list",
     "  hive browser sites add <site-id> --name <name> --home-url <url> [--login-url <url>] [--domain domain] [--credential-ref ref]",
     "  hive browser probes add <site-id> <probe-id> --name <name> --url <url> --text <expected-text>",
+    "  hive browser trace list",
+    "  hive browser trace latest",
+    "  hive browser trace show <trace-run-id>",
     "  hive browser open <site-id|url>",
     "  hive browser search <query>",
     "  hive browser read <url> [question]",

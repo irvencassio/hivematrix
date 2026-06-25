@@ -33,6 +33,26 @@ interface BrowserProbeRow {
   enabled: number;
 }
 
+interface BrowserTraceRunRow {
+  _id: string;
+  siteId: string | null;
+  workflowId: string | null;
+  status: string;
+  traceDir: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  metadata: string;
+}
+
+interface BrowserTraceEventRow {
+  _id: number;
+  traceRunId: string;
+  event: string;
+  payload: string;
+  screenshotPath: string | null;
+  createdAt: string;
+}
+
 export interface BrowserReadinessRunRecord {
   id: string;
   siteId: string;
@@ -65,6 +85,31 @@ export interface BrowserSiteSummary {
   probeCount: number;
   createdAt: string | null;
   updatedAt: string | null;
+}
+
+export interface BrowserTraceEvent {
+  id: number;
+  traceRunId: string;
+  event: string;
+  payload: Record<string, unknown>;
+  screenshotPath: string | null;
+  createdAt: string;
+}
+
+export interface BrowserTraceRunSummary {
+  id: string;
+  siteId: string | null;
+  workflowId: string | null;
+  status: string;
+  traceDir: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  metadata: Record<string, unknown>;
+  eventCount: number;
+}
+
+export interface BrowserTraceRunDetail extends BrowserTraceRunSummary {
+  events: BrowserTraceEvent[];
 }
 
 export function upsertBrowserSite(input: unknown): BrowserSite {
@@ -224,6 +269,40 @@ export function completeBrowserTraceRun(id: string, status: "done" | "failed", m
   `).run(status, JSON.stringify(metadata), id);
 }
 
+export function listBrowserTraceRuns(limit = 20): BrowserTraceRunSummary[] {
+  const rows = getDb().prepare(`
+    SELECT
+      r.*,
+      (SELECT COUNT(*) FROM browser_trace_events e WHERE e.traceRunId = r._id) AS eventCount
+    FROM browser_trace_runs r
+    ORDER BY r.startedAt DESC, r._id DESC
+    LIMIT ?
+  `).all(Math.max(1, Math.min(100, Math.floor(limit)))) as Array<BrowserTraceRunRow & { eventCount: number }>;
+  return rows.map(rowToTraceSummary);
+}
+
+export function getLatestBrowserTraceRun(): BrowserTraceRunDetail | null {
+  const latest = listBrowserTraceRuns(1)[0];
+  return latest ? getBrowserTraceRun(latest.id) : null;
+}
+
+export function getBrowserTraceRun(id: string): BrowserTraceRunDetail | null {
+  const row = getDb().prepare(`
+    SELECT
+      r.*,
+      (SELECT COUNT(*) FROM browser_trace_events e WHERE e.traceRunId = r._id) AS eventCount
+    FROM browser_trace_runs r
+    WHERE r._id = ?
+  `).get(id) as (BrowserTraceRunRow & { eventCount: number }) | undefined;
+  if (!row) return null;
+  const events = getDb().prepare(`
+    SELECT * FROM browser_trace_events
+    WHERE traceRunId = ?
+    ORDER BY _id ASC
+  `).all(id) as BrowserTraceEventRow[];
+  return { ...rowToTraceSummary(row), events: events.map(rowToTraceEvent) };
+}
+
 export function recordBrowserReadinessRun(input: BrowserReadinessRunInput): BrowserReadinessRunRecord {
   const state = normalizeBrowserReadinessState(input.status);
   const id = generateId();
@@ -278,6 +357,31 @@ function rowToProbe(row: BrowserProbeRow): ReadinessProbe {
   });
 }
 
+function rowToTraceSummary(row: BrowserTraceRunRow & { eventCount: number }): BrowserTraceRunSummary {
+  return {
+    id: row._id,
+    siteId: row.siteId,
+    workflowId: row.workflowId,
+    status: row.status,
+    traceDir: row.traceDir,
+    startedAt: row.startedAt,
+    completedAt: row.completedAt,
+    metadata: redactSecrets(parseJsonObject(row.metadata)) as Record<string, unknown>,
+    eventCount: Number(row.eventCount ?? 0),
+  };
+}
+
+function rowToTraceEvent(row: BrowserTraceEventRow): BrowserTraceEvent {
+  return {
+    id: row._id,
+    traceRunId: row.traceRunId,
+    event: row.event,
+    payload: redactSecrets(parseJsonObject(row.payload)) as Record<string, unknown>,
+    screenshotPath: row.screenshotPath,
+    createdAt: row.createdAt,
+  };
+}
+
 function parseJsonArray(value: string | null | undefined): unknown[] {
   if (!value) return [];
   try {
@@ -286,4 +390,24 @@ function parseJsonArray(value: string | null | undefined): unknown[] {
   } catch {
     return [];
   }
+}
+
+function parseJsonObject(value: string | null | undefined): Record<string, unknown> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function redactSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactSecrets);
+  if (!value || typeof value !== "object") return value;
+  const redacted: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    redacted[key] = /password|secret|token|cookie|totp/i.test(key) ? "[redacted]" : redactSecrets(entry);
+  }
+  return redacted;
 }
