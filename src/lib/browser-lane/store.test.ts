@@ -20,6 +20,7 @@ const {
   upsertBrowserReadinessProbe,
   upsertBrowserSite,
   listBrowserSiteSummaries,
+  getBrowserLaneReadinessDashboard,
 } = await import("./store");
 
 before(() => {
@@ -122,4 +123,49 @@ test("browser lane store lists trace runs and redacts event payload details", ()
   assert.equal(detail.events.length, 1);
   assert.equal(detail.events[0].payload.password, "[redacted]");
   assert.deepEqual(detail.events[0].payload.nested, { token: "[redacted]", safe: "visible" });
+});
+
+test("readiness dashboard aggregates latest run, credential ref, and color rollup", () => {
+  // A second site with no readiness run yet stays honestly "unknown/gray".
+  upsertBrowserSite({
+    id: "vercel",
+    displayName: "Vercel",
+    homeUrl: "https://vercel.com/dashboard",
+    allowedDomains: ["vercel.com"],
+  });
+  // Record a fresh run for heygen that supersedes the earlier "ready" run.
+  recordBrowserReadinessRun({
+    siteId: "heygen",
+    probeId: "heygen-home",
+    status: "needs_reauth",
+    color: "orange",
+    summary: "Session expired",
+    traceRunId: "trace-9",
+  });
+
+  const dashboard = getBrowserLaneReadinessDashboard();
+  assert.equal(dashboard.lane, "browser");
+  assert.equal(dashboard.laneDisplayName, "Browser Lane");
+  assert.equal(dashboard.totals.sites, 2);
+
+  const heygen = dashboard.sites.find((s) => s.id === "heygen");
+  assert.ok(heygen);
+  assert.equal(heygen.readiness.status, "needs_reauth");
+  assert.equal(heygen.readiness.color, "orange");
+  assert.equal(heygen.readiness.traceRunId, "trace-9");
+  assert.equal(heygen.credentialRef, "hivematrix.browser.heygen.primary");
+  assert.equal(heygen.probeCount, 1);
+  // Never leak secret material into the dashboard.
+  assert.equal("password" in heygen, false);
+  assert.equal("secret" in heygen, false);
+
+  const vercel = dashboard.sites.find((s) => s.id === "vercel");
+  assert.ok(vercel);
+  assert.equal(vercel.readiness.status, "unknown");
+  assert.equal(vercel.readiness.color, "gray");
+  assert.equal(vercel.credentialRef, null);
+
+  assert.equal(dashboard.totals.byColor.orange, 1);
+  assert.equal(dashboard.totals.byColor.gray, 1);
+  assert.equal(dashboard.totals.needsAttention, 1);
 });

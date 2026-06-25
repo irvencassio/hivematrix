@@ -1260,6 +1260,17 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /browser-lane/dashboard — site/auth readiness dashboard: per-site
+      // latest readiness state (color), Keychain credential status, probe counts,
+      // and trace linkage, plus a roll-up of how many sites need attention.
+      if (req.method === "GET" && urlPath === "/browser-lane/dashboard") {
+        const { getBrowserLaneReadinessDashboard } = await import("@/lib/browser-lane/store");
+        const q = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+        const dashboard = getBrowserLaneReadinessDashboard({ siteId: q.get("siteId") });
+        json(res, 200, { ok: true, ...dashboard });
+        return;
+      }
+
       if (req.method === "POST" && urlPath === "/browser-lane/sites") {
         const body = await parseBody(req) as Record<string, unknown>;
         try {
@@ -1313,6 +1324,85 @@ export function createDaemonServer() {
         const { runBrowserLaneReadiness } = await import("@/lib/browser-lane/probe-service");
         const result = await runBrowserLaneReadiness({ siteId: typeof body.siteId === "string" ? body.siteId : "all" });
         json(res, result.ok ? 200 : 404, result);
+        return;
+      }
+
+      // ----------------------------------------------------------------
+      // COO routing rules — SQL-backed intent→lane routing table. Rules are
+      // stored and resolved against canonical lane ids; legacy lane/capability
+      // names are normalized on write so older callers keep working.
+      // ----------------------------------------------------------------
+      if (req.method === "GET" && urlPath === "/coo/routing-rules") {
+        const { listCooRoutingRules } = await import("@/lib/coo/store");
+        const q = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+        const laneParam = q.get("lane");
+        const rules = listCooRoutingRules({
+          lane: laneParam ? (laneParam as never) : null,
+          enabledOnly: q.get("enabled") === "1" || q.get("enabledOnly") === "true",
+        });
+        json(res, 200, { ok: true, rules });
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/coo/routing-rules") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        try {
+          const { upsertCooRoutingRule } = await import("@/lib/coo/store");
+          const rule = upsertCooRoutingRule(body.rule ?? body);
+          json(res, 200, { ok: true, rule });
+        } catch (e) {
+          json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
+      // POST /coo/routing-rules/seed — install the canonical default rules
+      // (idempotent; existing rules are left untouched).
+      if (req.method === "POST" && urlPath === "/coo/routing-rules/seed") {
+        const { seedDefaultCooRoutingRules, listCooRoutingRules } = await import("@/lib/coo/store");
+        const created = seedDefaultCooRoutingRules();
+        json(res, 200, { ok: true, created, rules: listCooRoutingRules() });
+        return;
+      }
+
+      // POST /coo/routing-rules/resolve — resolve a request against enabled rules.
+      if (req.method === "POST" && urlPath === "/coo/routing-rules/resolve") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        try {
+          const { resolveCooRouteFromRules } = await import("@/lib/coo/store");
+          const route = resolveCooRouteFromRules({
+            text: typeof body.text === "string" ? body.text : "",
+            domains: Array.isArray(body.domains) ? body.domains.filter((d): d is string => typeof d === "string") : undefined,
+            project: typeof body.project === "string" ? body.project : null,
+            workflow: typeof body.workflow === "string" ? body.workflow : null,
+            tags: Array.isArray(body.tags) ? body.tags.filter((t): t is string => typeof t === "string") : undefined,
+          });
+          json(res, 200, { ok: true, route });
+        } catch (e) {
+          json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
+      const cooRuleHistoryMatch = urlPath.match(/^\/coo\/routing-rules\/([^/]+)\/history$/);
+      if (req.method === "GET" && cooRuleHistoryMatch) {
+        const { listCooRoutingRuleHistory } = await import("@/lib/coo/store");
+        json(res, 200, { ok: true, history: listCooRoutingRuleHistory(decodeURIComponent(cooRuleHistoryMatch[1])) });
+        return;
+      }
+
+      const cooRuleMatch = urlPath.match(/^\/coo\/routing-rules\/([^/]+)$/);
+      if (req.method === "GET" && cooRuleMatch) {
+        const { getCooRoutingRule } = await import("@/lib/coo/store");
+        const rule = getCooRoutingRule(decodeURIComponent(cooRuleMatch[1]));
+        json(res, rule ? 200 : 404, rule ? { ok: true, rule } : { ok: false, error: "Routing rule not found." });
+        return;
+      }
+
+      if (req.method === "DELETE" && cooRuleMatch) {
+        const { deleteCooRoutingRule } = await import("@/lib/coo/store");
+        const removed = deleteCooRoutingRule(decodeURIComponent(cooRuleMatch[1]));
+        json(res, removed ? 200 : 404, removed ? { ok: true } : { ok: false, error: "Routing rule not found." });
         return;
       }
 

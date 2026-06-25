@@ -1,4 +1,5 @@
 import { generateId, getDb } from "@/lib/db";
+import { laneDisplayName } from "@/lib/lanes/contracts";
 import {
   normalizeBrowserReadinessState,
   normalizeBrowserSite,
@@ -327,6 +328,134 @@ export function recordBrowserReadinessRun(input: BrowserReadinessRunInput): Brow
     color: input.color || state.color,
     summary: input.summary ?? "",
     traceRunId: input.traceRunId ?? null,
+  };
+}
+
+// ------------------------------------------------------------------
+// Site / auth readiness dashboard
+//
+// Aggregates the per-site MVP signals into one view: the latest readiness run
+// (status + color), the Keychain credential reference and its verification
+// status, the trace linkage for drill-down, and enabled probe counts. Secrets
+// never appear here — only credentialRef metadata, exactly as stored.
+// ------------------------------------------------------------------
+export interface BrowserLaneDashboardSite {
+  id: string;
+  displayName: string;
+  homeUrl: string;
+  loginUrl: string | null;
+  allowedDomains: string[];
+  authStrategy: BrowserSite["authStrategy"];
+  credentialRef: string | null;
+  credentialStatus: string | null;
+  credentialLastVerifiedAt: string | null;
+  probeCount: number;
+  readiness: {
+    status: BrowserReadinessStatus;
+    color: BrowserReadinessColor;
+    label: string;
+    summary: string;
+    runId: string | null;
+    traceRunId: string | null;
+    completedAt: string | null;
+    startedAt: string | null;
+  };
+}
+
+export interface BrowserLaneReadinessDashboard {
+  lane: "browser";
+  laneDisplayName: string;
+  totals: {
+    sites: number;
+    byColor: Record<BrowserReadinessColor, number>;
+    needsAttention: number;
+  };
+  sites: BrowserLaneDashboardSite[];
+}
+
+interface DashboardRow extends BrowserSiteRow {
+  credentialStatus: string | null;
+  credentialLastVerifiedAt: string | null;
+  probeCount: number;
+  runId: string | null;
+  readinessStatus: string | null;
+  readinessColor: string | null;
+  readinessSummary: string | null;
+  readinessTraceRunId: string | null;
+  readinessCompletedAt: string | null;
+  readinessStartedAt: string | null;
+}
+
+export function getBrowserLaneReadinessDashboard(filter: { siteId?: string | null } = {}): BrowserLaneReadinessDashboard {
+  const params: string[] = [];
+  const where = filter.siteId && filter.siteId !== "all" ? "WHERE s._id = ?" : "";
+  if (where) params.push(filter.siteId!);
+  const rows = getDb().prepare(`
+    SELECT
+      s.*,
+      c.credentialRef AS credentialRef,
+      c.status AS credentialStatus,
+      c.lastVerifiedAt AS credentialLastVerifiedAt,
+      (SELECT COUNT(*) FROM browser_readiness_probes p WHERE p.siteId = s._id AND p.enabled = 1) AS probeCount,
+      lr._id AS runId,
+      lr.status AS readinessStatus,
+      lr.color AS readinessColor,
+      lr.summary AS readinessSummary,
+      lr.traceRunId AS readinessTraceRunId,
+      lr.completedAt AS readinessCompletedAt,
+      lr.startedAt AS readinessStartedAt
+    FROM browser_sites s
+    LEFT JOIN browser_credentials c ON c.siteId = s._id
+    LEFT JOIN browser_readiness_runs lr ON lr._id = (
+      SELECT _id FROM browser_readiness_runs
+      WHERE siteId = s._id
+      ORDER BY startedAt DESC, rowid DESC
+      LIMIT 1
+    )
+    ${where}
+    GROUP BY s._id
+    ORDER BY s.displayName COLLATE NOCASE ASC
+  `).all(...params) as DashboardRow[];
+
+  const byColor: Record<BrowserReadinessColor, number> = { green: 0, yellow: 0, orange: 0, red: 0, gray: 0 };
+  let needsAttention = 0;
+
+  const sites = rows.map((row): BrowserLaneDashboardSite => {
+    const site = rowToSite(row);
+    // No run yet → honest "unknown/gray" rather than a fabricated "ready".
+    const state = normalizeBrowserReadinessState(row.readinessStatus ?? "unknown");
+    const color = (row.readinessColor as BrowserReadinessColor | null) ?? state.color;
+    byColor[color] += 1;
+    if (color === "orange" || color === "red") needsAttention += 1;
+    return {
+      id: site.id,
+      displayName: site.displayName,
+      homeUrl: site.homeUrl,
+      loginUrl: site.loginUrl,
+      allowedDomains: site.allowedDomains,
+      authStrategy: site.authStrategy,
+      credentialRef: site.credentialRef,
+      credentialStatus: row.credentialStatus ?? null,
+      credentialLastVerifiedAt: row.credentialLastVerifiedAt ?? null,
+      probeCount: Number(row.probeCount ?? 0),
+      readiness: {
+        status: state.status,
+        color,
+        label: state.label,
+        summary: row.readinessSummary ?? "",
+        runId: row.runId ?? null,
+        traceRunId: row.readinessTraceRunId ?? null,
+        completedAt: row.readinessCompletedAt ?? null,
+        startedAt: row.readinessStartedAt ?? null,
+      },
+    };
+  });
+
+  return {
+    lane: "browser",
+    laneDisplayName: laneDisplayName("browser"),
+    totals: { sites: sites.length, byColor, needsAttention },
+    sites,
   };
 }
 
