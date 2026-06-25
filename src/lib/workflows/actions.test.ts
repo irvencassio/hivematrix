@@ -14,6 +14,7 @@ const {
   listWorkflowActions,
   getWorkflowAction,
   executeWorkflowAction,
+  updateWorkflowActionStatus,
 } = await import("./actions");
 
 const HEYGEN = "heygen.portal_video_from_script";
@@ -129,4 +130,28 @@ test("sourceArtifactMap pulls the CURRENT (revised) source artifact over the sta
   const result = await executeWorkflowAction(a.id, {}, { prepare: async (_wid, inputs) => { seen = inputs; return { ok: true, status: "prepared", workflow: null, runId: "r" }; } });
   assert.equal(result.ok, true);
   assert.equal(seen.script, "REVISED script", "execution used the revised script, not the stale suggestion");
+});
+
+test("assessWorkflowAction agrees with the gate without executing", async () => {
+  const { assessWorkflowAction } = await import("./actions");
+  // review-blocked source run
+  const blocked = createWorkflowRun({ workflowId: BRIEF, title: "s", status: "needs_review" });
+  const ab = proposeWorkflowAction({ sourceRunId: blocked.id, targetWorkflowId: HEYGEN, title: "v", suggestedInputs: { title: "v", script: "real" } });
+  assert.equal(assessWorkflowAction(getWorkflowAction(ab.id)!).readiness, "review_required");
+
+  // approved + has inputs → ready
+  reviewWorkflowRun(blocked.id, "approve", {});
+  assert.equal(assessWorkflowAction(getWorkflowAction(ab.id)!).readiness, "ready");
+
+  // missing required input → needs_input with exact fields
+  const open = createWorkflowRun({ workflowId: HEYGEN, title: "x", status: "done" });
+  const an = proposeWorkflowAction({ sourceRunId: open.id, targetWorkflowId: HEYGEN, title: "v", suggestedInputs: { title: "v" } });
+  const assessment = assessWorkflowAction(getWorkflowAction(an.id)!);
+  assert.equal(assessment.readiness, "needs_input");
+  assert.ok(assessment.missing?.includes("script"));
+
+  // completed action
+  const ac = proposeWorkflowAction({ sourceRunId: open.id, targetWorkflowId: HEYGEN, title: "v", suggestedInputs: { title: "v", script: "s" } });
+  updateWorkflowActionStatus(ac.id, "completed", { resultRunId: "r" });
+  assert.equal(assessWorkflowAction(getWorkflowAction(ac.id)!).readiness, "completed");
 });

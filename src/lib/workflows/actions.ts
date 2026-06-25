@@ -145,25 +145,34 @@ function hasValue(v: unknown): boolean {
   return true;
 }
 
+export type WorkflowActionReadiness =
+  | "ready" | "review_required" | "needs_input" | "completed" | "refused" | "failed" | "unsupported" | "invalid";
+
+export interface WorkflowActionAssessment {
+  readiness: WorkflowActionReadiness;
+  sourceRunId: string;
+  missing?: string[];
+  reason?: string;
+  /** The resolved inputs (suggested ∩ schema + fresh source artifacts + operator). Internal. */
+  merged: Record<string, unknown>;
+}
+
 /**
- * Execute a proposed action: merge the target's schema-matched suggested inputs with
- * the operator's inputs; if a required field is still missing, return needs_input with
- * the exact field names (no guessing). Otherwise dispatch the registered handler.
+ * PURE, read-only assessment of a proposed action — the same gate + required-input logic
+ * executeWorkflowAction uses, but it NEVER dispatches. The inbox and execution agree.
  */
-export async function executeWorkflowAction(id: string, operatorInputs: Record<string, unknown> = {}, deps: ExecuteWorkflowActionDeps = {}): Promise<ExecuteWorkflowActionResult> {
-  const action = getWorkflowAction(id);
-  if (!action) return { ok: false, status: "invalid", actionId: id, reason: "action not found" };
-  if (action.status === "completed") return { ok: true, status: "prepared", actionId: id, resultRunId: action.resultRunId ?? undefined, reason: "already executed" };
-  if (action.status === "refused") return { ok: false, status: "invalid", actionId: id, reason: "action was refused" };
+export function assessWorkflowAction(action: WorkflowActionRecord, operatorInputs: Record<string, unknown> = {}): WorkflowActionAssessment {
+  const base: WorkflowActionAssessment = { readiness: "ready", sourceRunId: action.sourceRunId, merged: {} };
+  if (action.status === "completed") return { ...base, readiness: "completed" };
+  if (action.status === "refused") return { ...base, readiness: "refused", reason: "action was refused" };
+  if (action.status === "failed") return { ...base, readiness: "failed", reason: "action failed" };
 
   const def = getWorkflowRegistry().get(action.targetWorkflowId);
-  if (!def) return { ok: false, status: "unsupported", actionId: id, reason: "target workflow no longer registered" };
+  if (!def) return { ...base, readiness: "unsupported", reason: "target workflow no longer registered" };
 
-  // Review gate: a downstream action from a review-required source run must not execute
-  // until the source run is approved. No target dispatch while blocked.
   const sourceRun = getWorkflowRunRecord(action.sourceRunId);
   if (sourceRun && isWorkflowRunReviewBlocked(sourceRun)) {
-    return { ok: false, status: "review_required", actionId: id, sourceRunId: action.sourceRunId, reason: `Source run "${action.sourceRunId}" (${sourceRun.status}) needs approval before this action can run.` };
+    return { ...base, readiness: "review_required", reason: `Source run "${action.sourceRunId}" (${sourceRun.status}) needs approval before this action can run.` };
   }
 
   // Only the target's actual input fields satisfy requirements — a "scriptDraft"
@@ -179,14 +188,31 @@ export async function executeWorkflowAction(id: string, operatorInputs: Record<s
     }
   }
   const merged = { ...suggested, ...fresh, ...operatorInputs };
-
   const missing = action.requiredInputs.filter((name) => !hasValue(merged[name]));
-  if (missing.length) {
-    return { ok: false, status: "needs_input", actionId: id, missing };
+  if (missing.length) return { ...base, readiness: "needs_input", missing, merged };
+  return { ...base, readiness: "ready", merged };
+}
+
+/**
+ * Execute a proposed action — assesses it first (shared gate logic), and only dispatches
+ * when ready. Returns needs_input with the exact missing fields, review_required when the
+ * source run is unapproved, etc.
+ */
+export async function executeWorkflowAction(id: string, operatorInputs: Record<string, unknown> = {}, deps: ExecuteWorkflowActionDeps = {}): Promise<ExecuteWorkflowActionResult> {
+  const action = getWorkflowAction(id);
+  if (!action) return { ok: false, status: "invalid", actionId: id, reason: "action not found" };
+
+  const a = assessWorkflowAction(action, operatorInputs);
+  if (a.readiness === "completed") return { ok: true, status: "prepared", actionId: id, resultRunId: action.resultRunId ?? undefined, reason: "already executed" };
+  if (a.readiness !== "ready") {
+    const status: ExecuteWorkflowActionResult["status"] =
+      a.readiness === "needs_input" ? "needs_input" : a.readiness === "review_required" ? "review_required" : a.readiness === "unsupported" ? "unsupported" : "invalid";
+    return { ok: false, status, actionId: id, sourceRunId: a.sourceRunId, missing: a.missing, reason: a.reason };
   }
 
+  const def = getWorkflowRegistry().get(action.targetWorkflowId)!;
   const prepare = deps.prepare ?? (async (wid: string, inputs: Record<string, unknown>) => (await import("./prepare")).prepareWorkflowById(wid, inputs));
-  const out = await prepare(def.id, merged);
+  const out = await prepare(def.id, a.merged);
   if (!out.ok || out.status === "needs_input") {
     updateWorkflowActionStatus(id, "accepted");
     return { ok: false, status: out.status === "needs_input" ? "needs_input" : "unsupported", actionId: id, missing: out.missing, result: out.result, reason: out.reason };

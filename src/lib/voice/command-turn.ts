@@ -19,7 +19,7 @@ import {
   resolveApprovalReference,
   type ContextApproval,
 } from "./command-context";
-import { buildVoiceBriefing, usageReply, type BriefingUsage, type BriefingBrowserReadiness } from "./briefing";
+import { buildVoiceBriefing, usageReply, type BriefingUsage, type BriefingBrowserReadiness, type BriefingWorkflowInbox } from "./briefing";
 import { synthesizeSpeech } from "./tts";
 import type { ApprovalQueueItem } from "@/lib/approvals/queue";
 import type { DirectiveRow } from "@/lib/orchestrator/directive-store";
@@ -47,6 +47,7 @@ export interface CommandTurnDeps {
   getUsage?: () => Promise<BriefingUsage | null>;
   getMetrics?: () => Promise<Record<string, unknown>>;
   getBrowserReadiness?: () => Promise<BriefingBrowserReadiness | null> | BriefingBrowserReadiness | null;
+  getWorkflowInbox?: () => Promise<BriefingWorkflowInbox | null> | BriefingWorkflowInbox | null;
 }
 
 const contextStore = new RollingCommandContextStore();
@@ -57,12 +58,13 @@ const contextStore = new RollingCommandContextStore();
  * both read the same data and phrasing.
  */
 export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<string> {
-  const [approvals, directives, failedTasks, usage, browserReadiness] = await Promise.all([
+  const [approvals, directives, failedTasks, usage, browserReadiness, workflowInbox] = await Promise.all([
     approvalQueue(deps),
     listDirectives(deps),
     listFailedTasks(deps),
     getUsage(deps),
     getBrowserReadiness(deps),
+    getWorkflowInboxCounts(deps),
   ]);
   return buildVoiceBriefing({
     approvals: approvals.map((item) => ({ title: item.title, kind: item.kind })),
@@ -70,7 +72,29 @@ export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<strin
     directives: directives.map((d) => ({ goal: d.goal, status: d.status })),
     usage,
     browserReadiness,
+    workflowInbox,
   });
+}
+
+/**
+ * Workflow Inbox counts for the briefing — read-only over the run/action ledger.
+ * Counts only (reviews / ready / blocked / attention); never executes, never leaks
+ * artifact content. Degrades to null if the inbox is unavailable.
+ */
+async function getWorkflowInboxCounts(deps: CommandTurnDeps): Promise<BriefingWorkflowInbox | null> {
+  if (deps.getWorkflowInbox) return deps.getWorkflowInbox();
+  try {
+    const { getWorkflowInbox } = await import("@/lib/workflows/inbox");
+    const c = getWorkflowInbox().counts;
+    return {
+      needsReview: c.needs_review + c.changes_requested,
+      ready: c.proposed_actions_ready,
+      blocked: c.proposed_actions_blocked,
+      attention: c.failed_or_attention,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**

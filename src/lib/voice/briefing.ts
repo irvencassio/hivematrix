@@ -36,12 +36,20 @@ export interface BriefingBrowserReadiness {
   lastSweepAt?: string | null;
 }
 
+export interface BriefingWorkflowInbox {
+  needsReview: number;
+  ready: number;
+  blocked: number;
+  attention: number;
+}
+
 export interface VoiceBriefingInput {
   approvals?: BriefingApproval[];
   failedTasks?: BriefingTask[];
   directives?: BriefingDirective[];
   usage?: BriefingUsage | null;
   browserReadiness?: BriefingBrowserReadiness | null;
+  workflowInbox?: BriefingWorkflowInbox | null;
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => (n === 1 ? `${n} ${one}` : `${n} ${many}`);
@@ -94,11 +102,31 @@ export function buildVoiceBriefing(input: VoiceBriefingInput): string {
     parts.push("No active directives.");
   }
 
+  const inboxLine = workflowInboxReply(input.workflowInbox);
+  if (inboxLine) parts.push(inboxLine);
+
   const browserLine = browserReadinessReply(input.browserReadiness);
   if (browserLine) parts.push(browserLine);
 
   parts.push(usageReply(input.usage));
   return parts.join(" ");
+}
+
+/**
+ * Compact Workflow Inbox line: reviews needing attention, ready-to-execute actions,
+ * and a blocked/failed count. Counts only — no artifact previews, no secrets. Returns
+ * "" when the inbox is empty (so the briefing stays short).
+ */
+export function workflowInboxReply(inbox: BriefingWorkflowInbox | null | undefined): string {
+  if (!inbox) return "";
+  const total = inbox.needsReview + inbox.ready + inbox.blocked + inbox.attention;
+  if (total === 0) return "";
+  const parts = [
+    `${plural(inbox.needsReview, "review")} pending`,
+    `${plural(inbox.ready, "action")} ready`,
+    `${inbox.blocked + inbox.attention} blocked or failed`,
+  ];
+  return `Workflow inbox: ${parts.join(", ")}.`;
 }
 
 /**

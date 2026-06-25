@@ -24,6 +24,7 @@ import type { CooDispatchResult } from "@/lib/coo/dispatch";
 /** Tool name → the connectivity capability that gates it. */
 const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
   coo_dispatch: "coo_router",
+  workflow_inbox: "coo_router",
   hivematrix_browser: "browserbee",
   desktop_action: "desktopbee",
   terminal_session: "termbee",
@@ -77,6 +78,21 @@ export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
           create: { type: "boolean", description: "True to create the routed Browser Lane task (browser routes only); default false = prepare-only" },
         },
         required: ["text"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "workflow_inbox",
+      description:
+        "Workflow inbox / COO queue: read a concise, secret-free summary of pending workflow work — what needs review, what proposed actions are ready, what's blocked (and why), what failed, and what recently completed. READ-ONLY: this only reports counts and top items so you can tell the operator what to do next; it never approves, dispatches, or carries out any action itself.",
+      parameters: {
+        type: "object",
+        properties: {
+          workflowId: { type: "string", description: "Optional: only show items for this workflow id" },
+        },
+        required: [],
       },
     },
   },
@@ -312,6 +328,7 @@ export function availableLaneTools(policy = getConnectivityPolicy()): ChatTool[]
 
 /** Intent → tool mapping, shown for one available lane. */
 const CAPABILITY_ROUTING_LINES: Record<string, string> = {
+  workflow_inbox: "See what workflow work is pending (needs review / ready / blocked / failed / recently completed) → **workflow_inbox** (read-only; never executes).",
   coo_dispatch: "Route a browser/site/workflow request through COO routing rules (Browser Lane is the canonical browser automation path) → **coo_dispatch**. Routing + prepare work in every mode; create=true makes the routed Browser Lane task when browser execution is available, otherwise it reports the work is waiting for connectivity (it never silently reroutes). When the request matches a registered workflow (e.g. the HeyGen portal video), the result names the workflow id + runbook.",
   mail_send: "Send an email → **mail_send** (sends to trusted recipients; drafts for approval otherwise). Save a draft only → **mail_draft**.",
   message_send: "Send an SMS / iMessage → **message_send** (allowlisted recipients only).",
@@ -369,6 +386,8 @@ export async function executeLaneTool(
   switch (name) {
     case "coo_dispatch":
       return executeCooDispatch(args, ctx);
+    case "workflow_inbox":
+      return executeWorkflowInbox(args);
     case "hivematrix_browser":
       return executeBrowserLane(args, ctx);
     case "desktop_action":
@@ -493,6 +512,22 @@ export async function executeCooDispatch(
   } catch (err) {
     return `Error: COO dispatch failed — ${err instanceof Error ? err.message : String(err)}`;
   }
+}
+
+async function executeWorkflowInbox(args: Record<string, unknown>): Promise<string> {
+  // READ-ONLY: build the inbox and report a concise operational summary. Never executes.
+  const { getWorkflowInbox, formatWorkflowInboxSummary } = await import("@/lib/workflows/inbox");
+  const inbox = getWorkflowInbox({ workflowId: typeof args.workflowId === "string" ? args.workflowId : undefined });
+  const lines = [formatWorkflowInboxSummary(inbox)];
+  const top = (group: string, label: string) => {
+    for (const item of inbox.groups[group as keyof typeof inbox.groups].slice(0, 3)) {
+      lines.push(`- [${label}] ${item.title} — ${item.nextAction}`);
+    }
+  };
+  top("needs_review", "review");
+  top("proposed_actions_ready", "ready");
+  top("proposed_actions_blocked", "blocked");
+  return lines.join("\n");
 }
 
 async function executeCodeGraph(args: Record<string, unknown>, ctx: LaneToolContext): Promise<string> {

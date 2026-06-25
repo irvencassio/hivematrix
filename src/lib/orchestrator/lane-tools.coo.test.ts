@@ -141,6 +141,16 @@ test("executeCooDispatch rejects empty objective text", async () => {
   assert.match(out, /required|provide|objective|text/i);
 });
 
+test("workflow_inbox is a registered read-only tool advertised in every mode", () => {
+  assert.ok(isLaneTool("workflow_inbox"));
+  const def = LANE_TOOL_DEFINITIONS.find((t) => t.function.name === "workflow_inbox");
+  assert.ok(def);
+  assert.doesNotMatch(def.function.description, /execute|run the action/i); // read-only
+  for (const pol of [localPolicy(), offlinePolicy()]) {
+    assert.ok(availableLaneTools(pol).some((t) => t.function.name === "workflow_inbox"), "advertised locally");
+  }
+});
+
 test("coo_dispatch is advertised in local-only and offline (routing is local)", () => {
   const names = (tools: { function: { name: string } }[]) => tools.map((t) => t.function.name);
   assert.ok(names(availableLaneTools(localPolicy())).includes("coo_dispatch"), "local-only should advertise coo_dispatch");

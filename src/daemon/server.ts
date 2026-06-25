@@ -1570,6 +1570,20 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /workflows/inbox — the COO queue: needs-review / ready / blocked / failed /
+      // recently-completed, aggregated read-only over runs + actions. Secret-free; never executes.
+      if (req.method === "GET" && urlPath === "/workflows/inbox") {
+        const { getWorkflowInbox, formatWorkflowInboxSummary } = await import("@/lib/workflows/inbox");
+        const q = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+        const limitRaw = q.get("limit");
+        const inbox = getWorkflowInbox({
+          workflowId: q.get("workflowId") ?? undefined,
+          limit: limitRaw ? Number(limitRaw) : undefined,
+        });
+        json(res, 200, { inbox, summary: formatWorkflowInboxSummary(inbox) });
+        return;
+      }
+
       // GET /workflows/actions — recent proposed handoffs (for the console). Secret-free.
       if (req.method === "GET" && urlPath === "/workflows/actions") {
         const { listWorkflowActions } = await import("@/lib/workflows/actions");

@@ -29,6 +29,25 @@ test("briefing speaks pending approvals, failed tasks, active directives, and us
   assert.match(briefing, /42%/);
 });
 
+test("briefing speaks a compact Workflow Inbox line (reviews, ready actions, blocked/failed)", () => {
+  const briefing = buildVoiceBriefing({
+    workflowInbox: { needsReview: 2, ready: 1, blocked: 1, attention: 0 },
+  });
+  assert.match(briefing, /Workflow inbox/i);
+  assert.match(briefing, /2 .*review/i);
+  assert.match(briefing, /1 .*ready/i);
+  assert.match(briefing, /1 .*blocked/i);
+  // Compact: no artifact previews / script text leaking through.
+  assert.doesNotMatch(briefing, /password|cookie|secret/i);
+});
+
+test("briefing omits the Workflow Inbox line when nothing is pending", () => {
+  const empty = buildVoiceBriefing({ workflowInbox: { needsReview: 0, ready: 0, blocked: 0, attention: 0 } });
+  assert.doesNotMatch(empty, /Workflow inbox/i);
+  const none = buildVoiceBriefing({});
+  assert.doesNotMatch(none, /Workflow inbox/i);
+});
+
 test("briefing reports Browser Lane sites needing attention (counts + top sites, no secrets)", () => {
   const briefing = buildVoiceBriefing({
     browserReadiness: {

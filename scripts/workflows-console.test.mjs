@@ -41,6 +41,26 @@ test("console exposes a Workflows panel backed by /workflows", () => {
   assert.match(console, /Review required/);
 });
 
+test("console exposes a Workflow Inbox panel backed by /workflows/inbox", () => {
+  const console = read("src/daemon/console.ts");
+  assert.match(console, /renderWorkflowInbox\(/);
+  assert.match(console, /api\("\/workflows\/inbox"/);
+  assert.match(console, /Workflow inbox/i);
+  // Counts by group + actionable ordering (needs review first).
+  assert.match(console, /needs_review/);
+  assert.match(console, /proposed_actions_ready/);
+  assert.match(console, /proposed_actions_blocked/);
+  // Ready actions offer Execute; blocked actions show the reason (not a dead button).
+  assert.match(console, /executeWorkflowAction\(/);
+  assert.match(console, /blockedReason/);
+});
+
+test("the daemon declares the workflow inbox endpoint", () => {
+  const server = read("src/daemon/server.ts");
+  assert.match(server, /"\/workflows\/inbox"/);
+  assert.match(server, /getWorkflowInbox/);
+});
+
 test("the daemon declares the workflow endpoints", () => {
   const server = read("src/daemon/server.ts");
   assert.match(server, /"\/workflows"/);

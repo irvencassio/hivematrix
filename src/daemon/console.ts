@@ -747,7 +747,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <button class="copybtn" onclick="renderWorkflows()">↻ Refresh</button>
       </div>
       <div class="muted" style="font-size:11px;margin:4px 0 6px">Registered repeatable workflows COO and the model can route to. Each links its runbook.</div>
-      <div id="workflows_list" style="margin-top:6px"></div>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-top:8px">
+        <div class="muted" style="font-size:11px"><b>Workflow inbox</b> — what needs review, what's ready, what's blocked.</div>
+        <button class="copybtn" onclick="renderWorkflowInbox()">↻</button>
+      </div>
+      <div id="workflow_inbox" style="margin-top:4px"></div>
+      <div id="workflows_list" style="margin-top:10px"></div>
       <div class="row" style="margin-top:8px;gap:6px;align-items:center">
         <input id="brief_topic" placeholder="Research brief topic — e.g. AI video tools for solo founders" style="flex:1;box-sizing:border-box" />
         <button class="create" onclick="prepareResearchBrief()">Prepare research brief</button>
@@ -3618,7 +3623,7 @@ function switchSettingsTab(tab) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); renderBrowserReadiness(); renderPortalVideos(); renderWorkflows(); renderWorkflowActions(); }
+  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); renderBrowserReadiness(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); }
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -4024,8 +4029,52 @@ async function reviewWorkflowRun(runId, decision) {
     const msg = decision === "approve" ? 'Approved and ready — the proposed HeyGen action can now run.' : decision === "reject" ? 'Rejected — the action stays blocked.' : 'Changes requested — the action stays blocked.';
     if (note) note.innerHTML = msg;
   } else { if (note) note.innerHTML = '<span class="err">'+esc((r && r.error) || "Review failed")+'</span>'; }
-  renderWorkflowRuns(); renderWorkflowActions();
+  renderWorkflowRuns(); renderWorkflowActions(); renderWorkflowInbox();
 }
+// --- Workflow inbox / COO queue (read-only; never executes) ------------------
+// Actionable order: needs review → changes requested → ready → blocked → failed →
+// running → recently completed. Ready actions offer Execute; blocked actions show the
+// reason (not a dead button). Secret-free: counts + titles + system reasons only.
+const INBOX_ORDER = [
+  ["needs_review", "Needs review"],
+  ["changes_requested", "Changes requested"],
+  ["proposed_actions_ready", "Ready to execute"],
+  ["proposed_actions_blocked", "Blocked"],
+  ["failed_or_attention", "Failed / attention"],
+  ["running_or_pending", "Running"],
+  ["recently_completed", "Recently completed"],
+];
+async function renderWorkflowInbox() {
+  const el = document.getElementById("workflow_inbox");
+  if (!el) return;
+  el.innerHTML = '<div class="muted" style="font-size:11px">Loading…</div>';
+  const r = await api("/workflows/inbox");
+  const inbox = r && r.inbox;
+  if (!inbox) { el.innerHTML = '<div class="muted" style="font-size:11px">Inbox unavailable.</div>'; return; }
+  const counts = inbox.counts || {};
+  const groups = inbox.groups || {};
+  const total = INBOX_ORDER.reduce((n, g) => n + (counts[g[0]] || 0), 0);
+  if (!total) { el.innerHTML = '<div class="muted" style="font-size:11px">Inbox empty — nothing pending.</div>'; return; }
+  const chips = INBOX_ORDER.filter(g => counts[g[0]] > 0)
+    .map(g => '<span class="badge">'+esc(g[1])+': '+counts[g[0]]+'</span>').join(" ");
+  const sections = INBOX_ORDER.map(g => {
+    const items = (groups[g[0]] || []);
+    if (!items.length) return "";
+    const rows = items.map(it => {
+      const ready = it.status === "ready" && it.kind === "action";
+      const blocked = it.blockedReason ? '<div class="muted" style="font-size:11px;margin-top:2px">'+esc(it.blockedReason)+'</div>' : "";
+      const exec = ready
+        ? '<div class="row" style="margin-top:4px;justify-content:flex-end"><button class="create" onclick="executeWorkflowAction(\''+esc(it.id)+'\')">Execute</button></div>'
+          + '<div id="action_result_'+esc(it.id)+'" class="muted" style="font-size:11px;margin-top:2px"></div>'
+        : '';
+      const next = it.nextAction ? ' <span class="muted" style="font-size:11px">— '+esc(it.nextAction)+'</span>' : '';
+      return '<div class="m" style="margin-top:3px"><span class="badge">'+esc(it.status)+'</span> '+esc(it.title)+next+blocked+exec+'</div>';
+    }).join("");
+    return '<div style="margin-top:6px"><div class="muted" style="font-size:11px;font-weight:600">'+esc(g[1])+'</div>'+rows+'</div>';
+  }).join("");
+  el.innerHTML = '<div style="margin-bottom:4px">'+chips+'</div>'+sections;
+}
+
 // --- Workflow action handoffs (explicit execution) --------------------------
 async function renderWorkflowActions() {
   const el = document.getElementById("workflow_actions");
@@ -4058,7 +4107,7 @@ async function executeWorkflowAction(actionId) {
   } else {
     if (out) out.innerHTML = '<span class="err">'+esc(r.reason || r.error || "Execute failed")+'</span>';
   }
-  renderWorkflowActions();
+  renderWorkflowActions(); renderWorkflowInbox();
 }
 
 // --- Safe senders (Message Lane + Mail Lane) --------------------------------
