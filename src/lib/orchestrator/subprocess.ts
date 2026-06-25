@@ -454,7 +454,7 @@ export async function spawnAgent(
   generateHookSettings(taskId, projectPath);
 
   const isOps = project ? NO_REPO_LOCK_PROJECTS.has(project) : false;
-  // First-class outbound tools (MessageBee/MailBee) via a bundled MCP server, so
+  // First-class outbound tools (Message Lane/Mail Lane) via a bundled MCP server, so
   // SENDING is a real tool call the harness can't talk itself out of (it once
   // claimed "No SMS tool available" and punted). The server proxies the same
   // trust-gated daemon endpoints; auto-approve them since the gate is server-side.

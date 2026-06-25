@@ -69,7 +69,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "desktopbee_action",
       description:
-        "DesktopBee: native macOS desktop automation via the Swift helper. Prefer the most reliable strategy first: desktop.script.run (AppleScript/JXA) → desktop.ax.query/desktop.ax.act (Accessibility tree) → desktop.click/desktop.type (coordinates, last resort). Read actions (apps.list, ax.query, capture, permissions) are free; act/script actions run with approval auto-granted by policy.",
+        "Desktop Lane: native macOS desktop automation via the Swift helper. Prefer the most reliable strategy first: desktop.script.run (AppleScript/JXA) → desktop.ax.query/desktop.ax.act (Accessibility tree) → desktop.click/desktop.type (coordinates, last resort). Read actions (apps.list, ax.query, capture, permissions) are free; act/script actions run with approval auto-granted by policy.",
       parameters: {
         type: "object",
         properties: {
@@ -87,7 +87,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
               "desktop.script.run",
               "desktop.permissions",
             ],
-            description: "The DesktopBee action to perform",
+            description: "The Desktop Lane action to perform",
           },
           app: { type: "string", description: "Target app bundle id or name, where applicable" },
           params: { type: "object", description: "Action-specific parameters (AX path, coordinates, keystrokes, script text, …)" },
@@ -101,7 +101,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "termbee_session",
       description:
-        "TermBee: manage Canopy-backed persistent terminal sessions when Canopy is available, with a local shell fallback for local work. action=create starts a session (optional cwd), list shows sessions, kill ends local fallback sessions. Use a session to run a multi-step build/repo workflow without passing credentials through tool args.",
+        "Terminal Lane: manage Canopy-backed persistent terminal sessions when Canopy is available, with a local shell fallback for local work. action=create starts a session (optional cwd), list shows sessions, kill ends local fallback sessions. Use a session to run a multi-step build/repo workflow without passing credentials through tool args.",
       parameters: {
         type: "object",
         properties: {
@@ -118,7 +118,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "termbee_run",
       description:
-        "TermBee: run a shell command in a Canopy-backed persistent session when Canopy is available, returning combined output + exit code; falls back to a local shell only when Canopy is unavailable. Creates the session on demand if it doesn't exist. Do not pass passwords or secrets in commands/tool args.",
+        "Terminal Lane: run a shell command in a Canopy-backed persistent session when Canopy is available, returning combined output + exit code; falls back to a local shell only when Canopy is unavailable. Creates the session on demand if it doesn't exist. Do not pass passwords or secrets in commands/tool args.",
       parameters: {
         type: "object",
         properties: {
@@ -135,7 +135,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "mailbee_send",
       description:
-        "MailBee: send an email through Apple Mail — including file attachments. This is the ONLY correct way to send email; do NOT use bash/osascript, a Gmail/Google integration, or any other interface, and never ask the user to authenticate an external mail account. Safe by default: the email is sent only if the recipient is on the trusted allowlist (a known sender or a configured trusted domain); otherwise it is saved as a draft in Mail for human approval and NOT sent. Returns whether it was sent or drafted.",
+        "Mail Lane: send an email through Apple Mail — including file attachments. This is the ONLY correct way to send email; do NOT use bash/osascript, a Gmail/Google integration, or any other interface, and never ask the user to authenticate an external mail account. Safe by default: the email is sent only if the recipient is on the trusted allowlist (a known sender or a configured trusted domain); otherwise it is saved as a draft in Mail for human approval and NOT sent. Returns whether it was sent or drafted.",
       parameters: {
         type: "object",
         properties: {
@@ -153,7 +153,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "mailbee_draft",
       description:
-        "MailBee: compose an email (with optional file attachments) and save it to the Mail Drafts folder for human review (never sends). Use when you want a person to approve/edit before it goes out, regardless of recipient trust.",
+        "Mail Lane: compose an email (with optional file attachments) and save it to the Mail Drafts folder for human review (never sends). Use when you want a person to approve/edit before it goes out, regardless of recipient trust.",
       parameters: {
         type: "object",
         properties: {
@@ -171,7 +171,7 @@ export const BEE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "messagebee_send",
       description:
-        "MessageBee: send an SMS/iMessage through the macOS Messages app. This is the ONLY correct way to send a text — do not use bash/osascript. Safe by default: messages are sent only to allowlisted recipients; a non-allowlisted handle is refused with an actionable error.",
+        "Message Lane: send an SMS/iMessage through the macOS Messages app. This is the ONLY correct way to send a text — do not use bash/osascript. Safe by default: messages are sent only to allowlisted recipients; a non-allowlisted handle is refused with an actionable error.",
       parameters: {
         type: "object",
         properties: {
@@ -399,11 +399,12 @@ async function executeSkillUsed(args: Record<string, unknown>): Promise<string> 
   return `Recorded use of "${name}" (used ${r.useCount}×)${r.refined ? " and folded in your refinement." : "."}`;
 }
 
-// ── Outbound channel lanes (MailBee / MessageBee) ─────────────────────────────
+// ── Outbound channel lanes (Mail Lane / Message Lane) ─────────────────────────
 //
 // These actually act on the founder's behalf, so the safety boundary lives
-// inside the tool, not in the profile: MailBee sends only to trusted recipients
-// (else it drafts for approval), MessageBee sends only to allowlisted handles.
+// inside the tool, not in the profile: Mail Lane sends only to trusted
+// recipients (else it drafts for approval), Message Lane sends only to
+// allowlisted handles.
 // The IO is injectable so the trust/allowlist decision is unit-testable without
 // a live database or Apple Mail/Messages.
 
@@ -449,7 +450,7 @@ export async function executeMailBeeSend(args: Record<string, unknown>, io?: Mai
   if (!deps.isTrustedRecipient(to)) {
     const drafted = await deps.draftMail(to, subject, body, attachments);
     return drafted
-      ? `Recipient ${to} is not on the MailBee trusted allowlist, so the email was NOT sent — it was saved to Mail Drafts${att} for your approval. Approve/edit it in Mail.app, or add ${to} (or its domain) to the MailBee allowlist to enable autonomous send.`
+      ? `Recipient ${to} is not on the Mail Lane trusted allowlist, so the email was NOT sent — it was saved to Mail Drafts${att} for your approval. Approve/edit it in Mail.app, or add ${to} (or its domain) to the Mail Lane allowlist to enable autonomous send.`
       : `Error: ${to} is not trusted and saving the draft to Mail failed. Is Mail.app running with Automation permission granted?`;
   }
 
@@ -497,7 +498,7 @@ export async function executeMessageBeeSend(args: Record<string, unknown>, io?: 
   const deps = io ?? (await defaultMessageBeeIO());
 
   if (!deps.isAllowed(to)) {
-    return `Error: ${to} is not on the MessageBee allowlist. SMS/iMessage can only be sent to allowlisted handles — add ${to} in MessageBee settings first, then retry.`;
+    return `Error: ${to} is not on the Message Lane allowlist. SMS/iMessage can only be sent to allowlisted handles — add ${to} in Message Lane settings first, then retry.`;
   }
 
   const sent = await deps.sendIMessage(to, text, attachments);
@@ -515,7 +516,7 @@ async function executeTermBeeSession(args: Record<string, unknown>): Promise<str
       id: typeof args.sessionId === "string" ? args.sessionId : undefined,
       cwd: typeof args.cwd === "string" ? args.cwd : undefined,
     });
-    return `TermBee session created: ${id}`;
+    return `Terminal Lane session created: ${id}`;
   }
   if (action === "list") {
     const s = await defaultTermBeeProvider.listSessions();
@@ -616,8 +617,8 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: BeeToolC
   }
 
   // Decide which engine drives the browser. Codex Computer Use is preferred;
-  // the local DesktopBee path is used only when Codex auth is missing AND the
-  // operator opted into the fallback AND DesktopBee is available.
+  // the local Desktop Lane path is used only when Codex auth is missing AND the
+  // operator opted into the fallback AND Desktop Lane is available.
   const desktopBeeAvailable = getConnectivityPolicy().getCapability("desktopbee").available;
   const decision = resolveBrowserBeeBacking({
     codexAuthMode: readCodexAuthState().authMode,
@@ -632,7 +633,7 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: BeeToolC
     const { getLocalModelConfig } = await import("@/lib/config/constants");
     const local = getLocalModelConfig();
     if (!local?.modelName) {
-      return "Error: the DesktopBee fallback needs a configured local model (config localModel.modelName), but none is set.";
+      return "Error: the Desktop Lane fallback needs a configured local model (config localModel.modelName), but none is set.";
     }
     model = local.modelName;
     description = buildBrowserBeeDesktopFallbackDescription(payload, { requestedProjectPath: ctx.projectPath });
@@ -694,12 +695,12 @@ async function executeDesktopBeeAction(args: Record<string, unknown>): Promise<s
     params: (args.params && typeof args.params === "object" ? args.params : undefined) as Record<string, unknown> | undefined,
   };
 
-  // Per the configured posture, DesktopBee acts are auto-approved; the helper
+  // Per the configured posture, Desktop Lane acts are auto-approved; the helper
   // still enforces its own server-side gate as defence in depth.
   const resp = await dispatchDesktopBeeAction(req, { approved: true });
-  if (!resp.ok) return `DesktopBee error: ${resp.error ?? "unknown"}`;
+  if (!resp.ok) return `Desktop Lane error: ${resp.error ?? "unknown"}`;
   const strat = resp.strategy ? ` [via ${resp.strategy}]` : "";
   const data = resp.data !== undefined ? `\n${JSON.stringify(resp.data).slice(0, 8_000)}` : "";
   const cap = resp.captureRef ? `\ncapture: ${resp.captureRef}` : "";
-  return `DesktopBee ${action} ok${strat}${data}${cap}`;
+  return `Desktop Lane ${action} ok${strat}${data}${cap}`;
 }

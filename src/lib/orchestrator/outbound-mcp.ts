@@ -30,7 +30,7 @@ export const OUTBOUND_MCP_TOOL_NAMES = [
 ];
 
 // Bump when OUTBOUND_MCP_SERVER_JS changes so the on-disk copy is rewritten.
-const SERVER_VERSION = "1";
+const SERVER_VERSION = "2";
 
 // The stdio MCP server (CommonJS, run by the bundled node). Deliberately avoids
 // template literals / ${} so it nests cleanly in this TS template string. Speaks
@@ -63,13 +63,13 @@ export const OUTBOUND_MCP_SERVER_JS = [
   "}",
   "var TOOLS = [",
   '  { name: "send_imessage",',
-  '    description: "Send an SMS/iMessage to the operator or an allowlisted contact via HiveMatrix MessageBee. Use this whenever a message should be texted — never tell the user no SMS tool exists or to send it themselves. Only allowlisted handles are accepted; a refusal comes back as a clear message to relay.",',
+  '    description: "Send an SMS/iMessage to the operator or an allowlisted contact via HiveMatrix Message Lane. Use this whenever a message should be texted — never tell the user no SMS tool exists or to send it themselves. Only allowlisted handles are accepted; a refusal comes back as a clear message to relay.",',
   '    inputSchema: { type: "object", properties: { to: { type: "string", description: "Phone number or iMessage handle (e.g. +15135550000)" }, text: { type: "string", description: "Message body" } }, required: ["to", "text"] } },',
   '  { name: "send_email",',
-  '    description: "Send an email via HiveMatrix MailBee (Apple Mail). Sends only to trusted recipients; an untrusted recipient is saved as a draft for approval and the result says so. Use this to actually send — do not improvise with osascript or a Gmail integration.",',
+  '    description: "Send an email via HiveMatrix Mail Lane (Apple Mail). Sends only to trusted recipients; an untrusted recipient is saved as a draft for approval and the result says so. Use this to actually send — do not improvise with osascript or a Gmail integration.",',
   '    inputSchema: { type: "object", properties: { to: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }, required: ["to", "body"] } },',
   '  { name: "draft_email",',
-  '    description: "Save an email as a draft in Apple Mail (never sends) via HiveMatrix MailBee, for the operator to review and send.",',
+  '    description: "Save an email as a draft in Apple Mail (never sends) via HiveMatrix Mail Lane, for the operator to review and send.",',
   '    inputSchema: { type: "object", properties: { to: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }, required: ["to", "body"] } }',
   "];",
   "function callTool(name, a) {",

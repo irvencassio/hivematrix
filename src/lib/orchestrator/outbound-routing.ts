@@ -5,7 +5,7 @@
  * / `messagebee_send` function tools (see bee-tools.ts). The Claude Code and Codex
  * harnesses run their OWN toolset and never see those — which is exactly why an
  * "send this email" task historically got improvised with osascript instead of
- * going through MailBee.
+ * going through the Mail Lane.
  *
  * The bridge: the daemon exposes the SAME trust-gated send path over loopback
  * HTTP (POST /mailbee/send|draft, /messagebee/send — see daemon/server.ts), and
@@ -99,7 +99,7 @@ export function videoRoutingPrompt(): string {
 
 /**
  * The system-prompt block injected into the Claude Code / Codex agent so it
- * routes outbound email + messaging through MailBee/MessageBee instead of
+ * routes outbound email + messaging through Mail Lane/Message Lane instead of
  * improvising. Mirrors the local agent's capabilityRoutingGuide, but expressed
  * as loopback HTTP calls the CLI harness can make with its Bash tool.
  */
@@ -118,7 +118,7 @@ export function outboundHttpRoutingPrompt(port = daemonPort()): string {
     "",
     "Save an email as a draft only (never sends): identical, but POST to /mailbee/draft.",
     "",
-    'To ATTACH files (images, docs on this machine), add a repeated --data-urlencode "attachment=/ABSOLUTE/PATH" for each file (e.g. two: --data-urlencode "attachment=/Users/you/a.png" --data-urlencode "attachment=/Users/you/b.png"). MailBee attaches them through Apple Mail — you do NOT need Gmail or any external account to send files.',
+    'To ATTACH files (images, docs on this machine), add a repeated --data-urlencode "attachment=/ABSOLUTE/PATH" for each file (e.g. two: --data-urlencode "attachment=/Users/you/a.png" --data-urlencode "attachment=/Users/you/b.png"). Mail Lane attaches them through Apple Mail — you do NOT need Gmail or any external account to send files.',
     "",
     "Send an SMS/iMessage:",
     `  curl -s -X POST "http://127.0.0.1:${port}/messagebee/send" \\`,
@@ -153,8 +153,8 @@ export function beeToolsRoutingPrompt(port = daemonPort()): string {
     '- Fresh web search/answer with citations → Browser Lane args {"mode":"search","query":"..."}',
     '- Read a specific public URL → Browser Lane args {"mode":"read","url":"https://..."}',
     '- Logged-in or multi-step browser workflow (e.g. LinkedIn) → Browser Lane args {"mode":"workflow","objective":"...","startUrl":"https://...","requiresLogin":true}',
-    `Other lane tools still use /bee/<tool>, e.g. desktop control → http://127.0.0.1:${port}/bee/desktopbee_action and terminal → http://127.0.0.1:${port}/bee/termbee_run.`,
-    '- Persistent terminal command is Canopy-backed when Canopy is running, with local fallback only for local work. Do NOT pass passwords or secrets in commands or args; use configured profiles/Keychain-backed tools instead.',
+    `Other lane tools still use /bee/<tool>, e.g. Desktop Lane control → http://127.0.0.1:${port}/bee/desktopbee_action and Terminal Lane command → http://127.0.0.1:${port}/bee/termbee_run.`,
+    '- Terminal Lane command is Canopy-backed when Canopy is running, with local fallback only for local work. Do NOT pass passwords or secrets in commands or args; use configured profiles/Keychain-backed tools instead.',
     '- Find a symbol\'s definition + EVERY usage (deterministic) → /bee/code_graph args {"symbol":"...","path":"/repo"}',
     'Response is JSON {"ok","result"}; relay "result". An unavailable lane (wrong connectivity mode) returns an actionable error — surface it, don\'t work around it. For complex args, write the JSON to a temp file and curl -d @/tmp/args.json.',
   ].join("\n");

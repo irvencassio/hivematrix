@@ -46,7 +46,7 @@ test("outboundHttpRoutingPrompt names the endpoints, the token, and gates SENDIN
 test("outboundHttpRoutingPrompt affirms the capability and forbids the 'no SMS tool / send it yourself' denial", () => {
   // Regression: a Claude-harness task that should have texted a result instead
   // said "No SMS tool available in this setup" and told the user to send it
-  // themselves — a false denial of an existing, allowlisted MessageBee channel.
+  // themselves — a false denial of an existing, allowlisted Message Lane channel.
   const p = outboundHttpRoutingPrompt("3999");
   assert.match(p, /You CAN send email and SMS\/iMessage/i);
   assert.match(p, /NEVER tell the user that no email\/SMS tool is available/i);
@@ -59,9 +59,12 @@ test("outboundHttpRoutingPrompt covers email management, attachments, and forbid
   assert.match(p, /Reading & managing email/);
   assert.match(p, /do NOT use a Gmail\/Google MCP/i);
   assert.match(p, /Trash mailbox \(recoverable\)/);
-  // Sending files via MailBee attachments — no external account.
+  // Sending files via Mail Lane attachments — no external account.
   assert.match(p, /attachment=\/ABSOLUTE\/PATH/);
   assert.match(p, /do NOT need Gmail/i);
+  assert.match(p, /Mail Lane attaches them through Apple Mail/);
+  assert.doesNotMatch(p, /MailBee/);
+  assert.doesNotMatch(p, /MessageBee/);
   // Never tell the user to run /mcp (headless daemon).
   assert.match(p, /never ask for interactive auth/i);
   assert.match(p, /NEVER tell the user to run `\/mcp`/);
@@ -97,6 +100,10 @@ test("beeToolsRoutingPrompt routes browser through /lane/browser and keeps other
   assert.doesNotMatch(p, /browserbee_run/);
   assert.match(p, /desktopbee_action/);
   assert.match(p, /termbee_run/);
+  assert.match(p, /Desktop Lane/);
+  assert.match(p, /Terminal Lane/);
+  assert.doesNotMatch(p, /DesktopBee/);
+  assert.doesNotMatch(p, /TermBee/);
   assert.match(p, /Canopy-backed/i);
   assert.match(p, /Do NOT pass passwords or secrets/i);
   assert.match(p, /127\.0\.0\.1:3999/);

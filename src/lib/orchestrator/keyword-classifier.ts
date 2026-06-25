@@ -25,8 +25,8 @@ const KEYWORD_RULES: Array<{ patterns: RegExp[]; agentType: string }> = [
   // CTO — architecture/security
   { patterns: [/\b(architecture|infrastructure|security audit|system design|scalability|performance review|tech stack|database design|microservice|monolith|ci\/cd|devops|monitoring|observability)\b/i], agentType: "cto" },
 
-  // Inventor — new capabilities, new Bees, shared surfaces
-  { patterns: [/\b(inventorbee|capability gap|new capability|new skill|new mcp|new bee|shared contract|shared capability|tool surface|voice capability|live voice)\b/i], agentType: "inventor" },
+  // Inventor — new capabilities, lanes/providers, shared surfaces
+  { patterns: [/\b(capability gap|new capability|new skill|new mcp|new lane|new provider|shared contract|shared capability|tool surface|voice capability|live voice)\b/i], agentType: "inventor" },
 
   // QA — verification/ship readiness
   { patterns: [/\b(qa|quality assurance|verify|verification|ship.?ready|pre.?release|pre.?ship|acceptance test|regression test|smoke test|spec compliance|ready to ship|ready to merge|ready to release|sign.?off|final pass|test plan|test coverage|bug bash|edge case|pen.?test|vulnerability scan|security review|audit)\b/i], agentType: "qa" },

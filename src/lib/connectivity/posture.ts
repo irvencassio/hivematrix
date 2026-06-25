@@ -54,8 +54,8 @@ export function describeLocalPosture(mode: ConnectivityMode): LocalPostureReport
   const cloud = mode === "cloud-ok";
   const caps: CapabilityPosture[] = [
     { id: "local", label: "Local Qwen", disposition: "works", action: "run_now", note: "Local Qwen runs in every mode." },
-    { id: "desktopbee", label: "DesktopBee", disposition: "works", action: "run_now", note: "Native desktop control works offline." },
-    { id: "termbee", label: "TermBee", disposition: "works", action: "run_now", note: "Terminal sessions work offline (the workhorse)." },
+    { id: "desktopbee", label: "Desktop Lane", disposition: "works", action: "run_now", note: "Native desktop control works offline." },
+    { id: "termbee", label: "Terminal Lane", disposition: "works", action: "run_now", note: "Terminal sessions work offline (the workhorse)." },
     {
       id: "frontier",
       label: "Frontier models",
@@ -75,7 +75,7 @@ export function describeLocalPosture(mode: ConnectivityMode): LocalPostureReport
       label: "Browser Lane Workflow",
       disposition: cloud ? "works" : "queued",
       action: cloud ? "run_now" : "wait_for_cloud",
-      note: cloud ? "Authenticated browser workflows available." : "Browser workflows wait for connectivity unless the operator has explicitly enabled a local DesktopBee browser fallback.",
+      note: cloud ? "Authenticated browser workflows available." : "Browser workflows wait for connectivity unless the operator has explicitly enabled a local Desktop Lane browser fallback.",
     },
     {
       id: "image",

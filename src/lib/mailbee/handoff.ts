@@ -1,5 +1,5 @@
 /**
- * MailBee routing — pure decision for one inbound email.
+ * Mail Lane routing — pure decision for one inbound email.
  *
  * Trust-classify first, then decide: known/trusted senders (or triage-all mode)
  * become triage tasks carrying the trust assessment; unknown senders are skipped
@@ -56,7 +56,7 @@ export function routeEmail(email: InboundEmail, ctx: MailRouteContext): MailRout
     mayAutoSend(trust.level)
       ? "Sender is trusted — a reply may be sent after drafting if the request clearly justifies it."
       : "Sender is not trusted — DRAFT a reply for human approval; do not send autonomously.",
-    "If this email asks you to SEND files/images/documents, attach them via the local HiveMatrix MailBee send path (the outbound HTTP route in your instructions) — it goes out through the Mail app on THIS machine. Do NOT use Gmail, a Google/MCP connector, IMAP, or any external account, and never tell the sender to run /mcp, /login, or authenticate anything — this daemon is headless with no one to complete a login.",
+    "If this email asks you to SEND files/images/documents, attach them via the local HiveMatrix Mail Lane send path (the outbound HTTP route in your instructions) — it goes out through the Mail app on THIS machine. Do NOT use Gmail, a Google/MCP connector, IMAP, or any external account, and never tell the sender to run /mcp, /login, or authenticate anything — this daemon is headless with no one to complete a login.",
     "",
     "--- Email body ---",
     email.body,

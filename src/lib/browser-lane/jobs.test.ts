@@ -106,7 +106,7 @@ test("resolveBrowserBeeBacking does NOT use Codex on a ChatGPT-subscription acco
   assert.equal(refuse.backing, null);
   assert.match(refuse.reason, /ChatGPT-subscription/);
   assert.match(refuse.reason, /desktopFallback=true/);
-  // With the fallback enabled → route to DesktopBee instead of Codex.
+  // With the fallback enabled, route to Desktop Lane instead of Codex.
   const fallback = resolveBrowserBeeBacking({
     codexAuthMode: "subscription",
     desktopFallbackEnabled: true,
@@ -125,7 +125,7 @@ test("resolveBrowserBeeBacking refuses when Codex auth is missing and fallback i
   assert.match(decision.reason, /desktopFallback=true/);
 });
 
-test("resolveBrowserBeeBacking uses the DesktopBee fallback when enabled and available", () => {
+test("resolveBrowserBeeBacking uses the Desktop Lane fallback when enabled and available", () => {
   const decision = resolveBrowserBeeBacking({
     codexAuthMode: "logged-out",
     desktopFallbackEnabled: true,
@@ -134,14 +134,15 @@ test("resolveBrowserBeeBacking uses the DesktopBee fallback when enabled and ava
   assert.equal(decision.backing, "desktop_fallback");
 });
 
-test("resolveBrowserBeeBacking refuses the fallback when DesktopBee is unavailable", () => {
+test("resolveBrowserBeeBacking refuses the fallback when Desktop Lane is unavailable", () => {
   const decision = resolveBrowserBeeBacking({
     codexAuthMode: "logged-out",
     desktopFallbackEnabled: true,
     desktopBeeAvailable: false,
   });
   assert.equal(decision.backing, null);
-  assert.match(decision.reason, /DesktopBee is unavailable/);
+  assert.match(decision.reason, /Desktop Lane is unavailable/);
+  assert.doesNotMatch(decision.reason, /DesktopBee/);
 });
 
 test("readBrowserBeeDesktopFallbackEnabled reads the opt-in flag, default off", () => {
@@ -152,7 +153,7 @@ test("readBrowserBeeDesktopFallbackEnabled reads the opt-in flag, default off", 
   assert.equal(readBrowserBeeDesktopFallbackEnabled({ browserbee: { desktopFallback: false } }), false);
 });
 
-test("buildBrowserBeeDesktopFallbackDescription drives the browser via DesktopBee", () => {
+test("buildBrowserBeeDesktopFallbackDescription drives the browser via Desktop Lane", () => {
   const payload = parseBrowserBeeJobCreate({
     project: "hive",
     startUrl: "https://app.example.com/inbox",
@@ -167,6 +168,8 @@ test("buildBrowserBeeDesktopFallbackDescription drives the browser via DesktopBe
   assert.match(description, /Desktop fallback backing/);
   assert.match(description, /desktopbee_action tool/);
   assert.match(description, /no Codex Computer Use engine/);
+  assert.match(description, /Desktop Lane fallback/);
+  assert.doesNotMatch(description, /DesktopBee/);
   // shared body is still present
   assert.match(description, /Allowed domains: app\.example\.com/);
   assert.match(description, /Objective:/);

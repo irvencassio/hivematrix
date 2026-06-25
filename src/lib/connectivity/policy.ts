@@ -4,7 +4,7 @@
  * Three modes:
  *   cloud-ok    — frontier APIs reachable; full capability set available
  *   local-only  — LAN/loopback only; no cloud; Browser Lane cloud paths disabled
- *   offline     — no network at all; only local-model, TermBee, DesktopBee on local apps
+ *   offline     — no network at all; only local-model, Terminal Lane, Desktop Lane on local apps
  *
  * Mode is determined by:
  *   1. Manual override (highest priority — Irv's explicit choice)
@@ -60,7 +60,7 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     desktopbee: { available: true },
     termbee:    { available: true },
     image:      { available: false, reason: "No network connectivity; local mflux fallback if configured" },
-    // MailBee/MessageBee deliver through local apps; sending works even fully offline
+    // Mail Lane/Message Lane deliver through local apps; sending works even fully offline
     // (Mail/Messages queue + send when the host itself has a link).
     mailbee:    { available: true },
     messagebee: { available: true },

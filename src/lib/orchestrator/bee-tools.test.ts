@@ -39,7 +39,27 @@ test("all bee tools are defined with required schemas", () => {
   }
 });
 
-test("TermBee tool descriptions identify Canopy as the preferred provider", () => {
+test("lane tool descriptions use lane names while keeping compatibility tool ids", () => {
+  const prose = BEE_TOOL_DEFINITIONS.map((t) => JSON.stringify({
+    description: t.function.description,
+    parameters: t.function.parameters,
+  })).join("\n");
+
+  assert.match(prose, /Desktop Lane/);
+  assert.match(prose, /Terminal Lane/);
+  assert.match(prose, /Mail Lane/);
+  assert.match(prose, /Message Lane/);
+  assert.doesNotMatch(prose, /DesktopBee/);
+  assert.doesNotMatch(prose, /TermBee/);
+  assert.doesNotMatch(prose, /MailBee/);
+  assert.doesNotMatch(prose, /MessageBee/);
+  assert.ok(BEE_TOOL_DEFINITIONS.some((t) => t.function.name === "desktopbee_action"));
+  assert.ok(BEE_TOOL_DEFINITIONS.some((t) => t.function.name === "termbee_run"));
+  assert.ok(BEE_TOOL_DEFINITIONS.some((t) => t.function.name === "mailbee_send"));
+  assert.ok(BEE_TOOL_DEFINITIONS.some((t) => t.function.name === "messagebee_send"));
+});
+
+test("Terminal Lane tool descriptions identify Canopy as the preferred provider", () => {
   const termRun = BEE_TOOL_DEFINITIONS.find((t) => t.function.name === "termbee_run");
   const termSession = BEE_TOOL_DEFINITIONS.find((t) => t.function.name === "termbee_session");
   assert.match(termRun?.function.description ?? "", /Canopy-backed/i);
@@ -56,7 +76,7 @@ test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
   assert.ok(!names(availableBeeTools(local())).includes("digest_url"));
 });
 
-test("local-only drops web lanes but keeps DesktopBee/TermBee + outbound channels + brain/skill/codegraph", () => {
+test("local-only drops web lanes but keeps Desktop Lane/Terminal Lane + outbound channels + brain/skill/codegraph", () => {
   assert.deepEqual(names(availableBeeTools(local())),
     ["brain_search", "code_graph", "desktopbee_action", "mailbee_draft", "mailbee_send", "messagebee_send", "skill_used", "termbee_run", "termbee_session"]);
 });
@@ -122,7 +142,8 @@ test("mailbee_send DRAFTS (does not send) for an untrusted recipient", async () 
   const { io, calls } = mailIO({ trusted: false });
   const out = await executeMailBeeSend({ to: "stranger@nope.com", subject: "Hi", body: "yo" }, io);
   assert.deepEqual(calls, ["draft"]); // crucially NOT "send"
-  assert.match(out, /not on the MailBee trusted allowlist/);
+  assert.match(out, /not on the Mail Lane trusted allowlist/);
+  assert.doesNotMatch(out, /MailBee/);
   assert.match(out, /saved to Mail Drafts/);
 });
 
@@ -183,7 +204,8 @@ test("messagebee_send refuses a non-allowlisted handle (no send)", async () => {
   const { io, calls } = msgIO(false);
   const out = await executeMessageBeeSend({ to: "+19998887777", text: "hi" }, io);
   assert.deepEqual(calls, []);
-  assert.match(out, /not on the MessageBee allowlist/);
+  assert.match(out, /not on the Message Lane allowlist/);
+  assert.doesNotMatch(out, /MessageBee/);
 });
 
 test("messagebee_send forwards a voice-note attachment with no text required", async () => {

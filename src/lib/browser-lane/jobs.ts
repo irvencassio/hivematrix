@@ -30,7 +30,7 @@ export type BrowserBeeTracePolicy = (typeof BROWSERBEE_TRACE_POLICIES)[number];
  *   codex_computer_use — the default: Codex Computer Use (frontier) drives the
  *     browser. Requires Codex subscription/API auth and network.
  *   desktop_fallback   — opt-in: the local model drives a desktop browser via
- *     DesktopBee (AppleScript → Accessibility → click/type). Engaged only when
+ *     Desktop Lane (AppleScript → Accessibility → click/type). Engaged only when
  *     Codex auth is unavailable and the operator has enabled the fallback. Lower
  *     reliability, but keeps authenticated browser work running with no Codex
  *     subscription.
@@ -394,7 +394,7 @@ export function buildBrowserBeeDesktopFallbackDescription(
     "Output expectations:",
     "- Summarize what happened on the site.",
     "- Call out any approvals, login prompts, or blockers encountered.",
-    "- Note that this ran on the DesktopBee fallback (local model), and mention any screen captures taken.",
+    "- Note that this ran on the Desktop Lane fallback (local model), and mention any screen captures taken.",
   ];
 
   return sections.join("\n");
@@ -446,7 +446,7 @@ export interface BrowserBeeBackingDecision {
  * OpenAI API-key Codex account — it returns HTTP 400 "not supported when using
  * Codex with a ChatGPT account" on a subscription login. So only `api-key` auth
  * qualifies for that backing. Otherwise (subscription or logged-out) the job
- * runs on the DesktopBee fallback when the operator enabled it AND DesktopBee is
+ * runs on the Desktop Lane fallback when the operator enabled it AND Desktop Lane is
  * available; else it is refused with an actionable reason instead of creating a
  * task that will 400 and fail silently.
  */
@@ -475,12 +475,12 @@ export function resolveBrowserBeeBacking(input: {
   if (!input.desktopBeeAvailable) {
     return {
       backing: null,
-      reason: "DesktopBee fallback is enabled but DesktopBee is unavailable (the Swift helper is not running).",
+      reason: "Desktop Lane fallback is enabled but Desktop Lane is unavailable (the Swift helper is not running).",
     };
   }
   return {
     backing: "desktop_fallback",
-    reason: `${why} Using the DesktopBee fallback (local model drives a desktop browser).`,
+    reason: `${why} Using the Desktop Lane fallback (local model drives a desktop browser).`,
   };
 }
 

@@ -32,6 +32,13 @@ test("embedded server proxies the three trust-gated daemon routes", () => {
   assert.match(OUTBOUND_MCP_SERVER_JS, /\/mailbee\/draft/);
 });
 
+test("embedded server describes outbound tools with lane names", () => {
+  assert.match(OUTBOUND_MCP_SERVER_JS, /Message Lane/);
+  assert.match(OUTBOUND_MCP_SERVER_JS, /Mail Lane/);
+  assert.doesNotMatch(OUTBOUND_MCP_SERVER_JS, /MessageBee/);
+  assert.doesNotMatch(OUTBOUND_MCP_SERVER_JS, /MailBee/);
+});
+
 test("embedded server speaks the JSON-RPC methods Claude's MCP client needs", () => {
   for (const method of ["initialize", "tools/list", "tools/call", "notifications/initialized"]) {
     assert.match(OUTBOUND_MCP_SERVER_JS, new RegExp(method.replace("/", "\\/")));

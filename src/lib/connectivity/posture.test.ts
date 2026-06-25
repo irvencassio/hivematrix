@@ -14,7 +14,9 @@ test("offline: local workhorses work, image degrades, cloud work queues — noth
   const by = (id: string) => r.capabilities.find((c) => c.id === id)!;
   assert.equal(by("local").disposition, "works");
   assert.equal(by("termbee").disposition, "works");
+  assert.equal(by("termbee").label, "Terminal Lane");
   assert.equal(by("desktopbee").disposition, "works");
+  assert.equal(by("desktopbee").label, "Desktop Lane");
   assert.equal(by("image").disposition, "degraded");        // mflux fallback
   assert.equal(by("frontier").disposition, "queued");
   assert.equal(by("webbee").disposition, "queued");
