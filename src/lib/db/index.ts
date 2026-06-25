@@ -503,6 +503,10 @@ const MIGRATIONS: string[] = [
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_coo_dispatch_audit_created ON coo_dispatch_audit(createdAt);`,
+
+  // v20: link a dispatch audit row to the task it created (Browser Lane). Kept
+  // separate from workItemId (the envelope id) so neither is overloaded.
+  `ALTER TABLE coo_dispatch_audit ADD COLUMN taskId TEXT;`,
 ];
 
 // ------------------------------------------------------------------

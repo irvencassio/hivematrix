@@ -9,7 +9,30 @@ process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
 const { getDb, _resetDbForTests } = await import("@/lib/db");
 const { upsertCooRoutingRule } = await import("./store");
-const { dispatchCooRequest, listCooDispatchAudit, getCooDispatchAudit } = await import("./dispatch");
+const {
+  dispatchCooRequest,
+  dispatchCooTask,
+  CooDispatchValidationError,
+  listCooDispatchAudit,
+  getCooDispatchAudit,
+} = await import("./dispatch");
+
+function countAuditRows(): number {
+  return (getDb().prepare("SELECT COUNT(*) AS n FROM coo_dispatch_audit").get() as { n: number }).n;
+}
+
+function browserRule(id = "rule_browser") {
+  upsertCooRoutingRule({
+    id,
+    name: "Browser workflow",
+    priority: 100,
+    intent: "authenticated_browser_workflow",
+    match: { phrases: ["upload", "browser"] },
+    lane: "browser",
+    capability: "workflow.run",
+    riskTier: "external_side_effect",
+  });
+}
 
 before(() => {
   _resetDbForTests();
@@ -189,4 +212,102 @@ test("dispatch persists an audit row with rule, lane, status, reason and no secr
 
   const recent = listCooDispatchAudit(10);
   assert.equal(recent[0].id, result.auditId);
+});
+
+// ── Hardening: validation ─────────────────────────────────────────────
+
+test("empty or whitespace text throws a validation error and writes no audit row", () => {
+  const before = countAuditRows();
+  assert.throws(() => dispatchCooRequest({ text: "   " }), (err: unknown) => err instanceof CooDispatchValidationError);
+  assert.throws(() => dispatchCooRequest({ text: "" }), (err: unknown) => err instanceof CooDispatchValidationError);
+  assert.equal(countAuditRows(), before, "no audit rows should be written for invalid input");
+});
+
+// ── Hardening: audit redaction ────────────────────────────────────────
+
+test("obvious secrets are redacted from the persisted audit but routing uses the original text", () => {
+  browserRule();
+  const secrets = [
+    "upload with password=hunter2 to the browser",
+    "browser upload using token=abc.def-123",
+    "browser upload api-key=sk_live_9999",
+    "browser upload Authorization: Bearer abcXYZ123",
+    "browser upload key=topsecretvalue",
+  ];
+  for (const text of secrets) {
+    const result = dispatchCooRequest({ text, domains: ["app.heygen.com"] });
+    // Routing still works on the original text.
+    assert.equal(result.lane, "browser");
+    const audit = getCooDispatchAudit(result.auditId!);
+    assert.ok(audit);
+    for (const leak of ["hunter2", "abc.def-123", "sk_live_9999", "abcXYZ123", "topsecretvalue"]) {
+      assert.ok(!audit.requestText.includes(leak), `audit must not leak "${leak}" — got: ${audit.requestText}`);
+    }
+    assert.ok(audit.requestText.includes("[redacted]"), `expected a redaction marker in: ${audit.requestText}`);
+  }
+});
+
+test("project label no longer falls back to the literal 'hive'", () => {
+  browserRule();
+  const result = dispatchCooRequest({ text: "browser upload something", domains: ["example.com"] });
+  assert.ok(result.workItem);
+  assert.notEqual(result.workItem.envelope.project, "hive");
+});
+
+// ── Explicit task creation ────────────────────────────────────────────
+
+test("browser prepared result creates exactly one task when create=true and returns taskId", async () => {
+  browserRule();
+  const calls: Array<{ projectPath: string; lane: string }> = [];
+  const createTask = async (input: { workItem: { lane: string }; projectPath: string }) => {
+    calls.push({ projectPath: input.projectPath, lane: input.workItem.lane });
+    return { id: "task_created_1" };
+  };
+  const result = await dispatchCooTask(
+    { text: "browser upload to site", domains: ["app.heygen.com"] },
+    { create: true, projectPath: "/Users/test/proj", createTask },
+  );
+  assert.equal(result.status, "created");
+  assert.equal(result.taskId, "task_created_1");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].lane, "browser");
+
+  const audit = getCooDispatchAudit(result.auditId!);
+  assert.equal(audit?.taskId, "task_created_1");
+  assert.equal(audit?.status, "created");
+});
+
+test("dispatchCooTask without create flag stays prepare-only (no task)", async () => {
+  browserRule();
+  let called = 0;
+  const createTask = async () => { called += 1; return { id: "nope" }; };
+  const result = await dispatchCooTask(
+    { text: "browser upload to site", domains: ["app.heygen.com"] },
+    { create: false, projectPath: "/Users/test/proj", createTask },
+  );
+  assert.equal(result.status, "prepared");
+  assert.equal(result.taskId, null);
+  assert.equal(called, 0);
+});
+
+test("create=true never creates a task for approval_required / no_match / needs_input", async () => {
+  // approval-required lane
+  upsertCooRoutingRule({ id: "r_mail", name: "mail", priority: 10, intent: "mail", match: { phrases: ["mail-it"] }, lane: "mail", capability: "mail.send" });
+  // browser rule but request will lack a URL → needs_input
+  upsertCooRoutingRule({ id: "r_brnourl", name: "browser nourl", priority: 20, intent: "browser", match: { phrases: ["browse-nourl"] }, lane: "browser", capability: "workflow.run" });
+
+  let called = 0;
+  const createTask = async () => { called += 1; return { id: "should-not-happen" }; };
+
+  const approval = await dispatchCooTask({ text: "please mail-it now" }, { create: true, projectPath: "/Users/test/proj", createTask });
+  assert.equal(approval.status, "approval_required");
+  assert.equal(approval.taskId, null);
+
+  const noMatch = await dispatchCooTask({ text: "totally unmatched request" }, { create: true, projectPath: "/Users/test/proj", createTask });
+  assert.equal(noMatch.status, "no_match");
+
+  const needsInput = await dispatchCooTask({ text: "browse-nourl please" }, { create: true, projectPath: "/Users/test/proj", createTask });
+  assert.equal(needsInput.status, "needs_input");
+
+  assert.equal(called, 0, "createTask must never be called for non-prepared results");
 });

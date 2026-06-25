@@ -1388,21 +1388,64 @@ export function createDaemonServer() {
       // lane/capability and returns a typed dispatch result: a Browser-Lane-ready
       // work item for browser routes, an explicit approval requirement for
       // channel/native lanes, or a clear no_match/unsupported/needs_input result.
-      // Never performs risky actions and never returns secret material.
+      // Prepare-only by default; create=true turns a Browser-Lane *prepared*
+      // result into one real task (other statuses never create). Never performs
+      // risky actions and never returns secret material.
       if (req.method === "POST" && urlPath === "/coo/dispatch") {
         const body = await parseBody(req) as Record<string, unknown>;
+        const { dispatchCooRequest, dispatchCooTask, CooDispatchValidationError } = await import("@/lib/coo/dispatch");
+        const request = {
+          text: typeof body.text === "string" ? body.text : "",
+          domains: Array.isArray(body.domains) ? body.domains.filter((d): d is string => typeof d === "string") : undefined,
+          project: typeof body.project === "string" ? body.project : null,
+          workflow: typeof body.workflow === "string" ? body.workflow : null,
+          tags: Array.isArray(body.tags) ? body.tags.filter((t): t is string => typeof t === "string") : undefined,
+        };
+        // A real task needs a real project root under $HOME — validate this up
+        // front so a bad path is a clean 400 (and nothing is created or audited),
+        // distinct from an unexpected creation failure (500) below.
+        let createProjectPath: string | null = null;
+        if (body.create === true) {
+          try {
+            createProjectPath = normalizeHomeProjectPath(body.projectPath);
+          } catch (e) {
+            json(res, 400, { ok: false, error: `create requires a valid projectPath under $HOME: ${e instanceof Error ? e.message : String(e)}` });
+            return;
+          }
+        }
         try {
-          const { dispatchCooRequest } = await import("@/lib/coo/dispatch");
-          const result = dispatchCooRequest({
-            text: typeof body.text === "string" ? body.text : "",
-            domains: Array.isArray(body.domains) ? body.domains.filter((d): d is string => typeof d === "string") : undefined,
-            project: typeof body.project === "string" ? body.project : null,
-            workflow: typeof body.workflow === "string" ? body.workflow : null,
-            tags: Array.isArray(body.tags) ? body.tags.filter((t): t is string => typeof t === "string") : undefined,
-          });
-          json(res, 200, { ok: true, result });
+          if (body.create === true && createProjectPath) {
+            const result = await dispatchCooTask(request, {
+              create: true,
+              projectPath: createProjectPath,
+              createTask: async ({ workItem, projectPath: root, route }) => {
+                const { Task } = await import("@/lib/db");
+                const { buildBrowserBeeTaskDescription } = await import("@/lib/browser-lane/jobs");
+                const description = buildBrowserBeeTaskDescription(workItem.envelope, { requestedProjectPath: root });
+                const task = await Task.create({
+                  title: workItem.envelope.title,
+                  description,
+                  project: workItem.envelope.project,
+                  projectPath: root,
+                  model: workItem.envelope.backingModel,
+                  status: "backlog",
+                  executor: "agent",
+                  source: "browser-lane",
+                  output: { browserbeeRequest: workItem.envelope, coo: { ruleId: route.ruleId, capability: route.capability } },
+                });
+                broadcast("tasks:created", { taskId: task._id });
+                return { id: task._id };
+              },
+            });
+            json(res, 200, { ok: true, result });
+          } else {
+            const result = dispatchCooRequest(request);
+            json(res, 200, { ok: true, result });
+          }
         } catch (e) {
-          json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
+          // Empty/invalid text → 400 (no audit written). Anything else is a 500.
+          const status = e instanceof CooDispatchValidationError ? 400 : 500;
+          json(res, status, { ok: false, error: e instanceof Error ? e.message : String(e) });
         }
         return;
       }

@@ -51,7 +51,7 @@ test("browser lane and COO routing schema exists", () => {
 
 test("coo_dispatch_audit captures route-to-execution trail", () => {
   const columns = columnNames("coo_dispatch_audit");
-  for (const col of ["requestText", "ruleId", "ruleName", "lane", "capability", "status", "workItemId", "reason", "createdAt"]) {
+  for (const col of ["requestText", "ruleId", "ruleName", "lane", "capability", "status", "workItemId", "taskId", "reason", "createdAt"]) {
     assert.ok(columns.includes(col), `coo_dispatch_audit.${col} should exist`);
   }
 });
