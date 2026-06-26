@@ -744,24 +744,25 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Lane Apps</label>
-        <button class="copybtn" onclick="renderLaneApps()">↻ Refresh</button>
+        <button class="copybtn" onclick="renderLaneSetup()">↻ Refresh</button>
       </div>
-      <div class="muted" style="font-size:11px;margin:4px 0 8px">HiveMatrix updates itself automatically; lane apps are installed explicitly. Browser Lane and Terminal Lane are standalone signed apps — install or update each one here. A passing signature is not enough: launch is verified separately.</div>
+      <div class="muted" style="font-size:11px;margin:4px 0 8px">HiveMatrix updates itself automatically; lane apps are installed explicitly. Browser Lane and Terminal Lane are standalone signed apps — each card below shows whether it's bundled, installed, current, signed, launchable, and whether the daemon and its readiness are healthy, plus the one action to take next. A passing signature is not enough: launch is verified separately.</div>
       <div id="lane_apps" style="margin-top:6px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
+      <div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin:0 0 8px">Detail for the cards above</div>
       <div class="row" style="justify-content:space-between;align-items:center">
-        <label class="flbl" style="margin:0">Browser Lane Sites &amp; Auth</label>
+        <label class="flbl" style="margin:0">↳ Browser Lane Sites &amp; Auth</label>
         <button class="copybtn" onclick="renderBrowserReadiness()">↻ Refresh</button>
       </div>
-      <div class="muted" style="font-size:11px;margin:4px 0 6px">Per-site auth/readiness for the Browser Lane app, with stale tracking. A daily sweep keeps it fresh; run one now to refresh before routing browser work.</div>
+      <div class="muted" style="font-size:11px;margin:4px 0 6px">Per-site auth/readiness for the Browser Lane app, with stale tracking. Each site shows its auth strategy (Manual session / Keychain login / Google SSO / Microsoft SSO) and an honest session state. After you sign in, you can close Browser Lane — the session persists in its WebKit data store, and the readiness check confirms it. CAPTCHA / 2FA still need you; HiveMatrix never bypasses human verification.</div>
       <div class="row" style="margin-top:4px"><button class="create" onclick="runBrowserReadiness()">Run readiness check</button></div>
       <div id="browser_readiness" style="margin-top:8px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
-        <label class="flbl" style="margin:0">Terminal Lane Profiles &amp; Readiness</label>
+        <label class="flbl" style="margin:0">↳ Terminal Lane Profiles &amp; Readiness</label>
         <button class="copybtn" onclick="renderTerminalReadiness()">↻ Refresh</button>
       </div>
-      <div class="muted" style="font-size:11px;margin:4px 0 6px">Per-profile readiness (local shell / SSH) for the Terminal Lane app, with stale tracking. Run a check to probe each configured profile before routing terminal work. Credentials live in the macOS Keychain and are never shown here.</div>
+      <div class="muted" style="font-size:11px;margin:4px 0 6px">Per-profile readiness for the Terminal Lane app, with stale tracking. Local profiles run a shell on this Mac (localhost) — no key or login secret needed. SSH profiles connect to a remote host; their sign-in secret lives only in the macOS Keychain and is never shown here. Run a check to probe each profile before routing terminal work.</div>
       <div class="row" style="margin-top:4px"><button class="create" onclick="runTerminalReadiness()">Run readiness check</button></div>
       <div id="terminal_readiness" style="margin-top:8px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
@@ -3811,7 +3812,7 @@ function switchSettingsTab(tab) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderSystemReadiness(); renderLaneApps(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); }
+  if (tab === "lanes") { renderSystemReadiness(); renderLaneSetup(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); }
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -3971,21 +3972,10 @@ function renderAbout() {
 
 // --- Lane Apps manager (operator) ------------------------------------------
 // HiveMatrix updates itself automatically; the standalone Browser Lane and
-// Terminal Lane apps are installed/updated EXPLICITLY here. The badge treats
-// launch_failed as a DISTINCT state from invalid_signature — codesign/spctl
-// passing does not prove the app launches (the LaunchServices lesson).
-function laneAppBadge(status) {
-  const map = {
-    installed: ["var(--ok)", "Installed"],
-    update_available: ["var(--accent)", "Update available"],
-    missing: ["var(--muted)", "Not installed"],
-    launch_failed: ["var(--accent-2)", "Launch failed"],
-    invalid_signature: ["var(--accent-2)", "Invalid signature"],
-  };
-  const [color, label] = map[status] || ["var(--muted)", status || "unknown"];
-  return '<span class="badge" style="color:'+color+'">'+esc(label)+'</span>';
-}
-
+// Terminal Lane apps are installed/updated EXPLICITLY here. The Lane Setup model
+// keeps launchState ("failed") DISTINCT from signingState ("invalid") —
+// codesign/spctl passing does not prove the app launches (the LaunchServices
+// lesson) — and renderLaneSetup shows them as separate chips.
 function systemReadinessBadge(severity) {
   const color = severity === "ok" ? "var(--ok)"
     : severity === "info" ? "var(--accent-2)"
@@ -4043,33 +4033,85 @@ async function systemReadinessRepair(action) {
   renderSystemReadiness();
 }
 
-async function renderLaneApps() {
+// Lane Setup & Reliability Center — one card per Lane, driven by the unified
+// /lane-setup model. Shows install/signing/launch/daemon state + a readiness
+// summary + the single recommended next action. No dead buttons: actions that
+// can't run are disabled with a visible reason. No secrets are in the model.
+function laneInstallBadge(installState) {
+  const map = {
+    current: ["var(--ok)", "Current"],
+    outdated: ["var(--accent)", "Update available"],
+    not_installed: ["var(--muted)", "Not installed"],
+    broken: ["var(--err)", "Broken"],
+  };
+  const [color, label] = map[installState] || ["var(--muted)", installState || "unknown"];
+  return '<span class="badge" style="color:'+color+'">'+esc(label)+'</span>';
+}
+function laneStateChip(label, value, kind) {
+  const color = kind === "ok" ? "var(--ok)" : kind === "warn" ? "var(--warn)" : kind === "err" ? "var(--err)" : "var(--muted)";
+  return '<span class="badge" style="color:'+color+'">'+esc(label)+': '+esc(value)+'</span>';
+}
+function laneActionCall(id, action) {
+  return action === "run_readiness" ? "laneRunReadiness('"+id+"')" : "laneAppAction('"+id+"','"+(action === "open" ? "launch" : action)+"')";
+}
+function laneBtn(id, action, label, cls, reason) {
+  if (reason) return '<button class="'+cls+'" disabled title="'+esc(reason)+'">'+esc(label)+'</button>';
+  return '<button class="'+cls+'" onclick="'+laneActionCall(id, action)+'">'+esc(label)+'</button>';
+}
+async function renderLaneSetup() {
   const el = document.getElementById("lane_apps");
   if (!el) return;
   el.innerHTML = '<div class="muted">Loading…</div>';
-  const r = await api("/lane-apps");
-  const apps = (r && r.apps) || [];
-  if (!apps.length) { el.innerHTML = '<div class="muted">No lane apps registered.</div>'; return; }
-  el.innerHTML = apps.map(app => {
-    const installed = app.installed ? esc(app.installed.short)+' ('+esc(app.installed.build)+')' : '—';
-    const expected = esc(app.expected.short)+' ('+esc(app.expected.build)+')';
-    const dup = app.duplicated ? '<div class="muted" style="font-size:10px;color:var(--accent-2);margin-top:2px">⚠ Installed in both /Applications and ~/Applications — using '+esc(app.activePath||'')+'</div>' : '';
-    const path = app.activePath || app.installPath;
-    const canLaunch = !!app.activePath;
+  const r = await api("/lane-setup");
+  const lanes = (r && r.lanes) || [];
+  if (!lanes.length) { el.innerHTML = '<div class="muted">No lane apps registered.</div>'; return; }
+  el.innerHTML = lanes.map(lane => {
+    const installed = lane.installedVersion ? esc(lane.installedVersion.short)+' ('+esc(lane.installedVersion.build)+')' : '—';
+    const bundled = esc(lane.bundledVersion.short)+' ('+esc(lane.bundledVersion.build)+')';
+    const signing = laneStateChip("Signing", lane.signingState, lane.signingState === "valid" ? "ok" : lane.signingState === "invalid" ? "err" : "muted");
+    const launch = laneStateChip("Launch", lane.launchState, lane.launchState === "running" ? "ok" : lane.launchState === "failed" ? "err" : lane.launchState === "not_running" ? "warn" : "muted");
+    const daemon = laneStateChip("Daemon", lane.daemonState, lane.daemonState === "reachable" ? "ok" : "err");
+    const rd = lane.readiness || {};
+    const readinessLine = rd.lane === "browser"
+      ? (rd.configuredSites||0)+' site'+((rd.configuredSites===1)?'':'s')+' · '+(rd.ready||0)+' ready · '+(rd.needsAttention||0)+' need attention · '+(rd.stale||0)+' stale'
+      : (rd.configuredProfiles||0)+' profile'+((rd.configuredProfiles===1)?'':'s')+' · '+(rd.ready||0)+' ready · '+(rd.failed||0)+' failed · '+(rd.needsAttention||0)+' need attention';
+    const dr = lane.disabledReasons || {};
+    const na = lane.nextAction || { action: "verify", label: "Verify" };
+    // Primary = the single recommended action (never disabled — it's the fix).
+    const primary = laneBtn(lane.id, na.action, na.label, "create", null);
+    // Secondary actions, each disabled-with-reason when unavailable.
+    const secondary = [
+      laneBtn(lane.id, "verify", "Verify", "copybtn", dr.verify),
+      laneBtn(lane.id, "launch", "Open app", "copybtn", dr.launch),
+      laneBtn(lane.id, "run_readiness", "Run readiness", "copybtn", null),
+      laneBtn(lane.id, "reveal", "Reveal", "copybtn", dr.reveal),
+    ].join("");
+    const reasons = Object.keys(dr).filter(k => dr[k]).map(k => esc(dr[k])).filter((v,i,a)=>a.indexOf(v)===i);
+    const reasonNote = reasons.length ? '<div class="muted" style="font-size:10px;margin-top:4px">'+reasons.join(' ')+'</div>' : '';
     return '<div class="card" style="cursor:default">'
-      + '<div class="t">'+esc(app.displayName)+' '+laneAppBadge(app.status)+'</div>'
-      + '<div class="muted" style="font-size:11px;margin-top:4px">Installed: <b>'+installed+'</b> · Bundled/available: <b>'+expected+'</b></div>'
-      + '<div class="muted" style="font-size:10px;margin-top:2px">'+esc(path)+'</div>'
-      + dup
-      + '<div class="row" style="margin-top:6px;justify-content:flex-end;gap:6px">'
-      + '<button class="create" onclick="laneAppAction(\''+esc(app.id)+'\',\'install\')">Install/Update</button>'
-      + '<button class="copybtn" onclick="laneAppAction(\''+esc(app.id)+'\',\'verify\')">Verify</button>'
-      + (canLaunch ? '<button class="copybtn" onclick="laneAppAction(\''+esc(app.id)+'\',\'launch\')">Launch</button>' : '')
-      + (canLaunch ? '<button class="copybtn" onclick="laneAppAction(\''+esc(app.id)+'\',\'reveal\')">Reveal</button>' : '')
-      + '</div>'
-      + '<div id="lane_app_msg_'+esc(app.id)+'" class="muted" style="font-size:10px;margin-top:4px"></div>'
+      + '<div class="t">'+esc(lane.displayName)+' '+laneInstallBadge(lane.installState)+'</div>'
+      + '<div class="muted" style="font-size:11px;margin-top:4px">Installed: <b>'+installed+'</b> · Bundled: <b>'+bundled+'</b></div>'
+      + '<div class="muted" style="font-size:10px;margin-top:2px">'+esc(lane.installedPath||'—')+'</div>'
+      + '<div class="m" style="margin-top:6px">'+signing+' '+launch+' '+daemon+'</div>'
+      + '<div class="muted" style="font-size:11px;margin-top:4px">Readiness: '+readinessLine+'</div>'
+      + '<div class="muted" style="font-size:10px;margin-top:3px">Next: '+esc(na.label)+'</div>'
+      + '<div class="row" style="margin-top:6px;justify-content:flex-end;gap:6px;flex-wrap:wrap">'+primary+secondary+'</div>'
+      + reasonNote
+      + '<div id="lane_app_msg_'+esc(lane.id)+'" class="muted" style="font-size:10px;margin-top:4px"></div>'
       + '</div>';
   }).join("");
+}
+
+async function laneRunReadiness(id) {
+  const msg = document.getElementById("lane_app_msg_"+id);
+  if (msg) msg.textContent = "Running readiness…";
+  const url = id === "browser-lane" ? "/browser-lane/readiness/run" : "/terminal-lane/readiness/run";
+  const body = id === "browser-lane" ? { siteId: "all" } : { profileId: "all" };
+  const r = await api(url, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  if (!r || r.ok === false) { if (msg) msg.innerHTML = '<span style="color:var(--accent-2)">'+esc((r&&r.error)||'Readiness run failed')+'</span>'; return; }
+  if (msg) msg.textContent = "Readiness check complete.";
+  renderLaneSetup();
+  if (id === "browser-lane") renderBrowserReadiness(); else renderTerminalReadiness();
 }
 
 async function laneAppAction(id, action) {
@@ -4089,7 +4131,7 @@ async function laneAppAction(id, action) {
   } else if (action === 'reveal') {
     if (msg) msg.textContent = 'Revealed in Finder.';
   }
-  if (action !== 'reveal') renderLaneApps();
+  if (action !== 'reveal') renderLaneSetup();
 }
 
 async function renderSettingsLanes() {
@@ -4375,6 +4417,27 @@ async function cooResolveRuleTest() {
 }
 
 // --- Browser Lane readiness maintenance (operator) --------------------------
+// Auth strategy is config, never a secret — surface it so the operator knows
+// which sign-in path a site uses (the provider account is intentionally hidden).
+function authStrategyLabel(strategy) {
+  return strategy === "google_sso" ? "Google SSO"
+    : strategy === "microsoft_sso" ? "Microsoft SSO"
+    : strategy === "keychain_password" ? "Keychain login"
+    : "Manual session";
+}
+// Honest session state — never claims a login that wasn't observed.
+function browserSessionLabel(readiness) {
+  if (readiness.stale) return "Stale — re-check";
+  switch (readiness.status) {
+    case "ready": return "Logged-in session observed";
+    case "needs_reauth":
+    case "human_required": return "Manual sign-in required";
+    case "maintenance": return "Needs maintenance";
+    case "probe_failed": return "Probe failed";
+    case "blocked": return "Blocked";
+    default: return "Unknown — run a check";
+  }
+}
 async function renderBrowserReadiness() {
   const el = document.getElementById("browser_readiness");
   if (!el) return;
@@ -4386,12 +4449,13 @@ async function renderBrowserReadiness() {
   const attention = sites.filter(s => ['orange','red','gray'].includes(s.readiness.color) || s.readiness.stale === true);
   const m = (k,v) => '<div class="m" style="margin-top:2px"><span class="badge">'+esc(k)+'</span> '+esc(v)+'</div>';
   const head = m("sites", t.sites || 0) + m("needs attention", t.needsAttention || 0) + m("stale", (t.stale || 0) + ' (older than ' + (r.staleAfterHours || 24) + 'h)');
-  const list = attention.slice(0,5).map(s => {
+  const shown = (attention.length ? attention : sites).slice(0,5);
+  const list = shown.map(s => {
+    const strat = '<span class="badge">'+esc(authStrategyLabel(s.authStrategy))+'</span>';
     const stale = s.readiness.stale ? ' · stale' : '';
-    const trace = s.readiness.traceRunId ? ' · ' + esc(s.readiness.traceRunId) : '';
-    return '<div class="muted" style="font-size:11px">'+esc(s.displayName)+' — '+esc(s.readiness.status)+' ('+esc(s.readiness.color)+')'+stale+trace+'</div>';
+    return '<div class="muted" style="font-size:11px">'+esc(s.displayName)+' '+strat+' — '+esc(browserSessionLabel(s.readiness))+' ('+esc(s.readiness.color)+')'+stale+'</div>';
   }).join('');
-  el.innerHTML = '<div class="card" style="cursor:default">'+head+(list ? '<div style="margin-top:6px">'+list+'</div>' : '<div class="muted" style="font-size:11px;margin-top:6px">All sites fresh and ready.</div>')+'</div>';
+  el.innerHTML = '<div class="card" style="cursor:default">'+head+(list ? '<div style="margin-top:6px">'+list+'</div>' : '<div class="muted" style="font-size:11px;margin-top:6px">No sites configured yet — add one in the Browser Lane app.</div>')+'</div>';
 }
 async function runBrowserReadiness() {
   const el = document.getElementById("browser_readiness");
@@ -4419,9 +4483,22 @@ async function renderTerminalReadiness() {
   const shown = (attention.length ? attention : profiles).slice(0,5);
   const list = shown.map(p => {
     const lastRun = p.readiness.lastRunAt ? ' · ' + timeAgo(p.readiness.lastRunAt, Date.now()) : ' · never run';
-    return '<div class="muted" style="font-size:11px">'+esc(p.displayName)+' <span class="badge">'+esc(p.kind)+'</span> — '+esc(p.readiness.status)+' ('+esc(p.readiness.color)+')'+lastRun+'</div>';
+    const advice = terminalReadinessAdvice(p.readiness.status);
+    return '<div class="muted" style="font-size:11px">'+esc(p.displayName)+' <span class="badge">'+esc(p.kind)+'</span> — '+esc(p.readiness.status)+' ('+esc(p.readiness.color)+')'+lastRun
+      + (advice ? '<div style="font-size:10px;margin-top:1px">'+esc(advice)+'</div>' : '')
+      + '</div>';
   }).join('');
   el.innerHTML = '<div class="card" style="cursor:default">'+head+'<div style="margin-top:6px">'+list+'</div></div>';
+}
+// Actionable next step per readiness status (no secrets, just guidance).
+function terminalReadinessAdvice(status) {
+  switch (status) {
+    case "needs_auth": return "Add the SSH key/passphrase in Keychain, then re-run.";
+    case "blocked": return "Host unreachable — check the network and host details.";
+    case "probe_failed": return "Probe failed — open the run for details, then re-run.";
+    case "unknown": return "Never run — run a readiness check.";
+    default: return "";
+  }
 }
 async function runTerminalReadiness() {
   const el = document.getElementById("terminal_readiness");

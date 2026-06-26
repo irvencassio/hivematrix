@@ -622,6 +622,65 @@ test("readiness cards sit directly under Lane Apps, before Runtime Capabilities"
   assert.ok(runtime > terminalReadiness, "Runtime Capabilities comes after both readiness cards");
 });
 
+test("Lane Apps cards are driven by the unified /lane-setup model", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /async function renderLaneSetup\(/, "unified Lane Setup renderer present");
+  assert.match(js, /api\("\/lane-setup"\)/, "fetches the unified model");
+  assert.match(js, /getElementById\("lane_apps"\)/, "fills the Lane Apps mount");
+  assert.match(js, /renderLaneSetup\(\)/, "wired into the Lanes tab");
+  // The old basic renderer is gone (replaced by the reliability model).
+  assert.doesNotMatch(js, /async function renderLaneApps\(/, "old renderLaneApps replaced");
+});
+
+test("Lane Setup cards show install/signing/launch/daemon state and readiness", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const render = js.match(/async function renderLaneSetup\(\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(render.length > 200, "renderLaneSetup body extracted");
+  assert.match(render, /installState/, "renders install state");
+  assert.match(render, /Signing/, "signing chip");
+  assert.match(render, /Launch/, "launch chip");
+  assert.match(render, /Daemon/, "daemon chip");
+  assert.match(render, /nextAction/, "renders the single primary next action");
+  assert.match(render, /readiness/, "renders the readiness summary");
+});
+
+test("Lane Setup buttons are never dead — disabled ones carry a visible reason", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const render = js.match(/async function renderLaneSetup\(\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(render, /disabledReasons/, "uses the model's disabledReasons");
+  // Buttons reuse the shared HiveMatrix styles via the laneBtn helper.
+  assert.match(render, /"create"/, "primary uses the shared .create style");
+  assert.match(render, /"copybtn"/, "secondary uses the shared .copybtn style");
+  assert.match(js, /function laneBtn\([\s\S]*?<button class="'\s*\+\s*cls/, "laneBtn renders disabled buttons with a reason title");
+  assert.match(js, /disabled title=/, "disabled buttons carry a reason title");
+});
+
+test("Browser Lane dashboard surfaces auth strategy and never claims to bypass human verification", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /authStrategy/, "auth strategy surfaced in the readiness dashboard");
+  assert.match(js, /Google SSO|Microsoft SSO/, "named SSO strategies");
+  // Honest session states.
+  assert.match(js, /Logged-in session observed|Manual sign-in required/, "honest session-state copy");
+  // Future-use + no-bypass hint (static copy).
+  assert.match(CONSOLE_HTML, /persists in [^<]*WebKit/, "explains the WebKit session persists after closing");
+  assert.match(CONSOLE_HTML, /CAPTCHA|2FA/, "states human verification still needed");
+  assert.match(CONSOLE_HTML, /never bypass(es)? human verification|still need you/i, "no bypass claim");
+});
+
+test("Terminal Lane copy explains local vs SSH (local needs no key)", () => {
+  assert.match(CONSOLE_HTML, /Local profiles run a shell on this Mac/, "local shell explained");
+  assert.match(CONSOLE_HTML, /no key or login secret needed/i, "local needs no auth material");
+  assert.match(CONSOLE_HTML, /Keychain/, "SSH secret lives in Keychain");
+});
+
+test("subordinate readiness sections remain below the Lane Apps cards", () => {
+  assert.match(CONSOLE_HTML, /Browser Lane Sites &amp; Auth/, "browser drill-down kept");
+  assert.match(CONSOLE_HTML, /Terminal Lane Profiles &amp; Readiness/, "terminal drill-down kept");
+  const laneApps = CONSOLE_HTML.indexOf("Lane Apps");
+  const browserSites = CONSOLE_HTML.indexOf("Browser Lane Sites &amp; Auth");
+  assert.ok(laneApps >= 0 && browserSites > laneApps, "Lane Apps cards stay above the drill-downs");
+});
+
 test("board no longer renders the hardcoded AI-news video shortcut", () => {
   assert.doesNotMatch(CONSOLE_HTML, /AI-news video/, "bespoke AI-news video board button removed");
   const js = extractScript(CONSOLE_HTML);

@@ -1315,6 +1315,16 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /lane-setup — unified Lane Setup & Reliability model: install/version/
+      // signing/launch/daemon state + readiness counts + the single next action,
+      // per lane. Read-only; composes existing signals; carries no secrets and
+      // never launches an app to compute state.
+      if (req.method === "GET" && urlPath === "/lane-setup") {
+        const { getLaneSetup } = await import("@/lib/lane-setup");
+        json(res, 200, { ok: true, ...(await getLaneSetup()) });
+        return;
+      }
+
       // POST /lane-apps/:id/install — install/update one lane app from its
       // packaged artifact into the user-writable target (~/Applications/...).
       const laneAppInstall = urlPath.match(/^\/lane-apps\/(browser-lane|terminal-lane)\/install$/);
@@ -1366,7 +1376,10 @@ export function createDaemonServer() {
       const laneAppVerify = urlPath.match(/^\/lane-apps\/(browser-lane|terminal-lane)\/verify$/);
       if (req.method === "POST" && laneAppVerify) {
         const { verifyLaneAppById } = await import("@/lib/lane-apps");
+        const { recordLaneVerification } = await import("@/lib/lane-setup");
         const { state, verification } = await verifyLaneAppById(laneAppVerify[1]);
+        // Feed the session signing/launch truth into the unified /lane-setup model.
+        recordLaneVerification(laneAppVerify[1], verification);
         json(res, 200, { ok: true, state, verification });
         return;
       }
