@@ -48,6 +48,7 @@ const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
 const arg = process.argv[2];
 const note = process.argv[3] ?? "";
 const version = arg && /^\d+\.\d+\.\d+$/.test(arg) ? arg : bumpPatch(pkg.version);
+const today = new Date().toISOString().slice(0, 10);
 console.log(`Releasing HiveMatrix ${pkg.version} → ${version}${note ? ` (${note})` : ""}`);
 
 if (cap(`git tag -l v${version}`)) die(`tag v${version} already exists — never re-use a version for new code`);
@@ -72,13 +73,21 @@ writeFileSync(tauriPath, JSON.stringify(tauri, null, 2) + "\n");
 
 const verTsPath = join(repo, "src", "lib", "version.ts");
 const verTs = readFileSync(verTsPath, "utf-8");
-const nextVerTs = verTs.replace(/(VERSION\s*=\s*)["'][^"']*["']/, `$1"${version}"`);
-if (nextVerTs === verTs) die("could not bump VERSION in src/lib/version.ts");
+const buildMatch = verTs.match(/export const BUILD_NUMBER = ([0-9]+)/);
+if (!buildMatch) die("could not read BUILD_NUMBER in src/lib/version.ts");
+const nextBuildNumber = Number(buildMatch[1]) + 1;
+if (!Number.isInteger(nextBuildNumber) || nextBuildNumber <= 1) {
+  die(`invalid next BUILD_NUMBER from ${buildMatch[1]}`);
+}
+const nextVerTs = verTs
+  .replace(/(VERSION\s*=\s*)["'][^"']*["']/, `$1"${version}"`)
+  .replace(/BUILD_NUMBER\s*=\s*[0-9]+/, `BUILD_NUMBER = ${Number(buildMatch[1]) + 1}`)
+  .replace(/BUILD_DATE\s*=\s*["'][^"']*["']/, `BUILD_DATE = ${JSON.stringify(today)}`);
+if (nextVerTs === verTs) die("could not bump VERSION/BUILD_NUMBER/BUILD_DATE in src/lib/version.ts");
 writeFileSync(verTsPath, nextVerTs);
 
 // Release notes: prepend this release to the changelog (the in-app Release notes
 // view reads changelog.ts via GET /releases; CHANGELOG.md is the human/GitHub copy).
-const today = new Date().toISOString().slice(0, 10);
 const noteEsc = note.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 const clogTsPath = join(repo, "src", "lib", "version", "changelog.ts");
 const clogTs = readFileSync(clogTsPath, "utf-8");

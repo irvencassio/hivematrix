@@ -8,6 +8,7 @@ const base = {
   tauriVersion: "0.1.13",
   sourceVersion: "0.1.13",
   buildNumber: 629,
+  feedBuildNumber: 629,
   tagName: "v0.1.13",
   tagCommit: "abc123",
   releaseExists: true,
@@ -43,4 +44,10 @@ test("release proof fails when feed advertises a different source commit", () =>
   const proof = evaluateAutoUpdateProof({ ...base, feedSourceCommit: "different" });
   assert.equal(proof.ok, false);
   assert.ok(proof.checks.some((c) => c.id === "feed-source-commit" && !c.ok));
+});
+
+test("release proof fails when feed build number differs from source build number", () => {
+  const proof = evaluateAutoUpdateProof({ ...base, feedBuildNumber: 628 });
+  assert.equal(proof.ok, false);
+  assert.ok(proof.checks.some((c) => c.id === "feed-build-number" && !c.ok));
 });

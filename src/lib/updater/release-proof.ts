@@ -9,6 +9,7 @@ export interface AutoUpdateProofInput {
   releaseExists: boolean;
   feedVersion: string | null;
   feedSourceCommit: string | null;
+  feedBuildNumber: number | null;
 }
 
 export interface AutoUpdateProofCheck {
@@ -39,6 +40,11 @@ export function evaluateAutoUpdateProof(input: AutoUpdateProofInput): AutoUpdate
       id: "build-number-present",
       ok: Number.isInteger(input.buildNumber) && (input.buildNumber ?? 0) > 0,
       detail: `buildNumber=${input.buildNumber ?? "missing"}`,
+    },
+    {
+      id: "feed-build-number",
+      ok: Number.isInteger(input.feedBuildNumber) && input.feedBuildNumber === input.buildNumber,
+      detail: `feed=${input.feedBuildNumber ?? "missing"} source=${input.buildNumber ?? "missing"}`,
     },
     {
       id: "tag-exists",

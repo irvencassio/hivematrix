@@ -19,12 +19,12 @@ const FEED_URL = `https://github.com/${REPO}/releases/latest/download/latest.jso
  * GitHub's `releases/latest/download/<asset>` CDN redirect lags the release
  * "latest" pointer by a few minutes, so immediately after publishing a release
  * the feed still serves the *previous* version/commit. Only the two feed checks
- * (feed-version, feed-source-commit) are subject to this lag — every other check
- * is local/API and is correct the instant it's read. So we poll *only* when the
+ * (feed-version, feed-source-commit, feed-build-number) are subject to this lag
+ * — every other check is local/API and is correct the instant it's read. So we poll *only* when the
  * sole remaining failures are feed checks, giving the CDN time to propagate
  * before declaring a genuine mismatch.
  */
-const FEED_CHECK_IDS = new Set(["feed-version", "feed-source-commit"]);
+const FEED_CHECK_IDS = new Set(["feed-version", "feed-source-commit", "feed-build-number"]);
 const FEED_POLL_MAX_ATTEMPTS = 20; // ~20 × 15s ≈ 5 minutes total.
 const FEED_POLL_INTERVAL_MS = 15_000;
 
@@ -38,20 +38,21 @@ function sh(cmd: string, args: string[], fallback: string | null = null): string
   }
 }
 
-async function fetchFeed(): Promise<{ version: string | null; sourceCommit: string | null }> {
+async function fetchFeed(): Promise<{ version: string | null; sourceCommit: string | null; buildNumber: number | null }> {
   try {
     const res = await fetch(FEED_URL, { signal: AbortSignal.timeout(10_000) });
     if (res.ok) {
-      const feed = await res.json() as { version?: string; sourceCommit?: string };
+      const feed = await res.json() as { version?: string; sourceCommit?: string; buildNumber?: number };
       return {
         version: typeof feed.version === "string" ? feed.version : null,
         sourceCommit: typeof feed.sourceCommit === "string" ? feed.sourceCommit : null,
+        buildNumber: Number.isInteger(feed.buildNumber) ? feed.buildNumber ?? null : null,
       };
     }
   } catch {
     // A missing/unreachable feed surfaces as failing feed checks below.
   }
-  return { version: null, sourceCommit: null };
+  return { version: null, sourceCommit: null, buildNumber: null };
 }
 
 /** True when the proof's only failures are feed checks — i.e. plausibly CDN lag, worth waiting on. */
@@ -85,7 +86,7 @@ async function main(): Promise<void> {
   // Local/API inputs above are immediate and correct; only the feed lags behind
   // GitHub's CDN, so re-fetch it on each polling attempt while everything else
   // stays fixed.
-  const evaluate = (feed: { version: string | null; sourceCommit: string | null }): AutoUpdateProof =>
+  const evaluate = (feed: { version: string | null; sourceCommit: string | null; buildNumber: number | null }): AutoUpdateProof =>
     evaluateAutoUpdateProof({
       headCommit,
       packageVersion: pkg.version ?? "",
@@ -97,6 +98,7 @@ async function main(): Promise<void> {
       releaseExists,
       feedVersion: feed.version,
       feedSourceCommit: feed.sourceCommit,
+      feedBuildNumber: feed.buildNumber,
     });
 
   let proof = evaluate(await fetchFeed());
