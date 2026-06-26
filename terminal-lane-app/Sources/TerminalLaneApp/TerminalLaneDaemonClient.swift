@@ -2,7 +2,9 @@ import Foundation
 
 final class TerminalLaneDaemonClient {
     static let shared = TerminalLaneDaemonClient()
-    private let baseURL = URL(string: "http://127.0.0.1:3747")!
+    private var baseURL: URL {
+        URL(string: TerminalLaneSettings.shared.daemonURL) ?? URL(string: "http://127.0.0.1:3747")!
+    }
 
     func sync(profile: TerminalLaneProfile, completion: @escaping (Result<String, Error>) -> Void) {
         post(path: "/terminal-lane/profiles", body: [
@@ -78,7 +80,7 @@ final class TerminalLaneDaemonClient {
 
     private func request(path: String) -> URLRequest? {
         guard let auth = readAuthToken() else { return nil }
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        var request = URLRequest(url: baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))))
         request.setValue("Bearer \(auth)", forHTTPHeaderField: "Authorization")
         return request
     }

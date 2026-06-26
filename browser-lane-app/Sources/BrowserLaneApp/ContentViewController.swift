@@ -28,8 +28,8 @@ final class ContentViewController: NSViewController {
             ReadinessViewController()
         case .settings:
             SettingsViewController()
-        default:
-            PlaceholderViewController(screen: screen)
+        case .traces:
+            TracesViewController()
         }
         addChild(vc)
         vc.view.translatesAutoresizingMaskIntoConstraints = false

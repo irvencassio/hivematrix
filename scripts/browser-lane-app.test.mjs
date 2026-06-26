@@ -212,11 +212,14 @@ test("Browser Lane Add Site has an auth strategy picker that gates password capt
 test("Browser Lane has a Readiness dashboard with per-site status and actions", () => {
   const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
   const readinessPath = join(sourceDir, "ReadinessViewController.swift");
+  const tracesPath = join(sourceDir, "TracesViewController.swift");
   const content = readFileSync(join(sourceDir, "ContentViewController.swift"), "utf8");
   const daemonClient = readFileSync(join(sourceDir, "BrowserLaneDaemonClient.swift"), "utf8");
 
   assert.ok(existsSync(readinessPath), "ReadinessViewController should exist");
+  assert.ok(existsSync(tracesPath), "TracesViewController should exist");
   const readiness = readFileSync(readinessPath, "utf8");
+  const traces = readFileSync(tracesPath, "utf8");
 
   // Status colors green/orange/yellow/red are represented.
   assert.match(readiness, /green/);
@@ -236,7 +239,15 @@ test("Browser Lane has a Readiness dashboard with per-site status and actions", 
   // Wired into navigation and backed by the daemon dashboard endpoint.
   assert.match(content, /ReadinessViewController/);
   assert.match(daemonClient, /browser-lane\/dashboard/);
+  assert.match(content, /TracesViewController/);
+  assert.match(daemonClient, /browser-lane\/traces/);
+  assert.match(daemonClient, /browser-lane\/traces\/latest/);
+  assert.match(traces, /Latest trace/);
+  assert.match(traces, /Refresh traces/);
+  assert.match(traces, /fetchLatestTrace/);
+  assert.match(traces, /fetchTraces/);
   assert.doesNotMatch(readiness, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
+  assert.doesNotMatch(traces, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
 });
 
 test("Browser Lane WebKit view persists the session and supports OAuth popups", () => {

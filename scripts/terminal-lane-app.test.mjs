@@ -34,6 +34,7 @@ test("Terminal Lane app has profile, readiness, traces, settings, and terminal s
     "ReadinessViewController.swift",
     "TracesViewController.swift",
     "SettingsViewController.swift",
+    "TerminalLaneSettings.swift",
   ]) {
     assert.ok(existsSync(join(source, file)), `${file} should exist`);
   }
@@ -50,6 +51,7 @@ test("Terminal Lane profile model has no secret fields and daemon sync carries c
   const models = readFileSync(join(source, "TerminalLaneModels.swift"), "utf8");
   const daemon = readFileSync(join(source, "TerminalLaneDaemonClient.swift"), "utf8");
   const keychain = readFileSync(join(source, "TerminalLaneKeychain.swift"), "utf8");
+  const settings = readFileSync(join(source, "TerminalLaneSettings.swift"), "utf8");
 
   assert.match(models, /struct TerminalLaneProfile/);
   assert.match(models, /credentialRef/);
@@ -59,6 +61,9 @@ test("Terminal Lane profile model has no secret fields and daemon sync carries c
   assert.match(daemon, /terminal-lane\/profiles/);
   assert.match(daemon, /terminal-lane\/readiness\/run/);
   assert.match(daemon, /auth-token/);
+  assert.match(daemon, /TerminalLaneSettings\.shared\.daemonURL/);
+  assert.match(settings, /daemonURL/);
+  assert.match(settings, /http:\/\/127\.0\.0\.1:3747/);
   assert.doesNotMatch(daemon, /password|passphrase|privateKey/i);
 
   assert.match(keychain, /import Security/);
@@ -74,4 +79,22 @@ test("Terminal Lane terminal screen uses SwiftTerm PTY and avoids inline credent
   assert.match(terminal, /startProcess/);
   assert.match(terminal, /openCommand/);
   assert.doesNotMatch(terminal, /password|passphrase|privateKey/i);
+});
+
+test("Terminal Lane Add Profile guides local setup and gates credential capture to SSH", () => {
+  const addProfile = readFileSync(join(source, "AddProfileViewController.swift"), "utf8");
+  const settings = readFileSync(join(source, "SettingsViewController.swift"), "utf8");
+
+  assert.match(addProfile, /Use Local Mac defaults/);
+  assert.match(addProfile, /kindChanged/);
+  assert.match(addProfile, /credentialRowIndex/);
+  assert.match(addProfile, /credentialValueRowIndex/);
+  assert.match(addProfile, /kind == \.local/);
+  assert.match(addProfile, /Local profiles use your current macOS session/);
+  assert.match(addProfile, /Enter a host for SSH profiles|host is required for SSH profiles/);
+  assert.match(addProfile, /Enter both credential ref and key\/auth material/);
+  assert.match(settings, /Daemon URL/);
+  assert.match(settings, /TerminalLaneSettings\.shared/);
+  assert.match(settings, /Save settings/);
+  assert.doesNotMatch(addProfile, /password/i);
 });

@@ -29,7 +29,7 @@ final class BrowserLaneDaemonClient {
             return
         }
 
-        var request = URLRequest(url: baseURL.appendingPathComponent("/browser-lane/sites"))
+        var request = URLRequest(url: url(path: "/browser-lane/sites"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -68,7 +68,7 @@ final class BrowserLaneDaemonClient {
             completion(.failure(NSError(domain: "BrowserLane", code: 401, userInfo: [NSLocalizedDescriptionKey: "Daemon auth token not found at ~/.hivematrix/auth-token."])))
             return
         }
-        var request = URLRequest(url: baseURL.appendingPathComponent("/browser-lane/dashboard"))
+        var request = URLRequest(url: url(path: "/browser-lane/dashboard"))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error { completion(.failure(error)); return }
@@ -93,12 +93,22 @@ final class BrowserLaneDaemonClient {
         post(path: "/browser-lane/readiness/mark", body: body, completion: completion)
     }
 
+    /// GET /browser-lane/traces — list recent trace runs as daemon-redacted JSON.
+    func fetchTraces(completion: @escaping (Result<String, Error>) -> Void) {
+        getText(path: "/browser-lane/traces", completion: completion)
+    }
+
+    /// GET /browser-lane/traces/latest — latest trace run detail as daemon-redacted JSON.
+    func fetchLatestTrace(completion: @escaping (Result<String, Error>) -> Void) {
+        getText(path: "/browser-lane/traces/latest", completion: completion)
+    }
+
     private func post(path: String, body: [String: Any], completion: @escaping (Result<String, Error>) -> Void) {
         guard let token = readAuthToken() else {
             completion(.failure(NSError(domain: "BrowserLane", code: 401, userInfo: [NSLocalizedDescriptionKey: "Daemon auth token not found."])))
             return
         }
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        var request = URLRequest(url: url(path: path))
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -112,6 +122,25 @@ final class BrowserLaneDaemonClient {
                 return
             }
             completion(.success("ok"))
+        }.resume()
+    }
+
+    private func getText(path: String, completion: @escaping (Result<String, Error>) -> Void) {
+        guard let token = readAuthToken() else {
+            completion(.failure(NSError(domain: "BrowserLane", code: 401, userInfo: [NSLocalizedDescriptionKey: "Daemon auth token not found."])))
+            return
+        }
+        var request = URLRequest(url: url(path: path))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error { completion(.failure(error)); return }
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(code), let data else {
+                let detail = data.flatMap { String(data: $0, encoding: .utf8) } ?? "HTTP \(code)"
+                completion(.failure(NSError(domain: "BrowserLane", code: code, userInfo: [NSLocalizedDescriptionKey: detail])))
+                return
+            }
+            completion(.success(Self.prettyJSON(data) ?? String(data: data, encoding: .utf8) ?? "{}"))
         }.resume()
     }
 
@@ -134,6 +163,18 @@ final class BrowserLaneDaemonClient {
                 stale: readiness["stale"] as? Bool ?? true
             )
         }
+    }
+
+    private static func prettyJSON(_ data: Data) -> String? {
+        guard
+            let object = try? JSONSerialization.jsonObject(with: data),
+            let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        else { return nil }
+        return String(data: pretty, encoding: .utf8)
+    }
+
+    private func url(path: String) -> URL {
+        baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
     }
 
     private func readAuthToken() -> String? {

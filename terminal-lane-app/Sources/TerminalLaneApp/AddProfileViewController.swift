@@ -12,17 +12,26 @@ final class AddProfileViewController: NSViewController {
     private let credentialRefField = NSTextField()
     private let credentialValueField = NSSecureTextField()
     private let statusLabel = NSTextField(labelWithString: "")
+    private var form: NSGridView!
+    private let hostRowIndex = 3
+    private let userRowIndex = 4
+    private let portRowIndex = 5
+    private let credentialRowIndex = 8
+    private let credentialValueRowIndex = 9
 
     override func loadView() {
         view = NSView()
         let title = NSTextField(labelWithString: "Add Profile")
         title.font = .systemFont(ofSize: 34, weight: .bold)
         kindPopup.addItems(withTitles: TerminalLaneProfileKind.allCases.map(\.rawValue))
+        kindPopup.target = self
+        kindPopup.action = #selector(kindChanged)
+        useLocalDefaults()
         shellField.stringValue = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         cwdField.stringValue = FileManager.default.homeDirectoryForCurrentUser.path
         credentialRefField.placeholderString = "hivematrix.terminal.profile.primary"
 
-        let form = NSGridView(views: [
+        form = NSGridView(views: [
             [label("Profile id"), idField],
             [label("Display name"), nameField],
             [label("Kind"), kindPopup],
@@ -36,9 +45,11 @@ final class AddProfileViewController: NSViewController {
         ])
         form.column(at: 0).xPlacement = .trailing
         form.column(at: 1).width = 420
+        kindChanged()
+        let localDefaults = NSButton(title: "Use Local Mac defaults", target: self, action: #selector(useLocalDefaults))
         let save = NSButton(title: "Save profile + key", target: self, action: #selector(saveProfile))
         let test = NSButton(title: "Test connection", target: self, action: #selector(testConnection))
-        let buttons = NSStackView(views: [save, test, statusLabel])
+        let buttons = NSStackView(views: [localDefaults, save, test, statusLabel])
         buttons.orientation = .horizontal
         buttons.spacing = 10
         let stack = NSStackView(views: [title, form, buttons])
@@ -56,8 +67,9 @@ final class AddProfileViewController: NSViewController {
 
     @objc private func saveProfile() {
         do {
-            let profile = makeProfile(status: "saving")
-            if let ref = profile.credentialRef, !credentialValueField.stringValue.isEmpty {
+            let profile = try makeProfile(status: "saving")
+            let credentialMaterial = credentialValueField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if profile.kind == .ssh, let ref = profile.credentialRef, !credentialMaterial.isEmpty {
                 try TerminalLaneKeychain.shared.saveCredential(profileId: profile.id, credentialRef: ref, value: credentialValueField.stringValue)
             }
             try TerminalLaneProfileStore.shared.upsert(profile)
@@ -72,15 +84,47 @@ final class AddProfileViewController: NSViewController {
     }
 
     @objc private func testConnection() {
-        let id = idField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        TerminalLaneDaemonClient.shared.runReadiness(profileId: id.isEmpty ? "all" : id) { [weak self] result in
+        let profile: TerminalLaneProfile
+        do {
+            profile = try makeProfile(status: "checking")
+        } catch {
+            statusLabel.stringValue = error.localizedDescription
+            return
+        }
+        TerminalLaneDaemonClient.shared.runReadiness(profileId: profile.id) { [weak self] result in
             DispatchQueue.main.async {
                 self?.statusLabel.stringValue = (try? result.get()) ?? "readiness failed"
             }
         }
     }
 
-    private func makeProfile(status: String) -> TerminalLaneProfile {
+    @objc private func kindChanged() {
+        let kind = TerminalLaneProfileKind(rawValue: kindPopup.titleOfSelectedItem ?? "local") ?? .local
+        let local = kind == .local
+        for index in [hostRowIndex, userRowIndex, portRowIndex, credentialRowIndex, credentialValueRowIndex] {
+            form?.row(at: index).isHidden = local
+        }
+        statusLabel.stringValue = local
+            ? "Local profiles use your current macOS session; no key material is needed."
+            : "SSH profiles may store key/auth material in Keychain; the daemon receives only credentialRef."
+    }
+
+    @objc private func useLocalDefaults() {
+        let profile = TerminalLaneProfile.localDefault()
+        idField.stringValue = profile.id
+        nameField.stringValue = profile.displayName
+        kindPopup.selectItem(withTitle: profile.kind.rawValue)
+        hostField.stringValue = ""
+        userField.stringValue = profile.user ?? NSUserName()
+        portField.stringValue = ""
+        shellField.stringValue = profile.shell ?? ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        cwdField.stringValue = profile.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
+        credentialRefField.stringValue = ""
+        credentialValueField.stringValue = ""
+        kindChanged()
+    }
+
+    private func makeProfile(status: String) throws -> TerminalLaneProfile {
         let rawId = idField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let id = rawId.lowercased().replacingOccurrences(of: " ", with: "-")
         let kind = TerminalLaneProfileKind(rawValue: kindPopup.titleOfSelectedItem ?? "local") ?? .local
@@ -88,6 +132,18 @@ final class AddProfileViewController: NSViewController {
         let user = userField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let port = Int(portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
         let shell = shellField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let credentialRef = credentialRefField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let credentialMaterial = credentialValueField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !id.isEmpty else { throw ValidationError("Profile id is required.") }
+        if kind == .ssh {
+            guard !host.isEmpty else { throw ValidationError("Enter a host for SSH profiles.") }
+            guard !user.isEmpty else { throw ValidationError("Enter a user for SSH profiles.") }
+            if credentialRef.isEmpty != credentialMaterial.isEmpty {
+                throw ValidationError("Enter both credential ref and key/auth material, or leave both blank.")
+            }
+        }
+
         let openCommand = kind == .ssh
             ? "ssh \(port.map { "-p \($0) " } ?? "")\(user)@\(host)"
             : (shell.isEmpty ? "/bin/zsh" : shell)
@@ -95,14 +151,14 @@ final class AddProfileViewController: NSViewController {
             id: id,
             displayName: nameField.stringValue.isEmpty ? id : nameField.stringValue,
             kind: kind,
-            host: host.isEmpty ? nil : host,
-            user: user.isEmpty ? nil : user,
-            port: port,
+            host: kind == .local ? nil : host,
+            user: kind == .local ? NSUserName() : user,
+            port: kind == .local ? nil : port,
             shell: shell.isEmpty ? nil : shell,
             cwd: cwdField.stringValue.isEmpty ? nil : cwdField.stringValue,
-            credentialRef: credentialRefField.stringValue.isEmpty ? nil : credentialRefField.stringValue,
+            credentialRef: kind == .ssh && !credentialRef.isEmpty ? credentialRef : nil,
             openCommand: openCommand,
-            notes: "",
+            notes: kind == .local ? "Local shell on this Mac." : "",
             lastSyncStatus: status,
             createdAt: TerminalLaneProfile.nowString(),
             updatedAt: TerminalLaneProfile.nowString()
@@ -111,5 +167,15 @@ final class AddProfileViewController: NSViewController {
 
     private func label(_ text: String) -> NSTextField {
         NSTextField(labelWithString: text)
+    }
+
+    private struct ValidationError: LocalizedError {
+        let message: String
+
+        init(_ message: String) {
+            self.message = message
+        }
+
+        var errorDescription: String? { message }
     }
 }
