@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.87", date: "2026-06-26", note: "Browser Lane Google SSO, Terminal Lane, voice tools, and console UI updates" },
   { version: "0.1.86", date: "2026-06-26", note: "Browser Lane readiness, workflow inbox, and Terminal Lane cleanup" },
   { version: "0.1.84", date: "2026-06-25", note: "Bee-to-Lane rename: lane-native tools, services, config, central protocol, and refreshed guides" },
   { version: "0.1.83", date: "2026-06-24", note: "video: Approve renders via HeyGen Video Agent by default (slides + annotations + B-roll); failed renders are re-approvable; accuracy guard against invented stats" },
