@@ -20,6 +20,7 @@ cd "$(dirname "$0")/.."
 NOTARY_PROFILE="hivematrix"
 NOTARY_APPLE_ID="cassio.irv@gmail.com"
 NOTARY_TEAM_ID="8B3CHTY93V"   # Developer ID Application: Irven Cassio
+IDENTITY="Developer ID Application: Irven Cassio (8B3CHTY93V)"
 NOTARY_ARGS=(
   --apple-id "$NOTARY_APPLE_ID"
   --team-id "$NOTARY_TEAM_ID"
@@ -33,12 +34,21 @@ echo "==> Building the self-contained daemon runtime (bundled Node + addon)…"
 npm run build:daemon
 npm run verify:daemon-runtime
 
+echo "==> Building standalone lane app artifacts…"
+node scripts/package-browser-lane-app.mjs
+node scripts/package-terminal-lane-app.mjs
+
 # Sign the SOURCE resources before bundling: cargo tauri build packages the dmg
 # and the updater tarball mid-build, straight from these files — signing only
 # the bundled copies afterwards ships unsigned Mach-Os in those artifacts and
 # notarization rejects the dmg.
 echo "==> Pre-signing source resources (so dmg/updater artifacts are valid)…"
 bash scripts/sign-bundled-machos.sh dist/daemon desktopbee-helper/DesktopBeeHelper.app
+echo "==> Signing standalone lane app artifacts…"
+codesign --force --options runtime --timestamp --sign "$IDENTITY" --entitlements browser-lane-app/Resources/entitlements.plist "build/browser-lane/Browser Lane.app/Contents/MacOS/BrowserLane"
+codesign --force --options runtime --timestamp --sign "$IDENTITY" --entitlements browser-lane-app/Resources/entitlements.plist "build/browser-lane/Browser Lane.app"
+codesign --force --options runtime --timestamp --sign "$IDENTITY" --entitlements terminal-lane-app/Resources/entitlements.plist "build/terminal-lane/Terminal Lane.app/Contents/MacOS/TerminalLane"
+codesign --force --options runtime --timestamp --sign "$IDENTITY" --entitlements terminal-lane-app/Resources/entitlements.plist "build/terminal-lane/Terminal Lane.app"
 
 echo "==> Building + signing (cargo tauri build)…"
 # Don't abort the whole script if only the dmg sub-step fails; we check artifacts next.

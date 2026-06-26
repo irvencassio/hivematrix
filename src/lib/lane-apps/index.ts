@@ -114,13 +114,35 @@ export async function installLaneApp(
 
 // --- Runtime helpers (default deps backed by the real filesystem) ----------
 
-function repoFile(relative: string): string {
-  // src/lib/lane-apps/index.ts → repo root is three levels up.
-  return new URL(`../../../${relative}`, import.meta.url).pathname;
+export interface ArtifactPathDeps {
+  cwd?: string;
+  execPath?: string;
+  exists?: (path: string) => boolean;
+  candidates?: string[];
 }
 
-export function artifactPathFor(descriptor: LaneAppDescriptor): string {
-  return `${repoFile(ARTIFACT_DIR[descriptor.id])}/${descriptor.displayName}.app`;
+const PACKAGED_DAEMON_NODE_MARKER = "/Contents/Resources/daemon/bin/node";
+const PACKAGED_LANE_APP_MARKER = "/Contents/Resources/lane-apps";
+
+export function artifactPathCandidatesFor(descriptor: LaneAppDescriptor, deps: ArtifactPathDeps = {}): string[] {
+  const bundleName = `${descriptor.displayName}.app`;
+  const cwd = deps.cwd ?? process.cwd();
+  const execPath = deps.execPath ?? process.execPath;
+  const candidates: string[] = [];
+
+  if (execPath.endsWith(PACKAGED_DAEMON_NODE_MARKER)) {
+    const appRoot = execPath.slice(0, -PACKAGED_DAEMON_NODE_MARKER.length);
+    candidates.push(`${appRoot}${PACKAGED_LANE_APP_MARKER}/${bundleName}`);
+  }
+
+  candidates.push(`${cwd}/${ARTIFACT_DIR[descriptor.id]}/${bundleName}`);
+  return Array.from(new Set(candidates));
+}
+
+export function artifactPathFor(descriptor: LaneAppDescriptor, deps: ArtifactPathDeps = {}): string {
+  const candidates = deps.candidates ?? artifactPathCandidatesFor(descriptor, deps);
+  const exists = deps.exists ?? existsSync;
+  return candidates.find((candidate) => exists(candidate)) ?? candidates[0];
 }
 
 function readBundleVersion(appPath: string): LaneAppVersion | null {

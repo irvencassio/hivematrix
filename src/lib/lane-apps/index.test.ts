@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { getLaneApp } from "./catalog";
-import { getLaneAppState, installLaneApp } from "./index";
+import { artifactPathCandidatesFor, artifactPathFor, getLaneAppState, installLaneApp } from "./index";
 
 const HOME = "/Users/tester";
 const browser = getLaneApp("browser-lane");
@@ -84,4 +84,27 @@ test("installLaneApp refuses when the artifact is missing", async () => {
     }),
     /artifact/i,
   );
+});
+
+test("artifactPathFor prefers packaged HiveMatrix resources over dev build outputs", () => {
+  const packaged = "/Applications/HiveMatrix.app/Contents/Resources/lane-apps/Browser Lane.app";
+  const dev = "/repo/build/browser-lane/Browser Lane.app";
+  const candidates = artifactPathCandidatesFor(browser, {
+    cwd: "/repo",
+    execPath: "/Applications/HiveMatrix.app/Contents/Resources/daemon/bin/node",
+  });
+
+  assert.deepEqual(candidates, [packaged, dev]);
+  assert.equal(artifactPathFor(browser, { exists: (p) => p === packaged, candidates }), packaged);
+});
+
+test("artifactPathFor falls back to the dev checkout artifact when packaged resources are absent", () => {
+  const dev = "/repo/build/browser-lane/Browser Lane.app";
+  const candidates = artifactPathCandidatesFor(browser, {
+    cwd: "/repo",
+    execPath: "/usr/local/bin/node",
+  });
+
+  assert.deepEqual(candidates, [dev]);
+  assert.equal(artifactPathFor(browser, { exists: (p) => p === dev, candidates }), dev);
 });
