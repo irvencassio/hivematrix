@@ -154,12 +154,14 @@ catalog + COMPONENT-MAP updated. **Provers:** `src/lib/termbee/*.test.ts`
 (marker parsing + a real multi-step session: cd persists, command output across
 turns, runs offline).
 
-**Update (2026-06-23).** Terminal Lane remains the HiveMatrix terminal contract, but
-Canopy is now the preferred provider when its agent bridge is available. The
-direct in-process shell manager remains as a local fallback for local work. This
-keeps the `termbee_*` tool contract stable while moving credential/profile-aware
-terminal work toward Canopy's Keychain-backed profiles, approval policy, and
-agent audit/command logs.
+**Update (2026-06-25).** Reversed the 2026-06-23 "Canopy preferred provider"
+update. Terminal Lane is HiveMatrix-owned end-to-end with **no external provider**:
+the Canopy bridge and `src/lib/canopy/` are removed, and `src/lib/termbee/provider.ts`
+delegates only to the in-process shell engine. The credential/profile-aware work
+(Keychain-backed profiles, readiness/test-login, audit) moves *into* HiveMatrix as
+its own Terminal Lane app + subsystem, modeled on Browser Lane, with a SwiftTerm
+PTY for human-usable per-host sessions. See
+`docs/superpowers/specs/2026-06-25-terminal-lane-app-design.md`.
 
 ---
 

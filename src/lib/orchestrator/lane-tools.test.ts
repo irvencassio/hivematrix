@@ -98,11 +98,13 @@ test("lane tools advertise lane-native names and descriptions, not bee brands", 
   assert.ok(!LANE_TOOL_DEFINITIONS.some((t) => /bee_|bee$/.test(t.function.name)));
 });
 
-test("Terminal Lane tool descriptions identify Canopy as the preferred provider", () => {
+test("Terminal Lane tool descriptions identify a HiveMatrix-owned session (no external provider)", () => {
   const termRun = LANE_TOOL_DEFINITIONS.find((t) => t.function.name === "terminal_run");
   const termSession = LANE_TOOL_DEFINITIONS.find((t) => t.function.name === "terminal_session");
-  assert.match(termRun?.function.description ?? "", /Canopy-backed/i);
-  assert.match(termSession?.function.description ?? "", /Canopy-backed/i);
+  assert.match(termRun?.function.description ?? "", /HiveMatrix-owned/i);
+  assert.match(termSession?.function.description ?? "", /HiveMatrix-owned/i);
+  assert.doesNotMatch(termRun?.function.description ?? "", /Canopy/i);
+  assert.doesNotMatch(termSession?.function.description ?? "", /Canopy/i);
 });
 
 test("cloud-ok advertises every lane (web, browser, desktop, term, mail, message, brain, skill, digest)", () => {

@@ -154,7 +154,7 @@ export function beeToolsRoutingPrompt(port = daemonPort()): string {
     '- Read a specific public URL → Browser Lane args {"mode":"read","url":"https://..."}',
     '- Logged-in or multi-step browser workflow (e.g. LinkedIn) → Browser Lane args {"mode":"workflow","objective":"...","startUrl":"https://...","requiresLogin":true}',
     `Other lane tools still use /bee/<tool>, e.g. Desktop Lane control → http://127.0.0.1:${port}/bee/desktop_action and Terminal Lane command → http://127.0.0.1:${port}/bee/terminal_run.`,
-    '- Terminal Lane command is Canopy-backed when Canopy is running, with local fallback only for local work. Do NOT pass passwords or secrets in commands or args; use configured profiles/Keychain-backed tools instead.',
+    '- Terminal Lane command runs in a HiveMatrix-owned persistent shell session (no external dependency). Do NOT pass passwords or secrets in commands or args; use configured profiles/Keychain-backed tools instead.',
     '- Find a symbol\'s definition + EVERY usage (deterministic) → /bee/code_graph args {"symbol":"...","path":"/repo"}',
     'Response is JSON {"ok","result"}; relay "result". An unavailable lane (wrong connectivity mode) returns an actionable error — surface it, don\'t work around it. For complex args, write the JSON to a temp file and curl -d @/tmp/args.json.',
   ].join("\n");

@@ -18,7 +18,7 @@ test("browser-related source prose uses Browser Lane naming", () => {
   assert.match(connectivity, /Browser Lane read capability disabled in local-only/);
   assert.doesNotMatch(connectivity, /WebBee disabled in local-only/);
 
-  assert.match(desktopActions, /Browser Lane\/Canopy principle/);
+  assert.match(desktopActions, /Browser Lane native-helper principle/);
   assert.doesNotMatch(desktopActions, /BrowserBee\/Canopy principle/);
 
   assert.match(laneStatusTest, /lane statuses collapse browser read and workflow capabilities into one Browser Lane/);

@@ -2,7 +2,7 @@
  * Desktop Lane action contract — the structured protocol HiveMatrix speaks to the
  * native Swift helper daemon over a loopback API.
  *
- * Mirrors the Browser Lane/Canopy principle a third time: a signed native helper
+ * Mirrors the Browser Lane native-helper principle: a signed native helper
  * owns the dangerous surface (Accessibility, CGEvent, ScreenCapture, AppleScript);
  * agents speak only this structured contract; nothing sensitive flows through
  * prompts. Each action carries an approval tier so the HiveMatrix lane can gate

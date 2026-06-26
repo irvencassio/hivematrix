@@ -163,7 +163,7 @@ export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "terminal_session",
       description:
-        "Terminal Lane: manage Canopy-backed persistent terminal sessions when Canopy is available, with a local shell fallback for local work. action=create starts a session (optional cwd), list shows sessions, kill ends local fallback sessions. Use a session to run a multi-step build/repo workflow without passing credentials through tool args.",
+        "Terminal Lane: manage HiveMatrix-owned persistent terminal sessions (real in-process shells, no external dependency). action=create starts a session (optional cwd), list shows sessions, kill ends a session. Use a session to run a multi-step build/repo workflow without passing credentials through tool args.",
       parameters: {
         type: "object",
         properties: {
@@ -180,7 +180,7 @@ export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "terminal_run",
       description:
-        "Terminal Lane: run a shell command in a Canopy-backed persistent session when Canopy is available, returning combined output + exit code; falls back to a local shell only when Canopy is unavailable. Creates the session on demand if it doesn't exist. Do not pass passwords or secrets in commands/tool args.",
+        "Terminal Lane: run a shell command in a HiveMatrix-owned persistent session, returning combined output + exit code. Real in-process shell, no external dependency; works in every connectivity mode. Creates the session on demand if it doesn't exist. Do not pass passwords or secrets in commands/tool args.",
       parameters: {
         type: "object",
         properties: {
@@ -334,7 +334,7 @@ const CAPABILITY_ROUTING_LINES: Record<string, string> = {
   message_send: "Send an SMS / iMessage → **message_send** (allowlisted recipients only).",
   hivematrix_browser: "Read/search the live web or drive logged-in/multi-step browser workflows → **hivematrix_browser**.",
   desktop_action: "Control a native macOS app → **desktop_action**.",
-  terminal_run: "Run shell commands in a Canopy-backed persistent terminal with local fallback → **terminal_run**.",
+  terminal_run: "Run shell commands in a HiveMatrix-owned persistent terminal session → **terminal_run**.",
   brain_search: "Recall a stored document / brain doc / past decision → **brain_search** (search durable memory before assuming it isn't written down).",
   code_graph: "Find where a symbol is defined + every place it's used → **code_graph** (exact, deterministic — use it to verify you found ALL usages of anything you changed, not just the obvious ones).",
 };
