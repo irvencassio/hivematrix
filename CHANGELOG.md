@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.86 — 2026-06-26
+
+Browser Lane readiness, workflow inbox, and Terminal Lane cleanup
+
 ## v0.1.84 — 2026-06-25
 
 Bee-to-Lane rename: lane-native tools, services, config, central protocol, and refreshed guides
