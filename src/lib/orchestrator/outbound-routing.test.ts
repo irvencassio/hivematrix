@@ -104,9 +104,14 @@ test("beeToolsRoutingPrompt routes browser through /lane/browser and keeps other
   assert.match(p, /Terminal Lane/);
   assert.doesNotMatch(p, /DesktopBee/);
   assert.doesNotMatch(p, /TermBee/);
-  assert.doesNotMatch(p, /Canopy/i);
   assert.match(p, /HiveMatrix-owned persistent shell/i);
   assert.match(p, /Do NOT pass passwords or secrets/i);
+  // Terminal Lane is the canonical lane for shell/SSH; explicit requests must use it.
+  assert.match(p, /Terminal Lane is the canonical/i);
+  assert.match(p, /explicit(ly)?[^\n]*Terminal Lane[^\n]*HiveMatrix/i);
+  // Canopy may be named ONLY as an optional/legacy backend — never the default.
+  assert.match(p, /Canopy[^\n]*(legacy|optional)/i);
+  assert.doesNotMatch(p, /Canopy is the preferred|prefer Canopy|use Canopy by default/i);
   assert.match(p, /127\.0\.0\.1:3999/);
   assert.match(p, /do NOT improvise/i);
 });

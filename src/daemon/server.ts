@@ -3236,6 +3236,42 @@ export function createDaemonServer() {
             // fall through to a normal task
           }
         }
+        // "use TerminalLane and …" → route to the HiveMatrix Terminal Lane (NOT a
+        // generic frontier agent that would fall back on stale Canopy guidance).
+        // A non-agent executor keeps the scheduler from claiming it; the task
+        // carries the structured route + transcript (intent → route → profile →
+        // prepared/needs_input) so the transcript shows Terminal Lane, not a
+        // Canopy discovery loop. profileId only — never raw ssh creds.
+        const { isTerminalLaneRequest } = await import("@/lib/terminal-lane/intent");
+        if (body.executor !== "terminal-lane" && isTerminalLaneRequest(description)) {
+          try {
+            const { routeTerminalLaneRequest } = await import("@/lib/terminal-lane/route");
+            const { listTerminalProfileSummaries } = await import("@/lib/terminal-lane/store");
+            const terminalRoute = routeTerminalLaneRequest({ text: description, profiles: listTerminalProfileSummaries() });
+            const tTitle = (typeof body.title === "string" && body.title.trim()) || deriveTaskTitle(description);
+            const logs = terminalRoute.transcript.map((content) => ({ type: "log", content }));
+            const task = await Task.create({
+              _id: generateId(),
+              title: tTitle,
+              description,
+              project: typeof body.project === "string" ? body.project : "hivematrix",
+              projectPath: typeof body.projectPath === "string" ? body.projectPath : undefined,
+              status: "review",
+              reviewState: terminalRoute.status === "needs_input" ? "needs_input" : null,
+              executor: "terminal-lane", // scheduler skips non-agent executors
+              source: "terminal-lane",
+              model: "terminal-lane",
+              logs,
+              output: { terminalRoute },
+            });
+            broadcast("tasks:created", { taskId: task._id });
+            json(res, 201, { routed: "terminal-lane", taskId: task._id, status: terminalRoute.status, profile: terminalRoute.profile?.id ?? null, reason: terminalRoute.reason });
+            return;
+          } catch (e) {
+            console.error(`[tasks] Terminal Lane route failed; creating a normal task: ${e instanceof Error ? e.message : e}`);
+            // fall through to a normal task
+          }
+        }
         // Title is optional — derive it from the instructions when absent/blank.
         const title = typeof body.title === "string" ? body.title.trim() : "";
         body.title = title || deriveTaskTitle(description);
