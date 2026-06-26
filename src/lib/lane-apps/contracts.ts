@@ -13,6 +13,9 @@ export const LANE_APP_STATUSES = [
   "missing",
   "installed",
   "update_available",
+  // The active copy matches the expected version string but is a different build
+  // identity (e.g. a stale /Applications copy shadowing a fresh user copy).
+  "stale_copy",
   "launch_failed",
   "invalid_signature",
 ] as const;

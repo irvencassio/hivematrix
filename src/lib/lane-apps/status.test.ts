@@ -69,3 +69,49 @@ test("a healthy install with a good signature and launch is installed", () => {
     "installed",
   );
 });
+
+test("same version but a different build identity is stale_copy, not installed", () => {
+  assert.equal(
+    resolveStatus({
+      installed: { short: "0.1.2", build: "3" },
+      expected: { short: "0.1.2", build: "3" },
+      installedBuildId: "old1234",
+      expectedBuildId: "new5678",
+    }),
+    "stale_copy",
+  );
+});
+
+test("same version and same build identity stays installed", () => {
+  assert.equal(
+    resolveStatus({
+      installed: { short: "0.1.2", build: "3" },
+      expected: { short: "0.1.2", build: "3" },
+      installedBuildId: "same999",
+      expectedBuildId: "same999",
+    }),
+    "installed",
+  );
+});
+
+test("build identity is ignored when either side is unknown (back-compat)", () => {
+  assert.equal(
+    resolveStatus({
+      installed: { short: "0.1.2", build: "3" },
+      expected: { short: "0.1.2", build: "3" },
+      expectedBuildId: "new5678", // installed has no build id (legacy bundle)
+    }),
+    "installed",
+  );
+});
+
+test("an older version is update_available even if build ids differ", () => {
+  assert.equal(
+    resolveStatus({
+      installed: { short: "0.1.1", build: "2" },
+      expected: { short: "0.1.2", build: "3" },
+      installedBuildId: "old", expectedBuildId: "new",
+    }),
+    "update_available",
+  );
+});

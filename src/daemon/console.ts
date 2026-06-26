@@ -4041,6 +4041,7 @@ function laneInstallBadge(installState) {
   const map = {
     current: ["var(--ok)", "Current"],
     outdated: ["var(--accent)", "Update available"],
+    stale: ["var(--warn)", "Stale copy"],
     not_installed: ["var(--muted)", "Not installed"],
     broken: ["var(--err)", "Broken"],
   };
@@ -4052,7 +4053,9 @@ function laneStateChip(label, value, kind) {
   return '<span class="badge" style="color:'+color+'">'+esc(label)+': '+esc(value)+'</span>';
 }
 function laneActionCall(id, action) {
-  return action === "run_readiness" ? "laneRunReadiness('"+id+"')" : "laneAppAction('"+id+"','"+(action === "open" ? "launch" : action)+"')";
+  if (action === "run_readiness") return "laneRunReadiness('"+id+"')";
+  if (action === "repair") return "laneRepairApplications('"+id+"')";
+  return "laneAppAction('"+id+"','"+(action === "open" ? "launch" : action)+"')";
 }
 function laneBtn(id, action, label, cls, reason) {
   if (reason) return '<button class="'+cls+'" disabled title="'+esc(reason)+'">'+esc(label)+'</button>';
@@ -4088,10 +4091,21 @@ async function renderLaneSetup() {
     ].join("");
     const reasons = Object.keys(dr).filter(k => dr[k]).map(k => esc(dr[k])).filter((v,i,a)=>a.indexOf(v)===i);
     const reasonNote = reasons.length ? '<div class="muted" style="font-size:10px;margin-top:4px">'+reasons.join(' ')+'</div>' : '';
+    // List every installed copy so a stale /Applications copy shadowing a current
+    // user copy is visible. Mark the active copy and whether it's current/stale.
+    const copies = lane.installedCopies || [];
+    const copiesList = copies.length > 1 || (copies[0] && !copies[0].current) ? '<div class="muted" style="font-size:10px;margin-top:4px">Copies on disk:'
+      + copies.map(c => '<div>'+(c.active?'▶ ':'· ')+esc(c.path)+' — '+(c.current?'current':'<span style="color:var(--warn)">stale</span>')+(c.active?' (active)':'')+'</div>').join('')
+      + '</div>' : '';
+    const shadowWarn = lane.shadowed
+      ? '<div class="muted" style="font-size:10px;margin-top:3px;color:var(--warn)">⚠ A stale copy in /Applications is shadowing your current install — it wins at launch. Use “'+esc(na.label)+'”.</div>'
+      : '';
     return '<div class="card" style="cursor:default">'
       + '<div class="t">'+esc(lane.displayName)+' '+laneInstallBadge(lane.installState)+'</div>'
       + '<div class="muted" style="font-size:11px;margin-top:4px">Installed: <b>'+installed+'</b> · Bundled: <b>'+bundled+'</b></div>'
       + '<div class="muted" style="font-size:10px;margin-top:2px">'+esc(lane.installedPath||'—')+'</div>'
+      + copiesList
+      + shadowWarn
       + '<div class="m" style="margin-top:6px">'+signing+' '+launch+' '+daemon+'</div>'
       + '<div class="muted" style="font-size:11px;margin-top:4px">Readiness: '+readinessLine+'</div>'
       + '<div class="muted" style="font-size:10px;margin-top:3px">Next: '+esc(na.label)+'</div>'
@@ -4100,6 +4114,19 @@ async function renderLaneSetup() {
       + '<div id="lane_app_msg_'+esc(lane.id)+'" class="muted" style="font-size:10px;margin-top:4px"></div>'
       + '</div>';
   }).join("");
+}
+
+async function laneRepairApplications(id) {
+  const msg = document.getElementById("lane_app_msg_"+id);
+  if (msg) msg.textContent = "Replacing the /Applications copy…";
+  const r = await api("/lane-apps/"+id+"/repair-applications", { method:"POST", headers:{"Content-Type":"application/json"}, body: "{}" });
+  if (!r || r.ok === false) {
+    // Not a hard error — exact instructions when the copy isn't user-writable.
+    if (msg) msg.innerHTML = '<span style="color:var(--warn)">'+esc((r&&(r.instructions||r.error))||'Could not replace the /Applications copy.')+'</span>';
+    return;
+  }
+  if (msg) msg.textContent = "Replaced the /Applications copy at "+esc(r.replacedPath||'')+".";
+  renderLaneSetup();
 }
 
 async function laneRunReadiness(id) {
@@ -4126,6 +4153,13 @@ async function laneAppAction(id, action) {
     const v = r.verification;
     const launch = v.launchOk === null ? 'not probed' : (v.launchOk ? 'launched' : 'FAILED');
     if (msg) msg.textContent = 'signature: '+(v.signatureOk?'valid':'INVALID')+' · launch: '+launch;
+  } else if (action === 'install') {
+    // Honest install result: if a stale /Applications copy shadows the user copy,
+    // say so (the install did not become active) instead of claiming success.
+    if (msg) {
+      if (r.warning) msg.innerHTML = '<span style="color:var(--warn)">⚠ '+esc(r.warning)+'</span>';
+      else msg.textContent = 'Installed. Active: '+esc(r.activePath||r.installedPath||'');
+    }
   } else if (action === 'launch') {
     if (msg) msg.textContent = 'Opened.';
   } else if (action === 'reveal') {

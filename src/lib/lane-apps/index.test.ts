@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { getLaneApp } from "./catalog";
-import { artifactPathCandidatesFor, artifactPathFor, getLaneAppState, installLaneApp } from "./index";
+import { artifactPathCandidatesFor, artifactPathFor, getLaneAppState, installLaneApp, repairApplicationsCopyWith } from "./index";
 
 const HOME = "/Users/tester";
 const browser = getLaneApp("browser-lane");
@@ -54,6 +54,71 @@ test("getLaneAppState flags duplication when both copies exist", () => {
   });
   assert.equal(state.duplicated, true);
   assert.equal(state.activePath, APPS_PATH);
+});
+
+test("a stale /Applications copy shadowing a current user copy is stale_copy + shadowed, not current", () => {
+  const state = getLaneAppState(browser, {
+    home: HOME,
+    exists: () => true, // both copies present
+    expected: { short: "0.1.87", build: "1" },
+    expectedBuildId: "new",
+    readInstalled: () => ({ short: "0.1.86", build: "2" }), // active (/Applications) is the OLD version
+    readVersionAt: (p) => p === APPS_PATH ? { short: "0.1.86", build: "2" } : { short: "0.1.87", build: "1" },
+    readBuildId: (p) => p === APPS_PATH ? "old" : "new",
+  });
+  assert.equal(state.activePath, APPS_PATH, "/Applications wins active");
+  assert.equal(state.status, "stale_copy");
+  assert.equal(state.shadowed, true);
+  assert.equal(state.activeIsStale, true);
+  // both copies are listed, with the user copy marked current and the active one stale.
+  assert.equal(state.installedCopies.length, 2);
+  const apps = state.installedCopies.find((c) => c.location === "applications");
+  const user = state.installedCopies.find((c) => c.location === "user");
+  assert.equal(apps?.active, true);
+  assert.equal(apps?.current, false);
+  assert.equal(user?.current, true);
+});
+
+test("a same-version /Applications copy with a stale build id is stale_copy", () => {
+  const state = getLaneAppState(browser, {
+    home: HOME,
+    exists: (p) => p === APPS_PATH,
+    expected: { short: "0.1.86", build: "2" },
+    expectedBuildId: "new",
+    readInstalled: () => ({ short: "0.1.86", build: "2" }),
+    readVersionAt: () => ({ short: "0.1.86", build: "2" }),
+    readBuildId: () => "old",
+  });
+  assert.equal(state.status, "stale_copy");
+  assert.equal(state.activeIsStale, true);
+  assert.equal(state.shadowed, false, "not shadowed — there is no current user copy");
+});
+
+test("repairApplicationsCopyWith replaces a writable stale /Applications copy", () => {
+  const replaced: Array<{ from: string; to: string }> = [];
+  const r = repairApplicationsCopyWith(browser, {
+    home: HOME,
+    artifactPath: "/repo/build/browser-lane/Browser Lane.app",
+    exists: () => true,
+    writable: () => true,
+    replace: (from, to) => replaced.push({ from, to }),
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.replacedPath, APPS_PATH);
+  assert.deepEqual(replaced, [{ from: "/repo/build/browser-lane/Browser Lane.app", to: APPS_PATH }]);
+});
+
+test("repairApplicationsCopyWith gives exact instructions when /Applications is not writable", () => {
+  const r = repairApplicationsCopyWith(browser, {
+    home: HOME,
+    artifactPath: "/repo/build/browser-lane/Browser Lane.app",
+    exists: () => true,
+    writable: () => false,
+    replace: () => { throw new Error("must not replace a non-writable copy"); },
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.instructions ?? "", /not writable|admin|Trash/i);
+  assert.match(r.instructions ?? "", /Browser Lane\.app/);
 });
 
 test("installLaneApp copies the artifact into the user-writable target", async () => {

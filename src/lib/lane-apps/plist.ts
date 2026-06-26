@@ -6,6 +6,9 @@ export interface ParsedInfoPlist {
   short: string | null;
   build: string | null;
   bundleId: string | null;
+  /** HMBuildId — a per-build identity marker (e.g. source commit) so two builds
+   * of the same version string still differ. Null when the bundle predates it. */
+  buildId: string | null;
 }
 
 function readKey(xml: string, key: string): string | null {
@@ -21,5 +24,6 @@ export function parseInfoPlist(xml: string): ParsedInfoPlist {
     short: readKey(xml, "CFBundleShortVersionString"),
     build: readKey(xml, "CFBundleVersion"),
     bundleId: readKey(xml, "CFBundleIdentifier"),
+    buildId: readKey(xml, "HMBuildId"),
   };
 }

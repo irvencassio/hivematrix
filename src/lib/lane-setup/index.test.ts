@@ -70,6 +70,7 @@ test("installState maps from the lane-app status", async () => {
     ["missing", "not_installed"],
     ["installed", "current"],
     ["update_available", "outdated"],
+    ["stale_copy", "stale"],
     ["launch_failed", "broken"],
     ["invalid_signature", "broken"],
   ];
@@ -77,6 +78,33 @@ test("installState maps from the lane-app status", async () => {
     const d = deps({ appStates: () => [appState({ id: "browser-lane", status }), appState({ id: "terminal-lane", status })] });
     assert.equal((await browser(d)).installState, expected, status);
   }
+});
+
+test("a stale_copy never reads as current and carries the shadow detail", async () => {
+  const APPS = "/Applications/Browser Lane.app";
+  const USER = "/Users/x/Applications/HiveMatrix Lanes/Browser Lane.app";
+  const d = deps({ appStates: () => [
+    appState({
+      id: "browser-lane",
+      status: "stale_copy",
+      activePath: APPS,
+      shadowed: true,
+      activeIsStale: true,
+      installedCopies: [
+        { path: APPS, location: "applications", active: true, current: false, version: { short: "0.1.86", build: "2" }, buildId: "old" },
+        { path: USER, location: "user", active: false, current: true, version: { short: "0.1.87", build: "1" }, buildId: "new" },
+      ],
+    }),
+    appState({ id: "terminal-lane" }),
+  ] });
+  const b = await browser(d);
+  assert.equal(b.installState, "stale");
+  assert.notEqual(b.installState, "current");
+  assert.equal(b.shadowed, true);
+  assert.equal(b.installedCopies.length, 2);
+  // The fix points at the /Applications copy, not a shadowed user install.
+  assert.equal(b.nextAction.action, "repair");
+  assert.match(b.nextAction.label, /\/Applications/);
 });
 
 test("versions and path are carried through honestly", async () => {

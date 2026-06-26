@@ -28,3 +28,13 @@ test("daemon exposes the four /lane-apps routes wired to the lane-apps module", 
   assert.match(server, /verifyLaneAppById/);
   assert.match(server, /activePathFor/);
 });
+
+test("daemon exposes a typed repair-applications route + install reports active path", () => {
+  const server = read("src/daemon/server.ts");
+  // Repair is id-constrained (no arbitrary path, no shell).
+  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane|terminal-lane)\\/repair-applications$"), "repair route matcher");
+  assert.match(server, /repairApplicationsCopy/);
+  // Install result surfaces the active path + shadow warning honestly.
+  assert.match(server, /activePath/);
+  assert.match(server, /shadowed|warning/);
+});

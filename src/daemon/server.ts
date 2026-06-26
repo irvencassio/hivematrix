@@ -1332,7 +1332,24 @@ export function createDaemonServer() {
         const { installLaneAppById } = await import("@/lib/lane-apps");
         try {
           const result = await installLaneAppById(laneAppInstall[1]);
-          json(res, 200, { ok: true, ...result });
+          // Surface the ACTUAL active path + a shadow warning (never claim a clean
+          // install when a stale /Applications copy still wins LaunchServices).
+          json(res, 200, { ok: true, ...result, activePath: result.activePath, shadowed: result.shadowed, warning: result.warning });
+        } catch (err) {
+          json(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      // POST /lane-apps/:id/repair-applications — replace a stale, user-writable
+      // /Applications copy with the bundled artifact, else return exact
+      // instructions. Typed + id-constrained; no arbitrary path, no shell.
+      const laneAppRepair = urlPath.match(/^\/lane-apps\/(browser-lane|terminal-lane)\/repair-applications$/);
+      if (req.method === "POST" && laneAppRepair) {
+        const { repairApplicationsCopy } = await import("@/lib/lane-apps");
+        try {
+          const result = await repairApplicationsCopy(laneAppRepair[1]);
+          json(res, result.ok ? 200 : 409, { ...result });
         } catch (err) {
           json(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
         }

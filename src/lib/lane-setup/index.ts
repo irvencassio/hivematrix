@@ -17,13 +17,20 @@ import { getAllLaneAppStates, type LaneAppState } from "@/lib/lane-apps";
 import { getBrowserLaneReadinessDashboard } from "@/lib/browser-lane/store";
 import { getTerminalLaneReadinessDashboard } from "@/lib/terminal-lane/store";
 
-export type LaneInstallState = "not_installed" | "current" | "outdated" | "broken";
+export type LaneInstallState = "not_installed" | "current" | "outdated" | "stale" | "broken";
 export type LaneLaunchState = "unknown" | "running" | "not_running" | "failed";
 export type LaneSigningState = "unknown" | "valid" | "invalid";
 export type LaneDaemonState = "reachable" | "unavailable";
-export type LaneActionId = "install" | "update" | "verify" | "launch" | "run_readiness" | "open";
+export type LaneActionId = "install" | "update" | "verify" | "launch" | "run_readiness" | "open" | "repair";
 
 export interface LaneVersion { short: string; build: string }
+
+export interface LaneInstalledCopySummary {
+  path: string;
+  location: "applications" | "user";
+  active: boolean;
+  current: boolean;
+}
 
 export interface BrowserReadinessSummary {
   lane: "browser";
@@ -53,6 +60,12 @@ export interface LaneSetupEntry {
   readiness: BrowserReadinessSummary | TerminalReadinessSummary;
   nextAction: { action: LaneActionId; label: string };
   disabledReasons: Record<string, string>;
+  /** Every detected copy on disk (active/current flags) so the UI can list them. */
+  installedCopies: LaneInstalledCopySummary[];
+  /** A stale /Applications copy is shadowing a current user copy. */
+  shadowed: boolean;
+  /** The active copy exists but is not current. */
+  activeIsStale: boolean;
 }
 
 export interface LaneSetup { lanes: LaneSetupEntry[] }
@@ -96,6 +109,7 @@ function installStateFor(status: LaneAppState["status"]): LaneInstallState {
   switch (status) {
     case "missing": return "not_installed";
     case "update_available": return "outdated";
+    case "stale_copy": return "stale";
     case "launch_failed":
     case "invalid_signature": return "broken";
     default: return "current"; // "installed"
@@ -107,10 +121,18 @@ function pickNextAction(args: {
   signingState: LaneSigningState;
   launchState: LaneLaunchState;
   needsAttention: number;
+  activeInApplications: boolean;
 }): { action: LaneActionId; label: string } {
-  const { installState, signingState, launchState, needsAttention } = args;
+  const { installState, signingState, launchState, needsAttention, activeInApplications } = args;
   if (installState === "not_installed") return { action: "install", label: "Install" };
   if (installState === "outdated") return { action: "update", label: "Update" };
+  // A stale active copy: if it's the /Applications copy, installing a user copy
+  // would just be shadowed — point the operator at replacing the active copy.
+  if (installState === "stale") {
+    return activeInApplications
+      ? { action: "repair", label: "Update /Applications copy" }
+      : { action: "update", label: "Update" };
+  }
   if (installState === "broken") return { action: "verify", label: "Verify" };
   if (signingState === "unknown") return { action: "verify", label: "Verify" };
   if (launchState !== "running") return { action: "launch", label: "Launch" };
@@ -165,7 +187,14 @@ export async function getLaneSetup(deps: LaneSetupDeps = {}): Promise<LaneSetup>
         : { lane: "terminal", configuredProfiles: 0, ready: 0, failed: 0, needsAttention: 0 };
     }
 
-    const nextAction = pickNextAction({ installState, signingState, launchState, needsAttention: readiness.needsAttention });
+    const installedCopies: LaneInstalledCopySummary[] = (state?.installedCopies ?? []).map((c) => ({
+      path: c.path, location: c.location, active: c.active, current: c.current,
+    }));
+    const shadowed = !!state?.shadowed;
+    const activeIsStale = !!state?.activeIsStale;
+    const activeInApplications = installedCopies.some((c) => c.active && c.location === "applications");
+
+    const nextAction = pickNextAction({ installState, signingState, launchState, needsAttention: readiness.needsAttention, activeInApplications });
 
     const disabledReasons: Record<string, string> = {};
     if (installState === "not_installed") {
@@ -187,6 +216,9 @@ export async function getLaneSetup(deps: LaneSetupDeps = {}): Promise<LaneSetup>
       readiness,
       nextAction,
       disabledReasons,
+      installedCopies,
+      shadowed,
+      activeIsStale,
     };
   });
 

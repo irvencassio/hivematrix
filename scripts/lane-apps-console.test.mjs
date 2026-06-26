@@ -51,3 +51,16 @@ test("console exposes the Lane Apps reliability card in the Lanes tab", () => {
   // Never demands the restricted entitlement that previously blocked launch.
   assert.doesNotMatch(console, /keychain-access-groups/);
 });
+
+test("Lane Apps card surfaces installed copies, stale shadowing, and a repair action", () => {
+  const console = read("src/daemon/console.ts");
+  // The stale install state is rendered (never as 'current').
+  assert.match(console, /Stale|stale/);
+  // All installed copies are listed (so a shadowing /Applications copy is visible).
+  assert.match(console, /installedCopies/);
+  // A repair path to replace the stale /Applications copy.
+  assert.match(console, /laneRepairApplications/);
+  assert.match(console, /repair-applications/);
+  // Install result surfaces the shadow warning honestly.
+  assert.match(console, /\.warning|shadowed/);
+});

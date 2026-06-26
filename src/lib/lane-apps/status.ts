@@ -30,6 +30,10 @@ function numericCompare(a: string, b: string): number {
 export interface ResolveStatusInput {
   installed: LaneAppVersion | null;
   expected: LaneAppVersion;
+  /** Build identity (HMBuildId) of the installed/active copy, if present. */
+  installedBuildId?: string | null;
+  /** Build identity of the bundled/expected artifact, if present. */
+  expectedBuildId?: string | null;
   /** From codesign + spctl. undefined = not checked. */
   signatureOk?: boolean;
   /** From the launch probe. undefined = not checked. */
@@ -39,10 +43,17 @@ export interface ResolveStatusInput {
 // Status precedence is deliberate: a broken bundle is reported as broken, not as
 // "just needs an update". Signature failure dominates everything; a passing
 // signature with a FAILED launch is its own state (the LaunchServices lesson);
-// only a healthy bundle is graded on version freshness.
+// only a healthy bundle is graded on version freshness, then build identity.
 export function resolveStatus(input: ResolveStatusInput): LaneAppStatus {
   if (!input.installed) return "missing";
   if (input.signatureOk === false) return "invalid_signature";
   if (input.launchOk === false) return "launch_failed";
-  return compareVersions(input.installed, input.expected) < 0 ? "update_available" : "installed";
+  const cmp = compareVersions(input.installed, input.expected);
+  if (cmp < 0) return "update_available";
+  // Same (or newer) version string, but a known build identity that differs from
+  // the expected one → the copy is stale despite the matching version.
+  if (cmp === 0 && input.installedBuildId && input.expectedBuildId && input.installedBuildId !== input.expectedBuildId) {
+    return "stale_copy";
+  }
+  return "installed";
 }

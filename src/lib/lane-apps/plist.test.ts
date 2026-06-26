@@ -30,4 +30,10 @@ test("parseInfoPlist returns null fields when keys are absent", () => {
   assert.equal(parsed.short, null);
   assert.equal(parsed.build, null);
   assert.equal(parsed.bundleId, null);
+  assert.equal(parsed.buildId, null);
+});
+
+test("parseInfoPlist reads the HMBuildId build-identity marker", () => {
+  const xml = BROWSER_PLIST.replace("</dict>", "  <key>HMBuildId</key>\n  <string>abc1234</string>\n</dict>");
+  assert.equal(parseInfoPlist(xml).buildId, "abc1234");
 });

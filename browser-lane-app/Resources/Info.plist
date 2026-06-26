@@ -16,6 +16,8 @@
     <string>0.1.86</string>
   <key>CFBundleVersion</key>
     <string>2</string>
+  <key>HMBuildId</key>
+    <string>dev</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>

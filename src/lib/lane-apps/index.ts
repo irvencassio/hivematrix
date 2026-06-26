@@ -1,11 +1,11 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { accessSync, constants as fsConstants, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 
 import { LANE_APPS, getLaneApp } from "./catalog";
 import type { LaneAppDescriptor, LaneAppStatus, LaneAppVersion } from "./contracts";
 import { parseInfoPlist } from "./plist";
 import { resolveInstallTarget, type InstallTarget } from "./install-target";
-import { resolveStatus } from "./status";
+import { compareVersions, resolveStatus } from "./status";
 import { verifyLaneApp, type VerifyLaneAppResult } from "./verify";
 
 export * from "./contracts";
@@ -16,7 +16,7 @@ export { verifyLaneApp } from "./verify";
 // packaged daemon with no build/ tree). Verified on this machine 2026-06-26.
 const PINNED_EXPECTED: Record<string, LaneAppVersion> = {
   "browser-lane": { short: "0.1.86", build: "2" },
-  "terminal-lane": { short: "0.1.1", build: "2" },
+  "terminal-lane": { short: "0.1.2", build: "3" },
 };
 
 const ARTIFACT_DIR: Record<string, string> = {
@@ -24,11 +24,26 @@ const ARTIFACT_DIR: Record<string, string> = {
   "terminal-lane": "build/terminal-lane",
 };
 
+export interface LaneInstalledCopy {
+  path: string;
+  /** "applications" (/Applications) or "user" (~/Applications/HiveMatrix Lanes). */
+  location: "applications" | "user";
+  version: LaneAppVersion | null;
+  buildId: string | null;
+  /** The copy LaunchServices resolves the bundle id to. */
+  active: boolean;
+  /** Version ≥ expected AND build id matches when both are known. */
+  current: boolean;
+}
+
 export interface LaneAppState {
   id: string;
   displayName: string;
   installed: LaneAppVersion | null;
   expected: LaneAppVersion;
+  /** Build identity of the active copy / the bundled artifact, when known. */
+  installedBuildId?: string | null;
+  expectedBuildId?: string | null;
   /** The copy that would be used/launched (active), or the preferred target if none installed. */
   installPath: string;
   /** The active installed copy, or null when missing. */
@@ -36,7 +51,13 @@ export interface LaneAppState {
   /** Where an install would write (always user-writable). */
   preferredPath: string;
   installedPaths: string[];
+  /** Every detected copy with its version/build identity + active/current flags. */
+  installedCopies: LaneInstalledCopy[];
   duplicated: boolean;
+  /** The active copy exists but is not current (stale version or build id). */
+  activeIsStale: boolean;
+  /** The active /Applications copy is stale AND a current user copy is being shadowed by it. */
+  shadowed: boolean;
   status: LaneAppStatus;
   signatureOk?: boolean;
   launchOk?: boolean | null;
@@ -48,6 +69,12 @@ export interface GetLaneAppStateDeps {
   expected: LaneAppVersion;
   /** Read the installed version from the active bundle, or null if unreadable. */
   readInstalled: (activePath: string | null) => LaneAppVersion | null;
+  /** Build identity of the expected/bundled artifact, if available. */
+  expectedBuildId?: string | null;
+  /** Read a specific copy's version (defaults to readInstalled for the active path). */
+  readVersionAt?: (path: string) => LaneAppVersion | null;
+  /** Read a specific copy's build identity, if available. */
+  readBuildId?: (path: string) => string | null;
   /** Optional verification result (signature/launch) folded into status. */
   verify?: Pick<VerifyLaneAppResult, "signatureOk" | "launchOk">;
 }
@@ -55,22 +82,54 @@ export interface GetLaneAppStateDeps {
 export function getLaneAppState(descriptor: LaneAppDescriptor, deps: GetLaneAppStateDeps): LaneAppState {
   const target: InstallTarget = resolveInstallTarget(descriptor, { home: deps.home, exists: deps.exists });
   const installed = target.activePath ? deps.readInstalled(target.activePath) : null;
-  const status = resolveStatus({
+
+  const isCurrent = (version: LaneAppVersion | null, buildId: string | null): boolean => {
+    if (!version) return false;
+    if (compareVersions(version, deps.expected) < 0) return false;
+    if (buildId && deps.expectedBuildId && buildId !== deps.expectedBuildId) return false;
+    return true;
+  };
+
+  const installedCopies: LaneInstalledCopy[] = target.installedPaths.map((path) => {
+    const location: "applications" | "user" = path === target.applicationsPath ? "applications" : "user";
+    const version = path === target.activePath ? installed : (deps.readVersionAt?.(path) ?? null);
+    const buildId = deps.readBuildId?.(path) ?? null;
+    return { path, location, version, buildId, active: path === target.activePath, current: isCurrent(version, buildId) };
+  });
+
+  const activeCopy = installedCopies.find((c) => c.active) ?? null;
+  const userCopy = installedCopies.find((c) => c.location === "user") ?? null;
+
+  let status = resolveStatus({
     installed,
     expected: deps.expected,
+    installedBuildId: activeCopy?.buildId ?? null,
+    expectedBuildId: deps.expectedBuildId ?? null,
     signatureOk: deps.verify?.signatureOk,
     launchOk: deps.verify?.launchOk ?? undefined,
   });
+
+  const activeIsStale = !!activeCopy && !activeCopy.current
+    && status !== "missing" && status !== "invalid_signature" && status !== "launch_failed";
+  // The good user copy is shadowed when the active /Applications copy is stale.
+  const shadowed = !!activeCopy && activeCopy.location === "applications" && !activeCopy.current && !!userCopy?.current;
+  if (shadowed) status = "stale_copy";
+
   return {
     id: descriptor.id,
     displayName: descriptor.displayName,
     installed,
     expected: deps.expected,
+    installedBuildId: activeCopy?.buildId ?? null,
+    expectedBuildId: deps.expectedBuildId ?? null,
     installPath: target.activePath ?? target.preferredPath,
     activePath: target.activePath,
     preferredPath: target.preferredPath,
     installedPaths: target.installedPaths,
+    installedCopies,
     duplicated: target.duplicated,
+    activeIsStale,
+    shadowed,
     status,
     ...(deps.verify ? { signatureOk: deps.verify.signatureOk, launchOk: deps.verify.launchOk } : {}),
   };
@@ -145,20 +204,43 @@ export function artifactPathFor(descriptor: LaneAppDescriptor, deps: ArtifactPat
   return candidates.find((candidate) => exists(candidate)) ?? candidates[0];
 }
 
-function readBundleVersion(appPath: string): LaneAppVersion | null {
+function readBundleInfo(appPath: string): { version: LaneAppVersion | null; buildId: string | null } {
   try {
     const xml = readFileSync(`${appPath}/Contents/Info.plist`, "utf8");
     const parsed = parseInfoPlist(xml);
-    if (!parsed.short || !parsed.build) return null;
-    return { short: parsed.short, build: parsed.build };
+    const version = parsed.short && parsed.build ? { short: parsed.short, build: parsed.build } : null;
+    return { version, buildId: parsed.buildId };
   } catch {
-    return null;
+    return { version: null, buildId: null };
   }
+}
+
+function readBundleVersion(appPath: string): LaneAppVersion | null {
+  return readBundleInfo(appPath).version;
+}
+
+function readBundleBuildId(appPath: string): string | null {
+  return readBundleInfo(appPath).buildId;
 }
 
 export function expectedVersionFor(descriptor: LaneAppDescriptor): LaneAppVersion {
   const fromArtifact = readBundleVersion(artifactPathFor(descriptor));
   return fromArtifact ?? PINNED_EXPECTED[descriptor.id];
+}
+
+export function expectedBuildIdFor(descriptor: LaneAppDescriptor): string | null {
+  return readBundleBuildId(artifactPathFor(descriptor));
+}
+
+// Shared deps for reading per-copy version + build identity from real bundles.
+function realReadDeps(descriptor: LaneAppDescriptor) {
+  return {
+    expected: expectedVersionFor(descriptor),
+    expectedBuildId: expectedBuildIdFor(descriptor),
+    readInstalled: (activePath: string | null) => (activePath ? readBundleVersion(activePath) : null),
+    readVersionAt: (path: string) => readBundleVersion(path),
+    readBuildId: (path: string) => readBundleBuildId(path),
+  };
 }
 
 export interface GetAllLaneAppStatesOptions {
@@ -180,8 +262,8 @@ export async function getAllLaneAppStates(options: GetAllLaneAppStatesOptions = 
     states.push(getLaneAppState(descriptor, {
       home,
       exists: existsSync,
+      ...realReadDeps(descriptor),
       expected,
-      readInstalled: (activePath) => (activePath ? readBundleVersion(activePath) : null),
       verify,
     }));
   }
@@ -201,14 +283,13 @@ export async function verifyLaneAppById(id: string): Promise<{ state: LaneAppSta
   const state = getLaneAppState(descriptor, {
     home,
     exists: existsSync,
-    expected: expectedVersionFor(descriptor),
-    readInstalled: (activePath) => (activePath ? readBundleVersion(activePath) : null),
+    ...realReadDeps(descriptor),
     verify,
   });
   return { state, verification };
 }
 
-export async function installLaneAppById(id: string): Promise<{ state: LaneAppState; installedPath: string }> {
+export async function installLaneAppById(id: string): Promise<{ state: LaneAppState; installedPath: string; activePath: string | null; shadowed: boolean; warning?: string }> {
   const descriptor = getLaneApp(id as LaneAppDescriptor["id"]);
   const { installedPath } = await installLaneApp(descriptor, {
     artifactPath: artifactPathFor(descriptor),
@@ -225,13 +306,62 @@ export async function installLaneAppById(id: string): Promise<{ state: LaneAppSt
     },
   });
   const home = homedir();
-  const state = getLaneAppState(descriptor, {
-    home,
+  const state = getLaneAppState(descriptor, { home, exists: existsSync, ...realReadDeps(descriptor) });
+  // If we wrote the user copy but LaunchServices will still launch a different
+  // (stale /Applications) copy, say so — never report a clean install.
+  const shadowed = state.shadowed || (!!state.activePath && state.activePath !== installedPath);
+  const warning = shadowed
+    ? `Installed to ${installedPath}, but macOS will still launch the copy at ${state.activePath}. Use “Update /Applications copy” to replace the stale copy.`
+    : undefined;
+  return { state, installedPath, activePath: state.activePath, shadowed, warning };
+}
+
+export interface RepairApplicationsResult { ok: boolean; replacedPath?: string; instructions?: string }
+
+export interface RepairApplicationsDeps {
+  home: string;
+  artifactPath: string;
+  exists: (path: string) => boolean;
+  writable: (path: string) => boolean;
+  replace: (from: string, to: string) => void;
+}
+
+// Pure core: replace a writable stale /Applications copy with the bundled
+// artifact, else return exact instructions. Never sudo, never an arbitrary path.
+export function repairApplicationsCopyWith(descriptor: LaneAppDescriptor, deps: RepairApplicationsDeps): RepairApplicationsResult {
+  const target = resolveInstallTarget(descriptor, { home: deps.home, exists: deps.exists });
+  const appsPath = target.applicationsPath;
+  if (!deps.exists(appsPath)) {
+    return { ok: false, instructions: `No /Applications copy at ${appsPath}. Use Install/Update instead.` };
+  }
+  if (!deps.exists(deps.artifactPath)) {
+    return { ok: false, instructions: `Bundled artifact not found (${deps.artifactPath}). Reinstall HiveMatrix, then retry.` };
+  }
+  if (!deps.writable(appsPath)) {
+    return {
+      ok: false,
+      instructions: `${appsPath} is not writable by your user. Quit ${descriptor.displayName}, drag it to the Trash (admin rights may be required), then click Install/Update — or replace it manually from ${deps.artifactPath}.`,
+    };
+  }
+  deps.replace(deps.artifactPath, appsPath);
+  return { ok: true, replacedPath: appsPath };
+}
+
+export async function repairApplicationsCopy(id: string): Promise<RepairApplicationsResult> {
+  const descriptor = getLaneApp(id as LaneAppDescriptor["id"]);
+  return repairApplicationsCopyWith(descriptor, {
+    home: homedir(),
+    artifactPath: artifactPathFor(descriptor),
     exists: existsSync,
-    expected: expectedVersionFor(descriptor),
-    readInstalled: (activePath) => (activePath ? readBundleVersion(activePath) : null),
+    writable: (path) => { try { accessSync(path, fsConstants.W_OK); return true; } catch { return false; } },
+    replace: (from, to) => {
+      const staging = `${to}.installing`;
+      rmSync(staging, { recursive: true, force: true });
+      cpSync(from, staging, { recursive: true });
+      rmSync(to, { recursive: true, force: true });
+      renameSync(staging, to);
+    },
   });
-  return { state, installedPath };
 }
 
 export function activePathFor(id: string): string | null {
