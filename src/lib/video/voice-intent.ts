@@ -20,7 +20,7 @@ export function detectVideoVoiceIntent(text: string): VideoVoiceIntent {
   // Read it aloud.
   if (/\bread\b/.test(t)) return { kind: "read" };
 
-  // Approve → render + publish.
+  // Approve → create the Browser Lane portal task.
   if (/\b(approve|publish|ship|render|post|send)\b/.test(t)) return { kind: "approve" };
 
   // Cancel → nothing spent.

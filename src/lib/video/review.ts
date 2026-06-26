@@ -2,8 +2,8 @@
  * Video script review — the deterministic core of the human-in-the-loop checkpoint
  * for the video factory. The pipeline drafts a script, PAUSES, and the operator
  * replies (console Reply / iOS / voice). This classifies that reply into an action
- * so the expensive HeyGen render (~$0.05/sec) only runs on an explicit approval —
- * and so a bad script gets edited or reworked, not published. Pure + unit-tested.
+ * so the HeyGen portal task only starts on an explicit approval — and so a bad
+ * script gets edited or reworked, not sent to Browser Lane. Pure + unit-tested.
  *
  * Fits the HiveMatrix flow: a drafted video becomes a `needs_input` task; the same
  * Reply box that answers any task drives approve / edit / regenerate / cancel here.
@@ -17,8 +17,8 @@ export interface ReviewDecision {
   feedback?: string;  // regenerate: the change request to re-draft with
 }
 
-// Short affirmatives → approve (render + publish). Empty reply also = approve
-// (the natural "looks good, ship it" tap).
+// Short affirmatives → approve (create the Browser Lane portal task). Empty reply
+// also = approve (the natural "looks good, ship it" tap).
 const APPROVE = /^(approve|approved|ship it|ship|publish|post it|go|send it|lgtm|looks good|sounds good|perfect|great|yes|yep|yeah|ok|okay|👍|🚀)\.?$/i;
 // Short negatives → cancel (nothing rendered or spent).
 const CANCEL = /^(cancel|scrap|discard|stop|abort|no|nope|kill it|don'?t|delete|trash|reject)\.?$/i;
@@ -33,7 +33,7 @@ export function looksLikeFullScript(text: string): boolean {
 
 /**
  * Classify an operator reply to a drafted video script. Pure.
- * - empty / "approve" / "ship it" → approve (render + publish)
+ * - empty / "approve" / "ship it" → approve (create Browser Lane portal task)
  * - "cancel" / "scrap" / "no"     → cancel
  * - a long/multi-line reply       → edit (use it as the new script)
  * - a short instruction           → regenerate (re-draft with it as feedback)
@@ -51,8 +51,8 @@ export function classifyReply(reply: string): ReviewDecision {
 export function decisionReply(d: ReviewDecision, title: string): string {
   const t = title || "the video";
   switch (d.action) {
-    case "approve": return `Approved — rendering and publishing "${t}".`;
-    case "edit": return `Saved your edited script for "${t}". Re-read it above and reply "approve" to render + publish.`;
+    case "approve": return `Approved — creating a Browser Lane HeyGen portal task for "${t}".`;
+    case "edit": return `Saved your edited script for "${t}". Re-read it above and reply "approve" to create the Browser Lane portal task.`;
     case "regenerate": return `Reworking the script${d.feedback ? `: ${d.feedback}` : ""}. I'll send the new draft for review.`;
     case "cancel": return `Cancelled "${t}". Nothing was rendered or published.`;
   }
@@ -66,5 +66,5 @@ export function reviewPrompt(script: string): string {
   const full = script.trim().replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n");
   const MAX = 4000; // generous — a 90s script is ~1300 chars; only truncates the pathological case
   const shown = full.length > MAX ? `${full.slice(0, MAX).trimEnd()}…` : full;
-  return `Review this AI-news video script before it renders (HeyGen costs ~$0.05/sec, so I won't render until you say so):\n\n"${shown}"\n\nReply "approve" to render + publish, paste an edited script to use instead, give a short note (e.g. "cut the third story") to rework it, or "cancel".`;
+  return `Review this AI-news video script before Browser Lane creates the HeyGen portal task:\n\n"${shown}"\n\nReply "approve" to create the Browser Lane portal task, paste an edited script to use instead, give a short note (e.g. "cut the third story") to rework it, or "cancel".`;
 }

@@ -1,13 +1,13 @@
 /**
  * Voice override for the video review — lets the operator drive the video lifecycle
- * by voice: "read me the script", "approve the video" (review → render+publish),
+ * by voice: "read me the script", "approve the video" (review → Browser Lane portal task),
  * "publish the video" (a HeyGen portal_completed draft → publish-only, no re-render),
  * "cancel"/"rework". Wired into /voice/turn before the generic command layer.
  *
  * Detection is the pure tested core (voice-intent.ts). Routing here is STATUS-AWARE:
  * a portal_completed draft publishes its existing local MP4 (never re-renders), a
  * needs_publish_input draft is refused honestly (no local file), and a review draft
- * keeps the existing approve→render+publish path. Returns null → fall through.
+ * creates the Browser Lane portal task. Returns null → fall through.
  */
 
 import { readFileSync, existsSync } from "fs";
@@ -77,7 +77,7 @@ export async function videoVoiceOverride(transcript: string, deps: VideoVoiceDep
         const script = existsSync(draft.paths.script) ? readFileSync(draft.paths.script, "utf-8").trim() : "";
         if (draft.status === "review") {
           reply = script
-            ? `Here's the script for "${draft.title}":\n\n${script}\n\nSay "approve" to render and publish, or tell me what to change.`
+            ? `Here's the script for "${draft.title}":\n\n${script}\n\nSay "approve" to create the Browser Lane HeyGen portal task, or tell me what to change.`
             : `The draft "${draft.title}" has no script text yet.`;
         } else {
           reply = script ? `Here's the script for "${draft.title}":\n\n${script}\n\n${statusLine(draft)}` : statusLine(draft);
@@ -85,7 +85,7 @@ export async function videoVoiceOverride(transcript: string, deps: VideoVoiceDep
       } else if (intent.kind === "approve") {
         // "approve"/"publish": route by status. A portal_completed draft publishes its
         // existing local MP4 (no re-render); needs_publish_input is refused; a review
-        // draft keeps the existing approve→render+publish path.
+        // draft creates the Browser Lane portal task.
         if (draft.status === "portal_completed") {
           const r = await publish(draft.id);
           reply = r.ok

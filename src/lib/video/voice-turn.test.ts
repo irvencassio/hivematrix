@@ -54,17 +54,17 @@ test("\"publish the video\" on a portal_pending draft says it is still running",
   assert.match(ov.reply, /still running|not (done|finished)|waiting/i);
 });
 
-test("a review draft still approves via the existing render+publish path", async () => {
+test("a review draft approves by creating the Browser Lane portal task", async () => {
   let resolvedWith = "";
   const ov = await videoVoiceOverride("approve the video", {
     latestDraft: () => draftBase("review") as never,
     synthesize: async () => "",
-    resolveDraft: async (_id: string, reply: string) => { resolvedWith = reply; return { reply: "Approved — rendering and publishing." }; },
+    resolveDraft: async (_id: string, reply: string) => { resolvedWith = reply; return { reply: "Approved — created Browser Lane portal task." }; },
     publishDraft: async () => { throw new Error("review approve must go through resolveDraft, not publish-only"); },
   });
   assert.ok(ov);
   assert.equal(resolvedWith, "approve");
-  assert.match(ov.reply, /approv|render/i);
+  assert.match(ov.reply, /approv|Browser Lane|portal/i);
 });
 
 test("voice replies carry no secret material", async () => {

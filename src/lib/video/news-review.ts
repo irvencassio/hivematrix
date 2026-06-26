@@ -2,12 +2,13 @@
  * AI-news video with a human-in-the-loop SCRIPT REVIEW, wired into the HiveMatrix
  * flow. Phase 1 drafts the script (cheap) and pauses as a `needs_input` review task;
  * the operator's Reply (console / iOS / voice) drives approve / edit / regenerate /
- * cancel via the pure classifier in review.ts. Only an approval runs the expensive
- * HeyGen render + YouTube publish (the spend/outward step).
+ * cancel via the pure classifier in review.ts. Approval creates a Browser Lane
+ * HeyGen portal child task; publishing happens later only after a local portal MP4
+ * is handed back.
  *
  * The decision logic is the tested core (review.ts); this is the IO glue that drives
- * the out-of-process `video/` scripts (news-script.mjs / make-avatar.mjs / publish.mjs)
- * and the linked review task.
+ * the out-of-process `video/` scripts (news-script.mjs / publish.mjs) and the linked
+ * review task.
  */
 
 import { execFile } from "child_process";
@@ -20,7 +21,7 @@ import { classifyReply, decisionReply, reviewPrompt, type ReviewDecision } from 
 import { saveDraft, getDraft, updateDraft, type VideoDraft, type VideoDraftPaths } from "./draft-store";
 
 const execFileP = promisify(execFile);
-const RENDER_TIMEOUT_MS = 900_000; // HeyGen render + upload can take minutes
+const RENDER_TIMEOUT_MS = 900_000; // script generation / upload can take minutes
 
 function outPaths(dir: string, date: Date, id: string): VideoDraftPaths {
   const stamp = date.toISOString().slice(0, 10);
@@ -68,12 +69,10 @@ async function setTaskFields(taskId: string | undefined, fields: Record<string, 
   } catch { /* ignore */ }
 }
 
-/** A render/publish that failed → return the task to review with the reason, so the
- * operator can fix it (e.g. add HeyGen credit) and approve again, or cancel. */
-async function failReviewTask(taskId: string | undefined, errorMsg: string): Promise<void> {
-  const concise = /insufficient credit/i.test(errorMsg)
-    ? "Render failed: HeyGen is out of API credit. Add credit, then approve again — or cancel."
-    : `Render failed: ${errorMsg.replace(/\s+/g, " ").slice(0, 280)}`;
+/** A portal task creation failure → return the task to review with the reason, so
+ * the operator can fix Browser Lane readiness/auth and approve again, or cancel. */
+async function failPortalReviewTask(taskId: string | undefined, errorMsg: string): Promise<void> {
+  const concise = `Browser Lane portal task not created: ${errorMsg.replace(/\s+/g, " ").slice(0, 260)}`;
   await setTaskFields(taskId, { status: "review", reviewState: "needs_input", error: concise });
 }
 
@@ -100,6 +99,22 @@ export interface DraftNewsOptions {
   privacy?: string;   // youtube privacy on publish (default unlisted)
   source?: string;    // news source (default auto)
   writer?: string;    // script writer (default auto)
+}
+
+export interface CreatePortalTaskInput {
+  draft: VideoDraft;
+  script: string;
+  title: string;
+}
+
+export interface CreatePortalTaskResult {
+  status: string;
+  taskId?: string | null;
+  reason?: string | null;
+}
+
+export interface ResolveVideoDraftDeps {
+  createPortalTask?: (input: CreatePortalTaskInput) => Promise<CreatePortalTaskResult>;
 }
 
 /** Phase 1 — draft the AI-news script and create a review checkpoint. */
@@ -177,11 +192,11 @@ export async function draftNewsVideo(opts: DraftNewsOptions = {}): Promise<Video
 
 /**
  * Phase 2 — apply the operator's reply to a drafted script. Returns the spoken/text
- * confirmation, or null if the draft isn't awaiting review. Approve/edit kick off the
- * render+publish in the background (the spend step); regenerate re-drafts and stays in
- * review; cancel spends nothing.
+ * confirmation, or null if the draft isn't awaiting review. Approve creates the
+ * Browser Lane HeyGen portal child task; regenerate re-drafts and stays in review;
+ * cancel spends nothing.
  */
-export async function resolveVideoDraft(id: string, reply: string): Promise<{ decision: ReviewDecision; reply: string } | null> {
+export async function resolveVideoDraft(id: string, reply: string, deps: ResolveVideoDraftDeps = {}): Promise<{ decision: ReviewDecision; reply: string } | null> {
   const draft = getDraft(id);
   if (!draft || draft.status !== "review") return null;
   const decision = classifyReply(reply);
@@ -211,9 +226,8 @@ export async function resolveVideoDraft(id: string, reply: string): Promise<{ de
     return { decision, reply: decisionReply(decision, title) };
   }
 
-  // edit → SAVE the revised script and stay in review (no render/publish yet, no
-  // spend). The operator re-reads it and approves separately. This is the key fix:
-  // editing used to immediately render+publish, which surprised + spent money.
+  // edit → SAVE the revised script and stay in review. The operator re-reads it
+  // and approves separately.
   if (decision.action === "edit" && decision.script) {
     writeFileSync(draft.paths.script, decision.script);
     updateDraft(id, { revisions: draft.revisions + 1 });
@@ -221,43 +235,79 @@ export async function resolveVideoDraft(id: string, reply: string): Promise<{ de
     return { decision, reply: decisionReply(decision, draft.title) };
   }
 
-  // approve → render + publish (the gated spend). Keep the task VISIBLE while it
-  // renders and reflect the outcome — don't optimistically close to done, or a
-  // failed render (e.g. HeyGen out of credit) vanishes with no feedback.
-  updateDraft(id, { status: "rendering" });
-  await setTaskFields(draft.taskId, { status: "in_progress", reviewState: null });
-  void renderAndPublish(id)
-    .then(async () => { await closeTask(draft.taskId, "done"); })
-    .catch(async (e) => {
-      const msg = e instanceof Error ? e.message : String(e);
-      // Back to "review" (NOT "error") so the operator can simply approve again
-      // after fixing the cause (e.g. HeyGen credit) — the resolver only acts on
-      // drafts in "review" status, so "error" would make re-approve a no-op.
-      updateDraft(id, { status: "review", error: msg });
-      await failReviewTask(draft.taskId, msg); // task back to review with the error surfaced
+  // approve → create the Browser Lane HeyGen portal child task. No API renderer is
+  // called here; the parent remains visible while the child handles portal work.
+  const script = existsSync(draft.paths.script) ? readFileSync(draft.paths.script, "utf-8").trim() : "";
+  const title = existsSync(draft.paths.title) ? readFileSync(draft.paths.title, "utf-8").trim() : draft.title;
+  const createPortalTask = deps.createPortalTask ?? createHeyGenPortalTaskForDraft;
+  const portal = await createPortalTask({ draft, script, title });
+  if ((portal.status === "created" || portal.status === "portal_pending") && portal.taskId) {
+    const { markPortalTaskCreated } = await import("./portal-completion");
+    const { Task } = await import("@/lib/db");
+    await markPortalTaskCreated(id, portal.taskId, {
+      updateTask: async (taskId, fields) => { await Task.findByIdAndUpdate(taskId, fields); },
     });
-  return { decision, reply: decisionReply(decision, draft.title) };
+    return { decision, reply: `Approved — created Browser Lane HeyGen portal task ${portal.taskId} for "${title}".` };
+  }
+
+  const reason = portal.reason || `portal dispatch returned ${portal.status}`;
+  updateDraft(id, { status: "review", error: reason });
+  await failPortalReviewTask(draft.taskId, reason);
+  return { decision, reply: `Approved, but Browser Lane needs attention before it can create the HeyGen portal task: ${reason}` };
 }
 
-/** Render config (config.json `heygen`): which HeyGen path Approve renders through.
- *   renderMode "agent" (default) → Video Agent (/v3/video-agents): slides, on-screen
- *     annotations, B-roll, transitions — the creative look. Uses `styleId`.
- *   renderMode "avatar"          → basic talking avatar (/v2/video/generate): 1080p,
- *     lip-synced to the cloned voice, no slides.
- * Pinning these here is how the creative output is MAINTAINED — every Approve renders
- * the same recipe, not a one-off CLI run. */
-function renderConfig(): { mode: string; styleId: string } {
+async function createHeyGenPortalTaskForDraft(input: CreatePortalTaskInput): Promise<CreatePortalTaskResult> {
+  const { draft, script, title } = input;
+  if (!script.trim()) return { status: "needs_input", taskId: null, reason: "draft has no script text" };
+
+  const { dispatchHeyGenVideoWorkflow } = await import("./heygen-workflow");
+  const { seedHeyGenBrowserSite } = await import("@/lib/browser-lane/heygen");
+  const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
+  const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
+  const { Task } = await import("@/lib/db");
+
+  seedHeyGenBrowserSite();
+  const result = await dispatchHeyGenVideoWorkflow(
+    { script, title, project: "hivematrix" },
+    {
+      create: true,
+      projectPath: homedir(),
+      browserAvailable: getConnectivityPolicy().getCapability("browserbee").available,
+      staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours,
+      persistTask: async ({ envelope, projectPath: root, route }) => {
+        const { buildBrowserBeeTaskDescription } = await import("@/lib/browser-lane/jobs");
+        const description = buildBrowserBeeTaskDescription(envelope, { requestedProjectPath: root });
+        const task = await Task.create({
+          title: envelope.title,
+          description,
+          project: envelope.project,
+          projectPath: root,
+          model: envelope.backingModel,
+          status: "backlog",
+          executor: "agent",
+          source: "browser-lane",
+          output: {
+            browserbeeRequest: envelope,
+            coo: { ruleId: route.ruleId, capability: route.capability },
+            heygen: { title, parentDraftId: draft.id },
+          },
+        });
+        return { id: task._id };
+      },
+    },
+  );
+
   try {
-    const cfg = JSON.parse(readFileSync(join(homedir(), ".hivematrix", "config.json"), "utf-8"));
-    const h = (cfg?.heygen ?? {}) as { renderMode?: string; styleId?: string };
-    return { mode: (h.renderMode || "agent").trim(), styleId: (h.styleId || "").trim() };
-  } catch { return { mode: "agent", styleId: "" }; }
+    const { linkHeyGenPortalRunOnDispatch } = await import("@/lib/workflows/heygen-run-link");
+    linkHeyGenPortalRunOnDispatch(result, { draftId: draft.id, title });
+  } catch { /* the draft + child task remain the source of truth */ }
+
+  return { status: result.status, taskId: result.taskId, reason: result.reason };
 }
 
 /**
  * Shared publish step (no render): upload an already-rendered local MP4 to YouTube
- * via publish.mjs and return the captured URL. Used by both the API render+publish
- * flow and the portal publish-only path so they never diverge.
+ * via publish.mjs and return the captured URL. Used by the portal publish-only path.
  */
 async function runPublish(run: (args: string[]) => Promise<{ stdout: string }>, draft: VideoDraft): Promise<string | undefined> {
   const { stdout } = await run([
@@ -270,24 +320,6 @@ async function runPublish(run: (args: string[]) => Promise<{ stdout: string }>, 
   ]);
   const m = stdout.match(/https?:\/\/(?:youtu\.be|www\.youtube\.com)\/\S+/);
   return m ? m[0] : undefined;
-}
-
-async function renderAndPublish(id: string): Promise<void> {
-  const draft = getDraft(id);
-  if (!draft) return;
-  const dir = videoProjectDir();
-  if (!dir) throw new Error("video project not found");
-  // Render the approved script to a HeyGen MP4 (~$0.05/sec). Default = Video Agent
-  // (creative: slides + annotations + B-roll); config can pin "avatar" for the
-  // plain cloned-voice path.
-  const rc = renderConfig();
-  const renderArgs = rc.mode === "agent"
-    ? ["make-avatar.mjs", draft.paths.script, draft.paths.video, "--mode", "agent", ...(rc.styleId ? ["--style", rc.styleId] : [])]
-    : ["make-avatar.mjs", draft.paths.script, draft.paths.video];
-  await runNode(dir, renderArgs);
-  // Publish to YouTube and capture the URL from stdout.
-  const youtubeUrl = await runPublish((args) => runNode(dir, args), draft);
-  updateDraft(id, { status: "published", youtubeUrl });
 }
 
 export interface PublishDraftDeps {

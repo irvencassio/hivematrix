@@ -114,6 +114,20 @@ test("markPortalTaskCreated sets portal_pending and the dup guard prevents a sec
   assert.match(portalReviewCopy(draft!), /portal/i);
 });
 
+test("portal review task updates use real task columns only", async () => {
+  taskUpdates.length = 0;
+  seedDraft("d-real-cols", { taskId: "review-real" });
+  await applyHeyGenPortalCompletion({ parentDraftId: "d-real-cols", childTaskId: "child-1", localVideoPath: "/Users/me/final.mp4" }, deps);
+  assert.ok(taskUpdates.length > 0);
+  const fields = taskUpdates.at(-1)?.fields ?? {};
+  assert.deepEqual(Object.keys(fields).sort(), ["description", "error", "reviewState", "status"]);
+  assert.equal(fields.status, "review");
+  assert.equal(fields.reviewState, "needs_input");
+  assert.match(String(fields.description), /ready to publish/i);
+  assert.equal("portalState" in fields, false);
+  assert.equal("portalNote" in fields, false);
+});
+
 test("completion metadata carries linkage and no secrets", async () => {
   seedDraft("d-meta", { taskId: "review-m" });
   await applyHeyGenPortalCompletion({ parentDraftId: "d-meta", childTaskId: "child-1", localVideoPath: "/Users/me/final.mp4" }, deps);

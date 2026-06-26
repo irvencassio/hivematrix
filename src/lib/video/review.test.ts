@@ -39,7 +39,7 @@ test("looksLikeFullScript heuristic", () => {
 });
 
 test("decisionReply phrasing per action", () => {
-  assert.match(decisionReply({ action: "approve" }, "Top AI News"), /Approved.*rendering and publishing "Top AI News"/);
+  assert.match(decisionReply({ action: "approve" }, "Top AI News"), /Approved.*Browser Lane.*portal task.*"Top AI News"/);
   assert.match(decisionReply({ action: "edit" }, "Top AI News"), /edited script/);
   assert.match(decisionReply({ action: "regenerate", feedback: "shorter" }, "x"), /Reworking the script: shorter/);
   assert.match(decisionReply({ action: "cancel" }, "x"), /Cancelled.*Nothing was rendered/);
@@ -49,7 +49,8 @@ test("reviewPrompt shows the full script and explains the choices", () => {
   const script = "First story. ".repeat(15) + "And the sign-off.";
   const p = reviewPrompt(script);
   assert.match(p, /Review this AI-news video script/);
-  assert.match(p, /approve.*edited script.*cancel/s);
+  assert.match(p, /approve.*Browser Lane.*edited script.*cancel/s);
+  assert.doesNotMatch(p, /render \+ publish|HeyGen costs|\$0\.05/i);
   // The whole script is shown for review (not clipped at 280 chars).
   assert.ok(p.includes("And the sign-off."), "the full script is included, not a short clip");
   assert.ok(!p.includes("…"), "a normal-length script is not truncated");

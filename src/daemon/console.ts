@@ -1445,17 +1445,16 @@ function taskActionsHtml(t) {
   // subtler "reply to continue" box (toggled open from the ↩ Reply button).
   if (!steerable && t.executor === "video-review") {
     // Dedicated script-review controls: edit + Save (stays in review), Approve to
-    // render+publish, or Cancel. Explicit buttons so "submit" is unmissable and
-    // editing never silently renders.
+    // create the Browser Lane HeyGen portal task, or Cancel. Explicit buttons so
+    // "submit" is unmissable and editing never silently creates the portal task.
     html += '<div id="replySection_'+t._id+'" class="reply-section open needs">'
       + '<div class="reply-head">🎬 Review the script</div>'
-      + '<div class="reply-subhead">Click <b>Edit script</b>, revise it, then <b>Save edits</b> (stays here to re-read) — or <b>Approve</b> to render + publish. A short note instead = rework.</div>'
+      + '<div class="reply-subhead">Click <b>Edit script</b>, revise it, then <b>Save edits</b> (stays here to re-read) — or <b>Approve</b> to create a Browser Lane HeyGen portal task. A short note instead = rework.</div>'
       + '<div class="reply-row" style="margin-bottom:6px"><button class="reply-toggle" onclick="loadDraftIntoReply()">✎ Edit script</button></div>'
       + '<textarea id="replyText" class="reply-input" placeholder="Edit the script here (or type a short note like \'drop story 2\' to rework)…" rows="8" oninput="onCtxDraft(\'reply\',this)"></textarea>'
       + '<div class="reply-row" style="margin-top:8px;gap:8px;flex-wrap:wrap">'
       + '<button class="reply-primary" onclick="replyTask(\''+t._id+'\')">💾 Save edits / Send</button>'
-      + '<button onclick="videoReviewAction(\''+t._id+'\',\'approve\')">✅ Approve &amp; render</button>'
-      + ((t.output && t.output.videoDraftId) ? '<button onclick="createPortalTask(\''+esc(t.output.videoDraftId)+'\')" title="Make this in the HeyGen portal instead — routes through Browser Lane readiness, then publish without re-rendering">🎬 HeyGen portal</button>' : '')
+      + '<button onclick="videoReviewAction(\''+t._id+'\',\'approve\')">✅ Approve → Browser Lane</button>'
       + '<button class="cancel" onclick="videoReviewAction(\''+t._id+'\',\'cancel\')">✕ Cancel</button>'
       + '</div></div>';
   } else if (!steerable) {
@@ -1747,15 +1746,15 @@ async function replyTask(id) {
   else { hmAlert(r?.error || "Failed to send reply"); el.disabled = false; }
 }
 
-// One-click video-review decisions (approve renders + publishes — confirm first).
+// One-click video-review decisions (approval creates the Browser Lane portal task).
 async function videoReviewAction(id, action) {
   if (action === "approve") {
-    if (!await hmConfirm("Approve this script? It renders the HeyGen avatar (~$0.05/sec) and publishes to YouTube.")) return;
+    if (!await hmConfirm("Approve this script and create a Browser Lane HeyGen portal task? Publishing happens later after the portal video is completed.")) return;
   } else if (action === "cancel") {
     if (!await hmConfirm("Cancel this video draft? Nothing is rendered or published.")) return;
   }
   const r = await api("/tasks/"+id+"/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: action }) });
-  if (r && r.ok) { hmToast(action === "approve" ? "Approved — rendering + publishing in the background." : "Cancelled.", "ok"); refresh(); selectTask(id); }
+  if (r && r.ok) { hmToast(action === "approve" ? "Approved — Browser Lane portal task requested." : "Cancelled.", "ok"); refresh(); selectTask(id); }
   else { hmAlert((r && r.error) || "Action failed"); }
 }
 

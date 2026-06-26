@@ -100,7 +100,18 @@ export function portalReviewCopy(draft: VideoDraft): string {
 
 async function refreshReviewCopy(draft: VideoDraft, deps: PortalCompletionDeps): Promise<void> {
   if (!draft.taskId || !deps.updateTask) return;
-  await deps.updateTask(draft.taskId, { portalState: draft.status, portalNote: portalReviewCopy(draft) });
+  const description = portalReviewCopy(draft);
+  const fields: Record<string, unknown> = { description };
+  if (draft.status === "portal_pending") {
+    fields.status = "in_progress";
+    fields.reviewState = null;
+    fields.error = null;
+  } else if (draft.status === "portal_completed" || draft.status === "needs_publish_input" || draft.status === "review") {
+    fields.status = "review";
+    fields.reviewState = "needs_input";
+    fields.error = draft.status === "review" ? (draft.error ?? null) : null;
+  }
+  await deps.updateTask(draft.taskId, fields);
 }
 
 /** Mark that a portal child task was created for a draft (→ portal_pending). */

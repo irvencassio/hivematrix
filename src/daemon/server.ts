@@ -3117,9 +3117,10 @@ export function createDaemonServer() {
           if (typeof d === "string" && d) videoDraftId = d;
         } catch { /* detection failed → treat as a normal task */ }
         if (videoDraftId) {
-          // Render + publish spends money + posts to YouTube — require an EXPLICIT
-          // word ("approve" / an edited script / "cancel"), never a blank submission.
-          if (!text) { json(res, 400, { error: "Reply \"approve\" to render + publish, paste an edited script, give a change to rework it, or \"cancel\"." }); return; }
+          // Creating the Browser Lane portal child task is an outward workflow step
+          // — require an EXPLICIT word ("approve" / an edited script / "cancel"),
+          // never a blank submission.
+          if (!text) { json(res, 400, { error: "Reply \"approve\" to create the Browser Lane portal task, paste an edited script, give a change to rework it, or \"cancel\"." }); return; }
           try {
             const { resolveVideoDraft } = await import("@/lib/video/news-review");
             const out = await resolveVideoDraft(videoDraftId, text);
