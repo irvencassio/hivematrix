@@ -177,3 +177,85 @@ test("Browser Lane Add Site is wired to metadata, daemon sync, and Keychain-only
   assert.match(content, /SitesViewController/);
   assert.doesNotMatch(screens, /not wired yet/i);
 });
+
+test("Browser Lane Add Site has an auth strategy picker that gates password capture", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const addSite = readFileSync(join(sourceDir, "AddSiteViewController.swift"), "utf8");
+  const models = readFileSync(join(sourceDir, "BrowserLaneModels.swift"), "utf8");
+
+  // Auth strategy picker exposing the four real strategies.
+  assert.match(addSite, /NSPopUpButton/);
+  assert.match(addSite, /BrowserLaneAuthStrategy/);
+  for (const strategy of ["keychain_password", "google_sso", "microsoft_sso", "manual_session"]) {
+    assert.match(models, new RegExp(strategy));
+  }
+
+  // keychain_password is the only strategy that captures a secret, into the
+  // macOS Keychain — the secure field + the Security.framework path stay.
+  assert.match(addSite, /NSSecureTextField/);
+  assert.match(addSite, /usesKeychainPassword/);
+
+  // SSO/manual: password capture is gated off and the copy says no password is stored.
+  assert.match(addSite, /No password is stored/i);
+
+  // Non-secret provider account/email metadata field + provider domain defaults.
+  assert.match(addSite, /providerAccount/);
+  assert.match(models, /providerAccount/);
+  assert.match(models, /accounts\.google\.com/);
+  assert.match(models, /login\.microsoftonline\.com/);
+  assert.match(models, /login\.live\.com/);
+
+  // Model stays metadata-only: no secret-bearing fields.
+  assert.doesNotMatch(models, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
+});
+
+test("Browser Lane has a Readiness dashboard with per-site status and actions", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const readinessPath = join(sourceDir, "ReadinessViewController.swift");
+  const content = readFileSync(join(sourceDir, "ContentViewController.swift"), "utf8");
+  const daemonClient = readFileSync(join(sourceDir, "BrowserLaneDaemonClient.swift"), "utf8");
+
+  assert.ok(existsSync(readinessPath), "ReadinessViewController should exist");
+  const readiness = readFileSync(readinessPath, "utf8");
+
+  // Status colors green/orange/yellow/red are represented.
+  assert.match(readiness, /green/);
+  assert.match(readiness, /orange/);
+  assert.match(readiness, /yellow/);
+  assert.match(readiness, /red/);
+
+  // Per-site metadata + next action.
+  assert.match(readiness, /Last checked/i);
+  assert.match(readiness, /Next action/i);
+
+  // Action buttons.
+  assert.match(readiness, /Open auth flow/);
+  assert.match(readiness, /Run readiness/);
+  assert.match(readiness, /Refresh/);
+
+  // Wired into navigation and backed by the daemon dashboard endpoint.
+  assert.match(content, /ReadinessViewController/);
+  assert.match(daemonClient, /browser-lane\/dashboard/);
+  assert.doesNotMatch(readiness, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
+});
+
+test("Browser Lane WebKit view persists the session and supports OAuth popups", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const browser = readFileSync(join(sourceDir, "BrowserViewController.swift"), "utf8");
+
+  // Persistent website data store so a completed SSO login is reused.
+  assert.match(browser, /WKWebsiteDataStore/);
+  assert.match(browser, /\.default\(\)/);
+
+  // WKUIDelegate + new-window/popup support for OAuth flows.
+  assert.match(browser, /WKUIDelegate/);
+  assert.match(browser, /createWebViewWith/);
+});
+
+test("Browser Lane Sites view shows auth strategy and session/credential label", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const sites = readFileSync(join(sourceDir, "SitesViewController.swift"), "utf8");
+  assert.match(sites, /authStrategy/);
+  assert.match(sites, /providerAccount/);
+  assert.doesNotMatch(sites, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
+});

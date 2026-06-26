@@ -53,8 +53,12 @@ final class SitesViewController: NSViewController {
         box.boxType = .primary
         box.translatesAutoresizingMaskIntoConstraints = false
 
+        // authStrategy drives both the displayed label and the credential-vs-session wording.
+        let strategy = site.strategy
+        let credentialLabel = strategy.usesKeychainPassword ? "Credential ref" : "Session label"
+        let account = (site.providerAccount?.isEmpty == false) ? site.providerAccount! : "—"
         let text = NSTextField(labelWithString:
-            "\(site.id)\nHome: \(site.homeUrl)\nLogin: \(site.loginUrl)\nDomains: \(site.allowedDomains.joined(separator: ", "))\nCredential ref: \(site.credentialRef)\nSync: \(site.lastSyncStatus)"
+            "\(site.id)\nAuth strategy: \(strategy.label) (\(site.authStrategy))\nProvider account: \(account)\nHome: \(site.homeUrl)\nLogin / auth: \(site.loginUrl)\nDomains: \(site.allowedDomains.joined(separator: ", "))\n\(credentialLabel): \(site.credentialRef)\nSync: \(site.lastSyncStatus)"
         )
         text.lineBreakMode = .byWordWrapping
         text.maximumNumberOfLines = 0

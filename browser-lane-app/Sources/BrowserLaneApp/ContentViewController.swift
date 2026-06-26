@@ -5,6 +5,11 @@ final class ContentViewController: NSViewController {
 
     override func loadView() {
         view = NSView()
+        // Any screen can hand a URL to the persistent in-app browser (SSO handoff).
+        BrowserLaneNavigator.shared.openHandler = { [weak self] url in
+            BrowserLaneNavigator.shared.pendingURL = url
+            self?.show(.browser)
+        }
         show(.browser)
     }
 
@@ -19,6 +24,8 @@ final class ContentViewController: NSViewController {
             SitesViewController()
         case .addSite:
             AddSiteViewController()
+        case .readiness:
+            ReadinessViewController()
         case .settings:
             SettingsViewController()
         default:

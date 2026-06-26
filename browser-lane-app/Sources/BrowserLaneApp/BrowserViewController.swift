@@ -34,8 +34,18 @@ enum BrowserURLBuilder {
 final class BrowserViewController: NSViewController {
     private let addressField = NSSearchField()
     private let goButton = NSButton(title: "Go", target: nil, action: nil)
-    private let webView = WKWebView()
     private let statusLabel = NSTextField(labelWithString: "Ready")
+
+    /// One persistent website data store, shared across every WKWebView Browser Lane
+    /// creates (including OAuth popups). A completed Google/Microsoft sign-in is
+    /// written to this store and reused on the next launch — no re-login each time.
+    private static let sharedConfiguration: WKWebViewConfiguration = {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = WKWebsiteDataStore.default()
+        return config
+    }()
+
+    private lazy var webView = WKWebView(frame: .zero, configuration: BrowserViewController.sharedConfiguration)
 
     override func loadView() {
         view = NSView()
@@ -46,9 +56,8 @@ final class BrowserViewController: NSViewController {
         toolbar.spacing = 8
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
-        let startURL = BrowserLaneSettings.shared.defaultURL
         addressField.placeholderString = "Search Google or enter URL"
-        addressField.stringValue = startURL
+        addressField.stringValue = "https://www.google.com"
         addressField.target = self
         addressField.action = #selector(loadAddress)
         addressField.translatesAutoresizingMaskIntoConstraints = false
@@ -65,6 +74,7 @@ final class BrowserViewController: NSViewController {
         toolbar.addArrangedSubview(statusLabel)
 
         webView.navigationDelegate = self
+        webView.uiDelegate = self
         webView.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(toolbar)
@@ -83,7 +93,13 @@ final class BrowserViewController: NSViewController {
             webView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
         ])
 
-        load(startURL)
+        // A pending handoff URL (from Add Site / Readiness) wins over the default.
+        if let pending = BrowserLaneNavigator.shared.pendingURL {
+            BrowserLaneNavigator.shared.pendingURL = nil
+            load(pending.absoluteString)
+        } else {
+            load(BrowserLaneSettings.shared.defaultURL)
+        }
     }
 
     @objc private func loadAddress() {
@@ -104,6 +120,7 @@ final class BrowserViewController: NSViewController {
 
 extension BrowserViewController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        addressField.stringValue = webView.url?.absoluteString ?? addressField.stringValue
         statusLabel.stringValue = webView.url?.host ?? "Loaded"
     }
 
@@ -113,5 +130,23 @@ extension BrowserViewController: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         statusLabel.stringValue = error.localizedDescription
+    }
+}
+
+extension BrowserViewController: WKUIDelegate {
+    /// OAuth providers often open the consent/login step in a popup or a
+    /// `target="_blank"` window. Load that request into the main, persistent web
+    /// view instead of dropping it, so the SSO handoff completes in one session.
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
+            statusLabel.stringValue = "Continuing sign-in: \(url.host ?? url.absoluteString)"
+            webView.load(navigationAction.request)
+        }
+        return nil
     }
 }
