@@ -1276,6 +1276,75 @@ export function createDaemonServer() {
         return;
       }
 
+      // --- Lane Apps manager -------------------------------------------------
+      // HiveMatrix updates ITSELF automatically; the standalone Browser Lane and
+      // Terminal Lane apps are installed/updated EXPLICITLY here — never silently
+      // overwritten by the updater. GET reports install state for both.
+      if (req.method === "GET" && urlPath === "/lane-apps") {
+        const { getAllLaneAppStates } = await import("@/lib/lane-apps");
+        // ?verify=1 also runs signature + launch verification (slower; launches the app).
+        const verify = parseQueryString(req.url ?? "").verify === "1";
+        const apps = await getAllLaneAppStates({ verify });
+        json(res, 200, { ok: true, apps });
+        return;
+      }
+
+      // POST /lane-apps/:id/install — install/update one lane app from its
+      // packaged artifact into the user-writable target (~/Applications/...).
+      const laneAppInstall = urlPath.match(/^\/lane-apps\/(browser-lane|terminal-lane)\/install$/);
+      if (req.method === "POST" && laneAppInstall) {
+        const { installLaneAppById } = await import("@/lib/lane-apps");
+        try {
+          const result = await installLaneAppById(laneAppInstall[1]);
+          json(res, 200, { ok: true, ...result });
+        } catch (err) {
+          json(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      // POST /lane-apps/:id/launch — open the active installed copy.
+      const laneAppLaunch = urlPath.match(/^\/lane-apps\/(browser-lane|terminal-lane)\/launch$/);
+      if (req.method === "POST" && laneAppLaunch) {
+        const { activePathFor } = await import("@/lib/lane-apps");
+        const appPath = activePathFor(laneAppLaunch[1]);
+        if (!appPath) {
+          json(res, 400, { ok: false, error: "Lane app is not installed." });
+          return;
+        }
+        const { spawn } = await import("node:child_process");
+        spawn("open", [appPath], { stdio: "ignore", detached: true }).unref();
+        json(res, 200, { ok: true, launched: appPath });
+        return;
+      }
+
+      // POST /lane-apps/:id/reveal — reveal the active bundle in Finder. Scoped
+      // to the lane app id (no arbitrary-path reveal) so callers can't probe the fs.
+      const laneAppReveal = urlPath.match(/^\/lane-apps\/(browser-lane|terminal-lane)\/reveal$/);
+      if (req.method === "POST" && laneAppReveal) {
+        const { activePathFor } = await import("@/lib/lane-apps");
+        const appPath = activePathFor(laneAppReveal[1]);
+        if (!appPath) {
+          json(res, 400, { ok: false, error: "Lane app is not installed." });
+          return;
+        }
+        const { spawn } = await import("node:child_process");
+        spawn("open", ["-R", appPath], { stdio: "ignore", detached: true }).unref();
+        json(res, 200, { ok: true, revealed: appPath });
+        return;
+      }
+
+      // POST /lane-apps/:id/verify — rerun signature + Gatekeeper + launch
+      // verification and return the refreshed status. codesign/spctl passing is
+      // NOT enough; the launch probe is a separate signal (the LaunchServices lesson).
+      const laneAppVerify = urlPath.match(/^\/lane-apps\/(browser-lane|terminal-lane)\/verify$/);
+      if (req.method === "POST" && laneAppVerify) {
+        const { verifyLaneAppById } = await import("@/lib/lane-apps");
+        const { state, verification } = await verifyLaneAppById(laneAppVerify[1]);
+        json(res, 200, { ok: true, state, verification });
+        return;
+      }
+
       // GET /browser-lane/dashboard — site/auth readiness dashboard: per-site
       // latest readiness state (color), Keychain credential status, probe counts,
       // and trace linkage, plus a roll-up of how many sites need attention.

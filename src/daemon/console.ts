@@ -715,6 +715,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     </div>
     <div id="settingsLanes" style="display:none">
       <div class="row" style="justify-content:space-between;align-items:center">
+        <label class="flbl" style="margin:0">Lane Apps</label>
+        <button class="copybtn" onclick="renderLaneApps()">↻ Refresh</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin:4px 0 8px">HiveMatrix updates itself automatically; lane apps are installed explicitly. Browser Lane and Terminal Lane are standalone signed apps — install or update each one here. A passing signature is not enough: launch is verified separately.</div>
+      <div id="lane_apps" style="margin-top:6px"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
+      <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Embedded capability lanes</label>
         <button class="copybtn" onclick="renderSettingsLanes()">↻ Refresh</button>
       </div>
@@ -3667,7 +3674,7 @@ function switchSettingsTab(tab) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderBrowserReadiness(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); }
+  if (tab === "lanes") { renderLaneApps(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderBrowserReadiness(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); }
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -3823,6 +3830,72 @@ function renderAbout() {
   set("ab_version", "v" + (v.version || "?"));
   set("ab_build", String(v.build || "?"));
   set("ab_date", v.date || "?");
+}
+
+// --- Lane Apps manager (operator) ------------------------------------------
+// HiveMatrix updates itself automatically; the standalone Browser Lane and
+// Terminal Lane apps are installed/updated EXPLICITLY here. The badge treats
+// launch_failed as a DISTINCT state from invalid_signature — codesign/spctl
+// passing does not prove the app launches (the LaunchServices lesson).
+function laneAppBadge(status) {
+  const map = {
+    installed: ["var(--ok)", "Installed"],
+    update_available: ["var(--accent)", "Update available"],
+    missing: ["var(--muted)", "Not installed"],
+    launch_failed: ["var(--accent-2)", "Launch failed"],
+    invalid_signature: ["var(--accent-2)", "Invalid signature"],
+  };
+  const [color, label] = map[status] || ["var(--muted)", status || "unknown"];
+  return '<span class="badge" style="color:'+color+'">'+esc(label)+'</span>';
+}
+
+async function renderLaneApps() {
+  const el = document.getElementById("lane_apps");
+  if (!el) return;
+  el.innerHTML = '<div class="muted">Loading…</div>';
+  const r = await api("/lane-apps");
+  const apps = (r && r.apps) || [];
+  if (!apps.length) { el.innerHTML = '<div class="muted">No lane apps registered.</div>'; return; }
+  el.innerHTML = apps.map(app => {
+    const installed = app.installed ? esc(app.installed.short)+' ('+esc(app.installed.build)+')' : '—';
+    const expected = esc(app.expected.short)+' ('+esc(app.expected.build)+')';
+    const dup = app.duplicated ? '<div class="muted" style="font-size:10px;color:var(--accent-2);margin-top:2px">⚠ Installed in both /Applications and ~/Applications — using '+esc(app.activePath||'')+'</div>' : '';
+    const path = app.activePath || app.installPath;
+    const canLaunch = !!app.activePath;
+    return '<div class="card" style="cursor:default">'
+      + '<div class="t">'+esc(app.displayName)+' '+laneAppBadge(app.status)+'</div>'
+      + '<div class="muted" style="font-size:11px;margin-top:4px">Installed: <b>'+installed+'</b> · Bundled/available: <b>'+expected+'</b></div>'
+      + '<div class="muted" style="font-size:10px;margin-top:2px">'+esc(path)+'</div>'
+      + dup
+      + '<div class="row" style="margin-top:6px;justify-content:flex-end;gap:6px">'
+      + '<button class="create" onclick="laneAppAction(\''+esc(app.id)+'\',\'install\')">Install/Update</button>'
+      + '<button class="copybtn" onclick="laneAppAction(\''+esc(app.id)+'\',\'verify\')">Verify</button>'
+      + (canLaunch ? '<button class="copybtn" onclick="laneAppAction(\''+esc(app.id)+'\',\'launch\')">Launch</button>' : '')
+      + (canLaunch ? '<button class="copybtn" onclick="laneAppAction(\''+esc(app.id)+'\',\'reveal\')">Reveal</button>' : '')
+      + '</div>'
+      + '<div id="lane_app_msg_'+esc(app.id)+'" class="muted" style="font-size:10px;margin-top:4px"></div>'
+      + '</div>';
+  }).join("");
+}
+
+async function laneAppAction(id, action) {
+  const msg = document.getElementById("lane_app_msg_"+id);
+  if (msg) msg.textContent = action === 'install' ? 'Installing…' : action === 'verify' ? 'Verifying…' : action === 'reveal' ? 'Revealing…' : 'Launching…';
+  const r = await api("/lane-apps/"+id+"/"+action, { method:"POST", headers:{"Content-Type":"application/json"}, body: "{}" });
+  if (!r || r.ok === false) {
+    if (msg) msg.innerHTML = '<span style="color:var(--accent-2)">'+esc((r&&r.error)||'Action failed')+'</span>';
+    return;
+  }
+  if (action === 'verify' && r.verification) {
+    const v = r.verification;
+    const launch = v.launchOk === null ? 'not probed' : (v.launchOk ? 'launched' : 'FAILED');
+    if (msg) msg.textContent = 'signature: '+(v.signatureOk?'valid':'INVALID')+' · launch: '+launch;
+  } else if (action === 'launch') {
+    if (msg) msg.textContent = 'Opened.';
+  } else if (action === 'reveal') {
+    if (msg) msg.textContent = 'Revealed in Finder.';
+  }
+  if (action !== 'reveal') renderLaneApps();
 }
 
 async function renderSettingsLanes() {
