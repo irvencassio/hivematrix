@@ -127,6 +127,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     border: 1px dashed var(--border); border-radius: 8px; padding: 7px 10px; cursor: pointer;
     font-size: 12px; font-weight: 600; margin-bottom: 10px; }
   .addbtn:hover { border-color: var(--accent); }
+  /* Overview nav — explicit return target at the top of the board column. */
+  .ov-nav { width: 100%; text-align: left; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; cursor: pointer;
+    font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+  .ov-nav:hover { border-color: var(--accent); }
+  .ov-nav.active { border-color: var(--accent); color: var(--accent); }
+  .ov-back { font-size: 11px; margin-left: 8px; vertical-align: middle; }
   .form { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
     padding: 10px; margin-bottom: 12px; display: none; }
   .form.open { display: block; }
@@ -1000,6 +1007,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <main>
   <section class="col board">
     <h2>Board <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></h2>
+    <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
     <button class="addbtn" onclick="toggleForm('taskForm')">＋ New task</button>
     <button class="addbtn" onclick="draftVideoNow()" title="Draft today's AI-news video script and pause for your review">🎬 AI-news video</button>
     <div class="form" id="taskForm">
@@ -1174,6 +1182,24 @@ function renderOverview() {
     + '<div class="ov-hint">Select a task to inspect its session — or ＋ New task to start one.</div>'
     + '</div>';
 }
+
+// Explicit return-to-overview navigation. Clears the open task (same fields
+// delete/archive already null) and re-renders; the project filter is untouched.
+function showOverview() {
+  state.selected = null;
+  _ctxTask = null;
+  renderBoard();      // drops the .sel highlight + syncs the nav active state
+  renderOverview();   // fills the center column now that nothing is selected
+}
+function updateOverviewNav() {
+  const nav = document.getElementById("overviewNav");
+  if (nav) nav.classList.toggle("active", !state.selected);
+}
+function isEditableTarget(el) {
+  if (!el) return false;
+  const tag = (el.tagName || "").toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable;
+}
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -1313,6 +1339,7 @@ function renderBoard() {
   const archivable = state.tasks.filter(t => ["review","done","failed","cancelled"].includes(t.status)).length;
   const ab = document.getElementById("archiveBtn");
   if (ab) ab.textContent = archivable ? "· archive completed (" + archivable + ")" : "";
+  updateOverviewNav();
 }
 
 /*__MARKDOWN_RENDERER_START__*/
@@ -1542,7 +1569,8 @@ async function selectTask(id) {
   const el = document.getElementById("session");
   // Preserve scroll for non-live tasks — innerHTML rebuild resets scrollTop to 0.
   const prevScrollTop = live ? null : (el.querySelector(".transcript")?.scrollTop ?? null);
-  el.innerHTML = '<div class="session"><h1>'+esc(t.title||t._id)+(live?'<span class="streaming">● running</span>':'')+'</h1>'
+  el.innerHTML = '<div class="session"><h1>'+esc(t.title||t._id)+(live?'<span class="streaming">● running</span>':'')
+    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></h1>'
     + '<div class="sub">'+esc(t.project||"")+' · '+esc(t.status)+(t.reviewState?' · '+esc(t.reviewState):'')+'</div>'
     + taskActionsHtml(t)
     + taskExecutionPanel(t, out)
@@ -3541,6 +3569,16 @@ function onCommandProjectChange() {
 document.addEventListener("click", (e) => {
   const wrapper = document.getElementById("t_project_wrapper");
   if (wrapper && !wrapper.contains(e.target)) closeProjectDropdown();
+});
+
+// Escape returns to the Overview — but never while typing in a field or with a
+// modal open (those own Escape themselves).
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!state.selected) return;
+  if (isEditableTarget(document.activeElement)) return;
+  if (document.querySelector(".overlay.open")) return;
+  showOverview();
 });
 
 async function loadProjects(fresh) {

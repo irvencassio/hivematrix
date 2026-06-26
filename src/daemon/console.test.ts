@@ -622,6 +622,50 @@ test("readiness cards sit directly under Lane Apps, before Runtime Capabilities"
   assert.ok(runtime > terminalReadiness, "Runtime Capabilities comes after both readiness cards");
 });
 
+test("board column has an Overview nav above + New task", () => {
+  assert.match(CONSOLE_HTML, /id="overviewNav"/, "Overview nav control present");
+  assert.match(CONSOLE_HTML, /class="ov-nav"[^>]*id="overviewNav"|id="overviewNav"[^>]*class="ov-nav"/, "uses the compact ov-nav style");
+  assert.ok(
+    CONSOLE_HTML.indexOf('id="overviewNav"') < CONSOLE_HTML.indexOf("＋ New task"),
+    "Overview sits above the + New task button",
+  );
+  assert.match(CONSOLE_HTML, /id="overviewNav"[^>]*onclick="showOverview\(\)"/, "clicking it returns to overview");
+});
+
+test("showOverview clears the selected task and renders the overview", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = js.match(/function showOverview\(\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(body.length > 20, "showOverview defined");
+  assert.match(body, /state\.selected = null/, "clears the selected task");
+  assert.match(body, /renderOverview\(\)/, "renders the overview state");
+  // Active-state sync lives in renderBoard via updateOverviewNav.
+  assert.match(js, /function updateOverviewNav\(/, "active-state helper present");
+});
+
+test("task detail renders a Back to overview action", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const selectTask = js.match(/async function selectTask\(id\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(selectTask.length > 100, "selectTask body extracted");
+  assert.match(selectTask, /ov-back/, "detail header has a back-to-overview control");
+  assert.match(selectTask, /showOverview\(\)/, "the back control calls showOverview");
+});
+
+test("Escape returns to Overview only outside editable fields", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function isEditableTarget\(/, "editable-focus guard present");
+  assert.match(js, /isContentEditable/, "guards contenteditable focus");
+  assert.match(js, /e\.key !== "Escape"/, "only acts on the Escape key");
+  assert.match(js, /\.overlay\.open/, "does not steal Escape from open modals");
+  assert.match(js, /addEventListener\("keydown"/, "a keydown listener is registered");
+});
+
+test("new task and task selection remain intact", () => {
+  assert.match(CONSOLE_HTML, /toggleForm\('taskForm'\)/, "+ New task still toggles the task form");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function createTask\(/, "createTask flow preserved");
+  assert.match(js, /onclick="selectTask\(/, "task cards remain selectable in renderBoard");
+});
+
 test("frontier usage has its own Usage section above Models", () => {
   assert.match(CONSOLE_HTML, /id="usageSec"/, "standalone Usage section present");
   assert.match(CONSOLE_HTML, /<details class="ctx-sec" id="usageSec" open>/, "Usage is a collapsible ctx-sec, open by default");
