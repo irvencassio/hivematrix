@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.92 — 2026-06-26
+
+Post-autoupdate Lane app update handling
+
 ## v0.1.91 — 2026-06-26
 
 _Maintenance release._
