@@ -74,6 +74,23 @@ export async function prepareWorkflowById(workflowId: string, inputs: Record<str
       );
       return { ok: true, status: "prepared", workflow, result };
     }
+    case "content-youtube-summary": {
+      const { prepareYoutubeSummary } = await import("./youtube-summary");
+      const out = await prepareYoutubeSummary({
+        url: typeof inputs.url === "string" ? inputs.url : "",
+        title: typeof inputs.title === "string" ? inputs.title : undefined,
+      });
+      if (!out.ok) {
+        return { ok: false, status: out.status, workflow, missing: out.missing, reason: out.reason };
+      }
+      return {
+        ok: true,
+        status: "prepared",
+        workflow,
+        runId: out.runId,
+        result: { markdown: out.markdown, transcriptUsed: out.transcriptUsed, videoId: out.videoId },
+      };
+    }
     default:
       return { ok: false, status: "unsupported", workflow, reason: `no prepare handler for "${def.handler}"` };
   }

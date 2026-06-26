@@ -307,6 +307,29 @@ export const DEFAULT_COO_ROUTING_RULES: ReadonlyArray<Record<string, unknown>> =
     riskTier: "normal",
     notes: "Canonical default route for review/verification work.",
   },
+  {
+    id: "content.youtube_summary",
+    name: "YouTube Video Summary",
+    priority: 20,
+    intent: "youtube_video_summary",
+    match: {
+      phrases: [
+        "youtube summary",
+        "summarize this youtube video",
+        "summarize youtube",
+        "run the youtube thing",
+        "youtube thing that summarizes",
+        "youtube video summary",
+      ],
+      domains: ["youtube.com", "youtu.be"],
+    },
+    lane: "review",
+    capability: "content.youtube.summary",
+    backendPolicy: "local_first_frontier_on_failure",
+    modelPosture: "mixed-claude",
+    riskTier: "low",
+    notes: "Routes YouTube video summary requests to the content.youtube_summary workflow (review lane). Public transcript fetched daemon-side — no Browser Lane required for public videos. Browser Lane is a human-directed fallback only.",
+  },
 ];
 
 /**
