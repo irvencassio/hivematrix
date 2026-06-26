@@ -88,6 +88,20 @@ test("settings surfaces conservative voice auto-approval controls", () => {
   assert.match(js, /Content, external, stuck, and tool approvals stay manual/, "documents manual approval boundaries");
 });
 
+test("settings binary controls use the standardized readable switch component", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const renderFeatures = js.match(/async function renderFeatures\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+
+  assert.match(CONSOLE_HTML, /\.settings-switch\b/, "settings switch style exists");
+  assert.match(js, /function settingsSwitch\(/, "shared switch renderer exists");
+  assert.match(js, /role="switch"/, "switch uses accessible role");
+  assert.match(js, /aria-checked="/, "switch exposes checked state");
+  assert.match(js, /Enabled/, "active state uses readable copy");
+  assert.match(js, /Off/, "inactive state uses readable copy");
+  assert.match(js, /Unavailable/, "disabled state stays explicit");
+  assert.doesNotMatch(renderFeatures, /reply-toggle/, "feature settings no longer reuse reply/retry button styles");
+});
+
 test("main screen usage shows no dollar amounts (counts/tokens only)", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.doesNotMatch(js, /HiveMatrix spend/, "no spend tooltip");
@@ -228,6 +242,7 @@ test("Features tab lists optional capabilities with on/off toggles", () => {
   assert.match(js, /async function renderFeatures\(/);
   assert.match(js, /api\("\/settings\/features"\)/, "fetches the feature flags");
   assert.match(js, /async function toggleFeature\(/);
+  assert.match(js, /settingsSwitch\(/, "renders standard settings switches");
   assert.match(js, /\/settings\/features.*method: "POST"/s, "toggles via POST");
 });
 

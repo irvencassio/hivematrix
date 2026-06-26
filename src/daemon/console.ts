@@ -396,6 +396,23 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .reply-subhead { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
   .reply-row button.reply-primary { font-size: 13px; font-weight: 600; padding: 8px 18px; }
   .reply-toggle.active { border-color: var(--accent-2) !important; color: var(--accent-2) !important; }
+  .settings-switch { display: inline-flex; align-items: center; gap: 8px; min-width: 112px; justify-content: flex-start;
+    border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px 4px 5px; background: var(--panel-2);
+    color: var(--muted); font-size: 11px; font-weight: 700; line-height: 1; cursor: pointer; white-space: nowrap; }
+  .settings-switch:hover { border-color: var(--accent-2); color: var(--text); }
+  .settings-switch:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .settings-switch-track { position: relative; width: 34px; height: 18px; border-radius: 999px; flex: 0 0 34px;
+    background: var(--border); box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); transition: background .16s ease; }
+  .settings-switch-knob { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.35); transition: transform .16s ease, background .16s ease; }
+  .settings-switch-text { min-width: 58px; text-align: left; color: inherit; }
+  .settings-switch.is-on { border-color: color-mix(in srgb, var(--ok) 70%, var(--border)); color: var(--text);
+    background: color-mix(in srgb, var(--ok) 16%, var(--panel-2)); }
+  .settings-switch.is-on .settings-switch-track { background: var(--ok); }
+  .settings-switch.is-on .settings-switch-knob { transform: translateX(16px); background: var(--bg); }
+  .settings-switch.is-off { color: var(--muted); }
+  .settings-switch.is-disabled { opacity: .55; cursor: not-allowed; }
+  .settings-switch.is-disabled:hover { border-color: var(--border); color: var(--muted); }
   .transcript { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
     max-height: 240px; overflow-y: auto; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
     white-space: pre-wrap; margin-bottom: 16px; color: var(--code-text); }
@@ -3657,6 +3674,18 @@ function switchSettingsTab(tab) {
   if (tab === "about") { renderAbout(); checkUpdate(); }
 }
 
+function settingsSwitch(on, onclick, opts) {
+  const disabled = opts && opts.disabled === true;
+  const label = disabled ? "Unavailable" : (on ? "Enabled" : "Off");
+  const title = opts && opts.title ? opts.title : label;
+  const disabledAttrs = disabled ? ' disabled aria-disabled="true"' : '';
+  const clickAttr = disabled ? '' : ' onclick="' + onclick + '"';
+  return '<button type="button" role="switch" aria-checked="' + (on ? 'true' : 'false') + '" class="settings-switch ' + (disabled ? 'is-disabled' : (on ? 'is-on' : 'is-off')) + '"' + clickAttr + disabledAttrs + ' title="' + esc(title) + '">'
+    + '<span class="settings-switch-track" aria-hidden="true"><span class="settings-switch-knob"></span></span>'
+    + '<span class="settings-switch-text">' + label + '</span>'
+    + '</button>';
+}
+
 async function renderFeatures() {
   const el = document.getElementById("s_features");
   el.innerHTML = '<div class="muted">Loading…</div>';
@@ -3668,8 +3697,8 @@ async function renderFeatures() {
     const incapable = f.capable === false;
     const reason = (incapable && f.reason) ? ' <span style="color:var(--accent-2)">— ' + esc(f.reason) + '</span>' : '';
     const control = incapable
-      ? '<button class="reply-toggle" disabled title="' + esc(f.reason || 'not available') + '" style="opacity:.45;cursor:not-allowed">Unavailable</button>'
-      : '<button class="reply-toggle' + (on ? ' active' : '') + '" onclick="toggleFeature(\'' + esc(f.key) + '\',' + (!on) + ')">' + (on ? 'On' : 'Off') + '</button>';
+      ? settingsSwitch(false, '', { disabled: true, title: f.reason || 'not available' })
+      : settingsSwitch(on, "toggleFeature('" + esc(f.key) + "'," + (!on) + ")", { title: (on ? 'Turn off ' : 'Turn on ') + f.label });
     return '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
       + '<div style="flex:1"><div style="font-weight:600">' + esc(f.label) + '</div>'
       + '<div class="muted" style="font-size:11px;margin-top:2px">' + esc(f.description) + reason + '</div></div>'
@@ -3681,7 +3710,7 @@ async function renderFeatures() {
   const autoRow = '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
     + '<div style="flex:1"><div style="font-weight:600">Voice auto-approval</div>'
     + '<div class="muted" style="font-size:11px;margin-top:2px">Allows Talk to approve non-content directive checkpoints. Content, external, stuck, and tool approvals stay manual.</div></div>'
-    + '<button class="reply-toggle' + (checkpointAuto ? ' active' : '') + '" onclick="toggleAutoApproval(' + (!checkpointAuto) + ')">' + (checkpointAuto ? 'On' : 'Off') + '</button>'
+    + settingsSwitch(checkpointAuto, 'toggleAutoApproval(' + (!checkpointAuto) + ')', { title: checkpointAuto ? 'Turn off voice auto-approval' : 'Turn on voice auto-approval' })
     + '</div>';
   const b = (brief && brief.briefing) || {};
   const briefOn = b.enabled === true;
@@ -3695,7 +3724,7 @@ async function renderFeatures() {
     + '<div class="muted" style="font-size:11px;margin-top:2px">Pushes a daily standup (pending approvals, failures, active directives, usage) to your phone. ' + esc(apnsNote) + '. <button class="linklike" onclick="sendTestBriefing(this)">Send test</button></div></div>'
     + '<div class="row" style="gap:8px;align-items:center">'
     + '<select onchange="setBriefingHour(this.value)" ' + (briefOn ? '' : 'disabled ') + 'style="padding:4px 6px">' + hourOpts + '</select>'
-    + '<button class="reply-toggle' + (briefOn ? ' active' : '') + '" onclick="toggleBriefing(' + (!briefOn) + ')">' + (briefOn ? 'On' : 'Off') + '</button>'
+    + settingsSwitch(briefOn, 'toggleBriefing(' + (!briefOn) + ')', { title: briefOn ? 'Turn off morning briefing' : 'Turn on morning briefing' })
     + '</div></div>';
   // Video factory is no longer a Features toggle — it's a capability driven by a
   // user directive (scheduled job) that runs the factory and pauses at the script-
