@@ -470,6 +470,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .role-row select { width: 190px; flex: none; }
   .copybtn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px; font-size: 11px; cursor: pointer; }
   .copybtn:hover { border-color: var(--accent); }
+  /* Prominent primary for Lane actions (the form-scoped .create isn't styled in cards). */
+  .lane-primary { background: var(--accent); color: var(--create-btn-text); border: 0; border-radius: 6px; padding: 5px 12px; font-size: 11px; font-weight: 700; cursor: pointer; }
+  .lane-primary:hover { filter: brightness(1.08); }
+  /* When an update/repair is involved, use the warning colour so it stands out. */
+  .lane-primary.update { background: var(--warn); color: #1a1205; }
+  .lane-primary[disabled] { opacity: .5; cursor: default; filter: none; }
   .posture { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel-2); }
   .posture-summary { padding: 8px 10px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); }
   .posture-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); font-size: 11px; }
@@ -4055,7 +4061,11 @@ function laneStateChip(label, value, kind) {
 function laneActionCall(id, action) {
   if (action === "run_readiness") return "laneRunReadiness('"+id+"')";
   if (action === "repair") return "laneRepairApplications('"+id+"')";
-  return "laneAppAction('"+id+"','"+(action === "open" ? "launch" : action)+"')";
+  // "update" and "open" are UI labels that map onto real endpoints: update →
+  // install (installs/updates from the bundled artifact); open → launch. There is
+  // no /lane-apps/:id/update route.
+  const endpoint = action === "open" ? "launch" : action === "update" ? "install" : action;
+  return "laneAppAction('"+id+"','"+endpoint+"')";
 }
 function laneBtn(id, action, label, cls, reason) {
   if (reason) return '<button class="'+cls+'" disabled title="'+esc(reason)+'">'+esc(label)+'</button>';
@@ -4075,7 +4085,7 @@ async function renderLaneSetup() {
     ? '<div class="card" style="cursor:default;border:1px solid var(--warn)">'
       + '<div class="t" style="color:var(--warn)">⚠ HiveMatrix updated — Lane apps need update: '+esc(us.needsUpdate.join(", "))+'</div>'
       + (us.anyShadowed ? '<div class="muted" style="font-size:11px;margin-top:3px">A stale copy in /Applications is active and shadowing the fresh build.</div>' : '')
-      + '<div class="row" style="margin-top:6px;justify-content:flex-end"><button class="create" onclick="laneUpdateAll()">Update Lane Apps</button></div>'
+      + '<div class="row" style="margin-top:6px;justify-content:flex-end"><button class="lane-primary update" onclick="laneUpdateAll()">Update Lane Apps</button></div>'
       + '<div id="lane_update_all_msg" class="muted" style="font-size:10px;margin-top:4px"></div>'
       + '</div>'
     : '';
@@ -4097,7 +4107,9 @@ async function renderLaneSetup() {
     const dr = lane.disabledReasons || {};
     const na = lane.nextAction || { action: "verify", label: "Verify" };
     // Primary = the single recommended action (never disabled — it's the fix).
-    const primary = laneBtn(lane.id, na.action, na.label, "create", null);
+    // Colour it amber when an update/repair is involved so it's impossible to miss.
+    const updateLike = na.action === "install" || na.action === "update" || na.action === "repair";
+    const primary = laneBtn(lane.id, na.action, na.label, "lane-primary" + (updateLike ? " update" : ""), null);
     // Secondary actions, each disabled-with-reason when unavailable.
     const secondary = [
       laneBtn(lane.id, "verify", "Verify", "copybtn", dr.verify),

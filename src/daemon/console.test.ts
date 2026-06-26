@@ -622,6 +622,31 @@ test("readiness cards sit directly under Lane Apps, before Runtime Capabilities"
   assert.ok(runtime > terminalReadiness, "Runtime Capabilities comes after both readiness cards");
 });
 
+test("the lane 'update' action targets the real install endpoint (not a dead /update route)", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = js.match(/function laneActionCall\([\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(body.length > 20, "laneActionCall extracted");
+  const laneActionCall = new Function(body + "\nreturn laneActionCall;")() as (id: string, action: string) => string;
+  // The bug: "update" mapped to laneAppAction(id,'update') → POST /lane-apps/:id/update (404).
+  assert.equal(laneActionCall("terminal-lane", "update"), "laneAppAction('terminal-lane','install')");
+  assert.equal(laneActionCall("terminal-lane", "install"), "laneAppAction('terminal-lane','install')");
+  assert.equal(laneActionCall("terminal-lane", "open"), "laneAppAction('terminal-lane','launch')");
+  assert.equal(laneActionCall("terminal-lane", "repair"), "laneRepairApplications('terminal-lane')");
+  assert.equal(laneActionCall("terminal-lane", "run_readiness"), "laneRunReadiness('terminal-lane')");
+});
+
+test("the lane primary action button is prominent and color-coded for updates", () => {
+  // A globally-scoped style (not the form-only .create) + an amber 'update' variant.
+  assert.match(CONSOLE_HTML, /\.lane-primary\b/, "lane-primary style defined");
+  assert.match(CONSOLE_HTML, /\.lane-primary\.update\b/, "amber update variant defined");
+  const js = extractScript(CONSOLE_HTML);
+  const render = js.match(/async function renderLaneSetup\(\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(render, /lane-primary/, "card primary uses lane-primary");
+  // The update color is applied for update/install/repair actions.
+  assert.match(render, /install.*update.*repair|update.*install.*repair|"install"\s*\|\|\s*na\.action === "update"/, "update modifier gated on action");
+  assert.match(render, /Update Lane Apps/, "banner button present");
+});
+
 test("Lane Apps cards are driven by the unified /lane-setup model", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /async function renderLaneSetup\(/, "unified Lane Setup renderer present");
@@ -649,7 +674,7 @@ test("Lane Setup buttons are never dead — disabled ones carry a visible reason
   const render = js.match(/async function renderLaneSetup\(\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
   assert.match(render, /disabledReasons/, "uses the model's disabledReasons");
   // Buttons reuse the shared HiveMatrix styles via the laneBtn helper.
-  assert.match(render, /"create"/, "primary uses the shared .create style");
+  assert.match(render, /"lane-primary"/, "primary uses the prominent lane-primary style");
   assert.match(render, /"copybtn"/, "secondary uses the shared .copybtn style");
   assert.match(js, /function laneBtn\([\s\S]*?<button class="'\s*\+\s*cls/, "laneBtn renders disabled buttons with a reason title");
   assert.match(js, /disabled title=/, "disabled buttons carry a reason title");
