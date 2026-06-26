@@ -31,5 +31,5 @@ Design: `docs/superpowers/specs/2026-06-26-lane-app-artifact-delivery-design.md`
 - [x] `npm test`.
 - [x] `node scripts/scope-wall.mjs`.
 - [x] `npm run verify:portal`.
-- [ ] Commit and push to `main`.
+- [x] Commit and push to `main`.
 - [ ] Release a new HiveMatrix desktop version.
