@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { getLaneApp } from "./catalog";
-import { artifactPathCandidatesFor, artifactPathFor, getLaneAppState, installLaneApp, repairApplicationsCopyWith } from "./index";
+import { artifactPathCandidatesFor, artifactPathFor, getLaneAppState, installLaneApp, repairApplicationsCopyWith, updateAllStaleLaneApps } from "./index";
 
 const HOME = "/Users/tester";
 const browser = getLaneApp("browser-lane");
@@ -92,6 +92,42 @@ test("a same-version /Applications copy with a stale build id is stale_copy", ()
   assert.equal(state.status, "stale_copy");
   assert.equal(state.activeIsStale, true);
   assert.equal(state.shadowed, false, "not shadowed — there is no current user copy");
+});
+
+test("updateAllStaleLaneApps installs + replaces a writable stale shadowing /Applications copy", async () => {
+  const installed: string[] = [];
+  const repaired: string[] = [];
+  const states = [
+    { id: "browser-lane", displayName: "Browser Lane", status: "installed", shadowed: false, activePath: "/Applications/Browser Lane.app" },
+    { id: "terminal-lane", displayName: "Terminal Lane", status: "stale_copy", shadowed: true, activePath: "/Applications/Terminal Lane.app" },
+  ];
+  const r = await updateAllStaleLaneApps({
+    getStates: async () => states,
+    install: async (id) => { installed.push(id); return { installedPath: `/Users/me/Applications/HiveMatrix Lanes/${id}.app`, activePath: `/Applications/${id}.app`, shadowed: true }; },
+    repair: async (id) => { repaired.push(id); return { ok: true, replacedPath: `/Applications/${id}.app` }; },
+  });
+  // Only the stale lane is acted on.
+  assert.deepEqual(installed, ["terminal-lane"]);
+  assert.deepEqual(repaired, ["terminal-lane"]);
+  const t = r.results.find((x) => x.id === "terminal-lane");
+  assert.ok(t);
+  assert.equal(t.updated, true);
+  assert.equal(t.replacedApplications, "/Applications/terminal-lane.app");
+  assert.equal(r.results.find((x) => x.id === "browser-lane"), undefined, "current lane skipped");
+  assert.equal(r.ok, true);
+});
+
+test("updateAllStaleLaneApps never leaves a silent shadow when /Applications is not writable", async () => {
+  const r = await updateAllStaleLaneApps({
+    getStates: async () => [{ id: "terminal-lane", displayName: "Terminal Lane", status: "stale_copy", shadowed: true, activePath: "/Applications/Terminal Lane.app" }],
+    install: async () => ({ installedPath: "/Users/me/Applications/HiveMatrix Lanes/Terminal Lane.app", activePath: "/Applications/Terminal Lane.app", shadowed: true }),
+    repair: async () => ({ ok: false, instructions: "/Applications/Terminal Lane.app is not writable — drag it to the Trash, then retry." }),
+  });
+  const t = r.results.find((x) => x.id === "terminal-lane");
+  assert.ok(t);
+  assert.equal(t.shadowed, true, "still shadowed — surfaced, not hidden");
+  assert.match(t.warning ?? "", /not writable|Trash/i);
+  assert.equal(r.ok, false, "overall not-ok when a stale copy remains active");
 });
 
 test("repairApplicationsCopyWith replaces a writable stale /Applications copy", () => {

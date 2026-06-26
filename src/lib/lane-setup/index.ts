@@ -60,6 +60,11 @@ export interface LaneSetupEntry {
   readiness: BrowserReadinessSummary | TerminalReadinessSummary;
   nextAction: { action: LaneActionId; label: string };
   disabledReasons: Record<string, string>;
+  /** Build identity (HMBuildId) of the active installed copy / the bundled artifact. */
+  installedBuildId: string | null;
+  bundledBuildId: string | null;
+  /** The active copy is version-stale or shadowed → the bundled app should replace it. */
+  needsUpdate: boolean;
   /** Every detected copy on disk (active/current flags) so the UI can list them. */
   installedCopies: LaneInstalledCopySummary[];
   /** A stale /Applications copy is shadowing a current user copy. */
@@ -68,7 +73,15 @@ export interface LaneSetupEntry {
   activeIsStale: boolean;
 }
 
-export interface LaneSetup { lanes: LaneSetupEntry[] }
+export interface LaneUpdateSummary {
+  /** Display names of the Lane apps that need updating after a main-app update. */
+  needsUpdate: string[];
+  count: number;
+  /** Any stale copy is the active /Applications copy (a silent shadow risk). */
+  anyShadowed: boolean;
+}
+
+export interface LaneSetup { lanes: LaneSetupEntry[]; updateSummary: LaneUpdateSummary }
 
 interface LaneVerificationRecord { signatureOk?: boolean; launchOk?: boolean | null }
 
@@ -203,6 +216,11 @@ export async function getLaneSetup(deps: LaneSetupDeps = {}): Promise<LaneSetup>
       disabledReasons.reveal = "Install the app first.";
     }
 
+    // "needs update" = the bundled app should replace the active copy: a
+    // version-stale active copy, or a stale /Applications copy shadowing a fresh
+    // user copy. (broken → Verify, not_installed → Install — handled separately.)
+    const needsUpdate = installState === "outdated" || installState === "stale" || shadowed;
+
     return {
       id: descriptor.id,
       displayName: descriptor.displayName,
@@ -216,13 +234,23 @@ export async function getLaneSetup(deps: LaneSetupDeps = {}): Promise<LaneSetup>
       readiness,
       nextAction,
       disabledReasons,
+      installedBuildId: state?.installedBuildId ?? null,
+      bundledBuildId: state?.expectedBuildId ?? null,
+      needsUpdate,
       installedCopies,
       shadowed,
       activeIsStale,
     };
   });
 
-  return { lanes };
+  const stale = lanes.filter((l) => l.needsUpdate);
+  const updateSummary: LaneUpdateSummary = {
+    needsUpdate: stale.map((l) => l.displayName),
+    count: stale.length,
+    anyShadowed: stale.some((l) => l.shadowed),
+  };
+
+  return { lanes, updateSummary };
 }
 
 // Re-export the catalog accessor so callers can resolve executables/ids safely.

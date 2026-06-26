@@ -4068,9 +4068,25 @@ async function renderLaneSetup() {
   const r = await api("/lane-setup");
   const lanes = (r && r.lanes) || [];
   if (!lanes.length) { el.innerHTML = '<div class="muted">No lane apps registered.</div>'; return; }
-  el.innerHTML = lanes.map(lane => {
+  // Post-update banner: when the bundled HiveMatrix carries newer Lane apps than
+  // what's installed/active, make it impossible to miss + one click to fix.
+  const us = (r && r.updateSummary) || { needsUpdate: [], count: 0, anyShadowed: false };
+  const banner = us.count > 0
+    ? '<div class="card" style="cursor:default;border:1px solid var(--warn)">'
+      + '<div class="t" style="color:var(--warn)">⚠ HiveMatrix updated — Lane apps need update: '+esc(us.needsUpdate.join(", "))+'</div>'
+      + (us.anyShadowed ? '<div class="muted" style="font-size:11px;margin-top:3px">A stale copy in /Applications is active and shadowing the fresh build.</div>' : '')
+      + '<div class="row" style="margin-top:6px;justify-content:flex-end"><button class="create" onclick="laneUpdateAll()">Update Lane Apps</button></div>'
+      + '<div id="lane_update_all_msg" class="muted" style="font-size:10px;margin-top:4px"></div>'
+      + '</div>'
+    : '';
+  el.innerHTML = banner + lanes.map(lane => {
     const installed = lane.installedVersion ? esc(lane.installedVersion.short)+' ('+esc(lane.installedVersion.build)+')' : '—';
     const bundled = esc(lane.bundledVersion.short)+' ('+esc(lane.bundledVersion.build)+')';
+    // Build identity makes a same-version stale copy legible (build 2 vs 2 but
+    // different HMBuildId).
+    const idLine = (lane.installedBuildId || lane.bundledBuildId)
+      ? '<div class="muted" style="font-size:10px;margin-top:2px">build '+esc(lane.installedBuildId||'—')+(lane.bundledBuildId && lane.bundledBuildId !== lane.installedBuildId ? ' → bundled '+esc(lane.bundledBuildId) : '')+'</div>'
+      : '';
     const signing = laneStateChip("Signing", lane.signingState, lane.signingState === "valid" ? "ok" : lane.signingState === "invalid" ? "err" : "muted");
     const launch = laneStateChip("Launch", lane.launchState, lane.launchState === "running" ? "ok" : lane.launchState === "failed" ? "err" : lane.launchState === "not_running" ? "warn" : "muted");
     const daemon = laneStateChip("Daemon", lane.daemonState, lane.daemonState === "reachable" ? "ok" : "err");
@@ -4103,6 +4119,7 @@ async function renderLaneSetup() {
     return '<div class="card" style="cursor:default">'
       + '<div class="t">'+esc(lane.displayName)+' '+laneInstallBadge(lane.installState)+'</div>'
       + '<div class="muted" style="font-size:11px;margin-top:4px">Installed: <b>'+installed+'</b> · Bundled: <b>'+bundled+'</b></div>'
+      + idLine
       + '<div class="muted" style="font-size:10px;margin-top:2px">'+esc(lane.installedPath||'—')+'</div>'
       + copiesList
       + shadowWarn
@@ -4114,6 +4131,20 @@ async function renderLaneSetup() {
       + '<div id="lane_app_msg_'+esc(lane.id)+'" class="muted" style="font-size:10px;margin-top:4px"></div>'
       + '</div>';
   }).join("");
+}
+
+async function laneUpdateAll() {
+  const msg = document.getElementById("lane_update_all_msg");
+  if (msg) msg.textContent = "Updating Lane apps from the bundled HiveMatrix…";
+  const r = await api("/lane-apps/update-all", { method:"POST", headers:{"Content-Type":"application/json"}, body: "{}" });
+  if (!r || !r.results) { if (msg) msg.innerHTML = '<span style="color:var(--err)">'+esc((r&&r.error)||'Update failed')+'</span>'; return; }
+  const lines = r.results.map(x => {
+    if (x.replacedApplications) return '✓ '+esc(x.displayName)+' — replaced '+esc(x.replacedApplications);
+    if (x.shadowed) return '⚠ '+esc(x.displayName)+' — '+esc(x.warning||'still shadowed by a stale /Applications copy');
+    return '✓ '+esc(x.displayName)+' — updated '+esc(x.installedPath||'');
+  });
+  if (msg) msg.innerHTML = lines.join('<br>') || 'Nothing to update.';
+  renderLaneSetup();
 }
 
 async function laneRepairApplications(id) {

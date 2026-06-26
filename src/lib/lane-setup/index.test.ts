@@ -80,6 +80,44 @@ test("installState maps from the lane-app status", async () => {
   }
 });
 
+test("needsUpdate + updateSummary aggregate the stale lane apps", async () => {
+  // browser current; terminal stale → only terminal needs update.
+  const d = deps({ appStates: () => [
+    appState({ id: "browser-lane", displayName: "Browser Lane", status: "installed" }),
+    appState({ id: "terminal-lane", displayName: "Terminal Lane", status: "stale_copy", shadowed: false, activeIsStale: true }),
+  ] });
+  const setup = await getLaneSetup(d);
+  const b = setup.lanes.find(l => l.id === "browser-lane");
+  const t = setup.lanes.find(l => l.id === "terminal-lane");
+  assert.equal(b?.needsUpdate, false);
+  assert.equal(t?.needsUpdate, true);
+  assert.deepEqual(setup.updateSummary.needsUpdate, ["Terminal Lane"]);
+  assert.equal(setup.updateSummary.count, 1);
+  assert.equal(setup.updateSummary.anyShadowed, false);
+});
+
+test("a shadowed lane counts as needing update and flags anyShadowed", async () => {
+  const d = deps({ appStates: () => [
+    appState({ id: "browser-lane", displayName: "Browser Lane", status: "stale_copy", shadowed: true, activeIsStale: true, activePath: "/Applications/Browser Lane.app" }),
+    appState({ id: "terminal-lane", displayName: "Terminal Lane", status: "installed" }),
+  ] });
+  const setup = await getLaneSetup(d);
+  assert.equal(setup.lanes.find(l => l.id === "browser-lane")?.needsUpdate, true);
+  assert.equal(setup.updateSummary.anyShadowed, true);
+  assert.deepEqual(setup.updateSummary.needsUpdate, ["Browser Lane"]);
+});
+
+test("entries surface installed + bundled build identity (HMBuildId)", async () => {
+  const d = deps({ appStates: () => [
+    appState({ id: "browser-lane", installedBuildId: "old1234", expectedBuildId: "new5678" }),
+    appState({ id: "terminal-lane", installedBuildId: "new5678", expectedBuildId: "new5678" }),
+  ] });
+  const b = (await getLaneSetup(d)).lanes.find(l => l.id === "browser-lane");
+  assert.ok(b);
+  assert.equal(b.installedBuildId, "old1234");
+  assert.equal(b.bundledBuildId, "new5678");
+});
+
 test("a stale_copy never reads as current and carries the shadow detail", async () => {
   const APPS = "/Applications/Browser Lane.app";
   const USER = "/Users/x/Applications/HiveMatrix Lanes/Browser Lane.app";

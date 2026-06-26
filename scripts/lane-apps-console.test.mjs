@@ -64,3 +64,15 @@ test("Lane Apps card surfaces installed copies, stale shadowing, and a repair ac
   // Install result surfaces the shadow warning honestly.
   assert.match(console, /\.warning|shadowed/);
 });
+
+test("Settings → Lanes shows a post-update banner with a one-click Update Lane Apps action", () => {
+  const console = read("src/daemon/console.ts");
+  // Banner driven by the aggregate update summary.
+  assert.match(console, /updateSummary/);
+  assert.match(console, /need(s)? update/i);
+  assert.match(console, /Update Lane Apps/);
+  assert.match(console, /laneUpdateAll/);
+  assert.match(console, /\/lane-apps\/update-all/);
+  // Build identity is visible so a same-version stale copy is legible.
+  assert.match(console, /bundledBuildId|installedBuildId/);
+});

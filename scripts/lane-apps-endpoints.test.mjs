@@ -38,3 +38,9 @@ test("daemon exposes a typed repair-applications route + install reports active 
   assert.match(server, /activePath/);
   assert.match(server, /shadowed|warning/);
 });
+
+test("daemon exposes POST /lane-apps/update-all wired to the update-all helper", () => {
+  const server = read("src/daemon/server.ts");
+  assert.match(server, /urlPath === "\/lane-apps\/update-all"/);
+  assert.match(server, /updateAllStaleLaneApps/);
+});

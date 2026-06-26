@@ -368,3 +368,80 @@ export function activePathFor(id: string): string | null {
   const descriptor = getLaneApp(id as LaneAppDescriptor["id"]);
   return resolveInstallTarget(descriptor, { home: homedir(), exists: existsSync }).activePath;
 }
+
+// --- Update all stale lane apps (post main-app update) ----------------------
+
+interface UpdateAllStateLike {
+  id: string;
+  displayName: string;
+  status: string; // LaneAppStatus at runtime; widened so injected stubs/states fit
+  shadowed?: boolean;
+  activePath?: string | null;
+}
+
+export interface LaneUpdateResult {
+  id: string;
+  displayName: string;
+  updated: boolean;
+  installedPath?: string;
+  activePath?: string | null;
+  replacedApplications?: string;
+  shadowed: boolean;
+  warning?: string;
+}
+
+export interface UpdateAllStaleLaneAppsDeps {
+  getStates: () => Promise<UpdateAllStateLike[]>;
+  install: (id: string) => Promise<{ installedPath: string; activePath: string | null; shadowed: boolean; warning?: string }>;
+  repair: (id: string) => Promise<RepairApplicationsResult>;
+}
+
+/** A lane needs the bundled app to replace its active copy. */
+function laneIsStale(s: UpdateAllStateLike): boolean {
+  return s.status === "update_available" || s.status === "stale_copy" || !!s.shadowed;
+}
+
+/**
+ * Install/update every stale lane app from the bundled artifacts, and — when a
+ * stale /Applications copy is still active and writable — replace it so the fresh
+ * build actually launches. Reports exactly which path changed and never leaves a
+ * silently-shadowed user copy (a remaining shadow is surfaced with instructions).
+ */
+export async function updateAllStaleLaneApps(deps: UpdateAllStaleLaneAppsDeps = defaultUpdateAllDeps()): Promise<{ ok: boolean; results: LaneUpdateResult[] }> {
+  const states = await deps.getStates();
+  const results: LaneUpdateResult[] = [];
+  for (const s of states) {
+    if (!laneIsStale(s)) continue;
+    const out: LaneUpdateResult = { id: s.id, displayName: s.displayName, updated: false, shadowed: false };
+    const installed = await deps.install(s.id);
+    out.installedPath = installed.installedPath;
+    out.activePath = installed.activePath;
+    out.updated = true;
+    if (installed.shadowed) {
+      // The active /Applications copy still wins — try to replace it.
+      const rep = await deps.repair(s.id);
+      if (rep.ok) {
+        out.replacedApplications = rep.replacedPath;
+        out.shadowed = false;
+      } else {
+        out.shadowed = true;
+        out.warning = rep.instructions ?? installed.warning;
+      }
+    }
+    results.push(out);
+  }
+  // Not-ok if any stale copy remains active (so the UI keeps flagging it).
+  const ok = results.every((r) => !r.shadowed);
+  return { ok, results };
+}
+
+function defaultUpdateAllDeps(): UpdateAllStaleLaneAppsDeps {
+  return {
+    getStates: async () => (await getAllLaneAppStates()).map((s) => ({ id: s.id, displayName: s.displayName, status: s.status, shadowed: s.shadowed, activePath: s.activePath })),
+    install: async (id) => {
+      const r = await installLaneAppById(id);
+      return { installedPath: r.installedPath, activePath: r.activePath, shadowed: r.shadowed, warning: r.warning };
+    },
+    repair: (id) => repairApplicationsCopy(id),
+  };
+}

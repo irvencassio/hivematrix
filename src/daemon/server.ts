@@ -1341,6 +1341,21 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /lane-apps/update-all — after a main-app update, install/update every
+      // stale Lane app from the bundled artifacts and replace any writable stale
+      // /Applications copy that still shadows. Reports the exact paths changed;
+      // no id, no shell, no arbitrary path.
+      if (req.method === "POST" && urlPath === "/lane-apps/update-all") {
+        const { updateAllStaleLaneApps } = await import("@/lib/lane-apps");
+        try {
+          const result = await updateAllStaleLaneApps();
+          json(res, 200, { ...result });
+        } catch (err) {
+          json(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
       // POST /lane-apps/:id/repair-applications — replace a stale, user-writable
       // /Applications copy with the bundled artifact, else return exact
       // instructions. Typed + id-constrained; no arbitrary path, no shell.
