@@ -11,6 +11,8 @@ export interface TermSessionInfo {
   cwd: string;
   alive: boolean;
   createdAt: string;
+  profileId?: string;
+  openCommand?: string;
 }
 
 export interface TermRunResult {

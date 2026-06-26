@@ -44,3 +44,22 @@ test("runCommand auto-creates a missing session", { timeout: 10_000 }, async (t)
   const r = await runCommand(id, "echo created-on-demand");
   assert.match(r.output, /created-on-demand/);
 });
+
+test("session can bind to a Terminal Lane profile/open command", { timeout: 10_000 }, async (t) => {
+  const id = createSession({
+    id: "bound_profile_test",
+    profileId: "local-dev",
+    openCommand: "/bin/bash",
+    cwd: "/tmp",
+  });
+  t.after(() => killSession(id));
+
+  const info = listSessions().find((s) => s.id === id);
+  assert.ok(info);
+  assert.equal(info.profileId, "local-dev");
+  assert.equal(info.openCommand, "/bin/bash");
+
+  const result = await runCommand(id, "echo bound-session");
+  assert.equal(result.exitCode, 0);
+  assert.match(result.output, /bound-session/);
+});

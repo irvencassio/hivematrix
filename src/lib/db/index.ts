@@ -573,6 +573,78 @@ const MIGRATIONS: string[] = [
   // signs in as (Google/Microsoft SSO, or a Keychain account label). Metadata
   // only — never a password/cookie/token; secrets stay in macOS Keychain.
   `ALTER TABLE browser_sites ADD COLUMN providerAccount TEXT;`,
+
+  // v25: Terminal Lane control-plane schema. Secrets never live here:
+  // terminal_credentials stores only Keychain credentialRef metadata.
+  `CREATE TABLE IF NOT EXISTS terminal_profiles (
+      _id TEXT PRIMARY KEY,
+      displayName TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      host TEXT,
+      user TEXT,
+      port INTEGER,
+      shell TEXT,
+      cwd TEXT,
+      credentialRef TEXT,
+      openCommand TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'unknown',
+      notes TEXT NOT NULL DEFAULT '',
+      metadata TEXT NOT NULL DEFAULT '{}',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_terminal_profiles_kind ON terminal_profiles(kind);
+    CREATE INDEX IF NOT EXISTS idx_terminal_profiles_status ON terminal_profiles(status);
+
+    CREATE TABLE IF NOT EXISTS terminal_credentials (
+      _id TEXT PRIMARY KEY,
+      profileId TEXT NOT NULL,
+      credentialRef TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'keychain_secret',
+      accountLabel TEXT,
+      status TEXT NOT NULL DEFAULT 'unknown',
+      lastVerifiedAt TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_terminal_credentials_ref ON terminal_credentials(credentialRef);
+    CREATE INDEX IF NOT EXISTS idx_terminal_credentials_profile ON terminal_credentials(profileId);
+
+    CREATE TABLE IF NOT EXISTS terminal_readiness_probes (
+      _id TEXT PRIMARY KEY,
+      profileId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      command TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_terminal_readiness_probes_profile ON terminal_readiness_probes(profileId, enabled);
+
+    CREATE TABLE IF NOT EXISTS terminal_readiness_runs (
+      _id TEXT PRIMARY KEY,
+      profileId TEXT NOT NULL,
+      probeId TEXT,
+      status TEXT NOT NULL,
+      color TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      startedAt TEXT NOT NULL DEFAULT (datetime('now')),
+      completedAt TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_terminal_readiness_runs_profile ON terminal_readiness_runs(profileId, startedAt);
+
+    CREATE TABLE IF NOT EXISTS terminal_session_audit (
+      _id TEXT PRIMARY KEY,
+      profileId TEXT,
+      sessionId TEXT,
+      event TEXT NOT NULL,
+      command TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_terminal_session_audit_created ON terminal_session_audit(createdAt);
+    CREATE INDEX IF NOT EXISTS idx_terminal_session_audit_profile ON terminal_session_audit(profileId, createdAt);`,
 ];
 
 // ------------------------------------------------------------------

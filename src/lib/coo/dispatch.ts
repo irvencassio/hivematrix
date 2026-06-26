@@ -57,12 +57,28 @@ export interface CooDispatchReadiness extends BrowserSiteReadinessMatch {
   warning: string | null;
 }
 
-export interface CooDispatchWorkItem {
+export interface BrowserCooDispatchWorkItem {
   envelopeId: string;
   lane: "browser";
   capability: string;
   envelope: BrowserBeeTaskRequestEnvelope;
 }
+
+export interface TerminalLaneWorkItemEnvelope {
+  command: string;
+  profileId: string | null;
+  cwd: string | null;
+  requiresApproval: boolean;
+}
+
+export interface TerminalCooDispatchWorkItem {
+  envelopeId: string;
+  lane: "terminal";
+  capability: string;
+  envelope: TerminalLaneWorkItemEnvelope;
+}
+
+export type CooDispatchWorkItem = BrowserCooDispatchWorkItem | TerminalCooDispatchWorkItem;
 
 export interface CooDispatchApproval {
   required: boolean;
@@ -120,8 +136,8 @@ const LANE_DISPATCH_POLICY: Record<LaneId, LaneDispatchPolicy> = {
     trust: "Desktop Lane controls native apps; actions need explicit approval before they run.",
   },
   terminal: {
-    mode: "approval_required",
-    trust: "Terminal Lane runs shell commands; the command must be reviewed before execution.",
+    mode: "executable",
+    trust: "Terminal Lane prepares a shell-session work item; command execution still happens inside the lane with an auditable session boundary.",
   },
   memory: {
     mode: "unsupported",
@@ -152,7 +168,7 @@ function buildBrowserWorkItem(
   request: CooDispatchRequest,
   route: CooResolvedRouteWithDisplay,
   projectPath: string | null,
-): CooDispatchWorkItem | null {
+): BrowserCooDispatchWorkItem | null {
   const startUrl = firstStartUrl(request);
   if (!startUrl) return null;
   // Project *label* (never a path) — defaults to the inbox project, never the
@@ -172,6 +188,20 @@ function buildBrowserWorkItem(
   // until a root is bound at create time.
   const envelope = buildBrowserBeeTaskRequestEnvelope(payload, projectPath ?? projectLabel);
   return { envelopeId: generateId(), lane: "browser", capability: route.capability, envelope };
+}
+
+function buildTerminalWorkItem(request: CooDispatchRequest, route: CooResolvedRouteWithDisplay): TerminalCooDispatchWorkItem {
+  return {
+    envelopeId: generateId(),
+    lane: "terminal",
+    capability: route.capability,
+    envelope: {
+      command: request.text,
+      profileId: null,
+      cwd: null,
+      requiresApproval: route.riskTier !== "low",
+    },
+  };
 }
 
 /**
@@ -241,6 +271,10 @@ export function dispatchCooRequest(request: CooDispatchRequest, options: CooDisp
     reason = escalated && policy.mode === "executable"
       ? `Rule "${route.ruleName}" is risk-tier ${route.riskTier}; ${laneDisplayName(route.lane)} execution is held for explicit approval.`
       : `${laneDisplayName(route.lane)} requires approval before acting. ${policy.trust}`;
+  } else if (route.lane === "terminal") {
+    workItem = buildTerminalWorkItem(request, route);
+    status = "prepared";
+    reason = `Prepared a ${laneDisplayName(route.lane)} work item for capability "${route.capability}" (rule "${route.ruleName}").`;
   } else {
     // Executable lane (browser).
     workItem = buildBrowserWorkItem(request, route, options.projectPath ?? null);
@@ -275,7 +309,7 @@ export function dispatchCooRequest(request: CooDispatchRequest, options: CooDisp
 // and no_match never do.
 // ------------------------------------------------------------------
 export interface CooTaskCreateInput {
-  workItem: CooDispatchWorkItem;
+  workItem: BrowserCooDispatchWorkItem;
   projectPath: string;
   route: CooResolvedRouteWithDisplay;
   request: CooDispatchRequest;
@@ -305,7 +339,7 @@ export async function dispatchCooTask(
 ): Promise<CooDispatchResult> {
   const base = dispatchCooRequest(request, { projectPath: options.projectPath ?? null, staleAfterHours: options.staleAfterHours });
   // Only a prepared Browser-Lane result with a real project root may create a task.
-  if (!options.create || base.status !== "prepared" || !base.workItem || !base.route) {
+  if (!options.create || base.status !== "prepared" || !base.workItem || !base.route || base.workItem.lane !== "browser") {
     return base;
   }
   // Honest execution gating: route succeeded, but only create when Browser Lane

@@ -7,7 +7,7 @@ test("provider delegates session lifecycle to the local shell engine", async () 
   const localCalls: string[] = [];
   const local: LocalTermBeeClient = {
     createSession: (opts) => {
-      localCalls.push(`create:${opts.id ?? ""}`);
+      localCalls.push(`create:${opts.id ?? ""}:${opts.profileId ?? ""}`);
       return opts.id ?? "local-generated";
     },
     listSessions: () => {
@@ -34,7 +34,25 @@ test("provider delegates session lifecycle to the local shell engine", async () 
   assert.deepEqual(sessions, [{ id: "s1", cwd: "/tmp", alive: true, createdAt: "2026-06-25T00:00:00.000Z" }]);
   assert.deepEqual(result, { output: "local-output", exitCode: 0, timedOut: false });
   assert.equal(killed, true);
-  assert.deepEqual(localCalls, ["create:term-1", "list", "run:term-1:pwd", "kill:term-1"]);
+  assert.deepEqual(localCalls, ["create:term-1:", "list", "run:term-1:pwd", "kill:term-1"]);
+});
+
+test("provider passes Terminal Lane host binding to the local shell engine", async () => {
+  let seen: unknown;
+  const provider = createTermBeeProvider({
+    local: {
+      createSession: (opts) => {
+        seen = opts;
+        return "bound";
+      },
+      listSessions: () => [],
+      killSession: () => true,
+      runCommand: async () => ({ output: "", exitCode: 0, timedOut: false }),
+    },
+  });
+
+  await provider.createSession({ id: "s1", profileId: "prod", openCommand: "ssh deploy@example.com" });
+  assert.deepEqual(seen, { id: "s1", profileId: "prod", openCommand: "ssh deploy@example.com" });
 });
 
 test("provider has no Canopy / external-bridge dependency", async () => {

@@ -78,6 +78,7 @@ test("browser route prepares a Browser Lane-ready work item", () => {
   assert.equal(result.capability, "workflow.run");
   assert.ok(result.workItem, "expected a browser work item");
   assert.equal(result.workItem.lane, "browser");
+  if (result.workItem.lane !== "browser") throw new Error("expected browser work item");
   assert.equal(result.workItem.envelope.startUrl, "https://app.heygen.com/");
   assert.equal(result.workItem.envelope.requiresLogin, true);
   assert.ok(result.workItem.envelopeId);
@@ -127,7 +128,6 @@ test("channel/native lanes return approval_required without acting", () => {
     ["mail", "mail.send"],
     ["message", "message.send"],
     ["desktop", "desktop.action"],
-    ["terminal", "terminal.run"],
   ] as const) {
     upsertCooRoutingRule({
       id: `rule_${lane}`,
@@ -145,6 +145,27 @@ test("channel/native lanes return approval_required without acting", () => {
     assert.ok(result.approval?.required, `${lane} approval flag`);
     assert.ok(result.approval.trust.length > 0, `${lane} trust note`);
   }
+});
+
+test("terminal route prepares a Terminal Lane work item but does not run it", () => {
+  upsertCooRoutingRule({
+    id: "rule_terminal",
+    name: "Terminal rule",
+    priority: 10,
+    intent: "shell",
+    match: { phrases: ["run command"] },
+    lane: "terminal",
+    capability: "terminal.run",
+  });
+
+  const result = dispatchCooRequest({ text: "run command npm test", project: "hivematrix" });
+
+  assert.equal(result.status, "prepared");
+  assert.equal(result.lane, "terminal");
+  assert.equal(result.workItem?.lane, "terminal");
+  assert.equal(result.workItem?.capability, "terminal.run");
+  assert.match(JSON.stringify(result.workItem), /npm test/);
+  assert.equal(result.approval, null);
 });
 
 test("a sensitive-risk browser rule escalates to approval_required", () => {
@@ -261,6 +282,7 @@ test("project label no longer falls back to the literal 'hive'", () => {
   browserRule();
   const result = dispatchCooRequest({ text: "browser upload something", domains: ["example.com"] });
   assert.ok(result.workItem);
+  if (result.workItem.lane !== "browser") throw new Error("expected browser work item");
   assert.notEqual(result.workItem.envelope.project, "hive");
 });
 

@@ -7,7 +7,7 @@ import {
 } from "./session";
 
 export interface LocalTermBeeClient {
-  createSession(opts: { id?: string; cwd?: string }): string;
+  createSession(opts: { id?: string; cwd?: string; profileId?: string; openCommand?: string }): string;
   listSessions(): TermSessionInfo[];
   killSession(id: string): boolean;
   runCommand(id: string, command: string, timeoutMs?: number): Promise<TermRunResult>;
@@ -20,7 +20,7 @@ export interface LocalTermBeeClient {
  * if the engine ever grows remote/host-bound sessions.
  */
 export interface TermBeeProvider {
-  createSession(opts?: { id?: string; cwd?: string }): Promise<string>;
+  createSession(opts?: { id?: string; cwd?: string; profileId?: string; openCommand?: string }): Promise<string>;
   listSessions(): Promise<TermSessionInfo[]>;
   killSession(id: string): Promise<boolean>;
   runCommand(id: string, command: string, timeoutMs?: number): Promise<TermRunResult>;

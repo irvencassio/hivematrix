@@ -17,6 +17,8 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 interface Session {
   id: string;
   cwd: string;
+  profileId?: string;
+  openCommand?: string;
   proc: ChildProcess;
   scrollback: string;
   alive: boolean;
@@ -32,12 +34,26 @@ function appendScrollback(s: Session, chunk: string): void {
 }
 
 /** Create a new shell session. Returns its id. */
-export function createSession(opts: { id?: string; cwd?: string } = {}): string {
+export function createSession(opts: { id?: string; cwd?: string; profileId?: string; openCommand?: string } = {}): string {
   const id = opts.id ?? `term_${randomBytes(5).toString("hex")}`;
   const cwd = opts.cwd ?? homedir();
-  // bash with no rc → clean, deterministic; reads commands from stdin.
-  const proc = spawn("/bin/bash", ["--norc", "--noprofile"], { cwd, stdio: ["pipe", "pipe", "pipe"] });
-  const s: Session = { id, cwd, proc, scrollback: "", alive: true, createdAt: new Date().toISOString(), busy: false };
+  // Default: bash with no rc → clean, deterministic; reads commands from stdin.
+  // Bound profiles can instead open a persistent command (usually `ssh user@host`)
+  // and future writes go into that same live process.
+  const proc = opts.openCommand
+    ? spawn("/bin/bash", ["-lc", `exec ${opts.openCommand}`], { cwd, stdio: ["pipe", "pipe", "pipe"] })
+    : spawn("/bin/bash", ["--norc", "--noprofile"], { cwd, stdio: ["pipe", "pipe", "pipe"] });
+  const s: Session = {
+    id,
+    cwd,
+    profileId: opts.profileId,
+    openCommand: opts.openCommand,
+    proc,
+    scrollback: "",
+    alive: true,
+    createdAt: new Date().toISOString(),
+    busy: false,
+  };
   proc.stdout?.on("data", (b: Buffer) => appendScrollback(s, b.toString("utf-8")));
   proc.stderr?.on("data", (b: Buffer) => appendScrollback(s, b.toString("utf-8")));
   proc.on("exit", () => { s.alive = false; });
@@ -46,7 +62,14 @@ export function createSession(opts: { id?: string; cwd?: string } = {}): string 
 }
 
 export function listSessions(): TermSessionInfo[] {
-  return [...sessions.values()].map((s) => ({ id: s.id, cwd: s.cwd, alive: s.alive, createdAt: s.createdAt }));
+  return [...sessions.values()].map((s) => ({
+    id: s.id,
+    cwd: s.cwd,
+    alive: s.alive,
+    createdAt: s.createdAt,
+    ...(s.profileId ? { profileId: s.profileId } : {}),
+    ...(s.openCommand ? { openCommand: s.openCommand } : {}),
+  }));
 }
 
 export function readScrollback(id: string, lastChars = 8_000): string | null {

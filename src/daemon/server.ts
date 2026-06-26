@@ -1372,6 +1372,75 @@ export function createDaemonServer() {
         return;
       }
 
+      if (req.method === "GET" && urlPath === "/terminal-lane/profiles") {
+        const { listTerminalProfileSummaries } = await import("@/lib/terminal-lane/store");
+        json(res, 200, { ok: true, lane: "terminal", profiles: listTerminalProfileSummaries() });
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/terminal-lane/profiles") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        try {
+          const { upsertTerminalProfile } = await import("@/lib/terminal-lane/store");
+          const profile = upsertTerminalProfile(body.profile ?? body);
+          json(res, 200, { ok: true, lane: "terminal", profile });
+        } catch (e) {
+          json(res, 400, { ok: false, lane: "terminal", error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
+      if (req.method === "GET" && urlPath === "/terminal-lane/dashboard") {
+        const { getTerminalLaneReadinessDashboard } = await import("@/lib/terminal-lane/store");
+        json(res, 200, { ok: true, ...getTerminalLaneReadinessDashboard() });
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/terminal-lane/probes") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        try {
+          const { upsertTerminalReadinessProbe } = await import("@/lib/terminal-lane/store");
+          const probe = upsertTerminalReadinessProbe(body.probe ?? body);
+          json(res, 200, { ok: true, lane: "terminal", probe });
+        } catch (e) {
+          json(res, 400, { ok: false, lane: "terminal", error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/terminal-lane/readiness/run") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { listTerminalProfiles, listEnabledTerminalReadinessProbes, recordTerminalReadinessRun } = await import("@/lib/terminal-lane/store");
+        const { runTerminalReadinessProbe } = await import("@/lib/terminal-lane/readiness");
+        const requested = typeof body.profileId === "string" && body.profileId.trim() ? body.profileId.trim() : "all";
+        const profiles = listTerminalProfiles().filter((profile) => requested === "all" || profile.id === requested);
+        const runs = [];
+        for (const profile of profiles) {
+          const probes = listEnabledTerminalReadinessProbes(profile.id);
+          const probe = probes[0] ?? { id: `${profile.id}-default`, profileId: profile.id, name: "Default", command: null };
+          const result = await runTerminalReadinessProbe({ profile });
+          const run = recordTerminalReadinessRun({
+            profileId: profile.id,
+            probeId: probe.id,
+            status: result.state.status,
+            color: result.state.color,
+            summary: result.summary,
+            metadata: { command: result.command.file, args: result.command.args },
+          });
+          runs.push({ ...run, displayName: profile.displayName });
+        }
+        json(res, profiles.length ? 200 : 404, profiles.length
+          ? { ok: true, lane: "terminal", profileId: requested, runs }
+          : { ok: false, lane: "terminal", profileId: requested, runs: [], error: requested === "all" ? "No Terminal Lane profiles are configured." : `No Terminal Lane profile is configured for "${requested}".` });
+        return;
+      }
+
+      if (req.method === "GET" && urlPath === "/terminal-lane/traces") {
+        const { listTerminalSessionAudit } = await import("@/lib/terminal-lane/store");
+        json(res, 200, { ok: true, lane: "terminal", traces: listTerminalSessionAudit() });
+        return;
+      }
+
       // ----------------------------------------------------------------
       // COO routing rules — SQL-backed intent→lane routing table. Rules are
       // stored and resolved against canonical lane ids; legacy lane/capability
