@@ -622,6 +622,58 @@ test("readiness cards sit directly under Lane Apps, before Runtime Capabilities"
   assert.ok(runtime > terminalReadiness, "Runtime Capabilities comes after both readiness cards");
 });
 
+test("frontier usage has its own Usage section above Models", () => {
+  assert.match(CONSOLE_HTML, /id="usageSec"/, "standalone Usage section present");
+  assert.match(CONSOLE_HTML, /<details class="ctx-sec" id="usageSec" open>/, "Usage is a collapsible ctx-sec, open by default");
+  assert.ok(
+    CONSOLE_HTML.indexOf('id="usageSec"') < CONSOLE_HTML.indexOf('id="modelsSec"'),
+    "Usage section sits above the Models section",
+  );
+});
+
+test("Usage section renders Claude and Codex provider cards", () => {
+  assert.match(CONSOLE_HTML, /id="usageSummary"/, "at-a-glance summary mount present");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /getElementById\("usageSummary"\)/, "checkUsage fills the summary");
+  assert.match(js, /usageProviderCard\("Claude"/, "Claude card rendered");
+  assert.match(js, /usageProviderCard\("Codex"/, "Codex card rendered");
+  assert.match(js, /function usageProviderCard\(/, "compact provider card renderer present");
+});
+
+test("per-window usage details remain available but secondary", () => {
+  assert.match(CONSOLE_HTML, /id="usageDetailsSec"/, "per-window details disclosure present");
+  const usageSec = CONSOLE_HTML.indexOf('id="usageSec"');
+  const usage = CONSOLE_HTML.indexOf('id="usage"');
+  const modelsSec = CONSOLE_HTML.indexOf('id="modelsSec"');
+  assert.ok(usageSec >= 0 && usage > usageSec && usage < modelsSec, "#usage detail lives inside the Usage section, not Models");
+  const js = extractScript(CONSOLE_HTML);
+  assert.doesNotMatch(js, /Frontier · cloud/, "usage no longer buried under a Models 'Frontier · cloud' header");
+});
+
+test("Models panel still shows local engine and embeddings", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /Local · on-device/, "local engine group kept in Models");
+  assert.match(js, /Embeddings/, "embeddings group kept in Models");
+  assert.match(js, /getElementById\("modelStatus"\)/, "checkModels still fills modelStatus");
+});
+
+test("header usage pill shows a concise percent-and-reset summary", () => {
+  assert.match(CONSOLE_HTML, /id="usagePill"/, "header usage pill kept");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function fmtResetsCompact\(/, "compact reset formatter present");
+  assert.match(js, /"% · "/, "pill uses the '<pct>% · <reset>' format");
+  // Regression guard: the no-subscription fallback line is preserved verbatim.
+  assert.match(js, /pill\.textContent = "⚡ " \+ \(u\.taskCount/, "task-count fallback preserved");
+});
+
+test("Usage UI introduces no dollar/cost copy", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const checkUsage = js.match(/async function checkUsage\([\s\S]*?\n\}/)?.[0] ?? "";
+  const card = js.match(/function usageProviderCard\([\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(checkUsage.length > 100 && card.length > 50, "usage function bodies extracted");
+  assert.doesNotMatch(checkUsage + card, /\$\d|\bcost\b/i, "no dollar amounts or cost copy in the Usage UI");
+});
+
 test("settings surfaces a real Terminal Lane readiness card with no secrets", () => {
   assert.match(CONSOLE_HTML, /id="terminal_readiness"/, "Terminal readiness mount point present");
   const js = extractScript(CONSOLE_HTML);

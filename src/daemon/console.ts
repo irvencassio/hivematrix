@@ -181,6 +181,20 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-bar-fill.ok  { background: var(--ok,  #4caf50); }
   .usage-bar-fill.warn { background: #f0a500; }
   .usage-bar-fill.hi  { background: #e05b2c; }
+  /* Compact at-a-glance provider cards for the Usage section. */
+  .usage-cards { display: flex; flex-direction: column; gap: 6px; }
+  .usage-card { border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; background: var(--panel-2); }
+  .usage-card.low { border-color: #e05b2c; }
+  .usage-card .uc-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .usage-card .uc-name { font-weight: 600; font-size: 12px; }
+  .usage-card .uc-pct { font-size: 12px; font-weight: 600; }
+  .usage-card.low .uc-pct { color: #e05b2c; }
+  .usage-card .uc-reset { font-size: 10px; margin-top: 3px; }
+  .usage-details { margin-top: 8px; }
+  .usage-details > summary { cursor: pointer; list-style: none; font-size: 11px; color: var(--muted); }
+  .usage-details > summary::-webkit-details-marker { display: none; }
+  .usage-details > summary::before { content: '▸ '; }
+  .usage-details[open] > summary::before { content: '▾ '; }
   .usage-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:20px; }
   .usage-head h2 { margin:0 0 10px; }
   .obs-split { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
@@ -1032,9 +1046,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="approvals"></div>
     <details class="ctx-sec" id="setupSec" open><summary id="setupSummary">Setup</summary>
     <div id="onboarding"></div></details>
-    <details class="ctx-sec" id="modelsSec" open><summary>Models <button id="usageRefresh" class="usage-refresh" title="Refresh model status &amp; usage" onclick="event.stopPropagation();refreshModelsNow()">↻</button></summary>
-    <div id="modelStatus"></div>
-    <div id="usage"><div class="muted">No frontier usage yet.</div></div></details>
+    <details class="ctx-sec" id="usageSec" open><summary>Usage <button id="usageRefresh" class="usage-refresh" title="Refresh frontier usage" onclick="event.stopPropagation();refreshUsageNow()">↻</button></summary>
+    <div id="usageSummary"><div class="muted">No frontier usage yet.</div></div>
+    <details class="usage-details" id="usageDetailsSec"><summary>Per-window details</summary>
+    <div id="usage"></div></details></details>
+    <details class="ctx-sec" id="modelsSec" open><summary>Models <button id="modelsRefresh" class="usage-refresh" title="Refresh model status" onclick="event.stopPropagation();refreshModelsNow()">↻</button></summary>
+    <div id="modelStatus"></div></details>
     <details class="ctx-sec" id="obsSec"><summary>Observability</summary>
     <div id="observability"><div class="muted">No task telemetry yet.</div></div></details>
     <details class="ctx-sec" id="connSec" open><summary>Connectivity</summary>
@@ -2920,6 +2937,36 @@ function usageBarClass(util) {
   return util >= 80 ? "hi" : util >= 60 ? "warn" : "ok";
 }
 
+// Compact reset for the header pill: "2h 13m" (drops the "in " prefix fmtResets adds).
+function fmtResetsCompact(iso) { return fmtResets(iso).replace(/^in /, ""); }
+
+// The binding window = the one with the least remaining headroom.
+function lowestWindow(wins) {
+  const live = (wins || []).filter(w => w && typeof w.remaining === "number");
+  if (!live.length) return null;
+  return live.reduce((a, b) => (b.remaining < a.remaining ? b : a));
+}
+
+// One compact, scan-friendly card per frontier provider. Shows remaining % +
+// the binding window's reset; the bar fills with used% and reuses usageBarClass
+// so a low remaining reads amber/red. No dollar amounts, no secrets.
+function usageProviderCard(name, win, statusNote) {
+  if (!win) {
+    return '<div class="usage-card"><div class="uc-top"><span class="uc-name">' + esc(name) + '</span>'
+      + '<span class="uc-pct um">' + esc(statusNote || "—") + '</span></div></div>';
+  }
+  const remaining = Math.min(100, Math.max(0, win.remaining));
+  const used = 100 - remaining;
+  const cls = usageBarClass(used);
+  const low = remaining <= 20 ? " low" : "";
+  return '<div class="usage-card' + low + '">'
+    + '<div class="uc-top"><span class="uc-name">' + esc(name) + '</span>'
+    + '<span class="uc-pct">' + remaining.toFixed(0) + '% left</span></div>'
+    + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + used + '%"></div></div></div>'
+    + '<div class="uc-reset um">' + esc(win.label) + ' · resets ' + esc(fmtResets(win.resetsAt)) + '</div>'
+    + '</div>';
+}
+
 function renderSubBar(label, win) {
   if (!win) return "";
   const pct = Math.min(100, Math.max(0, win.utilization));
@@ -2955,18 +3002,36 @@ async function checkUsage(forceRefresh) {
     const codexSubscription = u.codexSubscription;
     const pill = document.getElementById("usagePill");
 
+    // Normalize each provider's windows into {label, remaining, resetsAt} so the
+    // pill, summary cards, and "worst window" all share one source of truth.
+    const claudeWins = [];
+    if (sub) {
+      if (sub.fiveHour) claudeWins.push({ label: "5-hour", remaining: sub.fiveHour.remaining, resetsAt: sub.fiveHour.resetsAt });
+      if (sub.sevenDay) claudeWins.push({ label: "7-day", remaining: sub.sevenDay.remaining, resetsAt: sub.sevenDay.resetsAt });
+      if (sub.sevenDayOpus) claudeWins.push({ label: "7-day Opus", remaining: sub.sevenDayOpus.remaining, resetsAt: sub.sevenDayOpus.resetsAt });
+      if (sub.sevenDaySonnet) claudeWins.push({ label: "7-day Sonnet", remaining: sub.sevenDaySonnet.remaining, resetsAt: sub.sevenDaySonnet.resetsAt });
+    }
+    const codexWins = [];
+    if (codexSubscription) {
+      if (codexSubscription.fiveHour) codexWins.push({ label: "5-hour", remaining: Math.max(0, 100 - (codexSubscription.fiveHour.utilization || 0)), resetsAt: codexSubscription.fiveHour.resetsAt });
+      if (codexSubscription.sevenDay) codexWins.push({ label: "7-day", remaining: Math.max(0, 100 - (codexSubscription.sevenDay.utilization || 0)), resetsAt: codexSubscription.sevenDay.resetsAt });
+    }
+    const allWins = claudeWins.concat(codexWins);
+
     if (pill) {
-      if (sub && (sub.fiveHour || sub.sevenDay)) {
-        // Prefer the most-constrained window for the pill label.
-        const win = sub.fiveHour ?? sub.sevenDay;
-        const pct = win.remaining.toFixed(0);
-        pill.textContent = "⚡ " + pct + "% left";
+      const worst = lowestWindow(allWins);
+      if (worst) {
+        // Pill mirrors the worst active frontier window across providers.
+        pill.textContent = "⚡ " + Math.round(worst.remaining) + "% · " + fmtResetsCompact(worst.resetsAt);
         pill.style.display = "";
         const lines = [];
-        if (sub.fiveHour) lines.push("5-hour: " + sub.fiveHour.remaining.toFixed(1) + "% left (" + fmtResets(sub.fiveHour.resetsAt) + ")");
-        if (sub.sevenDay) lines.push("7-day:  " + sub.sevenDay.remaining.toFixed(1) + "% left (" + fmtResets(sub.sevenDay.resetsAt) + ")");
-        if (sub.sevenDayOpus) lines.push("7-day Opus: " + sub.sevenDayOpus.remaining.toFixed(1) + "% left");
-        if (sub.sevenDaySonnet) lines.push("7-day Sonnet: " + sub.sevenDaySonnet.remaining.toFixed(1) + "% left");
+        if (sub) {
+          if (sub.fiveHour) lines.push("Claude 5-hour: " + sub.fiveHour.remaining.toFixed(1) + "% left (" + fmtResets(sub.fiveHour.resetsAt) + ")");
+          if (sub.sevenDay) lines.push("Claude 7-day:  " + sub.sevenDay.remaining.toFixed(1) + "% left (" + fmtResets(sub.sevenDay.resetsAt) + ")");
+          if (sub.sevenDayOpus) lines.push("Claude 7-day Opus: " + sub.sevenDayOpus.remaining.toFixed(1) + "% left");
+          if (sub.sevenDaySonnet) lines.push("Claude 7-day Sonnet: " + sub.sevenDaySonnet.remaining.toFixed(1) + "% left");
+        }
+        for (const w of codexWins) lines.push("Codex " + w.label + ": " + w.remaining.toFixed(1) + "% left (" + fmtResets(w.resetsAt) + ")");
         if (u.taskCount > 0) lines.push("", "HiveMatrix: " + u.taskCount + " task(s)");
         pill.title = lines.join("\n");
       } else if (subStatus && subStatus.state !== "missing_credentials") {
@@ -2982,6 +3047,27 @@ async function checkUsage(forceRefresh) {
         pill.title = "HiveMatrix: " + (u.taskCount||0) + " task(s)\n"
           + (u.byModel||[]).map(m => m.label + ": " + m.tasks + " task" + (m.tasks===1?"":"s")).join("\n");
       }
+    }
+
+    // At-a-glance summary: one compact card per active frontier provider.
+    const summaryEl = document.getElementById("usageSummary");
+    if (summaryEl) {
+      let cards = "";
+      if (claudeWins.length) {
+        cards += usageProviderCard("Claude", lowestWindow(claudeWins));
+      } else if (subStatus && subStatus.state !== "missing_credentials") {
+        cards += usageProviderCard("Claude", null, usagePlanLabel(subStatus));
+      }
+      if (codexSubscription) {
+        if (codexWins.length) {
+          cards += usageProviderCard("Codex", lowestWindow(codexWins));
+        } else {
+          cards += usageProviderCard("Codex", null, codexSubscription.error ? "unavailable" : (codexSubscription.planType || "subscription"));
+        }
+      }
+      summaryEl.innerHTML = cards
+        ? '<div class="usage-cards">' + cards + '</div>'
+        : '<div class="muted">No frontier usage yet — local Qwen work runs on-device.</div>';
     }
 
     const el = document.getElementById("usage");
@@ -3076,8 +3162,7 @@ async function checkModels() {
     }
   }
 
-  // — Frontier (cloud) — the bars below (#usage) are filled by checkUsage().
-  html += '<div class="mdl-grp">Frontier · cloud</div>';
+  // Frontier (cloud) usage now lives in its own Usage section, above Models.
   el.innerHTML = html;
 
   // Header pill — at-a-glance "is the local engine running".
@@ -3108,11 +3193,21 @@ async function reindexEmbeddings() {
 }
 
 async function refreshModelsNow() {
-  const btn = document.getElementById("usageRefresh");
+  const btn = document.getElementById("modelsRefresh");
   if (btn) { btn.disabled = true; btn.textContent = "…"; }
   try {
     await loadModels();                          // refresh local-engine tier health
-    await Promise.all([checkModels(), checkUsage(true)]);
+    await checkModels();                         // Models panel = local engine + embeddings only
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "↻"; }
+  }
+}
+
+async function refreshUsageNow() {
+  const btn = document.getElementById("usageRefresh");
+  if (btn) { btn.disabled = true; btn.textContent = "…"; }
+  try {
+    await checkUsage(true);                       // bypass cached auth/usage state
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "↻"; }
   }
