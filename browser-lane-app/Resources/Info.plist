@@ -10,6 +10,12 @@
   <string>Browser Lane</string>
   <key>CFBundleExecutable</key>
   <string>BrowserLane</string>
+  <key>CFBundleIconFile</key>
+  <string>BrowserLane</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.1.85</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>

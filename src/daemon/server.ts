@@ -1297,6 +1297,25 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /browser-lane/readiness/mark — honest operator-asserted readiness for
+      // sites with no feasible live probe yet (e.g. SSO sessions). No fake green:
+      // the operator vouches for the state from a constrained allow-list.
+      if (req.method === "POST" && urlPath === "/browser-lane/readiness/mark") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        try {
+          const { recordManualReadiness } = await import("@/lib/browser-lane/store");
+          const run = recordManualReadiness({
+            siteId: typeof body.siteId === "string" ? body.siteId : "",
+            state: body.state as never,
+            note: typeof body.note === "string" ? body.note : undefined,
+          });
+          json(res, 200, { ok: true, lane: "browser", run });
+        } catch (e) {
+          json(res, 400, { ok: false, lane: "browser", error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
       if (req.method === "POST" && urlPath === "/browser-lane/sites") {
         const body = await parseBody(req) as Record<string, unknown>;
         try {

@@ -716,6 +716,34 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </div>
       <div id="coo_result" style="margin-top:8px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
+      <div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <label class="flbl" style="margin:0">COO routing rules</label>
+        <div class="row" style="gap:6px;align-items:center">
+          <select id="coo_rules_lane_filter" onchange="renderCooRoutingRules()">
+            <option value="">All lanes</option>
+            <option value="browser">Browser</option>
+            <option value="mail">Mail</option>
+            <option value="message">Message</option>
+            <option value="terminal">Terminal</option>
+            <option value="desktop">Desktop</option>
+            <option value="memory">Memory</option>
+            <option value="review">Review</option>
+          </select>
+          <button class="copybtn" onclick="renderCooRoutingRules()">↻ Refresh</button>
+          <button class="copybtn" onclick="cooSeedDefaultRules()">Seed defaults</button>
+          <button class="create" onclick="cooNewRule()">New rule</button>
+        </div>
+      </div>
+      <div class="muted" style="font-size:11px;margin:4px 0 6px">View and update the typed routing entries used by COO Dispatch.</div>
+      <div class="row" style="gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
+        <input id="coo_resolve_text" placeholder="Resolve tester objective" style="flex:1;min-width:180px;box-sizing:border-box" />
+        <input id="coo_resolve_domains" placeholder="Domains, comma-separated" style="flex:1;min-width:160px;box-sizing:border-box" />
+        <button class="copybtn" onclick="cooResolveRuleTest()">Resolve</button>
+      </div>
+      <div id="coo_resolve_result" class="muted" style="font-size:11px;margin-top:4px"></div>
+      <div id="coo_rules_result" class="muted" style="font-size:11px;margin-top:6px"></div>
+      <div id="coo_rules_list" style="margin-top:8px"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Browser Lane readiness</label>
         <button class="copybtn" onclick="renderBrowserReadiness()">↻ Refresh</button>
@@ -3623,7 +3651,7 @@ function switchSettingsTab(tab) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); renderBrowserReadiness(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); }
+  if (tab === "lanes") { renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderBrowserReadiness(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); }
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -3857,6 +3885,198 @@ function renderCooResult(result) {
   if (result.auditId) rows.push(row("auditId", result.auditId));
   if (result.taskId) rows.push(row("taskId", result.taskId));
   out.innerHTML = '<div class="card" style="cursor:default">'+rows.join("")+'</div>';
+}
+
+// --- COO routing rules admin -------------------------------------------------
+// Structured editor over the typed COO rules API. This is not arbitrary SQL and
+// refuses obvious secret-looking values before sending anything to the daemon.
+let cooRulesCache = [];
+let cooDraftRule = null;
+function cooSetRulesResult(msg, err) {
+  const el = document.getElementById("coo_rules_result");
+  if (el) el.innerHTML = err ? '<span class="err">'+esc(msg)+'</span>' : esc(msg || "");
+}
+async function renderCooRoutingRules() {
+  const list = document.getElementById("coo_rules_list");
+  if (!list) return;
+  list.innerHTML = '<div class="muted">Loading COO routing rules…</div>';
+  const r = await api("/coo/routing-rules");
+  if (!r || !r.ok) { list.innerHTML = '<div class="errbox">'+esc((r&&r.error)||"COO routing rules unavailable")+'</div>'; return; }
+  cooRulesCache = r.rules || [];
+  const lane = (document.getElementById("coo_rules_lane_filter")?.value || "").trim();
+  let rules = lane ? cooRulesCache.filter(rule => (rule.lane || "") === lane) : cooRulesCache.slice();
+  if (cooDraftRule) rules = [cooDraftRule].concat(rules);
+  const enabled = rules.filter(rule => rule.enabled !== false).length;
+  const summary = '<div class="muted" style="font-size:11px;margin-bottom:6px">'
+    + esc(rules.length)+' shown · '+esc(enabled)+' enabled'+(lane ? ' · lane '+esc(lane) : '')+'</div>';
+  if (!rules.length) { list.innerHTML = summary + '<div class="muted">No routing rules.</div>'; return; }
+  list.innerHTML = summary + rules.map((rule, index) => cooRuleEditor(rule, index)).join("");
+}
+function cooRuleFieldId(index, field) { return "coo_rule_"+index+"_"+field; }
+function cooField(index, field) {
+  return document.getElementById(cooRuleFieldId(index, field));
+}
+function cooListText(value) {
+  return Array.isArray(value) ? value.join("\\n") : "";
+}
+function cooObjText(value) {
+  const obj = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return JSON.stringify(obj, null, 2);
+}
+function cooRuleEditor(rule, index) {
+  const id = rule.id || "";
+  const controls = [
+    ["name", "Name", rule.name || ""],
+    ["intent", "Intent", rule.intent || ""],
+    ["capability", "Capability", rule.capability || ""],
+    ["backendPolicy", "Backend policy", rule.backendPolicy || "lane_owned_first"],
+    ["modelPosture", "Model posture", rule.modelPosture || "mixed-local-first"],
+    ["riskTier", "Risk tier", rule.riskTier || "normal"],
+    ["phrases", "Phrases", cooListText(rule.match && rule.match.phrases)],
+    ["domains", "Domains", cooListText(rule.match && rule.match.domains)],
+    ["projects", "Projects", cooListText(rule.match && rule.match.projects)],
+    ["workflows", "Workflows", cooListText(rule.match && rule.match.workflows)],
+    ["tags", "Tags", cooListText(rule.match && rule.match.tags)],
+  ];
+  const fields = controls.map(c =>
+    '<label class="flbl">'+esc(c[1])+'</label><textarea id="'+cooRuleFieldId(index,c[0])+'" rows="'+(c[0].match(/phrases|domains|projects|workflows|tags/) ? 2 : 1)+'">'+esc(c[2])+'</textarea>'
+  ).join("");
+  const laneOptions = ["browser","mail","message","terminal","desktop","memory","review"].map(lane =>
+    '<option value="'+lane+'" '+((rule.lane||"browser")===lane?'selected':'')+'>'+lane+'</option>'
+  ).join("");
+  return '<details class="card" style="cursor:default" open>'
+    + '<summary><b>'+esc(rule.name || "New COO rule")+'</b> <span class="badge">'+esc(rule.lane || "browser")+'</span> <span class="badge">'+esc(rule.enabled === false ? "disabled" : "enabled")+'</span></summary>'
+    + '<div style="margin-top:8px">'
+    + '<label class="flbl">id</label><input id="'+cooRuleFieldId(index,"id")+'" value="'+esc(id)+'" readonly />'
+    + '<div class="row" style="gap:8px"><div style="flex:1"><label class="flbl">lane</label><select id="'+cooRuleFieldId(index,"lane")+'">'+laneOptions+'</select></div>'
+    + '<div style="width:110px"><label class="flbl">priority</label><input id="'+cooRuleFieldId(index,"priority")+'" value="'+esc(rule.priority ?? 100)+'" /></div>'
+    + '<div style="width:90px"><label class="flbl">enabled</label><select id="'+cooRuleFieldId(index,"enabled")+'"><option value="true" '+(rule.enabled!==false?'selected':'')+'>true</option><option value="false" '+(rule.enabled===false?'selected':'')+'>false</option></select></div></div>'
+    + fields
+    + '<label class="flbl">constraints</label><textarea id="'+cooRuleFieldId(index,"constraints")+'" rows="3">'+esc(cooObjText(rule.constraints))+'</textarea>'
+    + '<label class="flbl">approvalPolicy</label><textarea id="'+cooRuleFieldId(index,"approvalPolicy")+'" rows="3">'+esc(cooObjText(rule.approvalPolicy))+'</textarea>'
+    + '<label class="flbl">verificationPolicy</label><textarea id="'+cooRuleFieldId(index,"verificationPolicy")+'" rows="3">'+esc(cooObjText(rule.verificationPolicy))+'</textarea>'
+    + '<label class="flbl">notes</label><textarea id="'+cooRuleFieldId(index,"notes")+'" rows="2">'+esc(rule.notes || "")+'</textarea>'
+    + '<div class="row" style="gap:6px;justify-content:flex-end;margin-top:6px">'
+    + '<button class="create" onclick="cooSaveRule('+index+',\''+esc(id)+'\')">Save</button>'
+    + '<button class="copybtn" onclick="cooDuplicateRule('+index+')">Duplicate</button>'
+    + (id ? '<button class="copybtn" onclick="cooShowRuleHistory(\''+esc(id)+'\')">History</button><button class="copybtn" onclick="cooDeleteRule(\''+esc(id)+'\')">Delete</button>' : '')
+    + '</div></div></details>';
+}
+function cooParseList(value) {
+  return String(value || "").split(/[\\n,]+/).map(s => s.trim()).filter(Boolean);
+}
+function cooParseObject(value, label) {
+  const text = String(value || "").trim();
+  if (!text) return {};
+  const parsed = JSON.parse(text);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(label+" must be a JSON object");
+  return parsed;
+}
+function cooSecretLike(value) {
+  return /password|cookie|secret|bearer|api[-_ ]?key|token/i.test(String(value || ""));
+}
+function cooCollectRule(index, existingId) {
+  const textFields = ["name","intent","capability","backendPolicy","modelPosture","riskTier","phrases","domains","projects","workflows","tags","notes"];
+  const text = textFields.map(field => cooField(index, field)?.value || "").join("\\n");
+  if (cooSecretLike(text)) throw new Error("COO rules cannot contain secret-looking values.");
+  const constraints = cooParseObject(cooField(index, "constraints")?.value, "constraints");
+  const approvalPolicy = cooParseObject(cooField(index, "approvalPolicy")?.value, "approvalPolicy");
+  const verificationPolicy = cooParseObject(cooField(index, "verificationPolicy")?.value, "verificationPolicy");
+  if (cooSecretLike(JSON.stringify({ constraints, approvalPolicy, verificationPolicy }))) throw new Error("COO policy JSON cannot contain secret-looking values.");
+  const priority = Number(cooField(index, "priority")?.value || 0);
+  if (!Number.isFinite(priority)) throw new Error("priority must be numeric");
+  const rule = {
+    id: existingId || undefined,
+    name: (cooField(index, "name")?.value || "").trim(),
+    intent: (cooField(index, "intent")?.value || "").trim(),
+    lane: cooField(index, "lane")?.value || "browser",
+    capability: (cooField(index, "capability")?.value || "").trim(),
+    backendPolicy: (cooField(index, "backendPolicy")?.value || "lane_owned_first").trim(),
+    modelPosture: (cooField(index, "modelPosture")?.value || "mixed-local-first").trim(),
+    riskTier: (cooField(index, "riskTier")?.value || "normal").trim(),
+    enabled: cooField(index, "enabled")?.value !== "false",
+    priority: priority,
+    match: {
+      phrases: cooParseList(cooField(index, "phrases")?.value),
+      domains: cooParseList(cooField(index, "domains")?.value),
+      projects: cooParseList(cooField(index, "projects")?.value),
+      workflows: cooParseList(cooField(index, "workflows")?.value),
+      tags: cooParseList(cooField(index, "tags")?.value),
+    },
+    constraints: constraints,
+    approvalPolicy: approvalPolicy,
+    verificationPolicy: verificationPolicy,
+    notes: (cooField(index, "notes")?.value || "").trim(),
+  };
+  for (const field of ["name","intent","lane","capability"]) {
+    if (!rule[field]) throw new Error(field+" is required");
+  }
+  return rule;
+}
+function cooNewRule() {
+  cooDraftRule = {
+    name: "New Browser Lane rule",
+    intent: "browser_workflow",
+    lane: "browser",
+    capability: "workflow.run",
+    backendPolicy: "lane_owned_first",
+    modelPosture: "mixed-local-first",
+    riskTier: "normal",
+    enabled: true,
+    priority: 100,
+    match: { phrases: [], domains: [], projects: [], workflows: [], tags: [] },
+    constraints: {},
+    approvalPolicy: {},
+    verificationPolicy: {},
+    notes: "",
+  };
+  renderCooRoutingRules();
+}
+async function cooSaveRule(index, existingId) {
+  try {
+    const rule = cooCollectRule(index, existingId);
+    const r = await api("/coo/routing-rules", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ rule: rule }) });
+    if (!r || !r.ok) throw new Error((r && r.error) || "Save failed");
+    cooDraftRule = null; cooSetRulesResult("Saved "+(r.rule && r.rule.id ? r.rule.id : rule.name)+"."); renderCooRoutingRules();
+  } catch (e) { cooSetRulesResult(e.message || String(e), true); }
+}
+function cooDuplicateRule(index) {
+  try {
+    const rule = cooCollectRule(index, "");
+    rule.id = undefined;
+    rule.name = rule.name + " copy";
+    cooDraftRule = rule;
+    renderCooRoutingRules();
+  } catch (e) { cooSetRulesResult(e.message || String(e), true); }
+}
+async function cooDeleteRule(id) {
+  if (!id) return;
+  if (!confirm("Delete COO routing rule "+id+"?")) return;
+  const r = await api("/coo/routing-rules/"+encodeURIComponent(id), { method:"DELETE" });
+  if (!r || !r.ok) { cooSetRulesResult((r&&r.error)||"Delete failed", true); return; }
+  cooSetRulesResult("Deleted "+id+"."); renderCooRoutingRules();
+}
+async function cooShowRuleHistory(id) {
+  const r = await api("/coo/routing-rules/"+encodeURIComponent(id)+"/history");
+  if (!r || !r.ok) { cooSetRulesResult((r&&r.error)||"History unavailable", true); return; }
+  const history = r.history || [];
+  cooSetRulesResult(history.length ? history.slice(0,5).map(h => (h.action || h.event || "change")+" "+(h.createdAt || "")).join(" · ") : "No history.");
+}
+async function cooSeedDefaultRules() {
+  const r = await api("/coo/routing-rules/seed", { method:"POST" });
+  if (!r || !r.ok) { cooSetRulesResult((r&&r.error)||"Seed failed", true); return; }
+  cooSetRulesResult("Default COO routing rules seeded."); renderCooRoutingRules();
+}
+async function cooResolveRuleTest() {
+  const out = document.getElementById("coo_resolve_result");
+  const text = (document.getElementById("coo_resolve_text")?.value || "").trim();
+  const domains = cooParseList(document.getElementById("coo_resolve_domains")?.value || "");
+  if (!text) { if (out) out.innerHTML = '<span class="err">Enter text to resolve.</span>'; return; }
+  const r = await api("/coo/routing-rules/resolve", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ text: text, domains: domains }) });
+  if (!r || !r.ok) { if (out) out.innerHTML = '<span class="err">'+esc((r&&r.error)||"Resolve failed")+'</span>'; return; }
+  const route = r.route || r.result || null;
+  if (!route) { if (out) out.innerHTML = 'No matching rule.'; return; }
+  if (out) out.innerHTML = 'Matched '+esc(route.ruleName || route.ruleId || "rule")+' → '+esc(route.lane || "?")+' / '+esc(route.capability || "?");
 }
 
 // --- Browser Lane readiness maintenance (operator) --------------------------

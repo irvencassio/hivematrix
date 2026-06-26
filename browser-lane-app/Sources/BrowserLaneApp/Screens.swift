@@ -1,7 +1,7 @@
 import AppKit
 
 enum Screen: Int, CaseIterable {
-    case browser, sites, addSite, readiness, traces
+    case browser, sites, addSite, readiness, traces, settings
 
     var title: String {
         switch self {
@@ -10,6 +10,7 @@ enum Screen: Int, CaseIterable {
         case .addSite:   return "Add Site"
         case .readiness: return "Readiness"
         case .traces:    return "Traces"
+        case .settings:  return "Settings"
         }
     }
 
@@ -20,6 +21,7 @@ enum Screen: Int, CaseIterable {
         case .addSite:   return "Register a new site with display name, login URL, and Keychain credential ref."
         case .readiness: return "Daily authentication readiness results per site."
         case .traces:    return "Browser session trace events and audit history."
+        case .settings:  return "Browser Lane appearance, web defaults, daemon connection, storage, and about."
         }
     }
 
@@ -35,6 +37,8 @@ enum Screen: Int, CaseIterable {
             return "No readiness runs. Use hive browser readiness run --all to probe configured sites."
         case .traces:
             return "No trace events. Trace data is written each time a readiness probe or browser workflow runs."
+        case .settings:
+            return "Adjust icon state, default URL, daemon URL, storage metadata, and view version info."
         }
     }
 
@@ -45,6 +49,7 @@ enum Screen: Int, CaseIterable {
         case .addSite:   return "plus.circle"
         case .readiness: return "checkmark.shield"
         case .traces:    return "list.bullet.rectangle"
+        case .settings:  return "gearshape"
         }
     }
 }

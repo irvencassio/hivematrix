@@ -19,6 +19,7 @@ final class BrowserLaneAppDelegate: NSObject, NSApplicationDelegate {
         window.center()
         window.makeKeyAndOrderFront(nil)
         self.window = window
+        BrowserLaneSettings.shared.applyIconState()
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 

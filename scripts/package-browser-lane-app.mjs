@@ -11,7 +11,7 @@ const appBundle = join(outputRoot, "Browser Lane.app");
 const contents = join(appBundle, "Contents");
 const macos = join(contents, "MacOS");
 const resources = join(contents, "Resources");
-const executable = join(appRoot, ".build/debug/BrowserLane");
+const executable = join(appRoot, ".build/release/BrowserLane");
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -27,7 +27,7 @@ function run(command, args, options = {}) {
   return result;
 }
 
-run("swift", ["build"], { cwd: appRoot, stdio: "inherit" });
+run("swift", ["build", "-c", "release"], { cwd: appRoot, stdio: "inherit" });
 
 rmSync(appBundle, { recursive: true, force: true });
 mkdirSync(macos, { recursive: true });
@@ -35,6 +35,8 @@ mkdirSync(resources, { recursive: true });
 
 copyFileSync(join(appRoot, "Resources/Info.plist"), join(contents, "Info.plist"));
 copyFileSync(join(appRoot, "Resources/entitlements.plist"), join(resources, "entitlements.plist"));
+copyFileSync(join(appRoot, "Resources/BrowserLane.icns"), join(resources, "BrowserLane.icns"));
+copyFileSync(join(appRoot, "Resources/BrowserLaneWhite.icns"), join(resources, "BrowserLaneWhite.icns"));
 copyFileSync(executable, join(macos, "BrowserLane"));
 chmodSync(join(macos, "BrowserLane"), 0o755);
 

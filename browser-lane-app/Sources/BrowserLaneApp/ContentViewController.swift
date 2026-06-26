@@ -19,6 +19,8 @@ final class ContentViewController: NSViewController {
             SitesViewController()
         case .addSite:
             AddSiteViewController()
+        case .settings:
+            SettingsViewController()
         default:
             PlaceholderViewController(screen: screen)
         }

@@ -27,6 +27,31 @@ test("readiness states map to green yellow orange red semantics", () => {
   assert.equal(normalizeBrowserReadinessState("blocked").color, "red");
 });
 
+test("browser site accepts SSO strategies and a non-secret provider account", () => {
+  const ssoSite = normalizeBrowserSite({
+    id: "heygen",
+    displayName: "HeyGen",
+    homeUrl: "https://app.heygen.com/home",
+    loginUrl: "https://app.heygen.com/login",
+    allowedDomains: ["app.heygen.com", "accounts.google.com", "google.com"],
+    authStrategy: "google_sso",
+    providerAccount: "cassio.irv@gmail.com",
+  });
+  assert.equal(ssoSite.authStrategy, "google_sso");
+  assert.equal(ssoSite.providerAccount, "cassio.irv@gmail.com");
+  assert.equal(ssoSite.credentialRef, null);
+
+  const microsoft = normalizeBrowserSite({
+    id: "entra",
+    displayName: "Entra",
+    homeUrl: "https://portal.example.com",
+    allowedDomains: ["portal.example.com", "login.microsoftonline.com"],
+    authStrategy: "microsoft_sso",
+  });
+  assert.equal(microsoft.authStrategy, "microsoft_sso");
+  assert.equal(microsoft.providerAccount, null);
+});
+
 test("browser site rejects inline secret-looking values", () => {
   assert.throws(
     () => normalizeBrowserSite({

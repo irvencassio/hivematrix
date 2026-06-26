@@ -46,8 +46,9 @@ final class BrowserViewController: NSViewController {
         toolbar.spacing = 8
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
+        let startURL = BrowserLaneSettings.shared.defaultURL
         addressField.placeholderString = "Search Google or enter URL"
-        addressField.stringValue = "https://www.google.com"
+        addressField.stringValue = startURL
         addressField.target = self
         addressField.action = #selector(loadAddress)
         addressField.translatesAutoresizingMaskIntoConstraints = false
@@ -82,7 +83,7 @@ final class BrowserViewController: NSViewController {
             webView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
         ])
 
-        load("https://www.google.com")
+        load(startURL)
     }
 
     @objc private func loadAddress() {

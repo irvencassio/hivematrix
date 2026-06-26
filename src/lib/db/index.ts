@@ -568,6 +568,11 @@ const MIGRATIONS: string[] = [
    ALTER TABLE workflow_runs ADD COLUMN reviewedAt TEXT;
    ALTER TABLE workflow_runs ADD COLUMN reviewedArtifacts_json TEXT;
    ALTER TABLE workflow_actions ADD COLUMN source_artifact_map_json TEXT;`,
+
+  // v24: Browser Lane sites record the non-secret provider account/email the site
+  // signs in as (Google/Microsoft SSO, or a Keychain account label). Metadata
+  // only — never a password/cookie/token; secrets stay in macOS Keychain.
+  `ALTER TABLE browser_sites ADD COLUMN providerAccount TEXT;`,
 ];
 
 // ------------------------------------------------------------------

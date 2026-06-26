@@ -22,6 +22,7 @@ const {
   listBrowserSiteSummaries,
   getBrowserLaneReadinessDashboard,
   matchBrowserSiteReadiness,
+  recordManualReadiness,
 } = await import("./store");
 
 before(() => {
@@ -245,4 +246,51 @@ test("matchBrowserSiteReadiness reports stale + lastRunAt for a matched site", (
   recordBrowserReadinessRun({ siteId: "heygen", status: "ready", color: "green", summary: "fresh", traceRunId: "t" });
   const fresh = matchBrowserSiteReadiness(["app.heygen.com"], { staleAfterHours: 24 });
   assert.equal(fresh.stale, false);
+});
+
+test("browser lane store round-trips an SSO site with providerAccount and no credential row", () => {
+  upsertBrowserSite({
+    id: "heygen-sso",
+    displayName: "HeyGen SSO",
+    homeUrl: "https://app.heygen.com/home",
+    loginUrl: "https://app.heygen.com/login",
+    allowedDomains: ["app.heygen.com", "accounts.google.com", "google.com"],
+    authStrategy: "google_sso",
+    providerAccount: "cassio.irv@gmail.com",
+  });
+
+  const site = listBrowserSites().find((s) => s.id === "heygen-sso");
+  assert.ok(site);
+  assert.equal(site.authStrategy, "google_sso");
+  assert.equal(site.providerAccount, "cassio.irv@gmail.com");
+  assert.equal(site.credentialRef, null);
+
+  // No credential row for an SSO site — there is no secret to reference.
+  const credRow = getDb().prepare("SELECT * FROM browser_credentials WHERE siteId = ?").get("heygen-sso");
+  assert.equal(credRow, undefined);
+
+  const summary = listBrowserSiteSummaries({ siteId: "heygen-sso" })[0];
+  assert.equal(summary.providerAccount, "cassio.irv@gmail.com");
+  assert.equal("password" in summary, false);
+  assert.equal("secret" in summary, false);
+  assert.equal("token" in summary, false);
+});
+
+test("recordManualReadiness writes an honest operator-asserted run", () => {
+  recordManualReadiness({ siteId: "heygen-sso", state: "needs_reauth", note: "session expired" });
+  const dash = getBrowserLaneReadinessDashboard({ siteId: "heygen-sso" });
+  const site = dash.sites.find((s) => s.id === "heygen-sso");
+  assert.ok(site);
+  assert.equal(site.readiness.status, "needs_reauth");
+  assert.equal(site.readiness.color, "orange");
+  assert.equal(site.providerAccount, "cassio.irv@gmail.com");
+
+  const row = getDb().prepare(
+    "SELECT metadata FROM browser_readiness_runs WHERE siteId = ? ORDER BY rowid DESC LIMIT 1",
+  ).get("heygen-sso") as { metadata: string };
+  const metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+  assert.equal(metadata.source, "manual");
+  assert.equal(metadata.note, "session expired");
+
+  assert.throws(() => recordManualReadiness({ siteId: "heygen-sso", state: "totally-bogus" as never }), /state/i);
 });

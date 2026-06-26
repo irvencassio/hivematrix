@@ -64,3 +64,11 @@ test("browser_credentials stores references, not secret values", () => {
   assert.equal(columns.includes("secret"), false);
   assert.equal(columns.includes("token"), false);
 });
+
+test("browser_sites carries a non-secret providerAccount column", () => {
+  const columns = columnNames("browser_sites");
+  assert.ok(columns.includes("providerAccount"), "browser_sites.providerAccount should exist");
+  assert.ok(columns.includes("authStrategy"));
+  assert.equal(columns.includes("password"), false);
+  assert.equal(columns.includes("cookie"), false);
+});

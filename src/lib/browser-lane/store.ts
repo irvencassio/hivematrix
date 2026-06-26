@@ -18,6 +18,7 @@ interface BrowserSiteRow {
   allowedDomains: string;
   profileRef: string | null;
   authStrategy: BrowserSite["authStrategy"];
+  providerAccount: string | null;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -82,6 +83,7 @@ export interface BrowserSiteSummary {
   allowedDomains: string[];
   credentialRef: string | null;
   authStrategy: BrowserSite["authStrategy"];
+  providerAccount: string | null;
   status: string;
   probeCount: number;
   createdAt: string | null;
@@ -117,8 +119,8 @@ export function upsertBrowserSite(input: unknown): BrowserSite {
   const site = normalizeBrowserSite(input);
   const db = getDb();
   db.prepare(`
-    INSERT INTO browser_sites (_id, displayName, homeUrl, loginUrl, allowedDomains, profileRef, authStrategy, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO browser_sites (_id, displayName, homeUrl, loginUrl, allowedDomains, profileRef, authStrategy, providerAccount, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(_id) DO UPDATE SET
       displayName = excluded.displayName,
       homeUrl = excluded.homeUrl,
@@ -126,6 +128,7 @@ export function upsertBrowserSite(input: unknown): BrowserSite {
       allowedDomains = excluded.allowedDomains,
       profileRef = excluded.profileRef,
       authStrategy = excluded.authStrategy,
+      providerAccount = excluded.providerAccount,
       notes = excluded.notes,
       updatedAt = datetime('now')
   `).run(
@@ -136,10 +139,14 @@ export function upsertBrowserSite(input: unknown): BrowserSite {
     JSON.stringify(site.allowedDomains),
     site.profileRef,
     site.authStrategy,
+    site.providerAccount,
     site.notes,
   );
 
-  if (site.credentialRef) {
+  // A credential row exists only for keychain_password sites — that is the one
+  // strategy with a real secret behind the reference. SSO/manual sites carry no
+  // credentialRef secret (any "session label" is non-secret metadata on the site).
+  if (site.authStrategy === "keychain_password" && site.credentialRef) {
     db.prepare(`
       INSERT INTO browser_credentials (_id, siteId, credentialRef, kind, allowedDomains, status)
       VALUES (?, ?, ?, 'keychain_password', ?, 'unknown')
@@ -205,6 +212,7 @@ export function listBrowserSiteSummaries(filter: { siteId?: string | null } = {}
       allowedDomains: site.allowedDomains,
       credentialRef: site.credentialRef,
       authStrategy: site.authStrategy,
+      providerAccount: site.providerAccount,
       status: row.status,
       probeCount: Number(row.probeCount ?? 0),
       createdAt: site.createdAt,
@@ -332,6 +340,39 @@ export function recordBrowserReadinessRun(input: BrowserReadinessRunInput): Brow
 }
 
 // ------------------------------------------------------------------
+// Manual readiness mark — the honest fallback when no live probe is feasible
+// (e.g. an SSO session we can't programmatically validate yet). The operator
+// vouches for the state from a constrained allow-list; nothing fabricates green.
+// Recorded as a normal readiness run tagged metadata.source = "manual" so the
+// dashboard, matcher, and COO gating consume it through the existing path.
+// ------------------------------------------------------------------
+export const MANUAL_READINESS_STATES = ["ready", "needs_reauth", "blocked"] as const;
+export type ManualReadinessState = (typeof MANUAL_READINESS_STATES)[number];
+
+export interface ManualReadinessInput {
+  siteId: string;
+  state: ManualReadinessState;
+  note?: string;
+}
+
+export function recordManualReadiness(input: ManualReadinessInput): BrowserReadinessRunRecord {
+  const siteId = (input.siteId ?? "").trim();
+  if (!siteId) throw new Error("siteId is required");
+  if (!(MANUAL_READINESS_STATES as readonly string[]).includes(input.state)) {
+    throw new Error(`state must be one of: ${MANUAL_READINESS_STATES.join(", ")}`);
+  }
+  const state = normalizeBrowserReadinessState(input.state);
+  const note = typeof input.note === "string" ? input.note.trim() : "";
+  return recordBrowserReadinessRun({
+    siteId,
+    status: state.status,
+    color: state.color,
+    summary: note ? `Operator marked ${state.label}: ${note}` : `Operator marked ${state.label}`,
+    metadata: { source: "manual", note },
+  });
+}
+
+// ------------------------------------------------------------------
 // Site / auth readiness dashboard
 //
 // Aggregates the per-site MVP signals into one view: the latest readiness run
@@ -346,6 +387,7 @@ export interface BrowserLaneDashboardSite {
   loginUrl: string | null;
   allowedDomains: string[];
   authStrategy: BrowserSite["authStrategy"];
+  providerAccount: string | null;
   credentialRef: string | null;
   credentialStatus: string | null;
   credentialLastVerifiedAt: string | null;
@@ -456,6 +498,7 @@ export function getBrowserLaneReadinessDashboard(filter: BrowserLaneReadinessQue
       loginUrl: site.loginUrl,
       allowedDomains: site.allowedDomains,
       authStrategy: site.authStrategy,
+      providerAccount: site.providerAccount,
       credentialRef: site.credentialRef,
       credentialStatus: row.credentialStatus ?? null,
       credentialLastVerifiedAt: row.credentialLastVerifiedAt ?? null,
@@ -559,6 +602,7 @@ function rowToSite(row: BrowserSiteRow): BrowserSite {
     credentialRef: row.credentialRef ?? null,
     profileRef: row.profileRef,
     authStrategy: row.authStrategy,
+    providerAccount: row.providerAccount ?? null,
     notes: row.notes,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
