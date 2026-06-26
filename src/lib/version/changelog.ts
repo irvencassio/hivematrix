@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.91", date: "2026-06-26", note: "" },
   { version: "0.1.90", date: "2026-06-26", note: "Operator-path hardening: Browser Lane Add Site, lane app Edit menus, video-approval guard, release smoke" },
   { version: "0.1.89", date: "2026-06-26", note: "lane app artifact delivery" },
   { version: "0.1.88", date: "2026-06-26", note: "system readiness repair actions" },
