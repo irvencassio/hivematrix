@@ -715,6 +715,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     </div>
     <div id="settingsLanes" style="display:none">
       <div class="row" style="justify-content:space-between;align-items:center">
+        <label class="flbl" style="margin:0">System Readiness</label>
+        <button class="copybtn" onclick="renderSystemReadiness()">↻ Refresh</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin:4px 0 8px">Read-only result-quality checks across routing, Browser Lane auth, lane apps, workflows, local model readiness, and stale legacy task state.</div>
+      <div id="system_readiness" style="margin-top:6px"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
+      <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Lane Apps</label>
         <button class="copybtn" onclick="renderLaneApps()">↻ Refresh</button>
       </div>
@@ -3674,7 +3681,7 @@ function switchSettingsTab(tab) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderLaneApps(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderBrowserReadiness(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); }
+  if (tab === "lanes") { renderSystemReadiness(); renderLaneApps(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderBrowserReadiness(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); }
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -3847,6 +3854,45 @@ function laneAppBadge(status) {
   };
   const [color, label] = map[status] || ["var(--muted)", status || "unknown"];
   return '<span class="badge" style="color:'+color+'">'+esc(label)+'</span>';
+}
+
+function systemReadinessBadge(severity) {
+  const color = severity === "ok" ? "var(--ok)"
+    : severity === "info" ? "var(--accent-2)"
+    : severity === "warn" ? "var(--warn)"
+    : "var(--err)";
+  return '<span class="badge" style="color:'+color+'">'+esc(severity || "info")+'</span>';
+}
+
+async function renderSystemReadiness() {
+  const el = document.getElementById("system_readiness");
+  if (!el) return;
+  el.innerHTML = '<div class="muted">Loading…</div>';
+  const r = await api("/system/readiness");
+  const report = (r && r.report) || r;
+  if (!report || !report.checks) {
+    el.innerHTML = '<div class="muted">System readiness unavailable.</div>';
+    return;
+  }
+  const counts = report.counts || {};
+  const order = ["ok", "info", "warn", "critical"];
+  const chips = order.map(k => {
+    const color = k === "ok" ? "var(--ok)" : k === "info" ? "var(--accent-2)" : k === "warn" ? "var(--warn)" : "var(--err)";
+    return '<span class="badge" style="color:'+color+'">'+k+': '+esc(counts[k] || 0)+'</span>';
+  }).join(" ");
+  const checks = (report.checks || []).map(c => {
+    const next = c.nextAction ? '<div class="muted" style="font-size:10px;margin-top:3px">Next: '+esc(c.nextAction)+'</div>' : '';
+    return '<div style="padding:7px 0;border-top:1px solid var(--border)">'
+      + '<div class="row" style="justify-content:space-between;gap:8px;align-items:center"><b>'+esc(c.label || c.id)+'</b>'+systemReadinessBadge(c.severity)+'</div>'
+      + '<div class="muted" style="font-size:11px;margin-top:3px">'+esc(c.summary || '')+'</div>'
+      + next
+      + '</div>';
+  }).join("");
+  el.innerHTML = '<div class="card" style="cursor:default">'
+    + '<div class="t">'+esc(report.summary || 'System readiness')+'</div>'
+    + '<div style="margin:6px 0">'+chips+'</div>'
+    + checks
+    + '</div>';
 }
 
 async function renderLaneApps() {

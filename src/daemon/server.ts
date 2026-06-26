@@ -248,6 +248,16 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /system/readiness — read-only result-quality truth surface. It
+      // aggregates readiness and stale-state signals; it never seeds, installs,
+      // launches, repairs, approves, or mutates state.
+      if (req.method === "GET" && urlPath === "/system/readiness") {
+        const { getSystemReadinessReport } = await import("@/lib/system-readiness");
+        const report = await getSystemReadinessReport({ connectivity: () => policy.mode });
+        json(res, 200, { ok: report.ok, report });
+        return;
+      }
+
       // GET /projects — discovered projects for the project selector
       if (req.method === "GET" && urlPath === "/projects") {
         const { discoverProjects, discoverProjectsFresh, shouldPreSelect } = await import("@/lib/routing/project-discovery");
