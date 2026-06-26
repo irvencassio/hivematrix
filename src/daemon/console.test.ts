@@ -622,6 +622,19 @@ test("readiness cards sit directly under Lane Apps, before Runtime Capabilities"
   assert.ok(runtime > terminalReadiness, "Runtime Capabilities comes after both readiness cards");
 });
 
+test("board no longer renders the hardcoded AI-news video shortcut", () => {
+  assert.doesNotMatch(CONSOLE_HTML, /AI-news video/, "bespoke AI-news video board button removed");
+  const js = extractScript(CONSOLE_HTML);
+  assert.doesNotMatch(js, /draftVideoNow/, "no board shortcut wiring or unused draftVideoNow function");
+});
+
+test("+ New task and task creation remain after removing the shortcut", () => {
+  assert.match(CONSOLE_HTML, /＋ New task/, "+ New task button kept");
+  assert.match(CONSOLE_HTML, /toggleForm\('taskForm'\)/, "+ New task still toggles the form");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function createTask\(/, "task creation flow preserved");
+});
+
 test("board column has an Overview nav above + New task", () => {
   assert.match(CONSOLE_HTML, /id="overviewNav"/, "Overview nav control present");
   assert.match(CONSOLE_HTML, /class="ov-nav"[^>]*id="overviewNav"|id="overviewNav"[^>]*class="ov-nav"/, "uses the compact ov-nav style");

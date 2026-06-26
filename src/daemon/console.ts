@@ -1009,7 +1009,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <h2>Board <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></h2>
     <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
     <button class="addbtn" onclick="toggleForm('taskForm')">＋ New task</button>
-    <button class="addbtn" onclick="draftVideoNow()" title="Draft today's AI-news video script and pause for your review">🎬 AI-news video</button>
     <div class="form" id="taskForm">
       <input id="t_title" placeholder="Title (optional — derived from instructions)" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
@@ -3746,20 +3745,9 @@ async function openReleases() {
 }
 function closeReleases() { document.getElementById("releasesOverlay").classList.remove("open"); }
 
-// One-click AI-news video draft → creates the review task (full script + pause),
-// no general agent, no duplicate tasks. Same structured path the routing uses.
-async function draftVideoNow() {
-  hmToast("Drafting today's AI-news script…");
-  const r = await api("/video/news/draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-  if (r && (r.draft || r.taskId)) {
-    hmToast('Script ready — review it on the board (Edit the draft to revise).', "ok");
-    refresh();
-    const tid = r.taskId || (r.draft && r.draft.taskId);
-    if (tid) selectTask(tid);
-  } else {
-    hmToast((r && r.error) || "Draft failed", "err");
-  }
-}
+// The news-video draft is reached through normal task creation / voice intent
+// (src/lib/video/news-intent.ts) — not a bespoke board button. A future Command
+// Library surface will host repeatable actions like this; see the design doc.
 
 // Mixed-mode role models: thinking → frontier-premium, coding → frontier,
 // operational → local. Shown only when a Mixed posture is possible (local +
