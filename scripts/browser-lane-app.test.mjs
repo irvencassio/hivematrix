@@ -252,6 +252,20 @@ test("Browser Lane WebKit view persists the session and supports OAuth popups", 
   assert.match(browser, /createWebViewWith/);
 });
 
+test("Browser Lane Google auth pages expose a visible recovery path instead of white-screening silently", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const browser = readFileSync(join(sourceDir, "BrowserViewController.swift"), "utf8");
+
+  assert.match(browser, /accounts\.google\.com/);
+  assert.match(browser, /authRecoveryView/);
+  assert.match(browser, /Google sign-in can block embedded browser flows/);
+  assert.match(browser, /Reload auth/);
+  assert.match(browser, /Open in Chrome/);
+  assert.match(browser, /Open in Safari/);
+  assert.match(browser, /javaScriptCanOpenWindowsAutomatically/);
+  assert.match(browser, /customUserAgent/);
+});
+
 test("Browser Lane Sites view shows auth strategy and session/credential label", () => {
   const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
   const sites = readFileSync(join(sourceDir, "SitesViewController.swift"), "utf8");
