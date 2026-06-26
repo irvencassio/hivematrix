@@ -13,9 +13,9 @@
   <key>CFBundleIconFile</key>
   <string>BrowserLane</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.85</string>
+    <string>0.1.86</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+    <string>2</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>
