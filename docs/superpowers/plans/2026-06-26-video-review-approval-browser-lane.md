@@ -48,4 +48,4 @@ Design: `docs/superpowers/specs/2026-06-26-video-review-approval-browser-lane-de
 - [x] Run `npm test`.
 - [x] Run `node scripts/scope-wall.mjs`.
 - [x] Run `npm run verify:portal`.
-- [ ] Commit and push to `main`.
+- [x] Commit and push to `main`.
