@@ -298,3 +298,45 @@ test("Browser Lane Sites view shows auth strategy and session/credential label",
   assert.match(sites, /providerAccount/);
   assert.doesNotMatch(sites, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
 });
+
+test("Browser Lane installs a standard Edit menu so Cmd-C/V/X/A work in text fields", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const appDelegate = readFileSync(join(sourceDir, "AppDelegate.swift"), "utf8");
+  assert.match(appDelegate, /NSMenu/);
+  assert.match(appDelegate, /installMainMenu|mainMenu/);
+  for (const sel of ["cut:", "copy:", "paste:", "selectAll:"]) {
+    assert.match(appDelegate, new RegExp(sel.replace(":", "\\:")), `${sel} wired`);
+  }
+});
+
+test("Browser Lane Add Site auto-generates ids, hides technical fields, edits, and gives field-specific errors", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const addSite = readFileSync(join(sourceDir, "AddSiteViewController.swift"), "utf8");
+  const models = readFileSync(join(sourceDir, "BrowserLaneModels.swift"), "utf8");
+  const sites = readFileSync(join(sourceDir, "SitesViewController.swift"), "utf8");
+
+  // Technical Site id + Credential ref are tucked under an Advanced disclosure.
+  assert.match(addSite, /Advanced/);
+  // Site id is auto-generated from the display name / domain (a slug helper).
+  assert.match(addSite, /autoSiteId|slug/i);
+  // credentialRef is auto-generated for Keychain auth.
+  assert.match(addSite, /hivematrix\.browser\./);
+  assert.match(addSite, /\.primary/);
+
+  // Editing an existing site: a cross-screen edit target + prefill.
+  assert.match(models, /BrowserLaneEditTarget/);
+  assert.match(addSite, /BrowserLaneEditTarget/);
+  assert.match(addSite, /createdAt/);
+  // Blank password on edit preserves the existing Keychain secret (no overwrite).
+  assert.match(addSite, /leave blank to keep|keep the existing|keep existing/i);
+
+  // Field-specific errors focus the offending field.
+  assert.match(addSite, /makeFirstResponder/);
+
+  // The Sites screen offers an Edit affordance per site.
+  assert.match(sites, /editSite|"Edit"/);
+
+  // Still metadata-only: the daemon payload never carries a password value.
+  const daemonClient = readFileSync(join(sourceDir, "BrowserLaneDaemonClient.swift"), "utf8");
+  assert.doesNotMatch(daemonClient, /password/i);
+});

@@ -71,6 +71,32 @@ struct BrowserLaneSite: Codable, Equatable {
     }
 }
 
+// Cross-screen edit hand-off: Sites → Add/Edit passes a site id only.
+final class BrowserLaneEditTarget {
+    static let shared = BrowserLaneEditTarget()
+    var siteId: String?
+    func consume() -> String? { defer { siteId = nil }; return siteId }
+}
+
+extension Notification.Name {
+    static let browserLaneNavigate = Notification.Name("BrowserLaneNavigate")
+}
+
+/// Slugify a display name / domain into a valid site id ([a-z0-9._:-]).
+func browserLaneSlug(_ raw: String) -> String {
+    let lowered = raw.lowercased()
+    var out = ""
+    for ch in lowered {
+        if ch.isLetter || ch.isNumber || ch == "." || ch == "_" || ch == ":" || ch == "-" {
+            out.append(ch)
+        } else {
+            out.append("-")
+        }
+    }
+    while out.contains("--") { out = out.replacingOccurrences(of: "--", with: "-") }
+    return out.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+}
+
 extension BrowserLaneSite {
     static let heyGen = BrowserLaneSite(
         id: "heygen",

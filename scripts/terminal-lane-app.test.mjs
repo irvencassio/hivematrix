@@ -145,3 +145,12 @@ test("Terminal Lane Profiles screen is an editable table with delete/duplicate",
   assert.match(profiles, /authMethod/);
   assert.doesNotMatch(profiles, /kSecValueData|credentialValue|sshpass/i);
 });
+
+test("Terminal Lane installs a standard Edit menu so Cmd-C/V/X/A work in text fields", () => {
+  const appDelegate = readFileSync(join(source, "AppDelegate.swift"), "utf8");
+  assert.match(appDelegate, /NSMenu/);
+  assert.match(appDelegate, /installMainMenu|mainMenu/);
+  for (const sel of ["cut:", "copy:", "paste:", "selectAll:"]) {
+    assert.match(appDelegate, new RegExp(sel.replace(":", "\\:")), `${sel} wired`);
+  }
+});

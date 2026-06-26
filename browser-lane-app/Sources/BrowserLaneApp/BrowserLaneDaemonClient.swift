@@ -25,7 +25,9 @@ final class BrowserLaneDaemonClient {
 
     func sync(site: BrowserLaneSite, completion: @escaping (Result<String, Error>) -> Void) {
         guard let token = readAuthToken() else {
-            completion(.success("saved locally; daemon token not found"))
+            // A sync that did not happen is reported as a failure, not success, so
+            // the UI never dresses up "daemon unreachable" as "saved + synced".
+            completion(.failure(NSError(domain: "BrowserLane", code: 401, userInfo: [NSLocalizedDescriptionKey: "daemon auth token not found"])))
             return
         }
 

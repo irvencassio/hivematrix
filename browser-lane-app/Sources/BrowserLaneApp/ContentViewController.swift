@@ -10,7 +10,16 @@ final class ContentViewController: NSViewController {
             BrowserLaneNavigator.shared.pendingURL = url
             self?.show(.browser)
         }
+        // A screen (e.g. Sites → Edit) can request navigation to another screen.
+        NotificationCenter.default.addObserver(self, selector: #selector(handleNavigate(_:)), name: .browserLaneNavigate, object: nil)
         show(.browser)
+    }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    @objc private func handleNavigate(_ note: Notification) {
+        guard let screen = note.object as? Screen else { return }
+        show(screen)
     }
 
     func show(_ screen: Screen) {

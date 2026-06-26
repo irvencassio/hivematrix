@@ -47,6 +47,13 @@ final class SitesViewController: NSViewController {
         }
     }
 
+    @objc private func editSite(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        // Hand off the id only; Add/Edit Site reloads and prefills the full site.
+        BrowserLaneEditTarget.shared.siteId = id
+        NotificationCenter.default.post(name: .browserLaneNavigate, object: Screen.addSite)
+    }
+
     private func siteView(_ site: BrowserLaneSite) -> NSView {
         let box = NSBox()
         box.title = site.displayName
@@ -63,14 +70,23 @@ final class SitesViewController: NSViewController {
         text.lineBreakMode = .byWordWrapping
         text.maximumNumberOfLines = 0
         text.textColor = .secondaryLabelColor
-        text.translatesAutoresizingMaskIntoConstraints = false
-        box.contentView?.addSubview(text)
+
+        let editButton = NSButton(title: "Edit", target: self, action: #selector(editSite(_:)))
+        editButton.identifier = NSUserInterfaceItemIdentifier(site.id)
+        editButton.bezelStyle = .rounded
+
+        let content = NSStackView(views: [text, editButton])
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 8
+        content.translatesAutoresizingMaskIntoConstraints = false
+        box.contentView?.addSubview(content)
         NSLayoutConstraint.activate([
             box.widthAnchor.constraint(greaterThanOrEqualToConstant: 560),
-            text.leadingAnchor.constraint(equalTo: box.contentView!.leadingAnchor, constant: 12),
-            text.trailingAnchor.constraint(equalTo: box.contentView!.trailingAnchor, constant: -12),
-            text.topAnchor.constraint(equalTo: box.contentView!.topAnchor, constant: 10),
-            text.bottomAnchor.constraint(equalTo: box.contentView!.bottomAnchor, constant: -10),
+            content.leadingAnchor.constraint(equalTo: box.contentView!.leadingAnchor, constant: 12),
+            content.trailingAnchor.constraint(equalTo: box.contentView!.trailingAnchor, constant: -12),
+            content.topAnchor.constraint(equalTo: box.contentView!.topAnchor, constant: 10),
+            content.bottomAnchor.constraint(equalTo: box.contentView!.bottomAnchor, constant: -10),
         ])
         return box
     }
