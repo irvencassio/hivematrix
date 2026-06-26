@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.88 — 2026-06-26
+
+system readiness repair actions
+
 ## v0.1.87 — 2026-06-26
 
 Browser Lane Google SSO, Terminal Lane, voice tools, and console UI updates
