@@ -41,6 +41,18 @@ test("detects create-task and extracts the text", () => {
   assert.deepEqual(detectCommandIntent("remind me to call the bank"), { kind: "createTask", taskText: "call the bank" });
 });
 
+test("detects Mail Lane delete requests without deleting immediately", () => {
+  assert.deepEqual(detectCommandIntent("delete the latest email from Stripe"), {
+    kind: "mailDeleteTask",
+    mailDelete: { query: "latest email from Stripe", destructive: true },
+  });
+  assert.deepEqual(detectCommandIntent("trash emails from noreply@example.com about receipts"), {
+    kind: "mailDeleteTask",
+    mailDelete: { query: "emails from noreply@example.com about receipts", destructive: true },
+  });
+  assert.equal(detectCommandIntent("delete the second approval").kind, "none");
+});
+
 test("detects explicit Browser Lane task requests", () => {
   assert.deepEqual(detectCommandIntent("Use browser lane to search Tesla Model S price"), {
     kind: "browserLaneTask",

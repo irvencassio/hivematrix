@@ -99,3 +99,35 @@ test("commandTurnOverride queues explicit Browser Lane voice requests as Browser
     args: { mode: "search", query: "Tesla Model S price" },
   });
 });
+
+test("commandTurnOverride queues Mail Lane delete requests for review and does not delete", async () => {
+  const created: Record<string, unknown>[] = [];
+  const out = await commandTurnOverride("delete the latest email from Stripe", {
+    sessionId: "mail-delete",
+    synthesize: async () => "",
+    createTask: async (payload) => {
+      created.push(payload);
+      return { _id: "task-mail-delete", title: String(payload.title) };
+    },
+  });
+
+  assert.ok(out);
+  assert.equal(out?.command.kind, "mailDeleteTask");
+  assert.equal(out?.command.taskId, "task-mail-delete");
+  assert.match(out?.reply ?? "", /queued/i);
+  assert.match(out?.reply ?? "", /review/i);
+  assert.match(out?.reply ?? "", /No email has been deleted/i);
+
+  assert.equal(created.length, 1);
+  assert.equal(created[0]?.source, "mail-lane");
+  assert.equal(created[0]?.status, "review");
+  assert.equal(created[0]?.project, "inbox");
+  assert.match(String(created[0]?.title), /Delete email review/i);
+  assert.match(String(created[0]?.description), /Do not delete anything yet/i);
+  assert.deepEqual((created[0]?.output as Record<string, unknown>)?.mailDeleteVoiceRequest, {
+    query: "latest email from Stripe",
+    destructive: true,
+    source: "voice",
+  });
+  assert.doesNotMatch(JSON.stringify(created[0]), /password|secret|token|cookie/i);
+});

@@ -22,6 +22,7 @@ import {
 import { buildVoiceBriefing, usageReply, type BriefingUsage, type BriefingBrowserReadiness, type BriefingWorkflowInbox } from "./briefing";
 import { synthesizeSpeech } from "./tts";
 import { buildVoiceBrowserLaneTask } from "./browser-lane-intent";
+import { buildVoiceMailDeleteTask } from "./mail-delete-intent";
 import type { ApprovalQueueItem } from "@/lib/approvals/queue";
 import type { DirectiveRow } from "@/lib/orchestrator/directive-store";
 
@@ -232,6 +233,13 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
       const task = await createTask(deps, { ...payload });
       contextStore.update(sessionId, (ctx) => rememberLastTask(ctx, task._id));
       return r(`I queued Browser Lane ${intent.browserLane.mode}.`, task._id);
+    }
+    case "mailDeleteTask": {
+      if (!intent.mailDelete) return null;
+      const payload = buildVoiceMailDeleteTask(intent.mailDelete);
+      const task = await createTask(deps, { ...payload });
+      contextStore.update(sessionId, (ctx) => rememberLastTask(ctx, task._id));
+      return r(`I queued a Mail Lane deletion review for ${intent.mailDelete.query}. No email has been deleted.`, task._id);
     }
     case "createTask": {
       const text = (intent.taskText || "").trim();

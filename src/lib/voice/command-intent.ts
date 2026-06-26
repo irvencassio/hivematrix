@@ -11,6 +11,7 @@
  */
 
 import { detectVoiceBrowserLaneIntent, type VoiceBrowserLaneIntent } from "./browser-lane-intent";
+import { detectVoiceMailDeleteIntent, type VoiceMailDeleteIntent } from "./mail-delete-intent";
 
 export type ConnMode = "cloud-ok" | "local-only" | "offline" | "auto";
 
@@ -29,6 +30,7 @@ export type CommandKind =
   | "pauseDirective"    // "pause directive X" — pause directive
   | "triggerReleaseVerification" // "trigger release verification"
   | "browserLaneTask"  // "use Browser Lane to search/read/open ..."
+  | "mailDeleteTask"   // "delete/trash email ..." — queue review, never deletes immediately
   | "createTask"       // "create a task to <X>" / "remind me to <X>"
   | "connectivity"     // "are we online / connectivity status"
   | "setConnectivity"  // "go offline / cloud only / go local / auto"
@@ -43,6 +45,7 @@ export interface CommandIntent {
   model?: string;      // setTaskModel model id / alias
   directiveText?: string; // startDirective / pauseDirective target
   browserLane?: VoiceBrowserLaneIntent;
+  mailDelete?: VoiceMailDeleteIntent;
 }
 
 const clean = (s: string) => s.replace(/[.?!,\s]+$/g, "").trim();
@@ -94,6 +97,9 @@ export function detectCommandIntent(text: string): CommandIntent {
 
   const browserLane = detectVoiceBrowserLaneIntent(orig);
   if (browserLane) return { kind: "browserLaneTask", browserLane };
+
+  const mailDelete = detectVoiceMailDeleteIntent(orig);
+  if (mailDelete) return { kind: "mailDeleteTask", mailDelete };
 
   // --- Jarvis V2 operator intents ---
   if (/\b(good morning|brief me|briefing|morning briefing|what needs me|what needs my attention|standup|status briefing)\b/.test(t)) {
