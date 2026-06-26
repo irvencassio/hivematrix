@@ -17,7 +17,8 @@ test("Terminal Lane macOS app scaffold pins identity and package dependencies", 
   assert.match(pkg, /TerminalLaneApp/);
   assert.match(info, /com\.irvcassio\.hivematrix\.terminallane/);
   assert.match(info, /Terminal Lane/);
-  assert.match(entitlements, /keychain-access-groups/);
+  assert.doesNotMatch(entitlements, /keychain-access-groups/);
+  assert.match(entitlements, /com\.apple\.security\.app-sandbox/);
   assert.match(packager, /Terminal Lane\.app/);
 });
 

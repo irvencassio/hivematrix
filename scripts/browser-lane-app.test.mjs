@@ -37,7 +37,8 @@ test("Browser Lane macOS app scaffold pins identity and Keychain posture", () =>
 
   assert.match(info, /com\.irvcassio\.hivematrix\.browserlane/);
   assert.match(info, /Browser Lane/);
-  assert.match(entitlements, /keychain-access-groups/);
+  assert.doesNotMatch(entitlements, /keychain-access-groups/);
+  assert.match(entitlements, /com\.apple\.security\.app-sandbox/);
   assert.match(runbook, /macOS Keychain/);
   assert.match(runbook, /cassio\.irv@gmail\.com/);
   assert.doesNotMatch(runbook, /password.*command line/i);

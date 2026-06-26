@@ -37,3 +37,12 @@ Design: `docs/superpowers/specs/2026-06-26-browser-terminal-lane-polish-design.m
 - [x] `node scripts/scope-wall.mjs`.
 - [x] `npm run verify:portal`.
 - [x] Commit and push to `main`.
+
+## Task 5 — Release launch fix
+
+- [x] RED: update Browser Lane and Terminal Lane app tests to reject restricted
+      `keychain-access-groups` entitlements for Developer ID standalone apps.
+- [x] GREEN: remove `keychain-access-groups` from both standalone app
+      entitlement files while keeping sandbox off.
+- [x] Repackage, Developer ID sign, notarize, staple, install, and launch-test
+      both apps from `/Applications`.
