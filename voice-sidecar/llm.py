@@ -26,8 +26,7 @@ DEFAULT_BASE_URL = os.environ.get("HIVE_LLM_BASE_URL", "http://localhost:1234/v1
 DEFAULT_MODEL = os.environ.get("HIVE_LLM_MODEL", "qwen/qwen3.6-27b")
 
 # Spoken-style: short, no markdown — this text goes straight to TTS. The tool
-# guidance is explicit because a small model otherwise over-calls the email tool
-# for unrelated questions (time, calendar, weather), stalling the spoken turn.
+# guidance is explicit because a small model otherwise over-calls the surface Mail Lane uses for unrelated questions (time, calendar, weather), stalling the spoken turn before the request can reach the daemon's Mail Lane correctly.
 _APP_VERSION = os.environ.get("HIVE_APP_VERSION", "")
 _VERSION_LINE = f"The current HiveMatrix app version is {_APP_VERSION}. " if _APP_VERSION else ""
 

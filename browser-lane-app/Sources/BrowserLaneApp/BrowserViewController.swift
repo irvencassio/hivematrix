@@ -40,6 +40,11 @@ final class BrowserViewController: NSViewController {
     private let reloadAuthButton = NSButton(title: "Reload auth", target: nil, action: nil)
     private let openInChromeButton = NSButton(title: "Open in Chrome", target: nil, action: nil)
     private let openInSafariButton = NSButton(title: "Open in Safari", target: nil, action: nil)
+    private let popupContainer = NSView()
+    private let popupChrome = NSView()
+    private let popupTitleLabel = NSTextField(labelWithString: "Sign-in popup")
+    private let popupCloseButton = NSButton(title: "Close popup", target: nil, action: nil)
+    private var popupWebView: WKWebView?
 
     private static let safariUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"
 
@@ -116,6 +121,38 @@ final class BrowserViewController: NSViewController {
         authRecoveryView.addArrangedSubview(openInChromeButton)
         authRecoveryView.addArrangedSubview(openInSafariButton)
 
+        popupContainer.translatesAutoresizingMaskIntoConstraints = false
+        popupContainer.wantsLayer = true
+        popupContainer.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.32).cgColor
+        popupContainer.isHidden = true
+
+        popupChrome.translatesAutoresizingMaskIntoConstraints = false
+        popupChrome.wantsLayer = true
+        popupChrome.layer?.cornerRadius = 12
+        popupChrome.layer?.borderWidth = 1
+        popupChrome.layer?.borderColor = NSColor.separatorColor.cgColor
+        popupChrome.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        let popupToolbar = NSStackView()
+        popupToolbar.orientation = .horizontal
+        popupToolbar.alignment = .centerY
+        popupToolbar.spacing = 8
+        popupToolbar.translatesAutoresizingMaskIntoConstraints = false
+
+        popupTitleLabel.textColor = .labelColor
+        popupTitleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        popupTitleLabel.lineBreakMode = .byTruncatingMiddle
+        popupTitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        popupCloseButton.bezelStyle = .rounded
+        popupCloseButton.target = self
+        popupCloseButton.action = #selector(closePopup)
+
+        popupToolbar.addArrangedSubview(popupTitleLabel)
+        popupToolbar.addArrangedSubview(popupCloseButton)
+        popupChrome.addSubview(popupToolbar)
+        popupContainer.addSubview(popupChrome)
+
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.translatesAutoresizingMaskIntoConstraints = false
@@ -123,6 +160,7 @@ final class BrowserViewController: NSViewController {
         view.addSubview(toolbar)
         view.addSubview(authRecoveryView)
         view.addSubview(webView)
+        view.addSubview(popupContainer)
 
         NSLayoutConstraint.activate([
             toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
@@ -139,6 +177,23 @@ final class BrowserViewController: NSViewController {
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             webView.topAnchor.constraint(equalTo: authRecoveryView.bottomAnchor, constant: 12),
             webView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
+
+            popupContainer.leadingAnchor.constraint(equalTo: webView.leadingAnchor),
+            popupContainer.trailingAnchor.constraint(equalTo: webView.trailingAnchor),
+            popupContainer.topAnchor.constraint(equalTo: webView.topAnchor),
+            popupContainer.bottomAnchor.constraint(equalTo: webView.bottomAnchor),
+
+            popupChrome.centerXAnchor.constraint(equalTo: popupContainer.centerXAnchor),
+            popupChrome.centerYAnchor.constraint(equalTo: popupContainer.centerYAnchor),
+            popupChrome.widthAnchor.constraint(greaterThanOrEqualToConstant: 520),
+            popupChrome.widthAnchor.constraint(lessThanOrEqualTo: popupContainer.widthAnchor, multiplier: 0.86),
+            popupChrome.heightAnchor.constraint(greaterThanOrEqualToConstant: 520),
+            popupChrome.heightAnchor.constraint(lessThanOrEqualTo: popupContainer.heightAnchor, multiplier: 0.88),
+
+            popupToolbar.leadingAnchor.constraint(equalTo: popupChrome.leadingAnchor, constant: 12),
+            popupToolbar.trailingAnchor.constraint(equalTo: popupChrome.trailingAnchor, constant: -12),
+            popupToolbar.topAnchor.constraint(equalTo: popupChrome.topAnchor, constant: 10),
+            popupToolbar.heightAnchor.constraint(equalToConstant: 30),
         ])
 
         // A pending handoff URL (from Add Site / Readiness) wins over the default.
@@ -148,6 +203,34 @@ final class BrowserViewController: NSViewController {
         } else {
             load(BrowserLaneSettings.shared.defaultURL)
         }
+    }
+
+    private func showPopup(_ popup: WKWebView, initialURL: URL?) {
+        closePopup()
+        popupWebView = popup
+        popup.navigationDelegate = self
+        popup.uiDelegate = self
+        popup.customUserAgent = BrowserViewController.safariUserAgent
+        popup.translatesAutoresizingMaskIntoConstraints = false
+        popupChrome.addSubview(popup)
+        popupContainer.isHidden = false
+        popupTitleLabel.stringValue = initialURL?.host ?? "Sign-in popup"
+        statusLabel.stringValue = "Opened sign-in popup: \(initialURL?.host ?? "authentication")"
+        updateAuthRecovery(for: initialURL)
+        NSLayoutConstraint.activate([
+            popup.leadingAnchor.constraint(equalTo: popupChrome.leadingAnchor),
+            popup.trailingAnchor.constraint(equalTo: popupChrome.trailingAnchor),
+            popup.topAnchor.constraint(equalTo: popupTitleLabel.superview!.bottomAnchor, constant: 10),
+            popup.bottomAnchor.constraint(equalTo: popupChrome.bottomAnchor),
+        ])
+    }
+
+    @objc private func closePopup() {
+        popupWebView?.navigationDelegate = nil
+        popupWebView?.uiDelegate = nil
+        popupWebView?.removeFromSuperview()
+        popupWebView = nil
+        popupContainer.isHidden = true
     }
 
     @objc private func loadAddress() {
@@ -229,8 +312,13 @@ extension BrowserViewController: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        addressField.stringValue = webView.url?.absoluteString ?? addressField.stringValue
-        statusLabel.stringValue = webView.url?.host ?? "Loaded"
+        if webView === popupWebView {
+            popupTitleLabel.stringValue = webView.url?.host ?? "Sign-in popup"
+            statusLabel.stringValue = "Sign-in popup: \(webView.url?.host ?? "loaded")"
+        } else {
+            addressField.stringValue = webView.url?.absoluteString ?? addressField.stringValue
+            statusLabel.stringValue = webView.url?.host ?? "Loaded"
+        }
         updateAuthRecovery(for: webView.url)
     }
 
@@ -253,8 +341,8 @@ extension BrowserViewController: WKNavigationDelegate {
 
 extension BrowserViewController: WKUIDelegate {
     /// OAuth providers often open the consent/login step in a popup or a
-    /// `target="_blank"` window. Load that request into the main, persistent web
-    /// view instead of dropping it, so the SSO handoff completes in one session.
+    /// `target="_blank"` window. Return a real child WKWebView so Google GSI
+    /// keeps its opener relationship and can post the login result back.
     func webView(
         _ webView: WKWebView,
         createWebViewWith configuration: WKWebViewConfiguration,
@@ -262,9 +350,20 @@ extension BrowserViewController: WKUIDelegate {
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
         if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
-            statusLabel.stringValue = "Continuing sign-in: \(url.host ?? url.absoluteString)"
-            webView.load(navigationAction.request)
+            configuration.websiteDataStore = WKWebsiteDataStore.default()
+            configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+            configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+            let popup = WKWebView(frame: .zero, configuration: configuration)
+            showPopup(popup, initialURL: url)
+            return popup
         }
         return nil
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        if webView === popupWebView {
+            closePopup()
+            statusLabel.stringValue = "Sign-in popup closed"
+        }
     }
 }

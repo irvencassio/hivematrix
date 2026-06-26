@@ -252,6 +252,19 @@ test("Browser Lane WebKit view persists the session and supports OAuth popups", 
   assert.match(browser, /createWebViewWith/);
 });
 
+test("Browser Lane keeps Google SSO popups as real opener-preserving WebKit popups", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const browser = readFileSync(join(sourceDir, "BrowserViewController.swift"), "utf8");
+  const popupDelegate = browser.match(/func webView\(\s*_ webView: WKWebView,\s*createWebViewWith[\s\S]*?\n    \}/)?.[0] ?? "";
+
+  assert.match(browser, /popupWebView/);
+  assert.match(browser, /popupContainer/);
+  assert.match(browser, /showPopup/);
+  assert.match(browser, /webViewDidClose/);
+  assert.match(popupDelegate, /return popup/);
+  assert.doesNotMatch(popupDelegate, /webView\.load\(navigationAction\.request\)/);
+});
+
 test("Browser Lane Google auth pages expose a visible recovery path instead of white-screening silently", () => {
   const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
   const browser = readFileSync(join(sourceDir, "BrowserViewController.swift"), "utf8");
