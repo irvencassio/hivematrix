@@ -15,6 +15,10 @@ final class ContentViewController: NSViewController {
         let vc: NSViewController = switch screen {
         case .browser:
             BrowserViewController()
+        case .sites:
+            SitesViewController()
+        case .addSite:
+            AddSiteViewController()
         default:
             PlaceholderViewController(screen: screen)
         }

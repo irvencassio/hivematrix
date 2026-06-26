@@ -28,9 +28,9 @@ enum Screen: Int, CaseIterable {
         case .browser:
             return "Enter a search or URL above. Browser Lane uses a native WebKit view for this MVP."
         case .sites:
-            return "No sites configured. Use hive browser sites add to register the first site."
+            return "No sites configured. Use Add Site to register HeyGen or another authenticated site."
         case .addSite:
-            return "Site registration is not wired yet. Credentials are stored in macOS Keychain only — never in SQLite or logs."
+            return "Save site metadata and put username/password in macOS Keychain only."
         case .readiness:
             return "No readiness runs. Use hive browser readiness run --all to probe configured sites."
         case .traces:

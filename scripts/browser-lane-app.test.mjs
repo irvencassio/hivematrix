@@ -48,3 +48,45 @@ test("Browser Lane app can be packaged as a normal macOS app", () => {
   assert.match(packager, /Info\.plist/);
   assert.match(packager, /BrowserLane/);
 });
+
+test("Browser Lane Add Site is wired to metadata, daemon sync, and Keychain-only credentials", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const addSitePath = join(sourceDir, "AddSiteViewController.swift");
+  const siteStorePath = join(sourceDir, "BrowserLaneSiteStore.swift");
+  const keychainPath = join(sourceDir, "BrowserLaneKeychain.swift");
+  const daemonClientPath = join(sourceDir, "BrowserLaneDaemonClient.swift");
+  const modelsPath = join(sourceDir, "BrowserLaneModels.swift");
+  const content = readFileSync(join(sourceDir, "ContentViewController.swift"), "utf8");
+  const screens = readFileSync(join(sourceDir, "Screens.swift"), "utf8");
+
+  for (const path of [addSitePath, siteStorePath, keychainPath, daemonClientPath, modelsPath]) {
+    assert.ok(existsSync(path), `${path} should exist`);
+  }
+
+  const addSite = readFileSync(addSitePath, "utf8");
+  assert.match(addSite, /final class AddSiteViewController/);
+  assert.match(addSite, /NSTextField/);
+  assert.match(addSite, /NSSecureTextField/);
+  assert.match(addSite, /saveSite/);
+  assert.match(addSite, /Open login URL/);
+
+  const keychain = readFileSync(keychainPath, "utf8");
+  assert.match(keychain, /import Security/);
+  assert.match(keychain, /HiveMatrix Browser Lane/);
+  assert.match(keychain, /SecItemAdd/);
+  assert.match(keychain, /SecItemUpdate/);
+
+  const daemonClient = readFileSync(daemonClientPath, "utf8");
+  assert.match(daemonClient, /browser-lane\/sites/);
+  assert.match(daemonClient, /auth-token/);
+  assert.doesNotMatch(daemonClient, /password/i);
+
+  const models = readFileSync(modelsPath, "utf8");
+  assert.match(models, /struct BrowserLaneSite/);
+  assert.match(models, /credentialRef/);
+  assert.doesNotMatch(models, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
+
+  assert.match(content, /AddSiteViewController/);
+  assert.match(content, /SitesViewController/);
+  assert.doesNotMatch(screens, /not wired yet/i);
+});
