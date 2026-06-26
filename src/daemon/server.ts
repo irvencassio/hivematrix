@@ -258,6 +258,22 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /system/readiness/repair — explicit, allow-listed repair actions.
+      // There is intentionally no "repair all"; every mutation is one operator
+      // click and the implementation owns the action allowlist:
+      // seed_coo_rules, seed_heygen_browser_site, refresh_legacy_video_reviews.
+      if (req.method === "POST" && urlPath === "/system/readiness/repair") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        try {
+          const { performSystemReadinessRepair } = await import("@/lib/system-readiness");
+          const result = await performSystemReadinessRepair({ action: body.action }, { connectivity: () => policy.mode });
+          json(res, 200, result);
+        } catch (err) {
+          json(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
       // GET /projects — discovered projects for the project selector
       if (req.method === "GET" && urlPath === "/projects") {
         const { discoverProjects, discoverProjectsFresh, shouldPreSelect } = await import("@/lib/routing/project-discovery");

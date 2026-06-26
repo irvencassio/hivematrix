@@ -3882,17 +3882,35 @@ async function renderSystemReadiness() {
   }).join(" ");
   const checks = (report.checks || []).map(c => {
     const next = c.nextAction ? '<div class="muted" style="font-size:10px;margin-top:3px">Next: '+esc(c.nextAction)+'</div>' : '';
+    const repairs = (c.repairActions || []).map(a =>
+      '<button class="copybtn" onclick="systemReadinessRepair(\''+esc(a.id)+'\')" title="'+esc(a.description || '')+'">'+esc(a.label || a.id)+'</button>'
+    ).join(" ");
+    const repairRow = repairs ? '<div class="row" style="justify-content:flex-end;gap:6px;margin-top:5px">'+repairs+'</div>' : '';
     return '<div style="padding:7px 0;border-top:1px solid var(--border)">'
       + '<div class="row" style="justify-content:space-between;gap:8px;align-items:center"><b>'+esc(c.label || c.id)+'</b>'+systemReadinessBadge(c.severity)+'</div>'
       + '<div class="muted" style="font-size:11px;margin-top:3px">'+esc(c.summary || '')+'</div>'
       + next
+      + repairRow
       + '</div>';
   }).join("");
   el.innerHTML = '<div class="card" style="cursor:default">'
     + '<div class="t">'+esc(report.summary || 'System readiness')+'</div>'
     + '<div style="margin:6px 0">'+chips+'</div>'
+    + '<div id="system_readiness_msg" class="muted" style="font-size:10px;margin:4px 0"></div>'
     + checks
     + '</div>';
+}
+
+async function systemReadinessRepair(action) {
+  const msg = document.getElementById("system_readiness_msg");
+  if (msg) msg.textContent = "Repairing…";
+  const r = await api("/system/readiness/repair", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ action }) });
+  if (!r || r.ok === false) {
+    if (msg) msg.innerHTML = '<span style="color:var(--err)">'+esc((r&&r.error)||'Repair failed')+'</span>';
+    return;
+  }
+  if (msg) msg.textContent = r.message || "Repair complete.";
+  renderSystemReadiness();
 }
 
 async function renderLaneApps() {

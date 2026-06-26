@@ -11,3 +11,13 @@ test("daemon exposes the read-only system readiness endpoint", () => {
   assert.doesNotMatch(server, /\/system\/readiness[\s\S]{0,2200}seedDefaultCooRoutingRules/);
   assert.doesNotMatch(server, /\/system\/readiness[\s\S]{0,2200}installLaneApp/);
 });
+
+test("daemon exposes explicit system readiness repair endpoint with an action allowlist", () => {
+  assert.match(server, /POST \/system\/readiness\/repair/);
+  assert.match(server, /urlPath === "\/system\/readiness\/repair"/);
+  assert.match(server, /performSystemReadinessRepair/);
+  assert.match(server, /seed_coo_rules/);
+  assert.match(server, /seed_heygen_browser_site/);
+  assert.match(server, /refresh_legacy_video_reviews/);
+  assert.doesNotMatch(server, /repair_all|autoRepair|Repair all/);
+});

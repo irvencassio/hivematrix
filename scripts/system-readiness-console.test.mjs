@@ -11,5 +11,12 @@ test("settings lanes tab exposes a read-only System Readiness card", () => {
   assert.match(consoleSrc, /renderSystemReadiness/);
   assert.match(consoleSrc, /ok.*info.*warn.*critical/s);
   assert.match(consoleSrc, /Refresh/);
-  assert.doesNotMatch(consoleSrc, /systemReadinessRepair|Repair all|Auto repair/);
+  assert.doesNotMatch(consoleSrc, /Repair all|Auto repair|repair_all/);
+});
+
+test("system readiness card exposes only explicit per-check repair buttons", () => {
+  assert.match(consoleSrc, /systemReadinessRepair/);
+  assert.match(consoleSrc, /\/system\/readiness\/repair/);
+  assert.match(consoleSrc, /repairActions/);
+  assert.doesNotMatch(consoleSrc, /Repair all|autoRepair|repair_all/);
 });

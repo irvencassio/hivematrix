@@ -6,6 +6,9 @@ import { readCachedLocalModelHealth, type LocalModelHealth } from "@/lib/local-m
 import { getWorkflowInbox, type WorkflowInbox } from "@/lib/workflows/inbox";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { getBundledVersion } from "@/lib/version/bundle-version";
+import { seedDefaultCooRoutingRules } from "@/lib/coo/store";
+import { seedHeyGenBrowserSite } from "@/lib/browser-lane/heygen";
+import { reviewPrompt } from "@/lib/video/review";
 
 export type SystemReadinessSeverity = "ok" | "info" | "warn" | "critical";
 
@@ -15,6 +18,7 @@ export interface SystemReadinessCheck {
   severity: SystemReadinessSeverity;
   summary: string;
   nextAction?: string;
+  repairActions?: SystemReadinessRepairAction[];
   details?: Record<string, unknown>;
 }
 
@@ -24,6 +28,27 @@ export interface SystemReadinessReport {
   summary: string;
   counts: Record<SystemReadinessSeverity, number>;
   checks: SystemReadinessCheck[];
+}
+
+export const SYSTEM_READINESS_REPAIR_ACTIONS = [
+  "seed_coo_rules",
+  "seed_heygen_browser_site",
+  "refresh_legacy_video_reviews",
+] as const;
+export type SystemReadinessRepairActionId = (typeof SYSTEM_READINESS_REPAIR_ACTIONS)[number];
+
+export interface SystemReadinessRepairAction {
+  id: SystemReadinessRepairActionId;
+  label: string;
+  description: string;
+}
+
+export interface SystemReadinessRepairResult {
+  ok: boolean;
+  action: SystemReadinessRepairActionId;
+  message: string;
+  changed: number;
+  report: SystemReadinessReport;
 }
 
 interface MinimalLaneAppState {
@@ -88,9 +113,28 @@ function check(
   summary: string,
   nextAction?: string,
   details?: Record<string, unknown>,
+  repairActions?: SystemReadinessRepairAction[],
 ): SystemReadinessCheck {
-  return { id, label, severity, summary, ...(nextAction ? { nextAction } : {}), ...(details ? { details } : {}) };
+  return { id, label, severity, summary, ...(nextAction ? { nextAction } : {}), ...(repairActions?.length ? { repairActions } : {}), ...(details ? { details } : {}) };
 }
+
+const REPAIR_COPY: Record<SystemReadinessRepairActionId, SystemReadinessRepairAction> = {
+  seed_coo_rules: {
+    id: "seed_coo_rules",
+    label: "Seed COO rules",
+    description: "Install the canonical default COO routing rules without overwriting operator edits.",
+  },
+  seed_heygen_browser_site: {
+    id: "seed_heygen_browser_site",
+    label: "Seed HeyGen site",
+    description: "Register the HeyGen Browser Lane site/probe/rule while preserving SSO metadata.",
+  },
+  refresh_legacy_video_reviews: {
+    id: "refresh_legacy_video_reviews",
+    label: "Refresh video review copy",
+    description: "Update stale video review prompts to the current Browser Lane approval wording.",
+  },
+};
 
 function cooRoutingCheck(): SystemReadinessCheck {
   const total = countRows("coo_routing_rules");
@@ -103,6 +147,7 @@ function cooRoutingCheck(): SystemReadinessCheck {
       "No COO routing rules are stored, so routing depends on hardcoded/default paths only.",
       "Seed or review COO routing rules in Settings -> Lanes before relying on autonomous routing.",
       { total, enabled },
+      [REPAIR_COPY.seed_coo_rules],
     );
   }
   return check("coo-routing-rules", "COO routing rules", "ok", `${enabled}/${total} COO routing rules enabled.`, undefined, { total, enabled });
@@ -118,6 +163,7 @@ function browserReadinessCheck(dashboard: MinimalBrowserDashboard): SystemReadin
       "No Browser Lane sites are configured.",
       "Add the key business sites and mark or probe readiness before routing authenticated browser work.",
       { sites: 0 },
+      [REPAIR_COPY.seed_heygen_browser_site],
     );
   }
   if (totals.needsAttention > 0 || totals.stale > 0) {
@@ -246,6 +292,7 @@ function legacyVideoReviewCheck(): SystemReadinessCheck {
         updatedAt: row.updatedAt,
       })),
     },
+    [REPAIR_COPY.refresh_legacy_video_reviews],
   );
 }
 
@@ -323,5 +370,87 @@ export async function getSystemReadinessReport(deps: SystemReadinessDeps = {}): 
     summary: summarize(counts),
     counts,
     checks,
+  };
+}
+
+function isRepairAction(value: unknown): value is SystemReadinessRepairActionId {
+  return typeof value === "string" && (SYSTEM_READINESS_REPAIR_ACTIONS as readonly string[]).includes(value);
+}
+
+function legacyVideoWhere(): string {
+  return `
+    status IN ('review', 'needs_input')
+    AND source = 'video'
+    AND (
+      lower(description) LIKE '%make-avatar.mjs%'
+      OR lower(description) LIKE '%heygen costs%'
+      OR lower(description) LIKE '%render + publish%'
+      OR lower(description) LIKE '%before it renders%'
+      OR lower(coalesce(error, '')) LIKE '%make-avatar.mjs%'
+    )
+  `;
+}
+
+function refreshLegacyVideoReviews(): number {
+  const rows = getDb().prepare(`
+    SELECT _id, output, error
+    FROM tasks
+    WHERE ${legacyVideoWhere()}
+    ORDER BY datetime(updatedAt) DESC, rowid DESC
+    LIMIT 100
+  `).all() as Array<{ _id: string; output: string; error: string | null }>;
+  let changed = 0;
+  for (const row of rows) {
+    let output: Record<string, unknown>;
+    try {
+      output = JSON.parse(row.output || "{}") as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const script = typeof output.reviewScript === "string" ? output.reviewScript.trim() : "";
+    if (!script) continue;
+    const shouldClearError = /make-avatar\.mjs|heygen costs|render failed/i.test(row.error ?? "");
+    getDb().prepare(`
+      UPDATE tasks
+      SET description = ?,
+          error = CASE WHEN ? THEN NULL ELSE error END,
+          status = 'review',
+          reviewState = 'needs_input',
+          updatedAt = datetime('now')
+      WHERE _id = ?
+    `).run(reviewPrompt(script), shouldClearError ? 1 : 0, row._id);
+    changed += 1;
+  }
+  return changed;
+}
+
+export async function performSystemReadinessRepair(input: { action: unknown }, deps: SystemReadinessDeps = {}): Promise<SystemReadinessRepairResult> {
+  if (!isRepairAction(input.action)) {
+    throw new Error(`Unsupported system readiness repair action: ${String(input.action ?? "")}`);
+  }
+  let changed = 0;
+  let message = "";
+  switch (input.action) {
+    case "seed_coo_rules":
+      changed = seedDefaultCooRoutingRules("system-readiness-repair");
+      message = changed ? `Seeded ${changed} COO routing rule${changed === 1 ? "" : "s"}.` : "COO routing rules were already seeded.";
+      break;
+    case "seed_heygen_browser_site": {
+      const seeded = seedHeyGenBrowserSite();
+      changed = 1;
+      message = `Registered HeyGen Browser Lane site, probe, and COO rule (${seeded.ruleId}).`;
+      break;
+    }
+    case "refresh_legacy_video_reviews":
+      changed = refreshLegacyVideoReviews();
+      message = changed ? `Refreshed ${changed} legacy video review task${changed === 1 ? "" : "s"}.` : "No refreshable legacy video review tasks found.";
+      break;
+  }
+  return {
+    ok: true,
+    action: input.action,
+    message,
+    changed,
+    report: await getSystemReadinessReport(deps),
   };
 }

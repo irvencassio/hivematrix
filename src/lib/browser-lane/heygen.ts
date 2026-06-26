@@ -13,7 +13,7 @@
 import { DEFAULT_TASK_PROJECT } from "@/lib/routing/project-constants";
 import { upsertCooRoutingRule } from "@/lib/coo/store";
 import { parseBrowserBeeJobCreate, type BrowserBeeJobCreatePayload } from "./jobs";
-import { upsertBrowserReadinessProbe, upsertBrowserSite } from "./store";
+import { getBrowserSite, upsertBrowserReadinessProbe, upsertBrowserSite } from "./store";
 import type { BrowserSite, ReadinessProbe } from "./contracts";
 
 export const HEYGEN_SITE = {
@@ -22,11 +22,11 @@ export const HEYGEN_SITE = {
   homeUrl: "https://app.heygen.com/home",
   loginUrl: "https://app.heygen.com/login",
   createUrl: "https://app.heygen.com/create",
-  allowedDomains: ["app.heygen.com", "heygen.com"],
-  authStrategy: "manual_session" as const,
-  // Metadata pointer only — the operator may attach a Keychain entry here later.
-  // Seeding does NOT write any credential to the Keychain.
-  credentialRef: "hivematrix.browser.heygen.primary",
+  allowedDomains: ["app.heygen.com", "heygen.com", "auth.heygen.com", "accounts.google.com", "google.com"],
+  authStrategy: "google_sso" as const,
+  // Google SSO is session-based in Browser Lane. Seeding writes no Keychain
+  // credential; providerAccount is operator metadata when configured.
+  credentialRef: null,
 } as const;
 
 /** Manual operator handoff points — these are never automated by the lane. */
@@ -51,14 +51,21 @@ export interface SeedHeyGenResult {
  * no Keychain credential is written.
  */
 export function seedHeyGenBrowserSite(): SeedHeyGenResult {
+  const existing = getBrowserSite(HEYGEN_SITE.id);
+  const allowedDomains = Array.from(new Set([
+    ...HEYGEN_SITE.allowedDomains,
+    ...(existing?.allowedDomains ?? []),
+  ].map((domain) => domain.toLowerCase())));
   const site = upsertBrowserSite({
     id: HEYGEN_SITE.id,
     displayName: HEYGEN_SITE.displayName,
     homeUrl: HEYGEN_SITE.homeUrl,
     loginUrl: HEYGEN_SITE.loginUrl,
-    allowedDomains: HEYGEN_SITE.allowedDomains,
-    authStrategy: HEYGEN_SITE.authStrategy,
-    credentialRef: HEYGEN_SITE.credentialRef,
+    allowedDomains,
+    authStrategy: existing?.authStrategy ?? HEYGEN_SITE.authStrategy,
+    credentialRef: existing?.credentialRef ?? HEYGEN_SITE.credentialRef,
+    providerAccount: existing?.providerAccount ?? null,
+    notes: existing?.notes ?? "HeyGen portal video workflow. Google SSO session is maintained by Browser Lane persistent WebKit storage.",
   });
 
   const probe = upsertBrowserReadinessProbe({
