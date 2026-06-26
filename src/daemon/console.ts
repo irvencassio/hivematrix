@@ -729,9 +729,26 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="lane_apps" style="margin-top:6px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
-        <label class="flbl" style="margin:0">Embedded capability lanes</label>
+        <label class="flbl" style="margin:0">Browser Lane Sites &amp; Auth</label>
+        <button class="copybtn" onclick="renderBrowserReadiness()">↻ Refresh</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin:4px 0 6px">Per-site auth/readiness for the Browser Lane app, with stale tracking. A daily sweep keeps it fresh; run one now to refresh before routing browser work.</div>
+      <div class="row" style="margin-top:4px"><button class="create" onclick="runBrowserReadiness()">Run readiness check</button></div>
+      <div id="browser_readiness" style="margin-top:8px"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <label class="flbl" style="margin:0">Terminal Lane Profiles &amp; Readiness</label>
+        <button class="copybtn" onclick="renderTerminalReadiness()">↻ Refresh</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin:4px 0 6px">Per-profile readiness (local shell / SSH) for the Terminal Lane app, with stale tracking. Run a check to probe each configured profile before routing terminal work. Credentials live in the macOS Keychain and are never shown here.</div>
+      <div class="row" style="margin-top:4px"><button class="create" onclick="runTerminalReadiness()">Run readiness check</button></div>
+      <div id="terminal_readiness" style="margin-top:8px"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <label class="flbl" style="margin:0">Runtime Capabilities</label>
         <button class="copybtn" onclick="renderSettingsLanes()">↻ Refresh</button>
       </div>
+      <div class="muted" style="font-size:11px;margin:4px 0 8px">Lane capabilities the daemon runs in-process — not installable apps. These follow the connectivity mode; launchagent-backed ones can be turned on or off.</div>
       <div id="s_lanes" style="margin-top:8px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -774,14 +791,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="coo_resolve_result" class="muted" style="font-size:11px;margin-top:4px"></div>
       <div id="coo_rules_result" class="muted" style="font-size:11px;margin-top:6px"></div>
       <div id="coo_rules_list" style="margin-top:8px"></div>
-      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
-      <div class="row" style="justify-content:space-between;align-items:center">
-        <label class="flbl" style="margin:0">Browser Lane readiness</label>
-        <button class="copybtn" onclick="renderBrowserReadiness()">↻ Refresh</button>
-      </div>
-      <div class="muted" style="font-size:11px;margin:4px 0 6px">Per-site auth/readiness with stale tracking. A daily sweep keeps it fresh; run one now to refresh before routing browser work.</div>
-      <div class="row" style="margin-top:4px"><button class="create" onclick="runBrowserReadiness()">Run readiness check</button></div>
-      <div id="browser_readiness" style="margin-top:8px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">HeyGen portal videos</label>
@@ -3681,7 +3690,7 @@ function switchSettingsTab(tab) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderSystemReadiness(); renderLaneApps(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderBrowserReadiness(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); }
+  if (tab === "lanes") { renderSystemReadiness(); renderLaneApps(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); }
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -4269,6 +4278,36 @@ async function runBrowserReadiness() {
   const r = await api("/browser-lane/readiness/run", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ siteId: "all" }) });
   if (!r || !r.ok) { if (el) el.innerHTML = '<div class="errbox">'+esc((r&&r.error)||'Readiness run failed')+'</div>'; return; }
   renderBrowserReadiness(); // re-render the dashboard after the sweep
+}
+
+// Terminal Lane readiness mirrors Browser Lane: real data from the daemon's
+// /terminal-lane/dashboard. Only non-secret fields are rendered — credentials
+// live in the macOS Keychain and never reach this payload or the UI.
+async function renderTerminalReadiness() {
+  const el = document.getElementById("terminal_readiness");
+  if (!el) return;
+  el.innerHTML = '<div class="muted">Loading…</div>';
+  const r = await api("/terminal-lane/dashboard");
+  if (!r || !r.ok) { el.innerHTML = '<div class="muted">Readiness unavailable.</div>'; return; }
+  const t = r.totals || { byColor: {} };
+  const profiles = r.profiles || [];
+  if (!profiles.length) { el.innerHTML = '<div class="muted" style="font-size:11px">No Terminal Lane profiles are configured.</div>'; return; }
+  const m = (k,v) => '<div class="m" style="margin-top:2px"><span class="badge">'+esc(k)+'</span> '+esc(v)+'</div>';
+  const head = m("profiles", t.profiles || 0) + m("needs attention", t.needsAttention || 0);
+  const attention = profiles.filter(p => ['orange','red','gray'].includes(p.readiness.color));
+  const shown = (attention.length ? attention : profiles).slice(0,5);
+  const list = shown.map(p => {
+    const lastRun = p.readiness.lastRunAt ? ' · ' + timeAgo(p.readiness.lastRunAt, Date.now()) : ' · never run';
+    return '<div class="muted" style="font-size:11px">'+esc(p.displayName)+' <span class="badge">'+esc(p.kind)+'</span> — '+esc(p.readiness.status)+' ('+esc(p.readiness.color)+')'+lastRun+'</div>';
+  }).join('');
+  el.innerHTML = '<div class="card" style="cursor:default">'+head+'<div style="margin-top:6px">'+list+'</div></div>';
+}
+async function runTerminalReadiness() {
+  const el = document.getElementById("terminal_readiness");
+  if (el) el.innerHTML = '<div class="muted">Running readiness check…</div>';
+  const r = await api("/terminal-lane/readiness/run", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ profileId: "all" }) });
+  if (!r || !r.ok) { if (el) el.innerHTML = '<div class="errbox">'+esc((r&&r.error)||'Readiness run failed')+'</div>'; return; }
+  renderTerminalReadiness(); // re-render the dashboard after the sweep
 }
 
 // --- HeyGen portal videos (operator) ----------------------------------------

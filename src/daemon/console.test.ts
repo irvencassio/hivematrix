@@ -591,3 +591,48 @@ test("board renders a per-task age chip from updatedAt", () => {
   assert.match(js, /ageBadge\(t\)/, "renderBoard appends the age chip per card");
   assert.match(js, /updatedAt/, "age chip is driven by updatedAt");
 });
+
+test("settings lanes sections have distinct, non-duplicate labels", () => {
+  // The duplicate-feeling pair was "Lane Apps" (installable apps) vs "Embedded
+  // capability lanes" (daemon runtime). The latter is relabeled so it no longer
+  // reads as a second app inventory.
+  assert.match(CONSOLE_HTML, /Lane Apps/, "Lane Apps card kept as the app installer");
+  assert.match(CONSOLE_HTML, /Runtime Capabilities/, "embedded lanes relabeled to Runtime Capabilities");
+  assert.match(CONSOLE_HTML, /Browser Lane Sites &amp; Auth/, "browser readiness relabeled to Sites & Auth");
+  assert.match(CONSOLE_HTML, /Terminal Lane Profiles &amp; Readiness/, "matching Terminal Lane readiness card added");
+  assert.doesNotMatch(CONSOLE_HTML, /Embedded capability lanes/, "old duplicate-feeling label is gone");
+});
+
+test("Lane Apps still names both Browser Lane and Terminal Lane", () => {
+  // Lane Apps is the canonical install/update/verify/launch surface for both apps.
+  const start = CONSOLE_HTML.indexOf("Lane Apps");
+  const end = CONSOLE_HTML.indexOf("Runtime Capabilities");
+  assert.ok(start >= 0 && end > start, "Lane Apps precedes Runtime Capabilities");
+  const laneAppsCopy = CONSOLE_HTML.slice(start, end);
+  assert.match(laneAppsCopy, /Browser Lane and Terminal Lane are standalone signed apps/, "Lane Apps copy names both apps");
+});
+
+test("readiness cards sit directly under Lane Apps, before Runtime Capabilities", () => {
+  const laneApps = CONSOLE_HTML.indexOf("Lane Apps");
+  const browserSites = CONSOLE_HTML.indexOf("Browser Lane Sites &amp; Auth");
+  const terminalReadiness = CONSOLE_HTML.indexOf("Terminal Lane Profiles &amp; Readiness");
+  const runtime = CONSOLE_HTML.indexOf("Runtime Capabilities");
+  assert.ok(laneApps >= 0 && browserSites > laneApps, "Browser Lane Sites & Auth follows Lane Apps");
+  assert.ok(terminalReadiness > browserSites, "Terminal readiness follows Browser readiness");
+  assert.ok(runtime > terminalReadiness, "Runtime Capabilities comes after both readiness cards");
+});
+
+test("settings surfaces a real Terminal Lane readiness card with no secrets", () => {
+  assert.match(CONSOLE_HTML, /id="terminal_readiness"/, "Terminal readiness mount point present");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /async function renderTerminalReadiness\(/, "Terminal readiness renderer present");
+  assert.match(js, /api\("\/terminal-lane\/dashboard"\)/, "uses the existing daemon dashboard endpoint");
+  assert.match(js, /\/terminal-lane\/readiness\/run/, "uses the existing daemon run-probe endpoint");
+  assert.match(js, /renderTerminalReadiness\(\);/, "rendered when the Lanes tab opens");
+  // No fabricated readiness: honest empty state when nothing is configured.
+  assert.match(js, /No Terminal Lane profiles are configured\./, "honest empty state, no fake green");
+  // Secrets guard: the readiness render must not surface any credential ref/value.
+  const render = js.match(/async function renderTerminalReadiness\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(render.length > 50, "renderTerminalReadiness body extracted");
+  assert.doesNotMatch(render, /credentialRef|password|private_key|ssh_key_passphrase/, "no secrets surfaced in the UI");
+});
