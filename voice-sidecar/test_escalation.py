@@ -64,14 +64,16 @@ def main() -> int:
     check("plain qa does not escalate", not esc_ok)
     check("plain qa keeps reply", reply_ok == r_ok)
 
-    # "What time is it?" is treated as real-time info the local model can't reliably
-    # know (no clock in-prompt), so it hands off via needs_research — see
-    # _RESEARCH_TRIGGER_RE. (Math/general Q&A above still answers live.)
+    # "What time is it?" is now answered LIVE by the local datetime tool (the Mac
+    # clock), so it must NOT escalate. Only "time in <another place>" still hands off.
     t_time = "What time is it?"
-    r_time = "It's about a quarter past three."
+    r_time = "It is Thursday, June 25, 2026, 5:50 PM EDT."
     esc_time, reply_time = resolve_escalation(t_time, r_time)
-    check("time qa escalates (real-time lookup)", esc_time)
-    check("time qa speaks ack", reply_time == ESCALATION_ACK)
+    check("time qa does not escalate", not esc_time)
+    check("time qa keeps reply", reply_time == r_time)
+    esc_tz, reply_tz = resolve_escalation("What time is it in Tokyo?", "It's mid-morning there.")
+    check("time-in-place still escalates", esc_tz)
+    check("time-in-place speaks ack", reply_tz == ESCALATION_ACK)
 
     # A friendly reply that merely contains "can't" mid-sentence must NOT be a refusal.
     check("not a refusal: enthusiasm", not is_refusal("I can't wait to help you with that!"))
