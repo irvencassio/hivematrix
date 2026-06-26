@@ -1504,6 +1504,38 @@ export function createDaemonServer() {
         return;
       }
 
+      // DELETE /terminal-lane/profiles/:id — typed, id-constrained removal. The
+      // store refuses the local default. No secrets touched.
+      const terminalProfileDelete = urlPath.match(/^\/terminal-lane\/profiles\/([a-z0-9._:-]+)$/);
+      if (req.method === "DELETE" && terminalProfileDelete) {
+        try {
+          const { deleteTerminalProfile } = await import("@/lib/terminal-lane/store");
+          const deleted = deleteTerminalProfile(terminalProfileDelete[1]);
+          json(res, deleted ? 200 : 404, { ok: deleted, lane: "terminal", deleted });
+        } catch (e) {
+          json(res, 400, { ok: false, lane: "terminal", error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
+      // POST /terminal-lane/open — Canopy-style: resolve an open request from a
+      // profileId ONLY (rejectInlineSecrets blocks any smuggled password). It
+      // resolves the command + honest connectability; it does NOT execute.
+      if (req.method === "POST" && urlPath === "/terminal-lane/open") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        try {
+          const { resolveTerminalOpenRequest } = await import("@/lib/terminal-lane/open");
+          const { rejectInlineSecrets } = await import("@/lib/terminal-lane/contracts");
+          rejectInlineSecrets(body, "open request"); // profileId-only contract: no secrets cross this boundary
+          const profileId = typeof body.profileId === "string" ? body.profileId : "";
+          const result = resolveTerminalOpenRequest({ profileId });
+          json(res, result.ok ? 200 : 404, { lane: "terminal", ...result });
+        } catch (e) {
+          json(res, 400, { ok: false, lane: "terminal", error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+
       if (req.method === "POST" && urlPath === "/terminal-lane/probes") {
         const body = await parseBody(req) as Record<string, unknown>;
         try {

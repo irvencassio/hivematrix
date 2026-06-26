@@ -645,6 +645,12 @@ const MIGRATIONS: string[] = [
     );
     CREATE INDEX IF NOT EXISTS idx_terminal_session_audit_created ON terminal_session_audit(createdAt);
     CREATE INDEX IF NOT EXISTS idx_terminal_session_audit_profile ON terminal_session_audit(profileId, createdAt);`,
+
+  // v26: Terminal Lane honest auth model. authMethod replaces the implicit
+  // "kind+credentialRef" guesswork; keyPath stores an SSH identity-file PATH
+  // (metadata only — never a secret). Existing rows default to 'local'.
+  `ALTER TABLE terminal_profiles ADD COLUMN authMethod TEXT NOT NULL DEFAULT 'local';
+   ALTER TABLE terminal_profiles ADD COLUMN keyPath TEXT;`,
 ];
 
 // ------------------------------------------------------------------

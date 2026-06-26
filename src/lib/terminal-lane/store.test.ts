@@ -12,6 +12,8 @@ const {
   getTerminalLaneReadinessDashboard,
   listTerminalProfileSummaries,
   listTerminalProfiles,
+  getTerminalProfile,
+  deleteTerminalProfile,
   recordTerminalReadinessRun,
   upsertTerminalProfile,
   upsertTerminalReadinessProbe,
@@ -105,4 +107,39 @@ test("terminal store records probes, readiness, dashboard, and audit without sec
 
   const summaries = listTerminalProfileSummaries();
   assert.equal(summaries[0].probeCount, 1);
+});
+
+test("upsert persists authMethod + keyPath and preserves createdAt on update", () => {
+  const created = upsertTerminalProfile({
+    id: "kf", displayName: "Key File", authMethod: "ssh_key_file", host: "h.example", user: "u", keyPath: "/Users/me/.ssh/id_ed25519",
+  });
+  assert.equal(created.authMethod, "ssh_key_file");
+  assert.equal(created.keyPath, "/Users/me/.ssh/id_ed25519");
+  const firstCreatedAt = created.createdAt;
+
+  const updated = upsertTerminalProfile({ id: "kf", displayName: "Renamed", authMethod: "ssh_key_agent", host: "h.example", user: "u" });
+  assert.equal(updated.displayName, "Renamed");
+  assert.equal(updated.authMethod, "ssh_key_agent");
+  assert.equal(updated.keyPath, null, "ssh_key_agent clears keyPath");
+  assert.equal(updated.createdAt, firstCreatedAt, "createdAt preserved across update");
+});
+
+test("summaries expose authMethod + credentialPresent but never a secret value", () => {
+  upsertTerminalProfile({ id: "pw", displayName: "PW", authMethod: "password_keychain", host: "h.example", user: "u", credentialRef: "hivematrix.terminal.pw" });
+  const s = listTerminalProfileSummaries().find((x) => x.id === "pw")!;
+  assert.equal(s.authMethod, "password_keychain");
+  assert.equal(s.credentialPresent, true);
+  assert.doesNotMatch(JSON.stringify(s), /password=|--password|"password":|privateKey|passphrase/i);
+});
+
+test("deleteTerminalProfile removes a profile and its rows, but refuses the local default", () => {
+  upsertTerminalProfile({ id: "doomed", displayName: "Doomed", authMethod: "ssh_key_agent", host: "h.example", user: "u" });
+  upsertTerminalReadinessProbe({ id: "doomed-login", profileId: "doomed", name: "login" });
+  assert.equal(deleteTerminalProfile("doomed"), true);
+  assert.equal(getTerminalProfile("doomed"), null);
+  assert.equal(listEnabledTerminalReadinessProbes("doomed").length, 0);
+
+  upsertTerminalProfile({ id: "local", displayName: "Local Mac", authMethod: "local", shell: "/bin/zsh" });
+  assert.throws(() => deleteTerminalProfile("local"), /local default|cannot delete/i);
+  assert.ok(getTerminalProfile("local"), "local default preserved");
 });

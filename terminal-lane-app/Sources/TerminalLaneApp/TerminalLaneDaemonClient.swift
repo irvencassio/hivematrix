@@ -7,21 +7,42 @@ final class TerminalLaneDaemonClient {
     }
 
     func sync(profile: TerminalLaneProfile, completion: @escaping (Result<String, Error>) -> Void) {
+        // Metadata only — authMethod/keyPath/credentialRef. The secret VALUE never
+        // leaves the macOS Keychain and is never placed in this payload.
         post(path: "/terminal-lane/profiles", body: [
             "profile": [
                 "id": profile.id,
                 "displayName": profile.displayName,
                 "kind": profile.kind.rawValue,
+                "authMethod": profile.authMethod.rawValue,
                 "host": profile.host as Any,
                 "user": profile.user as Any,
                 "port": profile.port as Any,
                 "shell": profile.shell as Any,
                 "cwd": profile.cwd as Any,
+                "keyPath": profile.keyPath as Any,
                 "credentialRef": profile.credentialRef as Any,
                 "openCommand": profile.openCommand,
                 "notes": profile.notes,
             ],
         ], completion: completion)
+    }
+
+    func delete(profileId: String, completion: @escaping (Result<String, Error>) -> Void) {
+        guard var request = request(path: "/terminal-lane/profiles/\(profileId)") else {
+            completion(.failure(syncError("daemon auth token not found")))
+            return
+        }
+        request.httpMethod = "DELETE"
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            if let error { completion(.failure(error)); return }
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(code) else {
+                completion(.failure(self.syncError("daemon returned HTTP \(code)")))
+                return
+            }
+            completion(.success("Deleted on HiveMatrix"))
+        }.resume()
     }
 
     func runReadiness(profileId: String, completion: @escaping (Result<String, Error>) -> Void) {
@@ -55,9 +76,11 @@ final class TerminalLaneDaemonClient {
         }.resume()
     }
 
+    // A daemon sync failure is reported as a real .failure so the UI can show
+    // "Saved locally, daemon sync FAILED" rather than dressing it up as success.
     private func post(path: String, body: [String: Any], completion: @escaping (Result<String, Error>) -> Void) {
         guard var request = request(path: path) else {
-            completion(.success("saved locally; daemon auth token not found"))
+            completion(.failure(syncError("daemon auth token not found")))
             return
         }
         request.httpMethod = "POST"
@@ -65,17 +88,21 @@ final class TerminalLaneDaemonClient {
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error {
-                completion(.success("saved locally; daemon sync failed: \(error.localizedDescription)"))
+                completion(.failure(self.syncError(error.localizedDescription)))
                 return
             }
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard (200..<300).contains(code) else {
                 let detail = data.flatMap { String(data: $0, encoding: .utf8) } ?? "HTTP \(code)"
-                completion(.success("saved locally; daemon sync failed: \(detail)"))
+                completion(.failure(self.syncError(detail)))
                 return
             }
-            completion(.success("saved locally and synced to HiveMatrix"))
+            completion(.success("Saved locally and synced to HiveMatrix"))
         }.resume()
+    }
+
+    private func syncError(_ detail: String) -> NSError {
+        NSError(domain: "TerminalLane", code: 1, userInfo: [NSLocalizedDescriptionKey: "Saved locally — daemon sync FAILED: \(detail)"])
     }
 
     private func request(path: String) -> URLRequest? {

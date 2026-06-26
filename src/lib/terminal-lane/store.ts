@@ -3,6 +3,8 @@ import { laneDisplayName } from "@/lib/lanes/contracts";
 import {
   normalizeTerminalProfile,
   normalizeTerminalReadinessState,
+  terminalAuthCapability,
+  type TerminalAuthMethod,
   type TerminalProfile,
   type TerminalReadinessColor,
   type TerminalReadinessStatus,
@@ -12,11 +14,13 @@ interface TerminalProfileRow {
   _id: string;
   displayName: string;
   kind: TerminalProfile["kind"];
+  authMethod: TerminalAuthMethod | null;
   host: string | null;
   user: string | null;
   port: number | null;
   shell: string | null;
   cwd: string | null;
+  keyPath: string | null;
   credentialRef: string | null;
   openCommand: string;
   notes: string;
@@ -83,12 +87,18 @@ export interface TerminalProfileSummary {
   id: string;
   displayName: string;
   kind: TerminalProfile["kind"];
+  authMethod: TerminalAuthMethod;
   host: string | null;
   user: string | null;
   port: number | null;
   shell: string | null;
   cwd: string | null;
+  keyPath: string | null;
   credentialRef: string | null;
+  /** Whether a Keychain credential reference is attached — never the secret value. */
+  credentialPresent: boolean;
+  /** Honest auto-connectability (password_keychain is false until a native runtime lands). */
+  autoConnect: boolean;
   openCommand: string;
   status: string;
   probeCount: number;
@@ -108,17 +118,21 @@ export interface TerminalSessionAuditEntry {
 
 export function upsertTerminalProfile(input: unknown): TerminalProfile {
   const profile = normalizeTerminalProfile(input);
+  // createdAt is intentionally NOT in the UPDATE set, so it is preserved across
+  // edits; only updatedAt is bumped.
   getDb().prepare(`
-    INSERT INTO terminal_profiles (_id, displayName, kind, host, user, port, shell, cwd, credentialRef, openCommand, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO terminal_profiles (_id, displayName, kind, authMethod, host, user, port, shell, cwd, keyPath, credentialRef, openCommand, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(_id) DO UPDATE SET
       displayName = excluded.displayName,
       kind = excluded.kind,
+      authMethod = excluded.authMethod,
       host = excluded.host,
       user = excluded.user,
       port = excluded.port,
       shell = excluded.shell,
       cwd = excluded.cwd,
+      keyPath = excluded.keyPath,
       credentialRef = excluded.credentialRef,
       openCommand = excluded.openCommand,
       notes = excluded.notes,
@@ -127,15 +141,22 @@ export function upsertTerminalProfile(input: unknown): TerminalProfile {
     profile.id,
     profile.displayName,
     profile.kind,
+    profile.authMethod,
     profile.host,
     profile.user,
     profile.port,
     profile.shell,
     profile.cwd,
+    profile.keyPath,
     profile.credentialRef,
     profile.openCommand,
     profile.notes,
   );
+  // Stale credential rows: if the (edited) profile no longer references a
+  // credential, drop the orphaned metadata so credentialPresent stays honest.
+  if (!profile.credentialRef) {
+    getDb().prepare("DELETE FROM terminal_credentials WHERE profileId = ?").run(profile.id);
+  }
 
   if (profile.credentialRef) {
     getDb().prepare(`
@@ -167,11 +188,33 @@ export function listTerminalProfileSummaries(): TerminalProfileSummary[] {
     FROM terminal_profiles p
     ORDER BY p.displayName COLLATE NOCASE ASC
   `).all() as Array<TerminalProfileRow & { status: string; probeCount: number }>;
-  return rows.map((row) => ({
-    ...rowToProfile(row),
-    status: row.status,
-    probeCount: Number(row.probeCount ?? 0),
-  }));
+  return rows.map((row) => {
+    const profile = rowToProfile(row);
+    return {
+      ...profile,
+      credentialPresent: !!profile.credentialRef,
+      autoConnect: terminalAuthCapability(profile).autoConnect,
+      status: row.status,
+      probeCount: Number(row.probeCount ?? 0),
+    };
+  });
+}
+
+export function deleteTerminalProfile(id: string): boolean {
+  const normalized = String(id ?? "").trim().toLowerCase();
+  if (normalized === "local") throw new Error("Cannot delete the local default profile.");
+  const db = getDb();
+  const existing = db.prepare("SELECT _id FROM terminal_profiles WHERE _id = ?").get(normalized);
+  if (!existing) return false;
+  const tx = db.transaction((profileId: string) => {
+    db.prepare("DELETE FROM terminal_readiness_runs WHERE profileId = ?").run(profileId);
+    db.prepare("DELETE FROM terminal_readiness_probes WHERE profileId = ?").run(profileId);
+    db.prepare("DELETE FROM terminal_credentials WHERE profileId = ?").run(profileId);
+    db.prepare("DELETE FROM terminal_session_audit WHERE profileId = ?").run(profileId);
+    db.prepare("DELETE FROM terminal_profiles WHERE _id = ?").run(profileId);
+  });
+  tx(normalized);
+  return true;
 }
 
 export function upsertTerminalReadinessProbe(input: unknown): TerminalReadinessProbe {
@@ -284,11 +327,13 @@ function rowToProfile(row: TerminalProfileRow): TerminalProfile {
     id: row._id,
     displayName: row.displayName,
     kind: row.kind,
+    authMethod: (row.authMethod ?? (row.kind === "local" ? "local" : row.credentialRef ? "password_keychain" : "ssh_key_agent")) as TerminalAuthMethod,
     host: row.host,
     user: row.user,
     port: row.port,
     shell: row.shell,
     cwd: row.cwd,
+    keyPath: row.keyPath,
     credentialRef: row.credentialRef,
     openCommand: row.openCommand,
     notes: row.notes,

@@ -4,20 +4,52 @@ export const TERMINAL_READINESS_STATUSES = ["ready", "needs_auth", "probe_failed
 export type TerminalReadinessStatus = (typeof TERMINAL_READINESS_STATUSES)[number];
 export type TerminalReadinessColor = "green" | "yellow" | "orange" | "red" | "gray";
 
+// Honest auth model. password_keychain is intentionally NOT auto-connectable
+// yet: Terminal Lane has no native SSH runtime that can consume a stored
+// password, so we never pretend a saved password auto-connects (raw /usr/bin/ssh
+// can't use it). See the design doc.
+export const TERMINAL_AUTH_METHODS = ["local", "ssh_key_agent", "ssh_key_file", "password_keychain", "manual_password"] as const;
+export type TerminalAuthMethod = (typeof TERMINAL_AUTH_METHODS)[number];
+
 export interface TerminalProfile {
   id: string;
   displayName: string;
   kind: "local" | "ssh";
+  authMethod: TerminalAuthMethod;
   host: string | null;
   user: string | null;
   port: number | null;
   shell: string | null;
   cwd: string | null;
+  /** Absolute path to a private key (ssh_key_file) — metadata only, never a secret. */
+  keyPath: string | null;
   credentialRef: string | null;
   openCommand: string;
   notes: string;
   createdAt: string | null;
   updatedAt: string | null;
+}
+
+export interface TerminalAuthCapability {
+  autoConnect: boolean;
+  needsKeychain: boolean;
+  reason: string | null;
+}
+
+/** Honest connectability per auth method — used by UI, readiness, and open. */
+export function terminalAuthCapability(profile: Pick<TerminalProfile, "authMethod">): TerminalAuthCapability {
+  switch (profile.authMethod) {
+    case "local":
+      return { autoConnect: true, needsKeychain: false, reason: null };
+    case "ssh_key_agent":
+      return { autoConnect: true, needsKeychain: false, reason: null };
+    case "ssh_key_file":
+      return { autoConnect: true, needsKeychain: false, reason: null };
+    case "password_keychain":
+      return { autoConnect: false, needsKeychain: true, reason: "Saved, but not auto-connectable yet — Terminal Lane can't use a stored password to auto-connect. Use key auth, or connect manually." };
+    case "manual_password":
+      return { autoConnect: false, needsKeychain: false, reason: "Opens an interactive session and prompts for the password; nothing is stored." };
+  }
 }
 
 export interface TerminalReadinessState {
@@ -108,6 +140,7 @@ export function buildTerminalOpenCommand(input: {
   user?: string | null;
   port?: number | null;
   shell?: string | null;
+  keyPath?: string | null;
 }): string {
   if (input.kind === "local") return validateShell(input.shell ?? null) ?? "/bin/bash";
   const host = input.host?.trim().toLowerCase();
@@ -115,31 +148,83 @@ export function buildTerminalOpenCommand(input: {
   if (!host) fail("host is required for ssh profiles");
   if (!user) fail("user is required for ssh profiles");
   const target = `${user}@${host}`;
-  return input.port && input.port !== 22
-    ? `ssh -p ${input.port} ${shellQuote(target)}`
-    : `ssh ${shellQuote(target)}`;
+  // Identity file (ssh_key_file) is a path, never a secret. No password ever
+  // appears in an open command — Terminal Lane does not autotype credentials.
+  const parts = ["ssh"];
+  if (input.keyPath) parts.push("-i", shellQuote(input.keyPath));
+  if (input.port && input.port !== 22) parts.push("-p", String(input.port));
+  parts.push(shellQuote(target));
+  return parts.join(" ");
+}
+
+// authMethod governs which fields are valid. When absent (legacy payloads) it is
+// inferred from kind + credentialRef so old profiles keep working.
+function resolveAuthMethod(record: UnknownRecord, kind: "local" | "ssh", credentialRef: string | null): TerminalAuthMethod {
+  const raw = record.authMethod;
+  if (raw != null && raw !== "") {
+    if (typeof raw !== "string" || !(TERMINAL_AUTH_METHODS as readonly string[]).includes(raw.trim())) {
+      fail(`authMethod must be one of: ${TERMINAL_AUTH_METHODS.join(", ")}`);
+    }
+    return raw.trim() as TerminalAuthMethod;
+  }
+  if (kind === "local") return "local";
+  return credentialRef ? "password_keychain" : "ssh_key_agent";
+}
+
+function validateKeyPath(keyPath: string | null): string | null {
+  if (!keyPath) return null;
+  if (!keyPath.startsWith("/") && !keyPath.startsWith("~")) fail("keyPath must be an absolute path");
+  if (/\s/.test(keyPath)) fail("keyPath must not contain spaces");
+  return keyPath;
 }
 
 export function normalizeTerminalProfile(input: unknown): TerminalProfile {
   const record = asRecord(input, "terminal profile");
   rejectInlineSecrets(record);
-  const kind = normalizeKind(record.kind);
+  const credentialRef = validateCredentialRef(readString(record, "credentialRef", { required: false }));
+  const explicitKind = normalizeKind(record.kind);
+  const authMethod = resolveAuthMethod(record, explicitKind, credentialRef);
+  // kind is derived from authMethod so the two can never disagree.
+  const kind: "local" | "ssh" = authMethod === "local" ? "local" : "ssh";
   const host = readString(record, "host", { required: kind === "ssh" })?.toLowerCase() ?? null;
   const user = readString(record, "user", { required: kind === "ssh" }) ?? null;
   const port = readPort(record) ?? (kind === "ssh" ? 22 : null);
   const shell = validateShell(readString(record, "shell", { required: false }));
+  const keyPath = validateKeyPath(readString(record, "keyPath", { required: false }));
   const openCommandInput = readString(record, "openCommand", { required: false });
-  const profile = {
+
+  // Per-method field rules — keep secret boundaries honest.
+  if (kind === "local") {
+    if (credentialRef) fail("local profiles must not carry a credentialRef");
+    if (keyPath) fail("local profiles must not carry a keyPath");
+  } else {
+    if ((authMethod === "ssh_key_agent" || authMethod === "manual_password") && credentialRef) {
+      fail(`${authMethod} profiles must not carry a credentialRef`);
+    }
+    if (authMethod === "password_keychain" && !credentialRef) {
+      fail("password_keychain profiles require a credentialRef (Keychain)");
+    }
+    if (authMethod === "ssh_key_file" && !keyPath) {
+      fail("ssh_key_file profiles require a keyPath");
+    }
+  }
+
+  const effectiveCredentialRef = kind === "local" ? null : (authMethod === "password_keychain" || authMethod === "ssh_key_file" ? credentialRef : null);
+  const effectiveKeyPath = authMethod === "ssh_key_file" ? keyPath : null;
+
+  const profile: TerminalProfile = {
     id: normalizeId(readString(record, "id")!, "id"),
     displayName: readString(record, "displayName")!,
     kind,
-    host,
-    user,
-    port,
+    authMethod,
+    host: kind === "local" ? null : host,
+    user: kind === "local" ? user : user,
+    port: kind === "local" ? null : port,
     shell,
     cwd: readString(record, "cwd", { required: false }),
-    credentialRef: validateCredentialRef(readString(record, "credentialRef", { required: false })),
-    openCommand: openCommandInput ?? buildTerminalOpenCommand({ kind, host, user, port, shell }),
+    keyPath: kind === "local" ? null : effectiveKeyPath,
+    credentialRef: effectiveCredentialRef,
+    openCommand: openCommandInput ?? buildTerminalOpenCommand({ kind, host, user, port, shell, keyPath: effectiveKeyPath }),
     notes: readString(record, "notes", { required: false, allowEmpty: true }) ?? "",
     createdAt: readString(record, "createdAt", { required: false }),
     updatedAt: readString(record, "updatedAt", { required: false }),

@@ -3,6 +3,15 @@ import AppKit
 final class ContentViewController: NSViewController {
     override func loadView() {
         view = NSView()
+        // Allow a screen (e.g. Profiles → Edit) to request navigation.
+        NotificationCenter.default.addObserver(self, selector: #selector(handleNavigate(_:)), name: .terminalLaneNavigate, object: nil)
+    }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    @objc private func handleNavigate(_ note: Notification) {
+        guard let screen = note.object as? TerminalLaneScreen else { return }
+        show(screen)
     }
 
     func show(_ screen: TerminalLaneScreen) {

@@ -33,4 +33,20 @@ final class TerminalLaneProfileStore {
         }
         try save(profiles)
     }
+
+    enum StoreError: LocalizedError {
+        case cannotDeleteLocalDefault
+        var errorDescription: String? {
+            switch self {
+            case .cannotDeleteLocalDefault: return "The local default profile cannot be deleted."
+            }
+        }
+    }
+
+    func delete(id: String) throws {
+        guard id != "local" else { throw StoreError.cannotDeleteLocalDefault }
+        var profiles = load().filter { $0.id != id }
+        if profiles.isEmpty { profiles = [TerminalLaneProfile.localDefault()] }
+        try save(profiles)
+    }
 }

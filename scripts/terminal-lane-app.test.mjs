@@ -48,7 +48,7 @@ test("Terminal Lane app has profile, readiness, traces, settings, and terminal s
   }
 });
 
-test("Terminal Lane profile model has no secret fields and daemon sync carries credentialRef only", () => {
+test("Terminal Lane profile model has an honest authMethod enum and stores no secret VALUES", () => {
   const models = readFileSync(join(source, "TerminalLaneModels.swift"), "utf8");
   const daemon = readFileSync(join(source, "TerminalLaneDaemonClient.swift"), "utf8");
   const keychain = readFileSync(join(source, "TerminalLaneKeychain.swift"), "utf8");
@@ -57,15 +57,26 @@ test("Terminal Lane profile model has no secret fields and daemon sync carries c
   assert.match(models, /struct TerminalLaneProfile/);
   assert.match(models, /credentialRef/);
   assert.match(models, /openCommand/);
-  assert.doesNotMatch(models, /\bpassword\b|\bpassphrase\b|\bprivateKey\b|\btoken\b|\bcookie\b|\bsecret\b/i);
+  // Honest auth model with all five methods + key-file path metadata.
+  assert.match(models, /enum TerminalLaneAuthMethod/);
+  for (const m of ["local", "ssh_key_agent", "ssh_key_file", "password_keychain", "manual_password"]) {
+    assert.match(models, new RegExp(`case ${m}`));
+  }
+  assert.match(models, /keyPath/);
+  assert.match(models, /autoConnect/);
+  // No STORED secret value property (a credentialRef/keyPath is metadata, not a secret).
+  assert.doesNotMatch(models, /var (password|passphrase|privateKey|secret|token)\b/i);
 
+  // Daemon payload carries metadata only (authMethod, keyPath, credentialRef) — never a secret value.
   assert.match(daemon, /terminal-lane\/profiles/);
   assert.match(daemon, /terminal-lane\/readiness\/run/);
+  assert.match(daemon, /authMethod/);
   assert.match(daemon, /auth-token/);
   assert.match(daemon, /TerminalLaneSettings\.shared\.daemonURL/);
   assert.match(settings, /daemonURL/);
   assert.match(settings, /http:\/\/127\.0\.0\.1:3747/);
-  assert.doesNotMatch(daemon, /password|passphrase|privateKey/i);
+  // No secret VALUE smuggled into the payload (credentialValue/private key body).
+  assert.doesNotMatch(daemon, /credentialValue|kSecValueData|sshpass|--password/i);
 
   assert.match(keychain, /import Security/);
   assert.match(keychain, /HiveMatrix Terminal Lane/);
@@ -73,29 +84,64 @@ test("Terminal Lane profile model has no secret fields and daemon sync carries c
   assert.match(keychain, /SecItemUpdate/);
 });
 
-test("Terminal Lane terminal screen uses SwiftTerm PTY and avoids inline credential automation", () => {
+test("Terminal Lane daemon client distinguishes sync failure from local save and supports delete", () => {
+  const daemon = readFileSync(join(source, "TerminalLaneDaemonClient.swift"), "utf8");
+  // A daemon sync error must NOT be reported as success.
+  assert.match(daemon, /daemon sync FAILED|\.failure\(/);
+  assert.match(daemon, /Saved locally and synced/);
+  // Typed delete against the id-constrained endpoint.
+  assert.match(daemon, /func delete\(/);
+  assert.match(daemon, /httpMethod = "DELETE"|"DELETE"/);
+});
+
+test("Terminal Lane terminal screen shows connect mode and never autotypes a secret", () => {
   const terminal = readFileSync(join(source, "TerminalViewController.swift"), "utf8");
   assert.match(terminal, /import SwiftTerm/);
   assert.match(terminal, /LocalProcessTerminalView/);
   assert.match(terminal, /startProcess/);
   assert.match(terminal, /openCommand/);
-  assert.doesNotMatch(terminal, /password|passphrase|privateKey/i);
+  // Surfaces connect mode + honest auto-connect support.
+  assert.match(terminal, /autoConnect/);
+  assert.match(terminal, /not auto-connectable|connect manually|key auth/i);
+  // Never autotypes / injects a secret into the PTY.
+  assert.doesNotMatch(terminal, /sshpass|--password|credentialValue|kSecValueData/i);
 });
 
-test("Terminal Lane Add Profile guides local setup and gates credential capture to SSH", () => {
+test("Terminal Lane Add/Edit profile is auth-method driven and keeps secrets in Keychain only", () => {
   const addProfile = readFileSync(join(source, "AddProfileViewController.swift"), "utf8");
   const settings = readFileSync(join(source, "SettingsViewController.swift"), "utf8");
 
   assert.match(addProfile, /Use Local Mac defaults/);
-  assert.match(addProfile, /kindChanged/);
-  assert.match(addProfile, /credentialRowIndex/);
-  assert.match(addProfile, /credentialValueRowIndex/);
-  assert.match(addProfile, /kind == \.local/);
-  assert.match(addProfile, /Local profiles use your current macOS session/);
-  assert.match(addProfile, /Enter a host for SSH profiles|host is required for SSH profiles/);
-  assert.match(addProfile, /Enter both credential ref and key\/auth material/);
+  // Auth-method-driven field gating (replaces the old kind-only gate).
+  assert.match(addProfile, /authMethod/);
+  assert.match(addProfile, /authMethodChanged|authMethodPopup/);
+  // Honest copy for the non-auto-connectable password method.
+  assert.match(addProfile, /not auto-connectable/i);
+  // Local needs no key material.
+  assert.match(addProfile, /no key material|no key or login/i);
+  // Editing preserves createdAt.
+  assert.match(addProfile, /createdAt/);
+  assert.match(addProfile, /editingProfile|TerminalLaneEditTarget/);
+  // Secret material is entered securely and saved to Keychain only.
+  assert.match(addProfile, /NSSecureTextField/);
+  assert.match(addProfile, /saveCredential/);
+  // The profile/daemon payload never carries the secret value.
+  assert.doesNotMatch(addProfile, /sshpass|--password|kSecValueData/i);
+
   assert.match(settings, /Daemon URL/);
   assert.match(settings, /TerminalLaneSettings\.shared/);
-  assert.match(settings, /Save settings/);
-  assert.doesNotMatch(addProfile, /password/i);
+  assert.match(settings, /Keychain service/);
+});
+
+test("Terminal Lane Profiles screen is an editable table with delete/duplicate", () => {
+  const profiles = readFileSync(join(source, "ProfilesViewController.swift"), "utf8");
+  assert.match(profiles, /NSTableView/);
+  assert.match(profiles, /func .*[Ee]dit|editProfile/);
+  assert.match(profiles, /deleteProfile/);
+  assert.match(profiles, /duplicateProfile|Duplicate/);
+  // Delete asks for confirmation.
+  assert.match(profiles, /NSAlert/);
+  // Shows auth method + credential presence (no secret).
+  assert.match(profiles, /authMethod/);
+  assert.doesNotMatch(profiles, /kSecValueData|credentialValue|sshpass/i);
 });
