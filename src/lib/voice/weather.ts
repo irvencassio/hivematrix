@@ -79,18 +79,86 @@ function num(v: unknown): number | undefined {
 }
 
 interface GeoHit { name: string; lat: number; lon: number }
+type RankedGeoHit = GeoHit & { admin1?: string; countryCode?: string };
 
-function firstGeoResult(payload: unknown): GeoHit | null {
+const US_STATES: Record<string, string> = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut", DE: "Delaware",
+  FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky",
+  LA: "Louisiana", ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri",
+  MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina",
+  ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota",
+  TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+  DC: "District of Columbia",
+};
+
+interface LocationQuery {
+  search: string;
+  state?: string;
+  countryCode?: string;
+}
+
+function normalizeLocationQuery(location: string): LocationQuery[] {
+  const raw = location.trim().replace(/\s+/g, " ");
+  if (!raw) return [];
+  const out: LocationQuery[] = [];
+  const seen = new Set<string>();
+  const add = (q: LocationQuery) => {
+    const search = q.search.trim().replace(/\s+/g, " ");
+    if (!search) return;
+    const key = `${search.toLowerCase()}|${(q.state ?? "").toLowerCase()}|${q.countryCode ?? ""}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push({ ...q, search });
+    }
+  };
+
+  const comma = raw.match(/^(.+?),\s*([A-Za-z]{2}|[A-Za-z][A-Za-z .]+)$/);
+  if (comma) {
+    const city = comma[1].trim();
+    const suffix = comma[2].trim();
+    const state = US_STATES[suffix.toUpperCase()] ?? suffix.replace(/\b\w/g, (c) => c.toUpperCase());
+    add({ search: city, state, countryCode: "US" });
+  }
+
+  const trailing = raw.match(/^(.+?)\s+([A-Za-z]{2})$/);
+  if (trailing && US_STATES[trailing[2].toUpperCase()]) {
+    add({ search: trailing[1], state: US_STATES[trailing[2].toUpperCase()], countryCode: "US" });
+  }
+
+  add({ search: raw });
+  return out;
+}
+
+function geoResults(payload: unknown, preference?: Omit<LocationQuery, "search">): RankedGeoHit[] {
   const root = asRecord(payload);
   const results = root?.results;
-  if (!Array.isArray(results) || results.length === 0) return null;
-  const first = asRecord(results[0]);
-  if (!first) return null;
-  const lat = num(first.latitude);
-  const lon = num(first.longitude);
-  if (lat === undefined || lon === undefined) return null;
-  const name = typeof first.name === "string" && first.name ? first.name : "your area";
-  return { name, lat, lon };
+  if (!Array.isArray(results) || results.length === 0) return [];
+  const hits = results.flatMap((item): RankedGeoHit[] => {
+    const row = asRecord(item);
+    if (!row) return [];
+    const lat = num(row.latitude);
+    const lon = num(row.longitude);
+    if (lat === undefined || lon === undefined) return [];
+    const name = typeof row.name === "string" && row.name ? row.name : "your area";
+    const admin1 = typeof row.admin1 === "string" ? row.admin1 : "";
+    const countryCode = typeof row.country_code === "string" ? row.country_code : "";
+    return [{ name, lat, lon, admin1, countryCode }];
+  });
+  if (!preference?.state && !preference?.countryCode) return hits;
+  const state = preference.state?.toLowerCase();
+  const countryCode = preference.countryCode?.toUpperCase();
+  return [...hits].sort((a, b) => scoreGeo(b, state, countryCode) - scoreGeo(a, state, countryCode));
+}
+
+function scoreGeo(hit: RankedGeoHit, state?: string, countryCode?: string): number {
+  let score = 0;
+  if (countryCode && hit.countryCode?.toUpperCase() === countryCode) score += 10;
+  if (state && hit.admin1?.toLowerCase() === state) score += 20;
+  return score;
+}
+
+function firstGeoResult(payload: unknown, preference?: Omit<LocationQuery, "search">): GeoHit | null {
+  return geoResults(payload, preference)?.[0] ?? null;
 }
 
 function shapeReport(geo: GeoHit, payload: unknown, when: WeatherWhen, units: "fahrenheit" | "celsius"): WeatherReport {
@@ -136,10 +204,14 @@ export async function getWeather(location: string, when: WeatherWhen, deps: Weat
   const fetchJson = deps.fetchJson ?? defaultFetchJson;
   const units = deps.units ?? "fahrenheit";
 
-  let geo: GeoHit | null;
+  let geo: GeoHit | null = null;
   try {
-    const geoUrl = `${GEOCODE_URL}?name=${encodeURIComponent(location)}&count=1&language=en&format=json`;
-    geo = firstGeoResult(await fetchJson(geoUrl));
+    for (const query of normalizeLocationQuery(location)) {
+      const count = query.state || query.countryCode ? 10 : 1;
+      const geoUrl = `${GEOCODE_URL}?name=${encodeURIComponent(query.search)}&count=${count}&language=en&format=json`;
+      geo = firstGeoResult(await fetchJson(geoUrl), query);
+      if (geo) break;
+    }
   } catch {
     return { ok: false, error: "geocode_failed" };
   }

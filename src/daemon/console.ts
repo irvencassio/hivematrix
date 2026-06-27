@@ -4475,7 +4475,7 @@ async function runVoiceLogicTest(btn) {
   if (btn) btn.disabled = true;
   if (out) out.innerHTML = '<div class="muted" style="font-size:11px">Running…</div>';
   try {
-    const r = await api("/settings/voice/test-scenarios", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+    const r = await api("/settings/voice/test-scenarios", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ liveWeather: true }) });
     renderVoiceLogicResults(r);
     if (r && r.ok) hmToast('Voice logic test passed.', 'ok');
     else hmToast('Voice logic test found failures.', 'err');

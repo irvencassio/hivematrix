@@ -383,7 +383,12 @@ export function createDaemonServer() {
       // records, transcribes, speaks, creates real tasks, or resolves approvals.
       if (req.method === "POST" && urlPath === "/settings/voice/test-scenarios") {
         const { runVoiceLogicScenarios } = await import("@/lib/voice/logic-scenarios");
-        json(res, 200, await runVoiceLogicScenarios());
+        const { getLocation } = await import("@/lib/models/available");
+        const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
+        json(res, 200, await runVoiceLogicScenarios({
+          liveWeather: body.liveWeather === true,
+          location: getLocation() || undefined,
+        }));
         return;
       }
 

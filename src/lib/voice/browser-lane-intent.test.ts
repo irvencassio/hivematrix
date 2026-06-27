@@ -14,6 +14,10 @@ test("detects explicit Browser Lane search requests", () => {
     mode: "search",
     query: "tesla cars",
   });
+  assert.deepEqual(detectVoiceBrowserLaneIntent("search the web for best solo founder CRMs"), {
+    mode: "search",
+    query: "best solo founder CRMs",
+  });
 });
 
 test("detects explicit Browser Lane read requests", () => {
@@ -22,6 +26,10 @@ test("detects explicit Browser Lane read requests", () => {
     url: "https://example.com",
     query: "pricing",
   });
+  assert.deepEqual(detectVoiceBrowserLaneIntent("use browser lane to read apple developer news"), {
+    mode: "search",
+    query: "apple developer news",
+  });
 });
 
 test("detects explicit Browser Lane open requests", () => {
@@ -29,6 +37,10 @@ test("detects explicit Browser Lane open requests", () => {
     mode: "open",
     url: "https://google.com",
     objective: "Open https://google.com",
+  });
+  assert.deepEqual(detectVoiceBrowserLaneIntent("use browser lane to open TestFlight"), {
+    mode: "search",
+    query: "TestFlight",
   });
 });
 

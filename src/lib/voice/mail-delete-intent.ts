@@ -22,13 +22,15 @@ function normalizeDeleteQuery(raw: string): string {
 export function detectVoiceMailDeleteIntent(text: string): VoiceMailDeleteIntent | null {
   const orig = (text || "").trim();
   const t = orig.toLowerCase();
-  if (!/\b(mail|email|emails|message|messages)\b/.test(t)) return null;
 
   const match = orig.match(/\b(?:delete|trash|remove)\s+(.+)$/i);
   if (!match) return null;
 
   const query = normalizeDeleteQuery(match[1] ?? "");
   if (!query) return null;
+  const hasMailWord = /\b(mail|email|emails|message|messages)\b/.test(t);
+  const looksLikeMailboxItem = /\b(newsletter|receipt|promo|promotion|calendar invite|invite|sender)\b/i.test(query);
+  if (!hasMailWord && !looksLikeMailboxItem) return null;
 
   return { query, destructive: true };
 }

@@ -28,8 +28,13 @@ function clean(value: string): string {
 
 function stripLeadIn(text: string): string | null {
   const trimmed = clean(text);
-  const match = trimmed.match(/^(?:please\s+)?(?:use\s+)?(?:the\s+)?browser\s+lane(?:\s+to)?\s+(.+)$/i);
-  return match ? clean(match[1]) : null;
+  const direct = trimmed.match(/^(?:please\s+)?(?:use\s+)?(?:the\s+)?browser\s+lane(?:\s+to)?\s+(.+)$/i);
+  if (direct) return clean(direct[1]);
+  const trailing = trimmed.match(/^(.+?)\s+(?:in|with|using)\s+(?:the\s+)?browser\s+lane$/i);
+  if (trailing) return clean(trailing[1]);
+  const webSearch = trimmed.match(/^(?:please\s+)?search\s+the\s+web\s+(?:for\s+)?(.+)$/i);
+  if (webSearch) return `search ${clean(webSearch[1])}`;
+  return null;
 }
 
 function isHttpUrl(value: string): boolean {
@@ -55,11 +60,18 @@ export function detectVoiceBrowserLaneIntent(text: string): VoiceBrowserLaneInte
     const query = clean(read[2] ?? "");
     return { mode: "read", url: read[1], ...(query ? { query } : {}) };
   }
+  const readSearch = rest.match(/^(?:read|summarize|research|check|inspect)\s+(.+)$/i);
+  if (readSearch && clean(readSearch[1])) {
+    return { mode: "search", query: clean(readSearch[1]) };
+  }
 
   const open = rest.match(/^(?:open|go\s+to|navigate\s+to)\s+(\S+)(?:\s+(.+))?$/i);
   if (open && isHttpUrl(open[1])) {
     const extra = clean(open[2] ?? "");
     return { mode: "open", url: open[1], objective: extra || `Open ${open[1]}` };
+  }
+  if (open && clean(rest.replace(/^(?:open|go\s+to|navigate\s+to)\s+/i, ""))) {
+    return { mode: "search", query: clean(rest.replace(/^(?:open|go\s+to|navigate\s+to)\s+/i, "")) };
   }
 
   return null;

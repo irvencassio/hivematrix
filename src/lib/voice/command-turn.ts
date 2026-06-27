@@ -54,6 +54,7 @@ export interface CommandTurnDeps {
   /** Operator location from HiveMatrix settings (Personalization). Never agent memory. */
   getLocation?: () => string | null | undefined;
   fetchWeather?: (location: string, when: WeatherWhen) => Promise<WeatherResult>;
+  getBoardCounts?: () => Record<string, number>;
 }
 
 const contextStore = new RollingCommandContextStore();
@@ -163,8 +164,8 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
   const r = (reply: string, taskId?: string, detail?: string) => ({ reply, taskId, detail });
   switch (intent.kind) {
     case "board": {
-      const { Task } = await import("@/lib/db");
-      return r(boardReply(Task.countByStatus()));
+      const counts = deps.getBoardCounts ? deps.getBoardCounts() : await boardCounts();
+      return r(boardReply(counts));
     }
     case "approvalsList": {
       const items = await approvalQueue(deps);
@@ -295,6 +296,11 @@ async function operatorLocation(deps: CommandTurnDeps): Promise<string> {
 async function fetchWeather(deps: CommandTurnDeps, location: string, when: WeatherWhen): Promise<WeatherResult> {
   if (deps.fetchWeather) return deps.fetchWeather(location, when);
   return getWeather(location, when);
+}
+
+async function boardCounts(): Promise<Record<string, number>> {
+  const { Task } = await import("@/lib/db");
+  return Task.countByStatus();
 }
 
 async function approvalQueue(deps: CommandTurnDeps): Promise<ApprovalQueueItem[]> {

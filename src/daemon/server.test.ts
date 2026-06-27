@@ -117,7 +117,7 @@ test("voice logic diagnostic endpoint runs canned scenarios without audio", asyn
   const body = await res.json() as { ok: boolean; failed: number; scenarios: Array<{ audioBytes: number; actual: string }> };
   assert.equal(body.ok, true);
   assert.equal(body.failed, 0);
-  assert.ok(body.scenarios.length >= 7);
+  assert.ok(body.scenarios.length >= 50);
   assert.ok(body.scenarios.some((s) => s.actual === "command:weather"));
   assert.ok(body.scenarios.every((s) => s.audioBytes === 0));
 });

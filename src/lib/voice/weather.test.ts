@@ -60,6 +60,43 @@ test("getWeather returns a deterministic today report from injected fetch", asyn
   assert.doesNotMatch(calls.join(" "), /api[_-]?key|token|secret/i);
 });
 
+test("getWeather normalizes US state-suffixed locations and prefers the matching state", async () => {
+  const calls: string[] = [];
+  const fetchJson = async (url: string): Promise<unknown> => {
+    calls.push(url);
+    if (url.includes("geocoding-api")) {
+      assert.match(url, /name=Kings%20Mills(?:&|$)/, "searches city-only because Open-Meteo rejects 'Kings Mills, OH'");
+      return {
+        results: [
+          { name: "Kings Mills", latitude: 39.35561, longitude: -84.24855, admin1: "Ohio", country_code: "US" },
+        ],
+      };
+    }
+    return FORECAST;
+  };
+
+  const res = await getWeather("Kings Mills, OH", "today", { fetchJson });
+  assert.ok(res.ok);
+  if (!res.ok) return;
+  assert.equal(res.report.location, "Kings Mills");
+  assert.equal(res.report.high, 68);
+  assert.equal(calls.length, 2);
+});
+
+test("getWeather uses state preference when a city name has multiple US matches", async () => {
+  const { fetchJson } = fakeFetch({
+    results: [
+      { name: "Mason", latitude: 30.74879, longitude: -99.23061, admin1: "Texas", country_code: "US" },
+      { name: "Mason", latitude: 39.36006, longitude: -84.30994, admin1: "Ohio", country_code: "US" },
+    ],
+  });
+
+  const res = await getWeather("Mason, OH", "today", { fetchJson });
+  assert.ok(res.ok);
+  if (!res.ok) return;
+  assert.equal(res.report.location, "Mason");
+});
+
 test("getWeather tomorrow uses the second daily entry", async () => {
   const { fetchJson } = fakeFetch();
   const res = await getWeather("San Francisco", "tomorrow", { fetchJson });
