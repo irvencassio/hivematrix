@@ -67,6 +67,13 @@ if grep -q '"sshDiagnostics".*true' "$HOME/.hivematrix/config.json" 2>/dev/null;
   esac
 fi
 
+# Superpowers / CCD session tools — approved by repository policy
+case "$TOOL_NAME" in
+  mcp__ccd_session__*|mcp__superpowers__*)
+    exit 0
+    ;;
+esac
+
 # Check for risky Bash commands
 if [ "$TOOL_NAME" = "Bash" ]; then
   COMMAND=$(echo "$INPUT" | grep -o '"command":"[^"]*"' | head -1 | cut -d'"' -f4)

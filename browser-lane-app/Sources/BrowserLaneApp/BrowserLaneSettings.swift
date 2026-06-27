@@ -59,9 +59,13 @@ final class BrowserLaneSettings {
 
     func applyIconState() {
         let name = iconState.resourceName
-        let image = Bundle.main.url(forResource: name, withExtension: "icns").flatMap { NSImage(contentsOf: $0) }
-        if let image {
-            NSApplication.shared.applicationIconImage = image
-        }
+        guard let url = Bundle.main.url(forResource: name, withExtension: "icns"),
+              let image = NSImage(contentsOf: url) else { return }
+        NSApplication.shared.applicationIconImage = image
+#if !DEBUG
+        // Persist the chosen icon on the bundle via xattr so the Dock shows
+        // the correct icon even when BrowserLane is not running.
+        NSWorkspace.shared.setIcon(image, forFile: Bundle.main.bundlePath, options: [])
+#endif
     }
 }

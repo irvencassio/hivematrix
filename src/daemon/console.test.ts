@@ -779,9 +779,10 @@ test("board no longer renders the hardcoded AI-news video shortcut", () => {
 
 test("+ New task and task creation remain after removing the shortcut", () => {
   assert.match(CONSOLE_HTML, /＋ New task/, "+ New task button kept");
-  assert.match(CONSOLE_HTML, /toggleForm\('taskForm'\)/, "+ New task still toggles the form");
+  assert.match(CONSOLE_HTML, /showNewTaskPanel\(\)/, "+ New task opens the center-column panel");
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /function createTask\(/, "task creation flow preserved");
+  assert.match(js, /function showNewTaskPanel\(/, "center-column task panel flow preserved");
 });
 
 test("board column has an Overview nav above + New task", () => {
@@ -822,9 +823,10 @@ test("Escape returns to Overview only outside editable fields", () => {
 });
 
 test("new task and task selection remain intact", () => {
-  assert.match(CONSOLE_HTML, /toggleForm\('taskForm'\)/, "+ New task still toggles the task form");
+  assert.match(CONSOLE_HTML, /onclick="showNewTaskPanel\(\)"/, "+ New task opens the task form");
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /function createTask\(/, "createTask flow preserved");
+  assert.match(js, /function _closeNewTaskPanel\(/, "task form can return to the board column");
   assert.match(js, /onclick="selectTask\(/, "task cards remain selectable in renderBoard");
 });
 

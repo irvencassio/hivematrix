@@ -17,7 +17,10 @@ final class BrowserLaneAppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = "Browser Lane"
         window.contentViewController = splitVC
-        window.center()
+        window.frameAutosaveName = "BrowserLaneMain"
+        if UserDefaults.standard.string(forKey: "NSWindow Frame BrowserLaneMain") == nil {
+            window.center()
+        }
         window.makeKeyAndOrderFront(nil)
         self.window = window
         BrowserLaneSettings.shared.applyIconState()

@@ -63,7 +63,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   /* Wallpaper / Matrix: panels go translucent so the backdrop shows through; text stays readable. */
   html[data-wallpaper="1"] body { background-size: cover; background-position: center; background-attachment: fixed; }
   html[data-wallpaper="1"] .col, html[data-wallpaper="1"] header,
-  html[data-theme="matrix"] .col, html[data-theme="matrix"] header { background-color: color-mix(in srgb, var(--panel) var(--wp-opacity, 82%), transparent); backdrop-filter: blur(6px); }
+  html[data-theme="matrix"] .col, html[data-theme="matrix"] header { background-color: color-mix(in srgb, var(--panel) var(--wp-opacity, 82%), transparent); backdrop-filter: blur(var(--wp-blur, 6px)); }
   * { box-sizing: border-box; }
   body { margin: 0; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
@@ -176,7 +176,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .ov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px; }
   .ov-card { border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); padding: 12px 8px; text-align: center; }
   .ov-card.warn { border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); }
+  .ov-card.ok { border-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
+  .ov-card.err { border-color: color-mix(in srgb, var(--err) 50%, var(--border)); }
   .ov-num { font-size: 22px; font-weight: 700; line-height: 1; }
+  .new-task-panel { padding: 24px; }
+  .new-task-panel > h2 { margin: 0 0 14px; font-size: 18px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text); }
+  .new-task-panel .form { max-width: none; }
+  .attach-drop.drag-over { border: 1px dashed var(--accent) !important; background: color-mix(in srgb, var(--accent) 8%, var(--panel-2)); border-radius: 6px; }
   .ov-lbl { font-size: 11px; color: var(--muted); margin-top: 4px; }
   .ov-hint { color: var(--muted); font-size: 12px; text-align: center; margin-top: 20px; }
   .usage-pill { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
@@ -1053,7 +1059,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   <section class="col board">
     <h2>Board <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></h2>
     <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
-    <button class="addbtn" onclick="toggleForm('taskForm')">＋ New task</button>
+    <button class="addbtn" onclick="showNewTaskPanel()">＋ New task</button>
     <div class="form" id="taskForm">
       <input id="t_title" placeholder="Title (optional — derived from instructions)" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
@@ -1095,7 +1101,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </select>
       <div class="muted" style="font-size:11px;margin-top:2px">Auto picks the path from your text. Choose <b>Work Package</b> to stage a multi-step plan, <b>Normal</b> to force one plain task (e.g. when developing a lane itself), or <b>Terminal Lane</b> to run on a host.</div>
       <label class="flbl">Attachments (optional)</label>
-      <div class="attach-row">
+      <div class="attach-row attach-drop" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onAttachDrop(event)">
         <input type="file" id="t_attach_input" multiple style="display:none" onchange="onAttachFiles(this)">
         <button type="button" class="cancel" onclick="document.getElementById('t_attach_input').click()">⊕ Browse files</button>
         <span class="muted" id="t_attach_hint" style="font-size:11px">No files selected</span>
@@ -1123,14 +1129,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="observability"><div class="muted">No task telemetry yet.</div></div></details>
     <details class="ctx-sec" id="connSec" open><summary>Connectivity</summary>
     <div id="conn"></div></details>
-    <details class="ctx-sec" id="dirSec" open><summary>Directives</summary>
-    <button class="addbtn" onclick="toggleForm('dirForm')">＋ New directive</button>
+    <details class="ctx-sec" id="dirSec" open><summary>Scheduled</summary>
+    <button class="addbtn" onclick="toggleForm('dirForm')">＋ New scheduled item</button>
     <div class="form" id="dirForm">
       <input id="d_goal" placeholder="Standing goal" />
       <input id="d_path" placeholder="Project path" value="/tmp" />
       <input id="d_crit" placeholder="Success criterion (optional)" />
       <input id="d_interval" placeholder="Repeat interval (e.g. PT4H, P1D) — blank = manual" />
-      <div class="row"><button class="create" onclick="createDirective()">Create directive</button><button class="cancel" onclick="cancelForm('dirForm')">Cancel</button></div>
+      <div class="row"><button class="create" onclick="createDirective()">Schedule</button><button class="cancel" onclick="cancelForm('dirForm')">Cancel</button></div>
       <div class="err" id="d_err"></div>
     </div>
     <div class="form" id="dirEditForm">
@@ -1170,6 +1176,7 @@ const LANE_DEFS = [
   { key: "done",        label: "done",        statuses: ["done"] },
   { key: "failed",      label: "failed",      statuses: ["failed"] },
 ];
+const laneColor = { in_progress: "var(--accent)", review: "var(--ok)", failed: "var(--err)" };
 // Token: injected by the daemon for loopback requests; for remote (tunnel)
 // requests the daemon serves an empty value, so we fall back to a token the
 // user pasted once (stored locally). See requireToken().
@@ -1188,6 +1195,7 @@ function requireToken() {
   return false;
 }
 let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, projects: [], selectedProject: "" };
+let _taskFormInSession = false;
 
 async function api(path, opts) {
   opts = opts || {};
@@ -1221,7 +1229,7 @@ async function toggleThemeQuick() {
 // Center overview — at-a-glance board state when no task is selected, instead of
 // leaving the widest column empty.
 function renderOverview() {
-  if (state.selected) return;
+  if (state.selected || _taskFormInSession) return;
   const el = document.getElementById("session");
   if (!el) return;
   const statusToLane = {}; LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
@@ -1230,12 +1238,12 @@ function renderOverview() {
   for (const t of filtered) { const k = statusToLane[t.status]; if (k) counts[k]++; }
   const dirActive = (state.directives || []).filter(d => d.status === "active").length;
   const appr = (state.approvals || []).length;
-  const card = (label, val, cls) => '<div class="ov-card ' + (cls || "") + '"><div class="ov-num">' + val + '</div><div class="ov-lbl">' + esc(label) + '</div></div>';
+  const card = (label, val, cls, numColor) => '<div class="ov-card ' + (cls || "") + '"><div class="ov-num"' + (numColor ? ' style="color:' + numColor + '"' : '') + '>' + val + '</div><div class="ov-lbl">' + esc(label) + '</div></div>';
   el.innerHTML = '<div class="overview">'
     + '<div class="ov-head">Overview' + (state.selectedProject ? " · " + esc(state.selectedProject) : "") + '</div>'
-    + '<div class="ov-grid">' + LANE_DEFS.map(L => card(L.label, counts[L.key])).join("") + '</div>'
+    + '<div class="ov-grid">' + LANE_DEFS.map(L => card(L.label, counts[L.key], "", laneColor[L.key] || "")).join("") + '</div>'
     + '<div class="ov-grid" style="margin-top:8px">'
-    + card("active directives", dirActive)
+    + card("scheduled", dirActive)
     + card("pending approvals", appr, appr ? "warn" : "")
     + '</div>'
     + '<div class="ov-hint">Select a task to inspect its session — or ＋ New task to start one.</div>'
@@ -3353,7 +3361,34 @@ document.getElementById("modeSel").addEventListener("change", async (e) => {
 });
 
 function toggleForm(id) { document.getElementById(id).classList.toggle("open"); }
-function cancelForm(id) { document.getElementById(id).classList.remove("open"); }
+function cancelForm(id) {
+  if (id === "taskForm" && _taskFormInSession) { _closeNewTaskPanel(); return; }
+  document.getElementById(id).classList.remove("open");
+}
+function showNewTaskPanel() {
+  const form = document.getElementById("taskForm");
+  const session = document.getElementById("session");
+  if (!form || !session) return;
+  state.selected = null;
+  _ctxTask = null;
+  _taskFormInSession = true;
+  renderBoard();
+  session.innerHTML = '<div class="new-task-panel"><h2>New task</h2></div>';
+  session.querySelector(".new-task-panel").appendChild(form);
+  form.classList.add("open");
+  const desc = document.getElementById("t_desc");
+  if (desc) setTimeout(() => desc.focus(), 20);
+}
+function _closeNewTaskPanel() {
+  const form = document.getElementById("taskForm");
+  const board = document.getElementById("board");
+  if (form && board && board.parentElement) {
+    form.classList.remove("open");
+    board.parentElement.insertBefore(form, board);
+  }
+  _taskFormInSession = false;
+  renderOverview();
+}
 
 // --- Models / Settings ---
 let models = null;            // { backends, available, defaultModel, version }
@@ -3430,6 +3465,7 @@ function applyTheme(theme, hasWallpaper) {
   if (hasWallpaper || isMatrix) {
     const op = (models && typeof models.wallpaperOpacity === "number") ? models.wallpaperOpacity : 82;
     root.style.setProperty("--wp-opacity", op + "%");
+    root.style.setProperty("--wp-blur", op > 0 ? "6px" : "0px");
   }
   if (hasWallpaper) {
     root.dataset.wallpaper = "1";
@@ -3822,6 +3858,13 @@ async function onAttachFiles(input) {
     }
   }
 }
+function onAttachDrop(e) {
+  e.preventDefault();
+  const target = e.currentTarget || e.target;
+  if (target && target.classList) target.classList.remove("drag-over");
+  const files = e.dataTransfer && e.dataTransfer.files;
+  if (files && files.length) onAttachFiles({ files, value: "" });
+}
 function removeAttach(idx) {
   _attachments.splice(idx, 1);
   renderAttachChips();
@@ -3950,6 +3993,7 @@ async function saveRoleModel(role, modelId) {
 function onOpacityInput(v) {
   document.getElementById("s_wp_opacity_val").textContent = v + "%";
   document.documentElement.style.setProperty("--wp-opacity", v + "%"); // live preview
+  document.documentElement.style.setProperty("--wp-blur", parseInt(v, 10) > 0 ? "6px" : "0px");
 }
 async function saveOpacity(v) {
   await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperOpacity: parseInt(v,10) }) });
@@ -4026,7 +4070,7 @@ async function renderFeatures() {
   const hourOpts = Array.from({length:24}, (_,h) => '<option value="'+h+'"'+(h===briefHour?' selected':'')+'>'+String(h).padStart(2,'0')+':00</option>').join('');
   const briefRow = '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
     + '<div style="flex:1"><div style="font-weight:600">Morning briefing</div>'
-    + '<div class="muted" style="font-size:11px;margin-top:2px">Pushes a daily standup (pending approvals, failures, active directives, usage) to your phone. ' + esc(apnsNote) + '. <button class="linklike" onclick="sendTestBriefing(this)">Send test</button></div></div>'
+    + '<div class="muted" style="font-size:11px;margin-top:2px">Pushes a daily standup (pending approvals, failures, active scheduled items, usage) to your phone. ' + esc(apnsNote) + '. <button class="linklike" onclick="sendTestBriefing(this)">Send test</button></div></div>'
     + '<div class="row" style="gap:8px;align-items:center">'
     + '<select onchange="setBriefingHour(this.value)" ' + (briefOn ? '' : 'disabled ') + 'style="padding:4px 6px">' + hourOpts + '</select>'
     + settingsSwitch(briefOn, 'toggleBriefing(' + (!briefOn) + ')', { title: briefOn ? 'Turn off morning briefing' : 'Turn on morning briefing' })
@@ -5391,7 +5435,7 @@ async function createTask() {
     if (!ok) { err.textContent = (t && t.error) ? String(t.error) : "Create failed."; return; }
     document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = "";
     _attachments = []; _attachError = ""; _attachUploading = 0; renderAttachChips();
-    toggleForm("taskForm");
+    if (_taskFormInSession) _closeNewTaskPanel(); else toggleForm("taskForm");
     if (t.routed === "work_package") {
       const n = t.itemCount || 0;
       hmToast("Staged as a Work Package (" + n + " item" + (n === 1 ? "" : "s") + "). Open Settings → Lanes → Work Packages to review and start it.");
