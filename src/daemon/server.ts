@@ -1965,11 +1965,11 @@ export function createDaemonServer() {
       // Classify a prompt without persisting anything. Active same-project work
       // is looked up from the DB so the collision recommendation is real.
       if (req.method === "POST" && (urlPath === "/work-packages/intake/preview" || urlPath === "/tasks/intake/preview")) {
-        const { classifyIntake } = await import("@/lib/intake/classify");
+        const { classifyIntakeAsync } = await import("@/lib/intake/classify");
         const { activeSameProjectTasks } = await import("@/lib/work-packages/active");
         const body = await parseBody(req) as Record<string, unknown>;
         const projectPath = typeof body.projectPath === "string" ? body.projectPath : "";
-        const result = classifyIntake({
+        const result = await classifyIntakeAsync({
           title: typeof body.title === "string" ? body.title : undefined,
           description: typeof body.description === "string" ? body.description : "",
           project: typeof body.project === "string" ? body.project : undefined,
@@ -3474,10 +3474,10 @@ export function createDaemonServer() {
         // everything else falls through to the unchanged normal-task path.
         if (body.executor !== "workflow" && body.executor !== "terminal-lane" && body.executor !== "video-review") {
           try {
-            const { classifyIntake } = await import("@/lib/intake/classify");
+            const { classifyIntakeAsync } = await import("@/lib/intake/classify");
             const { activeSameProjectTasks } = await import("@/lib/work-packages/active");
             const projectPath = typeof body.projectPath === "string" ? body.projectPath : "";
-            const intake = classifyIntake({
+            const intake = await classifyIntakeAsync({
               title: typeof body.title === "string" ? body.title : undefined,
               description,
               project: typeof body.project === "string" ? body.project : undefined,

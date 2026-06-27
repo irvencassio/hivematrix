@@ -417,3 +417,57 @@ test("console source includes a Start-package control and still no run-all", () 
   assert.match(CONSOLE_HTML, /wpStart|startWorkPackage/);
   assert.doesNotMatch(CONSOLE_HTML, /runAllPackageItems|Run all items|run-all/i);
 });
+
+test("POST /tasks uses model-advised decomposition when a keyless client is injected", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { _setIntakeDecomposeDepsForTests } = await import("@/lib/intake/classify");
+  // Inject a fake keyless client (no network, no key) → forces decomposition on.
+  _setIntakeDecomposeDepsForTests({
+    client: async () => '["Refactor the parser module", "Add parser tests", "Deploy the release"]',
+    connectivityMode: "local-only",
+  });
+  t.after(() => _setIntakeDecomposeDepsForTests(null));
+
+  const { base, headers } = await startServer(t);
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "Fix all the things across the codebase and clean everything up." }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "work_package");
+
+  const pkg = await (await fetch(`${base}/work-packages/${body.packageId}`, { headers })).json() as Record<string, unknown>;
+  const items = pkg.items as Array<Record<string, unknown>>;
+  // Items came from the injected model fragments...
+  assert.deepEqual(items.map((i) => i.prompt), ["Refactor the parser module", "Add parser tests", "Deploy the release"]);
+  // ...and policy still stamped the release step held/high (model can't bypass the gate).
+  const rel = items.find((i) => /deploy|release/i.test(String(i.prompt)))!;
+  assert.equal(rel.executionMode, "hold");
+  assert.equal(rel.risk, "high");
+
+  // No generic agent task auto-spawned.
+  const agentCount = (getDb().prepare("SELECT COUNT(*) AS n FROM tasks WHERE executor = 'agent'").get() as { n: number }).n;
+  assert.equal(agentCount, 0);
+});
+
+test("a converted Work Package item is backend-agnostic (executor agent, auto agentType)", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const items = [{ title: "Step one", prompt: "do step one", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] }];
+  const pkg = await (await fetch(`${base}/work-packages`, {
+    method: "POST", headers, body: JSON.stringify({ title: "BA", project: "hivematrix", projectPath: "/tmp/ba", items }),
+  })).json() as Record<string, unknown>;
+  const item0 = (pkg.items as Array<Record<string, unknown>>)[0];
+  const conv = await (await fetch(`${base}/work-packages/${pkg.id}/items/${item0.id}/create-task`, { method: "POST", headers })).json() as Record<string, unknown>;
+
+  const row = getDb().prepare("SELECT executor, agentType, model FROM tasks WHERE _id = ?").get(conv.taskId) as { executor: string; agentType: string; model: string | null };
+  assert.equal(row.executor, "agent", "runs on the normal scheduler");
+  assert.equal(row.agentType, "auto", "no backend pinned — chatgpt/codex/qwen all eligible");
+  assert.equal(row.model, null, "no model pinned on the item task");
+});

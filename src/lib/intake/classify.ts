@@ -166,24 +166,7 @@ export function classifyIntake(input: IntakeInput): IntakeResult {
     if (enumerated) reasons.push("explicit multi-step enumeration");
     if (manySteps) reasons.push(`${fragments.length} sub-steps detected`);
 
-    const baseTitles = fragments.map((f) => deriveTaskTitle(f, 70));
-    const items: ProposedItem[] = fragments.map((frag, i) => {
-      const itemRisk = riskOf(frag);
-      const isGated = RELEASE_RE.test(frag) || DESTRUCTIVE_RE.test(frag);
-      const scopeHints: string[] = [];
-      if (WORKTREE_RE.test(frag)) scopeHints.push("worktree");
-      if (isReadOnly(frag)) scopeHints.push("read-only");
-      return {
-        title: baseTitles[i],
-        prompt: frag,
-        risk: isGated ? "high" : itemRisk,
-        // Release/deploy/destructive steps are held (final-gated) and ordered
-        // last via a dependency on every earlier item.
-        executionMode: isGated ? "hold" : "sequential",
-        scopeHints,
-        dependsOn: isGated ? baseTitles.slice(0, i) : [],
-      };
-    });
+    const items = proposedItemsFromFragments(fragments);
 
     return {
       kind: "work_package_candidate",
@@ -216,4 +199,104 @@ export function classifyIntake(input: IntakeInput): IntakeResult {
     suggestedMode,
     projectCollision: collision,
   };
+}
+
+/**
+ * Is the prompt broad enough to be worth a multi-step breakdown? Shared by the
+ * sync classifier's promotion rule and by classifyIntakeAsync's decision to
+ * consult the model even when the regex splitter found only one fragment.
+ */
+export function isBroadPrompt(description: string): boolean {
+  const text = (description ?? "").trim();
+  if (!text) return false;
+  return BROAD_KEYWORD_RE.test(text) || numberedCount(text) >= 2 || splitFragments(text).length >= 3;
+}
+
+/**
+ * Build proposed work-package items from step fragments — the single policy
+ * builder shared by the deterministic regex split AND model-advised
+ * decomposition. ALL safety policy lives here: per-item risk, the held
+ * release/deploy/destructive final-gate, and its dependency on every prior item.
+ * The model only supplies fragment text; it can never escalate risk or skip a gate.
+ */
+export function proposedItemsFromFragments(fragments: string[]): ProposedItem[] {
+  const baseTitles = fragments.map((f) => deriveTaskTitle(f, 70));
+  return fragments.map((frag, i) => {
+    const itemRisk = riskOf(frag);
+    const isGated = RELEASE_RE.test(frag) || DESTRUCTIVE_RE.test(frag);
+    const scopeHints: string[] = [];
+    if (WORKTREE_RE.test(frag)) scopeHints.push("worktree");
+    if (isReadOnly(frag)) scopeHints.push("read-only");
+    return {
+      title: baseTitles[i],
+      prompt: frag,
+      risk: isGated ? "high" : itemRisk,
+      // Release/deploy/destructive steps are held (final-gated) and ordered last
+      // via a dependency on every earlier item.
+      executionMode: isGated ? "hold" : "sequential",
+      scopeHints,
+      dependsOn: isGated ? baseTitles.slice(0, i) : [],
+    };
+  });
+}
+
+// Test-injected decomposition deps (mirrors youtube-summary's pattern) so server
+// tests stay deterministic and never hit a real model.
+let _testDecomposeDeps: import("./decompose").DecomposeDeps | null = null;
+export function _setIntakeDecomposeDepsForTests(deps: import("./decompose").DecomposeDeps | null): void {
+  _testDecomposeDeps = deps;
+}
+
+/**
+ * Async intake: runs the deterministic classifier, then — only for a broad
+ * `work_package_candidate`, and only when enabled — asks the keyless local/CLI
+ * model for a cleaner step breakdown. Falls back to the deterministic split on
+ * any failure. Small/normal tasks never call a model (cost + latency stay zero).
+ *
+ * Enabled when: explicit `deps` passed, a test dep is injected, or the
+ * `taskIntakeModelDecomposition` feature flag is on.
+ */
+export async function classifyIntakeAsync(
+  input: IntakeInput,
+  deps?: import("./decompose").DecomposeDeps,
+): Promise<IntakeResult> {
+  const base = classifyIntake(input);
+  // Lane/workflow routes own themselves — never consult a model for them.
+  if (base.kind === "workflow" || base.kind === "lane_task") return base;
+
+  const alreadyCandidate = base.kind === "work_package_candidate" && !!base.packageCandidate;
+  // Consult the model when the prompt is already a candidate (to IMPROVE the
+  // split) OR when it's broad but the regex couldn't split it (to PROMOTE it).
+  // Small/normal, non-broad prompts never reach the model.
+  if (!alreadyCandidate && !isBroadPrompt(input.description)) return base;
+
+  const effective = deps ?? _testDecomposeDeps ?? undefined;
+  let enabled = effective != null;
+  if (!enabled) {
+    try {
+      const { isFeatureEnabled } = await import("@/lib/config/features");
+      enabled = isFeatureEnabled("taskIntakeModelDecomposition");
+    } catch { enabled = false; }
+  }
+  if (!enabled) return base;
+
+  try {
+    const { decompose } = await import("./decompose");
+    const fragments = await decompose(input, effective ?? {});
+    if (!fragments || fragments.length < 2) return base;
+    const items = proposedItemsFromFragments(fragments);
+    if (items.length < 2) return base;
+    const title = base.packageCandidate?.title || input.title?.trim() || deriveTaskTitle(input.description);
+    return {
+      kind: "work_package_candidate",
+      confidence: alreadyCandidate ? base.confidence : 0.7,
+      reasons: [...base.reasons, "model-advised decomposition"],
+      risk: items.some((it) => it.risk === "high") ? "high" : (alreadyCandidate ? base.risk : "medium"),
+      suggestedMode: "split",
+      projectCollision: base.projectCollision,
+      packageCandidate: { title, items },
+    };
+  } catch {
+    return base;
+  }
 }

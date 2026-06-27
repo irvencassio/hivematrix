@@ -95,3 +95,65 @@ test("a single broad-sounding step does not become a package (needs >=2 items)",
   const r = classifyIntake({ description: "Refactor the whole auth module." });
   assert.equal(r.kind, "normal_task");
 });
+
+// ── proposedItemsFromFragments + classifyIntakeAsync (model-advised) ──
+
+import { proposedItemsFromFragments, classifyIntakeAsync, _setIntakeDecomposeDepsForTests } from "./classify";
+
+test("proposedItemsFromFragments stamps a release fragment as held/high regardless of source", () => {
+  const items = proposedItemsFromFragments(["update the docs", "deploy the release to prod"]);
+  assert.equal(items.length, 2);
+  const rel = items[1];
+  assert.equal(rel.risk, "high");
+  assert.equal(rel.executionMode, "hold");
+  assert.ok(rel.dependsOn.length >= 1, "held release depends on prior items");
+});
+
+test("classifyIntakeAsync replaces items with model fragments and notes the reason", async () => {
+  const r = await classifyIntakeAsync(
+    { description: "Fix all the things across the codebase and tidy up everything." },
+    { client: async () => '["Refactor the parser", "Add tests for the parser", "Update the changelog"]', connectivityMode: "local-only" },
+  );
+  assert.equal(r.kind, "work_package_candidate");
+  assert.deepEqual(r.packageCandidate!.items.map((i) => i.prompt), ["Refactor the parser", "Add tests for the parser", "Update the changelog"]);
+  assert.ok(r.reasons.includes("model-advised decomposition"));
+});
+
+test("classifyIntakeAsync keeps the held gate when the model proposes a release step", async () => {
+  const r = await classifyIntakeAsync(
+    { description: "Fix all the things and deploy everything." },
+    { client: async () => '["Fix the failing tests", "Deploy the release to production"]', connectivityMode: "cloud-ok" },
+  );
+  const rel = r.packageCandidate!.items.find((i) => /deploy|release/i.test(i.prompt))!;
+  assert.equal(rel.executionMode, "hold");
+  assert.equal(rel.risk, "high");
+});
+
+test("classifyIntakeAsync falls back to the deterministic split when the model fails", async () => {
+  const det = classifyIntake({ description: "Fix all the lint, update every dep, and refactor auth." });
+  const r = await classifyIntakeAsync(
+    { description: "Fix all the lint, update every dep, and refactor auth." },
+    { client: async () => { throw new Error("model down"); }, connectivityMode: "cloud-ok" },
+  );
+  assert.equal(r.kind, "work_package_candidate");
+  assert.deepEqual(r.packageCandidate!.items.map((i) => i.prompt), det.packageCandidate!.items.map((i) => i.prompt));
+  assert.ok(!r.reasons.includes("model-advised decomposition"));
+});
+
+test("classifyIntakeAsync never calls a model for a small/normal task", async () => {
+  let called = false;
+  const r = await classifyIntakeAsync(
+    { description: "Fix the typo in the footer." },
+    { client: async () => { called = true; return '["a","b"]'; }, connectivityMode: "cloud-ok" },
+  );
+  assert.equal(r.kind, "normal_task");
+  assert.equal(called, false, "no model call on the common path");
+});
+
+test("classifyIntakeAsync with no deps + flag off behaves like the deterministic classifier", async () => {
+  _setIntakeDecomposeDepsForTests(null);
+  const r = await classifyIntakeAsync({ description: "Fix all the lint, update every dep, and refactor auth." });
+  // Flag defaults off → identical to deterministic split, no model reason.
+  assert.equal(r.kind, "work_package_candidate");
+  assert.ok(!r.reasons.includes("model-advised decomposition"));
+});
