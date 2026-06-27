@@ -33,4 +33,11 @@ final class BrowserLaneSiteStore {
         let data = try encoder.encode(sites)
         try data.write(to: fileURL, options: [.atomic])
     }
+
+    func delete(id: String) throws {
+        var sites = listSites()
+        sites.removeAll { $0.id == id }
+        let data = try encoder.encode(sites)
+        try data.write(to: fileURL, options: [.atomic])
+    }
 }

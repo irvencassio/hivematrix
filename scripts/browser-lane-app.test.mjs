@@ -156,7 +156,7 @@ test("Browser Lane Add Site is wired to metadata, daemon sync, and Keychain-only
   assert.match(addSite, /NSTextField/);
   assert.match(addSite, /NSSecureTextField/);
   assert.match(addSite, /saveSite/);
-  assert.match(addSite, /Open auth flow/);
+  assert.match(addSite, /Open Sign-in/);
 
   const keychain = readFileSync(keychainPath, "utf8");
   assert.match(keychain, /import Security/);
@@ -291,12 +291,15 @@ test("Browser Lane Google auth pages expose a visible recovery path instead of w
   assert.match(browser, /customUserAgent/);
 });
 
-test("Browser Lane Sites view shows auth strategy and session/credential label", () => {
+test("Browser Lane Sites view shows the friendly sign-in label and account, no jargon", () => {
   const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
   const sites = readFileSync(join(sourceDir, "SitesViewController.swift"), "utf8");
-  assert.match(sites, /authStrategy/);
+  // Friendly presentation label (pickerTitle), not the raw enum/authStrategy string.
+  assert.match(sites, /pickerTitle/);
   assert.match(sites, /providerAccount/);
   assert.doesNotMatch(sites, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
+  // No leftover 1980s-admin "metadata" wording.
+  assert.doesNotMatch(sites, /metadata/i);
 });
 
 test("Browser Lane installs a standard Edit menu so Cmd-C/V/X/A work in text fields", () => {
@@ -336,7 +339,70 @@ test("Browser Lane Add Site auto-generates ids, hides technical fields, edits, a
   // The Sites screen offers an Edit affordance per site.
   assert.match(sites, /editSite|"Edit"/);
 
-  // Still metadata-only: the daemon payload never carries a password value.
+  // Still reference-only: the daemon payload never carries a password value.
   const daemonClient = readFileSync(join(sourceDir, "BrowserLaneDaemonClient.swift"), "utf8");
   assert.doesNotMatch(daemonClient, /password/i);
+});
+
+test("Browser Lane Add Site starts empty, derives from one Website field, and HeyGen is an opt-in preset", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const addSite = readFileSync(join(sourceDir, "AddSiteViewController.swift"), "utf8");
+  const screens = readFileSync(join(sourceDir, "Screens.swift"), "utf8");
+
+  // Empty by default: an explicit empty-state helper runs instead of auto-loading HeyGen.
+  assert.match(addSite, /startEmpty/);
+  assert.doesNotMatch(addSite, /else\s*\{\s*useHeyGenDefaults/);
+  // HeyGen survives only as an opt-in preset button; no "defaults loaded" auto-status.
+  assert.match(addSite, /Use HeyGen preset/);
+  assert.match(addSite, /useHeyGenDefaults/);
+  assert.doesNotMatch(addSite, /defaults loaded/i);
+
+  // Friendly, view-layer sign-in labels (not in the model).
+  assert.match(addSite, /pickerTitle/);
+  assert.match(addSite, /displayOrder/);
+  assert.match(addSite, /Username \+ password/);
+  assert.match(addSite, /Google sign-in/);
+  assert.match(addSite, /Microsoft sign-in/);
+  assert.match(addSite, /Manual session/);
+
+  // One primary Website field; home/login/domains are derived, not hand-entered twice.
+  assert.match(addSite, /websiteField/);
+  assert.match(addSite, /"Website"/);
+  assert.match(addSite, /normalizedWebsite/);
+  assert.match(addSite, /deriveAllowedDomains/);
+  assert.match(addSite, /accountEmailField/);
+
+  // Advanced disclosure carries the technical identifiers incl. the optional login override.
+  assert.match(addSite, /Advanced/);
+  assert.match(addSite, /Login URL override/);
+  assert.match(addSite, /loginOverrideField/);
+  assert.match(addSite, /hivematrix\.browser\./);
+
+  // Modern buttons + no admin-form jargon.
+  assert.match(addSite, /"Save Site"/);
+  assert.match(addSite, /Open Sign-in/);
+  assert.doesNotMatch(addSite, /metadata/i);
+
+  // Sidebar/Screens use the modern "New Site" label, no stale metadata copy.
+  assert.match(screens, /New Site/);
+  assert.doesNotMatch(screens, /metadata/i);
+});
+
+test("Browser Lane Sites list is editable and deletable with confirmation", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const sites = readFileSync(join(sourceDir, "SitesViewController.swift"), "utf8");
+  const store = readFileSync(join(sourceDir, "BrowserLaneSiteStore.swift"), "utf8");
+  const keychain = readFileSync(join(sourceDir, "BrowserLaneKeychain.swift"), "utf8");
+
+  // A site row is click-to-edit AND has explicit Edit/Delete buttons + a New Site entry.
+  assert.match(sites, /NSClickGestureRecognizer/);
+  assert.match(sites, /"Edit"/);
+  assert.match(sites, /"Delete"/);
+  assert.match(sites, /New Site/);
+
+  // Delete is confirmed (never silent) and removes the local record + Keychain secret.
+  assert.match(sites, /NSAlert/);
+  assert.match(store, /func delete/);
+  assert.match(keychain, /deleteCredential/);
+  assert.match(keychain, /SecItemDelete/);
 });

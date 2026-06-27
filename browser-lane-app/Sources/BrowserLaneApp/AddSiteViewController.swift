@@ -1,38 +1,61 @@
 import AppKit
 
+/// Operator-facing presentation for the auth strategies. Kept in the view layer
+/// (not the model) so the friendly "Username + password" wording never lands in
+/// the secret-free data model.
+extension BrowserLaneAuthStrategy {
+    /// Order shown in the Sign-in method picker — simplest first.
+    static var displayOrder: [BrowserLaneAuthStrategy] {
+        [.manualSession, .googleSso, .microsoftSso, .keychainPassword]
+    }
+
+    var pickerTitle: String {
+        switch self {
+        case .manualSession:    return "Manual session"
+        case .googleSso:        return "Google sign-in"
+        case .microsoftSso:     return "Microsoft sign-in"
+        case .keychainPassword: return "Username + password"
+        }
+    }
+}
+
 final class AddSiteViewController: NSViewController {
     private let store = BrowserLaneSiteStore.shared
     private let keychain = BrowserLaneKeychain.shared
     private let daemon = BrowserLaneDaemonClient.shared
 
-    private let idField = NSTextField()
+    // Primary fields.
     private let nameField = NSTextField()
-    private let homeField = NSTextField()
-    private let loginField = NSTextField()
-    private let domainsField = NSTextField()
+    private let websiteField = NSTextField()
     private let strategyPicker = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let providerAccountField = NSTextField()
-    private let credentialRefField = NSTextField()
+    private let accountEmailField = NSTextField()
     private let usernameField = NSTextField()
     private let passwordField = NSSecureTextField()
-    private let strategyHelp = NSTextField(labelWithString: "")
-    private let credentialRefLabel = NSTextField(labelWithString: "Credential ref")
-    private let advancedToggle = NSButton()
-    private let statusLabel = NSTextField(labelWithString: "")
-    private let titleLabel = NSTextField(labelWithString: "Add Site")
 
-    private var grid: NSGridView!
-    private var idRowIndex = 0
-    private var credentialRefRowIndex = 0
-    private var usernameRowIndex = 0
-    private var passwordRowIndex = 0
+    // Advanced fields.
+    private let idField = NSTextField()
+    private let domainsField = NSTextField()
+    private let loginOverrideField = NSTextField()
+    private let credentialRefField = NSTextField()
+    private let credentialRefLabel = NSTextField(labelWithString: "Session label")
+
+    private let strategyHelp = NSTextField(labelWithString: "")
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let titleLabel = NSTextField(labelWithString: "New Site")
+    private let advancedToggle = NSButton()
+
+    // Row containers we show/hide.
+    private var usernameRow: NSView!
+    private var passwordRow: NSView!
+    private var advancedStack: NSStackView!
     private var advancedShown = false
+    private var idManuallyEdited = false
 
     // When editing, the original site (createdAt preserved, secret kept if blank).
     private var editingSite: BrowserLaneSite?
 
     private var selectedStrategy: BrowserLaneAuthStrategy {
-        BrowserLaneAuthStrategy.allCases[max(0, strategyPicker.indexOfSelectedItem)]
+        BrowserLaneAuthStrategy.displayOrder[max(0, strategyPicker.indexOfSelectedItem)]
     }
 
     override func loadView() {
@@ -41,16 +64,22 @@ final class AddSiteViewController: NSViewController {
         let outer = NSStackView()
         outer.orientation = .vertical
         outer.alignment = .leading
-        outer.spacing = 14
+        outer.spacing = 18
         outer.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.font = .systemFont(ofSize: 28, weight: .semibold)
-
-        let subtitle = NSTextField(labelWithString: "Register site metadata and pick how it authenticates. Secrets live only in macOS Keychain.")
+        titleLabel.font = .systemFont(ofSize: 22, weight: .semibold)
+        let subtitle = NSTextField(labelWithString: "Add a website Browser Lane can open and keep signed in. Sign-in happens in the browser; passwords stay in your macOS Keychain.")
         subtitle.textColor = .secondaryLabelColor
-        subtitle.font = .systemFont(ofSize: 14)
+        subtitle.font = .systemFont(ofSize: 13)
+        subtitle.lineBreakMode = .byWordWrapping
+        subtitle.maximumNumberOfLines = 2
+        subtitle.preferredMaxLayoutWidth = 520
+        let header = NSStackView(views: [titleLabel, subtitle])
+        header.orientation = .vertical
+        header.alignment = .leading
+        header.spacing = 4
 
-        strategyPicker.addItems(withTitles: BrowserLaneAuthStrategy.allCases.map { $0.label })
+        strategyPicker.addItems(withTitles: BrowserLaneAuthStrategy.displayOrder.map { $0.pickerTitle })
         strategyPicker.target = self
         strategyPicker.action = #selector(strategyChanged)
         strategyPicker.translatesAutoresizingMaskIntoConstraints = false
@@ -58,96 +87,114 @@ final class AddSiteViewController: NSViewController {
         strategyHelp.textColor = .secondaryLabelColor
         strategyHelp.font = .systemFont(ofSize: 12)
         strategyHelp.lineBreakMode = .byWordWrapping
-        strategyHelp.maximumNumberOfLines = 2
+        strategyHelp.maximumNumberOfLines = 3
+        strategyHelp.preferredMaxLayoutWidth = 520
 
-        advancedToggle.title = "▸ Advanced (Site id, Credential ref)"
+        for field in [nameField, websiteField, accountEmailField, usernameField, passwordField, idField, domainsField, loginOverrideField, credentialRefField] {
+            field.translatesAutoresizingMaskIntoConstraints = false
+            field.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        }
+        nameField.placeholderString = "HeyGen Studio"
+        websiteField.placeholderString = "app.heygen.com"
+        accountEmailField.placeholderString = "you@example.com (optional)"
+        idField.placeholderString = "auto-generated from the name"
+        domainsField.placeholderString = "auto-derived from the website"
+        loginOverrideField.placeholderString = "optional — only if sign-in lives elsewhere"
+        credentialRefField.placeholderString = "auto: hivematrix.browser.<site>.primary"
+        passwordField.placeholderString = "leave blank to keep the saved sign-in"
+
+        nameField.target = self
+        nameField.action = #selector(identityEdited)
+        websiteField.target = self
+        websiteField.action = #selector(identityEdited)
+        idField.target = self
+        idField.action = #selector(idEdited)
+
+        usernameRow = labeledRow("Username", usernameField)
+        passwordRow = labeledRow("Password", passwordField)
+
+        let formStack = NSStackView(views: [
+            labeledRow("Name", nameField),
+            labeledRow("Website", websiteField),
+            labeledRow("Sign-in method", strategyPicker),
+            labeledRow("Account email", accountEmailField),
+            usernameRow,
+            passwordRow,
+        ])
+        formStack.orientation = .vertical
+        formStack.alignment = .leading
+        formStack.spacing = 10
+
         advancedToggle.bezelStyle = .inline
         advancedToggle.isBordered = false
         advancedToggle.target = self
         advancedToggle.action = #selector(toggleAdvanced)
 
-        // Display name + domain come first; the technical id/ref live under Advanced.
-        let rows: [[NSView]] = [
-            row("Display name", nameField),
-            row("Home URL", homeField),
-            row("Login / auth URL", loginField),
-            row("Allowed domains", domainsField),
-            [NSTextField(labelWithString: "Auth strategy"), strategyPicker],
-            row("Provider account / email", providerAccountField),
-            row("Username", usernameField),
-            row("Password", passwordField),
-            row("Site id", idField),
-            [credentialRefLabel, credentialRefField],
-        ]
-        usernameRowIndex = 6
-        passwordRowIndex = 7
-        idRowIndex = 8
-        credentialRefRowIndex = 9
+        advancedStack = NSStackView(views: [
+            labeledRow("Site ID", idField),
+            labeledRow("Allowed domains", domainsField),
+            labeledRow("Login URL override", loginOverrideField),
+            labeledRow(credentialRefLabel, credentialRefField),
+        ])
+        advancedStack.orientation = .vertical
+        advancedStack.alignment = .leading
+        advancedStack.spacing = 10
 
-        grid = NSGridView(views: rows)
-        grid.rowSpacing = 10
-        grid.columnSpacing = 12
-        grid.translatesAutoresizingMaskIntoConstraints = false
-        grid.column(at: 0).xPlacement = .trailing
-        grid.column(at: 1).width = 520
-
-        for field in [idField, nameField, homeField, loginField, domainsField, providerAccountField, credentialRefField, usernameField, passwordField] {
-            field.translatesAutoresizingMaskIntoConstraints = false
-            field.widthAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
-        }
-        nameField.placeholderString = "HeyGen Studio"
-        domainsField.placeholderString = "app.heygen.com, heygen.com"
-        idField.placeholderString = "auto-generated from the display name"
-        credentialRefField.placeholderString = "auto: hivematrix.browser.<site>.primary"
-        providerAccountField.placeholderString = "cassio.irv@gmail.com (optional, non-secret)"
-        passwordField.placeholderString = "leave blank to keep the existing Keychain secret"
-        // Regenerate ids live as the operator types the name (unless overridden via Advanced).
-        nameField.target = self
-        nameField.action = #selector(nameEdited)
-
-        let buttons = NSStackView()
+        let saveButton = NSButton(title: "Save Site", target: self, action: #selector(saveSite))
+        saveButton.bezelStyle = .rounded
+        saveButton.keyEquivalent = "\r"
+        let openButton = NSButton(title: "Open Sign-in", target: self, action: #selector(openAuthFlow))
+        openButton.bezelStyle = .rounded
+        let presetButton = NSButton(title: "Use HeyGen preset", target: self, action: #selector(useHeyGenDefaults))
+        presetButton.bezelStyle = .rounded
+        let buttons = NSStackView(views: [saveButton, openButton, presetButton])
         buttons.orientation = .horizontal
         buttons.spacing = 10
-        let heygenButton = NSButton(title: "Use HeyGen defaults", target: self, action: #selector(useHeyGenDefaults))
-        let saveButton = NSButton(title: "Save site", target: self, action: #selector(saveSite))
-        let openButton = NSButton(title: "Open auth flow", target: self, action: #selector(openAuthFlow))
-        saveButton.bezelStyle = .rounded
-        openButton.bezelStyle = .rounded
-        buttons.addArrangedSubview(heygenButton)
-        buttons.addArrangedSubview(saveButton)
-        buttons.addArrangedSubview(openButton)
 
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.lineBreakMode = .byWordWrapping
         statusLabel.maximumNumberOfLines = 3
+        statusLabel.preferredMaxLayoutWidth = 520
 
-        outer.addArrangedSubview(titleLabel)
-        outer.addArrangedSubview(subtitle)
-        outer.addArrangedSubview(grid)
-        outer.addArrangedSubview(advancedToggle)
+        outer.addArrangedSubview(header)
+        outer.addArrangedSubview(formStack)
         outer.addArrangedSubview(strategyHelp)
+        outer.addArrangedSubview(advancedToggle)
+        outer.addArrangedSubview(advancedStack)
         outer.addArrangedSubview(buttons)
         outer.addArrangedSubview(statusLabel)
         view.addSubview(outer)
 
         NSLayoutConstraint.activate([
             outer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            outer.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
+            outer.widthAnchor.constraint(lessThanOrEqualToConstant: 560),
             outer.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -32),
-            outer.topAnchor.constraint(equalTo: view.topAnchor, constant: 32),
         ])
 
         applyAdvancedVisibility()
         if let id = BrowserLaneEditTarget.shared.consume(), let existing = store.listSites().first(where: { $0.id == id }) {
             loadForEdit(existing)
         } else {
-            useHeyGenDefaults()
+            startEmpty()
         }
     }
 
-    private func row(_ label: String, _ field: NSTextField) -> [NSView] {
-        let labelView = NSTextField(labelWithString: label)
-        labelView.textColor = .secondaryLabelColor
-        return [labelView, field]
+    /// One label + field row, kept as an NSStackView so we can hide it by reference.
+    private func labeledRow(_ title: String, _ field: NSView) -> NSStackView {
+        labeledRow(NSTextField(labelWithString: title), field)
+    }
+
+    private func labeledRow(_ label: NSTextField, _ field: NSView) -> NSStackView {
+        label.alignment = .right
+        label.textColor = .secondaryLabelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        let row = NSStackView(views: [label, field])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 12
+        return row
     }
 
     @objc private func toggleAdvanced() {
@@ -156,116 +203,152 @@ final class AddSiteViewController: NSViewController {
     }
 
     private func applyAdvancedVisibility() {
-        grid.row(at: idRowIndex).isHidden = !advancedShown
-        grid.row(at: credentialRefRowIndex).isHidden = !advancedShown
-        advancedToggle.title = (advancedShown ? "▾" : "▸") + " Advanced (Site id, Credential ref)"
+        advancedStack.isHidden = !advancedShown
+        advancedToggle.title = (advancedShown ? "▾ Advanced" : "▸ Advanced") + "  (Site ID, allowed domains, login override)"
     }
 
-    /// Auto-fill the site id (and Keychain credentialRef) from the display name,
-    /// unless the operator has typed their own under Advanced.
-    @objc private func nameEdited() {
-        let typedId = idField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let suggested = suggestedId()
-        // Only auto-update when the id was empty or still matches a prior suggestion.
-        if typedId.isEmpty || editingSite == nil {
-            idField.stringValue = suggested
-            syncCredentialRef()
-        }
+    // MARK: - Live identity derivation
+
+    @objc private func idEdited() { idManuallyEdited = true }
+
+    /// Regenerate the auto Site ID + credential ref as the operator types Name/Website,
+    /// unless they've overridden the id under Advanced.
+    @objc private func identityEdited() {
+        if !idManuallyEdited { idField.stringValue = suggestedId() }
+        syncCredentialRef()
     }
 
     private func suggestedId() -> String {
-        let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fromName = browserLaneSlug(name)
+        let fromName = browserLaneSlug(nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
         if !fromName.isEmpty { return fromName }
-        let firstDomain = domainsField.stringValue
-            .split { $0 == "," || $0 == "\n" || $0 == " " }
-            .first.map(String.init) ?? ""
-        return browserLaneSlug(firstDomain)
+        if let host = URL(string: normalizedWebsite())?.host { return browserLaneSlug(host) }
+        return ""
+    }
+
+    private func currentId() -> String {
+        let typed = idField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return typed.isEmpty ? suggestedId() : typed
     }
 
     private func syncCredentialRef() {
         guard selectedStrategy.usesKeychainPassword else { return }
-        let id = idField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = currentId()
         if credentialRefField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !id.isEmpty {
             credentialRefField.stringValue = "hivematrix.browser.\(id).primary"
         }
     }
 
-    @objc private func strategyChanged() {
-        let strategy = selectedStrategy
-        let usesKeychainPassword = strategy.usesKeychainPassword
-        grid.row(at: usernameRowIndex).isHidden = !usesKeychainPassword
-        grid.row(at: passwordRowIndex).isHidden = !usesKeychainPassword
-        credentialRefLabel.stringValue = usesKeychainPassword ? "Credential ref" : "Session label (optional)"
-
-        if usesKeychainPassword {
-            syncCredentialRef()
-            strategyHelp.stringValue = "Username + password are saved to the macOS Keychain only — never to disk, logs, or the daemon. On edit, leave the password blank to keep the existing secret."
-        } else {
-            strategyHelp.stringValue = "\(strategy.label): complete sign-in (and 2FA/CAPTCHA) yourself in Browser Lane via Open auth flow. No password is stored — Browser Lane only preserves and monitors the session."
-            seedProviderDomains(strategy)
-            if let authURL = strategy.defaultAuthURL, loginField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                loginField.stringValue = authURL
-            }
+    /// Website with an implicit https:// when the operator typed a bare host.
+    private func normalizedWebsite() -> String {
+        var raw = websiteField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return "" }
+        let lower = raw.lowercased()
+        if !lower.hasPrefix("http://"), !lower.hasPrefix("https://") {
+            raw = "https://" + raw
         }
+        return raw
     }
 
-    private func seedProviderDomains(_ strategy: BrowserLaneAuthStrategy) {
-        guard !strategy.providerDomains.isEmpty else { return }
-        var domains = domainsField.stringValue
+    /// Allowed domains: operator override if typed, else website host + SSO provider hosts.
+    private func deriveAllowedDomains() -> [String] {
+        let typed = domainsField.stringValue
             .split { $0 == "," || $0 == "\n" || $0 == " " }
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        for domain in strategy.providerDomains where !domains.contains(domain) {
-            domains.append(domain)
+        if !typed.isEmpty { return typed }
+
+        var derived: [String] = []
+        if let host = URL(string: normalizedWebsite())?.host { derived.append(host) }
+        for domain in selectedStrategy.providerDomains where !derived.contains(domain) {
+            derived.append(domain)
         }
-        domainsField.stringValue = domains.joined(separator: ", ")
+        return derived
+    }
+
+    @objc private func strategyChanged() {
+        let strategy = selectedStrategy
+        let usesKeychain = strategy.usesKeychainPassword
+        usernameRow.isHidden = !usesKeychain
+        passwordRow.isHidden = !usesKeychain
+        credentialRefLabel.stringValue = usesKeychain ? "Credential ref" : "Session label"
+
+        if usesKeychain {
+            syncCredentialRef()
+            strategyHelp.stringValue = "Username and password are saved to the macOS Keychain only — never to disk, logs, or the daemon."
+        } else {
+            strategyHelp.stringValue = "\(strategy.pickerTitle): complete sign-in (and any 2FA/CAPTCHA) yourself via Open Sign-in. No password is stored — Browser Lane only preserves and monitors the session."
+        }
+    }
+
+    // MARK: - Presets / edit / empty
+
+    private func startEmpty() {
+        editingSite = nil
+        idManuallyEdited = false
+        titleLabel.stringValue = "New Site"
+        nameField.stringValue = ""
+        websiteField.stringValue = ""
+        accountEmailField.stringValue = ""
+        usernameField.stringValue = ""
+        passwordField.stringValue = ""
+        idField.stringValue = ""
+        domainsField.stringValue = ""
+        loginOverrideField.stringValue = ""
+        credentialRefField.stringValue = ""
+        strategyPicker.selectItem(at: 0) // Manual session
+        strategyChanged()
+        setStatus("Enter a name and website, then choose how it signs in.", error: false)
     }
 
     @objc private func useHeyGenDefaults() {
         editingSite = nil
-        titleLabel.stringValue = "Add Site"
+        idManuallyEdited = true
+        titleLabel.stringValue = "New Site"
         let site = BrowserLaneSite.heyGen
-        idField.stringValue = site.id
         nameField.stringValue = site.displayName
-        homeField.stringValue = site.homeUrl
-        loginField.stringValue = site.loginUrl
+        websiteField.stringValue = site.homeUrl
+        accountEmailField.stringValue = site.providerAccount ?? ""
+        idField.stringValue = site.id
         domainsField.stringValue = site.allowedDomains.joined(separator: ", ")
+        loginOverrideField.stringValue = site.loginUrl
         credentialRefField.stringValue = site.credentialRef
-        providerAccountField.stringValue = site.providerAccount ?? ""
         usernameField.stringValue = ""
         passwordField.stringValue = ""
-        if let index = BrowserLaneAuthStrategy.allCases.firstIndex(of: site.strategy) {
-            strategyPicker.selectItem(at: index)
-        }
+        selectStrategy(site.strategy)
         strategyChanged()
-        setStatus("HeyGen defaults loaded (Google SSO). Use Open auth flow to sign in, then Save.", error: false)
+        setStatus("HeyGen preset loaded (Google sign-in). Use Open Sign-in to sign in, then Save.", error: false)
     }
 
     private func loadForEdit(_ site: BrowserLaneSite) {
         editingSite = site
+        idManuallyEdited = true
         titleLabel.stringValue = "Edit Site"
-        idField.stringValue = site.id
         nameField.stringValue = site.displayName
-        homeField.stringValue = site.homeUrl
-        loginField.stringValue = site.loginUrl
+        websiteField.stringValue = site.homeUrl
+        accountEmailField.stringValue = site.providerAccount ?? ""
+        idField.stringValue = site.id
         domainsField.stringValue = site.allowedDomains.joined(separator: ", ")
+        // Only surface the login override when it actually differs from the website.
+        loginOverrideField.stringValue = (site.loginUrl == site.homeUrl) ? "" : site.loginUrl
         credentialRefField.stringValue = site.credentialRef
-        providerAccountField.stringValue = site.providerAccount ?? ""
         usernameField.stringValue = ""
         passwordField.stringValue = "" // secrets are never read back from Keychain into the form
-        if let index = BrowserLaneAuthStrategy.allCases.firstIndex(of: site.strategy) {
-            strategyPicker.selectItem(at: index)
-        }
+        selectStrategy(site.strategy)
         strategyChanged()
-        setStatus("Editing “\(site.displayName)”. Leave the password blank to keep the existing Keychain secret.", error: false)
+        setStatus("Editing “\(site.displayName)”. Leave the password blank to keep the saved sign-in.", error: false)
     }
 
+    private func selectStrategy(_ strategy: BrowserLaneAuthStrategy) {
+        strategyPicker.selectItem(at: BrowserLaneAuthStrategy.displayOrder.firstIndex(of: strategy) ?? 0)
+    }
+
+    // MARK: - Actions
+
     @objc private func openAuthFlow() {
-        let raw = loginField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let target = raw.isEmpty ? (selectedStrategy.defaultAuthURL ?? "") : raw
+        let override = loginOverrideField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let target = override.isEmpty ? normalizedWebsite() : override
         guard let url = URL(string: target), url.scheme?.hasPrefix("http") == true else {
-            failField(loginField, "Login / auth URL is invalid.")
+            failField(websiteField, "Enter a valid website (or login override) first.")
             return
         }
         BrowserLaneNavigator.shared.openInBrowser(url)
@@ -278,11 +361,8 @@ final class AddSiteViewController: NSViewController {
             if site.strategy.usesKeychainPassword {
                 let username = usernameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 let secret = passwordField.stringValue
-                if secret.isEmpty {
-                    // Blank password → keep the existing Keychain secret (no overwrite).
-                    // On a brand-new keychain site with no secret yet, that's allowed too;
-                    // the operator can add credentials later.
-                } else {
+                // Blank password → keep the existing Keychain secret (no overwrite).
+                if !secret.isEmpty {
                     guard !username.isEmpty else {
                         failField(usernameField, "Enter a username to go with the new password.")
                         return
@@ -300,7 +380,7 @@ final class AddSiteViewController: NSViewController {
     }
 
     private func finishSync(_ site: BrowserLaneSite) {
-        setStatus("Saved locally. Syncing metadata to HiveMatrix…", error: false)
+        setStatus("Saved locally. Syncing to HiveMatrix…", error: false)
         daemon.sync(site: site) { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
@@ -319,37 +399,46 @@ final class AddSiteViewController: NSViewController {
 
     private func buildSite() throws -> BrowserLaneSite {
         let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { throw FieldError(nameField, "Display name is required.") }
+        guard !name.isEmpty else { throw FieldError(nameField, "Name is required.") }
 
-        // Auto-generate the id from the name/domain when none was typed (Advanced).
-        var id = idField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if id.isEmpty { id = suggestedId() }
-        guard id.range(of: #"^[a-z0-9._:-]+$"#, options: .regularExpression) != nil else {
-            throw FieldError(idField, "Site id may contain lowercase letters, numbers, dot, underscore, colon, or dash.")
+        let home = normalizedWebsite()
+        guard URL(string: home)?.scheme?.hasPrefix("http") == true else {
+            throw FieldError(websiteField, "Website is required and must be a web address.")
         }
 
-        let home = homeField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let login = loginField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let providerAccount = providerAccountField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = currentId()
+        guard id.range(of: #"^[a-z0-9._:-]+$"#, options: .regularExpression) != nil else {
+            throw FieldError(idField, "Site ID may contain lowercase letters, numbers, dot, underscore, colon, or dash.")
+        }
+
+        let override = loginOverrideField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let login: String
+        if override.isEmpty {
+            login = home
+        } else {
+            guard URL(string: override)?.scheme?.hasPrefix("http") == true else {
+                throw FieldError(loginOverrideField, "Login URL override must be a web address.")
+            }
+            login = override
+        }
+
+        let domains = deriveAllowedDomains()
+        guard !domains.isEmpty else { throw FieldError(websiteField, "Enter a website so an allowed domain can be derived.") }
+
         let strategy = selectedStrategy
-        let domains = domainsField.stringValue
-            .split { $0 == "," || $0 == "\n" || $0 == " " }
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        guard URL(string: home)?.scheme?.hasPrefix("http") == true else { throw FieldError(homeField, "Home URL must be http(s).") }
-        guard URL(string: login)?.scheme?.hasPrefix("http") == true else { throw FieldError(loginField, "Login / auth URL must be http(s).") }
-        guard !domains.isEmpty else { throw FieldError(domainsField, "At least one allowed domain is required.") }
-
-        // Auto-generate a Keychain credentialRef when blank; require the prefix.
         var credentialRef = credentialRefField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if credentialRef.isEmpty {
+            credentialRef = strategy.usesKeychainPassword
+                ? "hivematrix.browser.\(id).primary"
+                : "hivematrix.browser.\(id).session"
+        }
         if strategy.usesKeychainPassword {
-            if credentialRef.isEmpty { credentialRef = "hivematrix.browser.\(id).primary" }
             guard credentialRef.hasPrefix("hivematrix.browser.") else {
                 throw FieldError(credentialRefField, "Credential ref must start with hivematrix.browser.")
             }
         }
 
+        let providerAccount = accountEmailField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let now = BrowserLaneSite.nowString()
         let existing = editingSite ?? store.listSites().first(where: { $0.id == id })
         return BrowserLaneSite(

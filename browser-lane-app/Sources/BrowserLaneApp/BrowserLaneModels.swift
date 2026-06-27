@@ -9,15 +9,6 @@ enum BrowserLaneAuthStrategy: String, CaseIterable {
     case microsoftSso = "microsoft_sso"
     case manualSession = "manual_session"
 
-    var label: String {
-        switch self {
-        case .keychainPassword: return "Keychain credentials"
-        case .googleSso:        return "Google sign-in (SSO)"
-        case .microsoftSso:     return "Microsoft sign-in (SSO)"
-        case .manualSession:    return "Manual session"
-        }
-    }
-
     /// Only the Keychain strategy captures a username/credential pair.
     var usesKeychainPassword: Bool { self == .keychainPassword }
 

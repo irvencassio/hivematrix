@@ -7,10 +7,17 @@ final class SidebarViewController: NSViewController {
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 640))
 
+        // Quiet section header, like a modern macOS source list.
+        let header = NSTextField(labelWithString: "Browser Lane")
+        header.font = .systemFont(ofSize: 11, weight: .semibold)
+        header.textColor = .tertiaryLabelColor
+        header.translatesAutoresizingMaskIntoConstraints = false
+
         tableView = NSTableView()
         tableView.headerView = nil
         tableView.style = .sourceList
-        tableView.rowHeight = 34
+        tableView.rowHeight = 32
+        tableView.intercellSpacing = NSSize(width: 0, height: 4)
         tableView.delegate = self
         tableView.dataSource = self
 
@@ -18,11 +25,21 @@ final class SidebarViewController: NSViewController {
         col.isEditable = false
         tableView.addTableColumn(col)
 
-        let scroll = NSScrollView(frame: view.bounds)
+        let scroll = NSScrollView()
         scroll.documentView = tableView
-        scroll.autoresizingMask = [.width, .height]
+        scroll.drawsBackground = false
         scroll.hasVerticalScroller = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(header)
         view.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14),
+            header.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
 
         DispatchQueue.main.async {
             self.tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)

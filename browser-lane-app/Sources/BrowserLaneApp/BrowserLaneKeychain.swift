@@ -30,6 +30,18 @@ final class BrowserLaneKeychain {
         try saveSecret(account: "\(siteId):password", value: password)
     }
 
+    /// Remove a site's stored credential pair. Safe to call when nothing is stored.
+    func deleteCredential(siteId: String) {
+        for account in ["\(siteId):username", "\(siteId):password"] {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: BrowserLaneKeychain.service,
+                kSecAttrAccount as String: account,
+            ]
+            SecItemDelete(query as CFDictionary)
+        }
+    }
+
     private func saveSecret(account: String, value: String) throws {
         let data = Data(value.utf8)
         let query: [String: Any] = [
