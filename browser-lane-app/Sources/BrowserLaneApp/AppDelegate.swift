@@ -17,7 +17,7 @@ final class BrowserLaneAppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = "Browser Lane"
         window.contentViewController = splitVC
-        window.frameAutosaveName = "BrowserLaneMain"
+        window.setFrameAutosaveName("BrowserLaneMain")
         if UserDefaults.standard.string(forKey: "NSWindow Frame BrowserLaneMain") == nil {
             window.center()
         }
