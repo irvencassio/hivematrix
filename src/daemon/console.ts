@@ -137,23 +137,27 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .ov-nav:hover { border-color: var(--accent); }
   .ov-nav.active { border-color: var(--accent); color: var(--accent); }
   .ov-back { font-size: 11px; margin-left: 8px; vertical-align: middle; }
-  .form { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
-    padding: 10px; margin-bottom: 12px; display: none; }
+  .form { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 12px; display: none; }
   .form.open { display: block; }
   .form input, .form textarea { width: 100%; box-sizing: border-box; background: var(--bg);
-    color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
-    font-size: 12px; margin-bottom: 6px; font-family: inherit; }
-  .form textarea { resize: vertical; min-height: 48px; }
-  .form .row { display: flex; gap: 6px; }
-  .form button.create { background: var(--accent); color: var(--create-btn-text); border: 0; border-radius: 6px;
-    padding: 6px 14px; font-weight: 700; cursor: pointer; font-size: 12px; }
-  .form button.cancel { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border);
-    border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 12px; }
+    color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
+    font-size: 13px; margin-bottom: 10px; font-family: inherit; }
+  .form textarea { resize: vertical; min-height: 72px; }
+  .form .row { display: flex; gap: 8px; }
+  .form button.create { background: var(--accent); color: var(--create-btn-text); border: 0; border-radius: 7px;
+    padding: 8px 18px; font-weight: 700; cursor: pointer; font-size: 13px; }
+  .form button.cancel { background: transparent; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 7px; padding: 8px 16px; cursor: pointer; font-size: 13px; }
   .form button.cancel:hover { border-color: var(--text); color: var(--text); }
-  .form .err { color: var(--err); font-size: 11px; margin-top: 4px; }
-  .form select { width: 100%; margin-bottom: 6px; }
+  .form .err { color: var(--err); font-size: 11px; margin-top: 6px; }
+  .form select { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px;
+    margin-bottom: 10px; font-family: inherit; cursor: pointer; }
+  .form select:focus { outline: none; border-color: var(--accent); }
   .flbl { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase;
     letter-spacing: .5px; margin: 2px 0 3px; }
+  .form .flbl { font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0; margin: 10px 0 4px; }
   .gear { cursor: pointer; color: var(--muted); font-size: 16px; background: none; border: 0; }
   .gear:hover { color: var(--accent); }
   /* Header zones: brand · scope · actions, grouped + responsive */
@@ -531,7 +535,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   /* Project search dropdown */
   .project-search { position: relative; margin-bottom: 6px; }
   .project-search input { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
-    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-family: inherit; }
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px; font-family: inherit; margin-bottom: 4px; }
   .project-search input:focus { outline: none; border-color: var(--accent); }
   .project-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -554,17 +558,21 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .project-empty { padding: 12px 10px; font-size: 11px; color: var(--muted); text-align: center; }
   .project-empty.hidden { display: none; }
   /* Selected project row: name + muted derived path (no raw path input) */
-  .project-selected { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 6px;
-    padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+  .project-selected { display: flex; align-items: center; gap: 6px; margin: 2px 0 8px;
+    padding: 7px 10px; background: color-mix(in srgb, var(--accent) 6%, var(--panel-2));
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: 8px; min-width: 0; }
   .project-selected .pname { font-size: 12px; font-weight: 600; color: var(--text);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; max-width: 60%; }
-  .project-selected .pstar { color: var(--ok); font-size: 11px; }
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
+  .project-selected .pstar { color: var(--ok); font-size: 11px; flex-shrink: 0; }
   .project-selected .ppath { font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis;
-    white-space: nowrap; flex: 1 1 auto; min-width: 0; text-align: right; }
+    white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+  .project-selected .project-clear { background: none; border: 0; cursor: pointer; color: var(--muted);
+    font-size: 16px; padding: 0; flex-shrink: 0; margin-left: auto; line-height: 1; }
+  .project-selected .project-clear:hover { color: var(--err); }
   .custom-folder-toggle { display: inline-block; margin: 0 0 6px; font-size: 11px; }
   .custom-folder { margin: 0 0 6px; }
   .custom-folder input { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
-    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-family: inherit; }
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px; font-family: inherit; }
 </style>
 </head>
 <body>
@@ -1099,14 +1107,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <button class="addbtn" onclick="showNewTaskPanel()">＋ New task</button>
     <div class="flight-sec" id="flights_rail"></div>
     <div class="form" id="taskForm">
-      <input id="t_title" placeholder="Title (optional — derived from instructions)" />
+      <input id="t_title" type="hidden" value="" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
-      <div class="row" style="gap:6px;margin-top:2px">
-        <button type="button" class="addbtn" onclick="toggleTaskSkillPicker()" title="Pick an installed skill or command to use — no need to remember names">＋ Use a skill</button>
+      <div style="margin:-4px 0 8px">
+        <button type="button" class="linklike" onclick="toggleTaskSkillPicker()" title="Pick an installed skill or command to use — no need to remember names">＋ Use a skill</button>
       </div>
-      <div id="t_skill_picker" style="display:none">
-        <input id="t_skill_q" placeholder="Search your skills & commands…" oninput="searchTaskSkills()" style="width:100%;margin-top:4px" />
-        <div id="t_skill_results" style="max-height:170px;overflow:auto;margin-top:4px"></div>
+      <div id="t_skill_picker" style="display:none;margin-bottom:4px">
+        <input id="t_skill_q" placeholder="Search your skills & commands…" oninput="searchTaskSkills()" style="margin-bottom:4px" />
+        <div id="t_skill_results" style="max-height:170px;overflow:auto"></div>
       </div>
       <label class="flbl">Project</label>
       <div id="t_project_wrapper" class="project-search">
@@ -1130,22 +1138,21 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <input id="t_path" type="hidden" value="" />
       <label class="flbl">Model</label>
       <select id="t_model"></select>
-      <label class="flbl">Route</label>
+      <label class="flbl">Mode</label>
       <select id="t_route">
-        <option value="auto" selected>Auto (route by content)</option>
-        <option value="work_package">Flight (stage autonomous run)</option>
-        <option value="terminal-lane">Terminal Lane (run on a host)</option>
-        <option value="normal">Normal task (no routing)</option>
+        <option value="auto" selected>Auto — route by content</option>
+        <option value="work_package">Flight — multi-step autonomous run</option>
+        <option value="terminal-lane">Terminal Lane — run on a host</option>
+        <option value="normal">Direct — one plain task</option>
       </select>
-      <div class="muted" style="font-size:11px;margin-top:2px">Auto picks the path from your text. Choose <b>Flight</b> to stage a multi-step autonomous run, <b>Normal</b> to force one plain task (e.g. when developing a lane itself), or <b>Terminal Lane</b> to run on a host.</div>
-      <label class="flbl">Attachments (optional)</label>
+      <label class="flbl">Attachments</label>
       <div class="attach-row attach-drop" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onAttachDrop(event)">
         <input type="file" id="t_attach_input" multiple style="display:none" onchange="onAttachFiles(this)">
-        <button type="button" class="cancel" onclick="document.getElementById('t_attach_input').click()">⊕ Browse files</button>
+        <button type="button" class="cancel" onclick="document.getElementById('t_attach_input').click()">⊕ Browse</button>
         <span class="muted" id="t_attach_hint" style="font-size:11px">No files selected</span>
       </div>
       <div class="attach-chips" id="t_attach_chips"></div>
-      <div class="row"><button class="create" onclick="createTask()">Create task</button><button class="cancel" onclick="cancelForm('taskForm')">Cancel</button></div>
+      <div class="row" style="margin-top:12px"><button class="cancel" onclick="cancelForm('taskForm')">Cancel</button><button class="create" onclick="createTask()">Create task</button></div>
       <div class="err" id="t_err"></div>
     </div>
     <div id="board"></div>
@@ -3862,7 +3869,14 @@ function renderSelectedProject() {
   row.style.display = "flex";
   row.innerHTML = tag
     + '<span class="pname" title="'+esc(name)+'">'+esc(name || "(unnamed)")+'</span>'
-    + '<span class="ppath" title="'+esc(path)+'">'+esc(path)+'</span>';
+    + '<span class="ppath" title="'+esc(path)+'">'+esc(path)+'</span>'
+    + '<button class="project-clear" onclick="clearTaskProject()" title="Change project">×</button>';
+}
+
+function clearTaskProject() {
+  setTaskProject("", "", false);
+  const s = document.getElementById("t_project_search");
+  if (s) { s.value = ""; s.focus(); openProjectDropdown(); }
 }
 
 function selectProjectFromDropdown(name, path) {
