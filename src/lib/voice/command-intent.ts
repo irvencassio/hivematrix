@@ -31,6 +31,7 @@ export type CommandKind =
   | "triggerReleaseVerification" // "trigger release verification"
   | "browserLaneTask"  // "use Browser Lane to search/read/open ..."
   | "mailDeleteTask"   // "delete/trash email ..." — queue review, never deletes immediately
+  | "weather"          // "what's the weather today" — answered inline from saved location
   | "createTask"       // "create a task to <X>" / "remind me to <X>"
   | "connectivity"     // "are we online / connectivity status"
   | "setConnectivity"  // "go offline / cloud only / go local / auto"
@@ -46,6 +47,46 @@ export interface CommandIntent {
   directiveText?: string; // startDirective / pauseDirective target
   browserLane?: VoiceBrowserLaneIntent;
   mailDelete?: VoiceMailDeleteIntent;
+  weatherWhen?: "today" | "tomorrow"; // weather
+  weatherCity?: string;               // weather — inline city override
+}
+
+const CITY_STOPWORDS = new Set([
+  "morning", "afternoon", "evening", "night", "tonight", "the future", "future",
+  "winter", "summer", "spring", "fall", "autumn", "celsius", "fahrenheit", "here",
+  "town", "general", "particular", "fact", "my area", "the area", "a bit", "a while",
+  "an hour", "a minute", "a sec", "a second",
+]);
+
+/** Extract an inline "weather in <city>" override, rejecting time-of-day phrases. */
+export function extractWeatherCity(orig: string): string | undefined {
+  const m = orig.match(/\bin\s+(.+?)\s*[.?!]*$/i);
+  if (!m) return undefined;
+  let cand = m[1].trim().replace(/^the\s+/i, "");
+  cand = cand.replace(/\s+(today|tomorrow|tonight|right now|now|please|this week|this weekend)$/i, "").trim();
+  if (!cand || /^(a|an)\b/i.test(cand) || !/[A-Za-z]/.test(cand)) return undefined;
+  if (CITY_STOPWORDS.has(cand.toLowerCase())) return undefined;
+  return cand;
+}
+
+/** Detect a weather request and whether it's about today or tomorrow/forecast. */
+export function detectWeatherIntent(text: string): CommandIntent | null {
+  const t = (text || "").toLowerCase().trim();
+  const isWeather =
+    /\bweather\b/.test(t) ||
+    /\bforecast\b/.test(t) ||
+    /\bumbrella\b/.test(t) ||
+    /\bhow\s+(cold|hot|warm|chilly|windy)\s+is\s+it\b/.test(t) ||
+    /\b(is it|will it|is it going to|gonna)\s+rain\b/.test(t) ||
+    /\btemperature\s+(outside|today|tomorrow|right now|now)\b/.test(t);
+  if (!isWeather) return null;
+  const weatherWhen: "today" | "tomorrow" =
+    /\btomorrow\b/.test(t) ? "tomorrow" :
+    /\b(today|tonight|right now|currently|outside|now)\b/.test(t) ? "today" :
+    /\bforecast\b/.test(t) ? "tomorrow" :
+    "today";
+  const city = extractWeatherCity((text || "").trim());
+  return { kind: "weather", weatherWhen, ...(city ? { weatherCity: city } : {}) };
 }
 
 const clean = (s: string) => s.replace(/[.?!,\s]+$/g, "").trim();
@@ -151,6 +192,11 @@ export function detectCommandIntent(text: string): CommandIntent {
   if (taskMatch && clean(taskMatch[1])) return { kind: "createTask", taskText: clean(taskMatch[1]) };
   const remind = orig.match(/\b(?:remind me to|remember to|have the team|get someone to|make sure to)\s+(.+)$/i);
   if (remind && clean(remind[1])) return { kind: "createTask", taskText: clean(remind[1]) };
+
+  // --- Weather (answered inline from saved location; runs after create-task so
+  // "create a task to check the weather" stays a task) ---
+  const weather = detectWeatherIntent(orig);
+  if (weather) return weather;
 
   // --- Approvals: query BEFORE the approve/deny verbs ---
   if (/\b(any|pending|outstanding|waiting)\s+approvals?\b/.test(t)

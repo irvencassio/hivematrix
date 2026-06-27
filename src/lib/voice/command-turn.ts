@@ -20,6 +20,7 @@ import {
   type ContextApproval,
 } from "./command-context";
 import { buildVoiceBriefing, usageReply, type BriefingUsage, type BriefingBrowserReadiness, type BriefingWorkflowInbox } from "./briefing";
+import { getWeather, weatherReply, weatherNeedsLocationReply, type WeatherWhen, type WeatherResult } from "./weather";
 import { synthesizeSpeech } from "./tts";
 import { buildVoiceBrowserLaneTask } from "./browser-lane-intent";
 import { buildVoiceMailDeleteTask } from "./mail-delete-intent";
@@ -50,6 +51,9 @@ export interface CommandTurnDeps {
   getMetrics?: () => Promise<Record<string, unknown>>;
   getBrowserReadiness?: () => Promise<BriefingBrowserReadiness | null> | BriefingBrowserReadiness | null;
   getWorkflowInbox?: () => Promise<BriefingWorkflowInbox | null> | BriefingWorkflowInbox | null;
+  /** Operator location from HiveMatrix settings (Personalization). Never agent memory. */
+  getLocation?: () => string | null | undefined;
+  fetchWeather?: (location: string, when: WeatherWhen) => Promise<WeatherResult>;
 }
 
 const contextStore = new RollingCommandContextStore();
@@ -241,6 +245,14 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
       contextStore.update(sessionId, (ctx) => rememberLastTask(ctx, task._id));
       return r(`I queued a Mail Lane deletion review for ${intent.mailDelete.query}. No email has been deleted.`, task._id);
     }
+    case "weather": {
+      const when = intent.weatherWhen ?? "today";
+      const location = (intent.weatherCity || "").trim() || await operatorLocation(deps);
+      if (!location) return r(weatherNeedsLocationReply(), undefined, "needs-location");
+      const result = await fetchWeather(deps, location, when);
+      if (!result.ok) return r(`I couldn't get the weather for ${location} right now.`, undefined, "weather-error");
+      return r(weatherReply(result.report), undefined, "weather");
+    }
     case "createTask": {
       const text = (intent.taskText || "").trim();
       if (!text) return null;
@@ -271,6 +283,18 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
     default:
       return null;
   }
+}
+
+/** Operator location from HiveMatrix settings (Personalization) — never agent memory. */
+async function operatorLocation(deps: CommandTurnDeps): Promise<string> {
+  if (deps.getLocation) return (deps.getLocation() || "").trim();
+  const { getLocation } = await import("@/lib/models/available");
+  return (getLocation() || "").trim();
+}
+
+async function fetchWeather(deps: CommandTurnDeps, location: string, when: WeatherWhen): Promise<WeatherResult> {
+  if (deps.fetchWeather) return deps.fetchWeather(location, when);
+  return getWeather(location, when);
 }
 
 async function approvalQueue(deps: CommandTurnDeps): Promise<ApprovalQueueItem[]> {

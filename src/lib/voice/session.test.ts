@@ -52,6 +52,12 @@ test("routeVoiceSession always spawns a task when the sidecar escalated", () => 
   assert.equal(r.kind, "task");
 });
 
+test("routeVoiceSession never spawns a generic task for weather (answered inline from saved location)", () => {
+  assert.equal(routeVoiceSession(session([{ role: "user", text: "what's the weather today?" }])).kind, "none");
+  // Even when the sidecar escalates, weather must not become a generic agent task.
+  assert.equal(routeVoiceSession(session([{ role: "user", text: "do I need an umbrella tomorrow?" }]), { escalated: true }).kind, "none");
+});
+
 test("parseVoiceSessionBody validates + normalizes a sidecar payload", () => {
   const out = parseVoiceSessionBody({
     sessionId: "s9", surface: "phone", handle: "+1", escalated: true,

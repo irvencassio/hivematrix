@@ -13,6 +13,7 @@
  */
 
 import { buildVoiceBrowserLaneTask, detectVoiceBrowserLaneIntent } from "./browser-lane-intent";
+import { detectWeatherIntent } from "./command-intent";
 
 export type VoiceSurface = "mac" | "ios" | "phone";
 
@@ -120,6 +121,15 @@ export function buildVoiceTaskDescription(session: VoiceSession, escalated?: boo
 export function routeVoiceSession(session: VoiceSession, opts: VoiceRouteOptions = {}): VoiceHandoff {
   const userTurns = session.turns.filter((t) => t.role === "user" && t.text.trim());
   if (userTurns.length === 0) return { kind: "none", reason: "no user utterances" };
+
+  // Weather is answered inline by the deterministic voice command override
+  // (command-turn.ts) from the operator's saved location — it must never become a
+  // generic agent task, even when the sidecar escalates. Suppressing it here is
+  // the single chokepoint for both the realtime /voice/session handoff and the
+  // /voice/turn escalation path.
+  if (userTurns.some((t) => detectWeatherIntent(t.text) !== null)) {
+    return { kind: "none", reason: "weather answered inline by voice command" };
+  }
 
   for (const turn of userTurns) {
     const intent = detectVoiceBrowserLaneIntent(turn.text);

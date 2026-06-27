@@ -53,6 +53,30 @@ test("detects Mail Lane delete requests without deleting immediately", () => {
   assert.equal(detectCommandIntent("delete the second approval").kind, "none");
 });
 
+test("detects weather intent before generic task creation", () => {
+  assert.deepEqual(detectCommandIntent("What's the weather today?"), { kind: "weather", weatherWhen: "today" });
+  assert.equal(detectCommandIntent("what's the weather").kind, "weather");
+  assert.equal(detectCommandIntent("how's the weather").kind, "weather");
+  assert.equal(detectCommandIntent("forecast").kind, "weather");
+  assert.deepEqual(detectCommandIntent("weather tomorrow"), { kind: "weather", weatherWhen: "tomorrow" });
+  assert.deepEqual(detectCommandIntent("what's the forecast"), { kind: "weather", weatherWhen: "tomorrow" });
+  assert.deepEqual(detectCommandIntent("do I need an umbrella"), { kind: "weather", weatherWhen: "today" });
+  assert.deepEqual(detectCommandIntent("how cold is it"), { kind: "weather", weatherWhen: "today" });
+  assert.deepEqual(detectCommandIntent("how hot is it outside"), { kind: "weather", weatherWhen: "today" });
+  assert.equal(detectCommandIntent("is it going to rain").kind, "weather");
+});
+
+test("weather intent extracts an inline city and strips trailing time words", () => {
+  assert.deepEqual(detectCommandIntent("what's the weather in Paris"), { kind: "weather", weatherWhen: "today", weatherCity: "Paris" });
+  assert.deepEqual(detectCommandIntent("what's the weather in New York tomorrow"), { kind: "weather", weatherWhen: "tomorrow", weatherCity: "New York" });
+  // "in the morning" is a time phrase, not a city.
+  assert.deepEqual(detectCommandIntent("is it going to rain in the morning"), { kind: "weather", weatherWhen: "today" });
+});
+
+test("weather detection does not swallow an explicit create-task", () => {
+  assert.equal(detectCommandIntent("create a task to check the weather tomorrow").kind, "createTask");
+});
+
 test("detects explicit Browser Lane task requests", () => {
   assert.deepEqual(detectCommandIntent("Use browser lane to search Tesla Model S price"), {
     kind: "browserLaneTask",
