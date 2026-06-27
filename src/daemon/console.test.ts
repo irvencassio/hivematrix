@@ -435,6 +435,12 @@ test("server retry/reply routes format structured attachments server-side", () =
   assert.match(server, /renderAttachmentBlock\(attachments\)/);
 });
 
+test("server retry route clears queued delay fields", () => {
+  const server = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+
+  assert.match(server, /status: "backlog", error: null, agentPid: null, startedAt: null, completedAt: null, reviewState: null,\s+delayUntil: null, delayReason: null,/);
+});
+
 test("server task creation formats structured attachments into the description", () => {
   const server = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
 

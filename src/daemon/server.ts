@@ -3705,6 +3705,7 @@ export function createDaemonServer() {
           const attachments = normalizeTaskAttachments(Array.isArray(body.attachments) ? body.attachments as unknown[] : []);
           const updates: Record<string, unknown> = {
             status: "backlog", error: null, agentPid: null, startedAt: null, completedAt: null, reviewState: null,
+            delayUntil: null, delayReason: null,
           };
           if (steer || attachments.length) {
             const cur = await Task.findById(tid);
