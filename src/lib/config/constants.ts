@@ -13,36 +13,40 @@ export const MAX_LOGS_PER_TASK = 10000;
 export const ARTIFACT_RETENTION_DAYS = 30;
 export const ARTIFACT_RETENTION_INTERVAL_MS = 60 * 60 * 1000; // hourly
 
-export const ALLOWED_TOOLS = [
-  "Read",
-  "Glob",
-  "Grep",
+/**
+ * Core coding tool names for OpenAI-compatible agents (Qwen/generic).
+ * Canonical source of truth; the Claude list below covers the same capabilities.
+ */
+export const CODING_OPENAI_TOOLS = [
+  "bash",       // Bash
+  "read_file",  // Read
+  "write_file", // Write
+  "edit_file",  // Edit
+  "search",     // Grep
+  "list_files", // Glob
+] as const;
+export type CodingOpenAITool = typeof CODING_OPENAI_TOOLS[number];
+
+// Claude Code tool names for the same core capabilities + orchestration extras.
+// When adding/removing a core capability, update CODING_OPENAI_TOOLS above too.
+const CODING_BASE_TOOLS = [
+  "Read",    // read_file
+  "Glob",    // list_files
+  "Grep",    // search
+  "Edit",    // edit_file
+  "Write",   // write_file
+  "Bash",    // bash
+  // Orchestration: Claude Code only, no OpenAI-compat equivalent
   "Agent",
-  "Edit",
-  "Write",
   "Skill",
   "TodoWrite",
-  "Bash",
   "ToolSearch",
   "AskUserQuestion",
 ];
 
-// Ops tasks get broader tool access — Bash unrestricted for running scripts/pipelines
-const OPS_BASE_TOOLS = [
-  "Read",
-  "Glob",
-  "Grep",
-  "Agent",
-  "Edit",
-  "Write",
-  "Skill",
-  "TodoWrite",
-  "Bash",
-  "ToolSearch",
-  "AskUserQuestion",
-];
+export const ALLOWED_TOOLS = CODING_BASE_TOOLS;
 
-// SSH MCP tools — only included when sshDiagnostics is enabled in settings
+// SSH MCP tools: only included when sshDiagnostics is enabled in settings.
 export const SSH_TOOLS = [
   "mcp__ssh__list_hosts",
   "mcp__ssh__exec",
@@ -55,8 +59,8 @@ export const SSH_TOOLS = [
 
 export function getOpsAllowedTools(): string[] {
   return isSshDiagnosticsEnabled()
-    ? [...OPS_BASE_TOOLS, ...SSH_TOOLS]
-    : OPS_BASE_TOOLS;
+    ? [...CODING_BASE_TOOLS, ...SSH_TOOLS]
+    : CODING_BASE_TOOLS;
 }
 
 export const RISKY_TOOL_PATTERNS: Record<string, RegExp[]> = {
@@ -83,7 +87,18 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
-// Active profile — stored globally, switchable from the dashboard
+export const RESULT_STATUSES = [
+  "answered",
+  "needs_confirmation",
+  "needs_selection",
+  "needs_input",
+  "refused",
+  "failed",
+] as const;
+
+export type ResultStatus = (typeof RESULT_STATUSES)[number];
+
+// Active profile: stored globally, switchable from the dashboard.
 const g = globalThis as unknown as { __hiveActiveProfile?: string };
 
 export function getActiveProfile(): string {

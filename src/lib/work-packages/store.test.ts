@@ -15,6 +15,7 @@ const {
   updateWorkPackage,
   updateWorkPackageItem,
   createTaskFromItem,
+  deleteWorkPackage,
   findItemByTaskId,
 } = await import("./store");
 const { classifyIntake } = await import("@/lib/intake/classify");
@@ -77,6 +78,54 @@ test("updateWorkPackage + updateWorkPackageItem change status", () => {
   const item = pkg.items[0];
   const ui = updateWorkPackageItem(pkg.id, item.id, { status: "held" });
   assert.equal(ui!.status, "held");
+});
+
+test("updateWorkPackageItem edits title and prompt while redacting secrets", () => {
+  const intake = broadIntake();
+  const pkg = createWorkPackage({ title: "Sweep edit", project: "hivematrix", projectPath: "/p", intake, items: intake.packageCandidate!.items });
+  const item = pkg.items[0];
+
+  const ui = updateWorkPackageItem(pkg.id, item.id, {
+    title: "New title with token=SUPERSECRET123",
+    prompt: "Use api_key=VERYSECRET456 in the prompt",
+  });
+
+  assert.ok(ui);
+  assert.match(ui!.title, /New title/);
+  assert.match(ui!.prompt, /Use/);
+  assert.doesNotMatch(ui!.title + ui!.prompt, /SUPERSECRET123|VERYSECRET456/);
+
+  const refreshed = getWorkPackage(pkg.id)!.items.find((i) => i.id === item.id)!;
+  assert.equal(refreshed.title, ui!.title);
+  assert.equal(refreshed.prompt, ui!.prompt);
+});
+
+test("deleteWorkPackage removes a non-running package and its items", () => {
+  const intake = broadIntake();
+  const pkg = createWorkPackage({ title: "Delete me", project: "hivematrix", projectPath: "/p", intake, items: intake.packageCandidate!.items });
+  const beforeItems = (getDb().prepare("SELECT COUNT(*) AS n FROM work_package_items WHERE packageId = ?").get(pkg.id) as { n: number }).n;
+  assert.ok(beforeItems > 0);
+
+  const result = deleteWorkPackage(pkg.id);
+
+  assert.deepEqual(result, { deleted: true });
+  assert.equal(getWorkPackage(pkg.id), null);
+  const afterItems = (getDb().prepare("SELECT COUNT(*) AS n FROM work_package_items WHERE packageId = ?").get(pkg.id) as { n: number }).n;
+  assert.equal(afterItems, 0);
+});
+
+test("deleteWorkPackage refuses a package with running items", () => {
+  const intake = broadIntake();
+  const pkg = createWorkPackage({ title: "Do not delete", project: "hivematrix", projectPath: "/p", intake, items: intake.packageCandidate!.items });
+  const item = pkg.items[0];
+  updateWorkPackageItem(pkg.id, item.id, { status: "running" });
+
+  const result = deleteWorkPackage(pkg.id);
+
+  assert.ok(result);
+  assert.equal(result.deleted, false);
+  assert.match(result.reason || "", /running/i);
+  assert.ok(getWorkPackage(pkg.id));
 });
 
 test("createTaskFromItem creates exactly one task and is idempotent", async () => {

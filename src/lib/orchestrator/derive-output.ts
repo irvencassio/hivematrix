@@ -1,4 +1,5 @@
 import type { OutputView, Turn, WorkflowPhase, ResultContent } from "./turn-types";
+import type { ResultStatus } from "@/lib/config/constants";
 import { analyzeTurn, ensureFreshSignals } from "./turn-analyzer";
 
 export interface DeriveOptions {
@@ -111,6 +112,24 @@ export function deriveOutput(turns: Turn[], opts: DeriveOptions = {}): OutputVie
       }
       if (t.kind === "assistant_message") break;
     }
+  }
+
+  // ---- Result status ----
+  {
+    const hasError = fresh.some(t => t.kind === "error");
+    let status: ResultStatus | undefined;
+    if (hasError) {
+      status = "failed";
+    } else if (view.questions.length > 0) {
+      const lastQ = view.questions[view.questions.length - 1];
+      const optCount = lastQ.options?.length ?? 0;
+      status = optCount === 2 ? "needs_confirmation" : optCount > 2 ? "needs_selection" : "needs_input";
+    } else if (view.awaiting?.kind === "user_response") {
+      status = "needs_input";
+    } else if (view.resultStats !== null || view.lastAssistantTurnId !== null) {
+      status = "answered";
+    }
+    view.resultStatus = status;
   }
 
   // ---- Headline priority ----

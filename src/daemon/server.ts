@@ -2087,6 +2087,18 @@ export function createDaemonServer() {
         return;
       }
 
+      // DELETE /work-packages/:id — remove a non-running Flight. Linked board
+      // tasks remain as task history; running/active Flights are protected.
+      if (req.method === "DELETE" && wpGetMatch) {
+        const { deleteWorkPackage } = await import("@/lib/work-packages/store");
+        const result = deleteWorkPackage(decodeURIComponent(wpGetMatch[1]));
+        if (!result) { json(res, 404, { error: "Not found" }); return; }
+        if (!result.deleted) { json(res, 409, { error: result.reason || "Flight is still running", reason: result.reason || "Flight is still running" }); return; }
+        broadcast("work-packages:updated", { packageId: decodeURIComponent(wpGetMatch[1]) });
+        json(res, 200, result);
+        return;
+      }
+
       // PATCH /work-packages/:id — update package status/fields.
       if (req.method === "PATCH" && wpGetMatch) {
         const { updateWorkPackage } = await import("@/lib/work-packages/store");

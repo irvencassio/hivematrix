@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { CODING_OPENAI_TOOLS } from "@/lib/config/constants";
 
 export interface AgentProfile {
   id: string;
@@ -49,7 +50,7 @@ Rules:
 - Run tests after changes when a test suite exists
 - Be direct — execute the task, don't ask for confirmation
 - Commit changes when work is complete`,
-    tools: ["bash", "read_file", "write_file", "edit_file", "search", "list_files"],
+    tools: [...CODING_OPENAI_TOOLS],
     loadClaudeMd: true,
     icon: "💻",
   },

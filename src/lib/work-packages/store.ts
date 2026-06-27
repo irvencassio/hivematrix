@@ -220,7 +220,8 @@ export function updateWorkPackage(id: string, patch: Record<string, unknown>): W
   return detail ? { ...detail } : null;
 }
 
-const ITEM_PATCH_FIELDS = new Set(["status", "risk", "executionMode", "blocker", "createdTaskId", "resultTaskId", "commitHash"]);
+const ITEM_PATCH_FIELDS = new Set(["title", "prompt", "status", "risk", "executionMode", "blocker", "createdTaskId", "resultTaskId", "commitHash"]);
+const ITEM_TEXT_FIELDS = new Set(["title", "prompt", "blocker"]);
 
 export function updateWorkPackageItem(packageId: string, itemId: string, patch: Record<string, unknown>): WorkPackageItem | null {
   const db = getDb();
@@ -231,13 +232,39 @@ export function updateWorkPackageItem(packageId: string, itemId: string, patch: 
   for (const [k, v] of Object.entries(patch)) {
     if (!ITEM_PATCH_FIELDS.has(k)) continue;
     sets.push(`${k} = ?`);
-    params.push(k === "blocker" && typeof v === "string" ? scrubSecretText(v) : v);
+    params.push(ITEM_TEXT_FIELDS.has(k) && typeof v === "string" ? scrubSecretText(v) : v);
   }
   if (sets.length === 0) return rowToItem(row);
   sets.push("updatedAt = ?"); params.push(new Date().toISOString());
   db.prepare(`UPDATE work_package_items SET ${sets.join(", ")} WHERE _id = ?`).run(...params, itemId);
   const updated = db.prepare("SELECT * FROM work_package_items WHERE _id = ?").get(itemId) as ItemRow;
   return rowToItem(updated);
+}
+
+export function deleteWorkPackage(id: string): { deleted: boolean; reason?: string } | null {
+  const db = getDb();
+  const pkg = db.prepare("SELECT _id FROM work_packages WHERE _id = ?").get(id) as { _id: string } | undefined;
+  if (!pkg) return null;
+
+  const runningItem = db.prepare("SELECT _id FROM work_package_items WHERE packageId = ? AND status = 'running' LIMIT 1").get(id);
+  if (runningItem) return { deleted: false, reason: "Flight has running items" };
+
+  const activeLinked = db.prepare(`
+    SELECT t._id
+    FROM work_package_items i
+    JOIN tasks t ON t._id = i.createdTaskId
+    WHERE i.packageId = ?
+      AND t.status IN ('assigned', 'in_progress')
+    LIMIT 1
+  `).get(id);
+  if (activeLinked) return { deleted: false, reason: "Flight has active linked tasks" };
+
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM work_package_items WHERE packageId = ?").run(id);
+    db.prepare("DELETE FROM work_packages WHERE _id = ?").run(id);
+  });
+  tx();
+  return { deleted: true };
 }
 
 /** Map a created child task back to its owning package + item (for the advance hook). */

@@ -6,6 +6,8 @@
  * a stable id, a human-readable label, and zero or more derived signals.
  */
 
+import type { ResultStatus } from "@/lib/config/constants";
+
 export type TurnKind =
   | "assistant_message"
   | "assistant_thinking"
@@ -64,6 +66,7 @@ export interface ResultContent {
   inputTokens: number;
   outputTokens: number;
   sessionId: string;
+  resultStatus?: ResultStatus;
 }
 
 export interface ErrorContent {
@@ -135,4 +138,5 @@ export interface OutputView {
   lastAssistantTurnId: string | null;
   resultStats: ResultContent | null;
   producedArtifacts: { kind: "json" | "diff"; turnId: string; preview: string }[];
+  resultStatus?: ResultStatus;
 }

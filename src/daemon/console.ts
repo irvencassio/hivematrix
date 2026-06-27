@@ -185,6 +185,23 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .attach-drop.drag-over { border: 1px dashed var(--accent) !important; background: color-mix(in srgb, var(--accent) 8%, var(--panel-2)); border-radius: 6px; }
   .ov-lbl { font-size: 11px; color: var(--muted); margin-top: 4px; }
   .ov-hint { color: var(--muted); font-size: 12px; text-align: center; margin-top: 20px; }
+  .flight-sec { margin: 0 0 12px; }
+  .flight-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin: 10px 0 6px; }
+  .flight-head h2 { margin:0; }
+  .flight-list { display:flex; flex-direction:column; gap:6px; }
+  .flight-card { width:100%; text-align:left; border:1px solid var(--border); border-radius:8px; background:var(--panel-2); color:var(--text); padding:8px 9px; cursor:pointer; }
+  .flight-card:hover, .flight-card.sel { border-color:var(--accent); }
+  .flight-title { font-weight:600; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .flight-meta { color:var(--muted); font-size:10.5px; display:flex; justify-content:space-between; gap:8px; margin-top:2px; }
+  .flight-progress { height:5px; border-radius:999px; background:var(--border); overflow:hidden; margin-top:6px; }
+  .flight-progress > i { display:block; height:100%; background:var(--ok); border-radius:999px; }
+  .flight-detail { max-width:760px; margin:20px auto 0; padding:0 12px 24px; }
+  .flight-detail h1 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .flight-counts { display:flex; flex-wrap:wrap; gap:5px; margin:8px 0; }
+  .flight-item { border:1px solid var(--border); border-radius:8px; background:var(--panel-2); padding:9px 10px; margin-top:8px; }
+  .flight-item-head { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
+  .flight-item-title { font-weight:600; min-width:0; }
+  .flight-item-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
   .usage-pill { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
     border-radius: 999px; padding: 3px 11px; font-size: 11px; font-weight: 600; white-space: nowrap; cursor: default; }
   .usage-breakdown { font-size: 11px; }
@@ -518,23 +535,24 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .project-search input:focus { outline: none; border-color: var(--accent); }
   .project-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-    margin-top: 2px; max-height: 240px; overflow-y: auto; box-shadow: 0 8px 24px var(--overlay-bg); }
+    margin-top: 2px; box-shadow: 0 8px 24px var(--overlay-bg); display: flex; flex-direction: column; }
   .project-dropdown.hidden { display: none; }
-  .project-sort-row { display: flex; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  .project-sort-row { display: flex; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .project-sort-btn { font-size: 10px; padding: 2px 8px; border-radius: 999px; cursor: pointer;
     color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); user-select: none; }
   .project-sort-btn.active { color: var(--accent); border-color: var(--accent); }
-  .project-list { max-height: 200px; overflow-y: auto; }
-  .project-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer;
+  .project-list { max-height: 320px; overflow-y: auto; }
+  .project-item { display: flex; flex-direction: column; gap: 1px; padding: 7px 10px; cursor: pointer;
     font-size: 12px; border-bottom: 1px solid var(--border); }
   .project-item:last-child { border-bottom: none; }
-  .project-item:hover, .project-item.selected { background: var(--hover-bg); }
-  .project-item .pname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .project-item .pstar { color: var(--ok); font-size: 11px; }
-  .project-item .ptime { font-size: 10px; color: var(--muted); }
+  .project-item:hover, .project-item.selected, .project-item.active { background: var(--hover-bg); }
+  .project-item-row1 { display: flex; align-items: center; gap: 5px; }
+  .project-item .pname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .project-item .pstar { color: var(--ok); font-size: 11px; flex-shrink: 0; }
+  .project-item .ptime { font-size: 10px; color: var(--muted); flex-shrink: 0; }
+  .project-item .ppath { font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .project-empty { padding: 12px 10px; font-size: 11px; color: var(--muted); text-align: center; }
   .project-empty.hidden { display: none; }
-  .project-item.active { background: var(--hover-bg); }
   /* Selected project row: name + muted derived path (no raw path input) */
   .project-selected { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 6px;
     padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
@@ -822,7 +840,26 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="muted" style="font-size:11px;margin:4px 0 8px">Route a request through your COO rules. Browser Lane is the canonical browser automation path; risky lanes (mail, message, desktop, terminal) return approval-required and never act here.</div>
       <textarea id="coo_text" rows="2" placeholder="Objective — e.g. Upload today's script on the site" style="width:100%;box-sizing:border-box"></textarea>
       <input id="coo_domains" placeholder="Target domain(s), comma-separated — e.g. app.heygen.com" style="width:100%;box-sizing:border-box;margin-top:6px" />
-      <input id="coo_project_path" placeholder="Project path (required to create a task) — e.g. ~/proj" style="width:100%;box-sizing:border-box;margin-top:6px" />
+      <label class="flbl" style="margin:6px 0 2px;display:block">Project <span class="muted" style="font-size:10px;font-weight:400">(required to create a task)</span></label>
+      <div id="coo_project_wrapper" class="project-search" style="margin-bottom:0">
+        <input id="coo_project_search" type="text" placeholder="Search projects…" autocomplete="off" oninput="mpFilter('coo')" onfocus="mpOpen('coo')" onkeydown="mpKeydown(event,'coo')" />
+        <div id="coo_project_dropdown" class="project-dropdown hidden">
+          <div class="project-sort-row">
+            <span class="project-sort-btn active" data-sort="recent" onclick="mpSort('coo','recent')">Most recent</span>
+            <span class="project-sort-btn" data-sort="name" onclick="mpSort('coo','name')">Name A–Z</span>
+          </div>
+          <div id="coo_project_list" class="project-list"></div>
+          <div id="coo_project_empty" class="project-empty hidden">No projects found</div>
+        </div>
+      </div>
+      <div id="coo_project_selected" class="project-selected" style="display:none;margin-bottom:6px"></div>
+      <button type="button" class="linklike custom-folder-toggle" onclick="mpToggleCustomFolder('coo')">Use another folder…</button>
+      <div id="coo_custom_folder" class="custom-folder" style="display:none">
+        <input id="coo_custom_path" placeholder="~/path/to/folder" onkeydown="if(event.key==='Enter'){event.preventDefault();mpUseCustomFolder('coo');}" />
+        <div class="row"><button class="create" onclick="mpUseCustomFolder('coo')">Use this folder</button><button class="cancel" onclick="mpToggleCustomFolder('coo')">Cancel</button></div>
+        <div class="err" id="coo_custom_err"></div>
+      </div>
+      <input id="coo_project_path" type="hidden" value="" />
       <div class="row" style="margin-top:6px;gap:6px">
         <button class="copybtn" onclick="cooDispatchPrepare()">Prepare</button>
         <button class="create" id="coo_create_btn" style="display:none" onclick="cooDispatchCreate()">Create Browser Lane task</button>
@@ -902,10 +939,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="workflow_runs" style="margin-top:4px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
-        <label class="flbl" style="margin:0">Work Packages</label>
+        <label class="flbl" style="margin:0">Flights</label>
         <button class="copybtn" onclick="renderWorkPackages()">↻ Refresh</button>
       </div>
-      <div class="muted" style="font-size:11px;margin:4px 0 6px">Broad or risky prompts are staged here as a draft instead of one messy task. Review each item, then explicitly turn it into a task. Same-repo writers stay one-at-a-time unless worktree-backed or read-only.</div>
+      <div class="muted" style="font-size:11px;margin:4px 0 6px">Broad or risky prompts are staged here as a Flight instead of one messy task. Review progress on the main screen; this Settings panel is the fallback admin view.</div>
       <div id="work_packages_list" style="margin-top:6px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -1060,6 +1097,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <h2>Board <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></h2>
     <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
     <button class="addbtn" onclick="showNewTaskPanel()">＋ New task</button>
+    <div class="flight-sec" id="flights_rail"></div>
     <div class="form" id="taskForm">
       <input id="t_title" placeholder="Title (optional — derived from instructions)" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
@@ -1095,11 +1133,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <label class="flbl">Route</label>
       <select id="t_route">
         <option value="auto" selected>Auto (route by content)</option>
-        <option value="work_package">Work Package (orchestrate steps)</option>
+        <option value="work_package">Flight (stage autonomous run)</option>
         <option value="terminal-lane">Terminal Lane (run on a host)</option>
         <option value="normal">Normal task (no routing)</option>
       </select>
-      <div class="muted" style="font-size:11px;margin-top:2px">Auto picks the path from your text. Choose <b>Work Package</b> to stage a multi-step plan, <b>Normal</b> to force one plain task (e.g. when developing a lane itself), or <b>Terminal Lane</b> to run on a host.</div>
+      <div class="muted" style="font-size:11px;margin-top:2px">Auto picks the path from your text. Choose <b>Flight</b> to stage a multi-step autonomous run, <b>Normal</b> to force one plain task (e.g. when developing a lane itself), or <b>Terminal Lane</b> to run on a host.</div>
       <label class="flbl">Attachments (optional)</label>
       <div class="attach-row attach-drop" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onAttachDrop(event)">
         <input type="file" id="t_attach_input" multiple style="display:none" onchange="onAttachFiles(this)">
@@ -1133,7 +1171,26 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <button class="addbtn" onclick="toggleForm('dirForm')">＋ New scheduled item</button>
     <div class="form" id="dirForm">
       <input id="d_goal" placeholder="Standing goal" />
-      <input id="d_path" placeholder="Project path" value="/tmp" />
+      <label class="flbl">Project</label>
+      <div id="d_project_wrapper" class="project-search">
+        <input id="d_project_search" type="text" placeholder="Search projects…" autocomplete="off" oninput="mpFilter('d')" onfocus="mpOpen('d')" onkeydown="mpKeydown(event,'d')" />
+        <div id="d_project_dropdown" class="project-dropdown hidden">
+          <div class="project-sort-row">
+            <span class="project-sort-btn active" data-sort="recent" onclick="mpSort('d','recent')">Most recent</span>
+            <span class="project-sort-btn" data-sort="name" onclick="mpSort('d','name')">Name A–Z</span>
+          </div>
+          <div id="d_project_list" class="project-list"></div>
+          <div id="d_project_empty" class="project-empty hidden">No projects found</div>
+        </div>
+      </div>
+      <div id="d_project_selected" class="project-selected" style="display:none"></div>
+      <button type="button" class="linklike custom-folder-toggle" onclick="mpToggleCustomFolder('d')">Use another folder…</button>
+      <div id="d_custom_folder" class="custom-folder" style="display:none">
+        <input id="d_custom_path" placeholder="~/path/to/folder" onkeydown="if(event.key==='Enter'){event.preventDefault();mpUseCustomFolder('d');}" />
+        <div class="row"><button class="create" onclick="mpUseCustomFolder('d')">Use this folder</button><button class="cancel" onclick="mpToggleCustomFolder('d')">Cancel</button></div>
+        <div class="err" id="d_custom_err"></div>
+      </div>
+      <input id="d_path" type="hidden" value="" />
       <input id="d_crit" placeholder="Success criterion (optional)" />
       <input id="d_interval" placeholder="Repeat interval (e.g. PT4H, P1D) — blank = manual" />
       <div class="row"><button class="create" onclick="createDirective()">Schedule</button><button class="cancel" onclick="cancelForm('dirForm')">Cancel</button></div>
@@ -1142,7 +1199,26 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="form" id="dirEditForm">
       <input id="de_id" type="hidden" />
       <input id="de_goal" placeholder="Standing goal" />
-      <input id="de_path" placeholder="Project path" />
+      <label class="flbl">Project</label>
+      <div id="de_project_wrapper" class="project-search">
+        <input id="de_project_search" type="text" placeholder="Search projects…" autocomplete="off" oninput="mpFilter('de')" onfocus="mpOpen('de')" onkeydown="mpKeydown(event,'de')" />
+        <div id="de_project_dropdown" class="project-dropdown hidden">
+          <div class="project-sort-row">
+            <span class="project-sort-btn active" data-sort="recent" onclick="mpSort('de','recent')">Most recent</span>
+            <span class="project-sort-btn" data-sort="name" onclick="mpSort('de','name')">Name A–Z</span>
+          </div>
+          <div id="de_project_list" class="project-list"></div>
+          <div id="de_project_empty" class="project-empty hidden">No projects found</div>
+        </div>
+      </div>
+      <div id="de_project_selected" class="project-selected" style="display:none"></div>
+      <button type="button" class="linklike custom-folder-toggle" onclick="mpToggleCustomFolder('de')">Use another folder…</button>
+      <div id="de_custom_folder" class="custom-folder" style="display:none">
+        <input id="de_custom_path" placeholder="~/path/to/folder" onkeydown="if(event.key==='Enter'){event.preventDefault();mpUseCustomFolder('de');}" />
+        <div class="row"><button class="create" onclick="mpUseCustomFolder('de')">Use this folder</button><button class="cancel" onclick="mpToggleCustomFolder('de')">Cancel</button></div>
+        <div class="err" id="de_custom_err"></div>
+      </div>
+      <input id="de_path" type="hidden" value="" />
       <input id="de_interval" placeholder="Repeat interval (e.g. PT4H, P1D) — blank = manual" />
       <select id="de_status"><option value="active">active</option><option value="sleeping">sleeping</option><option value="blocked">blocked</option><option value="retired">retired</option></select>
       <div class="row"><button class="create" onclick="saveDirective()">Save changes</button><button class="cancel" onclick="cancelForm('dirEditForm')">Cancel</button></div>
@@ -1194,7 +1270,7 @@ function requireToken() {
     + '<div style="color:var(--muted,#8b949e);font-size:11px;max-width:340px;text-align:center">Find this token in the local HiveMatrix console under Settings → Remote access.</div></div>';
   return false;
 }
-let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, projects: [], selectedProject: "" };
+let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedFlight: null, projects: [], selectedProject: "", workPackages: [] };
 let _taskFormInSession = false;
 
 async function api(path, opts) {
@@ -1229,7 +1305,7 @@ async function toggleThemeQuick() {
 // Center overview — at-a-glance board state when no task is selected, instead of
 // leaving the widest column empty.
 function renderOverview() {
-  if (state.selected || _taskFormInSession) return;
+  if (state.selected || state.selectedFlight || _taskFormInSession) return;
   const el = document.getElementById("session");
   if (!el) return;
   const statusToLane = {}; LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
@@ -1238,6 +1314,11 @@ function renderOverview() {
   for (const t of filtered) { const k = statusToLane[t.status]; if (k) counts[k]++; }
   const dirActive = (state.directives || []).filter(d => d.status === "active").length;
   const appr = (state.approvals || []).length;
+  const flights = state.workPackages || [];
+  const flightActive = flights.filter(p => ["running", "ready"].includes(p.status)).length;
+  const flightReview = flights.filter(p => p.status === "review").length;
+  const flightDone = flights.filter(p => p.status === "done").length;
+  const flightBlocked = flights.filter(p => ["failed", "held"].includes(p.status)).length;
   const card = (label, val, cls, numColor) => '<div class="ov-card ' + (cls || "") + '"><div class="ov-num"' + (numColor ? ' style="color:' + numColor + '"' : '') + '>' + val + '</div><div class="ov-lbl">' + esc(label) + '</div></div>';
   el.innerHTML = '<div class="overview">'
     + '<div class="ov-head">Overview' + (state.selectedProject ? " · " + esc(state.selectedProject) : "") + '</div>'
@@ -1246,7 +1327,14 @@ function renderOverview() {
     + card("scheduled", dirActive)
     + card("pending approvals", appr, appr ? "warn" : "")
     + '</div>'
-    + '<div class="ov-hint">Select a task to inspect its session — or ＋ New task to start one.</div>'
+    + '<div class="ov-head" style="margin-top:18px">Flights</div>'
+    + '<div class="ov-grid">'
+    + card("in flight", flightActive, flightActive ? "warn" : "")
+    + card("review", flightReview, flightReview ? "ok" : "")
+    + card("landed", flightDone, flightDone ? "ok" : "")
+    + card("blocked", flightBlocked, flightBlocked ? "err" : "")
+    + '</div>'
+    + '<div class="ov-hint">Select a task or Flight to inspect progress — or ＋ New task to start one.</div>'
     + '</div>';
 }
 
@@ -1254,13 +1342,14 @@ function renderOverview() {
 // delete/archive already null) and re-renders; the project filter is untouched.
 function showOverview() {
   state.selected = null;
+  state.selectedFlight = null;
   _ctxTask = null;
   renderBoard();      // drops the .sel highlight + syncs the nav active state
   renderOverview();   // fills the center column now that nothing is selected
 }
 function updateOverviewNav() {
   const nav = document.getElementById("overviewNav");
-  if (nav) nav.classList.toggle("active", !state.selected);
+  if (nav) nav.classList.toggle("active", !state.selected && !state.selectedFlight);
 }
 function isEditableTarget(el) {
   if (!el) return false;
@@ -1381,6 +1470,108 @@ function ageBadge(t) {
   return label ? '<span class="badge age" title="'+esc(raw)+'">'+esc(label)+'</span>' : "";
 }
 
+function flightLabel(status) {
+  if (status === "done") return "landed";
+  if (status === "running") return "in flight";
+  if (status === "review") return "review";
+  if (status === "failed") return "blocked";
+  if (status === "held") return "held";
+  if (status === "ready" || status === "draft") return "staged";
+  return status || "staged";
+}
+function flightProgress(p) {
+  const counts = p.counts || {};
+  const total = (p.items && p.items.length) || Object.values(counts).reduce((a, b) => a + Number(b || 0), 0) || 0;
+  const landed = Number(counts.done || 0);
+  const pct = total ? Math.round((landed / total) * 100) : 0;
+  return { total, landed, pct };
+}
+function flightCountsHtml(p) {
+  const counts = p.counts || {};
+  const order = ["draft","ready","running","review","done","held","failed","cancelled"];
+  return order.filter(k => counts[k]).map(k => '<span class="badge">'+counts[k]+' '+esc(flightLabel(k))+'</span>').join(" ");
+}
+function renderFlightsRail() {
+  const el = document.getElementById("flights_rail");
+  if (!el) return;
+  const all = state.workPackages || [];
+  const visible = all
+    .filter(p => !state.selectedProject || p.project === state.selectedProject)
+    .filter(p => p.status !== "cancelled")
+    .slice(0, 8);
+  const body = visible.length ? '<div class="flight-list">' + visible.map(p => {
+    const pr = flightProgress(p);
+    return '<button class="flight-card'+(state.selectedFlight===p.id?' sel':'')+'" onclick="selectFlight(\''+esc(p.id)+'\')">'
+      + '<div class="flight-title">'+esc(p.title || p.id)+'</div>'
+      + '<div class="flight-meta"><span>'+esc(flightLabel(p.status))+'</span><span>'+pr.landed+'/'+pr.total+' landed</span></div>'
+      + '<div class="flight-progress"><i style="width:'+Math.max(0, Math.min(100, pr.pct))+'%"></i></div>'
+      + '</button>';
+  }).join("") + '</div>' : '<div class="muted" style="font-size:11px">No Flights staged.</div>';
+  el.innerHTML = '<div class="flight-head"><h2>Flights</h2><button class="copybtn" onclick="loadFlights().then(function(){renderFlightsRail(); if(state.selectedFlight) renderFlightDetail(state.selectedFlight);})">↻</button></div>' + body;
+}
+async function loadFlights() {
+  const r = await api("/work-packages");
+  const packages = (r && r.packages) || [];
+  const details = [];
+  for (const p of packages.slice(0, 30)) {
+    const d = await api("/work-packages/"+encodeURIComponent(p.id));
+    if (d && d.id) details.push(d);
+  }
+  state.workPackages = details;
+}
+async function selectFlight(id) {
+  state.selectedFlight = id;
+  state.selected = null;
+  _ctxTask = null;
+  renderBoard();
+  await renderFlightDetail(id);
+}
+function flightItemActions(p, it) {
+  const canCreate = !it.createdTaskId && it.status !== "cancelled";
+  const b = [];
+  b.push('<button class="appr-btn" onclick="wpEditItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\')">Edit</button>');
+  if (canCreate) b.push('<button class="appr-btn" onclick="wpCreateTask(\''+esc(p.id)+'\',\''+esc(it.id)+'\')">Create task</button>');
+  b.push('<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'held\')">Hold</button>');
+  b.push('<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'ready\')">Ready</button>');
+  b.push('<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'cancelled\')">Cancel</button>');
+  return b.join("");
+}
+async function renderFlightDetail(id) {
+  const el = document.getElementById("session");
+  if (!el) return;
+  const p = await api("/work-packages/"+encodeURIComponent(id));
+  if (!p || !p.id) { state.selectedFlight = null; renderOverview(); return; }
+  const pr = flightProgress(p);
+  const canStart = ["draft","held","ready"].includes(p.status);
+  const canAdvance = p.status === "running";
+  const items = (p.items || []).map(it => {
+    const made = it.createdTaskId ? ' · task '+esc(it.createdTaskId) : '';
+    const deps = (it.dependsOn && it.dependsOn.length) ? ' · after '+it.dependsOn.length+' item(s)' : '';
+    const blocker = it.blocker ? '<div class="errbox" style="margin-top:6px">'+esc(it.blocker)+'</div>' : '';
+    return '<div class="flight-item">'
+      + '<div class="flight-item-head"><div class="flight-item-title">'+esc(it.title)+'</div><div><span class="badge">'+esc(flightLabel(it.status))+'</span> <span class="badge">'+esc(it.risk)+'</span></div></div>'
+      + '<div class="muted" style="font-size:11px;margin-top:3px">'+esc(it.prompt)+deps+made+'</div>'
+      + blocker
+      + '<div class="flight-item-actions">'+flightItemActions(p, it)+'</div>'
+      + '</div>';
+  }).join("");
+  el.innerHTML = '<div class="flight-detail">'
+    + '<h1>'+esc(p.title || p.id)+' <span class="badge">'+esc(flightLabel(p.status))+'</span><button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></h1>'
+    + '<div class="sub">'+esc(p.project || "")+' · '+esc(p.projectPath || "")+'</div>'
+    + '<div class="flight-counts">'+flightCountsHtml(p)+'</div>'
+    + '<div class="flight-progress" title="'+pr.pct+'% landed"><i style="width:'+Math.max(0, Math.min(100, pr.pct))+'%"></i></div>'
+    + '<div class="muted" style="font-size:11px;margin-top:4px">'+pr.landed+' of '+pr.total+' items landed.</div>'
+    + '<div class="action-bar">'
+    + (canStart ? '<button class="primary-action" onclick="wpStart(\''+esc(p.id)+'\')">Start Flight</button>' : '')
+    + (canAdvance ? '<button class="secondary-action" onclick="wpAdvance(\''+esc(p.id)+'\')">Advance</button>' : '')
+    + '<button class="secondary-action" onclick="wpEditPackage(\''+esc(p.id)+'\')">Edit</button>'
+    + '<button class="danger-action" onclick="wpDeletePackage(\''+esc(p.id)+'\')">Delete</button>'
+    + '</div>'
+    + '<h2>Description</h2><div class="desc">'+esc(p.description || "No description.")+'</div>'
+    + '<h2>Items</h2>' + (items || '<div class="muted">No items.</div>')
+    + '</div>';
+}
+
 function renderBoard() {
   const statusToLane = {};
   LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
@@ -1406,6 +1597,7 @@ function renderBoard() {
   const archivable = state.tasks.filter(t => ["review","done","failed","cancelled"].includes(t.status)).length;
   const ab = document.getElementById("archiveBtn");
   if (ab) ab.textContent = archivable ? "· archive completed (" + archivable + ")" : "";
+  renderFlightsRail();
   updateOverviewNav();
 }
 
@@ -1610,6 +1802,7 @@ function taskActionsHtml(t) {
 
 async function selectTask(id) {
   state.selected = id;
+  state.selectedFlight = null;
   // Switching tasks clears half-composed retry/reply state; staying on the same
   // task across a live refresh keeps files and draft text.
   if (_ctxTask !== id) {
@@ -2346,10 +2539,25 @@ function localDetailHtml(it) {
   return '<div><b>' + esc(it.name) + '</b>' + skBadges(it) + '</div>'
     + '<div class="sk-dmeta">' + commandMetaChips(c) + '</div>'
     + '<input id="cmdArgs" placeholder="Optional arguments" />'
-    + '<div class="sk-proj-row">'
-    + '<select id="commandProject" onchange="onCommandProjectChange()"><option value="">Manual path</option></select>'
-    + '<input id="commandPath" placeholder="Project path under $HOME" value="$HOME" />'
+    + '<label class="flbl" style="margin:6px 0 2px">Project</label>'
+    + '<div id="cmd_project_wrapper" class="project-search">'
+    + '<input id="cmd_project_search" type="text" placeholder="Search projects…" autocomplete="off" oninput="mpFilter(\'cmd\')" onfocus="mpOpen(\'cmd\')" onkeydown="mpKeydown(event,\'cmd\')" />'
+    + '<div id="cmd_project_dropdown" class="project-dropdown hidden">'
+    + '<div class="project-sort-row">'
+    + '<span class="project-sort-btn active" data-sort="recent" onclick="mpSort(\'cmd\',\'recent\')">Most recent</span>'
+    + '<span class="project-sort-btn" data-sort="name" onclick="mpSort(\'cmd\',\'name\')">Name A–Z</span>'
     + '</div>'
+    + '<div id="cmd_project_list" class="project-list"></div>'
+    + '<div id="cmd_project_empty" class="project-empty hidden">No projects found</div>'
+    + '</div></div>'
+    + '<div id="cmd_project_selected" class="project-selected" style="display:none"></div>'
+    + '<button type="button" class="linklike custom-folder-toggle" onclick="mpToggleCustomFolder(\'cmd\')">Use another folder…</button>'
+    + '<div id="cmd_custom_folder" class="custom-folder" style="display:none">'
+    + '<input id="cmd_custom_path" placeholder="~/path/to/folder" onkeydown="if(event.key===\'Enter\'){event.preventDefault();mpUseCustomFolder(\'cmd\');}" />'
+    + '<div class="row"><button class="create" onclick="mpUseCustomFolder(\'cmd\')">Use this folder</button><button class="cancel" onclick="mpToggleCustomFolder(\'cmd\')">Cancel</button></div>'
+    + '<div class="err" id="cmd_custom_err"></div>'
+    + '</div>'
+    + '<input id="commandPath" type="hidden" value="" />'
     + '<div class="sk-run-row">'
     + '<button class="command-run create" onclick="runSelectedCommand()">Run</button>'
     + '<button class="addbtn" onclick="inspectCommand()" title="View invoke name, source path, allowed-tools">Inspect</button>'
@@ -3002,10 +3210,11 @@ async function refresh() {
     ]);
     state.tasks = tasks; state.directives = directives; state.conn = conn; state.metrics = metrics; state.onboarding = onboarding;
     state.approvals = (appr && appr.approvals) || [];
+    await loadFlights();
     renderBoard();
     // Center column: drive it right after the board so a later panel error can't
     // leave it stale. selectTask re-fetches the open task; otherwise show overview.
-    if (state.selected) selectTask(state.selected); else renderOverview();
+    if (state.selected) selectTask(state.selected); else if (state.selectedFlight) renderFlightDetail(state.selectedFlight); else renderOverview();
     renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
     renderApprovals(); renderSkillCatalog(); renderMcp(); renderObservability();
   } catch (e) { /* transient */ }
@@ -3370,6 +3579,7 @@ function showNewTaskPanel() {
   const session = document.getElementById("session");
   if (!form || !session) return;
   state.selected = null;
+  state.selectedFlight = null;
   _ctxTask = null;
   _taskFormInSession = true;
   renderBoard();
@@ -3588,10 +3798,14 @@ function renderProjectDropdown() {
   listEl.innerHTML = sorted.map((p, i) => {
     const timeStr = p.lastModified ? new Date(p.lastModified).toLocaleDateString() : "";
     const cls = "project-item" + (selectedProjectName===p.name?" selected":"") + (i===projectHighlightIndex?" active":"");
+    const shortPath = p.path.replace(/^\/Users\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~');
     return '<div class="'+cls+'" data-idx="'+i+'" onclick="selectProjectFromDropdown(\''+esc(p.name)+'\',\''+esc(p.path)+'\')">'
+      + '<div class="project-item-row1">'
       + (p.preSelect ? '<span class="pstar">★</span>' : '')
       + '<span class="pname">'+esc(p.name)+'</span>'
       + (timeStr ? '<span class="ptime">'+esc(timeStr)+'</span>' : '')
+      + '</div>'
+      + '<span class="ppath" title="'+esc(p.path)+'">'+esc(shortPath)+'</span>'
       + '</div>';
   }).join("");
 }
@@ -3603,7 +3817,8 @@ function filterProjectDropdown() {
 
 function sortProjectsDropdown(mode) {
   projectDropdownSort = mode;
-  document.querySelectorAll(".project-sort-btn").forEach(b => {
+  const dd = document.getElementById("t_project_dropdown");
+  if (dd) dd.querySelectorAll(".project-sort-btn").forEach(b => {
     b.classList.toggle("active", b.dataset.sort === mode);
   });
   renderProjectDropdown();
@@ -3722,49 +3937,163 @@ function useCustomFolder() {
 }
 
 function syncCommandProject(name, path) {
-  const input = document.getElementById("commandPath");
-  if (input && path) input.value = path;
-  const sel = document.getElementById("commandProject");
-  if (!sel) return;
-  const opt = Array.from(sel.options).find(o => o.value === name || o.dataset.path === path);
-  sel.value = opt ? opt.value : "";
+  mpSet('cmd', name, path, false);
 }
 
 function populateCommandProjects(projects) {
-  if (projects && projects.length) _cmdProjects = projects; // cache for the detail panel
-  const sel = document.getElementById("commandProject");
-  if (!sel) return;
-  const pathInput = document.getElementById("commandPath");
-  const previousPath = (pathInput && pathInput.value) || "";
-  const previousName = sel.value;
-  sel.innerHTML = '<option value="">Manual path</option>'
-    + projects.map(p => '<option value="'+esc(p.name)+'" data-path="'+esc(p.path)+'">'+esc(p.name)+(p.preSelect?' ★':'')+'</option>').join("");
-
-  const chosen = projects.find(p => previousPath && p.path === previousPath)
-    || projects.find(p => previousName && p.name === previousName)
-    || (state.selectedProject ? projects.find(p => p.name === state.selectedProject) : null)
-    || projects.find(p => p.preSelect)
-    || projects[0];
-  if (chosen && pathInput && (!previousPath || previousPath === "$HOME" || previousPath === "/tmp")) {
-    syncCommandProject(chosen.name, chosen.path);
-  } else if (chosen) {
-    sel.value = chosen.name;
-  }
-}
-
-function onCommandProjectChange() {
-  const sel = document.getElementById("commandProject");
-  if (!sel) return;
-  const opt = sel.options[sel.selectedIndex];
-  const path = opt && opt.dataset ? opt.dataset.path : "";
-  if (path) syncCommandProject(opt.value, path);
+  if (projects && projects.length) _cmdProjects = projects;
+  mpAutoSelect('cmd');
 }
 
 // Close dropdown when clicking outside
 document.addEventListener("click", (e) => {
   const wrapper = document.getElementById("t_project_wrapper");
   if (wrapper && !wrapper.contains(e.target)) closeProjectDropdown();
+  Object.keys(_mpState).forEach(pfx => {
+    const w = document.getElementById(pfx + "_project_wrapper");
+    if (w && !w.contains(e.target)) mpClose(pfx);
+  });
 });
+
+// --- Generic multi-picker (directive, COO, command forms) ---
+const _mpState = {};
+function _mpS(pfx) {
+  if (!_mpState[pfx]) _mpState[pfx] = { sort: "recent", visible: [], highlight: -1, name: "", custom: false, pathId: pfx + "_path" };
+  return _mpState[pfx];
+}
+function mpRegister(pfx, pathId) { _mpS(pfx).pathId = pathId; }
+function _mpPathEl(pfx) { return document.getElementById(_mpS(pfx).pathId); }
+function mpSet(pfx, name, path, custom) {
+  const s = _mpS(pfx);
+  s.name = name || ""; s.custom = !!custom;
+  const search = document.getElementById(pfx + "_project_search");
+  if (search) search.value = name || "";
+  const pathEl = _mpPathEl(pfx);
+  if (pathEl) pathEl.value = path || "";
+  _mpRenderSelected(pfx);
+}
+function mpAutoSelect(pfx) {
+  const s = _mpS(pfx);
+  if (s.name && projectDropdownItems.some(p => p.name === s.name)) return;
+  const saved = state.selectedProject ? projectDropdownItems.find(p => p.name === state.selectedProject) : null;
+  const chosen = saved || projectDropdownItems.find(p => p.preSelect) || sortProjectItems(projectDropdownItems, "recent")[0];
+  if (chosen) mpSet(pfx, chosen.name, chosen.path, false);
+}
+function mpOpen(pfx) {
+  _mpRender(pfx);
+  const dd = document.getElementById(pfx + "_project_dropdown");
+  if (dd) dd.classList.remove("hidden");
+}
+function mpClose(pfx) {
+  const dd = document.getElementById(pfx + "_project_dropdown");
+  if (dd) dd.classList.add("hidden");
+  _mpS(pfx).highlight = -1;
+}
+function mpFilter(pfx) { _mpS(pfx).highlight = -1; _mpRender(pfx); }
+function mpSort(pfx, mode) {
+  _mpS(pfx).sort = mode;
+  const dd = document.getElementById(pfx + "_project_dropdown");
+  if (dd) dd.querySelectorAll(".project-sort-btn").forEach(b => b.classList.toggle("active", b.dataset.sort === mode));
+  _mpRender(pfx);
+}
+function _mpRender(pfx) {
+  const s = _mpS(pfx);
+  const search = (document.getElementById(pfx + "_project_search")?.value || "").toLowerCase();
+  const listEl = document.getElementById(pfx + "_project_list");
+  const emptyEl = document.getElementById(pfx + "_project_empty");
+  if (!listEl) return;
+  const filtered = projectDropdownItems.filter(p => p.name.toLowerCase().includes(search) || p.path.toLowerCase().includes(search));
+  const sorted = sortProjectItems(filtered, s.sort);
+  s.visible = sorted;
+  if (s.highlight >= sorted.length) s.highlight = sorted.length - 1;
+  if (!sorted.length) {
+    listEl.innerHTML = "";
+    if (emptyEl) emptyEl.classList.remove("hidden");
+    return;
+  }
+  if (emptyEl) emptyEl.classList.add("hidden");
+  listEl.innerHTML = sorted.map((p, i) => {
+    const timeStr = p.lastModified ? new Date(p.lastModified).toLocaleDateString() : "";
+    const cls = "project-item" + (s.name === p.name ? " selected" : "") + (i === s.highlight ? " active" : "");
+    return '<div class="' + cls + '" data-idx="' + i + '" onclick="mpPick(\'' + pfx + '\',\'' + esc(p.name) + '\',\'' + esc(p.path) + '\')">'
+      + (p.preSelect ? '<span class="pstar">&#9733;</span>' : '')
+      + '<span class="pname">' + esc(p.name) + '</span>'
+      + (timeStr ? '<span class="pdate">' + timeStr + '</span>' : '')
+      + '</div>';
+  }).join("");
+}
+function _mpRenderSelected(pfx) {
+  const s = _mpS(pfx);
+  const row = document.getElementById(pfx + "_project_selected");
+  if (!row) return;
+  const path = (_mpPathEl(pfx)?.value || "");
+  if (!s.name && !path) { row.style.display = "none"; row.innerHTML = ""; return; }
+  const known = projectDropdownItems.find(p => p.name === s.name && p.path === path);
+  const star = known && known.preSelect ? '<span class="pstar">&#9733;</span>' : '';
+  row.style.display = "flex";
+  row.innerHTML = star
+    + '<span class="pname" title="' + esc(s.name) + '">' + esc(s.name || "(unnamed)") + '</span>'
+    + '<span class="ppath" title="' + esc(path) + '">' + esc(path) + '</span>';
+}
+function mpPick(pfx, name, path) { mpSet(pfx, name, path, false); mpClose(pfx); }
+function mpKeydown(e, pfx) {
+  const s = _mpS(pfx);
+  const dd = document.getElementById(pfx + "_project_dropdown");
+  const open = dd && !dd.classList.contains("hidden");
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    if (!open) mpOpen(pfx);
+    if (!s.visible.length) return;
+    s.highlight = Math.min(s.visible.length - 1, s.highlight + 1);
+    _mpRender(pfx); _mpScrollIntoView(pfx);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!s.visible.length) return;
+    s.highlight = Math.max(0, s.highlight - 1);
+    _mpRender(pfx); _mpScrollIntoView(pfx);
+  } else if (e.key === "Enter") {
+    if (open && s.highlight >= 0 && s.highlight < s.visible.length) {
+      e.preventDefault();
+      mpPick(pfx, s.visible[s.highlight].name, s.visible[s.highlight].path);
+    }
+  } else if (e.key === "Escape") {
+    if (open) { e.preventDefault(); e.stopPropagation(); mpClose(pfx); }
+  }
+}
+function _mpScrollIntoView(pfx) {
+  const s = _mpS(pfx);
+  const listEl = document.getElementById(pfx + "_project_list");
+  if (!listEl) return;
+  const el = listEl.querySelector('.project-item[data-idx="' + s.highlight + '"]');
+  if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+}
+function mpSyncAll() { Object.keys(_mpState).forEach(pfx => mpAutoSelect(pfx)); }
+
+function mpToggleCustomFolder(pfx) {
+  const box = document.getElementById(pfx + "_custom_folder");
+  if (!box) return;
+  const showing = box.style.display !== "none";
+  box.style.display = showing ? "none" : "block";
+  const errEl = document.getElementById(pfx + "_custom_err");
+  if (errEl) errEl.textContent = "";
+  if (!showing) {
+    const inp = document.getElementById(pfx + "_custom_path");
+    if (inp) { inp.value = (_mpPathEl(pfx)?.value || ""); inp.focus(); }
+  }
+}
+
+function mpUseCustomFolder(pfx) {
+  const errEl = document.getElementById(pfx + "_custom_err");
+  if (errEl) errEl.textContent = "";
+  const raw = (document.getElementById(pfx + "_custom_path")?.value || "").trim();
+  if (!raw) { if (errEl) errEl.textContent = "Enter a folder path (e.g. ~/work/my-project)."; return; }
+  const trimmed = raw.replace(/\/+$/, "");
+  const base = trimmed.split("/").filter(Boolean).pop() || "custom";
+  const name = (base === "~" || base === "$HOME") ? "home" : base;
+  mpSet(pfx, name, raw, true);
+  const box = document.getElementById(pfx + "_custom_folder");
+  if (box) box.style.display = "none";
+}
 
 // Escape returns to the Overview — but never while typing in a field or with a
 // modal open (those own Escape themselves).
@@ -3816,6 +4145,7 @@ async function loadProjects(fresh) {
     }
     renderProjectDropdown();
     renderSelectedProject();
+    mpSyncAll();
   } catch (e) { /* transient */ }
 }
 
@@ -4878,7 +5208,7 @@ async function renderWorkflowRuns() {
     return '<div class="m" style="margin-top:2px"><span class="badge">'+esc(run.status)+'</span> '+esc(run.title)+(links?' ('+links+')':'')+yt+blk+'</div>';
   }).join("");
 }
-// ── Work Packages ──────────────────────────────────────────────────
+// -- Flights (internal /work-packages API) -------------------------------
 // Staged broad/risky prompts. Each item has explicit operator actions; there is
 // deliberately NO "run all" control — same-repo writers stay one-at-a-time.
 async function renderWorkPackages() {
@@ -4887,7 +5217,7 @@ async function renderWorkPackages() {
   el.innerHTML = '<div class="muted" style="font-size:11px">Loading…</div>';
   const r = await api("/work-packages");
   const packages = (r && r.packages) || [];
-  if (!packages.length) { el.innerHTML = '<div class="muted" style="font-size:11px">No work packages yet. Broad prompts will be staged here.</div>'; return; }
+  if (!packages.length) { el.innerHTML = '<div class="muted" style="font-size:11px">No Flights yet. Broad prompts will be staged here.</div>'; return; }
   const blocks = [];
   for (const p of packages) {
     const detail = await api("/work-packages/"+encodeURIComponent(p.id));
@@ -4926,11 +5256,11 @@ function renderWorkPackageCard(p) {
       + '<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+actions+'</div>'
       + '</div>';
   }).join("");
-  // Package-level controls: explicit Start (operator action) and Advance.
+  // Flight-level controls: explicit Start (operator action) and Advance.
   const canStart = p.status === "draft" || p.status === "held";
   const canAdvance = p.status === "running";
   const pkgActions = [
-    canStart ? '<button class="create" onclick="wpStart(\''+esc(p.id)+'\')">Start package</button>' : '',
+    canStart ? '<button class="create" onclick="wpStart(\''+esc(p.id)+'\')">Start Flight</button>' : '',
     canAdvance ? '<button class="appr-btn" onclick="wpAdvance(\''+esc(p.id)+'\')">Advance</button>' : '',
   ].filter(Boolean).join(" ");
   return '<div class="card" style="cursor:default">'
@@ -4946,23 +5276,57 @@ function renderWorkPackageCard(p) {
 }
 async function wpStart(pkgId) {
   const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/start", { method:"POST" });
-  if (r && r.package) { hmToast("Package started ("+((r.started||[]).length)+" item(s) running)"); } else { hmToast((r && r.error) || "Start failed"); }
-  renderWorkPackages();
+  if (r && r.package) { hmToast("Flight started ("+((r.started||[]).length)+" item(s) running)"); } else { hmToast((r && r.error) || "Start failed"); }
+  renderWorkPackages(); refresh();
 }
 async function wpAdvance(pkgId) {
   const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/advance", { method:"POST" });
   if (r && r.package) { hmToast((r.started||[]).length ? "Advanced ("+r.started.length+" started)" : "Nothing eligible yet"); } else { hmToast((r && r.error) || "Advance failed"); }
-  renderWorkPackages();
+  renderWorkPackages(); refresh();
 }
 async function wpCreateTask(pkgId, itemId) {
   const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/items/"+encodeURIComponent(itemId)+"/create-task", { method:"POST" });
   if (r && r.taskId) { hmToast(r.created===false ? "Task already exists" : "Task created"); } else { hmToast((r && r.error) || "Create failed"); }
-  renderWorkPackages();
+  renderWorkPackages(); refresh();
 }
 async function wpItem(pkgId, itemId, status) {
   const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/items/"+encodeURIComponent(itemId), { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ status: status }) });
   if (!r || !r.id) { hmToast((r && r.error) || "Update failed"); }
-  renderWorkPackages();
+  renderWorkPackages(); refresh();
+}
+async function wpEditPackage(pkgId) {
+  const p = await api("/work-packages/"+encodeURIComponent(pkgId));
+  if (!p || !p.id) { hmToast("Flight not found", "err"); return; }
+  const title = await hmPrompt("Flight title", p.title || "", { title: "Edit Flight" });
+  if (title == null) return;
+  const description = await hmPrompt("Flight description", p.description || "", { title: "Edit Flight" });
+  if (description == null) return;
+  const r = await api("/work-packages/"+encodeURIComponent(pkgId), { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ title, description }) });
+  if (r && r.id) { hmToast("Flight updated", "ok"); } else { hmToast((r && r.error) || "Update failed", "err"); }
+  renderWorkPackages(); refresh();
+}
+async function wpEditItem(pkgId, itemId) {
+  const p = await api("/work-packages/"+encodeURIComponent(pkgId));
+  const it = p && (p.items || []).find(x => x.id === itemId);
+  if (!it) { hmToast("Flight item not found", "err"); return; }
+  const title = await hmPrompt("Item title", it.title || "", { title: "Edit Flight Item" });
+  if (title == null) return;
+  const prompt = await hmPrompt("Item prompt", it.prompt || "", { title: "Edit Flight Item" });
+  if (prompt == null) return;
+  const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/items/"+encodeURIComponent(itemId), { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ title, prompt }) });
+  if (r && r.id) { hmToast("Flight item updated", "ok"); } else { hmToast((r && r.error) || "Update failed", "err"); }
+  renderWorkPackages(); refresh();
+}
+async function wpDeletePackage(pkgId) {
+  if (!await hmConfirm("Delete this Flight? Linked board tasks remain on the board; running Flights cannot be deleted.", { title: "Delete Flight", okLabel: "Delete", danger: true })) return;
+  const r = await api("/work-packages/"+encodeURIComponent(pkgId), { method:"DELETE" });
+  if (r && r.deleted) {
+    hmToast("Flight deleted", "ok");
+    if (state.selectedFlight === pkgId) state.selectedFlight = null;
+  } else {
+    hmToast((r && (r.reason || r.error)) || "Delete failed", "err");
+  }
+  renderWorkPackages(); refresh();
 }
 async function prepareResearchBrief() {
   const out = document.getElementById("brief_result");
@@ -5438,7 +5802,9 @@ async function createTask() {
     if (_taskFormInSession) _closeNewTaskPanel(); else toggleForm("taskForm");
     if (t.routed === "work_package") {
       const n = t.itemCount || 0;
-      hmToast("Staged as a Work Package (" + n + " item" + (n === 1 ? "" : "s") + "). Open Settings → Lanes → Work Packages to review and start it.");
+      hmToast("Staged as a Flight (" + n + " item" + (n === 1 ? "" : "s") + ").");
+      state.selectedFlight = t.packageId || null;
+      state.selected = null;
       renderWorkPackages();
     } else if (t.routed) {
       hmToast("Routed to " + String(t.routed).replace(/-/g, " ") + ".");
@@ -5469,7 +5835,8 @@ function editDirective(id) {
   if (!d) return;
   document.getElementById("de_id").value = d._id;
   document.getElementById("de_goal").value = d.goal;
-  document.getElementById("de_path").value = d.projectPath;
+  const _deProj = projectDropdownItems.find(p => p.path === d.projectPath);
+  mpSet('de', _deProj ? _deProj.name : ((d.projectPath || "").split("/").filter(Boolean).pop() || "custom"), d.projectPath, !_deProj);
   document.getElementById("de_status").value = d.status;
   // Reverse-engineer interval from triggerPolicy JSON
   try {
@@ -5525,6 +5892,10 @@ function connectSSE() {
 if (requireToken()) {
   loadModels();
   wireCtxSections();
+  mpRegister('d',   'd_path');
+  mpRegister('de',  'de_path');
+  mpRegister('cmd', 'commandPath');
+  mpRegister('coo', 'coo_project_path');
   loadProjects();
   refresh();
   connectSSE();

@@ -264,6 +264,49 @@ test("work package APIs round-trip: create, list, get, patch, create-task", asyn
   assert.doesNotMatch(blob, /password|cookie|secret|credential|api[_-]?key|\btoken\b/i);
 });
 
+test("DELETE /work-packages/:id deletes a non-running package", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const items = [
+    { title: "One", prompt: "do one", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+  ];
+  const pkg = await (await fetch(`${base}/work-packages`, {
+    method: "POST", headers, body: JSON.stringify({ title: "Delete Flight", project: "hivematrix", projectPath: "/tmp/delete", items }),
+  })).json() as Record<string, unknown>;
+
+  const del = await fetch(`${base}/work-packages/${pkg.id}`, { method: "DELETE", headers });
+  assert.equal(del.status, 200);
+  const body = await del.json() as Record<string, unknown>;
+  assert.equal(body.deleted, true);
+  const pkgs = (getDb().prepare("SELECT COUNT(*) AS n FROM work_packages WHERE _id = ?").get(pkg.id) as { n: number }).n;
+  const pkgItems = (getDb().prepare("SELECT COUNT(*) AS n FROM work_package_items WHERE packageId = ?").get(pkg.id) as { n: number }).n;
+  assert.equal(pkgs, 0);
+  assert.equal(pkgItems, 0);
+});
+
+test("DELETE /work-packages/:id refuses a running package", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const items = [
+    { title: "One", prompt: "do one", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+  ];
+  const pkg = await (await fetch(`${base}/work-packages`, {
+    method: "POST", headers, body: JSON.stringify({ title: "Running Flight", project: "hivematrix", projectPath: "/tmp/running", items }),
+  })).json() as Record<string, unknown>;
+  await fetch(`${base}/work-packages/${pkg.id}/start`, { method: "POST", headers });
+
+  const del = await fetch(`${base}/work-packages/${pkg.id}`, { method: "DELETE", headers });
+  assert.equal(del.status, 409);
+  const body = await del.json() as Record<string, unknown>;
+  assert.match(String(body.reason || body.error || ""), /running|active/i);
+});
+
 test("POST /tasks promotes a broad prompt into a Work Package, not a generic agent task", async (t) => {
   withTempHome(t);
   const { _resetDbForTests, getDb } = await import("@/lib/db");
@@ -336,10 +379,14 @@ test("POST /tasks does not promote an AI-news video prompt into a Work Package (
   assert.notEqual(body.routed, "work_package");
 });
 
-test("console source includes the Work Packages panel and no auto-run-all control", () => {
+test("console source includes the main-screen Flights surface and no auto-run-all control", () => {
   assert.match(CONSOLE_HTML, /work_packages_list/);
   assert.match(CONSOLE_HTML, /renderWorkPackages/);
-  assert.match(CONSOLE_HTML, /Work Packages/);
+  assert.match(CONSOLE_HTML, /id="flights_rail"/);
+  assert.match(CONSOLE_HTML, /renderFlightsRail/);
+  assert.match(CONSOLE_HTML, /renderFlightDetail/);
+  assert.match(CONSOLE_HTML, /Stage Flight|Flights/);
+  assert.doesNotMatch(CONSOLE_HTML, /Open Settings → Lanes → Work Packages/);
   // Conservative by design: there is no button that runs every item at once.
   assert.doesNotMatch(CONSOLE_HTML, /runAllPackageItems|Run all items|run-all/i);
 });
