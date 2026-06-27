@@ -15,8 +15,11 @@ test("POST /tasks routes explicit Terminal Lane requests to the lane, not the ge
   // generic frontier agent (which is what fell into the Canopy discovery loop).
   assert.match(server, /executor:\s*"terminal-lane"/);
 
-  // It is gated like the video route (skip if already a terminal-lane task).
-  assert.match(server, /body\.executor !== "terminal-lane" && isTerminalLaneRequest/);
+  // It is gated to skip if already a terminal-lane task, and routes on either an
+  // explicit route=terminal-lane selection or an auto-detected (non-broad) use
+  // request. Bare mentions in broad prompts no longer hijack the lane.
+  assert.match(server, /body\.executor !== "terminal-lane"/);
+  assert.match(server, /route === "terminal-lane" \|\| \(route === "auto" && !broad && isTerminalLaneRequest\(description\)\)/);
 
   // The structured route is carried so the transcript shows the route, and the
   // profiles come from the real store (profileId-only, no secrets).

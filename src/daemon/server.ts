@@ -3378,11 +3378,32 @@ export function createDaemonServer() {
         const description = typeof body.description === "string" ? body.description : "";
         body.description = appendAttachmentBlock(description, attachments);
         delete body.attachments;
+        // Explicit Route selector (New Task) — operator can force the path instead
+        // of relying on content heuristics, so "developing tool X" is never
+        // confused with "using tool X". auto = today's heuristics (with the
+        // breadth precedence below); normal = a plain agent task with no special
+        // routing or Work Package promotion; work_package = force-stage a package;
+        // terminal-lane = force the Terminal Lane route.
+        const route = typeof body.route === "string" ? body.route : "auto";
+        delete body.route;
+        const { isBroadPrompt } = await import("@/lib/intake/classify");
+        const broad = isBroadPrompt(description);
+
+        if (route === "normal") {
+          const ntitle = (typeof body.title === "string" && body.title.trim()) || deriveTaskTitle(description);
+          body.title = ntitle;
+          const task = await Task.create({ _id: generateId(), ...body });
+          broadcast("tasks:created", { taskId: task._id });
+          json(res, 201, task);
+          return;
+        }
         // "Make me an AI-news video" → route straight to the structured draft +
         // review (one task with the full script + Edit-the-draft), instead of a
         // general agent that would spawn a second review task plus a summary.
+        // Skipped for broad multi-step prompts (those become a Work Package) and
+        // when an explicit non-auto route is chosen.
         const { isAiNewsVideoRequest } = await import("@/lib/video/news-intent");
-        if (body.executor !== "video-review" && isAiNewsVideoRequest(description)) {
+        if (route === "auto" && !broad && body.executor !== "video-review" && isAiNewsVideoRequest(description)) {
           try {
             const { draftNewsVideo } = await import("@/lib/video/news-review");
             const draft = await draftNewsVideo({});
@@ -3401,7 +3422,8 @@ export function createDaemonServer() {
         // prepared/needs_input) so the transcript shows Terminal Lane, not a
         // Canopy discovery loop. profileId only — never raw ssh creds.
         const { isTerminalLaneRequest } = await import("@/lib/terminal-lane/intent");
-        if (body.executor !== "terminal-lane" && isTerminalLaneRequest(description)) {
+        if (body.executor !== "terminal-lane" &&
+            (route === "terminal-lane" || (route === "auto" && !broad && isTerminalLaneRequest(description)))) {
           try {
             const { routeTerminalLaneRequest } = await import("@/lib/terminal-lane/route");
             const { listTerminalProfileSummaries } = await import("@/lib/terminal-lane/store");
@@ -3436,7 +3458,7 @@ export function createDaemonServer() {
         // land in a sandbox with no network. Reuses the registered prepare path —
         // no bespoke duplicate logic — and links the run to a review-visible task.
         const { isYoutubeSummaryRequest, extractYoutubeUrlFromText } = await import("@/lib/workflows/youtube-summary-intent");
-        if (body.executor !== "workflow" && isYoutubeSummaryRequest(description)) {
+        if (route === "auto" && !broad && body.executor !== "workflow" && isYoutubeSummaryRequest(description)) {
           try {
             const { prepareWorkflowById } = await import("@/lib/workflows/prepare");
             const { setWorkflowRunLinks } = await import("@/lib/workflows/runs");
@@ -3472,12 +3494,13 @@ export function createDaemonServer() {
         // creation. A genuinely broad/multi-step prompt becomes a durable Work
         // Package DRAFT with proposed child items (never an auto-running swarm);
         // everything else falls through to the unchanged normal-task path.
-        if (body.executor !== "workflow" && body.executor !== "terminal-lane" && body.executor !== "video-review") {
+        if ((route === "work_package" || route === "auto") &&
+            body.executor !== "workflow" && body.executor !== "terminal-lane" && body.executor !== "video-review") {
           try {
-            const { classifyIntakeAsync } = await import("@/lib/intake/classify");
+            const { classifyIntakeAsync, forceWorkPackage } = await import("@/lib/intake/classify");
             const { activeSameProjectTasks } = await import("@/lib/work-packages/active");
             const projectPath = typeof body.projectPath === "string" ? body.projectPath : "";
-            const intake = await classifyIntakeAsync({
+            const intakeInput = {
               title: typeof body.title === "string" ? body.title : undefined,
               description,
               project: typeof body.project === "string" ? body.project : undefined,
@@ -3485,19 +3508,25 @@ export function createDaemonServer() {
               source: typeof body.source === "string" ? body.source : undefined,
               executor: typeof body.executor === "string" ? body.executor : undefined,
               activeSameProject: projectPath ? activeSameProjectTasks(projectPath) : [],
-            });
-            if (intake.kind === "work_package_candidate" && intake.packageCandidate) {
+            };
+            const intake = await classifyIntakeAsync(intakeInput);
+            // Stage a Work Package when intake classifies broad (auto) OR the
+            // operator explicitly forced the work_package route.
+            const candidate = route === "work_package"
+              ? await forceWorkPackage(intakeInput)
+              : (intake.kind === "work_package_candidate" ? intake.packageCandidate : null);
+            if (candidate) {
               const { createWorkPackage } = await import("@/lib/work-packages/store");
               // Hold the package when intake flags a same-project collision; else draft.
               const status = intake.projectCollision?.recommendation === "hold" ? "held" : "draft";
               const pkg = createWorkPackage({
-                title: intake.packageCandidate.title,
+                title: candidate.title,
                 description,
                 project: typeof body.project === "string" ? body.project : "hivematrix",
                 projectPath,
                 status,
                 intake,
-                items: intake.packageCandidate.items,
+                items: candidate.items,
               });
               broadcast("work-packages:created", { packageId: pkg.id });
               json(res, 201, {

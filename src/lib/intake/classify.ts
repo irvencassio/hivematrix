@@ -212,6 +212,31 @@ export function isBroadPrompt(description: string): boolean {
   return BROAD_KEYWORD_RE.test(text) || numberedCount(text) >= 2 || splitFragments(text).length >= 3;
 }
 
+/** Expose the deterministic regex splitter (always returns ≥1 fragment). */
+export function deterministicFragments(description: string): string[] {
+  return splitFragments(description ?? "");
+}
+
+/**
+ * Force a Work Package candidate even when the prompt isn't "broad" — used by the
+ * explicit `route: "work_package"` selector. Prefers model/deterministic
+ * decomposition (via classifyIntakeAsync); otherwise builds items from the regex
+ * split, falling back to a single item = the whole prompt. Always ≥1 item, and
+ * the same deterministic policy stamps risk/gate/concurrency.
+ */
+export async function forceWorkPackage(
+  input: IntakeInput,
+  deps?: import("./decompose").DecomposeDeps,
+): Promise<{ title: string; items: ProposedItem[] }> {
+  const enriched = await classifyIntakeAsync(input, deps);
+  if (enriched.kind === "work_package_candidate" && enriched.packageCandidate) {
+    return enriched.packageCandidate;
+  }
+  const frags = deterministicFragments(input.description).filter((f) => f.trim().length > 0);
+  const items = proposedItemsFromFragments(frags.length >= 1 ? frags : [input.description]);
+  return { title: input.title?.trim() || deriveTaskTitle(input.description), items };
+}
+
 /**
  * Build proposed work-package items from step fragments — the single policy
  * builder shared by the deterministic regex split AND model-advised

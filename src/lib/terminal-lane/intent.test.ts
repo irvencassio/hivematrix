@@ -26,6 +26,17 @@ test("isTerminalLaneRequest is false for unrelated requests", () => {
   }
 });
 
+test("isTerminalLaneRequest is false for a bare mention with no use-cue (developing the lane, not using it)", () => {
+  for (const t of [
+    "Terminal Lane: 4",                                  // a category tally in a bug list
+    "fix the Terminal Lane readiness card styling",      // developing the lane
+    "the Terminal Lane icon is wrong when white is selected",
+    "- Browser Lane: 5\n- Terminal Lane: 4\n- Email: 12", // tally block
+  ]) {
+    assert.equal(isTerminalLaneRequest(t), false, t);
+  }
+});
+
 test("detectTerminalHostHint extracts a host token from host-targeted phrasing", () => {
   assert.equal(detectTerminalHostHint("use TerminalLane and check the OS version of aiserver"), "aiserver");
   assert.equal(detectTerminalHostHint("check disk usage on prod-db"), "prod-db");

@@ -7,12 +7,16 @@
 
 // Explicit lane mention: "TerminalLane", "Terminal Lane", "terminal lane".
 const LANE_RE = /\bterminal[\s-]*lane\b/i;
+// A use-cue distinguishes USING the lane from merely naming it (e.g. a bug-list
+// category tally "Terminal Lane: 4", or "fix the Terminal Lane card"). Without a
+// cue, a bare mention is development work ABOUT the lane, not a request to use it.
+const USE_CUE_RE = /\b(use|using|via|through|route|run|ssh|connect|connecting|login|log[\s-]?in|shell|exec|execute|check)\b/i;
 
-/** True when the text explicitly asks to use Terminal Lane. */
+/** True when the text explicitly asks to USE Terminal Lane (mention + a use-cue). */
 export function isTerminalLaneRequest(text: string): boolean {
   const t = (text || "").trim();
   if (!t) return false;
-  return LANE_RE.test(t);
+  return LANE_RE.test(t) && USE_CUE_RE.test(t);
 }
 
 // Host-targeted phrasing: "... of <host>", "on <host>", "to <host>", "@<host>".

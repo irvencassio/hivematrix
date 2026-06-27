@@ -157,3 +157,27 @@ test("classifyIntakeAsync with no deps + flag off behaves like the deterministic
   assert.equal(r.kind, "work_package_candidate");
   assert.ok(!r.reasons.includes("model-advised decomposition"));
 });
+
+// ── deterministicFragments + forceWorkPackage (explicit Work Package route) ──
+
+import { deterministicFragments, forceWorkPackage } from "./classify";
+
+test("deterministicFragments splits a comma list and always returns at least one", () => {
+  assert.ok(deterministicFragments("do a, do b, and do c").length >= 3);
+  assert.deepEqual(deterministicFragments("just one thing"), ["just one thing"]);
+  assert.ok(deterministicFragments("   ").length >= 1); // never empty
+});
+
+test("forceWorkPackage returns >=1 item even for a non-broad prompt", async () => {
+  const pc = await forceWorkPackage({ description: "Refactor the auth module." });
+  assert.ok(pc.items.length >= 1);
+  assert.ok(pc.title);
+});
+
+test("forceWorkPackage still stamps a release step as held (policy wins)", async () => {
+  const pc = await forceWorkPackage({ description: "build the app, then deploy the release to prod" });
+  const rel = pc.items.find((i) => /deploy|release/i.test(i.prompt));
+  assert.ok(rel, "has a release item");
+  assert.equal(rel!.executionMode, "hold");
+  assert.equal(rel!.risk, "high");
+});

@@ -1086,6 +1086,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <input id="t_path" type="hidden" value="" />
       <label class="flbl">Model</label>
       <select id="t_model"></select>
+      <label class="flbl">Route</label>
+      <select id="t_route">
+        <option value="auto" selected>Auto (route by content)</option>
+        <option value="work_package">Work Package (orchestrate steps)</option>
+        <option value="terminal-lane">Terminal Lane (run on a host)</option>
+        <option value="normal">Normal task (no routing)</option>
+      </select>
+      <div class="muted" style="font-size:11px;margin-top:2px">Auto picks the path from your text. Choose <b>Work Package</b> to stage a multi-step plan, <b>Normal</b> to force one plain task (e.g. when developing a lane itself), or <b>Terminal Lane</b> to run on a host.</div>
       <label class="flbl">Attachments (optional)</label>
       <div class="attach-row">
         <input type="file" id="t_attach_input" multiple style="display:none" onchange="onAttachFiles(this)">
@@ -5373,8 +5381,9 @@ async function createTask() {
   const attachments = _attachments.slice();
   try {
     // Title optional — omit when blank so the daemon derives it from the instructions.
+    const route = (document.getElementById("t_route") || {}).value || "auto";
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: selectedProjectName, model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent" }) });
+      body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: selectedProjectName, model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent", route }) });
     // POST /tasks may return a normal task ({_id}), a special route
     // ({routed,taskId} for workflow / terminal-lane / video), or a staged Work
     // Package ({routed:"work_package", packageId}). All of these are success.

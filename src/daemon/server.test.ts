@@ -483,3 +483,89 @@ test("New Task createTask treats a Work Package / routed response as success, no
   assert.match(src, /t\.taskId/);
   assert.match(src, /work_package/);
 });
+
+test("POST /tasks: a broad prompt that NAMES a lane becomes a Work Package, not a Terminal Lane task", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  // A broad bug-list with a category tally that literally contains "Terminal Lane".
+  const description = [
+    "Fix all of these across the app, and clean everything up:",
+    "BrowserLane starts at a small window size, the overview color coding is wrong,",
+    "the icon resets to dark, and the wallpaper translucency is ignored.",
+    "Bug tally by area:",
+    "- Browser Lane: 5",
+    "- Terminal Lane: 4",
+    "- Email: 12",
+  ].join("\n");
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description, project: "hivematrix", projectPath: "/tmp/x" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "work_package", "broad prompt naming a lane must stage a Work Package");
+
+  // It must NOT have been hijacked into a Terminal Lane task.
+  const tl = (getDb().prepare("SELECT COUNT(*) AS n FROM tasks WHERE source = 'terminal-lane'").get() as { n: number }).n;
+  assert.equal(tl, 0, "no Terminal Lane task may be created for a broad prompt that merely names the lane");
+});
+
+test("POST /tasks route=normal creates a plain task even for a broad prompt", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ route: "normal", description: "Fix all the lint, update every dep, and refactor auth across the codebase.", project: "hivematrix", projectPath: "/tmp/x" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.ok(body._id, "a plain task is returned");
+  assert.notEqual(body.routed, "work_package");
+  const pkgs = (getDb().prepare("SELECT COUNT(*) AS n FROM work_packages").get() as { n: number }).n;
+  assert.equal(pkgs, 0, "route=normal must not stage a Work Package");
+});
+
+test("POST /tasks route=work_package forces a package for a non-broad prompt", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ route: "work_package", description: "Refactor the auth module.", project: "hivematrix", projectPath: "/tmp/x" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "work_package");
+  assert.ok((body.itemCount as number) >= 1);
+});
+
+test("POST /tasks route=terminal-lane forces the lane even without use-cue wording", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ route: "terminal-lane", description: "df -h on the build box", project: "hivematrix", projectPath: "/tmp/x" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "terminal-lane");
+});
+
+test("New Task form exposes a Route selector and createTask sends it", () => {
+  assert.match(CONSOLE_HTML, /id="t_route"/);
+  const block = CONSOLE_HTML.match(/async function createTask\(\) \{[\s\S]*?\n\}/);
+  assert.ok(block);
+  assert.match(block![0], /route/);
+});
