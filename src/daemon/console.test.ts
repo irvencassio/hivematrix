@@ -125,7 +125,7 @@ test("needs_input reply window stands out and uses a clear 'Reply' button", () =
   assert.match(js, /reply-section'\+\(isOpen\?' open needs'/);
   assert.match(js, /✋ Awaiting your reply/);
   // The submit is a labeled primary "Reply" button, not a bare arrow glyph.
-  assert.match(js, /class="reply-primary"[^>]*>Reply</);
+  assert.match(js, /class="primary-action"[^>]*>Reply</);
   assert.doesNotMatch(js, /↩ Send Reply/, "old arrow-labeled button replaced");
   assert.match(CONSOLE_HTML, /\.reply-section\.needs/, "standout style present");
 });
@@ -149,6 +149,71 @@ test("live steerable tasks do not render Reply controls", () => {
   assert.match(js, /if \(steerable\) \{[\s\S]*submitSteer/, "steer form remains available");
   assert.match(js, /if \(!steerable\) \{\s*const isOpen = t\.reviewState === "needs_input"/, "Reply section is skipped for live steerable runs");
   assert.match(js, /const canReply = !steerable &&/, "Reply toggle is skipped for live steerable runs");
+});
+
+test("task-detail action rows use the standardized .action-bar token set", () => {
+  // Reusable pattern + role classes are defined once in CSS.
+  assert.match(CONSOLE_HTML, /\.action-bar\s*\{/, ".action-bar defined");
+  assert.match(CONSOLE_HTML, /\.primary-action\b/, ".primary-action defined");
+  assert.match(CONSOLE_HTML, /\.secondary-action\b/, ".secondary-action defined");
+  assert.match(CONSOLE_HTML, /\.danger-action\b/, ".danger-action defined");
+  assert.match(CONSOLE_HTML, /\.ghost-action\b/, ".ghost-action defined");
+  // Consistent sizing tokens + accessible focus on every bar button.
+  assert.match(CONSOLE_HTML, /\.action-bar > button[^}]*min-height/, "buttons share a min-height");
+  assert.match(CONSOLE_HTML, /\.action-bar > button[^}]*min-width/, "buttons share a min-width");
+  assert.match(CONSOLE_HTML, /\.action-bar > button:focus-visible/, "visible focus ring for accessibility");
+  const js = extractScript(CONSOLE_HTML);
+  // Task detail emits the standardized bar, not the old ad-hoc .actions row.
+  assert.match(js, /class="action-bar"/, "taskActionsHtml uses .action-bar");
+  assert.doesNotMatch(js, /class="actions"/, "old .actions row removed from task detail");
+});
+
+test("reply textarea is full-width/responsive, not a narrow inline box", () => {
+  // The textarea fills the column at any width, with a stable min-height.
+  assert.match(CONSOLE_HTML, /\.reply-input\s*\{[^}]*width:\s*100%/, ".reply-input is full width");
+  assert.match(CONSOLE_HTML, /\.reply-input\s*\{[^}]*box-sizing:\s*border-box/, ".reply-input uses border-box");
+  assert.match(CONSOLE_HTML, /\.reply-input\s*\{[^}]*min-height/, ".reply-input has a stable min-height");
+  // No misleading flex:1 (a no-op outside a flex parent) and no inline fixed width.
+  assert.doesNotMatch(CONSOLE_HTML, /\.reply-input\s*\{[^}]*flex:\s*1/, "drop the no-op flex:1");
+  const js = extractScript(CONSOLE_HTML);
+  assert.doesNotMatch(js, /reply-input"[^>]*style="[^"]*width/, "no inline fixed-width on reply textareas");
+});
+
+test("center column is a responsive container that stacks action bars when narrow", () => {
+  assert.match(CONSOLE_HTML, /\.col\.session[^}]*container-type:\s*inline-size/, "session column is a query container");
+  assert.match(CONSOLE_HTML, /@container[^{]*\{[\s\S]*?\.action-bar\s*\{[^}]*flex-direction:\s*column/, "action bars stack on narrow columns");
+});
+
+test("task-detail keeps one clear primary; toggles secondary, delete danger", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // The submit buttons are the primary actions.
+  assert.match(js, /class="primary-action"[^>]*onclick="replyTask/, "Reply submit is primary");
+  assert.match(js, /class="primary-action"[^>]*onclick="submitRetry/, "Retry submit is primary");
+  assert.match(js, /class="primary-action"[^>]*onclick="submitSteer/, "Steer submit is primary");
+  // Top-bar toggles are secondary (keep reply-toggle for active highlight); Delete is danger.
+  assert.match(js, /class="secondary-action reply-toggle"[^>]*onclick="toggleRetry/, "Retry toggle is secondary");
+  assert.match(js, /class="secondary-action reply-toggle"[^>]*onclick="toggleReply/, "Reply toggle is secondary");
+  assert.match(js, /class="danger-action"[^>]*onclick="deleteTask/, "Delete is a danger action");
+  // No duplicated ad-hoc role class for the same (primary) role.
+  assert.doesNotMatch(CONSOLE_HTML, /reply-primary/, "reply-primary consolidated into primary-action");
+});
+
+test("video review controls use the standardized action row with a single primary", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const m = js.match(/executor === "video-review"\)\s*\{([\s\S]*?)\} else if \(!steerable\)/);
+  assert.ok(m, "video-review branch present");
+  const block = m![1];
+  assert.match(block, /class="action-bar"/, "video review uses .action-bar");
+  assert.match(block, /class="ghost-action"[^>]*loadDraftIntoReply/, "Edit script is a ghost action");
+  assert.match(block, /class="danger-action"[^>]*videoReviewAction\([^)]*cancel/, "Cancel is a danger action");
+  const primaries = block.match(/class="primary-action"/g) || [];
+  assert.equal(primaries.length, 1, "exactly one primary action in the video review block");
+});
+
+test("upload-disable targets the primary submit button, not the first button in the row", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /setCtxSubmitDisabled[\s\S]*?querySelector\(".primary-action"\)/, "disable targets .primary-action");
+  assert.doesNotMatch(js, /querySelector\(".reply-row button"\)/, "old .reply-row button selector removed");
 });
 
 test("settings has an About tab with version/build/date and update status", () => {

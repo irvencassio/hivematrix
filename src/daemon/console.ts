@@ -80,6 +80,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     border-radius: 6px; padding: 3px 8px; font-size: 11px; }
   main { display: grid; grid-template-columns: 300px 1fr 320px; height: calc(100vh - 44px); }
   .col { overflow-y: auto; padding: 12px; }
+  /* The task-detail column is a size container so controls respond to the column
+     width (rails collapse independently of the window), not the viewport. */
+  .col.session { container-type: inline-size; }
   .col.board { border-right: 1px solid var(--border); }
   .col.context { border-left: 1px solid var(--border); background: var(--panel); }
   main.ctx-collapsed { grid-template-columns: 300px 1fr; }
@@ -392,20 +395,36 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .live.stale { color: var(--err); }
   .archive-link { font-size: 11px; color: var(--accent-2); cursor: pointer; font-weight: 400; text-transform: none; letter-spacing: 0; }
   .archive-link:hover { text-decoration: underline; }
-  .actions { display: flex; gap: 6px; margin: 10px 0 16px; flex-wrap: wrap; }
-  .actions button { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 5px 12px; font-size: 11px; cursor: pointer; }
-  .actions button:hover { border-color: var(--accent-2); }
-  .actions button.danger:hover { border-color: var(--err); color: var(--err); }
+  /* Standardized task-detail action row. One set of tokens for every reply/review/
+     retry/steer/video control so heights, radius, padding, and min-width match. */
+  .action-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .action-bar > button { min-height: 30px; min-width: 72px; border-radius: 6px; padding: 6px 14px;
+    font-size: 12px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center;
+    justify-content: center; gap: 6px; white-space: nowrap; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--text); }
+  .action-bar > button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .action-bar > button[disabled] { opacity: .5; cursor: default; filter: none; }
+  /* The one obvious next action. Child combinator beats the base button rule. */
+  .action-bar > .primary-action { background: var(--accent); color: var(--create-btn-text);
+    border-color: var(--accent); font-weight: 700; }
+  .action-bar > .primary-action:hover { filter: brightness(1.08); }
+  .action-bar > .secondary-action:hover { border-color: var(--accent-2); }
+  .action-bar > .ghost-action { background: transparent; color: var(--muted); border-color: transparent; }
+  .action-bar > .ghost-action:hover { color: var(--text); border-color: var(--accent-2); }
+  /* Destructive: quiet until hover, then it reads red — not loud unless engaged. */
+  .action-bar > .danger-action:hover { border-color: var(--err); color: var(--err); }
+  /* Narrow task-detail column → stack controls full-width instead of cramming. */
+  @container (max-width: 420px) {
+    .action-bar { flex-direction: column; align-items: stretch; }
+    .action-bar > button { width: 100%; }
+  }
   .reply-question { background: var(--reply-q-bg); border: 1px solid var(--accent-2); border-radius: 6px;
     padding: 8px 12px; font-size: 12px; color: var(--text); margin-bottom: 8px; }
-  .reply-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 16px; }
-  .reply-input { flex: 1; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
-    color: var(--text); font: 12px/1.4 inherit; padding: 6px 10px; resize: vertical; }
+  /* Reply/retry/steer/video textarea fills the column (it's a block child of the
+     section, so flex:1 was a no-op) and keeps a stable minimum height. */
+  .reply-input { width: 100%; box-sizing: border-box; background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font: 12px/1.4 inherit; padding: 8px 10px; min-height: 64px; resize: vertical; }
   .reply-input:focus { outline: none; border-color: var(--accent-2); }
-  .reply-row button { background: var(--accent-2); color: #fff; border: none; border-radius: 6px;
-    padding: 6px 14px; font-size: 11px; cursor: pointer; white-space: nowrap; }
-  .reply-row button:hover { opacity: .85; }
   .reply-section { display: none; }
   .reply-section.open { display: block; }
   /* needs_input: the reply window stands out so a waiting question is unmissable. */
@@ -415,7 +434,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   /* review/failed reply: present but understated — a thin left rule, no glow/card. */
   .reply-section.subtle.open { display: block; border-left: 2px solid var(--border); padding: 8px 0 8px 12px; margin: 12px 0; }
   .reply-subhead { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
-  .reply-row button.reply-primary { font-size: 13px; font-weight: 600; padding: 8px 18px; }
   .reply-toggle.active { border-color: var(--accent-2) !important; color: var(--accent-2) !important; }
   .settings-switch { display: inline-flex; align-items: center; gap: 8px; min-width: 112px; justify-content: flex-start;
     border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px 4px 5px; background: var(--panel-2);
@@ -1509,21 +1527,21 @@ function taskActionsHtml(t) {
   const retryable = ["failed","review","cancelled"].includes(t.status);
   // Steerable: any live run can be interrupted and resumed on the same session.
   const steerable = t.status === "in_progress";
-  if (running) b.push('<button onclick="taskAction(\''+t._id+'\',\'cancel\')">■ Cancel</button>');
-  if (retryable) b.push('<button class="reply-toggle" id="retryToggle_'+t._id+'" onclick="toggleRetry(\''+t._id+'\')">↻ Retry</button>');
+  if (running) b.push('<button class="secondary-action" onclick="taskAction(\''+t._id+'\',\'cancel\')">■ Cancel</button>');
+  if (retryable) b.push('<button class="secondary-action reply-toggle" id="retryToggle_'+t._id+'" onclick="toggleRetry(\''+t._id+'\')">↻ Retry</button>');
   // Reply: answer the agent / continue a finished task (review, failed, cancelled)
   // — except needs_input, which already shows the fully-standout reply card.
   const canReply = !steerable && t.reviewState !== "needs_input" && (t.pendingQuestion || retryable);
-  if (canReply) b.push('<button class="reply-toggle" id="replyToggle_'+t._id+'" onclick="toggleReply(\''+t._id+'\')">↩ Reply</button>');
-  if (!running) b.push('<button onclick="taskAction(\''+t._id+'\',\'archive\')">⌫ Archive</button>');
-  b.push('<button class="danger" onclick="deleteTask(\''+t._id+'\')">🗑 Delete</button>');
-  let html = '<div class="actions">'+b.join("")+'</div>';
+  if (canReply) b.push('<button class="secondary-action reply-toggle" id="replyToggle_'+t._id+'" onclick="toggleReply(\''+t._id+'\')">↩ Reply</button>');
+  if (!running) b.push('<button class="secondary-action" onclick="taskAction(\''+t._id+'\',\'archive\')">⌫ Archive</button>');
+  b.push('<button class="danger-action" onclick="deleteTask(\''+t._id+'\')">🗑 Delete</button>');
+  let html = '<div class="action-bar">'+b.join("")+'</div>';
   // Retry-with-steer: optional guidance text + attachments fold out under Retry.
   if (retryable) {
     html += '<div id="retrySection_'+t._id+'" class="reply-section">'
       + '<textarea id="retryText" class="reply-input" placeholder="Optional: add guidance to steer the rerun…" rows="2" oninput="onCtxDraft(\'retry\',this)"></textarea>'
       + attachPickerHtml('retry')
-      + '<div class="reply-row" style="margin-top:6px"><button onclick="submitRetry(\''+t._id+'\')">↻ Retry'+(t.status==='cancelled'?'':' with guidance')+'</button></div></div>';
+      + '<div class="action-bar"><button class="primary-action" onclick="submitRetry(\''+t._id+'\')">↻ Retry'+(t.status==='cancelled'?'':' with guidance')+'</button></div></div>';
   }
   // Steer a live run: always-visible box (the task is live-refreshing, so a
   // collapsible section would close mid-compose). Submitting interrupts the agent
@@ -1532,7 +1550,7 @@ function taskActionsHtml(t) {
     html += '<div id="steerSection_'+t._id+'" class="reply-section open">'
       + '<div class="reply-question">Steer this run — your instruction is added and the session resumes.</div>'
       + '<textarea id="steerText" class="reply-input" placeholder="Type a new instruction to steer this run…" rows="2" oninput="onCtxDraft(\'steer\',this)"></textarea>'
-      + '<div class="reply-row" style="margin-top:6px"><button onclick="submitSteer(\''+t._id+'\')">⤳ Send Steer</button></div></div>';
+      + '<div class="action-bar"><button class="primary-action" onclick="submitSteer(\''+t._id+'\')">⤳ Send Steer</button></div></div>';
   }
   // Reply box. needs_input → the fully-standout card (auto-open). Otherwise a
   // subtler "reply to continue" box (toggled open from the ↩ Reply button).
@@ -1543,12 +1561,12 @@ function taskActionsHtml(t) {
     html += '<div id="replySection_'+t._id+'" class="reply-section open needs">'
       + '<div class="reply-head">🎬 Review the script</div>'
       + '<div class="reply-subhead">Click <b>Edit script</b>, revise it, then <b>Save edits</b> (stays here to re-read) — or <b>Approve</b> to create a Browser Lane HeyGen portal task. A short note instead = rework.</div>'
-      + '<div class="reply-row" style="margin-bottom:6px"><button class="reply-toggle" onclick="loadDraftIntoReply()">✎ Edit script</button></div>'
+      + '<div class="action-bar"><button class="ghost-action" onclick="loadDraftIntoReply()">✎ Edit script</button></div>'
       + '<textarea id="replyText" class="reply-input" placeholder="Edit the script here (or type a short note like \'drop story 2\' to rework)…" rows="8" oninput="onCtxDraft(\'reply\',this)"></textarea>'
-      + '<div class="reply-row" style="margin-top:8px;gap:8px;flex-wrap:wrap">'
-      + '<button class="reply-primary" onclick="replyTask(\''+t._id+'\')">💾 Save edits / Send</button>'
-      + '<button onclick="videoReviewAction(\''+t._id+'\',\'approve\')">✅ Approve → Browser Lane</button>'
-      + '<button class="cancel" onclick="videoReviewAction(\''+t._id+'\',\'cancel\')">✕ Cancel</button>'
+      + '<div class="action-bar">'
+      + '<button class="primary-action" onclick="replyTask(\''+t._id+'\')">💾 Save edits / Send</button>'
+      + '<button class="secondary-action" onclick="videoReviewAction(\''+t._id+'\',\'approve\')">✅ Approve → Browser Lane</button>'
+      + '<button class="danger-action" onclick="videoReviewAction(\''+t._id+'\',\'cancel\')">✕ Cancel</button>'
       + '</div></div>';
   } else if (!steerable) {
     const isOpen = t.reviewState === "needs_input";
@@ -1560,9 +1578,9 @@ function taskActionsHtml(t) {
       + q
       + '<textarea id="replyText" class="reply-input" placeholder="'+(isOpen?'Type your reply…':'Reply to this task…')+'" rows="'+(isOpen?'7':'2')+'" oninput="onCtxDraft(\'reply\',this)"></textarea>'
       + attachPickerHtml('reply')
-      + '<div class="reply-row" style="margin-top:6px">'
-      + (_replyEditSource ? '<button class="reply-toggle" onclick="loadDraftIntoReply()" title="Load the current draft into the box to edit in place — no copy-paste">✎ Edit the draft</button> ' : '')
-      + '<button class="reply-primary" onclick="replyTask(\''+t._id+'\')">Reply</button></div></div>';
+      + '<div class="action-bar">'
+      + (_replyEditSource ? '<button class="ghost-action" onclick="loadDraftIntoReply()" title="Load the current draft into the box to edit in place — no copy-paste">✎ Edit the draft</button> ' : '')
+      + '<button class="primary-action" onclick="replyTask(\''+t._id+'\')">Reply</button></div></div>';
   }
   return html;
 }
@@ -1773,7 +1791,7 @@ function clearCtxAttachError(ctx) {
 }
 function setCtxSubmitDisabled(ctx) {
   const sec = _ctxTask ? document.getElementById(ctx+"Section_"+_ctxTask) : null;
-  const btn = sec ? sec.querySelector(".reply-row button") : null;
+  const btn = sec ? sec.querySelector(".primary-action") : null;
   if (btn) btn.disabled = (_ctxUploading[ctx] || 0) > 0 || !!_ctxAttachError[ctx];
 }
 function renderCtxChips(ctx) {
