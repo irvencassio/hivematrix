@@ -829,3 +829,100 @@ test("settings surfaces a real Terminal Lane readiness card with no secrets", ()
   assert.ok(render.length > 50, "renderTerminalReadiness body extracted");
   assert.doesNotMatch(render, /credentialRef|password|private_key|ssh_key_passphrase/, "no secrets surfaced in the UI");
 });
+
+// ─── New Task project picker (2026-06-27) ────────────────────────────────────
+// The New Task form must expose ONE searchable Project control; the working
+// directory is derived from the selection (hidden), never a primary editable
+// input. Path assertions are scoped to the task-form slice so the (out-of-scope)
+// directive path field does not pollute results.
+function taskFormSlice(html: string): string {
+  const start = html.indexOf('id="taskForm"');
+  const end = html.indexOf('id="board"');
+  assert.ok(start >= 0 && end > start, "task form slice located");
+  return html.slice(start, end);
+}
+
+function fnBody(js: string, name: string): string {
+  const re = new RegExp("(?:async )?function " + name + "\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}");
+  const m = js.match(re);
+  assert.ok(m, name + " function present");
+  return m![0];
+}
+
+test("New task path field is hidden, not a primary editable input", () => {
+  const slice = taskFormSlice(CONSOLE_HTML);
+  assert.match(slice, /id="t_path"[^>]*type="hidden"/, "path is a hidden derived store");
+  assert.doesNotMatch(slice, /Project path \(working dir\)/, "stale raw-path placeholder removed");
+  assert.doesNotMatch(slice, /placeholder="Project path/, "no visible project-path input in the task form");
+});
+
+test("New task uses one Project control with derived path as secondary text", () => {
+  const slice = taskFormSlice(CONSOLE_HTML);
+  assert.match(slice, />Project<\/label>/, "a single 'Project' label");
+  assert.match(slice, /id="t_project_search"/, "searchable combobox kept");
+  assert.match(slice, /id="t_project_selected"/, "selected-project row (name + muted path) present");
+});
+
+test("project selection routes through a single setTaskProject writer", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "setTaskProject");
+  assert.match(body, /selectedProjectName =/, "writes the selected name");
+  assert.match(body, /getElementById\("t_path"\)/, "writes the derived path store");
+  assert.match(body, /renderSelectedProject\(/, "refreshes the selected-project row");
+  // The dropdown click path delegates to the single writer.
+  assert.match(fnBody(js, "selectProjectFromDropdown"), /setTaskProject\(/);
+});
+
+test("project dropdown filters by name or path", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "renderProjectDropdown");
+  assert.match(body, /\.name\.toLowerCase\(\)\.includes/, "matches on name");
+  assert.match(body, /\.path\.toLowerCase\(\)\.includes/, "matches on path");
+});
+
+test("project picker supports keyboard nav (ArrowDown/ArrowUp/Enter/Escape)", () => {
+  const slice = taskFormSlice(CONSOLE_HTML);
+  assert.match(slice, /onkeydown="onProjectSearchKeydown/, "search input is wired to the keydown handler");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /projectHighlightIndex/, "tracks a keyboard highlight index");
+  const body = fnBody(js, "onProjectSearchKeydown");
+  assert.match(body, /ArrowDown/, "handles ArrowDown");
+  assert.match(body, /ArrowUp/, "handles ArrowUp");
+  assert.match(body, /e\.key === "Enter"/, "handles Enter");
+  assert.match(body, /e\.key === "Escape"/, "handles Escape");
+});
+
+test("Use another folder is an explicit advanced disclosure", () => {
+  const slice = taskFormSlice(CONSOLE_HTML);
+  assert.match(slice, /Use another folder/, "explicit custom-folder action present");
+  assert.match(slice, /id="t_custom_folder"/, "custom-folder disclosure block present");
+  assert.match(slice, /id="t_custom_path"/, "one-off path input present");
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "useCustomFolder");
+  assert.match(body, /setTaskProject\([^)]*true\)/, "custom folder sets the selection with the custom flag");
+});
+
+test("createTask builds the payload from the selection (no freeform path/search read)", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "createTask");
+  assert.match(body, /selectedProjectName/, "project name comes from the selection state");
+  assert.match(body, /project: selectedProjectName/, "payload project is the selected name, not the search box");
+  assert.doesNotMatch(body, /getElementById\("t_project_search"\)\.value/, "never reads the freeform filter text into the payload");
+});
+
+test("createTask validates with human-readable messages", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "createTask");
+  assert.match(body, /Please describe what the agent should do\./, "description required");
+  assert.match(body, /Please choose a project/, "project required");
+  assert.match(body, /Please choose a model\./, "model required");
+  // Old technical phrasing is gone.
+  assert.doesNotMatch(body, /Description and project path are required\./, "stale technical error removed");
+});
+
+test("New task keeps the model selector and attachments controls", () => {
+  const slice = taskFormSlice(CONSOLE_HTML);
+  assert.match(slice, /<select id="t_model">/, "model selector kept");
+  assert.match(slice, /id="t_attach_input"/, "attachment input kept");
+  assert.match(slice, /onclick="createTask\(\)"/, "Create task button kept");
+});

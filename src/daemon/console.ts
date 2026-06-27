@@ -510,6 +510,19 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .project-item .ptime { font-size: 10px; color: var(--muted); }
   .project-empty { padding: 12px 10px; font-size: 11px; color: var(--muted); text-align: center; }
   .project-empty.hidden { display: none; }
+  .project-item.active { background: var(--hover-bg); }
+  /* Selected project row: name + muted derived path (no raw path input) */
+  .project-selected { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 6px;
+    padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+  .project-selected .pname { font-size: 12px; font-weight: 600; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; max-width: 60%; }
+  .project-selected .pstar { color: var(--ok); font-size: 11px; }
+  .project-selected .ppath { font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; flex: 1 1 auto; min-width: 0; text-align: right; }
+  .custom-folder-toggle { display: inline-block; margin: 0 0 6px; font-size: 11px; }
+  .custom-folder { margin: 0 0 6px; }
+  .custom-folder input { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-family: inherit; }
 </style>
 </head>
 <body>
@@ -1028,7 +1041,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </div>
       <label class="flbl">Project</label>
       <div id="t_project_wrapper" class="project-search">
-        <input id="t_project_search" type="text" placeholder="Search projects…" oninput="filterProjectDropdown()" onfocus="openProjectDropdown()" />
+        <input id="t_project_search" type="text" placeholder="Search projects…" autocomplete="off" oninput="filterProjectDropdown()" onfocus="openProjectDropdown()" onkeydown="onProjectSearchKeydown(event)" />
         <div id="t_project_dropdown" class="project-dropdown hidden">
           <div class="project-sort-row">
             <span class="project-sort-btn active" data-sort="recent" onclick="sortProjectsDropdown('recent')">Most recent</span>
@@ -1038,7 +1051,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
           <div id="t_project_empty" class="project-empty hidden">No projects found <button class="copybtn" id="t_project_rescan" onclick="refreshProjects()">↻ Re-scan</button></div>
         </div>
       </div>
-      <input id="t_path" placeholder="Project path (working dir)" value="/tmp" />
+      <div id="t_project_selected" class="project-selected" style="display:none"></div>
+      <button type="button" class="linklike custom-folder-toggle" onclick="toggleCustomFolder()">Use another folder…</button>
+      <div id="t_custom_folder" class="custom-folder" style="display:none">
+        <input id="t_custom_path" placeholder="~/path/to/folder" onkeydown="if(event.key==='Enter'){event.preventDefault();useCustomFolder();}" />
+        <div class="row"><button class="create" onclick="useCustomFolder()">Use this folder</button><button class="cancel" onclick="toggleCustomFolder()">Cancel</button></div>
+        <div class="err" id="t_custom_err"></div>
+      </div>
+      <input id="t_path" type="hidden" value="" />
       <label class="flbl">Model</label>
       <select id="t_model"></select>
       <label class="flbl">Attachments (optional)</label>
@@ -3462,6 +3482,9 @@ async function loadModels() {
 let projectDropdownSort = "recent";  // "recent" | "name"
 let projectDropdownItems = [];       // full list of {name, path, preSelect, lastModified}
 let selectedProjectName = "";        // currently selected project in the task form
+let selectedProjectCustom = false;   // true when the path came from "Use another folder…"
+let projectVisibleItems = [];        // the currently-rendered (filtered+sorted) dropdown rows
+let projectHighlightIndex = -1;      // keyboard-highlighted row in projectVisibleItems (-1 = none)
 
 function sortProjectItems(items, mode) {
   if (mode === "name") return items.slice().sort((a, b) => a.name.localeCompare(b.name));
@@ -3480,8 +3503,11 @@ function renderProjectDropdown() {
   const emptyEl = document.getElementById("t_project_empty");
   if (!listEl) return;
 
-  const filtered = projectDropdownItems.filter(p => p.name.toLowerCase().includes(search));
+  const filtered = projectDropdownItems.filter(p =>
+    p.name.toLowerCase().includes(search) || p.path.toLowerCase().includes(search));
   const sorted = sortProjectItems(filtered, projectDropdownSort);
+  projectVisibleItems = sorted;
+  if (projectHighlightIndex >= sorted.length) projectHighlightIndex = sorted.length - 1;
 
   if (!sorted.length) {
     listEl.innerHTML = "";
@@ -3490,9 +3516,10 @@ function renderProjectDropdown() {
   }
   if (emptyEl) emptyEl.classList.add("hidden");
 
-  listEl.innerHTML = sorted.map(p => {
+  listEl.innerHTML = sorted.map((p, i) => {
     const timeStr = p.lastModified ? new Date(p.lastModified).toLocaleDateString() : "";
-    return '<div class="project-item'+(selectedProjectName===p.name?' selected':'')+'" onclick="selectProjectFromDropdown(\''+esc(p.name)+'\',\''+esc(p.path)+'\')">'
+    const cls = "project-item" + (selectedProjectName===p.name?" selected":"") + (i===projectHighlightIndex?" active":"");
+    return '<div class="'+cls+'" data-idx="'+i+'" onclick="selectProjectFromDropdown(\''+esc(p.name)+'\',\''+esc(p.path)+'\')">'
       + (p.preSelect ? '<span class="pstar">★</span>' : '')
       + '<span class="pname">'+esc(p.name)+'</span>'
       + (timeStr ? '<span class="ptime">'+esc(timeStr)+'</span>' : '')
@@ -3501,6 +3528,7 @@ function renderProjectDropdown() {
 }
 
 function filterProjectDropdown() {
+  projectHighlightIndex = -1;  // typing resets the keyboard cursor
   renderProjectDropdown();
 }
 
@@ -3521,15 +3549,107 @@ function openProjectDropdown() {
 function closeProjectDropdown() {
   const dd = document.getElementById("t_project_dropdown");
   if (dd) dd.classList.add("hidden");
+  projectHighlightIndex = -1;
+}
+
+// The SINGLE writer of the task-form project selection. Name and the derived
+// path are always set together here, so the create payload can never carry a
+// project name that disagrees with its projectPath.
+function setTaskProject(name, path, custom) {
+  selectedProjectName = name || "";
+  selectedProjectCustom = !!custom;
+  const hidden = document.getElementById("t_path");
+  if (hidden) hidden.value = path || "";
+  const search = document.getElementById("t_project_search");
+  if (search) search.value = name || "";
+  renderSelectedProject();
+}
+
+// Subtle, non-editable confirmation of the choice: name + the derived path as
+// muted secondary text (never a primary input). ★ marks the discovered active
+// project; custom folders are labelled so the source is honest.
+function renderSelectedProject() {
+  const row = document.getElementById("t_project_selected");
+  if (!row) return;
+  const path = (document.getElementById("t_path")?.value || "");
+  if (!selectedProjectName && !path) { row.style.display = "none"; row.innerHTML = ""; return; }
+  const known = projectDropdownItems.find(p => p.name === selectedProjectName && p.path === path);
+  const star = known && known.preSelect ? '<span class="pstar">★</span>' : '';
+  const tag = selectedProjectCustom ? '<span class="pstar" title="Custom folder">◆</span>' : star;
+  row.style.display = "flex";
+  row.innerHTML = tag
+    + '<span class="pname" title="'+esc(selectedProjectName)+'">'+esc(selectedProjectName || "(unnamed)")+'</span>'
+    + '<span class="ppath" title="'+esc(path)+'">'+esc(path)+'</span>';
 }
 
 function selectProjectFromDropdown(name, path) {
-  selectedProjectName = name;
-  const search = document.getElementById("t_project_search");
-  if (search) search.value = name;
-  const pathInput = document.getElementById("t_path");
-  if (pathInput) pathInput.value = path;
+  setTaskProject(name, path, false);
   closeProjectDropdown();
+}
+
+// Keyboard support for the combobox: ArrowDown/ArrowUp move the highlight,
+// Enter selects it, Escape closes the dropdown.
+function onProjectSearchKeydown(e) {
+  const dd = document.getElementById("t_project_dropdown");
+  const open = dd && !dd.classList.contains("hidden");
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    if (!open) { openProjectDropdown(); }
+    if (!projectVisibleItems.length) return;
+    projectHighlightIndex = Math.min(projectVisibleItems.length - 1, projectHighlightIndex + 1);
+    renderProjectDropdown();
+    scrollProjectHighlightIntoView();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!projectVisibleItems.length) return;
+    projectHighlightIndex = Math.max(0, projectHighlightIndex - 1);
+    renderProjectDropdown();
+    scrollProjectHighlightIntoView();
+  } else if (e.key === "Enter") {
+    if (open && projectHighlightIndex >= 0 && projectHighlightIndex < projectVisibleItems.length) {
+      e.preventDefault();
+      const p = projectVisibleItems[projectHighlightIndex];
+      selectProjectFromDropdown(p.name, p.path);
+    }
+  } else if (e.key === "Escape") {
+    if (open) { e.preventDefault(); e.stopPropagation(); closeProjectDropdown(); }
+  }
+}
+
+function scrollProjectHighlightIntoView() {
+  const listEl = document.getElementById("t_project_list");
+  if (!listEl) return;
+  const el = listEl.querySelector('.project-item[data-idx="'+projectHighlightIndex+'"]');
+  if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+}
+
+// "Use another folder…" — the explicit, advanced path to an arbitrary directory.
+function toggleCustomFolder() {
+  const box = document.getElementById("t_custom_folder");
+  if (!box) return;
+  const showing = box.style.display !== "none";
+  box.style.display = showing ? "none" : "block";
+  const errEl = document.getElementById("t_custom_err");
+  if (errEl) errEl.textContent = "";
+  if (!showing) {
+    const inp = document.getElementById("t_custom_path");
+    if (inp) { inp.value = (document.getElementById("t_path")?.value || ""); inp.focus(); }
+  }
+}
+
+function useCustomFolder() {
+  const errEl = document.getElementById("t_custom_err");
+  if (errEl) errEl.textContent = "";
+  const raw = (document.getElementById("t_custom_path")?.value || "").trim();
+  if (!raw) { if (errEl) errEl.textContent = "Enter a folder path (e.g. ~/work/my-project)."; return; }
+  // Derive a human-readable name from the folder's last segment so the project
+  // name and path stay consistent (no silent mismatch). Backend expands ~/$HOME.
+  const trimmed = raw.replace(/\/+$/, "");
+  const base = trimmed.split("/").filter(Boolean).pop() || "custom";
+  const name = (base === "~" || base === "$HOME") ? "home" : base;
+  setTaskProject(name, raw, true);
+  const box = document.getElementById("t_custom_folder");
+  if (box) box.style.display = "none";
 }
 
 function syncCommandProject(name, path) {
@@ -3612,21 +3732,21 @@ async function loadProjects(fresh) {
       lastModified: p.lastModified || "",
     }));
     populateCommandProjects(data.projects);
-    const preSelected = data.projects.find(p => p.preSelect);
-    if (preSelected) {
-      selectedProjectName = preSelected.name;
-      document.getElementById("t_project_search").value = preSelected.name;
-      document.getElementById("t_path").value = preSelected.path;
+    // Default the New Task selection (name + path together, via the single
+    // writer) to the restored board filter if any, else the active ★ project,
+    // else the most-recently used. Never clobber a deliberate choice or a custom
+    // folder on a re-scan — only (re)default when nothing valid is selected.
+    const savedProj = state.selectedProject ? data.projects.find(p => p.name === state.selectedProject) : null;
+    const chosen = savedProj
+      || data.projects.find(p => p.preSelect)
+      || sortProjectItems(projectDropdownItems, "recent")[0];
+    const stillValid = selectedProjectCustom || projectDropdownItems.some(p => p.name === selectedProjectName);
+    if (chosen && (!selectedProjectName || !stillValid)) {
+      setTaskProject(chosen.name, chosen.path, false);
+      if (savedProj) syncCommandProject(savedProj.name, savedProj.path);
     }
     renderProjectDropdown();
-    // If a filter was restored, also sync the task form path
-    if (state.selectedProject) {
-      const activeOpt = sel.options[sel.selectedIndex];
-      if (activeOpt && activeOpt.dataset.path) {
-        document.getElementById("t_path").value = activeOpt.dataset.path;
-        syncCommandProject(state.selectedProject, activeOpt.dataset.path);
-      }
-    }
+    renderSelectedProject();
   } catch (e) { /* transient */ }
 }
 
@@ -3634,10 +3754,12 @@ document.getElementById("projectSel").addEventListener("change", async (e) => {
   state.selectedProject = e.target.value;
   localStorage.setItem("hm_project", e.target.value);
   renderBoard();
-  // Sync task-form project path when header project changes
+  // Changing the board filter to a real project also points New Task at it —
+  // name+path together via the single writer, so they can't desync. "(all
+  // projects)" leaves the New Task selection untouched.
   const opt = e.target.options[e.target.selectedIndex];
-  if (opt && opt.dataset.path) {
-    document.getElementById("t_path").value = opt.dataset.path;
+  if (e.target.value && opt && opt.dataset.path) {
+    setTaskProject(e.target.value, opt.dataset.path, false);
     syncCommandProject(e.target.value, opt.dataset.path);
   }
 });
@@ -5125,18 +5247,23 @@ async function saveEndpoint() {
 async function createTask() {
   const err = document.getElementById("t_err"); err.textContent = "";
   const title = document.getElementById("t_title").value.trim();
-  let description = document.getElementById("t_desc").value.trim();
-  const projectPath = document.getElementById("t_path").value.trim();
-  const projName = selectedProjectName || null;
-  const sel = modelById[document.getElementById("t_model").value] || { modelId: null, fast: false };
-  if (!description || !projectPath) { err.textContent = "Description and project path are required."; return; }
+  const description = document.getElementById("t_desc").value.trim();
+  // Project + path both come from the single selection state (set together by
+  // setTaskProject), never the freeform filter box — so the payload can never
+  // carry a project name that disagrees with its projectPath.
+  const projectPath = (document.getElementById("t_path").value || "").trim();
+  const modelValue = document.getElementById("t_model").value;
+  const sel = modelById[modelValue] || { modelId: null, fast: false };
+  if (!description) { err.textContent = "Please describe what the agent should do."; return; }
+  if (!selectedProjectName || !projectPath) { err.textContent = "Please choose a project, or use another folder."; return; }
+  if (!modelValue) { err.textContent = "Please choose a model."; return; }
   if (_attachUploading > 0) { err.textContent = "Wait for attachments to finish uploading."; return; }
   if (_attachError) { err.textContent = "Try attaching failed files again before creating the task."; return; }
   const attachments = _attachments.slice();
   try {
     // Title optional — omit when blank so the daemon derives it from the instructions.
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: projName || "console", model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent" }) });
+      body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: selectedProjectName, model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent" }) });
     if (!t || !t._id) { err.textContent = "Create failed."; return; }
     document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = "";
     _attachments = []; _attachError = ""; _attachUploading = 0; renderAttachChips();
