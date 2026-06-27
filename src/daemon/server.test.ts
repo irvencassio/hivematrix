@@ -94,6 +94,34 @@ test("voice auto-approval settings persist through daemon API", async (t) => {
   assert.deepEqual(updated.policy, { enabled: true, allowCheckpoints: true, allowLowRiskTools: true });
 });
 
+test("voice logic diagnostic endpoint runs canned scenarios without audio", async (t) => {
+  const originalHome = process.env.HOME;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-voice-logic-"));
+  process.env.HOME = tmp;
+  t.after(() => {
+    if (originalHome) process.env.HOME = originalHome;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/settings/voice/test-scenarios`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { ok: boolean; failed: number; scenarios: Array<{ audioBytes: number; actual: string }> };
+  assert.equal(body.ok, true);
+  assert.equal(body.failed, 0);
+  assert.ok(body.scenarios.length >= 7);
+  assert.ok(body.scenarios.some((s) => s.actual === "command:weather"));
+  assert.ok(body.scenarios.every((s) => s.audioBytes === 0));
+});
+
 test("POST /tasks routes the exact failed YouTube prompt to content.youtube_summary, not a generic Codex agent", async (t) => {
   const originalHome = process.env.HOME;
   const tmp = mkdtempSync(join(tmpdir(), "hm-server-youtube-"));

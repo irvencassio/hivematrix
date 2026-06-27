@@ -378,6 +378,14 @@ export function createDaemonServer() {
         });
         return;
       }
+      // POST /settings/voice/test-scenarios — no-audio diagnostic for the
+      // deterministic voice routing layer. It stubs synth/actions, so it never
+      // records, transcribes, speaks, creates real tasks, or resolves approvals.
+      if (req.method === "POST" && urlPath === "/settings/voice/test-scenarios") {
+        const { runVoiceLogicScenarios } = await import("@/lib/voice/logic-scenarios");
+        json(res, 200, await runVoiceLogicScenarios());
+        return;
+      }
 
       // GET/POST /settings/briefing — proactive morning briefing (enabled + hour).
       if (req.method === "GET" && urlPath === "/settings/briefing") {

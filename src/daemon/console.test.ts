@@ -88,6 +88,13 @@ test("settings surfaces conservative voice auto-approval controls", () => {
   assert.match(js, /Content, external, stuck, and tool approvals stay manual/, "documents manual approval boundaries");
 });
 
+test("settings surfaces the no-audio voice logic diagnostic", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(CONSOLE_HTML, /Voice logic test/, "Settings has a voice logic diagnostic row");
+  assert.match(js, /function runVoiceLogicTest\(/, "has a Settings action for the diagnostic");
+  assert.match(js, /\/settings\/voice\/test-scenarios/, "calls the no-audio diagnostic endpoint");
+});
+
 test("settings binary controls use the standardized readable switch component", () => {
   const js = extractScript(CONSOLE_HTML);
   const renderFeatures = js.match(/async function renderFeatures\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";

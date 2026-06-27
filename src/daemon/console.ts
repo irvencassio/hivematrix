@@ -4404,6 +4404,12 @@ async function renderFeatures() {
     + '<div class="muted" style="font-size:11px;margin-top:2px">Allows Talk to approve non-content directive checkpoints. Content, external, stuck, and tool approvals stay manual.</div></div>'
     + settingsSwitch(checkpointAuto, 'toggleAutoApproval(' + (!checkpointAuto) + ')', { title: checkpointAuto ? 'Turn off voice auto-approval' : 'Turn on voice auto-approval' })
     + '</div>';
+  const voiceLogicRow = '<div style="padding:10px 0;border-top:1px solid var(--border)">'
+    + '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">'
+    + '<div style="flex:1"><div style="font-weight:600">Voice logic test</div>'
+    + '<div class="muted" style="font-size:11px;margin-top:2px">Runs canned text scenarios through Talk routing. No mic, STT, or audio playback.</div></div>'
+    + '<button class="copybtn" onclick="runVoiceLogicTest(this)">Run test</button>'
+    + '</div><div id="s_voice_logic_result" style="margin-top:8px"></div></div>';
   const b = (brief && brief.briefing) || {};
   const briefOn = b.enabled === true;
   const briefHour = typeof b.hour === 'number' ? b.hour : 8;
@@ -4421,7 +4427,7 @@ async function renderFeatures() {
   // Video factory is no longer a Features toggle — it's a capability driven by a
   // user directive (scheduled job) that runs the factory and pauses at the script-
   // review checkpoint. Nothing to render here.
-  el.innerHTML = featureRows + autoRow + briefRow;
+  el.innerHTML = featureRows + autoRow + voiceLogicRow + briefRow;
 }
 
 async function toggleBriefing(enabled) {
@@ -4462,6 +4468,39 @@ async function toggleAutoApproval(enabled) {
     body: JSON.stringify({ enabled, allowCheckpoints: enabled, allowLowRiskTools: false }),
   });
   renderFeatures();
+}
+
+async function runVoiceLogicTest(btn) {
+  const out = document.getElementById("s_voice_logic_result");
+  if (btn) btn.disabled = true;
+  if (out) out.innerHTML = '<div class="muted" style="font-size:11px">Running…</div>';
+  try {
+    const r = await api("/settings/voice/test-scenarios", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+    renderVoiceLogicResults(r);
+    if (r && r.ok) hmToast('Voice logic test passed.', 'ok');
+    else hmToast('Voice logic test found failures.', 'err');
+  } catch (e) {
+    if (out) out.innerHTML = '<div class="muted" style="font-size:11px;color:var(--danger)">Voice logic test failed to run.</div>';
+    hmToast('Voice logic test failed to run.', 'err');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function renderVoiceLogicResults(r) {
+  const out = document.getElementById("s_voice_logic_result");
+  if (!out) return;
+  const scenarios = (r && r.scenarios) || [];
+  const ok = r && r.ok === true;
+  const summary = '<div class="muted" style="font-size:11px;margin-bottom:6px">'
+    + (ok ? '✓ ' : '✗ ') + esc(String((r && r.passed) || 0)) + ' passed, ' + esc(String((r && r.failed) || 0)) + ' failed'
+    + '</div>';
+  const rows = scenarios.map(s => '<div style="display:grid;grid-template-columns:18px minmax(120px,1fr) minmax(120px,1fr);gap:8px;align-items:start;padding:5px 0;border-top:1px solid var(--border);font-size:11px">'
+    + '<span style="color:' + (s.passed ? 'var(--ok)' : 'var(--danger)') + '">' + (s.passed ? '✓' : '✗') + '</span>'
+    + '<div><div style="font-weight:600">' + esc(s.name || '') + '</div><div class="muted">' + esc(s.utterance || '') + '</div></div>'
+    + '<div><code>' + esc(s.actual || '') + '</code><div class="muted">' + esc((s.reply || '').slice(0, 120)) + '</div></div>'
+    + '</div>').join('');
+  out.innerHTML = summary + rows;
 }
 
 // ── In-app push-to-talk (Voice feature) ───────────────────────────────
