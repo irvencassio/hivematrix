@@ -5375,10 +5375,22 @@ async function createTask() {
     // Title optional — omit when blank so the daemon derives it from the instructions.
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: selectedProjectName, model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent" }) });
-    if (!t || !t._id) { err.textContent = "Create failed."; return; }
+    // POST /tasks may return a normal task ({_id}), a special route
+    // ({routed,taskId} for workflow / terminal-lane / video), or a staged Work
+    // Package ({routed:"work_package", packageId}). All of these are success.
+    const ok = t && (t._id || t.taskId || t.routed || t.packageId);
+    if (!ok) { err.textContent = (t && t.error) ? String(t.error) : "Create failed."; return; }
     document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = "";
     _attachments = []; _attachError = ""; _attachUploading = 0; renderAttachChips();
-    toggleForm("taskForm"); refresh();
+    toggleForm("taskForm");
+    if (t.routed === "work_package") {
+      const n = t.itemCount || 0;
+      hmToast("Staged as a Work Package (" + n + " item" + (n === 1 ? "" : "s") + "). Open Settings → Lanes → Work Packages to review and start it.");
+      renderWorkPackages();
+    } else if (t.routed) {
+      hmToast("Routed to " + String(t.routed).replace(/-/g, " ") + ".");
+    }
+    refresh();
   } catch (e2) { err.textContent = String(e2); }
 }
 

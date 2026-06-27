@@ -471,3 +471,15 @@ test("a converted Work Package item is backend-agnostic (executor agent, auto ag
   assert.equal(row.agentType, "auto", "no backend pinned — chatgpt/codex/qwen all eligible");
   assert.equal(row.model, null, "no model pinned on the item task");
 });
+
+test("New Task createTask treats a Work Package / routed response as success, not a failure", () => {
+  const block = CONSOLE_HTML.match(/async function createTask\(\) \{[\s\S]*?\n\}/);
+  assert.ok(block, "createTask block present");
+  const src = block![0];
+  // The old, broken success gate required _id and broke work_package responses.
+  assert.doesNotMatch(src, /if \(!t \|\| !t\._id\) \{ err\.textContent = "Create failed\."/);
+  // It now accepts _id OR taskId OR routed OR packageId.
+  assert.match(src, /t\.routed/);
+  assert.match(src, /t\.taskId/);
+  assert.match(src, /work_package/);
+});
