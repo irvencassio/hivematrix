@@ -3760,8 +3760,7 @@ async function loadModels() {
 // --- Projects ---
 let projectDropdownSort = "recent";  // "recent" | "name"
 let projectDropdownItems = [];       // full list of {name, path, preSelect, lastModified}
-let selectedProjectName = "";        // currently selected project in the task form
-let selectedProjectCustom = false;   // true when the path came from "Use another folder…"
+let selectedProject = null;          // { name, path, custom } — single source of truth for task form selection
 let projectVisibleItems = [];        // the currently-rendered (filtered+sorted) dropdown rows
 let projectHighlightIndex = -1;      // keyboard-highlighted row in projectVisibleItems (-1 = none)
 
@@ -3797,7 +3796,7 @@ function renderProjectDropdown() {
 
   listEl.innerHTML = sorted.map((p, i) => {
     const timeStr = p.lastModified ? new Date(p.lastModified).toLocaleDateString() : "";
-    const cls = "project-item" + (selectedProjectName===p.name?" selected":"") + (i===projectHighlightIndex?" active":"");
+    const cls = "project-item" + (selectedProject?.name===p.name?" selected":"") + (i===projectHighlightIndex?" active":"");
     const shortPath = p.path.replace(/^\/Users\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~');
     return '<div class="'+cls+'" data-idx="'+i+'" onclick="selectProjectFromDropdown(\''+esc(p.name)+'\',\''+esc(p.path)+'\')">'
       + '<div class="project-item-row1">'
@@ -3836,12 +3835,11 @@ function closeProjectDropdown() {
   projectHighlightIndex = -1;
 }
 
-// The SINGLE writer of the task-form project selection. Name and the derived
-// path are always set together here, so the create payload can never carry a
-// project name that disagrees with its projectPath.
+// The SINGLE writer of the task-form project selection. Name and path are
+// always set together into one object, so the payload can never carry a name
+// that disagrees with its projectPath.
 function setTaskProject(name, path, custom) {
-  selectedProjectName = name || "";
-  selectedProjectCustom = !!custom;
+  selectedProject = (name || path) ? { name: name || "", path: path || "", custom: !!custom } : null;
   const hidden = document.getElementById("t_path");
   if (hidden) hidden.value = path || "";
   const search = document.getElementById("t_project_search");
@@ -3855,14 +3853,15 @@ function setTaskProject(name, path, custom) {
 function renderSelectedProject() {
   const row = document.getElementById("t_project_selected");
   if (!row) return;
-  const path = (document.getElementById("t_path")?.value || "");
-  if (!selectedProjectName && !path) { row.style.display = "none"; row.innerHTML = ""; return; }
-  const known = projectDropdownItems.find(p => p.name === selectedProjectName && p.path === path);
+  const name = selectedProject?.name || "";
+  const path = selectedProject?.path || "";
+  if (!name && !path) { row.style.display = "none"; row.innerHTML = ""; return; }
+  const known = projectDropdownItems.find(p => p.name === name && p.path === path);
   const star = known && known.preSelect ? '<span class="pstar">★</span>' : '';
-  const tag = selectedProjectCustom ? '<span class="pstar" title="Custom folder">◆</span>' : star;
+  const tag = selectedProject?.custom ? '<span class="pstar" title="Custom folder">◆</span>' : star;
   row.style.display = "flex";
   row.innerHTML = tag
-    + '<span class="pname" title="'+esc(selectedProjectName)+'">'+esc(selectedProjectName || "(unnamed)")+'</span>'
+    + '<span class="pname" title="'+esc(name)+'">'+esc(name || "(unnamed)")+'</span>'
     + '<span class="ppath" title="'+esc(path)+'">'+esc(path)+'</span>';
 }
 
@@ -4138,8 +4137,8 @@ async function loadProjects(fresh) {
     const chosen = savedProj
       || data.projects.find(p => p.preSelect)
       || sortProjectItems(projectDropdownItems, "recent")[0];
-    const stillValid = selectedProjectCustom || projectDropdownItems.some(p => p.name === selectedProjectName);
-    if (chosen && (!selectedProjectName || !stillValid)) {
+    const stillValid = selectedProject?.custom || projectDropdownItems.some(p => p.name === selectedProject?.name);
+    if (chosen && (!selectedProject?.name || !stillValid)) {
       setTaskProject(chosen.name, chosen.path, false);
       if (savedProj) syncCommandProject(savedProj.name, savedProj.path);
     }
@@ -5775,23 +5774,21 @@ async function createTask() {
   const err = document.getElementById("t_err"); err.textContent = "";
   const title = document.getElementById("t_title").value.trim();
   const description = document.getElementById("t_desc").value.trim();
-  // Project + path both come from the single selection state (set together by
-  // setTaskProject), never the freeform filter box — so the payload can never
-  // carry a project name that disagrees with its projectPath.
-  const projectPath = (document.getElementById("t_path").value || "").trim();
   const modelValue = document.getElementById("t_model").value;
   const sel = modelById[modelValue] || { modelId: null, fast: false };
   if (!description) { err.textContent = "Please describe what the agent should do."; return; }
-  if (!selectedProjectName || !projectPath) { err.textContent = "Please choose a project, or use another folder."; return; }
-  if (!modelValue) { err.textContent = "Please choose a model."; return; }
+  if (!selectedProject?.name || !selectedProject?.path) { err.textContent = "Please choose a project — or use \"Another folder\" to pick one manually."; return; }
+  if (!modelValue) { err.textContent = "Please choose a model before creating the task."; return; }
   if (_attachUploading > 0) { err.textContent = "Wait for attachments to finish uploading."; return; }
   if (_attachError) { err.textContent = "Try attaching failed files again before creating the task."; return; }
   const attachments = _attachments.slice();
+  const projectPath = selectedProject.path;
+  const projectName = selectedProject.name;
   try {
     // Title optional — omit when blank so the daemon derives it from the instructions.
     const route = (document.getElementById("t_route") || {}).value || "auto";
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: selectedProjectName, model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent", route }) });
+      body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: projectName, model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent", route }) });
     // POST /tasks may return a normal task ({_id}), a special route
     // ({routed,taskId} for workflow / terminal-lane / video), or a staged Work
     // Package ({routed:"work_package", packageId}). All of these are success.
@@ -5810,7 +5807,10 @@ async function createTask() {
       hmToast("Routed to " + String(t.routed).replace(/-/g, " ") + ".");
     }
     refresh();
-  } catch (e2) { err.textContent = String(e2); }
+  } catch (e2) {
+    const msg = e2 instanceof Error ? e2.message : String(e2);
+    err.textContent = "Could not create task: " + msg.replace(/^Error:\s*/i, "");
+  }
 }
 
 async function createDirective() {

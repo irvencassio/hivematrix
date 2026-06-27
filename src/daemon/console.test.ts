@@ -939,7 +939,7 @@ test("New task uses one Project control with derived path as secondary text", ()
 test("project selection routes through a single setTaskProject writer", () => {
   const js = extractScript(CONSOLE_HTML);
   const body = fnBody(js, "setTaskProject");
-  assert.match(body, /selectedProjectName =/, "writes the selected name");
+  assert.match(body, /selectedProject = \(name \|\| path\) \? \{ name: name \|\| "", path: path \|\| "", custom: !!custom \} : null/, "writes the selected project object");
   assert.match(body, /getElementById\("t_path"\)/, "writes the derived path store");
   assert.match(body, /renderSelectedProject\(/, "refreshes the selected-project row");
   // The dropdown click path delegates to the single writer.
@@ -978,8 +978,9 @@ test("Use another folder is an explicit advanced disclosure", () => {
 test("createTask builds the payload from the selection (no freeform path/search read)", () => {
   const js = extractScript(CONSOLE_HTML);
   const body = fnBody(js, "createTask");
-  assert.match(body, /selectedProjectName/, "project name comes from the selection state");
-  assert.match(body, /project: selectedProjectName/, "payload project is the selected name, not the search box");
+  assert.match(body, /const projectPath = selectedProject\.path/, "project path comes from the selection state");
+  assert.match(body, /const projectName = selectedProject\.name/, "project name comes from the selection state");
+  assert.match(body, /project: projectName/, "payload project is the selected name, not the search box");
   assert.doesNotMatch(body, /getElementById\("t_project_search"\)\.value/, "never reads the freeform filter text into the payload");
 });
 
@@ -988,7 +989,7 @@ test("createTask validates with human-readable messages", () => {
   const body = fnBody(js, "createTask");
   assert.match(body, /Please describe what the agent should do\./, "description required");
   assert.match(body, /Please choose a project/, "project required");
-  assert.match(body, /Please choose a model\./, "model required");
+  assert.match(body, /Please choose a model before creating the task\./, "model required");
   // Old technical phrasing is gone.
   assert.doesNotMatch(body, /Description and project path are required\./, "stale technical error removed");
 });
