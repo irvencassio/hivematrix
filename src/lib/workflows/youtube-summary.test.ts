@@ -8,7 +8,7 @@ const TMP = mkdtempSync(join(tmpdir(), "hivematrix-youtube-summary-"));
 process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
 const { getDb, _resetDbForTests } = await import("@/lib/db");
-const { extractVideoId, buildYoutubeSummaryMarkdown, prepareYoutubeSummary } = await import("./youtube-summary");
+const { extractVideoId, buildYoutubeSummaryMarkdown, prepareYoutubeSummary, parseSummaryResponse } = await import("./youtube-summary");
 const { getWorkflowRegistry } = await import("./registry");
 const { getWorkflowRun } = await import("./runs");
 
@@ -58,6 +58,45 @@ test("buildYoutubeSummaryMarkdown: no-transcript path includes honest note and t
   assert.doesNotMatch(md, /Hello world/);
   assert.match(md, /No transcript/i);
   assert.match(md, /Browser Lane|private|login/i);
+});
+
+test("buildYoutubeSummaryMarkdown: has the four required sections", () => {
+  const md = buildYoutubeSummaryMarkdown(
+    { url: "https://www.youtube.com/watch?v=9PUaEj0pMYE", videoId: "9PUaEj0pMYE" },
+    { transcript: "some transcript", title: "T" },
+  );
+  assert.match(md, /^## Summary$/m);
+  assert.match(md, /^## Key points$/m);
+  assert.match(md, /^## Source \/ transcript status$/m);
+  assert.match(md, /^## Limitations$/m);
+});
+
+test("buildYoutubeSummaryMarkdown: real summary + key points render under their sections", () => {
+  const md = buildYoutubeSummaryMarkdown(
+    { url: "https://www.youtube.com/watch?v=9PUaEj0pMYE", videoId: "9PUaEj0pMYE" },
+    {
+      transcript: "the transcript",
+      title: "T",
+      summary: "This video explains widgets in three minutes.",
+      keyPoints: ["Widgets are blue", "Widgets are cheap"],
+    },
+  );
+  assert.match(md, /This video explains widgets in three minutes\./);
+  assert.match(md, /- Widgets are blue/);
+  assert.match(md, /- Widgets are cheap/);
+  assert.match(md, /summaryGenerated.*true/i);
+});
+
+test("buildYoutubeSummaryMarkdown: transcript present but no summary → honest pending note, no hallucination", () => {
+  const md = buildYoutubeSummaryMarkdown(
+    { url: "https://www.youtube.com/watch?v=9PUaEj0pMYE", videoId: "9PUaEj0pMYE" },
+    { transcript: "the captured transcript text", title: "T", summary: null, keyPoints: null },
+  );
+  assert.match(md, /summaryGenerated.*false/i);
+  // Honest: it must say the summary still needs generation/review, not invent one.
+  assert.match(md, /needs (generation|review)|not.*generated|pending/i);
+  // The transcript is still captured for provenance.
+  assert.match(md, /the captured transcript text/);
 });
 
 test("buildYoutubeSummaryMarkdown: long transcript is truncated with marker", () => {
@@ -163,6 +202,68 @@ test("prepareYoutubeSummary: does not create browser-lane tasks", async () => {
     .prepare("SELECT COUNT(*) AS n FROM tasks WHERE source = 'browser-lane'")
     .get() as { n: number };
   assert.equal(taskCount.n, 0);
+});
+
+// --- summarizer injection ---
+const fakeSummarizer = async (_input: { transcript: string; title: string | null; url: string }) => ({
+  summary: "A crisp injected summary.",
+  keyPoints: ["First key point", "Second key point"],
+});
+
+test("prepareYoutubeSummary: injected summarizer produces a real summary artifact", async () => {
+  const result = await prepareYoutubeSummary(
+    { url: "https://www.youtube.com/watch?v=9PUaEj0pMYE" },
+    { fetchTranscript: fakeTranscript, fetchTitle: fakeTitle, summarize: fakeSummarizer },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.summaryGenerated, true);
+  assert.match(result.markdown, /A crisp injected summary\./);
+  assert.match(result.markdown, /- First key point/);
+
+  const run = getWorkflowRun(result.runId!);
+  assert.ok(run);
+  assert.equal(run.artifacts.summaryGenerated, true);
+  assert.match(String(run.artifacts.summaryMarkdown), /A crisp injected summary\./);
+});
+
+test("prepareYoutubeSummary: summarizer is NOT called when transcript is missing (no hallucination)", async () => {
+  let called = false;
+  const spySummarizer = async () => {
+    called = true;
+    return { summary: "should never appear", keyPoints: [] };
+  };
+  const result = await prepareYoutubeSummary(
+    { url: "https://www.youtube.com/watch?v=9PUaEj0pMYE" },
+    { fetchTranscript: nullTranscript, fetchTitle: nullTitle, summarize: spySummarizer },
+  );
+  assert.equal(called, false, "summarizer must not run without a transcript");
+  assert.equal(result.summaryGenerated, false);
+  assert.doesNotMatch(result.markdown, /should never appear/);
+});
+
+test("prepareYoutubeSummary: transcript but summarizer returns null → honest, transcriptUsed stays true", async () => {
+  const result = await prepareYoutubeSummary(
+    { url: "https://www.youtube.com/watch?v=9PUaEj0pMYE" },
+    { fetchTranscript: fakeTranscript, fetchTitle: fakeTitle, summarize: async () => null },
+  );
+  assert.equal(result.transcriptUsed, true);
+  assert.equal(result.summaryGenerated, false);
+  assert.match(result.markdown, /needs (generation|review)|pending/i);
+});
+
+// --- parseSummaryResponse ---
+test("parseSummaryResponse: parses SUMMARY + KEY POINTS blocks", () => {
+  const parsed = parseSummaryResponse(
+    "SUMMARY: It is about cats.\nKEY POINTS:\n- Cats nap\n- Cats eat\n",
+  );
+  assert.ok(parsed);
+  assert.equal(parsed!.summary, "It is about cats.");
+  assert.deepEqual(parsed!.keyPoints, ["Cats nap", "Cats eat"]);
+});
+
+test("parseSummaryResponse: empty / contentless → null", () => {
+  assert.equal(parseSummaryResponse(""), null);
+  assert.equal(parseSummaryResponse("   "), null);
 });
 
 // --- prepareWorkflowById dispatcher ---

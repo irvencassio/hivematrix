@@ -379,6 +379,14 @@ test("dispatch surfaces the research brief workflow from natural-language text",
   assert.equal(result.workflow?.runbook, "docs/runbooks/content-research-brief.md");
 });
 
+test("dispatch surfaces content.youtube_summary for the exact failed YouTube prompt", () => {
+  const result = dispatchCooRequest({
+    text: "can you run the YouTube thing that summarizes for: https://www.youtube.com/watch?v=9PUaEj0pMYE",
+  });
+  assert.equal(result.workflow?.id, "content.youtube_summary");
+  assert.equal(result.workflow?.runbook, "docs/runbooks/youtube-summary.md");
+});
+
 test("prepare attaches readiness metadata/warning for a matched site (no secrets)", () => {
   browserRule();
   seedSite({ id: "heygen", domain: "app.heygen.com", status: "needs_reauth", color: "orange" });

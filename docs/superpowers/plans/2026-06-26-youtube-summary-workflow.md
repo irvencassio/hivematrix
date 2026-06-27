@@ -550,3 +550,60 @@ git add src/lib/workflows/youtube-summary-def.ts \
 git commit -m "feat: add content.youtube_summary workflow (ad-hoc YouTube transcript summary)"
 git push
 ```
+
+---
+
+# Follow-up Plan — closing the three gaps (2026-06-27)
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+TDD throughout: write the failing test, watch it fail, write minimal code, watch it pass.
+
+## Task F1 — YouTube-summary intent helper (reuse registry routing)
+
+- [ ] RED: `src/lib/workflows/youtube-summary-intent.test.ts`
+  - exact failed prompt → `isYoutubeSummaryRequest` is `true`
+  - exact failed prompt → `extractYoutubeUrlFromText` returns the watch URL
+  - a youtube URL with no phrase → `true` (domain match)
+  - a non-YouTube task ("fix the login bug") → `false`, URL extractor `null`
+- [ ] GREEN: `src/lib/workflows/youtube-summary-intent.ts`
+  - `extractYoutubeUrlFromText(text)` — first URL whose `extractVideoId` validates
+  - `extractDomainsFromText(text)` — hostnames of URLs in the text
+  - `isYoutubeSummaryRequest(text)` — `getWorkflowRegistry().match({ text, domains }).id === "content.youtube_summary"`
+
+## Task F2 — real summary artifact + injectable summarizer
+
+- [ ] RED: extend `src/lib/workflows/youtube-summary.test.ts`
+  - builder emits `## Summary`, `## Key points`, `## Source / transcript status`, `## Limitations`
+  - fake summarizer → real summary + key points appear; `summaryGenerated:true`
+  - transcript present but summarizer `null` → honest "needs generation" note; `summaryGenerated:false`; no hallucinated summary
+  - no transcript → summarizer NOT called; honest no-transcript note retained
+- [ ] GREEN: `src/lib/workflows/youtube-summary.ts`
+  - extend `YoutubeSummaryContext` with `summary`/`keyPoints`/`summaryGenerated`
+  - restructure `buildYoutubeSummaryMarkdown` sections
+  - add `summarize` dep (default wraps `renderViaCompletion`) + `_setYoutubeSummaryDepsForTests`
+  - call summarizer only when transcript present; link `summaryGenerated` artifact
+
+## Task F3 — `/tasks` ingress routing
+
+- [ ] RED: `src/daemon/server.test.ts`
+  - POST `/tasks` with the exact failed prompt (deps stubbed via the test seam)
+  - response `routed:"workflow"`, `workflowId:"content.youtube_summary"`, has `runId` + `taskId`
+  - the created task's `executor !== "agent"`; no `executor:"agent"` task exists
+  - no Browser Lane task created; no secrets in the response/task output
+- [ ] GREEN: `src/daemon/server.ts`
+  - third intent branch before generic `Task.create`; uses `prepareWorkflowById`; links run↔task
+
+## Task F4 — COO dispatch sanity test
+
+- [ ] RED/GREEN: `src/lib/coo/dispatch.test.ts`
+  - `dispatchCooRequest({ text: <failed prompt> }).workflow?.id === "content.youtube_summary"`
+
+## Task F5 — runbook
+
+- [ ] `docs/runbooks/youtube-summary.md` (public path, no Browser Lane, fallback, trigger, troubleshooting)
+
+## Task F6 — gates + commit
+
+- [ ] `npm run typecheck` · `npm test` · `node scripts/scope-wall.mjs`
+- [ ] commit + push to main (no release)

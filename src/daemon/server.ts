@@ -3287,6 +3287,43 @@ export function createDaemonServer() {
             // fall through to a normal task
           }
         }
+        // "run the youtube thing that summarizes …" / a YouTube URL → route to the
+        // deterministic content.youtube_summary review workflow (public transcript
+        // fetched daemon-side, no Browser Lane), NOT a generic Codex agent that would
+        // land in a sandbox with no network. Reuses the registered prepare path —
+        // no bespoke duplicate logic — and links the run to a review-visible task.
+        const { isYoutubeSummaryRequest, extractYoutubeUrlFromText } = await import("@/lib/workflows/youtube-summary-intent");
+        if (body.executor !== "workflow" && isYoutubeSummaryRequest(description)) {
+          try {
+            const { prepareWorkflowById } = await import("@/lib/workflows/prepare");
+            const { setWorkflowRunLinks } = await import("@/lib/workflows/runs");
+            const url = extractYoutubeUrlFromText(description) ?? "";
+            const prep = await prepareWorkflowById("content.youtube_summary", { url });
+            // needs_input (e.g. no URL in the text) is a known state — surface it as a
+            // review-visible workflow task, never fall through to a generic agent.
+            const yTitle = (typeof body.title === "string" && body.title.trim()) || deriveTaskTitle(description);
+            const task = await Task.create({
+              _id: generateId(),
+              title: yTitle,
+              description,
+              project: typeof body.project === "string" ? body.project : "hivematrix",
+              projectPath: typeof body.projectPath === "string" ? body.projectPath : process.cwd(),
+              status: "review",
+              reviewState: prep.status === "needs_input" ? "needs_input" : null,
+              executor: "workflow", // scheduler only claims executor:"agent" — never run as Codex
+              source: "workflow",
+              model: "workflow",
+              output: { routed: "workflow", workflowId: "content.youtube_summary", runId: prep.runId ?? null, status: prep.status, missing: prep.missing, result: prep.result },
+            });
+            if (prep.runId) setWorkflowRunLinks(prep.runId, { parentTaskId: task._id });
+            broadcast("tasks:created", { taskId: task._id });
+            json(res, 201, { routed: "workflow", workflowId: "content.youtube_summary", runId: prep.runId ?? null, taskId: task._id, status: prep.status, missing: prep.missing });
+            return;
+          } catch (e) {
+            console.error(`[tasks] YouTube-summary route failed; creating a normal task: ${e instanceof Error ? e.message : e}`);
+            // fall through to a normal task only on an UNEXPECTED failure
+          }
+        }
         // Title is optional — derive it from the instructions when absent/blank.
         const title = typeof body.title === "string" ? body.title.trim() : "";
         body.title = title || deriveTaskTitle(description);

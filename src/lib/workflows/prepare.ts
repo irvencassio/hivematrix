@@ -88,7 +88,7 @@ export async function prepareWorkflowById(workflowId: string, inputs: Record<str
         status: "prepared",
         workflow,
         runId: out.runId,
-        result: { markdown: out.markdown, transcriptUsed: out.transcriptUsed, videoId: out.videoId },
+        result: { markdown: out.markdown, transcriptUsed: out.transcriptUsed, summaryGenerated: out.summaryGenerated, videoId: out.videoId },
       };
     }
     default:

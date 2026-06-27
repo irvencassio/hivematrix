@@ -93,3 +93,73 @@ test("voice auto-approval settings persist through daemon API", async (t) => {
   const updated = await res.json() as { policy: Record<string, boolean> };
   assert.deepEqual(updated.policy, { enabled: true, allowCheckpoints: true, allowLowRiskTools: true });
 });
+
+test("POST /tasks routes the exact failed YouTube prompt to content.youtube_summary, not a generic Codex agent", async (t) => {
+  const originalHome = process.env.HOME;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-youtube-"));
+  process.env.HOME = tmp;
+
+  // Deterministic, no network: inject fake transcript/title/summarizer.
+  const { _setYoutubeSummaryDepsForTests } = await import("@/lib/workflows/youtube-summary");
+  _setYoutubeSummaryDepsForTests({
+    fetchTranscript: async () => "This is the captured transcript for the failed-prompt video.",
+    fetchTitle: async () => "The Failed Prompt Video",
+    summarize: async () => ({ summary: "A concise generated summary.", keyPoints: ["Point one", "Point two"] }),
+  });
+
+  t.after(() => {
+    _setYoutubeSummaryDepsForTests(null);
+    if (originalHome) process.env.HOME = originalHome;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const base = `http://127.0.0.1:${port}`;
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      description: "can you run the YouTube thing that summarizes for: https://www.youtube.com/watch?v=9PUaEj0pMYE",
+    }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+
+  // Routed to the deterministic workflow, with run + task pointers for the board.
+  assert.equal(body.routed, "workflow");
+  assert.equal(body.workflowId, "content.youtube_summary");
+  assert.ok(typeof body.runId === "string" && body.runId, "response carries a runId");
+  assert.ok(typeof body.taskId === "string" && body.taskId, "response carries a taskId");
+
+  const { getDb } = await import("@/lib/db");
+  const db = getDb();
+
+  // The created task is NOT a generic Codex agent task, and none exists.
+  const created = db.prepare("SELECT executor, source FROM tasks WHERE _id = ?").get(body.taskId) as { executor: string; source: string };
+  assert.notEqual(created.executor, "agent");
+  const agentCount = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE executor = 'agent'").get() as { n: number };
+  assert.equal(agentCount.n, 0, "no generic agent task may be created for a matched YouTube-summary request");
+
+  // Public YouTube URL → Browser Lane is never required/created.
+  const browserCount = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE source = 'browser-lane'").get() as { n: number };
+  assert.equal(browserCount.n, 0);
+
+  // The run is linked back to the task so the operator sees it from the board.
+  const { getWorkflowRun } = await import("@/lib/workflows/runs");
+  const run = getWorkflowRun(body.runId as string);
+  assert.ok(run);
+  assert.equal(run!.workflowId, "content.youtube_summary");
+  assert.equal(run!.parentTaskId, body.taskId);
+
+  // No secrets anywhere in the response or persisted task/run output.
+  const taskRow = db.prepare("SELECT output FROM tasks WHERE _id = ?").get(body.taskId) as { output: string };
+  const blob = JSON.stringify(body) + taskRow.output + JSON.stringify(run);
+  assert.doesNotMatch(blob, /password|cookie|secret|credential|api[_-]?key|\btoken\b/i);
+});
