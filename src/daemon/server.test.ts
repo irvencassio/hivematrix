@@ -163,3 +163,183 @@ test("POST /tasks routes the exact failed YouTube prompt to content.youtube_summ
   const blob = JSON.stringify(body) + taskRow.output + JSON.stringify(run);
   assert.doesNotMatch(blob, /password|cookie|secret|credential|api[_-]?key|\btoken\b/i);
 });
+
+// ── Work Packages + Task Intake ───────────────────────────────────
+
+async function startServer(t: import("node:test").TestContext) {
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const { port } = server.address() as AddressInfo;
+  return { base: `http://127.0.0.1:${port}`, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } };
+}
+
+function withTempHome(t: import("node:test").TestContext) {
+  const originalHome = process.env.HOME;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-wp-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "test.db");
+  t.after(async () => {
+    const { _resetDbForTests } = await import("@/lib/db");
+    _resetDbForTests();
+    delete process.env.HIVEMATRIX_DB_PATH;
+    if (originalHome) process.env.HOME = originalHome;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+}
+
+test("POST /work-packages/intake/preview classifies a broad prompt as a work_package_candidate", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/work-packages/intake/preview`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ description: "Fix all the lint errors across the codebase, update every dependency, and refactor auth." }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.kind, "work_package_candidate");
+  const pc = body.packageCandidate as { items: unknown[] };
+  assert.ok(pc.items.length >= 2);
+});
+
+test("work package APIs round-trip: create, list, get, patch, create-task", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  // Create from an intake preview.
+  const prev = await (await fetch(`${base}/work-packages/intake/preview`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "Fix all the failing tests across the project, and then deploy the release." }),
+  })).json() as Record<string, unknown>;
+
+  const created = await fetch(`${base}/work-packages`, {
+    method: "POST", headers,
+    body: JSON.stringify({ title: "Test sweep", project: "hivematrix", projectPath: "/tmp/x", intake: prev, items: (prev.packageCandidate as { items: unknown[] }).items }),
+  });
+  assert.equal(created.status, 201);
+  const pkg = await created.json() as Record<string, unknown>;
+  assert.ok(pkg.id);
+  assert.equal(pkg.status, "draft");
+
+  // List.
+  const list = await (await fetch(`${base}/work-packages`, { headers })).json() as Record<string, unknown>;
+  assert.ok((list.packages as unknown[]).some((p) => (p as Record<string, unknown>).id === pkg.id));
+
+  // Get detail with items.
+  const detail = await (await fetch(`${base}/work-packages/${pkg.id}`, { headers })).json() as Record<string, unknown>;
+  const items = detail.items as Array<Record<string, unknown>>;
+  assert.ok(items.length >= 2);
+
+  // Patch package status.
+  const patched = await (await fetch(`${base}/work-packages/${pkg.id}`, {
+    method: "PATCH", headers, body: JSON.stringify({ status: "ready" }),
+  })).json() as Record<string, unknown>;
+  assert.equal(patched.status, "ready");
+
+  // Patch an item status.
+  const item0 = items[0];
+  const pItem = await (await fetch(`${base}/work-packages/${pkg.id}/items/${item0.id}`, {
+    method: "PATCH", headers, body: JSON.stringify({ status: "ready" }),
+  })).json() as Record<string, unknown>;
+  assert.equal(pItem.status, "ready");
+
+  // Convert exactly one item to a task.
+  const before = (getDb().prepare("SELECT COUNT(*) AS n FROM tasks").get() as { n: number }).n;
+  const conv = await fetch(`${base}/work-packages/${pkg.id}/items/${item0.id}/create-task`, { method: "POST", headers });
+  assert.equal(conv.status, 201);
+  const convBody = await conv.json() as Record<string, unknown>;
+  assert.ok(convBody.taskId);
+  const after = (getDb().prepare("SELECT COUNT(*) AS n FROM tasks").get() as { n: number }).n;
+  assert.equal(after - before, 1, "exactly one task created");
+
+  // No secrets in the package JSON.
+  const blob = JSON.stringify(pkg) + JSON.stringify(detail);
+  assert.doesNotMatch(blob, /password|cookie|secret|credential|api[_-]?key|\btoken\b/i);
+});
+
+test("POST /tasks promotes a broad prompt into a Work Package, not a generic agent task", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "Fix all the broken imports across the codebase, update every config, and refactor the router." }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "work_package");
+  assert.ok(body.packageId);
+  assert.ok((body.itemCount as number) >= 2);
+
+  // No generic agent task was spawned for the broad prompt.
+  const agentCount = (getDb().prepare("SELECT COUNT(*) AS n FROM tasks WHERE executor = 'agent'").get() as { n: number }).n;
+  assert.equal(agentCount, 0, "broad prompt must not auto-create a running agent task");
+});
+
+test("POST /tasks still creates a normal task for a small prompt (intake passthrough)", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "Fix the typo in the footer.", project: "hivematrix", projectPath: "/tmp/x" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.notEqual(body.routed, "work_package");
+  assert.ok(body._id, "a normal task is returned");
+  const agentCount = (getDb().prepare("SELECT COUNT(*) AS n FROM tasks WHERE executor = 'agent'").get() as { n: number }).n;
+  assert.equal(agentCount, 1);
+});
+
+test("POST /tasks still routes an explicit Terminal Lane request to the lane (regression)", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "Use Terminal Lane to run uptime on the build server.", project: "hivematrix", projectPath: "/tmp/x" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "terminal-lane");
+});
+
+test("POST /tasks does not promote an AI-news video prompt into a Work Package (regression)", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { isAiNewsVideoRequest } = await import("@/lib/video/news-intent");
+  assert.equal(isAiNewsVideoRequest("make me an AI news video"), true);
+
+  const { base, headers } = await startServer(t);
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "make me an AI news video" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  // AI-news is handled before intake; it must never be classified as a package.
+  assert.notEqual(body.routed, "work_package");
+});
+
+test("console source includes the Work Packages panel and no auto-run-all control", () => {
+  assert.match(CONSOLE_HTML, /work_packages_list/);
+  assert.match(CONSOLE_HTML, /renderWorkPackages/);
+  assert.match(CONSOLE_HTML, /Work Packages/);
+  // Conservative by design: there is no button that runs every item at once.
+  assert.doesNotMatch(CONSOLE_HTML, /runAllPackageItems|Run all items|run-all/i);
+});

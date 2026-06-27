@@ -12,7 +12,12 @@ Supersedes: Hive 1 component map
 
 ## Hive daemon (headless, launchd, auto-updating)
 
-Owns: tasks, directives + runs (long-horizon autonomy primitive, replaces missions), approvals, model router, connectivity policy (cloud-ok | local-only | offline), usage-window scheduler, mixed-mode role routing, memory bundle assembly, traces, artifacts, health, verified-completion ledger, updater. Scheduling/watchers live in directive triggerPolicy (no separate scheduler-branded subsystem).
+Owns: tasks, directives + runs (long-horizon autonomy primitive, replaces missions), Task Intake + Work Packages (preflight classification + staged multi-step parents; see below), approvals, model router, connectivity policy (cloud-ok | local-only | offline), usage-window scheduler, mixed-mode role routing, memory bundle assembly, traces, artifacts, health, verified-completion ledger, updater. Scheduling/watchers live in directive triggerPolicy (no separate scheduler-branded subsystem).
+
+### Task Intake + Work Packages
+
+- **Task Intake** (`src/lib/intake/classify.ts`) — a pure, deterministic, rule-first preflight that classifies every new task before it becomes a board task. Output: kind (normal_task | workflow | lane_task | work_package_candidate | held), risk, suggestedMode, project-collision recommendation, and a proposed-item decomposition. No live LLM in the MVP — models advise (later), HiveMatrix policy decides.
+- **Work Package** (`src/lib/work-packages/`, tables `work_packages` + `work_package_items`) — the durable parent for a broad/multi-step prompt. Broad prompts are staged as a draft/held package with proposed child items instead of one messy task or an auto-running swarm. An operator explicitly converts an item into exactly one normal task. Same-repo non-worktree writer concurrency stays 1; parallel same-project work needs worktree-backing or read-only/safe scope. Release/deploy items are held (final-gated). Product copy: "Work Package" (not "macro task"). APIs under `/work-packages/*`; console panel in the Lanes tab (no run-all control).
 
 ## Hive console
 

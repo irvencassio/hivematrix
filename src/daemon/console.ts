@@ -896,6 +896,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="workflow_runs" style="margin-top:4px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
+        <label class="flbl" style="margin:0">Work Packages</label>
+        <button class="copybtn" onclick="renderWorkPackages()">↻ Refresh</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin:4px 0 6px">Broad or risky prompts are staged here as a draft instead of one messy task. Review each item, then explicitly turn it into a task. Same-repo writers stay one-at-a-time unless worktree-backed or read-only.</div>
+      <div id="work_packages_list" style="margin-top:6px"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
+      <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Safe senders</label>
         <button class="copybtn" onclick="renderSafeSenders()">↻</button>
       </div>
@@ -3958,7 +3965,7 @@ function switchSettingsTab(tab) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderSystemReadiness(); renderLaneSetup(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); }
+  if (tab === "lanes") { renderSystemReadiness(); renderLaneSetup(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); renderWorkPackages(); }
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -4818,6 +4825,74 @@ async function renderWorkflowRuns() {
     const blk = run.blocker ? ' — '+esc(run.blocker) : '';
     return '<div class="m" style="margin-top:2px"><span class="badge">'+esc(run.status)+'</span> '+esc(run.title)+(links?' ('+links+')':'')+yt+blk+'</div>';
   }).join("");
+}
+// ── Work Packages ──────────────────────────────────────────────────
+// Staged broad/risky prompts. Each item has explicit operator actions; there is
+// deliberately NO "run all" control — same-repo writers stay one-at-a-time.
+async function renderWorkPackages() {
+  const el = document.getElementById("work_packages_list");
+  if (!el) return;
+  el.innerHTML = '<div class="muted" style="font-size:11px">Loading…</div>';
+  const r = await api("/work-packages");
+  const packages = (r && r.packages) || [];
+  if (!packages.length) { el.innerHTML = '<div class="muted" style="font-size:11px">No work packages yet. Broad prompts will be staged here.</div>'; return; }
+  const blocks = [];
+  for (const p of packages) {
+    const detail = await api("/work-packages/"+encodeURIComponent(p.id));
+    if (!detail || !detail.id) continue;
+    blocks.push(renderWorkPackageCard(detail));
+  }
+  el.innerHTML = blocks.join("");
+}
+function renderWorkPackageCard(p) {
+  const counts = p.counts || {};
+  const order = ["held","ready","running","review","done","failed","draft","cancelled"];
+  const countChips = order.filter(k => counts[k]).map(k => '<span class="badge">'+counts[k]+' '+esc(k)+'</span>').join(" ");
+  // Collision / parallelism warning, surfaced from the intake snapshot.
+  let warn = "";
+  const col = p.intake && p.intake.projectCollision;
+  if (col && col.active) {
+    warn = '<div class="muted" style="font-size:11px;margin-top:4px;color:var(--warn,#d29922)">⚠ Same-project work active → '+esc(col.recommendation)+(col.recommendation==="hold"?" (one writer per repo)":"")+'</div>';
+  }
+  const items = (p.items || []).map(it => {
+    const deps = (it.dependsOn && it.dependsOn.length) ? ' · after '+it.dependsOn.length+' item(s)' : '';
+    const hints = (it.scopeHints && it.scopeHints.length) ? ' · '+it.scopeHints.map(esc).join(", ") : '';
+    const made = it.createdTaskId ? ' · task '+esc(it.createdTaskId) : '';
+    const canCreate = !it.createdTaskId && it.status !== "cancelled";
+    const actions = [
+      canCreate ? '<button class="appr-btn" onclick="wpCreateTask(\''+esc(p.id)+'\',\''+esc(it.id)+'\')">Create task</button>' : '',
+      '<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'held\')">Hold</button>',
+      '<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'ready\')">Mark ready</button>',
+      '<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'cancelled\')">Cancel</button>',
+    ].filter(Boolean).join(" ");
+    return '<div style="border:1px solid var(--border);border-radius:8px;padding:7px 9px;margin-top:6px;background:var(--panel)">'
+      + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">'
+      + '<div class="t" style="font-size:12px">'+esc(it.title)+'</div>'
+      + '<div><span class="badge">'+esc(it.status)+'</span> <span class="badge">'+esc(it.risk)+'</span> <span class="badge">'+esc(it.executionMode)+'</span></div>'
+      + '</div>'
+      + '<div class="muted" style="font-size:11px;margin-top:2px">'+esc(it.prompt)+deps+hints+made+'</div>'
+      + '<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+actions+'</div>'
+      + '</div>';
+  }).join("");
+  return '<div class="card" style="cursor:default">'
+    + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">'
+    + '<div class="t">'+esc(p.title)+' <span class="badge">'+esc(p.status)+'</span></div>'
+    + '<div>'+countChips+'</div>'
+    + '</div>'
+    + '<div class="muted" style="font-size:11px;margin-top:2px">'+esc(p.project)+' · '+esc(p.projectPath||"")+'</div>'
+    + warn
+    + items
+    + '</div>';
+}
+async function wpCreateTask(pkgId, itemId) {
+  const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/items/"+encodeURIComponent(itemId)+"/create-task", { method:"POST" });
+  if (r && r.taskId) { hmToast(r.created===false ? "Task already exists" : "Task created"); } else { hmToast((r && r.error) || "Create failed"); }
+  renderWorkPackages();
+}
+async function wpItem(pkgId, itemId, status) {
+  const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/items/"+encodeURIComponent(itemId), { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ status: status }) });
+  if (!r || !r.id) { hmToast((r && r.error) || "Update failed"); }
+  renderWorkPackages();
 }
 async function prepareResearchBrief() {
   const out = document.getElementById("brief_result");

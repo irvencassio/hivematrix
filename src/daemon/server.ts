@@ -1955,6 +1955,112 @@ export function createDaemonServer() {
         return;
       }
 
+      // ── Work Packages + Task Intake ─────────────────────────────────
+      // Every new task can be run through a lightweight, deterministic intake
+      // preflight. Small tasks stay normal tasks; broad/risky/colliding prompts
+      // become a durable Work Package draft with proposed child items. Models
+      // advise (later); HiveMatrix policy decides. All responses are secret-free.
+
+      // POST /work-packages/intake/preview  (alias: POST /tasks/intake/preview)
+      // Classify a prompt without persisting anything. Active same-project work
+      // is looked up from the DB so the collision recommendation is real.
+      if (req.method === "POST" && (urlPath === "/work-packages/intake/preview" || urlPath === "/tasks/intake/preview")) {
+        const { classifyIntake } = await import("@/lib/intake/classify");
+        const { activeSameProjectTasks } = await import("@/lib/work-packages/active");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const projectPath = typeof body.projectPath === "string" ? body.projectPath : "";
+        const result = classifyIntake({
+          title: typeof body.title === "string" ? body.title : undefined,
+          description: typeof body.description === "string" ? body.description : "",
+          project: typeof body.project === "string" ? body.project : undefined,
+          projectPath,
+          model: typeof body.model === "string" ? body.model : undefined,
+          source: typeof body.source === "string" ? body.source : undefined,
+          executor: typeof body.executor === "string" ? body.executor : undefined,
+          activeSameProject: projectPath ? activeSameProjectTasks(projectPath) : [],
+        });
+        json(res, 200, result);
+        return;
+      }
+
+      // POST /work-packages — create a package from an intake result + items.
+      if (req.method === "POST" && urlPath === "/work-packages") {
+        const { createWorkPackage } = await import("@/lib/work-packages/store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const items = Array.isArray(body.items) ? body.items : [];
+        if (items.length === 0) { json(res, 400, { error: "a work package needs at least one item" }); return; }
+        const pkg = createWorkPackage({
+          title: typeof body.title === "string" && body.title.trim() ? body.title : "Untitled work package",
+          description: typeof body.description === "string" ? body.description : "",
+          project: typeof body.project === "string" ? body.project : "hivematrix",
+          projectPath: typeof body.projectPath === "string" ? body.projectPath : "",
+          status: typeof body.status === "string" ? body.status as never : undefined,
+          sourceTaskId: typeof body.sourceTaskId === "string" ? body.sourceTaskId : null,
+          intake: (body.intake && typeof body.intake === "object") ? body.intake as never : null,
+          items: items as never,
+        });
+        broadcast("work-packages:created", { packageId: pkg.id });
+        json(res, 201, pkg);
+        return;
+      }
+
+      // GET /work-packages — list, optionally filtered by ?status=
+      if (req.method === "GET" && urlPath === "/work-packages") {
+        const { listWorkPackages } = await import("@/lib/work-packages/store");
+        const rawUrl = req.url ?? "";
+        const qIdx = rawUrl.indexOf("?");
+        const status = qIdx >= 0 ? (new URLSearchParams(rawUrl.slice(qIdx + 1)).get("status") ?? undefined) : undefined;
+        json(res, 200, { packages: listWorkPackages({ status }) });
+        return;
+      }
+
+      // POST /work-packages/:id/items/:itemId/create-task — convert ONE item to one task.
+      const wpCreateTaskMatch = urlPath.match(/^\/work-packages\/([^/]+)\/items\/([^/]+)\/create-task$/);
+      if (req.method === "POST" && wpCreateTaskMatch) {
+        const { createTaskFromItem } = await import("@/lib/work-packages/store");
+        try {
+          const r = await createTaskFromItem(decodeURIComponent(wpCreateTaskMatch[1]), decodeURIComponent(wpCreateTaskMatch[2]));
+          if (r.created) broadcast("tasks:created", { taskId: r.taskId });
+          json(res, 201, r);
+        } catch (e) {
+          json(res, 404, { error: e instanceof Error ? e.message : "create-task failed" });
+        }
+        return;
+      }
+
+      // PATCH /work-packages/:id/items/:itemId — update one item (hold/ready/cancel/...).
+      const wpItemMatch = urlPath.match(/^\/work-packages\/([^/]+)\/items\/([^/]+)$/);
+      if (req.method === "PATCH" && wpItemMatch) {
+        const { updateWorkPackageItem } = await import("@/lib/work-packages/store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const item = updateWorkPackageItem(decodeURIComponent(wpItemMatch[1]), decodeURIComponent(wpItemMatch[2]), body);
+        if (!item) { json(res, 404, { error: "Not found" }); return; }
+        broadcast("work-packages:updated", { packageId: decodeURIComponent(wpItemMatch[1]) });
+        json(res, 200, item);
+        return;
+      }
+
+      // GET /work-packages/:id — detail with items + status counts.
+      const wpGetMatch = urlPath.match(/^\/work-packages\/([^/]+)$/);
+      if (req.method === "GET" && wpGetMatch) {
+        const { getWorkPackage } = await import("@/lib/work-packages/store");
+        const pkg = getWorkPackage(decodeURIComponent(wpGetMatch[1]));
+        if (!pkg) { json(res, 404, { error: "Not found" }); return; }
+        json(res, 200, pkg);
+        return;
+      }
+
+      // PATCH /work-packages/:id — update package status/fields.
+      if (req.method === "PATCH" && wpGetMatch) {
+        const { updateWorkPackage } = await import("@/lib/work-packages/store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const pkg = updateWorkPackage(decodeURIComponent(wpGetMatch[1]), body);
+        if (!pkg) { json(res, 404, { error: "Not found" }); return; }
+        broadcast("work-packages:updated", { packageId: pkg.id });
+        json(res, 200, pkg);
+        return;
+      }
+
       // POST /coo/dispatch — route-to-execution bridge. Resolves the request to a
       // lane/capability and returns a typed dispatch result: a Browser-Lane-ready
       // work item for browser routes, an explicit approval requirement for
@@ -3322,6 +3428,54 @@ export function createDaemonServer() {
           } catch (e) {
             console.error(`[tasks] YouTube-summary route failed; creating a normal task: ${e instanceof Error ? e.message : e}`);
             // fall through to a normal task only on an UNEXPECTED failure
+          }
+        }
+        // Task Intake preflight — a deterministic, rule-first classifier that runs
+        // AFTER the explicit lane/workflow routes above and BEFORE generic agent
+        // creation. A genuinely broad/multi-step prompt becomes a durable Work
+        // Package DRAFT with proposed child items (never an auto-running swarm);
+        // everything else falls through to the unchanged normal-task path.
+        if (body.executor !== "workflow" && body.executor !== "terminal-lane" && body.executor !== "video-review") {
+          try {
+            const { classifyIntake } = await import("@/lib/intake/classify");
+            const { activeSameProjectTasks } = await import("@/lib/work-packages/active");
+            const projectPath = typeof body.projectPath === "string" ? body.projectPath : "";
+            const intake = classifyIntake({
+              title: typeof body.title === "string" ? body.title : undefined,
+              description,
+              project: typeof body.project === "string" ? body.project : undefined,
+              projectPath,
+              source: typeof body.source === "string" ? body.source : undefined,
+              executor: typeof body.executor === "string" ? body.executor : undefined,
+              activeSameProject: projectPath ? activeSameProjectTasks(projectPath) : [],
+            });
+            if (intake.kind === "work_package_candidate" && intake.packageCandidate) {
+              const { createWorkPackage } = await import("@/lib/work-packages/store");
+              // Hold the package when intake flags a same-project collision; else draft.
+              const status = intake.projectCollision?.recommendation === "hold" ? "held" : "draft";
+              const pkg = createWorkPackage({
+                title: intake.packageCandidate.title,
+                description,
+                project: typeof body.project === "string" ? body.project : "hivematrix",
+                projectPath,
+                status,
+                intake,
+                items: intake.packageCandidate.items,
+              });
+              broadcast("work-packages:created", { packageId: pkg.id });
+              json(res, 201, {
+                routed: "work_package",
+                packageId: pkg.id,
+                status: pkg.status,
+                itemCount: pkg.items.length,
+                collision: intake.projectCollision ?? null,
+                intake,
+              });
+              return;
+            }
+          } catch (e) {
+            console.error(`[tasks] Task Intake failed; creating a normal task: ${e instanceof Error ? e.message : e}`);
+            // fall through to a normal task on any unexpected intake failure
           }
         }
         // Title is optional — derive it from the instructions when absent/blank.

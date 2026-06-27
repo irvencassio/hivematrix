@@ -651,6 +651,48 @@ const MIGRATIONS: string[] = [
   // (metadata only — never a secret). Existing rows default to 'local'.
   `ALTER TABLE terminal_profiles ADD COLUMN authMethod TEXT NOT NULL DEFAULT 'local';
    ALTER TABLE terminal_profiles ADD COLUMN keyPath TEXT;`,
+
+  // v27: Work Packages — the Task Intake parent object + its items. A broad
+  // prompt is staged here (draft/held) instead of becoming one messy task or a
+  // swarm of colliding ones. Secret-free: description/prompt/scopeHints/blocker
+  // and the intake snapshot are key-redacted by the store on write.
+  `CREATE TABLE IF NOT EXISTS work_packages (
+      _id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      project TEXT NOT NULL DEFAULT 'hivematrix',
+      projectPath TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'draft',
+      sourceTaskId TEXT,
+      modelPolicy TEXT NOT NULL DEFAULT 'mixed_orchestrated',
+      orchestrationMode TEXT NOT NULL DEFAULT 'sequential',
+      intake_json TEXT NOT NULL DEFAULT '{}',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+      completedAt TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_work_packages_status ON work_packages(status, createdAt);
+    CREATE INDEX IF NOT EXISTS idx_work_packages_project ON work_packages(projectPath, status);
+
+    CREATE TABLE IF NOT EXISTS work_package_items (
+      _id TEXT PRIMARY KEY,
+      packageId TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      title TEXT NOT NULL,
+      prompt TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'draft',
+      risk TEXT NOT NULL DEFAULT 'low',
+      dependsOn TEXT NOT NULL DEFAULT '[]',
+      scopeHints TEXT NOT NULL DEFAULT '[]',
+      executionMode TEXT NOT NULL DEFAULT 'sequential',
+      createdTaskId TEXT,
+      resultTaskId TEXT,
+      commitHash TEXT,
+      blocker TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_work_package_items_pkg ON work_package_items(packageId, position);`,
 ];
 
 // ------------------------------------------------------------------
