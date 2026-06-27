@@ -121,6 +121,12 @@ async function main(): Promise<void> {
   const { startBrowserLaneReadinessLoop } = await import("@/lib/browser-lane/readiness-schedule");
   startBrowserLaneReadinessLoop();
 
+  // Work Package orchestration: a lightweight loop that reconciles + advances any
+  // running package, so ready items keep flowing even when a child completes
+  // outside the API (in-process scheduler). The PATCH /tasks hook is the fast path.
+  const { startWorkPackageOrchestrationLoop } = await import("@/lib/work-packages/orchestrate");
+  startWorkPackageOrchestrationLoop();
+
   // Voice result return path: when a voice-escalated task finishes, speak the
   // result (Kokoro) and push a voice:result SSE event so the open Talk screen
   // gets the answer it was told was "being looked into".

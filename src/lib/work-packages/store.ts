@@ -240,6 +240,13 @@ export function updateWorkPackageItem(packageId: string, itemId: string, patch: 
   return rowToItem(updated);
 }
 
+/** Map a created child task back to its owning package + item (for the advance hook). */
+export function findItemByTaskId(taskId: string): { packageId: string; itemId: string } | null {
+  if (!taskId) return null;
+  const row = getDb().prepare("SELECT _id, packageId FROM work_package_items WHERE createdTaskId = ?").get(taskId) as { _id: string; packageId: string } | undefined;
+  return row ? { packageId: row.packageId, itemId: row._id } : null;
+}
+
 export interface CreateTaskFromItemResult {
   taskId: string;
   created: boolean;

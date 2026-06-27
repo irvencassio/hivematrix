@@ -2040,6 +2040,43 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /work-packages/:id/start — explicit operator action: promote draft
+      // items to ready (held stays held), set the package running, advance.
+      const wpStartMatch = urlPath.match(/^\/work-packages\/([^/]+)\/start$/);
+      if (req.method === "POST" && wpStartMatch) {
+        const { startWorkPackage } = await import("@/lib/work-packages/orchestrate");
+        try {
+          const r = await startWorkPackage(decodeURIComponent(wpStartMatch[1]));
+          for (const itemId of r.started) {
+            const linked = r.package.items.find((i) => i.id === itemId);
+            if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
+          }
+          broadcast("work-packages:updated", { packageId: r.package.id });
+          json(res, 200, r);
+        } catch (e) {
+          json(res, 404, { error: e instanceof Error ? e.message : "start failed" });
+        }
+        return;
+      }
+
+      // POST /work-packages/:id/advance — reconcile + start eligible items.
+      const wpAdvanceMatch = urlPath.match(/^\/work-packages\/([^/]+)\/advance$/);
+      if (req.method === "POST" && wpAdvanceMatch) {
+        const { advanceWorkPackage } = await import("@/lib/work-packages/orchestrate");
+        try {
+          const r = await advanceWorkPackage(decodeURIComponent(wpAdvanceMatch[1]));
+          for (const itemId of r.started) {
+            const linked = r.package.items.find((i) => i.id === itemId);
+            if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
+          }
+          broadcast("work-packages:updated", { packageId: r.package.id });
+          json(res, 200, r);
+        } catch (e) {
+          json(res, 404, { error: e instanceof Error ? e.message : "advance failed" });
+        }
+        return;
+      }
+
       // GET /work-packages/:id — detail with items + status counts.
       const wpGetMatch = urlPath.match(/^\/work-packages\/([^/]+)$/);
       if (req.method === "GET" && wpGetMatch) {
@@ -3494,6 +3531,27 @@ export function createDaemonServer() {
         const task = await Task.findByIdAndUpdate(taskMatch[1], body);
         if (!task) { json(res, 404, { error: "Not found" }); return; }
         broadcast("tasks:updated", { taskId: task._id, status: task.status });
+        // Work Package advance hook: when a work-package-sourced child reaches a
+        // terminal/review state, advance its package immediately (the loop is the
+        // backstop). Never let a hook failure break the task update.
+        if ((task as Record<string, unknown>).source === "work-package" &&
+            ["done", "failed", "cancelled", "review"].includes(String((task as Record<string, unknown>).status))) {
+          try {
+            const { findItemByTaskId } = await import("@/lib/work-packages/store");
+            const owner = findItemByTaskId(task._id);
+            if (owner) {
+              const { advanceWorkPackage } = await import("@/lib/work-packages/orchestrate");
+              const r = await advanceWorkPackage(owner.packageId);
+              for (const itemId of r.started) {
+                const linked = r.package.items.find((i) => i.id === itemId);
+                if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
+              }
+              broadcast("work-packages:updated", { packageId: owner.packageId });
+            }
+          } catch (e) {
+            console.error(`[work-packages] advance hook failed: ${e instanceof Error ? e.message : e}`);
+          }
+        }
         json(res, 200, task);
         return;
       }

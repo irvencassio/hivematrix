@@ -4874,6 +4874,13 @@ function renderWorkPackageCard(p) {
       + '<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">'+actions+'</div>'
       + '</div>';
   }).join("");
+  // Package-level controls: explicit Start (operator action) and Advance.
+  const canStart = p.status === "draft" || p.status === "held";
+  const canAdvance = p.status === "running";
+  const pkgActions = [
+    canStart ? '<button class="create" onclick="wpStart(\''+esc(p.id)+'\')">Start package</button>' : '',
+    canAdvance ? '<button class="appr-btn" onclick="wpAdvance(\''+esc(p.id)+'\')">Advance</button>' : '',
+  ].filter(Boolean).join(" ");
   return '<div class="card" style="cursor:default">'
     + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">'
     + '<div class="t">'+esc(p.title)+' <span class="badge">'+esc(p.status)+'</span></div>'
@@ -4881,8 +4888,19 @@ function renderWorkPackageCard(p) {
     + '</div>'
     + '<div class="muted" style="font-size:11px;margin-top:2px">'+esc(p.project)+' · '+esc(p.projectPath||"")+'</div>'
     + warn
+    + (pkgActions ? '<div class="row" style="gap:6px;margin-top:8px">'+pkgActions+'</div>' : '')
     + items
     + '</div>';
+}
+async function wpStart(pkgId) {
+  const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/start", { method:"POST" });
+  if (r && r.package) { hmToast("Package started ("+((r.started||[]).length)+" item(s) running)"); } else { hmToast((r && r.error) || "Start failed"); }
+  renderWorkPackages();
+}
+async function wpAdvance(pkgId) {
+  const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/advance", { method:"POST" });
+  if (r && r.package) { hmToast((r.started||[]).length ? "Advanced ("+r.started.length+" started)" : "Nothing eligible yet"); } else { hmToast((r && r.error) || "Advance failed"); }
+  renderWorkPackages();
 }
 async function wpCreateTask(pkgId, itemId) {
   const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/items/"+encodeURIComponent(itemId)+"/create-task", { method:"POST" });

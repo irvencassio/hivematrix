@@ -343,3 +343,77 @@ test("console source includes the Work Packages panel and no auto-run-all contro
   // Conservative by design: there is no button that runs every item at once.
   assert.doesNotMatch(CONSOLE_HTML, /runAllPackageItems|Run all items|run-all/i);
 });
+
+test("POST /work-packages/:id/start runs the first item; completing it auto-advances (event hook)", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const items = [
+    { title: "Step one", prompt: "do step one", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+    { title: "Step two", prompt: "do step two", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: ["Step one"] },
+  ];
+  const pkg = await (await fetch(`${base}/work-packages`, {
+    method: "POST", headers, body: JSON.stringify({ title: "Seq", project: "hivematrix", projectPath: "/tmp/seq", items }),
+  })).json() as Record<string, unknown>;
+
+  // Start: only the first writer runs.
+  const start = await fetch(`${base}/work-packages/${pkg.id}/start`, { method: "POST", headers });
+  assert.equal(start.status, 200);
+  const startBody = await start.json() as Record<string, unknown>;
+  assert.equal((startBody.package as Record<string, unknown>).status, "running");
+  assert.equal((startBody.started as unknown[]).length, 1);
+
+  const detail1 = await (await fetch(`${base}/work-packages/${pkg.id}`, { headers })).json() as Record<string, unknown>;
+  const it1 = (detail1.items as Array<Record<string, unknown>>);
+  assert.equal(it1[0].status, "running");
+  assert.ok(it1[0].createdTaskId);
+  assert.equal(it1[1].status, "ready");
+  assert.equal(it1[1].createdTaskId, null);
+
+  // Complete the first child via PATCH /tasks/:id → the hook advances the package.
+  const firstTaskId = it1[0].createdTaskId as string;
+  const patched = await fetch(`${base}/tasks/${firstTaskId}`, { method: "PATCH", headers, body: JSON.stringify({ status: "done" }) });
+  assert.equal(patched.status, 200);
+
+  const detail2 = await (await fetch(`${base}/work-packages/${pkg.id}`, { headers })).json() as Record<string, unknown>;
+  const it2 = (detail2.items as Array<Record<string, unknown>>);
+  assert.equal(it2[0].status, "done");
+  assert.equal(it2[1].status, "running", "next item auto-started by the event hook");
+  assert.ok(it2[1].createdTaskId);
+});
+
+test("starting a package never auto-runs a held release item (final gate)", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const items = [
+    { title: "Build", prompt: "build it", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+    { title: "Deploy release", prompt: "deploy the release", risk: "high", executionMode: "hold", scopeHints: [], dependsOn: ["Build"] },
+  ];
+  const pkg = await (await fetch(`${base}/work-packages`, {
+    method: "POST", headers, body: JSON.stringify({ title: "Gated", project: "hivematrix", projectPath: "/tmp/gated", items }),
+  })).json() as Record<string, unknown>;
+
+  await fetch(`${base}/work-packages/${pkg.id}/start`, { method: "POST", headers });
+  const detail = await (await fetch(`${base}/work-packages/${pkg.id}`, { headers })).json() as Record<string, unknown>;
+  const its = detail.items as Array<Record<string, unknown>>;
+  const build = its[0].createdTaskId as string;
+  await fetch(`${base}/tasks/${build}`, { method: "PATCH", headers, body: JSON.stringify({ status: "done" }) });
+
+  // Advance explicitly; the held release item must remain held with no task.
+  await fetch(`${base}/work-packages/${pkg.id}/advance`, { method: "POST", headers });
+  const after = await (await fetch(`${base}/work-packages/${pkg.id}`, { headers })).json() as Record<string, unknown>;
+  const a = after.items as Array<Record<string, unknown>>;
+  assert.equal(a[0].status, "done");
+  assert.equal(a[1].status, "held");
+  assert.equal(a[1].createdTaskId, null);
+});
+
+test("console source includes a Start-package control and still no run-all", () => {
+  assert.match(CONSOLE_HTML, /wpStart|startWorkPackage/);
+  assert.doesNotMatch(CONSOLE_HTML, /runAllPackageItems|Run all items|run-all/i);
+});

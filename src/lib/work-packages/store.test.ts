@@ -15,6 +15,7 @@ const {
   updateWorkPackage,
   updateWorkPackageItem,
   createTaskFromItem,
+  findItemByTaskId,
 } = await import("./store");
 const { classifyIntake } = await import("@/lib/intake/classify");
 
@@ -97,6 +98,18 @@ test("createTaskFromItem creates exactly one task and is idempotent", async () =
 
   const refreshed = getWorkPackage(pkg.id)!.items.find((i) => i.id === item.id)!;
   assert.equal(refreshed.createdTaskId, r1.taskId);
+});
+
+test("findItemByTaskId maps a created task back to its package + item", async () => {
+  const intake = broadIntake();
+  const pkg = createWorkPackage({ title: "Sweep 5", project: "hivematrix", projectPath: "/Users/x/hivematrix", intake, items: intake.packageCandidate!.items });
+  const item = pkg.items[0];
+  const r = await createTaskFromItem(pkg.id, item.id);
+  const found = findItemByTaskId(r.taskId);
+  assert.ok(found);
+  assert.equal(found!.packageId, pkg.id);
+  assert.equal(found!.itemId, item.id);
+  assert.equal(findItemByTaskId("nope-does-not-exist"), null);
 });
 
 test("serialized package JSON carries no secrets", () => {
