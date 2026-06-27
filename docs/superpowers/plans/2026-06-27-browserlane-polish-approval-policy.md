@@ -102,6 +102,6 @@ File: `src/lib/orchestrator/approval.ts`
 ---
 
 ## Task 11 — Commit and push
-- [ ] `git add` relevant files
-- [ ] Commit with conventional message
-- [ ] Push to main
+- [x] `git add` relevant files
+- [x] Commit with conventional message (`894a59b`)
+- [x] Push to main
