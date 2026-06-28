@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.102 — 2026-06-28
+
+Flight reliability and Goal Flights
+
 ## v0.1.101 — 2026-06-28
 
 UI polish and Flight queue fixes

@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.102", date: "2026-06-28", note: "Flight reliability and Goal Flights" },
   { version: "0.1.101", date: "2026-06-28", note: "UI polish and Flight queue fixes" },
   { version: "0.1.100", date: "2026-06-28", note: "" },
   { version: "0.1.99", date: "2026-06-27", note: "" },
