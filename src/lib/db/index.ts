@@ -693,6 +693,50 @@ const MIGRATIONS: string[] = [
       updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_work_package_items_pkg ON work_package_items(packageId, position);`,
+
+  // v28: Flight Loops + Passes — bounded quality-pass runner attached to a
+  // Flight (work package). flight_loops holds the policy (mode, profile,
+  // max passes, cadence, expiry). flight_loop_passes records each bounded
+  // inspection-and-action cycle with its evidence, created items, and stop
+  // reason. Scheduler queries nextRunAt; per-Flight index prevents overlapping
+  // passes from racing.
+  `CREATE TABLE IF NOT EXISTS flight_loops (
+      _id TEXT PRIMARY KEY,
+      packageId TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      profile TEXT NOT NULL,
+      status TEXT NOT NULL,
+      maxPasses INTEGER NOT NULL,
+      passCount INTEGER NOT NULL DEFAULT 0,
+      cadenceSeconds INTEGER,
+      nextRunAt TEXT,
+      expiresAt TEXT,
+      autoCreateItems INTEGER NOT NULL DEFAULT 1,
+      autoReadySafeItems INTEGER NOT NULL DEFAULT 0,
+      stopReason TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_flight_loops_package ON flight_loops(packageId);
+    CREATE INDEX IF NOT EXISTS idx_flight_loops_next_run ON flight_loops(nextRunAt, status);
+
+    CREATE TABLE IF NOT EXISTS flight_loop_passes (
+      _id TEXT PRIMARY KEY,
+      loopId TEXT NOT NULL,
+      packageId TEXT NOT NULL,
+      passNumber INTEGER NOT NULL,
+      profile TEXT NOT NULL,
+      status TEXT NOT NULL,
+      startedAt TEXT NOT NULL,
+      completedAt TEXT,
+      summary TEXT,
+      evidenceJson TEXT,
+      createdItemIdsJson TEXT,
+      stopReason TEXT,
+      error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_flight_loop_passes_loop ON flight_loop_passes(loopId, passNumber);
+    CREATE INDEX IF NOT EXISTS idx_flight_loop_passes_pkg ON flight_loop_passes(packageId, startedAt);`,
 ];
 
 // ------------------------------------------------------------------

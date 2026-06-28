@@ -23,6 +23,7 @@ import {
   type WorkPackageDetail,
   type WorkPackageItem,
 } from "./store";
+import { notifySelfPacedLoop } from "./flight-loop-store";
 import type { IntakeActiveTask } from "@/lib/intake/classify";
 
 /** A writer item mutates the repo working tree; worktree/safe items do not. */
@@ -79,6 +80,7 @@ export async function reconcileWorkPackage(id: string): Promise<void> {
   const db = getDb();
   const detail = getWorkPackage(id);
   if (!detail) return;
+  let selfPacedTrigger = false;
   for (const item of detail.items) {
     if (!item.createdTaskId) continue;
     if (item.status !== "running" && item.status !== "review") continue;
@@ -98,7 +100,9 @@ export async function reconcileWorkPackage(id: string): Promise<void> {
       new Date().toISOString(),
       item.id,
     );
+    if (["done", "failed", "review"].includes(next)) selfPacedTrigger = true;
   }
+  if (selfPacedTrigger) notifySelfPacedLoop(id);
 }
 
 /** Recompute a package's status from its item statuses. */

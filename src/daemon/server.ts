@@ -2090,6 +2090,86 @@ export function createDaemonServer() {
         return;
       }
 
+      // ── Flight Loop API ─────────────────────────────────────────────
+      // GET  /work-packages/:id/loop          — get loop policy for a Flight
+      // PUT  /work-packages/:id/loop          — upsert loop config (create or update)
+      // POST /work-packages/:id/loop/run-pass — run one quality pass immediately
+      // POST /work-packages/:id/loop/pause    — pause an idle/active loop
+      // POST /work-packages/:id/loop/resume   — resume a paused loop
+      // GET  /work-packages/:id/loop/passes   — pass history newest-first
+
+      const wpLoopPassesMatch = urlPath.match(/^\/work-packages\/([^/]+)\/loop\/passes$/);
+      if (req.method === "GET" && wpLoopPassesMatch) {
+        const { getLoop, getLoopPasses } = await import("@/lib/work-packages/flight-loop-store");
+        const pkgId = decodeURIComponent(wpLoopPassesMatch[1]);
+        const loop = getLoop(pkgId);
+        if (!loop) { json(res, 404, { error: "Loop not found" }); return; }
+        const passes = getLoopPasses(loop.id);
+        json(res, 200, { passes });
+        return;
+      }
+
+      const wpLoopActionMatch = urlPath.match(/^\/work-packages\/([^/]+)\/loop\/(run-pass|pause|resume)$/);
+      if (req.method === "POST" && wpLoopActionMatch) {
+        const pkgId = decodeURIComponent(wpLoopActionMatch[1]);
+        const action = wpLoopActionMatch[2];
+        if (action === "run-pass") {
+          const { runPass } = await import("@/lib/work-packages/flight-loop-pass");
+          try {
+            const r = await runPass(pkgId);
+            broadcast("work-packages:updated", { packageId: pkgId });
+            json(res, 200, r);
+          } catch (e) {
+            json(res, 409, { error: e instanceof Error ? e.message : "run-pass failed" });
+          }
+          return;
+        }
+        if (action === "pause") {
+          const { pauseLoop } = await import("@/lib/work-packages/flight-loop-store");
+          const loop = pauseLoop(pkgId);
+          if (!loop) { json(res, 409, { error: "Loop not found or cannot be paused (may be running or already paused)" }); return; }
+          broadcast("work-packages:updated", { packageId: pkgId });
+          json(res, 200, { loop });
+          return;
+        }
+        if (action === "resume") {
+          const { resumeLoop } = await import("@/lib/work-packages/flight-loop-store");
+          const loop = resumeLoop(pkgId);
+          if (!loop) { json(res, 409, { error: "Loop not found or not currently paused" }); return; }
+          broadcast("work-packages:updated", { packageId: pkgId });
+          json(res, 200, { loop });
+          return;
+        }
+      }
+
+      const wpLoopMatch = urlPath.match(/^\/work-packages\/([^/]+)\/loop$/);
+      if (wpLoopMatch) {
+        const pkgId = decodeURIComponent(wpLoopMatch[1]);
+        if (req.method === "GET") {
+          const { getLoop } = await import("@/lib/work-packages/flight-loop-store");
+          const loop = getLoop(pkgId);
+          if (!loop) { json(res, 404, { error: "Loop not found" }); return; }
+          json(res, 200, { loop });
+          return;
+        }
+        if (req.method === "PUT") {
+          const { upsertLoop } = await import("@/lib/work-packages/flight-loop-store");
+          const body = await parseBody(req) as Record<string, unknown>;
+          const loop = upsertLoop(pkgId, {
+            mode: typeof body.mode === "string" ? body.mode as never : undefined,
+            profile: typeof body.profile === "string" ? body.profile as never : undefined,
+            maxPasses: typeof body.maxPasses === "number" ? body.maxPasses : undefined,
+            cadenceSeconds: body.cadenceSeconds === null ? null : typeof body.cadenceSeconds === "number" ? body.cadenceSeconds : undefined,
+            expiresAt: body.expiresAt === null ? null : typeof body.expiresAt === "string" ? body.expiresAt : undefined,
+            autoCreateItems: typeof body.autoCreateItems === "boolean" ? body.autoCreateItems : undefined,
+            autoReadySafeItems: typeof body.autoReadySafeItems === "boolean" ? body.autoReadySafeItems : undefined,
+          });
+          broadcast("work-packages:updated", { packageId: pkgId });
+          json(res, 200, { loop });
+          return;
+        }
+      }
+
       // GET /work-packages/:id — detail with items + status counts.
       const wpGetMatch = urlPath.match(/^\/work-packages\/([^/]+)$/);
       if (req.method === "GET" && wpGetMatch) {

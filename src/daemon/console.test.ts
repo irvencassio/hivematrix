@@ -1007,3 +1007,38 @@ test("New task keeps the model selector and attachments controls", () => {
   assert.match(slice, /id="t_attach_input"/, "attachment input kept");
   assert.match(slice, /onclick="createTask\(\)"/, "Create task button kept");
 });
+
+test("Flight detail includes a Loop section with controls in the Flight view", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /flight-loop-sec/, "loop section class exists");
+  assert.match(js, /function flightLoopSectionHtml\(/, "loop section renderer exists");
+  assert.match(js, /async function wpRunPass\(/, "Run pass control exists");
+  assert.match(js, /async function wpPauseLoop\(/, "Pause loop control exists");
+  assert.match(js, /async function wpResumeLoop\(/, "Resume loop control exists");
+  assert.match(js, /async function wpEditLoop\(/, "Edit loop control exists");
+  assert.match(js, /async function wpSetupLoop\(/, "Setup loop control exists");
+  // Loop section must be called from renderFlightDetail with the flight id
+  assert.match(js, /flightLoopSectionHtml\(id,\s*loop,\s*passes\)/, "loop section wired into renderFlightDetail");
+});
+
+test("Flight detail renders pass history rows", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function flightPassRowHtml\(/, "pass row renderer exists");
+  assert.match(js, /flight-pass-list/, "pass list class exists");
+  assert.match(js, /flight-pass-row/, "pass row class exists");
+  assert.match(js, /Pass History/, "pass history heading text exists");
+  assert.match(js, /pass\.passNumber/, "pass number is displayed");
+  assert.match(js, /pass\.summary/, "pass summary is displayed");
+});
+
+test("Flight loop controls are in the Flight detail, not a hidden Settings panel", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // Setup loop button is emitted from flightLoopSectionHtml, not settings
+  assert.match(js, /wpSetupLoop\(\\\''\+esc\(pkgId\)/, "setup loop button wired to pkgId in loop section");
+  // Loop section fetches from the correct API paths
+  assert.match(js, /\/loop\/run-pass/, "run-pass endpoint referenced");
+  assert.match(js, /\/loop\/pause/, "pause endpoint referenced");
+  assert.match(js, /\/loop\/resume/, "resume endpoint referenced");
+  // Passes are fetched for the active loop
+  assert.match(js, /\/loop\/passes/, "passes endpoint fetched in renderFlightDetail");
+});

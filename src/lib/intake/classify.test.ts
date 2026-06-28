@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { classifyIntake } from "./classify";
 
 test("a small, single-step prompt stays a normal_task and runs now", () => {
@@ -152,10 +155,19 @@ test("classifyIntakeAsync never calls a model for a small/normal task", async ()
 
 test("classifyIntakeAsync with no deps + flag off behaves like the deterministic classifier", async () => {
   _setIntakeDecomposeDepsForTests(null);
-  const r = await classifyIntakeAsync({ description: "Fix all the lint, update every dep, and refactor auth." });
-  // Flag defaults off → identical to deterministic split, no model reason.
-  assert.equal(r.kind, "work_package_candidate");
-  assert.ok(!r.reasons.includes("model-advised decomposition"));
+  const oldHome = process.env.HOME;
+  const tempHome = mkdtempSync(join(tmpdir(), "hm-intake-flags-"));
+  try {
+    process.env.HOME = tempHome;
+    const r = await classifyIntakeAsync({ description: "Fix all the lint, update every dep, and refactor auth." });
+    // Flag defaults off → identical to deterministic split, no model reason.
+    assert.equal(r.kind, "work_package_candidate");
+    assert.ok(!r.reasons.includes("model-advised decomposition"));
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME;
+    else process.env.HOME = oldHome;
+    rmSync(tempHome, { recursive: true, force: true });
+  }
 });
 
 // ── deterministicFragments + forceWorkPackage (explicit Work Package route) ──

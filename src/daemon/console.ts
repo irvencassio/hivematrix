@@ -206,6 +206,19 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .flight-item-head { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
   .flight-item-title { font-weight:600; min-width:0; }
   .flight-item-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+  .badge.ok { color: var(--ok); }
+  .badge.warn { color: var(--warn); }
+  .badge.err { color: var(--err); }
+  .flight-loop-sec { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); padding: 10px 12px; margin: 12px 0; }
+  .flight-loop-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .flight-loop-lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .flight-loop-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: var(--muted); margin: 6px 0; }
+  .flight-loop-meta b { color: var(--text); }
+  .flight-loop-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .flight-pass-list { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
+  .flight-pass-row { border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; }
+  .flight-pass-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11.5px; }
+  .flight-pass-summary { color: var(--muted); font-size: 11px; margin-top: 3px; }
   .usage-pill { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
     border-radius: 999px; padding: 3px 11px; font-size: 11px; font-weight: 600; white-space: nowrap; cursor: default; }
   .usage-breakdown { font-size: 11px; }
@@ -313,6 +326,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     width:24px; height:24px; border-radius:6px; cursor:pointer; line-height:1; font-size:13px; }
   .usage-refresh:hover { color:var(--text); border-color:var(--text); }
   .usage-refresh[disabled] { opacity:.45; cursor:default; }
+  .col.board .ctx-sec:first-child > summary { margin-top: 6px; }
+  .attach-drop { border: 1px dashed var(--border); border-radius: 6px; padding: 4px 6px; }
   .usage-action { border:1px solid var(--border); background:var(--panel-2); color:var(--text);
     border-radius:6px; cursor:pointer; font-size:11px; padding:4px 8px; margin-top:6px; }
   .usage-action:hover { border-color:var(--accent-2); }
@@ -799,7 +814,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     </div>
     <div id="settingsProjects" style="display:none">
       <div class="kv"><span class="k">discovered</span><span id="s_proj_count">…</span></div>
-      <div id="s_projects"></div>
+      <label class="flbl" style="margin-top:10px">Default project</label>
+      <select id="s_default_project" onchange="saveDefaultProject()" style="width:100%">
+        <option value="">(none — auto-select)</option>
+      </select>
+      <div class="muted" style="font-size:11px;margin-top:2px">Pre-filled in New Task when no recent project is active. Inbox is the built-in catch-all for non-project work.</div>
+      <div id="s_projects" style="margin-top:10px"></div>
       <div class="row" style="margin-top:10px"><button class="create" onclick="refreshProjects()">↻ Re-scan</button></div>
       <div class="muted" style="font-size:11px;margin-top:8px">Projects discovered from git repos, Claude Code history, and VS Code recents. ★ = pre-selected (active project).</div>
     </div>
@@ -1102,10 +1122,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 
 <main>
   <section class="col board">
-    <h2>Board <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></h2>
-    <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
-    <button class="addbtn" onclick="showNewTaskPanel()">＋ New task</button>
-    <div class="flight-sec" id="flights_rail"></div>
+    <details class="ctx-sec" id="flightsSec" open>
+      <summary>Flights <button class="usage-refresh" title="Refresh flights" onclick="event.stopPropagation();loadFlights().then(function(){renderFlightsRail();if(state.selectedFlight)renderFlightDetail(state.selectedFlight);})">↻</button></summary>
+      <div id="flights_rail" style="margin-bottom:6px"></div>
+    </details>
+    <details class="ctx-sec" id="boardSec" open>
+      <summary>Board <span id="archiveBtn" class="archive-link" onclick="event.stopPropagation();archiveCompleted()" title="Archive review/done/failed tasks"></span></summary>
+      <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
+      <button class="addbtn" onclick="showNewTaskPanel()">＋ New task</button>
     <div class="form" id="taskForm">
       <input id="t_title" type="hidden" value="" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
@@ -1142,20 +1166,25 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <select id="t_route">
         <option value="auto" selected>Auto — route by content</option>
         <option value="work_package">Flight — multi-step autonomous run</option>
+        <option value="browser">Browser Lane — web browsing &amp; automation</option>
         <option value="terminal-lane">Terminal Lane — run on a host</option>
+        <option value="mail">Mail Lane — compose &amp; send email</option>
+        <option value="message">Message Lane — iMessage &amp; SMS</option>
+        <option value="desktop">Desktop Lane — screen &amp; GUI automation</option>
         <option value="normal">Direct — one plain task</option>
       </select>
       <label class="flbl">Attachments</label>
       <div class="attach-row attach-drop" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onAttachDrop(event)">
         <input type="file" id="t_attach_input" multiple style="display:none" onchange="onAttachFiles(this)">
         <button type="button" class="cancel" onclick="document.getElementById('t_attach_input').click()">⊕ Browse</button>
-        <span class="muted" id="t_attach_hint" style="font-size:11px">No files selected</span>
+        <span class="muted" id="t_attach_hint" style="font-size:11px">Drag files here or browse</span>
       </div>
       <div class="attach-chips" id="t_attach_chips"></div>
       <div class="row" style="margin-top:12px"><button class="cancel" onclick="cancelForm('taskForm')">Cancel</button><button class="create" onclick="createTask()">Create task</button></div>
       <div class="err" id="t_err"></div>
     </div>
     <div id="board"></div>
+    </details>
   </section>
   <section class="col session">
     <div id="session"><div class="session-empty">Select a task to inspect its session.</div></div>
@@ -1506,7 +1535,7 @@ function renderFlightsRail() {
     .filter(p => !state.selectedProject || p.project === state.selectedProject)
     .filter(p => p.status !== "cancelled")
     .slice(0, 8);
-  const body = visible.length ? '<div class="flight-list">' + visible.map(p => {
+  el.innerHTML = visible.length ? '<div class="flight-list">' + visible.map(p => {
     const pr = flightProgress(p);
     return '<button class="flight-card'+(state.selectedFlight===p.id?' sel':'')+'" onclick="selectFlight(\''+esc(p.id)+'\')">'
       + '<div class="flight-title">'+esc(p.title || p.id)+'</div>'
@@ -1514,7 +1543,6 @@ function renderFlightsRail() {
       + '<div class="flight-progress"><i style="width:'+Math.max(0, Math.min(100, pr.pct))+'%"></i></div>'
       + '</button>';
   }).join("") + '</div>' : '<div class="muted" style="font-size:11px">No Flights staged.</div>';
-  el.innerHTML = '<div class="flight-head"><h2>Flights</h2><button class="copybtn" onclick="loadFlights().then(function(){renderFlightsRail(); if(state.selectedFlight) renderFlightDetail(state.selectedFlight);})">↻</button></div>' + body;
 }
 async function loadFlights() {
   const r = await api("/work-packages");
@@ -1551,6 +1579,13 @@ async function renderFlightDetail(id) {
   const pr = flightProgress(p);
   const canStart = ["draft","held","ready"].includes(p.status);
   const canAdvance = p.status === "running";
+  const loopResp = await api("/work-packages/"+encodeURIComponent(id)+"/loop");
+  const loop = loopResp && loopResp.loop ? loopResp.loop : null;
+  let passes = [];
+  if (loop) {
+    const passResp = await api("/work-packages/"+encodeURIComponent(id)+"/loop/passes");
+    passes = (passResp && passResp.passes) || [];
+  }
   const items = (p.items || []).map(it => {
     const made = it.createdTaskId ? ' · task '+esc(it.createdTaskId) : '';
     const deps = (it.dependsOn && it.dependsOn.length) ? ' · after '+it.dependsOn.length+' item(s)' : '';
@@ -1574,11 +1609,84 @@ async function renderFlightDetail(id) {
     + '<button class="secondary-action" onclick="wpEditPackage(\''+esc(p.id)+'\')">Edit</button>'
     + '<button class="danger-action" onclick="wpDeletePackage(\''+esc(p.id)+'\')">Delete</button>'
     + '</div>'
+    + flightLoopSectionHtml(id, loop, passes)
     + '<h2>Description</h2><div class="desc">'+esc(p.description || "No description.")+'</div>'
     + '<h2>Items</h2>' + (items || '<div class="muted">No items.</div>')
     + '</div>';
 }
 
+function flightLoopSectionHtml(pkgId, loop, passes) {
+  if (!loop) {
+    return '<div class="flight-loop-sec">'
+      + '<div class="flight-loop-head"><span class="flight-loop-lbl">Loop</span></div>'
+      + '<div class="muted" style="font-size:11px">No loop configured. Quality passes help iteratively improve the Flight.</div>'
+      + '<div class="flight-loop-actions"><button class="appr-btn" onclick="wpSetupLoop(\''+esc(pkgId)+'\')">Setup loop</button></div>'
+      + '</div>';
+  }
+  const modeLabels = { off: 'Off', manual: 'Manual', fixed: 'Fixed cadence', self_paced: 'Self-paced' };
+  const profileLabels = { quality: 'Quality', release: 'Release', watch: 'Watch', personal_admin: 'Personal admin' };
+  const passCounter = loop.passCount + ' of ' + loop.maxPasses + ' passes';
+  let nextWake = '—';
+  if (loop.status === 'paused') {
+    nextWake = 'paused';
+  } else if (loop.status === 'stopped') {
+    nextWake = 'stopped' + (loop.stopReason ? ' · ' + loop.stopReason : '');
+  } else if (loop.mode === 'manual') {
+    nextWake = 'on demand';
+  } else if (loop.nextRunAt) {
+    const diffMs = new Date(loop.nextRunAt).valueOf() - Date.now();
+    const diffS = Math.round(diffMs / 1000);
+    if (diffS <= 0) nextWake = 'imminent';
+    else if (diffS < 60) nextWake = 'in ' + diffS + 's';
+    else nextWake = 'in ' + Math.round(diffS / 60) + 'm';
+  } else if (loop.mode === 'self_paced') {
+    nextWake = 'after next item';
+  }
+  const statusCls = loop.status === 'active' || loop.status === 'running' ? ' warn' : loop.status === 'stopped' ? ' err' : '';
+  const canRun = loop.status !== 'running' && loop.status !== 'stopped';
+  const canPause = loop.status === 'idle' || loop.status === 'active';
+  const canResume = loop.status === 'paused';
+  const actions = [];
+  if (canRun) actions.push('<button class="appr-btn" onclick="wpRunPass(\''+esc(pkgId)+'\')">Run pass</button>');
+  if (canPause) actions.push('<button class="appr-btn" onclick="wpPauseLoop(\''+esc(pkgId)+'\')">Pause loop</button>');
+  if (canResume) actions.push('<button class="appr-btn" onclick="wpResumeLoop(\''+esc(pkgId)+'\')">Resume loop</button>');
+  actions.push('<button class="appr-btn" onclick="wpEditLoop(\''+esc(pkgId)+'\')">Edit loop</button>');
+  const passHistoryHtml = passes.length
+    ? '<div class="flight-pass-list">'+passes.map(flightPassRowHtml).join('')+'</div>'
+    : '<div class="muted" style="font-size:11px;margin-top:6px">No passes yet.</div>';
+  return '<div class="flight-loop-sec">'
+    + '<div class="flight-loop-head">'
+    + '<span class="flight-loop-lbl">Loop</span>'
+    + '<span class="badge'+statusCls+'">'+esc(loop.status)+'</span>'
+    + '</div>'
+    + '<div class="flight-loop-meta">'
+    + '<span><b>'+esc(modeLabels[loop.mode] || loop.mode)+'</b> mode</span>'
+    + '<span><b>'+esc(profileLabels[loop.profile] || loop.profile)+'</b> profile</span>'
+    + '<span><b>'+esc(passCounter)+'</b></span>'
+    + '<span>next: <b>'+esc(nextWake)+'</b></span>'
+    + '</div>'
+    + '<div class="flight-loop-actions">'+actions.join('')+'</div>'
+    + (passes.length ? '<h2 style="margin-top:12px">Pass History</h2>' : '')
+    + passHistoryHtml
+    + '</div>';
+}
+function flightPassRowHtml(pass) {
+  const statusCls = pass.status === 'completed' ? 'ok' : pass.status === 'failed' ? 'err' : 'warn';
+  let duration = 'running';
+  if (pass.completedAt && pass.startedAt) {
+    duration = Math.round((new Date(pass.completedAt).valueOf() - new Date(pass.startedAt).valueOf()) / 1000) + 's';
+  }
+  const created = (pass.createdItemIds && pass.createdItemIds.length)
+    ? ' · ' + pass.createdItemIds.length + ' item(s) created' : '';
+  const stopNote = pass.stopReason ? ' · ' + esc(pass.stopReason) : '';
+  return '<div class="flight-pass-row">'
+    + '<div class="flight-pass-head">'
+    + '<span>Pass '+pass.passNumber+' <span class="badge '+statusCls+'">'+esc(pass.status)+'</span></span>'
+    + '<span class="muted" style="font-size:10.5px">'+esc(duration)+esc(created)+stopNote+'</span>'
+    + '</div>'
+    + (pass.summary ? '<div class="flight-pass-summary">'+esc(pass.summary)+'</div>' : '')
+    + '</div>';
+}
 function renderBoard() {
   const statusToLane = {};
   LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
@@ -3859,10 +3967,21 @@ function setTaskProject(name, path, custom) {
 // project; custom folders are labelled so the source is honest.
 function renderSelectedProject() {
   const row = document.getElementById("t_project_selected");
+  const wrapper = document.getElementById("t_project_wrapper");
+  const customToggle = document.querySelector("#taskForm .custom-folder-toggle");
+  const customFolder = document.getElementById("t_custom_folder");
   if (!row) return;
   const name = selectedProject?.name || "";
   const path = selectedProject?.path || "";
-  if (!name && !path) { row.style.display = "none"; row.innerHTML = ""; return; }
+  if (!name && !path) {
+    row.style.display = "none"; row.innerHTML = "";
+    if (wrapper) wrapper.style.display = "";
+    if (customToggle) customToggle.style.display = "";
+    return;
+  }
+  if (wrapper) wrapper.style.display = "none";
+  if (customToggle) customToggle.style.display = "none";
+  if (customFolder) customFolder.style.display = "none";
   const known = projectDropdownItems.find(p => p.name === name && p.path === path);
   const star = known && known.preSelect ? '<span class="pstar">★</span>' : '';
   const tag = selectedProject?.custom ? '<span class="pstar" title="Custom folder">◆</span>' : star;
@@ -4135,20 +4254,34 @@ async function loadProjects(fresh) {
       sel.value = saved;
       state.selectedProject = saved;
     }
-    // Populate New Task project search dropdown
-    projectDropdownItems = data.projects.map(p => ({
+    // Always include the built-in Inbox project (for general non-project work) unless it's a real discovered project.
+    const inboxEntry = { name: "inbox", path: "~", preSelect: false, lastModified: "" };
+    const discoveredItems = data.projects.map(p => ({
       name: p.name,
       path: p.path,
       preSelect: !!p.preSelect,
       lastModified: p.lastModified || "",
     }));
+    projectDropdownItems = data.projects.some(p => p.name === "inbox")
+      ? discoveredItems
+      : [inboxEntry, ...discoveredItems];
+    // Populate the default-project selector in Settings → Projects.
+    const defSel = document.getElementById("s_default_project");
+    if (defSel) {
+      const prevDef = defSel.value;
+      defSel.innerHTML = '<option value="">(none — auto-select)</option>'
+        + projectDropdownItems.map(p => '<option value="'+esc(p.name)+'">'+esc(p.name)+'</option>').join("");
+      const storedDefault = localStorage.getItem("hm_default_project");
+      if (storedDefault && defSel.querySelector('option[value="'+CSS.escape(storedDefault)+'"]')) defSel.value = storedDefault;
+      else if (prevDef && defSel.querySelector('option[value="'+CSS.escape(prevDef)+'"]')) defSel.value = prevDef;
+    }
     populateCommandProjects(data.projects);
-    // Default the New Task selection (name + path together, via the single
-    // writer) to the restored board filter if any, else the active ★ project,
-    // else the most-recently used. Never clobber a deliberate choice or a custom
-    // folder on a re-scan — only (re)default when nothing valid is selected.
+    // Default the New Task selection: board filter → user default → ★ project → most-recent.
+    const defaultProjName = localStorage.getItem("hm_default_project");
+    const defaultProj = defaultProjName ? projectDropdownItems.find(p => p.name === defaultProjName) : null;
     const savedProj = state.selectedProject ? data.projects.find(p => p.name === state.selectedProject) : null;
     const chosen = savedProj
+      || defaultProj
       || data.projects.find(p => p.preSelect)
       || sortProjectItems(projectDropdownItems, "recent")[0];
     const stillValid = selectedProject?.custom || projectDropdownItems.some(p => p.name === selectedProject?.name);
@@ -5380,6 +5513,56 @@ async function wpDeletePackage(pkgId) {
   }
   renderWorkPackages(); refresh();
 }
+async function wpRunPass(pkgId) {
+  hmToast("Running pass…");
+  const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/loop/run-pass", { method: "POST" });
+  if (r && r.pass) { hmToast("Pass "+r.pass.passNumber+" complete", "ok"); }
+  else { hmToast((r && r.error) || "Run pass failed", "err"); }
+  renderFlightDetail(pkgId);
+}
+async function wpPauseLoop(pkgId) {
+  const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/loop/pause", { method: "POST" });
+  if (r && r.loop) { hmToast("Loop paused", "ok"); } else { hmToast((r && r.error) || "Pause failed", "err"); }
+  renderFlightDetail(pkgId);
+}
+async function wpResumeLoop(pkgId) {
+  const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/loop/resume", { method: "POST" });
+  if (r && r.loop) { hmToast("Loop resumed", "ok"); } else { hmToast((r && r.error) || "Resume failed", "err"); }
+  renderFlightDetail(pkgId);
+}
+async function wpEditLoop(pkgId) {
+  const loopResp = await api("/work-packages/"+encodeURIComponent(pkgId)+"/loop");
+  const loop = loopResp && loopResp.loop;
+  const validModes = ["off", "manual", "fixed", "self_paced"];
+  const validProfiles = ["quality", "release", "watch", "personal_admin"];
+  const mode = await hmPrompt("Loop mode (off / manual / fixed / self_paced)", (loop && loop.mode) || "manual", { title: "Edit Loop" });
+  if (mode == null) return;
+  if (!validModes.includes(mode)) { hmToast("Invalid mode — use: off, manual, fixed, self_paced", "err"); return; }
+  const profile = await hmPrompt("Pass profile (quality / release / watch / personal_admin)", (loop && loop.profile) || "quality", { title: "Edit Loop" });
+  if (profile == null) return;
+  if (!validProfiles.includes(profile)) { hmToast("Invalid profile — use: quality, release, watch, personal_admin", "err"); return; }
+  const maxStr = await hmPrompt("Max passes (1-12)", String((loop && loop.maxPasses) || 3), { title: "Edit Loop" });
+  if (maxStr == null) return;
+  const maxPasses = parseInt(maxStr, 10);
+  if (isNaN(maxPasses) || maxPasses < 1 || maxPasses > 12) { hmToast("Max passes must be between 1 and 12", "err"); return; }
+  const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/loop", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: mode, profile: profile, maxPasses: maxPasses }),
+  });
+  if (r && r.loop) { hmToast("Loop updated", "ok"); } else { hmToast((r && r.error) || "Update failed", "err"); }
+  renderFlightDetail(pkgId);
+}
+async function wpSetupLoop(pkgId) {
+  const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/loop", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: "manual", profile: "quality", maxPasses: 3 }),
+  });
+  if (r && r.loop) { hmToast("Loop created — manual, quality profile, 3 passes", "ok"); }
+  else { hmToast((r && r.error) || "Setup failed", "err"); }
+  renderFlightDetail(pkgId);
+}
 async function prepareResearchBrief() {
   const out = document.getElementById("brief_result");
   const topic = (document.getElementById("brief_topic").value || "").trim();
@@ -5628,6 +5811,15 @@ function selectProjectFromSettings(name) {
   state.selectedProject = name;
   localStorage.setItem("hm_project", name);
   renderBoard();
+}
+
+function saveDefaultProject() {
+  const sel = document.getElementById("s_default_project");
+  if (!sel) return;
+  const name = sel.value;
+  if (name) localStorage.setItem("hm_default_project", name);
+  else localStorage.removeItem("hm_default_project");
+  hmToast(name ? "Default project: " + name : "Default project cleared", "ok");
 }
 
 async function refreshProjects() {

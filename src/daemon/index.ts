@@ -127,6 +127,12 @@ async function main(): Promise<void> {
   const { startWorkPackageOrchestrationLoop } = await import("@/lib/work-packages/orchestrate");
   startWorkPackageOrchestrationLoop();
 
+  // Flight Loop scheduler: ticks every 15s to fire fixed-cadence and self-paced
+  // quality passes, expire loops past their expiresAt, and stop loops whose
+  // Flight has completed. Paired with the Work Package orchestration loop above.
+  const { startFlightLoopSchedulerLoop } = await import("@/lib/work-packages/flight-loop-scheduler");
+  startFlightLoopSchedulerLoop();
+
   // Voice result return path: when a voice-escalated task finishes, speak the
   // result (Kokoro) and push a voice:result SSE event so the open Talk screen
   // gets the answer it was told was "being looked into".

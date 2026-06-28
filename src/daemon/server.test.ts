@@ -644,3 +644,282 @@ test("New Task form exposes a Route selector and createTask sends it", () => {
   assert.ok(block);
   assert.match(block![0], /route/);
 });
+
+// ── Flight Loop API — server round-trips ─────────────────────────────────────
+
+function makeLoopPackage(base: string, headers: Record<string, string>, suffix: string) {
+  const items = [{ title: "Item", prompt: "do it", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] }];
+  return fetch(`${base}/work-packages`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ title: `Loop pkg ${suffix}`, project: "hivematrix", projectPath: `/tmp/loop-${suffix}`, items }),
+  }).then((r) => r.json() as Promise<Record<string, unknown>>);
+}
+
+// ── Loop CRUD ─────────────────────────────────────────────────────────────────
+
+test("GET /work-packages/:id/loop returns 404 when no loop configured", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const pkg = await makeLoopPackage(base, headers, "get-404");
+  const res = await fetch(`${base}/work-packages/${pkg.id}/loop`, { headers });
+  assert.equal(res.status, 404);
+  const body = await res.json() as Record<string, unknown>;
+  assert.match(body.error as string, /not found/i);
+});
+
+test("PUT /work-packages/:id/loop creates a loop and GET returns it", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const pkg = await makeLoopPackage(base, headers, "put-create");
+  const putRes = await fetch(`${base}/work-packages/${pkg.id}/loop`, {
+    method: "PUT", headers,
+    body: JSON.stringify({ mode: "fixed", cadenceSeconds: 300, maxPasses: 4 }),
+  });
+  assert.equal(putRes.status, 200);
+  const putBody = await putRes.json() as { loop: Record<string, unknown> };
+  assert.equal(putBody.loop.packageId, pkg.id);
+  assert.equal(putBody.loop.mode, "fixed");
+  assert.equal(putBody.loop.cadenceSeconds, 300);
+  assert.equal(putBody.loop.maxPasses, 4);
+  assert.ok(putBody.loop.id, "loop has an id");
+
+  const getRes = await fetch(`${base}/work-packages/${pkg.id}/loop`, { headers });
+  assert.equal(getRes.status, 200);
+  const getBody = await getRes.json() as { loop: Record<string, unknown> };
+  assert.equal(getBody.loop.id, putBody.loop.id, "same row persisted");
+  assert.equal(getBody.loop.mode, "fixed");
+  assert.equal(getBody.loop.cadenceSeconds, 300);
+});
+
+test("PUT /work-packages/:id/loop updates only the specified fields", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const pkg = await makeLoopPackage(base, headers, "put-partial");
+  await fetch(`${base}/work-packages/${pkg.id}/loop`, {
+    method: "PUT", headers, body: JSON.stringify({ mode: "manual", maxPasses: 3, profile: "quality" }),
+  });
+
+  const updateRes = await fetch(`${base}/work-packages/${pkg.id}/loop`, {
+    method: "PUT", headers, body: JSON.stringify({ maxPasses: 7 }),
+  });
+  assert.equal(updateRes.status, 200);
+  const body = await updateRes.json() as { loop: Record<string, unknown> };
+  assert.equal(body.loop.maxPasses, 7);
+  assert.equal(body.loop.mode, "manual", "mode unchanged by partial update");
+  assert.equal(body.loop.profile, "quality", "profile unchanged by partial update");
+});
+
+test("PUT expiresAt:null clears expiry and GET confirms it", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const pkg = await makeLoopPackage(base, headers, "put-expiry");
+  await fetch(`${base}/work-packages/${pkg.id}/loop`, {
+    method: "PUT", headers, body: JSON.stringify({ mode: "manual" }),
+  });
+
+  const clearRes = await fetch(`${base}/work-packages/${pkg.id}/loop`, {
+    method: "PUT", headers, body: JSON.stringify({ expiresAt: null }),
+  });
+  assert.equal(clearRes.status, 200);
+  const cleared = await clearRes.json() as { loop: Record<string, unknown> };
+  assert.equal(cleared.loop.expiresAt, null, "expiresAt cleared to null");
+
+  const getRes = await fetch(`${base}/work-packages/${pkg.id}/loop`, { headers });
+  const got = await getRes.json() as { loop: Record<string, unknown> };
+  assert.equal(got.loop.expiresAt, null, "null expiresAt persisted across GET");
+});
+
+// ── Pass persistence ──────────────────────────────────────────────────────────
+
+test("GET /work-packages/:id/loop/passes returns 404 when no loop configured", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const pkg = await makeLoopPackage(base, headers, "passes-404");
+  const res = await fetch(`${base}/work-packages/${pkg.id}/loop/passes`, { headers });
+  assert.equal(res.status, 404);
+});
+
+test("GET /work-packages/:id/loop/passes returns empty array on a fresh loop", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const pkg = await makeLoopPackage(base, headers, "passes-empty");
+  await fetch(`${base}/work-packages/${pkg.id}/loop`, {
+    method: "PUT", headers, body: JSON.stringify({ mode: "manual", maxPasses: 3 }),
+  });
+
+  const res = await fetch(`${base}/work-packages/${pkg.id}/loop/passes`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { passes: unknown[] };
+  assert.equal(body.passes.length, 0);
+});
+
+test("GET /work-packages/:id/loop/passes returns persisted passes newest-first", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const pkg = await makeLoopPackage(base, headers, "passes-order");
+  const putBody = await (await fetch(`${base}/work-packages/${pkg.id}/loop`, {
+    method: "PUT", headers, body: JSON.stringify({ mode: "manual", maxPasses: 5 }),
+  })).json() as { loop: Record<string, unknown> };
+  const loopId = putBody.loop.id as string;
+
+  const { createPass, completePass } = await import("@/lib/work-packages/flight-loop-store");
+  const p1 = createPass(loopId, pkg.id as string, "quality", 1);
+  completePass(p1.id, { status: "completed", summary: "pass one", evidence: {}, createdItemIds: [], stopReason: null });
+  const p2 = createPass(loopId, pkg.id as string, "quality", 2);
+  completePass(p2.id, { status: "completed", summary: "pass two", evidence: {}, createdItemIds: [], stopReason: null });
+
+  const res = await fetch(`${base}/work-packages/${pkg.id}/loop/passes`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { passes: Array<Record<string, unknown>> };
+  assert.equal(body.passes.length, 2);
+  assert.equal(body.passes[0].passNumber, 2, "newest pass first");
+  assert.equal(body.passes[0].summary, "pass two");
+  assert.equal(body.passes[1].passNumber, 1);
+  assert.equal(body.passes[1].loopId, loopId, "pass is linked to the loop");
+});
+
+// ── Pause / Resume ────────────────────────────────────────────────────────────
+
+test("POST /work-packages/:id/loop/pause returns 409 when no loop configured", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/work-packages/no-such-pkg/loop/pause`, { method: "POST", headers });
+  assert.equal(res.status, 409);
+  const body = await res.json() as Record<string, unknown>;
+  assert.ok(body.error, "error message present");
+});
+
+test("POST /work-packages/:id/loop/pause sets status=paused and stopReason=manually_paused", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const pkg = await makeLoopPackage(base, headers, "pause-ok");
+  await fetch(`${base}/work-packages/${pkg.id}/loop`, {
+    method: "PUT", headers, body: JSON.stringify({ mode: "manual" }),
+  });
+
+  const res = await fetch(`${base}/work-packages/${pkg.id}/loop/pause`, { method: "POST", headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { loop: Record<string, unknown> };
+  assert.equal(body.loop.status, "paused");
+  assert.equal(body.loop.stopReason, "manually_paused");
+});
+
+test("POST /work-packages/:id/loop/pause returns 409 when already paused", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const pkg = await makeLoopPackage(base, headers, "pause-double");
+  await fetch(`${base}/work-packages/${pkg.id}/loop`, {
+    method: "PUT", headers, body: JSON.stringify({ mode: "manual" }),
+  });
+  await fetch(`${base}/work-packages/${pkg.id}/loop/pause`, { method: "POST", headers });
+
+  const secondPause = await fetch(`${base}/work-packages/${pkg.id}/loop/pause`, { method: "POST", headers });
+  assert.equal(secondPause.status, 409);
+});
+
+test("POST /work-packages/:id/loop/resume returns 409 when loop is not paused", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const pkg = await makeLoopPackage(base, headers, "resume-idle");
+  await fetch(`${base}/work-packages/${pkg.id}/loop`, {
+    method: "PUT", headers, body: JSON.stringify({ mode: "manual" }),
+  });
+
+  const res = await fetch(`${base}/work-packages/${pkg.id}/loop/resume`, { method: "POST", headers });
+  assert.equal(res.status, 409);
+});
+
+test("POST /work-packages/:id/loop/resume returns 409 when no loop configured", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/work-packages/no-such-pkg/loop/resume`, { method: "POST", headers });
+  assert.equal(res.status, 409);
+});
+
+test("POST .../loop/pause then .../loop/resume restores manual loop to idle", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const pkg = await makeLoopPackage(base, headers, "resume-manual");
+  await fetch(`${base}/work-packages/${pkg.id}/loop`, {
+    method: "PUT", headers, body: JSON.stringify({ mode: "manual" }),
+  });
+  await fetch(`${base}/work-packages/${pkg.id}/loop/pause`, { method: "POST", headers });
+
+  const res = await fetch(`${base}/work-packages/${pkg.id}/loop/resume`, { method: "POST", headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { loop: Record<string, unknown> };
+  assert.equal(body.loop.status, "idle");
+  assert.equal(body.loop.stopReason, null);
+});
+
+test("POST .../loop/pause then .../loop/resume restores fixed loop to active", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const pkg = await makeLoopPackage(base, headers, "resume-fixed");
+  await fetch(`${base}/work-packages/${pkg.id}/loop`, {
+    method: "PUT", headers, body: JSON.stringify({ mode: "fixed", cadenceSeconds: 60, maxPasses: 5 }),
+  });
+  await fetch(`${base}/work-packages/${pkg.id}/loop/pause`, { method: "POST", headers });
+
+  const res = await fetch(`${base}/work-packages/${pkg.id}/loop/resume`, { method: "POST", headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { loop: Record<string, unknown> };
+  assert.equal(body.loop.status, "active");
+  assert.equal(body.loop.stopReason, null);
+});
+
+test("POST /work-packages/:id/loop/run-pass returns 409 when no loop is configured", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const pkg = await makeLoopPackage(base, headers, "run-pass-noloop");
+  const res = await fetch(`${base}/work-packages/${pkg.id}/loop/run-pass`, { method: "POST", headers });
+  assert.equal(res.status, 409);
+  const body = await res.json() as Record<string, unknown>;
+  assert.ok(body.error, "error message present");
+});
