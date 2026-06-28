@@ -4,7 +4,10 @@
 #
 # Xcode account sign-in gives signing identities but NOT headless notarytool
 # credentials. This stores an app-specific-password-based notary profile named
-# "hivematrix" in the login keychain so the build pipeline can notarize with
+# "hivematrix" in the login keychain. Apple's saved item uses:
+#   name/service: com.apple.gke.notary.tool
+#   account:      com.apple.gke.notary.tool.saved-creds.hivematrix
+# The build pipeline uses that saved profile to notarize with
 #   xcrun notarytool submit ... --keychain-profile hivematrix
 #
 # Run:  bash scripts/setup-notary.sh
@@ -24,10 +27,12 @@ echo "========================================"
 echo "Apple ID : $APPLE_ID"
 echo "Team ID  : $TEAM_ID"
 echo "Profile  : $PROFILE"
+echo "Keychain : service com.apple.gke.notary.tool"
+echo "           account com.apple.gke.notary.tool.saved-creds.$PROFILE"
 echo
 
 # If a working profile already exists, don't clobber it.
-if xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
+if xcrun notarytool history --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --keychain-profile "$PROFILE" >/dev/null 2>&1; then
   echo "✓ A working '$PROFILE' notary profile already exists. Nothing to do."
   exit 0
 fi
@@ -100,7 +105,7 @@ fi
 
 echo
 echo "Validating..."
-if xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
+if xcrun notarytool history --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --keychain-profile "$PROFILE" >/dev/null 2>&1; then
   echo "✓ Notary profile '$PROFILE' is working. Notarization is now headless:"
   echo "    xcrun notarytool submit <app.zip> --keychain-profile $PROFILE --wait"
 else

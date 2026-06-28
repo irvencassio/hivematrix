@@ -32,21 +32,27 @@ interface ProfileStrategy {
   allowsItemCreation: boolean;
   forceDraftItems: boolean;
   forceHeldRiskyItems: boolean;
+  /** personal_admin: hold medium-risk items too, not just high */
+  forceHeldMediumRisk: boolean;
   stopLoopOnGateFailure: boolean;
+  /** release: gather signing/artifact evidence without re-running release.mjs */
+  gatherReleaseArtifacts: boolean;
+  /** watch: keep loop active as long as items are running or ready */
+  continueIfRunning: boolean;
 }
 
 function getProfileStrategy(profile: import("./flight-loop-store").PassProfile): ProfileStrategy {
   switch (profile) {
     case "release":
-      return { requiresGates: true, allowsItemCreation: true, forceDraftItems: false, forceHeldRiskyItems: true, stopLoopOnGateFailure: true };
+      return { requiresGates: true, allowsItemCreation: true, forceDraftItems: false, forceHeldRiskyItems: true, forceHeldMediumRisk: false, stopLoopOnGateFailure: true, gatherReleaseArtifacts: true, continueIfRunning: false };
     case "watch":
-      return { requiresGates: false, allowsItemCreation: false, forceDraftItems: false, forceHeldRiskyItems: false, stopLoopOnGateFailure: false };
+      return { requiresGates: false, allowsItemCreation: false, forceDraftItems: false, forceHeldRiskyItems: false, forceHeldMediumRisk: false, stopLoopOnGateFailure: false, gatherReleaseArtifacts: false, continueIfRunning: true };
     case "personal_admin":
-      return { requiresGates: false, allowsItemCreation: true, forceDraftItems: true, forceHeldRiskyItems: false, stopLoopOnGateFailure: false };
+      return { requiresGates: false, allowsItemCreation: true, forceDraftItems: false, forceHeldRiskyItems: true, forceHeldMediumRisk: true, stopLoopOnGateFailure: false, gatherReleaseArtifacts: false, continueIfRunning: false };
     case "goal_quality":
-      return { requiresGates: false, allowsItemCreation: true, forceDraftItems: false, forceHeldRiskyItems: false, stopLoopOnGateFailure: false };
+      return { requiresGates: false, allowsItemCreation: true, forceDraftItems: false, forceHeldRiskyItems: false, forceHeldMediumRisk: false, stopLoopOnGateFailure: false, gatherReleaseArtifacts: false, continueIfRunning: false };
     default: // quality
-      return { requiresGates: false, allowsItemCreation: true, forceDraftItems: false, forceHeldRiskyItems: false, stopLoopOnGateFailure: false };
+      return { requiresGates: false, allowsItemCreation: true, forceDraftItems: false, forceHeldRiskyItems: false, forceHeldMediumRisk: false, stopLoopOnGateFailure: false, gatherReleaseArtifacts: false, continueIfRunning: false };
   }
 }
 
@@ -246,6 +252,40 @@ function gatherGitEvidence(projectPath: string): { status: string; diffStat: str
   }
 }
 
+export interface ReleaseArtifactEvidence {
+  releaseMjsExists: boolean;
+  packageVersion: string | null;
+  /** Git tag pointing at HEAD, e.g. "v0.1.102"; null if no tag or git unavailable. */
+  gitTagAtHead: string | null;
+}
+
+function gatherReleaseArtifactEvidence(projectPath: string): ReleaseArtifactEvidence {
+  const releaseMjsExists = existsSync(join(projectPath, "scripts", "release.mjs"));
+  let packageVersion: string | null = null;
+  let gitTagAtHead: string | null = null;
+
+  const pkgPath = join(projectPath, "package.json");
+  if (existsSync(pkgPath)) {
+    try {
+      const raw = readFileSync(pkgPath, "utf8");
+      const pkg = JSON.parse(raw) as Record<string, unknown>;
+      packageVersion = typeof pkg.version === "string" ? pkg.version : null;
+    } catch { /* malformed */ }
+  }
+
+  try {
+    const r = spawnSync("git", ["tag", "--points-at", "HEAD"], {
+      cwd: projectPath,
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    const tags = (r.stdout ?? "").trim().split("\n").filter(Boolean);
+    gitTagAtHead = tags.length > 0 ? tags[0] : null;
+  } catch { /* no git */ }
+
+  return { releaseMjsExists, packageVersion, gitTagAtHead };
+}
+
 function gatherTaskOutputs(
   items: Array<{ id: string; createdTaskId: string | null }>,
 ): Record<string, string> {
@@ -324,23 +364,33 @@ export async function runPass(packageId: string): Promise<RunPassResult> {
     const discoveredGates = projectPath ? discoverRepoGates(projectPath) : [];
     const gatesDiscovered = discoveredGates.map((g) => g.name);
 
-    // Watch profile: skip all heavy work — observe external state only.
+    // Watch profile: observe state only — no item creation, no gate execution.
     if (!strategy.allowsItemCreation) {
+      const runningItems = detail.items.filter((i) => i.status === "running");
+      const runningCount = runningItems.length;
+      // Items in running state with no linked task cannot make progress — flag as stuck.
+      const stuckItems = runningItems
+        .filter((i) => i.createdTaskId === null)
+        .map((i) => ({ id: i.id, title: i.title, reason: "no_task_linked" as const }));
+      const watchState = classifyPassState({ counts, blockedItemCount: 0 });
       const watchEvidence: Record<string, unknown> = {
         counts,
-        state: classifyPassState({ counts, blockedItemCount: 0 }),
+        state: watchState,
         externalChecks: [],
         loopMode: loop.mode,
         passIndex: newPassCount,
         gatesDiscovered,
-        archivedCount: 0,
-        archivedItems: [],
-        runningCount: detail.items.filter((i) => i.status === "running").length,
+        archivedCount: detail.items.filter((i) => i.status === "archived").length,
+        archivedItems: detail.items.filter((i) => i.status === "archived").map((i) => ({ id: i.id, title: i.title })),
+        runningCount,
         blockedItemCount: 0,
-        failedItems: [],
-        reviewItems: [],
+        failedItems: detail.items.filter((i) => i.status === "failed").map((i) => ({ id: i.id, title: i.title, blocker: i.blocker })),
+        reviewItems: detail.items.filter((i) => i.status === "review").map((i) => ({ id: i.id, title: i.title })),
+        stuckItems,
       };
-      const watchStop = "external_state_unchanged";
+      // Keep watching while there is active work; stop only when nothing to observe.
+      const hasActiveWork = strategy.continueIfRunning && (runningCount > 0 || (counts.ready ?? 0) > 0);
+      const watchStop = hasActiveWork ? null : "no_active_items_to_watch";
       const watchSummary = buildSummary(counts, 0, watchStop);
       const completedWatchPass = completePass(pass.id, {
         status: "completed",
@@ -349,9 +399,12 @@ export async function runPass(packageId: string): Promise<RunPassResult> {
         createdItemIds: [],
         stopReason: watchStop,
       });
-      const stopped = true;
-      const nextStatus: LoopStatus = "stopped";
-      updateLoopAfterPass(loop.id, newPassCount, nextStatus, watchStop, null);
+      const watchStopped = watchStop !== null;
+      const nextWatchStatus: LoopStatus = watchStopped
+        ? "stopped"
+        : loop.mode === "fixed" ? "active" : "idle";
+      const nextWatchRunAt = computeNextRunAt(loop, watchStopped);
+      updateLoopAfterPass(loop.id, newPassCount, nextWatchStatus, watchStop, nextWatchRunAt);
       return { loop: getLoop(packageId)!, pass: completedWatchPass, createdItemIds: [] };
     }
 
@@ -382,6 +435,9 @@ export async function runPass(packageId: string): Promise<RunPassResult> {
 
     const taskOutputs = gatherTaskOutputs([...failedItems, ...reviewItems]);
     const gitEvidence = gatherGitEvidence(projectPath);
+    const releaseArtifacts = strategy.gatherReleaseArtifacts && projectPath
+      ? gatherReleaseArtifactEvidence(projectPath)
+      : null;
 
     const gates = projectPath ? runRepoGates(projectPath, discoveredGates) : [];
     const failedGates = gates.filter((g) => !g.passed);
@@ -425,6 +481,7 @@ export async function runPass(packageId: string): Promise<RunPassResult> {
       ...(pendingApprovals !== undefined ? { pendingApprovals } : {}),
       ...(goalFlight ? { goal: goalFlight.goal, successCriteria: goalFlight.successCriteria ?? [] } : {}),
       ...(criteriaStatus ? { criteriaStatus } : {}),
+      ...(releaseArtifacts ? { releaseArtifacts } : {}),
       ...(gitEvidence ? { git: gitEvidence } : {}),
       ...(gates.length > 0 ? { gates } : {}),
     };
@@ -449,6 +506,7 @@ export async function runPass(packageId: string): Promise<RunPassResult> {
         autoReadySafeItems: loop.autoReadySafeItems,
         forceDraft: strategy.forceDraftItems || undefined,
         forceHeld: strategy.forceHeldRiskyItems || undefined,
+        forceHeldMediumRisk: strategy.forceHeldMediumRisk || undefined,
       });
       createdItemIds.push(...created.map((c) => c.id));
       nextPos += created.length;

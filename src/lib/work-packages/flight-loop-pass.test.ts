@@ -841,12 +841,12 @@ test("watch profile creates no follow-up items even when autoCreateItems=true", 
   assert.equal(result.createdItemIds.length, 0, "watch profile creates no follow-up items");
   const evidence = result.pass.evidence as Record<string, unknown>;
   assert.ok(Array.isArray(evidence.externalChecks), "watch evidence has externalChecks array");
-  assert.equal(result.pass.stopReason, "external_state_unchanged", "watch stops with external_state_unchanged");
+  assert.equal(result.pass.stopReason, "no_active_items_to_watch", "watch stops when no running/ready items");
 });
 
-test("personal_admin profile creates draft items for all risk levels", async () => {
+test("personal_admin profile creates held items for high-risk failed items", async () => {
   const { createWorkPackage: cwp } = await import("./store");
-  const pkg = cwp({ title: "Personal-admin pkg", project: "test", projectPath: "/tmp/test", items: [
+  const pkg = cwp({ title: "Personal-admin high-risk pkg", project: "test", projectPath: "/tmp/test", items: [
     { title: "Deploy to prod", prompt: "Push release", risk: "high", executionMode: "sequential", dependsOn: [], scopeHints: [] },
   ]});
   upsertLoop(pkg.id, { maxPasses: 3, profile: "personal_admin", autoCreateItems: true });
@@ -854,12 +854,10 @@ test("personal_admin profile creates draft items for all risk levels", async () 
 
   const result = await runPass(pkg.id);
 
-  if (result.createdItemIds.length > 0) {
-    const detail = getWorkPackage(pkg.id)!;
-    const followUp = detail.items.find((i) => result.createdItemIds.includes(i.id))!;
-    assert.notEqual(followUp.status, "held", "personal_admin never creates held items");
-    assert.equal(followUp.status, "draft", "personal_admin forces draft status");
-  }
+  assert.equal(result.createdItemIds.length, 1, "one follow-up created");
+  const detail = getWorkPackage(pkg.id)!;
+  const followUp = detail.items.find((i) => result.createdItemIds.includes(i.id))!;
+  assert.equal(followUp.status, "held", "personal_admin holds high-risk items for operator approval");
   const evidence = result.pass.evidence as Record<string, unknown>;
   assert.equal(typeof evidence.pendingApprovals, "number", "personal_admin evidence has pendingApprovals count");
 });
@@ -1254,6 +1252,230 @@ test("goal_quality unmet criteria with autoCreateItems=true prevent all_checks_c
 
   assert.notEqual(result.pass.stopReason, "all_checks_clean", "all_checks_clean should not fire when criterion follow-ups were created");
   assert.ok(result.createdItemIds.length > 0, "criterion follow-up items created");
+});
+
+// --- Release profile artifact evidence ---
+
+test("release profile: evidence includes releaseArtifacts with releaseMjsExists, packageVersion, gitTagAtHead", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hm-release-artifacts-"));
+  try {
+    writeFileSync(join(dir, "package.json"), JSON.stringify({
+      version: "1.2.3",
+      scripts: { typecheck: "node -e \"process.exit(0)\"", test: "node -e \"process.exit(0)\"" },
+    }));
+    const pkg = createWorkPackage({
+      title: "Release-artifacts pkg",
+      project: "test",
+      projectPath: dir,
+      items: [{ title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+    });
+    upsertLoop(pkg.id, { maxPasses: 3, profile: "release" });
+    updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+
+    const result = await runPass(pkg.id);
+
+    const evidence = result.pass.evidence as Record<string, unknown>;
+    assert.ok("releaseArtifacts" in evidence, "evidence.releaseArtifacts present for release profile");
+    const ra = evidence.releaseArtifacts as Record<string, unknown>;
+    assert.equal(ra.packageVersion, "1.2.3", "packageVersion read from package.json");
+    assert.equal(ra.releaseMjsExists, false, "releaseMjsExists false when file absent");
+    assert.ok(ra.gitTagAtHead === null || typeof ra.gitTagAtHead === "string", "gitTagAtHead is string or null");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("release profile: releaseMjsExists true when scripts/release.mjs is present", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hm-release-mjs-"));
+  try {
+    writeFileSync(join(dir, "package.json"), JSON.stringify({
+      scripts: { typecheck: "node -e \"process.exit(0)\"" },
+    }));
+    mkdirSync(join(dir, "scripts"));
+    writeFileSync(join(dir, "scripts", "release.mjs"), "// release");
+    const pkg = createWorkPackage({
+      title: "Release-mjs pkg",
+      project: "test",
+      projectPath: dir,
+      items: [{ title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+    });
+    upsertLoop(pkg.id, { maxPasses: 3, profile: "release" });
+    updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+
+    const result = await runPass(pkg.id);
+
+    const evidence = result.pass.evidence as Record<string, unknown>;
+    const ra = evidence.releaseArtifacts as Record<string, unknown>;
+    assert.equal(ra.releaseMjsExists, true, "releaseMjsExists true when scripts/release.mjs is present");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("release profile: evidence does NOT include releaseArtifacts for quality profile", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hm-quality-no-ra-"));
+  try {
+    writeFileSync(join(dir, "package.json"), JSON.stringify({
+      scripts: { typecheck: "node -e \"process.exit(0)\"" },
+    }));
+    const pkg = createWorkPackage({
+      title: "Quality-no-artifacts pkg",
+      project: "test",
+      projectPath: dir,
+      items: [{ title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+    });
+    upsertLoop(pkg.id, { maxPasses: 3, profile: "quality" });
+    updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+
+    const result = await runPass(pkg.id);
+
+    const evidence = result.pass.evidence as Record<string, unknown>;
+    assert.ok(!("releaseArtifacts" in evidence), "releaseArtifacts absent for non-release profiles");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- Watch profile: progress and stuck state monitoring ---
+
+test("watch profile: loop stays active (not stopped) when running items exist", async () => {
+  const pkg = makePackage("Watch-active package");
+  upsertLoop(pkg.id, { maxPasses: 5, profile: "watch", autoCreateItems: true });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "running" });
+
+  const result = await runPass(pkg.id);
+
+  assert.equal(result.createdItemIds.length, 0, "watch creates no items");
+  assert.equal(result.pass.stopReason, null, "no stop reason when running items exist");
+  assert.notEqual(result.loop.status, "stopped", "loop stays active while items are running");
+  const evidence = result.pass.evidence as Record<string, unknown>;
+  assert.equal(evidence.runningCount, 1, "evidence.runningCount reflects running items");
+});
+
+test("watch profile: evidence includes stuckItems for running items with no linked task", async () => {
+  const pkg = makePackage("Watch-stuck package");
+  upsertLoop(pkg.id, { maxPasses: 5, profile: "watch" });
+  // items[0] stays in draft (createdTaskId=null). Set it to running with no task.
+  getDb().prepare("UPDATE work_package_items SET status = 'running', createdTaskId = NULL WHERE _id = ?").run(pkg.items[0].id);
+
+  const result = await runPass(pkg.id);
+
+  const evidence = result.pass.evidence as Record<string, unknown>;
+  const stuck = evidence.stuckItems as Array<{ id: string; title: string; reason: string }>;
+  assert.ok(Array.isArray(stuck), "evidence.stuckItems is an array");
+  assert.equal(stuck.length, 1, "one stuck item detected");
+  assert.equal(stuck[0].reason, "no_task_linked", "stuck reason is no_task_linked");
+  assert.equal(stuck[0].id, pkg.items[0].id);
+});
+
+test("watch profile: stops with no_active_items_to_watch when no running or ready items", async () => {
+  const pkg = makePackage("Watch-idle package");
+  upsertLoop(pkg.id, { maxPasses: 5, profile: "watch" });
+  // items are in draft (default) — not running or ready
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+  updateWorkPackageItem(pkg.id, pkg.items[1].id, { status: "done" });
+
+  const result = await runPass(pkg.id);
+
+  assert.equal(result.pass.stopReason, "no_active_items_to_watch");
+  assert.equal(result.loop.status, "stopped");
+});
+
+test("watch profile: evidence includes failedItems and reviewItems for observability", async () => {
+  const pkg = makePackage("Watch-obs package");
+  upsertLoop(pkg.id, { maxPasses: 5, profile: "watch" });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "failed", blocker: "timeout" });
+  updateWorkPackageItem(pkg.id, pkg.items[1].id, { status: "review" });
+
+  const result = await runPass(pkg.id);
+
+  const evidence = result.pass.evidence as Record<string, unknown>;
+  const failed = evidence.failedItems as Array<{ id: string; title: string; blocker: string | null }>;
+  const review = evidence.reviewItems as Array<{ id: string; title: string }>;
+  assert.ok(Array.isArray(failed) && failed.length === 1, "failedItems in watch evidence");
+  assert.equal(failed[0].blocker, "timeout", "blocker captured in watch evidence");
+  assert.ok(Array.isArray(review) && review.length === 1, "reviewItems in watch evidence");
+});
+
+// --- Personal admin: conservative follow-up status ---
+
+test("personal_admin profile creates held follow-up for medium-risk failed item", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({ title: "Personal-admin medium-risk pkg", project: "test", projectPath: "/tmp/test", items: [
+    { title: "Send email blast", prompt: "Email all users", risk: "medium", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+  ]});
+  upsertLoop(pkg.id, { maxPasses: 3, profile: "personal_admin", autoCreateItems: true });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "failed", blocker: "smtp error" });
+
+  const result = await runPass(pkg.id);
+
+  assert.equal(result.createdItemIds.length, 1);
+  const detail = getWorkPackage(pkg.id)!;
+  const followUp = detail.items.find((i) => result.createdItemIds.includes(i.id))!;
+  assert.equal(followUp.status, "held", "personal_admin holds medium-risk items for review before executing");
+});
+
+test("personal_admin profile creates draft follow-up for low-risk failed item", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({ title: "Personal-admin low-risk pkg", project: "test", projectPath: "/tmp/test", items: [
+    { title: "Update README", prompt: "Fix typo in docs", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+  ]});
+  upsertLoop(pkg.id, { maxPasses: 3, profile: "personal_admin", autoCreateItems: true });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "failed", blocker: "lint error" });
+
+  const result = await runPass(pkg.id);
+
+  assert.equal(result.createdItemIds.length, 1);
+  const detail = getWorkPackage(pkg.id)!;
+  const followUp = detail.items.find((i) => result.createdItemIds.includes(i.id))!;
+  assert.equal(followUp.status, "draft", "personal_admin leaves low-risk items as draft (safe to queue)");
+});
+
+test("personal_admin evidence pendingApprovals counts pre-existing held items", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({ title: "Personal-admin pending pkg", project: "test", projectPath: "/tmp/test", items: [
+    { title: "Hold me", prompt: "Held task", risk: "high", executionMode: "hold", dependsOn: [], scopeHints: [] },
+    { title: "Fail me", prompt: "Will fail", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+  ]});
+  upsertLoop(pkg.id, { maxPasses: 3, profile: "personal_admin", autoCreateItems: true });
+  // items[0] starts held (executionMode: "hold" creates it held)
+  updateWorkPackageItem(pkg.id, pkg.items[1].id, { status: "failed", blocker: "network" });
+
+  const result = await runPass(pkg.id);
+
+  const evidence = result.pass.evidence as Record<string, unknown>;
+  // pendingApprovals counts pre-existing held items at evidence-gathering time
+  assert.ok(typeof evidence.pendingApprovals === "number", "pendingApprovals is a number");
+  assert.ok((evidence.pendingApprovals as number) >= 1, "at least one pre-existing held item counted");
+});
+
+// --- resolveFollowUpStatus: forceHeldMediumRisk path ---
+
+test("forceHeldMediumRisk holds medium-risk follow-ups for personal_admin", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const medPkg = cwp({ title: "Medium-held pkg", project: "test", projectPath: "/tmp/test", items: [
+    { title: "Medium item", prompt: "Do medium thing", risk: "medium", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+  ]});
+  upsertLoop(medPkg.id, { maxPasses: 3, profile: "personal_admin", autoCreateItems: true });
+  updateWorkPackageItem(medPkg.id, medPkg.items[0].id, { status: "failed" });
+  const r = await runPass(medPkg.id);
+  const detail = getWorkPackage(medPkg.id)!;
+  const fu = detail.items.find((i) => r.createdItemIds.includes(i.id))!;
+  assert.equal(fu.status, "held", "medium-risk follow-up is held under personal_admin");
+  assert.equal(fu.risk, "medium");
+});
+
+test("forceHeldMediumRisk does not affect quality profile — medium-risk stays draft", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({ title: "Quality-medium pkg", project: "test", projectPath: "/tmp/test", items: [
+    { title: "Medium item", prompt: "Do medium thing", risk: "medium", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+  ]});
+  upsertLoop(pkg.id, { maxPasses: 3, profile: "quality", autoCreateItems: true, autoReadySafeItems: false });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "failed" });
+  const r = await runPass(pkg.id);
+  const detail = getWorkPackage(pkg.id)!;
+  const fu = detail.items.find((i) => r.createdItemIds.includes(i.id))!;
+  assert.equal(fu.status, "draft", "quality profile does not hold medium-risk items");
 });
 
 test("runPass: all_checks_clean fires when all items terminal and some are high-risk cancelled", async () => {

@@ -27,10 +27,12 @@ export interface CreateFollowUpItemsInput {
   /** Position to assign to the first created item; incremented for each subsequent item. */
   startPosition: number;
   autoReadySafeItems: boolean;
-  /** personal_admin: all items start as draft regardless of risk */
+  /** Force all items to draft regardless of risk. */
   forceDraft?: boolean;
-  /** release: risky items always held regardless of autoReadySafeItems */
+  /** release: high-risk items always held regardless of autoReadySafeItems */
   forceHeld?: boolean;
+  /** personal_admin: medium and high-risk items held; operator must release before they run */
+  forceHeldMediumRisk?: boolean;
 }
 
 export interface FollowUpItemCreated {
@@ -146,10 +148,12 @@ export function createFollowUpItems(input: CreateFollowUpItemsInput): FollowUpIt
   for (const source of input.sources) {
     const id = generateId();
     let status: "draft" | "held" | "ready";
-    if (input.forceDraft) {
-      status = "draft";
+    if (input.forceHeldMediumRisk && (source.risk === "medium" || source.risk === "high")) {
+      status = "held";
     } else if (input.forceHeld && source.risk === "high") {
       status = "held";
+    } else if (input.forceDraft) {
+      status = "draft";
     } else {
       status = resolveFollowUpStatus(source.risk, input.autoReadySafeItems);
     }

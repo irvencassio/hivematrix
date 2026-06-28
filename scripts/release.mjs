@@ -37,6 +37,21 @@ function bumpPatch(v) {
 const branch = cap("git rev-parse --abbrev-ref HEAD");
 if (branch !== "main") die(`must be on main to release (on "${branch}")`);
 
+const notaryAppleId = "cassio.irv@gmail.com";
+const notaryTeamId = "8B3CHTY93V";
+const notaryProfile = "hivematrix";
+try {
+  execSync(
+    `xcrun notarytool history --apple-id ${notaryAppleId} --team-id ${notaryTeamId} --keychain-profile ${notaryProfile}`,
+    { cwd: repo, stdio: "ignore" },
+  );
+} catch {
+  die(
+    `notarytool profile "${notaryProfile}" is not usable for ${notaryAppleId} / ${notaryTeamId}. ` +
+    "Run: bash scripts/setup-notary.sh",
+  );
+}
+
 const keyPath = join(homedir(), ".hivematrix", "tauri-updater.key");
 const keyPw = join(homedir(), ".hivematrix", "tauri-updater.key.password");
 if (!existsSync(keyPath) || !existsSync(keyPw)) {
