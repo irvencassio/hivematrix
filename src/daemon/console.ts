@@ -234,6 +234,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .flight-pass-row { border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; }
   .flight-pass-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11.5px; }
   .flight-pass-summary { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .stuck-banner { background: color-mix(in srgb, var(--warn) 10%, var(--panel-2)); border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border)); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
+  .stuck-banner-head { font-weight: 600; color: var(--warn); font-size: 12px; margin-bottom: 4px; }
+  .stuck-item-list { margin: 4px 0 0; list-style: none; padding: 0; }
+  .stuck-item-list li { font-size: 11px; color: var(--text); padding: 2px 0; }
+  .stuck-action { font-size: 11px; color: var(--muted); margin-top: 6px; }
   .usage-pill { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
     border-radius: 999px; padding: 3px 11px; font-size: 11px; font-weight: 600; white-space: nowrap; cursor: default; }
   .usage-breakdown { font-size: 11px; }
@@ -1373,7 +1378,7 @@ function requireToken() {
     + '<div style="color:var(--muted,#8b949e);font-size:11px;max-width:340px;text-align:center">Find this token in the local HiveMatrix console under Settings → Remote access.</div></div>';
   return false;
 }
-let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedFlight: null, projects: [], selectedProject: "", workPackages: [], schedView: 'timeline', tlWindow: 24 };
+let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedFlight: null, selectedFlightLoop: null, projects: [], selectedProject: "", workPackages: [], schedView: 'timeline', tlWindow: 24 };
 let _taskFormInSession = false;
 
 async function api(path, opts) {
@@ -1589,10 +1594,12 @@ function ageBadge(t) {
 
 function flightLabel(status) {
   if (status === "done") return "landed";
+  if (status === "done_with_skips") return "landed (with skips)";
   if (status === "running") return "in flight";
   if (status === "review") return "review";
   if (status === "failed") return "blocked";
   if (status === "held") return "held";
+  if (status === "archived") return "archived";
   if (status === "ready" || status === "draft") return "staged";
   return status || "staged";
 }
@@ -1600,12 +1607,13 @@ function flightProgress(p) {
   const counts = p.counts || {};
   const total = (p.items && p.items.length) || Object.values(counts).reduce((a, b) => a + Number(b || 0), 0) || 0;
   const landed = Number(counts.done || 0);
+  const skipped = Number(p.skippedCount || 0);
   const pct = total ? Math.round((landed / total) * 100) : 0;
-  return { total, landed, pct };
+  return { total, landed, skipped, pct };
 }
 function flightCountsHtml(p) {
   const counts = p.counts || {};
-  const order = ["draft","ready","running","review","done","held","failed","cancelled"];
+  const order = ["draft","ready","running","review","done","done_with_skips","archived","held","failed","cancelled"];
   return order.filter(k => counts[k]).map(k => '<span class="badge">'+counts[k]+' '+esc(flightLabel(k))+'</span>').join(" ");
 }
 function renderFlightsRail() {
@@ -1618,8 +1626,9 @@ function renderFlightsRail() {
     .slice(0, 8);
   el.innerHTML = visible.length ? '<div class="flight-list">' + visible.map(p => {
     const pr = flightProgress(p);
+    const isGoalFlight = p.intake && p.intake.goalFlight;
     return '<button class="flight-card'+(state.selectedFlight===p.id?' sel':'')+'" onclick="selectFlight(\''+esc(p.id)+'\')">'
-      + '<div class="flight-title">'+esc(p.title || p.id)+'</div>'
+      + '<div class="flight-title">'+esc(p.title || p.id)+(isGoalFlight ? ' <span class="badge">Goal Flight</span>' : '')+'</div>'
       + '<div class="flight-meta"><span>'+esc(flightLabel(p.status))+'</span><span>'+pr.landed+'/'+pr.total+' landed</span></div>'
       + '<div class="flight-progress"><i style="width:'+Math.max(0, Math.min(100, pr.pct))+'%"></i></div>'
       + '</button>';
@@ -1642,17 +1651,89 @@ async function selectFlight(id) {
   renderBoard();
   await renderFlightDetail(id);
 }
+/*__FLIGHT_GOAL_SECTION_START__*/
+function flightGoalSectionHtml(intake) {
+  if (!intake || !intake.goalFlight) return '';
+  const gf = intake.goalFlight;
+  return '<div class="flight-goal-sec"><h2>Goal</h2><div class="desc">'+esc(gf.goal || '')+'</div>'
+    + (gf.successCriteria && gf.successCriteria.length
+      ? '<h3>Success criteria</h3><ul>'+gf.successCriteria.map(function(c){return '<li>'+esc(c)+'</li>';}).join('')+'</ul>'
+      : '')
+    + '</div>';
+}
+/*__FLIGHT_GOAL_SECTION_END__*/
+/*__FLIGHT_ADVANCE_LABEL_START__*/
+function flightAdvanceLabel(intake) {
+  return (intake && intake.goalFlight) ? 'Repair / Nudge' : 'Advance';
+}
+/*__FLIGHT_ADVANCE_LABEL_END__*/
+/*__FLIGHT_NEXT_WAKE_START__*/
+function computeNextWake(loop, nowMs) {
+  if (!loop) return '—';
+  if (loop.status === 'paused') return 'paused';
+  if (loop.status === 'stopped') return 'stopped' + (loop.stopReason ? ' · ' + loop.stopReason : '');
+  if (loop.mode === 'manual') return 'on demand';
+  if (loop.nextRunAt) {
+    const diffMs = new Date(loop.nextRunAt).valueOf() - (nowMs == null ? Date.now() : nowMs);
+    const diffS = Math.round(diffMs / 1000);
+    if (diffS <= 0) return 'imminent';
+    if (diffS < 60) return 'in ' + diffS + 's';
+    return 'in ' + Math.round(diffS / 60) + 'm';
+  }
+  if (loop.mode === 'self_paced') return 'after next item';
+  return '—';
+}
+/*__FLIGHT_NEXT_WAKE_END__*/
 function flightItemActions(p, it) {
   const canCreate = !it.createdTaskId && it.status !== "cancelled";
   const b = [];
   b.push('<button class="appr-btn" onclick="wpEditItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\')">Edit</button>');
   if (canCreate) b.push('<button class="appr-btn" onclick="wpCreateTask(\''+esc(p.id)+'\',\''+esc(it.id)+'\')">Create task</button>');
+  if (it.status === "review") b.push('<button class="primary-action" onclick="wpAccept(\''+esc(p.id)+'\',\''+esc(it.id)+'\')">Accept / Land</button>');
   b.push('<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'held\')">Hold</button>');
   b.push('<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'ready\')">Ready</button>');
   b.push('<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'cancelled\')">Cancel</button>');
   return b.join("");
 }
-async function renderFlightDetail(id) {
+async function wpAccept(pkgId, itemId) {
+  const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/items/"+encodeURIComponent(itemId)+"/accept", { method: "POST" });
+  if (r && r.package) {
+    hmToast("Item accepted — flight advanced");
+    await renderFlightDetail(pkgId, r.stall, r.blockers);
+  } else {
+    hmToast((r && r.error) || "Accept failed", "err");
+  }
+}
+function stuckStateBannerHtml(pkgId, ss) {
+  if (!ss) return '';
+  const itemRows = ss.stuckItems.map(function(si) {
+    return '<li><strong>'+esc(si.itemTitle)+'</strong>'
+      +' <span class="badge">'+esc(si.itemStatus)+'</span>'
+      +' → linked task <span class="badge'+(si.taskStatus === 'archived' ? '' : ' err')+'">'+esc(si.taskStatus)+'</span></li>';
+  }).join('');
+  const repairBadge = ss.canAutoRepair
+    ? '<span class="badge ok">auto-repair</span> '
+    : '<span class="badge warn">operator review</span> ';
+  return '<div class="stuck-banner">'
+    + '<div class="stuck-banner-head">Flight stalled — '+esc(ss.reason)+'</div>'
+    + (itemRows ? '<ul class="stuck-item-list">'+itemRows+'</ul>' : '')
+    + '<div class="stuck-action">'+repairBadge+esc(ss.suggestedAction)+'</div>'
+    + '<div style="margin-top:8px"><button class="primary-action" onclick="wpReconcile(\''+esc(pkgId)+'\')">Reconcile Flight</button></div>'
+    + '</div>';
+}
+/*__RECONCILE_START__*/
+async function wpReconcile(pkgId) {
+  const r = await api('/work-packages/'+encodeURIComponent(pkgId)+'/reconcile', { method: 'POST' });
+  if (r && r.package) {
+    const n = (r.started || []).length;
+    hmToast(n ? 'Flight reconciled — '+n+' item'+(n===1?'':'s')+' started' : 'Flight reconciled');
+    await renderFlightDetail(pkgId, r.stall, r.blockers);
+  } else {
+    hmToast((r && r.error) || 'Reconcile failed', 'err');
+  }
+}
+/*__RECONCILE_END__*/
+async function renderFlightDetail(id, stall, blockers) {
   const el = document.getElementById("session");
   if (!el) return;
   const p = await api("/work-packages/"+encodeURIComponent(id));
@@ -1660,36 +1741,51 @@ async function renderFlightDetail(id) {
   const pr = flightProgress(p);
   const canStart = ["draft","held","ready"].includes(p.status);
   const canAdvance = p.status === "running";
-  const loopResp = await api("/work-packages/"+encodeURIComponent(id)+"/loop");
-  const loop = loopResp && loopResp.loop ? loopResp.loop : null;
+  const loop = p.loop || null;
+  state.selectedFlightLoop = loop;
   let passes = [];
   if (loop) {
     const passResp = await api("/work-packages/"+encodeURIComponent(id)+"/loop/passes");
     passes = (passResp && passResp.passes) || [];
   }
   const items = (p.items || []).map(it => {
-    const made = it.createdTaskId ? ' · task '+esc(it.createdTaskId) : '';
+    const taskLink = it.createdTaskId
+      ? ' · task '+esc(it.createdTaskId)+(it.taskStatus ? ' <span class="badge">'+esc(it.taskStatus)+'</span>' : '')
+      : '';
     const deps = (it.dependsOn && it.dependsOn.length) ? ' · after '+it.dependsOn.length+' item(s)' : '';
+    const ts = it.updatedAt ? ' · '+esc(it.updatedAt.slice(0,16).replace('T',' ')) : '';
     const blocker = it.blocker ? '<div class="errbox" style="margin-top:6px">'+esc(it.blocker)+'</div>' : '';
     return '<div class="flight-item">'
       + '<div class="flight-item-head"><div class="flight-item-title">'+esc(it.title)+'</div><div><span class="badge">'+esc(flightLabel(it.status))+'</span> <span class="badge">'+esc(it.risk)+'</span></div></div>'
-      + '<div class="muted" style="font-size:11px;margin-top:3px">'+esc(it.prompt)+deps+made+'</div>'
+      + '<div class="muted" style="font-size:11px;margin-top:3px">'+esc(it.prompt)+deps+taskLink+ts+'</div>'
       + blocker
       + '<div class="flight-item-actions">'+flightItemActions(p, it)+'</div>'
       + '</div>';
   }).join("");
+  const stallBanner = stall
+    ? '<div class="errbox" style="margin:8px 0"><strong>'+esc(stall.reason)+'</strong>'
+      + (stall.suggestions && stall.suggestions.length ? '<ul style="margin:4px 0 0 16px">'+stall.suggestions.map(function(s){return '<li>'+esc(s)+'</li>';}).join('')+'</ul>' : '')
+      + '</div>'
+    : '';
+  const blockerBanner = (!stall && blockers) ? renderBlockerBanner(blockers) : '';
+  const stuckBanner = stuckStateBannerHtml(id, p.stuckState || null);
+  const completedLine = p.completedAt ? ' · completed '+esc(p.completedAt.slice(0,16).replace('T',' ')) : '';
   el.innerHTML = '<div class="flight-detail">'
     + '<h1>'+esc(p.title || p.id)+' <span class="badge">'+esc(flightLabel(p.status))+'</span><button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></h1>'
-    + '<div class="sub">'+esc(p.project || "")+' · '+esc(p.projectPath || "")+'</div>'
+    + '<div class="sub">'+esc(p.project || "")+' · '+esc(p.projectPath || "")+completedLine+'</div>'
     + '<div class="flight-counts">'+flightCountsHtml(p)+'</div>'
     + '<div class="flight-progress" title="'+pr.pct+'% landed"><i style="width:'+Math.max(0, Math.min(100, pr.pct))+'%"></i></div>'
-    + '<div class="muted" style="font-size:11px;margin-top:4px">'+pr.landed+' of '+pr.total+' items landed.</div>'
+    + '<div class="muted" style="font-size:11px;margin-top:4px">'+pr.landed+' of '+pr.total+' items landed.'+(pr.skipped > 0 ? ' '+pr.skipped+' skipped (high-risk scope).' : '')+'</div>'
     + '<div class="action-bar">'
     + (canStart ? '<button class="primary-action" onclick="wpStart(\''+esc(p.id)+'\')">Start Flight</button>' : '')
-    + (canAdvance ? '<button class="secondary-action" onclick="wpAdvance(\''+esc(p.id)+'\')">Advance</button>' : '')
+    + (canAdvance ? '<button class="secondary-action" onclick="wpAdvance(\''+esc(p.id)+'\')">'+flightAdvanceLabel(p.intake)+'</button>' : '')
     + '<button class="secondary-action" onclick="wpEditPackage(\''+esc(p.id)+'\')">Edit</button>'
     + '<button class="danger-action" onclick="wpDeletePackage(\''+esc(p.id)+'\')">Delete</button>'
     + '</div>'
+    + stallBanner
+    + blockerBanner
+    + stuckBanner
+    + flightGoalSectionHtml(p.intake)
     + flightLoopSectionHtml(id, loop, passes)
     + '<h2>Description</h2><div class="desc">'+esc(p.description || "No description.")+'</div>'
     + '<h2>Items</h2>' + (items || '<div class="muted">No items.</div>')
@@ -1705,24 +1801,9 @@ function flightLoopSectionHtml(pkgId, loop, passes) {
       + '</div>';
   }
   const modeLabels = { off: 'Off', manual: 'Manual', fixed: 'Fixed cadence', self_paced: 'Self-paced' };
-  const profileLabels = { quality: 'Quality', release: 'Release', watch: 'Watch', personal_admin: 'Personal admin' };
+  const profileLabels = { quality: 'Quality', goal_quality: 'Goal quality', release: 'Release', watch: 'Watch', personal_admin: 'Personal admin' };
   const passCounter = loop.passCount + ' of ' + loop.maxPasses + ' passes';
-  let nextWake = '—';
-  if (loop.status === 'paused') {
-    nextWake = 'paused';
-  } else if (loop.status === 'stopped') {
-    nextWake = 'stopped' + (loop.stopReason ? ' · ' + loop.stopReason : '');
-  } else if (loop.mode === 'manual') {
-    nextWake = 'on demand';
-  } else if (loop.nextRunAt) {
-    const diffMs = new Date(loop.nextRunAt).valueOf() - Date.now();
-    const diffS = Math.round(diffMs / 1000);
-    if (diffS <= 0) nextWake = 'imminent';
-    else if (diffS < 60) nextWake = 'in ' + diffS + 's';
-    else nextWake = 'in ' + Math.round(diffS / 60) + 'm';
-  } else if (loop.mode === 'self_paced') {
-    nextWake = 'after next item';
-  }
+  const nextWake = computeNextWake(loop, null);
   const statusCls = loop.status === 'active' || loop.status === 'running' ? ' warn' : loop.status === 'stopped' ? ' err' : '';
   const canRun = loop.status !== 'running' && loop.status !== 'stopped';
   const canPause = loop.status === 'idle' || loop.status === 'active';
@@ -1752,20 +1833,24 @@ function flightLoopSectionHtml(pkgId, loop, passes) {
     + '</div>';
 }
 function flightPassRowHtml(pass) {
-  const statusCls = pass.status === 'completed' ? 'ok' : pass.status === 'failed' ? 'err' : 'warn';
-  let duration = 'running';
-  if (pass.completedAt && pass.startedAt) {
+  const statusCls = pass.status === 'completed' ? 'ok' : pass.status === 'failed' ? 'err' : pass.status === 'skipped' ? '' : 'warn';
+  let duration = pass.status === 'skipped' ? 'skipped' : 'running';
+  if (pass.completedAt && pass.startedAt && pass.status !== 'skipped') {
     duration = Math.round((new Date(pass.completedAt).valueOf() - new Date(pass.startedAt).valueOf()) / 1000) + 's';
   }
   const created = (pass.createdItemIds && pass.createdItemIds.length)
     ? ' · ' + pass.createdItemIds.length + ' item(s) created' : '';
   const stopNote = pass.stopReason ? ' · ' + esc(pass.stopReason) : '';
+  const evidenceState = (pass.evidence && pass.evidence.state) ? ' · state: '+esc(pass.evidence.state) : '';
+  const errorBlock = (pass.status === 'failed' && pass.error)
+    ? '<div class="errbox" style="margin-top:4px;font-size:10.5px">'+esc(pass.error)+'</div>' : '';
   return '<div class="flight-pass-row">'
     + '<div class="flight-pass-head">'
     + '<span>Pass '+pass.passNumber+' <span class="badge '+statusCls+'">'+esc(pass.status)+'</span></span>'
-    + '<span class="muted" style="font-size:10.5px">'+esc(duration)+esc(created)+stopNote+'</span>'
+    + '<span class="muted" style="font-size:10.5px">'+esc(duration)+esc(created)+stopNote+evidenceState+'</span>'
     + '</div>'
     + (pass.summary ? '<div class="flight-pass-summary">'+esc(pass.summary)+'</div>' : '')
+    + errorBlock
     + '</div>';
 }
 function renderBoard() {
@@ -5687,6 +5772,29 @@ function renderWorkPackageCard(p) {
     + items
     + '</div>';
 }
+/*__ADVANCE_BLOCKER_MSG_START__*/
+function advanceBlockerMsg(bl) {
+  if (!bl || (!bl.held.length && !bl.review.length && !bl.dependency.length && !bl.activeWriter.length && !bl.noReadyItems)) return "Nothing eligible yet";
+  if (bl.noReadyItems) return "No items in ready state";
+  var parts = [];
+  if (bl.held.length) parts.push(bl.held.length + " held");
+  if (bl.review.length) parts.push(bl.review.length + " awaiting review");
+  if (bl.dependency.length) parts.push(bl.dependency.length + " waiting on deps");
+  if (bl.activeWriter.length) parts.push(bl.activeWriter.length + " blocked by active writer");
+  return "Blocked: " + parts.join(", ");
+}
+/*__ADVANCE_BLOCKER_MSG_END__*/
+function renderBlockerBanner(bl) {
+  if (!bl) return '';
+  if (bl.noReadyItems) return '<div class="errbox" style="margin:8px 0">No items in ready state — all items are terminal, running, or held.</div>';
+  var parts = [];
+  if (bl.held.length) parts.push(bl.held.length + " held (approve to unblock)");
+  if (bl.review.length) parts.push(bl.review.length + " awaiting review");
+  if (bl.dependency.length) parts.push(bl.dependency.length + " waiting on dependencies");
+  if (bl.activeWriter.length) parts.push(bl.activeWriter.length + " blocked by active writer");
+  if (!parts.length) return '';
+  return '<div class="errbox" style="margin:8px 0">Nothing started: ' + esc(parts.join(" · ")) + '</div>';
+}
 async function wpStart(pkgId) {
   const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/start", { method:"POST" });
   if (r && r.package) { hmToast("Flight started ("+((r.started||[]).length)+" item(s) running)"); } else { hmToast((r && r.error) || "Start failed"); }
@@ -5694,8 +5802,11 @@ async function wpStart(pkgId) {
 }
 async function wpAdvance(pkgId) {
   const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/advance", { method:"POST" });
-  if (r && r.package) { hmToast((r.started||[]).length ? "Advanced ("+r.started.length+" started)" : "Nothing eligible yet"); } else { hmToast((r && r.error) || "Advance failed"); }
+  if (r && r.package) {
+    hmToast((r.started||[]).length ? "Advanced ("+r.started.length+" started)" : advanceBlockerMsg(r.blockers));
+  } else { hmToast((r && r.error) || "Advance failed"); }
   renderWorkPackages(); refresh();
+  if (state.selectedFlight === pkgId) await renderFlightDetail(pkgId, r && r.stall, r && r.blockers);
 }
 async function wpCreateTask(pkgId, itemId) {
   const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/items/"+encodeURIComponent(itemId)+"/create-task", { method:"POST" });
@@ -5759,8 +5870,7 @@ async function wpResumeLoop(pkgId) {
   renderFlightDetail(pkgId);
 }
 async function wpEditLoop(pkgId) {
-  const loopResp = await api("/work-packages/"+encodeURIComponent(pkgId)+"/loop");
-  const loop = loopResp && loopResp.loop;
+  const loop = state.selectedFlightLoop;
   const validModes = ["off", "manual", "fixed", "self_paced"];
   const validProfiles = ["quality", "release", "watch", "personal_admin"];
   const mode = await hmPrompt("Loop mode (off / manual / fixed / self_paced)", (loop && loop.mode) || "manual", { title: "Edit Loop" });

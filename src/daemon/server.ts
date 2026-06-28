@@ -2053,6 +2053,30 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /work-packages/:id/items/:itemId/accept — explicit Accept / Land operator
+      // action for a review-status item: marks it done, archives its linked task
+      // (preserving it on the board), then advances the package.
+      const wpAcceptItemMatch = urlPath.match(/^\/work-packages\/([^/]+)\/items\/([^/]+)\/accept$/);
+      if (req.method === "POST" && wpAcceptItemMatch) {
+        const { acceptWorkPackageItem } = await import("@/lib/work-packages/orchestrate");
+        try {
+          const r = await acceptWorkPackageItem(
+            decodeURIComponent(wpAcceptItemMatch[1]),
+            decodeURIComponent(wpAcceptItemMatch[2]),
+          );
+          for (const itemId of r.started) {
+            const linked = r.package.items.find((i) => i.id === itemId);
+            if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
+          }
+          broadcast("work-packages:updated", { packageId: r.package.id });
+          json(res, 200, r);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "accept failed";
+          json(res, msg.includes("not in review status") ? 409 : 404, { error: msg });
+        }
+        return;
+      }
+
       // POST /work-packages/:id/start — explicit operator action: promote draft
       // items to ready (held stays held), set the package running, advance.
       const wpStartMatch = urlPath.match(/^\/work-packages\/([^/]+)\/start$/);
@@ -2090,6 +2114,26 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /work-packages/:id/reconcile — force reconcile + advance for a stuck Flight.
+      // Safe and idempotent; auto-repairs the unambiguous archived→done case.
+      // Returns AdvanceResult including updated stuckState in package detail.
+      const wpReconcileMatch = urlPath.match(/^\/work-packages\/([^/]+)\/reconcile$/);
+      if (req.method === "POST" && wpReconcileMatch) {
+        const { reconcileStuckFlight } = await import("@/lib/work-packages/orchestrate");
+        try {
+          const r = await reconcileStuckFlight(decodeURIComponent(wpReconcileMatch[1]));
+          for (const itemId of r.started) {
+            const linked = r.package.items.find((i) => i.id === itemId);
+            if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
+          }
+          broadcast("work-packages:updated", { packageId: r.package.id });
+          json(res, 200, r);
+        } catch (e) {
+          json(res, 404, { error: e instanceof Error ? e.message : "reconcile failed" });
+        }
+        return;
+      }
+
       // ── Flight Loop API ─────────────────────────────────────────────
       // GET  /work-packages/:id/loop          — get loop policy for a Flight
       // PUT  /work-packages/:id/loop          — upsert loop config (create or update)
@@ -2097,6 +2141,39 @@ export function createDaemonServer() {
       // POST /work-packages/:id/loop/pause    — pause an idle/active loop
       // POST /work-packages/:id/loop/resume   — resume a paused loop
       // GET  /work-packages/:id/loop/passes   — pass history newest-first
+
+      // GET /work-packages/:id/loop/summary — trend and recent pass summary
+      const wpLoopSummaryMatch = urlPath.match(/^\/work-packages\/([^/]+)\/loop\/summary$/);
+      if (req.method === "GET" && wpLoopSummaryMatch) {
+        const { getLoop, getLoopPasses } = await import("@/lib/work-packages/flight-loop-store");
+        const pkgId = decodeURIComponent(wpLoopSummaryMatch[1]);
+        const loop = getLoop(pkgId);
+        if (!loop) { json(res, 404, { error: "no loop for this package" }); return; }
+        const passes = getLoopPasses(loop.id, 5);
+        const completedPasses = passes.filter((p) => p.status === "completed" || p.status === "failed");
+        const recentPasses = passes.map((p) => ({
+          passNumber: p.passNumber,
+          state: (p.evidence as Record<string, unknown>).state ?? null,
+          stopReason: p.stopReason,
+          createdItemCount: p.createdItemIds.length,
+          completedAt: p.completedAt,
+        }));
+        const SEVERITY: Record<string, number> = { risky: 4, blocked: 3, needs_follow_up: 2, running: 1, clean: 0 };
+        let trend: "improving" | "stable" | "degrading" | "insufficient_data" = "insufficient_data";
+        if (completedPasses.length >= 2) {
+          const lastState = (completedPasses[0].evidence as Record<string, unknown>).state as string | undefined;
+          const prevState = (completedPasses[1].evidence as Record<string, unknown>).state as string | undefined;
+          const lastSev = SEVERITY[lastState ?? ""] ?? -1;
+          const prevSev = SEVERITY[prevState ?? ""] ?? -1;
+          if (lastSev >= 0 && prevSev >= 0) {
+            if (lastSev < prevSev) trend = "improving";
+            else if (lastSev > prevSev) trend = "degrading";
+            else trend = "stable";
+          }
+        }
+        json(res, 200, { loop, recentPasses, trend });
+        return;
+      }
 
       const wpLoopPassesMatch = urlPath.match(/^\/work-packages\/([^/]+)\/loop\/passes$/);
       if (req.method === "GET" && wpLoopPassesMatch) {
@@ -3681,7 +3758,7 @@ export function createDaemonServer() {
         // terminal/review state, advance its package immediately (the loop is the
         // backstop). Never let a hook failure break the task update.
         if ((task as Record<string, unknown>).source === "work-package" &&
-            ["done", "failed", "cancelled", "review"].includes(String((task as Record<string, unknown>).status))) {
+            ["done", "failed", "cancelled", "review", "archived"].includes(String((task as Record<string, unknown>).status))) {
           try {
             const { findItemByTaskId } = await import("@/lib/work-packages/store");
             const owner = findItemByTaskId(task._id);
@@ -3823,6 +3900,25 @@ export function createDaemonServer() {
           const t = await Task.findByIdAndUpdate(tid, updates);
           if (!t) { json(res, 404, { error: "Not found" }); return; }
           broadcast("tasks:updated", { taskId: tid, status: "backlog" });
+          // Work Package advance hook: retry on a work-package child must reconcile the
+          // linked Flight item out of failed and clear its stale blocker.
+          if ((t as Record<string, unknown>).source === "work-package") {
+            try {
+              const { findItemByTaskId } = await import("@/lib/work-packages/store");
+              const owner = findItemByTaskId(t._id);
+              if (owner) {
+                const { advanceWorkPackage } = await import("@/lib/work-packages/orchestrate");
+                const r = await advanceWorkPackage(owner.packageId);
+                for (const itemId of r.started) {
+                  const linked = r.package.items.find((i) => i.id === itemId);
+                  if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
+                }
+                broadcast("work-packages:updated", { packageId: owner.packageId });
+              }
+            } catch (e) {
+              console.error(`[work-packages] advance hook failed on retry: ${e instanceof Error ? e.message : e}`);
+            }
+          }
           json(res, 200, t); return;
         }
         if (action === "cancel") {
@@ -3840,6 +3936,26 @@ export function createDaemonServer() {
         const t = await Task.findByIdAndUpdate(tid, { status: "archived" });
         if (!t) { json(res, 404, { error: "Not found" }); return; }
         broadcast("tasks:updated", { taskId: tid, status: "archived" });
+        // Work Package advance hook — archiving a work-package child (e.g. a
+        // review task the operator accepted) is a terminal transition that must
+        // reconcile the package item and unblock the next eligible item.
+        if ((t as Record<string, unknown>).source === "work-package") {
+          try {
+            const { findItemByTaskId } = await import("@/lib/work-packages/store");
+            const owner = findItemByTaskId(t._id);
+            if (owner) {
+              const { advanceWorkPackage } = await import("@/lib/work-packages/orchestrate");
+              const r = await advanceWorkPackage(owner.packageId);
+              for (const itemId of r.started) {
+                const linked = r.package.items.find((i) => i.id === itemId);
+                if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
+              }
+              broadcast("work-packages:updated", { packageId: owner.packageId });
+            }
+          } catch (e) {
+            console.error(`[work-packages] advance hook failed: ${e instanceof Error ? e.message : e}`);
+          }
+        }
         json(res, 200, t); return;
       }
 

@@ -66,7 +66,7 @@ export async function tickFlightLoops(): Promise<void> {
 
     // Stop loops whose Flight has reached a terminal state.
     const pkg = getWorkPackage(loop.packageId);
-    if (!pkg || ["done", "failed", "cancelled"].includes(pkg.status)) {
+    if (!pkg || ["done", "done_with_skips", "failed", "cancelled"].includes(pkg.status)) {
       updateLoopAfterPass(loop._id, loop.passCount, "stopped", "flight_complete", null);
       continue;
     }

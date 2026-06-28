@@ -65,6 +65,12 @@ export interface IntakeProjectCollision {
   recommendation: "hold" | "worktree_parallel" | "safe_parallel";
 }
 
+export interface GoalFlightMetadata {
+  goal: string;
+  successCriteria: string[];
+  constraints?: string[];
+}
+
 export interface IntakeResult {
   kind: IntakeKind;
   confidence: number;
@@ -73,6 +79,7 @@ export interface IntakeResult {
   suggestedMode: IntakeMode;
   projectCollision?: IntakeProjectCollision;
   packageCandidate?: { title: string; items: ProposedItem[] };
+  goalFlight?: GoalFlightMetadata;
 }
 
 // ── Signal regexes ────────────────────────────────────────────────
@@ -85,6 +92,40 @@ const READONLY_RE = /\b(review|summari[sz]e|audit|read|report|inspect|analy[sz]e
 const WRITE_RE = /\b(fix|refactor|rename|update|edit|delete|build|deploy|add|remove|create|implement|write|migrate|change|patch|bump|install|upgrade|configure)\b/i;
 
 const BROAD_KEYWORD_RE = /\bfix all\b|\ball (the|of the|of)\b|\bevery(thing|where)?\b|\bacross the (codebase|repo(sitory)?|project)\b|\b(the whole|entire)\b|\bmigrate\b|\band then\b/i;
+
+/**
+ * Goal Flight signal: broad outcome-based prompt that reads like a product objective
+ * rather than a checklist. Matches prompts like "create a site that does X" or
+ * "build me a platform for X with features Y and Z". Intentionally does NOT match
+ * enumerated step-by-step prompts (those remain checklist Work Packages).
+ */
+const GOAL_FLIGHT_VERB_RE = /\b(create|build|make|develop|set up|launch|ship|design)\b/i;
+const GOAL_FLIGHT_SCOPE_RE = /\b(a|an)\s+(?:\w+\s+)?(web\s*site|website|app|application|service|api|platform|dashboard|tool|system|bot|integration|marketplace|store|portal)\b/i;
+const GOAL_FLIGHT_CRITERIA_RE = /\b(with|that|so\s+that|including|featuring|to\s+support|which\s+(allows?|lets?|enables?))\b/i;
+
+function isGoalFlightPrompt(text: string): boolean {
+  return GOAL_FLIGHT_VERB_RE.test(text)
+    && GOAL_FLIGHT_SCOPE_RE.test(text)
+    && (GOAL_FLIGHT_CRITERIA_RE.test(text) || text.length > 80);
+}
+
+function extractGoalFlightMetadata(text: string, title: string): GoalFlightMetadata {
+  // The goal is the full prompt trimmed to a reasonable sentence.
+  const goal = title || text.split(/[.,;]/)[0].trim().slice(0, 200);
+  // Extract features/criteria as comma or "and"-separated requirements after connecting words.
+  const criteriaMatch = text.match(/\b(?:with|that|including|featuring)\b(.+)$/i);
+  let successCriteria: string[] = [];
+  if (criteriaMatch) {
+    successCriteria = criteriaMatch[1]
+      .split(/,\s*(?:and\s+)?|\s+and\s+/)
+      .map((s) => s.replace(/[.,;!?]+$/, "").trim())
+      .filter((s) => s.length > 2 && s.length < 120);
+  }
+  if (successCriteria.length === 0) {
+    successCriteria = ["Goal delivered as described"];
+  }
+  return { goal, successCriteria };
+}
 
 // Lane / workflow executors own their own routing — intake never re-promotes them.
 const WORKFLOW_EXECUTORS = new Set(["workflow"]);
@@ -160,7 +201,33 @@ export function classifyIntake(input: IntakeInput): IntakeResult {
     reasons.push(`active same-project work (${active.length}) → ${recommendation}`);
   }
 
-  // 4. Promote to a Work Package when broad AND it decomposes into >=2 items.
+  // 4a. Goal Flight detection: broad outcome-based prompt (not an enumerated list).
+  //     Returns a work_package_candidate with goalFlight metadata attached.
+  if (!enumerated && isGoalFlightPrompt(description)) {
+    const title = input.title?.trim() || deriveTaskTitle(description);
+    const goalMeta = extractGoalFlightMetadata(description, title);
+    reasons.push("broad outcome-based goal prompt");
+    const items = fragments.length >= 2 ? proposedItemsFromFragments(fragments) : [{
+      title: "Plan and execute goal",
+      prompt: description,
+      risk: "low" as IntakeRisk,
+      executionMode: "sequential" as IntakeMode,
+      scopeHints: [],
+      dependsOn: [],
+    }];
+    return {
+      kind: "work_package_candidate",
+      confidence: 0.82,
+      reasons,
+      risk: items.some((it) => it.risk === "high") ? "high" : "medium",
+      suggestedMode: "split",
+      projectCollision: collision,
+      packageCandidate: { title, items },
+      goalFlight: goalMeta,
+    };
+  }
+
+  // 4b. Promote to a Work Package when broad AND it decomposes into >=2 items.
   if (broad && fragments.length >= 2) {
     if (keywordBroad) reasons.push("broad-scope wording");
     if (enumerated) reasons.push("explicit multi-step enumeration");
@@ -320,6 +387,7 @@ export async function classifyIntakeAsync(
       suggestedMode: "split",
       projectCollision: base.projectCollision,
       packageCandidate: { title, items },
+      goalFlight: base.goalFlight,
     };
   } catch {
     return base;

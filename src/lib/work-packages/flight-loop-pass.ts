@@ -14,7 +14,7 @@ import { getDb } from "@/lib/db";
 import { scrubSecretText } from "@/lib/workflows/runs";
 import { reconcileWorkPackage } from "./orchestrate";
 import { getWorkPackage } from "./store";
-import { createFollowUpItems, createGateFollowUpItems } from "./follow-up-creator";
+import { createFollowUpItems, createGateFollowUpItems, createCriterionFollowUpItems } from "./follow-up-creator";
 import {
   getLoop,
   createPass,
@@ -26,6 +26,29 @@ import {
 } from "./flight-loop-store";
 
 export type PassStateClassification = "clean" | "needs_follow_up" | "blocked" | "risky" | "running";
+
+interface ProfileStrategy {
+  requiresGates: boolean;
+  allowsItemCreation: boolean;
+  forceDraftItems: boolean;
+  forceHeldRiskyItems: boolean;
+  stopLoopOnGateFailure: boolean;
+}
+
+function getProfileStrategy(profile: import("./flight-loop-store").PassProfile): ProfileStrategy {
+  switch (profile) {
+    case "release":
+      return { requiresGates: true, allowsItemCreation: true, forceDraftItems: false, forceHeldRiskyItems: true, stopLoopOnGateFailure: true };
+    case "watch":
+      return { requiresGates: false, allowsItemCreation: false, forceDraftItems: false, forceHeldRiskyItems: false, stopLoopOnGateFailure: false };
+    case "personal_admin":
+      return { requiresGates: false, allowsItemCreation: true, forceDraftItems: true, forceHeldRiskyItems: false, stopLoopOnGateFailure: false };
+    case "goal_quality":
+      return { requiresGates: false, allowsItemCreation: true, forceDraftItems: false, forceHeldRiskyItems: false, stopLoopOnGateFailure: false };
+    default: // quality
+      return { requiresGates: false, allowsItemCreation: true, forceDraftItems: false, forceHeldRiskyItems: false, stopLoopOnGateFailure: false };
+  }
+}
 
 export interface ClassifyPassStateInput {
   /** Item status counts keyed by PackageStatus values. */
@@ -53,6 +76,34 @@ export function classifyPassState(input: ClassifyPassStateInput): PassStateClass
   return "clean";
 }
 
+export type CriterionStatus = "met" | "in_progress" | "unmet";
+
+export interface CriterionResult {
+  criterion: string;
+  status: CriterionStatus;
+}
+
+/**
+ * Maps each success criterion to a status by inspecting existing items.
+ * A criterion is matched when its text (case-insensitive) appears in an item
+ * title or prompt. "met" = a matching item is done; "in_progress" = matching
+ * item exists but isn't done; "unmet" = no matching item found.
+ */
+export function classifyCriteria(
+  criteria: string[],
+  items: Array<{ title: string; prompt: string; status: string }>,
+): CriterionResult[] {
+  return criteria.map((criterion) => {
+    const lc = criterion.toLowerCase();
+    const matching = items.filter(
+      (i) => i.title.toLowerCase().includes(lc) || i.prompt.toLowerCase().includes(lc),
+    );
+    if (matching.length === 0) return { criterion, status: "unmet" as const };
+    if (matching.some((i) => i.status === "done")) return { criterion, status: "met" as const };
+    return { criterion, status: "in_progress" as const };
+  });
+}
+
 export interface RunPassResult {
   loop: FlightLoop;
   pass: FlightLoopPass;
@@ -63,11 +114,20 @@ function buildSummary(
   counts: Record<string, number>,
   createdCount: number,
   stopReason: string | null,
+  archivedCount = 0,
+  cancelledHighRiskCount = 0,
+  criteriaStatus?: CriterionResult[] | null,
 ): string {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   const parts = [`${counts.done ?? 0}/${total} items done`];
+  if (archivedCount > 0) parts.push(`${archivedCount} archived`);
+  if (cancelledHighRiskCount > 0) parts.push(`${cancelledHighRiskCount} high-risk skipped`);
   if ((counts.failed ?? 0) > 0) parts.push(`${counts.failed} failed`);
   if ((counts.review ?? 0) > 0) parts.push(`${counts.review} in review`);
+  if (criteriaStatus && criteriaStatus.length > 0) {
+    const metCount = criteriaStatus.filter((c) => c.status === "met").length;
+    parts.push(`${metCount}/${criteriaStatus.length} criteria met`);
+  }
   if (createdCount > 0) parts.push(`${createdCount} follow-up item${createdCount === 1 ? "" : "s"} created`);
   if (stopReason) parts.push(`stopped: ${stopReason}`);
   return parts.join("; ");
@@ -222,6 +282,23 @@ export async function runPass(packageId: string): Promise<RunPassResult> {
     throw new Error("loop has expired");
   }
 
+  // Check Flight readiness — skip (don't consume a pass count) if Flight can't run yet.
+  const pkgForStatus = getWorkPackage(packageId);
+  if (!pkgForStatus) throw new Error(`package "${packageId}" not found`);
+  if (pkgForStatus.status === "held" || pkgForStatus.status === "review") {
+    const skippedPassNum = loop.passCount + 1;
+    const skippedPass = createPass(loop.id, packageId, loop.profile, skippedPassNum);
+    const completedSkipped = completePass(skippedPass.id, {
+      status: "skipped",
+      summary: null,
+      evidence: {},
+      createdItemIds: [],
+      stopReason: "skipped_flight_not_ready",
+    });
+    // Loop passCount stays unchanged (no increment), loop status stays idle/active
+    return { loop: getLoop(packageId)!, pass: completedSkipped, createdItemIds: [] };
+  }
+
   // Atomic lock: flip idle/active → running in one statement.
   // SQLite serializes writes; exactly one concurrent caller gets changes=1.
   const lockResult = getDb()
@@ -235,6 +312,7 @@ export async function runPass(packageId: string): Promise<RunPassResult> {
 
   const newPassCount = loop.passCount + 1;
   const pass = createPass(loop.id, packageId, loop.profile, newPassCount);
+  const strategy = getProfileStrategy(loop.profile);
 
   try {
     await reconcileWorkPackage(packageId);
@@ -242,23 +320,84 @@ export async function runPass(packageId: string): Promise<RunPassResult> {
     if (!detail) throw new Error(`package "${packageId}" not found after reconcile`);
 
     const counts = detail.counts;
+    const projectPath = detail.projectPath ?? "";
+    const discoveredGates = projectPath ? discoverRepoGates(projectPath) : [];
+    const gatesDiscovered = discoveredGates.map((g) => g.name);
+
+    // Watch profile: skip all heavy work — observe external state only.
+    if (!strategy.allowsItemCreation) {
+      const watchEvidence: Record<string, unknown> = {
+        counts,
+        state: classifyPassState({ counts, blockedItemCount: 0 }),
+        externalChecks: [],
+        loopMode: loop.mode,
+        passIndex: newPassCount,
+        gatesDiscovered,
+        archivedCount: 0,
+        archivedItems: [],
+        runningCount: detail.items.filter((i) => i.status === "running").length,
+        blockedItemCount: 0,
+        failedItems: [],
+        reviewItems: [],
+      };
+      const watchStop = "external_state_unchanged";
+      const watchSummary = buildSummary(counts, 0, watchStop);
+      const completedWatchPass = completePass(pass.id, {
+        status: "completed",
+        summary: watchSummary,
+        evidence: watchEvidence,
+        createdItemIds: [],
+        stopReason: watchStop,
+      });
+      const stopped = true;
+      const nextStatus: LoopStatus = "stopped";
+      updateLoopAfterPass(loop.id, newPassCount, nextStatus, watchStop, null);
+      return { loop: getLoop(packageId)!, pass: completedWatchPass, createdItemIds: [] };
+    }
+
+    // Release profile: require gates to be present.
+    if (strategy.requiresGates && discoveredGates.length === 0) {
+      const releaseStop = "release_gate_missing";
+      const completedReleaseFail = completePass(pass.id, {
+        status: "failed",
+        summary: null,
+        evidence: { counts, gatesDiscovered, loopMode: loop.mode, passIndex: newPassCount },
+        createdItemIds: [],
+        stopReason: releaseStop,
+      });
+      updateLoopAfterPass(loop.id, newPassCount, "stopped", releaseStop, null);
+      return { loop: getLoop(packageId)!, pass: completedReleaseFail, createdItemIds: [] };
+    }
+
     const failedItems = detail.items.filter((i) => i.status === "failed");
     const reviewItems = detail.items.filter((i) => i.status === "review");
     const runningItems = detail.items.filter((i) => i.status === "running");
+    const archivedItems = detail.items.filter((i) => i.status === "archived");
+    const archivedCount = archivedItems.length;
+    const cancelledHighRisk = detail.items.filter((i) => i.status === "cancelled" && i.risk === "high");
     const blockedItemCount = detail.items.filter(
-      (i) => !["done", "cancelled", "failed", "held"].includes(i.status) && i.blocker !== null,
+      (i) => !["done", "cancelled", "failed", "held", "archived"].includes(i.status) && i.blocker !== null,
     ).length;
     const state = classifyPassState({ counts, blockedItemCount });
 
     const taskOutputs = gatherTaskOutputs([...failedItems, ...reviewItems]);
-    const gitEvidence = gatherGitEvidence(detail.projectPath ?? "");
+    const gitEvidence = gatherGitEvidence(projectPath);
 
-    // Repo gate discovery and execution (Quality profile).
-    const projectPath = detail.projectPath ?? "";
-    const gates = projectPath
-      ? runRepoGates(projectPath, discoverRepoGates(projectPath))
-      : [];
+    const gates = projectPath ? runRepoGates(projectPath, discoveredGates) : [];
     const failedGates = gates.filter((g) => !g.passed);
+
+    // personal_admin: count pending approvals (held items in this flight)
+    const pendingApprovals = loop.profile === "personal_admin"
+      ? detail.items.filter((i) => i.status === "held").length
+      : undefined;
+
+    const goalFlight = loop.profile === "goal_quality"
+      ? (detail.intake?.goalFlight as { goal?: string; successCriteria?: string[] } | undefined) ?? null
+      : null;
+    const criteriaStatus =
+      goalFlight?.successCriteria?.length
+        ? classifyCriteria(goalFlight.successCriteria, detail.items)
+        : null;
 
     const evidence: Record<string, unknown> = {
       counts,
@@ -274,8 +413,18 @@ export async function runPass(packageId: string): Promise<RunPassResult> {
         title: i.title,
         taskOutput: taskOutputs[i.id] ?? null,
       })),
+      archivedCount,
+      archivedItems: archivedItems.map((i) => ({ id: i.id, title: i.title })),
+      cancelledHighRiskCount: cancelledHighRisk.length,
+      cancelledHighRiskItems: cancelledHighRisk.map((i) => ({ id: i.id, title: i.title })),
       runningCount: runningItems.length,
       blockedItemCount,
+      loopMode: loop.mode,
+      passIndex: newPassCount,
+      gatesDiscovered,
+      ...(pendingApprovals !== undefined ? { pendingApprovals } : {}),
+      ...(goalFlight ? { goal: goalFlight.goal, successCriteria: goalFlight.successCriteria ?? [] } : {}),
+      ...(criteriaStatus ? { criteriaStatus } : {}),
       ...(gitEvidence ? { git: gitEvidence } : {}),
       ...(gates.length > 0 ? { gates } : {}),
     };
@@ -298,6 +447,8 @@ export async function runPass(packageId: string): Promise<RunPassResult> {
         sources,
         startPosition: nextPos,
         autoReadySafeItems: loop.autoReadySafeItems,
+        forceDraft: strategy.forceDraftItems || undefined,
+        forceHeld: strategy.forceHeldRiskyItems || undefined,
       });
       createdItemIds.push(...created.map((c) => c.id));
       nextPos += created.length;
@@ -315,11 +466,28 @@ export async function runPass(packageId: string): Promise<RunPassResult> {
         autoReadySafeItems: loop.autoReadySafeItems,
       });
       createdItemIds.push(...gateItems.map((c) => c.id));
+      nextPos += gateItems.length;
     }
 
-    // all_checks_clean requires both items done AND all gates passing.
-    const allItemsDone = detail.items.every((i) => ["done", "cancelled"].includes(i.status));
-    const allTerminal = allItemsDone && failedGates.length === 0;
+    if (loop.autoCreateItems && criteriaStatus) {
+      const unmetCriteria = criteriaStatus
+        .filter((c) => c.status === "unmet")
+        .map((c) => c.criterion);
+      if (unmetCriteria.length > 0) {
+        const criterionItems = createCriterionFollowUpItems({
+          packageId,
+          unmetCriteria,
+          startPosition: nextPos,
+          autoReadySafeItems: loop.autoReadySafeItems,
+        });
+        createdItemIds.push(...criterionItems.map((c) => c.id));
+        nextPos += criterionItems.length;
+      }
+    }
+
+    // all_checks_clean requires items all done, all gates passing, AND no new follow-ups created.
+    const allItemsDone = detail.items.every((i) => ["done", "cancelled", "archived"].includes(i.status));
+    const allTerminal = allItemsDone && failedGates.length === 0 && createdItemIds.length === 0;
     let stopReason: string | null = null;
 
     if (allTerminal) {
@@ -334,7 +502,7 @@ export async function runPass(packageId: string): Promise<RunPassResult> {
       stopReason = "no_actionable_follow_up";
     }
 
-    const summary = buildSummary(counts, createdItemIds.length, stopReason);
+    const summary = buildSummary(counts, createdItemIds.length, stopReason, archivedCount, cancelledHighRisk.length, criteriaStatus);
     const completedPass = completePass(pass.id, {
       status: "completed",
       summary,

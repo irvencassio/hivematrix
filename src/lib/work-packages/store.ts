@@ -14,9 +14,18 @@
 import { generateId, getDb, Task } from "@/lib/db";
 import { scrubSecretText } from "@/lib/workflows/runs";
 import type { IntakeActiveTask, IntakeMode, IntakeResult, ProposedItem } from "@/lib/intake/classify";
+import { type FlightLoop, type PassStatus, getLoop, getLoopPasses, upsertLoop } from "./flight-loop-store";
 
-export type PackageStatus = "draft" | "held" | "ready" | "running" | "review" | "done" | "failed" | "cancelled";
-const TERMINAL = new Set<PackageStatus>(["done", "failed", "cancelled"]);
+export interface GoalFlightMetadata {
+  goal: string;
+  successCriteria: string[];
+  constraints?: string[];
+}
+
+export type GoalFlightIntake = IntakeResult & { goalFlight: GoalFlightMetadata };
+
+export type PackageStatus = "draft" | "held" | "ready" | "running" | "review" | "done" | "done_with_skips" | "failed" | "cancelled" | "archived";
+const TERMINAL = new Set<PackageStatus>(["done", "done_with_skips", "failed", "cancelled"]);
 
 const SECRET_KEY = /password|passwd|pwd|secret|token|cookie|session|credential|api[_-]?key|bearer|keychain/i;
 
@@ -56,6 +65,39 @@ export interface WorkPackageItem {
   blocker: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Board task status for the linked task; null if no task has been created yet. */
+  taskStatus: string | null;
+}
+
+export interface StuckItemInfo {
+  itemId: string;
+  itemTitle: string;
+  itemStatus: "running" | "review";
+  taskId: string;
+  taskStatus: string;
+}
+
+export interface FlightStuckState {
+  reason: string;
+  stuckItems: StuckItemInfo[];
+  readyDependentIds: string[];
+  /** True when every stuck item has an archived linked task: reconcile auto-repairs these as done. */
+  canAutoRepair: boolean;
+  suggestedAction: string;
+}
+
+/** Lightweight pass record inlined in WorkPackageDetail for single-call diagnostics. */
+export interface FlightLoopPassSummary {
+  passNumber: number;
+  status: PassStatus;
+  startedAt: string;
+  completedAt: string | null;
+  stopReason: string | null;
+  summary: string | null;
+  createdItemCount: number;
+  /** evidence.state classification from the pass: clean | needs_follow_up | blocked | risky | running */
+  evidenceState: string | null;
+  error: string | null;
 }
 
 export interface WorkPackageRecord {
@@ -77,6 +119,16 @@ export interface WorkPackageRecord {
 export interface WorkPackageDetail extends WorkPackageRecord {
   items: WorkPackageItem[];
   counts: Record<string, number>;
+  /** Archived items + high-risk cancelled items: scope the operator intentionally did not run. */
+  skippedCount: number;
+  failedCount: number;
+  reviewCount: number;
+  /** Inline loop policy; null if no loop has been configured for this Flight. */
+  loop: FlightLoop | null;
+  /** Last 5 passes newest-first; empty if no loop or no passes yet. */
+  recentPasses: FlightLoopPassSummary[];
+  /** Non-null when the Flight appears running but item states are inconsistent with their linked tasks. */
+  stuckState: FlightStuckState | null;
 }
 
 interface PackageRow {
@@ -97,6 +149,7 @@ function rowToItem(r: ItemRow): WorkPackageItem {
     dependsOn: parseArray(r.dependsOn), scopeHints: parseArray(r.scopeHints),
     executionMode: r.executionMode as IntakeMode, createdTaskId: r.createdTaskId, resultTaskId: r.resultTaskId,
     commitHash: r.commitHash, blocker: r.blocker, createdAt: r.createdAt, updatedAt: r.updatedAt,
+    taskStatus: null,
   };
 }
 function rowToPackage(r: PackageRow): WorkPackageRecord {
@@ -190,14 +243,91 @@ export function listWorkPackages(filter: { status?: string; limit?: number } = {
   return rows.map(rowToPackage);
 }
 
+const TASK_TERMINAL = new Set(["done", "archived", "cancelled", "failed"]);
+
+/**
+ * Detects whether a running Flight is stuck: one or more items appear active
+ * (running/review) but their linked tasks have already reached a terminal state,
+ * while at least one ready item is waiting on them. The caller should trigger
+ * POST /work-packages/:id/reconcile to repair.
+ *
+ * Pure function — takes the already-joined items list from getWorkPackage.
+ */
+export function detectStuckState(items: WorkPackageItem[]): FlightStuckState | null {
+  const stuckItems = items.filter(
+    (i) =>
+      (i.status === "running" || i.status === "review") &&
+      i.createdTaskId !== null &&
+      i.taskStatus !== null &&
+      TASK_TERMINAL.has(i.taskStatus),
+  );
+  if (stuckItems.length === 0) return null;
+
+  const stuckIds = new Set(stuckItems.map((i) => i.id));
+  const readyDependents = items.filter(
+    (i) => i.status === "ready" && i.dependsOn.some((d) => stuckIds.has(d)),
+  );
+  if (readyDependents.length === 0) return null;
+
+  const canAutoRepair = stuckItems.every((i) => i.taskStatus === "archived");
+  const n = stuckItems.length;
+  const d = readyDependents.length;
+
+  return {
+    reason:
+      `${n} item${n !== 1 ? "s" : ""} ${n !== 1 ? "appear" : "appears"} active but ` +
+      `${n !== 1 ? "their" : "its"} linked task${n !== 1 ? "s are" : " is"} terminal — ` +
+      `${d} dependent item${d !== 1 ? "s" : ""} cannot start`,
+    stuckItems: stuckItems.map((i) => ({
+      itemId: i.id,
+      itemTitle: i.title,
+      itemStatus: i.status as "running" | "review",
+      taskId: i.createdTaskId!,
+      taskStatus: i.taskStatus!,
+    })),
+    readyDependentIds: readyDependents.map((i) => i.id),
+    canAutoRepair,
+    suggestedAction: canAutoRepair
+      ? "Reconcile Flight to land stuck items as done and start ready dependents"
+      : "Reconcile Flight to sync item states from their linked tasks, then review dependents",
+  };
+}
+
 export function getWorkPackage(id: string): WorkPackageDetail | null {
   const db = getDb();
   const row = db.prepare("SELECT * FROM work_packages WHERE _id = ?").get(id) as PackageRow | undefined;
   if (!row) return null;
-  const items = (db.prepare("SELECT * FROM work_package_items WHERE packageId = ? ORDER BY position ASC").all(id) as ItemRow[]).map(rowToItem);
+  const itemRows = db.prepare(`
+    SELECT i.*, t.status AS taskStatus
+    FROM work_package_items i
+    LEFT JOIN tasks t ON t._id = i.createdTaskId
+    WHERE i.packageId = ?
+    ORDER BY i.position ASC
+  `).all(id) as (ItemRow & { taskStatus: string | null })[];
+  const items = itemRows.map((r) => ({ ...rowToItem(r), taskStatus: r.taskStatus ?? null }));
   const counts: Record<string, number> = {};
   for (const it of items) counts[it.status] = (counts[it.status] ?? 0) + 1;
-  return { ...rowToPackage(row), items, counts };
+  const skippedCount = items.filter(
+    (it) => it.status === "archived" || (it.status === "cancelled" && it.risk === "high"),
+  ).length;
+  const failedCount = counts.failed ?? 0;
+  const reviewCount = counts.review ?? 0;
+  const loop = getLoop(id);
+  const recentPasses: FlightLoopPassSummary[] = loop
+    ? getLoopPasses(loop.id, 5).map((p) => ({
+        passNumber: p.passNumber,
+        status: p.status,
+        startedAt: p.startedAt,
+        completedAt: p.completedAt,
+        stopReason: p.stopReason,
+        summary: p.summary,
+        createdItemCount: p.createdItemIds.length,
+        evidenceState: typeof p.evidence.state === "string" ? p.evidence.state : null,
+        error: p.error,
+      }))
+    : [];
+  const stuckState = row.status === "running" ? detectStuckState(items) : null;
+  return { ...rowToPackage(row), items, counts, skippedCount, failedCount, reviewCount, loop, recentPasses, stuckState };
 }
 
 const PACKAGE_PATCH_FIELDS = new Set(["title", "description", "status", "orchestrationMode", "modelPolicy"]);
@@ -327,4 +457,27 @@ export function resolveItemConcurrency(
     return { allow: true, reason: "read-only/safe — no write collision" };
   }
   return { allow: false, reason: "non-worktree writer held: one writer per repo" };
+}
+
+/**
+ * Transition a package from draft → ready, and auto-create a self_paced quality
+ * loop if none exists yet. This is the standard operator action before starting a Flight.
+ */
+export async function readyWorkPackage(id: string): Promise<WorkPackageDetail | null> {
+  const existing = getWorkPackage(id);
+  if (!existing) return null;
+  updateWorkPackage(id, { status: "ready" });
+  if (!getLoop(id)) {
+    const isGoalFlight = !!existing.intake?.goalFlight;
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    upsertLoop(id, {
+      mode: "self_paced",
+      profile: isGoalFlight ? "goal_quality" : "quality",
+      maxPasses: isGoalFlight ? 6 : 3,
+      autoCreateItems: true,
+      autoReadySafeItems: false,
+      expiresAt,
+    });
+  }
+  return getWorkPackage(id);
 }

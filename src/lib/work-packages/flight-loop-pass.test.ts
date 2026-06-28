@@ -347,6 +347,42 @@ test("runPass creates draft follow-up for low-risk failed item when autoReadySaf
   assert.equal(followUp.status, "draft");
 });
 
+// --- Observability tests ---
+
+test("runPass evidence includes loopMode, passIndex, gatesDiscovered", async () => {
+  const pkg = makePackage("Observability package");
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 5 });
+
+  const result = await runPass(pkg.id);
+
+  const evidence = result.pass.evidence as Record<string, unknown>;
+  assert.equal(evidence.loopMode, "self_paced", "evidence.loopMode matches loop mode");
+  assert.equal(evidence.passIndex, 1, "evidence.passIndex is 1 for first pass");
+  assert.ok(Array.isArray(evidence.gatesDiscovered), "evidence.gatesDiscovered is an array");
+});
+
+test("runPass evidence gatesDiscovered lists gate names from package.json even when gates are not run", async () => {
+  const { mkdtempSync: mktmp, writeFileSync: wf, rmSync: rms } = await import("node:fs");
+  const { tmpdir: tmp } = await import("node:os");
+  const { join: pjoin } = await import("node:path");
+  const dir = mktmp(pjoin(tmp(), "hm-obs-gates-"));
+  try {
+    wf(pjoin(dir, "package.json"), JSON.stringify({ scripts: { typecheck: "tsc --noEmit", test: "node --test" } }));
+    const { createWorkPackage: cwp } = await import("./store");
+    const pkg2 = cwp({ title: "Gates-discovered pkg", project: "test", projectPath: dir, items: [
+      { title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+    ]});
+    upsertLoop(pkg2.id, { maxPasses: 3 });
+    const result = await runPass(pkg2.id);
+    const evidence = result.pass.evidence as Record<string, unknown>;
+    const discovered = evidence.gatesDiscovered as string[];
+    assert.ok(discovered.includes("typecheck"), "typecheck in gatesDiscovered");
+    assert.ok(discovered.includes("tests"), "tests in gatesDiscovered");
+  } finally {
+    rms(dir, { recursive: true, force: true });
+  }
+});
+
 // --- classifyPassState unit tests (pure function) ---
 
 test("classifyPassState: risky when held items exist", () => {
@@ -708,6 +744,196 @@ test("max pass limit: two-pass sequence reaches limit then pre-rejects on third 
 
 // --- Non-overlapping passes: concurrent lock test ---
 
+// --- Skipped pass tests ---
+
+test("runPass writes a skipped pass when Flight is held", async () => {
+  const { getDb: gdb } = await import("@/lib/db");
+  const pkg = createWorkPackage({
+    title: "Held-flight skip package",
+    project: "test",
+    projectPath: "/tmp/test",
+    items: [{ title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  gdb().prepare("UPDATE work_packages SET status = 'held' WHERE _id = ?").run(pkg.id);
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 3 });
+
+  const result = await runPass(pkg.id);
+
+  assert.equal(result.pass.status, "skipped", "pass status is 'skipped'");
+  assert.equal(result.pass.stopReason, "skipped_flight_not_ready");
+  const loop = getLoop(pkg.id)!;
+  assert.equal(loop.passCount, 0, "passCount stays at 0 after skip");
+});
+
+test("runPass writes a skipped pass when Flight is in review", async () => {
+  const { getDb: gdb } = await import("@/lib/db");
+  const pkg = createWorkPackage({
+    title: "Review-flight skip package",
+    project: "test",
+    projectPath: "/tmp/test",
+    items: [{ title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  gdb().prepare("UPDATE work_packages SET status = 'review' WHERE _id = ?").run(pkg.id);
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 3 });
+
+  const result = await runPass(pkg.id);
+
+  assert.equal(result.pass.status, "skipped");
+  assert.equal(result.pass.stopReason, "skipped_flight_not_ready");
+  const loop = getLoop(pkg.id)!;
+  assert.equal(loop.passCount, 0);
+});
+
+test("skipped pass does not count toward maxPasses", async () => {
+  const { getDb: gdb } = await import("@/lib/db");
+  const pkg = createWorkPackage({
+    title: "Skip-maxpass package",
+    project: "test",
+    projectPath: "/tmp/test",
+    items: [{ title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 1 });
+
+  gdb().prepare("UPDATE work_packages SET status = 'held' WHERE _id = ?").run(pkg.id);
+  const skipped = await runPass(pkg.id);
+  assert.equal(skipped.pass.status, "skipped");
+  assert.equal(getLoop(pkg.id)!.passCount, 0, "passCount still 0 after skip");
+
+  gdb().prepare("UPDATE work_packages SET status = 'running' WHERE _id = ?").run(pkg.id);
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+  const real = await runPass(pkg.id);
+  assert.equal(real.pass.status, "completed", "real pass succeeds despite prior skip");
+  assert.equal(getLoop(pkg.id)!.passCount, 1, "passCount is 1 after one real pass");
+});
+
+// --- Profile strategy tests ---
+
+test("release profile: pass fails when mandatory typecheck gate is missing", async () => {
+  const { mkdtempSync: mktmp, rmSync: rms } = await import("node:fs");
+  const { tmpdir: tmp } = await import("node:os");
+  const { join: pjoin } = await import("node:path");
+  const dir = mktmp(pjoin(tmp(), "hm-release-nogate-"));
+  try {
+    // No package.json → no typecheck gate
+    const { createWorkPackage: cwp } = await import("./store");
+    const pkg = cwp({ title: "Release-nogate pkg", project: "test", projectPath: dir, items: [
+      { title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+    ]});
+    upsertLoop(pkg.id, { maxPasses: 3, profile: "release" });
+
+    const result = await runPass(pkg.id);
+
+    assert.equal(result.pass.status, "failed", "release pass fails when gates are missing");
+    assert.equal(result.pass.stopReason, "release_gate_missing");
+    assert.equal(result.loop.status, "stopped", "loop stopped on release gate missing");
+  } finally {
+    rms(dir, { recursive: true, force: true });
+  }
+});
+
+test("watch profile creates no follow-up items even when autoCreateItems=true", async () => {
+  const pkg = makePackage("Watch-profile package");
+  upsertLoop(pkg.id, { maxPasses: 5, profile: "watch", autoCreateItems: true });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "failed" });
+
+  const result = await runPass(pkg.id);
+
+  assert.equal(result.createdItemIds.length, 0, "watch profile creates no follow-up items");
+  const evidence = result.pass.evidence as Record<string, unknown>;
+  assert.ok(Array.isArray(evidence.externalChecks), "watch evidence has externalChecks array");
+  assert.equal(result.pass.stopReason, "external_state_unchanged", "watch stops with external_state_unchanged");
+});
+
+test("personal_admin profile creates draft items for all risk levels", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({ title: "Personal-admin pkg", project: "test", projectPath: "/tmp/test", items: [
+    { title: "Deploy to prod", prompt: "Push release", risk: "high", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+  ]});
+  upsertLoop(pkg.id, { maxPasses: 3, profile: "personal_admin", autoCreateItems: true });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "failed", blocker: "auth error" });
+
+  const result = await runPass(pkg.id);
+
+  if (result.createdItemIds.length > 0) {
+    const detail = getWorkPackage(pkg.id)!;
+    const followUp = detail.items.find((i) => result.createdItemIds.includes(i.id))!;
+    assert.notEqual(followUp.status, "held", "personal_admin never creates held items");
+    assert.equal(followUp.status, "draft", "personal_admin forces draft status");
+  }
+  const evidence = result.pass.evidence as Record<string, unknown>;
+  assert.equal(typeof evidence.pendingApprovals, "number", "personal_admin evidence has pendingApprovals count");
+});
+
+// --- Archived item evidence tests ---
+
+test("runPass evidence includes archivedCount and archivedItems for archived items", async () => {
+  const pkg = makePackage("Archived-evidence package");
+  upsertLoop(pkg.id, { maxPasses: 3, autoCreateItems: true });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+  updateWorkPackageItem(pkg.id, pkg.items[1].id, { status: "archived" });
+
+  const result = await runPass(pkg.id);
+
+  const evidence = result.pass.evidence as Record<string, unknown>;
+  assert.equal(evidence.archivedCount, 1, "evidence.archivedCount is 1");
+  assert.ok(Array.isArray(evidence.archivedItems), "evidence.archivedItems is an array");
+  assert.equal((evidence.archivedItems as unknown[]).length, 1, "one archived item");
+  const archived = (evidence.archivedItems as Array<{ id: string; title: string }>)[0];
+  assert.ok(archived.id, "archived item has id");
+  assert.ok(archived.title, "archived item has title");
+  assert.equal(result.pass.stopReason, "all_checks_clean", "all terminal → all_checks_clean");
+});
+
+test("runPass summary includes archived count when archived items present", async () => {
+  const pkg = makePackage("Archived-summary package");
+  upsertLoop(pkg.id, { maxPasses: 3 });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+  updateWorkPackageItem(pkg.id, pkg.items[1].id, { status: "archived" });
+
+  const result = await runPass(pkg.id);
+
+  assert.ok(result.pass.summary?.includes("archived"), "summary mentions archived count");
+});
+
+test("classifyPassState: clean for a Flight with only archived and done items", () => {
+  assert.equal(
+    classifyPassState({ counts: { done: 2, archived: 1 }, blockedItemCount: 0 }),
+    "clean",
+    "archived items do not make state risky/blocked/needs_follow_up"
+  );
+});
+
+// --- Goal Flight pass evidence tests ---
+
+test("goal_quality pass includes goal and successCriteria from intake.goalFlight in evidence", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({
+    title: "Goal-evidence pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    intake: {
+      kind: "work_package_candidate" as const,
+      confidence: 0.85,
+      reasons: ["broad outcome"],
+      risk: "medium" as const,
+      suggestedMode: "split" as const,
+      goalFlight: {
+        goal: "Build an online store",
+        successCriteria: ["Catalogue browsable", "Cart functional", "Checkout completes"],
+      },
+    },
+    items: [{ title: "Item A", prompt: "Do A", risk: "low" as const, executionMode: "sequential" as const, dependsOn: [], scopeHints: [] }],
+  });
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 6, profile: "goal_quality" });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+
+  const result = await runPass(pkg.id);
+
+  const evidence = result.pass.evidence as Record<string, unknown>;
+  assert.equal(evidence.goal, "Build an online store", "evidence.goal from intake.goalFlight");
+  assert.deepEqual(evidence.successCriteria, ["Catalogue browsable", "Cart functional", "Checkout completes"]);
+});
+
 test("two concurrent runPass calls: exactly one acquires the lock, other is rejected", async () => {
   const pkg = makePackage("Concurrent-lock package");
   upsertLoop(pkg.id, { maxPasses: 5, autoCreateItems: false });
@@ -731,4 +957,322 @@ test("two concurrent runPass calls: exactly one acquires the lock, other is reje
 
   const loop = getLoop(pkg.id)!;
   assert.notEqual(loop.status, "running", "loop not stuck in 'running' after both settle");
+});
+
+// --- High-risk cancelled item semantics in passes ---
+
+test("runPass: high-risk cancelled items appear in evidence as cancelledHighRiskCount and cancelledHighRiskItems", async () => {
+  const pkg = createWorkPackage({
+    title: "Cancelled-high-risk evidence pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    items: [
+      { title: "Safe step", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+      { title: "Risky deploy", prompt: "Deploy", risk: "high", executionMode: "hold", dependsOn: [], scopeHints: [] },
+    ],
+  });
+  upsertLoop(pkg.id, { maxPasses: 3, autoCreateItems: false });
+  // Operator marks the safe step done and intentionally cancels the high-risk action.
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+  updateWorkPackageItem(pkg.id, pkg.items[1].id, { status: "cancelled" });
+  // Ensure risk=high is persisted (hold items start as held, we're simulating operator cancel).
+  getDb().prepare("UPDATE work_package_items SET risk = 'high' WHERE _id = ?").run(pkg.items[1].id);
+
+  const result = await runPass(pkg.id);
+
+  const evidence = result.pass.evidence as Record<string, unknown>;
+  assert.equal(evidence.cancelledHighRiskCount, 1, "evidence reports 1 cancelled high-risk item");
+  const items = evidence.cancelledHighRiskItems as Array<{ id: string; title: string }>;
+  assert.ok(Array.isArray(items), "cancelledHighRiskItems is an array");
+  assert.equal(items.length, 1, "one cancelled high-risk item");
+  assert.equal(items[0].title, "Risky deploy");
+});
+
+test("runPass: summary includes 'high-risk skipped' when high-risk items are cancelled", async () => {
+  const pkg = createWorkPackage({
+    title: "Cancelled-high-risk summary pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    items: [
+      { title: "Safe step", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+      { title: "Risky deploy", prompt: "Deploy", risk: "high", executionMode: "hold", dependsOn: [], scopeHints: [] },
+    ],
+  });
+  upsertLoop(pkg.id, { maxPasses: 3, autoCreateItems: false });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+  updateWorkPackageItem(pkg.id, pkg.items[1].id, { status: "cancelled" });
+  getDb().prepare("UPDATE work_package_items SET risk = 'high' WHERE _id = ?").run(pkg.items[1].id);
+
+  const result = await runPass(pkg.id);
+
+  assert.ok(result.pass.summary?.includes("high-risk skipped"), `summary should mention 'high-risk skipped', got: "${result.pass.summary}"`);
+});
+
+// --- Goal Flight success criteria follow-up and evidence tests ---
+
+test("goal_quality evidence.criteriaStatus: met when done item title contains criterion text", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({
+    title: "Criteria-match pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    intake: {
+      kind: "work_package_candidate" as const,
+      confidence: 0.9,
+      reasons: ["broad outcome"],
+      risk: "medium" as const,
+      suggestedMode: "split" as const,
+      goalFlight: {
+        goal: "Build a store",
+        successCriteria: ["Build checkout", "Add payment"],
+      },
+    },
+    items: [
+      { title: "Build checkout page", prompt: "Create checkout UI", risk: "low" as const, executionMode: "sequential" as const, dependsOn: [], scopeHints: [] },
+      { title: "Miscellaneous task", prompt: "Do something else", risk: "low" as const, executionMode: "sequential" as const, dependsOn: [], scopeHints: [] },
+    ],
+  });
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 6, profile: "goal_quality", autoCreateItems: false });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+
+  const result = await runPass(pkg.id);
+
+  const evidence = result.pass.evidence as Record<string, unknown>;
+  const cs = evidence.criteriaStatus as Array<{ criterion: string; status: string }>;
+  assert.ok(Array.isArray(cs), "criteriaStatus is an array");
+  assert.equal(cs.length, 2, "one entry per criterion");
+  const checkout = cs.find((c) => c.criterion === "Build checkout")!;
+  const payment = cs.find((c) => c.criterion === "Add payment")!;
+  assert.equal(checkout.status, "met", "Build checkout is met (done item title contains it)");
+  assert.equal(payment.status, "unmet", "Add payment is unmet (no matching item)");
+});
+
+test("goal_quality evidence.criteriaStatus: in_progress when matching item is not done", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({
+    title: "Criteria-inprogress pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    intake: {
+      kind: "work_package_candidate" as const,
+      confidence: 0.9,
+      reasons: ["broad outcome"],
+      risk: "medium" as const,
+      suggestedMode: "split" as const,
+      goalFlight: {
+        goal: "Build a store",
+        successCriteria: ["Add payment gateway"],
+      },
+    },
+    items: [
+      { title: "Add payment gateway", prompt: "Integrate Stripe", risk: "low" as const, executionMode: "sequential" as const, dependsOn: [], scopeHints: [] },
+    ],
+  });
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 6, profile: "goal_quality", autoCreateItems: false });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "running" });
+
+  const result = await runPass(pkg.id);
+
+  const evidence = result.pass.evidence as Record<string, unknown>;
+  const cs = evidence.criteriaStatus as Array<{ criterion: string; status: string }>;
+  assert.ok(Array.isArray(cs), "criteriaStatus is an array");
+  assert.equal(cs[0].status, "in_progress", "criterion is in_progress when matching item is running");
+});
+
+test("goal_quality evidence has no criteriaStatus when successCriteria is empty", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({
+    title: "No-criteria pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    intake: {
+      kind: "work_package_candidate" as const,
+      confidence: 0.9,
+      reasons: ["broad outcome"],
+      risk: "medium" as const,
+      suggestedMode: "split" as const,
+      goalFlight: { goal: "Build a store", successCriteria: [] },
+    },
+    items: [
+      { title: "Item A", prompt: "Do A", risk: "low" as const, executionMode: "sequential" as const, dependsOn: [], scopeHints: [] },
+    ],
+  });
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 6, profile: "goal_quality", autoCreateItems: false });
+
+  const result = await runPass(pkg.id);
+
+  const evidence = result.pass.evidence as Record<string, unknown>;
+  assert.ok(!("criteriaStatus" in evidence), "criteriaStatus absent when successCriteria is empty");
+});
+
+test("goal_quality creates follow-up items for unmet criteria when autoCreateItems=true", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({
+    title: "Criteria-followup pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    intake: {
+      kind: "work_package_candidate" as const,
+      confidence: 0.9,
+      reasons: ["broad outcome"],
+      risk: "medium" as const,
+      suggestedMode: "split" as const,
+      goalFlight: {
+        goal: "Build a store",
+        successCriteria: ["Build checkout", "Send notifications"],
+      },
+    },
+    items: [
+      { title: "Build checkout page", prompt: "Create checkout", risk: "low" as const, executionMode: "sequential" as const, dependsOn: [], scopeHints: [] },
+    ],
+  });
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 6, profile: "goal_quality", autoCreateItems: true });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+
+  const result = await runPass(pkg.id);
+
+  assert.ok(result.createdItemIds.length >= 1, "at least one follow-up created for unmet criterion");
+  const detail = getWorkPackage(pkg.id)!;
+  const criterionItem = detail.items.find((i) => result.createdItemIds.includes(i.id) && i.title.includes("Send notifications"))!;
+  assert.ok(criterionItem, "follow-up item for unmet criterion 'Send notifications' exists");
+  assert.ok(criterionItem.title.includes("Send notifications"), "title references the unmet criterion");
+  assert.ok(criterionItem.prompt.includes("Send notifications"), "prompt references the unmet criterion");
+});
+
+test("goal_quality does not create follow-up for in-progress criterion", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({
+    title: "Criteria-inprogress-nofollowup pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    intake: {
+      kind: "work_package_candidate" as const,
+      confidence: 0.9,
+      reasons: ["broad outcome"],
+      risk: "medium" as const,
+      suggestedMode: "split" as const,
+      goalFlight: {
+        goal: "Build a store",
+        successCriteria: ["Add payment gateway"],
+      },
+    },
+    items: [
+      { title: "Add payment gateway", prompt: "Integrate Stripe", risk: "low" as const, executionMode: "sequential" as const, dependsOn: [], scopeHints: [] },
+    ],
+  });
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 6, profile: "goal_quality", autoCreateItems: true });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "running" });
+
+  const result = await runPass(pkg.id);
+
+  assert.equal(result.createdItemIds.length, 0, "no follow-up created when criterion is in_progress");
+});
+
+test("goal_quality does not create criterion follow-ups when autoCreateItems=false", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({
+    title: "Criteria-no-auto-create pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    intake: {
+      kind: "work_package_candidate" as const,
+      confidence: 0.9,
+      reasons: ["broad outcome"],
+      risk: "medium" as const,
+      suggestedMode: "split" as const,
+      goalFlight: {
+        goal: "Build a store",
+        successCriteria: ["Build checkout", "Send notifications"],
+      },
+    },
+    items: [
+      { title: "Build checkout page", prompt: "Create checkout", risk: "low" as const, executionMode: "sequential" as const, dependsOn: [], scopeHints: [] },
+    ],
+  });
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 6, profile: "goal_quality", autoCreateItems: false });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+
+  const result = await runPass(pkg.id);
+
+  assert.equal(result.createdItemIds.length, 0, "no criterion follow-ups when autoCreateItems=false");
+});
+
+test("goal_quality pass summary includes criteria met count", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({
+    title: "Criteria-summary pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    intake: {
+      kind: "work_package_candidate" as const,
+      confidence: 0.9,
+      reasons: ["broad outcome"],
+      risk: "medium" as const,
+      suggestedMode: "split" as const,
+      goalFlight: {
+        goal: "Build a store",
+        successCriteria: ["Build checkout", "Add payment", "Send notifications"],
+      },
+    },
+    items: [
+      { title: "Build checkout page", prompt: "Create checkout", risk: "low" as const, executionMode: "sequential" as const, dependsOn: [], scopeHints: [] },
+    ],
+  });
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 6, profile: "goal_quality", autoCreateItems: false });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+
+  const result = await runPass(pkg.id);
+
+  assert.ok(result.pass.summary?.includes("criteria"), `summary should mention 'criteria', got: "${result.pass.summary}"`);
+});
+
+test("goal_quality unmet criteria with autoCreateItems=true prevent all_checks_clean", async () => {
+  const { createWorkPackage: cwp } = await import("./store");
+  const pkg = cwp({
+    title: "Criteria-prevent-clean pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    intake: {
+      kind: "work_package_candidate" as const,
+      confidence: 0.9,
+      reasons: ["broad outcome"],
+      risk: "medium" as const,
+      suggestedMode: "split" as const,
+      goalFlight: {
+        goal: "Build a store",
+        successCriteria: ["Build checkout", "Send notifications"],
+      },
+    },
+    items: [
+      { title: "Build checkout page", prompt: "Create checkout", risk: "low" as const, executionMode: "sequential" as const, dependsOn: [], scopeHints: [] },
+    ],
+  });
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 6, profile: "goal_quality", autoCreateItems: true });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+
+  const result = await runPass(pkg.id);
+
+  assert.notEqual(result.pass.stopReason, "all_checks_clean", "all_checks_clean should not fire when criterion follow-ups were created");
+  assert.ok(result.createdItemIds.length > 0, "criterion follow-up items created");
+});
+
+test("runPass: all_checks_clean fires when all items terminal and some are high-risk cancelled", async () => {
+  const pkg = createWorkPackage({
+    title: "AllTerminal-cancelled-high pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    items: [
+      { title: "Safe step", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+      { title: "Risky deploy", prompt: "Deploy", risk: "high", executionMode: "hold", dependsOn: [], scopeHints: [] },
+    ],
+  });
+  upsertLoop(pkg.id, { maxPasses: 3, autoCreateItems: false });
+  updateWorkPackageItem(pkg.id, pkg.items[0].id, { status: "done" });
+  updateWorkPackageItem(pkg.id, pkg.items[1].id, { status: "cancelled" });
+  getDb().prepare("UPDATE work_package_items SET risk = 'high' WHERE _id = ?").run(pkg.items[1].id);
+
+  const result = await runPass(pkg.id);
+
+  assert.equal(result.pass.stopReason, "all_checks_clean", "all items terminal (including cancelled high-risk) → all_checks_clean stop");
+  assert.equal(result.loop.status, "stopped", "loop stops when all items terminal");
 });

@@ -1042,3 +1042,413 @@ test("Flight loop controls are in the Flight detail, not a hidden Settings panel
   // Passes are fetched for the active loop
   assert.match(js, /\/loop\/passes/, "passes endpoint fetched in renderFlightDetail");
 });
+
+test("console flightLabel handles done_with_skips status as a done variant", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /done_with_skips/, "console handles done_with_skips status");
+});
+
+test("console flightLabel handles archived item status", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /archived/, "console handles archived item status");
+});
+
+test("console flightPassRowHtml handles skipped pass status", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /'skipped'|"skipped"/, "console references skipped pass status");
+});
+
+test("console flightProgress uses skippedCount from API to expose intentionally skipped scope", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /skippedCount/, "flightProgress reads skippedCount from the package detail");
+});
+
+test("console flight detail shows skipped-scope text when skippedCount > 0", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /skipped/, "flight detail mentions skipped scope for high-risk cancelled items");
+});
+
+test("server has GET /work-packages/:id/loop/summary route", () => {
+  const server = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+  assert.match(server, /loop\/summary/, "summary route exists in server");
+  assert.match(server, /recentPasses/, "summary response includes recentPasses");
+});
+
+// ── Goal Flight UX ───────────────────────────────────────────────────────────
+
+test("console handles goal_quality profile label", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /goal_quality/, "console references goal_quality profile");
+});
+
+test("console renderFlightDetail shows Goal section when intake.goalFlight exists", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /goalFlight/, "console references goalFlight metadata from intake");
+  assert.match(js, /successCriteria|success.criteria/i, "console shows success criteria for Goal Flights");
+});
+
+test("console Advance button is labeled as Repair / Nudge for Goal Flights", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /Repair.*Nudge|Nudge.*Repair/i, "console uses repair/nudge label for Goal Flight advance");
+});
+
+test("console flight list labels Goal Flights distinctly", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /Goal Flight|goal.flight.label|goal_flight/i, "console distinguishes Goal Flights in board/rail");
+});
+
+// ── advanceBlockerMsg ─────────────────────────────────────────────────────────
+
+function extractAdvanceBlockerMsg(html: string): (bl: unknown) => string {
+  const js = extractScript(html);
+  const block = js.match(/\/\*__ADVANCE_BLOCKER_MSG_START__\*\/([\s\S]*?)\/\*__ADVANCE_BLOCKER_MSG_END__\*\//);
+  assert.ok(block, "console script must define the advanceBlockerMsg block");
+  const factory = new Function(`${block![1]}\nreturn advanceBlockerMsg;`) as () => (bl: unknown) => string;
+  return factory();
+}
+
+test("advanceBlockerMsg: undefined blockers → Nothing eligible yet", () => {
+  const fn = extractAdvanceBlockerMsg(CONSOLE_HTML);
+  assert.equal(fn(undefined), "Nothing eligible yet");
+});
+
+test("advanceBlockerMsg: empty blocker summary → Nothing eligible yet", () => {
+  const fn = extractAdvanceBlockerMsg(CONSOLE_HTML);
+  assert.equal(fn({ review: [], held: [], dependency: [], activeWriter: [], noReadyItems: false }), "Nothing eligible yet");
+});
+
+test("advanceBlockerMsg: noReadyItems → mentions ready state", () => {
+  const fn = extractAdvanceBlockerMsg(CONSOLE_HTML);
+  const msg = fn({ review: [], held: [], dependency: [], activeWriter: [], noReadyItems: true });
+  assert.match(msg, /ready/i, "should mention ready state");
+});
+
+test("advanceBlockerMsg: held items → shows count and held label", () => {
+  const fn = extractAdvanceBlockerMsg(CONSOLE_HTML);
+  const msg = fn({ review: [], held: ["a", "b"], dependency: [], activeWriter: [], noReadyItems: false });
+  assert.ok(msg.includes("2"), "should mention count");
+  assert.match(msg, /held/i, "should mention held");
+});
+
+test("advanceBlockerMsg: review items → shows awaiting review", () => {
+  const fn = extractAdvanceBlockerMsg(CONSOLE_HTML);
+  const msg = fn({ review: ["x"], held: [], dependency: [], activeWriter: [], noReadyItems: false });
+  assert.match(msg, /review/i, "should mention review");
+});
+
+test("advanceBlockerMsg: dependency items → shows waiting on deps", () => {
+  const fn = extractAdvanceBlockerMsg(CONSOLE_HTML);
+  const msg = fn({ review: [], held: [], dependency: ["y"], activeWriter: [], noReadyItems: false });
+  assert.match(msg, /dep/i, "should mention dependency");
+});
+
+test("advanceBlockerMsg: activeWriter items → shows blocked by active writer", () => {
+  const fn = extractAdvanceBlockerMsg(CONSOLE_HTML);
+  const msg = fn({ review: [], held: [], dependency: [], activeWriter: ["z"], noReadyItems: false });
+  assert.match(msg, /writer|active/i, "should mention active writer");
+});
+
+test("advanceBlockerMsg: multiple categories → all listed in message", () => {
+  const fn = extractAdvanceBlockerMsg(CONSOLE_HTML);
+  const msg = fn({ review: ["r"], held: ["h"], dependency: [], activeWriter: [], noReadyItems: false });
+  assert.match(msg, /held/i, "held present");
+  assert.match(msg, /review/i, "review present");
+});
+
+// ── Flight detail observability ───────────────────────────────────────────────
+
+test("flightPassRowHtml renders evidence state from pass.evidence.state", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // evidence.state must appear in the meta line of a pass row.
+  assert.match(js, /evidence.*state|state.*evidence/i, "flightPassRowHtml references evidence.state");
+  assert.match(js, /evidenceState|evidence\.state/, "evidenceState label rendered in pass row");
+});
+
+test("flightPassRowHtml renders error block for failed passes", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /pass\.status.*failed.*pass\.error|pass\.error.*pass\.status.*failed/s,
+    "flightPassRowHtml guards error rendering on failed status");
+  assert.match(js, /errbox/, "flightPassRowHtml uses errbox class for pass errors");
+});
+
+test("renderFlightDetail item rows reference taskStatus", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /it\.taskStatus|taskStatus/, "item row renders taskStatus");
+  assert.match(js, /taskStatus.*badge|badge.*taskStatus/, "taskStatus is wrapped in a badge");
+});
+
+test("renderFlightDetail shows completedAt for terminal flights", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /completedAt/, "renderFlightDetail references completedAt");
+  assert.match(js, /completed\s+/, "completedAt rendered with 'completed' label");
+});
+
+test("renderFlightDetail uses inlined p.loop instead of a separate /loop GET", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // The optimisation: use p.loop from the main response, not an extra api("/loop") GET.
+  assert.match(js, /p\.loop/, "console uses p.loop from main response");
+  // The old pattern was `const loopResp = await api("...\/loop"); const loop = loopResp.loop`.
+  // After the change, renderFlightDetail should not call api() solely to obtain the loop object.
+  assert.doesNotMatch(js, /loopResp\s*=\s*await\s+api\(/, "no separate loopResp await call");
+});
+
+test("GET /work-packages/:id response shape includes loop and recentPasses", async () => {
+  // Guard the server source: the response must carry these fields.
+  const { readFileSync } = await import("node:fs");
+  const store = readFileSync(new URL("../lib/work-packages/store.ts", import.meta.url), "utf8");
+  assert.match(store, /recentPasses/, "WorkPackageDetail declares recentPasses");
+  assert.match(store, /failedCount/, "WorkPackageDetail declares failedCount");
+  assert.match(store, /reviewCount/, "WorkPackageDetail declares reviewCount");
+  assert.match(store, /loop.*FlightLoop|FlightLoop.*loop/, "WorkPackageDetail declares loop");
+  assert.match(store, /taskStatus/, "WorkPackageItem declares taskStatus");
+});
+
+// ── Accept / Land operator action ────────────────────────────────────────────
+
+test("flightItemActions shows Accept / Land button only for review items", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /Accept \/ Land/, "Accept / Land button text exists in flightItemActions");
+  assert.match(js, /it\.status\s*===\s*['"]review['"]/, "Accept button is conditional on review status");
+  assert.match(js, /wpAccept\(/, "wpAccept is called from item actions");
+});
+
+test("wpAccept posts to the /accept endpoint and refreshes the flight detail", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /async function wpAccept\(/, "wpAccept async function defined");
+  assert.match(js, /\/accept/, "wpAccept posts to the /accept endpoint");
+  assert.match(js, /renderFlightDetail\(pkgId/, "wpAccept refreshes the flight detail on success");
+  assert.match(js, /Item accepted/, "wpAccept shows a confirmation toast on success");
+});
+
+test("server has POST /work-packages/:id/items/:itemId/accept route wired to acceptWorkPackageItem", () => {
+  const server = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+  assert.match(server, /\/accept/, "accept route pattern exists in server");
+  assert.match(server, /acceptWorkPackageItem/, "server imports and calls acceptWorkPackageItem");
+});
+
+// ── Goal summary section ──────────────────────────────────────────────────────
+
+function extractFlightGoalSectionHtml(html: string): (intake: unknown) => string {
+  const js = extractScript(html);
+  const esc = js.match(/function esc\(s\)\{[^\n]+\}/);
+  const block = js.match(/\/\*__FLIGHT_GOAL_SECTION_START__\*\/([\s\S]*?)\/\*__FLIGHT_GOAL_SECTION_END__\*\//);
+  assert.ok(esc, "console must define esc");
+  assert.ok(block, "console must contain sentinel-wrapped flightGoalSectionHtml");
+  const factory = new Function(`${esc![0]}\n${block![1]}\nreturn flightGoalSectionHtml;`) as () => (intake: unknown) => string;
+  return factory();
+}
+
+test("flightGoalSectionHtml: returns empty string when no intake", () => {
+  const fn = extractFlightGoalSectionHtml(CONSOLE_HTML);
+  assert.equal(fn(null), "");
+  assert.equal(fn(undefined), "");
+  assert.equal(fn({}), "");
+});
+
+test("flightGoalSectionHtml: renders .flight-goal-sec wrapper with Goal heading", () => {
+  const fn = extractFlightGoalSectionHtml(CONSOLE_HTML);
+  const html = fn({ goalFlight: { goal: "Build a marketing site", successCriteria: [] } });
+  assert.match(html, /class="flight-goal-sec"/, "wrapper has .flight-goal-sec class");
+  assert.match(html, /<h2>Goal<\/h2>/, "Goal h2 heading present");
+  assert.match(html, /Build a marketing site/, "goal text rendered");
+});
+
+test("flightGoalSectionHtml: renders Success criteria list when criteria present", () => {
+  const fn = extractFlightGoalSectionHtml(CONSOLE_HTML);
+  const html = fn({ goalFlight: { goal: "Build a site", successCriteria: ["Pages load under 2s", "Passes Lighthouse audit"] } });
+  assert.match(html, /<h3>Success criteria<\/h3>/, "Success criteria h3 heading");
+  assert.match(html, /<ul>/, "criteria rendered as list");
+  assert.match(html, /<li>Pages load under 2s<\/li>/, "first criterion rendered");
+  assert.match(html, /<li>Passes Lighthouse audit<\/li>/, "second criterion rendered");
+});
+
+test("flightGoalSectionHtml: omits Success criteria section when list is empty", () => {
+  const fn = extractFlightGoalSectionHtml(CONSOLE_HTML);
+  const html = fn({ goalFlight: { goal: "Build a site", successCriteria: [] } });
+  assert.doesNotMatch(html, /<h3>Success criteria<\/h3>/, "no criteria heading when list empty");
+  assert.doesNotMatch(html, /<ul>/, "no list when no criteria");
+});
+
+test("flightGoalSectionHtml: escapes HTML in goal text and criteria", () => {
+  const fn = extractFlightGoalSectionHtml(CONSOLE_HTML);
+  const html = fn({ goalFlight: { goal: "<script>xss</script>", successCriteria: ["<b>bold</b>"] } });
+  assert.doesNotMatch(html, /<script>/, "script tag escaped in goal");
+  assert.match(html, /&lt;script&gt;/, "goal text HTML-escaped");
+  assert.doesNotMatch(html, /<b>bold<\/b>/, "criteria HTML-escaped");
+});
+
+// ── computeNextWake / loop status ─────────────────────────────────────────────
+
+function extractComputeNextWake(html: string): (loop: Record<string, unknown>, nowMs: number) => string {
+  const js = extractScript(html);
+  const block = js.match(/\/\*__FLIGHT_NEXT_WAKE_START__\*\/([\s\S]*?)\/\*__FLIGHT_NEXT_WAKE_END__\*\//);
+  assert.ok(block, "console must contain sentinel-wrapped computeNextWake");
+  const factory = new Function(`${block![1]}\nreturn computeNextWake;`) as () => (loop: Record<string, unknown>, nowMs: number) => string;
+  return factory();
+}
+
+const NOW = Date.parse("2026-06-28T12:00:00Z");
+
+test("computeNextWake: paused loop → 'paused'", () => {
+  const fn = extractComputeNextWake(CONSOLE_HTML);
+  assert.equal(fn({ status: "paused", mode: "fixed", nextRunAt: null, stopReason: null }, NOW), "paused");
+});
+
+test("computeNextWake: stopped loop without reason → 'stopped'", () => {
+  const fn = extractComputeNextWake(CONSOLE_HTML);
+  assert.equal(fn({ status: "stopped", mode: "fixed", nextRunAt: null, stopReason: null }, NOW), "stopped");
+});
+
+test("computeNextWake: stopped loop with reason → 'stopped · <reason>'", () => {
+  const fn = extractComputeNextWake(CONSOLE_HTML);
+  assert.equal(fn({ status: "stopped", mode: "fixed", nextRunAt: null, stopReason: "max passes reached" }, NOW), "stopped · max passes reached");
+});
+
+test("computeNextWake: manual mode → 'on demand'", () => {
+  const fn = extractComputeNextWake(CONSOLE_HTML);
+  assert.equal(fn({ status: "active", mode: "manual", nextRunAt: null, stopReason: null }, NOW), "on demand");
+});
+
+test("computeNextWake: self_paced with no nextRunAt → 'after next item'", () => {
+  const fn = extractComputeNextWake(CONSOLE_HTML);
+  assert.equal(fn({ status: "active", mode: "self_paced", nextRunAt: null, stopReason: null }, NOW), "after next item");
+});
+
+test("computeNextWake: nextRunAt in past → 'imminent'", () => {
+  const fn = extractComputeNextWake(CONSOLE_HTML);
+  const pastTime = new Date(NOW - 5000).toISOString();
+  assert.equal(fn({ status: "active", mode: "fixed", nextRunAt: pastTime, stopReason: null }, NOW), "imminent");
+});
+
+test("computeNextWake: nextRunAt 30s away → 'in 30s'", () => {
+  const fn = extractComputeNextWake(CONSOLE_HTML);
+  const soonTime = new Date(NOW + 30000).toISOString();
+  assert.equal(fn({ status: "active", mode: "fixed", nextRunAt: soonTime, stopReason: null }, NOW), "in 30s");
+});
+
+test("computeNextWake: nextRunAt 3 min away → 'in 3m'", () => {
+  const fn = extractComputeNextWake(CONSOLE_HTML);
+  const laterTime = new Date(NOW + 180000).toISOString();
+  assert.equal(fn({ status: "active", mode: "fixed", nextRunAt: laterTime, stopReason: null }, NOW), "in 3m");
+});
+
+test("computeNextWake: no nextRunAt and not self_paced → '—'", () => {
+  const fn = extractComputeNextWake(CONSOLE_HTML);
+  assert.equal(fn({ status: "idle", mode: "fixed", nextRunAt: null, stopReason: null }, NOW), "—");
+});
+
+// ── Loop section metadata rendering ──────────────────────────────────────────
+
+test("flightLoopSectionHtml renders mode label, profile label, pass counter, next wake", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // Mode labels map
+  assert.match(js, /self_paced.*Self-paced|Self-paced.*self_paced/, "self_paced → Self-paced label");
+  assert.match(js, /goal_quality.*Goal quality|Goal quality.*goal_quality/, "goal_quality → Goal quality label");
+  // Pass counter format
+  assert.match(js, /passCount.*\+.*'.*of.*'.*\+.*maxPasses|passCount.*of.*maxPasses/, "pass counter uses N of M format");
+  // Status badge with warn class for active/running
+  assert.match(js, /status.*active.*warn|active.*running.*warn/, "active/running get warn badge class");
+  // Status badge with err class for stopped
+  assert.match(js, /stopped.*err|err.*stopped/, "stopped gets err badge class");
+});
+
+test("flightLoopSectionHtml renders next wake label from computeNextWake", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /next:.*nextWake|nextWake.*next:/, "next wake label renders with 'next:' prefix");
+  assert.match(js, /computeNextWake\(/, "flightLoopSectionHtml calls computeNextWake");
+});
+
+// ── Advance button: repair/nudge for Goal Flights ────────────────────────────
+
+function extractFlightAdvanceLabel(html: string): (intake: unknown) => string {
+  const js = extractScript(html);
+  const block = js.match(/\/\*__FLIGHT_ADVANCE_LABEL_START__\*\/([\s\S]*?)\/\*__FLIGHT_ADVANCE_LABEL_END__\*\//);
+  assert.ok(block, "console must contain sentinel-wrapped flightAdvanceLabel");
+  const factory = new Function(`${block![1]}\nreturn flightAdvanceLabel;`) as () => (intake: unknown) => string;
+  return factory();
+}
+
+test("flightAdvanceLabel: Goal Flight → 'Repair / Nudge'", () => {
+  const fn = extractFlightAdvanceLabel(CONSOLE_HTML);
+  assert.equal(fn({ goalFlight: { goal: "Build a site" } }), "Repair / Nudge");
+});
+
+test("flightAdvanceLabel: checklist Flight (no goalFlight) → 'Advance'", () => {
+  const fn = extractFlightAdvanceLabel(CONSOLE_HTML);
+  assert.equal(fn({}), "Advance");
+  assert.equal(fn(null), "Advance");
+  assert.equal(fn(undefined), "Advance");
+});
+
+// ── Stuck-state detector UI ───────────────────────────────────────
+
+test("stuckStateBannerHtml and wpReconcile are present in the console script", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function stuckStateBannerHtml\(/, "stuckStateBannerHtml function present");
+  assert.match(js, /wpReconcile/, "wpReconcile function wired");
+  assert.match(js, /\/reconcile/, "reconcile endpoint referenced");
+  assert.match(js, /Reconcile Flight/, "Reconcile Flight CTA present");
+  assert.match(js, /stuckState/, "stuckState read from flight detail response");
+  assert.match(js, /stuck-banner/, "stuck-banner CSS class used");
+  assert.match(CONSOLE_HTML, /\.stuck-banner\s*\{/, "stuck-banner CSS defined");
+});
+
+function extractStuckBannerFn(html: string) {
+  const js = extractScript(html);
+  const block = js.match(/\/\*__RECONCILE_START__\*\/([\s\S]*?)\/\*__RECONCILE_END__\*\//);
+  assert.ok(block, "console must contain sentinel-wrapped wpReconcile");
+  return block![1];
+}
+
+test("stuckStateBannerHtml: returns empty string for null stuckState", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const fn = new Function("esc", `${js.match(/function stuckStateBannerHtml[\s\S]*?\n\}/)?.[0] ?? "throw new Error('not found')"}\nreturn stuckStateBannerHtml;`)(
+    (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;"),
+  ) as (pkgId: string, ss: unknown) => string;
+  assert.equal(fn("pkg1", null), "");
+  assert.equal(fn("pkg1", undefined), "");
+});
+
+test("stuckStateBannerHtml: renders reason, stuck items, canAutoRepair badge, and Reconcile button", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const fn = new Function("esc", `${js.match(/function stuckStateBannerHtml[\s\S]*?\n\}/)?.[0] ?? "throw new Error('not found')"}\nreturn stuckStateBannerHtml;`)(
+    (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;"),
+  ) as (pkgId: string, ss: unknown) => string;
+
+  const ss = {
+    reason: "1 item appears active but its linked task is terminal — 1 dependent item cannot start",
+    stuckItems: [{ itemTitle: "Step A", itemStatus: "running", taskId: "t1", taskStatus: "archived" }],
+    readyDependentIds: ["item-b"],
+    canAutoRepair: true,
+    suggestedAction: "Reconcile Flight to land stuck items as done and start ready dependents",
+  };
+
+  const html = fn("pkg-x", ss);
+  assert.match(html, /Flight stalled/, "reason prefix present");
+  assert.match(html, /1 item appears active/, "reason text included");
+  assert.match(html, /Step A/, "stuck item title present");
+  assert.match(html, /running/, "stuck item status present");
+  assert.match(html, /archived/, "stuck item taskStatus present");
+  assert.match(html, /auto-repair/, "canAutoRepair badge present");
+  assert.match(html, /Reconcile Flight/, "CTA button present");
+  assert.match(html, /wpReconcile\('pkg-x'\)/, "CTA calls wpReconcile with pkgId");
+});
+
+test("stuckStateBannerHtml: canAutoRepair false shows 'operator review' badge", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const fn = new Function("esc", `${js.match(/function stuckStateBannerHtml[\s\S]*?\n\}/)?.[0] ?? "throw new Error('not found')"}\nreturn stuckStateBannerHtml;`)(
+    (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;"),
+  ) as (pkgId: string, ss: unknown) => string;
+
+  const ss = {
+    reason: "1 item appears active but its linked task is terminal — 1 dependent item cannot start",
+    stuckItems: [{ itemTitle: "Step A", itemStatus: "running", taskId: "t1", taskStatus: "failed" }],
+    readyDependentIds: ["item-b"],
+    canAutoRepair: false,
+    suggestedAction: "Reconcile Flight to sync item states from their linked tasks, then review dependents",
+  };
+
+  const html = fn("pkg-y", ss);
+  assert.match(html, /operator review/, "operator review badge shown when canAutoRepair is false");
+  assert.doesNotMatch(html, /auto-repair/, "auto-repair badge absent when canAutoRepair is false");
+});

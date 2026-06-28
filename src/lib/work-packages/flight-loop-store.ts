@@ -11,8 +11,8 @@ import { scrubSecretText } from "@/lib/workflows/runs";
 
 export type LoopMode = "off" | "manual" | "fixed" | "self_paced";
 export type LoopStatus = "idle" | "active" | "running" | "paused" | "stopped";
-export type PassProfile = "quality" | "release" | "watch" | "personal_admin";
-export type PassStatus = "running" | "completed" | "failed";
+export type PassProfile = "quality" | "goal_quality" | "release" | "watch" | "personal_admin";
+export type PassStatus = "running" | "completed" | "failed" | "skipped";
 
 export interface FlightLoop {
   id: string;

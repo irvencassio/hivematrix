@@ -8,8 +8,8 @@ const TMP = mkdtempSync(join(tmpdir(), "hivematrix-wp-orch-"));
 process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
 const { _resetDbForTests, getDb, Task } = await import("@/lib/db");
-const { createWorkPackage, getWorkPackage, updateWorkPackageItem } = await import("./store");
-const { planNextItems, startWorkPackage, advanceWorkPackage, tickWorkPackages } = await import("./orchestrate");
+const { createWorkPackage, getWorkPackage, updateWorkPackageItem, detectStuckState } = await import("./store");
+const { planNextItems, classifyBlockers, startWorkPackage, advanceWorkPackage, tickWorkPackages, reconcileWorkPackage, acceptWorkPackageItem, reconcileStuckFlight } = await import("./orchestrate");
 import type { WorkPackageItem } from "./store";
 import type { ProposedItem } from "@/lib/intake/classify";
 
@@ -27,7 +27,7 @@ function mkItem(over: Partial<WorkPackageItem>): WorkPackageItem {
     status: over.status ?? "ready", risk: over.risk ?? "low", dependsOn: over.dependsOn ?? [],
     scopeHints: over.scopeHints ?? [], executionMode: over.executionMode ?? "sequential",
     createdTaskId: over.createdTaskId ?? null, resultTaskId: null, commitHash: null, blocker: null,
-    createdAt: "", updatedAt: "",
+    createdAt: "", updatedAt: "", taskStatus: over.taskStatus ?? null,
   };
 }
 
@@ -117,7 +117,7 @@ test("advanceWorkPackage starts the dependent item after the first completes, th
   void started;
 });
 
-test("advanceWorkPackage treats archived linked tasks as landed", async () => {
+test("advanceWorkPackage: archiving a running item's task lands the item done and closes the package cleanly", async () => {
   const items: ProposedItem[] = [
     { title: "Only step", prompt: "do it", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
   ];
@@ -128,8 +128,10 @@ test("advanceWorkPackage treats archived linked tasks as landed", async () => {
   await Task.findByIdAndUpdate(item.createdTaskId!, { status: "archived" });
   const advanced = await advanceWorkPackage(pkg.id);
 
-  assert.equal(advanced.package.status, "done");
-  assert.equal(advanced.package.items[0].status, "done");
+  assert.equal(advanced.package.items[0].status, "done",
+    "durable repair: archiving a running task lands the item done (not archived)");
+  assert.equal(advanced.package.status, "done",
+    "package closes as clean done (not done_with_skips) since the item landed done");
   assert.ok(advanced.package.completedAt);
 });
 
@@ -161,4 +163,763 @@ test("a held release item is never auto-started by start or advance", async () =
   assert.equal(d.items[0].status, "done");
   assert.equal(d.items[1].status, "held", "release stays held — final gate");
   assert.equal(d.items[1].createdTaskId, null, "no task auto-created for the held release");
+});
+
+// --- Archived item tests ---
+
+test("reconcileWorkPackage: archiving a running item's task lands it done (durable runtime repair)", async () => {
+  const { generateId } = await import("@/lib/db");
+  const pkg = createWorkPackage({
+    title: "Archived-task pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    items: [{ title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const itemA = pkg.items[0];
+  const db = getDb();
+  const taskId = generateId();
+  db.prepare("INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'in_progress')").run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(taskId, itemA.id);
+  db.prepare("UPDATE tasks SET status = 'archived' WHERE _id = ?").run(taskId);
+  await reconcileWorkPackage(pkg.id);
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(detail.items[0].status, "done",
+    "durable repair: archiving a running task lands the item done, not archived");
+});
+
+test("rollupStatus returns done_with_skips when all items terminal and at least one archived, none failed", async () => {
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Rollup-archived pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    items: [
+      { title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+      { title: "Item B", prompt: "Do B", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+    ],
+  });
+  db.prepare("UPDATE work_package_items SET status = 'done' WHERE _id = ?").run(pkg.items[0].id);
+  db.prepare("UPDATE work_package_items SET status = 'archived' WHERE _id = ?").run(pkg.items[1].id);
+  const result = await advanceWorkPackage(pkg.id);
+  assert.equal(result.package.status, "done_with_skips", "done+archived → done_with_skips");
+});
+
+test("rollupStatus returns done when all items done, none archived", async () => {
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Rollup-alldone pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    items: [
+      { title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+      { title: "Item B", prompt: "Do B", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+    ],
+  });
+  db.prepare("UPDATE work_package_items SET status = 'done' WHERE _id = ?").run(pkg.items[0].id);
+  db.prepare("UPDATE work_package_items SET status = 'done' WHERE _id = ?").run(pkg.items[1].id);
+  const result = await advanceWorkPackage(pkg.id);
+  assert.equal(result.package.status, "done", "all done → done (not done_with_skips)");
+});
+
+test("rollupStatus returns failed when any item failed even with archived items", async () => {
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Rollup-failed pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    items: [
+      { title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+      { title: "Item B", prompt: "Do B", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+      { title: "Item C", prompt: "Do C", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+    ],
+  });
+  db.prepare("UPDATE work_package_items SET status = 'done' WHERE _id = ?").run(pkg.items[0].id);
+  db.prepare("UPDATE work_package_items SET status = 'archived' WHERE _id = ?").run(pkg.items[1].id);
+  db.prepare("UPDATE work_package_items SET status = 'failed' WHERE _id = ?").run(pkg.items[2].id);
+  const result = await advanceWorkPackage(pkg.id);
+  assert.equal(result.package.status, "failed", "any failed → failed (even with archived)");
+});
+
+// --- Durable runtime repair: archive of a running/review item's task lands it done ---
+// When an operator archives a task that was running or in review, reconciliation
+// treats the archive as accepted work and lands the item as done — not as an
+// intentional skip (archived). This allows Advance to unblock dependent items.
+// The explicit acceptWorkPackageItem action is still the preferred path for review
+// items; this repair handles the case where the task is archived directly.
+
+test("reconcileWorkPackage: archiving a review-state task lands the item done (durable repair)", async () => {
+  const { generateId } = await import("@/lib/db");
+  const pkg = createWorkPackage({
+    title: "Review-archived pkg",
+    project: "test",
+    projectPath: "/tmp/test-review-archived",
+    items: [{ title: "Review Item", prompt: "Do review", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const db = getDb();
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'review')",
+  ).run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'review', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+  db.prepare("UPDATE tasks SET status = 'archived' WHERE _id = ?").run(taskId);
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(detail.items[0].status, "done",
+    "durable repair: archiving a review task lands the item done, enabling Advance");
+});
+
+test("advanceWorkPackage: archiving a review item's task lands the package as clean done", async () => {
+  const items: ProposedItem[] = [
+    { title: "Only step", prompt: "do it", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+  ];
+  const pkg = createWorkPackage({ title: "Archived-review-repair", project: "hivematrix", projectPath: "/Users/x/arch-rev2", items });
+  await startWorkPackage(pkg.id);
+  const [item1] = getWorkPackage(pkg.id)!.items;
+
+  const db = getDb();
+  await Task.findByIdAndUpdate(item1.createdTaskId!, { status: "review" });
+  db.prepare("UPDATE work_package_items SET status = 'review' WHERE _id = ?").run(item1.id);
+
+  // Operator archives the task — durable repair lands the item as done.
+  await Task.findByIdAndUpdate(item1.createdTaskId!, { status: "archived" });
+
+  const r = await advanceWorkPackage(pkg.id);
+
+  assert.equal(r.package.items[0].status, "done",
+    "durable repair: review item lands done when its task is archived");
+  assert.equal(r.package.status, "done",
+    "package closes as clean done (not done_with_skips) since item landed done");
+});
+
+test("advanceWorkPackage: archiving a review item's task lands it done and unblocks the dependent", async () => {
+  const items: ProposedItem[] = [
+    { title: "Review step", prompt: "do review", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+    { title: "Next step", prompt: "do next", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: ["Review step"] },
+  ];
+  const pkg = createWorkPackage({ title: "Advance-archived-dep", project: "hivematrix", projectPath: "/Users/x/arch-dep", items });
+  await startWorkPackage(pkg.id);
+  const [item1] = getWorkPackage(pkg.id)!.items;
+
+  const db = getDb();
+  await Task.findByIdAndUpdate(item1.createdTaskId!, { status: "review" });
+  db.prepare("UPDATE work_package_items SET status = 'review' WHERE _id = ?").run(item1.id);
+  await Task.findByIdAndUpdate(item1.createdTaskId!, { status: "archived" });
+
+  const r = await advanceWorkPackage(pkg.id);
+
+  const d = getWorkPackage(pkg.id)!;
+  assert.equal(d.items[0].status, "done", "durable repair: review item lands done when its task is archived");
+  assert.equal(d.items[1].status, "running", "dependent item starts (done satisfies dep resolution)");
+  assert.equal(r.started.length, 1, "Advance is not stalled — one item started");
+  assert.equal(d.status, "running");
+});
+
+// --- acceptWorkPackageItem: explicit Accept / Land operator action ---
+
+test("acceptWorkPackageItem: marks review item done, archives linked task, advances package to done", async () => {
+  const items: ProposedItem[] = [
+    { title: "Review work", prompt: "check it", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+  ];
+  const pkg = createWorkPackage({ title: "Accept-to-done", project: "hivematrix", projectPath: "/Users/x/accept-done", items });
+  await startWorkPackage(pkg.id);
+  const [item1] = getWorkPackage(pkg.id)!.items;
+
+  const db = getDb();
+  await Task.findByIdAndUpdate(item1.createdTaskId!, { status: "review" });
+  db.prepare("UPDATE work_package_items SET status = 'review' WHERE _id = ?").run(item1.id);
+
+  const r = await acceptWorkPackageItem(pkg.id, item1.id);
+
+  assert.equal(r.package.items[0].status, "done", "accepted item is 'done'");
+  assert.equal(r.package.status, "done", "package completes as clean 'done' — not done_with_skips");
+  assert.ok(r.package.completedAt, "package has completedAt");
+
+  const task = await Task.findById(item1.createdTaskId!);
+  assert.equal(String((task as Record<string, unknown>).status), "archived", "linked task is archived (preserved on board)");
+});
+
+test("acceptWorkPackageItem: unblocks dependent item, package remains running", async () => {
+  const items: ProposedItem[] = [
+    { title: "Review step", prompt: "do review", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+    { title: "Next step", prompt: "do next", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: ["Review step"] },
+  ];
+  const pkg = createWorkPackage({ title: "Accept-unblocks-dep", project: "hivematrix", projectPath: "/Users/x/accept-dep", items });
+  await startWorkPackage(pkg.id);
+  const [item1] = getWorkPackage(pkg.id)!.items;
+
+  const db = getDb();
+  await Task.findByIdAndUpdate(item1.createdTaskId!, { status: "review" });
+  db.prepare("UPDATE work_package_items SET status = 'review' WHERE _id = ?").run(item1.id);
+
+  const r = await acceptWorkPackageItem(pkg.id, item1.id);
+
+  const d = getWorkPackage(pkg.id)!;
+  assert.equal(d.items[0].status, "done", "accepted item is done");
+  assert.equal(d.items[1].status, "running", "dependent item starts after accept");
+  assert.equal(r.started.length, 1, "Advance is not stalled — one item started");
+  assert.equal(d.status, "running");
+});
+
+test("acceptWorkPackageItem: rejects non-review item with an error", async () => {
+  const items: ProposedItem[] = [
+    { title: "Running step", prompt: "doing work", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+  ];
+  const pkg = createWorkPackage({ title: "Accept-not-review", project: "hivematrix", projectPath: "/Users/x/not-review", items });
+  await startWorkPackage(pkg.id);
+  const [item1] = getWorkPackage(pkg.id)!.items;
+
+  await assert.rejects(
+    () => acceptWorkPackageItem(pkg.id, item1.id),
+    /not in review status/,
+    "acceptWorkPackageItem must reject items that are not in review status",
+  );
+});
+
+test("acceptWorkPackageItem: item with no linked task is still marked done", async () => {
+  const pkg = createWorkPackage({
+    title: "Accept-no-task",
+    project: "test",
+    projectPath: "/tmp/accept-no-task",
+    items: [{ title: "Review item", prompt: "Check this", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const db = getDb();
+  db.prepare("UPDATE work_package_items SET status = 'review' WHERE _id = ?").run(pkg.items[0].id);
+
+  const r = await acceptWorkPackageItem(pkg.id, pkg.items[0].id);
+
+  assert.equal(r.package.items[0].status, "done", "item without linked task is still marked done on accept");
+});
+
+// --- High-risk cancelled item rollup semantics ---
+
+test("rollupStatus: high-risk cancelled item triggers done_with_skips (not done)", async () => {
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Rollup-cancelled-high pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    items: [
+      { title: "Safe step", prompt: "Do it", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+      { title: "Risky deploy", prompt: "Deploy release", risk: "high", executionMode: "hold", dependsOn: [], scopeHints: [] },
+    ],
+  });
+  db.prepare("UPDATE work_package_items SET status = 'done' WHERE _id = ?").run(pkg.items[0].id);
+  // Operator intentionally skips the held high-risk item by cancelling it.
+  db.prepare("UPDATE work_package_items SET status = 'cancelled', risk = 'high' WHERE _id = ?").run(pkg.items[1].id);
+  const result = await advanceWorkPackage(pkg.id);
+  assert.equal(result.package.status, "done_with_skips", "done + cancelled(high) → done_with_skips, not done");
+});
+
+test("rollupStatus: low-risk cancelled item does NOT trigger done_with_skips", async () => {
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Rollup-cancelled-low pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    items: [
+      { title: "Step A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+      { title: "Step B", prompt: "Do B", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+    ],
+  });
+  db.prepare("UPDATE work_package_items SET status = 'done' WHERE _id = ?").run(pkg.items[0].id);
+  db.prepare("UPDATE work_package_items SET status = 'cancelled', risk = 'low' WHERE _id = ?").run(pkg.items[1].id);
+  const result = await advanceWorkPackage(pkg.id);
+  assert.equal(result.package.status, "done", "done + cancelled(low) → done, no scope skip signal");
+});
+
+test("rollupStatus: medium-risk cancelled item does NOT trigger done_with_skips", async () => {
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Rollup-cancelled-medium pkg",
+    project: "test",
+    projectPath: "/tmp/test",
+    items: [
+      { title: "Step A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+      { title: "Step B", prompt: "Do B", risk: "medium", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+    ],
+  });
+  db.prepare("UPDATE work_package_items SET status = 'done' WHERE _id = ?").run(pkg.items[0].id);
+  db.prepare("UPDATE work_package_items SET status = 'cancelled', risk = 'medium' WHERE _id = ?").run(pkg.items[1].id);
+  const result = await advanceWorkPackage(pkg.id);
+  assert.equal(result.package.status, "done", "done + cancelled(medium) → done, only high-risk signals skip");
+});
+
+// --- Goal Flight stall diagnostics ---
+
+test("advanceWorkPackage returns stall diagnostic for running Goal Flight with no eligible items and no scheduled pass", async () => {
+  const { upsertLoop } = await import("./flight-loop-store");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Stalled Goal Flight",
+    project: "test",
+    projectPath: "/tmp/test",
+    intake: {
+      kind: "work_package_candidate" as const,
+      confidence: 0.85,
+      reasons: ["broad outcome"],
+      risk: "medium" as const,
+      suggestedMode: "split" as const,
+      goalFlight: {
+        goal: "Build a marketplace",
+        successCriteria: ["Users can list items"],
+      },
+    },
+    items: [
+      { title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+    ],
+  });
+  // Set package to running, all items to held (no eligible next items, no active work)
+  db.prepare("UPDATE work_packages SET status = 'running' WHERE _id = ?").run(pkg.id);
+  db.prepare("UPDATE work_package_items SET status = 'held' WHERE _id = ?").run(pkg.items[0].id);
+  // Create a loop with no scheduled pass
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 6, profile: "goal_quality" });
+
+  const result = await advanceWorkPackage(pkg.id);
+
+  assert.ok(result.stall, "stall diagnostic returned for stalled Goal Flight");
+  assert.equal(typeof result.stall!.reason, "string", "stall.reason is a string");
+  assert.ok(Array.isArray(result.stall!.suggestions), "stall.suggestions is an array");
+});
+
+// --- classifyBlockers (pure) ---
+
+test("classifyBlockers: review — item in review status is a review blocker", () => {
+  const items = [
+    mkItem({ id: "a", status: "review" }),
+    mkItem({ id: "b", status: "done" }),
+  ];
+  const bl = classifyBlockers(items, []);
+  assert.deepEqual(bl.review, ["a"]);
+  assert.deepEqual(bl.held, []);
+  assert.deepEqual(bl.dependency, []);
+  assert.deepEqual(bl.activeWriter, []);
+  assert.equal(bl.noReadyItems, true);
+});
+
+test("classifyBlockers: held — item in held status is a held blocker", () => {
+  const items = [mkItem({ id: "a", status: "held", executionMode: "hold" })];
+  const bl = classifyBlockers(items, []);
+  assert.deepEqual(bl.held, ["a"]);
+  assert.deepEqual(bl.review, []);
+  assert.equal(bl.noReadyItems, true);
+});
+
+test("classifyBlockers: dependency — ready item with unsatisfied dep is a dependency blocker", () => {
+  const items = [
+    mkItem({ id: "dep", status: "running" }),
+    mkItem({ id: "child", status: "ready", position: 1, dependsOn: ["dep"] }),
+  ];
+  const bl = classifyBlockers(items, []);
+  assert.deepEqual(bl.dependency, ["child"]);
+  assert.deepEqual(bl.activeWriter, []);
+  assert.equal(bl.noReadyItems, false);
+});
+
+test("classifyBlockers: activeWriter — ready writer blocked by same-package running writer", () => {
+  const items = [
+    mkItem({ id: "running", status: "running" }),
+    mkItem({ id: "next", status: "ready", position: 1 }),
+  ];
+  const bl = classifyBlockers(items, []);
+  assert.deepEqual(bl.activeWriter, ["next"]);
+  assert.deepEqual(bl.dependency, []);
+  assert.equal(bl.noReadyItems, false);
+});
+
+test("classifyBlockers: activeWriter — ready writer blocked by external same-project task", () => {
+  const items = [mkItem({ id: "w", status: "ready" })];
+  const external = [{ taskId: "ext", title: "other", worktreeName: null }];
+  const bl = classifyBlockers(items, external);
+  assert.deepEqual(bl.activeWriter, ["w"]);
+  assert.equal(bl.noReadyItems, false);
+});
+
+test("classifyBlockers: noReadyItems — true when all items are terminal or running", () => {
+  const items = [
+    mkItem({ id: "a", status: "done" }),
+    mkItem({ id: "b", status: "running" }),
+  ];
+  const bl = classifyBlockers(items, []);
+  assert.equal(bl.noReadyItems, true);
+  assert.deepEqual(bl.review, []);
+  assert.deepEqual(bl.held, []);
+  assert.deepEqual(bl.dependency, []);
+  assert.deepEqual(bl.activeWriter, []);
+});
+
+test("classifyBlockers: worktree/safe items are not classified as activeWriter blockers", () => {
+  const items = [
+    mkItem({ id: "running", status: "running" }),
+    mkItem({ id: "safe", status: "ready", position: 1, scopeHints: ["read-only"] }),
+  ];
+  const bl = classifyBlockers(items, []);
+  assert.deepEqual(bl.activeWriter, [], "read-only item should not be an activeWriter blocker");
+  assert.deepEqual(bl.dependency, [], "no dep blockers");
+  assert.equal(bl.noReadyItems, false);
+});
+
+// --- advanceWorkPackage returns blockers (integration) ---
+
+test("advanceWorkPackage returns held blocker when all items are held", async () => {
+  const items: ProposedItem[] = [
+    { title: "Gate", prompt: "gate it", risk: "high", executionMode: "hold", scopeHints: [], dependsOn: [] },
+  ];
+  const pkg = createWorkPackage({ title: "Held gate", project: "test", projectPath: "/tmp/bl-held", items });
+  const r = await startWorkPackage(pkg.id);
+  assert.equal(r.started.length, 0, "held item cannot auto-start");
+  assert.ok(r.blockers, "blockers returned when nothing started");
+  assert.ok(r.blockers!.held.length > 0, "held blocker present");
+  assert.equal(r.blockers!.noReadyItems, true);
+});
+
+test("advanceWorkPackage returns dependency blocker when dep not yet done", async () => {
+  const pkg = twoWriterSequentialPackage("BlockerDep");
+  const r = await startWorkPackage(pkg.id);
+  assert.equal(r.started.length, 1, "first item starts");
+  // Advance again immediately — dep still running, second item is dep-blocked.
+  const r2 = await advanceWorkPackage(pkg.id);
+  assert.equal(r2.started.length, 0);
+  assert.ok(r2.blockers, "blockers returned on second advance");
+  assert.ok(r2.blockers!.dependency.length > 0, "dependency blocker for second item");
+});
+
+test("advanceWorkPackage returns blockers=undefined when items do start", async () => {
+  const items: ProposedItem[] = [
+    { title: "Solo", prompt: "do it", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+  ];
+  const pkg = createWorkPackage({ title: "Started ok", project: "test", projectPath: "/tmp/bl-ok", items });
+  const r = await startWorkPackage(pkg.id);
+  assert.equal(r.started.length, 1);
+  assert.equal(r.blockers, undefined, "no blockers when items started");
+});
+
+// ── Failed item retry / resurrection semantics (RED — currently failing) ──────
+
+test("reconcileWorkPackage: failed item is restored to 'running' when linked task moves to in_progress", async () => {
+  const pkg = twoWriterSequentialPackage("RetryInProgress");
+  await startWorkPackage(pkg.id);
+  const item = getWorkPackage(pkg.id)!.items[0];
+
+  // Fail the task so the item reconciles to failed.
+  await Task.findByIdAndUpdate(item.createdTaskId!, { status: "failed", error: "build error" });
+  await reconcileWorkPackage(pkg.id);
+  assert.equal(getWorkPackage(pkg.id)!.items[0].status, "failed", "precondition: item is failed");
+
+  // Operator retries: task moves back to in_progress.
+  await Task.findByIdAndUpdate(item.createdTaskId!, { status: "in_progress" });
+  await reconcileWorkPackage(pkg.id);
+
+  // FAILS today: reconcileWorkPackage skips items whose status is not running/review,
+  // so a failed item is never restored even when its task is retried.
+  assert.equal(getWorkPackage(pkg.id)!.items[0].status, "running",
+    "failed item must be restored to running when its linked task is retried to in_progress");
+});
+
+test("reconcileWorkPackage: failed item is restored to 'running' when linked task moves to backlog", async () => {
+  const pkg = twoWriterSequentialPackage("RetryBacklog");
+  await startWorkPackage(pkg.id);
+  const item = getWorkPackage(pkg.id)!.items[0];
+
+  await Task.findByIdAndUpdate(item.createdTaskId!, { status: "failed" });
+  await reconcileWorkPackage(pkg.id);
+  assert.equal(getWorkPackage(pkg.id)!.items[0].status, "failed", "precondition: item is failed");
+
+  await Task.findByIdAndUpdate(item.createdTaskId!, { status: "backlog" });
+  await reconcileWorkPackage(pkg.id);
+
+  assert.equal(getWorkPackage(pkg.id)!.items[0].status, "running",
+    "failed item must be restored to running when its linked task is queued back to backlog");
+});
+
+test("reconcileWorkPackage: failed item is restored to 'review' when linked task advances to review", async () => {
+  const pkg = twoWriterSequentialPackage("RetryToReview");
+  await startWorkPackage(pkg.id);
+  const item = getWorkPackage(pkg.id)!.items[0];
+
+  await Task.findByIdAndUpdate(item.createdTaskId!, { status: "failed" });
+  await reconcileWorkPackage(pkg.id);
+  assert.equal(getWorkPackage(pkg.id)!.items[0].status, "failed", "precondition: item is failed");
+
+  // Task was salvaged and moved straight to review without re-running.
+  await Task.findByIdAndUpdate(item.createdTaskId!, { status: "review" });
+  await reconcileWorkPackage(pkg.id);
+
+  assert.equal(getWorkPackage(pkg.id)!.items[0].status, "review",
+    "failed item must advance to review when its linked task is moved to review state");
+});
+
+test("advanceWorkPackage: dependent item starts after failed predecessor is retried and completes", async () => {
+  const pkg = twoWriterSequentialPackage("RetryAndUnblockDep");
+  await startWorkPackage(pkg.id);
+  const [itemA, itemB] = getWorkPackage(pkg.id)!.items;
+
+  // Step A fails.
+  await Task.findByIdAndUpdate(itemA.createdTaskId!, { status: "failed", error: "compilation error" });
+  await advanceWorkPackage(pkg.id);
+  assert.equal(getWorkPackage(pkg.id)!.items[0].status, "failed", "precondition: A is failed");
+  assert.equal(getWorkPackage(pkg.id)!.items[1].status, "ready", "B is still ready while A failed");
+
+  // Operator retries A's task (moves it back to in_progress).
+  await Task.findByIdAndUpdate(itemA.createdTaskId!, { status: "in_progress" });
+  await reconcileWorkPackage(pkg.id);
+  // FAILS today: reconcile does not update failed items, so A stays failed.
+  assert.equal(getWorkPackage(pkg.id)!.items[0].status, "running",
+    "A must be restored to running after the retry — the gating condition for B to eventually proceed");
+
+  // A completes successfully.
+  await Task.findByIdAndUpdate(itemA.createdTaskId!, { status: "done" });
+  const adv = await advanceWorkPackage(pkg.id);
+
+  assert.equal(getWorkPackage(pkg.id)!.items[0].status, "done", "A is now done");
+  assert.ok(adv.started.includes(itemB.id), "B must start once A reaches done after retry");
+  assert.equal(getWorkPackage(pkg.id)!.items[1].status, "running", "B is now running");
+});
+
+// --- Blocker clearing on retry ---
+
+test("reconcileWorkPackage: stale blocker is cleared when failed item is restored to running", async () => {
+  const pkg = twoWriterSequentialPackage("BlockerClear");
+  await startWorkPackage(pkg.id);
+  const item = getWorkPackage(pkg.id)!.items[0];
+
+  // Fail the task with an error message — blocker should be set.
+  await Task.findByIdAndUpdate(item.createdTaskId!, { status: "failed", error: "network timeout" });
+  await reconcileWorkPackage(pkg.id);
+  const failedItem = getWorkPackage(pkg.id)!.items[0];
+  assert.equal(failedItem.status, "failed", "precondition: item is failed");
+  assert.equal(failedItem.blocker, "network timeout", "precondition: blocker is set from task error");
+
+  // Operator retries: task goes back to backlog.
+  await Task.findByIdAndUpdate(item.createdTaskId!, { status: "backlog", error: null });
+  await reconcileWorkPackage(pkg.id);
+
+  const retried = getWorkPackage(pkg.id)!.items[0];
+  assert.equal(retried.status, "running", "item restored to running");
+  assert.equal(retried.blocker, null, "stale blocker must be cleared when item leaves failed state");
+});
+
+// --- Terminal safety: cancelled/archived items are never re-synced ---
+
+test("reconcileWorkPackage: cancelled item is not resurrected even when linked task is active", async () => {
+  const { generateId } = await import("@/lib/db");
+  const pkg = createWorkPackage({
+    title: "Terminal-cancel pkg",
+    project: "test",
+    projectPath: "/tmp/test-terminal",
+    items: [{ title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const db = getDb();
+  const taskId = generateId();
+  db.prepare("INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'in_progress')").run(taskId);
+  // Manually wire up a cancelled item to a still-active task (operator cancelled the item, not the task).
+  db.prepare("UPDATE work_package_items SET status = 'cancelled', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(detail.items[0].status, "cancelled",
+    "cancelled item must not be resurrected by reconcile even when linked task is active");
+});
+
+test("reconcileWorkPackage: archived item is not resurrected even when linked task is active", async () => {
+  const { generateId } = await import("@/lib/db");
+  const pkg = createWorkPackage({
+    title: "Terminal-archived pkg",
+    project: "test",
+    projectPath: "/tmp/test-terminal-arch",
+    items: [{ title: "Item B", prompt: "Do B", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const db = getDb();
+  const taskId = generateId();
+  db.prepare("INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'in_progress')").run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'archived', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(detail.items[0].status, "archived",
+    "archived item must not be resurrected by reconcile even when linked task is active");
+});
+
+// ── detectStuckState (pure unit tests) ───────────────────────────
+
+test("detectStuckState: null when no items have terminal linked tasks", () => {
+  const items = [
+    mkItem({ id: "a", status: "running", createdTaskId: "t1", taskStatus: "in_progress" }),
+    mkItem({ id: "b", status: "ready", position: 1, dependsOn: ["a"] }),
+  ];
+  assert.equal(detectStuckState(items), null);
+});
+
+test("detectStuckState: null when stuck item has no ready dependents", () => {
+  const items = [
+    mkItem({ id: "a", status: "running", createdTaskId: "t1", taskStatus: "archived" }),
+    mkItem({ id: "b", status: "done", position: 1, dependsOn: ["a"] }),
+  ];
+  assert.equal(detectStuckState(items), null, "dep already done — not stuck");
+});
+
+test("detectStuckState: null when no items at all", () => {
+  assert.equal(detectStuckState([]), null);
+});
+
+test("detectStuckState: detects stuck when running item has archived task and ready dependent", () => {
+  const items = [
+    mkItem({ id: "a", status: "running", createdTaskId: "t1", taskStatus: "archived" }),
+    mkItem({ id: "b", status: "ready", position: 1, dependsOn: ["a"] }),
+  ];
+  const stuck = detectStuckState(items);
+  assert.ok(stuck, "stuck state must be detected");
+  assert.equal(stuck!.stuckItems.length, 1);
+  assert.equal(stuck!.stuckItems[0].itemId, "a");
+  assert.equal(stuck!.stuckItems[0].itemStatus, "running");
+  assert.equal(stuck!.stuckItems[0].taskStatus, "archived");
+  assert.deepEqual(stuck!.readyDependentIds, ["b"]);
+  assert.equal(stuck!.canAutoRepair, true, "archived task is the unambiguous auto-repair case");
+  assert.equal(typeof stuck!.reason, "string");
+  assert.equal(typeof stuck!.suggestedAction, "string");
+});
+
+test("detectStuckState: detects stuck when review item has done task and ready dependent", () => {
+  const items = [
+    mkItem({ id: "a", status: "review", createdTaskId: "t1", taskStatus: "done" }),
+    mkItem({ id: "b", status: "ready", position: 1, dependsOn: ["a"] }),
+  ];
+  const stuck = detectStuckState(items);
+  assert.ok(stuck, "review item with done task and ready dep is stuck");
+  assert.equal(stuck!.stuckItems[0].itemStatus, "review");
+  assert.equal(stuck!.canAutoRepair, false, "done task is not the unambiguous archived case");
+});
+
+test("detectStuckState: canAutoRepair false when any stuck item has non-archived terminal task", () => {
+  const items = [
+    mkItem({ id: "a", status: "running", createdTaskId: "t1", taskStatus: "archived" }),
+    mkItem({ id: "b", status: "running", createdTaskId: "t2", taskStatus: "failed" }),
+    mkItem({ id: "c", status: "ready", position: 2, dependsOn: ["a", "b"] }),
+  ];
+  const stuck = detectStuckState(items);
+  assert.ok(stuck);
+  assert.equal(stuck!.stuckItems.length, 2);
+  assert.equal(stuck!.canAutoRepair, false, "mixed archived+failed: not all archived, so no auto-repair");
+});
+
+test("detectStuckState: multiple ready dependents all appear in readyDependentIds", () => {
+  const items = [
+    mkItem({ id: "a", status: "running", createdTaskId: "t1", taskStatus: "archived" }),
+    mkItem({ id: "b", status: "ready", position: 1, dependsOn: ["a"] }),
+    mkItem({ id: "c", status: "ready", position: 2, dependsOn: ["a"] }),
+  ];
+  const stuck = detectStuckState(items);
+  assert.ok(stuck);
+  assert.deepEqual(stuck!.readyDependentIds.sort(), ["b", "c"]);
+});
+
+// ── stuckState in getWorkPackage (DB integration) ────────────────
+
+test("getWorkPackage: stuckState is non-null for running Flight with stuck item and ready dependent", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Stuck-state DB test",
+    project: "test",
+    projectPath: "/tmp/stuck-db",
+    items: [
+      { title: "Step A", prompt: "do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+      { title: "Step B", prompt: "do B", risk: "low", executionMode: "sequential", dependsOn: ["Step A"], scopeHints: [] },
+    ],
+  });
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'archived')",
+  ).run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(taskId, pkg.items[0].id);
+  db.prepare("UPDATE work_package_items SET status = 'ready' WHERE _id = ?").run(pkg.items[1].id);
+  db.prepare("UPDATE work_packages SET status = 'running' WHERE _id = ?").run(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.ok(detail.stuckState, "stuckState must be non-null for stuck running Flight");
+  assert.equal(detail.stuckState!.stuckItems[0].itemId, pkg.items[0].id);
+  assert.equal(detail.stuckState!.canAutoRepair, true);
+  assert.deepEqual(detail.stuckState!.readyDependentIds, [pkg.items[1].id]);
+});
+
+test("getWorkPackage: stuckState is null for non-running Flight (done)", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Done-flight stuckState",
+    project: "test",
+    projectPath: "/tmp/done-stuck",
+    items: [
+      { title: "Only step", prompt: "do it", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+    ],
+  });
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'archived')",
+  ).run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(taskId, pkg.items[0].id);
+  db.prepare("UPDATE work_packages SET status = 'done' WHERE _id = ?").run(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(detail.stuckState, null, "stuckState must be null for non-running (done) Flight");
+});
+
+// ── reconcileStuckFlight (integration) ───────────────────────────
+
+test("reconcileStuckFlight: repairs archived-task stuck item and starts ready dependent", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Reconcile-stuck repair",
+    project: "test",
+    projectPath: "/tmp/reconcile-stuck",
+    items: [
+      { title: "Step A", prompt: "do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] },
+      { title: "Step B", prompt: "do B", risk: "low", executionMode: "sequential", dependsOn: ["Step A"], scopeHints: [] },
+    ],
+  });
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'archived')",
+  ).run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(taskId, pkg.items[0].id);
+  db.prepare("UPDATE work_package_items SET status = 'ready' WHERE _id = ?").run(pkg.items[1].id);
+  db.prepare("UPDATE work_packages SET status = 'running' WHERE _id = ?").run(pkg.id);
+
+  // Pre-condition: stuckState is non-null before repair.
+  assert.ok(getWorkPackage(pkg.id)!.stuckState, "pre-condition: stuckState is non-null");
+
+  const result = await reconcileStuckFlight(pkg.id);
+
+  assert.equal(result.package.items[0].status, "done",
+    "stuck running item with archived task is repaired to done");
+  assert.equal(result.package.items[1].status, "running",
+    "ready dependent starts after repair");
+  assert.equal(result.started.length, 1, "one item started");
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(detail.stuckState, null, "stuckState is null after successful repair");
+});
+
+test("reconcileStuckFlight: throws for unknown package id", async () => {
+  await assert.rejects(
+    () => reconcileStuckFlight("nonexistent-id"),
+    /unknown work package/,
+  );
+});
+
+test("reconcileStuckFlight: idempotent on a clean running Flight (no stuck items)", async () => {
+  const pkg = twoWriterSequentialPackage("ReconcileClean");
+  await startWorkPackage(pkg.id);
+
+  const result = await reconcileStuckFlight(pkg.id);
+
+  assert.equal(result.started.length, 0, "no new items started on a clean flight");
+  assert.equal(result.package.stuckState, null, "no stuckState on clean flight");
 });

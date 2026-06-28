@@ -311,6 +311,28 @@ test("tickFlightLoops stops loop when Flight is cancelled", async () => {
   assert.equal(loop.stopReason, "flight_complete");
 });
 
+// ── tickFlightLoops — skipped pass for held Flight ──────────────────────────
+
+test("tickFlightLoops writes skipped pass for held-Flight loop without incrementing passCount", async () => {
+  const pkg = makePackage("Held-flight-sched pkg");
+  getDb().prepare("UPDATE work_packages SET status = 'held' WHERE _id = ?").run(pkg.id);
+  upsertLoop(pkg.id, { mode: "self_paced", maxPasses: 5 });
+
+  const past = new Date(Date.now() - 1000).toISOString();
+  const loop = getLoop(pkg.id)!;
+  getDb().prepare("UPDATE flight_loops SET nextRunAt = ? WHERE _id = ?").run(past, loop.id);
+
+  await tickFlightLoops();
+
+  const updatedLoop = getLoop(pkg.id)!;
+  const passes = getLoopPasses(updatedLoop.id);
+  assert.ok(passes.length >= 1, "a skipped pass record was written");
+  assert.equal(passes[0].status, "skipped", "pass status is skipped");
+  assert.equal(passes[0].stopReason, "skipped_flight_not_ready");
+  assert.equal(updatedLoop.passCount, 0, "passCount not incremented");
+  assert.notEqual(updatedLoop.status, "stopped", "loop not stopped by a skip");
+});
+
 // ── tickFlightLoops — null expiresAt never triggers expiry ──────────────────
 
 test("tickFlightLoops does not mark stopped a loop with null expiresAt", async () => {

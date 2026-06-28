@@ -23,7 +23,7 @@ import {
   type WorkPackageDetail,
   type WorkPackageItem,
 } from "./store";
-import { notifySelfPacedLoop } from "./flight-loop-store";
+import { notifySelfPacedLoop, getLoop } from "./flight-loop-store";
 import type { IntakeActiveTask } from "@/lib/intake/classify";
 
 /** A writer item mutates the repo working tree; worktree/safe items do not. */
@@ -40,7 +40,7 @@ function isWriterItem(item: Pick<WorkPackageItem, "executionMode" | "scopeHints"
  * tasks and already-running package writers).
  */
 export function planNextItems(items: WorkPackageItem[], activeSameProject: IntakeActiveTask[]): string[] {
-  const doneIds = new Set(items.filter((i) => i.status === "done").map((i) => i.id));
+  const doneIds = new Set(items.filter((i) => i.status === "done" || i.status === "archived").map((i) => i.id));
   let activeWriters = activeSameProject.length + items.filter((i) => i.status === "running" && isWriterItem(i)).length;
   const eligible: string[] = [];
   for (const item of [...items].sort((a, b) => a.position - b.position)) {
@@ -57,11 +57,34 @@ export function planNextItems(items: WorkPackageItem[], activeSameProject: Intak
   return eligible;
 }
 
+/**
+ * Classify why no items started. Each item ID appears in exactly one category
+ * (first matching reason wins). Call only when planNextItems returned [].
+ */
+export function classifyBlockers(items: WorkPackageItem[], activeSameProject: IntakeActiveTask[]): BlockerSummary {
+  const doneIds = new Set(items.filter((i) => i.status === "done" || i.status === "archived").map((i) => i.id));
+  const activeWriterCount = activeSameProject.length + items.filter((i) => i.status === "running" && isWriterItem(i)).length;
+  const review: string[] = [];
+  const held: string[] = [];
+  const dependency: string[] = [];
+  const activeWriter: string[] = [];
+  let hasReady = false;
+  for (const item of items) {
+    if (item.status === "review") { review.push(item.id); continue; }
+    if (item.status === "held") { held.push(item.id); continue; }
+    if (item.status !== "ready") continue;
+    hasReady = true;
+    if (!item.dependsOn.every((d) => doneIds.has(d))) { dependency.push(item.id); continue; }
+    if (isWriterItem(item) && activeWriterCount > 0) { activeWriter.push(item.id); continue; }
+  }
+  return { review, held, dependency, activeWriter, noReadyItems: !hasReady };
+}
+
 /** Map a child task's status onto its package item's status. */
 function itemStatusForTask(taskStatus: string): PackageStatus | null {
   switch (taskStatus) {
     case "done": return "done";
-    case "archived": return "done";
+    case "archived": return "archived";
     case "failed": return "failed";
     case "cancelled": return "cancelled";
     case "review":
@@ -84,24 +107,38 @@ export async function reconcileWorkPackage(id: string): Promise<void> {
   let selfPacedTrigger = false;
   for (const item of detail.items) {
     if (!item.createdTaskId) continue;
-    if (item.status !== "running" && item.status !== "review") continue;
+    // Also process failed items so a retry (task moves back to backlog/in_progress)
+    // restores the item to running. Terminal cancelled/archived items are never re-synced.
+    if (item.status !== "running" && item.status !== "review" && item.status !== "failed") continue;
     const task = await Task.findById(item.createdTaskId);
     if (!task) continue;
-    const next = itemStatusForTask(String((task as Record<string, unknown>).status));
-    if (!next || next === item.status) continue;
+    const raw = itemStatusForTask(String((task as Record<string, unknown>).status));
+    if (!raw) continue;
+    // Durable runtime repair: archiving the linked task of a running/review item lands
+    // it as done (accepted work), not as an intentional skip (archived). This handles
+    // the case where an operator archives a task that was still in flight — the item
+    // should complete cleanly so Advance can unblock dependent items.
+    const next: PackageStatus = (raw === "archived" && (item.status === "running" || item.status === "review"))
+      ? "done"
+      : raw;
+    if (next === item.status) continue;
     const output = (task as Record<string, unknown>).output;
     const commitHash = output && typeof output === "object" ? (output as Record<string, unknown>).commitHash : undefined;
     const error = (task as Record<string, unknown>).error;
+    // Set blocker when failing; clear it when leaving failed (retry); preserve otherwise.
+    const newBlocker = next === "failed" && typeof error === "string"
+      ? error
+      : (item.status === "failed" ? null : item.blocker);
     db.prepare(
-      "UPDATE work_package_items SET status = ?, commitHash = COALESCE(?, commitHash), blocker = COALESCE(?, blocker), updatedAt = ? WHERE _id = ?",
+      "UPDATE work_package_items SET status = ?, commitHash = COALESCE(?, commitHash), blocker = ?, updatedAt = ? WHERE _id = ?",
     ).run(
       next,
       typeof commitHash === "string" ? commitHash : null,
-      next === "failed" && typeof error === "string" ? error : null,
+      newBlocker,
       new Date().toISOString(),
       item.id,
     );
-    if (["done", "failed", "review"].includes(next)) selfPacedTrigger = true;
+    if (["done", "archived", "failed", "review"].includes(next)) selfPacedTrigger = true;
   }
   if (selfPacedTrigger) notifySelfPacedLoop(id);
 }
@@ -109,7 +146,19 @@ export async function reconcileWorkPackage(id: string): Promise<void> {
 /** Recompute a package's status from its item statuses. */
 function rollupStatus(items: WorkPackageItem[]): PackageStatus {
   if (items.length === 0) return "draft";
-  if (items.every((i) => i.status === "done")) return "done";
+  const terminalStatuses = new Set(["done", "cancelled", "archived", "failed"]);
+  const allTerminal = items.every((i) => terminalStatuses.has(i.status));
+  if (allTerminal) {
+    const anyFailed = items.some((i) => i.status === "failed");
+    if (anyFailed) return "failed";
+    // Archived items are explicit skips. High-risk cancelled items are intentional
+    // scope reductions (operator declined a held action) — same signal.
+    const anySkipped = items.some(
+      (i) => i.status === "archived" || (i.status === "cancelled" && i.risk === "high"),
+    );
+    if (anySkipped) return "done_with_skips";
+    return "done";
+  }
   if (items.some((i) => ["running", "ready", "draft"].includes(i.status))) return "running";
   if (items.some((i) => i.status === "review")) return "review";
   if (items.some((i) => i.status === "held")) return "held";
@@ -117,9 +166,25 @@ function rollupStatus(items: WorkPackageItem[]): PackageStatus {
   return "running";
 }
 
+export interface StallDiagnostic {
+  reason: string;
+  suggestions: string[];
+}
+
+/** Structured breakdown of why no items could start when advance returned started=[]. */
+export interface BlockerSummary {
+  review: string[];       // item IDs currently in review/needs_input status
+  held: string[];         // item IDs explicitly held at the final gate
+  dependency: string[];   // ready item IDs whose dependsOn are not yet done
+  activeWriter: string[]; // ready writer item IDs blocked by another active writer
+  noReadyItems: boolean;  // true when no items at all have status "ready"
+}
+
 export interface AdvanceResult {
   started: string[];
   package: WorkPackageDetail;
+  stall?: StallDiagnostic;
+  blockers?: BlockerSummary;
 }
 
 /**
@@ -146,7 +211,43 @@ export async function advanceWorkPackage(id: string): Promise<AdvanceResult> {
     updateWorkPackage(id, { status: rolled });
     detail = getWorkPackage(id)!;
   }
-  return { started, package: detail };
+
+  // Stall diagnostic: running Goal Flight with no started items, no eligible next
+  // items, and no active scheduled loop pass.
+  let stall: StallDiagnostic | undefined;
+  const isGoalFlight = !!(detail.intake?.goalFlight);
+  if (
+    isGoalFlight &&
+    (detail.status === "running" || detail.status === "held") &&
+    started.length === 0 &&
+    eligible.length === 0
+  ) {
+    const loop = getLoop(id);
+    const hasScheduledPass = loop && loop.status !== "stopped" && loop.nextRunAt !== null;
+    if (!hasScheduledPass) {
+      const heldCount = detail.items.filter((i) => i.status === "held").length;
+      const allHeld = heldCount === detail.items.length;
+      stall = {
+        reason: allHeld
+          ? "All items are held — operator approval required to proceed"
+          : "Goal Flight is running but has no eligible items and no scheduled loop pass",
+        suggestions: [
+          allHeld
+            ? "Review and approve held items to unblock the flight"
+            : "Run a quality pass to discover follow-up work",
+          "Use Repair / Nudge to manually guide the next step",
+        ],
+      };
+    }
+  }
+
+  // Structured blocker diagnostics: present whenever nothing was started.
+  let blockers: BlockerSummary | undefined;
+  if (started.length === 0) {
+    blockers = classifyBlockers(detail.items, active);
+  }
+
+  return { started, package: detail, stall, blockers };
 }
 
 /**
@@ -165,6 +266,31 @@ export async function startWorkPackage(id: string): Promise<AdvanceResult> {
   }
   updateWorkPackage(id, { status: "running" });
   return advanceWorkPackage(id);
+}
+
+/**
+ * Explicit operator action: accept a review item as done, archive its linked
+ * task (preserving it on the board with its output), then advance. This is the
+ * first-class replacement for the former hidden "archive task = accepted" behaviour.
+ */
+export async function acceptWorkPackageItem(packageId: string, itemId: string): Promise<AdvanceResult> {
+  const db = getDb();
+  const detail = getWorkPackage(packageId);
+  if (!detail) throw new Error(`unknown work package "${packageId}"`);
+  const item = detail.items.find((i) => i.id === itemId);
+  if (!item) throw new Error(`unknown item "${itemId}" in package "${packageId}"`);
+  if (item.status !== "review") throw new Error(`item "${itemId}" is not in review status (current: ${item.status})`);
+
+  db.prepare("UPDATE work_package_items SET status = 'done', updatedAt = ? WHERE _id = ?").run(
+    new Date().toISOString(),
+    itemId,
+  );
+
+  if (item.createdTaskId) {
+    await Task.findByIdAndUpdate(item.createdTaskId, { status: "archived" });
+  }
+
+  return advanceWorkPackage(packageId);
 }
 
 // ── Lightweight reconcile loop ────────────────────────────────────
@@ -199,4 +325,16 @@ export function startWorkPackageOrchestrationLoop(intervalMs = LOOP_INTERVAL_MS)
 
 export function stopWorkPackageOrchestrationLoop(): void {
   if (timer) { clearInterval(timer); timer = null; }
+}
+
+/**
+ * Operator-triggered reconcile for a stuck Flight. Forces an immediate
+ * reconcile-and-advance cycle so item states are synced from their linked tasks
+ * without waiting for the 15-second scheduler tick. The existing
+ * reconcileWorkPackage already auto-repairs the unambiguous archived→done case.
+ */
+export async function reconcileStuckFlight(id: string): Promise<AdvanceResult> {
+  const detail = getWorkPackage(id);
+  if (!detail) throw new Error(`unknown work package "${id}"`);
+  return advanceWorkPackage(id);
 }

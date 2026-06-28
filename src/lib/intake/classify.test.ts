@@ -193,3 +193,90 @@ test("forceWorkPackage still stamps a release step as held (policy wins)", async
   assert.equal(rel!.executionMode, "hold");
   assert.equal(rel!.risk, "high");
 });
+
+// ── Goal Flight classifier ────────────────────────────────────────────────────
+
+test("broad outcome-based prompt returns goalFlight metadata", () => {
+  const r = classifyIntake({
+    description: "Create a web site that lets users browse products, add to cart, and checkout with Stripe.",
+  });
+  assert.ok(r.goalFlight, "goalFlight metadata present");
+  assert.equal(typeof r.goalFlight!.goal, "string", "goal is a string");
+  assert.ok(r.goalFlight!.goal.length > 0, "goal is non-empty");
+  assert.ok(Array.isArray(r.goalFlight!.successCriteria), "successCriteria is an array");
+});
+
+test("build a platform prompt triggers goalFlight", () => {
+  const r = classifyIntake({
+    description: "Build me a SaaS platform for managing team schedules, with user auth, calendar views, and Slack notifications.",
+  });
+  assert.ok(r.goalFlight, "goalFlight detected for broad platform prompt");
+});
+
+test("simple fix-a-bug prompt does not trigger goalFlight", () => {
+  const r = classifyIntake({
+    description: "Fix the null pointer in the login handler.",
+  });
+  assert.equal(r.goalFlight, undefined, "single-step bug fix is not a Goal Flight");
+});
+
+test("explicit multi-step refactor does not trigger goalFlight — it stays a checklist Work Package", () => {
+  const r = classifyIntake({
+    description: "1. Extract auth helpers. 2. Move to shared module. 3. Update all import paths.",
+  });
+  assert.equal(r.kind, "work_package_candidate");
+  assert.equal(r.goalFlight, undefined, "explicit checklist does not become a Goal Flight");
+});
+
+// ── Goal Flight metadata determinism ─────────────────────────────────────────
+
+test("classifyIntake: goal field equals provided title when title is given", () => {
+  const r = classifyIntake({
+    title: "My eShop",
+    description: "Create a web site that lets users browse products and checkout with Stripe.",
+  });
+  assert.ok(r.goalFlight, "goalFlight present");
+  assert.equal(r.goalFlight!.goal, "My eShop", "goal uses title, not auto-extracted sentence");
+});
+
+test("classifyIntake: successCriteria extracted deterministically from comma-separated features after 'with'", () => {
+  const r = classifyIntake({
+    description: "Build a marketplace platform with product listings, seller profiles, and Stripe payments.",
+  });
+  assert.ok(r.goalFlight, "goalFlight present");
+  const sc = r.goalFlight!.successCriteria;
+  assert.ok(sc.length >= 2, `expected >=2 criteria, got ${sc.length}: ${JSON.stringify(sc)}`);
+  assert.ok(sc.some((s) => /product/i.test(s)), "successCriteria mentions product listings");
+});
+
+test("classifyIntake: successCriteria falls back to default when no criteria phrase found", () => {
+  // Long enough to pass the >80 char gate but no with/that/including/featuring
+  const desc = "Create a web application to help teams stay organized, focused, and effective all day long";
+  const r = classifyIntake({ description: desc });
+  assert.ok(r.goalFlight, "goalFlight present for a long goal prompt");
+  assert.deepEqual(r.goalFlight!.successCriteria, ["Goal delivered as described"]);
+});
+
+test("classifyIntake: goal flight with active collision includes projectCollision and goalFlight together", () => {
+  const r = classifyIntake({
+    description: "Create a web site that lets users browse products and checkout with Stripe.",
+    activeSameProject: [{ taskId: "t-active", title: "Other writer" }],
+  });
+  assert.ok(r.goalFlight, "goalFlight present");
+  assert.ok(r.projectCollision, "projectCollision reported alongside goalFlight");
+  assert.equal(r.projectCollision!.recommendation, "hold");
+});
+
+test("classifyIntakeAsync preserves goalFlight metadata when model provides better decomposition", async () => {
+  const r = await classifyIntakeAsync(
+    { description: "Create a web site that lets users browse products, add to cart, and checkout with Stripe." },
+    { client: async () => '["Design product catalog", "Build shopping cart", "Integrate Stripe checkout"]', connectivityMode: "cloud-ok" },
+  );
+  assert.equal(r.kind, "work_package_candidate");
+  assert.ok(r.reasons.includes("model-advised decomposition"), "confirms model was used");
+  // goalFlight must survive — the base deterministic result had it and the model only improves items.
+  assert.ok(r.goalFlight, "goalFlight metadata preserved after model-advised decomposition");
+  assert.equal(typeof r.goalFlight!.goal, "string");
+  assert.ok(r.goalFlight!.goal.length > 0, "goal is non-empty");
+  assert.ok(Array.isArray(r.goalFlight!.successCriteria), "successCriteria array preserved");
+});
