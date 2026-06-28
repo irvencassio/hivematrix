@@ -17,7 +17,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <script defer src="/assets/mermaid.min.js"></script>
 <style>
   :root {
-    --bg: #0d1117; --panel: #161b22; --panel-2: #1c2230; --border: #2d333b;
+    color-scheme: dark;
+    --bg: #0d1117; --panel: rgba(22,27,34,.82); --panel-2: rgba(28,34,48,.72); --border: #2d333b;
     --text: #e6edf3; --muted: #8b949e; --accent: #d9a441; --accent-2: #58a6ff;
     --ok: #3fb950; --warn: #d29922; --err: #f85149;
     --code-bg: #0a0d12; --code-text: #e6edf3;
@@ -25,12 +26,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     --overlay-bg: rgba(0,0,0,.55);
     --reply-q-bg: rgba(88,166,255,.08);
     --hover-bg: rgba(255,255,255,.06);
-    --card-shadow: none;
+    --card-shadow: 0 1px 3px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.12);
     --create-btn-text: #1a1a1a;
     --errbox-bg: rgba(248,81,73,.08);
   }
   html[data-theme="light"] {
-    --bg: #f6f8fa; --panel: #ffffff; --panel-2: #f0f3f6; --border: #d0d7de;
+    color-scheme: light;
+    --bg: #f6f8fa; --panel: rgba(255,255,255,.85); --panel-2: rgba(240,243,246,.78); --border: #d0d7de;
     --text: #1f2328; --muted: #57606a; --accent: #9a6700; --accent-2: #0969da;
     --ok: #1a7f37; --warn: #9a6700; --err: #cf222e;
     --code-bg: #e8ecf1; --code-text: #1f2328;
@@ -38,13 +40,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     --overlay-bg: rgba(0,0,0,.25);
     --reply-q-bg: rgba(9,105,218,.08);
     --hover-bg: rgba(0,0,0,.04);
-    --card-shadow: 0 1px 3px rgba(0,0,0,.06);
+    --card-shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.04);
     --create-btn-text: #fff;
     --errbox-bg: rgba(207,34,46,.06);
   }
   /* Matrix: deep green-black palette with neon-green accents, behind an animated code-rain canvas. */
   html[data-theme="matrix"] {
-    --bg: #010a05; --panel: #04140b; --panel-2: #0a2113; --border: #1d5a32;
+    color-scheme: dark;
+    --bg: #010a05; --panel: rgba(4,20,11,.85); --panel-2: rgba(10,33,19,.78); --border: #1d5a32;
     --text: #b9ffce; --muted: #57b074; --accent: #39ff7e; --accent-2: #6effa3;
     --ok: #39ff7e; --warn: #d2e022; --err: #ff5d6c;
     --code-bg: #03100a; --code-text: #b9ffce;
@@ -63,23 +66,33 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   /* Wallpaper / Matrix: panels go translucent so the backdrop shows through; text stays readable. */
   html[data-wallpaper="1"] body { background-size: cover; background-position: center; background-attachment: fixed; }
   html[data-wallpaper="1"] .col, html[data-wallpaper="1"] header,
-  html[data-theme="matrix"] .col, html[data-theme="matrix"] header { background-color: color-mix(in srgb, var(--panel) var(--wp-opacity, 82%), transparent); backdrop-filter: blur(var(--wp-blur, 6px)); }
+  html[data-theme="matrix"] .col, html[data-theme="matrix"] header { backdrop-filter: blur(var(--wp-blur, 6px)) saturate(160%); -webkit-backdrop-filter: blur(var(--wp-blur, 6px)) saturate(160%); }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
+  body { margin: 0; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    background: transparent; color: var(--text); height: 100vh; overflow: hidden;
+    -webkit-font-smoothing: antialiased; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.14); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.26); }
+  html[data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(0,0,0,.14); }
+  html[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.26); }
+  ::selection { background: rgba(217,164,65,.28); }
   header { display: flex; align-items: center; gap: 12px; padding: 8px 16px;
-    background: var(--panel); border-bottom: 1px solid var(--border); height: 44px; }
+    background: var(--panel); border-bottom: 1px solid var(--border); height: 44px;
+    backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%); }
   header .logo { font-weight: 700; color: var(--accent); letter-spacing: .5px; }
   header .mode { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .pill { padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600;
-    border: 1px solid var(--border); background: var(--panel-2); }
+    border: 1px solid var(--border); background: var(--panel-2);
+    transition: color .2s ease, border-color .2s ease, background .2s ease; }
   .pill.cloud-ok { color: var(--ok); border-color: var(--ok); }
   .pill.local-only { color: var(--warn); border-color: var(--warn); }
   .pill.offline { color: var(--err); border-color: var(--err); }
   select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
     border-radius: 6px; padding: 3px 8px; font-size: 11px; }
   main { display: grid; grid-template-columns: 300px 1fr 320px; height: calc(100vh - 44px); }
-  .col { overflow-y: auto; padding: 12px; }
+  .col { overflow-y: auto; padding: 12px; backdrop-filter: blur(20px) saturate(160%); -webkit-backdrop-filter: blur(20px) saturate(160%); }
   /* The task-detail column is a size container so controls respond to the column
      width (rails collapse independently of the window), not the viewport. */
   .col.session { container-type: inline-size; }
@@ -128,18 +141,20 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     margin: 4px 0 10px; }
   .addbtn { width: 100%; text-align: left; background: var(--panel-2); color: var(--accent);
     border: 1px dashed var(--border); border-radius: 8px; padding: 7px 10px; cursor: pointer;
-    font-size: 12px; font-weight: 600; margin-bottom: 10px; }
+    font-size: 12px; font-weight: 600; margin-bottom: 10px; transition: border-color .15s ease; }
   .addbtn:hover { border-color: var(--accent); }
   /* Overview nav — explicit return target at the top of the board column. */
   .ov-nav { width: 100%; text-align: left; background: var(--panel-2); color: var(--text);
     border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; cursor: pointer;
-    font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+    font-size: 12px; font-weight: 600; margin-bottom: 8px; transition: border-color .15s ease, color .15s ease; }
   .ov-nav:hover { border-color: var(--accent); }
   .ov-nav.active { border-color: var(--accent); color: var(--accent); }
   .ov-back { font-size: 11px; margin-left: 8px; vertical-align: middle; }
   .form { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
-    padding: 14px 16px; margin-bottom: 12px; display: none; }
-  .form.open { display: block; }
+    padding: 0 16px; margin-bottom: 0; display: block;
+    max-height: 0; overflow: hidden; opacity: 0;
+    transition: max-height .24s ease, opacity .18s ease, padding .24s ease, margin .24s ease; }
+  .form.open { max-height: 700px; opacity: 1; padding: 14px 16px; margin-bottom: 12px; }
   .form input, .form textarea { width: 100%; box-sizing: border-box; background: var(--bg);
     color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
     font-size: 13px; margin-bottom: 10px; font-family: inherit; }
@@ -193,12 +208,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .flight-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin: 10px 0 6px; }
   .flight-head h2 { margin:0; }
   .flight-list { display:flex; flex-direction:column; gap:6px; }
-  .flight-card { width:100%; text-align:left; border:1px solid var(--border); border-radius:8px; background:var(--panel-2); color:var(--text); padding:8px 9px; cursor:pointer; }
+  .flight-card { width:100%; text-align:left; border:1px solid var(--border); border-radius:8px; background:var(--panel-2); color:var(--text); padding:8px 9px; cursor:pointer; transition:border-color .15s ease; }
   .flight-card:hover, .flight-card.sel { border-color:var(--accent); }
   .flight-title { font-weight:600; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .flight-meta { color:var(--muted); font-size:10.5px; display:flex; justify-content:space-between; gap:8px; margin-top:2px; }
   .flight-progress { height:5px; border-radius:999px; background:var(--border); overflow:hidden; margin-top:6px; }
-  .flight-progress > i { display:block; height:100%; background:var(--ok); border-radius:999px; }
+  .flight-progress > i { display:block; height:100%; background:var(--ok); border-radius:999px; transition:width .4s ease; }
   .flight-detail { max-width:760px; margin:20px auto 0; padding:0 12px 24px; }
   .flight-detail h1 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .flight-counts { display:flex; flex-wrap:wrap; gap:5px; margin:8px 0; }
@@ -293,22 +308,29 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .command-run { background:var(--accent); color:var(--create-btn-text); border:0; flex:1; }
   .command-view { display:none; max-height:200px; overflow:auto; font-size:11px; background:var(--code-bg); color:var(--code-text); padding:8px; border-radius:6px; margin:0 10px 10px; white-space:pre-wrap; }
   /* Unified Skills & Commands section */
-  .sk-toolbar { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+  .sk-toolbar { display:flex; gap:6px; align-items:center; margin-bottom:8px; }
   .sk-toolbar input { flex:1; min-width:80px; margin:0; }
   .sk-toolbar .addbtn { width:auto; flex:none; margin-bottom:0; white-space:nowrap; }
-  .sk-list { max-height:230px; overflow:auto; border:1px solid var(--border); border-radius:8px; background:var(--panel-2); }
+  .sk-list { max-height:300px; overflow:auto; }
   .sk-list:empty { display:none; }
-  .sk-row { padding:6px 8px; border-bottom:1px solid var(--border); cursor:pointer; }
-  .sk-row:last-child { border-bottom:0; }
-  .sk-row:hover { background:var(--panel); }
-  .sk-row.sel { background:color-mix(in srgb, var(--accent) 16%, var(--panel-2)); }
-  .sk-row b { font-size:12px; }
-  .sk-row .sk-desc { color:var(--muted); font-size:11px; line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sk-row { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:7px; cursor:pointer; transition:background .1s; }
+  .sk-row:hover { background:color-mix(in srgb,var(--panel) 70%,transparent); }
+  .sk-row.sel { background:color-mix(in srgb,var(--accent) 11%,var(--panel-2)); }
+  .sk-row.sel .sk-row-name { color:var(--accent-2); }
+  .sk-row.kbd-focus { background:var(--panel); outline:1px solid color-mix(in srgb,var(--accent-2) 35%,transparent); outline-offset:-1px; }
+  .sk-row-icon { font-size:15px; flex:none; width:20px; text-align:center; line-height:1; }
+  .sk-row-body { flex:1; min-width:0; }
+  .sk-row-name { font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sk-row-desc { font-size:10.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sk-row .sk-desc { overflow:hidden; text-overflow:ellipsis; }
+  .sk-row-right { display:flex; align-items:center; gap:3px; flex:none; }
   .sk-badge { display:inline-block; font-size:10px; color:var(--muted); border:1px solid var(--border); border-radius:999px; padding:0 5px; margin-left:4px; white-space:nowrap; }
   .sk-badge.src { color:var(--accent-2); border-color:color-mix(in srgb, var(--accent-2) 42%, var(--border)); }
   .sk-badge.warn { color:var(--warn); border-color:color-mix(in srgb, var(--warn) 45%, var(--border)); }
   .sk-badge.err { color:var(--err); border-color:color-mix(in srgb, var(--err) 45%, var(--border)); }
-  .sk-detail { margin-top:8px; border:1px solid var(--border); border-radius:8px; background:var(--panel-2); padding:9px 10px; }
+  .sk-detail { margin-top:10px; border:1px solid var(--border); border-radius:10px; background:var(--panel-2); padding:10px 11px; }
+  .sk-detail .sk-dhead { display:flex; align-items:center; gap:7px; margin-bottom:4px; }
+  .sk-detail .sk-dhead-icon { font-size:18px; line-height:1; flex:none; }
   .sk-detail .sk-dmeta { font-size:11px; color:var(--muted); margin:4px 0; }
   .sk-detail input, .sk-detail select { margin:0; }
   .sk-detail .sk-run-row { display:flex; gap:6px; margin-top:8px; }
@@ -319,7 +341,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   /* The .addbtn default is full-width; keep it inline inside skill controls/rows. */
   .sk-run-row .addbtn, .sk-more .addbtn, #addShared .addbtn, #skPrune .addbtn, #addSkillOverlay .addbtn { width:auto; flex:none; margin-bottom:0; }
   .sk-tabs { display:flex; gap:4px; margin-bottom:10px; }
-  .sk-tab { flex:1; text-align:center; padding:6px 4px; font-size:12px; border:1px solid var(--border); border-radius:6px; cursor:pointer; color:var(--muted); }
+  .sk-tab { flex:1; text-align:center; padding:6px 4px; font-size:12px; border:1px solid var(--border); border-radius:6px; cursor:pointer; color:var(--muted); transition:color .15s ease, border-color .15s ease, background .15s ease; }
   .sk-tab.active { color:var(--accent-2); border-color:color-mix(in srgb, var(--accent-2) 45%, var(--border)); background:var(--panel); }
   .linklike { background:none; border:0; color:var(--muted); text-decoration:underline; cursor:pointer; font-size:11px; padding:0; }
   .usage-refresh { border:1px solid var(--border); background:var(--panel-2); color:var(--muted);
@@ -337,9 +359,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     animation: updatePulse 2s ease-in-out infinite; }
   .update-pill:hover { filter: brightness(1.08); }
   @keyframes updatePulse { 0%,100% { opacity: 1; } 50% { opacity: .72; } }
-  .overlay { position: fixed; inset: 0; background: var(--overlay-bg); display: none;
-    align-items: center; justify-content: center; z-index: 50; }
-  .overlay.open { display: flex; }
+  .overlay { position: fixed; inset: 0; background: var(--overlay-bg);
+    display: flex; align-items: center; justify-content: center; z-index: 50;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transition: opacity .18s ease, visibility .18s; }
+  .overlay.open { opacity: 1; visibility: visible; pointer-events: auto; }
+  .overlay .modal { transform: translateY(8px) scale(.97); transition: transform .2s cubic-bezier(.2,.8,.2,1); }
+  .overlay.open .modal { transform: none; }
   .modal { width: 640px; max-width: 92vw; max-height: 84vh; overflow-y: auto; background: var(--panel);
     border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
   .modal h1 { font-size: 16px; margin: 0 0 14px; display: flex; align-items: center; }
@@ -376,7 +402,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .mb-ignored-row button { font-size: 10px; padding: 2px 9px; border-radius: 6px; cursor: pointer;
     background: var(--accent); color: var(--create-btn-text, #1a1a1a); border: 0; font-weight: 700; }
   .tabs { display: flex; gap: 6px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
-  .tab { padding: 6px 12px; cursor: pointer; font-size: 12px; color: var(--muted); border-bottom: 2px solid transparent; }
+  .tab { padding: 6px 12px; cursor: pointer; font-size: 12px; color: var(--muted); border-bottom: 2px solid transparent; transition: color .15s ease, border-color .15s ease; }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
   .backend { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
   .backend .nm { font-weight: 600; min-width: 150px; }
@@ -429,6 +455,36 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     background: var(--panel-2); color: var(--muted); cursor: pointer; }
   .sm:hover { border-color: var(--accent-2); color: var(--text); }
   .sm.err:hover { border-color: var(--err); color: var(--err); }
+  /* ── Schedule timeline ───────────────────────────────── */
+  .sch-view-btns { display: flex; gap: 4px; margin-bottom: 8px; }
+  .sch-view-btn { font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--muted); cursor: pointer; }
+  .sch-view-btn.active { border-color: var(--accent-2); color: var(--accent-2); background: rgba(88,166,255,.1); }
+  .sch-view-btn:hover:not(.active) { border-color: var(--accent-2); color: var(--text); }
+  .tl-wrap { margin: 0 0 10px; }
+  .tl-header { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+  .tl-track { position: relative; height: 32px; background: var(--bg); border-radius: 4px; border: 1px solid var(--border); overflow: visible; }
+  .tl-now-line { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ok); opacity: .8; z-index: 2; border-radius: 1px; }
+  .tl-tick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); }
+  .tl-tick-lbl { position: absolute; bottom: -14px; font-size: 9px; color: var(--muted); transform: translateX(-50%); white-space: nowrap; pointer-events: none; }
+  .tl-dot { position: absolute; top: 50%; transform: translate(-50%,-50%); width: 10px; height: 10px;
+    border-radius: 50%; border: 2px solid var(--bg); cursor: pointer; z-index: 3; transition: transform .1s; }
+  .tl-dot:hover { transform: translate(-50%,-50%) scale(1.5); z-index: 10; }
+  .tl-dot.status-active { background: var(--ok); }
+  .tl-dot.status-sleeping { background: var(--muted); }
+  .tl-dot.status-blocked { background: var(--err); }
+  .tl-dot.status-overdue { background: var(--err); box-shadow: 0 0 0 3px rgba(248,81,73,.3); }
+  .tl-dot.status-soon { background: var(--warn); box-shadow: 0 0 0 3px rgba(210,153,34,.25); }
+  .tl-window-btn { font-size: 10px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--muted); cursor: pointer; }
+  .tl-window-btn.active { color: var(--accent-2); border-color: var(--accent-2); }
+  .countdown { font-size: 10px; padding: 1px 5px; border-radius: 3px; font-weight: 600; }
+  .countdown.soon { background: rgba(210,153,34,.18); color: var(--warn); }
+  .countdown.overdue { background: rgba(248,81,73,.13); color: var(--err); }
+  .countdown.ok { background: rgba(63,185,80,.13); color: var(--ok); }
+  .countdown.muted { background: var(--badge-bg); color: var(--badge-text); }
+  .dir-group-hdr { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .5px; margin: 8px 0 4px; padding-bottom: 3px; border-bottom: 1px solid var(--border); }
   .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
   .dot.active { background: var(--ok); } .dot.done { background: var(--accent-2); }
   .dot.sleeping { background: var(--muted); } .dot.blocked, .dot.failed { background: var(--err); }
@@ -443,7 +499,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .action-bar > button { min-height: 30px; min-width: 72px; border-radius: 6px; padding: 6px 14px;
     font-size: 12px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center;
     justify-content: center; gap: 6px; white-space: nowrap; border: 1px solid var(--border);
-    background: var(--panel-2); color: var(--text); }
+    background: var(--panel-2); color: var(--text);
+    transition: background .15s ease, border-color .15s ease, color .15s ease, opacity .12s ease, filter .12s ease; }
   .action-bar > button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
   .action-bar > button[disabled] { opacity: .5; cursor: default; filter: none; }
   /* The one obvious next action. Child combinator beats the base button rule. */
@@ -588,6 +645,16 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .custom-folder { margin: 0 0 6px; }
   .custom-folder input { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
     border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px; font-family: inherit; }
+  /* Dropdown appear animation */
+  @keyframes dropdownAppear { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:none; } }
+  .project-dropdown:not(.hidden) { animation: dropdownAppear .14s ease; }
+  /* Active/live status dot pulse */
+  @keyframes dotPulse { 0%,100% { opacity:1; } 55% { opacity:.5; } }
+  .dot.active { animation: dotPulse 2.8s ease-in-out infinite; }
+  /* Obs window button transition */
+  .obs-win button { transition: background .15s ease, color .15s ease; }
+  /* Sch-view-btn transition */
+  .sch-view-btn { transition: border-color .15s ease, color .15s ease, background .15s ease; }
 </style>
 </head>
 <body>
@@ -1263,7 +1330,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="directives"></div></details>
     <details class="ctx-sec" id="skillsSec" open><summary>Skills &amp; Commands</summary>
     <div class="sk-toolbar">
-      <input id="skQuery" placeholder="Search skills &amp; commands…" oninput="renderSkillList()" />
+      <input id="skQuery" placeholder="Search skills &amp; commands…" oninput="skQueryInput()" onkeydown="skQueryKeydown(event)" />
       <button class="addbtn" onclick="openAddSkills()" title="Import a skill from a URL, a file, a shared scope, or your local folders">＋ Add</button>
       <button class="addbtn" onclick="syncSkills()" title="Git-sync all scopes + write skills into the Claude/Codex/Qwen dirs">⇄ Sync</button>
     </div>
@@ -1306,7 +1373,7 @@ function requireToken() {
     + '<div style="color:var(--muted,#8b949e);font-size:11px;max-width:340px;text-align:center">Find this token in the local HiveMatrix console under Settings → Remote access.</div></div>';
   return false;
 }
-let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedFlight: null, projects: [], selectedProject: "", workPackages: [] };
+let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedFlight: null, projects: [], selectedProject: "", workPackages: [], schedView: 'timeline', tlWindow: 24 };
 let _taskFormInSession = false;
 
 async function api(path, opts) {
@@ -1499,6 +1566,20 @@ function timeAgo(value, nowMs) {
   return Math.round(sec / 31536000) + " yr ago";
 }
 /*__TIMEAGO_END__*/
+
+function timeUntil(iso) {
+  if (!iso) return null;
+  const ms = new Date(iso).valueOf() - Date.now();
+  if (ms < -300000) return { label: 'overdue', cls: 'overdue', ms };
+  if (ms < 60000) return { label: 'now', cls: 'ok', ms };
+  const m = Math.floor(ms / 60000);
+  if (m < 60) return { label: 'in ' + m + 'm', cls: m < 15 ? 'soon' : 'muted', ms };
+  const h = Math.floor(m / 60), rm = m % 60;
+  if (h < 24) return { label: 'in ' + h + 'h' + (rm ? ' ' + rm + 'm' : ''), cls: 'muted', ms };
+  return { label: 'in ' + Math.floor(h / 24) + 'd', cls: 'muted', ms };
+}
+function setSchedView(v) { state.schedView = v; renderDirectives(); }
+function setTlWindow(h) { state.tlWindow = h; renderDirectives(); }
 
 function ageBadge(t) {
   var raw = (t && t.updatedAt) || (t && t.createdAt) || "";
@@ -2547,6 +2628,8 @@ let _skills = [];        // brain-library skills (/skills)
 let _commands = [];      // local profile commands + folder skills (/commands)
 let _cmdProjects = [];   // cached project list for the command project picker
 let _skSel = '';         // selected catalog key: "lib:<name>" or "local:<invokeName>"
+let _skFocusIdx = -1;    // keyboard-focused row index in current filtered list (-1 = none)
+let _skItems = [];       // current filtered+sorted catalog slice (parallel to rendered rows)
 let _addSrc = 'url';     // active Add-modal source tab
 
 async function renderSkillCatalog() {
@@ -2581,6 +2664,20 @@ function skBadges(it) {
   if (it.useCount > 0) b += '<span class="sk-badge">' + it.useCount + '×</span>';
   return b;
 }
+function skIcon(it) {
+  if (it.source === 'local') return it.kind === 'skill' ? '📁' : '⌨️';
+  return it.kind === 'script' ? '⚙️' : '🧩';
+}
+function skCardAlert(it) {
+  if (it.scan === 'block') return '<span class="sk-card-alert" title="scan blocked — do not run">⛔</span>';
+  if (it.scan === 'warn') return '<span class="sk-card-alert" style="color:var(--warn)" title="scan: review">⚠</span>';
+  if (it.trusted === false) return '<span class="sk-card-alert" style="color:var(--warn)" title="untrusted — approve before agents use it">⚠</span>';
+  return '';
+}
+function skTypeLabel(it) {
+  if (it.source === 'local') return it.kind === 'skill' ? 'folder' : 'cmd';
+  return it.kind === 'script' ? 'ops' : 'skill';
+}
 function renderSkillList() {
   const box = document.getElementById('skList');
   if (!box) return;
@@ -2594,15 +2691,27 @@ function renderSkillList() {
     });
   }
   items.sort((x, y) => (y.useCount - x.useCount) || x.name.localeCompare(y.name));
-  if (!items.length) {
+  _skItems = items.slice(0, 60);
+  if (_skFocusIdx >= _skItems.length) _skFocusIdx = -1;
+  if (!_skItems.length) {
     box.innerHTML = '<div class="muted" style="font-size:11px;padding:8px">No skills or commands' + (q ? ' match.' : ' yet — use ＋ Add to import.') + '</div>';
     return;
   }
-  box.innerHTML = items.slice(0, 60).map(it => {
+  box.innerHTML = _skItems.map((it, i) => {
     const k = it.key.replace(/'/g, '&#39;');
-    return '<div class="sk-row' + (it.key === _skSel ? ' sel' : '') + '" onclick="selectSkill(\'' + k + '\')">'
-      + '<div><b>' + esc(it.name) + '</b>' + skBadges(it) + '</div>'
-      + (it.description ? '<div class="sk-desc">' + esc(it.description) + '</div>' : '')
+    const alert = (it.scan === 'block') ? '⛔' : (it.scan === 'warn' || it.trusted === false) ? '⚠' : '';
+    const cls = 'sk-row' + (it.key === _skSel ? ' sel' : '') + (i === _skFocusIdx ? ' kbd-focus' : '');
+    return '<div class="' + cls + '" data-idx="' + i + '" onclick="selectSkill(\'' + k + '\')" title="' + esc(it.description || it.name) + '">'
+      + '<div class="sk-row-icon">' + skIcon(it) + '</div>'
+      + '<div class="sk-row-body">'
+      + '<div class="sk-row-name">' + esc(it.name) + '</div>'
+      + (it.description ? '<div class="sk-row-desc sk-desc">' + esc(it.description) + '</div>' : '')
+      + '</div>'
+      + '<div class="sk-row-right">'
+      + '<span class="sk-badge src">' + esc(skTypeLabel(it)) + '</span>'
+      + (it.useCount > 0 ? '<span class="sk-badge">' + it.useCount + '×</span>' : '')
+      + (alert ? '<span style="font-size:11px;margin-left:2px" title="' + (it.scan === 'block' ? 'scan blocked' : 'review before use') + '">' + alert + '</span>' : '')
+      + '</div>'
       + '</div>';
   }).join('');
 }
@@ -2612,6 +2721,31 @@ function selectSkill(key) {
   renderSkillDetail();
 }
 function skSelected() { return skCatalog().find(it => it.key === _skSel) || null; }
+function skQueryInput() { _skFocusIdx = -1; renderSkillList(); }
+function skQueryKeydown(e) {
+  const n = _skItems.length;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (!n) return;
+    _skFocusIdx = (_skFocusIdx < 0) ? 0 : Math.min(_skFocusIdx + 1, n - 1);
+    renderSkillList(); skScrollFocused();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    _skFocusIdx = Math.max(_skFocusIdx - 1, -1);
+    renderSkillList(); skScrollFocused();
+  } else if (e.key === 'Enter' && _skFocusIdx >= 0 && _skFocusIdx < n) {
+    e.preventDefault();
+    selectSkill(_skItems[_skFocusIdx].key);
+  } else if (e.key === 'Escape') {
+    _skSel = ''; _skFocusIdx = -1;
+    renderSkillList(); renderSkillDetail();
+  }
+}
+function skScrollFocused() {
+  const box = document.getElementById('skList');
+  const el = box && box.querySelector('.kbd-focus');
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
 function renderSkillDetail() {
   const d = document.getElementById('skDetail');
   if (!d) return;
@@ -2633,7 +2767,7 @@ function libMetaLine(s) {
 function libDetailHtml(it) {
   const s = it.raw;
   const untrusted = s.trusted === false;
-  return '<div><b>' + esc(it.name) + '</b>' + skBadges(it) + '</div>'
+  return '<div class="sk-dhead"><span class="sk-dhead-icon">' + skIcon(it) + '</span><b>' + esc(it.name) + '</b>' + skBadges(it) + '</div>'
     + '<div class="sk-dmeta">' + libMetaLine(s) + '</div>'
     + (s.hasInput ? '<input id="skInput" placeholder="Text input for the skill (optional)" />' : '')
     + '<div class="sk-run-row">'
@@ -2651,7 +2785,7 @@ function libDetailHtml(it) {
 }
 function localDetailHtml(it) {
   const c = it.raw;
-  return '<div><b>' + esc(it.name) + '</b>' + skBadges(it) + '</div>'
+  return '<div class="sk-dhead"><span class="sk-dhead-icon">' + skIcon(it) + '</span><b>' + esc(it.name) + '</b>' + skBadges(it) + '</div>'
     + '<div class="sk-dmeta">' + commandMetaChips(c) + '</div>'
     + '<input id="cmdArgs" placeholder="Optional arguments" />'
     + '<label class="flbl" style="margin:6px 0 2px">Project</label>'
@@ -2984,16 +3118,110 @@ async function restartMcp(name) {
   renderMcp();
 }
 
+function renderSchedTimeline(sorted) {
+  const windowHours = state.tlWindow || 24;
+  const windowMs = windowHours * 3600000;
+  const now = Date.now();
+  const inWindow = sorted.filter(d => {
+    if (!d.nextRunAt) return false;
+    const t = new Date(d.nextRunAt).valueOf();
+    return t >= now - 3600000 && t <= now + windowMs;
+  });
+  const winBtns = [6, 24, 72].map(h =>
+    '<button class="tl-window-btn' + (state.tlWindow === h ? ' active' : '')
+    + '" onclick="setTlWindow(' + h + ')">' + (h < 24 ? h + 'h' : h === 24 ? '1d' : '3d') + '</button>'
+  ).join(' ');
+  const tickInterval = windowHours <= 6 ? 1 : windowHours <= 24 ? 4 : 12;
+  let ticks = '';
+  for (let h = tickInterval; h < windowHours; h += tickInterval) {
+    const pct = (h / windowHours) * 100;
+    const lbl = new Date(now + h * 3600000).toLocaleTimeString([], { hour: 'numeric' });
+    ticks += '<div class="tl-tick" style="left:' + pct.toFixed(1) + '%"></div>'
+           + '<div class="tl-tick-lbl" style="left:' + pct.toFixed(1) + '%">' + esc(lbl) + '</div>';
+  }
+  const dots = inWindow.map(d => {
+    const t = new Date(d.nextRunAt).valueOf();
+    const pct = Math.max(1, Math.min(97, ((t - now) / windowMs) * 100));
+    const until = timeUntil(d.nextRunAt);
+    const dotCls = (until && until.ms < 0) ? 'status-overdue'
+      : (until && until.ms < 3600000) ? 'status-soon'
+      : 'status-' + d.status;
+    return '<div class="tl-dot ' + dotCls + '" style="left:' + pct.toFixed(1) + '%"'
+      + ' title="' + esc(d.goal + ' · ' + (until ? until.label : '')) + '"></div>';
+  }).join('');
+  return '<div class="tl-wrap">'
+    + '<div class="tl-header">'
+    + '<span style="color:var(--ok);font-weight:600;font-size:10px">▸ now</span>'
+    + '<div style="display:flex;gap:4px">' + winBtns + '</div>'
+    + '<span>+' + windowHours + 'h</span></div>'
+    + '<div class="tl-track">'
+    + '<div class="tl-now-line" style="left:0.5%"></div>'
+    + ticks + dots
+    + '</div>'
+    + (inWindow.length === 0 ? '<div class="muted" style="font-size:11px;margin-top:18px">Nothing scheduled in this window.</div>' : '')
+    + '</div>';
+}
+
+function renderSchedList(sorted) {
+  const now = Date.now();
+  const groups = [
+    { key: 'overdue', label: 'Overdue',           items: [] },
+    { key: 'soon',    label: 'Next 1 hour',        items: [] },
+    { key: 'today',   label: 'Today',              items: [] },
+    { key: 'week',    label: 'This week',          items: [] },
+    { key: 'later',   label: 'Later',              items: [] },
+    { key: 'manual',  label: 'Manual / on demand', items: [] }
+  ];
+  for (const d of sorted) {
+    if (!d.nextRunAt) { groups[5].items.push(d); continue; }
+    const ms = new Date(d.nextRunAt).valueOf() - now;
+    if (ms < 0) groups[0].items.push(d);
+    else if (ms < 3600000) groups[1].items.push(d);
+    else if (ms < 86400000) groups[2].items.push(d);
+    else if (ms < 604800000) groups[3].items.push(d);
+    else groups[4].items.push(d);
+  }
+  let html = '';
+  for (const g of groups) {
+    if (!g.items.length) continue;
+    html += '<div class="dir-group-hdr">' + esc(g.label) + '</div>';
+    html += g.items.map(d => {
+      const until = d.nextRunAt ? timeUntil(d.nextRunAt) : null;
+      const ctd = until ? ' <span class="countdown ' + esc(until.cls) + '">' + esc(until.label) + '</span>' : '';
+      const timeStr = d.nextRunAt
+        ? ' · <span style="font-size:10px;color:var(--muted)" title="' + esc(d.nextRunAt) + '">'
+          + esc(new Date(d.nextRunAt).toLocaleTimeString()) + '</span>'
+        : '';
+      return '<div class="directive">'
+        + '<div class="g"><span class="dot ' + d.status + '"></span>' + esc(d.goal) + '</div>'
+        + '<div class="s">' + esc(d.status) + timeStr + ctd
+        + '<span class="directive-actions">'
+        + '<button class="sm" onclick="editDirective(\'' + d._id + '\')">Edit</button>'
+        + '<button class="sm err" onclick="deleteDirective(\'' + d._id + '\')">Delete</button>'
+        + '</span></div></div>';
+    }).join('');
+  }
+  return html;
+}
+
 function renderDirectives() {
   const el = document.getElementById("directives");
   if (!state.directives.length) { el.innerHTML = '<div class="muted">None.</div>'; return; }
-  el.innerHTML = state.directives.map(d => '<div class="directive">'
-    + '<div class="g"><span class="dot '+d.status+'"></span>'+esc(d.goal)+'</div>'
-    + '<div class="s">'+esc(d.status)+(d.nextRunAt?' · next '+esc(new Date(d.nextRunAt).toLocaleTimeString()):'')
-    + '<span class="directive-actions">'
-    + '<button class="sm" onclick="editDirective(\''+d._id+'\')">Edit</button>'
-    + '<button class="sm err" onclick="deleteDirective(\''+d._id+'\')">Delete</button>'
-    + '</span></div></div>').join("");
+  const view = state.schedView || 'timeline';
+  const sorted = state.directives.slice().sort((a, b) => {
+    if (!a.nextRunAt && !b.nextRunAt) return 0;
+    if (!a.nextRunAt) return 1;
+    if (!b.nextRunAt) return -1;
+    return new Date(a.nextRunAt).valueOf() - new Date(b.nextRunAt).valueOf();
+  });
+  const viewBtns = '<div class="sch-view-btns">'
+    + '<button class="sch-view-btn' + (view === 'timeline' ? ' active' : '') + '" onclick="setSchedView(\'timeline\')" title="Visual timeline">⊶ Timeline</button>'
+    + '<button class="sch-view-btn' + (view === 'list' ? ' active' : '') + '" onclick="setSchedView(\'list\')" title="Flat list">☰ List</button>'
+    + '</div>';
+  let html = viewBtns;
+  if (view === 'timeline') html += renderSchedTimeline(sorted);
+  html += renderSchedList(sorted);
+  el.innerHTML = html;
 }
 
 function fmtUptime(s) {

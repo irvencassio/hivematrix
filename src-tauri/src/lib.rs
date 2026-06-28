@@ -90,6 +90,14 @@ fn apply_runtime_dock_icon(app: &tauri::App) {
 #[cfg(not(target_os = "macos"))]
 fn apply_runtime_dock_icon(_app: &tauri::App) {}
 
+#[cfg(target_os = "macos")]
+fn apply_macos_vibrancy(window: &tauri::WebviewWindow) {
+    use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
+    if let Err(e) = apply_vibrancy(window, NSVisualEffectMaterial::UnderWindowBackground, None, None) {
+        log::warn!("vibrancy: {e}");
+    }
+}
+
 /// Holds the transient first-run daemon child (if we spawned one) so it can be
 /// reaped on app exit.
 struct DaemonChild(Mutex<Option<Child>>);
@@ -247,6 +255,11 @@ pub fn run() {
             )?;
 
             apply_runtime_dock_icon(app);
+
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                apply_macos_vibrancy(&window);
+            }
 
             // Ensure a daemon is up so the webview's health-poll redirects.
             if daemon_health_ok() {
