@@ -74,6 +74,7 @@ npx tsx scripts/qwen-readiness.mts   # 6-check readiness gate + eval suite
 ### Build the signed app
 
 ```bash
+npm run autodeploy                 # increment version, commit, push, build, publish update feed
 cargo tauri build                    # signed HiveMatrix.app (Developer ID, hardened runtime)
 bash scripts/build-app.sh            # notarize the .app via the `hivematrix` profile
 bash scripts/build-dmg.sh            # notarized drag-to-install .dmg (hdiutil, GUI-free)
