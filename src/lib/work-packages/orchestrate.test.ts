@@ -117,6 +117,22 @@ test("advanceWorkPackage starts the dependent item after the first completes, th
   void started;
 });
 
+test("advanceWorkPackage treats archived linked tasks as landed", async () => {
+  const items: ProposedItem[] = [
+    { title: "Only step", prompt: "do it", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+  ];
+  const pkg = createWorkPackage({ title: "Archived child", project: "hivematrix", projectPath: "/Users/x/archive", items });
+  await startWorkPackage(pkg.id);
+  const item = getWorkPackage(pkg.id)!.items[0];
+
+  await Task.findByIdAndUpdate(item.createdTaskId!, { status: "archived" });
+  const advanced = await advanceWorkPackage(pkg.id);
+
+  assert.equal(advanced.package.status, "done");
+  assert.equal(advanced.package.items[0].status, "done");
+  assert.ok(advanced.package.completedAt);
+});
+
 test("tickWorkPackages advances a running package whose child has completed", async () => {
   const pkg = twoWriterSequentialPackage("C");
   await startWorkPackage(pkg.id);

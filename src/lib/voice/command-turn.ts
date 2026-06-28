@@ -234,6 +234,7 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
     }
     case "browserLaneTask": {
       if (!intent.browserLane) return null;
+      console.log(`[voice-cmd] browserLaneTask: mode=${intent.browserLane.mode}`);
       const payload = buildVoiceBrowserLaneTask(intent.browserLane, { titlePrefix: "Voice" });
       const task = await createTask(deps, { ...payload });
       contextStore.update(sessionId, (ctx) => rememberLastTask(ctx, task._id));

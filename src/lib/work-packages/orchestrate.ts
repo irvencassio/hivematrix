@@ -61,6 +61,7 @@ export function planNextItems(items: WorkPackageItem[], activeSameProject: Intak
 function itemStatusForTask(taskStatus: string): PackageStatus | null {
   switch (taskStatus) {
     case "done": return "done";
+    case "archived": return "done";
     case "failed": return "failed";
     case "cancelled": return "cancelled";
     case "review":

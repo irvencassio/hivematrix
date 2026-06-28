@@ -63,9 +63,14 @@ def _one_turn(audio_b64: str, lang: str, text: str | None = None) -> dict:
         if not transcript.strip():
             return {"transcript": "", "reply": "", "audioBase64": "", "escalated": False}
         reply = LocalLLM().respond_with_tools(transcript)
+        # Voice prompt action: log when the Browser Lane system-prompt phrase fires so
+        # it's visible in turn_server logs that the model followed the instruction.
+        if "browser lane" in reply.lower():
+            print(f"[voice][prompt-action] browser_lane transcript={transcript!r} reply={reply!r}", flush=True)
         # Hand off to a full HiveMatrix agent task when the local model can't do the
         # ask (research, web/repo lookups) — and speak an acknowledgment, not a refusal.
         escalated, reply = resolve_escalation(transcript, reply)
+        print(f"[voice][turn] escalated={escalated} transcript={transcript!r}", flush=True)
         audio_out = _synth_to_m4a_b64(reply, lang, work)  # same warm voice as /synth
         return {"transcript": transcript, "reply": reply, "audioBase64": audio_out, "escalated": escalated}
     finally:

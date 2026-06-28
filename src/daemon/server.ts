@@ -2568,6 +2568,17 @@ export function createDaemonServer() {
           if (r.escalated && r.transcript) {
             void (async () => {
               try {
+                // Guard: skip background task creation for intents that commandTurnOverride
+                // handles deterministically (browserLaneTask, mailDeleteTask, createTask,
+                // retryFailedTask, etc.) — both paths would otherwise create duplicate tasks.
+                const { detectCommandIntent } = await import("@/lib/voice/command-intent");
+                const precheck = detectCommandIntent(r.transcript!);
+                console.log(`[voice/turn] escalation precheck: kind=${precheck.kind}`);
+                if (precheck.kind !== "none") {
+                  console.log(`[voice/turn] skipping background task — commandTurnOverride handles ${precheck.kind}`);
+                  return;
+                }
+
                 const { routeVoiceSession } = await import("@/lib/voice/session");
                 const { Task, generateId } = await import("@/lib/db");
                 const { DEFAULT_TASK_PROJECT } = await import("@/lib/routing/project-constants");
@@ -2622,6 +2633,7 @@ export function createDaemonServer() {
           const { commandTurnOverride } = await import("@/lib/voice/command-turn");
           const cmd = await commandTurnOverride(r.transcript || "", { synthesize: speak });
           if (cmd) {
+            console.log(`[voice/turn] commandTurnOverride matched: kind=${cmd.command.kind}${cmd.command.taskId ? ` taskId=${cmd.command.taskId}` : ""}`);
             if (cmd.command.taskId) broadcast("tasks:created", { taskId: cmd.command.taskId });
             json(res, 200, { transcript: r.transcript, ...cmd });
             return;
