@@ -335,6 +335,36 @@ test("DELETE /work-packages/:id refuses a running package", async (t) => {
   assert.match(String(body.reason || body.error || ""), /running|active/i);
 });
 
+test("DELETE /work-packages/:id deletes landed package with stale active linked task", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb, Task } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const items = [
+    { title: "Done but stale", prompt: "done work", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+  ];
+  const pkg = await (await fetch(`${base}/work-packages`, {
+    method: "POST", headers, body: JSON.stringify({ title: "Landed stale Flight", project: "hivematrix", projectPath: "/tmp/landed-stale", items }),
+  })).json() as Record<string, unknown>;
+  const pkgItems = pkg.items as Array<Record<string, unknown>>;
+  const linked = await Task.create({
+    title: "Done but stale",
+    description: "stale child",
+    project: "hivematrix",
+    projectPath: "/tmp/landed-stale",
+    status: "in_progress",
+    source: "work-package",
+  });
+  getDb().prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(linked._id, pkgItems[0].id);
+  getDb().prepare("UPDATE work_packages SET status = 'done_with_skips' WHERE _id = ?").run(pkg.id);
+
+  const del = await fetch(`${base}/work-packages/${pkg.id}`, { method: "DELETE", headers });
+  assert.equal(del.status, 200);
+  const body = await del.json() as Record<string, unknown>;
+  assert.equal(body.deleted, true);
+});
+
 test("POST /tasks promotes a broad prompt into a Work Package, not a generic agent task", async (t) => {
   withTempHome(t);
   const { _resetDbForTests, getDb } = await import("@/lib/db");
@@ -570,6 +600,59 @@ test("POST /tasks/:id/reply reconciles a Flight review item back to running", as
   const afterItems = after.items as Array<Record<string, unknown>>;
   assert.equal(afterItems[0].status, "running", "reply reconciliation moves the Flight item out of review");
   assert.equal(after.status, "running", "Flight is no longer blocked in review");
+});
+
+test("GET /tasks adds Flight context for review tasks linked to Flight items", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb, Task } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const items = [
+    { title: "Already landed", prompt: "done work", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+    { title: "Review blocker", prompt: "reviewed work", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: ["Already landed"] },
+  ];
+  const pkg = await (await fetch(`${base}/work-packages`, {
+    method: "POST", headers, body: JSON.stringify({ title: "Visible Flight Context", project: "hivematrix", projectPath: "/tmp/flight-context", items }),
+  })).json() as Record<string, unknown>;
+
+  const pkgItems = pkg.items as Array<Record<string, unknown>>;
+  getDb().prepare("UPDATE work_package_items SET status = 'done' WHERE _id = ?").run(pkgItems[0].id);
+  getDb().prepare("UPDATE work_package_items SET status = 'ready' WHERE _id = ?").run(pkgItems[1].id);
+  getDb().prepare("UPDATE work_packages SET status = 'running' WHERE _id = ?").run(pkg.id);
+
+  await fetch(`${base}/work-packages/${pkg.id}/advance`, { method: "POST", headers });
+  const afterAdvance = await (await fetch(`${base}/work-packages/${pkg.id}`, { headers })).json() as Record<string, unknown>;
+  const reviewItem = (afterAdvance.items as Array<Record<string, unknown>>).find((i) => i.title === "Review blocker")!;
+  const linkedTaskId = reviewItem.createdTaskId as string;
+
+  getDb().prepare("UPDATE work_package_items SET status = 'review' WHERE _id = ?").run(reviewItem.id);
+  await fetch(`${base}/tasks/${linkedTaskId}`, {
+    method: "PATCH", headers, body: JSON.stringify({ status: "review", reviewState: "ready_for_review" }),
+  });
+
+  const unrelated = await Task.create({
+    title: "Standalone review",
+    description: "not linked to a Flight",
+    project: "hivematrix",
+    projectPath: "/tmp/flight-context",
+    status: "review",
+    reviewState: "ready_for_review",
+  });
+
+  const tasks = await (await fetch(`${base}/tasks`, { headers })).json() as Array<Record<string, unknown>>;
+  const linked = tasks.find((task) => task._id === linkedTaskId)!;
+  const standalone = tasks.find((task) => task._id === unrelated._id)!;
+
+  assert.deepEqual(linked.flightContext, {
+    packageId: pkg.id,
+    packageTitle: "Visible Flight Context",
+    itemId: reviewItem.id,
+    itemStatus: "review",
+    landedCount: 1,
+    totalCount: 2,
+  });
+  assert.equal("flightContext" in standalone, false, "non-Flight review tasks are unchanged");
 });
 
 test("POST /work-packages/:id/items/:itemId/accept returns 409 when item is not in review status", async (t) => {

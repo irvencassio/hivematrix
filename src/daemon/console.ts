@@ -424,6 +424,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .card.sel { border-color: var(--accent); }
   .card .t { font-weight: 600; margin-bottom: 2px; padding-right: 22px; }
   .card .m { font-size: 11px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
+  .flight-ctx { margin-top: 4px; font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .flight-ctx b { color: var(--accent); font-weight: 650; }
   .card .card-archive { position: absolute; top: 6px; right: 8px; font-size: 13px; line-height: 1;
     color: var(--muted); background: none; border: none; cursor: pointer; padding: 2px 4px;
     border-radius: 4px; opacity: 0; transition: opacity .1s; }
@@ -1872,7 +1874,8 @@ function renderBoard() {
           + '<div class="t">'+esc(t.title||t._id)+'</div>'
           + '<div class="m">'+(t.model?'<span class="badge model">'+esc(t.model)+'</span>':'')
           + (t.reviewState?'<span class="badge">'+esc(t.reviewState)+'</span>':'')
-          + (t.directiveId?'<span class="badge">directive</span>':'')+ageBadge(t)+'</div></div>').join("")
+          + (t.directiveId?'<span class="badge">directive</span>':'')+ageBadge(t)+'</div>'
+          + flightContextBadge(t) + '</div>').join("")
       + '</div>';
   }).join("") || '<div class="muted">No tasks.</div>';
   const archivable = state.tasks.filter(t => ["review","done","failed","cancelled"].includes(t.status)).length;
@@ -1880,6 +1883,19 @@ function renderBoard() {
   if (ab) ab.textContent = archivable ? "· archive completed (" + archivable + ")" : "";
   renderFlightsRail();
   updateOverviewNav();
+}
+
+function flightContextBadge(t) {
+  const fc = t && t.flightContext;
+  if (!fc) return "";
+  const itemStatus = String(fc.itemStatus || "");
+  const prefix = itemStatus === "review" ? "Blocks Flight" : "Flight";
+  const title = fc.packageTitle || fc.packageId || "Flight";
+  const landed = Number(fc.landedCount || 0);
+  const total = Number(fc.totalCount || 0);
+  const count = total ? landed + "/" + total + " landed" : "";
+  const parts = [prefix, title, itemStatus ? "item " + itemStatus : "item", count].filter(Boolean);
+  return '<div class="flight-ctx" title="' + esc(parts.join(" · ")) + '"><b>' + esc(prefix) + '</b> · ' + esc(parts.slice(1).join(" · ")) + '</div>';
 }
 
 /*__MARKDOWN_RENDERER_START__*/

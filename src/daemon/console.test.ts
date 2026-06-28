@@ -670,6 +670,16 @@ test("board renders a per-task age chip from updatedAt", () => {
   assert.match(js, /updatedAt/, "age chip is driven by updatedAt");
 });
 
+test("board renders Flight context for linked review cards only", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function flightContextBadge\(/, "board has a Flight context helper");
+  assert.match(js, /Blocks Flight/, "review Flight items explain that they block a Flight");
+  assert.match(js, /itemStatus/, "Flight chip includes the linked item status");
+  assert.match(js, /landedCount/, "Flight chip includes landed count");
+  assert.match(js, /flightContextBadge\(t\)/, "renderBoard appends the Flight context line per card");
+  assert.match(js, /if \(!fc\) return "";/, "non-Flight cards render no extra Flight chip");
+});
+
 test("settings lanes sections have distinct, non-duplicate labels", () => {
   // The duplicate-feeling pair was "Lane Apps" (installable apps) vs "Embedded
   // capability lanes" (daemon runtime). The latter is relabeled so it no longer

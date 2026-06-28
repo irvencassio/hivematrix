@@ -26,6 +26,7 @@ export type GoalFlightIntake = IntakeResult & { goalFlight: GoalFlightMetadata }
 
 export type PackageStatus = "draft" | "held" | "ready" | "running" | "review" | "done" | "done_with_skips" | "failed" | "cancelled" | "archived";
 const TERMINAL = new Set<PackageStatus>(["done", "done_with_skips", "failed", "cancelled"]);
+const DELETE_TERMINAL = new Set<PackageStatus>(["done", "done_with_skips", "failed", "cancelled", "archived"]);
 
 const SECRET_KEY = /password|passwd|pwd|secret|token|cookie|session|credential|api[_-]?key|bearer|keychain/i;
 
@@ -373,21 +374,23 @@ export function updateWorkPackageItem(packageId: string, itemId: string, patch: 
 
 export function deleteWorkPackage(id: string): { deleted: boolean; reason?: string } | null {
   const db = getDb();
-  const pkg = db.prepare("SELECT _id FROM work_packages WHERE _id = ?").get(id) as { _id: string } | undefined;
+  const pkg = db.prepare("SELECT _id, status FROM work_packages WHERE _id = ?").get(id) as { _id: string; status: PackageStatus } | undefined;
   if (!pkg) return null;
 
-  const runningItem = db.prepare("SELECT _id FROM work_package_items WHERE packageId = ? AND status = 'running' LIMIT 1").get(id);
-  if (runningItem) return { deleted: false, reason: "Flight has running items" };
+  if (!DELETE_TERMINAL.has(pkg.status)) {
+    const runningItem = db.prepare("SELECT _id FROM work_package_items WHERE packageId = ? AND status = 'running' LIMIT 1").get(id);
+    if (runningItem) return { deleted: false, reason: "Flight has running items" };
 
-  const activeLinked = db.prepare(`
-    SELECT t._id
-    FROM work_package_items i
-    JOIN tasks t ON t._id = i.createdTaskId
-    WHERE i.packageId = ?
-      AND t.status IN ('assigned', 'in_progress')
-    LIMIT 1
-  `).get(id);
-  if (activeLinked) return { deleted: false, reason: "Flight has active linked tasks" };
+    const activeLinked = db.prepare(`
+      SELECT t._id
+      FROM work_package_items i
+      JOIN tasks t ON t._id = i.createdTaskId
+      WHERE i.packageId = ?
+        AND t.status IN ('assigned', 'in_progress')
+      LIMIT 1
+    `).get(id);
+    if (activeLinked) return { deleted: false, reason: "Flight has active linked tasks" };
+  }
 
   const tx = db.transaction(() => {
     db.prepare("DELETE FROM work_package_items WHERE packageId = ?").run(id);

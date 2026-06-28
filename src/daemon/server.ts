@@ -152,6 +152,56 @@ function parseQueryString(url: string): Record<string, string> {
   return params;
 }
 
+interface TaskFlightContextRow {
+  createdTaskId: string;
+  packageId: string;
+  packageTitle: string;
+  itemId: string;
+  itemStatus: string;
+  landedCount: number;
+  totalCount: number;
+}
+
+function attachFlightContextToTasks<T extends Record<string, unknown>>(rows: T[]): Array<T & { flightContext?: Record<string, unknown> }> {
+  const taskIds = rows.map((row) => row._id).filter((id): id is string => typeof id === "string" && id.length > 0);
+  if (taskIds.length === 0) return rows;
+
+  const placeholders = taskIds.map(() => "?").join(", ");
+  const links = getDb().prepare(`
+    SELECT
+      i.createdTaskId AS createdTaskId,
+      p._id AS packageId,
+      p.title AS packageTitle,
+      i._id AS itemId,
+      i.status AS itemStatus,
+      SUM(CASE WHEN all_i.status = 'done' THEN 1 ELSE 0 END) AS landedCount,
+      COUNT(all_i._id) AS totalCount
+    FROM work_package_items i
+    JOIN work_packages p ON p._id = i.packageId
+    JOIN work_package_items all_i ON all_i.packageId = i.packageId
+    WHERE i.createdTaskId IN (${placeholders})
+    GROUP BY i.createdTaskId, p._id, p.title, i._id, i.status
+  `).all(...taskIds) as TaskFlightContextRow[];
+
+  if (links.length === 0) return rows;
+  const byTaskId = new Map(links.map((row) => [row.createdTaskId, row]));
+  return rows.map((row) => {
+    const link = typeof row._id === "string" ? byTaskId.get(row._id) : undefined;
+    if (!link) return row;
+    return {
+      ...row,
+      flightContext: {
+        packageId: link.packageId,
+        packageTitle: link.packageTitle,
+        itemId: link.itemId,
+        itemStatus: link.itemStatus,
+        landedCount: Number(link.landedCount) || 0,
+        totalCount: Number(link.totalCount) || 0,
+      },
+    };
+  });
+}
+
 export function createDaemonServer() {
   const policy = getConnectivityPolicy();
   const AUTH_TOKEN = getOrCreateToken(DAEMON_TOKEN_FILE);
@@ -3452,8 +3502,8 @@ export function createDaemonServer() {
         if (q.profile) { conditions.push("profile = ?"); params.push(q.profile); }
         if (q.project) { conditions.push("project = ?"); params.push(q.project); }
         const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
-        const rows = db.prepare(`SELECT * FROM tasks${where} ORDER BY position ASC LIMIT 300`).all(...params);
-        json(res, 200, rows);
+        const rows = db.prepare(`SELECT * FROM tasks${where} ORDER BY position ASC LIMIT 300`).all(...params) as Array<Record<string, unknown>>;
+        json(res, 200, attachFlightContextToTasks(rows));
         return;
       }
 
@@ -3483,7 +3533,7 @@ export function createDaemonServer() {
             (row as Record<string, unknown>).pendingQuestion = latest.reason;
           }
         }
-        json(res, 200, row);
+        json(res, 200, attachFlightContextToTasks([row])[0]);
         return;
       }
 

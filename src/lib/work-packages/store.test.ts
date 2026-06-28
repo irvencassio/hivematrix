@@ -7,7 +7,7 @@ import { join } from "node:path";
 const TMP = mkdtempSync(join(tmpdir(), "hivematrix-wp-store-"));
 process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
-const { _resetDbForTests, getDb } = await import("@/lib/db");
+const { _resetDbForTests, getDb, Task } = await import("@/lib/db");
 const {
   createWorkPackage,
   listWorkPackages,
@@ -126,6 +126,27 @@ test("deleteWorkPackage refuses a package with running items", () => {
   assert.equal(result.deleted, false);
   assert.match(result.reason || "", /running/i);
   assert.ok(getWorkPackage(pkg.id));
+});
+
+test("deleteWorkPackage deletes a landed package even with stale active child state", async () => {
+  const intake = broadIntake();
+  const pkg = createWorkPackage({ title: "Landed but stale", project: "hivematrix", projectPath: "/p", intake, items: intake.packageCandidate!.items });
+  const item = pkg.items[0];
+  const linked = await Task.create({
+    title: item.title,
+    description: item.prompt,
+    project: "hivematrix",
+    projectPath: "/p",
+    status: "in_progress",
+    source: "work-package",
+  });
+  updateWorkPackageItem(pkg.id, item.id, { status: "running", createdTaskId: linked._id });
+  updateWorkPackage(pkg.id, { status: "done" });
+
+  const result = deleteWorkPackage(pkg.id);
+
+  assert.deepEqual(result, { deleted: true });
+  assert.equal(getWorkPackage(pkg.id), null);
 });
 
 test("createTaskFromItem creates exactly one task and is idempotent", async () => {
