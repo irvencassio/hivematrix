@@ -20,6 +20,8 @@ set -euo pipefail
 APPLE_ID="cassio.irv@gmail.com"
 TEAM_ID="8B3CHTY93V"   # Developer ID Application: Irven Cassio
 PROFILE="hivematrix"
+KEYCHAIN_SERVICE="com.apple.gke.notary.tool"
+KEYCHAIN_ACCOUNT="$KEYCHAIN_SERVICE.saved-creds.$PROFILE"
 ASP_URL="https://account.apple.com/account/manage"
 
 echo "HiveMatrix — notarytool credential setup"
@@ -27,8 +29,8 @@ echo "========================================"
 echo "Apple ID : $APPLE_ID"
 echo "Team ID  : $TEAM_ID"
 echo "Profile  : $PROFILE"
-echo "Keychain : service com.apple.gke.notary.tool"
-echo "           account com.apple.gke.notary.tool.saved-creds.$PROFILE"
+echo "Keychain : service $KEYCHAIN_SERVICE"
+echo "           account $KEYCHAIN_ACCOUNT"
 echo
 
 # If a working profile already exists, don't clobber it.
@@ -105,6 +107,12 @@ fi
 
 echo
 echo "Validating..."
+if ! security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$KEYCHAIN_ACCOUNT" >/dev/null 2>&1; then
+  echo "✗ Stored, but the expected notarytool Keychain item is not visible:" >&2
+  echo "    security find-generic-password -s \"$KEYCHAIN_SERVICE\" -a \"$KEYCHAIN_ACCOUNT\"" >&2
+  exit 1
+fi
+
 if xcrun notarytool history --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --keychain-profile "$PROFILE" >/dev/null 2>&1; then
   echo "✓ Notary profile '$PROFILE' is working. Notarization is now headless:"
   echo "    xcrun notarytool submit <app.zip> --keychain-profile $PROFILE --wait"

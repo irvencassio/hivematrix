@@ -6,6 +6,8 @@ const expected = {
   appleId: "cassio.irv@gmail.com",
   teamId: "8B3CHTY93V",
   profile: "hivematrix",
+  keychainService: "com.apple.gke.notary.tool",
+  keychainAccount: "com.apple.gke.notary.tool.saved-creds.hivematrix",
 };
 
 for (const script of ["scripts/build-app.sh", "scripts/build-dmg.sh"]) {
@@ -29,6 +31,9 @@ test("release preflight validates the saved notarytool profile before version bu
   assert.match(body, /const notaryAppleId = "cassio\.irv@gmail\.com"/);
   assert.match(body, /const notaryTeamId = "8B3CHTY93V"/);
   assert.match(body, /const notaryProfile = "hivematrix"/);
+  assert.match(body, /const notaryKeychainService = "com\.apple\.gke\.notary\.tool"/);
+  assert.match(body, /const notaryKeychainAccount = `\$\{notaryKeychainService\}\.saved-creds\.\$\{notaryProfile\}`/);
+  assert.match(body, /security find-generic-password -s "\$\{notaryKeychainService\}" -a "\$\{notaryKeychainAccount\}"/);
   assert.match(body, /--apple-id \$\{notaryAppleId\}/);
   assert.match(body, /--team-id \$\{notaryTeamId\}/);
   assert.match(body, /--keychain-profile \$\{notaryProfile\}/);
@@ -39,4 +44,13 @@ test("setup-notary documents the actual notarytool Keychain service and account"
 
   assert.match(body, /com\.apple\.gke\.notary\.tool/);
   assert.match(body, /com\.apple\.gke\.notary\.tool\.saved-creds\.hivematrix/);
+  assert.match(body, /security find-generic-password -s "\$KEYCHAIN_SERVICE" -a "\$KEYCHAIN_ACCOUNT"/);
+});
+
+test("autodeploy banner shows the profile and exact notarytool Keychain account", () => {
+  const body = readFileSync("scripts/autodeploy-main.sh", "utf8");
+
+  assert.match(body, /Profile\s+: hivematrix/);
+  assert.match(body, /Service\s+: com\.apple\.gke\.notary\.tool/);
+  assert.match(body, /Account\s+: com\.apple\.gke\.notary\.tool\.saved-creds\.hivematrix/);
 });

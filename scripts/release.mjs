@@ -40,14 +40,32 @@ if (branch !== "main") die(`must be on main to release (on "${branch}")`);
 const notaryAppleId = "cassio.irv@gmail.com";
 const notaryTeamId = "8B3CHTY93V";
 const notaryProfile = "hivematrix";
+const notaryKeychainService = "com.apple.gke.notary.tool";
+const notaryKeychainAccount = `${notaryKeychainService}.saved-creds.${notaryProfile}`;
+const notaryKeychainLookupCommand = `security find-generic-password -s "${notaryKeychainService}" -a "${notaryKeychainAccount}"`;
+const notaryHistoryCommand = `xcrun notarytool history --apple-id ${notaryAppleId} --team-id ${notaryTeamId} --keychain-profile ${notaryProfile}`;
+
 try {
-  execSync(
-    `xcrun notarytool history --apple-id ${notaryAppleId} --team-id ${notaryTeamId} --keychain-profile ${notaryProfile}`,
-    { cwd: repo, stdio: "ignore" },
-  );
+  execSync(notaryKeychainLookupCommand, { cwd: repo, stdio: "ignore" });
 } catch {
   die(
-    `notarytool profile "${notaryProfile}" is not usable for ${notaryAppleId} / ${notaryTeamId}. ` +
+    "notarytool Keychain item is missing. Expected:\n" +
+    `  service: ${notaryKeychainService}\n` +
+    `  account: ${notaryKeychainAccount}\n\n` +
+    "Verify with:\n" +
+    `  ${notaryKeychainLookupCommand}\n\n` +
+    "Then run: bash scripts/setup-notary.sh",
+  );
+}
+
+try {
+  execSync(notaryHistoryCommand, { cwd: repo, stdio: "ignore" });
+} catch {
+  die(
+    `notarytool profile "${notaryProfile}" exists at ${notaryKeychainService} / ${notaryKeychainAccount}, ` +
+    `but is not usable for ${notaryAppleId} / ${notaryTeamId}.\n\n` +
+    "Failed command:\n" +
+    `  ${notaryHistoryCommand}\n\n` +
     "Run: bash scripts/setup-notary.sh",
   );
 }

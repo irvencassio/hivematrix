@@ -23,6 +23,11 @@ echo "  scripts/build-dmg.sh             - signed/notarized DMG"
 echo "  scripts/setup-notary.sh          - notarytool credential setup and validation"
 echo "  scripts/notary-identity.test.mjs - source guard for Apple ID/team/profile wiring"
 echo
+echo "Notary profile/keychain:"
+echo "  Profile : hivematrix"
+echo "  Service : com.apple.gke.notary.tool"
+echo "  Account : com.apple.gke.notary.tool.saved-creds.hivematrix"
+echo
 echo "Node-RED logic check:"
 if rg -n "node-red|nodered|Node-RED" src scripts package.json \
   --glob '!scripts/autodeploy-main.sh' \
