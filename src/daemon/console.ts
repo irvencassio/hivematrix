@@ -276,15 +276,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .obs-strip { display:flex; flex-wrap:wrap; gap:14px; margin:8px 0 4px; padding:8px 10px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; }
   .obs-cell { display:flex; flex-direction:column; font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
   .obs-cell b { font-size:13px; color:var(--text); text-transform:none; letter-spacing:0; }
-  .exec-panel { margin:10px 0 10px; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--panel-2); }
-  .exec-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 10px; border-bottom:1px solid var(--border); }
-  .exec-title { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:700; }
-  .exec-provider { font-size:11px; color:var(--accent-2); border:1px solid color-mix(in srgb, var(--accent-2) 45%, var(--border)); border-radius:999px; padding:1px 8px; background:color-mix(in srgb, var(--accent-2) 10%, transparent); }
-  .exec-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; background:var(--border); }
-  .exec-cell { min-width:0; padding:7px 9px; background:var(--panel); }
-  .exec-cell .ek { display:block; font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:1px; }
-  .exec-cell .ev { display:block; color:var(--text); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .exec-cell.wide { grid-column:1 / -1; }
   /* Observability dashboard (Settings tab) */
   .obs-win { display:inline-flex; border:1px solid var(--border); border-radius:7px; overflow:hidden; }
   .obs-win button { border:0; background:var(--panel-2); color:var(--muted); font-size:11px; padding:3px 9px; cursor:pointer; }
@@ -1234,19 +1225,22 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <div class="err" id="t_custom_err"></div>
       </div>
       <input id="t_path" type="hidden" value="" />
-      <label class="flbl">Model</label>
-      <select id="t_model"></select>
-      <label class="flbl">Mode</label>
-      <select id="t_route">
-        <option value="auto" selected>Auto — route by content</option>
-        <option value="work_package">Flight — multi-step autonomous run</option>
-        <option value="browser">Browser Lane — web browsing &amp; automation</option>
-        <option value="terminal-lane">Terminal Lane — run on a host</option>
-        <option value="mail">Mail Lane — compose &amp; send email</option>
-        <option value="message">Message Lane — iMessage &amp; SMS</option>
-        <option value="desktop">Desktop Lane — screen &amp; GUI automation</option>
-        <option value="normal">Direct — one plain task</option>
-      </select>
+      <details id="t_advanced">
+        <summary style="display:block;cursor:pointer;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;margin:10px 0 3px">Advanced</summary>
+        <label class="flbl">Model</label>
+        <select id="t_model"></select>
+        <label class="flbl">Mode</label>
+        <select id="t_route">
+          <option value="auto" selected>Auto — route by content</option>
+          <option value="work_package">Flight — multi-step autonomous run</option>
+          <option value="browser-lane">Browser Lane — web browsing &amp; automation</option>
+          <option value="terminal-lane">Terminal Lane — run on a host</option>
+          <option value="mail">Mail Lane — compose &amp; send email</option>
+          <option value="message">Message Lane — iMessage &amp; SMS</option>
+          <option value="desktop">Desktop Lane — screen &amp; GUI automation</option>
+          <option value="normal">Direct — one plain task</option>
+        </select>
+      </details>
       <label class="flbl">Attachments</label>
       <div class="attach-row attach-drop" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onAttachDrop(event)">
         <input type="file" id="t_attach_input" multiple style="display:none" onchange="onAttachFiles(this)">
@@ -1874,7 +1868,7 @@ function renderBoard() {
           + '<div class="t">'+esc(t.title||t._id)+'</div>'
           + '<div class="m">'+(t.model?'<span class="badge model">'+esc(t.model)+'</span>':'')
           + (t.reviewState?'<span class="badge">'+esc(t.reviewState)+'</span>':'')
-          + (t.directiveId?'<span class="badge">directive</span>':'')+ageBadge(t)+'</div>'
+          + ageBadge(t)+'</div>'
           + flightContextBadge(t) + '</div>').join("")
       + '</div>';
   }).join("") || '<div class="muted">No tasks.</div>';
@@ -2130,13 +2124,7 @@ async function selectTask(id) {
     + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></h1>'
     + '<div class="sub">'+esc(t.project||"")+' · '+esc(t.status)+(t.reviewState?' · '+esc(t.reviewState):'')+'</div>'
     + taskActionsHtml(t)
-    + taskExecutionPanel(t, out)
-    + '<div class="kv">'
-    + '<span class="k">project path</span><span>'+esc(t.projectPath||"—")+'</span>'
-    + '<span class="k">directive</span><span>'+esc(t.directiveId||"—")+'</span>'
-    + '<span class="k">completedBy</span><span>'+esc(t.completedBy||"—")+'</span>'
-    + '<span class="k">prover</span><span>'+esc(t.proverType||"—")+'</span>'
-    + '</div>'
+    + (t.projectPath ? '<div class="kv"><span class="k">project path</span><span>'+esc(t.projectPath)+'</span></div>' : '')
     + taskTelemetryStrip(t, out)
     + '<h2>Description</h2><div class="desc md">'+mdToHtml(t.description||"")+'</div>'
     + (t.error?'<h2>Error</h2><div class="errbox">'+esc(t.error)+'</div>':'')
@@ -2407,101 +2395,6 @@ function obsProvider(model) {
   return "—";
 }
 
-/*__EXECUTION_HELPERS_START__*/
-function firstText() {
-  for (const v of arguments) {
-    if (typeof v === "string" && v.trim()) return v.trim();
-  }
-  return "";
-}
-function modelList(output) {
-  const rows = output && Array.isArray(output.modelsUsed) ? output.modelsUsed : [];
-  return rows.filter(m => typeof m === "string" && m.trim()).map(m => m.trim());
-}
-function executionModel(task, output) {
-  const used = modelList(output);
-  return firstText(task && task.model, used[used.length - 1], used[0]);
-}
-function executionProviderLabel(model) {
-  const m = (model || "").toLowerCase().trim();
-  if (!m) return "—";
-  if (/^(codex|chatgpt)/.test(m) || /^(gpt|o[0-9])/.test(m)) return "ChatGPT/Codex";
-  if (/^(claude|opus|sonnet|haiku)/.test(m)) return "Claude";
-  if (/(qwen|mistral|llama|mlx|local|deepseek|gemma|phi)/.test(m)) return "Qwen/local";
-  if (/(nano|banana|mflux|image)/.test(m)) return "Image";
-  return "Other";
-}
-function titleCaseLabel(value) {
-  return String(value || "")
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, ch => ch.toUpperCase())
-    .trim();
-}
-function tierRoleLabel(tier) {
-  switch (tier) {
-    case "frontier-premium": return "Thinking";
-    case "frontier": return "Coding";
-    case "local-primary": return "Execution";
-    case "local-secondary": return "Operational";
-    case "nanai": return "Image";
-    case "unavailable": return "Waiting";
-    default: return "";
-  }
-}
-function modelRoleLabel(model) {
-  const m = (model || "").toLowerCase().trim();
-  if (!m) return "";
-  if (/opus/.test(m)) return "Thinking";
-  if (/sonnet|codex|chatgpt|gpt|o[0-9]/.test(m)) return "Coding";
-  if (/haiku/.test(m)) return "Lightweight";
-  if (/qwen|mistral|llama|mlx|local|deepseek|gemma|phi/.test(m)) return "Operational";
-  if (/nano|banana|mflux|image/.test(m)) return "Image";
-  return "";
-}
-function executionRoleLabel(task, output) {
-  output = output || {};
-  const phase = firstText(output.directivePhase);
-  if (phase) return titleCaseLabel(phase);
-  const tierRole = tierRoleLabel(output.routedTier);
-  if (tierRole) return tierRole;
-  return modelRoleLabel(executionModel(task || {}, output)) || "Agent";
-}
-function executionCoordinatorLabel(task, output) {
-  task = task || {}; output = output || {};
-  if (output.directivePhase || task.directiveId || output.runId) return "Review Lane / directive";
-  if (task.source === "command" || output.command) return "Command launcher";
-  if (task.source === "skill" || output.skill) return "Skill launcher";
-  if (task.source === "messagebee") return "Message Lane";
-  if (task.source === "mailbee") return "Mail Lane";
-  if (task.source === "digest") return "Digest";
-  return "Standalone task";
-}
-function executionRow(label, value, wide) {
-  return '<div class="exec-cell' + (wide ? ' wide' : '') + '"><span class="ek">' + esc(label)
-    + '</span><span class="ev" title="' + esc(String(value || "—")) + '">' + esc(String(value || "—")) + '</span></div>';
-}
-function taskExecutionPanel(task, output) {
-  task = task || {}; output = output || {};
-  const model = executionModel(task, output);
-  const provider = executionProviderLabel(model);
-  const role = executionRoleLabel(task, output);
-  const tier = firstText(output.routedTier);
-  const roleTier = role + (tier ? " / " + tier : "");
-  const models = modelList(output);
-  const modelText = models.length ? models.join(" · ") : (model || "—");
-  const profile = firstText(task.profile, task.agentType, "auto");
-  const agentType = firstText(task.agentType, "auto");
-  const coord = executionCoordinatorLabel(task, output);
-  return '<section class="exec-panel"><div class="exec-head"><span class="exec-title">Execution</span>'
-    + '<span class="exec-provider">' + esc(provider) + '</span></div><div class="exec-grid">'
-    + executionRow("role / tier", roleTier, false)
-    + executionRow("profile", profile, false)
-    + executionRow("agent type", agentType, false)
-    + executionRow("coordinator", coord, false)
-    + executionRow("models used", modelText, true)
-    + '</div></section>';
-}
-/*__EXECUTION_HELPERS_END__*/
 
 function fmtMs(ms) {
   if (ms == null) return "—";
@@ -2533,8 +2426,9 @@ function taskTelemetryStrip(t, out) {
     ["tok/s", tps != null ? tps : "—"],
     ["turns", out.turns != null ? out.turns : "—"],
   ];
-  return '<div class="obs-strip">' + cells.map(c =>
+  const strip = '<div class="obs-strip">' + cells.map(c =>
     '<span class="obs-cell"><b>' + esc(String(c[1])) + '</b>' + esc(c[0]) + '</span>').join("") + '</div>';
+  return '<details class="task-debug"><summary class="muted" style="font-size:11px;cursor:pointer">Debug info</summary>' + strip + '</details>';
 }
 
 async function renderObservability() {
@@ -6389,7 +6283,7 @@ async function createTask() {
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: projectName, model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent", route }) });
     // POST /tasks may return a normal task ({_id}), a special route
-    // ({routed,taskId} for workflow / terminal-lane / video), or a staged Work
+    // ({routed,taskId} for workflow / terminal-lane / browser-lane / video), or a staged Work
     // Package ({routed:"work_package", packageId}). All of these are success.
     const ok = t && (t._id || t.taskId || t.routed || t.packageId);
     if (!ok) { err.textContent = (t && t.error) ? String(t.error) : "Create failed."; return; }

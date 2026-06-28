@@ -253,14 +253,6 @@ test("settings lane setup surfaces use lane names instead of bee product names",
   assert.doesNotMatch(CONSOLE_HTML, /Enable MailBee/);
   assert.doesNotMatch(CONSOLE_HTML, /MessageBee — iMessage \/ SMS/);
   assert.doesNotMatch(CONSOLE_HTML, /MailBee — Email/);
-
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /return "Review Lane \/ directive"/);
-  assert.match(js, /return "Message Lane"/);
-  assert.match(js, /return "Mail Lane"/);
-  assert.doesNotMatch(js, /return "ManagerBee \/ directive"/);
-  assert.doesNotMatch(js, /return "MessageBee"/);
-  assert.doesNotMatch(js, /return "MailBee"/);
 });
 
 test("compatibility bees endpoint returns lane-shaped status", () => {
@@ -538,23 +530,6 @@ function extractTimeAgo(html: string): (value: string | null | undefined, nowMs:
   return factory();
 }
 
-function extractExecutionHelpers(html: string): {
-  executionProviderLabel: (model: string | null | undefined) => string;
-  executionRoleLabel: (task: Record<string, unknown>, output: Record<string, unknown>) => string;
-  taskExecutionPanel: (task: Record<string, unknown>, output: Record<string, unknown>) => string;
-} {
-  const js = extractScript(html);
-  const esc = js.match(/function esc\(s\)\{[^\n]+\}/);
-  const block = js.match(/\/\*__EXECUTION_HELPERS_START__\*\/([\s\S]*?)\/\*__EXECUTION_HELPERS_END__\*\//);
-  assert.ok(esc, "console script must define esc");
-  assert.ok(block, "console script must define execution helper block");
-  const factory = new Function(`${esc![0]}\n${block![1]}\nreturn { executionProviderLabel, executionRoleLabel, taskExecutionPanel };`) as () => {
-    executionProviderLabel: (model: string | null | undefined) => string;
-    executionRoleLabel: (task: Record<string, unknown>, output: Record<string, unknown>) => string;
-    taskExecutionPanel: (task: Record<string, unknown>, output: Record<string, unknown>) => string;
-  };
-  return factory();
-}
 
 test("skills & commands render in one unified, searchable section", () => {
   // Skills and Commands are a single section over both catalogs (lib skills +
@@ -607,38 +582,12 @@ test("center column shows an overview when no task is selected", () => {
   assert.match(js, /else renderOverview\(\)/, "refresh shows the overview when nothing is selected");
 });
 
-test("execution provenance covers Claude, ChatGPT/Codex, and Qwen/local modes", () => {
+test("task detail does not render an execution provenance panel", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /taskExecutionPanel\(t, out\)/, "task detail view renders execution provenance");
-
-  const helpers = extractExecutionHelpers(CONSOLE_HTML);
-  assert.equal(helpers.executionProviderLabel("claude-opus-4-8"), "Claude");
-  assert.equal(helpers.executionProviderLabel("codex:gpt-5.4"), "ChatGPT/Codex");
-  assert.equal(helpers.executionProviderLabel("qwen/qwen3.6-27b"), "Qwen/local");
-
-  const claude = helpers.taskExecutionPanel(
-    { model: "claude-opus-4-8", profile: "developer", agentType: "auto", source: "dashboard" },
-    { modelsUsed: ["claude-opus-4-8"], routedTier: "frontier-premium" },
-  );
-  assert.match(claude, /Claude/);
-  assert.match(claude, /Thinking/);
-  assert.match(claude, /frontier-premium/);
-
-  const codex = helpers.taskExecutionPanel(
-    { model: "codex:gpt-5.4", profile: "developer", agentType: "auto", source: "command" },
-    { modelsUsed: ["codex:gpt-5.4"], command: "import-vodafone" },
-  );
-  assert.match(codex, /ChatGPT\/Codex/);
-  assert.match(codex, /Coding/);
-  assert.match(codex, /Command launcher/);
-
-  const qwen = helpers.taskExecutionPanel(
-    { model: "qwen\/qwen3.6-27b", profile: "developer", agentType: "auto", source: "directive" },
-    { modelsUsed: ["qwen\/qwen3.6-27b"], routedTier: "local-secondary", directivePhase: "executor" },
-  );
-  assert.match(qwen, /Qwen\/local/);
-  assert.match(qwen, /Executor/);
-  assert.match(qwen, /local-secondary/);
+  // The execution panel (provider / profile / models-used) was removed from the task detail
+  // view — operators see status, result, transcript, and debug strip only.
+  assert.doesNotMatch(js, /taskExecutionPanel\(t, out\)/, "execution panel must not be rendered in selectTask");
+  assert.doesNotMatch(CONSOLE_HTML, /class="exec-panel"/, "exec-panel CSS class must be absent");
 });
 
 test("console timeAgo humanizes BOTH daemon date formats as UTC", () => {

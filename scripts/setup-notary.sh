@@ -5,7 +5,7 @@
 # Xcode account sign-in gives signing identities but NOT headless notarytool
 # credentials. This stores an app-specific-password-based notary profile named
 # "hivematrix" in the login keychain. Apple's saved item uses:
-#   name/service: com.apple.gke.notary.tool
+#   name:         com.apple.gke.notary.tool
 #   account:      com.apple.gke.notary.tool.saved-creds.hivematrix
 # The build pipeline uses that saved profile to notarize with
 #   xcrun notarytool submit ... --keychain-profile hivematrix
@@ -20,8 +20,9 @@ set -euo pipefail
 APPLE_ID="cassio.irv@gmail.com"
 TEAM_ID="8B3CHTY93V"   # Developer ID Application: Irven Cassio
 PROFILE="hivematrix"
-KEYCHAIN_SERVICE="com.apple.gke.notary.tool"
-KEYCHAIN_ACCOUNT="$KEYCHAIN_SERVICE.saved-creds.$PROFILE"
+KEYCHAIN_NAME="com.apple.gke.notary.tool"
+KEYCHAIN_ACCOUNT="$KEYCHAIN_NAME.saved-creds.$PROFILE"
+KEYCHAIN_PATH="$HOME/Library/Keychains/login.keychain-db"
 ASP_URL="https://account.apple.com/account/manage"
 
 echo "HiveMatrix — notarytool credential setup"
@@ -29,12 +30,13 @@ echo "========================================"
 echo "Apple ID : $APPLE_ID"
 echo "Team ID  : $TEAM_ID"
 echo "Profile  : $PROFILE"
-echo "Keychain : service $KEYCHAIN_SERVICE"
+echo "Keychain : name $KEYCHAIN_NAME"
 echo "           account $KEYCHAIN_ACCOUNT"
+echo "           path $KEYCHAIN_PATH"
 echo
 
 # If a working profile already exists, don't clobber it.
-if xcrun notarytool history --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --keychain-profile "$PROFILE" >/dev/null 2>&1; then
+if xcrun notarytool history --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --keychain-profile "$PROFILE" --keychain "$KEYCHAIN_PATH" >/dev/null 2>&1; then
   echo "✓ A working '$PROFILE' notary profile already exists. Nothing to do."
   exit 0
 fi
@@ -76,6 +78,7 @@ set +e
 STORE_OUT="$(xcrun notarytool store-credentials "$PROFILE" \
   --apple-id "$APPLE_ID" \
   --team-id "$TEAM_ID" \
+  --keychain "$KEYCHAIN_PATH" \
   --password "$APP_PW" \
   --verbose 2>&1)"
 STORE_RC=$?
@@ -107,13 +110,26 @@ fi
 
 echo
 echo "Validating..."
-if ! security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$KEYCHAIN_ACCOUNT" >/dev/null 2>&1; then
+if security find-generic-password -s "$KEYCHAIN_NAME" -a "$KEYCHAIN_ACCOUNT" "$KEYCHAIN_PATH" >/dev/null 2>&1; then
+  KEYCHAIN_FOUND="yes"
+elif security find-generic-password -l "$KEYCHAIN_NAME" -a "$KEYCHAIN_ACCOUNT" "$KEYCHAIN_PATH" >/dev/null 2>&1; then
+  KEYCHAIN_FOUND="yes"
+else
+  KEYCHAIN_FOUND="no"
+fi
+
+if [ "$KEYCHAIN_FOUND" != "yes" ]; then
   echo "✗ Stored, but the expected notarytool Keychain item is not visible:" >&2
-  echo "    security find-generic-password -s \"$KEYCHAIN_SERVICE\" -a \"$KEYCHAIN_ACCOUNT\"" >&2
+  echo "    name: $KEYCHAIN_NAME" >&2
+  echo "    account: $KEYCHAIN_ACCOUNT" >&2
+  echo "    keychain: $KEYCHAIN_PATH" >&2
+  echo "  Tried:" >&2
+  echo "    security find-generic-password -s \"$KEYCHAIN_NAME\" -a \"$KEYCHAIN_ACCOUNT\" \"$KEYCHAIN_PATH\"" >&2
+  echo "    security find-generic-password -l \"$KEYCHAIN_NAME\" -a \"$KEYCHAIN_ACCOUNT\" \"$KEYCHAIN_PATH\"" >&2
   exit 1
 fi
 
-if xcrun notarytool history --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --keychain-profile "$PROFILE" >/dev/null 2>&1; then
+if xcrun notarytool history --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --keychain-profile "$PROFILE" --keychain "$KEYCHAIN_PATH" >/dev/null 2>&1; then
   echo "✓ Notary profile '$PROFILE' is working. Notarization is now headless:"
   echo "    xcrun notarytool submit <app.zip> --keychain-profile $PROFILE --wait"
 else

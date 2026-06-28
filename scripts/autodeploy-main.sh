@@ -25,7 +25,7 @@ echo "  scripts/notary-identity.test.mjs - source guard for Apple ID/team/profil
 echo
 echo "Notary profile/keychain:"
 echo "  Profile : hivematrix"
-echo "  Service : com.apple.gke.notary.tool"
+echo "  Name    : com.apple.gke.notary.tool"
 echo "  Account : com.apple.gke.notary.tool.saved-creds.hivematrix"
 echo
 echo "Node-RED logic check:"

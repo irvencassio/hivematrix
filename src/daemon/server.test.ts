@@ -419,6 +419,41 @@ test("POST /tasks still routes an explicit Terminal Lane request to the lane (re
   assert.equal(body.routed, "terminal-lane");
 });
 
+test("POST /tasks routes an explicit Browser Lane request to the lane (parity with voice)", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "search the web for best solo founder CRMs", project: "ios", projectPath: "/tmp/x" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "browser-lane");
+  assert.ok(body.taskId, "a browser-lane task id is returned");
+  // The created task must carry the browser-lane source so the agent calls the
+  // Browser Lane endpoint instead of Chrome MCP / WebSearch.
+  const row = getDb().prepare("SELECT source FROM tasks WHERE _id = ?").get(body.taskId) as { source?: string } | undefined;
+  assert.equal(row?.source, "browser-lane");
+});
+
+test("POST /tasks does not mis-route a plain 'search' dev task to Browser Lane (no false positive)", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "search the codebase for the login bug and fix it", project: "hivematrix", projectPath: "/tmp/x" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.notEqual(body.routed, "browser-lane");
+});
+
 test("POST /tasks does not promote an AI-news video prompt into a Work Package (regression)", async (t) => {
   withTempHome(t);
   const { _resetDbForTests } = await import("@/lib/db");
@@ -828,6 +863,39 @@ test("New Task form exposes a Route selector and createTask sends it", () => {
   const block = CONSOLE_HTML.match(/async function createTask\(\) \{[\s\S]*?\n\}/);
   assert.ok(block);
   assert.match(block![0], /route/);
+});
+
+test("task screen does not expose internal fields (directiveId / completedBy / proverType)", () => {
+  // selectTask renders the task detail view — it must not leak these internal identifiers
+  // into the operator-facing UI.
+  const block = CONSOLE_HTML.match(/async function selectTask\([\s\S]*?^\}/m);
+  assert.ok(block, "selectTask block must be present");
+  assert.doesNotMatch(block![0], /directiveId/);
+  assert.doesNotMatch(block![0], /completedBy/);
+  assert.doesNotMatch(block![0], /proverType/);
+});
+
+test("task detail does not render execution provenance panel", () => {
+  // taskExecutionPanel removed — selectTask must not call it and no exec-panel markup in console.
+  const block = CONSOLE_HTML.match(/async function selectTask\([\s\S]*?^\}/m);
+  assert.ok(block, "selectTask block must be present");
+  assert.doesNotMatch(block![0], /taskExecutionPanel/);
+  assert.doesNotMatch(CONSOLE_HTML, /class="exec-panel"/);
+});
+
+test("task telemetry strip is placed inside a collapsed debug details block", () => {
+  const block = CONSOLE_HTML.match(/function taskTelemetryStrip\([\s\S]*?^\}/m);
+  assert.ok(block, "taskTelemetryStrip must be present");
+  assert.match(block![0], /<details/);
+  assert.match(block![0], /Debug info/);
+});
+
+test("board card does not show a directiveId badge", () => {
+  // renderBoard builds the board card HTML — the directiveId badge was removed so
+  // operators don't see internal directive IDs in the task list.
+  const block = CONSOLE_HTML.match(/function renderBoard\([\s\S]*?^\}/m);
+  assert.ok(block, "renderBoard must be present");
+  assert.doesNotMatch(block![0], /directiveId/);
 });
 
 // ── GET /work-packages/:id — diagnostic completeness ─────────────────────────

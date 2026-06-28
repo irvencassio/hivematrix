@@ -40,33 +40,42 @@ if (branch !== "main") die(`must be on main to release (on "${branch}")`);
 const notaryAppleId = "cassio.irv@gmail.com";
 const notaryTeamId = "8B3CHTY93V";
 const notaryProfile = "hivematrix";
-const notaryKeychainService = "com.apple.gke.notary.tool";
-const notaryKeychainAccount = `${notaryKeychainService}.saved-creds.${notaryProfile}`;
-const notaryKeychainLookupCommand = `security find-generic-password -s "${notaryKeychainService}" -a "${notaryKeychainAccount}"`;
-const notaryHistoryCommand = `xcrun notarytool history --apple-id ${notaryAppleId} --team-id ${notaryTeamId} --keychain-profile ${notaryProfile}`;
+const notaryKeychainName = "com.apple.gke.notary.tool";
+const notaryKeychainAccount = `${notaryKeychainName}.saved-creds.${notaryProfile}`;
+const notaryKeychainPath = join(homedir(), "Library", "Keychains", "login.keychain-db");
+const notaryKeychainLookupCommands = [
+  `security find-generic-password -s "${notaryKeychainName}" -a "${notaryKeychainAccount}" "${notaryKeychainPath}"`,
+  `security find-generic-password -l "${notaryKeychainName}" -a "${notaryKeychainAccount}" "${notaryKeychainPath}"`,
+];
+const notaryHistoryCommand = `xcrun notarytool history --apple-id ${notaryAppleId} --team-id ${notaryTeamId} --keychain-profile ${notaryProfile} --keychain ${notaryKeychainPath}`;
 
-try {
-  execSync(notaryKeychainLookupCommand, { cwd: repo, stdio: "ignore" });
-} catch {
-  die(
-    "notarytool Keychain item is missing. Expected:\n" +
-    `  service: ${notaryKeychainService}\n` +
-    `  account: ${notaryKeychainAccount}\n\n` +
-    "Verify with:\n" +
-    `  ${notaryKeychainLookupCommand}\n\n` +
-    "Then run: bash scripts/setup-notary.sh",
-  );
+function hasNotaryKeychainItem() {
+  return notaryKeychainLookupCommands.some((cmd) => {
+    try {
+      execSync(cmd, { cwd: repo, stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 try {
   execSync(notaryHistoryCommand, { cwd: repo, stdio: "ignore" });
 } catch {
+  const hasKeychainItem = hasNotaryKeychainItem();
   die(
-    `notarytool profile "${notaryProfile}" exists at ${notaryKeychainService} / ${notaryKeychainAccount}, ` +
-    `but is not usable for ${notaryAppleId} / ${notaryTeamId}.\n\n` +
-    "Failed command:\n" +
+    `notarytool profile "${notaryProfile}" is not usable for ${notaryAppleId} / ${notaryTeamId}.\n\n` +
+    "Expected Keychain item:\n" +
+    `  name: ${notaryKeychainName}\n` +
+    `  account: ${notaryKeychainAccount}\n` +
+    `  keychain: ${notaryKeychainPath}\n` +
+    `  found by security lookup: ${hasKeychainItem ? "yes" : "no"}\n\n` +
+    "Tried profile proof:\n" +
     `  ${notaryHistoryCommand}\n\n` +
-    "Run: bash scripts/setup-notary.sh",
+    "Useful Keychain checks:\n" +
+    notaryKeychainLookupCommands.map((cmd) => `  ${cmd}`).join("\n") + "\n\n" +
+    "If this was already set up, the profile is not visible to this login keychain context; re-store it with scripts/setup-notary.sh in this user session.",
   );
 }
 

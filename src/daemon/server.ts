@@ -3659,6 +3659,33 @@ export function createDaemonServer() {
             // fall through to a normal task
           }
         }
+        // "use browser lane to …" / "search the web for …" / "read|open <url> … in
+        // browser lane" → route to the Browser Lane, at parity with the voice path.
+        // iOS (and any /tasks caller) previously had no Browser Lane route, so these
+        // requests fell through to a generic agent that reached for Chrome MCP /
+        // WebSearch instead of HiveMatrix's Browser Lane. Reuse the SAME detector +
+        // task builder the voice surface uses so the created task explicitly drives
+        // /lane/browser (the builder's description forbids ad-hoc browser tools).
+        // Conservative by design: the detector only fires on explicit browser-lane
+        // phrasing, so ordinary dev tasks that merely contain "search" are never
+        // hijacked. Skipped when the request is already a browser-lane task (avoids
+        // reprocessing lane-tools' own loopback posts).
+        const { detectVoiceBrowserLaneIntent, buildVoiceBrowserLaneTask } = await import("@/lib/voice/browser-lane-intent");
+        if ((route === "browser-lane" || (route === "auto" && !broad)) && body.source !== "browser-lane" &&
+            (body.executor === undefined || body.executor === "agent")) {
+          const intent = detectVoiceBrowserLaneIntent(description)
+            ?? (route === "browser-lane" ? { mode: "search" as const, query: description.trim().slice(0, 200) } : null);
+          if (intent) {
+            const built = buildVoiceBrowserLaneTask(intent, {
+              titlePrefix: typeof body.source === "string" && body.source.trim() ? body.source : "Web",
+              projectPath: typeof body.projectPath === "string" ? body.projectPath : undefined,
+            });
+            const task = await Task.create({ _id: generateId(), ...built });
+            broadcast("tasks:created", { taskId: task._id });
+            json(res, 201, { routed: "browser-lane", taskId: task._id, mode: intent.mode });
+            return;
+          }
+        }
         // "use TerminalLane and …" → route to the HiveMatrix Terminal Lane (NOT a
         // generic frontier agent that would fall back on stale Canopy guidance).
         // A non-agent executor keeps the scheduler from claiming it; the task

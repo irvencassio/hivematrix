@@ -20,11 +20,13 @@ cd "$(dirname "$0")/.."
 NOTARY_PROFILE="hivematrix"
 NOTARY_APPLE_ID="cassio.irv@gmail.com"
 NOTARY_TEAM_ID="8B3CHTY93V"   # Developer ID Application: Irven Cassio
+NOTARY_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 IDENTITY="Developer ID Application: Irven Cassio (8B3CHTY93V)"
 NOTARY_ARGS=(
   --apple-id "$NOTARY_APPLE_ID"
   --team-id "$NOTARY_TEAM_ID"
   --keychain-profile "$NOTARY_PROFILE"
+  --keychain "$NOTARY_KEYCHAIN"
 )
 # shellcheck disable=SC1090
 source "$HOME/.cargo/env"
