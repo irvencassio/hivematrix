@@ -530,6 +530,48 @@ test("POST /work-packages/:id/items/:itemId/accept marks a review item done and 
   assert.equal(pkg2.status, "running", "package is running (not done_with_skips)");
 });
 
+test("POST /tasks/:id/reply reconciles a Flight review item back to running", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const items = [
+    { title: "Review step", prompt: "reviewed work", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+    { title: "Next step", prompt: "after review", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: ["Review step"] },
+  ];
+  const pkg = await (await fetch(`${base}/work-packages`, {
+    method: "POST", headers, body: JSON.stringify({ title: "Reply reconcile test", project: "hivematrix", projectPath: "/tmp/reply-reconcile-test", items }),
+  })).json() as Record<string, unknown>;
+
+  await fetch(`${base}/work-packages/${pkg.id}/start`, { method: "POST", headers });
+  const detail = await (await fetch(`${base}/work-packages/${pkg.id}`, { headers })).json() as Record<string, unknown>;
+  const its = detail.items as Array<Record<string, unknown>>;
+  const item0Id = its[0].id as string;
+  const taskId = its[0].createdTaskId as string;
+
+  getDb().prepare("UPDATE work_package_items SET status = 'review' WHERE _id = ?").run(item0Id);
+  await fetch(`${base}/tasks/${taskId}`, {
+    method: "PATCH", headers, body: JSON.stringify({ status: "review", reviewState: "ready_for_review" }),
+  });
+
+  const reply = await fetch(`${base}/tasks/${taskId}/reply`, {
+    method: "POST", headers, body: JSON.stringify({ text: "Please continue with this adjustment." }),
+  });
+  assert.equal(reply.status, 200);
+  const replyBody = await reply.json() as Record<string, unknown>;
+  assert.equal(replyBody.fallback, "requeued", "review task reply requeues the child task");
+
+  const taskRow = getDb().prepare("SELECT status, reviewState FROM tasks WHERE _id = ?").get(taskId) as { status: string; reviewState: string | null };
+  assert.equal(taskRow.status, "backlog", "linked task is requeued");
+  assert.equal(taskRow.reviewState, null, "review flag is cleared for rerun");
+
+  const after = await (await fetch(`${base}/work-packages/${pkg.id}`, { headers })).json() as Record<string, unknown>;
+  const afterItems = after.items as Array<Record<string, unknown>>;
+  assert.equal(afterItems[0].status, "running", "reply reconciliation moves the Flight item out of review");
+  assert.equal(after.status, "running", "Flight is no longer blocked in review");
+});
+
 test("POST /work-packages/:id/items/:itemId/accept returns 409 when item is not in review status", async (t) => {
   withTempHome(t);
   const { _resetDbForTests } = await import("@/lib/db");

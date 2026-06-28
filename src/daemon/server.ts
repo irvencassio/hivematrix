@@ -3841,6 +3841,26 @@ export function createDaemonServer() {
             reviewState: null,
           });
           broadcast("tasks:updated", { taskId: tid, status: "backlog" });
+          // Work Package advance hook: replying to a review child requeues the
+          // task for more work, so reconcile the Flight item out of review
+          // immediately instead of waiting for a later poll.
+          if ((cur as Record<string, unknown>).source === "work-package") {
+            try {
+              const { findItemByTaskId } = await import("@/lib/work-packages/store");
+              const owner = findItemByTaskId(String((cur as Record<string, unknown>)._id));
+              if (owner) {
+                const { advanceWorkPackage } = await import("@/lib/work-packages/orchestrate");
+                const r = await advanceWorkPackage(owner.packageId);
+                for (const itemId of r.started) {
+                  const linked = r.package.items.find((i) => i.id === itemId);
+                  if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
+                }
+                broadcast("work-packages:updated", { packageId: owner.packageId });
+              }
+            } catch (e) {
+              console.error(`[work-packages] advance hook failed on reply: ${e instanceof Error ? e.message : e}`);
+            }
+          }
           json(res, 200, { ok: true, fallback: "requeued" });
           return;
         }
