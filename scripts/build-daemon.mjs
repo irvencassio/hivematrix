@@ -27,6 +27,7 @@
 import { build } from "esbuild";
 import {
   rmSync, mkdirSync, cpSync, existsSync, chmodSync, writeFileSync, statSync,
+  readdirSync, lstatSync, readlinkSync, unlinkSync,
 } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -70,6 +71,22 @@ function dirSize(p) {
 function gitValue(args, fallback = null) {
   try { return execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim(); }
   catch { return fallback; }
+}
+
+function replaceAbsoluteSymlinks(root) {
+  for (const dirent of readdirSync(root, { withFileTypes: true })) {
+    const entry = join(root, dirent.name);
+    const stat = lstatSync(entry);
+    if (stat.isSymbolicLink()) {
+      const target = readlinkSync(entry);
+      if (target.startsWith("/")) {
+        unlinkSync(entry);
+        cpSync(target, entry, { recursive: true, preserveTimestamps: true });
+      }
+      continue;
+    }
+    if (stat.isDirectory()) replaceAbsoluteSymlinks(entry);
+  }
 }
 
 function runPinnedNpm(args, cwd) {
@@ -164,12 +181,12 @@ if (!existsSync(cachedPython)) {
 const pyVersionOut = execFileSync(cachedPython, ["--version"], { encoding: "utf8" }).trim();
 log(`staging python/ (${pyVersionOut})`);
 cpSync(join(PY_CACHE_ROOT, "python"), join(OUT, "python"), { recursive: true });
+replaceAbsoluteSymlinks(join(OUT, "python"));
 
 // python-build-standalone ships python/python3 as symlinks to python3.14. Tauri
-// DEREFERENCES them into unsigned copies when bundling the .app, which fails
-// notarization ("not signed with a valid Developer ID"). Replace the interpreter
-// symlinks with real copies now, so the pre-sign pass signs all three and the
-// bundled .app ships signed interpreter binaries.
+// dereferences them into unsigned copies when bundling the .app. Replace the
+// interpreter symlinks with real copies now, so the pre-sign pass signs all
+// three and the bundled .app ships signed interpreter binaries.
 const pyBinDir = join(OUT, "python", "bin");
 const realPython = join(pyBinDir, "python3.14");
 for (const name of ["python", "python3"]) {
