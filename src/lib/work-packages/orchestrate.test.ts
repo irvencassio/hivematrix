@@ -1041,3 +1041,391 @@ test("reconcileStuckFlight: idempotent on a clean running Flight (no stuck items
   assert.equal(result.started.length, 0, "no new items started on a clean flight");
   assert.equal(result.package.stuckState, null, "no stuckState on clean flight");
 });
+
+// ── shouldAutoLand (pure predicate) ─────────────────────────────────────────
+// RED until orchestrate.ts exports shouldAutoLand (Task 6 in the auto-land plan).
+// shouldAutoLand is captured here from the module object; it will be `undefined`
+// until implemented. Tests that call it throw TypeError → expected RED state.
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const shouldAutoLand = ((await import("./orchestrate")) as any).shouldAutoLand as
+  | ((
+      item: { risk: string; blocker: string | null; executionMode: string },
+      actualTaskStatus: string | null,
+      loop: { profile: string } | null,
+    ) => { autoLand: boolean; reason: string })
+  | undefined;
+
+function mkLoop(profile: string): { profile: string } {
+  return { profile };
+}
+
+test("shouldAutoLand: low risk + task=review + no blocker + no loop → autoLand true (clean micro-task)", () => {
+  const r = shouldAutoLand!({ risk: "low", blocker: null, executionMode: "sequential" }, "review", null);
+  assert.equal(r.autoLand, true);
+  assert.equal(typeof r.reason, "string");
+});
+
+test("shouldAutoLand: medium risk → autoLand false (human judgment required)", () => {
+  const r = shouldAutoLand!({ risk: "medium", blocker: null, executionMode: "sequential" }, "review", null);
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /medium/);
+});
+
+test("shouldAutoLand: high risk → autoLand false (human judgment required)", () => {
+  const r = shouldAutoLand!({ risk: "high", blocker: null, executionMode: "sequential" }, "review", null);
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /high/);
+});
+
+test("shouldAutoLand: task=needs_input → autoLand false (agent waiting for operator data)", () => {
+  const r = shouldAutoLand!({ risk: "low", blocker: null, executionMode: "sequential" }, "needs_input", null);
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /input/);
+});
+
+test("shouldAutoLand: has open blocker → autoLand false (unanswered question)", () => {
+  const r = shouldAutoLand!({ risk: "low", blocker: "some error", executionMode: "sequential" }, "review", null);
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /blocker/i);
+});
+
+test("shouldAutoLand: executionMode=hold → autoLand false (final-gated item)", () => {
+  const r = shouldAutoLand!({ risk: "low", blocker: null, executionMode: "hold" }, "review", null);
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /hold|gat/i);
+});
+
+test("shouldAutoLand: release loop → autoLand false (sign-off required on every release item)", () => {
+  const r = shouldAutoLand!({ risk: "low", blocker: null, executionMode: "sequential" }, "review", mkLoop("release"));
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /release/i);
+});
+
+test("shouldAutoLand: quality loop → autoLand true (quality loop creates follow-ups but does not gate acceptance)", () => {
+  const r = shouldAutoLand!({ risk: "low", blocker: null, executionMode: "sequential" }, "review", mkLoop("quality"));
+  assert.equal(r.autoLand, true);
+});
+
+// ── reconcileWorkPackage — auto-land, positive cases (integration) ────────────
+// RED until reconcileWorkPackage calls shouldAutoLand internally (Task 6).
+
+test("reconcileWorkPackage auto-land: low-risk task=review with no blocker lands to done without operator action", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Auto-land clean item",
+    project: "test",
+    projectPath: "/tmp/auto-land-clean",
+    items: [{ title: "Micro step", prompt: "do micro", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'review')",
+  ).run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(
+    detail.items[0].status,
+    "done",
+    "low-risk review item with no blocker must auto-land to done — no operator action required",
+  );
+  const task = await Task.findById(taskId);
+  assert.equal(
+    String((task as Record<string, unknown>).status),
+    "archived",
+    "auto-land archives the linked task (same behaviour as acceptWorkPackageItem)",
+  );
+});
+
+test("reconcileWorkPackage auto-land: auto-landed item advances package to done via advanceWorkPackage", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Auto-land advance to done",
+    project: "test",
+    projectPath: "/tmp/auto-land-advance",
+    items: [{ title: "Only step", prompt: "do it", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'review')",
+  ).run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+  db.prepare("UPDATE work_packages SET status = 'running' WHERE _id = ?").run(pkg.id);
+
+  // advanceWorkPackage calls reconcile internally; after auto-land the item is done
+  // and rollup closes the package cleanly.
+  const result = await advanceWorkPackage(pkg.id);
+
+  assert.equal(result.package.items[0].status, "done", "auto-landed item is done");
+  assert.equal(result.package.status, "done", "package closes as clean done once only item auto-lands");
+  assert.ok(result.package.completedAt, "package has completedAt");
+});
+
+// ── shouldAutoLand — additional negative predicate cases (Task 5) ────────────
+// Boundary tests: conditions that MUST block auto-land.
+// All are RED until orchestrate.ts exports shouldAutoLand (Task 6).
+// The mkLoop helper and shouldAutoLand capture are defined in the block above.
+
+test("shouldAutoLand: structured NEEDS_PARENT_DECISION blocker → false (open child question must not auto-land)", () => {
+  const parentBlocker = "NEEDS_PARENT_DECISION:" + JSON.stringify({
+    ambiguity: "Which endpoint to call?",
+    parentExcerpt: "",
+    options: ["/api/v1", "/api/v2"],
+    recommendedDefault: "/api/v1",
+    confidence: 0.5,
+  });
+  const r = shouldAutoLand!({ risk: "low", blocker: parentBlocker, executionMode: "sequential" }, "review", null);
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /blocker/i);
+});
+
+test("shouldAutoLand: structured NEEDS_OPERATOR_DECISION blocker → false (escalated decision requires operator before landing)", () => {
+  const operatorBlocker = "NEEDS_OPERATOR_DECISION:" + JSON.stringify({
+    question: "Which payment provider?",
+    options: ["Stripe", "PayPal"],
+    recommendedDefault: "Stripe",
+    ambiguity: "Product decision outside parent context",
+  });
+  const r = shouldAutoLand!({ risk: "low", blocker: operatorBlocker, executionMode: "sequential" }, "review", null);
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /blocker/i);
+});
+
+test("shouldAutoLand: medium risk + quality loop → false (risk overrides loop permissiveness)", () => {
+  const r = shouldAutoLand!({ risk: "medium", blocker: null, executionMode: "sequential" }, "review", mkLoop("quality"));
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /medium/);
+});
+
+test("shouldAutoLand: high risk + quality loop → false (risk overrides loop permissiveness)", () => {
+  const r = shouldAutoLand!({ risk: "high", blocker: null, executionMode: "sequential" }, "review", mkLoop("quality"));
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /high/);
+});
+
+test("shouldAutoLand: null actualTaskStatus → false (cannot confirm clean completion without task status)", () => {
+  const r = shouldAutoLand!({ risk: "low", blocker: null, executionMode: "sequential" }, null, null);
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /status|task|complet/i);
+});
+
+test("shouldAutoLand: watch loop → false (watch profile monitors state for human interpretation, not auto-acceptance)", () => {
+  const r = shouldAutoLand!({ risk: "low", blocker: null, executionMode: "sequential" }, "review", mkLoop("watch"));
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /watch|loop/i);
+});
+
+test("shouldAutoLand: personal_admin loop → false (admin decisions require explicit operator sign-off)", () => {
+  const r = shouldAutoLand!({ risk: "low", blocker: null, executionMode: "sequential" }, "review", mkLoop("personal_admin"));
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /admin|loop|sign/i);
+});
+
+// ── reconcileWorkPackage — manual-review retention guard tests (Task 5) ──────
+// These integration tests define the BOUNDARY of auto-land: items that must
+// NOT be auto-landed. Currently green (nothing auto-lands yet). Must stay green
+// after Task 6's auto-land is implemented — they are the safety contract.
+
+test("reconcileWorkPackage no-auto-land: medium-risk review item stays in review", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "No-auto-land medium risk",
+    project: "test",
+    projectPath: "/tmp/nal-medium",
+    items: [{ title: "Medium step", prompt: "do it", risk: "medium", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'review')",
+  ).run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(
+    detail.items[0].status,
+    "review",
+    "medium-risk item must stay in review — operator judgment required for risky changes",
+  );
+});
+
+test("reconcileWorkPackage no-auto-land: high-risk review item stays in review", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "No-auto-land high risk",
+    project: "test",
+    projectPath: "/tmp/nal-high",
+    items: [{ title: "High-risk step", prompt: "do it", risk: "high", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'review')",
+  ).run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(
+    detail.items[0].status,
+    "review",
+    "high-risk item must stay in review — destructive/sensitive changes require explicit approval",
+  );
+});
+
+test("reconcileWorkPackage no-auto-land: low-risk item with plain blocker stays in review", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "No-auto-land plain blocker",
+    project: "test",
+    projectPath: "/tmp/nal-plain-blocker",
+    items: [{ title: "Blocked step", prompt: "do it", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'review')",
+  ).run(taskId);
+  db.prepare(
+    "UPDATE work_package_items SET status = 'running', createdTaskId = ?, blocker = 'missing test coverage' WHERE _id = ?",
+  ).run(taskId, item.id);
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(
+    detail.items[0].status,
+    "review",
+    "item with open blocker must stay in review — operator must resolve the issue before acceptance",
+  );
+});
+
+test("reconcileWorkPackage no-auto-land: low-risk item with parent-decision blocker stays in review", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "No-auto-land parent-decision blocker",
+    project: "test",
+    projectPath: "/tmp/nal-parent-blocker",
+    items: [{ title: "Ambiguous step", prompt: "do it", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  const parentBlocker = "NEEDS_PARENT_DECISION:" + JSON.stringify({
+    ambiguity: "Which config file to update?",
+    parentExcerpt: "",
+    options: ["config.json", "config.ts"],
+    recommendedDefault: "config.json",
+    confidence: 0.4,
+  });
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'review')",
+  ).run(taskId);
+  db.prepare(
+    "UPDATE work_package_items SET status = 'running', createdTaskId = ?, blocker = ? WHERE _id = ?",
+  ).run(taskId, parentBlocker, item.id);
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(
+    detail.items[0].status,
+    "review",
+    "item with parent-decision blocker must stay in review — unanswered question must be resolved first",
+  );
+});
+
+test("reconcileWorkPackage no-auto-land: hold-mode item with review task stays in review", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "No-auto-land hold mode",
+    project: "test",
+    projectPath: "/tmp/nal-hold",
+    items: [{ title: "Gated step", prompt: "do it", risk: "low", executionMode: "hold", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'review')",
+  ).run(taskId);
+  db.prepare(
+    "UPDATE work_package_items SET status = 'running', createdTaskId = ?, executionMode = 'hold' WHERE _id = ?",
+  ).run(taskId, item.id);
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(
+    detail.items[0].status,
+    "review",
+    "hold-mode (final-gated) item must stay in review — always requires explicit operator go-ahead",
+  );
+});
+
+test("reconcileWorkPackage no-auto-land: needs_input task stays in review", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "No-auto-land needs_input",
+    project: "test",
+    projectPath: "/tmp/nal-needs-input",
+    items: [{ title: "Waiting step", prompt: "do it", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'needs_input')",
+  ).run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(
+    detail.items[0].status,
+    "review",
+    "needs_input item must stay in review — agent is waiting for operator-supplied data",
+  );
+});
+
+test("reconcileWorkPackage no-auto-land: release loop blocks auto-land for otherwise-clean low-risk item", async () => {
+  const { generateId } = await import("@/lib/db");
+  const { upsertLoop } = await import("./flight-loop-store");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "No-auto-land release loop",
+    project: "test",
+    projectPath: "/tmp/nal-release-loop",
+    items: [{ title: "Release step", prompt: "do it", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'review')",
+  ).run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+  upsertLoop(pkg.id, { mode: "manual", profile: "release", maxPasses: 3 });
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(
+    detail.items[0].status,
+    "review",
+    "release loop must block auto-land — release items require explicit operator sign-off before landing",
+  );
+});

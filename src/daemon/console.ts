@@ -227,6 +227,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .flight-head h2 { margin:0; }
   .flight-list { display:flex; flex-direction:column; gap:6px; }
   .flight-card { width:100%; text-align:left; border:1px solid var(--border); border-radius:8px; background:var(--panel-2); color:var(--text); padding:8px 9px; cursor:pointer; transition:border-color .15s ease; }
+  .flight-card.warn { border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); box-shadow: inset 3px 0 0 var(--warn); }
+  .flight-card.ok { border-color: color-mix(in srgb, var(--ok) 50%, var(--border)); box-shadow: inset 3px 0 0 var(--ok); }
+  .flight-card.err { border-color: color-mix(in srgb, var(--err) 50%, var(--border)); box-shadow: inset 3px 0 0 var(--err); }
   .flight-card:hover, .flight-card.sel { border-color:var(--accent); }
   .flight-title { font-weight:600; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .flight-meta { color:var(--muted); font-size:10.5px; display:flex; justify-content:space-between; gap:8px; margin-top:2px; }
@@ -435,12 +438,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     box-shadow: var(--card-shadow); }
   .card:hover { border-color: var(--accent-2); }
   .card.sel { border-color: var(--accent); }
-  .card .t { font-weight: 600; margin-bottom: 2px; padding-right: 22px; }
+  .card .t { font-weight: 600; margin-bottom: 2px; padding-right: 28px; }
   .card .m { font-size: 11px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
   .flight-ctx { margin-top: 4px; font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .flight-ctx b { color: var(--accent); font-weight: 650; }
-  .card .card-archive { position: absolute; top: 6px; right: 8px; font-size: 13px; line-height: 1;
-    color: var(--muted); background: none; border: none; cursor: pointer; padding: 2px 4px;
+  .card .card-archive { position: absolute; top: 5px; right: 6px; font-size: 17px; line-height: 1;
+    color: var(--muted); background: none; border: none; cursor: pointer; padding: 3px 6px;
     border-radius: 4px; opacity: 0; transition: opacity .1s; }
   .card:hover .card-archive { opacity: 1; }
   .card .card-archive:hover { color: var(--accent-2); background: var(--border); }
@@ -1703,7 +1706,7 @@ function renderFlightsRail() {
   el.innerHTML = visible.length ? '<div class="flight-list">' + visible.map(p => {
     const pr = flightProgress(p);
     const isGoalFlight = p.intake && p.intake.goalFlight;
-    return '<button class="flight-card'+(state.selectedFlight===p.id?' sel':'')+'" onclick="selectFlight(\''+esc(p.id)+'\')">'
+    return '<button class="flight-card '+flightBadgeClass(p.status)+(state.selectedFlight===p.id?' sel':'')+'" onclick="selectFlight(\''+esc(p.id)+'\')">'
       + '<div class="flight-title">'+esc(p.title || p.id)+(isGoalFlight ? ' <span class="badge">Goal Flight</span>' : '')+'</div>'
       + '<div class="flight-meta"><span>'+esc(flightLabel(p.status))+'</span><span>'+pr.landed+'/'+pr.total+' landed</span></div>'
       + '<div class="flight-progress"><i style="width:'+Math.max(0, Math.min(100, pr.pct))+'%"></i></div>'
@@ -1760,12 +1763,27 @@ function computeNextWake(loop, nowMs) {
   return '—';
 }
 /*__FLIGHT_NEXT_WAKE_END__*/
+/*__REVIEW_REASON_START__*/
+function _computeReviewReasonJs(it, loop) {
+  if (it.taskStatus === "needs_input") return "Agent is waiting for your input";
+  if (it.risk === "medium" || it.risk === "high")
+    return (it.risk.charAt(0).toUpperCase() + it.risk.slice(1)) + "-risk change — operator sign-off required";
+  if (loop && loop.profile === "release") return "Release sign-off required";
+  return null;
+}
+/*__REVIEW_REASON_END__*/
 function flightItemActions(p, it) {
   const canCreate = !it.createdTaskId && it.status !== "cancelled";
   const b = [];
   b.push('<button class="appr-btn" onclick="wpEditItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\')">Edit</button>');
   if (canCreate) b.push('<button class="appr-btn" onclick="wpCreateTask(\''+esc(p.id)+'\',\''+esc(it.id)+'\')">Create task</button>');
-  if (it.status === "review") b.push('<button class="primary-action" onclick="wpAccept(\''+esc(p.id)+'\',\''+esc(it.id)+'\')">Accept / Land</button>');
+  if (it.status === "review") {
+    const reviewReason = _computeReviewReasonJs(it, p.loop);
+    const reasonHtml = reviewReason
+      ? '<div class="review-reason" style="font-size:11px;color:var(--muted);margin-bottom:4px">'+esc(reviewReason)+'</div>'
+      : '';
+    b.push(reasonHtml + '<button class="primary-action" onclick="wpAccept(\''+esc(p.id)+'\',\''+esc(it.id)+'\')">Accept / Land</button>');
+  }
   b.push('<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'held\')">Hold</button>');
   b.push('<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'ready\')">Ready</button>');
   b.push('<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'cancelled\')">Cancel</button>');
@@ -1846,7 +1864,14 @@ async function renderFlightDetail(id, stall, blockers) {
   const blockerBanner = (!stall && blockers) ? renderBlockerBanner(blockers) : '';
   const stuckBanner = stuckStateBannerHtml(id, p.stuckState || null);
   const completedLine = p.completedAt ? ' · completed '+esc(p.completedAt.slice(0,16).replace('T',' ')) : '';
-  el.innerHTML = '<div class="flight-detail">'
+  // Preserve middle-column scroll across re-renders. refresh() re-invokes this
+  // on every tick (and item/loop actions do too); without this the .col.session
+  // column snaps back to the top mid-scroll. A fresh selection of a *different*
+  // flight starts at the top — detected via the stamped data-flight-id.
+  const colEl = el.parentElement; // .col.session — the scrollable column
+  const sameFlight = el.querySelector(".flight-detail")?.dataset.flightId === String(id);
+  const prevColScroll = (sameFlight && colEl) ? colEl.scrollTop : 0;
+  el.innerHTML = '<div class="flight-detail" data-flight-id="'+esc(String(id))+'">'
     + '<h1>'+esc(p.title || p.id)+' <span class="badge '+flightBadgeClass(p.status)+'">'+esc(flightLabel(p.status))+'</span><button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></h1>'
     + '<div class="sub">'+esc(p.project || "")+' · '+esc(p.projectPath || "")+completedLine+'</div>'
     + '<div class="flight-counts">'+flightCountsHtml(p)+'</div>'
@@ -1866,6 +1891,7 @@ async function renderFlightDetail(id, stall, blockers) {
     + '<h2>Description</h2><div class="desc">'+esc(p.description || "No description.")+'</div>'
     + '<h2>Items</h2>' + (items || '<div class="muted">No items.</div>')
     + '</div>';
+  if (colEl && prevColScroll) colEl.scrollTop = prevColScroll;
 }
 
 function flightLoopSectionHtml(pkgId, loop, passes) {
@@ -4542,7 +4568,13 @@ function renderSelectedProject() {
 function clearTaskProject() {
   setTaskProject("", "", false);
   const s = document.getElementById("t_project_search");
-  if (s) { s.value = ""; s.focus(); openProjectDropdown(); }
+  if (!s) return;
+  s.value = "";
+  s.focus();
+  // Defer so the click event finishes bubbling before the dropdown opens —
+  // the document handler would otherwise close it immediately because the
+  // X button lives outside t_project_wrapper.
+  setTimeout(() => openProjectDropdown(), 0);
 }
 
 function selectProjectFromDropdown(name, path) {
@@ -4940,10 +4972,7 @@ function openSettings() {
   const hasWp = !!models.hasWallpaper;
   document.getElementById("s_wallpaper").value = hasWp ? (models.wallpaperPath || "") : "";
   if (hasWp) showWallpaperPreview(); else document.getElementById("wallpaper_preview").style.display = "none";
-  document.getElementById("wallpaper_opacity_row").style.display = (hasWp || models.theme === "matrix") ? "" : "none";
-  const op = typeof models.wallpaperOpacity === "number" ? models.wallpaperOpacity : 82;
-  document.getElementById("s_wp_opacity").value = op;
-  document.getElementById("s_wp_opacity_val").textContent = op + "%";
+  syncWallpaperOpacityRow();
   document.getElementById("s_location").value = models.location || "";
   document.getElementById("s_autoupdate").checked = !!models.autoUpdate;
   const hasBothFrontier = models.backends.some(b => b.id === "claude" && b.configured)
@@ -6486,8 +6515,7 @@ async function saveTheme() {
   models = await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ theme }) }) || models;
   applyTheme(theme, !!(models && models.hasWallpaper));
   // The panel-translucency slider applies to the Matrix rain too, so reveal it here.
-  const hasWp = !!(models && models.hasWallpaper);
-  document.getElementById("wallpaper_opacity_row").style.display = (hasWp || theme === "matrix") ? "" : "none";
+  syncWallpaperOpacityRow();
   hmToast("Theme: " + theme, "ok");
 }
 async function saveAppIconChoice() {
@@ -6504,6 +6532,17 @@ async function saveAppIconChoice() {
     statusEl.textContent = "Saved. Reopen HiveMatrix to update the Dock icon.";
   }
 }
+// Reveal/hide the panel-translucency slider to match the current wallpaper/theme
+// state. openSettings() calls this on open; the wallpaper set/clear handlers must
+// call it after loadModels() too, or the row stays stale until settings is reopened.
+function syncWallpaperOpacityRow() {
+  const hasWp = !!(models && models.hasWallpaper);
+  const theme = (models && models.theme) || "system";
+  document.getElementById("wallpaper_opacity_row").style.display = (hasWp || theme === "matrix") ? "" : "none";
+  const op = (models && typeof models.wallpaperOpacity === "number") ? models.wallpaperOpacity : 82;
+  document.getElementById("s_wp_opacity").value = op;
+  document.getElementById("s_wp_opacity_val").textContent = op + "%";
+}
 async function saveWallpaperPath() {
   const wallpaperPath = document.getElementById("s_wallpaper").value.trim();
   const statusEl = document.getElementById("wallpaper_status");
@@ -6512,6 +6551,7 @@ async function saveWallpaperPath() {
   try {
     await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperPath }) });
     await loadModels();
+    syncWallpaperOpacityRow();
     statusEl.style.color = "var(--ok)";
     statusEl.textContent = "✓ Wallpaper set";
     if (wallpaperPath) showWallpaperPreview();
@@ -6530,6 +6570,7 @@ async function clearWallpaper() {
   try {
     await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperPath: null }) });
     await loadModels();
+    syncWallpaperOpacityRow();
     statusEl.style.color = "var(--ok)";
     statusEl.textContent = "✓ Wallpaper cleared";
     setTimeout(() => { statusEl.textContent = ""; }, 3000);
@@ -6559,6 +6600,7 @@ function onWallpaperFileSelected(input) {
     try {
       await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperData: b64, wallpaperExt: ext }) });
       await loadModels();
+      syncWallpaperOpacityRow();
       statusEl.style.color = "var(--ok)";
       statusEl.textContent = "✓ Wallpaper set from " + f.name;
       // Update the path field to show where it was saved

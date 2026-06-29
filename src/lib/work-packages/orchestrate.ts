@@ -35,6 +35,41 @@ import { resolveParentDecision } from "./coordinator";
 import { appendCoordinatorAnswer } from "@/lib/tasks/reply-continuation";
 import type { IntakeActiveTask } from "@/lib/intake/classify";
 
+export interface AutoLandDecision {
+  autoLand: boolean;
+  reason: string;
+}
+
+const AUTO_LAND_SAFE_LOOP_PROFILES = new Set<string>(["quality", "goal_quality"]);
+
+/**
+ * Pure predicate: should this review item land automatically without operator action?
+ * Returns true only when ALL conditions pass — low risk, clean task completion,
+ * no open blocker, not final-gated, and no sign-off loop.
+ */
+export function shouldAutoLand(
+  item: Pick<WorkPackageItem, "risk" | "blocker" | "executionMode">,
+  actualTaskStatus: string | null,
+  loop: { profile: string } | null,
+): AutoLandDecision {
+  if (item.risk !== "low")
+    return { autoLand: false, reason: `risk is ${item.risk}` };
+  if (actualTaskStatus !== "review")
+    return {
+      autoLand: false,
+      reason: actualTaskStatus === "needs_input"
+        ? "agent is waiting for input"
+        : `task status is ${actualTaskStatus}`,
+    };
+  if (item.blocker !== null)
+    return { autoLand: false, reason: "item has an open blocker" };
+  if (item.executionMode === "hold")
+    return { autoLand: false, reason: "item is final-gated (hold)" };
+  if (loop && !AUTO_LAND_SAFE_LOOP_PROFILES.has(loop.profile))
+    return { autoLand: false, reason: `${loop.profile} loop requires sign-off` };
+  return { autoLand: true, reason: "low-risk, clean completion, no open questions" };
+}
+
 /** A writer item mutates the repo working tree; worktree/safe items do not. */
 function isWriterItem(item: Pick<WorkPackageItem, "executionMode" | "scopeHints">): boolean {
   if (item.executionMode === "worktree_parallel" || item.executionMode === "safe_parallel") return false;
@@ -173,16 +208,38 @@ export async function reconcileWorkPackage(id: string): Promise<void> {
       // the structured decision blocker so it never lingers on an active item.
       newBlocker = null;
     }
+    // Auto-land: bypass manual approval for low-risk, clean, question-free review items.
+    // Only fires on the normal running→review completion path. Failed items salvaged
+    // to review by the operator are intentionally managed — never auto-landed.
+    // Uses effective blocker (newBlocker) to catch parent-decision blockers extracted above.
+    let effectiveNext = next;
+    if (next === "review" && item.status === "running") {
+      const actualTaskStatus = String((task as Record<string, unknown>).status);
+      const loop = getLoop(id);
+      const { autoLand } = shouldAutoLand(
+        { ...item, blocker: newBlocker },
+        actualTaskStatus,
+        loop,
+      );
+      if (autoLand) {
+        effectiveNext = "done";
+        if (item.createdTaskId) {
+          await Task.findByIdAndUpdate(item.createdTaskId, { status: "archived" });
+        }
+        newBlocker = null;
+        console.info(`[work-packages] auto-landed item ${item.id}: low-risk clean completion`);
+      }
+    }
     db.prepare(
       "UPDATE work_package_items SET status = ?, commitHash = COALESCE(?, commitHash), blocker = ?, updatedAt = ? WHERE _id = ?",
     ).run(
-      next,
+      effectiveNext,
       typeof commitHash === "string" ? commitHash : null,
       newBlocker,
       new Date().toISOString(),
       item.id,
     );
-    if (["done", "archived", "failed", "review"].includes(next)) selfPacedTrigger = true;
+    if (["done", "archived", "failed", "review"].includes(effectiveNext)) selfPacedTrigger = true;
   }
   if (selfPacedTrigger) notifySelfPacedLoop(id);
 }

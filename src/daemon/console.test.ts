@@ -1037,6 +1037,17 @@ test("console flight status badges are color-coordinated by status", () => {
   assert.match(js, /"failed"\) return "err"/, "failed → err");
 });
 
+test("console flight rail cards are color-coded by status", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // The rail card itself carries the semantic class so in-flight, staged,
+  // landed and blocked Flights are visually distinct at a glance.
+  assert.match(js, /class="flight-card '\+flightBadgeClass\(p\.status\)/, "flight-card pulls flightBadgeClass");
+  // Tinted-border styles mirror the overview cards.
+  assert.match(CONSOLE_HTML, /\.flight-card\.warn\b/, ".flight-card.warn style present");
+  assert.match(CONSOLE_HTML, /\.flight-card\.ok\b/, ".flight-card.ok style present");
+  assert.match(CONSOLE_HTML, /\.flight-card\.err\b/, ".flight-card.err style present");
+});
+
 test("console flightPassRowHtml handles skipped pass status", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /'skipped'|"skipped"/, "console references skipped pass status");
@@ -1435,4 +1446,102 @@ test("stuckStateBannerHtml: canAutoRepair false shows 'operator review' badge", 
   const html = fn("pkg-y", ss);
   assert.match(html, /operator review/, "operator review badge shown when canAutoRepair is false");
   assert.doesNotMatch(html, /auto-repair/, "auto-repair badge absent when canAutoRepair is false");
+});
+
+test("translucency row syncs to wallpaper/theme state without reopening settings", () => {
+  // Regression: after choosing a wallpaper the panel-translucency slider stayed
+  // hidden until Settings was closed and reopened, because only openSettings()
+  // toggled the row. The set/clear handlers now call syncWallpaperOpacityRow().
+  const js = extractScript(CONSOLE_HTML);
+  const src = js.match(/function syncWallpaperOpacityRow\(\)[\s\S]*?\n\}/)?.[0];
+  assert.ok(src, "syncWallpaperOpacityRow must be defined");
+
+  const factory = new Function("document", "models", `${src}\nreturn syncWallpaperOpacityRow;`) as (
+    doc: unknown,
+    models: unknown,
+  ) => () => void;
+  const run = (m: unknown) => {
+    const els: Record<string, { style: { display?: string }; value: unknown; textContent: unknown }> = {};
+    const doc = { getElementById: (id: string) => (els[id] ||= { style: {}, value: "", textContent: "" }) };
+    factory(doc, m)();
+    return els;
+  };
+
+  // Wallpaper present -> row revealed and slider reflects the saved opacity.
+  let els = run({ hasWallpaper: true, theme: "light", wallpaperOpacity: 40 });
+  assert.equal(els["wallpaper_opacity_row"].style.display, "", "row shown when a wallpaper is set");
+  assert.equal(els["s_wp_opacity"].value, 40);
+  assert.equal(els["s_wp_opacity_val"].textContent, "40%");
+
+  // No wallpaper, ordinary theme -> row hidden.
+  els = run({ hasWallpaper: false, theme: "light" });
+  assert.equal(els["wallpaper_opacity_row"].style.display, "none", "row hidden with no wallpaper");
+
+  // Matrix theme uses the same slider even without a wallpaper image.
+  els = run({ hasWallpaper: false, theme: "matrix" });
+  assert.equal(els["wallpaper_opacity_row"].style.display, "", "row shown for the Matrix theme");
+
+  // Every handler that mutates wallpaper state must re-sync the row.
+  for (const fn of ["onWallpaperFileSelected", "saveWallpaperPath", "clearWallpaper"]) {
+    const start = js.search(new RegExp("(async\\s+)?function\\s+" + fn + "\\b"));
+    assert.ok(start >= 0, fn + " must be defined");
+    const after = js.slice(start + 1);
+    const nextDecl = after.search(/\n(async\s+)?function\s+[A-Za-z]/);
+    const region = nextDecl >= 0 ? after.slice(0, nextDecl) : after;
+    assert.match(region, /syncWallpaperOpacityRow\(\)/, fn + " must re-sync the translucency row");
+  }
+});
+
+// ── _computeReviewReasonJs — review reason for manual items ──────────────────
+
+function extractComputeReviewReasonJs(
+  html: string,
+): (it: Record<string, unknown>, loop: Record<string, unknown> | null) => string | null {
+  const js = extractScript(html);
+  const block = js.match(/\/\*__REVIEW_REASON_START__\*\/([\s\S]*?)\/\*__REVIEW_REASON_END__\*\//);
+  assert.ok(block, "console must contain sentinel-wrapped _computeReviewReasonJs");
+  const factory = new Function(
+    `${block![1]}\nreturn _computeReviewReasonJs;`,
+  ) as () => (it: Record<string, unknown>, loop: Record<string, unknown> | null) => string | null;
+  return factory();
+}
+
+test("_computeReviewReasonJs: needs_input → 'Agent is waiting for your input'", () => {
+  const fn = extractComputeReviewReasonJs(CONSOLE_HTML);
+  assert.equal(fn({ taskStatus: "needs_input", risk: "low", blocker: null }, null), "Agent is waiting for your input");
+});
+
+test("_computeReviewReasonJs: medium risk → 'Medium-risk change — operator sign-off required'", () => {
+  const fn = extractComputeReviewReasonJs(CONSOLE_HTML);
+  const result = fn({ taskStatus: "review", risk: "medium", blocker: null }, null);
+  assert.match(result!, /Medium-risk change/);
+  assert.match(result!, /operator sign-off required/);
+});
+
+test("_computeReviewReasonJs: high risk → 'High-risk change — operator sign-off required'", () => {
+  const fn = extractComputeReviewReasonJs(CONSOLE_HTML);
+  const result = fn({ taskStatus: "review", risk: "high", blocker: null }, null);
+  assert.match(result!, /High-risk change/);
+});
+
+test("_computeReviewReasonJs: release loop → 'Release sign-off required'", () => {
+  const fn = extractComputeReviewReasonJs(CONSOLE_HTML);
+  const result = fn({ taskStatus: "review", risk: "low", blocker: null }, { profile: "release" });
+  assert.equal(result, "Release sign-off required");
+});
+
+test("_computeReviewReasonJs: clean low-risk item no loop → null (no reason banner needed)", () => {
+  const fn = extractComputeReviewReasonJs(CONSOLE_HTML);
+  assert.equal(fn({ taskStatus: "review", risk: "low", blocker: null }, null), null);
+});
+
+test("flightItemActions: review-reason class and _computeReviewReasonJs wired into flightItemActions", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /review-reason/, "review-reason class used for reason banner");
+  assert.match(js, /_computeReviewReasonJs\(it,\s*p\.loop\)/, "_computeReviewReasonJs called with item and package loop");
+});
+
+test("flightItemActions: Accept / Land button shown only for review-status items (done items excluded)", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /it\.status\s*===\s*['"]review['"]/, "Accept button gated on review status — done items never show it");
 });

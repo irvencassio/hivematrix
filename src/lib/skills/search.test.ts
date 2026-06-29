@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rankSkills } from "./search";
+import { rankSkills, filterSkillsByHarness, getSkillCompatibility } from "./search";
 import type { SkillIndexEntry } from "./contracts";
 
 function e(p: Partial<SkillIndexEntry>): SkillIndexEntry {
@@ -40,4 +40,66 @@ test("multi-word query requires every term to contribute", () => {
 
 test("no match → empty", () => {
   assert.deepEqual(rankSkills(lib, "kubernetes"), []);
+});
+
+const mixedLib: SkillIndexEntry[] = [
+  e({ name: "claude-only", compat: ["claude"] }),
+  e({ name: "codex-only", compat: ["codex"] }),
+  e({ name: "qwen-only", compat: ["qwen"] }),
+  e({ name: "claude-and-codex", compat: ["claude", "codex"] }),
+  e({ name: "any-harness", compat: ["all"] }),
+  e({ name: "empty-compat", compat: [] }),
+];
+
+test("filterSkillsByHarness: claude sees claude-specific and 'all' skills", () => {
+  const r = filterSkillsByHarness(mixedLib, "claude");
+  const names = r.map((x) => x.name);
+  assert.ok(names.includes("claude-only"));
+  assert.ok(names.includes("claude-and-codex"));
+  assert.ok(names.includes("any-harness"));
+  assert.ok(names.includes("empty-compat")); // empty compat = any
+  assert.ok(!names.includes("codex-only"));
+  assert.ok(!names.includes("qwen-only"));
+});
+
+test("filterSkillsByHarness: qwen only sees qwen-specific and 'all' skills", () => {
+  const r = filterSkillsByHarness(mixedLib, "qwen");
+  const names = r.map((x) => x.name);
+  assert.ok(names.includes("qwen-only"));
+  assert.ok(names.includes("any-harness"));
+  assert.ok(!names.includes("claude-only"));
+  assert.ok(!names.includes("codex-only"));
+  assert.ok(!names.includes("claude-and-codex"));
+});
+
+test("filterSkillsByHarness: empty list stays empty", () => {
+  assert.deepEqual(filterSkillsByHarness([], "codex"), []);
+});
+
+// --- getSkillCompatibility ---
+
+test("getSkillCompatibility returns the entry for a known skill", () => {
+  const entry = getSkillCompatibility("usageleft");
+  assert.ok(entry !== null, "usageleft must be in the registry");
+  assert.equal(entry.claude, true);
+  assert.equal(entry.codex, false);
+  assert.equal(entry.qwen, false);
+  assert.equal(typeof entry.description, "string");
+  assert.ok(entry.description.length > 0);
+});
+
+test("getSkillCompatibility returns correct flags for a multi-harness skill", () => {
+  const entry = getSkillCompatibility("claude-docs");
+  assert.ok(entry !== null);
+  assert.equal(entry.claude, true);
+  assert.equal(entry.codex, false);
+  assert.equal(entry.qwen, false);
+});
+
+test("getSkillCompatibility returns null for an unknown skill ID", () => {
+  assert.equal(getSkillCompatibility("nonexistent-skill-xyz"), null);
+});
+
+test("getSkillCompatibility returns null for an empty string", () => {
+  assert.equal(getSkillCompatibility(""), null);
 });

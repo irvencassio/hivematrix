@@ -13,7 +13,7 @@ writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory:
 const origHome = process.env.HOME;
 process.env.HOME = HOME;
 
-const { upsertSkill, listSkills, readSkill, skillsDir, markSkillUsed, setSkillTrusted, deleteSkill } = await import("./store");
+const { upsertSkill, listSkills, listSkillsFor, readSkill, skillsDir, markSkillUsed, setSkillTrusted, deleteSkill } = await import("./store");
 
 test.after(() => {
   process.env.HOME = origHome;
@@ -101,4 +101,25 @@ test("imported (untrusted) skill: trusted=false, approvable, deletable", async (
 test("distilled/manual skills default trusted", async () => {
   await upsertSkill({ name: "House Style", description: "ours", body: "use tabs", source: "directive:r1" });
   assert.equal((await readSkill("House Style"))?.trusted, true);
+});
+
+test("listSkillsFor returns only skills compatible with the requested harness", async () => {
+  await upsertSkill({ name: "Claude Only Skill", description: "claude only", body: "do this", source: "test", compat: ["claude"] });
+  await upsertSkill({ name: "Qwen Only Skill", description: "qwen only", body: "do that", source: "test", compat: ["qwen"] });
+  await upsertSkill({ name: "Universal Skill", description: "any model", body: "do both", source: "test", compat: ["all"] });
+
+  const claudeSkills = await listSkillsFor("claude");
+  const qwenSkills = await listSkillsFor("qwen");
+  const codexSkills = await listSkillsFor("codex");
+
+  assert.ok(claudeSkills.some((s) => s.name === "Claude Only Skill"), "claude-only appears for claude");
+  assert.ok(claudeSkills.some((s) => s.name === "Universal Skill"), "'all' appears for claude");
+  assert.ok(!claudeSkills.some((s) => s.name === "Qwen Only Skill"), "qwen-only excluded from claude");
+
+  assert.ok(qwenSkills.some((s) => s.name === "Qwen Only Skill"), "qwen-only appears for qwen");
+  assert.ok(!qwenSkills.some((s) => s.name === "Claude Only Skill"), "claude-only excluded from qwen");
+
+  assert.ok(!codexSkills.some((s) => s.name === "Claude Only Skill"), "claude-only excluded from codex");
+  assert.ok(!codexSkills.some((s) => s.name === "Qwen Only Skill"), "qwen-only excluded from codex");
+  assert.ok(codexSkills.some((s) => s.name === "Universal Skill"), "'all' appears for codex");
 });

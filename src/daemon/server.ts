@@ -4162,7 +4162,7 @@ export function createDaemonServer() {
   return server;
 }
 
-export function startDaemonServer(port = 3747): Promise<void> {
+export function startDaemonServer(port = parseInt(process.env.HIVEMATRIX_PORT ?? "3747", 10)): Promise<void> {
   return new Promise((resolve, reject) => {
     const server = createDaemonServer();
     server.on("error", reject);

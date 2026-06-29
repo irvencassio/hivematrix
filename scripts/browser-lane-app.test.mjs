@@ -108,6 +108,22 @@ test("Browser Lane app has a HiveMatrix-themed bundle icon", () => {
   assert.equal(whiteIcon.corner[3], 0, "Browser Lane white icon corners should be transparent, not white");
 });
 
+// The squircle must be INSET inside the 1024 canvas (~Apple's 0.805 content
+// ratio, matching Terminal Lane and src-tauri/icons/icon.png) with a transparent
+// margin — not full-bleed — so the dock doesn't render Browser Lane larger than
+// neighboring app icons.
+test("Browser Lane bundle icon is inset (~0.805) with a transparent margin", () => {
+  for (const file of ["BrowserLane.png", "BrowserLaneWhite.png"]) {
+    const icon = inspectPng(join(root, "browser-lane-app/Resources", file));
+    assert.deepEqual(icon.size, [1024, 1024]);
+    assert.equal(icon.corner[3], 0, `${file} corner should be transparent, not a matte`);
+    const [x0, y0, x1, y1] = icon.bbox;
+    const ratio = (x1 - x0) / icon.size[0];
+    assert.ok(ratio > 0.74 && ratio < 0.86, `${file} squircle should fill ~0.805 of the canvas (got ${ratio.toFixed(3)})`);
+    assert.ok(x0 > 40 && y0 > 40, `${file} squircle should sit inside a transparent margin (got x0=${x0}, y0=${y0})`);
+  }
+});
+
 test("Browser Lane has a Settings screen for appearance, web defaults, daemon, storage, and about", () => {
   const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
   const screens = readFileSync(join(sourceDir, "Screens.swift"), "utf8");

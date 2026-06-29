@@ -26,3 +26,21 @@ export function flightDecisionLabel(state: FlightDecisionState | null): string {
   if (state === "operator_decision") return "Needs your reply";
   return "";
 }
+
+/**
+ * Compact plain-text reason shown on manual-review items in the console so
+ * operators understand WHY their action is required. Returns null when the
+ * blocker HTML already explains the situation (structured blockers) or when
+ * the item should have been auto-landed (shouldn't reach the UI).
+ */
+export function computeReviewReason(
+  item: { taskStatus?: string | null; risk?: string | null; blocker?: string | null; executionMode?: string | null },
+  loop: { profile: string } | null,
+): string | null {
+  if (item.taskStatus === "needs_input") return "Agent is waiting for your input";
+  if (item.risk === "medium" || item.risk === "high")
+    return `${item.risk.charAt(0).toUpperCase() + item.risk.slice(1)}-risk change — operator sign-off required`;
+  if (loop && loop.profile === "release") return "Release sign-off required";
+  if (item.blocker) return null; // flightBlockerHtml already renders structured blockers
+  return null;
+}

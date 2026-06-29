@@ -9,7 +9,7 @@ import { promises as fs } from "fs";
 import { join } from "path";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import {
-  renderSkillFile, parseSkillFile, skillFilename, skillSlug, skillHasInput, extractSkillParams,
+  renderSkillFile, parseSkillFile, skillFilename, skillSlug, skillHasInput, extractSkillParams, skillRunsOn,
   type Skill, type SkillIndexEntry, type SkillHarness, type SkillKind, type SkillInterpreter, type SkillScope, type ScanVerdict,
 } from "./contracts";
 
@@ -58,6 +58,12 @@ export async function listSkills(): Promise<SkillIndexEntry[]> {
   }
   // Most-used first (proven skills surface), then alphabetical.
   return out.sort((a, b) => b.useCount - a.useCount || a.name.localeCompare(b.name));
+}
+
+/** List all skills compatible with the given AI model/harness, most-used first. */
+export async function listSkillsFor(harness: SkillHarness): Promise<SkillIndexEntry[]> {
+  const all = await listSkills();
+  return all.filter((e) => skillRunsOn(e.compat, harness));
 }
 
 /** Full skills (not just the index) — bounded, timed. For fan-out + prune, which

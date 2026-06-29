@@ -4,7 +4,8 @@ import { DEFAULT_TASK_PROJECT } from "@/lib/routing/project-constants";
 export type VoiceBrowserLaneIntent =
   | { mode: "search"; query: string }
   | { mode: "read"; url: string; query?: string }
-  | { mode: "open"; url: string; objective: string };
+  | { mode: "open"; url: string; objective: string }
+  | { mode: "workflow"; objective: string; startUrl: string; requiresLogin: true };
 
 export interface VoiceBrowserLaneTask {
   title: string;
@@ -30,6 +31,8 @@ function stripLeadIn(text: string): string | null {
   const trimmed = clean(text);
   const direct = trimmed.match(/^(?:please\s+)?(?:use\s+)?(?:the\s+)?browser\s+lane(?:\s+to)?\s+(.+)$/i);
   if (direct) return clean(direct[1]);
+  const infixAnd = trimmed.match(/^(.+?)\s+(?:in|with|using)\s+(?:the\s+)?browser\s+lane\s+(?:and|to)\s+(.+)$/i);
+  if (infixAnd) return clean(`${infixAnd[1]} and ${infixAnd[2]}`);
   const trailing = trimmed.match(/^(.+?)\s+(?:in|with|using)\s+(?:the\s+)?browser\s+lane$/i);
   if (trailing) return clean(trailing[1]);
   const webSearch = trimmed.match(/^(?:please\s+)?search\s+the\s+web\s+(?:for\s+)?(.+)$/i);
@@ -46,6 +49,103 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+function hasWorkflowCue(value: string): boolean {
+  return /\b(sign\s*in|signin|log\s*in|login|log\s*into|authenticated|auth|workflow|check|see\s+if|look\s+for|review|triage|status|requests?|invitations?|unread)\b/i.test(value);
+}
+
+function workflowIntent(rest: string): VoiceBrowserLaneIntent | null {
+  const value = clean(rest);
+  const lower = value.toLowerCase();
+  if (!hasWorkflowCue(value)) return null;
+
+  if (/\blinkedin\b/.test(lower)) {
+    if (/\bconnection\s+requests?\b/.test(lower)) {
+      return {
+        mode: "workflow",
+        objective: "Check LinkedIn connection requests",
+        startUrl: "https://www.linkedin.com/mynetwork/invitation-manager/",
+        requiresLogin: true,
+      };
+    }
+    if (/\bfriend\s+requests?\b/.test(lower)) {
+      return {
+        mode: "workflow",
+        objective: "Check LinkedIn friend requests",
+        startUrl: "https://www.linkedin.com/mynetwork/invitation-manager/",
+        requiresLogin: true,
+      };
+    }
+    if (/\binvitations?\b/.test(lower)) {
+      return {
+        mode: "workflow",
+        objective: "Check LinkedIn invitations",
+        startUrl: "https://www.linkedin.com/mynetwork/invitation-manager/",
+        requiresLogin: true,
+      };
+    }
+    if (/\brequests?\b/.test(lower)) {
+      return {
+        mode: "workflow",
+        objective: "Check LinkedIn requests",
+        startUrl: "https://www.linkedin.com/mynetwork/invitation-manager/",
+        requiresLogin: true,
+      };
+    }
+    return {
+      mode: "workflow",
+      objective: "Open LinkedIn workflow",
+      startUrl: "https://www.linkedin.com/feed/",
+      requiresLogin: true,
+    };
+  }
+
+  if (/\bgmail\b|\bgoogle\s+mail\b/.test(lower)) {
+    if (/\bunread\b/.test(lower)) {
+      return {
+        mode: "workflow",
+        objective: "Check Gmail unread mail",
+        startUrl: "https://mail.google.com/mail/u/0/#inbox",
+        requiresLogin: true,
+      };
+    }
+    return {
+      mode: "workflow",
+      objective: "Check Gmail",
+      startUrl: "https://mail.google.com/mail/u/0/#inbox",
+      requiresLogin: true,
+    };
+  }
+
+  if (/\bheygen\b/.test(lower)) {
+    if (/\bvideo\b.*\bstatus\b|\bstatus\b.*\bvideo\b/.test(lower)) {
+      return {
+        mode: "workflow",
+        objective: "Check HeyGen video status",
+        startUrl: "https://app.heygen.com/home",
+        requiresLogin: true,
+      };
+    }
+    return {
+      mode: "workflow",
+      objective: "Run HeyGen workflow",
+      startUrl: "https://app.heygen.com/home",
+      requiresLogin: true,
+    };
+  }
+
+  const urlMatch = value.match(/\bhttps?:\/\/\S+/i);
+  if (urlMatch && isHttpUrl(urlMatch[0])) {
+    return {
+      mode: "workflow",
+      objective: value,
+      startUrl: urlMatch[0],
+      requiresLogin: true,
+    };
+  }
+
+  return null;
+}
+
 export function detectVoiceBrowserLaneIntent(text: string): VoiceBrowserLaneIntent | null {
   const rest = stripLeadIn(text);
   if (!rest || SECRETISH.test(rest)) return null;
@@ -60,6 +160,10 @@ export function detectVoiceBrowserLaneIntent(text: string): VoiceBrowserLaneInte
     const query = clean(read[2] ?? "");
     return { mode: "read", url: read[1], ...(query ? { query } : {}) };
   }
+
+  const workflow = workflowIntent(rest);
+  if (workflow) return workflow;
+
   const readSearch = rest.match(/^(?:read|summarize|research|check|inspect)\s+(.+)$/i);
   if (readSearch && clean(readSearch[1])) {
     return { mode: "search", query: clean(readSearch[1]) };
@@ -92,6 +196,13 @@ export function buildVoiceBrowserLaneTask(
     title,
     description: [
       "Explicit voice request: use Browser Lane.",
+      ...(args.mode === "workflow"
+        ? [
+            "This is a Browser Lane workflow task, not a generic code or research task.",
+            `Requires login: ${args.requiresLogin ? "yes" : "no"}. If Browser Lane reports a missing session, sign-in prompt, or 2FA challenge, stop and report exactly what the operator must complete.`,
+            "",
+          ]
+        : []),
       "",
       "Do not use WebSearch, Chrome MCP, or ad-hoc browser tools for this task.",
       "Call HiveMatrix's Browser Lane endpoint and report the returned result:",

@@ -65,6 +65,23 @@ for y in range(h):
 im.save(sys.argv[2])
 `, rendered, transparent]);
 
+  // Inset the full-bleed squircle into Apple's icon grid (~0.805 content ratio)
+  // on a transparent canvas, so the dock renders Browser Lane the same size as
+  // sibling app icons instead of ~23% larger. Matches Terminal Lane / src-tauri.
+  const padded = join(renderDir, `${baseName}-padded.png`);
+  run("assets/icon/.venv/bin/python", ["-c", `
+from PIL import Image
+import sys
+src = Image.open(sys.argv[1]).convert("RGBA")
+W = src.width
+content = round(W * 0.8125)
+margin = (W - content) // 2
+scaled = src.resize((content, content), Image.LANCZOS)
+canvas = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+canvas.paste(scaled, (margin, margin), scaled)
+canvas.save(sys.argv[2])
+`, transparent, padded]);
+
   const sizes = [
     [16, "icon_16x16.png"], [32, "icon_16x16@2x.png"],
     [32, "icon_32x32.png"], [64, "icon_32x32@2x.png"],
@@ -74,10 +91,10 @@ im.save(sys.argv[2])
   ];
 
   for (const [size, name] of sizes) {
-    run("sips", ["-z", String(size), String(size), transparent, "--out", join(out, name)]);
+    run("sips", ["-z", String(size), String(size), padded, "--out", join(out, name)]);
   }
   run("iconutil", ["-c", "icns", out, "-o", icns]);
-  copyFileSync(transparent, join(resources, `${baseName}.png`));
+  copyFileSync(padded, join(resources, `${baseName}.png`));
   rmSync(out, { recursive: true, force: true });
   console.log(`Generated ${icns}${whiteState ? " (white state)" : ""}`);
 }

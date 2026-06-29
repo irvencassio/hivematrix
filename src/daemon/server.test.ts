@@ -771,6 +771,47 @@ test("POST /tasks routes an explicit Browser Lane request to the lane (parity wi
   assert.equal(row?.source, "browser-lane");
 });
 
+test("POST /tasks routes explicit logged-in Browser Lane workflows to Browser Lane", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({
+      description: "use Browser Lane to sign into LinkedIn and see if I have any friend requests",
+      project: "hivematrix",
+      projectPath: "/tmp/x",
+    }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "browser-lane");
+  assert.equal(body.mode, "workflow");
+  assert.ok(body.taskId, "a browser-lane task id is returned");
+
+  const row = getDb()
+    .prepare("SELECT source, description, output FROM tasks WHERE _id = ?")
+    .get(body.taskId) as { source?: string; description?: string; output?: string } | undefined;
+  assert.equal(row?.source, "browser-lane");
+  assert.match(row?.description ?? "", /Browser Lane workflow/);
+  assert.match(row?.description ?? "", /Requires login: yes/);
+  assert.match(row?.description ?? "", /\/lane\/browser/);
+  assert.match(row?.description ?? "", /HIVEMATRIX_PORT/);
+  assert.doesNotMatch(row?.description ?? "", /127\.0\.0\.1:3748\/lane\/browser/);
+
+  const output = JSON.parse(row?.output ?? "{}") as {
+    browserLaneVoice?: { args?: Record<string, unknown> };
+  };
+  assert.deepEqual(output.browserLaneVoice?.args, {
+    mode: "workflow",
+    objective: "Check LinkedIn friend requests",
+    startUrl: "https://www.linkedin.com/mynetwork/invitation-manager/",
+    requiresLogin: true,
+  });
+});
+
 test("POST /tasks does not mis-route a plain 'search' dev task to Browser Lane (no false positive)", async (t) => {
   withTempHome(t);
   const { _resetDbForTests } = await import("@/lib/db");
@@ -784,6 +825,27 @@ test("POST /tasks does not mis-route a plain 'search' dev task to Browser Lane (
   assert.equal(res.status, 201);
   const body = await res.json() as Record<string, unknown>;
   assert.notEqual(body.routed, "browser-lane");
+});
+
+test("POST /tasks does not mis-route Browser Lane development work to Browser Lane", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  for (const description of [
+    "search the codebase for Browser Lane bugs",
+    "fix Browser Lane icon size",
+    "add tests for browser lane routing",
+  ]) {
+    const res = await fetch(`${base}/tasks`, {
+      method: "POST", headers,
+      body: JSON.stringify({ description, project: "hivematrix", projectPath: "/tmp/x" }),
+    });
+    assert.equal(res.status, 201);
+    const body = await res.json() as Record<string, unknown>;
+    assert.notEqual(body.routed, "browser-lane", description);
+  }
 });
 
 test("POST /tasks does not promote an AI-news video prompt into a Work Package (regression)", async (t) => {

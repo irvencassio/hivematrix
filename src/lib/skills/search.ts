@@ -6,7 +6,28 @@
  * instead of recalling exact names. Pure — fully testable.
  */
 
-import type { SkillIndexEntry } from "./contracts";
+import { skillRunsOn, type SkillHarness, type SkillIndexEntry } from "./contracts";
+import compatibilityRegistry from "./skill_compatibility.json";
+
+/** Compatibility flags for a single skill in the static registry. */
+export interface SkillCompatibilityEntry {
+  claude: boolean;
+  codex: boolean;
+  qwen: boolean;
+  kind: string;
+  description: string;
+}
+
+/**
+ * Look up the compatibility object for a skill by its registry ID.
+ * Returns null when the skill ID is not in the static registry.
+ */
+export function getSkillCompatibility(skillId: string): SkillCompatibilityEntry | null {
+  if (!skillId) return null;
+  const skills = compatibilityRegistry.skills as Record<string, SkillCompatibilityEntry>;
+  if (!Object.prototype.hasOwnProperty.call(skills, skillId)) return null;
+  return skills[skillId];
+}
 
 export interface RankedSkill extends SkillIndexEntry { score: number }
 
@@ -29,6 +50,11 @@ function scoreEntry(e: SkillIndexEntry, q: string): number {
   // small boost for proven skills so ties favor what actually gets used
   if (score > 0) score += Math.min(e.useCount, 9);
   return score;
+}
+
+/** Filter a skill index to entries compatible with the given AI model/harness. Pure. */
+export function filterSkillsByHarness(entries: SkillIndexEntry[], harness: SkillHarness): SkillIndexEntry[] {
+  return entries.filter((e) => skillRunsOn(e.compat, harness));
 }
 
 /**
