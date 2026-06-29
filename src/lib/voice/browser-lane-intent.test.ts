@@ -131,6 +131,49 @@ test("unrelated voice text does not become Browser Lane work", () => {
   assert.equal(detectVoiceBrowserLaneIntent("add tests for browser lane routing"), null);
 });
 
+// ── Generic routing guard: readSearch false-positives ──
+// Descriptions that BEGIN with "Browser Lane" and contain a readSearch verb
+// (check / inspect / research / summarize / read) currently trigger the
+// `readSearch` branch because stripLeadIn matches them via the `direct` pattern
+// (which does NOT require the "use" prefix). They should return null — these
+// are dev-work descriptions ABOUT Browser Lane, not instructions to USE it.
+//
+// These tests FAIL today because stripLeadIn("Browser Lane check X") → "check X"
+// and readSearch("check X") → {mode:"search", query:"X"} — a false positive.
+
+test("descriptions starting with 'Browser Lane <readSearch-verb>' without explicit 'use' lead-in return null", () => {
+  assert.equal(detectVoiceBrowserLaneIntent("Browser Lane check icon rendering"), null);
+  assert.equal(detectVoiceBrowserLaneIntent("Browser Lane inspect the sidebar layout"), null);
+  assert.equal(detectVoiceBrowserLaneIntent("Browser Lane research the navigation bug"), null);
+  assert.equal(detectVoiceBrowserLaneIntent("Browser Lane summarize the icon issue"), null);
+  assert.equal(detectVoiceBrowserLaneIntent("Browser Lane read the test results"), null);
+});
+
+// ── Generic routing guard: explicit 'use Browser Lane to' lead-in still routes ──
+// After fixing the readSearch false-positive, "use Browser Lane to check X" must
+// still route correctly. The explicit "use" framing distinguishes user instructions
+// to invoke the lane from dev-work descriptions that mention the lane as a topic.
+// These tests currently PASS and serve as regression guards for the fix.
+
+test("explicit 'use Browser Lane to <readSearch-verb>' without a known service still routes to browser-lane search", () => {
+  assert.deepEqual(detectVoiceBrowserLaneIntent("use Browser Lane to check this article"), {
+    mode: "search",
+    query: "this article",
+  });
+  assert.deepEqual(detectVoiceBrowserLaneIntent("use Browser Lane to research quantum computing"), {
+    mode: "search",
+    query: "quantum computing",
+  });
+  assert.deepEqual(detectVoiceBrowserLaneIntent("use Browser Lane to inspect this page"), {
+    mode: "search",
+    query: "this page",
+  });
+  assert.deepEqual(detectVoiceBrowserLaneIntent("use Browser Lane to read this blog post"), {
+    mode: "search",
+    query: "this blog post",
+  });
+});
+
 test("task builder carries deterministic lane endpoint instructions", () => {
   const task = buildVoiceBrowserLaneTask({
     mode: "search",

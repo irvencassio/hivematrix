@@ -82,6 +82,69 @@ test("the route never mentions Canopy or leaks secrets", () => {
   assert.doesNotMatch(blob, /\bpassword\b|\bpassphrase\b|private_key|sshpass|credentialRef/i);
 });
 
+// ── Generic routing guard: SSH host hint wins even when local profiles exist ──
+// Once local-profile fallback is implemented, it must only fire when there is NO
+// resolved profile for the given host hint. A clear SSH host hint that resolves
+// to a known profile must produce a "prepared" result — the local fallback must
+// NOT override it. These tests currently PASS (no fallback logic exists yet) and
+// must continue to pass after the new logic is added.
+
+test("explicit Terminal Lane + SSH host hint that resolves + local profiles present → SSH profile wins", () => {
+  // "on aiserver" is the last host-cue match; no "to <word>" follows so hostHint stays "aiserver".
+  const r = routeTerminalLaneRequest({
+    text: "run uptime on aiserver using Terminal Lane",
+    profiles: [AISERVER, LOCAL],
+  });
+  assert.equal(r.status, "prepared");
+  assert.equal(r.reason, null);
+  assert.ok(r.profile);
+  assert.equal(r.profile?.id, "aiserver");
+  assert.equal(r.profile?.kind, "ssh");
+});
+
+test("explicit Terminal Lane + SSH host hint that resolves + multiple local profiles → SSH profile wins, no ambiguity", () => {
+  const r = routeTerminalLaneRequest({
+    text: "run df on aiserver using Terminal Lane",
+    profiles: [AISERVER, LOCAL, LOCAL_ALT],
+  });
+  assert.equal(r.status, "prepared");
+  assert.equal(r.reason, null);
+  assert.ok(r.profile);
+  assert.equal(r.profile?.id, "aiserver");
+});
+
+test("explicit Terminal Lane + SSH host hint that resolves + autoConnect=false → auth_not_ready even with local profiles present", () => {
+  // Avoid "to <verb>" after the hostname — it would be picked up as the last host hint.
+  const r = routeTerminalLaneRequest({
+    text: "disk space on prod-db using Terminal Lane",
+    profiles: [PROD, LOCAL, LOCAL_DEFAULT],
+  });
+  assert.equal(r.status, "prepared");
+  assert.equal(r.reason, "auth_not_ready");
+  assert.ok(r.profile);
+  assert.equal(r.profile?.id, "prod-db");
+});
+
+test("explicit Terminal Lane + SSH host hint resolved by IP + local profiles present → SSH profile wins", () => {
+  const r = routeTerminalLaneRequest({
+    text: "OS version on 10.80.114.11 using Terminal Lane",
+    profiles: [AISERVER, LOCAL],
+  });
+  assert.equal(r.status, "prepared");
+  assert.equal(r.reason, null);
+  assert.ok(r.profile);
+  assert.equal(r.profile?.id, "aiserver");
+  assert.match(r.suggestedCommand ?? "", /os-release|uname/i);
+});
+
+test("resolveTerminalProfileForQuery still resolves SSH profiles when local profiles are in the list", () => {
+  assert.equal(resolveTerminalProfileForQuery("aiserver", [AISERVER, LOCAL, LOCAL_ALT])?.id, "aiserver");
+  assert.equal(resolveTerminalProfileForQuery("10.80.114.11", [AISERVER, LOCAL])?.id, "aiserver");
+  assert.equal(resolveTerminalProfileForQuery("prod-db", [PROD, LOCAL_DEFAULT])?.id, "prod-db");
+  // A query that matches nothing — even with local profiles present — returns null.
+  assert.equal(resolveTerminalProfileForQuery("unknown-host", [AISERVER, LOCAL]), null);
+});
+
 // ── Local-profile fallback: no host hint, single or default local profile ──
 // These tests describe the DESIRED behavior. They currently FAIL because
 // routeTerminalLaneRequest sets profile=null whenever hostHint is null
@@ -400,4 +463,141 @@ test("choose_local_profile transcript notes ambiguity, not missing host", () => 
   assert.match(t, /multiple local|ambiguous|choose|which local/i);
   assert.doesNotMatch(t, /no target host given/i);
   assert.doesNotMatch(t, /no local.*profile.*missing|local.*profile.*not configured/i);
+});
+
+// ── Explicit REMOTE intent: no host given, SSH profiles available ──
+// When the user makes an explicit Terminal Lane request with a clear SSH/remote
+// signal ("ssh", "sftp", "connect remotely", "remote server") but names NO
+// specific host, and remote (SSH-kind) profiles ARE available, the router must
+// ask the user to pick a remote profile. It must NOT:
+//   - silently auto-select an SSH profile (unsafe when multiple exist)
+//   - return no_local_profile guidance (wrong — the user wants SSH, not local setup)
+//   - emit the generic "Name the target host" message (profiles exist; need selection)
+//
+// These tests FAIL today because routeTerminalLaneRequest has no remote-intent
+// detection: it returns needs_input with reason "profile_missing" (or falls into
+// the no_local_profile branch) for all no-host-hint cases, regardless of whether
+// SSH profiles exist or the text contains an SSH/remote signal.
+
+test("explicit remote Terminal Lane ('ssh using Terminal Lane') + no host + single SSH profile → choose_remote_profile", () => {
+  const r = routeTerminalLaneRequest({
+    text: "ssh using Terminal Lane",
+    profiles: [AISERVER],
+  });
+  assert.equal(r.lane, "terminal");
+  assert.equal(r.explicit, true);
+  assert.equal(r.hostHint, null);
+  assert.equal(r.status, "needs_input");
+  // Must ask user to pick the remote profile — not complain about a missing local profile.
+  assert.equal(r.reason, "choose_remote_profile");
+  assert.equal(r.profile, null);
+  assert.ok(r.needsInput);
+  assert.match(r.needsInput.instructions, /which|choose|select/i);
+  assert.match(r.needsInput.instructions, /aiserver/i);
+  const choices: string[] = (r.needsInput as any).choices;
+  assert.ok(Array.isArray(choices));
+  assert.ok(choices.includes("aiserver"));
+});
+
+test("explicit remote Terminal Lane ('connect remotely via Terminal Lane') + no host + multiple SSH profiles → choose_remote_profile lists all", () => {
+  const r = routeTerminalLaneRequest({
+    text: "connect remotely via Terminal Lane",
+    profiles: [AISERVER, PROD],
+  });
+  assert.equal(r.status, "needs_input");
+  assert.equal(r.reason, "choose_remote_profile");
+  assert.equal(r.profile, null);
+  assert.ok(r.needsInput);
+  assert.match(r.needsInput.instructions, /which|choose|select/i);
+  const choices: string[] = (r.needsInput as any).choices;
+  assert.ok(Array.isArray(choices));
+  assert.ok(choices.includes("aiserver"));
+  assert.ok(choices.includes("prod-db"));
+});
+
+test("explicit remote Terminal Lane ('sftp via Terminal Lane') + no host + SSH profiles → choose_remote_profile", () => {
+  const r = routeTerminalLaneRequest({
+    text: "sftp via Terminal Lane",
+    profiles: [AISERVER, PROD],
+  });
+  assert.equal(r.status, "needs_input");
+  assert.equal(r.reason, "choose_remote_profile");
+  const choices: string[] = (r.needsInput as any).choices;
+  assert.ok(Array.isArray(choices));
+  assert.ok(choices.includes("aiserver") || choices.includes("prod-db"));
+});
+
+test("explicit remote Terminal Lane + no host + SSH profiles → does NOT return no_local_profile", () => {
+  // Telling a user who wants SSH to "create a local profile" is wrong.
+  const r = routeTerminalLaneRequest({
+    text: "use Terminal Lane to ssh to the server",
+    profiles: [AISERVER, PROD],
+  });
+  assert.notEqual(r.reason, "no_local_profile");
+  assert.equal(r.status, "needs_input");
+});
+
+test("explicit remote Terminal Lane + no host + SSH AND local profiles → choose_remote_profile offers only SSH profiles", () => {
+  // When the user's intent is remote (ssh), local-kind profiles must not appear in choices.
+  const r = routeTerminalLaneRequest({
+    text: "ssh via Terminal Lane",
+    profiles: [AISERVER, LOCAL, PROD],
+  });
+  assert.equal(r.status, "needs_input");
+  assert.equal(r.reason, "choose_remote_profile");
+  const choices: string[] = (r.needsInput as any).choices;
+  assert.ok(choices.includes("aiserver"));
+  assert.ok(choices.includes("prod-db"));
+  assert.ok(!choices.includes("local"), "local-kind profile must not appear in remote choices");
+});
+
+test("explicit remote Terminal Lane + no host + no SSH profiles at all → profile_missing with SSH-profile setup guidance", () => {
+  // No SSH profiles exist. Guide the user to add a remote/SSH profile — not to "name a host".
+  const r = routeTerminalLaneRequest({
+    text: "ssh using Terminal Lane",
+    profiles: [],
+  });
+  assert.equal(r.status, "needs_input");
+  assert.equal(r.reason, "profile_missing");
+  assert.ok(r.needsInput);
+  assert.match(r.needsInput.instructions, /add.*ssh|ssh.*profile|remote.*profile|configure.*ssh/i);
+  assert.doesNotMatch(r.needsInput.instructions, /name the target host/i);
+});
+
+test("explicit remote Terminal Lane + no host + only local profiles → profile_missing with SSH-profile setup guidance", () => {
+  // Local profiles exist but the user wants SSH. Must not auto-select the local profile
+  // and must not tell the user to "name a host" — it should say to add an SSH profile.
+  const r = routeTerminalLaneRequest({
+    text: "connect remotely via Terminal Lane",
+    profiles: [LOCAL],
+  });
+  assert.equal(r.status, "needs_input");
+  assert.equal(r.reason, "profile_missing");
+  assert.ok(r.needsInput);
+  assert.match(r.needsInput.instructions, /add.*ssh|ssh.*profile|remote.*profile|configure.*ssh/i);
+  assert.doesNotMatch(r.needsInput.instructions, /name the target host/i);
+});
+
+test("explicit remote Terminal Lane + no host → transcript notes remote-profile selection needed, not local-profile gap", () => {
+  const r = routeTerminalLaneRequest({
+    text: "connect remotely using Terminal Lane",
+    profiles: [AISERVER],
+  });
+  const t = r.transcript.join("\n");
+  assert.equal(r.status, "needs_input");
+  // Transcript must NOT say "no local profile" — user wants remote, not local setup.
+  assert.doesNotMatch(t, /no local.*profile|local.*profile.*missing|local.*profile.*not configured/i);
+  // Transcript must reference the remote selection need.
+  assert.match(t, /remote|ssh|choose|which/i);
+});
+
+test("explicit remote Terminal Lane + no host → does NOT emit generic 'Name the target host' instruction when profiles exist", () => {
+  // "Name the target host" is wrong when SSH profiles are already configured —
+  // the user should pick from the list, not go configure a new profile.
+  const r = routeTerminalLaneRequest({
+    text: "ssh using Terminal Lane",
+    profiles: [AISERVER],
+  });
+  assert.ok(r.needsInput);
+  assert.doesNotMatch(r.needsInput.instructions, /name the target host/i);
 });

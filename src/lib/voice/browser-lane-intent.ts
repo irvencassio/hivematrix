@@ -29,8 +29,18 @@ function clean(value: string): string {
 
 function stripLeadIn(text: string): string | null {
   const trimmed = clean(text);
-  const direct = trimmed.match(/^(?:please\s+)?(?:use\s+)?(?:the\s+)?browser\s+lane(?:\s+to)?\s+(.+)$/i);
-  if (direct) return clean(direct[1]);
+  const directUse = trimmed.match(/^(?:please\s+)?use\s+(?:the\s+)?browser\s+lane(?:\s+to)?\s+(.+)$/i);
+  if (directUse) return clean(directUse[1]);
+  const directBare = trimmed.match(/^(?:please\s+)?(?:the\s+)?browser\s+lane\s+(.+)$/i);
+  if (directBare) {
+    const rest = clean(directBare[1]);
+    if (/^(?:search|look\s*up|lookup|google|find|open|go\s+to|navigate\s+to)\b/i.test(rest)) {
+      return rest;
+    }
+    const readUrl = rest.match(/^read\s+(\S+)/i);
+    if (readUrl && isHttpUrl(readUrl[1])) return rest;
+    if (/^check\b/i.test(rest) && /\bstatus\b/i.test(rest)) return rest;
+  }
   const infixAnd = trimmed.match(/^(.+?)\s+(?:in|with|using)\s+(?:the\s+)?browser\s+lane\s+(?:and|to)\s+(.+)$/i);
   if (infixAnd) return clean(`${infixAnd[1]} and ${infixAnd[2]}`);
   const trailing = trimmed.match(/^(.+?)\s+(?:in|with|using)\s+(?:the\s+)?browser\s+lane$/i);
@@ -49,8 +59,12 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+function browserLaneDaemonPort(): string {
+  return process.env.HIVEMATRIX_PORT ?? process.env.HIVE_DAEMON_PORT ?? "3747";
+}
+
 function hasWorkflowCue(value: string): boolean {
-  return /\b(sign\s*in|signin|log\s*in|login|log\s*into|authenticated|auth|workflow|check|see\s+if|look\s+for|review|triage|status|requests?|invitations?|unread)\b/i.test(value);
+  return /\b(sign\s*in(?:to)?|signin|log\s*in|login|log\s*into|authenticated|auth|workflow|check|see\s+if|look\s+for|review|triage|status|requests?|invitations?|unread)\b/i.test(value);
 }
 
 function workflowIntent(rest: string): VoiceBrowserLaneIntent | null {
@@ -150,6 +164,8 @@ export function detectVoiceBrowserLaneIntent(text: string): VoiceBrowserLaneInte
   const rest = stripLeadIn(text);
   if (!rest || SECRETISH.test(rest)) return null;
 
+  if (/^browser\s+lane\b/i.test(rest)) return null;
+
   const search = rest.match(/^(?:search|look\s*up|lookup|google|find)\s+(.+)$/i);
   if (search && clean(search[1])) {
     return { mode: "search", query: clean(search[1]) };
@@ -192,6 +208,7 @@ export function buildVoiceBrowserLaneTask(
       : args.objective;
   const title = `${opts.titlePrefix ?? "Browser Lane"}: Browser Lane ${args.mode} ${label}`.slice(0, 100);
   const json = JSON.stringify({ args }, null, 2);
+  const port = browserLaneDaemonPort();
   return {
     title,
     description: [
@@ -208,7 +225,7 @@ export function buildVoiceBrowserLaneTask(
       "Call HiveMatrix's Browser Lane endpoint and report the returned result:",
       "",
       "```bash",
-      `curl -s -X POST "http://127.0.0.1:\${HIVEMATRIX_PORT:-3747}/lane/browser" \\`,
+      `curl -s -X POST "http://127.0.0.1:${port}/lane/browser" \\`,
       `  -H "Authorization: Bearer $(cat ~/.hivematrix/auth-token)" \\`,
       `  -H "Content-Type: application/json" \\`,
       `  -d '${JSON.stringify({ args })}'`,

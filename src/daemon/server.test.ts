@@ -798,7 +798,6 @@ test("POST /tasks routes explicit logged-in Browser Lane workflows to Browser La
   assert.match(row?.description ?? "", /Browser Lane workflow/);
   assert.match(row?.description ?? "", /Requires login: yes/);
   assert.match(row?.description ?? "", /\/lane\/browser/);
-  assert.match(row?.description ?? "", /HIVEMATRIX_PORT/);
   assert.doesNotMatch(row?.description ?? "", /127\.0\.0\.1:3748\/lane\/browser/);
 
   const output = JSON.parse(row?.output ?? "{}") as {
@@ -808,6 +807,118 @@ test("POST /tasks routes explicit logged-in Browser Lane workflows to Browser La
     mode: "workflow",
     objective: "Check LinkedIn friend requests",
     startUrl: "https://www.linkedin.com/mynetwork/invitation-manager/",
+    requiresLogin: true,
+  });
+});
+
+test("POST /tasks routes LinkedIn connection-requests workflow prompt to Browser Lane with correct args", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({
+      description: "open LinkedIn with Browser Lane and check connection requests",
+      project: "hivematrix",
+      projectPath: "/tmp/x",
+    }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "browser-lane");
+  assert.equal(body.mode, "workflow");
+  assert.ok(body.taskId, "a browser-lane task id is returned");
+
+  const row = getDb()
+    .prepare("SELECT source, output FROM tasks WHERE _id = ?")
+    .get(body.taskId) as { source?: string; output?: string } | undefined;
+  assert.equal(row?.source, "browser-lane");
+
+  const output = JSON.parse(row?.output ?? "{}") as {
+    browserLaneVoice?: { args?: Record<string, unknown> };
+  };
+  assert.deepEqual(output.browserLaneVoice?.args, {
+    mode: "workflow",
+    objective: "Check LinkedIn connection requests",
+    startUrl: "https://www.linkedin.com/mynetwork/invitation-manager/",
+    requiresLogin: true,
+  });
+});
+
+test("POST /tasks routes Gmail unread workflow prompt to Browser Lane with correct args", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({
+      description: "use Browser Lane to sign into Gmail and check unread mail",
+      project: "hivematrix",
+      projectPath: "/tmp/x",
+    }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "browser-lane");
+  assert.equal(body.mode, "workflow");
+  assert.ok(body.taskId, "a browser-lane task id is returned");
+
+  const row = getDb()
+    .prepare("SELECT source, description, output FROM tasks WHERE _id = ?")
+    .get(body.taskId) as { source?: string; description?: string; output?: string } | undefined;
+  assert.equal(row?.source, "browser-lane");
+  assert.match(row?.description ?? "", /Browser Lane workflow/);
+  assert.match(row?.description ?? "", /Requires login: yes/);
+
+  const output = JSON.parse(row?.output ?? "{}") as {
+    browserLaneVoice?: { args?: Record<string, unknown> };
+  };
+  assert.deepEqual(output.browserLaneVoice?.args, {
+    mode: "workflow",
+    objective: "Check Gmail unread mail",
+    startUrl: "https://mail.google.com/mail/u/0/#inbox",
+    requiresLogin: true,
+  });
+});
+
+test("POST /tasks routes HeyGen video-status workflow prompt to Browser Lane with correct args", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({
+      description: "use Browser Lane to log into HeyGen and check video status",
+      project: "hivematrix",
+      projectPath: "/tmp/x",
+    }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "browser-lane");
+  assert.equal(body.mode, "workflow");
+  assert.ok(body.taskId, "a browser-lane task id is returned");
+
+  const row = getDb()
+    .prepare("SELECT source, description, output FROM tasks WHERE _id = ?")
+    .get(body.taskId) as { source?: string; description?: string; output?: string } | undefined;
+  assert.equal(row?.source, "browser-lane");
+  assert.match(row?.description ?? "", /Browser Lane workflow/);
+  assert.match(row?.description ?? "", /Requires login: yes/);
+
+  const output = JSON.parse(row?.output ?? "{}") as {
+    browserLaneVoice?: { args?: Record<string, unknown> };
+  };
+  assert.deepEqual(output.browserLaneVoice?.args, {
+    mode: "workflow",
+    objective: "Check HeyGen video status",
+    startUrl: "https://app.heygen.com/home",
     requiresLogin: true,
   });
 });
@@ -837,6 +948,39 @@ test("POST /tasks does not mis-route Browser Lane development work to Browser La
     "search the codebase for Browser Lane bugs",
     "fix Browser Lane icon size",
     "add tests for browser lane routing",
+    "update Browser Lane to use a darker icon",
+    "Browser Lane icon is misaligned in dark mode",
+    "debug Browser Lane session expiry logic",
+    "refactor Browser Lane auth handler",
+    "Browser Lane auth tests are failing on CI",
+    "Browser Lane status badge color is wrong",
+  ]) {
+    const res = await fetch(`${base}/tasks`, {
+      method: "POST", headers,
+      body: JSON.stringify({ description, project: "hivematrix", projectPath: "/tmp/x" }),
+    });
+    assert.equal(res.status, 201);
+    const body = await res.json() as Record<string, unknown>;
+    assert.notEqual(body.routed, "browser-lane", description);
+  }
+});
+
+test("POST /tasks does not mis-route dev tasks whose description begins 'Browser Lane <readSearch-verb>' to Browser Lane", async (t) => {
+  // These descriptions trigger stripLeadIn (the string starts with "Browser Lane")
+  // and then the readSearch branch of detectVoiceBrowserLaneIntent matches the
+  // remainder (check/inspect/research/summarize), producing a false-positive
+  // browser-lane route. The intent is unambiguously development work — none of
+  // the descriptions include an explicit "use Browser Lane to …" framing.
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  for (const description of [
+    "Browser Lane check icon rendering",
+    "Browser Lane inspect the sidebar layout",
+    "Browser Lane research the navigation bug",
+    "Browser Lane summarize the icon issue",
   ]) {
     const res = await fetch(`${base}/tasks`, {
       method: "POST", headers,
@@ -1957,6 +2101,115 @@ test("POST /tasks/:id/archive on work-package child in running state lands item 
     "Advance triggered: dependent item starts after the running item lands done");
   assert.ok(its2[1].createdTaskId, "dependent item has a linked task");
   assert.equal(detail2.status, "running", "package is still running (second item in flight)");
+});
+
+// ── Daemon port in generated lane instructions ───────────────────────────────
+//
+// These tests currently FAIL because buildVoiceBrowserLaneTask embeds the port
+// as a shell variable `${HIVEMATRIX_PORT:-3747}` rather than resolving
+// daemonPort() at task-creation time. The desired behaviour: instructions must
+// contain the literal resolved port (e.g. 127.0.0.1:3747/lane/browser) so the
+// agent receives an unambiguous URL. Shell-variable deferral is unsafe because
+// the agent's harness sets HIVE_DAEMON_PORT (not HIVEMATRIX_PORT), so the
+// fallback :3747 fires whenever the non-default port is in use.
+
+test("Browser Lane workflow description uses the default daemon port 3747 when HIVEMATRIX_PORT is unset", async (t) => {
+  withTempHome(t);
+  const originalPort = process.env.HIVEMATRIX_PORT;
+  delete process.env.HIVEMATRIX_PORT;
+  t.after(() => {
+    if (originalPort !== undefined) process.env.HIVEMATRIX_PORT = originalPort;
+  });
+
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({
+      description: "use Browser Lane to check LinkedIn messages",
+      project: "hivematrix",
+      projectPath: "/tmp/x",
+    }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "browser-lane");
+
+  const row = getDb()
+    .prepare("SELECT description FROM tasks WHERE _id = ?")
+    .get(body.taskId) as { description?: string } | undefined;
+
+  // Must embed the resolved port 3747, not the shell variable form.
+  assert.match(row?.description ?? "", /127\.0\.0\.1:3747\/lane\/browser/);
+});
+
+test("Browser Lane workflow description uses the HIVEMATRIX_PORT value when set to a non-default port", async (t) => {
+  withTempHome(t);
+  const originalPort = process.env.HIVEMATRIX_PORT;
+  process.env.HIVEMATRIX_PORT = "3888";
+  t.after(() => {
+    if (originalPort !== undefined) process.env.HIVEMATRIX_PORT = originalPort;
+    else delete process.env.HIVEMATRIX_PORT;
+  });
+
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({
+      description: "use Browser Lane to check LinkedIn messages",
+      project: "hivematrix",
+      projectPath: "/tmp/x",
+    }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "browser-lane");
+
+  const row = getDb()
+    .prepare("SELECT description FROM tasks WHERE _id = ?")
+    .get(body.taskId) as { description?: string } | undefined;
+
+  // Description must embed the actual runtime port 3888, not the default 3747.
+  assert.match(row?.description ?? "", /127\.0\.0\.1:3888\/lane\/browser/);
+  assert.doesNotMatch(row?.description ?? "", /127\.0\.0\.1:3747/);
+});
+
+test("Browser Lane workflow description does not defer port resolution to shell variable expansion", async (t) => {
+  // When the task description's curl URL contains ${HIVEMATRIX_PORT:-3747} the
+  // port is resolved by the agent's shell at execution time. That is unreliable:
+  // the subprocess harness exports HIVE_DAEMON_PORT, not HIVEMATRIX_PORT, so the
+  // shell fallback (:3747) fires even on a daemon running on a different port.
+  // The description must embed a literal resolved URL instead.
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({
+      description: "use Browser Lane to search for the latest AI news",
+      project: "hivematrix",
+      projectPath: "/tmp/x",
+    }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.routed, "browser-lane");
+
+  const row = getDb()
+    .prepare("SELECT description FROM tasks WHERE _id = ?")
+    .get(body.taskId) as { description?: string } | undefined;
+
+  // The curl URL must not contain shell variable syntax for the port.
+  assert.doesNotMatch(row?.description ?? "", /\$\{HIVEMATRIX_PORT/);
+  // And the /lane/browser endpoint must still appear with a literal port.
+  assert.match(row?.description ?? "", /127\.0\.0\.1:\d+\/lane\/browser/);
 });
 
 test("POST /tasks/:id/archive on work-package child in review state lands item done and triggers Advance", async (t) => {
