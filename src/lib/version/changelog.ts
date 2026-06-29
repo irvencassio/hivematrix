@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.107", date: "2026-06-29", note: "flight child autonomy + one-click decisions" },
   { version: "0.1.106", date: "2026-06-29", note: "about version metadata refresh" },
   { version: "0.1.105", date: "2026-06-29", note: "disabled lane passive probe fix" },
   { version: "0.1.104", date: "2026-06-28", note: "Flight review reply reconciliation" },

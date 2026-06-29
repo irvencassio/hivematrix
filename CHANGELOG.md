@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.107 — 2026-06-29
+
+flight child autonomy + one-click decisions
+
 ## v0.1.106 — 2026-06-29
 
 about version metadata refresh
