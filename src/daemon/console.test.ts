@@ -1023,6 +1023,18 @@ test("console flightLabel handles archived item status", () => {
   assert.match(js, /archived/, "console handles archived item status");
 });
 
+test("console flight status badges are color-coordinated by status", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function flightBadgeClass/, "flightBadgeClass helper defined");
+  // Status badges in the item head and flight header pull the semantic class.
+  assert.match(js, /class="badge '\+flightBadgeClass\(it\.status\)/, "item status badge uses flightBadgeClass");
+  assert.match(js, /class="badge '\+flightBadgeClass\(p\.status\)/, "flight header status badge uses flightBadgeClass");
+  // Mapping mirrors the overview cards: active → warn, success/review → ok, failure → err.
+  assert.match(js, /"running" \|\| status === "held"\) return "warn"/, "running/held → warn");
+  assert.match(js, /"review"\) return "ok"/, "done/review → ok");
+  assert.match(js, /"failed"\) return "err"/, "failed → err");
+});
+
 test("console flightPassRowHtml handles skipped pass status", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /'skipped'|"skipped"/, "console references skipped pass status");

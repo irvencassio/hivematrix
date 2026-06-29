@@ -1435,7 +1435,7 @@ async function toggleThemeQuick() {
 // Center overview — at-a-glance board state when no task is selected, instead of
 // leaving the widest column empty.
 function renderOverview() {
-  if (state.selected || state.selectedFlight || _taskFormInSession) return;
+  if (state.selected || state.selectedFlight || state.selectedSkillOrCommand || _taskFormInSession) return;
   const el = document.getElementById("session");
   if (!el) return;
   const statusToLane = {}; LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
@@ -1627,6 +1627,14 @@ function flightLabel(status) {
   if (status === "archived") return "archived";
   if (status === "ready" || status === "draft") return "staged";
   return status || "staged";
+}
+// Semantic color class for a Flight status badge, matching the overview cards:
+// active → warn, terminal-success/review → ok, failure → err, otherwise neutral.
+function flightBadgeClass(status) {
+  if (status === "running" || status === "held") return "warn";
+  if (status === "done" || status === "done_with_skips" || status === "review") return "ok";
+  if (status === "failed") return "err";
+  return "";
 }
 // Render a Flight item's blocker. Three shapes:
 //  - NEEDS_PARENT_DECISION: → "Needs Flight decision" (coordinator owns it; operator need not act)
@@ -1823,7 +1831,7 @@ async function renderFlightDetail(id, stall, blockers) {
     const ts = it.updatedAt ? ' · '+esc(it.updatedAt.slice(0,16).replace('T',' ')) : '';
     const blocker = flightBlockerHtml(it.blocker, it.createdTaskId);
     return '<div class="flight-item">'
-      + '<div class="flight-item-head"><div class="flight-item-title">'+esc(it.title)+'</div><div><span class="badge">'+esc(flightLabel(it.status))+'</span> <span class="badge">'+esc(it.risk)+'</span></div></div>'
+      + '<div class="flight-item-head"><div class="flight-item-title">'+esc(it.title)+'</div><div><span class="badge '+flightBadgeClass(it.status)+'">'+esc(flightLabel(it.status))+'</span> <span class="badge">'+esc(it.risk)+'</span></div></div>'
       + '<div class="muted" style="font-size:11px;margin-top:3px">'+esc(it.prompt)+deps+taskLink+ts+'</div>'
       + blocker
       + '<div class="flight-item-actions">'+flightItemActions(p, it)+'</div>'
@@ -1838,7 +1846,7 @@ async function renderFlightDetail(id, stall, blockers) {
   const stuckBanner = stuckStateBannerHtml(id, p.stuckState || null);
   const completedLine = p.completedAt ? ' · completed '+esc(p.completedAt.slice(0,16).replace('T',' ')) : '';
   el.innerHTML = '<div class="flight-detail">'
-    + '<h1>'+esc(p.title || p.id)+' <span class="badge">'+esc(flightLabel(p.status))+'</span><button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></h1>'
+    + '<h1>'+esc(p.title || p.id)+' <span class="badge '+flightBadgeClass(p.status)+'">'+esc(flightLabel(p.status))+'</span><button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></h1>'
     + '<div class="sub">'+esc(p.project || "")+' · '+esc(p.projectPath || "")+completedLine+'</div>'
     + '<div class="flight-counts">'+flightCountsHtml(p)+'</div>'
     + '<div class="flight-progress" title="'+pr.pct+'% landed"><i style="width:'+Math.max(0, Math.min(100, pr.pct))+'%"></i></div>'
@@ -2189,7 +2197,9 @@ async function selectTask(id) {
   const logs = typeof t.logs === "string" ? (()=>{try{return JSON.parse(t.logs)}catch{return[]}})() : (t.logs||[]);
   const live = ["assigned","in_progress"].includes(t.status);
   const el = document.getElementById("session");
-  // Preserve scroll for non-live tasks — innerHTML rebuild resets scrollTop to 0.
+  const colEl = el && el.parentElement; // .col.session — the scrollable outer column
+  // Preserve scroll positions — innerHTML rebuild resets scrollTop to 0.
+  const prevColScroll = (colEl && !live) ? colEl.scrollTop : 0;
   const prevScrollTop = live ? null : (el.querySelector(".transcript")?.scrollTop ?? null);
   el.innerHTML = '<div class="session"><h1>'+esc(t.title||t._id)+(live?'<span class="streaming">● running</span>':'')
     + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></h1>'
@@ -2207,6 +2217,7 @@ async function selectTask(id) {
     if (live) tr.scrollTop = tr.scrollHeight;
     else if (prevScrollTop !== null) tr.scrollTop = prevScrollTop;
   }
+  if (colEl && prevColScroll) colEl.scrollTop = prevColScroll;
   // Restore form state after the innerHTML rebuild.
   restoreCtxState();
   renderCtxChips("retry"); renderCtxChips("reply");
@@ -2814,11 +2825,15 @@ function _closeSkillPanel() {
 function _libSkillPanelHtml(it) {
   const s = it.raw;
   const untrusted = s.trusted === false;
-  const params = (Array.isArray(s.params) && s.params.length) ? s.params : (s.hasInput ? ['input'] : []);
-  const paramFields = params.map(p =>
+  const namedParams = (Array.isArray(s.params) && s.params.length) ? s.params : [];
+  const paramFields = namedParams.map(p =>
     '<label class="flbl">' + esc(skParamLabel(p)) + '</label>'
     + '<input id="skParam_' + esc(p) + '" placeholder="' + esc(skParamLabel(p)) + '…" />'
   ).join('');
+  const inputField = s.hasInput
+    ? '<label class="flbl">Input</label>'
+      + '<textarea id="skInput" placeholder="Freeform input for this skill…" style="resize:vertical"></textarea>'
+    : '';
   const scanWarn = s.scan === 'block'
     ? '<div style="color:var(--err);font-size:12px;margin-bottom:8px">⛔ Scan blocked — do not run this skill.</div>'
     : s.scan === 'warn' ? '<div style="color:var(--warn);font-size:12px;margin-bottom:8px">⚠ Scan: review before running.</div>' : '';
@@ -2829,9 +2844,11 @@ function _libSkillPanelHtml(it) {
     + '<div style="font-size:11px;color:var(--muted);margin:0 0 12px">' + libMetaLine(s) + '</div>'
     + scanWarn
     + '<div class="form open">'
-    + (params.length
-        ? '<div class="sk-param-area">' + paramFields + '</div>'
-        : '<div class="muted" style="font-size:12px;margin-bottom:8px">No parameters required.</div>')
+    + (namedParams.length ? '<div class="sk-param-area">' + paramFields + '</div>' : '')
+    + inputField
+    + (!namedParams.length && !s.hasInput
+        ? '<div class="muted" style="font-size:12px;margin-bottom:8px">No parameters required.</div>'
+        : '')
     + '<div class="row" style="margin-top:12px">'
     + '<button class="cancel" onclick="_closeSkillPanel()">Cancel</button>'
     + '<button class="create" onclick="runSelectedSkill()">Run</button>'
@@ -3103,19 +3120,18 @@ function pickTaskSkill(name) {
 // --- run helpers (route by the selected item's source) ----------------------
 async function runSelectedSkill() {
   const it = skSelected(); if (!it || it.source !== 'lib') return;
-  const ps = (it.raw && Array.isArray(it.raw.params) && it.raw.params.length) ? it.raw.params
-    : (it.raw && it.raw.hasInput ? ['input'] : []);
-  let payload;
-  if (ps.length) {
-    const params = {};
-    for (const p of ps) {
-      const el = document.getElementById('skParam_' + p);
-      params[p] = el ? el.value : '';
-    }
-    payload = { params };
-  } else {
-    payload = { input: '' };
+  const namedParams = (it.raw && Array.isArray(it.raw.params)) ? it.raw.params : [];
+  const hasInput = !!(it.raw && it.raw.hasInput);
+  const params = {};
+  for (const p of namedParams) {
+    const el = document.getElementById('skParam_' + p);
+    params[p] = el ? el.value : '';
   }
+  const inputEl = document.getElementById('skInput');
+  const payload = {};
+  if (namedParams.length) payload.params = params;
+  if (hasInput) payload.input = inputEl ? inputEl.value : '';
+  if (!namedParams.length && !hasInput) payload.input = '';
   const res = document.getElementById('skRunStatus') || document.getElementById('skStatus');
   if (res) res.textContent = 'Launching…';
   try {
