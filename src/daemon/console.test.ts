@@ -234,6 +234,17 @@ test("settings has an About tab with version/build/date and update status", () =
   assert.match(js, /if \(tab === "about"\)/, "About tab wired in switchSettingsTab");
 });
 
+test("loading models refreshes About version metadata", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const loadModels = js.match(/async function loadModels\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(loadModels, /models = await api\("\/models"\)/, "loadModels fetches the version-bearing models payload");
+  assert.match(loadModels, /renderAbout\(\)/, "About metadata re-renders after models load");
+  assert.ok(
+    loadModels.indexOf("renderAbout()") > loadModels.indexOf('models = await api("/models")'),
+    "About should refresh after the models payload is assigned",
+  );
+});
+
 test("settings tabs are in a defined order ending with About", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /\["about", "features", "general", "models", "observability", "lanes", "remote"\]/);

@@ -4093,6 +4093,10 @@ async function loadModels() {
   if (def) sel.value = def.id;
   // Refresh the Models panel now that local-engine tier health is loaded.
   checkModels();
+  // About can be opened before /models finishes; patch its version rows once
+  // the version-bearing payload arrives.
+  const about = document.getElementById("settingsAbout");
+  if (about && about.style.display !== "none") renderAbout();
 }
 
 // --- Projects ---
