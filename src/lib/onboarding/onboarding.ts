@@ -187,8 +187,8 @@ export function getOnboardingStatus(opts: {
   const messagebeeOk = !!mb && mb.enabled && mb.chatDbReadable;
   let messagebeeDetail = "Message Lane disabled";
   if (mb) {
-    if (!mb.chatDbReadable) messagebeeDetail = mb.chatDbDetail ?? "Full Disk Access needed to read Messages (chat.db)";
-    else if (!mb.enabled) messagebeeDetail = "chat.db readable; channel disabled";
+    if (!mb.enabled) messagebeeDetail = mb.chatDbReadable ? "chat.db readable; channel disabled" : "Message Lane disabled";
+    else if (!mb.chatDbReadable) messagebeeDetail = mb.chatDbDetail ?? "Full Disk Access needed to read Messages (chat.db)";
     else messagebeeDetail = "enabled; reading chat.db and sending via Messages";
   }
   steps.push({
@@ -205,8 +205,8 @@ export function getOnboardingStatus(opts: {
   const mailbeeOk = !!ml && ml.enabled && ml.mailControllable;
   let mailbeeDetail = "Mail Lane disabled";
   if (ml) {
-    if (!ml.mailControllable) mailbeeDetail = "Mail.app automation permission needed";
-    else if (!ml.enabled) mailbeeDetail = "Mail controllable; channel disabled";
+    if (!ml.enabled) mailbeeDetail = ml.mailControllable ? "Mail controllable; channel disabled" : "Mail Lane disabled";
+    else if (!ml.mailControllable) mailbeeDetail = "Mail.app automation permission needed";
     else mailbeeDetail = "enabled; watching the inbox";
   }
   steps.push({

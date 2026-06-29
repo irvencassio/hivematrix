@@ -582,15 +582,14 @@ export async function listLaneWorkerStatuses(): Promise<LaneWorkerStatus[]> {
 /** Live status for an in-daemon channel bee: enabled? OS permission granted? */
 async function channelStatus(kind: string): Promise<{ enabled: boolean; permitted: boolean; detail: string }> {
   if (kind === "messagebee") {
-    const { isChannelEnabled } = await import("@/lib/messagebee/store");
-    const { probeChatDbAccess } = await import("@/lib/messagebee/imessage");
-    const enabled = isChannelEnabled();
-    const probe = probeChatDbAccess();
-    const permitted = probe.ok;
+    const { getMessagebeeStatus } = await import("@/lib/messagebee/status");
+    const status = getMessagebeeStatus();
+    const permitted = status.chatDbReadable;
     return {
-      enabled, permitted,
-      detail: !enabled ? "channel off — set up to enable"
-        : permitted ? "running; reading Messages chat.db" : `enabled, but ${probe.detail}`,
+      enabled: status.enabled,
+      permitted,
+      detail: !status.enabled ? "channel off — set up to enable"
+        : permitted ? "running; reading Messages chat.db" : `enabled, but ${status.chatDbDetail}`,
     };
   }
   // mailbee

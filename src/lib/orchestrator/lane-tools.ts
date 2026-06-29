@@ -658,6 +658,7 @@ export async function executeMailBeeDraft(args: Record<string, unknown>, io?: Ma
 }
 
 export interface MessageBeeSendIO {
+  isChannelEnabled?(): boolean;
   isAllowed(handle: string): boolean;
   sendIMessage(handle: string, text: string, attachments?: string[]): Promise<boolean>;
   recordOutbound(): void;
@@ -667,6 +668,7 @@ async function defaultMessageBeeIO(): Promise<MessageBeeSendIO> {
   const store = await import("@/lib/messagebee/store");
   const im = await import("@/lib/messagebee/imessage");
   return {
+    isChannelEnabled: store.isChannelEnabled,
     isAllowed: store.isAllowed,
     sendIMessage: im.sendIMessage,
     recordOutbound: store.recordOutbound,
@@ -681,6 +683,10 @@ export async function executeMessageBeeSend(args: Record<string, unknown>, io?: 
     return "Error: 'to' and either 'text' or an attachment are required to send a message.";
   }
   const deps = io ?? (await defaultMessageBeeIO());
+
+  if (deps.isChannelEnabled && !deps.isChannelEnabled()) {
+    return "Error: Message Lane is disabled. Enable Message Lane before sending SMS/iMessage.";
+  }
 
   if (!deps.isAllowed(to)) {
     return `Error: ${to} is not on the Message Lane allowlist. SMS/iMessage can only be sent to allowlisted handles — add ${to} in Message Lane settings first, then retry.`;

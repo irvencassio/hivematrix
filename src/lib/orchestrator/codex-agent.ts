@@ -11,7 +11,9 @@ import type { AgentProcess, AgentEventHandler } from "./subprocess";
 import { findBinary, CODEX_BINARY_SEARCH_PATHS, buildCliPath } from "@/lib/config/binary-detection";
 import { resolveCodexModel } from "@/lib/models/catalog";
 import { readLatestCodexTokenUsage } from "@/lib/usage/codex";
-import { outboundHttpRoutingPrompt, brainSearchRoutingPrompt, beeToolsRoutingPrompt } from "./outbound-routing";
+import { isChannelEnabled as isMailLaneEnabled } from "@/lib/mailbee/store";
+import { isChannelEnabled as isMessageLaneEnabled } from "@/lib/messagebee/store";
+import { outboundHttpRoutingPrompt, brainSearchRoutingPrompt, beeToolsRoutingPrompt, type OutboundRoutingPromptOptions } from "./outbound-routing";
 
 let fakePidCounter = -5000;
 
@@ -21,8 +23,10 @@ let fakePidCounter = -5000;
  * Claude Code bridge: send email/SMS through the daemon's trust-gated endpoints
  * with the shell, not osascript.
  */
-export function buildCodexPrompt(description: string): string {
-  return `${outboundHttpRoutingPrompt()}\n\n${brainSearchRoutingPrompt()}\n\n${beeToolsRoutingPrompt()}\n\n--- Your task ---\n${description}`;
+export function buildCodexPrompt(description: string, opts: OutboundRoutingPromptOptions = {}): string {
+  const mailLaneEnabled = opts.mailLaneEnabled ?? isMailLaneEnabled();
+  const messageLaneEnabled = opts.messageLaneEnabled ?? isMessageLaneEnabled();
+  return `${outboundHttpRoutingPrompt(undefined, { mailLaneEnabled, messageLaneEnabled })}\n\n${brainSearchRoutingPrompt()}\n\n${beeToolsRoutingPrompt()}\n\n--- Your task ---\n${description}`;
 }
 
 /**

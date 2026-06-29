@@ -29,8 +29,20 @@ export const OUTBOUND_MCP_TOOL_NAMES = [
   `mcp__${OUTBOUND_MCP_SERVER_NAME}__draft_email`,
 ];
 
+export interface OutboundMcpOptions {
+  mailLaneEnabled?: boolean;
+  messageLaneEnabled?: boolean;
+}
+
+export function outboundMcpToolNames(opts: OutboundMcpOptions = {}): string[] {
+  return [
+    ...(opts.messageLaneEnabled === false ? [] : [OUTBOUND_MCP_TOOL_NAMES[0]]),
+    ...(opts.mailLaneEnabled === false ? [] : [OUTBOUND_MCP_TOOL_NAMES[1], OUTBOUND_MCP_TOOL_NAMES[2]]),
+  ];
+}
+
 // Bump when OUTBOUND_MCP_SERVER_JS changes so the on-disk copy is rewritten.
-const SERVER_VERSION = "2";
+const SERVER_VERSION = "4";
 
 // The stdio MCP server (CommonJS, run by the bundled node). Deliberately avoids
 // template literals / ${} so it nests cleanly in this TS template string. Speaks
@@ -41,6 +53,8 @@ export const OUTBOUND_MCP_SERVER_JS = [
   '"use strict";',
   'var fs = require("fs"), os = require("os"), path = require("path"), http = require("http");',
   'var PORT = process.env.HIVE_DAEMON_PORT || "3747";',
+  'var MAIL_LANE_ENABLED = process.env.HIVE_MAIL_LANE_ENABLED !== "0";',
+  'var MESSAGE_LANE_ENABLED = process.env.HIVE_MESSAGE_LANE_ENABLED !== "0";',
   "function token() {",
   '  try { return fs.readFileSync(path.join(os.homedir(), ".hivematrix", "auth-token"), "utf8").trim(); }',
   '  catch (e) { return ""; }',
@@ -72,8 +86,17 @@ export const OUTBOUND_MCP_SERVER_JS = [
   '    description: "Save an email as a draft in Apple Mail (never sends) via HiveMatrix Mail Lane, for the operator to review and send.",',
   '    inputSchema: { type: "object", properties: { to: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }, required: ["to", "body"] } }',
   "];",
+  "function toolsForCurrentState() {",
+  "  return TOOLS.filter(function (tool) {",
+  "    if (!MESSAGE_LANE_ENABLED && tool.name === \"send_imessage\") return false;",
+  "    if (!MAIL_LANE_ENABLED && (tool.name === \"send_email\" || tool.name === \"draft_email\")) return false;",
+  "    return true;",
+  "  });",
+  "}",
   "function callTool(name, a) {",
+  '  if (!MESSAGE_LANE_ENABLED && name === "send_imessage") return Promise.resolve(JSON.stringify({ ok: false, message: "Message Lane is disabled. Enable Message Lane before using SMS/iMessage tools." }));',
   '  if (name === "send_imessage") return post("/messagebee/send", { to: a.to, text: a.text });',
+  '  if (!MAIL_LANE_ENABLED && (name === "send_email" || name === "draft_email")) return Promise.resolve(JSON.stringify({ ok: false, message: "Mail Lane is disabled. Enable or test Mail Lane before using email tools." }));',
   '  if (name === "send_email") return post("/mailbee/send", { to: a.to, subject: a.subject, body: a.body });',
   '  if (name === "draft_email") return post("/mailbee/draft", { to: a.to, subject: a.subject, body: a.body });',
   '  return Promise.resolve(JSON.stringify({ ok: false, message: "unknown tool: " + name }));',
@@ -88,7 +111,7 @@ export const OUTBOUND_MCP_SERVER_JS = [
   "  }",
   '  if (method === "notifications/initialized" || method === "initialized") return;',
   '  if (method === "ping") { send({ jsonrpc: "2.0", id: id, result: {} }); return; }',
-  '  if (method === "tools/list") { send({ jsonrpc: "2.0", id: id, result: { tools: TOOLS } }); return; }',
+  '  if (method === "tools/list") { send({ jsonrpc: "2.0", id: id, result: { tools: toolsForCurrentState() } }); return; }',
   '  if (method === "tools/call") {',
   "    var p = msg.params || {};",
   "    Promise.resolve(callTool(p.name, p.arguments || {})).then(function (out) {",
@@ -131,7 +154,7 @@ export function ensureOutboundMcpServer(): string {
 }
 
 /** The `mcpServers` config object Claude Code reads via `--mcp-config`. Pure. */
-export function buildOutboundMcpConfig(nodePath: string, serverPath: string, port: string): {
+export function buildOutboundMcpConfig(nodePath: string, serverPath: string, port: string, opts: OutboundMcpOptions = {}): {
   mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
 } {
   return {
@@ -139,7 +162,11 @@ export function buildOutboundMcpConfig(nodePath: string, serverPath: string, por
       [OUTBOUND_MCP_SERVER_NAME]: {
         command: nodePath,
         args: [serverPath],
-        env: { HIVE_DAEMON_PORT: port },
+        env: {
+          HIVE_DAEMON_PORT: port,
+          HIVE_MAIL_LANE_ENABLED: opts.mailLaneEnabled === false ? "0" : "1",
+          HIVE_MESSAGE_LANE_ENABLED: opts.messageLaneEnabled === false ? "0" : "1",
+        },
       },
     },
   };
@@ -150,12 +177,16 @@ export function buildOutboundMcpConfig(nodePath: string, serverPath: string, por
  * (for `--mcp-config`) and the tool names (for `--allowedTools`). `nodePath`
  * defaults to the running node so it's valid in dev and in the packaged bundle.
  */
-export function prepareOutboundMcp(port = process.env.HIVE_DAEMON_PORT ?? "3747", nodePath = process.execPath): {
+export function prepareOutboundMcp(
+  port = process.env.HIVE_DAEMON_PORT ?? "3747",
+  nodePath = process.execPath,
+  opts: OutboundMcpOptions = {},
+): {
   configPath: string;
   toolNames: string[];
 } {
   const serverPath = ensureOutboundMcpServer();
   const configPath = join(mcpDir(), "claude-mcp-config.json");
-  writeFileSync(configPath, JSON.stringify(buildOutboundMcpConfig(nodePath, serverPath, port), null, 2), { mode: 0o600 });
-  return { configPath, toolNames: OUTBOUND_MCP_TOOL_NAMES };
+  writeFileSync(configPath, JSON.stringify(buildOutboundMcpConfig(nodePath, serverPath, port, opts), null, 2), { mode: 0o600 });
+  return { configPath, toolNames: outboundMcpToolNames(opts) };
 }

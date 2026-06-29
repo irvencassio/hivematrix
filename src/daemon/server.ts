@@ -672,13 +672,10 @@ export function createDaemonServer() {
           const d = r?.data as { accessibility?: boolean; screenRecording?: boolean } | undefined;
           if (d) desktopPermissions = { accessibility: !!d.accessibility, screenRecording: !!d.screenRecording };
         }
-        const { isChannelEnabled } = await import("@/lib/messagebee/store");
-        const { probeChatDbAccess } = await import("@/lib/messagebee/imessage");
-        const chatDbProbe = probeChatDbAccess();
-        const messagebee = { enabled: isChannelEnabled(), chatDbReadable: chatDbProbe.ok, chatDbDetail: chatDbProbe.detail };
-        const { isChannelEnabled: mailEnabled } = await import("@/lib/mailbee/store");
-        const { canControlMail } = await import("@/lib/mailbee/applemail");
-        const mailbee = { enabled: mailEnabled(), mailControllable: await canControlMail() };
+        const { getMessagebeeStatus } = await import("@/lib/messagebee/status");
+        const messagebee = getMessagebeeStatus();
+        const { getMailbeeStatus } = await import("@/lib/mailbee/status");
+        const mailbee = await getMailbeeStatus();
         json(res, 200, getOnboardingStatus({ helperBuilt, desktopPermissions, messagebee, mailbee }));
         return;
       }
@@ -891,15 +888,15 @@ export function createDaemonServer() {
 
       // GET /messagebee — channel status (enabled, chat.db readable, allowlist)
       if (req.method === "GET" && urlPath === "/messagebee") {
-        const { isChannelEnabled, listIdentities } = await import("@/lib/messagebee/store");
-        const { probeChatDbAccess } = await import("@/lib/messagebee/imessage");
-        const chatDbProbe = probeChatDbAccess();
-        json(res, 200, {
-          enabled: isChannelEnabled(),
-          chatDbReadable: chatDbProbe.ok,
-          chatDbDetail: chatDbProbe.detail,
-          identities: listIdentities(),
-        });
+        const { getMessagebeeStatus } = await import("@/lib/messagebee/status");
+        json(res, 200, getMessagebeeStatus());
+        return;
+      }
+
+      // POST /messagebee/probe — explicit Messages chat.db readiness test.
+      if (req.method === "POST" && urlPath === "/messagebee/probe") {
+        const { getMessagebeeStatus } = await import("@/lib/messagebee/status");
+        json(res, 200, getMessagebeeStatus({ probe: true }));
         return;
       }
 
@@ -2540,15 +2537,15 @@ export function createDaemonServer() {
 
       // GET /mailbee — channel status (enabled, Mail controllable, allowlist)
       if (req.method === "GET" && urlPath === "/mailbee") {
-        const { isChannelEnabled, listIdentities, trustedDomains, triageAll } = await import("@/lib/mailbee/store");
-        const { canControlMail } = await import("@/lib/mailbee/applemail");
-        json(res, 200, {
-          enabled: isChannelEnabled(),
-          mailControllable: await canControlMail(),
-          identities: listIdentities(),
-          trustedDomains: trustedDomains(),
-          triageAll: triageAll(),
-        });
+        const { getMailbeeStatus } = await import("@/lib/mailbee/status");
+        json(res, 200, await getMailbeeStatus());
+        return;
+      }
+
+      // POST /mailbee/probe — explicit Apple Mail Automation permission test.
+      if (req.method === "POST" && urlPath === "/mailbee/probe") {
+        const { getMailbeeStatus } = await import("@/lib/mailbee/status");
+        json(res, 200, await getMailbeeStatus({ probe: true }));
         return;
       }
 

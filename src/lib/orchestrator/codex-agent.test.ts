@@ -4,7 +4,7 @@ import { renderAttachmentBlock } from "@/lib/tasks/attachments";
 import { buildCodexPrompt, buildCodexExecArgs } from "./codex-agent";
 
 test("buildCodexPrompt prepends the outbound routing block and keeps the task", () => {
-  const prompt = buildCodexPrompt("Email Jane the Q3 numbers.");
+  const prompt = buildCodexPrompt("Email Jane the Q3 numbers.", { mailLaneEnabled: true });
   // routing guidance present
   assert.match(prompt, /\/mailbee\/send/);
   assert.match(prompt, /\/messagebee\/send/);
@@ -18,12 +18,12 @@ test("buildCodexPrompt prepends the outbound routing block and keeps the task", 
 test("the prompt starts with '--' — so codex exec MUST get it after a `--` separator", () => {
   // Regression guard for the "unexpected argument '--- Outbound Channels …'"
   // failure: the prompt begins with dashes, which clap rejects as a flag.
-  const prompt = buildCodexPrompt("do a thing");
+  const prompt = buildCodexPrompt("do a thing", { mailLaneEnabled: true });
   assert.ok(prompt.startsWith("--"), "prompt starts with dashes (the hazard)");
 });
 
 test("buildCodexExecArgs places the prompt after a `--` end-of-options separator", () => {
-  const prompt = buildCodexPrompt("ship it");
+  const prompt = buildCodexPrompt("ship it", { mailLaneEnabled: true });
   const args = buildCodexExecArgs({ codexModel: "gpt-5.5-codex", projectPath: "/tmp/p", prompt });
   // The last two argv entries are exactly: "--", <prompt>
   assert.equal(args[args.length - 2], "--", "`--` precedes the prompt");
@@ -46,9 +46,27 @@ test("buildCodexPrompt keeps formatted attachment paths in the task section", ()
   const attachmentBlock = renderAttachmentBlock([
     { filename: "shot.png", path: "/Users/me/.hivematrix/uploads/id-shot.png" },
   ]);
-  const prompt = buildCodexPrompt(`Please inspect this image.\n\n${attachmentBlock}`);
+  const prompt = buildCodexPrompt(`Please inspect this image.\n\n${attachmentBlock}`, { mailLaneEnabled: true });
 
   assert.ok(prompt.includes(attachmentBlock));
   assert.match(prompt, /--- Your task ---[\s\S]*path: \/Users\/me\/\.hivematrix\/uploads\/id-shot\.png/);
   assert.ok(prompt.indexOf("--- Your task ---") < prompt.indexOf("id-shot.png"));
+});
+
+test("buildCodexPrompt omits Mail Lane guidance when Mail Lane is disabled", () => {
+  const prompt = buildCodexPrompt("Summarize the dashboard.", { mailLaneEnabled: false });
+  assert.match(prompt, /Mail Lane is disabled/i);
+  assert.match(prompt, /\/messagebee\/send/);
+  assert.doesNotMatch(prompt, /\/mailbee\/send/);
+  assert.doesNotMatch(prompt, /\/mailbee\/draft/);
+  assert.doesNotMatch(prompt, /Reading & managing email/);
+  assert.match(prompt, /--- Your task ---\nSummarize the dashboard\./);
+});
+
+test("buildCodexPrompt omits Message Lane guidance when Message Lane is disabled", () => {
+  const prompt = buildCodexPrompt("Summarize the dashboard.", { messageLaneEnabled: false });
+  assert.match(prompt, /Message Lane is disabled/i);
+  assert.doesNotMatch(prompt, /\/messagebee\/send/);
+  assert.doesNotMatch(prompt, /Send an SMS\/iMessage/);
+  assert.match(prompt, /--- Your task ---\nSummarize the dashboard\./);
 });

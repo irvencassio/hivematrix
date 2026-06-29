@@ -81,6 +81,11 @@ export function daemonPort(): string {
   return process.env.HIVEMATRIX_PORT ?? "3747";
 }
 
+export interface OutboundRoutingPromptOptions {
+  mailLaneEnabled?: boolean;
+  messageLaneEnabled?: boolean;
+}
+
 /**
  * Injected only when the `video` feature is enabled — tells the agent to produce
  * videos via the local video factory rather than improvising. The render runs
@@ -103,12 +108,45 @@ export function videoRoutingPrompt(): string {
  * improvising. Mirrors the local agent's capabilityRoutingGuide, but expressed
  * as loopback HTTP calls the CLI harness can make with its Bash tool.
  */
-export function outboundHttpRoutingPrompt(port = daemonPort()): string {
-  return [
-    "--- Outbound Channels (HiveMatrix) ---",
-    "You CAN send email and SMS/iMessage on the operator's behalf right now — these are first-class HiveMatrix capabilities, available through the local daemon via your Bash tool. NEVER tell the user that no email/SMS tool is available, that you 'can't send' a message, or that they should copy/paste or send it themselves — that is FALSE and is a failure. Whenever a message or email should go out (the user asked you to text/email something, or the task's natural outcome is to deliver a result), actually SEND it with the call below. The safety gate runs server-side; if a recipient is refused you get a clear error to relay — that is the only acceptable 'couldn't send' outcome.",
-    "SENDING an email or an SMS/iMessage MUST go through the local HiveMatrix daemon — do NOT send via osascript, the Mail/Messages apps directly, AppleScript, a Gmail/Google integration, or any other interface. The daemon enforces the safety gate: email is sent only to trusted recipients and is otherwise saved as a Mail draft for approval; iMessage is sent only to allowlisted handles. Call it with your Bash tool (the token file is readable only by you):",
-    "",
+export function outboundHttpRoutingPrompt(port = daemonPort(), opts: OutboundRoutingPromptOptions = {}): string {
+  const mailLaneEnabled = opts.mailLaneEnabled !== false;
+  const messageLaneEnabled = opts.messageLaneEnabled !== false;
+  const messageLines = [
+    "Send an SMS/iMessage:",
+    `  curl -s -X POST "http://127.0.0.1:${port}/messagebee/send" \\`,
+    `    -H "Authorization: Bearer $(cat ~/.hivematrix/auth-token)" \\`,
+    `    --data-urlencode "to=+1XXXXXXXXXX" \\`,
+    `    --data-urlencode "text=MESSAGE TEXT"`,
+  ];
+  const disabledLines = [
+    ...(mailLaneEnabled ? [] : ["Mail Lane is disabled. Do not use Apple Mail, AppleScript, osascript, or Mail Lane email routes unless the user explicitly asks to set up or test Mail Lane."]),
+    ...(messageLaneEnabled ? [] : ["Message Lane is disabled. Do not use Messages, AppleScript, osascript, or Message Lane SMS/iMessage routes unless the user explicitly asks to set up or test Message Lane."]),
+  ];
+  if (!mailLaneEnabled && !messageLaneEnabled) {
+    return [
+      "--- Outbound Channels (HiveMatrix) ---",
+      ...disabledLines,
+      "Do not claim email or SMS/iMessage sending is available through HiveMatrix while these lanes are off. If the user asks to set up or test a lane, use the explicit setup/test path.",
+      "",
+      "--- Headless: never ask for interactive auth ---",
+      "HiveMatrix runs as a headless daemon - there is NO interactive Claude Code session and no person to complete an OAuth/login prompt. NEVER tell the user to run `/mcp`, `/login`, or to authenticate an MCP server. If a tool would need auth you cannot complete non-interactively, do NOT request it.",
+    ].join("\n");
+  }
+  if (!mailLaneEnabled) {
+    return [
+      "--- Outbound Channels (HiveMatrix) ---",
+      "You CAN send SMS/iMessage on the operator's behalf right now through the local daemon via your Bash tool. NEVER tell the user that no SMS tool is available, that you can't send a message, or that they should copy/paste or send it themselves. The safety gate runs server-side; if a recipient is refused you get a clear error to relay.",
+      ...disabledLines,
+      "",
+      ...messageLines,
+      "",
+      'Each call returns JSON {"ok", "message"}. Read "message" and relay the outcome verbatim. For a long text with newlines or quotes, write it to a temp file and pass --data-urlencode "text@/tmp/hive_text.txt".',
+      "",
+      "--- Headless: never ask for interactive auth ---",
+      "HiveMatrix runs as a headless daemon - there is NO interactive Claude Code session and no person to complete an OAuth/login prompt. NEVER tell the user to run `/mcp`, `/login`, or to authenticate an MCP server. If a tool would need auth you cannot complete non-interactively, do NOT request it.",
+    ].join("\n");
+  }
+  const mailLines = [
     "Send an email:",
     `  curl -s -X POST "http://127.0.0.1:${port}/mailbee/send" \\`,
     `    -H "Authorization: Bearer $(cat ~/.hivematrix/auth-token)" \\`,
@@ -119,12 +157,33 @@ export function outboundHttpRoutingPrompt(port = daemonPort()): string {
     "Save an email as a draft only (never sends): identical, but POST to /mailbee/draft.",
     "",
     'To ATTACH files (images, docs on this machine), add a repeated --data-urlencode "attachment=/ABSOLUTE/PATH" for each file (e.g. two: --data-urlencode "attachment=/Users/you/a.png" --data-urlencode "attachment=/Users/you/b.png"). Mail Lane attaches them through Apple Mail — you do NOT need Gmail or any external account to send files.',
+  ];
+  if (!messageLaneEnabled) {
+    return [
+      "--- Outbound Channels (HiveMatrix) ---",
+      "You CAN send email on the operator's behalf right now through the local daemon via your Bash tool. NEVER tell the user that no email tool is available, that you can't send an email, or that they should copy/paste or send it themselves. The safety gate runs server-side; if a recipient is refused you get a clear error to relay.",
+      "SENDING an email MUST go through the local HiveMatrix daemon — do NOT send via osascript, the Mail app directly, AppleScript, a Gmail/Google integration, or any other interface. The daemon enforces the safety gate: email is sent only to trusted recipients and is otherwise saved as a Mail draft for approval. Call it with your Bash tool (the token file is readable only by you):",
+      ...disabledLines,
+      "",
+      ...mailLines,
+      "",
+      'Each call returns JSON {"ok", "message"}. Read "message" and relay the outcome verbatim (it tells you whether the email was sent or drafted-for-approval, or whether a recipient was refused). For a long body with newlines or quotes, write it to a temp file and pass --data-urlencode "body@/tmp/hive_body.txt".',
+      "",
+      "--- Reading & managing email ---",
+      "To READ, SEARCH, organize, or DELETE email, drive the local Apple Mail app directly with AppleScript via your Bash tool (osascript). That is the correct, private path here — the send-gate above governs only SENDING new mail, not managing the mailbox. Do NOT use a Gmail/Google MCP, web Gmail, IMAP, or any cloud-email integration; HiveMatrix manages mail through the Mail app on THIS machine. For destructive bulk actions (deleting many messages), MOVE the matching messages to the Trash mailbox (recoverable) rather than permanently erasing them, and report the count + match criteria so the operator can confirm.",
+      "",
+      "--- Headless: never ask for interactive auth ---",
+      "HiveMatrix runs as a headless daemon — there is NO interactive Claude Code session and no person to complete an OAuth/login prompt. NEVER tell the user to run `/mcp`, `/login`, or to authenticate an MCP server (e.g. a claude.ai Gmail connector). If a tool would need auth you cannot complete non-interactively, do NOT request it — use the local Apple Mail / daemon path above instead, or state the limitation plainly and stop.",
+    ].join("\n");
+  }
+  return [
+    "--- Outbound Channels (HiveMatrix) ---",
+    "You CAN send email and SMS/iMessage on the operator's behalf right now — these are first-class HiveMatrix capabilities, available through the local daemon via your Bash tool. NEVER tell the user that no email/SMS tool is available, that you 'can't send' a message, or that they should copy/paste or send it themselves — that is FALSE and is a failure. Whenever a message or email should go out (the user asked you to text/email something, or the task's natural outcome is to deliver a result), actually SEND it with the call below. The safety gate runs server-side; if a recipient is refused you get a clear error to relay — that is the only acceptable 'couldn't send' outcome.",
+    "SENDING an email or an SMS/iMessage MUST go through the local HiveMatrix daemon — do NOT send via osascript, the Mail/Messages apps directly, AppleScript, a Gmail/Google integration, or any other interface. The daemon enforces the safety gate: email is sent only to trusted recipients and is otherwise saved as a Mail draft for approval; iMessage is sent only to allowlisted handles. Call it with your Bash tool (the token file is readable only by you):",
     "",
-    "Send an SMS/iMessage:",
-    `  curl -s -X POST "http://127.0.0.1:${port}/messagebee/send" \\`,
-    `    -H "Authorization: Bearer $(cat ~/.hivematrix/auth-token)" \\`,
-    `    --data-urlencode "to=+1XXXXXXXXXX" \\`,
-    `    --data-urlencode "text=MESSAGE TEXT"`,
+    ...mailLines,
+    "",
+    ...messageLines,
     "",
     'Each call returns JSON {"ok", "message"}. Read "message" and relay the outcome verbatim (it tells you whether the email was sent or drafted-for-approval, or whether a recipient was refused). For a long body with newlines or quotes, write it to a temp file and pass --data-urlencode "body@/tmp/hive_body.txt".',
     "",

@@ -29,6 +29,302 @@ test("Mermaid browser asset is served same-origin without a token", async (t) =>
   assert.match(await res.text(), /mermaid/i);
 });
 
+test("GET /mailbee is passive when Mail Lane is disabled", async (t) => {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-mail-passive-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  const { _setMailbeeStatusDepsForTests } = await import("@/lib/mailbee/status");
+  _resetDbForTests();
+  let probeCalls = 0;
+  _setMailbeeStatusDepsForTests({
+    canControlMail: async () => {
+      probeCalls++;
+      throw new Error("passive /mailbee must not probe Mail.app");
+    },
+  });
+
+  t.after(() => {
+    _setMailbeeStatusDepsForTests(null);
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/mailbee`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.enabled, false);
+  assert.equal(body.mailControllable, false);
+  assert.equal(body.mailProbeSkipped, true);
+  assert.equal(body.mailProbeReason, "channel_disabled");
+  assert.equal(probeCalls, 0);
+});
+
+test("GET /onboarding is passive when Mail Lane is disabled", async (t) => {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-onboarding-mail-passive-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  const { _setMailbeeStatusDepsForTests } = await import("@/lib/mailbee/status");
+  _resetDbForTests();
+  let probeCalls = 0;
+  _setMailbeeStatusDepsForTests({
+    canControlMail: async () => {
+      probeCalls++;
+      throw new Error("passive /onboarding must not probe Mail.app");
+    },
+  });
+
+  t.after(() => {
+    _setMailbeeStatusDepsForTests(null);
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/onboarding`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { steps: Array<{ id: string; detail: string }> };
+  const mail = body.steps.find((step) => step.id === "mailbee");
+  assert.ok(mail);
+  assert.match(mail.detail, /disabled/i);
+  assert.equal(probeCalls, 0);
+});
+
+test("POST /mailbee/probe is an explicit Mail.app probe", async (t) => {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-mail-probe-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  const { _setMailbeeStatusDepsForTests } = await import("@/lib/mailbee/status");
+  _resetDbForTests();
+  let probeCalls = 0;
+  _setMailbeeStatusDepsForTests({
+    canControlMail: async () => {
+      probeCalls++;
+      return true;
+    },
+  });
+
+  t.after(() => {
+    _setMailbeeStatusDepsForTests(null);
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/mailbee/probe`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.mailControllable, true);
+  assert.equal(body.mailProbeSkipped, false);
+  assert.equal(probeCalls, 1);
+});
+
+test("GET /messagebee is passive when Message Lane is disabled", async (t) => {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-message-passive-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  const { _setMessagebeeStatusDepsForTests } = await import("@/lib/messagebee/status");
+  _resetDbForTests();
+  let probeCalls = 0;
+  _setMessagebeeStatusDepsForTests({
+    probeChatDbAccess: () => {
+      probeCalls++;
+      throw new Error("passive /messagebee must not probe chat.db");
+    },
+  });
+
+  t.after(() => {
+    _setMessagebeeStatusDepsForTests(null);
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/messagebee`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.enabled, false);
+  assert.equal(body.chatDbReadable, false);
+  assert.equal(body.chatDbProbeSkipped, true);
+  assert.equal(body.chatDbProbeReason, "channel_disabled");
+  assert.equal(probeCalls, 0);
+});
+
+test("GET /onboarding is passive for Message Lane when disabled", async (t) => {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-onboarding-message-passive-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  const { _setMessagebeeStatusDepsForTests } = await import("@/lib/messagebee/status");
+  _resetDbForTests();
+  let probeCalls = 0;
+  _setMessagebeeStatusDepsForTests({
+    probeChatDbAccess: () => {
+      probeCalls++;
+      throw new Error("passive /onboarding must not probe chat.db");
+    },
+  });
+
+  t.after(() => {
+    _setMessagebeeStatusDepsForTests(null);
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/onboarding`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { steps: Array<{ id: string; detail: string }> };
+  const message = body.steps.find((step) => step.id === "messagebee");
+  assert.ok(message);
+  assert.match(message.detail, /disabled/i);
+  assert.equal(probeCalls, 0);
+});
+
+test("POST /messagebee/probe is an explicit chat.db probe", async (t) => {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-message-probe-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  const { _setMessagebeeStatusDepsForTests } = await import("@/lib/messagebee/status");
+  _resetDbForTests();
+  let probeCalls = 0;
+  _setMessagebeeStatusDepsForTests({
+    probeChatDbAccess: () => {
+      probeCalls++;
+      return { ok: true, detail: "Messages database readable" };
+    },
+  });
+
+  t.after(() => {
+    _setMessagebeeStatusDepsForTests(null);
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/messagebee/probe`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.chatDbReadable, true);
+  assert.equal(body.chatDbProbeSkipped, false);
+  assert.equal(probeCalls, 1);
+});
+
+test("POST /messagebee/send refuses while Message Lane is disabled", async (t) => {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-message-send-disabled-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  t.after(() => {
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/messagebee/send`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ to: "+15555550123", text: "hello" }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.ok, false);
+  assert.match(String(body.message), /Message Lane is disabled/i);
+});
+
 test("command project paths resolve from the current user home", () => {
   assert.equal(
     normalizeHomeProjectPath("~/hivematrix", "/Users/example"),

@@ -5,6 +5,7 @@ import {
   OUTBOUND_MCP_SERVER_NAME,
   OUTBOUND_MCP_SERVER_JS,
   buildOutboundMcpConfig,
+  outboundMcpToolNames,
 } from "./outbound-mcp";
 
 test("tool names are namespaced under the hivematrix MCP server", () => {
@@ -16,12 +17,31 @@ test("tool names are namespaced under the hivematrix MCP server", () => {
   ]);
 });
 
+test("tool names omit Mail Lane tools when Mail Lane is disabled", () => {
+  assert.deepEqual(outboundMcpToolNames({ mailLaneEnabled: false }), [
+    "mcp__hivematrix__send_imessage",
+  ]);
+});
+
+test("tool names omit Message Lane tools when Message Lane is disabled", () => {
+  assert.deepEqual(outboundMcpToolNames({ messageLaneEnabled: false }), [
+    "mcp__hivematrix__send_email",
+    "mcp__hivematrix__draft_email",
+  ]);
+});
+
+test("tool names omit all outbound tools when both lanes are disabled", () => {
+  assert.deepEqual(outboundMcpToolNames({ mailLaneEnabled: false, messageLaneEnabled: false }), []);
+});
+
 test("buildOutboundMcpConfig wires the node command, server arg, and daemon port", () => {
-  const cfg = buildOutboundMcpConfig("/path/to/node", "/p/outbound-server.cjs", "3999");
+  const cfg = buildOutboundMcpConfig("/path/to/node", "/p/outbound-server.cjs", "3999", { mailLaneEnabled: false, messageLaneEnabled: false });
   const s = cfg.mcpServers.hivematrix;
   assert.equal(s.command, "/path/to/node");
   assert.deepEqual(s.args, ["/p/outbound-server.cjs"]);
   assert.equal(s.env.HIVE_DAEMON_PORT, "3999");
+  assert.equal(s.env.HIVE_MAIL_LANE_ENABLED, "0");
+  assert.equal(s.env.HIVE_MESSAGE_LANE_ENABLED, "0");
 });
 
 test("embedded server proxies the three trust-gated daemon routes", () => {
@@ -46,6 +66,18 @@ test("embedded server speaks the JSON-RPC methods Claude's MCP client needs", ()
   // Sends the daemon auth token so the gated endpoints accept the proxied call.
   assert.match(OUTBOUND_MCP_SERVER_JS, /auth-token/);
   assert.match(OUTBOUND_MCP_SERVER_JS, /Bearer/);
+});
+
+test("embedded server can hide and refuse Mail Lane tools when disabled", () => {
+  assert.match(OUTBOUND_MCP_SERVER_JS, /HIVE_MAIL_LANE_ENABLED/);
+  assert.match(OUTBOUND_MCP_SERVER_JS, /Mail Lane is disabled/);
+  assert.match(OUTBOUND_MCP_SERVER_JS, /toolsForCurrentState/);
+});
+
+test("embedded server can hide and refuse Message Lane tools when disabled", () => {
+  assert.match(OUTBOUND_MCP_SERVER_JS, /HIVE_MESSAGE_LANE_ENABLED/);
+  assert.match(OUTBOUND_MCP_SERVER_JS, /Message Lane is disabled/);
+  assert.match(OUTBOUND_MCP_SERVER_JS, /toolsForCurrentState/);
 });
 
 test("embedded server is valid JavaScript (no syntax error in the generated source)", () => {

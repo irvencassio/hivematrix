@@ -454,11 +454,15 @@ export async function spawnAgent(
   generateHookSettings(taskId, projectPath);
 
   const isOps = project ? NO_REPO_LOCK_PROJECTS.has(project) : false;
+  const { isChannelEnabled: isMailLaneEnabled } = await import("@/lib/mailbee/store");
+  const { isChannelEnabled: isMessageLaneEnabled } = await import("@/lib/messagebee/store");
+  const mailLaneEnabled = isMailLaneEnabled();
+  const messageLaneEnabled = isMessageLaneEnabled();
   // First-class outbound tools (Message Lane/Mail Lane) via a bundled MCP server, so
   // SENDING is a real tool call the harness can't talk itself out of (it once
   // claimed "No SMS tool available" and punted). The server proxies the same
   // trust-gated daemon endpoints; auto-approve them since the gate is server-side.
-  const outboundMcp = prepareOutboundMcp(process.env.HIVEMATRIX_PORT ?? "3747");
+  const outboundMcp = prepareOutboundMcp(process.env.HIVEMATRIX_PORT ?? "3747", process.execPath, { mailLaneEnabled, messageLaneEnabled });
   const tools = [...(isOps ? getOpsAllowedTools() : ALLOWED_TOOLS), ...outboundMcp.toolNames];
 
   // Prepend workflow skill prefix if applicable
@@ -513,7 +517,7 @@ export async function spawnAgent(
   // Outbound routing: teach the CLI agent to send email/SMS through the daemon's
   // trust-gated endpoints (its Bash tool can reach loopback) instead of
   // improvising with osascript. Mirrors the local agent's capability routing.
-  const outboundRouting = outboundHttpRoutingPrompt();
+  const outboundRouting = outboundHttpRoutingPrompt(undefined, { mailLaneEnabled, messageLaneEnabled });
   args.push("--append-system-prompt", outboundRouting);
   overheadBytes.agentGuide += Buffer.byteLength(outboundRouting);
 

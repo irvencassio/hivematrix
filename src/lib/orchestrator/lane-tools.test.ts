@@ -249,6 +249,19 @@ test("messagebee_send refuses a non-allowlisted handle (no send)", async () => {
   assert.doesNotMatch(out, /MessageBee/);
 });
 
+test("messagebee_send refuses while Message Lane is disabled before sending", async () => {
+  const calls: string[] = [];
+  const io: MessageBeeSendIO = {
+    isChannelEnabled: () => false,
+    isAllowed: () => { calls.push("allow"); return true; },
+    sendIMessage: async () => { calls.push("send"); return true; },
+    recordOutbound: () => { calls.push("record"); },
+  };
+  const out = await executeMessageBeeSend({ to: "+14155551234", text: "hi" }, io);
+  assert.deepEqual(calls, []);
+  assert.match(out, /Message Lane is disabled/i);
+});
+
 test("messagebee_send forwards a voice-note attachment with no text required", async () => {
   let gotAttachments: string[] | undefined;
   const io: MessageBeeSendIO = {

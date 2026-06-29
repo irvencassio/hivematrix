@@ -32,8 +32,8 @@ test("parseOutboundFields returns empty object on junk", () => {
   assert.deepEqual(parseOutboundFields("application/json", "not json at all {{{"), {});
 });
 
-test("outboundHttpRoutingPrompt names the endpoints, the token, and gates SENDING", () => {
-  const p = outboundHttpRoutingPrompt("3999");
+test("outboundHttpRoutingPrompt names the endpoints, the token, and gates SENDING when Mail Lane is enabled", () => {
+  const p = outboundHttpRoutingPrompt("3999", { mailLaneEnabled: true });
   assert.match(p, /\/mailbee\/send/);
   assert.match(p, /\/mailbee\/draft/);
   assert.match(p, /\/messagebee\/send/);
@@ -47,14 +47,14 @@ test("outboundHttpRoutingPrompt affirms the capability and forbids the 'no SMS t
   // Regression: a Claude-harness task that should have texted a result instead
   // said "No SMS tool available in this setup" and told the user to send it
   // themselves — a false denial of an existing, allowlisted Message Lane channel.
-  const p = outboundHttpRoutingPrompt("3999");
+  const p = outboundHttpRoutingPrompt("3999", { mailLaneEnabled: true });
   assert.match(p, /You CAN send email and SMS\/iMessage/i);
   assert.match(p, /NEVER tell the user that no email\/SMS tool is available/i);
   assert.match(p, /send it themselves/i);
 });
 
 test("outboundHttpRoutingPrompt covers email management, attachments, and forbids interactive auth", () => {
-  const p = outboundHttpRoutingPrompt("3999");
+  const p = outboundHttpRoutingPrompt("3999", { mailLaneEnabled: true });
   // Managing email = local Apple Mail, never a Gmail MCP.
   assert.match(p, /Reading & managing email/);
   assert.match(p, /do NOT use a Gmail\/Google MCP/i);
@@ -68,6 +68,34 @@ test("outboundHttpRoutingPrompt covers email management, attachments, and forbid
   // Never tell the user to run /mcp (headless daemon).
   assert.match(p, /never ask for interactive auth/i);
   assert.match(p, /NEVER tell the user to run `\/mcp`/);
+});
+
+test("outboundHttpRoutingPrompt omits Mail Lane instructions when Mail Lane is disabled", () => {
+  const p = outboundHttpRoutingPrompt("3999", { mailLaneEnabled: false });
+  assert.match(p, /Mail Lane is disabled/i);
+  assert.match(p, /\/messagebee\/send/);
+  assert.doesNotMatch(p, /\/mailbee\/send/);
+  assert.doesNotMatch(p, /\/mailbee\/draft/);
+  assert.doesNotMatch(p, /Reading & managing email/);
+  assert.doesNotMatch(p, /drive the local Apple Mail app directly/i);
+  assert.doesNotMatch(p, /Mail Lane attaches them through Apple Mail/);
+});
+
+test("outboundHttpRoutingPrompt omits Message Lane instructions when Message Lane is disabled", () => {
+  const p = outboundHttpRoutingPrompt("3999", { messageLaneEnabled: false });
+  assert.match(p, /Message Lane is disabled/i);
+  assert.match(p, /\/mailbee\/send/);
+  assert.doesNotMatch(p, /\/messagebee\/send/);
+  assert.doesNotMatch(p, /Send an SMS\/iMessage/);
+});
+
+test("outboundHttpRoutingPrompt omits both outbound lanes when both are disabled", () => {
+  const p = outboundHttpRoutingPrompt("3999", { mailLaneEnabled: false, messageLaneEnabled: false });
+  assert.match(p, /Mail Lane is disabled/i);
+  assert.match(p, /Message Lane is disabled/i);
+  assert.doesNotMatch(p, /\/mailbee\/send/);
+  assert.doesNotMatch(p, /\/mailbee\/draft/);
+  assert.doesNotMatch(p, /\/messagebee\/send/);
 });
 
 test("parseOutboundFields collects attachments (form-repeated + JSON array)", () => {
