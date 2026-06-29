@@ -91,26 +91,39 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .pill.offline { color: var(--err); border-color: var(--err); }
   select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
     border-radius: 6px; padding: 3px 8px; font-size: 11px; }
-  main { display: grid; grid-template-columns: 300px 1fr 320px; height: calc(100vh - 44px); }
+  main { --col-left: 300px; --col-right: 320px; position: relative;
+    display: grid; grid-template-columns: var(--col-left) 1fr var(--col-right); height: calc(100vh - 44px); }
   .col { overflow-y: auto; padding: 12px; backdrop-filter: blur(20px) saturate(160%); -webkit-backdrop-filter: blur(20px) saturate(160%); }
+  /* Draggable dividers on the inner edge of each side rail. Thin absolute
+     overlays pinned to the rail boundary; dragging rewrites --col-left /
+     --col-right (the grid widths), which are persisted in localStorage. */
+  .col-resizer { position: absolute; top: 0; bottom: 0; width: 9px; z-index: 6;
+    cursor: col-resize; touch-action: none; }
+  .col-resizer::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%;
+    width: 2px; transform: translateX(-50%); background: transparent; transition: background .12s ease; }
+  .col-resizer:hover::after, .col-resizer.dragging::after { background: var(--accent); }
+  #resizeLeft { left: var(--col-left); margin-left: -4px; }
+  #resizeRight { right: var(--col-right); margin-right: -4px; }
   /* The task-detail column is a size container so controls respond to the column
      width (rails collapse independently of the window), not the viewport. */
   .col.session { container-type: inline-size; }
   .col.board { border-right: 1px solid var(--border); }
   .col.context { border-left: 1px solid var(--border); background: var(--panel); }
-  main.ctx-collapsed { grid-template-columns: 300px 1fr; }
+  main.ctx-collapsed { grid-template-columns: var(--col-left) 1fr; }
   main.ctx-collapsed .col.context { display: none; }
-  /* Tablet / mid-size window: narrow the side rails so the center keeps usable
-     width (the ◨ context toggle still reclaims it entirely). */
+  main.ctx-collapsed #resizeRight { display: none; }
+  /* Tablet / mid-size window: narrow the default rail widths so the center keeps
+     usable width (the ◨ context toggle still reclaims it entirely). A user's
+     dragged width is an inline style, so it overrides these defaults. */
   @media (min-width: 761px) and (max-width: 1080px) {
-    main { grid-template-columns: 240px 1fr 280px; }
-    main.ctx-collapsed { grid-template-columns: 240px 1fr; }
+    main { --col-left: 240px; --col-right: 280px; }
   }
   /* Narrow screens (remote / iOS webview / small window): stack the three columns
      into one document-flow column instead of crushing the center. */
   @media (max-width: 760px) {
     body { height: auto; overflow: auto; }
     main, main.ctx-collapsed { grid-template-columns: 1fr; height: auto; }
+    .col-resizer { display: none; }
     .col { height: auto; max-height: none; }
     .col.board { border-right: 0; border-bottom: 1px solid var(--border); }
     .col.context { border-left: 0; border-top: 1px solid var(--border); }
@@ -1186,6 +1199,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 </div>
 
 <main>
+  <div class="col-resizer" id="resizeLeft" title="Drag to resize the left panel"></div>
+  <div class="col-resizer" id="resizeRight" title="Drag to resize the right panel"></div>
   <section class="col board">
     <details class="ctx-sec" id="flightsSec" open>
       <summary>Flights <button class="usage-refresh" title="Refresh flights" onclick="event.stopPropagation();loadFlights().then(function(){renderFlightsRail();if(state.selectedFlight)renderFlightDetail(state.selectedFlight);})">↻</button></summary>
@@ -3267,6 +3282,80 @@ function renderOnboarding() {
     abSetup.textContent = o.requiredComplete
       ? "✓ Required setup complete."
       : remaining + " required step" + (remaining === 1 ? "" : "s") + " remaining — see the Setup panel on the dashboard.";
+  }
+}
+
+// Side rails are width-adjustable: drag the divider on a rail's inner edge.
+// Apply any saved widths immediately (the script runs after <main> is parsed)
+// so there's no flash from the default width on reload.
+(function applyColWidths() {
+  try {
+    const m = document.querySelector('main');
+    if (!m) return;
+    const l = parseInt(localStorage.getItem('hm_col_left') || '', 10);
+    const r = parseInt(localStorage.getItem('hm_col_right') || '', 10);
+    if (l >= 180) m.style.setProperty('--col-left', l + 'px');
+    if (r >= 180) m.style.setProperty('--col-right', r + 'px');
+  } catch (e) { /* ignore */ }
+})();
+
+function initColResizers() {
+  const main = document.querySelector('main');
+  if (!main) return;
+  const MIN = 180, CENTER_MIN = 240;
+  function widthOf(varName, fallback) {
+    const v = parseFloat(getComputedStyle(main).getPropertyValue(varName));
+    return isNaN(v) ? fallback : v;
+  }
+  function startDrag(side, ev) {
+    ev.preventDefault();
+    const handle = ev.currentTarget;
+    handle.classList.add('dragging');
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    const rect = main.getBoundingClientRect();
+    function clientX(e) { return (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX; }
+    function onMove(e) {
+      const x = clientX(e);
+      if (side === 'left') {
+        const other = main.classList.contains('ctx-collapsed') ? 0 : widthOf('--col-right', 320);
+        const max = rect.width - other - CENTER_MIN;
+        const w = Math.max(MIN, Math.min(x - rect.left, max));
+        main.style.setProperty('--col-left', Math.round(w) + 'px');
+      } else {
+        const other = widthOf('--col-left', 300);
+        const max = rect.width - other - CENTER_MIN;
+        const w = Math.max(MIN, Math.min(rect.right - x, max));
+        main.style.setProperty('--col-right', Math.round(w) + 'px');
+      }
+    }
+    function onUp() {
+      handle.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onUp);
+      try {
+        localStorage.setItem('hm_col_left', String(Math.round(widthOf('--col-left', 300))));
+        localStorage.setItem('hm_col_right', String(Math.round(widthOf('--col-right', 320))));
+      } catch (e) { /* ignore */ }
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onUp);
+  }
+  const lh = document.getElementById('resizeLeft');
+  const rh = document.getElementById('resizeRight');
+  if (lh) {
+    lh.addEventListener('mousedown', (e) => startDrag('left', e));
+    lh.addEventListener('touchstart', (e) => startDrag('left', e), { passive: false });
+  }
+  if (rh) {
+    rh.addEventListener('mousedown', (e) => startDrag('right', e));
+    rh.addEventListener('touchstart', (e) => startDrag('right', e), { passive: false });
   }
 }
 
@@ -6389,6 +6478,7 @@ function connectSSE() {
 if (requireToken()) {
   loadModels();
   wireCtxSections();
+  initColResizers();
   mpRegister('d',   'd_path');
   mpRegister('de',  'de_path');
   mpRegister('cmd', 'commandPath');
