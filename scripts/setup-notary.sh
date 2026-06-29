@@ -49,7 +49,7 @@ echo
 
 # Read the password silently — not echoed, not stored anywhere but the keychain.
 printf "Paste the app-specific password (input hidden): "
-read -rs APP_PW
+IFS= read -rs APP_PW || true
 echo
 
 # Defensive trim: strip any whitespace/newlines that came along on paste — a
