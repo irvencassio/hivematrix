@@ -3202,21 +3202,27 @@ export function createDaemonServer() {
         if (!skill) { json(res, 404, { error: "skill not found" }); return; }
         const body = await parseBody(req) as Record<string, unknown>;
         const input = typeof body.input === "string" ? body.input : "";
+        const rawParams = body.params && typeof body.params === "object" && !Array.isArray(body.params)
+          ? body.params as Record<string, unknown> : null;
+        const params = rawParams
+          ? Object.fromEntries(Object.entries(rawParams).map(([k, v]) => [k, typeof v === "string" ? v : String(v ?? "")]))
+          : null;
 
         if (skill.kind === "script") {
           const { runScriptSkill } = await import("@/lib/skills/run-script");
           const cwd = typeof body.path === "string" && body.path.trim() ? body.path.trim() : process.cwd();
-          const r = runScriptSkill(skill, input, { cwd });
+          const r = runScriptSkill(skill, params ? Object.values(params).join(" ") : input, { cwd });
           json(res, r.ok ? 202 : 400, r.ok ? { kind: "script", runId: r.run!.runId } : { error: r.error });
           return;
         }
 
-        const { applySkillInput } = await import("@/lib/skills/contracts");
+        const { applySkillInput, applySkillParams } = await import("@/lib/skills/contracts");
+        const filledBody = params ? applySkillParams(skill.body, params) : applySkillInput(skill.body, input);
         const { Task, generateId } = await import("@/lib/db");
         const task = await Task.create({
           _id: generateId(),
           title: `[skill] ${skill.name}`,
-          description: `Apply this skill:\n\n${applySkillInput(skill.body, input)}`,
+          description: `Apply this skill:\n\n${filledBody}`,
           project: "ops",
           projectPath: process.cwd(),
           profile: typeof body.agentType === "string" ? body.agentType : "developer",

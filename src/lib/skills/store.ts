@@ -9,7 +9,7 @@ import { promises as fs } from "fs";
 import { join } from "path";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import {
-  renderSkillFile, parseSkillFile, skillFilename, skillSlug, skillHasInput,
+  renderSkillFile, parseSkillFile, skillFilename, skillSlug, skillHasInput, extractSkillParams,
   type Skill, type SkillIndexEntry, type SkillHarness, type SkillKind, type SkillInterpreter, type SkillScope, type ScanVerdict,
 } from "./contracts";
 
@@ -51,6 +51,7 @@ export async function listSkills(): Promise<SkillIndexEntry[]> {
     if (skill) out.push({
       name: skill.name, description: skill.description, tags: skill.tags,
       useCount: skill.useCount, compat: skill.compat, hasInput: skillHasInput(skill.body),
+      params: extractSkillParams(skill.body),
       trusted: skill.trusted, kind: skill.kind, scope: skill.scope, signed: !!skill.signature,
       scan: skill.scanVerdict,
     });

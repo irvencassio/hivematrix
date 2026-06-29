@@ -44,6 +44,60 @@ export interface SubscriptionUsageOptions {
   bypassCache?: boolean;
 }
 
+export type UsageStatusColor = "green" | "yellow" | "red";
+
+export const FIVE_HOUR_WINDOW_MS = 5 * 60 * 60 * 1000;
+export const SEVEN_DAY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Classifies a subscription window as green/yellow/red using both the
+ * absolute utilization and the pace relative to elapsed window time.
+ *
+ * Early in a window (< 15% elapsed) a single task spike is expected;
+ * utilization above the per-unit threshold (100 / windowUnits) triggers red.
+ * After that, burn rate relative to expected pace drives the classification,
+ * with an absolute floor at maxAllowable = (100/windowUnits) * (windowUnits - 1)
+ * so a consistently slow burn still warns near the limit.
+ */
+export function classifyWindowStatus(
+  win: SubscriptionWindow,
+  windowDurationMs: number,
+  nowMs?: number,
+): UsageStatusColor {
+  const now = nowMs ?? Date.now();
+  const util = win.utilization;
+
+  if (util >= 90) return "red";
+
+  const resetsMs = new Date(win.resetsAt).getTime();
+  const timeUntilResetMs = resetsMs - now;
+
+  if (timeUntilResetMs <= 0 || windowDurationMs <= 0) {
+    return util >= 80 ? "red" : util >= 60 ? "yellow" : "green";
+  }
+
+  // windowUnits = number of natural periods (days for multi-day, hours for sub-day)
+  const windowUnits = windowDurationMs >= 86400000
+    ? windowDurationMs / 86400000
+    : windowDurationMs / 3600000;
+  const dailyThreshold = 100 / windowUnits;
+  const maxAllowable = dailyThreshold * (windowUnits - 1);
+
+  const elapsedMs = Math.max(0, windowDurationMs - timeUntilResetMs);
+  const elapsedFraction = elapsedMs / windowDurationMs;
+
+  if (elapsedFraction < 0.15) {
+    return util > dailyThreshold ? "red" : "green";
+  }
+
+  const expectedUtil = elapsedFraction * 100;
+  const burnRatio = util / expectedUtil;
+
+  if (burnRatio >= 1.5 || util >= maxAllowable) return "red";
+  if (burnRatio >= 1.25 || util >= 60) return "yellow";
+  return "green";
+}
+
 type SubscriptionExecFileSync = (
   file: string,
   args: readonly string[],

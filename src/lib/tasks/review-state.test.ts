@@ -64,5 +64,9 @@ test("getReviewStateMeta returns distinct labels for review substates", () => {
     label: "Ready for Review",
     tone: "review",
   });
+  assert.deepEqual(getReviewStateMeta("needs_parent_decision"), {
+    label: "Needs Flight decision",
+    tone: "review",
+  });
   assert.equal(getReviewStateMeta(null), null);
 });

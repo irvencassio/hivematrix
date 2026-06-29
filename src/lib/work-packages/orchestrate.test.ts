@@ -9,7 +9,8 @@ process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
 const { _resetDbForTests, getDb, Task } = await import("@/lib/db");
 const { createWorkPackage, getWorkPackage, updateWorkPackageItem, detectStuckState } = await import("./store");
-const { planNextItems, classifyBlockers, startWorkPackage, advanceWorkPackage, tickWorkPackages, reconcileWorkPackage, acceptWorkPackageItem, reconcileStuckFlight } = await import("./orchestrate");
+const { planNextItems, classifyBlockers, startWorkPackage, advanceWorkPackage, tickWorkPackages, reconcileWorkPackage, acceptWorkPackageItem, reconcileStuckFlight, coordinateFlightDecisions } = await import("./orchestrate");
+const { readItemBlocker } = await import("./parent-blocker");
 import type { WorkPackageItem } from "./store";
 import type { ProposedItem } from "@/lib/intake/classify";
 
@@ -93,6 +94,123 @@ test("startWorkPackage promotes draft items to ready, starts only the first writ
   assert.ok(one.createdTaskId);
   assert.equal(two.status, "ready", "second item is ready but waiting on dep + concurrency");
   assert.equal(two.createdTaskId, null);
+});
+
+// ── Flight child autonomy: parent-decision blockers + coordinator ──
+
+function usagePackage(title: string, description: string) {
+  const items: ProposedItem[] = [
+    { title: "Color the usage bar", prompt: "color the usage bar", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+  ];
+  return createWorkPackage({ title, description, project: "hivematrix", projectPath: "/Users/x/coord-" + title, items });
+}
+
+function parentDecisionMarker(b: Record<string, unknown>): string {
+  return [
+    "I read the parent context but a value is unclear.",
+    "<<<NEEDS_PARENT_DECISION",
+    JSON.stringify(b),
+    "NEEDS_PARENT_DECISION>>>",
+    "Awaiting a decision.",
+  ].join("\n");
+}
+
+test("case 3: reconcile records a needs_parent_decision blocker, not a bare operator needs_input", async () => {
+  const pkg = usagePackage("C3", "For the 7-day window color the bar; day 1 at 15% red (14.3% per-day).");
+  await startWorkPackage(pkg.id);
+  const item = getWorkPackage(pkg.id)!.items[0];
+  assert.equal(item.status, "running");
+
+  await Task.findByIdAndUpdate(item.createdTaskId!, {
+    status: "review",
+    reviewState: "needs_input",
+    output: { summary: parentDecisionMarker({ ambiguity: "What period are you referring to?", parentExcerpt: "", options: ["7-day", "5-hour"], recommendedDefault: "7-day", confidence: 0.3 }) },
+  });
+  await reconcileWorkPackage(pkg.id);
+
+  const after = getWorkPackage(pkg.id)!.items[0];
+  assert.equal(after.status, "review");
+  const read = readItemBlocker(after.blocker);
+  assert.ok(read && read.kind === "parent", "structured parent-decision blocker recorded, not a plain needs_input");
+  assert.equal(read!.payload.ambiguity, "What period are you referring to?");
+});
+
+test("case 4: coordinator auto-resolves a 'what period?' blocker from the parent's 7-day window and requeues", async () => {
+  const pkg = usagePackage("C4", "For the 7-day window color the usage bar. Day 1 at 15% → red (14.3% per-day). Day 7 at 82% → green (85.7%).");
+  await startWorkPackage(pkg.id);
+  const item = getWorkPackage(pkg.id)!.items[0];
+  await Task.findByIdAndUpdate(item.createdTaskId!, {
+    status: "review",
+    reviewState: "needs_input",
+    output: { summary: parentDecisionMarker({ ambiguity: "What period are you referring to?", parentExcerpt: "", options: [], recommendedDefault: "", confidence: 0.1 }) },
+  });
+
+  // advance = reconcile (record blocker) + coordinate (resolve + requeue), no operator input.
+  await advanceWorkPackage(pkg.id);
+
+  const after = getWorkPackage(pkg.id)!.items[0];
+  assert.equal(after.status, "running", "item requeued to running");
+  assert.equal(after.blocker, null, "blocker cleared");
+  const task = await Task.findById(item.createdTaskId!);
+  assert.equal(String((task as Record<string, unknown>).status), "backlog", "child task requeued for more work");
+  const desc = String((task as Record<string, unknown>).description);
+  assert.match(desc, /7-day/);
+  assert.match(desc, /14\.3%/);
+  assert.match(desc, /Flight coordinator/);
+});
+
+test("case 5: coordinator escalates a product-facing blocker to the operator", async () => {
+  const pkg = usagePackage("C5", "Build a pricing page for the app.");
+  await startWorkPackage(pkg.id);
+  const item = getWorkPackage(pkg.id)!.items[0];
+  await Task.findByIdAndUpdate(item.createdTaskId!, {
+    status: "review",
+    reviewState: "needs_input",
+    output: { summary: parentDecisionMarker({ ambiguity: "Which pricing tiers should we show?", parentExcerpt: "", options: ["$9/$29/$99", "single $49"], recommendedDefault: "$9/$29/$99", confidence: 0.2 }) },
+  });
+
+  await advanceWorkPackage(pkg.id);
+
+  const after = getWorkPackage(pkg.id)!.items[0];
+  assert.equal(after.status, "review", "stays in review for the operator");
+  const read = readItemBlocker(after.blocker);
+  assert.ok(read && read.kind === "operator", "escalated to an operator decision");
+  assert.match(read!.payload.question, /pricing tiers/);
+  // The child task is NOT requeued — it waits for the operator.
+  const task = await Task.findById(item.createdTaskId!);
+  assert.equal(String((task as Record<string, unknown>).status), "review");
+});
+
+test("reconcile clears a stale structured decision blocker when an item is requeued to running", async () => {
+  const pkg = usagePackage("C7", "Build a pricing page for the app.");
+  await startWorkPackage(pkg.id);
+  const item = getWorkPackage(pkg.id)!.items[0];
+  // Escalate to the operator first.
+  await Task.findByIdAndUpdate(item.createdTaskId!, {
+    status: "review",
+    reviewState: "needs_input",
+    output: { summary: parentDecisionMarker({ ambiguity: "Which pricing tiers should we show?", parentExcerpt: "", options: ["a", "b"], recommendedDefault: "a", confidence: 0.2 }) },
+  });
+  await advanceWorkPackage(pkg.id);
+  assert.equal(readItemBlocker(getWorkPackage(pkg.id)!.items[0].blocker)?.kind, "operator");
+
+  // Operator replies → task requeued to backlog; reconcile must drop the sentinel.
+  await Task.findByIdAndUpdate(item.createdTaskId!, { status: "backlog", reviewState: null });
+  await reconcileWorkPackage(pkg.id);
+  const after = getWorkPackage(pkg.id)!.items[0];
+  assert.equal(after.status, "running");
+  assert.equal(after.blocker, null, "structured decision blocker cleared on requeue");
+});
+
+test("coordinateFlightDecisions ignores plain failure blockers and already-escalated items", async () => {
+  const pkg = usagePackage("C6", "Make it nicer.");
+  await startWorkPackage(pkg.id);
+  const item = getWorkPackage(pkg.id)!.items[0];
+  await Task.findByIdAndUpdate(item.createdTaskId!, { status: "failed", error: "agent crashed" });
+  await reconcileWorkPackage(pkg.id);
+  const r = await coordinateFlightDecisions(pkg.id);
+  assert.deepEqual(r.requeued, []);
+  assert.deepEqual(r.escalated, []);
 });
 
 test("advanceWorkPackage starts the dependent item after the first completes, then finishes", async () => {

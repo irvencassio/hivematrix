@@ -84,6 +84,8 @@ export interface SkillIndexEntry {
   compat: SkillHarness[];
   /** True when the skill body has a {{input}} placeholder (takes text input). */
   hasInput: boolean;
+  /** Ordered list of unique {{param}} names found in the skill body. */
+  params?: string[];
   trusted: boolean;
   kind: SkillKind;
   /** Provenance (optional): sharing scope + whether it carries a signature. */
@@ -106,6 +108,25 @@ export function skillHasInput(body: string): boolean {
 export function applySkillInput(body: string, input: string): string {
   if (skillHasInput(body)) return body.replace(/\{\{\s*input\s*\}\}/gi, input);
   return input.trim() ? `${body.trim()}\n\n--- Input ---\n${input.trim()}` : body;
+}
+
+/** Extract unique {{param}} names from a skill body, in order of first appearance. */
+export function extractSkillParams(body: string): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const m of body.matchAll(/\{\{\s*(\w+)\s*\}\}/gi)) {
+    const name = m[1].toLowerCase();
+    if (!seen.has(name)) { seen.add(name); result.push(name); }
+  }
+  return result;
+}
+
+/** Substitute all {{key}} placeholders with values from params; unmatched keys stay as-is. */
+export function applySkillParams(body: string, params: Record<string, string>): string {
+  return body.replace(/\{\{\s*(\w+)\s*\}\}/gi, (match, name) => {
+    const val = params[name.toLowerCase()];
+    return val !== undefined ? val : match;
+  });
 }
 
 function parseCompat(raw: string | undefined): SkillHarness[] {

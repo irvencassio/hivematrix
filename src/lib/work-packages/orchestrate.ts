@@ -24,6 +24,15 @@ import {
   type WorkPackageItem,
 } from "./store";
 import { notifySelfPacedLoop, getLoop } from "./flight-loop-store";
+import {
+  parseParentDecisionBlocker,
+  serializeParentBlocker,
+  serializeOperatorEscalation,
+  readItemBlocker,
+  type ParentDecisionBlocker,
+} from "./parent-blocker";
+import { resolveParentDecision } from "./coordinator";
+import { appendCoordinatorAnswer } from "@/lib/tasks/reply-continuation";
 import type { IntakeActiveTask } from "@/lib/intake/classify";
 
 /** A writer item mutates the repo working tree; worktree/safe items do not. */
@@ -80,6 +89,30 @@ export function classifyBlockers(items: WorkPackageItem[], activeSameProject: In
   return { review, held, dependency, activeWriter, noReadyItems: !hasReady };
 }
 
+/**
+ * Pull a structured needs_parent_decision blocker out of a child task's output,
+ * if the worker emitted the fenced NEEDS_PARENT_DECISION marker. Tolerant of the
+ * output being a raw string or an object with a text/summary/message field.
+ */
+function extractParentDecisionFromTask(task: unknown): ParentDecisionBlocker | null {
+  const t = task as Record<string, unknown>;
+  const candidates: string[] = [];
+  const out = t.output;
+  if (typeof out === "string") candidates.push(out);
+  else if (out && typeof out === "object") {
+    for (const k of ["summary", "text", "message", "result"]) {
+      const v = (out as Record<string, unknown>)[k];
+      if (typeof v === "string") candidates.push(v);
+    }
+  }
+  if (typeof t.error === "string") candidates.push(t.error);
+  for (const c of candidates) {
+    const pd = parseParentDecisionBlocker(c);
+    if (pd) return pd;
+  }
+  return null;
+}
+
 /** Map a child task's status onto its package item's status. */
 function itemStatusForTask(taskStatus: string): PackageStatus | null {
   switch (taskStatus) {
@@ -126,9 +159,20 @@ export async function reconcileWorkPackage(id: string): Promise<void> {
     const commitHash = output && typeof output === "object" ? (output as Record<string, unknown>).commitHash : undefined;
     const error = (task as Record<string, unknown>).error;
     // Set blocker when failing; clear it when leaving failed (retry); preserve otherwise.
-    const newBlocker = next === "failed" && typeof error === "string"
+    let newBlocker = next === "failed" && typeof error === "string"
       ? error
       : (item.status === "failed" ? null : item.blocker);
+    // A child that emitted a structured parent-decision marker is recorded as a
+    // needs_parent_decision blocker for the Flight coordinator — NOT left as a bare
+    // operator needs_input. (Don't clobber an existing structured/operator blocker.)
+    if (next === "review" && !readItemBlocker(item.blocker)) {
+      const pd = extractParentDecisionFromTask(task);
+      if (pd) newBlocker = serializeParentBlocker(pd);
+    } else if (next === "running" && readItemBlocker(item.blocker)) {
+      // Leaving review back into work (operator reply / coordinator requeue) — drop
+      // the structured decision blocker so it never lingers on an active item.
+      newBlocker = null;
+    }
     db.prepare(
       "UPDATE work_package_items SET status = ?, commitHash = COALESCE(?, commitHash), blocker = ?, updatedAt = ? WHERE _id = ?",
     ).run(
@@ -141,6 +185,78 @@ export async function reconcileWorkPackage(id: string): Promise<void> {
     if (["done", "archived", "failed", "review"].includes(next)) selfPacedTrigger = true;
   }
   if (selfPacedTrigger) notifySelfPacedLoop(id);
+}
+
+export interface CoordinationResult {
+  /** Item IDs the coordinator answered from the parent and requeued. */
+  requeued: string[];
+  /** Item IDs the coordinator escalated to the operator. */
+  escalated: string[];
+}
+
+/**
+ * Flight coordinator pass: for every review item carrying a needs_parent_decision
+ * blocker, try to answer it from the parent Flight context (deterministically, no
+ * model). Resolved → append the answer to the child task and requeue it (no
+ * operator input). Escalated → record an operator-facing decision blocker and leave
+ * the item in review. Idempotent: operator-escalated and plain blockers are skipped.
+ */
+export async function coordinateFlightDecisions(id: string): Promise<CoordinationResult> {
+  const db = getDb();
+  const detail = getWorkPackage(id);
+  if (!detail) return { requeued: [], escalated: [] };
+  const parent = { title: detail.title, description: detail.description, intake: detail.intake };
+  const requeued: string[] = [];
+  const escalated: string[] = [];
+
+  for (const item of detail.items) {
+    if (item.status !== "review") continue;
+    const read = readItemBlocker(item.blocker);
+    if (!read || read.kind !== "parent") continue; // only pending parent decisions
+
+    const res = resolveParentDecision(parent, read.payload);
+    const now = new Date().toISOString();
+
+    if (res.resolved && res.answer) {
+      if (item.createdTaskId) {
+        const task = await Task.findById(item.createdTaskId);
+        if (task) {
+          const desc = appendCoordinatorAnswer(String((task as Record<string, unknown>).description ?? ""), res.answer);
+          await Task.findByIdAndUpdate(item.createdTaskId, {
+            description: desc,
+            status: "backlog",
+            reviewState: null,
+            error: null,
+            agentPid: null,
+            startedAt: null,
+            completedAt: null,
+          });
+        }
+      }
+      // Raw SQL: a NEEDS_* blocker is structured JSON; updateWorkPackageItem would
+      // scrub it. Here we clear it and return the item to running.
+      db.prepare("UPDATE work_package_items SET status = 'running', blocker = NULL, updatedAt = ? WHERE _id = ?").run(now, item.id);
+      requeued.push(item.id);
+    } else if (res.escalate) {
+      const question = buildOperatorQuestion(read.payload);
+      db.prepare("UPDATE work_package_items SET blocker = ?, updatedAt = ? WHERE _id = ?").run(
+        serializeOperatorEscalation(read.payload, question),
+        now,
+        item.id,
+      );
+      escalated.push(item.id);
+    }
+  }
+  if (requeued.length) notifySelfPacedLoop(id);
+  return { requeued, escalated };
+}
+
+/** Build a crisp operator-facing question from an escalated parent-decision blocker. */
+function buildOperatorQuestion(b: ParentDecisionBlocker): string {
+  const parts = [b.ambiguity.trim()];
+  if (b.options.length) parts.push(`Options: ${b.options.join(" / ")}.`);
+  if (b.recommendedDefault) parts.push(`Recommended: ${b.recommendedDefault}.`);
+  return parts.join(" ");
 }
 
 /** Recompute a package's status from its item statuses. */
@@ -194,6 +310,9 @@ export interface AdvanceResult {
  */
 export async function advanceWorkPackage(id: string): Promise<AdvanceResult> {
   await reconcileWorkPackage(id);
+  // Coordinator pass: auto-resolve child parent-decision blockers from the parent
+  // context (or escalate genuine operator decisions) before planning next items.
+  await coordinateFlightDecisions(id);
   let detail = getWorkPackage(id);
   if (!detail) throw new Error(`unknown work package "${id}"`);
 

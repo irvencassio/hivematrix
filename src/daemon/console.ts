@@ -214,6 +214,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .new-task-panel { padding: 24px; }
   .new-task-panel > h2 { margin: 0 0 14px; font-size: 18px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text); }
   .new-task-panel .form { max-width: none; }
+  .sk-param-area { border: 1px dashed var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
+  .sk-param-area .flbl { color: var(--accent); margin-top: 0; }
+  .sk-param-area input + .flbl { margin-top: 8px; }
+  .sk-param-area input { margin-bottom: 6px; }
   .attach-drop.drag-over { border: 1px dashed var(--accent) !important; background: color-mix(in srgb, var(--accent) 8%, var(--panel-2)); border-radius: 6px; }
   .ov-lbl { font-size: 11px; color: var(--muted); margin-top: 4px; }
   .ov-hint { color: var(--muted); font-size: 12px; text-align: center; margin-top: 20px; }
@@ -264,6 +268,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-bar-fill.ok  { background: var(--ok,  #4caf50); }
   .usage-bar-fill.warn { background: #f0a500; }
   .usage-bar-fill.hi  { background: #e05b2c; }
+  .usage-status-dot { font-size: 9px; vertical-align: middle; margin-right: 3px; }
+  .usage-status-dot.ok   { color: var(--ok, #4caf50); }
+  .usage-status-dot.warn { color: #f0a500; }
+  .usage-status-dot.hi   { color: #e05b2c; }
   /* Compact at-a-glance provider cards for the Usage section. */
   .usage-cards { display: flex; flex-direction: column; gap: 6px; }
   .usage-card { border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; background: var(--panel-2); }
@@ -1276,7 +1284,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="approvals"></div>
     <details class="ctx-sec" id="setupSec" open><summary id="setupSummary">Setup</summary>
     <div id="onboarding"></div></details>
-    <details class="ctx-sec" id="usageSec" open><summary>Usage <button id="usageRefresh" class="usage-refresh" title="Refresh frontier usage" onclick="event.stopPropagation();refreshUsageNow()">↻</button></summary>
+    <details class="ctx-sec" id="usageSec" open><summary><span id="usageStatusDot" class="usage-status-dot" style="display:none">●</span>Usage <button id="usageRefresh" class="usage-refresh" title="Refresh frontier usage" onclick="event.stopPropagation();refreshUsageNow()">↻</button></summary>
     <div id="usageSummary"><div class="muted">No frontier usage yet.</div></div>
     <details class="usage-details" id="usageDetailsSec"><summary>Per-window details</summary>
     <div id="usage"></div></details></details>
@@ -1389,7 +1397,7 @@ function requireToken() {
     + '<div style="color:var(--muted,#8b949e);font-size:11px;max-width:340px;text-align:center">Find this token in the local HiveMatrix console under Settings → Remote access.</div></div>';
   return false;
 }
-let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedFlight: null, selectedFlightLoop: null, projects: [], selectedProject: "", workPackages: [], schedView: 'timeline', tlWindow: 24 };
+let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedFlight: null, selectedFlightLoop: null, selectedSkillOrCommand: null, projects: [], selectedProject: "", workPackages: [], schedView: 'timeline', tlWindow: 24 };
 let _taskFormInSession = false;
 
 async function api(path, opts) {
@@ -1400,6 +1408,9 @@ async function api(path, opts) {
   return r.json();
 }
 function esc(s){ return (s==null?"":String(s)).replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+// Encode arbitrary text for safe inlining as a single-quoted JS string argument in
+// an onclick attribute (esc() only handles &<>; this also neutralises quotes).
+function attrEnc(s){ return encodeURIComponent(s==null?"":String(s)).replace(/'/g,"%27"); }
 // Lightweight toast — consistent "it saved" feedback for auto-saving settings.
 function hmToast(message, kind) {
   let host = document.getElementById("toastHost");
@@ -1462,13 +1473,16 @@ function renderOverview() {
 function showOverview() {
   state.selected = null;
   state.selectedFlight = null;
+  state.selectedSkillOrCommand = null;
+  _skSel = '';
   _ctxTask = null;
-  renderBoard();      // drops the .sel highlight + syncs the nav active state
-  renderOverview();   // fills the center column now that nothing is selected
+  renderBoard();
+  renderSkillList();
+  renderOverview();
 }
 function updateOverviewNav() {
   const nav = document.getElementById("overviewNav");
-  if (nav) nav.classList.toggle("active", !state.selected && !state.selectedFlight);
+  if (nav) nav.classList.toggle("active", !state.selected && !state.selectedFlight && !state.selectedSkillOrCommand);
 }
 function isEditableTarget(el) {
   if (!el) return false;
@@ -1613,6 +1627,48 @@ function flightLabel(status) {
   if (status === "archived") return "archived";
   if (status === "ready" || status === "draft") return "staged";
   return status || "staged";
+}
+// Render a Flight item's blocker. Three shapes:
+//  - NEEDS_PARENT_DECISION: → "Needs Flight decision" (coordinator owns it; operator need not act)
+//  - NEEDS_OPERATOR_DECISION: → "Needs your reply" (a crisp operator decision with options)
+//  - plain text → ordinary failure blocker
+function flightBlockerHtml(blocker, taskId) {
+  if (!blocker) return '';
+  if (blocker.indexOf('NEEDS_PARENT_DECISION:') === 0) {
+    var b = {}; try { b = JSON.parse(blocker.slice('NEEDS_PARENT_DECISION:'.length)); } catch (e) {}
+    return '<div class="reply-section" style="display:block;margin-top:6px;border:1px solid var(--accent-2);border-radius:8px;padding:8px 12px">'
+      + '<div class="reply-head" style="margin-bottom:4px">🛫 Needs Flight decision</div>'
+      + '<div class="muted" style="font-size:11px">The Flight coordinator is resolving this from the parent context — no action needed from you.</div>'
+      + (b.ambiguity ? '<div style="font-size:12px;margin-top:4px">'+esc(b.ambiguity)+'</div>' : '')
+      + '</div>';
+  }
+  if (blocker.indexOf('NEEDS_OPERATOR_DECISION:') === 0) {
+    var o = {}; try { o = JSON.parse(blocker.slice('NEEDS_OPERATOR_DECISION:'.length)); } catch (e) {}
+    var head = '<div class="reply-head">✋ Needs your reply</div>'
+      + '<div class="reply-question">'+esc(o.question || o.ambiguity || 'A decision is needed.')+'</div>';
+    // One-click accept: requeue the child with the recommended default (or any
+    // option) without typing — reuses the tested /tasks/:id/reply requeue path.
+    var actions;
+    if (taskId && (o.recommendedDefault || (o.options && o.options.length))) {
+      var picks = [];
+      if (o.recommendedDefault) {
+        picks.push('<button class="primary-action" onclick="wpAcceptDecision(\''+esc(taskId)+'\',\''+attrEnc(o.recommendedDefault)+'\')">✓ Accept recommended: '+esc(o.recommendedDefault)+'</button>');
+      }
+      (o.options || []).forEach(function (op) {
+        if (op && op !== o.recommendedDefault) {
+          picks.push('<button class="secondary-action" onclick="wpAcceptDecision(\''+esc(taskId)+'\',\''+attrEnc(op)+'\')">Use: '+esc(op)+'</button>');
+        }
+      });
+      actions = '<div class="flight-item-actions" style="margin-top:6px">'+picks.join('')+'</div>'
+        + '<div class="muted" style="font-size:10px;margin-top:3px">Or open the task to reply with a custom answer.</div>';
+    } else {
+      var opts = (o.options && o.options.length) ? '<div class="muted" style="font-size:11px;margin-top:3px">Options: '+esc(o.options.join(' / '))+'</div>' : '';
+      var rec = o.recommendedDefault ? '<div class="muted" style="font-size:11px">Recommended: '+esc(o.recommendedDefault)+'</div>' : '';
+      actions = opts + rec;
+    }
+    return '<div class="reply-section needs" style="margin-top:6px">'+head+actions+'</div>';
+  }
+  return '<div class="errbox" style="margin-top:6px">'+esc(blocker)+'</div>';
 }
 function flightProgress(p) {
   const counts = p.counts || {};
@@ -1765,7 +1821,7 @@ async function renderFlightDetail(id, stall, blockers) {
       : '';
     const deps = (it.dependsOn && it.dependsOn.length) ? ' · after '+it.dependsOn.length+' item(s)' : '';
     const ts = it.updatedAt ? ' · '+esc(it.updatedAt.slice(0,16).replace('T',' ')) : '';
-    const blocker = it.blocker ? '<div class="errbox" style="margin-top:6px">'+esc(it.blocker)+'</div>' : '';
+    const blocker = flightBlockerHtml(it.blocker, it.createdTaskId);
     return '<div class="flight-item">'
       + '<div class="flight-item-head"><div class="flight-item-title">'+esc(it.title)+'</div><div><span class="badge">'+esc(flightLabel(it.status))+'</span> <span class="badge">'+esc(it.risk)+'</span></div></div>'
       + '<div class="muted" style="font-size:11px;margin-top:3px">'+esc(it.prompt)+deps+taskLink+ts+'</div>'
@@ -2726,11 +2782,113 @@ function renderSkillList() {
   }).join('');
 }
 function selectSkill(key) {
-  _skSel = (_skSel === key) ? '' : key; // click selected row again to collapse
+  if (_skSel === key) { _closeSkillPanel(); return; }
+  _skSel = key;
   renderSkillList();
-  renderSkillDetail();
+  showSkillPanel(key);
 }
 function skSelected() { return skCatalog().find(it => it.key === _skSel) || null; }
+
+function showSkillPanel(key) {
+  const it = skCatalog().find(i => i.key === key);
+  if (!it) return;
+  state.selected = null;
+  state.selectedFlight = null;
+  state.selectedSkillOrCommand = key;
+  if (_taskFormInSession) _closeNewTaskPanel();
+  renderBoard();
+  const session = document.getElementById('session');
+  if (!session) return;
+  session.innerHTML = it.source === 'local' ? _localCmdPanelHtml(it) : _libSkillPanelHtml(it);
+  if (it.source === 'local') populateCommandProjects(_cmdProjects);
+}
+
+function _closeSkillPanel() {
+  state.selectedSkillOrCommand = null;
+  _skSel = '';
+  renderSkillList();
+  renderSkillDetail();
+  renderOverview();
+}
+
+function _libSkillPanelHtml(it) {
+  const s = it.raw;
+  const untrusted = s.trusted === false;
+  const params = (Array.isArray(s.params) && s.params.length) ? s.params : (s.hasInput ? ['input'] : []);
+  const paramFields = params.map(p =>
+    '<label class="flbl">' + esc(skParamLabel(p)) + '</label>'
+    + '<input id="skParam_' + esc(p) + '" placeholder="' + esc(skParamLabel(p)) + '…" />'
+  ).join('');
+  const scanWarn = s.scan === 'block'
+    ? '<div style="color:var(--err);font-size:12px;margin-bottom:8px">⛔ Scan blocked — do not run this skill.</div>'
+    : s.scan === 'warn' ? '<div style="color:var(--warn);font-size:12px;margin-bottom:8px">⚠ Scan: review before running.</div>' : '';
+  return '<div class="new-task-panel">'
+    + '<button class="linklike ov-back" onclick="_closeSkillPanel()" title="Back to overview (Esc)">← Overview</button>'
+    + '<h2>' + skIcon(it) + ' ' + esc(it.name) + '</h2>'
+    + (it.description ? '<div class="sub">' + esc(it.description) + '</div>' : '')
+    + '<div style="font-size:11px;color:var(--muted);margin:0 0 12px">' + libMetaLine(s) + '</div>'
+    + scanWarn
+    + '<div class="form open">'
+    + (params.length
+        ? '<div class="sk-param-area">' + paramFields + '</div>'
+        : '<div class="muted" style="font-size:12px;margin-bottom:8px">No parameters required.</div>')
+    + '<div class="row" style="margin-top:12px">'
+    + '<button class="cancel" onclick="_closeSkillPanel()">Cancel</button>'
+    + '<button class="create" onclick="runSelectedSkill()">Run</button>'
+    + '</div>'
+    + '<div class="err" id="skRunStatus" style="margin-top:6px"></div>'
+    + '</div>'
+    + '<pre id="skViewPane" style="display:none;max-height:300px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:12px;white-space:pre-wrap"></pre>'
+    + '<div class="sk-more" style="margin-top:10px">'
+    + '<button class="addbtn" onclick="viewSkill()" title="View the skill markdown">View</button>'
+    + '<button class="addbtn" onclick="copySkill()" title="Copy the shareable skill markdown">Copy</button>'
+    + '<select id="skPubScope" style="width:auto" title="Scope to publish to"><option value="personal">personal</option><option value="team" selected>team</option><option value="org">org</option><option value="public">public</option></select>'
+    + '<button class="addbtn" onclick="publishSelected()" title="Sign &amp; publish to the chosen scope">Publish</button>'
+    + (untrusted ? '<button class="addbtn" onclick="trustSelected()" title="Approve so agents may use it">Trust</button>' : '')
+    + '<button class="addbtn" onclick="deleteSelected()" title="Delete this skill">🗑 Delete</button>'
+    + '</div>'
+    + '</div>';
+}
+
+function _localCmdPanelHtml(it) {
+  const c = it.raw;
+  return '<div class="new-task-panel">'
+    + '<button class="linklike ov-back" onclick="_closeSkillPanel()" title="Back to overview (Esc)">← Overview</button>'
+    + '<h2>' + skIcon(it) + ' ' + esc(it.name) + '</h2>'
+    + (it.description ? '<div class="sub">' + esc(it.description) + '</div>' : '')
+    + '<div style="font-size:11px;color:var(--muted);margin:0 0 12px">' + commandMetaChips(c) + '</div>'
+    + '<div class="form open">'
+    + '<label class="flbl">Arguments</label>'
+    + '<input id="cmdArgs" placeholder="' + (c.argumentHint ? esc(c.argumentHint) : 'Optional arguments') + '" />'
+    + '<label class="flbl">Project</label>'
+    + '<div id="cmd_project_wrapper" class="project-search">'
+    + '<input id="cmd_project_search" type="text" placeholder="Search projects…" autocomplete="off" oninput="mpFilter(\'cmd\')" onfocus="mpOpen(\'cmd\')" onkeydown="mpKeydown(event,\'cmd\')" />'
+    + '<div id="cmd_project_dropdown" class="project-dropdown hidden">'
+    + '<div class="project-sort-row">'
+    + '<span class="project-sort-btn active" data-sort="recent" onclick="mpSort(\'cmd\',\'recent\')">Most recent</span>'
+    + '<span class="project-sort-btn" data-sort="name" onclick="mpSort(\'cmd\',\'name\')">Name A–Z</span>'
+    + '</div>'
+    + '<div id="cmd_project_list" class="project-list"></div>'
+    + '<div id="cmd_project_empty" class="project-empty hidden">No projects found</div>'
+    + '</div></div>'
+    + '<div id="cmd_project_selected" class="project-selected" style="display:none"></div>'
+    + '<button type="button" class="linklike custom-folder-toggle" onclick="mpToggleCustomFolder(\'cmd\')">Use another folder…</button>'
+    + '<div id="cmd_custom_folder" class="custom-folder" style="display:none">'
+    + '<input id="cmd_custom_path" placeholder="~/path/to/folder" onkeydown="if(event.key===\'Enter\'){event.preventDefault();mpUseCustomFolder(\'cmd\');}" />'
+    + '<div class="row"><button class="create" onclick="mpUseCustomFolder(\'cmd\')">Use this folder</button><button class="cancel" onclick="mpToggleCustomFolder(\'cmd\')">Cancel</button></div>'
+    + '<div class="err" id="cmd_custom_err"></div>'
+    + '</div>'
+    + '<input id="commandPath" type="hidden" value="" />'
+    + '<div class="row" style="margin-top:12px">'
+    + '<button class="cancel" onclick="_closeSkillPanel()">Cancel</button>'
+    + '<button class="create" onclick="runSelectedCommand()">Run</button>'
+    + '</div>'
+    + '<div class="err" id="skRunStatus" style="margin-top:6px"></div>'
+    + '</div>'
+    + '<pre id="cmdViewPane" style="display:none;max-height:300px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:12px;white-space:pre-wrap"></pre>'
+    + '</div>';
+}
+
 function skQueryInput() { _skFocusIdx = -1; renderSkillList(); }
 function skQueryKeydown(e) {
   const n = _skItems.length;
@@ -2757,13 +2915,10 @@ function skScrollFocused() {
   if (el) el.scrollIntoView({ block: 'nearest' });
 }
 function renderSkillDetail() {
+  // Detail is now shown in the session panel (showSkillPanel); keep the right-rail
+  // slot permanently hidden so it never conflicts with session-panel element IDs.
   const d = document.getElementById('skDetail');
-  if (!d) return;
-  const it = skSelected();
-  if (!it) { d.style.display = 'none'; d.innerHTML = ''; return; }
-  d.style.display = '';
-  d.innerHTML = it.source === 'local' ? localDetailHtml(it) : libDetailHtml(it);
-  if (it.source === 'local') populateCommandProjects(_cmdProjects);
+  if (d) { d.style.display = 'none'; d.innerHTML = ''; }
 }
 function libMetaLine(s) {
   const scan = s.scan === 'block' ? '<span style="color:var(--err)">⛔ scan: blocked (do not run)</span> · '
@@ -2774,12 +2929,21 @@ function libMetaLine(s) {
     + 'runs on: ' + esc((s.compat && s.compat.length ? s.compat : ['all']).join(', '))
     + (s.hasInput ? ' · takes input' : '');
 }
+function skParamLabel(name) {
+  return name.replace(/_/g, ' ').replace(/-/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
 function libDetailHtml(it) {
   const s = it.raw;
   const untrusted = s.trusted === false;
+  const params = (Array.isArray(s.params) && s.params.length) ? s.params : (s.hasInput ? ['input'] : []);
+  const paramFields = params.map(p =>
+    '<label class="flbl" style="margin:5px 0 2px">' + esc(skParamLabel(p)) + '</label>'
+    + '<input id="skParam_' + esc(p) + '" placeholder="' + esc(skParamLabel(p)) + '…" />'
+  ).join('');
   return '<div class="sk-dhead"><span class="sk-dhead-icon">' + skIcon(it) + '</span><b>' + esc(it.name) + '</b>' + skBadges(it) + '</div>'
     + '<div class="sk-dmeta">' + libMetaLine(s) + '</div>'
-    + (s.hasInput ? '<input id="skInput" placeholder="Text input for the skill (optional)" />' : '')
+    + (paramFields ? '<div class="sk-param-area">' + paramFields + '</div>' : '')
     + '<div class="sk-run-row">'
     + '<button class="create" onclick="runSelectedSkill()">Run</button>'
     + '<button class="addbtn" onclick="viewSkill()" title="View the skill markdown">View</button>'
@@ -2797,7 +2961,7 @@ function localDetailHtml(it) {
   const c = it.raw;
   return '<div class="sk-dhead"><span class="sk-dhead-icon">' + skIcon(it) + '</span><b>' + esc(it.name) + '</b>' + skBadges(it) + '</div>'
     + '<div class="sk-dmeta">' + commandMetaChips(c) + '</div>'
-    + '<input id="cmdArgs" placeholder="Optional arguments" />'
+    + '<input id="cmdArgs" placeholder="' + (c.argumentHint ? esc(c.argumentHint) : 'Optional arguments') + '" />'
     + '<label class="flbl" style="margin:6px 0 2px">Project</label>'
     + '<div id="cmd_project_wrapper" class="project-search">'
     + '<input id="cmd_project_search" type="text" placeholder="Search projects…" autocomplete="off" oninput="mpFilter(\'cmd\')" onfocus="mpOpen(\'cmd\')" onkeydown="mpKeydown(event,\'cmd\')" />'
@@ -2939,12 +3103,24 @@ function pickTaskSkill(name) {
 // --- run helpers (route by the selected item's source) ----------------------
 async function runSelectedSkill() {
   const it = skSelected(); if (!it || it.source !== 'lib') return;
-  const input = (document.getElementById('skInput') || {}).value || '';
-  const res = document.getElementById('skStatus');
+  const ps = (it.raw && Array.isArray(it.raw.params) && it.raw.params.length) ? it.raw.params
+    : (it.raw && it.raw.hasInput ? ['input'] : []);
+  let payload;
+  if (ps.length) {
+    const params = {};
+    for (const p of ps) {
+      const el = document.getElementById('skParam_' + p);
+      params[p] = el ? el.value : '';
+    }
+    payload = { params };
+  } else {
+    payload = { input: '' };
+  }
+  const res = document.getElementById('skRunStatus') || document.getElementById('skStatus');
   if (res) res.textContent = 'Launching…';
   try {
     const d = await api('/skills/' + encodeURIComponent(it.name) + '/run',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input }) });
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     if (d && d.kind === 'script' && d.runId) {
       if (res) res.textContent = 'Running script… (deterministic)';
       pollScriptRun(d.runId);
@@ -2956,7 +3132,7 @@ async function runSelectedSkill() {
 }
 async function pollScriptRun(runId) {
   const view = document.getElementById('skViewPane');
-  const res = document.getElementById('skStatus');
+  const res = document.getElementById('skRunStatus') || document.getElementById('skStatus');
   for (let i = 0; i < 900; i++) { // up to ~15 min for long builds/releases
     try {
       const d = await api('/skills/runs/' + encodeURIComponent(runId));
@@ -2971,7 +3147,7 @@ async function runSelectedCommand() {
   const c = it.raw;
   const args = (document.getElementById('cmdArgs') || {}).value || '';
   const projectPath = ((document.getElementById('commandPath') || {}).value || '$HOME').trim() || '$HOME';
-  const res = document.getElementById('skStatus');
+  const res = document.getElementById('skRunStatus') || document.getElementById('skStatus');
   if (res) res.textContent = 'Launching /' + c.invokeName + '…';
   try {
     const d = await api('/commands/run',
@@ -3664,7 +3840,25 @@ function fmtResets(iso) {
   return "in " + h + "h " + m + "m";
 }
 
-function usageBarClass(util) {
+function usageBarClass(util, resetsAt, durationMs) {
+  if (resetsAt && durationMs > 0) {
+    const now = Date.now();
+    const timeUntilResetMs = new Date(resetsAt).getTime() - now;
+    if (timeUntilResetMs > 0) {
+      if (util >= 90) return "hi";
+      const elapsedMs = Math.max(0, durationMs - timeUntilResetMs);
+      const elapsedFraction = elapsedMs / durationMs;
+      const windowUnits = durationMs >= 86400000 ? durationMs / 86400000 : durationMs / 3600000;
+      const dailyThreshold = 100 / windowUnits;
+      if (elapsedFraction < 0.15) {
+        return util > dailyThreshold ? "hi" : "ok";
+      }
+      const ratio = util / (elapsedFraction * 100);
+      if (ratio >= 1.5 || util >= 80) return "hi";
+      if (ratio >= 1.25 || util >= 60) return "warn";
+      return "ok";
+    }
+  }
   return util >= 80 ? "hi" : util >= 60 ? "warn" : "ok";
 }
 
@@ -3688,7 +3882,8 @@ function usageProviderCard(name, win, statusNote) {
   }
   const remaining = Math.min(100, Math.max(0, win.remaining));
   const used = 100 - remaining;
-  const cls = usageBarClass(used);
+  const util = win.utilization != null ? win.utilization : used;
+  const cls = usageBarClass(util, win.resetsAt, win.durationMs || 0);
   const low = remaining <= 20 ? " low" : "";
   return '<div class="usage-card' + low + '">'
     + '<div class="uc-top"><span class="uc-name">' + esc(name) + '</span>'
@@ -3698,20 +3893,20 @@ function usageProviderCard(name, win, statusNote) {
     + '</div>';
 }
 
-function renderSubBar(label, win) {
+function renderSubBar(label, win, durationMs) {
   if (!win) return "";
   const pct = Math.min(100, Math.max(0, win.utilization));
-  const cls = usageBarClass(pct);
+  const cls = usageBarClass(pct, win.resetsAt, durationMs || 0);
   return '<div class="urow"><span>' + esc(label) + '</span>'
     + '<span class="um">' + win.remaining.toFixed(1) + '% left · ' + esc(fmtResets(win.resetsAt)) + '</span></div>'
     + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div></div>';
 }
 
-function renderCodexBar(label, win) {
+function renderCodexBar(label, win, durationMs) {
   if (!win) return "";
   const pct = Math.min(100, Math.max(0, win.utilization || 0));
   const remaining = Math.max(0, 100 - pct);
-  const cls = usageBarClass(pct);
+  const cls = usageBarClass(pct, win.resetsAt, durationMs || 0);
   return '<div class="urow"><span>' + esc(label) + '</span>'
     + '<span class="um">' + remaining.toFixed(1) + '% left · ' + esc(fmtResets(win.resetsAt)) + '</span></div>'
     + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div></div>';
@@ -3737,15 +3932,15 @@ async function checkUsage(forceRefresh) {
     // pill, summary cards, and "worst window" all share one source of truth.
     const claudeWins = [];
     if (sub) {
-      if (sub.fiveHour) claudeWins.push({ label: "5-hour", remaining: sub.fiveHour.remaining, resetsAt: sub.fiveHour.resetsAt });
-      if (sub.sevenDay) claudeWins.push({ label: "7-day", remaining: sub.sevenDay.remaining, resetsAt: sub.sevenDay.resetsAt });
-      if (sub.sevenDayOpus) claudeWins.push({ label: "7-day Opus", remaining: sub.sevenDayOpus.remaining, resetsAt: sub.sevenDayOpus.resetsAt });
-      if (sub.sevenDaySonnet) claudeWins.push({ label: "7-day Sonnet", remaining: sub.sevenDaySonnet.remaining, resetsAt: sub.sevenDaySonnet.resetsAt });
+      if (sub.fiveHour) claudeWins.push({ label: "5-hour", remaining: sub.fiveHour.remaining, resetsAt: sub.fiveHour.resetsAt, utilization: sub.fiveHour.utilization, durationMs: 18000000 });
+      if (sub.sevenDay) claudeWins.push({ label: "7-day", remaining: sub.sevenDay.remaining, resetsAt: sub.sevenDay.resetsAt, utilization: sub.sevenDay.utilization, durationMs: 604800000 });
+      if (sub.sevenDayOpus) claudeWins.push({ label: "7-day Opus", remaining: sub.sevenDayOpus.remaining, resetsAt: sub.sevenDayOpus.resetsAt, utilization: sub.sevenDayOpus.utilization, durationMs: 604800000 });
+      if (sub.sevenDaySonnet) claudeWins.push({ label: "7-day Sonnet", remaining: sub.sevenDaySonnet.remaining, resetsAt: sub.sevenDaySonnet.resetsAt, utilization: sub.sevenDaySonnet.utilization, durationMs: 604800000 });
     }
     const codexWins = [];
     if (codexSubscription) {
-      if (codexSubscription.fiveHour) codexWins.push({ label: "5-hour", remaining: Math.max(0, 100 - (codexSubscription.fiveHour.utilization || 0)), resetsAt: codexSubscription.fiveHour.resetsAt });
-      if (codexSubscription.sevenDay) codexWins.push({ label: "7-day", remaining: Math.max(0, 100 - (codexSubscription.sevenDay.utilization || 0)), resetsAt: codexSubscription.sevenDay.resetsAt });
+      if (codexSubscription.fiveHour) codexWins.push({ label: "5-hour", remaining: Math.max(0, 100 - (codexSubscription.fiveHour.utilization || 0)), resetsAt: codexSubscription.fiveHour.resetsAt, utilization: codexSubscription.fiveHour.utilization || 0, durationMs: 18000000 });
+      if (codexSubscription.sevenDay) codexWins.push({ label: "7-day", remaining: Math.max(0, 100 - (codexSubscription.sevenDay.utilization || 0)), resetsAt: codexSubscription.sevenDay.resetsAt, utilization: codexSubscription.sevenDay.utilization || 0, durationMs: 604800000 });
     }
     const allWins = claudeWins.concat(codexWins);
 
@@ -3780,6 +3975,23 @@ async function checkUsage(forceRefresh) {
       }
     }
 
+    // Status dot: worst-case color across all active windows.
+    const statusDot = document.getElementById("usageStatusDot");
+    if (statusDot) {
+      if (allWins.length) {
+        let worstCls = "ok";
+        for (const w of allWins) {
+          const cls = usageBarClass(w.utilization, w.resetsAt, w.durationMs || 0);
+          if (cls === "hi") { worstCls = "hi"; break; }
+          if (cls === "warn") worstCls = "warn";
+        }
+        statusDot.className = "usage-status-dot " + worstCls;
+        statusDot.style.display = "";
+      } else {
+        statusDot.style.display = "none";
+      }
+    }
+
     // At-a-glance summary: one compact card per active frontier provider.
     const summaryEl = document.getElementById("usageSummary");
     if (summaryEl) {
@@ -3809,10 +4021,10 @@ async function checkUsage(forceRefresh) {
     // Subscription remaining rows (Code + Claude share same subscription).
     if (sub && (sub.fiveHour || sub.sevenDay || sub.sevenDayOpus || sub.sevenDaySonnet)) {
       html += '<div class="urow"><span><b>Claude subscription</b></span><span class="um">remaining allotment</span></div>';
-      html += renderSubBar("5-hour rolling", sub.fiveHour);
-      html += renderSubBar("7-day overall", sub.sevenDay);
-      html += renderSubBar("7-day Opus", sub.sevenDayOpus);
-      html += renderSubBar("7-day Sonnet", sub.sevenDaySonnet);
+      html += renderSubBar("5-hour rolling", sub.fiveHour, 18000000);
+      html += renderSubBar("7-day overall", sub.sevenDay, 604800000);
+      html += renderSubBar("7-day Opus", sub.sevenDayOpus, 604800000);
+      html += renderSubBar("7-day Sonnet", sub.sevenDaySonnet, 604800000);
     } else if (subStatus && subStatus.state !== "missing_credentials") {
       html += '<div class="urow"><span><b>Claude subscription</b></span><span class="um">' + esc(usagePlanLabel(subStatus)) + '</span></div>'
         + '<div class="muted" style="font-size:11px">' + esc(subStatus.message || "Usage left unavailable.") + '</div>'
@@ -3828,8 +4040,8 @@ async function checkUsage(forceRefresh) {
       const codexPlan = codexSubscription.planType ? String(codexSubscription.planType) : "subscription";
       html += '<div class="urow"><span><b>Codex subscription</b></span><span class="um">' + esc(codexPlan) + '</span></div>';
       if (codexSubscription.fiveHour || codexSubscription.sevenDay) {
-        html += renderCodexBar("5-hour rolling", codexSubscription.fiveHour);
-        html += renderCodexBar("7-day overall", codexSubscription.sevenDay);
+        html += renderCodexBar("5-hour rolling", codexSubscription.fiveHour, 18000000);
+        html += renderCodexBar("7-day overall", codexSubscription.sevenDay, 604800000);
       } else {
         html += '<div class="muted" style="font-size:11px">' + esc(codexSubscription.error || "Usage unavailable.") + '</div>';
       }
@@ -4547,7 +4759,7 @@ function mpUseCustomFolder(pfx) {
 // modal open (those own Escape themselves).
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (!state.selected) return;
+  if (!state.selected && !state.selectedSkillOrCommand) return;
   if (isEditableTarget(document.activeElement)) return;
   if (document.querySelector(".overlay.open")) return;
   showOverview();
@@ -5810,6 +6022,17 @@ async function wpAdvance(pkgId) {
   } else { hmToast((r && r.error) || "Advance failed"); }
   renderWorkPackages(); refresh();
   if (state.selectedFlight === pkgId) await renderFlightDetail(pkgId, r && r.stall, r && r.blockers);
+}
+// One-click answer to a coordinator-escalated child decision: send the chosen
+// option as the operator reply, which requeues the child for more work.
+async function wpAcceptDecision(taskId, enc) {
+  let text = enc;
+  try { text = decodeURIComponent(enc); } catch (e) {}
+  const r = await api("/tasks/"+encodeURIComponent(taskId)+"/reply", { method:"POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+  if (r && r.ok) { hmToast("Answer sent — child requeued.", "ok"); }
+  else { hmToast((r && r.error) || "Reply failed"); return; }
+  renderWorkPackages(); refresh();
+  if (state.selectedFlight) await renderFlightDetail(state.selectedFlight);
 }
 async function wpCreateTask(pkgId, itemId) {
   const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/items/"+encodeURIComponent(itemId)+"/create-task", { method:"POST" });

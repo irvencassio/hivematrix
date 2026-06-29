@@ -15,6 +15,7 @@ import { generateId, getDb, Task } from "@/lib/db";
 import { scrubSecretText } from "@/lib/workflows/runs";
 import type { IntakeActiveTask, IntakeMode, IntakeResult, ProposedItem } from "@/lib/intake/classify";
 import { type FlightLoop, type PassStatus, getLoop, getLoopPasses, upsertLoop } from "./flight-loop-store";
+import { buildChildTaskPrompt, type SiblingSummary } from "./parent-context";
 
 export interface GoalFlightMetadata {
   goal: string;
@@ -425,10 +426,28 @@ export async function createTaskFromItem(packageId: string, itemId: string): Pro
 
   if (itemRow.createdTaskId) return { taskId: itemRow.createdTaskId, created: false };
 
+  // Every Flight child carries a Parent Context Pack so a decomposed item never
+  // loses the parent's intent (examples, numbers, acceptance criteria, siblings)
+  // and does not ask the operator for values the parent already specified.
+  const siblingRows = db.prepare(
+    "SELECT _id, title, status, commitHash FROM work_package_items WHERE packageId = ? ORDER BY position ASC",
+  ).all(packageId) as { _id: string; title: string; status: string; commitHash: string | null }[];
+  const siblings: SiblingSummary[] = siblingRows.map((s) => ({
+    title: s.title,
+    status: s.status,
+    done: s.status === "done" || s.status === "archived",
+    summary: s._id !== itemId && s.commitHash ? `commit ${s.commitHash}` : null,
+  }));
+  const description = buildChildTaskPrompt(
+    { title: pkgRow.title, description: pkgRow.description, intake: parseObject(pkgRow.intake_json) },
+    { title: itemRow.title, prompt: itemRow.prompt },
+    siblings,
+  );
+
   const task = await Task.create({
     _id: generateId(),
     title: itemRow.title,
-    description: itemRow.prompt,
+    description,
     project: pkgRow.project,
     projectPath: pkgRow.projectPath || undefined,
     status: "backlog",

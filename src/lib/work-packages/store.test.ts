@@ -170,6 +170,36 @@ test("createTaskFromItem creates exactly one task and is idempotent", async () =
   assert.equal(refreshed.createdTaskId, r1.taskId);
 });
 
+test("createTaskFromItem prepends a Parent Context Pack carrying the parent's intent", async () => {
+  const intake = broadIntake();
+  const pkg = createWorkPackage({
+    title: "Usage panel traffic-light thresholds",
+    description:
+      "For the 7-day window, color the usage bar. On day 1 at 15% show red (14.3% per-day budget); " +
+      "on day 7 at 82% show green (under the 6-day max of 85.7%).",
+    project: "hivematrix",
+    projectPath: "/Users/x/hivematrix",
+    intake,
+    items: intake.packageCandidate!.items,
+  });
+  const item = pkg.items[0];
+  const { taskId } = await createTaskFromItem(pkg.id, item.id);
+  const task = await Task.findById(taskId);
+  const desc = String((task as Record<string, unknown>).description ?? "");
+
+  // Test case 1: child prompt includes the Parent Context Pack with the parent
+  // description and its concrete examples.
+  assert.match(desc, /Parent Flight Context/);
+  assert.match(desc, /7-day window/);
+  assert.match(desc, /14\.3%/);
+  assert.match(desc, /85\.7%/);
+  // Test case 2: the child is told not to ask the operator vague questions.
+  assert.match(desc, /Do not ask the operator for clarification if the parent context gives a reasonable default\. Use the parent context and proceed\./);
+  // The item's own prompt is still present, under its own header.
+  assert.match(desc, /=== Your task ===/);
+  assert.ok(desc.includes(item.prompt), "item prompt retained");
+});
+
 test("findItemByTaskId maps a created task back to its package + item", async () => {
   const intake = broadIntake();
   const pkg = createWorkPackage({ title: "Sweep 5", project: "hivematrix", projectPath: "/Users/x/hivematrix", intake, items: intake.packageCandidate!.items });
