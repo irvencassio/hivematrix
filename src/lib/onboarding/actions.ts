@@ -363,7 +363,7 @@ export async function configureMailBee(opts: {
     else store.upsertIdentity(raw, "allowed", opts.displayName ?? null);
   }
 
-  const mailControllable = await canControlMail();
+  const mailControllable = await canControlMail(undefined, { allowLaunch: true });
   // Only enable once Mail is controllable, and pin the high-water to the newest
   // message so existing inbox mail isn't turned into a flood of tasks.
   if (opts.enable !== false && mailControllable) {

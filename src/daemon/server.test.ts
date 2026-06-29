@@ -325,6 +325,42 @@ test("POST /messagebee/send refuses while Message Lane is disabled", async (t) =
   assert.match(String(body.message), /Message Lane is disabled/i);
 });
 
+test("POST /messagebee/test-send refuses while Message Lane is disabled", async (t) => {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-message-test-send-disabled-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  t.after(() => {
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/messagebee/test-send`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ handle: "+15555550123", text: "hello" }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.ok, false);
+  assert.match(String(body.error), /Message Lane is disabled/i);
+});
+
 test("command project paths resolve from the current user home", () => {
   assert.equal(
     normalizeHomeProjectPath("~/hivematrix", "/Users/example"),

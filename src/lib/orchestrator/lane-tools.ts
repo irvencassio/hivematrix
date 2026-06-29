@@ -594,6 +594,7 @@ async function executeSkillUsed(args: Record<string, unknown>): Promise<string> 
 // a live database or Apple Mail/Messages.
 
 export interface MailBeeSendIO {
+  isChannelEnabled?(): boolean;
   /** True when the recipient is a known sender or sits on a configured trusted domain. */
   isTrustedRecipient(to: string): boolean;
   sendMail(to: string, subject: string, body: string, attachments?: string[]): Promise<boolean>;
@@ -613,6 +614,7 @@ async function defaultMailBeeIO(): Promise<MailBeeSendIO> {
   const store = await import("@/lib/mailbee/store");
   const mail = await import("@/lib/mailbee/applemail");
   return {
+    isChannelEnabled: store.isChannelEnabled,
     isTrustedRecipient: (to) => store.isKnownSender(to) || store.isAuthenticatedDomain(to),
     sendMail: mail.sendMail,
     draftMail: mail.draftMail,
@@ -631,6 +633,10 @@ export async function executeMailBeeSend(args: Record<string, unknown>, io?: Mai
   const attachments = readAttachments(args);
   const att = attachments.length ? ` with ${attachments.length} attachment(s)` : "";
   const deps = io ?? (await defaultMailBeeIO());
+
+  if (deps.isChannelEnabled && !deps.isChannelEnabled()) {
+    return "Error: Mail Lane is disabled. Enable Mail Lane before sending or drafting email.";
+  }
 
   if (!deps.isTrustedRecipient(to)) {
     const drafted = await deps.draftMail(to, subject, body, attachments);
@@ -651,6 +657,11 @@ export async function executeMailBeeDraft(args: Record<string, unknown>, io?: Ma
   const attachments = readAttachments(args);
   const att = attachments.length ? ` with ${attachments.length} attachment(s)` : "";
   const deps = io ?? (await defaultMailBeeIO());
+
+  if (deps.isChannelEnabled && !deps.isChannelEnabled()) {
+    return "Error: Mail Lane is disabled. Enable Mail Lane before sending or drafting email.";
+  }
+
   const drafted = await deps.draftMail(to, subject, body, attachments);
   return drafted
     ? `Draft saved to Mail Drafts for ${to}${att} — review and send it from Mail.app when ready.`

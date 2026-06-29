@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.109 — 2026-06-29
+
+lane-off guards for Mail and Message Lane
+
 ## v0.1.108 — 2026-06-29
 
 auto-update console fixes

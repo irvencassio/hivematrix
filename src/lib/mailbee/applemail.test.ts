@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseSender, parseMailRecords } from "./applemail";
+import { canControlMail, parseSender, parseMailRecords, _setAppleMailDepsForTests } from "./applemail";
 
 test("parseSender splits name + address and lowercases", () => {
   assert.deepEqual(parseSender("Bob Smith <Bob@Acme.com>"), { from: "bob@acme.com", fromName: "Bob Smith" });
@@ -30,4 +30,34 @@ test("parseMailRecords skips blank/garbage records", () => {
   assert.deepEqual(parseMailRecords(""), []);
   assert.deepEqual(parseMailRecords("\x1e\x1e"), []);
   assert.deepEqual(parseMailRecords("notanumber\x1fx\x1fy\x1fz\x1f\x1fbody\x1e"), []);
+});
+
+test("canControlMail does not run Mail AppleScript when Mail is closed", async (t) => {
+  let scriptCalls = 0;
+  _setAppleMailDepsForTests({
+    isMailAppRunning: () => false,
+    osascript: async () => {
+      scriptCalls++;
+      return { ok: true, stdout: "" };
+    },
+  });
+  t.after(() => _setAppleMailDepsForTests(null));
+
+  assert.equal(await canControlMail(), false);
+  assert.equal(scriptCalls, 0);
+});
+
+test("canControlMail can explicitly allow a launch-capable setup probe", async (t) => {
+  let scriptCalls = 0;
+  _setAppleMailDepsForTests({
+    isMailAppRunning: () => false,
+    osascript: async () => {
+      scriptCalls++;
+      return { ok: true, stdout: "" };
+    },
+  });
+  t.after(() => _setAppleMailDepsForTests(null));
+
+  assert.equal(await canControlMail(8_000, { allowLaunch: true }), true);
+  assert.equal(scriptCalls, 1);
 });

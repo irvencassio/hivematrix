@@ -15,6 +15,8 @@ import { join } from "path";
 import { getTelegramConfig, sendTelegram } from "./telegram";
 import { sendIMessage } from "@/lib/messagebee/imessage";
 import { sendMail } from "@/lib/mailbee/applemail";
+import { isChannelEnabled as isMessageLaneEnabled } from "@/lib/messagebee/store";
+import { isChannelEnabled as isMailLaneEnabled } from "@/lib/mailbee/store";
 
 export interface NotifyTargets {
   telegram: boolean;
@@ -52,18 +54,44 @@ function readNotifyConfig(): NotifyConfig {
 
 export interface NotifyResult { telegram: boolean; imessage: boolean; email: boolean; anySent: boolean }
 
+export interface NotifyDeps {
+  getTelegramConfig: typeof getTelegramConfig;
+  readNotifyConfig: () => NotifyConfig;
+  isMessageLaneEnabled: () => boolean;
+  isMailLaneEnabled: () => boolean;
+  sendTelegram: typeof sendTelegram;
+  sendIMessage: typeof sendIMessage;
+  sendMail: typeof sendMail;
+}
+
+const defaultNotifyDeps: NotifyDeps = {
+  getTelegramConfig,
+  readNotifyConfig,
+  isMessageLaneEnabled,
+  isMailLaneEnabled,
+  sendTelegram,
+  sendIMessage,
+  sendMail,
+};
+
 /**
  * Send a notification to every configured channel. `telegramMarkup` attaches an
  * inline keyboard to the Telegram message only (other channels are text-only).
  */
-export async function notify(text: string, opts: { telegramMarkup?: unknown } = {}): Promise<NotifyResult> {
-  const tgCfg = getTelegramConfig();
-  const targets = resolveNotifyTargets(readNotifyConfig(), tgCfg !== null);
+export async function notify(
+  text: string,
+  opts: { telegramMarkup?: unknown } = {},
+  deps: NotifyDeps = defaultNotifyDeps,
+): Promise<NotifyResult> {
+  const tgCfg = deps.getTelegramConfig();
+  const targets = resolveNotifyTargets(deps.readNotifyConfig(), tgCfg !== null);
+  const messageTarget = targets.imessage && deps.isMessageLaneEnabled() ? targets.imessage : null;
+  const mailTarget = targets.email && deps.isMailLaneEnabled() ? targets.email : null;
 
   const [telegram, imessage, email] = await Promise.all([
-    targets.telegram && tgCfg ? sendTelegram(tgCfg, text, opts.telegramMarkup) : Promise.resolve(false),
-    targets.imessage ? sendIMessage(targets.imessage, text) : Promise.resolve(false),
-    targets.email ? sendMail(targets.email, "HiveMatrix", text) : Promise.resolve(false),
+    targets.telegram && tgCfg ? deps.sendTelegram(tgCfg, text, opts.telegramMarkup) : Promise.resolve(false),
+    messageTarget ? deps.sendIMessage(messageTarget, text) : Promise.resolve(false),
+    mailTarget ? deps.sendMail(mailTarget, "HiveMatrix", text) : Promise.resolve(false),
   ]);
 
   return { telegram, imessage, email, anySent: telegram || imessage || email };

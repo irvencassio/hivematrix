@@ -2557,7 +2557,7 @@ export function createDaemonServer() {
         const enabled = body.enabled !== false;
         ensureChannel();
         if (enabled) {
-          if (!(await canControlMail())) { json(res, 412, { error: "Mail.app not controllable — open Mail and grant Automation permission to HiveMatrix" }); return; }
+          if (!(await canControlMail(undefined, { allowLaunch: true }))) { json(res, 412, { error: "Mail.app not controllable — open Mail and grant Automation permission to HiveMatrix" }); return; }
           const recent = await readInboxSince(0, 1);
           setLastId(recent[0]?.id ?? 0);
         }
@@ -2584,6 +2584,8 @@ export function createDaemonServer() {
         const handle = String(body.handle ?? "").trim();
         const text = String(body.text ?? "HiveMatrix test message").trim();
         if (!handle) { json(res, 400, { error: "handle is required" }); return; }
+        const { isChannelEnabled } = await import("@/lib/messagebee/store");
+        if (!isChannelEnabled()) { json(res, 400, { ok: false, error: "Message Lane is disabled. Enable Message Lane before sending SMS/iMessage." }); return; }
         const { sendIMessage } = await import("@/lib/messagebee/imessage");
         const ok = await sendIMessage(handle, text);
         json(res, ok ? 200 : 502, { ok });

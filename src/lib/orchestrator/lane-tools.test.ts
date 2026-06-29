@@ -164,6 +164,7 @@ test("executeLaneTool rejects removed BrowserBee/WebBee aliases", async () => {
 function mailIO(over: Partial<MailBeeSendIO> & { trusted: boolean }): { io: MailBeeSendIO; calls: string[] } {
   const calls: string[] = [];
   const io: MailBeeSendIO = {
+    isChannelEnabled: () => true,
     isTrustedRecipient: () => over.trusted,
     sendMail: async () => { calls.push("send"); return true; },
     draftMail: async () => { calls.push("draft"); return true; },
@@ -195,6 +196,13 @@ test("mailbee_send requires to + body", async () => {
   assert.match(out, /'to' and 'body' are required/);
 });
 
+test("mailbee_send refuses while Mail Lane is disabled before send or draft IO", async () => {
+  const { io, calls } = mailIO({ trusted: true, isChannelEnabled: () => false });
+  const out = await executeMailBeeSend({ to: "boss@known.com", subject: "Hi", body: "yo" }, io);
+  assert.deepEqual(calls, []);
+  assert.match(out, /Mail Lane is disabled/i);
+});
+
 test("mailbee_draft never sends, always drafts", async () => {
   const { io, calls } = mailIO({ trusted: true });
   const out = await executeMailBeeDraft({ to: "anyone@x.com", subject: "x", body: "y" }, io);
@@ -202,9 +210,17 @@ test("mailbee_draft never sends, always drafts", async () => {
   assert.match(out, /Draft saved to Mail Drafts/);
 });
 
+test("mailbee_draft refuses while Mail Lane is disabled before draft IO", async () => {
+  const { io, calls } = mailIO({ trusted: true, isChannelEnabled: () => false });
+  const out = await executeMailBeeDraft({ to: "anyone@x.com", subject: "x", body: "y" }, io);
+  assert.deepEqual(calls, []);
+  assert.match(out, /Mail Lane is disabled/i);
+});
+
 test("mailbee_send forwards attachments to Apple Mail (no Gmail needed)", async () => {
   let gotAttachments: string[] | undefined;
   const io: MailBeeSendIO = {
+    isChannelEnabled: () => true,
     isTrustedRecipient: () => true,
     sendMail: async (_t, _s, _b, att) => { gotAttachments = att; return true; },
     draftMail: async () => true,

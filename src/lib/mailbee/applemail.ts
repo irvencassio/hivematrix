@@ -10,18 +10,37 @@
  * interaction is verified on the real machine.
  */
 
-import { execFile } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import { type InboundEmail } from "./contracts";
 
 const RS = "\x1e"; // record separator
 const US = "\x1f"; // unit separator
 
-function osascript(script: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; stdout: string }> {
+type OsascriptRunner = (script: string, args: string[], timeoutMs: number) => Promise<{ ok: boolean; stdout: string }>;
+
+function defaultOsascript(script: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; stdout: string }> {
   return new Promise((resolve) => {
     execFile("osascript", ["-e", script, ...args], { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
       resolve({ ok: !err, stdout: String(stdout ?? "") });
     });
   });
+}
+
+function defaultIsMailAppRunning(): boolean {
+  try {
+    execFileSync("pgrep", ["-x", "Mail"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+let osascriptRunner: OsascriptRunner = defaultOsascript;
+let isMailAppRunningForApplemail: () => boolean = defaultIsMailAppRunning;
+
+export function _setAppleMailDepsForTests(deps: { osascript?: OsascriptRunner; isMailAppRunning?: () => boolean } | null): void {
+  osascriptRunner = deps?.osascript ?? defaultOsascript;
+  isMailAppRunningForApplemail = deps?.isMailAppRunning ?? defaultIsMailAppRunning;
 }
 
 /** Split "Name <email@x>" or "email@x" into address + display name. */
@@ -93,14 +112,15 @@ end run`;
 
 /** Read inbox messages with id > sinceId (most-recent scan, capped at limit). */
 export async function readInboxSince(sinceId: number, limit = 25, timeoutMs = 30_000): Promise<InboundEmail[]> {
-  const res = await osascript(READ_SCRIPT, [String(sinceId), String(limit)], timeoutMs);
+  const res = await osascriptRunner(READ_SCRIPT, [String(sinceId), String(limit)], timeoutMs);
   if (!res.ok) return [];
   return parseMailRecords(res.stdout);
 }
 
 /** Can we drive Mail.app (running + Automation permission granted)? */
-export async function canControlMail(timeoutMs = 8_000): Promise<boolean> {
-  const res = await osascript(`tell application "Mail" to return (count of mailboxes)`, [], timeoutMs);
+export async function canControlMail(timeoutMs = 8_000, opts: { allowLaunch?: boolean } = {}): Promise<boolean> {
+  if (!opts.allowLaunch && !isMailAppRunningForApplemail()) return false;
+  const res = await osascriptRunner(`tell application "Mail" to return (count of mailboxes)`, [], timeoutMs);
   return res.ok;
 }
 

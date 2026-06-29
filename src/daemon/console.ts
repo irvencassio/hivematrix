@@ -187,6 +187,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     letter-spacing: .5px; margin: 2px 0 3px; }
   .form .flbl { font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0; margin: 10px 0 4px; }
   .gear { cursor: pointer; color: var(--muted); font-size: 16px; background: none; border: 0; }
+  .gear-lg { font-size: 19px; line-height: 1; }
   .gear:hover { color: var(--accent); }
   /* Header zones: brand · scope · actions, grouped + responsive */
   .hzone { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -708,8 +709,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <span class="muted" id="talkStatus" style="display:none;font-size:11px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
     <button class="gear" id="talkBtn" style="display:none" title="Push to talk" onclick="toggleTalk()">🎤 Talk</button>
     <button class="gear" id="themeToggle" title="Toggle light / dark theme" onclick="toggleThemeQuick()">🌗</button>
-    <button class="gear ctx-toggle" id="ctxToggle" title="Hide / show the right panel" onclick="toggleContext()">◨</button>
-    <button class="gear" title="Settings" onclick="openSettings()">⚙</button>
+    <button class="gear gear-lg ctx-toggle" id="ctxToggle" title="Hide / show the right panel" onclick="toggleContext()">◨</button>
+    <button class="gear gear-lg" title="Settings" onclick="openSettings()">⚙</button>
   </div>
 </header>
 <div id="toastHost"></div>
@@ -1962,12 +1963,14 @@ function flightContextBadge(t) {
   const fc = t && t.flightContext;
   if (!fc) return "";
   const itemStatus = String(fc.itemStatus || "");
-  const prefix = itemStatus === "review" ? "Blocks Flight" : "Flight";
+  const review = itemStatus === "review";
+  const prefix = review ? "Flight Review" : "Flight";
   const title = fc.packageTitle || fc.packageId || "Flight";
   const landed = Number(fc.landedCount || 0);
   const total = Number(fc.totalCount || 0);
   const count = total ? landed + "/" + total + " landed" : "";
-  const parts = [prefix, title, itemStatus ? "item " + itemStatus : "item", count].filter(Boolean);
+  const itemDetail = review ? "awaiting accept" : (itemStatus ? "item " + itemStatus : "item");
+  const parts = [prefix, title, itemDetail, count].filter(Boolean);
   return '<div class="flight-ctx" title="' + esc(parts.join(" · ")) + '"><b>' + esc(prefix) + '</b> · ' + esc(parts.slice(1).join(" · ")) + '</div>';
 }
 
@@ -4913,7 +4916,7 @@ function renderAttachChips() {
 
 function openSettings() {
   document.getElementById("settingsOverlay").classList.add("open");
-  switchSettingsTab("models"); // land on the most-used config, not About
+  switchSettingsTab("about"); // open on About by default
   if (!models) return;
   const sd = document.getElementById("s_default");
   sd.innerHTML = models.available.map(m => '<option value="'+esc(m.modelId)+'">'+esc(m.name)+'</option>').join("");

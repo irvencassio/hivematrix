@@ -1,7 +1,7 @@
 import { canControlMail as defaultCanControlMail } from "./applemail";
 import { isChannelEnabled, listIdentities, trustedDomains, triageAll, type MailIdentity } from "./store";
 
-type CanControlMail = (timeoutMs?: number) => Promise<boolean>;
+type CanControlMail = (timeoutMs?: number, opts?: { allowLaunch?: boolean }) => Promise<boolean>;
 
 export interface MailbeeStatus {
   enabled: boolean;
@@ -22,7 +22,7 @@ export function _setMailbeeStatusDepsForTests(deps: { canControlMail?: CanContro
 export async function getMailbeeStatus(opts: { probe?: boolean } = {}): Promise<MailbeeStatus> {
   const enabled = isChannelEnabled();
   const shouldProbe = opts.probe === true || enabled;
-  const mailControllable = shouldProbe ? await canControlMailForStatus() : false;
+  const mailControllable = shouldProbe ? await canControlMailForStatus(undefined, { allowLaunch: opts.probe === true }) : false;
   return {
     enabled,
     mailControllable,

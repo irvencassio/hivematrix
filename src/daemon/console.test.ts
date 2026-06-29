@@ -577,14 +577,14 @@ test("header is grouped into zones with a theme toggle and grouped connectivity"
   assert.match(CONSOLE_HTML, /@media \(max-width: 760px\)[\s\S]*\.hlabel \{ display: none/, "header labels hide on narrow widths");
 });
 
-test("settings auto-save with toast feedback and open on Models", () => {
+test("settings auto-save with toast feedback and open on About", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(CONSOLE_HTML, /id="s_default"[^>]*onchange="saveDefault\(\)"/, "default model auto-saves on change");
   assert.match(CONSOLE_HTML, /id="s_endpoint"[^>]*onchange="saveEndpoint\(\)"/, "endpoint auto-saves on change");
   assert.doesNotMatch(CONSOLE_HTML, /onclick="saveDefault\(\)"/, "no separate Save-default button");
   assert.doesNotMatch(CONSOLE_HTML, /onclick="saveEndpoint\(\)"/, "no separate Save-endpoint button");
   assert.match(js, /function hmToast\(/, "toast helper present");
-  assert.match(js, /function openSettings\(\)[\s\S]*switchSettingsTab\("models"\)/, "settings lands on Models, not About");
+  assert.match(js, /function openSettings\(\)[\s\S]*switchSettingsTab\("about"\)/, "settings lands on About by default");
 });
 
 test("center column shows an overview when no task is selected", () => {
@@ -633,7 +633,9 @@ test("board renders a per-task age chip from updatedAt", () => {
 test("board renders Flight context for linked review cards only", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /function flightContextBadge\(/, "board has a Flight context helper");
-  assert.match(js, /Blocks Flight/, "review Flight items explain that they block a Flight");
+  assert.match(js, /Flight Review/, "review Flight items use review wording, not failure wording");
+  assert.match(js, /awaiting accept/, "review Flight tooltip explains the operator action");
+  assert.doesNotMatch(js, /Blocks Flight/, "review Flight items should not read like failure blockers");
   assert.match(js, /itemStatus/, "Flight chip includes the linked item status");
   assert.match(js, /landedCount/, "Flight chip includes landed count");
   assert.match(js, /flightContextBadge\(t\)/, "renderBoard appends the Flight context line per card");
