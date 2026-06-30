@@ -1053,6 +1053,7 @@ const shouldAutoLand = ((await import("./orchestrate")) as any).shouldAutoLand a
       item: { risk: string; blocker: string | null; executionMode: string },
       actualTaskStatus: string | null,
       loop: { profile: string } | null,
+      taskReviewState?: string | null,
     ) => { autoLand: boolean; reason: string })
   | undefined;
 
@@ -1082,6 +1083,12 @@ test("shouldAutoLand: task=needs_input → autoLand false (agent waiting for ope
   const r = shouldAutoLand!({ risk: "low", blocker: null, executionMode: "sequential" }, "needs_input", null);
   assert.equal(r.autoLand, false);
   assert.match(r.reason, /input/);
+});
+
+test("shouldAutoLand: task reviewState=needs_input → autoLand false (review is waiting for operator input)", () => {
+  const r = shouldAutoLand!({ risk: "low", blocker: null, executionMode: "sequential" }, "review", null, "needs_input");
+  assert.equal(r.autoLand, false);
+  assert.match(r.reason, /review state|input/i);
 });
 
 test("shouldAutoLand: has open blocker → autoLand false (unanswered question)", () => {
@@ -1399,6 +1406,43 @@ test("reconcileWorkPackage no-auto-land: needs_input task stays in review", asyn
     detail.items[0].status,
     "review",
     "needs_input item must stay in review — agent is waiting for operator-supplied data",
+  );
+});
+
+test("reconcileWorkPackage no-auto-land: review task with needs_input reviewState stays in review", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "No-auto-land reviewState needs_input",
+    project: "test",
+    projectPath: "/tmp/nal-review-state-needs-input",
+    items: [{ title: "Waiting approval step", prompt: "do it", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status, reviewState, output) VALUES (?, 'T', 'D', 'test', '/tmp', 'review', 'needs_input', ?)",
+  ).run(taskId, JSON.stringify({ summary: "❓ Awaiting your reply:\n\nDoes this design look correct?" }));
+  db.prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(
+    detail.items[0].status,
+    "review",
+    "reviewState needs_input means the child is waiting for a reply and must not auto-land",
+  );
+  const task = await Task.findById(taskId);
+  assert.equal(
+    String((task as Record<string, unknown>).status),
+    "review",
+    "no-auto-land must leave the linked task in review instead of archiving it",
+  );
+  assert.equal(
+    String((task as Record<string, unknown>).reviewState),
+    "needs_input",
+    "the operator-input review state is preserved",
   );
 });
 

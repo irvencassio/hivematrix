@@ -51,6 +51,7 @@ export function shouldAutoLand(
   item: Pick<WorkPackageItem, "risk" | "blocker" | "executionMode">,
   actualTaskStatus: string | null,
   loop: { profile: string } | null,
+  taskReviewState: string | null = null,
 ): AutoLandDecision {
   if (item.risk !== "low")
     return { autoLand: false, reason: `risk is ${item.risk}` };
@@ -61,6 +62,8 @@ export function shouldAutoLand(
         ? "agent is waiting for input"
         : `task status is ${actualTaskStatus}`,
     };
+  if (taskReviewState)
+    return { autoLand: false, reason: `task review state is ${taskReviewState}` };
   if (item.blocker !== null)
     return { autoLand: false, reason: "item has an open blocker" };
   if (item.executionMode === "hold")
@@ -215,11 +218,14 @@ export async function reconcileWorkPackage(id: string): Promise<void> {
     let effectiveNext = next;
     if (next === "review" && item.status === "running") {
       const actualTaskStatus = String((task as Record<string, unknown>).status);
+      const rawReviewState = (task as Record<string, unknown>).reviewState;
+      const taskReviewState = typeof rawReviewState === "string" && rawReviewState.length > 0 ? rawReviewState : null;
       const loop = getLoop(id);
       const { autoLand } = shouldAutoLand(
         { ...item, blocker: newBlocker },
         actualTaskStatus,
         loop,
+        taskReviewState,
       );
       if (autoLand) {
         effectiveNext = "done";

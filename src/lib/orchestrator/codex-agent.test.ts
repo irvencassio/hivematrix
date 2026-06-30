@@ -4,7 +4,7 @@ import { renderAttachmentBlock } from "@/lib/tasks/attachments";
 import { buildCodexPrompt, buildCodexExecArgs } from "./codex-agent";
 
 test("buildCodexPrompt prepends the outbound routing block and keeps the task", () => {
-  const prompt = buildCodexPrompt("Email Jane the Q3 numbers.", { mailLaneEnabled: true });
+  const prompt = buildCodexPrompt("Email Jane the Q3 numbers.", { mailLaneEnabled: true, messageLaneEnabled: true });
   // routing guidance present
   assert.match(prompt, /\/mailbee\/send/);
   assert.match(prompt, /\/messagebee\/send/);
@@ -54,7 +54,7 @@ test("buildCodexPrompt keeps formatted attachment paths in the task section", ()
 });
 
 test("buildCodexPrompt omits Mail Lane guidance when Mail Lane is disabled", () => {
-  const prompt = buildCodexPrompt("Summarize the dashboard.", { mailLaneEnabled: false });
+  const prompt = buildCodexPrompt("Summarize the dashboard.", { mailLaneEnabled: false, messageLaneEnabled: true });
   assert.match(prompt, /Mail Lane is disabled/i);
   assert.match(prompt, /\/messagebee\/send/);
   assert.doesNotMatch(prompt, /\/mailbee\/send/);
