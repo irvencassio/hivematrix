@@ -41,6 +41,15 @@ test("is idempotent — re-allowlisting the same handle does not duplicate", asy
   assert.equal(allow.length, 1, "same normalized address, one identity");
 });
 
+test("disables the channel when enable is false", async () => {
+  await configureMessageBee({ enable: true, phone: "+1-555-123-4567" });
+  const r = await configureMessageBee({ enable: false });
+  assert.equal(isChannelEnabled(), false);
+  assert.equal(r.ok, true);
+  assert.equal((r.data as { enabled: boolean }).enabled, false);
+  assert.match(r.detail, /disabled/i);
+});
+
 test("rejects an invalid handle with a warning but still enables the channel", async () => {
   const r = await configureMessageBee({ enable: true, phone: "   " });
   // Whitespace-only is treated as no phone (no warning, no new identity).

@@ -294,9 +294,10 @@ export async function probeOpenAiEndpoint(
 }
 
 /**
- * Guided Message Lane setup: enable the iMessage channel, allowlist a sender, and
- * report whether Full Disk Access (chat.db readability) is in place. Idempotent
- * and safe to re-run; returns the live state the wizard renders.
+ * Guided Message Lane setup: enable/disable the iMessage channel, allowlist a
+ * sender, and report whether Full Disk Access (chat.db readability) is in
+ * place. Idempotent and safe to re-run; returns the live state the wizard
+ * renders.
  */
 export async function configureMessageBee(opts: {
   enable?: boolean;
@@ -305,9 +306,25 @@ export async function configureMessageBee(opts: {
 }): Promise<ActionResult> {
   const store = await import("@/lib/messagebee/store");
   const { normalizeHandle } = await import("@/lib/messagebee/contracts");
+
+  if (opts.enable === false) {
+    store.setChannelEnabled(false);
+    return {
+      ok: true,
+      detail: "Message Lane disabled.",
+      data: {
+        enabled: false,
+        chatDbReadable: false,
+        chatDbDetail: "Message Lane disabled",
+        identities: store.listIdentities(),
+        deepLinks: { fullDiskAccess: TCC_DEEP_LINKS.fullDiskAccess },
+      },
+    };
+  }
+
   const { probeChatDbAccess } = await import("@/lib/messagebee/imessage");
 
-  if (opts.enable !== false) store.setChannelEnabled(true);
+  store.setChannelEnabled(true);
 
   const warnings: string[] = [];
   const raw = (opts.phone ?? "").trim();
