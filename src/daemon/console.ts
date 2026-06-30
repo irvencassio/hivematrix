@@ -48,11 +48,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     --mat-tint-thick:     rgba(28,34,48,  var(--mat-tint-alpha-thick));
     --mat-tint-thin:      rgba(13,17,23,  var(--mat-tint-alpha-thin));
     --bg: #0d1117; --panel: var(--mat-tint-regular); --panel-2: var(--mat-tint-thick); --border: #2d333b;
+    --modal-bg: #161b22;
     --text: #e6edf3; --muted: #8b949e; --accent: #d9a441; --accent-2: #58a6ff;
     --ok: #3fb950; --warn: #d29922; --err: #f85149;
     --code-bg: #0a0d12; --code-text: #e6edf3;
     --badge-bg: #21262d; --badge-text: #8b949e;
-    --overlay-bg: rgba(0,0,0,.55);
+    --overlay-bg: transparent;
     --reply-q-bg: rgba(88,166,255,.08);
     --hover-bg: rgba(255,255,255,.06);
     --card-shadow: 0 1px 3px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.12);
@@ -66,11 +67,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     --mat-tint-thick:     rgba(240,243,246, var(--mat-tint-alpha-thick));
     --mat-tint-thin:      rgba(255,255,255, var(--mat-tint-alpha-thin));
     --bg: #f6f8fa; --panel: var(--mat-tint-regular); --panel-2: var(--mat-tint-thick); --border: #d0d7de;
+    --modal-bg: #ffffff;
     --text: #1f2328; --muted: #57606a; --accent: #9a6700; --accent-2: #0969da;
     --ok: #1a7f37; --warn: #9a6700; --err: #cf222e;
     --code-bg: #e8ecf1; --code-text: #1f2328;
     --badge-bg: #e8ecf1; --badge-text: #57606a;
-    --overlay-bg: rgba(0,0,0,.25);
+    --overlay-bg: transparent;
     --reply-q-bg: rgba(9,105,218,.08);
     --hover-bg: rgba(0,0,0,.04);
     --card-shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.04);
@@ -86,11 +88,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     --mat-tint-thick:     rgba(10,33,19,  var(--mat-tint-alpha-thick));
     --mat-tint-thin:      rgba(1,10,5,    var(--mat-tint-alpha-thin));
     --bg: #010a05; --panel: var(--mat-tint-regular); --panel-2: var(--mat-tint-thick); --border: #1d5a32;
+    --modal-bg: #071206;
     --text: #b9ffce; --muted: #57b074; --accent: #39ff7e; --accent-2: #6effa3;
     --ok: #39ff7e; --warn: #d2e022; --err: #ff5d6c;
     --code-bg: #03100a; --code-text: #b9ffce;
     --badge-bg: #0c2416; --badge-text: #57b074;
-    --overlay-bg: rgba(0,10,4,.7);
+    --overlay-bg: transparent;
     --reply-q-bg: rgba(57,255,126,.08);
     --hover-bg: rgba(57,255,126,.08);
     --card-shadow: 0 0 12px rgba(57,255,126,.07);
@@ -125,7 +128,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   * { box-sizing: border-box; }
   body { margin: 0; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
     background: transparent; color: var(--text); height: 100vh; overflow: hidden;
-    -webkit-font-smoothing: antialiased; }
+    -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.14); border-radius: 3px; }
@@ -134,7 +137,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   html[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.26); }
   ::selection { background: rgba(217,164,65,.28); }
   header { display: flex; align-items: center; gap: 12px; padding: 8px 16px;
-    background: var(--panel); border-bottom: 1px solid var(--border); height: 44px;
+    background: var(--panel); border-bottom: 1px solid var(--border); height: 44px; flex-shrink: 0;
     backdrop-filter: var(--mat-chrome); -webkit-backdrop-filter: var(--mat-chrome); }
   header .logo { font-weight: 700; color: var(--accent); letter-spacing: .5px; }
   header .mode { margin-left: auto; display: flex; align-items: center; gap: 8px; }
@@ -147,7 +150,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
     border-radius: 6px; padding: 3px 8px; font-size: 11px; }
   main { --col-left: 300px; --col-right: 320px; position: relative;
-    display: grid; grid-template-columns: var(--col-left) 1fr var(--col-right); height: calc(100vh - 44px); }
+    display: grid; grid-template-columns: var(--col-left) 1fr var(--col-right); flex: 1 1 0%; min-height: 0; }
   .col { overflow-y: auto; padding: 12px; backdrop-filter: var(--mat-regular); -webkit-backdrop-filter: var(--mat-regular); }
   /* Draggable dividers on the inner edge of each side rail. Thin absolute
      overlays pinned to the rail boundary; dragging rewrites --col-left /
@@ -185,7 +188,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     .session { min-height: 180px; }
   }
   .ctx-sec { margin: 0; }
+  .col.context .ctx-sec[open] { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 0 10px 10px; margin-bottom: 10px; }
   .ctx-sec > summary { cursor: pointer; list-style: none; font-size: 14px; font-weight: 600; margin: 20px 0 6px; color: var(--text); }
+  .col.context .ctx-sec[open] > summary { margin: 10px 0 8px; }
   .ctx-sec > summary::-webkit-details-marker { display: none; }
   .ctx-sec > summary::before { content: '▾ '; color: var(--muted); }
   .ctx-sec:not([open]) > summary::before { content: '▸ '; }
@@ -442,7 +447,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .overlay.open { opacity: 1; visibility: visible; pointer-events: auto; }
   .overlay .modal { transform: translateY(8px) scale(.97); transition: transform .2s cubic-bezier(.2,.8,.2,1); }
   .overlay.open .modal { transform: none; }
-  .modal { width: 640px; max-width: 92vw; max-height: 84vh; overflow-y: auto; background: var(--panel);
+  .modal { width: 640px; max-width: 92vw; max-height: 84vh; overflow-y: auto; background: var(--modal-bg);
     border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
   .modal h1 { font-size: 16px; margin: 0 0 14px; display: flex; align-items: center; }
   .modal h1 .x { margin-left: auto; cursor: pointer; color: var(--muted); font-weight: 400; }
@@ -484,10 +489,19 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .backend .nm { font-weight: 600; min-width: 150px; }
   .backend .st { font-size: 11px; }
   .backend .st.ok { color: var(--ok); } .backend .st.no { color: var(--muted); }
+  .mdl-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+  .mdl-card-head { display: flex; align-items: center; gap: 8px; }
+  .mdl-card-name { font-weight: 600; font-size: 12px; flex: 1; }
+  .mdl-tier { font-size: 11px; color: var(--muted); margin-top: 4px; word-break: keep-all; }
+  .mdl-tier-alias { display: block; padding-left: 14px; }
+  .mdl-card-foot { font-size: 11px; color: var(--muted); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
   .vinfo { font-size: 11px; color: var(--muted); margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
   .lane { margin-bottom: 16px; }
-  .lane-title { font-size: 11px; color: var(--muted); margin-bottom: 6px; display: flex; gap: 6px; }
+  .lane-title { font-size: 11px; color: var(--muted); margin-bottom: 6px; display: flex; gap: 6px; align-items: center; cursor: pointer; user-select: none; }
+  .lane-title:hover { color: var(--text); }
   .lane-title .count { color: var(--accent); }
+  .lane-caret { font-size: 9px; width: 8px; color: var(--muted); flex: 0 0 auto; }
+  .lane.collapsed { margin-bottom: 10px; }
   .card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
     padding: 8px 10px; margin-bottom: 6px; cursor: pointer; transition: border-color .1s; position: relative;
     box-shadow: var(--card-shadow); }
@@ -733,6 +747,50 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .obs-win button { transition: background .15s ease, color .15s ease; }
   /* Sch-view-btn transition */
   .sch-view-btn { transition: border-color .15s ease, color .15s ease, background .15s ease; }
+  /* ── OpenClaw chat dock ─────────────────────────────────────────────── */
+  #openclawDock { flex: 0 0 auto; height: 240px; display: none;
+    border-top: 1px solid var(--border); background: var(--panel-2);
+    backdrop-filter: var(--mat-regular); -webkit-backdrop-filter: var(--mat-regular);
+    overflow: hidden; transition: height .15s ease; }
+  #openclawDock.collapsed { height: 38px; }
+  .oc-header { display:flex; align-items:center; gap:8px; padding:0 12px; height:38px; flex-shrink:0;
+    border-bottom:1px solid var(--border); background:var(--panel); cursor:pointer; user-select:none;
+    font-size:12px; font-weight:600; }
+  .oc-header:hover { background:var(--hover-bg); }
+  .oc-avail-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .oc-avail-dot.ok  { background:var(--ok); }
+  .oc-avail-dot.off { background:var(--muted); }
+  .oc-avail-dot.err { background:var(--err); }
+  .oc-session-sel { font-size:11px; color:var(--muted); background:transparent; border:none;
+    cursor:pointer; max-width:160px; padding:2px 4px; border-radius:4px; }
+  .oc-session-sel:hover { background:var(--hover-bg); }
+  .oc-body { display:flex; flex-direction:column; height:calc(100% - 38px); }
+  .oc-transcript { flex:1; overflow-y:auto; padding:8px 14px; font-size:12px; scroll-behavior:smooth; }
+  .oc-msg { margin-bottom:8px; }
+  .oc-msg-user { text-align:right; }
+  .oc-msg-user .oc-msg-text { background:var(--reply-q-bg); border-radius:10px; padding:5px 10px;
+    display:inline-block; max-width:78%; word-break:break-word; }
+  .oc-msg-assistant .oc-msg-text { color:var(--text); word-break:break-word; }
+  .oc-msg-system .oc-msg-text { color:var(--muted); font-style:italic; word-break:break-word; }
+  .oc-msg-meta { font-size:10px; color:var(--muted); margin-bottom:2px; }
+  .oc-composer { display:flex; align-items:flex-end; gap:6px; padding:5px 10px 7px;
+    border-top:1px solid var(--border); background:var(--panel); flex-shrink:0; }
+  .oc-input { flex:1; min-height:28px; max-height:80px; padding:4px 8px;
+    border:1px solid var(--border); border-radius:8px; background:var(--code-bg);
+    color:var(--text); font-size:12px; resize:none; font-family:inherit; line-height:1.4; }
+  .oc-input:focus { outline:none; border-color:var(--accent); }
+  /* compact warning panel shown when OpenClaw is unavailable */
+  #openclawDock.oc-unavail-state:not(.collapsed) { height:94px; }
+  .oc-warn-panel { display:flex; align-items:flex-start; gap:10px; padding:11px 14px 13px; font-size:12px; }
+  .oc-warn-icon { flex-shrink:0; color:var(--warn); font-size:15px; line-height:1.3; }
+  .oc-warn-body { flex:1; min-width:0; }
+  .oc-warn-title { font-weight:600; color:var(--text); margin-bottom:2px; }
+  .oc-warn-reason { color:var(--muted); line-height:1.4; word-break:break-word; }
+  .oc-warn-action { display:inline-block; margin-top:5px; font-size:11px; color:var(--accent);
+    cursor:pointer; text-decoration:underline; background:none; border:none; padding:0;
+    font-family:inherit; }
+  .oc-warn-action:hover { opacity:.75; }
+  @media (max-width:760px) { #openclawDock { display:none !important; } }
 </style>
 </head>
 <body>
@@ -1446,6 +1504,28 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="mcp"></div></details>
   </section>
 </main>
+<div id="openclawDock" class="collapsed">
+  <div class="oc-header" onclick="ocToggleCollapse()">
+    <span class="oc-avail-dot off" id="ocAvailDot"></span>
+    <span>OpenClaw</span>
+    <select id="ocSessionSel" class="oc-session-sel" onclick="event.stopPropagation()" onchange="ocSessionChanged()">
+      <option value="agent:main:main">agent:main:main</option>
+      <option value="agent:main:hivematrix">agent:main:hivematrix</option>
+    </select>
+    <span style="flex:1"></span>
+    <button class="usage-refresh" onclick="event.stopPropagation();initOpenclawDock()" title="Re-check OpenClaw status and refresh history">↻</button>
+    <span id="ocCollapseArrow" style="font-size:10px;color:var(--muted);margin-left:6px">▼</span>
+  </div>
+  <div class="oc-body">
+    <div class="oc-transcript" id="ocTranscript"></div>
+    <div class="oc-composer">
+      <textarea class="oc-input" id="ocInput" placeholder="Message OpenClaw…" rows="1"
+        onkeydown="ocInputKeydown(event)" oninput="ocInputResize(this)"></textarea>
+      <button class="create" style="padding:5px 10px;font-size:12px;line-height:1.4" id="ocSendBtn" onclick="ocSend()" disabled>Send</button>
+      <button class="copybtn" id="ocTaskBtn" onclick="ocCreateTask()" title="Create HiveMatrix task — uses selected transcript text, or the last message if nothing is selected">＋ Task</button>
+    </div>
+  </div>
+</div>
 <script>
 // Board lanes (display-only). The underlying task statuses are unchanged
 // (no migration): "backlog" is shown as "queued", and "assigned" (a ~2s
@@ -2029,6 +2109,20 @@ function flightPassRowHtml(pass) {
     + errorBlock
     + '</div>';
 }
+// Collapsed board lanes persist in localStorage and survive the periodic board
+// re-render (renderBoard rebuilds innerHTML, so collapse state can't live in the
+// DOM). Lets the operator fold a tall lane (e.g. "review") so failed / in-progress
+// stay in view; the header + count remain visible while collapsed.
+function getCollapsedLanes() {
+  try { return new Set(JSON.parse(localStorage.getItem("hm_lanes_collapsed") || "[]")); }
+  catch (e) { return new Set(); }
+}
+function toggleLane(key) {
+  const c = getCollapsedLanes();
+  if (c.has(key)) c.delete(key); else c.add(key);
+  try { localStorage.setItem("hm_lanes_collapsed", JSON.stringify(Array.from(c))); } catch (e) { /* ignore */ }
+  renderBoard();
+}
 function renderBoard() {
   const statusToLane = {};
   LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
@@ -2039,17 +2133,21 @@ function renderBoard() {
     : state.tasks;
   for (const t of filtered) { const k = statusToLane[t.status]; if (k) byLane[k].push(t); }
   const el = document.getElementById("board");
+  const collapsedLanes = getCollapsedLanes();
   el.innerHTML = LANE_DEFS.map(L => {
     const items = byLane[L.key] || [];
     if (!items.length && (L.key==="done"||L.key==="failed")) return "";
-    return '<div class="lane"><div class="lane-title">'+L.label+' <span class="count">'+items.length+'</span></div>'
-      + items.map(t => '<div class="card'+(state.selected===t._id?' sel':'')+'" onclick="selectTask(\''+t._id+'\')">'
+    const isCollapsed = collapsedLanes.has(L.key);
+    return '<div class="lane'+(isCollapsed?' collapsed':'')+'">'
+      + '<div class="lane-title" onclick="toggleLane(\''+L.key+'\')" title="'+(isCollapsed?'Expand':'Collapse')+' '+esc(L.label)+'">'
+      + '<span class="lane-caret">'+(isCollapsed?'▸':'▾')+'</span>'+L.label+' <span class="count">'+items.length+'</span></div>'
+      + (isCollapsed ? '' : items.map(t => '<div class="card'+(state.selected===t._id?' sel':'')+'" onclick="selectTask(\''+t._id+'\')">'
           + '<button class="card-archive" title="Archive" onclick="event.stopPropagation();cardArchive(\''+t._id+'\')">⌫</button>'
           + '<div class="t">'+esc(t.title||t._id)+'</div>'
           + '<div class="m">'+(t.model?'<span class="badge model">'+esc(t.model)+'</span>':'')
           + (t.reviewState?'<span class="badge">'+esc(t.reviewState)+'</span>':'')
           + ageBadge(t)+'</div>'
-          + flightContextBadge(t) + '</div>').join("")
+          + flightContextBadge(t) + '</div>').join(""))
       + '</div>';
   }).join("") || '<div class="muted">No tasks.</div>';
   const archivable = state.tasks.filter(t => ["review","done","failed","cancelled"].includes(t.status)).length;
@@ -3266,13 +3364,25 @@ async function runSelectedCommand() {
   const c = it.raw;
   const args = (document.getElementById('cmdArgs') || {}).value || '';
   const projectPath = ((document.getElementById('commandPath') || {}).value || '$HOME').trim() || '$HOME';
+  const cmdProject = _mpS('cmd');
+  const projectName = (cmdProject.name || '').trim();
   const res = document.getElementById('skRunStatus') || document.getElementById('skStatus');
   if (res) res.textContent = 'Launching /' + c.invokeName + '…';
   try {
+    const payload = { name: c.invokeName, args: args, projectPath: projectPath };
+    if (projectName) payload.project = projectName;
     const d = await api('/commands/run',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: c.invokeName, args: args, projectPath: projectPath }) });
-    if (d && d.task) { if (res) res.textContent = 'Launched /' + c.invokeName + ' — see the board.'; refresh(); }
-    else if (res) { res.textContent = (d && d.error) || 'Launched.'; }
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (d && d.task) {
+      const taskProject = (d.task.project || 'ops');
+      const boardFilter = state.selectedProject || '';
+      let msg = 'Launched /' + c.invokeName + ' — see the board.';
+      if (boardFilter && boardFilter !== taskProject) {
+        msg = 'Launched /' + c.invokeName + ' in ' + taskProject + ' — current board filter is ' + boardFilter + '.';
+      }
+      if (res) res.textContent = msg;
+      refresh();
+    } else if (res) { res.textContent = (d && d.error) || 'Launched.'; }
   } catch (e) { if (res) res.textContent = 'Error launching command.'; }
 }
 function inspectCommand() {
@@ -4212,15 +4322,16 @@ async function checkModels() {
     html += '<div class="mdl-grp">Embeddings <span style="font-weight:400;text-transform:none;letter-spacing:0">· shared with Brainpower</span></div>';
     if (emb.model) {
       const dot = emb.enabled ? '<span style="color:var(--ok)">●</span>' : '<span style="color:var(--muted)">○</span>';
-      html += '<div class="backend"><span class="nm">' + dot + " " + esc(emb.model) + '</span>'
+      html += '<div class="mdl-card">'
+        + '<div class="mdl-card-head"><span class="mdl-card-name">' + dot + ' ' + esc(emb.model) + '</span>'
         + '<span class="st ' + (emb.enabled ? "ok" : "no") + '">' + (emb.enabled ? "✓ on" : "off") + '</span></div>'
-        + '<div class="muted" style="font-size:11px;margin:2px 0 6px 2px">'
+        + '<div class="mdl-card-foot">'
         + esc((emb.indexedDocs || 0) + " doc" + (emb.indexedDocs === 1 ? "" : "s") + " indexed")
         + (emb.endpoint ? " · " + esc(emb.endpoint) : "")
         + (emb.enabled ? ' &nbsp; <button class="linklike" onclick="reindexEmbeddings()">Reindex</button>' : "")
-        + '</div>';
+        + '</div></div>';
     } else {
-      html += '<div class="muted" style="font-size:11px;margin:2px 0 6px 2px">Not configured — set <code>embeddings</code> in ~/.hivematrix/config.json (shares Brainpower\'s qwen3-embedding model over the same brain).</div>';
+      html += '<div class="mdl-card"><div class="mdl-card-foot" style="border:none;margin:0;padding:0">Not configured — set <code>embeddings</code> in ~/.hivematrix/config.json (shares Brainpower\'s qwen3-embedding model over the same brain).</div></div>';
     }
   }
 
@@ -4369,25 +4480,29 @@ function renderLocalEngine(le, cap) {
   const name = le.engine === "rapid-mlx" ? "Rapid-MLX" : le.engine === "ollama" ? "Ollama" : "LM Studio";
   const capByKey = {};
   if (cap && cap.tiers) for (const t of cap.tiers) capByKey[t.key] = t;
-  const tiers = (le.tiers || []).map(t => {
+  const tierDivs = (le.tiers || []).map(t => {
     const c = capByKey[t.key];
-    const grey = c && !c.residentCapable; // hardware can't keep this tier resident
+    const grey = c && !c.residentCapable;
     const body = (t.healthy ? '<span style="color:var(--ok)">●</span>' : '<span style="color:var(--muted)">○</span>')
-      + ' ' + esc(t.key) + ' — ' + esc(t.alias) + ' :' + t.port
+      + ' <b>' + esc(t.key) + '</b>'
+      + '<span class="mdl-tier-alias">' + esc(t.alias) + ' :' + t.port
       + ' · reasoning ' + (t.reasoning ? 'on' : 'off') + (t.healthy ? '' : ' · not running')
-      + (grey && c.reason ? ' · <span style="color:#c8922b">' + esc(c.reason) + '</span>' : '');
-    return grey ? '<span style="opacity:.5" title="' + esc(c.reason || '') + '">' + body + '</span>' : body;
-  }).join(' &nbsp;&nbsp; ');
-  let foot = '';
+      + (grey && c.reason ? ' · <span style="color:#c8922b">' + esc(c.reason) + '</span>' : '')
+      + '</span>';
+    return '<div class="mdl-tier">' + (grey ? '<span style="opacity:.5" title="' + esc(c.reason || '') + '">' + body + '</span>' : body) + '</div>';
+  }).join('');
+  let footContent = '';
   if (cap && !cap.localCapable) {
-    foot = '<div class="muted" style="font-size:11px;color:#c8922b;margin:2px 0 6px 2px">' + esc(cap.reason || 'Local models unavailable on this Mac — running cloud-only.') + '</div>';
+    footContent = '<span style="color:#c8922b">' + esc(cap.reason || 'Local models unavailable on this Mac — running cloud-only.') + '</span>';
   } else if (cap && cap.recommendedTiers && cap.recommendedTiers.length) {
-    foot = '<div class="muted" style="font-size:11px;margin:2px 0 6px 2px">Recommended for this Mac (' + Math.round(cap.ramGB || 0) + ' GB): <b>' + esc(cap.recommendedTiers.join(' + ')) + '</b> resident.</div>';
+    footContent = 'Recommended for this Mac (' + Math.round(cap.ramGB || 0) + ' GB): <b>' + esc(cap.recommendedTiers.join(' + ')) + '</b> resident.';
   }
-  return '<div class="backend"><span class="nm">Local engine — ' + name + '</span>'
+  return '<div class="mdl-card">'
+    + '<div class="mdl-card-head"><span class="mdl-card-name">Local engine — ' + name + '</span>'
     + '<span class="st ' + (le.up ? 'ok' : 'no') + '">' + (le.up ? '✓ running' : 'not running') + '</span></div>'
-    + (tiers ? '<div class="muted" style="font-size:11px;margin:2px 0 6px 2px">' + tiers + '</div>' : '')
-    + foot;
+    + tierDivs
+    + (footContent ? '<div class="mdl-card-foot">' + footContent + '</div>' : '')
+    + '</div>';
 }
 
 // One-click provisioner: sizes Rapid-MLX to this Mac, installs it, pulls the
@@ -5029,9 +5144,9 @@ function openSettings() {
   sd.innerHTML = models.available.map(m => '<option value="'+esc(m.modelId)+'">'+esc(m.name)+'</option>').join("");
   if (models.defaultModel) sd.value = models.defaultModel;
   document.getElementById("s_backends").innerHTML = models.backends.map(b =>
-    '<div class="backend"><span class="nm">'+esc(b.name)+'</span>'
-    + '<span class="st '+(b.configured?'ok':'no')+'">'+(b.configured?'✓ '+esc(b.detail):'not set up')+'</span>'
-    + (b.configured?'':'<span class="muted" style="flex:1"> — '+esc(b.connect||'')+'</span>')+'</div>').join("")
+    '<div class="mdl-card"><div class="mdl-card-head"><span class="mdl-card-name">'+esc(b.name)+'</span>'
+    + '<span class="st '+(b.configured?'ok':'no')+'">'+(b.configured?'✓ '+esc(b.detail):'not set up')+'</span></div>'
+    + (b.configured?'':'<div class="mdl-card-foot">'+esc(b.connect||'')+'</div>')+'</div>').join("")
     + renderLocalEngine(models.localEngine, models.localEngineCapability)
     + renderProvisionUI(models.localEngineCapability);
   const local = models.backends.find(b => b.id === "local");
@@ -5206,6 +5321,7 @@ async function toggleFeature(key, enabled) {
   await api("/settings/features", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, enabled }) });
   renderFeatures();
   initVoiceFeature();
+  if (key === 'openclaw.chatDock') initOpenclawDock();
 }
 
 async function toggleAutoApproval(enabled) {
@@ -5260,6 +5376,169 @@ async function initVoiceFeature() {
     if (btn) btn.style.display = on ? "" : "none";
   } catch (e) { /* ignore */ }
 }
+
+// ── OpenClaw Chat Dock ─────────────────────────────────────────────────
+let _ocState = { session: 'agent:main:main', collapsed: true, sending: false, lastMsgId: null, messages: [] };
+
+function ocWarnPanel(reason) {
+  return '<div class="oc-warn-panel">'
+    + '<span class="oc-warn-icon" aria-hidden="true">⚠</span>'
+    + '<div class="oc-warn-body">'
+    + '<div class="oc-warn-title">OpenClaw unavailable</div>'
+    + '<div class="oc-warn-reason">' + esc(reason) + '</div>'
+    + '<button class="oc-warn-action" onclick="openSettings();switchSettingsTab(\'features\')">'
+    + 'Settings → Features</button>'
+    + '</div></div>';
+}
+
+async function initOpenclawDock() {
+  const dock = document.getElementById('openclawDock');
+  if (!dock) return;
+  try {
+    const r = await api('/openclaw/status');
+    const enabled = r && r.enabled;
+    if (!enabled) { dock.style.display = 'none'; return; }
+    dock.style.display = '';
+    const available = !!(r && r.available);
+    const dot = document.getElementById('ocAvailDot');
+    if (dot) dot.className = 'oc-avail-dot ' + (available ? 'ok' : 'err');
+    const comp = document.querySelector('.oc-composer');
+    if (!available) {
+      const reason = (r && r.reason) || 'OpenClaw is not available on this Mac.';
+      const t = document.getElementById('ocTranscript');
+      if (t) t.innerHTML = ocWarnPanel(reason);
+      if (comp) comp.style.display = 'none';
+      dock.classList.add('oc-unavail-state');
+      return;
+    }
+    dock.classList.remove('oc-unavail-state');
+    if (comp) comp.style.display = '';
+    await ocRefresh();
+  } catch (e) { const dock2 = document.getElementById('openclawDock'); if (dock2) dock2.style.display = 'none'; }
+}
+
+async function ocRefresh() {
+  const t = document.getElementById('ocTranscript');
+  if (!t) return;
+  t.innerHTML = '<div class="oc-warn-panel"><span class="oc-warn-icon" aria-hidden="true">⏳</span><div class="oc-warn-body"><div class="oc-warn-reason">Loading…</div></div></div>';
+  try {
+    const r = await api('/openclaw/chat/history?sessionKey=' + encodeURIComponent(_ocState.session) + '&limit=50');
+    if (!r || !r.available) {
+      t.innerHTML = ocWarnPanel((r && r.reason) || 'OpenClaw unavailable.');
+      return;
+    }
+    ocRenderMessages(r.messages || [], r.truncated);
+  } catch (e) { t.innerHTML = ocWarnPanel('Could not load history. Is OpenClaw running?'); }
+}
+
+function ocRenderMessages(msgs, truncated) {
+  const el = document.getElementById('ocTranscript');
+  if (!el) return;
+  _ocState.messages = msgs || [];
+  if (!msgs.length) { el.innerHTML = '<div class="muted" style="font-size:12px;padding:8px 0">No messages yet.</div>'; return; }
+  const rows = msgs.map(function(m) {
+    const ts = m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+    return '<div class="oc-msg oc-msg-' + esc(m.role || 'assistant') + '">'
+      + '<div class="oc-msg-meta">' + esc(m.role || '') + (ts ? ' \xb7 ' + ts : '') + '</div>'
+      + '<div class="oc-msg-text">' + esc(m.content || '').replace(/\n/g, '<br>') + '</div>'
+      + '</div>';
+  }).join('');
+  const trunc = truncated ? '<div class="muted" style="font-size:11px;padding:4px 0 8px">…history truncated</div>' : '';
+  el.innerHTML = trunc + rows;
+  el.scrollTop = el.scrollHeight;
+  const last = msgs[msgs.length - 1];
+  _ocState.lastMsgId = last && last.id ? last.id : null;
+}
+
+async function ocSend() {
+  const input = document.getElementById('ocInput');
+  const sendBtn = document.getElementById('ocSendBtn');
+  if (!input || !input.value.trim() || _ocState.sending) return;
+  const msg = input.value.trim();
+  _ocState.sending = true;
+  if (sendBtn) sendBtn.disabled = true;
+  input.value = '';
+  ocInputResize(input);
+  try {
+    const r = await api('/openclaw/chat/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionKey: _ocState.session, message: msg,
+        idempotencyKey: 'oc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) })
+    });
+    if (!r || !r.ok) {
+      input.value = msg; ocInputResize(input);
+      hmToast((r && r.reason) || 'OpenClaw send failed.', 'err');
+    } else {
+      setTimeout(ocRefresh, 900);
+    }
+  } catch (e) {
+    input.value = msg; ocInputResize(input);
+    hmToast('OpenClaw send failed.', 'err');
+  } finally {
+    _ocState.sending = false;
+    if (sendBtn) sendBtn.disabled = !(input.value.trim());
+  }
+}
+
+function ocInputKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ocSend(); }
+}
+
+function ocInputResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 80) + 'px';
+  const sendBtn = document.getElementById('ocSendBtn');
+  if (sendBtn) sendBtn.disabled = !el.value.trim();
+}
+
+function ocToggleCollapse() {
+  const dock = document.getElementById('openclawDock');
+  const arrow = document.getElementById('ocCollapseArrow');
+  if (!dock) return;
+  _ocState.collapsed = !_ocState.collapsed;
+  dock.classList.toggle('collapsed', _ocState.collapsed);
+  if (arrow) arrow.textContent = _ocState.collapsed ? '▼' : '▲';
+  if (!_ocState.collapsed) setTimeout(function() { const t = document.getElementById('ocTranscript'); if (t) t.scrollTop = t.scrollHeight; }, 160);
+}
+
+async function ocCreateTask() {
+  const btn = document.getElementById('ocTaskBtn');
+  if (btn) btn.disabled = true;
+  try {
+    // Prefer user-selected text inside the transcript; fall back to the last message's content.
+    let text = '';
+    const sel = window.getSelection();
+    const transcript = document.getElementById('ocTranscript');
+    if (sel && sel.rangeCount > 0 && transcript && transcript.contains(sel.anchorNode)) {
+      text = sel.toString().trim();
+    }
+    if (!text && _ocState.messages.length > 0) {
+      text = (_ocState.messages[_ocState.messages.length - 1].content || '').trim();
+    }
+    if (!text) {
+      hmToast('Select transcript text or wait for a message first.', 'err');
+      return;
+    }
+    const body = { sessionKey: _ocState.session, text };
+    if (_ocState.lastMsgId) body.messageId = _ocState.lastMsgId;
+    const r = await api('/openclaw/chat/create-hivematrix-task', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (r && r.ok) {
+      hmToast('HiveMatrix task created' + (r.taskId ? ' — ' + esc(String(r.taskId)) : '') + '.', 'ok');
+      refresh();
+    } else { hmToast((r && r.reason) || 'Task creation failed.', 'err'); }
+  } catch (e) { hmToast('Task creation failed.', 'err'); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+function ocSessionChanged() {
+  const sel = document.getElementById('ocSessionSel');
+  if (sel) _ocState.session = sel.value;
+  ocRefresh();
+}
+
 function talkStatus(msg, show) {
   const el = document.getElementById("talkStatus");
   if (!el) return;
@@ -6854,6 +7133,7 @@ if (requireToken()) {
   refresh();
   connectSSE();
   initVoiceFeature();
+  initOpenclawDock();
   setInterval(refresh, 5000);
   checkUpdate();
   setInterval(checkUpdate, 5 * 60 * 1000);

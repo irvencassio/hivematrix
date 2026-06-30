@@ -1725,3 +1725,214 @@ test("Scheduled add-item button uses 'New scheduled item' copy", () => {
   assert.match(CONSOLE_HTML, /New scheduled item/, "add button says 'New scheduled item'");
   assert.doesNotMatch(CONSOLE_HTML, /New directive/i, "add button must not say 'New directive'");
 });
+
+// ── OpenClaw Chat Dock console tests ─────────────────────────────────────────
+
+test("openclaw.chatDock feature toggle is off by default", () => {
+  // renderFeatures treats a feature as off when f.enabled !== true.
+  // The incapable branch (capable === false) uses a disabled switch;
+  // the normal off branch uses a clickable off switch.
+  // Either way the switch must NOT appear as aria-checked="true" by default.
+  const js = extractScript(CONSOLE_HTML);
+  // renderFeatures reads enabled via `f.enabled === true`
+  assert.match(js, /const on = f\.enabled === true/, "feature on state uses strict equality");
+  // The incapable guard means no toggle if openclaw is absent
+  assert.match(js, /const incapable = f\.capable === false/, "incapable guard checks capable flag");
+  // When incapable, settingsSwitch gets disabled:true and produces aria-disabled
+  assert.match(js, /settingsSwitch\(false, '', \{ disabled: true/, "disabled switch rendered for incapable features");
+});
+
+test("openclaw.chatDock toggle is greyed out when OpenClaw is not installed", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // settingsSwitch(…, {disabled:true}) adds aria-disabled="true" and is-disabled class.
+  assert.match(js, /aria-disabled="true"/, "disabled switch carries aria-disabled");
+  assert.match(js, /is-disabled/, "disabled switch gets is-disabled CSS class");
+  // The incapable path passes an empty onclick, preventing any toggle call.
+  assert.match(js, /settingsSwitch\(false, '', \{ disabled: true, title: f\.reason \|\| 'not available' \}\)/, "incapable feature renders non-clickable switch");
+});
+
+test("openclaw.chatDock feature appears in the Settings features list", () => {
+  // The feature definition in features.ts must include the openclaw.chatDock key
+  // and a label that surfaces in the rendered features panel.
+  const js = extractScript(CONSOLE_HTML);
+  // renderFeatures maps over features and renders esc(f.label) — the feature
+  // registry must contain this key for it to appear.
+  assert.match(js, /async function renderFeatures\(/, "renderFeatures function exists");
+  assert.match(CONSOLE_HTML, /OpenClaw Chat Dock/, "Features panel mentions OpenClaw Chat Dock label");
+});
+
+test("dock element structure is present in the console HTML", () => {
+  assert.match(CONSOLE_HTML, /id="openclawDock"/, "openclawDock mount point present");
+  assert.match(CONSOLE_HTML, /id="ocAvailDot"/, "availability dot element present");
+  assert.match(CONSOLE_HTML, /id="ocTranscript"/, "transcript element present");
+  assert.match(CONSOLE_HTML, /id="ocInput"/, "composer textarea present");
+  assert.match(CONSOLE_HTML, /id="ocSendBtn"/, "Send button present");
+  assert.match(CONSOLE_HTML, /id="ocTaskBtn"/, "Create-Task button present");
+  assert.match(CONSOLE_HTML, /id="ocSessionSel"/, "session selector present");
+  assert.match(CONSOLE_HTML, /id="ocCollapseArrow"/, "collapse arrow present");
+});
+
+test("dock defaults to collapsed with availability dot in off state", () => {
+  // The dock starts collapsed and the dot is off until initOpenclawDock runs.
+  assert.match(CONSOLE_HTML, /id="openclawDock" class="collapsed"/, "dock starts collapsed");
+  assert.match(CONSOLE_HTML, /class="oc-avail-dot off" id="ocAvailDot"/, "availability dot starts off");
+});
+
+test("dock session selector offers both default sessions", () => {
+  assert.match(CONSOLE_HTML, /value="agent:main:main"/, "default agent:main:main session present");
+  assert.match(CONSOLE_HTML, /value="agent:main:hivematrix"/, "agent:main:hivematrix session present");
+});
+
+test("dock is absent (display:none) when the feature is disabled", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // initOpenclawDock hides the dock when the status response reports enabled:false.
+  assert.match(js, /if \(!enabled\) \{ dock\.style\.display = 'none'; return; \}/, "dock hidden when disabled");
+});
+
+test("dock becomes visible when feature is enabled and OpenClaw is available", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // When enabled, display is cleared; when available, oc-unavail-state is removed.
+  assert.match(js, /dock\.style\.display = '';/, "dock display cleared when enabled");
+  assert.match(js, /dock\.classList\.remove\('oc-unavail-state'\)/, "unavail class removed when available");
+  assert.match(js, /await ocRefresh\(\)/, "history fetched after dock becomes available");
+});
+
+test("unavailable state hides the composer and shows a warning panel", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // When enabled but gateway is unreachable, the composer is hidden and a warn panel is shown.
+  assert.match(js, /if \(comp\) comp\.style\.display = 'none'/, "composer hidden when unavailable");
+  assert.match(js, /dock\.classList\.add\('oc-unavail-state'\)/, "unavail class set when not reachable");
+  assert.match(js, /function ocWarnPanel\(reason\)/, "ocWarnPanel helper defined");
+  assert.match(js, /oc-warn-panel/, "warn panel markup is produced");
+  assert.match(js, /OpenClaw unavailable/, "unavailable title in warn panel");
+});
+
+test("unavailable state includes a Settings link in the warning panel", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // The warn panel offers a Settings → Features link so the user can check status.
+  assert.match(js, /openSettings\(\);switchSettingsTab\(\\'features\\'/, "warn panel links to Settings → Features");
+  assert.match(js, /Settings → Features/, "warn panel button copy is 'Settings → Features'");
+});
+
+test("Send button is disabled for empty input", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // ocInputResize disables the button when the textarea is empty.
+  assert.match(js, /sendBtn\.disabled = !el\.value\.trim\(\)/, "send button disabled when input is empty");
+  // The button starts disabled in HTML.
+  assert.match(CONSOLE_HTML, /id="ocSendBtn"[^>]*disabled/, "Send button starts disabled in HTML");
+});
+
+test("Send button is disabled while a message is in-flight", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // ocSend guards against concurrent sends via _ocState.sending.
+  assert.match(js, /if \(!input \|\| !input\.value\.trim\(\) \|\| _ocState\.sending\) return/, "ocSend bails on empty or in-flight");
+  assert.match(js, /_ocState\.sending = true/, "sending flag set before request");
+  assert.match(js, /if \(sendBtn\) sendBtn\.disabled = true/, "send button explicitly disabled during flight");
+  assert.match(js, /_ocState\.sending = false/, "sending flag cleared in finally block");
+});
+
+test("Send failure restores the draft message", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // If the send API returns !r.ok or throws, the message is put back into the input.
+  assert.match(js, /input\.value = msg; ocInputResize\(input\)/, "draft restored on send failure");
+});
+
+test("create-task calls the handoff endpoint with session key and text", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /async function ocCreateTask\(\)/, "ocCreateTask function defined");
+  assert.match(js, /\/openclaw\/chat\/create-hivematrix-task/, "calls the create-hivematrix-task endpoint");
+  assert.match(js, /sessionKey: _ocState\.session/, "includes the active session key");
+  assert.match(js, /text/, "includes the message text in request body");
+});
+
+test("create-task prefers user-selected transcript text over last message", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // The function first checks window.getSelection() inside the transcript element.
+  assert.match(js, /window\.getSelection\(\)/, "reads window selection");
+  assert.match(js, /transcript\.contains\(sel\.anchorNode\)/, "selection must be inside the transcript");
+  assert.match(js, /sel\.toString\(\)\.trim\(\)/, "uses selection text when present");
+  // Falls back to the last message in _ocState.messages.
+  assert.match(js, /_ocState\.messages\[_ocState\.messages\.length - 1\]\.content/, "falls back to last message content");
+});
+
+test("create-task displays the returned HiveMatrix task ID in a toast", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // On success, a toast shows "HiveMatrix task created — <taskId>".
+  assert.match(js, /hmToast\('HiveMatrix task created'/, "success toast says 'HiveMatrix task created'");
+  assert.match(js, /r\.taskId/, "task ID from response is used in the toast");
+});
+
+test("create-task shows an error toast on failure without crashing", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // On API error or network failure, an error toast is shown.
+  assert.match(js, /hmToast\([^)]*'Task creation failed\.', 'err'\)/, "error toast shown on create-task failure");
+});
+
+test("create-task re-enables its button in all paths via finally", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // The create-task button is disabled before the call and re-enabled in finally.
+  assert.match(js, /if \(btn\) btn\.disabled = true/, "task button disabled before request");
+  assert.match(js, /finally \{ if \(btn\) btn\.disabled = false;/, "task button re-enabled in finally");
+});
+
+test("initOpenclawDock is called when the openclaw.chatDock flag is toggled", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // toggleFeature dispatches to initOpenclawDock after saving the flag.
+  assert.match(js, /if \(key === 'openclaw\.chatDock'\) initOpenclawDock\(\)/, "toggleFeature calls initOpenclawDock for chatDock key");
+});
+
+test("dock CSS is responsive and hidden on narrow screens", () => {
+  // The dock is hidden via media query on narrow viewports (mobile).
+  assert.match(CONSOLE_HTML, /@media \(max-width:760px\)[^{]*\{[^}]*#openclawDock[^}]*display:none !important/, "dock hidden on narrow screens");
+  assert.match(CONSOLE_HTML, /#openclawDock\.collapsed[^{]*\{[^}]*height: 38px/, "collapsed dock is a fixed-height header strip");
+});
+
+test("runSelectedCommand sends both project and projectPath from the cmd multi-picker state", () => {
+  // Regression guard: the command launcher must forward the operator's selected
+  // project name alongside the path so that server-created tasks land under the
+  // right project rather than always defaulting to "ops".
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "runSelectedCommand");
+
+  // projectPath must come from the commandPath hidden input (registered to the
+  // cmd multi-picker via mpRegister('cmd', 'commandPath')).
+  assert.match(body, /commandPath/, "projectPath is read from the commandPath hidden input");
+  assert.match(body, /projectPath/, "projectPath is included in the payload");
+
+  // Project identity must come from _mpS('cmd'), the cmd-picker state — not
+  // from _mpS('d') (the New Task picker) or any other source.
+  assert.match(body, /_mpS\('cmd'\)/, "project name is sourced from the cmd multi-picker state");
+  assert.doesNotMatch(body, /_mpS\('d'\)/, "project name does not bleed from the New Task picker");
+
+  // The payload must conditionally include project when a name is present.
+  assert.match(body, /payload\.project\s*=\s*project/, "project field is set on the payload when a project name is selected");
+
+  // /commands/run is the target endpoint.
+  assert.match(body, /\/commands\/run/, "payload is posted to /commands/run");
+});
+
+test("runSelectedCommand success message reports project mismatch when board filter differs from task project", () => {
+  // Regression guard: after a successful command launch the operator must see
+  // a clear message when the newly-created task lands in a project that is
+  // different from the currently active board filter.  Without this guard the
+  // board appears empty and the operator has no hint about where the task went.
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "runSelectedCommand");
+
+  // The function must read the active board filter from state.selectedProject.
+  assert.match(body, /state\.selectedProject/, "board filter is read from state.selectedProject");
+
+  // It must also read the project from the returned task object.
+  assert.match(body, /d\.task\.project/, "task project is read from the API response");
+
+  // When the filter is set and differs from the task project the message must
+  // mention the task project ("in <project>") so the operator knows where to look.
+  assert.match(body, /in '\s*\+.*taskProject|'in '\s*\+\s*taskProject|in " \+ taskProject|"in " \+ taskProject|in\s+\'\s*\+\s*taskProject|in.*taskProject.*board filter|in.*taskProject/, "mismatch message includes the task project");
+
+  // The mismatch message must also name the active board filter so the operator
+  // can reconcile which view they are looking at.
+  assert.match(body, /current board filter is\s*'\s*\+\s*boardFilter|current board filter is\s*"\s*\+\s*boardFilter|boardFilter.*current board filter|board filter.*boardFilter/, "mismatch message includes the board filter name");
+
+  // When no board filter is active the plain "see the board" fallback is used.
+  assert.match(body, /see the board/, "default success message remains available for the no-filter case");
+});

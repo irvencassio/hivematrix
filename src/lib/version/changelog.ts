@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.112", date: "2026-06-30", note: "ship OpenClaw chat dock and command project routing" },
   { version: "0.1.111", date: "2026-06-30", note: "complete Flight lanes and guard work-package auto-land" },
   { version: "0.1.110", date: "2026-06-29", note: "auto-deploy HiveMatrix" },
   { version: "0.1.109", date: "2026-06-29", note: "lane-off guards for Mail and Message Lane" },

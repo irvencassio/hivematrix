@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -2354,4 +2354,51 @@ test("POST /briefing/test returns 410 Gone (deprecated endpoint retired)", async
   assert.equal(res.status, 410, "/briefing/test returns 410 Gone after Morning Briefing retirement");
   const body = await res.json() as Record<string, unknown>;
   assert.match(String(body.error), /retired/i, "error body mentions retirement");
+});
+
+// ── POST /commands/run — project identity ───────────────────────────────────────
+
+test("POST /commands/run preserves explicit project; omitted project defaults to ops; invalid path returns 400", async (t) => {
+  withTempHome(t);
+  // Plant a local command so scanLocalCommands finds it under the temp HOME.
+  const cmdDir = join(process.env.HOME!, ".claude", "commands");
+  mkdirSync(cmdDir, { recursive: true });
+  writeFileSync(join(cmdDir, "import-all.md"), "---\ndescription: Import everything\n---\nDo the import");
+
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  // Case 1: explicit project is preserved on the created task.
+  const r1 = await fetch(`${base}/commands/run`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ name: "import-all", project: "digibot", projectPath: "$HOME/digibot" }),
+  });
+  assert.equal(r1.status, 201, "explicit project: 201 Created");
+  const b1 = await r1.json() as { task: Record<string, unknown> };
+  assert.equal(b1.task.project, "digibot", "explicit project name is stored on the task");
+  assert.doesNotMatch(String(b1.task.projectPath), /\$HOME/, "projectPath has $HOME expanded to a real path");
+  assert.match(String(b1.task.projectPath), /digibot$/, "normalized projectPath ends with the folder name");
+  assert.equal(b1.task.source, "command", "task source is command");
+
+  // Case 2: omitted project falls back to 'ops'.
+  const r2 = await fetch(`${base}/commands/run`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ name: "import-all", projectPath: "$HOME/work" }),
+  });
+  assert.equal(r2.status, 201, "no project field: 201 Created");
+  const b2 = await r2.json() as { task: Record<string, unknown> };
+  assert.equal(b2.task.project, "ops", "missing project falls back to ops");
+
+  // Case 3: path outside HOME is rejected; no third task is created.
+  const r3 = await fetch(`${base}/commands/run`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ name: "import-all", projectPath: "/tmp/outside-home" }),
+  });
+  assert.equal(r3.status, 400, "path outside HOME is rejected with 400");
+  const taskCount = (getDb().prepare("SELECT COUNT(*) AS n FROM tasks WHERE source = 'command'").get() as { n: number }).n;
+  assert.equal(taskCount, 2, "only the two valid requests created tasks");
 });

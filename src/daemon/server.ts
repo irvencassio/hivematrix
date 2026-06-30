@@ -391,10 +391,24 @@ export function createDaemonServer() {
       // GET /settings/features — feature flags + on/off state + machine capability.
       if (req.method === "GET" && urlPath === "/settings/features") {
         const { getFeatureFlags, KNOWN_FEATURES, featureCapability } = await import("@/lib/config/features");
-        const flags = getFeatureFlags();
+        const { discoverOpenclaw } = await import("@/lib/openclaw/discovery");
+        const [flags, openclawDiscovery] = await Promise.all([
+          Promise.resolve(getFeatureFlags()),
+          discoverOpenclaw(),
+        ]);
         json(res, 200, { features: KNOWN_FEATURES.map((f) => {
-          const cap = featureCapability(f.key);
-          return { ...f, enabled: flags[f.key] === true, capable: cap.capable, reason: cap.reason ?? null };
+          let cap = featureCapability(f.key);
+          let enabled = flags[f.key] === true;
+          if (f.key === "openclaw.chatDock") {
+            if (!openclawDiscovery.installed) {
+              cap = { capable: false, reason: "OpenClaw is not installed." };
+              enabled = false;
+            } else if (!openclawDiscovery.available) {
+              cap = { capable: false, reason: openclawDiscovery.reason ?? "OpenClaw Gateway is not reachable." };
+              enabled = false;
+            }
+          }
+          return { ...f, enabled, capable: cap.capable, reason: cap.reason ?? null };
         }) });
         return;
       }
@@ -408,6 +422,13 @@ export function createDaemonServer() {
         if (body.enabled === true) {
           const cap = featureCapability(key);
           if (!cap.capable) { json(res, 400, { error: cap.reason ?? "not available on this machine" }); return; }
+          // OpenClaw dock requires the binary and a reachable Gateway.
+          if (key === "openclaw.chatDock") {
+            const { discoverOpenclaw } = await import("@/lib/openclaw/discovery");
+            const discovery = await discoverOpenclaw();
+            if (!discovery.installed) { json(res, 400, { error: "OpenClaw is not installed." }); return; }
+            if (!discovery.available) { json(res, 400, { error: discovery.reason ?? "OpenClaw Gateway is not reachable." }); return; }
+          }
         }
         const flags = setFeature(key as typeof KNOWN_FEATURES[number]["key"], body.enabled === true);
         json(res, 200, { features: flags });
@@ -994,6 +1015,189 @@ export function createDaemonServer() {
         json(res, 200, urlPath === "/api/brainbee/health"
           ? { bee: "brainbee", ok: status.enabled, ...status }
           : status);
+        return;
+      }
+
+      // GET /openclaw/status — OpenClaw discovery + feature flag state. Never returns secrets.
+      if (req.method === "GET" && urlPath === "/openclaw/status") {
+        const { discoverOpenclaw } = await import("@/lib/openclaw/discovery");
+        const { isFeatureEnabled } = await import("@/lib/config/features");
+        const discovery = await discoverOpenclaw();
+        const flagEnabled = isFeatureEnabled("openclaw.chatDock");
+        // Force flag off when OpenClaw is not installed — the feature cannot function.
+        const enabled = discovery.installed ? flagEnabled : false;
+        json(res, 200, { ...discovery, enabled });
+        return;
+      }
+
+      // GET /openclaw/chat/history — bounded, display-ready messages from OpenClaw Gateway.
+      if (req.method === "GET" && urlPath === "/openclaw/chat/history") {
+        const { discoverOpenclaw } = await import("@/lib/openclaw/discovery");
+        const { isFeatureEnabled } = await import("@/lib/config/features");
+        const { fetchChatHistory } = await import("@/lib/openclaw/bridge");
+        const q = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+        const sessionKey = q.get("sessionKey") ?? "agent:main:main";
+        const limitRaw = parseInt(q.get("limit") ?? "50", 10);
+        const limit = isNaN(limitRaw) ? 50 : limitRaw;
+
+        if (!isFeatureEnabled("openclaw.chatDock")) {
+          json(res, 200, {
+            ok: false,
+            available: false,
+            sessionKey,
+            messages: [],
+            truncated: false,
+            reason: "OpenClaw Chat Dock feature is not enabled.",
+          });
+          return;
+        }
+
+        const discovery = await discoverOpenclaw();
+        if (!discovery.installed || !discovery.available || !discovery.gateway) {
+          json(res, 200, {
+            ok: false,
+            available: false,
+            sessionKey,
+            messages: [],
+            truncated: false,
+            reason: discovery.reason ?? "OpenClaw is not available.",
+          });
+          return;
+        }
+
+        const result = await fetchChatHistory({ gatewayUrl: discovery.gateway.url, sessionKey, limit });
+        json(res, 200, result);
+        return;
+      }
+
+      // POST /openclaw/chat/send — proxy a user message to OpenClaw Gateway.
+      if (req.method === "POST" && urlPath === "/openclaw/chat/send") {
+        const { discoverOpenclaw } = await import("@/lib/openclaw/discovery");
+        const { isFeatureEnabled } = await import("@/lib/config/features");
+        const { sendChatMessage } = await import("@/lib/openclaw/bridge");
+
+        const body = await parseBody(req) as Record<string, unknown>;
+        const rawSessionKey = typeof body.sessionKey === "string" ? body.sessionKey.trim() : "";
+        const sessionKey = rawSessionKey || "agent:main:main";
+        const message = typeof body.message === "string" ? body.message.trim() : "";
+        const idempotencyKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey : undefined;
+
+        if (!message) {
+          json(res, 400, { ok: false, available: false, sessionKey, runId: null, reason: "message is required." });
+          return;
+        }
+
+        if (!isFeatureEnabled("openclaw.chatDock")) {
+          json(res, 200, { ok: false, available: false, sessionKey, runId: null, reason: "OpenClaw Chat Dock feature is not enabled." });
+          return;
+        }
+
+        const discovery = await discoverOpenclaw();
+        if (!discovery.installed || !discovery.available || !discovery.gateway) {
+          json(res, 200, { ok: false, available: false, sessionKey, runId: null, reason: discovery.reason ?? "OpenClaw is not available." });
+          return;
+        }
+
+        const result = await sendChatMessage({ gatewayUrl: discovery.gateway.url, sessionKey, message, idempotencyKey });
+        json(res, 200, result);
+        return;
+      }
+
+      // POST /openclaw/chat/inject — inject a message into an OpenClaw session without triggering a response.
+      if (req.method === "POST" && urlPath === "/openclaw/chat/inject") {
+        const { discoverOpenclaw } = await import("@/lib/openclaw/discovery");
+        const { isFeatureEnabled } = await import("@/lib/config/features");
+        const { injectChatMessage } = await import("@/lib/openclaw/bridge");
+
+        const body = await parseBody(req) as Record<string, unknown>;
+        const rawSessionKey = typeof body.sessionKey === "string" ? body.sessionKey.trim() : "";
+        const sessionKey = rawSessionKey || "agent:main:main";
+        const text = typeof body.text === "string" ? body.text.trim() : "";
+        const rawRole = body.role;
+        const role: "user" | "assistant" | "system" | undefined =
+          rawRole === "user" || rawRole === "assistant" || rawRole === "system" ? rawRole : undefined;
+        const idempotencyKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey : undefined;
+
+        if (!text) {
+          json(res, 400, { ok: false, available: false, sessionKey, messageId: null, reason: "text is required." });
+          return;
+        }
+
+        if (!isFeatureEnabled("openclaw.chatDock")) {
+          json(res, 200, { ok: false, available: false, sessionKey, messageId: null, reason: "OpenClaw Chat Dock feature is not enabled." });
+          return;
+        }
+
+        const discovery = await discoverOpenclaw();
+        if (!discovery.installed || !discovery.available || !discovery.gateway) {
+          json(res, 200, { ok: false, available: false, sessionKey, messageId: null, reason: discovery.reason ?? "OpenClaw is not available." });
+          return;
+        }
+
+        const result = await injectChatMessage({ gatewayUrl: discovery.gateway.url, sessionKey, text, role, idempotencyKey });
+        json(res, 200, result);
+        return;
+      }
+
+      // POST /openclaw/chat/create-hivematrix-task — convert an OpenClaw chat message
+      // into a durable HiveMatrix task. Requires OpenClaw to be installed; task creation
+      // is explicit (operator-initiated only, never automatic).
+      if (req.method === "POST" && urlPath === "/openclaw/chat/create-hivematrix-task") {
+        const { discoverOpenclaw } = await import("@/lib/openclaw/discovery");
+        const { isFeatureEnabled } = await import("@/lib/config/features");
+        const { Task, generateId } = await import("@/lib/db");
+        const { deriveTaskTitle } = await import("@/lib/tasks/derive-title");
+        const { recordAudit } = await import("@/lib/audit/audit");
+
+        const body = await parseBody(req) as Record<string, unknown>;
+        const rawSessionKey = typeof body.sessionKey === "string" ? body.sessionKey.trim() : "";
+        const sessionKey = rawSessionKey || "agent:main:main";
+        const messageId = typeof body.messageId === "string" ? body.messageId.trim() : null;
+        const text = typeof body.text === "string" ? body.text.trim() : "";
+        const projectPath = typeof body.projectPath === "string" ? body.projectPath.trim() : process.cwd();
+
+        if (!text) {
+          json(res, 400, { ok: false, taskId: null, reason: "text is required." });
+          return;
+        }
+
+        if (!isFeatureEnabled("openclaw.chatDock")) {
+          json(res, 200, { ok: false, taskId: null, reason: "OpenClaw Chat Dock feature is not enabled." });
+          return;
+        }
+
+        const discovery = await discoverOpenclaw();
+        if (!discovery.installed || !discovery.available) {
+          json(res, 200, { ok: false, taskId: null, reason: discovery.reason ?? "OpenClaw is not available." });
+          return;
+        }
+
+        const title = deriveTaskTitle(text);
+        const task = await Task.create({
+          _id: generateId(),
+          title,
+          description: text,
+          project: projectPath.split("/").pop() ?? "openclaw",
+          projectPath,
+          source: "openclaw-chat",
+          executor: "agent",
+          status: "backlog",
+          output: {
+            origin: "openclaw",
+            sessionKey,
+            messageId: messageId || null,
+          },
+        });
+        broadcast("tasks:created", { taskId: task._id });
+        recordAudit({
+          ts: "",
+          event: "openclaw:task-created",
+          taskId: task._id,
+          project: projectPath,
+          prompt: text.slice(0, 500),
+          summary: `OpenClaw chat → HiveMatrix task (session: ${sessionKey})`,
+        });
+        json(res, 201, { ok: true, taskId: task._id, task });
         return;
       }
 
@@ -3279,16 +3483,18 @@ export function createDaemonServer() {
         return;
       }
 
-      // POST /commands/run — { name, args?, profile? }. Run a local command/skill
-      // natively by creating a standalone Task whose description IS "/<name> <args>"
-      // (prompt === description for a standalone/auto task — subprocess.ts). The
-      // name MUST exist in a fresh scan, so an arbitrary "/..." prompt can't be
-      // injected; args is a single line appended after the slash invocation.
+      // POST /commands/run — { name, args?, profile?, project?, projectPath }. Run a
+      // local command/skill natively by creating a standalone Task whose description
+      // IS "/<name> <args>" (prompt === description for a standalone/auto task —
+      // subprocess.ts). The name MUST exist in a fresh scan, so an arbitrary "/..."
+      // prompt can't be injected; args is a single line appended after the slash
+      // invocation. project is optional; older clients that omit it fall back to "ops".
       if (req.method === "POST" && urlPath === "/commands/run") {
         const body = await parseBody(req) as Record<string, unknown>;
         const name = typeof body.name === "string" ? body.name.trim() : "";
         const args = typeof body.args === "string" ? body.args.trim() : "";
         const profile = typeof body.profile === "string" && body.profile.trim() ? body.profile.trim() : undefined;
+        const project = typeof body.project === "string" && body.project.trim() ? body.project.trim() : "ops";
         if (!name) { json(res, 400, { error: "name is required" }); return; }
         let projectPath: string;
         try {
@@ -3311,7 +3517,7 @@ export function createDaemonServer() {
           _id: generateId(),
           title: `[command] /${cmd.invokeName}`,
           description,
-          project: "ops",
+          project,
           projectPath,
           profile: profile ? normalizeTaskProfileKey(profile) : getActiveTaskProfileKey(),
           status: "backlog",

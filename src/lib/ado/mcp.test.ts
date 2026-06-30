@@ -4,10 +4,11 @@ import { parseAdoConfig, buildAdoMcpServer } from "./mcp";
 import { parseFeatures, featureCapability } from "@/lib/config/features";
 
 test("parseFeatures defaults flags off; reads true only for explicit true", () => {
-  assert.deepEqual(parseFeatures({}), { ado: false, voice: false, video: false, taskIntakeModelDecomposition: false });
-  assert.deepEqual(parseFeatures({ features: { ado: true } }), { ado: true, voice: false, video: false, taskIntakeModelDecomposition: false });
-  assert.deepEqual(parseFeatures({ features: { ado: "yes" } }), { ado: false, voice: false, video: false, taskIntakeModelDecomposition: false });
-  assert.deepEqual(parseFeatures({ features: { voice: true } }), { ado: false, voice: true, video: false, taskIntakeModelDecomposition: false });
+  const base = { ado: false, voice: false, video: false, taskIntakeModelDecomposition: false, "openclaw.chatDock": false };
+  assert.deepEqual(parseFeatures({}), base);
+  assert.deepEqual(parseFeatures({ features: { ado: true } }), { ...base, ado: true });
+  assert.deepEqual(parseFeatures({ features: { ado: "yes" } }), base);
+  assert.deepEqual(parseFeatures({ features: { voice: true } }), { ...base, voice: true });
 });
 
 test("featureCapability gates heavy features on Apple Silicon + RAM", () => {
