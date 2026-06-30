@@ -1,12 +1,17 @@
 /**
- * Directive run engine — the 24x7 autonomy loop.
+ * Scheduled item run engine — the 24x7 autonomy loop.
  *
- * A Directive is a standing objective. When due, the engine opens a Run and
- * walks it through the plan → execute → verify → reflect → yield loop, one
- * scheduler tick at a time. Every transition is written to run_journal so an
- * interrupted run resumes from its last recorded step after a daemon restart.
+ * "Directive" is the internal/DB identifier; the user-facing product term is
+ * "Scheduled item". All DB columns, types, and SQL queries use "directive" to
+ * avoid a storage migration.
  *
- *   Directive (weeks)  ──>  Run (one episode)  ──>  Task[] (work units)
+ * A Scheduled item (Directive internally) is a standing objective. When due,
+ * the engine opens a Run and walks it through the plan → execute → verify →
+ * reflect → yield loop, one scheduler tick at a time. Every transition is
+ * written to run_journal so an interrupted run resumes from its last recorded
+ * step after a daemon restart.
+ *
+ *   Scheduled item / Directive (weeks)  ──>  Run (one episode)  ──>  Task[] (work units)
  *
  * Run phases (runs.phase):
  *   plan     → create bounded task set toward unmet criteria; journal "planned"

@@ -98,6 +98,12 @@ test("detects directives and falls through otherwise", () => {
   assert.equal(detectCommandIntent("").kind, "none");
 });
 
+test("detects scheduled-items phrasing as directives", () => {
+  assert.equal(detectCommandIntent("what are my scheduled items").kind, "directives");
+  assert.equal(detectCommandIntent("what scheduled items are active").kind, "directives");
+  assert.equal(detectCommandIntent("show scheduled items").kind, "directives");
+});
+
 test("board reply summarizes lanes", () => {
   assert.match(boardReply({ backlog: 2, in_progress: 1, review: 1, done: 5, failed: 0 }), /2 queued.*1 in progress.*1 in review.*5 done/);
   assert.match(boardReply({}), /empty/);
@@ -109,11 +115,11 @@ test("approvals reply guides the next voice action", () => {
   assert.match(approvalsReply([{ title: "a", kind: "tool" }, { title: "b", kind: "content" }]), /2 approvals/);
 });
 
-test("resolved + directive + task + connectivity replies", () => {
+test("resolved + scheduled + task + connectivity replies", () => {
   assert.match(resolvedReply("approve", "send email"), /Approved: send email/);
   assert.match(resolvedReply("deny", null), /Denied/);
-  assert.match(directivesReply([{ goal: "ship news", status: "active" }]), /1 active directive: ship news/);
-  assert.match(directivesReply([]), /no standing directives/);
+  assert.match(directivesReply([{ goal: "ship news", status: "active" }]), /1 active scheduled item: ship news/);
+  assert.match(directivesReply([]), /no scheduled items/);
   assert.match(createdTaskReply("call the bank"), /queued a task: call the bank/);
   assert.match(connectivityReply("offline"), /offline/);
   assert.match(setConnectivityReply("auto"), /automatic/);

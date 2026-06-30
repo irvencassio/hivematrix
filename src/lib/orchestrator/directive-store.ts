@@ -1,5 +1,9 @@
 /**
- * Data-access helpers for directives, runs, the run journal, and criteria.
+ * Data-access helpers for Scheduled items (stored internally as "directives"),
+ * runs, the run journal, and criteria.
+ *
+ * "Directive" is the internal/DB identifier; the user-facing product term is
+ * "Scheduled item". The DB table name is unchanged to avoid a migration.
  *
  * Thin raw-SQL layer over the v6–v10 tables. The directive engine
  * (directive-engine.ts) is the only writer of run phase transitions; this

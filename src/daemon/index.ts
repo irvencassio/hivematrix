@@ -110,12 +110,6 @@ async function main(): Promise<void> {
   const { startNotifyLoop } = await import("@/lib/notify/notify-loop");
   startNotifyLoop();
 
-  // Proactive morning briefing: once a day at the configured hour, push the
-  // operator standup (overnight runs, pending approvals, failures) to registered
-  // iOS devices via APNs, falling back to notify(). Self-gates on config.
-  const { startMorningBriefingLoop } = await import("@/lib/briefing/morning-briefing");
-  startMorningBriefingLoop();
-
   // Browser Lane readiness sweep: a daily, config-gated pass that refreshes
   // per-site auth/readiness so COO dispatch has fresh state to gate on.
   const { startBrowserLaneReadinessLoop } = await import("@/lib/browser-lane/readiness-schedule");
@@ -141,8 +135,8 @@ async function main(): Promise<void> {
 
   // Review Lane heartbeat: fold scheduler diagnostics + directive/run state +
   // pending escalations into a control-plane report, cached + broadcast.
-  const { startManagerBeeHeartbeat } = await import("@/lib/managerbee/heartbeat");
-  startManagerBeeHeartbeat();
+  const { startReviewLaneHeartbeat } = await import("@/lib/managerbee/heartbeat");
+  startReviewLaneHeartbeat();
 
   // Memory Lane poller: curate playbook files (dedup repeated retrospective rules)
   // on a slow schedule. Self-gates when the brain root is unreachable.

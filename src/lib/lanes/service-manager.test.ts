@@ -5,9 +5,9 @@ import { buildLaunchAgentPlist, getLaneWorkerRuntimeDescriptor, summarizeEmbedde
 
 test("embeddedHealthRoute points at health routes the daemon actually serves", () => {
   // Regression: these embedded bees showed false "unhealthy / fetch failed" because
-  // the probe hit a non-existent path (and the wrong port). Managerbee/brainbee have
+  // the probe hit a non-existent path (and the wrong port). Review Lane/brainbee have
   // /api/*/health aliases; browserbee only has /browserbee/health (no /api/ prefix).
-  assert.equal(embeddedHealthRoute("managerbee"), "/api/managerbee/health");
+  assert.equal(embeddedHealthRoute("review"), "/api/review-lane/health");
   assert.equal(embeddedHealthRoute("brainbee"), "/api/brainbee/health");
   assert.equal(embeddedHealthRoute("browserbee"), "/browserbee/health");
   assert.equal(embeddedHealthRoute("desktopbee"), "/desktopbee/health");
@@ -45,13 +45,16 @@ test("Message and Mail lanes are embedded channel pollers (not launchagents)", (
   assert.equal(mail.manageable, false);
 });
 
-test("Manager and Memory lanes are embedded control-plane workers", () => {
+test("Review Lane and Memory lanes are embedded control-plane workers", () => {
   // W4.2: both run in-daemon (heartbeat + curation poller), like the other
   // embedded lanes — no separate launchd repo to ship.
-  const manager = getLaneWorkerRuntimeDescriptor("managerbee");
+  const reviewLane = getLaneWorkerRuntimeDescriptor("review");
+  const managerbeeCompat = getLaneWorkerRuntimeDescriptor("managerbee"); // deprecated alias
   const brain = getLaneWorkerRuntimeDescriptor("brainbee");
-  assert.equal(manager.runtimeMode, "embedded");
-  assert.equal(manager.manageable, false);
+  assert.equal(reviewLane.runtimeMode, "embedded");
+  assert.equal(reviewLane.manageable, false);
+  assert.equal(managerbeeCompat.runtimeMode, "embedded"); // compat alias resolves correctly
+  assert.equal(managerbeeCompat.manageable, false);
   assert.equal(brain.runtimeMode, "embedded");
   assert.equal(brain.manageable, false);
 });

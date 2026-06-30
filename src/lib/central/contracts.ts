@@ -17,6 +17,7 @@ export const WORKER_KINDS = [
   "cronbee",
   "authbee",
   "voicebee",
+  "review",
   "managerbee",
   "brainbee",
   "inventorbee",
@@ -246,6 +247,7 @@ function isCentralTaskStatus(value: string): value is CentralTaskStatus {
 // Part of the staged Bee→Lane migration: a lane-shaped producer can register or
 // lease as "message"/"mail"/… and central stores the existing kind value, so no
 // persisted data or old worker changes. The legacy kind strings stay canonical.
+// Note: "review" is no longer aliased here — it is a canonical WorkerKind.
 const LANE_ALIAS_TO_WORKER_KIND: Record<string, WorkerKind> = {
   message: "messagebee",
   mail: "mailbee",
@@ -253,7 +255,6 @@ const LANE_ALIAS_TO_WORKER_KIND: Record<string, WorkerKind> = {
   desktop: "desktopbee",
   terminal: "termbee",
   memory: "brainbee",
-  review: "managerbee",
 };
 
 function normalizeWorkerKind(value: unknown): WorkerKind {

@@ -73,7 +73,7 @@ test("commandTurnOverride retries failed tasks, sets task model, updates directi
 
   assert.match((await commandTurnOverride("retry failed task", deps))?.reply ?? "", /Retrying Broken build/);
   assert.match((await commandTurnOverride("set task abc123 to qwen", deps))?.reply ?? "", /Set Important task to qwen/);
-  assert.match((await commandTurnOverride("start directive release watcher", deps))?.reply ?? "", /Started directive/);
+  assert.match((await commandTurnOverride("start directive release watcher", deps))?.reply ?? "", /Started scheduled item/);
   assert.match((await commandTurnOverride("trigger release verification", deps))?.reply ?? "", /queued release verification/);
 
   assert.deepEqual(actions, [

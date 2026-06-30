@@ -213,8 +213,8 @@ export function detectCommandIntent(text: string): CommandIntent {
     return { kind: "approve", ordinal: parseOrdinal(t) };
   }
 
-  // --- Directives / standing goals ---
-  if (/\b(directives?|standing goals?|what.*standing|what are you watching)\b/.test(t)) return { kind: "directives" };
+  // --- Scheduled items (formerly "directives") / standing goals ---
+  if (/\b(directives?|standing goals?|what.*standing|what are you watching|scheduled items?|what.*scheduled)\b/.test(t)) return { kind: "directives" };
 
   // --- Board / task status ---
   if (/\b(board|task status|how many tasks|what('?s| is) (queued|in progress|pending)|what are you working on|what('?s| is) running|status report)\b/.test(t)) {
@@ -264,11 +264,11 @@ export function noApprovalToResolveReply(): string {
 export interface SpokenDirective { goal: string; status: string }
 export function directivesReply(rows: SpokenDirective[]): string {
   const active = rows.filter((r) => r.status === "active");
-  if (!rows.length) return "You have no standing directives.";
-  if (!active.length) return `No active directives (${rows.length} total, none running).`;
+  if (!rows.length) return "You have no scheduled items.";
+  if (!active.length) return `No active scheduled items (${rows.length} total, none running).`;
   const names = active.slice(0, 3).map((r) => r.goal).join("; ");
   const more = active.length > 3 ? `, and ${active.length - 3} more` : "";
-  return `${plural(active.length, "active directive")}: ${names}${more}.`;
+  return `${plural(active.length, "active scheduled item")}: ${names}${more}.`;
 }
 
 export function createdTaskReply(title: string): string {

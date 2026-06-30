@@ -2254,3 +2254,104 @@ test("POST /tasks/:id/archive on work-package child in review state lands item d
   assert.ok(its2[1].createdTaskId, "dependent item has a linked task");
   assert.equal(detail2.status, "running", "package is still running (second item in flight)");
 });
+
+// ─── Morning Briefing retirement: /settings/briefing + /briefing/test guards ──
+
+test("GET /settings/briefing returns 200 with disabled config", async (t) => {
+  const originalHome = process.env.HOME;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-briefing-get-"));
+  process.env.HOME = tmp;
+  t.after(() => {
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/settings/briefing`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.ok("briefing" in body, "response includes briefing config");
+  assert.equal((body.briefing as Record<string, unknown>).enabled, false, "default config has briefing disabled");
+});
+
+test("POST /settings/briefing with enabled:true returns 410 (Morning Briefing retired)", async (t) => {
+  const originalHome = process.env.HOME;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-briefing-enable-"));
+  process.env.HOME = tmp;
+  t.after(() => {
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/settings/briefing`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: true }),
+  });
+  assert.equal(res.status, 410, "re-enabling Morning Briefing is refused with 410 Gone");
+  const body = await res.json() as Record<string, unknown>;
+  assert.match(String(body.error), /retired/i, "error body mentions retirement");
+});
+
+test("POST /settings/briefing with enabled:false returns 200 (disabling is still accepted)", async (t) => {
+  const originalHome = process.env.HOME;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-briefing-disable-"));
+  process.env.HOME = tmp;
+  t.after(() => {
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/settings/briefing`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: false }),
+  });
+  assert.equal(res.status, 200, "disabling briefing via POST is still accepted for backward compat");
+  const body = await res.json() as Record<string, unknown>;
+  assert.ok("briefing" in body, "response includes updated briefing config");
+  assert.equal((body.briefing as Record<string, unknown>).enabled, false, "briefing remains disabled");
+});
+
+test("POST /briefing/test returns 410 Gone (deprecated endpoint retired)", async (t) => {
+  const originalHome = process.env.HOME;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-briefing-test-"));
+  process.env.HOME = tmp;
+  t.after(() => {
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/briefing/test`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 410, "/briefing/test returns 410 Gone after Morning Briefing retirement");
+  const body = await res.json() as Record<string, unknown>;
+  assert.match(String(body.error), /retired/i, "error body mentions retirement");
+});

@@ -347,6 +347,7 @@ export function createDaemonServer() {
       if (req.method === "GET" && urlPath === "/models") {
         const { detectBackends } = await import("@/lib/models/backends");
         const { buildAvailableModels, buildRoleModelOptions, getDefaultModel, getThemeSettings } = await import("@/lib/models/available");
+        const { embeddingModelChoices, getEmbeddingsConfig } = await import("@/lib/embeddings/provider");
         const { localEngineStatus, localEngineCapability } = await import("@/lib/models/local-engine");
         const { versionInfo } = await import("@/lib/version");
         const backends = detectBackends();
@@ -372,6 +373,8 @@ export function createDaemonServer() {
           frontierProvider: getFrontierProvider(),
           roleModels: getRoleModels(),
           roleModelOptions: buildRoleModelOptions(backends),
+          embeddings: getEmbeddingsConfig(),
+          embeddingModelChoices: embeddingModelChoices(),
         });
         return;
       }
@@ -450,10 +453,13 @@ export function createDaemonServer() {
         return;
       }
       if (req.method === "POST" && urlPath === "/settings/briefing") {
-        const { setMorningBriefingConfig } = await import("@/lib/briefing/morning-briefing");
         const body = await parseBody(req) as Record<string, unknown>;
-        const patch: Record<string, unknown> = {};
-        if ("enabled" in body) patch.enabled = body.enabled === true;
+        if (body.enabled === true) {
+          json(res, 410, { error: "Morning Briefing has been retired. Use Scheduled items instead." });
+          return;
+        }
+        const { setMorningBriefingConfig } = await import("@/lib/briefing/morning-briefing");
+        const patch: Record<string, unknown> = { enabled: false };
         if (typeof body.hour === "number") patch.hour = body.hour;
         json(res, 200, { briefing: setMorningBriefingConfig(patch) });
         return;
@@ -474,10 +480,9 @@ export function createDaemonServer() {
         json(res, 200, { readiness: setBrowserLaneReadinessConfig(patch) });
         return;
       }
-      // POST /briefing/test — deliver the briefing right now (verify push wiring).
+      // POST /briefing/test — deprecated; Morning Briefing has been retired.
       if (req.method === "POST" && urlPath === "/briefing/test") {
-        const { runBriefingNow } = await import("@/lib/briefing/morning-briefing");
-        json(res, 200, await runBriefingNow());
+        json(res, 410, { error: "Morning Briefing has been retired. Use Scheduled items instead." });
         return;
       }
 
@@ -534,6 +539,18 @@ export function createDaemonServer() {
         if (typeof body.autoUpdate === "boolean") m.setAutoUpdate(body.autoUpdate);
         if (body.appIconChoice === "dark-green" || body.appIconChoice === "white") m.setAppIconChoice(body.appIconChoice);
         if (body.frontierProvider === "claude" || body.frontierProvider === "codex") m.setFrontierProvider(body.frontierProvider);
+        let embeddings = null;
+        if (body.embeddings && typeof body.embeddings === "object") {
+          const { setEmbeddingsConfig } = await import("@/lib/embeddings/provider");
+          const e = body.embeddings as Record<string, unknown>;
+          embeddings = setEmbeddingsConfig({
+            enabled: e.enabled === true,
+            endpoint: typeof e.endpoint === "string" ? e.endpoint : undefined,
+            model: typeof e.model === "string" ? e.model : undefined,
+            provider: typeof e.provider === "string" ? e.provider : undefined,
+            pollIntervalMinutes: typeof e.pollIntervalMinutes === "number" ? e.pollIntervalMinutes : undefined,
+          });
+        }
         if (body.roleModel && typeof body.roleModel === "object") {
           const rm = body.roleModel as { role?: unknown; modelId?: unknown };
           if ((rm.role === "thinking" || rm.role === "coding" || rm.role === "operational" || rm.role === "writer") && typeof rm.modelId === "string") {
@@ -542,10 +559,14 @@ export function createDaemonServer() {
         }
         const available = m.buildAvailableModels();
         const theme = m.getThemeSettings();
+        if (!embeddings) {
+          const { getEmbeddingsConfig } = await import("@/lib/embeddings/provider");
+          embeddings = getEmbeddingsConfig();
+        }
         json(res, 200, { ok: true, defaultModel: m.getDefaultModel(available), theme: theme.theme,
           hasWallpaper: !!theme.wallpaperPath, wallpaperPath: theme.wallpaperPath,
           wallpaperOpacity: theme.wallpaperOpacity, location: m.getLocation(), autoUpdate: m.getAutoUpdate(),
-          appIconChoice: m.getAppIconChoice() });
+          appIconChoice: m.getAppIconChoice(), embeddings });
         return;
       }
 
@@ -946,7 +967,17 @@ export function createDaemonServer() {
         return;
       }
 
-      // Review Lane — control-plane heartbeat + diagnostics (W4.2)
+      // Review Lane — canonical routes (W4.2)
+      if (req.method === "GET" && (urlPath === "/review-lane/status" || urlPath === "/api/review-lane/health")) {
+        const { getReviewLaneStatus } = await import("@/lib/managerbee/heartbeat");
+        const report = getReviewLaneStatus();
+        json(res, 200, urlPath === "/api/review-lane/health"
+          ? { lane: "review", name: "Review Lane", ok: report.health === "ok", health: report.health, report }
+          : report);
+        return;
+      }
+
+      // Review Lane — deprecated compat aliases (one migration window)
       if (req.method === "GET" && (urlPath === "/managerbee/status" || urlPath === "/api/managerbee/health")) {
         const { getManagerBeeStatus } = await import("@/lib/managerbee/heartbeat");
         const report = getManagerBeeStatus();

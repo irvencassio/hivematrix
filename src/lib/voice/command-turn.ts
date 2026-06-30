@@ -197,7 +197,7 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
       const tasks = metrics.tasksByStatus as Record<string, number> | undefined;
       const dirs = metrics.directivesByStatus as Record<string, number> | undefined;
       const runs = metrics.runs as { failed?: number; done?: number; total?: number } | undefined;
-      return r(`Analytics: ${tasks?.backlog ?? 0} queued tasks, ${tasks?.failed ?? 0} failed, ${dirs?.active ?? 0} active directives, ${runs?.failed ?? 0} failed runs.`);
+      return r(`Analytics: ${tasks?.backlog ?? 0} queued tasks, ${tasks?.failed ?? 0} failed, ${dirs?.active ?? 0} active scheduled items, ${runs?.failed ?? 0} failed runs.`);
     }
     case "retryFailedTask": {
       const [task] = await listFailedTasks(deps);
@@ -214,10 +214,10 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
     case "startDirective":
     case "pauseDirective": {
       const directive = findDirective(await listDirectives(deps), intent.directiveText ?? "");
-      if (!directive?._id) return r(`I couldn't find directive ${intent.directiveText ?? ""}.`);
+      if (!directive?._id) return r(`I couldn't find scheduled item ${intent.directiveText ?? ""}.`);
       const status = intent.kind === "startDirective" ? "active" : "sleeping";
       await updateDirective(deps, directive._id, { status });
-      return r(`${intent.kind === "startDirective" ? "Started" : "Paused"} directive: ${directive.goal}.`);
+      return r(`${intent.kind === "startDirective" ? "Started" : "Paused"} scheduled item: ${directive.goal}.`);
     }
     case "triggerReleaseVerification": {
       const task = await createTask(deps, {

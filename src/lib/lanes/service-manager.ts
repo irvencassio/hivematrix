@@ -93,7 +93,7 @@ const MANAGED_LANE_DESCRIPTORS: LaneWorkerDescriptor[] = [
     logDirName: "inventorbee",
   },
   {
-    kind: "managerbee",
+    kind: "review",
     runtimeMode: "embedded",
     manageable: false,
   },
@@ -149,6 +149,12 @@ const MANAGED_LANE_DESCRIPTORS: LaneWorkerDescriptor[] = [
 ];
 
 const DESCRIPTOR_MAP = new Map(MANAGED_LANE_DESCRIPTORS.map((descriptor) => [descriptor.kind, descriptor]));
+
+// Backwards-compat aliases: maps deprecated kind strings to the canonical kind that
+// replaced them, so callers (tests, persisted worker records) still resolve correctly.
+const DESCRIPTOR_KIND_COMPAT: Record<string, string> = {
+  managerbee: "review",
+};
 
 function getUid(): string {
   return execSync("id -u", { encoding: "utf-8", timeout: 2000 }).trim();
@@ -463,7 +469,8 @@ export function summarizeEmbeddedHealthDetail(kindOrUrl: string, payload: unknow
 }
 
 function descriptorForKind(kind: string): LaneWorkerDescriptor {
-  const existing = DESCRIPTOR_MAP.get(kind);
+  const canonical = DESCRIPTOR_KIND_COMPAT[kind] ?? kind;
+  const existing = DESCRIPTOR_MAP.get(canonical);
   if (existing) return existing;
   return {
     kind,
@@ -606,7 +613,9 @@ async function channelStatus(kind: string): Promise<{ enabled: boolean; permitte
 
 export function embeddedHealthRoute(kind: string): string | null {
   switch (kind) {
-    case "managerbee":
+    case "review":
+      return "/api/review-lane/health";
+    case "managerbee": // @deprecated compat — use "review"
       return "/api/managerbee/health";
     case "brainbee":
       return "/api/brainbee/health";

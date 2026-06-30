@@ -12,6 +12,9 @@ export interface LaneServiceStatus {
   statusDetail: string | null;
 }
 
+// Maps legacy worker kinds to canonical LaneIds.
+// Canonical lane kinds (e.g. "review") pass through implicitly via `laneId ?? status.kind`;
+// only bee kinds and deprecated aliases need explicit entries here.
 const STATUS_KIND_TO_LANE: Record<string, LaneId> = {
   browserbee: "browser",
   webbee: "browser",
@@ -20,6 +23,7 @@ const STATUS_KIND_TO_LANE: Record<string, LaneId> = {
   mailbee: "mail",
   messagebee: "message",
   brainbee: "memory",
+  /** @deprecated Review Lane now emits kind: "review" directly — this entry handles persisted/old-client records only. */
   managerbee: "review",
 };
 
@@ -85,9 +89,9 @@ function laneKindToManagedWorkerKind(kind: string): string | null {
       return "browserbee";
     case "memory":
       return "brainbee";
-    case "review":
-      return "managerbee";
     default:
+      // "review" and other canonical lane ids pass through via getLaneRuntimeDescriptor's
+      // `?? kind` fallback, which looks them up directly in DESCRIPTOR_MAP.
       return kind.endsWith("bee") ? kind : null;
   }
 }

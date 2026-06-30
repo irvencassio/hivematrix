@@ -18,7 +18,36 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <style>
   :root {
     color-scheme: dark;
-    --bg: #0d1117; --panel: rgba(22,27,34,.82); --panel-2: rgba(28,34,48,.72); --border: #2d333b;
+    /* ── Material tier: blur radii ──────────────────────── */
+    --mat-blur-chrome:  24px;
+    --mat-blur-regular: 20px;
+    --mat-blur-thick:   14px;
+    --mat-blur-thin:     8px;
+    /* ── Saturation multipliers ─────────────────────────── */
+    --mat-sat-chrome:  180%;
+    --mat-sat-regular: 160%;
+    --mat-sat-thick:   140%;
+    --mat-sat-thin:    120%;
+    /* ── Backdrop-filter shorthands ─────────────────────── */
+    --mat-chrome:  blur(var(--mat-blur-chrome))  saturate(var(--mat-sat-chrome));
+    --mat-regular: blur(var(--mat-blur-regular)) saturate(var(--mat-sat-regular));
+    --mat-thick:   blur(var(--mat-blur-thick))   saturate(var(--mat-sat-thick));
+    --mat-thin:    blur(var(--mat-blur-thin))    saturate(var(--mat-sat-thin));
+    /* ── Tint alphas ─────────────────────────────────────── */
+    --mat-tint-alpha-chrome:  0.82;
+    --mat-tint-alpha-regular: 0.72;
+    --mat-tint-alpha-thick:   0.86;
+    --mat-tint-alpha-thin:    0.55;
+    /* ── Wallpaper participation ─────────────────────────── */
+    --mat-wp-blur:     6px;
+    --mat-wp-sat:      160%;
+    --mat-wp-opacity:  0.82;
+    /* ── Dark tints ─────────────────────────────────────── */
+    --mat-tint-chrome:    rgba(22,27,34,  var(--mat-tint-alpha-chrome));
+    --mat-tint-regular:   rgba(22,27,34,  var(--mat-tint-alpha-regular));
+    --mat-tint-thick:     rgba(28,34,48,  var(--mat-tint-alpha-thick));
+    --mat-tint-thin:      rgba(13,17,23,  var(--mat-tint-alpha-thin));
+    --bg: #0d1117; --panel: var(--mat-tint-regular); --panel-2: var(--mat-tint-thick); --border: #2d333b;
     --text: #e6edf3; --muted: #8b949e; --accent: #d9a441; --accent-2: #58a6ff;
     --ok: #3fb950; --warn: #d29922; --err: #f85149;
     --code-bg: #0a0d12; --code-text: #e6edf3;
@@ -32,7 +61,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   }
   html[data-theme="light"] {
     color-scheme: light;
-    --bg: #f6f8fa; --panel: rgba(255,255,255,.85); --panel-2: rgba(240,243,246,.78); --border: #d0d7de;
+    --mat-tint-chrome:    rgba(255,255,255, var(--mat-tint-alpha-chrome));
+    --mat-tint-regular:   rgba(255,255,255, var(--mat-tint-alpha-regular));
+    --mat-tint-thick:     rgba(240,243,246, var(--mat-tint-alpha-thick));
+    --mat-tint-thin:      rgba(255,255,255, var(--mat-tint-alpha-thin));
+    --bg: #f6f8fa; --panel: var(--mat-tint-regular); --panel-2: var(--mat-tint-thick); --border: #d0d7de;
     --text: #1f2328; --muted: #57606a; --accent: #9a6700; --accent-2: #0969da;
     --ok: #1a7f37; --warn: #9a6700; --err: #cf222e;
     --code-bg: #e8ecf1; --code-text: #1f2328;
@@ -47,7 +80,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   /* Matrix: deep green-black palette with neon-green accents, behind an animated code-rain canvas. */
   html[data-theme="matrix"] {
     color-scheme: dark;
-    --bg: #010a05; --panel: rgba(4,20,11,.85); --panel-2: rgba(10,33,19,.78); --border: #1d5a32;
+    --mat-tint-alpha-regular: 0.85;
+    --mat-tint-chrome:    rgba(4,20,11,   var(--mat-tint-alpha-chrome));
+    --mat-tint-regular:   rgba(4,20,11,   var(--mat-tint-alpha-regular));
+    --mat-tint-thick:     rgba(10,33,19,  var(--mat-tint-alpha-thick));
+    --mat-tint-thin:      rgba(1,10,5,    var(--mat-tint-alpha-thin));
+    --bg: #010a05; --panel: var(--mat-tint-regular); --panel-2: var(--mat-tint-thick); --border: #1d5a32;
     --text: #b9ffce; --muted: #57b074; --accent: #39ff7e; --accent-2: #6effa3;
     --ok: #39ff7e; --warn: #d2e022; --err: #ff5d6c;
     --code-bg: #03100a; --code-text: #b9ffce;
@@ -66,7 +104,24 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   /* Wallpaper / Matrix: panels go translucent so the backdrop shows through; text stays readable. */
   html[data-wallpaper="1"] body { background-size: cover; background-position: center; background-attachment: fixed; }
   html[data-wallpaper="1"] .col, html[data-wallpaper="1"] header,
-  html[data-theme="matrix"] .col, html[data-theme="matrix"] header { backdrop-filter: blur(var(--wp-blur, 6px)) saturate(160%); -webkit-backdrop-filter: blur(var(--wp-blur, 6px)) saturate(160%); }
+  html[data-theme="matrix"] .col, html[data-theme="matrix"] header { backdrop-filter: blur(var(--mat-wp-blur)) saturate(var(--mat-wp-sat)); -webkit-backdrop-filter: blur(var(--mat-wp-blur)) saturate(var(--mat-wp-sat)); }
+  /* ── .text-on-material ─────────────────────────────────────────────────
+     Protective text treatment for section labels exposed above panel surfaces.
+     Usable as a utility class; also auto-applied to known section headings
+     when a wallpaper is active so they remain legible at panel edges.       */
+  .text-on-material { text-shadow: 0 1px 4px rgba(0,0,0,.55); }
+  html[data-theme="light"] .text-on-material { text-shadow: 0 1px 4px rgba(255,255,255,.80); }
+  html[data-theme="matrix"] .text-on-material { text-shadow: 0 1px 4px rgba(0,10,4,.70); }
+  html[data-wallpaper="1"] h2,
+  html[data-wallpaper="1"] .lane-title,
+  html[data-wallpaper="1"] .mdl-grp,
+  html[data-wallpaper="1"] .ctx-sec > summary,
+  html[data-wallpaper="1"] .dir-group-hdr { text-shadow: 0 1px 4px rgba(0,0,0,.55); }
+  html[data-theme="light"][data-wallpaper="1"] h2,
+  html[data-theme="light"][data-wallpaper="1"] .lane-title,
+  html[data-theme="light"][data-wallpaper="1"] .mdl-grp,
+  html[data-theme="light"][data-wallpaper="1"] .ctx-sec > summary,
+  html[data-theme="light"][data-wallpaper="1"] .dir-group-hdr { text-shadow: 0 1px 4px rgba(255,255,255,.80); }
   * { box-sizing: border-box; }
   body { margin: 0; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
     background: transparent; color: var(--text); height: 100vh; overflow: hidden;
@@ -80,7 +135,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   ::selection { background: rgba(217,164,65,.28); }
   header { display: flex; align-items: center; gap: 12px; padding: 8px 16px;
     background: var(--panel); border-bottom: 1px solid var(--border); height: 44px;
-    backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%); }
+    backdrop-filter: var(--mat-chrome); -webkit-backdrop-filter: var(--mat-chrome); }
   header .logo { font-weight: 700; color: var(--accent); letter-spacing: .5px; }
   header .mode { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .pill { padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600;
@@ -93,7 +148,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     border-radius: 6px; padding: 3px 8px; font-size: 11px; }
   main { --col-left: 300px; --col-right: 320px; position: relative;
     display: grid; grid-template-columns: var(--col-left) 1fr var(--col-right); height: calc(100vh - 44px); }
-  .col { overflow-y: auto; padding: 12px; backdrop-filter: blur(20px) saturate(160%); -webkit-backdrop-filter: blur(20px) saturate(160%); }
+  .col { overflow-y: auto; padding: 12px; backdrop-filter: var(--mat-regular); -webkit-backdrop-filter: var(--mat-regular); }
   /* Draggable dividers on the inner edge of each side rail. Thin absolute
      overlays pinned to the rail boundary; dragging rewrites --col-left /
      --col-right (the grid widths), which are persisted in localStorage. */
@@ -106,8 +161,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   #resizeRight { right: var(--col-right); margin-right: -4px; }
   /* The task-detail column is a size container so controls respond to the column
      width (rails collapse independently of the window), not the viewport. */
-  .col.session { container-type: inline-size; }
-  .col.board { border-right: 1px solid var(--border); }
+  .col.session { container-type: inline-size; background: var(--panel); }
+  .col.board { border-right: 1px solid var(--border); background: var(--panel); }
   .col.context { border-left: 1px solid var(--border); background: var(--panel); }
   main.ctx-collapsed { grid-template-columns: var(--col-left) 1fr; }
   main.ctx-collapsed .col.context { display: none; }
@@ -757,6 +812,25 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 
       <label class="flbl" style="margin-top:16px">Local server endpoint</label>
       <input id="s_endpoint" placeholder="http://localhost:1234/v1" style="width:100%" onchange="saveEndpoint()" />
+
+      <label class="flbl" style="margin-top:16px">Embeddings</label>
+      <div class="row" style="align-items:center;gap:8px;margin-bottom:6px">
+        <input type="checkbox" id="s_embedding_enabled" style="width:auto" />
+        <select id="s_embedding_model" onchange="applyEmbeddingChoice(this.value)" style="flex:1">
+          <option value="custom">Custom</option>
+          <option value="rapid-mlx-qwen3-8b">Rapid-MLX Qwen3 Embedding 8B</option>
+          <option value="brainpower-ollama-qwen3-8b">Brainpower / Ollama Qwen3 Embedding 8B</option>
+        </select>
+      </div>
+      <div class="row" style="gap:6px">
+        <input id="s_embedding_endpoint" placeholder="http://localhost:8002/v1" style="flex:1" />
+        <input id="s_embedding_provider" placeholder="rapid-mlx" style="width:110px" />
+      </div>
+      <input id="s_embedding_model_id" placeholder="mlx-community/Qwen3-Embedding-8B-4bit-DWQ" style="width:100%;margin-top:6px" />
+      <div class="row" style="gap:6px;margin-top:6px;align-items:center">
+        <button class="sm" onclick="saveEmbeddingsSettings()">Save embeddings</button>
+        <span class="muted" id="s_embedding_status" style="font-size:11px">Local vectors stay on this Mac.</span>
+      </div>
     </div>
     <div id="settingsObservability" style="display:none">
       <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">
@@ -4359,6 +4433,7 @@ function applyTheme(theme, hasWallpaper) {
   if (hasWallpaper || isMatrix) {
     const op = (models && typeof models.wallpaperOpacity === "number") ? models.wallpaperOpacity : 82;
     root.style.setProperty("--wp-opacity", op + "%");
+    root.style.setProperty("--mat-wp-opacity", (op / 100).toFixed(2));
     root.style.setProperty("--wp-blur", op > 0 ? "6px" : "0px");
   }
   if (hasWallpaper) {
@@ -4961,6 +5036,7 @@ function openSettings() {
     + renderProvisionUI(models.localEngineCapability);
   const local = models.backends.find(b => b.id === "local");
   document.getElementById("s_endpoint").value = (local && local.endpoint) || "http://localhost:1234/v1";
+  renderEmbeddingSettings();
   const v = models.version || {};
   document.getElementById("s_version").textContent = "HiveMatrix v" + (v.version||"?") + " · build " + (v.build||"?") + " · " + (v.date||"?");
   document.getElementById("s_theme").value = models.theme || "system";
@@ -5045,6 +5121,7 @@ async function saveRoleModel(role, modelId) {
 function onOpacityInput(v) {
   document.getElementById("s_wp_opacity_val").textContent = v + "%";
   document.documentElement.style.setProperty("--wp-opacity", v + "%"); // live preview
+  document.documentElement.style.setProperty("--mat-wp-opacity", (parseInt(v, 10) / 100).toFixed(2));
   document.documentElement.style.setProperty("--wp-blur", parseInt(v, 10) > 0 ? "6px" : "0px");
 }
 async function saveOpacity(v) {
@@ -5090,7 +5167,7 @@ function settingsSwitch(on, onclick, opts) {
 async function renderFeatures() {
   const el = document.getElementById("s_features");
   el.innerHTML = '<div class="muted">Loading…</div>';
-  const [r, auto, brief] = await Promise.all([api("/settings/features"), api("/settings/voice/auto-approval"), api("/settings/briefing")]);
+  const [r, auto] = await Promise.all([api("/settings/features"), api("/settings/voice/auto-approval")]);
   const features = (r && r.features) || [];
   if (!features.length) { el.innerHTML = '<div class="muted">No optional features.</div>'; return; }
   const featureRows = features.map(f => {
@@ -5110,7 +5187,7 @@ async function renderFeatures() {
   const checkpointAuto = policy.enabled === true && policy.allowCheckpoints === true;
   const autoRow = '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
     + '<div style="flex:1"><div style="font-weight:600">Voice auto-approval</div>'
-    + '<div class="muted" style="font-size:11px;margin-top:2px">Allows Talk to approve non-content directive checkpoints. Content, external, stuck, and tool approvals stay manual.</div></div>'
+    + '<div class="muted" style="font-size:11px;margin-top:2px">Allows Talk to approve non-content scheduled item checkpoints. Content, external, stuck, and tool approvals stay manual.</div></div>'
     + settingsSwitch(checkpointAuto, 'toggleAutoApproval(' + (!checkpointAuto) + ')', { title: checkpointAuto ? 'Turn off voice auto-approval' : 'Turn on voice auto-approval' })
     + '</div>';
   const voiceLogicRow = '<div style="padding:10px 0;border-top:1px solid var(--border)">'
@@ -5119,49 +5196,10 @@ async function renderFeatures() {
     + '<div class="muted" style="font-size:11px;margin-top:2px">Runs canned text scenarios through Talk routing. No mic, STT, or audio playback.</div></div>'
     + '<button class="copybtn" onclick="runVoiceLogicTest(this)">Run test</button>'
     + '</div><div id="s_voice_logic_result" style="margin-top:8px"></div></div>';
-  const b = (brief && brief.briefing) || {};
-  const briefOn = b.enabled === true;
-  const briefHour = typeof b.hour === 'number' ? b.hour : 8;
-  const apnsNote = (brief && brief.apnsConfigured)
-    ? ((brief.devices || 0) + ' device' + (brief.devices === 1 ? '' : 's') + ' registered')
-    : 'APNs not set up — falls back to iMessage/Telegram/email';
-  const hourOpts = Array.from({length:24}, (_,h) => '<option value="'+h+'"'+(h===briefHour?' selected':'')+'>'+String(h).padStart(2,'0')+':00</option>').join('');
-  const briefRow = '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
-    + '<div style="flex:1"><div style="font-weight:600">Morning briefing</div>'
-    + '<div class="muted" style="font-size:11px;margin-top:2px">Pushes a daily standup (pending approvals, failures, active scheduled items, usage) to your phone. ' + esc(apnsNote) + '. <button class="linklike" onclick="sendTestBriefing(this)">Send test</button></div></div>'
-    + '<div class="row" style="gap:8px;align-items:center">'
-    + '<select onchange="setBriefingHour(this.value)" ' + (briefOn ? '' : 'disabled ') + 'style="padding:4px 6px">' + hourOpts + '</select>'
-    + settingsSwitch(briefOn, 'toggleBriefing(' + (!briefOn) + ')', { title: briefOn ? 'Turn off morning briefing' : 'Turn on morning briefing' })
-    + '</div></div>';
   // Video factory is no longer a Features toggle — it's a capability driven by a
-  // user directive (scheduled job) that runs the factory and pauses at the script-
-  // review checkpoint. Nothing to render here.
-  el.innerHTML = featureRows + autoRow + voiceLogicRow + briefRow;
-}
-
-async function toggleBriefing(enabled) {
-  await api("/settings/briefing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) });
-  renderFeatures();
-}
-
-async function setBriefingHour(hour) {
-  await api("/settings/briefing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hour: Number(hour) }) });
-  renderFeatures();
-}
-
-async function sendTestBriefing(btn) {
-  if (btn) btn.disabled = true;
-  hmToast('Sending a test briefing…');
-  try {
-    const r = await api("/briefing/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-    if (r && r.pushed > 0) hmToast('Pushed to ' + r.pushed + ' device' + (r.pushed === 1 ? '' : 's') + ' via APNs.', 'ok');
-    else if (r && r.fellBack) hmToast('No device registered — sent via iMessage/Telegram/email instead.', 'ok');
-    else hmToast('Briefing built but not delivered (no push, no fallback channel).', 'err');
-  } catch (e) {
-    hmToast('Test briefing failed.', 'err');
-  } finally {
-    if (btn) btn.disabled = false;
-  }
+  // scheduled job that runs the factory and pauses at the script-review checkpoint.
+  // Nothing to render here.
+  el.innerHTML = featureRows + autoRow + voiceLogicRow;
 }
 
 async function toggleFeature(key, enabled) {
@@ -6640,6 +6678,51 @@ async function saveEndpoint() {
   hmToast("Endpoint saved", "ok");
 }
 
+function embeddingChoices() {
+  return (models && models.embeddingModelChoices) || [];
+}
+function findEmbeddingChoice(id) {
+  return embeddingChoices().find(c => c.id === id);
+}
+function matchingEmbeddingChoice(e) {
+  if (!e) return null;
+  return embeddingChoices().find(c => c.endpoint === e.endpoint && c.model === e.model && c.provider === e.provider) || null;
+}
+function renderEmbeddingSettings() {
+  const select = document.getElementById("s_embedding_model");
+  if (!select || !models) return;
+  const choices = embeddingChoices();
+  const e = models.embeddings || {};
+  select.innerHTML = '<option value="custom">Custom</option>' + choices.map(c => '<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join("");
+  const match = matchingEmbeddingChoice(e);
+  select.value = match ? match.id : "custom";
+  document.getElementById("s_embedding_enabled").checked = e.enabled === true;
+  document.getElementById("s_embedding_endpoint").value = e.endpoint || "http://localhost:8002/v1";
+  document.getElementById("s_embedding_model_id").value = e.model || "mlx-community/Qwen3-Embedding-8B-4bit-DWQ";
+  document.getElementById("s_embedding_provider").value = e.provider || "rapid-mlx";
+}
+function applyEmbeddingChoice(id) {
+  const choice = findEmbeddingChoice(id);
+  if (!choice) return;
+  document.getElementById("s_embedding_endpoint").value = choice.endpoint;
+  document.getElementById("s_embedding_model_id").value = choice.model;
+  document.getElementById("s_embedding_provider").value = choice.provider;
+  document.getElementById("s_embedding_enabled").checked = true;
+}
+async function saveEmbeddingsSettings() {
+  const embeddings = {
+    enabled: document.getElementById("s_embedding_enabled").checked,
+    endpoint: document.getElementById("s_embedding_endpoint").value.trim(),
+    model: document.getElementById("s_embedding_model_id").value.trim(),
+    provider: document.getElementById("s_embedding_provider").value.trim(),
+  };
+  models = await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ embeddings }) }) || models;
+  await loadModels();
+  renderEmbeddingSettings();
+  await checkModels();
+  hmToast("Embeddings saved", "ok");
+}
+
 async function createTask() {
   const err = document.getElementById("t_err"); err.textContent = "";
   const title = document.getElementById("t_title").value.trim();
@@ -6734,7 +6817,7 @@ async function saveDirective() {
 }
 
 async function deleteDirective(id) {
-  if (!await hmConfirm("Delete this directive and all its runs?", { okLabel: "Delete", danger: true })) return;
+  if (!await hmConfirm("Delete this scheduled item and all its runs?", { okLabel: "Delete", danger: true })) return;
   try {
     await api("/directives/" + encodeURIComponent(id), { method: "DELETE" });
     refresh();

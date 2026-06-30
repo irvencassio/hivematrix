@@ -27,10 +27,10 @@ test("card() passes numColor to ov-num element", () => {
   assert.match(console_ts, /ov-num.*numColor|numColor.*ov-num/s);
 });
 
-test("wallpaper translucency uses --wp-blur CSS variable", () => {
+test("wallpaper translucency uses --mat-wp-blur CSS variable", () => {
   assert.ok(
-    console_ts.includes("blur(var(--wp-blur"),
-    "backdrop-filter must use var(--wp-blur) not hardcoded 6px"
+    console_ts.includes("blur(var(--mat-wp-blur)"),
+    "backdrop-filter must use var(--mat-wp-blur) not hardcoded 6px"
   );
   assert.ok(
     !console_ts.includes("backdrop-filter: blur(6px)"),

@@ -13,6 +13,7 @@ import { getPendingApprovals } from "@/lib/orchestrator/approval";
 import { getPendingStuck } from "@/lib/orchestrator/stuck";
 import { loopHealth, type LoopHealth } from "@/lib/feedback/self-improvement";
 
+/** @deprecated Use ReviewLaneReport */
 export interface ManagerBeeReport {
   generatedAt: string;
   scheduler: {
@@ -45,6 +46,9 @@ export interface ManagerBeeReport {
 
 const DIRECTIVE_STATUSES: DirectiveStatus[] = ["active", "sleeping", "blocked", "done", "retired"];
 const RUN_PHASES: RunPhase[] = ["plan", "execute", "verify", "reflect", "done", "failed"];
+
+/** Canonical Review Lane report type. */
+export type ReviewLaneReport = ManagerBeeReport;
 
 export function buildManagerBeeReport(nowIso: string = new Date().toISOString()): ManagerBeeReport {
   const diag = getSchedulerDiagnostics();
@@ -86,3 +90,6 @@ export function buildManagerBeeReport(nowIso: string = new Date().toISOString())
     health,
   };
 }
+
+/** Canonical alias. @deprecated buildManagerBeeReport kept for one migration window. */
+export const buildReviewLaneReport = buildManagerBeeReport;

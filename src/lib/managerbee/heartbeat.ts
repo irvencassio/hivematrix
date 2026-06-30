@@ -14,6 +14,11 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let lastReport: ManagerBeeReport | null = null;
 
 /** The cached report, or a freshly computed one if the heartbeat hasn't ticked. */
+export function getReviewLaneStatus(): ManagerBeeReport {
+  return lastReport ?? buildManagerBeeReport();
+}
+
+/** @deprecated Use getReviewLaneStatus. */
 export function getManagerBeeStatus(): ManagerBeeReport {
   return lastReport ?? buildManagerBeeReport();
 }
@@ -27,6 +32,15 @@ function tick(): void {
   }
 }
 
+export function startReviewLaneHeartbeat(intervalMs: number = HEARTBEAT_INTERVAL_MS): () => void {
+  if (timer) return stopManagerBeeHeartbeat;
+  tick(); // emit an initial snapshot immediately
+  timer = setInterval(tick, intervalMs);
+  if (typeof timer.unref === "function") timer.unref();
+  return stopManagerBeeHeartbeat;
+}
+
+/** @deprecated Use startReviewLaneHeartbeat. */
 export function startManagerBeeHeartbeat(intervalMs: number = HEARTBEAT_INTERVAL_MS): () => void {
   if (timer) return stopManagerBeeHeartbeat;
   tick(); // emit an initial snapshot immediately

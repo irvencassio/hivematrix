@@ -850,6 +850,14 @@ test("Models panel still shows local engine and embeddings", () => {
   assert.match(js, /getElementById\("modelStatus"\)/, "checkModels still fills modelStatus");
 });
 
+test("Settings Models includes configurable embedding model choices", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(CONSOLE_HTML, /id="s_embedding_model"/, "embedding model selector present");
+  assert.match(CONSOLE_HTML, /Rapid-MLX Qwen3 Embedding 8B/, "Rapid-MLX Qwen preset is visible");
+  assert.match(js, /function saveEmbeddingsSettings\(/, "embedding settings save handler present");
+  assert.match(js, /applyEmbeddingChoice/, "embedding preset handler present");
+});
+
 test("header usage pill shows a concise percent-and-reset summary", () => {
   assert.match(CONSOLE_HTML, /id="usagePill"/, "header usage pill kept");
   const js = extractScript(CONSOLE_HTML);
@@ -1544,4 +1552,176 @@ test("flightItemActions: review-reason class and _computeReviewReasonJs wired in
 test("flightItemActions: Accept / Land button shown only for review-status items (done items excluded)", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /it\.status\s*===\s*['"]review['"]/, "Accept button gated on review status — done items never show it");
+});
+
+// ─── Wallpaper material shell tokens (2026-06-29) ────────────────────────────
+
+test("material shell: base blur tokens defined", () => {
+  assert.match(CONSOLE_HTML, /--mat-blur-chrome:\s*24px/);
+  assert.match(CONSOLE_HTML, /--mat-blur-regular:\s*20px/);
+  assert.match(CONSOLE_HTML, /--mat-blur-thick:\s*14px/);
+  assert.match(CONSOLE_HTML, /--mat-blur-thin:\s*8px/);
+});
+
+test("material shell: backdrop-filter shorthands defined", () => {
+  assert.match(CONSOLE_HTML, /--mat-chrome:\s*blur\(var\(--mat-blur-chrome\)\)/);
+  assert.match(CONSOLE_HTML, /--mat-regular:\s*blur\(var\(--mat-blur-regular\)\)/);
+});
+
+test("material shell: header uses var(--mat-chrome)", () => {
+  assert.match(CONSOLE_HTML, /header\s*\{[^}]*backdrop-filter:\s*var\(--mat-chrome\)/s);
+});
+
+test("material shell: .col uses var(--mat-regular)", () => {
+  assert.match(CONSOLE_HTML, /\.col\s*\{[^}]*backdrop-filter:\s*var\(--mat-regular\)/s);
+});
+
+test("material shell: --panel references mat-tint-regular in all three themes", () => {
+  const occurrences = (CONSOLE_HTML.match(/--panel:\s*var\(--mat-tint-regular\)/g) || []).length;
+  assert.ok(occurrences >= 3, `expected --panel to reference --mat-tint-regular in all 3 themes, got ${occurrences}`);
+});
+
+test("material shell: wallpaper override uses --mat-wp-blur and --mat-wp-sat", () => {
+  assert.match(CONSOLE_HTML, /blur\(var\(--mat-wp-blur\)\)\s+saturate\(var\(--mat-wp-sat\)\)/);
+});
+
+test("material shell: --mat-wp-opacity token present in :root", () => {
+  assert.match(CONSOLE_HTML, /--mat-wp-opacity:/);
+});
+
+test("material shell: no-wallpaper tokens still present (regression guard)", () => {
+  assert.match(CONSOLE_HTML, /--bg:/);
+  assert.match(CONSOLE_HTML, /--text:/);
+  assert.match(CONSOLE_HTML, /--accent:/);
+  assert.match(CONSOLE_HTML, /--border:/);
+});
+
+// ─── Wallpaper material shell: panel uniformity ───────────────────────────────
+
+test("material shell: .col.board uses background: var(--panel) (same token as right panel)", () => {
+  assert.match(CONSOLE_HTML, /\.col\.board \{[^}]*background: var\(--panel\)/);
+});
+
+test("material shell: .col.context uses background: var(--panel) (same token as left panel)", () => {
+  assert.match(CONSOLE_HTML, /\.col\.context \{[^}]*background: var\(--panel\)/);
+});
+
+test("material shell: .col.session uses background: var(--panel) (center shares material)", () => {
+  assert.match(CONSOLE_HTML, /\.col\.session \{[^}]*background: var\(--panel\)/);
+});
+
+test("material shell: left and right panels share the same backdrop-filter via .col", () => {
+  // Both .col.board and .col.context carry the .col class, so both inherit
+  // the shared backdrop-filter: var(--mat-regular) rule — verified by checking
+  // that the .col rule applies to both specific column selectors.
+  assert.match(CONSOLE_HTML, /\.col\s*\{[^}]*backdrop-filter:\s*var\(--mat-regular\)/s);
+  assert.match(CONSOLE_HTML, /\.col\.board/);
+  assert.match(CONSOLE_HTML, /\.col\.context/);
+});
+
+test("material shell: side panel borders both use var(--border)", () => {
+  assert.match(CONSOLE_HTML, /\.col\.board \{[^}]*var\(--border\)/);
+  assert.match(CONSOLE_HTML, /\.col\.context \{[^}]*var\(--border\)/);
+});
+
+// ─── Wallpaper material shell: text readability ───────────────────────────────
+
+test("material shell: wallpaper mode adds text-shadow to h2 section headings", () => {
+  assert.match(CONSOLE_HTML, /html\[data-wallpaper="1"\] h2/);
+  assert.match(CONSOLE_HTML, /html\[data-wallpaper="1"\] h2[^}]*\{[^}]*text-shadow/s);
+});
+
+test("material shell: wallpaper mode adds text-shadow to .lane-title", () => {
+  assert.match(CONSOLE_HTML, /html\[data-wallpaper="1"\] \.lane-title/);
+});
+
+test("material shell: wallpaper mode adds text-shadow to .mdl-grp (model group labels)", () => {
+  assert.match(CONSOLE_HTML, /html\[data-wallpaper="1"\] \.mdl-grp/);
+});
+
+test("material shell: wallpaper mode adds text-shadow to .ctx-sec summary (inspector section labels)", () => {
+  assert.match(CONSOLE_HTML, /html\[data-wallpaper="1"\] \.ctx-sec > summary/);
+});
+
+test("material shell: wallpaper mode adds text-shadow to .dir-group-hdr (directive group headers)", () => {
+  assert.match(CONSOLE_HTML, /html\[data-wallpaper="1"\] \.dir-group-hdr/);
+});
+
+test("material shell: wallpaper dark-mode heading shadow is black-tinted", () => {
+  // rgba(0,0,0,…) shadow darkens text halos on bright/busy wallpaper.
+  assert.match(CONSOLE_HTML, /html\[data-wallpaper="1"\] h2[^{]*\{[^}]*text-shadow:\s*0 1px 4px rgba\(0,0,0,\.55\)/s);
+});
+
+test("material shell: wallpaper light-mode heading shadow is white-tinted", () => {
+  // Light theme inverts the halo so text lifts off bright backgrounds.
+  assert.match(CONSOLE_HTML, /html\[data-theme="light"\]\[data-wallpaper="1"\] h2[^{]*\{[^}]*text-shadow:\s*0 1px 4px rgba\(255,255,255,\.80\)/s);
+});
+
+test("material shell: .text-on-material utility class defined with text-shadow", () => {
+  assert.match(CONSOLE_HTML, /\.text-on-material \{[^}]*text-shadow/);
+});
+
+test("material shell: light theme .text-on-material uses white halo", () => {
+  assert.match(CONSOLE_HTML, /html\[data-theme="light"\] \.text-on-material \{[^}]*text-shadow:\s*0 1px 4px rgba\(255,255,255/);
+});
+
+// ─── Wallpaper material shell: opacity contract ───────────────────────────────
+
+test("material shell: tint alpha tokens drive panel overlay opacity (not background-image opacity)", () => {
+  // The tint overlay (rgba + alpha) protects text contrast independently of the wallpaper image.
+  // This means legibility doesn't depend on the image being dim — the tint layer guarantees it.
+  assert.match(CONSOLE_HTML, /--mat-tint-alpha-regular:\s*0\.\d+/);
+  assert.match(CONSOLE_HTML, /rgba\([^)]+var\(--mat-tint-alpha-regular\)\)/);
+});
+
+test("material shell: JS sets --mat-wp-opacity on the tint alpha, not on body opacity", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /setProperty\("--mat-wp-opacity"/);
+  assert.doesNotMatch(js, /document\.body\.style\.opacity\s*=/, "body opacity must never be set");
+});
+
+test("material shell: --mat-wp-blur is set to 0px when opacity is zero (blur follows tint)", () => {
+  // When the user zeros out translucency, blur is also removed — both track together.
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /--wp-blur.*0px|0px.*--wp-blur/s);
+});
+
+// ─── No-wallpaper mode regression: per-theme bg values unchanged ──────────────
+
+test("material shell: dark mode --bg is still solid #0d1117 (no-wallpaper regression guard)", () => {
+  assert.match(CONSOLE_HTML, /--bg: #0d1117/);
+});
+
+test("material shell: light theme --bg is still solid #f6f8fa (no-wallpaper regression guard)", () => {
+  assert.match(CONSOLE_HTML, /html\[data-theme="light"\][^{]*\{[^}]*--bg: #f6f8fa/s);
+});
+
+test("material shell: at least 3 columns all use background: var(--panel) (no orphan surface)", () => {
+  const count = (CONSOLE_HTML.match(/background: var\(--panel\)/g) || []).length;
+  assert.ok(count >= 3, `expected at least 3 background:var(--panel) declarations, got ${count}`);
+});
+
+// ─── Morning Briefing retirement: settings UI source guards ───────────────────
+
+test("console source has no Morning Briefing toggle", () => {
+  const src = readFileSync(new URL("./console.ts", import.meta.url), "utf8");
+  assert.ok(!src.includes("Morning briefing"), "Morning Briefing settings toggle removed from UI source");
+  assert.ok(!src.includes("toggleBriefing"), "toggleBriefing function removed from console source");
+  assert.ok(!src.includes("sendTestBriefing"), "sendTestBriefing function removed from console source");
+});
+
+test("console source uses scheduled item copy instead of directive copy for deletes", () => {
+  const src = readFileSync(new URL("./console.ts", import.meta.url), "utf8");
+  assert.ok(!src.includes("Delete this directive"), "'Delete this directive' string removed");
+  assert.ok(src.includes("Delete this scheduled item"), "Uses 'Delete this scheduled item' copy");
+});
+
+test("Scheduled panel section header says 'Scheduled' not 'Directives'", () => {
+  assert.match(CONSOLE_HTML, /<summary>Scheduled<\/summary>/, "panel <summary> says Scheduled");
+  assert.doesNotMatch(CONSOLE_HTML, /<summary>Directives?<\/summary>/, "panel <summary> must not say Directive/Directives");
+});
+
+test("Scheduled add-item button uses 'New scheduled item' copy", () => {
+  assert.match(CONSOLE_HTML, /New scheduled item/, "add button says 'New scheduled item'");
+  assert.doesNotMatch(CONSOLE_HTML, /New directive/i, "add button must not say 'New directive'");
 });

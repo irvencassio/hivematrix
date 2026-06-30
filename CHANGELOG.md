@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.111 — 2026-06-30
+
+complete Flight lanes and guard work-package auto-land
+
 ## v0.1.110 — 2026-06-29
 
 auto-deploy HiveMatrix

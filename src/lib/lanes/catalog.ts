@@ -1,4 +1,5 @@
 import type { WorkerKind } from "@/lib/central/contracts";
+import type { LaneId } from "@/lib/lanes/contracts";
 
 // HiveMatrix capability lane catalog — scoped per COMPONENT-MAP.md.
 // Public surfaces use lane names; internal worker kinds keep legacy identifiers
@@ -7,7 +8,7 @@ import type { WorkerKind } from "@/lib/central/contracts";
 export type LaneRole = "channel" | "capability" | "meta" | "workflow";
 
 export interface LaneDefinition {
-  kind: WorkerKind;
+  kind: WorkerKind | LaneId;
   name: string;
   role: LaneRole;
   phase: 1 | 2 | 3 | 4;
@@ -45,7 +46,7 @@ const LANE_DEFINITIONS: LaneDefinition[] = [
     standalone: false,
   },
   {
-    kind: "managerbee",
+    kind: "review",
     name: "Review Lane",
     role: "meta",
     phase: 1,
@@ -93,6 +94,12 @@ const LANE_DEFINITIONS: LaneDefinition[] = [
 
 const LANE_DEFINITION_MAP = new Map(LANE_DEFINITIONS.map((definition) => [definition.kind, definition]));
 
+// Deprecated kind strings that map to a canonical lane definition.
+// Kept for one migration window so old workers and persisted records still resolve.
+const COMPATIBILITY_KIND_MAP = new Map<string, LaneDefinition>([
+  ["managerbee", LANE_DEFINITIONS.find((d) => d.kind === "review")!],
+]);
+
 export const FIRST_WORKER_SET = LANE_DEFINITIONS.filter((definition) => definition.phase === 1);
 export const CAPABILITY_SUBSTRATE_SET = LANE_DEFINITIONS.filter((definition) => definition.phase === 2);
 export const HIGHER_RISK_SURFACE_SET = LANE_DEFINITIONS.filter((definition) => definition.phase === 3);
@@ -103,5 +110,5 @@ export function listLaneDefinitions(): LaneDefinition[] {
 
 export function getLaneDefinition(kind: WorkerKind | string | null | undefined): LaneDefinition | null {
   if (!kind) return null;
-  return LANE_DEFINITION_MAP.get(kind as WorkerKind) ?? null;
+  return LANE_DEFINITION_MAP.get(kind as WorkerKind) ?? COMPATIBILITY_KIND_MAP.get(kind) ?? null;
 }
