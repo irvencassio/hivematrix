@@ -428,7 +428,7 @@ async function askOpenClaw(deps: CommandTurnDeps, request: OpenClawVoiceRequest)
       available: false,
       sessionKey: request.sessionKey,
       runId: null,
-      reason: "OpenClaw Chat Dock is disabled.",
+      reason: "OpenClaw Chat is disabled.",
     };
   }
 
@@ -502,7 +502,7 @@ async function deliverOpenClawReply(opts: {
   const raw = pollResult.found && pollResult.text ? pollResult.text : null;
   const text = raw
     ? capOpenClawText(raw)
-    : `${displayName} didn't respond in time. Check the OpenClaw Chat Dock for details.`;
+    : `${displayName} didn't respond in time. Check OpenClaw Chat for details.`;
 
   let audioBase64 = "";
   try {

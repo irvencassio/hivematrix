@@ -1047,7 +1047,7 @@ export function createDaemonServer() {
             sessionKey,
             messages: [],
             truncated: false,
-            reason: "OpenClaw Chat Dock feature is not enabled.",
+            reason: "OpenClaw Chat feature is not enabled.",
           });
           return;
         }
@@ -1088,7 +1088,7 @@ export function createDaemonServer() {
         }
 
         if (!isFeatureEnabled("openclaw.chatDock")) {
-          json(res, 200, { ok: false, available: false, sessionKey, runId: null, reason: "OpenClaw Chat Dock feature is not enabled." });
+          json(res, 200, { ok: false, available: false, sessionKey, runId: null, reason: "OpenClaw Chat feature is not enabled." });
           return;
         }
 
@@ -1124,7 +1124,7 @@ export function createDaemonServer() {
         }
 
         if (!isFeatureEnabled("openclaw.chatDock")) {
-          json(res, 200, { ok: false, available: false, sessionKey, messageId: null, reason: "OpenClaw Chat Dock feature is not enabled." });
+          json(res, 200, { ok: false, available: false, sessionKey, messageId: null, reason: "OpenClaw Chat feature is not enabled." });
           return;
         }
 
@@ -1162,7 +1162,7 @@ export function createDaemonServer() {
         }
 
         if (!isFeatureEnabled("openclaw.chatDock")) {
-          json(res, 200, { ok: false, taskId: null, reason: "OpenClaw Chat Dock feature is not enabled." });
+          json(res, 200, { ok: false, taskId: null, reason: "OpenClaw Chat feature is not enabled." });
           return;
         }
 

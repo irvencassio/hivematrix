@@ -845,6 +845,26 @@ test("+ New task and task creation remain after removing the shortcut", () => {
   assert.match(js, /function showNewTaskPanel\(/, "center-column task panel flow preserved");
 });
 
+test("board column has OpenClaw nav directly under New task", () => {
+  assert.match(CONSOLE_HTML, /id="openclawNav"/, "OpenClaw nav control present");
+  assert.match(CONSOLE_HTML, /id="openclawNav"[^>]*onclick="showOpenClawPanel\(\)"/, "OpenClaw nav opens center pane");
+  const newTaskIdx = CONSOLE_HTML.indexOf("＋ New task");
+  const openClawIdx = CONSOLE_HTML.indexOf('id="openclawNav"');
+  const taskFormIdx = CONSOLE_HTML.indexOf('id="taskForm"');
+  assert.ok(newTaskIdx >= 0 && openClawIdx > newTaskIdx, "OpenClaw sits below New task");
+  assert.ok(taskFormIdx >= 0 && openClawIdx < taskFormIdx, "OpenClaw sits above the task form");
+});
+
+test("showOpenClawPanel renders OpenClaw in the center column", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = js.match(/function showOpenClawPanel\(\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(body.length > 50, "showOpenClawPanel defined");
+  assert.match(body, /state\.selected = null/, "clears selected task");
+  assert.match(body, /state\.selectedFlight = null/, "clears selected Flight");
+  assert.match(body, /renderOpenClawPanel\(\)/, "renders the center OpenClaw panel");
+  assert.match(body, /initOpenclawDock\(\)/, "refreshes OpenClaw availability/history");
+});
+
 test("board column has an Overview nav above + New task", () => {
   assert.match(CONSOLE_HTML, /id="overviewNav"/, "Overview nav control present");
   assert.match(CONSOLE_HTML, /class="ov-nav"[^>]*id="overviewNav"|id="overviewNav"[^>]*class="ov-nav"/, "uses the compact ov-nav style");
@@ -1801,7 +1821,7 @@ test("Scheduled add-item button uses 'New scheduled item' copy", () => {
   assert.doesNotMatch(CONSOLE_HTML, /New directive/i, "add button must not say 'New directive'");
 });
 
-// ── OpenClaw Chat Dock console tests ─────────────────────────────────────────
+// ── OpenClaw Chat center-pane console tests ──────────────────────────────────
 
 test("openclaw.chatDock feature toggle is off by default", () => {
   // renderFeatures treats a feature as off when f.enabled !== true.
@@ -1833,54 +1853,68 @@ test("openclaw.chatDock feature appears in the Settings features list", () => {
   // renderFeatures maps over features and renders esc(f.label) — the feature
   // registry must contain this key for it to appear.
   assert.match(js, /async function renderFeatures\(/, "renderFeatures function exists");
-  assert.match(CONSOLE_HTML, /OpenClaw Chat Dock/, "Features panel mentions OpenClaw Chat Dock label");
+  assert.match(CONSOLE_HTML, /OpenClaw Chat/, "Features panel mentions OpenClaw Chat label");
 });
 
-test("dock element structure is present in the console HTML", () => {
-  assert.match(CONSOLE_HTML, /id="openclawDock"/, "openclawDock mount point present");
-  assert.match(CONSOLE_HTML, /id="ocAvailDot"/, "availability dot element present");
-  assert.match(CONSOLE_HTML, /id="ocTranscript"/, "transcript element present");
-  assert.match(CONSOLE_HTML, /id="ocInput"/, "composer textarea present");
-  assert.match(CONSOLE_HTML, /id="ocSendBtn"/, "Send button present");
-  assert.match(CONSOLE_HTML, /id="ocTaskBtn"/, "Create-Task button present");
-  assert.match(CONSOLE_HTML, /id="ocSessionSel"/, "session selector present");
-  assert.match(CONSOLE_HTML, /id="ocCollapseArrow"/, "collapse arrow present");
+test("OpenClaw center pane uses panel IDs and a large composer target", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /id="ocPanelTranscript"/, "center panel transcript has a unique id");
+  assert.match(js, /id="ocPanelInput"/, "center panel textarea has a unique id");
+  assert.match(js, /id="ocPanelSendBtn"/, "center panel send button has a unique id");
+  assert.match(js, /id="ocPanelTaskBtn"/, "center panel task button has a unique id");
+  assert.match(js, /id="ocPanelSessionSel"/, "center panel session selector has a unique id");
+  assert.match(js, /id="ocPanelAvailDot"/, "center panel availability dot has a unique id");
+  assert.match(CONSOLE_HTML, /\.oc-panel-composer-shell[^}]*min-height:\s*96px/, "center composer has a large click target");
+  assert.match(js, /onclick="ocFocusPanelInput\(\)"/, "composer shell focuses the textarea");
 });
 
-test("dock defaults to collapsed with availability dot in off state", () => {
-  // The dock starts collapsed and the dot is off until initOpenclawDock runs.
-  assert.match(CONSOLE_HTML, /id="openclawDock" class="collapsed"/, "dock starts collapsed");
-  assert.match(CONSOLE_HTML, /class="oc-avail-dot off" id="ocAvailDot"/, "availability dot starts off");
+test("OpenClaw center pane reserves bottom composer space while transcript scrolls", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(CONSOLE_HTML, /\.col\.session\.oc-session-mode[^}]*overflow:\s*hidden/, "OpenClaw mode keeps the center column from page-scrolling past the composer");
+  assert.match(js, /session\.parentElement\.classList\.toggle\("oc-session-mode", !!open\)/, "OpenClaw mode is applied to the outer center column");
+  assert.match(CONSOLE_HTML, /\.oc-center-pane[^}]*calc\(100vh - 68px\)/, "OpenClaw workspace is bounded to the visible center column height");
+  assert.match(CONSOLE_HTML, /\.oc-panel-body[^}]*min-height:\s*0/, "panel body can shrink inside the bounded center column");
+  assert.match(CONSOLE_HTML, /\.oc-transcript[^}]*overflow-y:\s*auto/, "only the transcript scrolls");
+  assert.match(CONSOLE_HTML, /\.oc-panel-composer-shell[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+88px/, "composer reserves a full-width input column and fixed action column");
+  assert.match(CONSOLE_HTML, /\.oc-input[^}]*width:\s*100%/, "textarea fills the composer input column");
+  assert.match(CONSOLE_HTML, /\.oc-input[^}]*min-width:\s*0/, "textarea can fit the grid without collapsing into vertical text");
+  assert.match(CONSOLE_HTML, /\.oc-panel-composer-shell[^}]*border-top:\s*1px solid var\(--border\)/, "composer remains in the panel flow at the bottom edge");
+  assert.match(CONSOLE_HTML, /\.oc-panel-composer-shell[^}]*flex:\s*0\s+0\s+auto/, "composer keeps reserved bottom space");
+}
+);
+
+test("primary left nav uses a single active color convention", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(CONSOLE_HTML, /id="newTaskNav"/, "New task has a tracked nav id");
+  assert.match(CONSOLE_HTML, /\.addbtn \{[^}]*color:\s*var\(--text\)/, "New task is neutral when inactive");
+  assert.match(CONSOLE_HTML, /\.addbtn\.active[^}]*color:\s*var\(--accent\)/, "New task uses accent only when active");
+  assert.match(js, /overviewActive = .* !_taskFormInSession/, "Overview is not active while New task is open");
+  assert.match(js, /newTaskNav.*classList\.toggle\("active", _taskFormInSession\)/s, "New task active state follows the center form");
 });
 
-test("dock session selector offers both default sessions", () => {
+test("OpenClaw center pane session selector offers both default sessions", () => {
   assert.match(CONSOLE_HTML, /value="agent:main:main"/, "default agent:main:main session present");
   assert.match(CONSOLE_HTML, /value="agent:main:hivematrix"/, "agent:main:hivematrix session present");
 });
 
-test("dock is hidden when the chatDock feature flag is off", () => {
+test("OpenClaw nav is hidden when the chat feature flag is off", () => {
   const js = extractScript(CONSOLE_HTML);
-  // initOpenclawDock hides the dock only when the feature flag (flagEnabled) is off.
-  // A non-installed OpenClaw with the flag on must show a visible unavailable state instead.
-  assert.match(js, /if \(!flagEnabled\) \{ dock\.style\.display = 'none'; return; \}/, "dock hidden only when feature flag is off");
+  assert.match(js, /if \(nav\) nav\.style\.display = flagEnabled \? '' : 'none'/, "OpenClaw nav follows the feature flag");
+  assert.doesNotMatch(CONSOLE_HTML, /id="openclawDock"/, "bottom dock is not rendered as a second visible surface");
 });
 
-test("dock becomes visible when feature is enabled and OpenClaw is available", () => {
+test("OpenClaw center pane refreshes history when feature is enabled and available", () => {
   const js = extractScript(CONSOLE_HTML);
-  // When enabled, display is cleared; when available, oc-unavail-state is removed.
-  assert.match(js, /dock\.style\.display = '';/, "dock display cleared when enabled");
-  assert.match(js, /dock\.classList\.remove\('oc-unavail-state'\)/, "unavail class removed when available");
+  assert.match(js, /_ocState\.available = !!\(r && r\.available\)/, "available state is stored centrally");
   assert.match(js, /await ocRefresh\(\)/, "history fetched after dock becomes available");
 });
 
-test("unavailable state hides the composer and shows a warning panel", () => {
+test("unavailable state shows a center-pane warning panel", () => {
   const js = extractScript(CONSOLE_HTML);
-  // When enabled but gateway is unreachable, the composer is hidden and a warn panel is shown.
-  assert.match(js, /if \(comp\) comp\.style\.display = 'none'/, "composer hidden when unavailable");
-  assert.match(js, /dock\.classList\.add\('oc-unavail-state'\)/, "unavail class set when not reachable");
   assert.match(js, /function ocWarnPanel\(reason\)/, "ocWarnPanel helper defined");
   assert.match(js, /oc-warn-panel/, "warn panel markup is produced");
   assert.match(js, /OpenClaw unavailable/, "unavailable title in warn panel");
+  assert.match(js, /renderOpenClawPanel\(\)/, "status changes update the center pane");
 });
 
 test("unavailable state includes a Settings link in the warning panel", () => {
@@ -1894,8 +1928,7 @@ test("Send button is disabled for empty input", () => {
   const js = extractScript(CONSOLE_HTML);
   // ocInputResize disables the button when the textarea is empty.
   assert.match(js, /sendBtn\.disabled = !el\.value\.trim\(\)/, "send button disabled when input is empty");
-  // The button starts disabled in HTML.
-  assert.match(CONSOLE_HTML, /id="ocSendBtn"[^>]*disabled/, "Send button starts disabled in HTML");
+  assert.match(js, /id="ocPanelSendBtn"[^']*disabled/, "Send button starts disabled in the center panel");
 });
 
 test("Send button is disabled while a message is in-flight", () => {
@@ -1925,6 +1958,7 @@ test("create-task prefers user-selected transcript text over last message", () =
   const js = extractScript(CONSOLE_HTML);
   // The function first checks window.getSelection() inside the transcript element.
   assert.match(js, /window\.getSelection\(\)/, "reads window selection");
+  assert.match(js, /ocPanelTranscript/, "uses the center transcript");
   assert.match(js, /transcript\.contains\(sel\.anchorNode\)/, "selection must be inside the transcript");
   assert.match(js, /sel\.toString\(\)\.trim\(\)/, "uses selection text when present");
   // Falls back to the last message in _ocState.messages.
@@ -1957,30 +1991,25 @@ test("initOpenclawDock is called when the openclaw.chatDock flag is toggled", ()
   assert.match(js, /if \(key === 'openclaw\.chatDock'\) initOpenclawDock\(\)/, "toggleFeature calls initOpenclawDock for chatDock key");
 });
 
-test("dock CSS is responsive and hidden on narrow screens", () => {
-  // The dock is hidden via media query on narrow viewports (mobile).
-  assert.match(CONSOLE_HTML, /@media \(max-width:760px\)[^{]*\{[^}]*#openclawDock[^}]*display:none !important/, "dock hidden on narrow screens");
-  assert.match(CONSOLE_HTML, /#openclawDock\.collapsed[^{]*\{[^}]*height: 38px/, "collapsed dock is a fixed-height header strip");
+test("OpenClaw center pane CSS is responsive", () => {
+  assert.match(CONSOLE_HTML, /\.oc-center-pane/, "center pane CSS exists");
+  assert.match(CONSOLE_HTML, /@media \(max-width:760px\)[\s\S]*?\.oc-center-pane/, "center pane participates in narrow-screen rules");
 });
 
-test("dock shows visible unavailable state when feature flag is on but OpenClaw is not installed", () => {
+test("center pane shows visible unavailable state when feature flag is on but OpenClaw is not installed", () => {
   const js = extractScript(CONSOLE_HTML);
   // flagEnabled controls visibility; !enabled (not installed) shows unavailable strip, not hidden.
   assert.match(js, /const flagEnabled = !!\(r && r\.flagEnabled\)/, "flagEnabled read from status response");
-  assert.match(js, /const enabled = !!\(r && r\.enabled\)/, "enabled checked separately after flagEnabled guard");
-  // The dock is made visible (display='') before the !enabled check.
-  assert.match(js, /dock\.style\.display = '';[\s\S]{0,300}const enabled = !!/, "dock display cleared before !enabled check");
-  // The !enabled branch renders an unavailable warn panel (not a hidden dock).
-  assert.match(js, /if \(!enabled\) \{[\s\S]{0,400}ocWarnPanel/, "!enabled branch renders an unavailable warn panel");
+  assert.match(js, /_ocState\.enabled = !!\(r && r\.enabled\)/, "enabled checked separately after flagEnabled guard");
+  assert.match(js, /_ocState\.reason = \(r && r\.reason\)/, "unavailable reason is stored for the center pane");
 });
 
-test("status probe error shows error panel with Retry button, not a hidden dock", () => {
+test("status probe error shows error panel with Retry button", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /function ocErrPanel\(reason\)/, "ocErrPanel helper defined");
   assert.match(js, /OpenClaw status error/, "error title appears in ocErrPanel");
   assert.match(js, /onclick="initOpenclawDock\(\)"/, "error panel Retry button calls initOpenclawDock");
-  assert.match(js, /dock2\.style\.display = '';/, "catch block shows the dock instead of hiding it");
-  assert.match(js, /ocErrPanel\('Could not check OpenClaw status\.'\)/, "catch block uses ocErrPanel with the correct message");
+  assert.match(js, /_ocState\.statusError = 'Could not check OpenClaw status\.'/, "catch block stores status error for the center pane");
 });
 
 test("runSelectedCommand sends both project and projectPath from the cmd multi-picker state", () => {
@@ -2053,14 +2082,13 @@ test("OpenClaw diagnostics panel shows all four status items", () => {
   assert.match(js, /Feature flag/, "diagnostics shows Feature flag row");
   assert.match(js, /Installed/, "diagnostics shows Installed row");
   assert.match(js, /Gateway reachable/, "diagnostics shows Gateway reachable row");
-  assert.match(js, /Dock visible/, "diagnostics shows Dock visible row");
+  assert.match(js, /Center entry/, "diagnostics shows Center entry row");
 });
 
-test("OpenClaw diagnostics shows narrow-screen note and reads viewport width for dock visibility", () => {
+test("OpenClaw diagnostics reads the center-pane nav visibility", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /hidden on narrow screens/, "diagnostics notes dock is hidden on narrow screens");
-  assert.match(js, /window\.innerWidth <= 760/, "diagnostics checks viewport width for narrow-screen detection");
-  assert.match(js, /window\.getComputedStyle\(dockEl\)\.display !== 'none'/, "diagnostics reads computed display of dock element");
+  assert.match(js, /document\.getElementById\('openclawNav'\)/, "diagnostics reads the OpenClaw nav element");
+  assert.match(js, /window\.getComputedStyle\(navEl\)\.display !== 'none'/, "diagnostics reads computed display of nav element");
 });
 
 test("OpenClaw diagnostics refresh button calls renderFeatures and is labeled Re-check", () => {
@@ -2071,7 +2099,7 @@ test("OpenClaw diagnostics refresh button calls renderFeatures and is labeled Re
 
 // ── renderOcDiagnostics integration: status-shape → HTML output ───────────────
 // Extracts and calls renderOcDiagnostics with different /openclaw/status response
-// shapes to verify the dock diagnostics panel maps server data to the correct HTML.
+// shapes to verify the OpenClaw diagnostics panel maps server data to the correct HTML.
 
 type MockDoc = { getElementById: (id: string) => { style?: { display?: string } } | null };
 type MockWindow = { innerWidth: number; getComputedStyle: (el: unknown) => { display: string } };
@@ -2116,11 +2144,11 @@ test("renderOcDiagnostics: fully available state — all four rows show yes / vi
   const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
   const features = [{ key: "openclaw.chatDock", enabled: true }];
   const ocSt = { installed: true, available: true, gateway: { reachable: true }, reason: null };
-  const dockEl = { style: { display: "block" } };
+  const navEl = { style: { display: "block" } };
   const html = fn(
     features,
     ocSt,
-    { getElementById: (id: string) => id === "openclawDock" ? dockEl : null },
+    { getElementById: (id: string) => id === "openclawNav" ? navEl : null },
     { innerWidth: 1280, getComputedStyle: () => ({ display: "block" }) },
   );
   assert.match(html, /id="s_oc_diag"/, "diagnostics wrapper is present");
@@ -2130,8 +2158,8 @@ test("renderOcDiagnostics: fully available state — all four rows show yes / vi
   assert.match(html, /Installed[\s\S]*?yes/, "installed row shows yes when installed:true");
   // Gateway reachable row — reachable:true → "yes"
   assert.match(html, /Gateway reachable[\s\S]*?yes/, "gateway reachable row shows yes when reachable:true");
-  // Dock visible row — dock element found + display:block → "yes"
-  assert.match(html, /Dock visible[\s\S]*?yes/, "dock visible row shows yes when display is not none");
+  // Center entry row — nav element found + display:block → "yes"
+  assert.match(html, /Center entry[\s\S]*?yes/, "center entry row shows yes when display is not none");
 });
 
 test("renderOcDiagnostics: installed but gateway unreachable — installed yes, gateway no", () => {
@@ -2155,20 +2183,7 @@ test("renderOcDiagnostics: not installed — installed no, gateway shows dash, r
   assert.match(html, /OpenClaw is not installed/, "reason note is rendered below the rows");
 });
 
-test("renderOcDiagnostics: narrow viewport — dock visible row shows hidden-on-narrow-screens text", () => {
-  const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
-  const features = [{ key: "openclaw.chatDock", enabled: true }];
-  const ocSt = { installed: true, available: true, gateway: { reachable: true } };
-  const html = fn(
-    features,
-    ocSt,
-    { getElementById: () => ({ style: {} }) },
-    { innerWidth: 400, getComputedStyle: () => ({ display: "none" }) },
-  );
-  assert.match(html, /hidden on narrow screens/, "narrow viewport shows the narrow-screen note, not a yes/no pill");
-});
-
-test("renderOcDiagnostics: dock element not found — dock visible row shows dash", () => {
+test("renderOcDiagnostics: center nav element not found — center entry row shows dash", () => {
   const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
   const features = [{ key: "openclaw.chatDock", enabled: true }];
   const ocSt = { installed: true, available: true, gateway: { reachable: true } };
@@ -2178,6 +2193,5 @@ test("renderOcDiagnostics: dock element not found — dock visible row shows das
     { getElementById: () => null },
     { innerWidth: 1280, getComputedStyle: () => ({ display: "block" }) },
   );
-  // When the dock element is absent (dock hidden via CSS display:none by flag), show dash
-  assert.match(html, /Dock visible[\s\S]*?—/, "dock visible row shows dash when dock element is not in DOM");
+  assert.match(html, /Center entry[\s\S]*?—/, "center entry row shows dash when nav element is not in DOM");
 });

@@ -103,6 +103,24 @@ test("fetchChatHistory: sends op=chat.history with sessionKey and limit", async 
   assert.equal(payload.limit, 25);
 });
 
+test("fetchChatHistory: default gateway caller uses chat.history RPC method", async () => {
+  const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const result = await fetchChatHistory({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:custom",
+    limit: 25,
+    _timeoutMs: 20,
+    _gatewayCall: async (method: string, params: Record<string, unknown>) => {
+      calls.push({ method, params });
+      return { messages: [] };
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "chat.history");
+  assert.deepEqual(calls[0].params, { sessionKey: "agent:main:custom", limit: 25 });
+});
+
 test("fetchChatHistory: returns display-ready messages from gateway response", async () => {
   const rawMessages = [
     { id: "m1", role: "user", content: "Hello OpenClaw", timestamp: "2026-06-30T10:00:00Z" },
@@ -135,6 +153,21 @@ test("fetchChatHistory: normalizes text field as fallback for content", async ()
   assert.equal(result.messages[0].content, "text field fallback");
 });
 
+test("fetchChatHistory: normalizes OpenClaw text content arrays", async () => {
+  const rawMessages = [{
+    id: "m1",
+    role: "assistant",
+    content: [{ type: "text", text: "array " }, { type: "text", text: "content" }],
+  }];
+  const { factory } = makeMockWsFactory({ response: { ok: true, messages: rawMessages } });
+  const result = await fetchChatHistory({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    _wsFactory: factory,
+  });
+  assert.equal(result.messages[0].content, "array content");
+});
+
 test("fetchChatHistory: normalizes sender field as fallback for role", async () => {
   const rawMessages = [{ id: "m1", sender: "assistant", content: "hi" }];
   const { factory } = makeMockWsFactory({ response: { ok: true, messages: rawMessages } });
@@ -156,6 +189,17 @@ test("fetchChatHistory: normalizes numeric ts as ISO timestamp", async () => {
     _wsFactory: factory,
   });
   assert.ok(result.messages[0].timestamp?.startsWith("20"));
+});
+
+test("fetchChatHistory: normalizes numeric millisecond timestamp as ISO timestamp", async () => {
+  const rawMessages = [{ id: "m1", role: "assistant", content: "hello", timestamp: 1782903343840 }];
+  const { factory } = makeMockWsFactory({ response: { ok: true, messages: rawMessages } });
+  const result = await fetchChatHistory({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    _wsFactory: factory,
+  });
+  assert.equal(result.messages[0].timestamp, "2026-07-01T10:55:43.840Z");
 });
 
 test("fetchChatHistory: truncates oversized response and sets truncated:true", async () => {
@@ -688,6 +732,45 @@ test("pollForAssistantReply: returns earliest assistant message when multiple ex
   });
   assert.equal(result.found, true);
   assert.equal(result.text, "First reply");
+});
+
+test("pollForAssistantReply: skips empty and tool output before final speakable answer", async () => {
+  const sentAfter = "2026-07-01T11:08:02.000Z";
+  const { factory } = makeMockWsFactoryQueue([{
+    ok: true,
+    messages: [
+      { id: "a-empty", role: "assistant", content: "", timestamp: "2026-07-01T11:08:09.554Z" },
+      {
+        id: "a-skill",
+        role: "assistant",
+        content: "---\nname: weather\n---\n# Weather\nUse this skill to check local weather.",
+        timestamp: "2026-07-01T11:08:14.998Z",
+      },
+      {
+        id: "a-json",
+        role: "assistant",
+        content: "{\"temperature\":76,\"condition\":\"partly cloudy\"}",
+        timestamp: "2026-07-01T11:08:23.118Z",
+      },
+      {
+        id: "a-final",
+        role: "assistant",
+        content: "Assuming New York City: today looks hot and partly cloudy.",
+        timestamp: "2026-07-01T11:08:26.189Z",
+      },
+    ],
+  }]);
+  const result = await pollForAssistantReply({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    sentAfter,
+    maxAttempts: 3,
+    pollIntervalMs: 1,
+    _wsFactory: factory,
+    _timeoutMs: 100,
+  });
+  assert.equal(result.found, true);
+  assert.equal(result.text, "Assuming New York City: today looks hot and partly cloudy.");
 });
 
 test("pollForAssistantReply: gateway connection error returns found:false with reason", async () => {

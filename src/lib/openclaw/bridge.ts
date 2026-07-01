@@ -3,11 +3,15 @@
  * Keeps OpenClaw credentials server-side; browser code never touches them.
  */
 
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
 const HISTORY_LIMIT_DEFAULT = 50;
 const HISTORY_LIMIT_MAX = 200;
 const GATEWAY_OP_TIMEOUT_MS = 10_000;
 const VOICE_POLL_INTERVAL_MS = 1_000;
 const VOICE_POLL_MAX_ATTEMPTS = 30;
+const execFileAsync = promisify(execFile);
 
 export interface ChatMessage {
   id: string;
@@ -36,10 +40,127 @@ export interface GatewaySocket {
 }
 
 export type WsFactory = (url: string) => GatewaySocket;
+export type GatewayCall = (
+  method: string,
+  params: Record<string, unknown>,
+  opts: { gatewayUrl: string; timeoutMs: number },
+) => Promise<Record<string, unknown>>;
 
 function defaultWsFactory(url: string): GatewaySocket {
   // Node.js 22 exposes WebSocket globally; cast through unknown for TypeScript.
   return new (globalThis as unknown as { WebSocket: new (u: string) => GatewaySocket }).WebSocket(url);
+}
+
+function parseJsonFromCliOutput(output: string): Record<string, unknown> {
+  const trimmed = output.trim();
+  for (let i = 0; i < trimmed.length; i++) {
+    if (trimmed[i] !== "{") continue;
+    try {
+      const parsed = JSON.parse(trimmed.slice(i)) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Keep scanning; OpenClaw may print warnings before the JSON payload.
+    }
+  }
+  throw new Error("OpenClaw Gateway returned non-JSON response");
+}
+
+function extractOpenclawErrorMessage(data: Record<string, unknown>): string {
+  const error = data.error;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const message = (error as Record<string, unknown>).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return "OpenClaw returned an error.";
+}
+
+function normalizeContent(raw: Record<string, unknown>): string {
+  if (typeof raw.content === "string") return raw.content;
+  if (Array.isArray(raw.content)) {
+    return raw.content
+      .map((part) => {
+        if (!part || typeof part !== "object") return "";
+        const text = (part as Record<string, unknown>).text;
+        return typeof text === "string" ? text : "";
+      })
+      .join("");
+  }
+  return typeof raw.text === "string" ? raw.text : "";
+}
+
+function normalizeTimestampValue(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const ms = value > 1_000_000_000_000 ? value : value * 1000;
+  return new Date(ms).toISOString();
+}
+
+function isJsonPayload(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false;
+  try {
+    JSON.parse(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isOpenClawToolOutput(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  if (isJsonPayload(trimmed)) return true;
+  if (/^---\s*\nname:\s*[\w-]+/i.test(trimmed)) return true;
+  if (/^(sed|grep|rg|curl|node|npm|python|tsx):\s.+/i.test(trimmed)) return true;
+  return false;
+}
+
+function speakableAssistantContent(message: ChatMessage): string | null {
+  const content = message.content.trim();
+  if (isOpenClawToolOutput(content)) return null;
+  return content;
+}
+
+async function defaultGatewayCall(
+  method: string,
+  params: Record<string, unknown>,
+  opts: { gatewayUrl: string; timeoutMs: number },
+): Promise<Record<string, unknown>> {
+  // Let OpenClaw resolve local/remote gateway details from its own config.
+  // Passing --url forces explicit credentials and bypasses trusted local device auth.
+  void opts.gatewayUrl;
+  const openclawBin = process.env.OPENCLAW_BIN?.trim() || "openclaw";
+  const args = [
+    "gateway",
+    "call",
+    method,
+    "--params",
+    JSON.stringify(params),
+    "--json",
+  ];
+
+  try {
+    const { stdout } = await execFileAsync(openclawBin, args, {
+      timeout: opts.timeoutMs,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    return parseJsonFromCliOutput(stdout);
+  } catch (err) {
+    const maybe = err as { stdout?: unknown; stderr?: unknown; message?: unknown };
+    if (typeof maybe.stdout === "string" && maybe.stdout.trim()) {
+      try {
+        return parseJsonFromCliOutput(maybe.stdout);
+      } catch {
+        // Fall through to a concise process error.
+      }
+    }
+    const stderr = typeof maybe.stderr === "string" ? maybe.stderr.trim().split("\n").find((line) => line.trim()) : "";
+    const message = typeof maybe.message === "string" ? maybe.message : "OpenClaw Gateway CLI call failed";
+    throw new Error(stderr || message);
+  }
 }
 
 /**
@@ -49,9 +170,18 @@ function defaultWsFactory(url: string): GatewaySocket {
 async function gatewayRequest(
   gatewayUrl: string,
   payload: Record<string, unknown>,
-  opts: { timeoutMs?: number; _wsFactory?: WsFactory } = {},
+  opts: { timeoutMs?: number; _wsFactory?: WsFactory; _gatewayCall?: GatewayCall } = {},
 ): Promise<Record<string, unknown>> {
   const timeoutMs = opts.timeoutMs ?? GATEWAY_OP_TIMEOUT_MS;
+
+  if (!opts._wsFactory) {
+    const op = typeof payload.op === "string" ? payload.op : "";
+    if (!op) throw new Error("OpenClaw Gateway method is missing.");
+    const { op: _op, ...params } = payload;
+    const data = await (opts._gatewayCall ?? defaultGatewayCall)(op, params, { gatewayUrl, timeoutMs });
+    return typeof data.ok === "boolean" ? data : { ok: true, ...data };
+  }
+
   const makeWs = opts._wsFactory ?? defaultWsFactory;
 
   return new Promise((resolve, reject) => {
@@ -118,8 +248,7 @@ function normalizeMessage(raw: unknown, sessionKey: string): ChatMessage | null 
   if (!raw || typeof raw !== "object") return null;
   const m = raw as Record<string, unknown>;
 
-  const content = typeof m.content === "string" ? m.content :
-    typeof m.text === "string" ? m.text : "";
+  const content = normalizeContent(m);
 
   const rawRole = m.role ?? m.sender;
   const role: "user" | "assistant" | "system" =
@@ -132,10 +261,9 @@ function normalizeMessage(raw: unknown, sessionKey: string): ChatMessage | null 
     `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   const timestamp =
-    typeof m.timestamp === "string" ? m.timestamp :
-    typeof m.createdAt === "string" ? m.createdAt :
-    typeof m.ts === "number" ? new Date(m.ts * 1000).toISOString() :
-    null;
+    normalizeTimestampValue(m.timestamp) ??
+    normalizeTimestampValue(m.createdAt) ??
+    normalizeTimestampValue(m.ts);
 
   return { id, role, content, timestamp, sessionKey };
 }
@@ -167,6 +295,7 @@ export async function sendChatMessage(opts: {
   message: string;
   idempotencyKey?: string;
   _wsFactory?: WsFactory;
+  _gatewayCall?: GatewayCall;
   _timeoutMs?: number;
 }): Promise<ChatSendResult> {
   const sessionKey = opts.sessionKey?.trim() || "agent:main:main";
@@ -185,7 +314,7 @@ export async function sendChatMessage(opts: {
     data = await gatewayRequest(
       opts.gatewayUrl,
       payload,
-      { timeoutMs: opts._timeoutMs, _wsFactory: opts._wsFactory },
+      { timeoutMs: opts._timeoutMs, _wsFactory: opts._wsFactory, _gatewayCall: opts._gatewayCall },
     );
   } catch (err) {
     return {
@@ -203,7 +332,7 @@ export async function sendChatMessage(opts: {
       available: true,
       sessionKey,
       runId: null,
-      reason: typeof data.error === "string" ? data.error : "OpenClaw returned an error.",
+      reason: extractOpenclawErrorMessage(data),
     };
   }
 
@@ -231,6 +360,7 @@ export async function injectChatMessage(opts: {
   role?: "user" | "assistant" | "system";
   idempotencyKey?: string;
   _wsFactory?: WsFactory;
+  _gatewayCall?: GatewayCall;
   _timeoutMs?: number;
 }): Promise<ChatInjectResult> {
   const sessionKey = opts.sessionKey?.trim() || "agent:main:main";
@@ -252,7 +382,7 @@ export async function injectChatMessage(opts: {
     data = await gatewayRequest(
       opts.gatewayUrl,
       payload,
-      { timeoutMs: opts._timeoutMs, _wsFactory: opts._wsFactory },
+      { timeoutMs: opts._timeoutMs, _wsFactory: opts._wsFactory, _gatewayCall: opts._gatewayCall },
     );
   } catch (err) {
     return {
@@ -270,7 +400,7 @@ export async function injectChatMessage(opts: {
       available: true,
       sessionKey,
       messageId: null,
-      reason: typeof data.error === "string" ? data.error : "OpenClaw returned an error.",
+      reason: extractOpenclawErrorMessage(data),
     };
   }
 
@@ -304,6 +434,7 @@ export async function pollForAssistantReply(opts: {
   pollIntervalMs?: number;
   maxAttempts?: number;
   _wsFactory?: WsFactory;
+  _gatewayCall?: GatewayCall;
   _timeoutMs?: number;
 }): Promise<PollAssistantReplyResult> {
   const sessionKey = opts.sessionKey?.trim() || "agent:main:main";
@@ -321,6 +452,7 @@ export async function pollForAssistantReply(opts: {
       sessionKey,
       limit: 20,
       _wsFactory: opts._wsFactory,
+      _gatewayCall: opts._gatewayCall,
       _timeoutMs: opts._timeoutMs,
     });
 
@@ -328,7 +460,9 @@ export async function pollForAssistantReply(opts: {
       return { found: false, text: null, reason: history.reason ?? "OpenClaw Gateway is not reachable." };
     }
 
-    // Find the earliest assistant message at or after sentAfter.
+    // Find the earliest speakable assistant message at or after sentAfter.
+    // OpenClaw can emit assistant-role scratch/tool records before the final
+    // reply, and the voice path should not stop on those.
     const candidates = history.messages.filter((m) => {
       if (m.role !== "assistant") return false;
       if (!m.timestamp) return false;
@@ -337,7 +471,10 @@ export async function pollForAssistantReply(opts: {
 
     if (candidates.length > 0) {
       candidates.sort((a, b) => Date.parse(a.timestamp!) - Date.parse(b.timestamp!));
-      return { found: true, text: candidates[0].content || null, reason: null };
+      for (const candidate of candidates) {
+        const text = speakableAssistantContent(candidate);
+        if (text) return { found: true, text, reason: null };
+      }
     }
   }
 
@@ -354,6 +491,7 @@ export async function fetchChatHistory(opts: {
   sessionKey?: string;
   limit?: number;
   _wsFactory?: WsFactory;
+  _gatewayCall?: GatewayCall;
   _timeoutMs?: number;
 }): Promise<ChatHistoryResult> {
   const sessionKey = opts.sessionKey?.trim() || "agent:main:main";
@@ -365,7 +503,7 @@ export async function fetchChatHistory(opts: {
     data = await gatewayRequest(
       opts.gatewayUrl,
       { op: "chat.history", sessionKey, limit },
-      { timeoutMs: opts._timeoutMs, _wsFactory: opts._wsFactory },
+      { timeoutMs: opts._timeoutMs, _wsFactory: opts._wsFactory, _gatewayCall: opts._gatewayCall },
     );
   } catch (err) {
     return {
@@ -385,7 +523,7 @@ export async function fetchChatHistory(opts: {
       sessionKey,
       messages: [],
       truncated: false,
-      reason: typeof data.error === "string" ? data.error : "OpenClaw returned an error.",
+      reason: extractOpenclawErrorMessage(data),
     };
   }
 

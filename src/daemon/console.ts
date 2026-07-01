@@ -225,16 +225,19 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .ctx-toggle.on { color: var(--accent); }
   h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted);
     margin: 4px 0 10px; }
-  .addbtn { width: 100%; text-align: left; background: var(--panel-2); color: var(--accent);
+  .addbtn { width: 100%; text-align: left; background: var(--panel-2); color: var(--text);
     border: 1px dashed var(--border); border-radius: 8px; padding: 7px 10px; cursor: pointer;
-    font-size: 12px; font-weight: 600; margin-bottom: 10px; transition: border-color .15s ease; }
-  .addbtn:hover { border-color: var(--accent); }
+    font-size: 12px; font-weight: 600; margin-bottom: 10px; transition: border-color .15s ease, color .15s ease; }
+  .addbtn:hover { border-color: var(--accent); color: var(--accent); }
+  .addbtn.active { border-color: var(--accent); color: var(--accent); }
   /* Overview nav — explicit return target at the top of the board column. */
   .ov-nav { width: 100%; text-align: left; background: var(--panel-2); color: var(--text);
     border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; cursor: pointer;
     font-size: 12px; font-weight: 600; margin-bottom: 8px; transition: border-color .15s ease, color .15s ease; }
   .ov-nav:hover { border-color: var(--accent); }
   .ov-nav.active { border-color: var(--accent); color: var(--accent); }
+  .oc-nav { display:block; }
+  .oc-nav .oc-avail-dot { margin-right: 7px; }
   .ov-back { font-size: 11px; margin-left: 8px; vertical-align: middle; }
   .form { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
     padding: 0 16px; margin-bottom: 0; display: block;
@@ -767,16 +770,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .obs-win button { transition: background .15s ease, color .15s ease; }
   /* Sch-view-btn transition */
   .sch-view-btn { transition: border-color .15s ease, color .15s ease, background .15s ease; }
-  /* ── OpenClaw chat dock ─────────────────────────────────────────────── */
-  #openclawDock { flex: 0 0 auto; height: 240px; display: none;
-    border-top: 1px solid var(--border); background: var(--panel-2);
-    backdrop-filter: var(--mat-regular); -webkit-backdrop-filter: var(--mat-regular);
-    overflow: hidden; transition: height .15s ease; }
-  #openclawDock.collapsed { height: 38px; }
-  .oc-header { display:flex; align-items:center; gap:8px; padding:0 12px; height:38px; flex-shrink:0;
-    border-bottom:1px solid var(--border); background:var(--panel); cursor:pointer; user-select:none;
-    font-size:12px; font-weight:600; }
-  .oc-header:hover { background:var(--hover-bg); }
+  /* ── OpenClaw center pane ───────────────────────────────────────────── */
   .oc-avail-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
   .oc-avail-dot.ok  { background:var(--ok); }
   .oc-avail-dot.off { background:var(--muted); }
@@ -784,24 +778,33 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .oc-session-sel { font-size:11px; color:var(--muted); background:transparent; border:none;
     cursor:pointer; max-width:160px; padding:2px 4px; border-radius:4px; }
   .oc-session-sel:hover { background:var(--hover-bg); }
-  .oc-body { display:flex; flex-direction:column; height:calc(100% - 38px); }
-  .oc-transcript { flex:1; overflow-y:auto; padding:8px 14px; font-size:12px; scroll-behavior:smooth; }
-  .oc-msg { margin-bottom:8px; }
+  .col.session.oc-session-mode { overflow:hidden; display:flex; flex-direction:column; min-height:0; }
+  .oc-center-pane { flex:1 1 auto; min-height:0; height:calc(100vh - 68px); max-height:calc(100vh - 68px); width:100%; display:flex; flex-direction:column; max-width:980px;
+    margin:0 auto; padding:18px 18px 14px; gap:12px; overflow:hidden; }
+  .oc-panel-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .oc-panel-title { display:flex; align-items:center; gap:8px; font-size:18px; font-weight:700; }
+  .oc-panel-sub { color:var(--muted); font-size:12px; }
+  .oc-panel-head-spacer { flex:1 1 auto; min-width:12px; }
+  .oc-panel-body { flex:1 1 auto; min-height:0; display:flex; flex-direction:column;
+    border:1px solid var(--border); border-radius:10px; background:var(--panel-2); overflow:hidden; }
+  .oc-transcript { flex:1 1 auto; min-height:0; overflow-y:auto; padding:16px 18px; font-size:13px; scroll-behavior:smooth; }
+  .oc-msg { margin-bottom:14px; }
   .oc-msg-user { text-align:right; }
-  .oc-msg-user .oc-msg-text { background:var(--reply-q-bg); border-radius:10px; padding:5px 10px;
-    display:inline-block; max-width:78%; word-break:break-word; }
+  .oc-msg-user .oc-msg-text { background:var(--reply-q-bg); border-radius:10px; padding:7px 11px;
+    display:inline-block; max-width:78%; word-break:break-word; text-align:left; }
   .oc-msg-assistant .oc-msg-text { color:var(--text); word-break:break-word; }
   .oc-msg-system .oc-msg-text { color:var(--muted); font-style:italic; word-break:break-word; }
-  .oc-msg-meta { font-size:10px; color:var(--muted); margin-bottom:2px; }
-  .oc-composer { display:flex; align-items:flex-end; gap:6px; padding:5px 10px 7px;
-    border-top:1px solid var(--border); background:var(--panel); flex-shrink:0; }
-  .oc-input { flex:1; min-height:28px; max-height:80px; padding:4px 8px;
+  .oc-msg-meta { font-size:10px; color:var(--muted); margin-bottom:3px; }
+  .oc-panel-composer-shell { flex:0 0 auto; min-height:96px; display:grid; grid-template-columns:minmax(0, 1fr) 88px;
+    align-items:end; gap:8px; width:100%; min-width:0;
+    padding:12px; border-top:1px solid var(--border); background:var(--panel); cursor:text; }
+  .oc-input { width:100%; min-width:0; min-height:64px; max-height:180px; padding:9px 11px;
     border:1px solid var(--border); border-radius:8px; background:var(--code-bg);
-    color:var(--text); font-size:12px; resize:none; font-family:inherit; line-height:1.4; }
+    color:var(--text); font-size:13px; resize:none; font-family:inherit; line-height:1.45; }
   .oc-input:focus { outline:none; border-color:var(--accent); }
-  /* compact warning panel shown when OpenClaw is unavailable */
-  #openclawDock.oc-unavail-state:not(.collapsed) { height:94px; }
-  .oc-warn-panel { display:flex; align-items:flex-start; gap:10px; padding:11px 14px 13px; font-size:12px; }
+  .oc-panel-composer-actions { display:flex; flex-direction:column; gap:7px; min-width:0; }
+  .oc-panel-composer-actions button { width:100%; min-width:0; text-align:center; }
+  .oc-warn-panel { display:flex; align-items:flex-start; gap:10px; padding:18px; font-size:13px; }
   .oc-warn-icon { flex-shrink:0; color:var(--warn); font-size:15px; line-height:1.3; }
   .oc-warn-body { flex:1; min-width:0; }
   .oc-warn-title { font-weight:600; color:var(--text); margin-bottom:2px; }
@@ -810,7 +813,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     cursor:pointer; text-decoration:underline; background:none; border:none; padding:0;
     font-family:inherit; }
   .oc-warn-action:hover { opacity:.75; }
-  @media (max-width:760px) { #openclawDock { display:none !important; } }
+  @media (max-width:760px) {
+    .oc-center-pane { padding:12px; min-height:420px; height:auto; max-height:none; }
+    .oc-panel-composer-shell { min-height:118px; grid-template-columns:1fr; align-items:stretch; }
+    .oc-panel-composer-actions { flex-direction:row; }
+    .oc-panel-composer-actions button { flex:1; }
+  }
 </style>
 </head>
 <body>
@@ -1366,7 +1374,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   <div class="col-resizer" id="resizeRight" title="Drag to resize the right panel"></div>
   <section class="col board">
     <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
-    <button class="addbtn" onclick="showNewTaskPanel()">＋ New task</button>
+    <button class="addbtn" id="newTaskNav" onclick="showNewTaskPanel()">＋ New task</button>
+    <button class="ov-nav oc-nav" id="openclawNav" onclick="showOpenClawPanel()"><span class="oc-avail-dot off" id="ocNavAvailDot"></span>OpenClaw</button>
     <div class="form" id="taskForm">
       <input id="t_title" type="hidden" value="" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
@@ -1523,28 +1532,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="mcp"></div></details>
   </section>
 </main>
-<div id="openclawDock" class="collapsed">
-  <div class="oc-header" onclick="ocToggleCollapse()">
-    <span class="oc-avail-dot off" id="ocAvailDot"></span>
-    <span>OpenClaw</span>
-    <select id="ocSessionSel" class="oc-session-sel" onclick="event.stopPropagation()" onchange="ocSessionChanged()">
-      <option value="agent:main:main">agent:main:main</option>
-      <option value="agent:main:hivematrix">agent:main:hivematrix</option>
-    </select>
-    <span style="flex:1"></span>
-    <button class="usage-refresh" onclick="event.stopPropagation();initOpenclawDock()" title="Re-check OpenClaw status and refresh history">↻</button>
-    <span id="ocCollapseArrow" style="font-size:10px;color:var(--muted);margin-left:6px">▼</span>
-  </div>
-  <div class="oc-body">
-    <div class="oc-transcript" id="ocTranscript"></div>
-    <div class="oc-composer">
-      <textarea class="oc-input" id="ocInput" placeholder="Message OpenClaw…" rows="1"
-        onkeydown="ocInputKeydown(event)" oninput="ocInputResize(this)"></textarea>
-      <button class="create" style="padding:5px 10px;font-size:12px;line-height:1.4" id="ocSendBtn" onclick="ocSend()" disabled>Send</button>
-      <button class="copybtn" id="ocTaskBtn" onclick="ocCreateTask()" title="Create HiveMatrix task — uses selected transcript text, or the last message if nothing is selected">＋ Task</button>
-    </div>
-  </div>
-</div>
 <script>
 // Board lanes (display-only). The underlying task statuses are unchanged
 // (no migration): "backlog" is shown as "queued", and "assigned" (a ~2s
@@ -1576,6 +1563,14 @@ function requireToken() {
 }
 let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedFlight: null, selectedFlightLoop: null, selectedSkillOrCommand: null, projects: [], selectedProject: "", workPackages: [], schedView: 'timeline', tlWindow: 24 };
 let _taskFormInSession = false;
+
+function setOpenClawSessionMode(open) {
+  const session = document.getElementById("session");
+  if (session) {
+    session.classList.toggle("oc-session-mode", !!open);
+    if (session.parentElement) session.parentElement.classList.toggle("oc-session-mode", !!open);
+  }
+}
 
 async function api(path, opts) {
   opts = opts || {};
@@ -1612,7 +1607,8 @@ async function toggleThemeQuick() {
 // Center overview — at-a-glance board state when no task is selected, instead of
 // leaving the widest column empty.
 function renderOverview() {
-  if (state.selected || state.selectedFlight || state.selectedSkillOrCommand || _taskFormInSession) return;
+  if (state.selected || state.selectedFlight || state.selectedSkillOrCommand || _taskFormInSession || _ocState.panelOpen) return;
+  setOpenClawSessionMode(false);
   const el = document.getElementById("session");
   if (!el) return;
   const statusToLane = {}; LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
@@ -1653,6 +1649,8 @@ function showOverview() {
   state.selectedSkillOrCommand = null;
   _skSel = '';
   _ctxTask = null;
+  _ocState.panelOpen = false;
+  setOpenClawSessionMode(false);
   renderBoard();
   renderSkillList();
   renderOverview();
@@ -1672,7 +1670,11 @@ function focusFlightsSection() {
 }
 function updateOverviewNav() {
   const nav = document.getElementById("overviewNav");
-  if (nav) nav.classList.toggle("active", !state.selected && !state.selectedFlight && !state.selectedSkillOrCommand);
+  const overviewActive = !state.selected && !state.selectedFlight && !state.selectedSkillOrCommand && !_taskFormInSession && !_ocState.panelOpen;
+  if (nav) nav.classList.toggle("active", overviewActive);
+  const newTaskNav = document.getElementById("newTaskNav");
+  if (newTaskNav) newTaskNav.classList.toggle("active", _taskFormInSession);
+  updateOpenClawNav();
 }
 function isEditableTarget(el) {
   if (!el) return false;
@@ -1912,6 +1914,8 @@ async function loadFlights() {
 async function selectFlight(id) {
   state.selectedFlight = id;
   state.selected = null;
+  _ocState.panelOpen = false;
+  setOpenClawSessionMode(false);
   _ctxTask = null;
   renderBoard();
   await renderFlightDetail(id);
@@ -2426,6 +2430,8 @@ function taskActionsHtml(t) {
 async function selectTask(id) {
   state.selected = id;
   state.selectedFlight = null;
+  _ocState.panelOpen = false;
+  setOpenClawSessionMode(false);
   // Switching tasks clears half-composed retry/reply state; staying on the same
   // task across a live refresh keeps files and draft text.
   if (_ctxTask !== id) {
@@ -3059,6 +3065,8 @@ function showSkillPanel(key) {
   state.selected = null;
   state.selectedFlight = null;
   state.selectedSkillOrCommand = key;
+  _ocState.panelOpen = false;
+  setOpenClawSessionMode(false);
   if (_taskFormInSession) _closeNewTaskPanel();
   renderBoard();
   const session = document.getElementById('session');
@@ -3070,6 +3078,8 @@ function showSkillPanel(key) {
 function _closeSkillPanel() {
   state.selectedSkillOrCommand = null;
   _skSel = '';
+  _ocState.panelOpen = false;
+  setOpenClawSessionMode(false);
   renderSkillList();
   renderSkillDetail();
   renderOverview();
@@ -4470,6 +4480,8 @@ function showNewTaskPanel() {
   if (!form || !session) return;
   state.selected = null;
   state.selectedFlight = null;
+  _ocState.panelOpen = false;
+  setOpenClawSessionMode(false);
   _ctxTask = null;
   _taskFormInSession = true;
   renderBoard();
@@ -5314,21 +5326,18 @@ function renderOcDiagnostics(features, ocSt) {
   const flagEnabled = ocFeature.enabled === true;
   const installed = st.installed === true;
   const gatewayReachable = installed && !!(st.gateway && st.gateway.reachable === true);
-  const dockEl = document.getElementById('openclawDock');
-  const narrow = window.innerWidth <= 760;
-  let dockVisVal;
-  if (narrow) {
-    dockVisVal = '<span class="muted" style="font-size:11px">hidden on narrow screens (≤ 760 px)</span>';
-  } else if (dockEl) {
-    dockVisVal = pill(window.getComputedStyle(dockEl).display !== 'none');
+  const navEl = document.getElementById('openclawNav');
+  let centerEntryVal;
+  if (navEl) {
+    centerEntryVal = pill(window.getComputedStyle(navEl).display !== 'none');
   } else {
-    dockVisVal = '<span class="muted" style="font-size:11px">—</span>';
+    centerEntryVal = '<span class="muted" style="font-size:11px">—</span>';
   }
   const rows = [
     dr('Feature flag', pill(flagEnabled)),
     dr('Installed', pill(installed)),
     dr('Gateway reachable', installed ? pill(gatewayReachable) : '<span class="muted" style="font-size:11px">—</span>'),
-    dr('Dock visible', dockVisVal),
+    dr('Center entry', centerEntryVal),
   ].join('');
   const note = (st.reason && !installed) ? '<div class="muted" style="font-size:11px;margin-top:4px">' + esc(st.reason) + '</div>' : '';
   return '<div id="s_oc_diag" style="padding:8px 0 10px;border-top:1px solid var(--border)">'
@@ -5439,8 +5448,19 @@ async function initVoiceFeature() {
   } catch (e) { /* ignore */ }
 }
 
-// ── OpenClaw Chat Dock ─────────────────────────────────────────────────
-let _ocState = { session: 'agent:main:main', collapsed: true, sending: false, lastMsgId: null, messages: [] };
+// ── OpenClaw Chat center pane ──────────────────────────────────────────
+let _ocState = {
+  session: 'agent:main:main',
+  panelOpen: false,
+  flagEnabled: true,
+  enabled: false,
+  available: false,
+  statusError: '',
+  reason: '',
+  sending: false,
+  lastMsgId: null,
+  messages: []
+};
 
 function ocWarnPanel(reason) {
   return '<div class="oc-warn-panel">'
@@ -5463,70 +5483,131 @@ function ocErrPanel(reason) {
     + '</div></div>';
 }
 
+function ocPanelHtml() {
+  const dotClass = _ocState.statusError ? 'err' : (_ocState.available ? 'ok' : (_ocState.enabled ? 'err' : 'off'));
+  return '<div class="oc-center-pane">'
+    + '<div class="oc-panel-head">'
+    + '<div><div class="oc-panel-title"><span class="oc-avail-dot ' + dotClass + '" id="ocPanelAvailDot"></span><span>OpenClaw</span></div>'
+    + '<div class="oc-panel-sub">Vale chat through the local OpenClaw gateway</div></div>'
+    + '<select id="ocPanelSessionSel" class="oc-session-sel" onchange="ocSessionChanged()">'
+    + '<option value="agent:main:main"' + (_ocState.session === 'agent:main:main' ? ' selected' : '') + '>agent:main:main</option>'
+    + '<option value="agent:main:hivematrix"' + (_ocState.session === 'agent:main:hivematrix' ? ' selected' : '') + '>agent:main:hivematrix</option>'
+    + '</select>'
+    + '<span class="oc-panel-head-spacer"></span>'
+    + '<button class="usage-refresh" onclick="initOpenclawDock()" title="Re-check OpenClaw status and refresh history">↻</button>'
+    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button>'
+    + '</div>'
+    + '<div class="oc-panel-body">'
+    + '<div class="oc-transcript" id="ocPanelTranscript"></div>'
+    + '<div class="oc-panel-composer-shell" onclick="ocFocusPanelInput()">'
+    + '<textarea class="oc-input" id="ocPanelInput" placeholder="Message OpenClaw…" rows="3" onkeydown="ocInputKeydown(event)" oninput="ocInputResize(this)"></textarea>'
+    + '<div class="oc-panel-composer-actions">'
+    + '<button class="create" id="ocPanelSendBtn" onclick="event.stopPropagation();ocSend()" disabled>Send</button>'
+    + '<button class="copybtn" id="ocPanelTaskBtn" onclick="event.stopPropagation();ocCreateTask()" title="Create HiveMatrix task — uses selected transcript text, or the last message if nothing is selected">＋ Task</button>'
+    + '</div></div></div></div>';
+}
+
+function renderOpenClawPanel() {
+  if (!_ocState.panelOpen) return;
+  const session = document.getElementById('session');
+  if (!session) return;
+  setOpenClawSessionMode(true);
+  const active = document.activeElement && document.activeElement.id === 'ocPanelInput';
+  const draft = active ? document.getElementById('ocPanelInput').value : '';
+  session.innerHTML = ocPanelHtml();
+  const input = document.getElementById('ocPanelInput');
+  if (input && draft) { input.value = draft; ocInputResize(input); }
+  if (_ocState.statusError) {
+    const t = document.getElementById('ocPanelTranscript');
+    if (t) t.innerHTML = ocErrPanel(_ocState.statusError);
+    return;
+  }
+  if (!_ocState.flagEnabled) {
+    const t = document.getElementById('ocPanelTranscript');
+    if (t) t.innerHTML = ocWarnPanel('OpenClaw Chat is disabled in Settings.');
+    return;
+  }
+  if (!_ocState.enabled || !_ocState.available) {
+    const t = document.getElementById('ocPanelTranscript');
+    if (t) t.innerHTML = ocWarnPanel(_ocState.reason || 'OpenClaw is not available on this Mac.');
+    return;
+  }
+  ocRenderMessages(_ocState.messages || [], false);
+  if (active && input) input.focus();
+}
+
+function showOpenClawPanel() {
+  state.selected = null;
+  state.selectedFlight = null;
+  state.selectedSkillOrCommand = null;
+  _skSel = '';
+  _ctxTask = null;
+  _taskFormInSession = false;
+  _ocState.panelOpen = true;
+  renderBoard();
+  renderSkillList();
+  renderOpenClawPanel();
+  initOpenclawDock();
+}
+
+function updateOpenClawNav() {
+  const nav = document.getElementById('openclawNav');
+  const dot = document.getElementById('ocNavAvailDot');
+  const flagEnabled = _ocState.flagEnabled !== false;
+  if (nav) {
+    nav.style.display = flagEnabled ? '' : 'none';
+    nav.classList.toggle('active', _ocState.panelOpen);
+  }
+  if (dot) {
+    dot.className = 'oc-avail-dot ' + (_ocState.statusError ? 'err' : (_ocState.available ? 'ok' : (_ocState.enabled ? 'err' : 'off')));
+  }
+}
+
 async function initOpenclawDock() {
-  const dock = document.getElementById('openclawDock');
-  if (!dock) return;
   try {
     const r = await api('/openclaw/status');
     const flagEnabled = !!(r && r.flagEnabled);
-    if (!flagEnabled) { dock.style.display = 'none'; return; }
-    dock.style.display = '';
-    const dot = document.getElementById('ocAvailDot');
-    const comp = document.querySelector('.oc-composer');
-    const enabled = !!(r && r.enabled);
-    if (!enabled) {
-      if (dot) dot.className = 'oc-avail-dot off';
-      const t = document.getElementById('ocTranscript');
-      if (t) t.innerHTML = ocWarnPanel((r && r.reason) || 'OpenClaw is not installed on this Mac.');
-      if (comp) comp.style.display = 'none';
-      dock.classList.add('oc-unavail-state');
-      return;
-    }
-    const available = !!(r && r.available);
-    if (dot) dot.className = 'oc-avail-dot ' + (available ? 'ok' : 'err');
-    if (!available) {
-      const t = document.getElementById('ocTranscript');
-      if (t) t.innerHTML = ocWarnPanel((r && r.reason) || 'OpenClaw is not available on this Mac.');
-      if (comp) comp.style.display = 'none';
-      dock.classList.add('oc-unavail-state');
-      return;
-    }
-    dock.classList.remove('oc-unavail-state');
-    if (comp) comp.style.display = '';
+    const nav = document.getElementById('openclawNav');
+    if (nav) nav.style.display = flagEnabled ? '' : 'none';
+    _ocState.flagEnabled = flagEnabled;
+    _ocState.enabled = !!(r && r.enabled);
+    _ocState.available = !!(r && r.available);
+    _ocState.reason = (r && r.reason) || '';
+    _ocState.statusError = '';
+    updateOpenClawNav();
+    renderOpenClawPanel();
+    if (!flagEnabled || !_ocState.enabled || !_ocState.available) return;
     await ocRefresh();
   } catch (e) {
-    const dock2 = document.getElementById('openclawDock');
-    if (!dock2) return;
-    dock2.style.display = '';
-    const dot2 = document.getElementById('ocAvailDot');
-    if (dot2) dot2.className = 'oc-avail-dot err';
-    const t = document.getElementById('ocTranscript');
-    if (t) t.innerHTML = ocErrPanel('Could not check OpenClaw status.');
-    const comp2 = dock2.querySelector('.oc-composer');
-    if (comp2) comp2.style.display = 'none';
-    dock2.classList.add('oc-unavail-state');
+    _ocState.statusError = 'Could not check OpenClaw status.';
+    _ocState.available = false;
+    updateOpenClawNav();
+    renderOpenClawPanel();
   }
 }
 
 async function ocRefresh() {
-  const t = document.getElementById('ocTranscript');
-  if (!t) return;
-  t.innerHTML = '<div class="oc-warn-panel"><span class="oc-warn-icon" aria-hidden="true">⏳</span><div class="oc-warn-body"><div class="oc-warn-reason">Loading…</div></div></div>';
+  const t = document.getElementById('ocPanelTranscript');
+  if (t) t.innerHTML = '<div class="oc-warn-panel"><span class="oc-warn-icon" aria-hidden="true">⏳</span><div class="oc-warn-body"><div class="oc-warn-reason">Loading…</div></div></div>';
   try {
     const r = await api('/openclaw/chat/history?sessionKey=' + encodeURIComponent(_ocState.session) + '&limit=50');
     if (!r || !r.available) {
-      t.innerHTML = ocWarnPanel((r && r.reason) || 'OpenClaw unavailable.');
+      _ocState.reason = (r && r.reason) || 'OpenClaw unavailable.';
+      renderOpenClawPanel();
       return;
     }
     ocRenderMessages(r.messages || [], r.truncated);
-  } catch (e) { t.innerHTML = ocWarnPanel('Could not load history. Is OpenClaw running?'); }
+  } catch (e) {
+    const t2 = document.getElementById('ocPanelTranscript');
+    if (t2) t2.innerHTML = ocWarnPanel('Could not load history. Is OpenClaw running?');
+  }
 }
 
 function ocRenderMessages(msgs, truncated) {
-  const el = document.getElementById('ocTranscript');
-  if (!el) return;
   _ocState.messages = msgs || [];
-  if (!msgs.length) { el.innerHTML = '<div class="muted" style="font-size:12px;padding:8px 0">No messages yet.</div>'; return; }
+  const el = document.getElementById('ocPanelTranscript');
+  if (!el) return;
+  if (!msgs.length) { el.innerHTML = '<div class="muted" style="font-size:13px;padding:8px 0">No messages yet.</div>'; return; }
   const rows = msgs.map(function(m) {
     const ts = m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
     return '<div class="oc-msg oc-msg-' + esc(m.role || 'assistant') + '">'
@@ -5542,8 +5623,8 @@ function ocRenderMessages(msgs, truncated) {
 }
 
 async function ocSend() {
-  const input = document.getElementById('ocInput');
-  const sendBtn = document.getElementById('ocSendBtn');
+  const input = document.getElementById('ocPanelInput');
+  const sendBtn = document.getElementById('ocPanelSendBtn');
   if (!input || !input.value.trim() || _ocState.sending) return;
   const msg = input.value.trim();
   _ocState.sending = true;
@@ -5577,29 +5658,24 @@ function ocInputKeydown(e) {
 
 function ocInputResize(el) {
   el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 80) + 'px';
-  const sendBtn = document.getElementById('ocSendBtn');
+  el.style.height = Math.min(el.scrollHeight, 180) + 'px';
+  const sendBtn = document.getElementById('ocPanelSendBtn');
   if (sendBtn) sendBtn.disabled = !el.value.trim();
 }
 
-function ocToggleCollapse() {
-  const dock = document.getElementById('openclawDock');
-  const arrow = document.getElementById('ocCollapseArrow');
-  if (!dock) return;
-  _ocState.collapsed = !_ocState.collapsed;
-  dock.classList.toggle('collapsed', _ocState.collapsed);
-  if (arrow) arrow.textContent = _ocState.collapsed ? '▼' : '▲';
-  if (!_ocState.collapsed) setTimeout(function() { const t = document.getElementById('ocTranscript'); if (t) t.scrollTop = t.scrollHeight; }, 160);
+function ocFocusPanelInput() {
+  const input = document.getElementById('ocPanelInput');
+  if (input) input.focus();
 }
 
 async function ocCreateTask() {
-  const btn = document.getElementById('ocTaskBtn');
+  const btn = document.getElementById('ocPanelTaskBtn');
   if (btn) btn.disabled = true;
   try {
     // Prefer user-selected text inside the transcript; fall back to the last message's content.
     let text = '';
     const sel = window.getSelection();
-    const transcript = document.getElementById('ocTranscript');
+    const transcript = document.getElementById('ocPanelTranscript');
     if (sel && sel.rangeCount > 0 && transcript && transcript.contains(sel.anchorNode)) {
       text = sel.toString().trim();
     }
@@ -5625,7 +5701,7 @@ async function ocCreateTask() {
 }
 
 function ocSessionChanged() {
-  const sel = document.getElementById('ocSessionSel');
+  const sel = document.getElementById('ocPanelSessionSel');
   if (sel) _ocState.session = sel.value;
   ocRefresh();
 }
@@ -7125,6 +7201,7 @@ async function createTask() {
       hmToast("Staged as a Flight (" + n + " item" + (n === 1 ? "" : "s") + ").");
       state.selectedFlight = t.packageId || null;
       state.selected = null;
+      _ocState.panelOpen = false;
       renderWorkPackages();
     } else if (t.routed) {
       hmToast("Routed to " + String(t.routed).replace(/-/g, " ") + ".");
