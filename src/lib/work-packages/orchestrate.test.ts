@@ -1149,6 +1149,62 @@ test("reconcileWorkPackage auto-land: low-risk task=review with no blocker lands
   );
 });
 
+test("reconcileWorkPackage auto-land: ready_for_review state still lands clean low-risk item", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Auto-land ready_for_review item",
+    project: "test",
+    projectPath: "/tmp/auto-land-ready-for-review",
+    items: [{ title: "Micro step", prompt: "do micro", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status, reviewState) VALUES (?, 'T', 'D', 'test', '/tmp', 'review', 'ready_for_review')",
+  ).run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(
+    detail.items[0].status,
+    "done",
+    "ready_for_review is a clean completion marker and must not block low-risk auto-land",
+  );
+  const task = await Task.findById(taskId);
+  assert.equal(String((task as Record<string, unknown>).status), "archived");
+});
+
+test("reconcileWorkPackage auto-land: existing review item with ready_for_review state is repaired to done", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Auto-land existing review item",
+    project: "test",
+    projectPath: "/tmp/auto-land-existing-review",
+    items: [{ title: "Micro step", prompt: "do micro", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status, reviewState) VALUES (?, 'T', 'D', 'test', '/tmp', 'review', 'ready_for_review')",
+  ).run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'review', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+
+  await reconcileWorkPackage(pkg.id);
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(
+    detail.items[0].status,
+    "done",
+    "already-review clean low-risk items should be repairable without manual landing",
+  );
+  const task = await Task.findById(taskId);
+  assert.equal(String((task as Record<string, unknown>).status), "archived");
+});
+
 test("reconcileWorkPackage auto-land: auto-landed item advances package to done via advanceWorkPackage", async () => {
   const { generateId } = await import("@/lib/db");
   const db = getDb();

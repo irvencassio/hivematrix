@@ -328,6 +328,14 @@ test("Mixed-mode role models keep Thinking/Coding visible when the frontier prov
   assert.match(js, /roleModelOptions/);
 });
 
+test("Mixed-mode role-model defaults use version-agnostic Claude labels", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.doesNotMatch(js, /Opus 4\.8/, "no pinned Opus version in role defaults");
+  assert.doesNotMatch(js, /Sonnet 4\.6/, "no pinned Sonnet version in role defaults");
+  assert.match(js, /"Default — Opus"/, "thinking default tracks the latest Opus");
+  assert.match(js, /"Default — Sonnet"/, "coding default tracks the latest Sonnet");
+});
+
 test("right-panel sections are collapsible <details> with persisted open state", () => {
   // Each context section is a <details class="ctx-sec"> so the long panel can be tidied.
   for (const id of ["modelsSec", "obsSec", "connSec", "dirSec", "skillsSec", "mcpSec"]) {
@@ -640,6 +648,73 @@ test("board renders Flight context for linked review cards only", () => {
   assert.match(js, /landedCount/, "Flight chip includes landed count");
   assert.match(js, /flightContextBadge\(t\)/, "renderBoard appends the Flight context line per card");
   assert.match(js, /if \(!fc\) return "";/, "non-Flight cards render no extra Flight chip");
+});
+
+test("review lane sorts tasks newest first, oldest last", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // Verify the sort is applied only to the review lane and uses the best available timestamp.
+  assert.match(js, /L\.key === "review"/, "sort is scoped to the review lane");
+  assert.match(js, /reviewSortComparator/, "sort delegates to the named reviewSortComparator function");
+  assert.match(js, /updatedAt.*createdAt|createdAt.*updatedAt/, "comparator falls back from updatedAt to createdAt");
+  assert.match(js, /tb - ta/, "sort is descending (newest first)");
+  // Verify the sort does not affect other lanes.
+  const reviewSortBlock = js.match(/if \(L\.key === "review"\) \{([\s\S]*?)\}/);
+  assert.ok(reviewSortBlock, "review sort block exists");
+  const block = reviewSortBlock![1];
+  assert.doesNotMatch(block, /in_progress|done|failed|queued/, "sort block is review-only");
+});
+
+function extractReviewSortComparator(html: string): (a: Record<string, string | undefined>, b: Record<string, string | undefined>) => number {
+  const js = extractScript(html);
+  const block = js.match(/\/\*__REVIEW_SORT_COMPARATOR_START__\*\/([\s\S]*?)\/\*__REVIEW_SORT_COMPARATOR_END__\*\//);
+  assert.ok(block, "console must contain sentinel-wrapped reviewSortComparator");
+  const factory = new Function(`${block![1]}\nreturn reviewSortComparator;`) as () => (a: Record<string, string | undefined>, b: Record<string, string | undefined>) => number;
+  return factory();
+}
+
+test("reviewSortComparator: mixed timestamps — newest updatedAt sorts first", () => {
+  const cmp = extractReviewSortComparator(CONSOLE_HTML);
+  const tasks = [
+    { _id: "oldest", createdAt: "2026-06-01T10:00:00Z" },
+    { _id: "newest", updatedAt: "2026-06-30T10:00:00Z", createdAt: "2026-06-01T10:00:00Z" },
+    { _id: "middle", createdAt: "2026-06-15T10:00:00Z" },
+  ];
+  const sorted = tasks.slice().sort(cmp);
+  assert.equal(sorted[0]._id, "newest", "most recently updated task is first");
+  assert.equal(sorted[1]._id, "middle", "middle-dated task is second");
+  assert.equal(sorted[2]._id, "oldest", "oldest task is last");
+});
+
+test("reviewSortComparator: falls back to createdAt when updatedAt is absent", () => {
+  const cmp = extractReviewSortComparator(CONSOLE_HTML);
+  const tasks = [
+    { _id: "old", createdAt: "2026-05-01T00:00:00Z" },
+    { _id: "recent", createdAt: "2026-06-28T00:00:00Z" },
+  ];
+  const sorted = tasks.slice().sort(cmp);
+  assert.equal(sorted[0]._id, "recent", "task with later createdAt sorts first when no updatedAt");
+  assert.equal(sorted[1]._id, "old");
+});
+
+test("reviewSortComparator: updatedAt takes priority over a more recent createdAt", () => {
+  const cmp = extractReviewSortComparator(CONSOLE_HTML);
+  // taskA was created later but taskB was updated more recently — updatedAt wins.
+  const taskA = { _id: "a", createdAt: "2026-06-20T00:00:00Z" };
+  const taskB = { _id: "b", createdAt: "2026-06-10T00:00:00Z", updatedAt: "2026-06-29T00:00:00Z" };
+  const sorted = [taskA, taskB].sort(cmp);
+  assert.equal(sorted[0]._id, "b", "task with recent updatedAt sorts first even when created earlier");
+  assert.equal(sorted[1]._id, "a");
+});
+
+test("reviewSortComparator: tasks with no timestamps sort below dated tasks", () => {
+  const cmp = extractReviewSortComparator(CONSOLE_HTML);
+  const tasks = [
+    { _id: "no-dates" },
+    { _id: "with-date", createdAt: "2026-06-15T00:00:00Z" },
+  ];
+  const sorted = tasks.slice().sort(cmp);
+  assert.equal(sorted[0]._id, "with-date", "dated task floats above undated task");
+  assert.equal(sorted[1]._id, "no-dates", "undated task sinks to bottom");
 });
 
 test("settings lanes sections have distinct, non-duplicate labels", () => {
@@ -1631,8 +1706,8 @@ test("material shell: wallpaper mode adds text-shadow to h2 section headings", (
   assert.match(CONSOLE_HTML, /html\[data-wallpaper="1"\] h2[^}]*\{[^}]*text-shadow/s);
 });
 
-test("material shell: wallpaper mode adds text-shadow to .lane-title", () => {
-  assert.match(CONSOLE_HTML, /html\[data-wallpaper="1"\] \.lane-title/);
+test("material shell: wallpaper mode adds text-shadow to .status-card-name", () => {
+  assert.match(CONSOLE_HTML, /html\[data-wallpaper="1"\] \.status-card-name/);
 });
 
 test("material shell: wallpaper mode adds text-shadow to .mdl-grp (model group labels)", () => {
@@ -1783,10 +1858,11 @@ test("dock session selector offers both default sessions", () => {
   assert.match(CONSOLE_HTML, /value="agent:main:hivematrix"/, "agent:main:hivematrix session present");
 });
 
-test("dock is absent (display:none) when the feature is disabled", () => {
+test("dock is hidden when the chatDock feature flag is off", () => {
   const js = extractScript(CONSOLE_HTML);
-  // initOpenclawDock hides the dock when the status response reports enabled:false.
-  assert.match(js, /if \(!enabled\) \{ dock\.style\.display = 'none'; return; \}/, "dock hidden when disabled");
+  // initOpenclawDock hides the dock only when the feature flag (flagEnabled) is off.
+  // A non-installed OpenClaw with the flag on must show a visible unavailable state instead.
+  assert.match(js, /if \(!flagEnabled\) \{ dock\.style\.display = 'none'; return; \}/, "dock hidden only when feature flag is off");
 });
 
 test("dock becomes visible when feature is enabled and OpenClaw is available", () => {
@@ -1887,6 +1963,26 @@ test("dock CSS is responsive and hidden on narrow screens", () => {
   assert.match(CONSOLE_HTML, /#openclawDock\.collapsed[^{]*\{[^}]*height: 38px/, "collapsed dock is a fixed-height header strip");
 });
 
+test("dock shows visible unavailable state when feature flag is on but OpenClaw is not installed", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // flagEnabled controls visibility; !enabled (not installed) shows unavailable strip, not hidden.
+  assert.match(js, /const flagEnabled = !!\(r && r\.flagEnabled\)/, "flagEnabled read from status response");
+  assert.match(js, /const enabled = !!\(r && r\.enabled\)/, "enabled checked separately after flagEnabled guard");
+  // The dock is made visible (display='') before the !enabled check.
+  assert.match(js, /dock\.style\.display = '';[\s\S]{0,300}const enabled = !!/, "dock display cleared before !enabled check");
+  // The !enabled branch renders an unavailable warn panel (not a hidden dock).
+  assert.match(js, /if \(!enabled\) \{[\s\S]{0,400}ocWarnPanel/, "!enabled branch renders an unavailable warn panel");
+});
+
+test("status probe error shows error panel with Retry button, not a hidden dock", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function ocErrPanel\(reason\)/, "ocErrPanel helper defined");
+  assert.match(js, /OpenClaw status error/, "error title appears in ocErrPanel");
+  assert.match(js, /onclick="initOpenclawDock\(\)"/, "error panel Retry button calls initOpenclawDock");
+  assert.match(js, /dock2\.style\.display = '';/, "catch block shows the dock instead of hiding it");
+  assert.match(js, /ocErrPanel\('Could not check OpenClaw status\.'\)/, "catch block uses ocErrPanel with the correct message");
+});
+
 test("runSelectedCommand sends both project and projectPath from the cmd multi-picker state", () => {
   // Regression guard: the command launcher must forward the operator's selected
   // project name alongside the path so that server-created tasks land under the
@@ -1935,4 +2031,153 @@ test("runSelectedCommand success message reports project mismatch when board fil
 
   // When no board filter is active the plain "see the board" fallback is used.
   assert.match(body, /see the board/, "default success message remains available for the no-filter case");
+});
+
+// ── OpenClaw / Vale diagnostics panel ────────────────────────────────────────
+
+test("renderFeatures fetches /openclaw/status for the diagnostics panel", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /api\("\/openclaw\/status"\)\.catch/, "renderFeatures fetches /openclaw/status and catches errors");
+  assert.match(js, /const \[r, auto, ocSt\] = await Promise\.all/, "renderFeatures destructures ocSt from Promise.all");
+});
+
+test("renderOcDiagnostics function is defined and called from renderFeatures", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function renderOcDiagnostics\(/, "renderOcDiagnostics helper function is defined");
+  assert.match(js, /renderOcDiagnostics\(features, ocSt\)/, "renderFeatures passes features and ocSt to renderOcDiagnostics");
+  assert.match(js, /ocDiagRow/, "renderFeatures includes ocDiagRow in el.innerHTML");
+});
+
+test("OpenClaw diagnostics panel shows all four status items", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /Feature flag/, "diagnostics shows Feature flag row");
+  assert.match(js, /Installed/, "diagnostics shows Installed row");
+  assert.match(js, /Gateway reachable/, "diagnostics shows Gateway reachable row");
+  assert.match(js, /Dock visible/, "diagnostics shows Dock visible row");
+});
+
+test("OpenClaw diagnostics shows narrow-screen note and reads viewport width for dock visibility", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /hidden on narrow screens/, "diagnostics notes dock is hidden on narrow screens");
+  assert.match(js, /window\.innerWidth <= 760/, "diagnostics checks viewport width for narrow-screen detection");
+  assert.match(js, /window\.getComputedStyle\(dockEl\)\.display !== 'none'/, "diagnostics reads computed display of dock element");
+});
+
+test("OpenClaw diagnostics refresh button calls renderFeatures and is labeled Re-check", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /onclick="renderFeatures\(\)"[^>]*title="Re-check OpenClaw status"/, "diagnostics refresh button calls renderFeatures with Re-check title");
+  assert.match(js, /id="s_oc_diag"/, "diagnostics panel has s_oc_diag id for targeting");
+});
+
+// ── renderOcDiagnostics integration: status-shape → HTML output ───────────────
+// Extracts and calls renderOcDiagnostics with different /openclaw/status response
+// shapes to verify the dock diagnostics panel maps server data to the correct HTML.
+
+type MockDoc = { getElementById: (id: string) => { style?: { display?: string } } | null };
+type MockWindow = { innerWidth: number; getComputedStyle: (el: unknown) => { display: string } };
+
+function extractRenderOcDiagnostics(
+  html: string,
+): (
+  features: Array<{ key: string; enabled?: boolean; capable?: boolean; reason?: string }>,
+  ocSt: Record<string, unknown> | null,
+  mockDoc?: MockDoc,
+  mockWindow?: MockWindow,
+) => string {
+  const js = extractScript(html);
+  const escFn = js.match(/function esc\(s\)\{[^\n]+\}/)?.[0];
+  assert.ok(escFn, "esc must be defined in the console script");
+  const block = js.match(/\/\*__OC_DIAGNOSTICS_START__\*\/([\s\S]*?)\/\*__OC_DIAGNOSTICS_END__\*\//);
+  assert.ok(block, "console must contain sentinel-wrapped renderOcDiagnostics");
+  const fnBody = block![1].trim();
+
+  return (features, ocSt, mockDoc, mockWindow) => {
+    const doc: MockDoc = mockDoc ?? { getElementById: () => null };
+    const win: MockWindow = mockWindow ?? {
+      innerWidth: 1280,
+      getComputedStyle: () => ({ display: "block" }),
+    };
+    const factory = new Function(
+      "document",
+      "window",
+      `${escFn}\n${fnBody}\nreturn renderOcDiagnostics;`,
+    ) as (d: MockDoc, w: MockWindow) => (f: unknown, s: unknown) => string;
+    return factory(doc, win)(features, ocSt);
+  };
+}
+
+test("renderOcDiagnostics: returns empty string when openclaw.chatDock feature is absent from the list", () => {
+  const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
+  const html = fn([{ key: "voice", enabled: true }], { installed: true, available: true });
+  assert.equal(html, "", "must return empty string when openclaw.chatDock is not in the features list");
+});
+
+test("renderOcDiagnostics: fully available state — all four rows show yes / visible", () => {
+  const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
+  const features = [{ key: "openclaw.chatDock", enabled: true }];
+  const ocSt = { installed: true, available: true, gateway: { reachable: true }, reason: null };
+  const dockEl = { style: { display: "block" } };
+  const html = fn(
+    features,
+    ocSt,
+    { getElementById: (id: string) => id === "openclawDock" ? dockEl : null },
+    { innerWidth: 1280, getComputedStyle: () => ({ display: "block" }) },
+  );
+  assert.match(html, /id="s_oc_diag"/, "diagnostics wrapper is present");
+  // Feature flag row — enabled:true → "yes"
+  assert.match(html, /Feature flag[\s\S]*?yes/, "feature flag row shows yes when enabled:true");
+  // Installed row — installed:true → "yes"
+  assert.match(html, /Installed[\s\S]*?yes/, "installed row shows yes when installed:true");
+  // Gateway reachable row — reachable:true → "yes"
+  assert.match(html, /Gateway reachable[\s\S]*?yes/, "gateway reachable row shows yes when reachable:true");
+  // Dock visible row — dock element found + display:block → "yes"
+  assert.match(html, /Dock visible[\s\S]*?yes/, "dock visible row shows yes when display is not none");
+});
+
+test("renderOcDiagnostics: installed but gateway unreachable — installed yes, gateway no", () => {
+  const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
+  const features = [{ key: "openclaw.chatDock", enabled: true }];
+  const ocSt = { installed: true, available: false, gateway: { reachable: false }, reason: "OpenClaw Gateway is not reachable." };
+  const html = fn(features, ocSt);
+  assert.match(html, /Installed[\s\S]*?yes/, "installed shows yes when binary exists");
+  assert.match(html, /Gateway reachable[\s\S]*?no/, "gateway reachable shows no when gateway is down");
+  assert.doesNotMatch(html, /OpenClaw Gateway is not reachable/, "reason note is only shown when not installed");
+});
+
+test("renderOcDiagnostics: not installed — installed no, gateway shows dash, reason note is displayed", () => {
+  const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
+  const features = [{ key: "openclaw.chatDock", enabled: false }];
+  const ocSt = { installed: false, available: false, gateway: null, reason: "OpenClaw is not installed." };
+  const html = fn(features, ocSt);
+  assert.match(html, /Feature flag[\s\S]*?no/, "feature flag row shows no when enabled:false");
+  assert.match(html, /Installed[\s\S]*?no/, "installed shows no when binary is absent");
+  assert.match(html, /Gateway reachable[\s\S]*?—/, "gateway row shows dash when not installed");
+  assert.match(html, /OpenClaw is not installed/, "reason note is rendered below the rows");
+});
+
+test("renderOcDiagnostics: narrow viewport — dock visible row shows hidden-on-narrow-screens text", () => {
+  const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
+  const features = [{ key: "openclaw.chatDock", enabled: true }];
+  const ocSt = { installed: true, available: true, gateway: { reachable: true } };
+  const html = fn(
+    features,
+    ocSt,
+    { getElementById: () => ({ style: {} }) },
+    { innerWidth: 400, getComputedStyle: () => ({ display: "none" }) },
+  );
+  assert.match(html, /hidden on narrow screens/, "narrow viewport shows the narrow-screen note, not a yes/no pill");
+});
+
+test("renderOcDiagnostics: dock element not found — dock visible row shows dash", () => {
+  const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
+  const features = [{ key: "openclaw.chatDock", enabled: true }];
+  const ocSt = { installed: true, available: true, gateway: { reachable: true } };
+  const html = fn(
+    features,
+    ocSt,
+    { getElementById: () => null },
+    { innerWidth: 1280, getComputedStyle: () => ({ display: "block" }) },
+  );
+  // When the dock element is absent (dock hidden via CSS display:none by flag), show dash
+  assert.match(html, /Dock visible[\s\S]*?—/, "dock visible row shows dash when dock element is not in DOM");
 });

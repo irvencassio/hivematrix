@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { fetchChatHistory, sendChatMessage, injectChatMessage, type GatewaySocket, type WsFactory } from "./bridge";
+import { fetchChatHistory, sendChatMessage, injectChatMessage, pollForAssistantReply, type GatewaySocket, type WsFactory } from "./bridge";
 
 // ── Mock WebSocket factory helpers ──────────────────────────────────────────
 
@@ -519,4 +519,338 @@ test("injectChatMessage: result JSON never contains token, secret, or password f
   assert.ok(!serialized.toLowerCase().includes("token"));
   assert.ok(!serialized.toLowerCase().includes("secret"));
   assert.ok(!serialized.toLowerCase().includes("password"));
+});
+
+// ── pollForAssistantReply ────────────────────────────────────────────────────
+
+/**
+ * Mock factory that returns responses from a queue, one per WS connection.
+ * Once the queue is exhausted, the last response is repeated.
+ */
+function makeMockWsFactoryQueue(responses: unknown[]): { factory: WsFactory } {
+  let index = 0;
+
+  const factory: WsFactory = (_url: string): GatewaySocket => {
+    const response = responses[index] ?? responses[responses.length - 1];
+    index++;
+
+    const handlers: {
+      open: Array<() => void>;
+      message: Array<(e: { data: unknown }) => void>;
+      error: Array<(e: { message?: string }) => void>;
+    } = { open: [], message: [], error: [] };
+
+    const ws: GatewaySocket = {
+      addEventListener(event, handler) {
+        if (event === "open") handlers.open.push(handler as () => void);
+        else if (event === "message") handlers.message.push(handler as (e: { data: unknown }) => void);
+        else if (event === "error") handlers.error.push(handler as (e: { message?: string }) => void);
+      },
+      send(_data: string) {
+        Promise.resolve().then(() =>
+          handlers.message.forEach(h => h({ data: JSON.stringify(response) }))
+        );
+      },
+      close() {},
+    };
+
+    Promise.resolve().then(() => handlers.open.forEach(h => h()));
+    return ws;
+  };
+
+  return { factory };
+}
+
+test("pollForAssistantReply: returns found:true with text on first poll", async () => {
+  const sentAfter = "2026-06-30T10:00:00.000Z";
+  const { factory } = makeMockWsFactoryQueue([{
+    ok: true,
+    messages: [
+      { id: "u1", role: "user", content: "hey Vale", timestamp: "2026-06-30T10:00:01Z" },
+      { id: "a1", role: "assistant", content: "Here is your email summary", timestamp: "2026-06-30T10:00:02Z" },
+    ],
+  }]);
+  const result = await pollForAssistantReply({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    sentAfter,
+    maxAttempts: 5,
+    pollIntervalMs: 1,
+    _wsFactory: factory,
+    _timeoutMs: 100,
+  });
+  assert.equal(result.found, true);
+  assert.equal(result.text, "Here is your email summary");
+  assert.equal(result.reason, null);
+});
+
+test("pollForAssistantReply: finds assistant reply on second poll", async () => {
+  const sentAfter = "2026-06-30T10:00:00.000Z";
+  const { factory } = makeMockWsFactoryQueue([
+    { ok: true, messages: [] },
+    {
+      ok: true,
+      messages: [
+        { id: "a1", role: "assistant", content: "Vale response arrived", timestamp: "2026-06-30T10:00:03Z" },
+      ],
+    },
+  ]);
+  const result = await pollForAssistantReply({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    sentAfter,
+    maxAttempts: 5,
+    pollIntervalMs: 1,
+    _wsFactory: factory,
+    _timeoutMs: 100,
+  });
+  assert.equal(result.found, true);
+  assert.equal(result.text, "Vale response arrived");
+});
+
+test("pollForAssistantReply: returns found:false with timeout reason after maxAttempts exhausted", async () => {
+  const sentAfter = "2026-06-30T10:00:00.000Z";
+  const { factory } = makeMockWsFactoryQueue([{ ok: true, messages: [] }]);
+  const result = await pollForAssistantReply({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    sentAfter,
+    maxAttempts: 3,
+    pollIntervalMs: 1,
+    _wsFactory: factory,
+    _timeoutMs: 100,
+  });
+  assert.equal(result.found, false);
+  assert.equal(result.text, null);
+  assert.equal(result.reason, "OpenClaw response timed out.");
+});
+
+test("pollForAssistantReply: ignores assistant messages before sentAfter", async () => {
+  const sentAfter = "2026-06-30T10:00:10.000Z";
+  const { factory } = makeMockWsFactoryQueue([{
+    ok: true,
+    messages: [
+      { id: "a1", role: "assistant", content: "Stale message", timestamp: "2026-06-30T10:00:01Z" },
+    ],
+  }]);
+  const result = await pollForAssistantReply({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    sentAfter,
+    maxAttempts: 2,
+    pollIntervalMs: 1,
+    _wsFactory: factory,
+    _timeoutMs: 100,
+  });
+  assert.equal(result.found, false);
+  assert.equal(result.reason, "OpenClaw response timed out.");
+});
+
+test("pollForAssistantReply: ignores user and system messages", async () => {
+  const sentAfter = "2026-06-30T10:00:00.000Z";
+  const { factory } = makeMockWsFactoryQueue([{
+    ok: true,
+    messages: [
+      { id: "u1", role: "user", content: "user msg", timestamp: "2026-06-30T10:00:02Z" },
+      { id: "s1", role: "system", content: "system msg", timestamp: "2026-06-30T10:00:03Z" },
+    ],
+  }]);
+  const result = await pollForAssistantReply({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    sentAfter,
+    maxAttempts: 2,
+    pollIntervalMs: 1,
+    _wsFactory: factory,
+    _timeoutMs: 100,
+  });
+  assert.equal(result.found, false);
+  assert.equal(result.reason, "OpenClaw response timed out.");
+});
+
+test("pollForAssistantReply: returns earliest assistant message when multiple exist after sentAfter", async () => {
+  const sentAfter = "2026-06-30T10:00:00.000Z";
+  const { factory } = makeMockWsFactoryQueue([{
+    ok: true,
+    messages: [
+      { id: "a2", role: "assistant", content: "Second reply", timestamp: "2026-06-30T10:00:05Z" },
+      { id: "a1", role: "assistant", content: "First reply", timestamp: "2026-06-30T10:00:02Z" },
+    ],
+  }]);
+  const result = await pollForAssistantReply({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    sentAfter,
+    maxAttempts: 3,
+    pollIntervalMs: 1,
+    _wsFactory: factory,
+    _timeoutMs: 100,
+  });
+  assert.equal(result.found, true);
+  assert.equal(result.text, "First reply");
+});
+
+test("pollForAssistantReply: gateway connection error returns found:false with reason", async () => {
+  const { factory } = makeMockWsFactory({ failOnConnect: true });
+  const result = await pollForAssistantReply({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    sentAfter: "2026-06-30T10:00:00.000Z",
+    maxAttempts: 3,
+    pollIntervalMs: 1,
+    _wsFactory: factory,
+    _timeoutMs: 100,
+  });
+  assert.equal(result.found, false);
+  assert.equal(result.text, null);
+  assert.ok(typeof result.reason === "string" && result.reason.length > 0);
+});
+
+test("pollForAssistantReply: defaults sessionKey to agent:main:main when omitted", async () => {
+  const { factory } = makeMockWsFactoryQueue([{
+    ok: true,
+    messages: [
+      { id: "a1", role: "assistant", content: "Reply", timestamp: "2026-06-30T10:00:02Z" },
+    ],
+  }]);
+  const result = await pollForAssistantReply({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sentAfter: "2026-06-30T10:00:00.000Z",
+    maxAttempts: 3,
+    pollIntervalMs: 1,
+    _wsFactory: factory,
+    _timeoutMs: 100,
+  });
+  assert.equal(result.found, true);
+});
+
+test("pollForAssistantReply: result JSON never contains token, secret, or password fields", async () => {
+  const { factory } = makeMockWsFactory({ failOnConnect: true });
+  const result = await pollForAssistantReply({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sentAfter: "2026-06-30T10:00:00.000Z",
+    maxAttempts: 2,
+    pollIntervalMs: 1,
+    _wsFactory: factory,
+    _timeoutMs: 100,
+  });
+  const serialized = JSON.stringify(result);
+  assert.ok(!serialized.toLowerCase().includes("token"));
+  assert.ok(!serialized.toLowerCase().includes("secret"));
+  assert.ok(!serialized.toLowerCase().includes("password"));
+});
+
+// ── Send-then-poll integration ────────────────────────────────────────────────
+// These tests exercise the full voice return path: sendChatMessage establishes
+// a sentAt cursor; pollForAssistantReply uses it to find only the new reply.
+
+test("send-then-poll integration: sessionKey from send flows into poll and finds the reply", async () => {
+  const sentAt = "2026-07-01T10:00:00.000Z";
+  const { factory: sendFactory } = makeMockWsFactory({ response: { ok: true, runId: "run-voice-123" } });
+
+  const sendResult = await sendChatMessage({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    message: "summarize today's email",
+    _wsFactory: sendFactory,
+  });
+
+  assert.equal(sendResult.ok, true);
+  assert.equal(sendResult.runId, "run-voice-123");
+  assert.equal(sendResult.sessionKey, "agent:main:main");
+
+  const { factory: pollFactory } = makeMockWsFactoryQueue([{
+    ok: true,
+    messages: [
+      { id: "u1", role: "user", content: "summarize today's email", timestamp: "2026-07-01T10:00:01Z" },
+      { id: "a1", role: "assistant", content: "You have 5 emails today.", timestamp: "2026-07-01T10:00:05Z" },
+    ],
+  }]);
+
+  const pollResult = await pollForAssistantReply({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: sendResult.sessionKey,
+    sentAfter: sentAt,
+    maxAttempts: 3,
+    pollIntervalMs: 1,
+    _wsFactory: pollFactory,
+    _timeoutMs: 100,
+  });
+
+  assert.equal(pollResult.found, true);
+  assert.equal(pollResult.text, "You have 5 emails today.");
+  assert.equal(pollResult.reason, null);
+});
+
+test("send-then-poll integration: failed send exposes ok:false and null runId — caller must not poll", async () => {
+  const { factory } = makeMockWsFactory({ failOnConnect: true });
+
+  const sendResult = await sendChatMessage({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    message: "summarize today's email",
+    _wsFactory: factory,
+  });
+
+  // Contract: ok:false + available:false means gateway is unreachable; do not proceed to poll.
+  assert.equal(sendResult.ok, false);
+  assert.equal(sendResult.available, false);
+  assert.equal(sendResult.runId, null);
+  // Neither gatewayUrl nor sentAt are present on a failed send — there is nothing to poll with.
+  assert.ok(!("gatewayUrl" in sendResult), "gatewayUrl must not appear on a failed send result");
+  assert.ok(!("sentAt" in sendResult), "sentAt must not appear on a failed send result");
+});
+
+test("send-then-poll integration: gateway error during poll returns found:false with reason", async () => {
+  const sentAt = "2026-07-01T10:00:00.000Z";
+  const { factory: sendFactory } = makeMockWsFactory({ response: { ok: true, runId: "run-poll-fail" } });
+  const { factory: pollFactory } = makeMockWsFactory({ failOnConnect: true });
+
+  const sendResult = await sendChatMessage({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    message: "summarize today's email",
+    _wsFactory: sendFactory,
+  });
+  assert.equal(sendResult.ok, true);
+
+  const pollResult = await pollForAssistantReply({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: sendResult.sessionKey,
+    sentAfter: sentAt,
+    maxAttempts: 3,
+    pollIntervalMs: 1,
+    _wsFactory: pollFactory,
+    _timeoutMs: 100,
+  });
+
+  assert.equal(pollResult.found, false);
+  assert.ok(typeof pollResult.reason === "string" && pollResult.reason.length > 0);
+  assert.equal(pollResult.text, null);
+});
+
+test("send-then-poll integration: stale pre-sentAfter reply is filtered; only new reply after sentAt is returned", async () => {
+  // Voice scenario: the session has history from earlier turns. sentAfter prevents
+  // returning a stale reply that predates the current voice message send.
+  const sentAt = "2026-07-01T10:05:00.000Z";
+
+  const { factory: pollFactory } = makeMockWsFactoryQueue([{
+    ok: true,
+    messages: [
+      { id: "stale", role: "assistant", content: "Old email summary from yesterday.", timestamp: "2026-07-01T09:00:00Z" },
+      { id: "fresh", role: "assistant", content: "Today's email summary: 3 new messages.", timestamp: "2026-07-01T10:05:03Z" },
+    ],
+  }]);
+
+  const pollResult = await pollForAssistantReply({
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    sentAfter: sentAt,
+    maxAttempts: 3,
+    pollIntervalMs: 1,
+    _wsFactory: pollFactory,
+    _timeoutMs: 100,
+  });
+
+  assert.equal(pollResult.found, true);
+  assert.equal(pollResult.text, "Today's email summary: 3 new messages.", "stale pre-sentAfter reply must be excluded");
 });

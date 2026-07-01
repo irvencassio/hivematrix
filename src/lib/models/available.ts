@@ -9,6 +9,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { detectBackends, type BackendStatus, type BackendId } from "./backends";
 import { getLocalEngineConfig } from "./local-engine";
+import { claudeAliasId } from "./catalog";
 
 // Claude frontier models are referenced by the CLI's version-agnostic aliases,
 // so they always resolve to the latest model for the tier (no version to bump).
@@ -303,6 +304,23 @@ export function getRoleModels(): RoleModels {
     coding: str("frontierModel"),
     operational: str("operationalModel"),
     writer: str("writerModel"),
+  };
+}
+
+/**
+ * Role models normalized for the Settings dropdowns: a legacy pinned Claude
+ * full id (`claude-opus-4-8`) collapses to the bare CLI alias the catalog now
+ * offers, so the stored value matches the "Claude Opus"/"Claude Sonnet" option
+ * instead of rendering as a raw id. Storage is untouched — the resolver keeps
+ * matching the full id via its `claude-*` predicates.
+ */
+export function getRoleModelsForDisplay(): RoleModels {
+  const rm = getRoleModels();
+  return {
+    thinking: claudeAliasId(rm.thinking),
+    coding: claudeAliasId(rm.coding),
+    operational: claudeAliasId(rm.operational),
+    writer: claudeAliasId(rm.writer),
   };
 }
 

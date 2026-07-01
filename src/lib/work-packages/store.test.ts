@@ -57,6 +57,29 @@ test("createWorkPackage persists a draft package with its items", () => {
   assert.ok(held!.dependsOn.every((d) => ids.has(d)), "dependsOn holds item ids, not titles");
 });
 
+test("createWorkPackage is idempotent for an identical active Flight", () => {
+  const intake = broadIntake();
+  const input = {
+    title: "Duplicate-click Flight",
+    description: "Split this broad request once, even if the caller submits twice.",
+    project: "hivematrix",
+    projectPath: "/Users/x/hivematrix",
+    status: "running" as const,
+    intake,
+    items: intake.packageCandidate!.items,
+  };
+
+  const first = createWorkPackage(input);
+  const second = createWorkPackage(input);
+
+  assert.equal(second.id, first.id, "second identical active create returns the existing Flight");
+  const rows = getDb().prepare(
+    "SELECT COUNT(*) AS n FROM work_packages WHERE title = ? AND description = ? AND project = ? AND projectPath = ?",
+  ).get(input.title, input.description, input.project, input.projectPath) as { n: number };
+  assert.equal(rows.n, 1, "only one package row is persisted");
+  assert.equal(second.items.length, first.items.length, "existing package detail is returned intact");
+});
+
 test("list + get reflect the created package with item counts", () => {
   const intake = broadIntake();
   const pkg = createWorkPackage({ title: "Sweep 2", project: "hivematrix", projectPath: "/p", intake, items: intake.packageCandidate!.items });

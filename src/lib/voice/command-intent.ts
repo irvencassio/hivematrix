@@ -31,6 +31,7 @@ export type CommandKind =
   | "triggerReleaseVerification" // "trigger release verification"
   | "browserLaneTask"  // "use Browser Lane to search/read/open ..."
   | "mailDeleteTask"   // "delete/trash email ..." — queue review, never deletes immediately
+  | "openclawAsk"      // "ask Vale / hey Vale / ask OpenClaw / hey OpenClaw <prompt>"
   | "weather"          // "what's the weather today" — answered inline from saved location
   | "scheduledReminder" // "remind me at 5:35 PM to <X>" — delayed HiveMatrix task
   | "createTask"       // "create a task to <X>" / "remind me to <X>"
@@ -48,6 +49,11 @@ export interface CommandIntent {
   directiveText?: string; // startDirective / pauseDirective target
   browserLane?: VoiceBrowserLaneIntent;
   mailDelete?: VoiceMailDeleteIntent;
+  openclaw?: {
+    assistant: "vale" | "openclaw";
+    prompt: string;
+    sessionKey: string;
+  };
   weatherWhen?: "today" | "tomorrow"; // weather
   weatherCity?: string;               // weather — inline city override
   reminderWhenText?: string;           // scheduledReminder
@@ -93,6 +99,25 @@ export function detectWeatherIntent(text: string): CommandIntent | null {
 }
 
 const clean = (s: string) => s.replace(/[.?!,\s]+$/g, "").trim();
+
+/**
+ * Match "ask Vale/OpenClaw [to] ..." and "hey Vale/OpenClaw[,] ...".
+ * Must run before Jarvis intents so "ask Vale to retry..." routes to Vale, not retryFailedTask.
+ */
+export function detectOpenClawIntent(text: string): CommandIntent | null {
+  const m = (text || "").match(
+    /^(?:ask\s+(vale|openclaw)(?:\s+to)?|hey\s+(vale|openclaw))\s*,?\s*(.+)$/i,
+  );
+  if (!m) return null;
+  const assistantRaw = (m[1] ?? m[2] ?? "").toLowerCase();
+  const assistant: "vale" | "openclaw" = assistantRaw === "openclaw" ? "openclaw" : "vale";
+  const prompt = clean(m[3]);
+  if (!prompt) return null;
+  return {
+    kind: "openclawAsk",
+    openclaw: { assistant, prompt, sessionKey: "agent:main:main" },
+  };
+}
 
 function detectScheduledReminder(orig: string): CommandIntent | null {
   const time = String.raw`([0-9]{1,2}(?::[0-9]{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)`;
@@ -154,6 +179,9 @@ export function detectCommandIntent(text: string): CommandIntent {
 
   const mailDelete = detectVoiceMailDeleteIntent(orig);
   if (mailDelete) return { kind: "mailDeleteTask", mailDelete };
+
+  const openclawIntent = detectOpenClawIntent(orig);
+  if (openclawIntent) return openclawIntent;
 
   // --- Jarvis V2 operator intents ---
   if (/\b(good morning|brief me|briefing|morning briefing|what needs me|what needs my attention|standup|status briefing)\b/.test(t)) {

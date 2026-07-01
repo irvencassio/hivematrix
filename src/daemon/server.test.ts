@@ -1103,7 +1103,7 @@ test("POST /work-packages/:id/items/:itemId/accept marks a review item done and 
   const { base, headers } = await startServer(t);
 
   const items = [
-    { title: "Review step", prompt: "reviewed work", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+    { title: "Review step", prompt: "reviewed work", risk: "medium", executionMode: "sequential", scopeHints: [], dependsOn: [] },
     { title: "Next step", prompt: "after review", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: ["Review step"] },
   ];
   const pkg = await (await fetch(`${base}/work-packages`, {
@@ -1140,7 +1140,7 @@ test("POST /tasks/:id/reply reconciles a Flight review item back to running", as
   const { base, headers } = await startServer(t);
 
   const items = [
-    { title: "Review step", prompt: "reviewed work", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
+    { title: "Review step", prompt: "reviewed work", risk: "medium", executionMode: "sequential", scopeHints: [], dependsOn: [] },
     { title: "Next step", prompt: "after review", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: ["Review step"] },
   ];
   const pkg = await (await fetch(`${base}/work-packages`, {
@@ -1183,7 +1183,7 @@ test("GET /tasks adds Flight context for review tasks linked to Flight items", a
 
   const items = [
     { title: "Already landed", prompt: "done work", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: [] },
-    { title: "Review blocker", prompt: "reviewed work", risk: "low", executionMode: "sequential", scopeHints: [], dependsOn: ["Already landed"] },
+    { title: "Review blocker", prompt: "reviewed work", risk: "medium", executionMode: "sequential", scopeHints: [], dependsOn: ["Already landed"] },
   ];
   const pkg = await (await fetch(`${base}/work-packages`, {
     method: "POST", headers, body: JSON.stringify({ title: "Visible Flight Context", project: "hivematrix", projectPath: "/tmp/flight-context", items }),

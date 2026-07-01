@@ -129,12 +129,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   html[data-theme="light"] .text-on-material { text-shadow: 0 1px 4px rgba(255,255,255,.80); }
   html[data-theme="matrix"] .text-on-material { text-shadow: 0 1px 4px rgba(0,10,4,.70); }
   html[data-wallpaper="1"] h2,
-  html[data-wallpaper="1"] .lane-title,
+  html[data-wallpaper="1"] .status-card-name,
   html[data-wallpaper="1"] .mdl-grp,
   html[data-wallpaper="1"] .ctx-sec > summary,
   html[data-wallpaper="1"] .dir-group-hdr { text-shadow: 0 1px 4px rgba(0,0,0,.55); }
   html[data-theme="light"][data-wallpaper="1"] h2,
-  html[data-theme="light"][data-wallpaper="1"] .lane-title,
+  html[data-theme="light"][data-wallpaper="1"] .status-card-name,
   html[data-theme="light"][data-wallpaper="1"] .mdl-grp,
   html[data-theme="light"][data-wallpaper="1"] .ctx-sec > summary,
   html[data-theme="light"][data-wallpaper="1"] .dir-group-hdr { text-shadow: 0 1px 4px rgba(255,255,255,.80); }
@@ -510,13 +510,16 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .mdl-tier { font-size: 11px; color: var(--muted); margin-top: 4px; word-break: keep-all; }
   .mdl-tier-alias { display: block; padding-left: 14px; }
   .mdl-card-foot { font-size: 11px; color: var(--muted); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+  .mdl-card-foot .flight-ctx { margin-top: 0; }
   .vinfo { font-size: 11px; color: var(--muted); margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
-  .lane { margin-bottom: 16px; }
-  .lane-title { font-size: 11px; color: var(--muted); margin-bottom: 6px; display: flex; gap: 6px; align-items: center; cursor: pointer; user-select: none; }
-  .lane-title:hover { color: var(--text); }
-  .lane-title .count { color: var(--accent); }
-  .lane-caret { font-size: 9px; width: 8px; color: var(--muted); flex: 0 0 auto; }
-  .lane.collapsed { margin-bottom: 10px; }
+  .status-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+  .status-card-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; user-select: none; border-bottom: 1px solid var(--border); }
+  .status-card.collapsed .status-card-head { border-bottom: none; }
+  .status-card-head:hover { background: rgba(255,255,255,.03); }
+  .status-card-name { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; flex: 1; }
+  .status-card-caret { font-size: 9px; color: var(--muted); flex: 0 0 auto; }
+  .status-card-count { font-size: 11px; color: var(--accent); font-weight: 600; }
+  .status-card-body { padding: 6px 8px 8px; }
   .card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
     padding: 8px 10px; margin-bottom: 6px; cursor: pointer; transition: border-color .1s; position: relative;
     box-shadow: var(--card-shadow); }
@@ -600,6 +603,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .live.stale { color: var(--err); }
   .archive-link { font-size: 11px; color: var(--accent-2); cursor: pointer; font-weight: 400; text-transform: none; letter-spacing: 0; }
   .archive-link:hover { text-decoration: underline; }
+  .board-sec { margin: 0; }
+  .board-sec-header { font-size: 14px; font-weight: 600; margin: 20px 0 6px; color: var(--text); display: flex; align-items: center; gap: 8px; }
   /* Standardized task-detail action row. One set of tokens for every reply/review/
      retry/steer/video control so heights, radius, padding, and min-width match. */
   .action-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
@@ -1360,14 +1365,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   <div class="col-resizer" id="resizeLeft" title="Drag to resize the left panel"></div>
   <div class="col-resizer" id="resizeRight" title="Drag to resize the right panel"></div>
   <section class="col board">
-    <details class="ctx-sec" id="flightsSec" open>
-      <summary>Flights <button class="usage-refresh" title="Refresh flights" onclick="event.stopPropagation();loadFlights().then(function(){renderFlightsRail();if(state.selectedFlight)renderFlightDetail(state.selectedFlight);})">↻</button></summary>
-      <div id="flights_rail" style="margin-bottom:6px"></div>
-    </details>
-    <details class="ctx-sec" id="boardSec" open>
-      <summary>Board <span id="archiveBtn" class="archive-link" onclick="event.stopPropagation();archiveCompleted()" title="Archive review/done/failed tasks"></span></summary>
-      <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
-      <button class="addbtn" onclick="showNewTaskPanel()">＋ New task</button>
+    <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
+    <button class="addbtn" onclick="showNewTaskPanel()">＋ New task</button>
     <div class="form" id="taskForm">
       <input id="t_title" type="hidden" value="" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
@@ -1424,8 +1423,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="row" style="margin-top:12px"><button class="cancel" onclick="cancelForm('taskForm')">Cancel</button><button class="create" onclick="createTask()">Create task</button></div>
       <div class="err" id="t_err"></div>
     </div>
-    <div id="board"></div>
+    <details class="ctx-sec" id="flightsSec" open>
+      <summary>Flights <button class="usage-refresh" title="Refresh flights" onclick="event.stopPropagation();loadFlights().then(function(){renderFlightsRail();if(state.selectedFlight)renderFlightDetail(state.selectedFlight);})">↻</button></summary>
+      <div id="flights_rail" style="margin-bottom:6px"></div>
     </details>
+    <div id="boardSec" class="board-sec">
+      <div class="board-sec-header">Board <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></div>
+      <div id="board"></div>
+    </div>
   </section>
   <section class="col session">
     <div id="session"><div class="session-empty">Select a task to inspect its session.</div></div>
@@ -1655,8 +1660,6 @@ function showOverview() {
 function focusBoardLane(key) {
   const allOtherKeys = LANE_DEFS.map(L => L.key).filter(k => k !== key);
   try { localStorage.setItem("hm_lanes_collapsed", JSON.stringify(allOtherKeys)); } catch (e) { /* ignore */ }
-  const boardSec = document.getElementById("boardSec");
-  if (boardSec && !boardSec.open) boardSec.open = true;
   renderBoard();
   const board = document.getElementById("board");
   if (board) board.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2146,12 +2149,19 @@ function getCollapsedLanes() {
   try { return new Set(JSON.parse(localStorage.getItem("hm_lanes_collapsed") || "[]")); }
   catch (e) { return new Set(); }
 }
-function toggleLane(key) {
+function toggleBoardLane(key) {
   const c = getCollapsedLanes();
   if (c.has(key)) c.delete(key); else c.add(key);
   try { localStorage.setItem("hm_lanes_collapsed", JSON.stringify(Array.from(c))); } catch (e) { /* ignore */ }
   renderBoard();
 }
+/*__REVIEW_SORT_COMPARATOR_START__*/
+function reviewSortComparator(a, b) {
+  const ta = Date.parse(a.updatedAt || a.createdAt || "") || 0;
+  const tb = Date.parse(b.updatedAt || b.createdAt || "") || 0;
+  return tb - ta;
+}
+/*__REVIEW_SORT_COMPARATOR_END__*/
 function renderBoard() {
   const statusToLane = {};
   LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
@@ -2164,19 +2174,32 @@ function renderBoard() {
   const el = document.getElementById("board");
   const collapsedLanes = getCollapsedLanes();
   el.innerHTML = LANE_DEFS.map(L => {
-    const items = byLane[L.key] || [];
+    let items = byLane[L.key] || [];
+    if (L.key === "review") {
+      items = items.slice().sort(reviewSortComparator);
+    }
     if (!items.length && (L.key==="done"||L.key==="failed")) return "";
     const isCollapsed = collapsedLanes.has(L.key);
-    return '<div class="lane'+(isCollapsed?' collapsed':'')+'">'
-      + '<div class="lane-title" onclick="toggleLane(\''+L.key+'\')" title="'+(isCollapsed?'Expand':'Collapse')+' '+esc(L.label)+'">'
-      + '<span class="lane-caret">'+(isCollapsed?'▸':'▾')+'</span>'+L.label+' <span class="count">'+items.length+'</span></div>'
-      + (isCollapsed ? '' : items.map(t => '<div class="card'+(state.selected===t._id?' sel':'')+'" onclick="selectTask(\''+t._id+'\')">'
-          + '<button class="card-archive" title="Archive task" onclick="event.stopPropagation();cardArchive(\''+t._id+'\')">Archive</button>'
-          + '<div class="t">'+esc(t.title||t._id)+'</div>'
-          + '<div class="m">'+(t.model?'<span class="badge model">'+esc(t.model)+'</span>':'')
-          + (t.reviewState?'<span class="badge">'+esc(t.reviewState)+'</span>':'')
-          + ageBadge(t)+'</div>'
-          + flightContextBadge(t) + '</div>').join(""))
+    const nameColor = laneColor[L.key] || "var(--text)";
+    return '<div class="status-card'+(isCollapsed?' collapsed':'')+'">'
+      + '<div class="status-card-head" onclick="toggleBoardLane(\''+L.key+'\')" title="'+(isCollapsed?'Expand':'Collapse')+' '+esc(L.label)+'">'
+      + '<span class="status-card-caret">'+(isCollapsed?'▸':'▾')+'</span>'
+      + '<span class="status-card-name" style="color:'+nameColor+'">'+L.label+'</span>'
+      + '<span class="status-card-count">'+items.length+'</span>'
+      + '</div>'
+      + (isCollapsed ? '' : '<div class="status-card-body">'
+          + items.map(t => { const fctx = flightContextBadge(t); return '<div class="card'+(state.selected===t._id?' sel':'')+'" onclick="selectTask(\''+t._id+'\')">'
+              + '<button class="card-archive" title="Archive task" onclick="event.stopPropagation();cardArchive(\''+t._id+'\')">Archive</button>'
+              + '<div class="mdl-card-head" style="padding-right:58px;align-items:flex-start">'
+              + '<span class="mdl-card-name" style="min-width:0">'+esc(t.title||t._id)+'</span>'
+              + '<div style="flex:0 0 auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
+              + (t.model?'<span class="badge model">'+esc(t.model)+'</span>':'')
+              + (t.reviewState?'<span class="badge">'+esc(t.reviewState)+'</span>':'')
+              + ageBadge(t)+'</div>'
+              + '</div>'
+              + (fctx ? '<div class="mdl-card-foot">'+fctx+'</div>' : '')
+              + '</div>'; }).join("")
+          + '</div>')
       + '</div>';
   }).join("") || '<div class="muted">No tasks.</div>';
   const archivable = state.tasks.filter(t => ["review","done","failed","cancelled"].includes(t.status)).length;
@@ -5220,8 +5243,8 @@ function renderRoleModels() {
     sel.disabled = false;
     sel.title = "";
   };
-  fill("s_role_thinking", opts.thinking || [], provider === "codex" ? "Default — Codex GPT-5.5" : "Default — Opus 4.8", rm.thinking);
-  fill("s_role_coding", opts.coding || [], provider === "codex" ? "Default — Codex Spark" : "Default — Sonnet 4.6", rm.coding);
+  fill("s_role_thinking", opts.thinking || [], provider === "codex" ? "Default — Codex GPT-5.5" : "Default — Opus", rm.thinking);
+  fill("s_role_coding", opts.coding || [], provider === "codex" ? "Default — Codex Spark" : "Default — Sonnet", rm.coding);
   fill("s_role_operational", opts.operational || [], "Default — local Qwen", rm.operational);
   fill("s_role_writer", opts.writer || [], provider === "codex" ? "Default — Codex GPT-5.5 online, local offline" : "Default — Sonnet online, local offline", rm.writer);
 }
@@ -5279,10 +5302,48 @@ function settingsSwitch(on, onclick, opts) {
     + '</button>';
 }
 
+/*__OC_DIAGNOSTICS_START__*/
+function renderOcDiagnostics(features, ocSt) {
+  const ocFeature = features.find(f => f.key === 'openclaw.chatDock');
+  if (!ocFeature) return '';
+  const st = ocSt || {};
+  const pill = val => '<span style="color:' + (val ? 'var(--ok)' : 'var(--danger)') + ';font-weight:600;font-size:11px">' + (val ? 'yes' : 'no') + '</span>';
+  const dr = (label, value) => '<div style="display:flex;gap:8px;align-items:baseline;padding:2px 0">'
+    + '<span class="muted" style="min-width:132px;font-size:11px">' + esc(label) + '</span>'
+    + value + '</div>';
+  const flagEnabled = ocFeature.enabled === true;
+  const installed = st.installed === true;
+  const gatewayReachable = installed && !!(st.gateway && st.gateway.reachable === true);
+  const dockEl = document.getElementById('openclawDock');
+  const narrow = window.innerWidth <= 760;
+  let dockVisVal;
+  if (narrow) {
+    dockVisVal = '<span class="muted" style="font-size:11px">hidden on narrow screens (≤ 760 px)</span>';
+  } else if (dockEl) {
+    dockVisVal = pill(window.getComputedStyle(dockEl).display !== 'none');
+  } else {
+    dockVisVal = '<span class="muted" style="font-size:11px">—</span>';
+  }
+  const rows = [
+    dr('Feature flag', pill(flagEnabled)),
+    dr('Installed', pill(installed)),
+    dr('Gateway reachable', installed ? pill(gatewayReachable) : '<span class="muted" style="font-size:11px">—</span>'),
+    dr('Dock visible', dockVisVal),
+  ].join('');
+  const note = (st.reason && !installed) ? '<div class="muted" style="font-size:11px;margin-top:4px">' + esc(st.reason) + '</div>' : '';
+  return '<div id="s_oc_diag" style="padding:8px 0 10px;border-top:1px solid var(--border)">'
+    + '<div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">'
+    + '<span style="font-size:11px;font-weight:600;color:var(--muted)">OpenClaw / Vale diagnostics</span>'
+    + '<button class="copybtn" onclick="renderFeatures()" style="font-size:11px;padding:2px 8px" title="Re-check OpenClaw status">↻</button>'
+    + '</div>'
+    + rows + note + '</div>';
+}
+/*__OC_DIAGNOSTICS_END__*/
+
 async function renderFeatures() {
   const el = document.getElementById("s_features");
   el.innerHTML = '<div class="muted">Loading…</div>';
-  const [r, auto] = await Promise.all([api("/settings/features"), api("/settings/voice/auto-approval")]);
+  const [r, auto, ocSt] = await Promise.all([api("/settings/features"), api("/settings/voice/auto-approval"), api("/openclaw/status").catch(() => null)]);
   const features = (r && r.features) || [];
   if (!features.length) { el.innerHTML = '<div class="muted">No optional features.</div>'; return; }
   const featureRows = features.map(f => {
@@ -5314,7 +5375,8 @@ async function renderFeatures() {
   // Video factory is no longer a Features toggle — it's a capability driven by a
   // scheduled job that runs the factory and pauses at the script-review checkpoint.
   // Nothing to render here.
-  el.innerHTML = featureRows + autoRow + voiceLogicRow;
+  const ocDiagRow = renderOcDiagnostics(features, ocSt);
+  el.innerHTML = featureRows + ocDiagRow + autoRow + voiceLogicRow;
 }
 
 async function toggleFeature(key, enabled) {
@@ -5391,22 +5453,40 @@ function ocWarnPanel(reason) {
     + '</div></div>';
 }
 
+function ocErrPanel(reason) {
+  return '<div class="oc-warn-panel">'
+    + '<span class="oc-warn-icon" aria-hidden="true">⚠</span>'
+    + '<div class="oc-warn-body">'
+    + '<div class="oc-warn-title">OpenClaw status error</div>'
+    + '<div class="oc-warn-reason">' + esc(reason) + '</div>'
+    + '<button class="oc-warn-action" onclick="initOpenclawDock()">Retry</button>'
+    + '</div></div>';
+}
+
 async function initOpenclawDock() {
   const dock = document.getElementById('openclawDock');
   if (!dock) return;
   try {
     const r = await api('/openclaw/status');
-    const enabled = r && r.enabled;
-    if (!enabled) { dock.style.display = 'none'; return; }
+    const flagEnabled = !!(r && r.flagEnabled);
+    if (!flagEnabled) { dock.style.display = 'none'; return; }
     dock.style.display = '';
-    const available = !!(r && r.available);
     const dot = document.getElementById('ocAvailDot');
-    if (dot) dot.className = 'oc-avail-dot ' + (available ? 'ok' : 'err');
     const comp = document.querySelector('.oc-composer');
-    if (!available) {
-      const reason = (r && r.reason) || 'OpenClaw is not available on this Mac.';
+    const enabled = !!(r && r.enabled);
+    if (!enabled) {
+      if (dot) dot.className = 'oc-avail-dot off';
       const t = document.getElementById('ocTranscript');
-      if (t) t.innerHTML = ocWarnPanel(reason);
+      if (t) t.innerHTML = ocWarnPanel((r && r.reason) || 'OpenClaw is not installed on this Mac.');
+      if (comp) comp.style.display = 'none';
+      dock.classList.add('oc-unavail-state');
+      return;
+    }
+    const available = !!(r && r.available);
+    if (dot) dot.className = 'oc-avail-dot ' + (available ? 'ok' : 'err');
+    if (!available) {
+      const t = document.getElementById('ocTranscript');
+      if (t) t.innerHTML = ocWarnPanel((r && r.reason) || 'OpenClaw is not available on this Mac.');
       if (comp) comp.style.display = 'none';
       dock.classList.add('oc-unavail-state');
       return;
@@ -5414,7 +5494,18 @@ async function initOpenclawDock() {
     dock.classList.remove('oc-unavail-state');
     if (comp) comp.style.display = '';
     await ocRefresh();
-  } catch (e) { const dock2 = document.getElementById('openclawDock'); if (dock2) dock2.style.display = 'none'; }
+  } catch (e) {
+    const dock2 = document.getElementById('openclawDock');
+    if (!dock2) return;
+    dock2.style.display = '';
+    const dot2 = document.getElementById('ocAvailDot');
+    if (dot2) dot2.className = 'oc-avail-dot err';
+    const t = document.getElementById('ocTranscript');
+    if (t) t.innerHTML = ocErrPanel('Could not check OpenClaw status.');
+    const comp2 = dock2.querySelector('.oc-composer');
+    if (comp2) comp2.style.display = 'none';
+    dock2.classList.add('oc-unavail-state');
+  }
 }
 
 async function ocRefresh() {

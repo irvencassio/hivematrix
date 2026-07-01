@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   detectCommandIntent,
+  detectOpenClawIntent,
   boardReply, approvalsReply, resolvedReply, directivesReply,
   createdTaskReply, connectivityReply, setConnectivityReply,
 } from "./command-intent";
@@ -115,6 +116,110 @@ test("detects scheduled-items phrasing as directives", () => {
   assert.equal(detectCommandIntent("what are my scheduled items").kind, "directives");
   assert.equal(detectCommandIntent("what scheduled items are active").kind, "directives");
   assert.equal(detectCommandIntent("show scheduled items").kind, "directives");
+});
+
+// ── OpenClaw / Vale intent detection ─────────────────────────────────────────
+
+test("detectOpenClawIntent: detects all four wake-phrase forms", () => {
+  const phrases = [
+    "ask Vale to summarize today's email",
+    "ask Vale summarize today's email",
+    "hey Vale, summarize today's email",
+    "hey Vale summarize today's email",
+    "ask OpenClaw to summarize today's email",
+    "ask OpenClaw summarize today's email",
+    "hey OpenClaw, summarize today's email",
+    "hey OpenClaw summarize today's email",
+  ];
+  for (const phrase of phrases) {
+    const result = detectOpenClawIntent(phrase);
+    assert.ok(result, `expected match for: ${phrase}`);
+    assert.equal(result?.kind, "openclawAsk", phrase);
+  }
+});
+
+test("detectOpenClawIntent: strips wake phrase and returns only the user request", () => {
+  assert.equal(detectOpenClawIntent("ask Vale to summarize today's email")?.openclaw?.prompt, "summarize today's email");
+  assert.equal(detectOpenClawIntent("hey Vale, summarize today's email")?.openclaw?.prompt, "summarize today's email");
+  assert.equal(detectOpenClawIntent("ask OpenClaw summarize today's email")?.openclaw?.prompt, "summarize today's email");
+  assert.equal(detectOpenClawIntent("ask Vale to check my schedule")?.openclaw?.prompt, "check my schedule");
+  assert.equal(detectOpenClawIntent("hey OpenClaw, what's on my calendar")?.openclaw?.prompt, "what's on my calendar");
+});
+
+test("detectOpenClawIntent: strips trailing punctuation from prompt", () => {
+  assert.equal(detectOpenClawIntent("ask Vale to summarize today's email.")?.openclaw?.prompt, "summarize today's email");
+  assert.equal(detectOpenClawIntent("hey Vale, what are my tasks?")?.openclaw?.prompt, "what are my tasks");
+  assert.equal(detectOpenClawIntent("ask OpenClaw what's new!")?.openclaw?.prompt, "what's new");
+});
+
+test("detectOpenClawIntent: sets assistant to 'vale' for 'Vale' phrasing", () => {
+  assert.equal(detectOpenClawIntent("ask Vale to do something")?.openclaw?.assistant, "vale");
+  assert.equal(detectOpenClawIntent("hey Vale, do something")?.openclaw?.assistant, "vale");
+});
+
+test("detectOpenClawIntent: sets assistant to 'openclaw' for 'OpenClaw' phrasing", () => {
+  assert.equal(detectOpenClawIntent("ask OpenClaw to do something")?.openclaw?.assistant, "openclaw");
+  assert.equal(detectOpenClawIntent("hey OpenClaw, do something")?.openclaw?.assistant, "openclaw");
+});
+
+test("detectOpenClawIntent: defaults sessionKey to agent:main:main", () => {
+  assert.equal(detectOpenClawIntent("ask Vale to summarize today's email")?.openclaw?.sessionKey, "agent:main:main");
+  assert.equal(detectOpenClawIntent("hey OpenClaw, check the news")?.openclaw?.sessionKey, "agent:main:main");
+});
+
+test("detectOpenClawIntent: is case-insensitive for the wake phrase", () => {
+  assert.equal(detectOpenClawIntent("ASK VALE TO summarize today's email")?.kind, "openclawAsk");
+  assert.equal(detectOpenClawIntent("HEY OPENCLAW summarize today's email")?.kind, "openclawAsk");
+  assert.equal(detectOpenClawIntent("Ask Vale To summarize")?.kind, "openclawAsk");
+});
+
+test("detectOpenClawIntent: returns null when no content follows the wake phrase", () => {
+  // Comma-only or space-only after wake phrase — (.+) fails to match
+  assert.equal(detectOpenClawIntent("hey Vale,"), null);
+  assert.equal(detectOpenClawIntent("ask OpenClaw "), null);
+  assert.equal(detectOpenClawIntent("hey OpenClaw,  "), null);
+});
+
+test("detectOpenClawIntent: returns null for non-Vale/OpenClaw utterances", () => {
+  assert.equal(detectOpenClawIntent("summarize today's email"), null);
+  assert.equal(detectOpenClawIntent("ask Siri to do something"), null);
+  assert.equal(detectOpenClawIntent("tell me the weather"), null);
+  assert.equal(detectOpenClawIntent(""), null);
+});
+
+test("detectCommandIntent: routes openclawAsk BEFORE retryFailedTask", () => {
+  // "retry failed tasks" is also a valid Jarvis intent — Vale routing must win
+  const result = detectCommandIntent("ask Vale to retry failed tasks");
+  assert.equal(result.kind, "openclawAsk");
+  assert.equal(result.openclaw?.prompt, "retry failed tasks");
+});
+
+test("detectCommandIntent: routes openclawAsk BEFORE createTask", () => {
+  const result = detectCommandIntent("ask Vale to create a task to email the investors");
+  assert.equal(result.kind, "openclawAsk");
+  assert.equal(result.openclaw?.prompt, "create a task to email the investors");
+});
+
+test("detectCommandIntent: routes openclawAsk BEFORE briefing", () => {
+  const result = detectCommandIntent("hey Vale, good morning brief me");
+  assert.equal(result.kind, "openclawAsk");
+  assert.equal(result.openclaw?.prompt, "good morning brief me");
+});
+
+test("detectCommandIntent: does not swallow generic briefing or task utterances", () => {
+  assert.equal(detectCommandIntent("good morning").kind, "briefing");
+  assert.equal(detectCommandIntent("retry failed task").kind, "retryFailedTask");
+  assert.equal(detectCommandIntent("create a task to email the investors").kind, "createTask");
+});
+
+test("detectOpenClawIntent: multi-word prompt is preserved verbatim after wake phrase", () => {
+  const result = detectOpenClawIntent("ask Vale to read the latest news and summarize the top 3 stories");
+  assert.equal(result?.openclaw?.prompt, "read the latest news and summarize the top 3 stories");
+});
+
+test("detectOpenClawIntent: handles extra comma and whitespace after wake phrase", () => {
+  assert.equal(detectOpenClawIntent("hey Vale,   check my email")?.openclaw?.prompt, "check my email");
+  assert.equal(detectOpenClawIntent("ask OpenClaw,  what's new")?.openclaw?.prompt, "what's new");
 });
 
 test("board reply summarizes lanes", () => {

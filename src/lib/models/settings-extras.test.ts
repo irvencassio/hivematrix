@@ -68,3 +68,22 @@ test("role models default empty, round-trip per role, and clear back to default"
   assert.equal(s.getRoleModels().coding, "");
   assert.equal(s.getRoleModels().thinking, "claude-opus-4-8", "other roles untouched");
 });
+
+test("getRoleModelsForDisplay aliases legacy Claude IDs while storage stays raw", () => {
+  s.setRoleModel("thinking", "claude-opus-4-8");
+  s.setRoleModel("coding", "claude-sonnet-4-6");
+  s.setRoleModel("operational", "qwen3-coder-30b");
+  s.setRoleModel("writer", "opus");
+  // Display value the console dropdown matches against uses the CLI aliases, so a
+  // legacy pinned full id selects the "Claude Opus"/"Claude Sonnet" option instead
+  // of rendering as a raw id.
+  assert.deepEqual(s.getRoleModelsForDisplay(), {
+    thinking: "opus",
+    coding: "sonnet",
+    operational: "qwen3-coder-30b",
+    writer: "opus",
+  });
+  // Stored config is untouched — full names still resolve via the CLI + regexes.
+  assert.equal(s.getRoleModels().thinking, "claude-opus-4-8");
+  assert.equal(s.getRoleModels().coding, "claude-sonnet-4-6");
+});

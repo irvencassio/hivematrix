@@ -58,6 +58,18 @@ export function claudeShortName(modelId: string): "Opus" | "Sonnet" | "Haiku" | 
   return null;
 }
 
+/**
+ * Canonical selection id for a Claude model: a legacy pinned full id
+ * (`claude-opus-4-8`) or a resolved id (`claude-sonnet-5-0`) collapses to the
+ * bare CLI alias (`opus`/`sonnet`/`haiku`) the catalog now offers. Non-Claude
+ * ids (local, `codex:*`) and already-alias values pass through unchanged, so
+ * this is safe to map over any stored model id for display.
+ */
+export function claudeAliasId(modelId: string): string {
+  const short = claudeShortName(modelId);
+  return short ? (short.toLowerCase() as "opus" | "sonnet" | "haiku") : modelId;
+}
+
 export const CODEX_COMPUTER_USE_MODEL_ID = "codex:gpt-5.4-computer-use";
 export const NANO_BANANA_MODEL_ID = "gemini-3.1-flash-image-preview";
 

@@ -189,6 +189,8 @@ test("GET /openclaw/status: enabled forced to false when openclaw.chatDock flag 
   // Flag was stored as true but binary is missing — must be forced off.
   assert.equal(body.installed, false);
   assert.equal(body.enabled, false);
+  // flagEnabled reflects the raw flag so the client can distinguish "flag off" from "not installed".
+  assert.equal(body.flagEnabled, true, "flagEnabled is true even when binary is missing");
 });
 
 test("GET /openclaw/status: response never contains token, secret, or password fields", async (t) => {
@@ -677,4 +679,105 @@ test("POST /openclaw/chat/create-hivematrix-task: response never contains token,
   const text = await res.text();
   assert.ok(!text.toLowerCase().includes("secret"), "response must not contain 'secret'");
   assert.ok(!text.toLowerCase().includes("password"), "response must not contain 'password'");
+});
+
+// ── /openclaw/status — enabled/flagEnabled distinction ───────────────────────
+// The dock visibility logic depends on two separate fields:
+//   flagEnabled — the raw feature flag value (controls whether the dock shows at all)
+//   enabled     — flagEnabled AND gateway is reachable (controls available vs unavailable panel)
+// These tests verify both paths so a future regression is caught at the server level.
+
+const DISCOVERY_UNREACHABLE: OpenclawDiscovery = {
+  installed: true,
+  available: false,
+  version: "OpenClaw 2026.7.01 (test)",
+  gateway: { reachable: false, url: "ws://127.0.0.1:18789" },
+  reason: "OpenClaw Gateway is not reachable.",
+};
+
+test("GET /openclaw/status: enabled:true when flag is on and OpenClaw gateway is reachable", async (t) => {
+  const { tmp, hmDir, dbPath } = setupTmp("status-fully-available");
+  const origHome = process.env.HOME;
+  const origDb = process.env.HIVEMATRIX_DB_PATH;
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = dbPath;
+  enableChatDock(hmDir);
+  _setOpenclawDiscoveryForTests(async () => DISCOVERY_AVAILABLE);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+
+  t.after(() => {
+    _setOpenclawDiscoveryForTests(null);
+    _resetDbForTests();
+    if (origHome) process.env.HOME = origHome; else delete process.env.HOME;
+    if (origDb) process.env.HIVEMATRIX_DB_PATH = origDb; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const { port } = server.address() as AddressInfo;
+
+  const res = await fetch(`http://127.0.0.1:${port}/openclaw/status`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.enabled, true, "enabled must be true when flag on and gateway reachable");
+  assert.equal(body.flagEnabled, true, "flagEnabled must be true");
+  assert.equal(body.installed, true, "installed must be true");
+  assert.equal(body.available, true, "available must be true");
+  assert.ok(body.gateway && (body.gateway as Record<string, unknown>).reachable === true, "gateway.reachable must be true");
+  assert.equal(body.reason, null, "reason must be null on success");
+});
+
+test("GET /openclaw/status: enabled:true but available:false when gateway is not reachable", async (t) => {
+  // 'Installed but gateway down' state: the flag is on, the binary exists, but the gateway
+  // is not running. The dock init logic reads:
+  //   enabled:true  → binary exists, don't show "not installed" panel
+  //   available:false → gateway down, show "gateway unreachable" warn panel
+  // Neither value should be absent — the dock needs both to pick the right panel.
+  const { tmp, hmDir, dbPath } = setupTmp("status-unreachable");
+  const origHome = process.env.HOME;
+  const origDb = process.env.HIVEMATRIX_DB_PATH;
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = dbPath;
+  enableChatDock(hmDir);
+  _setOpenclawDiscoveryForTests(async () => DISCOVERY_UNREACHABLE);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+
+  t.after(() => {
+    _setOpenclawDiscoveryForTests(null);
+    _resetDbForTests();
+    if (origHome) process.env.HOME = origHome; else delete process.env.HOME;
+    if (origDb) process.env.HIVEMATRIX_DB_PATH = origDb; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const { port } = server.address() as AddressInfo;
+
+  const res = await fetch(`http://127.0.0.1:${port}/openclaw/status`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  // enabled = installed AND flagEnabled — binary exists and flag is on, so enabled is true.
+  // The dock uses enabled to distinguish "not installed" from "installed, gateway down".
+  assert.equal(body.flagEnabled, true, "flagEnabled must be true — flag is on, so dock should show");
+  assert.equal(body.enabled, true, "enabled must be true — binary exists and flag is on");
+  assert.equal(body.installed, true, "installed must be true — binary exists");
+  // available:false is the signal the dock uses to show the 'gateway unreachable' warn panel.
+  assert.equal(body.available, false, "available must be false — gateway is down");
+  assert.ok(typeof body.reason === "string" && body.reason.length > 0, "reason explains the unavailability");
+  // Gateway field present but reachable:false — dock shows unavailable panel, not a hidden dock.
+  const gw = body.gateway as Record<string, unknown> | null;
+  assert.ok(gw !== null, "gateway field must be present");
+  assert.equal(gw?.reachable, false, "gateway.reachable must be false");
 });

@@ -184,7 +184,46 @@ function itemStartStatus(mode: IntakeMode): PackageStatus {
   return mode === "hold" ? "held" : "draft";
 }
 
+const ACTIVE_PACKAGE_STATUSES = new Set<PackageStatus>(["draft", "held", "ready", "running", "review"]);
+
+function itemEquivalent(existing: WorkPackageItem, proposed: ProposedItem): boolean {
+  return existing.title === scrubSecretText(proposed.title)
+    && existing.prompt === scrubSecretText(proposed.prompt)
+    && existing.risk === proposed.risk
+    && existing.executionMode === proposed.executionMode
+    && JSON.stringify(existing.scopeHints) === JSON.stringify(proposed.scopeHints.map((s) => scrubSecretText(s)));
+}
+
+function findEquivalentActivePackage(input: CreateWorkPackageInput): WorkPackageDetail | null {
+  const db = getDb();
+  const title = scrubSecretText(input.title);
+  const description = scrubSecretText(input.description ?? "");
+  const project = input.project ?? "hivematrix";
+  const projectPath = input.projectPath ?? "";
+  const rows = db.prepare(`
+    SELECT *
+    FROM work_packages
+    WHERE title = ?
+      AND description = ?
+      AND project = ?
+      AND projectPath = ?
+    ORDER BY createdAt DESC
+  `).all(title, description, project, projectPath) as PackageRow[];
+
+  for (const row of rows) {
+    if (!ACTIVE_PACKAGE_STATUSES.has(row.status as PackageStatus)) continue;
+    const detail = getWorkPackage(row._id);
+    if (!detail || detail.items.length !== input.items.length) continue;
+    const sameItems = detail.items.every((item, idx) => itemEquivalent(item, input.items[idx]));
+    if (sameItems) return detail;
+  }
+  return null;
+}
+
 export function createWorkPackage(input: CreateWorkPackageInput): WorkPackageDetail {
+  const existing = findEquivalentActivePackage(input);
+  if (existing) return existing;
+
   const db = getDb();
   const id = generateId();
   const status = input.status ?? "draft";

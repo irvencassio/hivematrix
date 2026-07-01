@@ -355,7 +355,7 @@ export function createDaemonServer() {
         const theme = getThemeSettings();
         const localEngine = await localEngineStatus();
         const localEngineCap = localEngineCapability();
-        const { getLocation, getAutoUpdate, getAppIconChoice, getFrontierProvider, getRoleModels } = await import("@/lib/models/available");
+        const { getLocation, getAutoUpdate, getAppIconChoice, getFrontierProvider, getRoleModelsForDisplay } = await import("@/lib/models/available");
         json(res, 200, {
           backends,
           localEngine,
@@ -371,7 +371,7 @@ export function createDaemonServer() {
           autoUpdate: getAutoUpdate(),
           appIconChoice: getAppIconChoice(),
           frontierProvider: getFrontierProvider(),
-          roleModels: getRoleModels(),
+          roleModels: getRoleModelsForDisplay(),
           roleModelOptions: buildRoleModelOptions(backends),
           embeddings: getEmbeddingsConfig(),
           embeddingModelChoices: embeddingModelChoices(),
@@ -1026,7 +1026,7 @@ export function createDaemonServer() {
         const flagEnabled = isFeatureEnabled("openclaw.chatDock");
         // Force flag off when OpenClaw is not installed — the feature cannot function.
         const enabled = discovery.installed ? flagEnabled : false;
-        json(res, 200, { ...discovery, enabled });
+        json(res, 200, { ...discovery, enabled, flagEnabled });
         return;
       }
 

@@ -6,6 +6,8 @@
 const HISTORY_LIMIT_DEFAULT = 50;
 const HISTORY_LIMIT_MAX = 200;
 const GATEWAY_OP_TIMEOUT_MS = 10_000;
+const VOICE_POLL_INTERVAL_MS = 1_000;
+const VOICE_POLL_MAX_ATTEMPTS = 30;
 
 export interface ChatMessage {
   id: string;
@@ -281,6 +283,65 @@ export async function injectChatMessage(opts: {
     messageId,
     reason: null,
   };
+}
+
+export interface PollAssistantReplyResult {
+  found: boolean;
+  text: string | null;
+  reason: string | null;
+}
+
+/**
+ * Poll chat history until an assistant message appears at or after sentAfter, or
+ * maxAttempts × pollIntervalMs elapses. Designed for the voice return path:
+ * send a message to Vale/OpenClaw, then watch for the assistant's answer.
+ * Returns found:false with a reason on timeout or gateway failure.
+ */
+export async function pollForAssistantReply(opts: {
+  gatewayUrl: string;
+  sessionKey?: string;
+  sentAfter: string;
+  pollIntervalMs?: number;
+  maxAttempts?: number;
+  _wsFactory?: WsFactory;
+  _timeoutMs?: number;
+}): Promise<PollAssistantReplyResult> {
+  const sessionKey = opts.sessionKey?.trim() || "agent:main:main";
+  const intervalMs = opts.pollIntervalMs ?? VOICE_POLL_INTERVAL_MS;
+  const maxAttempts = opts.maxAttempts ?? VOICE_POLL_MAX_ATTEMPTS;
+  const sentTime = Date.parse(opts.sentAfter);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+    }
+
+    const history = await fetchChatHistory({
+      gatewayUrl: opts.gatewayUrl,
+      sessionKey,
+      limit: 20,
+      _wsFactory: opts._wsFactory,
+      _timeoutMs: opts._timeoutMs,
+    });
+
+    if (!history.ok && !history.available) {
+      return { found: false, text: null, reason: history.reason ?? "OpenClaw Gateway is not reachable." };
+    }
+
+    // Find the earliest assistant message at or after sentAfter.
+    const candidates = history.messages.filter((m) => {
+      if (m.role !== "assistant") return false;
+      if (!m.timestamp) return false;
+      return Date.parse(m.timestamp) >= sentTime;
+    });
+
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => Date.parse(a.timestamp!) - Date.parse(b.timestamp!));
+      return { found: true, text: candidates[0].content || null, reason: null };
+    }
+  }
+
+  return { found: false, text: null, reason: "OpenClaw response timed out." };
 }
 
 /**

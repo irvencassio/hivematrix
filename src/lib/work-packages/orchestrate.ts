@@ -192,7 +192,7 @@ export async function reconcileWorkPackage(id: string): Promise<void> {
     const next: PackageStatus = (raw === "archived" && (item.status === "running" || item.status === "review"))
       ? "done"
       : raw;
-    if (next === item.status) continue;
+    if (next === item.status && next !== "review") continue;
     const output = (task as Record<string, unknown>).output;
     const commitHash = output && typeof output === "object" ? (output as Record<string, unknown>).commitHash : undefined;
     const error = (task as Record<string, unknown>).error;
@@ -212,14 +212,17 @@ export async function reconcileWorkPackage(id: string): Promise<void> {
       newBlocker = null;
     }
     // Auto-land: bypass manual approval for low-risk, clean, question-free review items.
-    // Only fires on the normal running→review completion path. Failed items salvaged
-    // to review by the operator are intentionally managed — never auto-landed.
+    // Fires on the normal running→review completion path and on already-review
+    // items during repair/reconcile. Failed items salvaged to review by the operator
+    // are intentionally managed — never auto-landed.
     // Uses effective blocker (newBlocker) to catch parent-decision blockers extracted above.
     let effectiveNext = next;
-    if (next === "review" && item.status === "running") {
+    if (next === "review" && (item.status === "running" || item.status === "review")) {
       const actualTaskStatus = String((task as Record<string, unknown>).status);
       const rawReviewState = (task as Record<string, unknown>).reviewState;
-      const taskReviewState = typeof rawReviewState === "string" && rawReviewState.length > 0 ? rawReviewState : null;
+      const taskReviewState = typeof rawReviewState === "string" && rawReviewState.length > 0 && rawReviewState !== "ready_for_review"
+        ? rawReviewState
+        : null;
       const loop = getLoop(id);
       const { autoLand } = shouldAutoLand(
         { ...item, blocker: newBlocker },
@@ -236,6 +239,7 @@ export async function reconcileWorkPackage(id: string): Promise<void> {
         console.info(`[work-packages] auto-landed item ${item.id}: low-risk clean completion`);
       }
     }
+    if (effectiveNext === item.status && newBlocker === item.blocker) continue;
     db.prepare(
       "UPDATE work_package_items SET status = ?, commitHash = COALESCE(?, commitHash), blocker = ?, updatedAt = ? WHERE _id = ?",
     ).run(

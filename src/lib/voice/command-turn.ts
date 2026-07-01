@@ -29,6 +29,18 @@ import type { DirectiveRow } from "@/lib/orchestrator/directive-store";
 
 interface VoiceTaskRef { _id: string; title: string }
 interface VoiceDirectiveRef { _id?: string; goal: string; status: string }
+interface OpenClawVoiceRequest { assistant: "vale" | "openclaw"; prompt: string; sessionKey: string }
+interface OpenClawVoiceResult {
+  ok: boolean;
+  available: boolean;
+  sessionKey: string;
+  runId: string | null;
+  reason: string | null;
+  /** Populated by the real impl so the handler can start async polling. Absent from test stubs. */
+  gatewayUrl?: string | null;
+  /** ISO timestamp when the message was sent — cursor for reply polling. */
+  sentAt?: string;
+}
 
 export interface CommandTurnOverride {
   reply: string;
@@ -51,6 +63,11 @@ export interface CommandTurnDeps {
   getMetrics?: () => Promise<Record<string, unknown>>;
   getBrowserReadiness?: () => Promise<BriefingBrowserReadiness | null> | BriefingBrowserReadiness | null;
   getWorkflowInbox?: () => Promise<BriefingWorkflowInbox | null> | BriefingWorkflowInbox | null;
+  askOpenClaw?: (request: OpenClawVoiceRequest) => Promise<OpenClawVoiceResult>;
+  /** Poll for the next OpenClaw assistant reply after sentAfter. */
+  pollOpenClawReply?: (opts: { gatewayUrl: string; sessionKey: string; sentAfter: string }) => Promise<{ found: boolean; text: string | null; reason: string | null }>;
+  /** Broadcast a named SSE event to connected clients (e.g. voice:result). */
+  broadcast?: (event: string, data: unknown) => void;
   /** Operator location from HiveMatrix settings (Personalization). Never agent memory. */
   getLocation?: () => string | null | undefined;
   fetchWeather?: (location: string, when: WeatherWhen) => Promise<WeatherResult>;
@@ -286,6 +303,35 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
       contextStore.update(sessionId, (ctx) => rememberLastTask(ctx, task._id));
       return r(`I queued a Mail Lane deletion review for ${intent.mailDelete.query}. No email has been deleted.`, task._id);
     }
+    case "openclawAsk": {
+      if (!intent.openclaw) return null;
+      const { assistant } = intent.openclaw;
+      const result = await askOpenClaw(deps, intent.openclaw);
+      const displayName = assistant === "vale" ? "Vale" : "OpenClaw";
+      if (!result.ok) {
+        return r(
+          `I couldn't reach ${displayName}: ${result.reason ?? "OpenClaw is unavailable."}`,
+          undefined,
+          `openclaw:${assistant}:unavailable`,
+        );
+      }
+      // Async path: poll for Vale's reply in the background and broadcast voice:result when ready.
+      if (result.gatewayUrl && result.sentAt) {
+        void deliverOpenClawReply({
+          deps,
+          sessionId,
+          gatewayUrl: result.gatewayUrl,
+          sessionKey: result.sessionKey,
+          sentAfter: result.sentAt,
+          assistant,
+        });
+      }
+      return r(
+        `I asked ${displayName}. I'll read it back when it's ready.`,
+        undefined,
+        `openclaw:${assistant}:${result.runId ?? "sent"}`,
+      );
+    }
     case "weather": {
       const when = intent.weatherWhen ?? "today";
       const location = (intent.weatherCity || "").trim() || await operatorLocation(deps);
@@ -365,6 +411,109 @@ async function operatorLocation(deps: CommandTurnDeps): Promise<string> {
 async function fetchWeather(deps: CommandTurnDeps, location: string, when: WeatherWhen): Promise<WeatherResult> {
   if (deps.fetchWeather) return deps.fetchWeather(location, when);
   return getWeather(location, when);
+}
+
+/** Voice preface so Vale answers concisely for spoken delivery. */
+function openclawVoiceMessage(prompt: string): string {
+  return `The operator asked by voice through HiveMatrix. Answer concisely because the response may be spoken aloud. If you need email access, use the available OpenClaw/HiveMatrix lane tools or browser workflow rather than asking the operator to manually summarize. Request: ${prompt}`;
+}
+
+async function askOpenClaw(deps: CommandTurnDeps, request: OpenClawVoiceRequest): Promise<OpenClawVoiceResult> {
+  if (deps.askOpenClaw) return deps.askOpenClaw(request);
+
+  const { isFeatureEnabled } = await import("@/lib/config/features");
+  if (!isFeatureEnabled("openclaw.chatDock")) {
+    return {
+      ok: false,
+      available: false,
+      sessionKey: request.sessionKey,
+      runId: null,
+      reason: "OpenClaw Chat Dock is disabled.",
+    };
+  }
+
+  const { discoverOpenclaw } = await import("@/lib/openclaw/discovery");
+  const discovery = await discoverOpenclaw();
+  if (!discovery.available || !discovery.gateway) {
+    return {
+      ok: false,
+      available: false,
+      sessionKey: request.sessionKey,
+      runId: null,
+      reason: discovery.reason ?? "OpenClaw Gateway is not reachable.",
+    };
+  }
+
+  const { sendChatMessage } = await import("@/lib/openclaw/bridge");
+  const sentAt = new Date().toISOString();
+  const message = openclawVoiceMessage(request.prompt);
+  const sendResult = await sendChatMessage({
+    gatewayUrl: discovery.gateway.url,
+    sessionKey: request.sessionKey,
+    message,
+  });
+  return { ...sendResult, gatewayUrl: discovery.gateway.url, sentAt };
+}
+
+const MAX_SPOKEN_OPENCLAW_CHARS = 600;
+
+/** Cap and clean OpenClaw text for spoken delivery. */
+function capOpenClawText(text: string): string {
+  const clean = text.replace(/[*_`#>]/g, "").replace(/\s+/g, " ").trim();
+  return clean.length > MAX_SPOKEN_OPENCLAW_CHARS
+    ? clean.slice(0, MAX_SPOKEN_OPENCLAW_CHARS - 1).trimEnd() + "…"
+    : clean;
+}
+
+function defaultOpenClawBroadcast(event: string, data: unknown): void {
+  void import("@/lib/ws/broadcaster").then(({ broadcastEvent }) => broadcastEvent(event, data));
+}
+
+async function pollOpenClaw(
+  deps: CommandTurnDeps,
+  opts: { gatewayUrl: string; sessionKey: string; sentAfter: string },
+): Promise<{ found: boolean; text: string | null; reason: string | null }> {
+  if (deps.pollOpenClawReply) return deps.pollOpenClawReply(opts);
+  const { pollForAssistantReply } = await import("@/lib/openclaw/bridge");
+  return pollForAssistantReply(opts);
+}
+
+/**
+ * Background async path: poll for the assistant reply after sending, then
+ * synthesize and broadcast voice:result. Never throws — voice turn already acked.
+ */
+async function deliverOpenClawReply(opts: {
+  deps: CommandTurnDeps;
+  sessionId: string;
+  gatewayUrl: string;
+  sessionKey: string;
+  sentAfter: string;
+  assistant: "vale" | "openclaw";
+}): Promise<void> {
+  const { deps, sessionId, gatewayUrl, sessionKey, sentAfter, assistant } = opts;
+  const displayName = assistant === "vale" ? "Vale" : "OpenClaw";
+  let pollResult: { found: boolean; text: string | null; reason: string | null };
+  try {
+    pollResult = await pollOpenClaw(deps, { gatewayUrl, sessionKey, sentAfter });
+  } catch (e) {
+    pollResult = { found: false, text: null, reason: e instanceof Error ? e.message : "poll failed" };
+  }
+
+  const raw = pollResult.found && pollResult.text ? pollResult.text : null;
+  const text = raw
+    ? capOpenClawText(raw)
+    : `${displayName} didn't respond in time. Check the OpenClaw Chat Dock for details.`;
+
+  let audioBase64 = "";
+  try {
+    const path = deps.synthesize
+      ? await deps.synthesize(text)
+      : (await synthesizeSpeech(text)).path;
+    audioBase64 = path ? readFileSync(path).toString("base64") : "";
+  } catch { /* speak-less fallback */ }
+
+  const broadcastFn = deps.broadcast ?? defaultOpenClawBroadcast;
+  broadcastFn("voice:result", { sessionId, text, audioBase64, ok: pollResult.found });
 }
 
 async function boardCounts(): Promise<Record<string, number>> {

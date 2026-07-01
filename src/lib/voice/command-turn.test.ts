@@ -135,6 +135,119 @@ test("commandTurnOverride queues Mail Lane delete requests for review and does n
   assert.doesNotMatch(JSON.stringify(created[0]), /password|secret|token|cookie/i);
 });
 
+test("commandTurnOverride routes ask Vale requests to OpenClaw with the wake phrase stripped", async () => {
+  const calls: Array<{ assistant: string; prompt: string; sessionKey: string }> = [];
+  const out = await commandTurnOverride("ask Vale to summarize today's email", {
+    sessionId: "vale-openclaw",
+    synthesize: async () => "",
+    askOpenClaw: async (request) => {
+      calls.push(request);
+      return { ok: true, available: true, sessionKey: request.sessionKey, runId: "run-vale", reason: null };
+    },
+  });
+
+  assert.ok(out);
+  assert.equal(out?.command.kind, "openclawAsk");
+  assert.equal(out?.command.detail, "openclaw:vale:run-vale");
+  assert.match(out?.reply ?? "", /asked Vale/i);
+  assert.deepEqual(calls, [{
+    assistant: "vale",
+    prompt: "summarize today's email",
+    sessionKey: "agent:main:main",
+  }]);
+});
+
+test("commandTurnOverride returns a spoken OpenClaw unavailable reply", async () => {
+  const out = await commandTurnOverride("hey OpenClaw, summarize today's email", {
+    sessionId: "openclaw-unavailable",
+    synthesize: async () => "",
+    askOpenClaw: async (request) => ({
+      ok: false,
+      available: false,
+      sessionKey: request.sessionKey,
+      runId: null,
+      reason: "OpenClaw Gateway is not reachable.",
+    }),
+  });
+
+  assert.ok(out);
+  assert.equal(out?.command.kind, "openclawAsk");
+  assert.equal(out?.command.detail, "openclaw:openclaw:unavailable");
+  assert.match(out?.reply ?? "", /couldn't reach OpenClaw/i);
+  assert.match(out?.reply ?? "", /Gateway is not reachable/i);
+});
+
+test("commandTurnOverride broadcasts voice:result when Vale reply arrives asynchronously", async () => {
+  const broadcasts: Array<{ event: string; data: unknown }> = [];
+  const sentAt = new Date().toISOString();
+
+  const out = await commandTurnOverride("ask Vale to summarize today's email", {
+    sessionId: "vale-async",
+    synthesize: async () => "",
+    askOpenClaw: async (request) => ({
+      ok: true,
+      available: true,
+      sessionKey: request.sessionKey,
+      runId: "run-async",
+      reason: null,
+      gatewayUrl: "ws://127.0.0.1:18789",
+      sentAt,
+    }),
+    pollOpenClawReply: async () => ({
+      found: true,
+      text: "You have 5 emails from today. The most important is from your manager.",
+      reason: null,
+    }),
+    broadcast: (event, data) => broadcasts.push({ event, data }),
+  });
+
+  // Immediate ack — voice turn completes synchronously
+  assert.ok(out);
+  assert.equal(out?.command.kind, "openclawAsk");
+  assert.match(out?.reply ?? "", /asked Vale/i);
+  assert.match(out?.reply ?? "", /read it back/i);
+
+  // Wait for the async delivery microtasks to drain
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(broadcasts.length, 1);
+  assert.equal(broadcasts[0].event, "voice:result");
+  const data = broadcasts[0].data as Record<string, unknown>;
+  assert.equal(data.sessionId, "vale-async");
+  assert.equal(data.ok, true);
+  assert.match(String(data.text), /email/i);
+  assert.equal(typeof data.audioBase64, "string");
+});
+
+test("commandTurnOverride broadcasts voice:result timeout message when Vale does not respond", async () => {
+  const broadcasts: Array<{ event: string; data: unknown }> = [];
+  const sentAt = new Date().toISOString();
+
+  await commandTurnOverride("hey Vale, check my schedule", {
+    sessionId: "vale-timeout",
+    synthesize: async () => "",
+    askOpenClaw: async (request) => ({
+      ok: true,
+      available: true,
+      sessionKey: request.sessionKey,
+      runId: "run-timeout",
+      reason: null,
+      gatewayUrl: "ws://127.0.0.1:18789",
+      sentAt,
+    }),
+    pollOpenClawReply: async () => ({ found: false, text: null, reason: "OpenClaw response timed out." }),
+    broadcast: (event, data) => broadcasts.push({ event, data }),
+  });
+
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(broadcasts.length, 1);
+  assert.equal(broadcasts[0].event, "voice:result");
+  const data = broadcasts[0].data as Record<string, unknown>;
+  assert.equal(data.ok, false);
+  assert.match(String(data.text), /didn't respond/i);
+});
+
 test("commandTurnOverride creates a delayed HiveMatrix task for time-specific reminders", async () => {
   const created: Record<string, unknown>[] = [];
   const now = new Date("2026-06-30T21:29:00.000Z"); // 5:29 PM America/New_York on this machine
