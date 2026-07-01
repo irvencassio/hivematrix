@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.117", date: "2026-07-01", note: "7-day usage bar green-red pacing" },
   { version: "0.1.116", date: "2026-07-01", note: "ship OpenClaw center pane" },
   { version: "0.1.115", date: "2026-07-01", note: "refresh desktop auto-update release" },
   { version: "0.1.114", date: "2026-07-01", note: "Fix Vale voice bridge and Flight duplication" },
