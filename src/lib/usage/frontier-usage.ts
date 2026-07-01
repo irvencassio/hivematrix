@@ -6,7 +6,7 @@
  */
 
 import { Task } from "@/lib/db";
-import { MODEL_SHORT_NAMES } from "@/lib/models/catalog";
+import { MODEL_SHORT_NAMES, claudeShortName } from "@/lib/models/catalog";
 import {
   getSubscriptionRemainingDetailed,
   type SubscriptionUsage,
@@ -41,7 +41,7 @@ export interface FrontierUsage {
 
 /** A model id that bills (frontier) vs. local Qwen / image models (free). */
 export function isFrontierModel(modelId: string): boolean {
-  return /^(claude|gpt|o[0-9]|codex)/i.test(modelId);
+  return /^(claude|gpt|o[0-9]|codex|opus$|sonnet$|haiku$)/i.test(modelId);
 }
 
 interface TaskOutput {
@@ -96,7 +96,7 @@ export async function getFrontierUsage(options: FrontierUsageOptions = {}): Prom
     // Attribute the task's cost to the first frontier model it used (avoids
     // double-counting when a task touched more than one).
     const primary = frontier[0];
-    const row = byModel.get(primary) ?? { modelId: primary, label: MODEL_SHORT_NAMES[primary] ?? primary, tasks: 0, cost: 0 };
+    const row = byModel.get(primary) ?? { modelId: primary, label: claudeShortName(primary) ?? MODEL_SHORT_NAMES[primary] ?? primary, tasks: 0, cost: 0 };
     row.tasks += 1;
     row.cost += cost;
     byModel.set(primary, row);

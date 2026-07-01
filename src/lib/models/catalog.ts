@@ -22,9 +22,11 @@ export interface ModelDef {
 export const CODEX_MODEL_PREFIX = "codex:";
 
 export const MODEL_OPTIONS: ModelDef[] = [
-  { value: "opus", label: "Opus", description: "Claude subscription, highest quality", modelId: "claude-opus-4-8" },
-  { value: "sonnet", label: "Sonnet", description: "Claude subscription, fast and capable", modelId: "claude-sonnet-4-6" },
-  { value: "haiku", label: "Haiku", description: "Claude subscription, lightweight tasks", modelId: "claude-haiku-4-5-20251001" },
+  // Claude models use the CLI's version-agnostic aliases ("opus"/"sonnet"/"haiku"),
+  // so selection always resolves to the latest model for that tier.
+  { value: "opus", label: "Opus", description: "Claude subscription, highest quality", modelId: "opus" },
+  { value: "sonnet", label: "Sonnet", description: "Claude subscription, fast and capable", modelId: "sonnet" },
+  { value: "haiku", label: "Haiku", description: "Claude subscription, lightweight tasks", modelId: "haiku" },
   { value: "chatgpt", label: "ChatGPT", description: "OpenAI subscription via Codex CLI", modelId: "codex:gpt-5.4", provider: "codex" },
   { value: "codex-computer-use", label: "Codex Computer Use", description: "Codex driving your screen — mouse, keyboard, screenshots", modelId: "codex:gpt-5.4-computer-use", provider: "codex" },
   { value: "nano-banana", label: "Nano Banana", description: "Image generation (cloud-ok); local mflux fallback in local-only/offline", modelId: "gemini-3.1-flash-image-preview", provider: "nanai" },
@@ -41,6 +43,20 @@ export const MODEL_SHORT_NAMES: Record<string, string> = {
   "codex:gpt-5.4": "ChatGPT",
   "codex:gpt-5.4-computer-use": "Codex CU",
 };
+
+/**
+ * Short display name for a Claude model by FAMILY, robust to version changes.
+ * Matches the bare CLI alias (what tasks now carry) and any resolved full id the
+ * CLI reports back in its stream (e.g. `claude-sonnet-5-0` → "Sonnet"). Returns
+ * null for non-Claude models so callers can fall through to other lookups.
+ */
+export function claudeShortName(modelId: string): "Opus" | "Sonnet" | "Haiku" | null {
+  const m = (modelId || "").toLowerCase().trim();
+  if (m === "opus" || m.startsWith("claude-opus")) return "Opus";
+  if (m === "sonnet" || m.startsWith("claude-sonnet")) return "Sonnet";
+  if (m === "haiku" || m.startsWith("claude-haiku")) return "Haiku";
+  return null;
+}
 
 export const CODEX_COMPUTER_USE_MODEL_ID = "codex:gpt-5.4-computer-use";
 export const NANO_BANANA_MODEL_ID = "gemini-3.1-flash-image-preview";

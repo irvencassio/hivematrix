@@ -4,10 +4,19 @@ import { isFrontierModelId, resolveWriterModel } from "./writer-role";
 
 test("isFrontierModelId distinguishes frontier vs local ids", () => {
   assert.ok(isFrontierModelId("claude-sonnet-4-6"));
+  assert.ok(isFrontierModelId("sonnet"), "bare Claude alias is frontier");
+  assert.ok(isFrontierModelId("opus"), "bare Claude alias is frontier");
   assert.ok(isFrontierModelId("codex:gpt-5.5"));
   assert.ok(isFrontierModelId("gpt-5"));
   assert.ok(!isFrontierModelId("mlx-community/Qwen3.6-35B-A3B-4bit"));
   assert.ok(!isFrontierModelId(""));
+});
+
+test("a Claude alias pick resolves to the anthropic frontier, not local", () => {
+  const w = resolveWriterModel({ canUseCloud: true, writerModel: "sonnet" });
+  assert.equal(w.provider, "anthropic");
+  assert.equal(w.modelId, "sonnet");
+  assert.equal(w.lockedLocal, false);
 });
 
 test("a local pick locks writing to local, even when cloud is available", () => {

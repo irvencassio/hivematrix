@@ -108,6 +108,19 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   html[data-wallpaper="1"] body { background-size: cover; background-position: center; background-attachment: fixed; }
   html[data-wallpaper="1"] .col, html[data-wallpaper="1"] header,
   html[data-theme="matrix"] .col, html[data-theme="matrix"] header { backdrop-filter: blur(var(--mat-wp-blur)) saturate(var(--mat-wp-sat)); -webkit-backdrop-filter: blur(var(--mat-wp-blur)) saturate(var(--mat-wp-sat)); }
+  /* Panel tint alphas scale with the opacity slider so that 0% = fully transparent */
+  html[data-wallpaper="1"] {
+    --mat-tint-alpha-chrome:  var(--mat-wp-opacity);
+    --mat-tint-alpha-regular: calc(var(--mat-wp-opacity) * 0.878);
+    --mat-tint-alpha-thick:   calc(var(--mat-wp-opacity) * 1.049);
+    --mat-tint-alpha-thin:    calc(var(--mat-wp-opacity) * 0.671);
+  }
+  html[data-theme="matrix"] {
+    --mat-tint-alpha-chrome:  var(--mat-wp-opacity);
+    --mat-tint-alpha-regular: calc(var(--mat-wp-opacity) * 1.037);
+    --mat-tint-alpha-thick:   calc(var(--mat-wp-opacity) * 1.049);
+    --mat-tint-alpha-thin:    calc(var(--mat-wp-opacity) * 0.671);
+  }
   /* ── .text-on-material ─────────────────────────────────────────────────
      Protective text treatment for section labels exposed above panel surfaces.
      Usable as a utility class; also auto-applied to known section headings
@@ -268,11 +281,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .ov-head { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; }
   .ov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px; }
   .ov-card { border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); padding: 12px 8px; text-align: center; }
+  .ov-card[onclick] { cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+  .ov-card[onclick]:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel-2)); }
   .ov-card.warn { border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); }
   .ov-card.ok { border-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
   .ov-card.err { border-color: color-mix(in srgb, var(--err) 50%, var(--border)); }
   .ov-num { font-size: 22px; font-weight: 700; line-height: 1; }
-  .new-task-panel { padding: 24px; }
+  .new-task-panel { padding: 24px; background: var(--modal-bg); }
   .new-task-panel > h2 { margin: 0 0 14px; font-size: 18px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text); }
   .new-task-panel .form { max-width: none; }
   .sk-param-area { border: 1px dashed var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
@@ -440,7 +455,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     animation: updatePulse 2s ease-in-out infinite; }
   .update-pill:hover { filter: brightness(1.08); }
   @keyframes updatePulse { 0%,100% { opacity: 1; } 50% { opacity: .72; } }
-  .overlay { position: fixed; inset: 0; background: var(--overlay-bg);
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45);
     display: flex; align-items: center; justify-content: center; z-index: 50;
     opacity: 0; visibility: hidden; pointer-events: none;
     transition: opacity .18s ease, visibility .18s; }
@@ -507,15 +522,15 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     box-shadow: var(--card-shadow); }
   .card:hover { border-color: var(--accent-2); }
   .card.sel { border-color: var(--accent); }
-  .card .t { font-weight: 600; margin-bottom: 2px; padding-right: 28px; }
+  .card .t { font-weight: 600; margin-bottom: 2px; padding-right: 58px; }
   .card .m { font-size: 11px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
   .flight-ctx { margin-top: 4px; font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .flight-ctx b { color: var(--accent); font-weight: 650; }
-  .card .card-archive { position: absolute; top: 5px; right: 6px; font-size: 17px; line-height: 1;
-    color: var(--muted); background: none; border: none; cursor: pointer; padding: 3px 6px;
-    border-radius: 4px; opacity: 0; transition: opacity .1s; }
+  .card .card-archive { position: absolute; top: 5px; right: 6px; font-size: 10.5px; font-weight: 600;
+    line-height: 1; color: var(--muted); background: none; border: 1px solid transparent;
+    cursor: pointer; padding: 3px 7px; border-radius: 4px; opacity: 0; transition: opacity .1s; letter-spacing: .2px; }
   .card:hover .card-archive { opacity: 1; }
-  .card .card-archive:hover { color: var(--accent-2); background: var(--border); }
+  .card .card-archive:hover { color: var(--accent-2); background: var(--border); border-color: var(--border); }
   .attach-row { display: flex; align-items: center; gap: 6px; }
   .attach-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .attach-chip { display: flex; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--border);
@@ -702,8 +717,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px; font-family: inherit; margin-bottom: 4px; }
   .project-search input:focus { outline: none; border-color: var(--accent); }
   .project-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
-    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-    margin-top: 2px; box-shadow: 0 8px 24px var(--overlay-bg); display: flex; flex-direction: column; }
+    background: var(--modal-bg); border: 1px solid var(--border); border-radius: 8px;
+    margin-top: 2px; box-shadow: 0 8px 24px rgba(0,0,0,.35); display: flex; flex-direction: column; }
   .project-dropdown.hidden { display: none; }
   .project-sort-row { display: flex; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .project-sort-btn { font-size: 10px; padding: 2px 8px; border-radius: 999px; cursor: pointer;
@@ -819,7 +834,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <span class="pill" id="modePill">…</span>
     </span>
     <span class="usage-pill" id="localPill" style="display:none" title="">🧠 local</span>
-    <span class="usage-pill" id="usagePill" style="display:none" title="">⚡ —</span>
     <span class="update-pill" id="updatePill" style="display:none" onclick="applyUpdate()" title="Click to install and restart">⬆ Update</span>
     <span class="hsep"></span>
     <span class="muted" id="talkStatus" style="display:none;font-size:11px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
@@ -1607,20 +1621,20 @@ function renderOverview() {
   const flightReview = flights.filter(p => p.status === "review").length;
   const flightDone = flights.filter(p => p.status === "done").length;
   const flightBlocked = flights.filter(p => ["failed", "held"].includes(p.status)).length;
-  const card = (label, val, cls, numColor) => '<div class="ov-card ' + (cls || "") + '"><div class="ov-num"' + (numColor ? ' style="color:' + numColor + '"' : '') + '>' + val + '</div><div class="ov-lbl">' + esc(label) + '</div></div>';
+  const card = (label, val, cls, numColor, action) => '<div class="ov-card ' + (cls || "") + '"' + (action ? ' onclick="' + action + '"' : '') + '><div class="ov-num"' + (numColor ? ' style="color:' + numColor + '"' : '') + '>' + val + '</div><div class="ov-lbl">' + esc(label) + '</div></div>';
   el.innerHTML = '<div class="overview">'
     + '<div class="ov-head">Overview' + (state.selectedProject ? " · " + esc(state.selectedProject) : "") + '</div>'
-    + '<div class="ov-grid">' + LANE_DEFS.map(L => card(L.label, counts[L.key], "", laneColor[L.key] || "")).join("") + '</div>'
+    + '<div class="ov-grid">' + LANE_DEFS.map(L => card(L.label, counts[L.key], "", laneColor[L.key] || "", "focusBoardLane('" + L.key + "')")).join("") + '</div>'
     + '<div class="ov-grid" style="margin-top:8px">'
     + card("scheduled", dirActive)
     + card("pending approvals", appr, appr ? "warn" : "")
     + '</div>'
     + '<div class="ov-head" style="margin-top:18px">Flights</div>'
     + '<div class="ov-grid">'
-    + card("in flight", flightActive, flightActive ? "warn" : "")
-    + card("review", flightReview, flightReview ? "ok" : "")
-    + card("landed", flightDone, flightDone ? "ok" : "")
-    + card("blocked", flightBlocked, flightBlocked ? "err" : "")
+    + card("in flight", flightActive, flightActive ? "warn" : "", "", "focusFlightsSection()")
+    + card("review", flightReview, flightReview ? "ok" : "", "", "focusFlightsSection()")
+    + card("landed", flightDone, flightDone ? "ok" : "", "", "focusFlightsSection()")
+    + card("blocked", flightBlocked, flightBlocked ? "err" : "", "", "focusFlightsSection()")
     + '</div>'
     + '<div class="ov-hint">Select a task or Flight to inspect progress — or ＋ New task to start one.</div>'
     + '</div>';
@@ -1637,6 +1651,21 @@ function showOverview() {
   renderBoard();
   renderSkillList();
   renderOverview();
+}
+function focusBoardLane(key) {
+  const allOtherKeys = LANE_DEFS.map(L => L.key).filter(k => k !== key);
+  try { localStorage.setItem("hm_lanes_collapsed", JSON.stringify(allOtherKeys)); } catch (e) { /* ignore */ }
+  const boardSec = document.getElementById("boardSec");
+  if (boardSec && !boardSec.open) boardSec.open = true;
+  renderBoard();
+  const board = document.getElementById("board");
+  if (board) board.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+function focusFlightsSection() {
+  const flightsSec = document.getElementById("flightsSec");
+  if (flightsSec && !flightsSec.open) flightsSec.open = true;
+  const rail = document.getElementById("flights_rail");
+  if (rail) rail.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 function updateOverviewNav() {
   const nav = document.getElementById("overviewNav");
@@ -2142,7 +2171,7 @@ function renderBoard() {
       + '<div class="lane-title" onclick="toggleLane(\''+L.key+'\')" title="'+(isCollapsed?'Expand':'Collapse')+' '+esc(L.label)+'">'
       + '<span class="lane-caret">'+(isCollapsed?'▸':'▾')+'</span>'+L.label+' <span class="count">'+items.length+'</span></div>'
       + (isCollapsed ? '' : items.map(t => '<div class="card'+(state.selected===t._id?' sel':'')+'" onclick="selectTask(\''+t._id+'\')">'
-          + '<button class="card-archive" title="Archive" onclick="event.stopPropagation();cardArchive(\''+t._id+'\')">⌫</button>'
+          + '<button class="card-archive" title="Archive task" onclick="event.stopPropagation();cardArchive(\''+t._id+'\')">Archive</button>'
           + '<div class="t">'+esc(t.title||t._id)+'</div>'
           + '<div class="m">'+(t.model?'<span class="badge model">'+esc(t.model)+'</span>':'')
           + (t.reviewState?'<span class="badge">'+esc(t.reviewState)+'</span>':'')
@@ -4155,7 +4184,6 @@ async function checkUsage(forceRefresh) {
     const sub = u.subscription;
     const subStatus = u.subscriptionStatus;
     const codexSubscription = u.codexSubscription;
-    const pill = document.getElementById("usagePill");
 
     // Normalize each provider's windows into {label, remaining, resetsAt} so the
     // pill, summary cards, and "worst window" all share one source of truth.
@@ -4173,36 +4201,6 @@ async function checkUsage(forceRefresh) {
     }
     const allWins = claudeWins.concat(codexWins);
 
-    if (pill) {
-      const worst = lowestWindow(allWins);
-      if (worst) {
-        // Pill mirrors the worst active frontier window across providers.
-        pill.textContent = "⚡ " + Math.round(worst.remaining) + "% · " + fmtResetsCompact(worst.resetsAt);
-        pill.style.display = "";
-        const lines = [];
-        if (sub) {
-          if (sub.fiveHour) lines.push("Claude 5-hour: " + sub.fiveHour.remaining.toFixed(1) + "% left (" + fmtResets(sub.fiveHour.resetsAt) + ")");
-          if (sub.sevenDay) lines.push("Claude 7-day:  " + sub.sevenDay.remaining.toFixed(1) + "% left (" + fmtResets(sub.sevenDay.resetsAt) + ")");
-          if (sub.sevenDayOpus) lines.push("Claude 7-day Opus: " + sub.sevenDayOpus.remaining.toFixed(1) + "% left");
-          if (sub.sevenDaySonnet) lines.push("Claude 7-day Sonnet: " + sub.sevenDaySonnet.remaining.toFixed(1) + "% left");
-        }
-        for (const w of codexWins) lines.push("Codex " + w.label + ": " + w.remaining.toFixed(1) + "% left (" + fmtResets(w.resetsAt) + ")");
-        if (u.taskCount > 0) lines.push("", "HiveMatrix: " + u.taskCount + " task(s)");
-        pill.title = lines.join("\n");
-      } else if (subStatus && subStatus.state !== "missing_credentials") {
-        const label = usagePlanLabel(subStatus);
-        pill.textContent = "⚡ " + label + " ?";
-        pill.style.display = "";
-        pill.title = (subStatus.message || "Claude subscription usage left is unavailable.")
-          + "\nHiveMatrix: " + (u.taskCount||0) + " task(s)";
-      } else {
-        // No subscription data — show task count (no dollar amounts).
-        pill.textContent = "⚡ " + (u.taskCount||0) + " task" + (u.taskCount===1?"":"s");
-        pill.style.display = u.taskCount > 0 ? "" : "none";
-        pill.title = "HiveMatrix: " + (u.taskCount||0) + " task(s)\n"
-          + (u.byModel||[]).map(m => m.label + ": " + m.tasks + " task" + (m.tasks===1?"":"s")).join("\n");
-      }
-    }
 
     // Status dot: worst-case color across all active windows.
     const statusDot = document.getElementById("usageStatusDot");
@@ -4344,7 +4342,7 @@ async function checkModels() {
     if (le && (!cap || cap.localCapable)) {
       const up = !!le.up;
       const live = (le.tiers || []).filter(t => t.healthy).map(t => t.key);
-      pill.textContent = up ? "🧠 local ●" : "🧠 local ○";
+      pill.textContent = "🧠 local";
       pill.style.display = "";
       pill.title = up
         ? "Local engine running" + (live.length ? " — " + live.join(", ") : "")
@@ -4549,7 +4547,8 @@ function applyTheme(theme, hasWallpaper) {
     const op = (models && typeof models.wallpaperOpacity === "number") ? models.wallpaperOpacity : 82;
     root.style.setProperty("--wp-opacity", op + "%");
     root.style.setProperty("--mat-wp-opacity", (op / 100).toFixed(2));
-    root.style.setProperty("--wp-blur", op > 0 ? "6px" : "0px");
+    root.style.setProperty("--mat-wp-blur", op > 0 ? "6px" : "0px");
+    root.style.setProperty("--mat-wp-sat",  op > 0 ? "160%" : "100%");
   }
   if (hasWallpaper) {
     root.dataset.wallpaper = "1";
@@ -5234,10 +5233,11 @@ async function saveRoleModel(role, modelId) {
   hmToast(role + " model saved", "ok");
 }
 function onOpacityInput(v) {
+  const op = parseInt(v, 10);
   document.getElementById("s_wp_opacity_val").textContent = v + "%";
-  document.documentElement.style.setProperty("--wp-opacity", v + "%"); // live preview
-  document.documentElement.style.setProperty("--mat-wp-opacity", (parseInt(v, 10) / 100).toFixed(2));
-  document.documentElement.style.setProperty("--wp-blur", parseInt(v, 10) > 0 ? "6px" : "0px");
+  document.documentElement.style.setProperty("--mat-wp-opacity", (op / 100).toFixed(2));
+  document.documentElement.style.setProperty("--mat-wp-blur", op > 0 ? "6px" : "0px");
+  document.documentElement.style.setProperty("--mat-wp-sat",  op > 0 ? "160%" : "100%");
 }
 async function saveOpacity(v) {
   await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ wallpaperOpacity: parseInt(v,10) }) });

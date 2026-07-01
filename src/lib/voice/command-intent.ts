@@ -32,6 +32,7 @@ export type CommandKind =
   | "browserLaneTask"  // "use Browser Lane to search/read/open ..."
   | "mailDeleteTask"   // "delete/trash email ..." — queue review, never deletes immediately
   | "weather"          // "what's the weather today" — answered inline from saved location
+  | "scheduledReminder" // "remind me at 5:35 PM to <X>" — delayed HiveMatrix task
   | "createTask"       // "create a task to <X>" / "remind me to <X>"
   | "connectivity"     // "are we online / connectivity status"
   | "setConnectivity"  // "go offline / cloud only / go local / auto"
@@ -49,6 +50,8 @@ export interface CommandIntent {
   mailDelete?: VoiceMailDeleteIntent;
   weatherWhen?: "today" | "tomorrow"; // weather
   weatherCity?: string;               // weather — inline city override
+  reminderWhenText?: string;           // scheduledReminder
+  reminderText?: string;               // scheduledReminder
 }
 
 const CITY_STOPWORDS = new Set([
@@ -90,6 +93,16 @@ export function detectWeatherIntent(text: string): CommandIntent | null {
 }
 
 const clean = (s: string) => s.replace(/[.?!,\s]+$/g, "").trim();
+
+function detectScheduledReminder(orig: string): CommandIntent | null {
+  const time = String.raw`([0-9]{1,2}(?::[0-9]{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)`;
+  const match = orig.match(new RegExp(String.raw`\bremind me\s+(?:at|for)\s+${time}\s+(?:to\s+)?(.+)$`, "i"));
+  if (!match) return null;
+  const reminderWhenText = clean(match[1]);
+  const reminderText = clean(match[2]);
+  if (!reminderWhenText || !reminderText) return null;
+  return { kind: "scheduledReminder", reminderWhenText, reminderText };
+}
 
 const ORDINAL_WORDS: Array<[string, number]> = [
   ["first", 1],
@@ -188,6 +201,9 @@ export function detectCommandIntent(text: string): CommandIntent {
 
   // --- Create task / reminder (verb forms). Match case-insensitively but extract
   // the task text from the ORIGINAL string so the title keeps its capitalization.
+  const scheduledReminder = detectScheduledReminder(orig);
+  if (scheduledReminder) return scheduledReminder;
+
   const taskMatch = orig.match(/\b(?:create|add|make|new|start|open|queue)\s+(?:a\s+|an\s+|another\s+)?task\b(?:\s+(?:to|that|for|about|:|-))?\s*(.+)$/i);
   if (taskMatch && clean(taskMatch[1])) return { kind: "createTask", taskText: clean(taskMatch[1]) };
   const remind = orig.match(/\b(?:remind me to|remember to|have the team|get someone to|make sure to)\s+(.+)$/i);

@@ -135,6 +135,35 @@ test("commandTurnOverride queues Mail Lane delete requests for review and does n
   assert.doesNotMatch(JSON.stringify(created[0]), /password|secret|token|cookie/i);
 });
 
+test("commandTurnOverride creates a delayed HiveMatrix task for time-specific reminders", async () => {
+  const created: Record<string, unknown>[] = [];
+  const now = new Date("2026-06-30T21:29:00.000Z"); // 5:29 PM America/New_York on this machine
+  const expected = new Date(now);
+  expected.setHours(17, 35, 0, 0);
+
+  const out = await commandTurnOverride("remind me at 5:35 PM to go look up something", {
+    sessionId: "scheduled-reminder",
+    now,
+    synthesize: async () => "",
+    createTask: async (payload) => {
+      created.push(payload);
+      return { _id: "task-reminder", title: String(payload.title) };
+    },
+  });
+
+  assert.ok(out);
+  assert.equal(out?.command.kind, "scheduledReminder");
+  assert.equal(out?.command.taskId, "task-reminder");
+  assert.match(out?.reply ?? "", /Scheduled reminder/i);
+  assert.equal(created.length, 1);
+  assert.equal(created[0]?.title, "Reminder: go look up something");
+  assert.equal(created[0]?.status, "backlog");
+  assert.equal(created[0]?.source, "voice");
+  assert.equal(created[0]?.delayUntil, expected.toISOString());
+  assert.match(String(created[0]?.description), /direct Voice Lane delayed reminder/i);
+  assert.doesNotMatch(String(created[0]?.description), /schedule a reminder|create_trigger|send_later/i);
+});
+
 test("commandTurnOverride answers weather inline from the saved personalization location and spawns no task", async () => {
   const created: Record<string, unknown>[] = [];
   const seen: Array<{ location: string; when: string }> = [];

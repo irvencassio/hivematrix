@@ -114,8 +114,8 @@ test("main screen usage shows no dollar amounts (counts/tokens only)", () => {
   assert.doesNotMatch(js, /HiveMatrix spend/, "no spend tooltip");
   assert.doesNotMatch(js, /No frontier spend/, "no spend placeholder");
   assert.doesNotMatch(js, /\bspent\b/, "no 'spent' labels");
-  // The Frontier Usage pill fallback shows a task count, never a dollar total.
-  assert.match(js, /pill\.textContent = "⚡ " \+ \(u\.taskCount/, "pill fallback is task count");
+  // Usage status is now shown via the usageStatusDot in the sidebar section header.
+  assert.match(CONSOLE_HTML, /id="usageStatusDot"/, "usage status dot is present in the sidebar");
 });
 
 test("observability does not surface cost (Claude-only, removed)", () => {
@@ -858,13 +858,13 @@ test("Settings Models includes configurable embedding model choices", () => {
   assert.match(js, /applyEmbeddingChoice/, "embedding preset handler present");
 });
 
-test("header usage pill shows a concise percent-and-reset summary", () => {
-  assert.match(CONSOLE_HTML, /id="usagePill"/, "header usage pill kept");
+test("usage section header has status dot, not a header pill", () => {
+  // The old usagePill (⚡) in the header was removed; usage state is now shown
+  // via the usageStatusDot coloured ● inside the Usage section summary.
+  assert.doesNotMatch(CONSOLE_HTML, /id="usagePill"/, "header usage pill removed");
+  assert.match(CONSOLE_HTML, /id="usageStatusDot"/, "usage status dot present in section summary");
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /function fmtResetsCompact\(/, "compact reset formatter present");
-  assert.match(js, /"% · "/, "pill uses the '<pct>% · <reset>' format");
-  // Regression guard: the no-subscription fallback line is preserved verbatim.
-  assert.match(js, /pill\.textContent = "⚡ " \+ \(u\.taskCount/, "task-count fallback preserved");
 });
 
 test("Usage UI introduces no dollar/cost copy", () => {
@@ -1683,7 +1683,7 @@ test("material shell: JS sets --mat-wp-opacity on the tint alpha, not on body op
 test("material shell: --mat-wp-blur is set to 0px when opacity is zero (blur follows tint)", () => {
   // When the user zeros out translucency, blur is also removed — both track together.
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /--wp-blur.*0px|0px.*--wp-blur/s);
+  assert.match(js, /--mat-wp-blur.*0px|0px.*--mat-wp-blur/s);
 });
 
 // ─── No-wallpaper mode regression: per-theme bg values unchanged ──────────────

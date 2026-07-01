@@ -32,7 +32,7 @@ function readConfig(): Record<string, unknown> {
 }
 
 function isFrontierOverride(modelId: string): boolean {
-  return /^(claude-|codex:|gpt-|o[0-9])/i.test(modelId);
+  return /^(claude-|codex:|gpt-|o[0-9]|opus$|sonnet$|haiku$)/i.test(modelId);
 }
 
 /**

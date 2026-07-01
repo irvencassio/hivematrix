@@ -38,8 +38,8 @@ test("wallpaper translucency uses --mat-wp-blur CSS variable", () => {
   );
 });
 
-test("wallpaper JS sets --wp-blur alongside --wp-opacity", () => {
-  assert.match(console_ts, /--wp-blur.*6px|6px.*--wp-blur/);
+test("wallpaper JS sets --mat-wp-blur alongside --wp-opacity", () => {
+  assert.match(console_ts, /--mat-wp-blur.*6px|6px.*--mat-wp-blur/);
   // When opacity is 0, blur is set to 0px
-  assert.match(console_ts, /--wp-blur.*0px|0px.*--wp-blur/);
+  assert.match(console_ts, /--mat-wp-blur.*0px|0px.*--mat-wp-blur/);
 });

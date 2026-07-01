@@ -26,8 +26,8 @@ Cloud-only.
 
 | Role | Tier | Concrete model (default) |
 |------|------|--------------------------|
-| **think** (thinking) | frontier-premium | **Claude Opus** (`claude-opus-4-8`, or `thinkModel` from config) |
-| **code-critical** (final coding) | frontier | **Claude Sonnet** (`claude-sonnet-4-6`, or `frontierModel` from config) |
+| **think** (thinking) | frontier-premium | **Claude Opus** (alias `opus` → latest, or `thinkModel` from config) |
+| **code-critical** (final coding) | frontier | **Claude Sonnet** (alias `sonnet` → latest, or `frontierModel` from config) |
 | **execute** (operational tasks) | local-secondary | **local Qwen** (profile `secondary` model, else `primary`) |
 | **cheap-web** | local-secondary | **local Qwen** |
 | **image** | nanai | **Nano Banana** (cloud) |
@@ -103,8 +103,8 @@ not downgraded to local (`router.ts` `RouteOptions.noLocal`).
 ```jsonc
 {
   "frontierProvider": "claude",          // or "codex"
-  "thinkModel": "claude-opus-4-8",       // optional override for think tier
-  "frontierModel": "claude-sonnet-4-6",  // optional override for code-critical; can be Opus/Sonnet/GPT-5.5/Spark/Qwen in Mixed
+  "thinkModel": "opus",                  // optional override for think tier (alias → latest; full ids like "claude-opus-4-8" still accepted)
+  "frontierModel": "sonnet",             // optional override for code-critical; can be Opus/Sonnet/GPT-5.5/Spark/Qwen in Mixed
   "operationalModel": "qwen/qwen3.6-27b", // optional override for local-secondary; can be Qwen/Spark/Sonnet
   "qwen": {
     "location": "local",                 // local | lan | public

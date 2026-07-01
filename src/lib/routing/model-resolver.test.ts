@@ -17,14 +17,14 @@ test.after(() => rmSync(TMP, { recursive: true, force: true }));
 
 test("frontier-premium uses thinkModel override, else Opus default", () => {
   writeCfg({});
-  assert.equal(resolveModelId("frontier-premium"), "claude-opus-4-8");
+  assert.equal(resolveModelId("frontier-premium"), "opus");
   writeCfg({ thinkModel: "claude-sonnet-4-6" });
   assert.equal(resolveModelId("frontier-premium"), "claude-sonnet-4-6");
 });
 
 test("frontier uses frontierModel (coding) override, else Sonnet default", () => {
   writeCfg({});
-  assert.equal(resolveModelId("frontier"), "claude-sonnet-4-6");
+  assert.equal(resolveModelId("frontier"), "sonnet");
   writeCfg({ frontierModel: "claude-opus-4-8" });
   assert.equal(resolveModelId("frontier"), "claude-opus-4-8");
 });
@@ -44,7 +44,7 @@ test("role model overrides win even when frontier provider is Codex", () => {
 test("cloud-only resolution ignores local role overrides", () => {
   writeCfg({ frontierProvider: "claude", frontierModel: "qwen/qwen3.6-27b" });
   assert.equal(resolveModelId("frontier"), "qwen/qwen3.6-27b");
-  assert.equal(resolveModelId("frontier", { noLocalOverrides: true }), "claude-sonnet-4-6");
+  assert.equal(resolveModelId("frontier", { noLocalOverrides: true }), "sonnet");
 });
 
 test("local-secondary honors operationalModel override before the Qwen profile", () => {

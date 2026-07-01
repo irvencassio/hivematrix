@@ -10,9 +10,10 @@ import { homedir } from "os";
 import { detectBackends, type BackendStatus, type BackendId } from "./backends";
 import { getLocalEngineConfig } from "./local-engine";
 
-// Pinned current frontier model IDs (2026-06).
-export const CLAUDE_OPUS_ID = "claude-opus-4-8";   // Opus 4.8
-export const CLAUDE_SONNET_ID = "claude-sonnet-4-6"; // Sonnet 4.6
+// Claude frontier models are referenced by the CLI's version-agnostic aliases,
+// so they always resolve to the latest model for the tier (no version to bump).
+export const CLAUDE_OPUS_ID = "opus";     // alias → latest Opus
+export const CLAUDE_SONNET_ID = "sonnet"; // alias → latest Sonnet
 export const CODEX_NEWEST_ID = "codex:gpt-5.5"; // GPT-5.5 (the -codex variants are API-key-only, rejected on ChatGPT subscriptions)
 export const CODEX_SPARK_ID = "codex:gpt-5.3-codex-spark"; // Spark has a separate Codex usage pool
 export const MIXED_ID = "mixed";
@@ -59,8 +60,8 @@ export function buildAvailableModels(backends: BackendStatus[] = detectBackends(
 
   const claude = by("claude");
   if (claude?.configured) {
-    models.push({ id: "claude-opus", name: "Claude Opus 4.8 (claude-opus-4-8)", modelId: CLAUDE_OPUS_ID, backend: "claude" });
-    models.push({ id: "claude-sonnet", name: "Claude Sonnet 4.6 (claude-sonnet-4-6)", modelId: CLAUDE_SONNET_ID, backend: "claude" });
+    models.push({ id: "claude-opus", name: "Claude Opus", modelId: CLAUDE_OPUS_ID, backend: "claude" });
+    models.push({ id: "claude-sonnet", name: "Claude Sonnet", modelId: CLAUDE_SONNET_ID, backend: "claude" });
   }
 
   const codex = by("codex");
@@ -280,8 +281,8 @@ export function buildRoleModelOptions(backends: BackendStatus[] = detectBackends
   const localOption = local?.configured && local.modelId
     ? roleOption(local.modelId, `Local — ${local.modelId}`, "local", "runs on this Mac")
     : null;
-  const opus = claude?.configured ? roleOption(CLAUDE_OPUS_ID, "Claude Opus 4.8", "claude") : null;
-  const sonnet = claude?.configured ? roleOption(CLAUDE_SONNET_ID, "Claude Sonnet 4.6", "claude") : null;
+  const opus = claude?.configured ? roleOption(CLAUDE_OPUS_ID, "Claude Opus", "claude") : null;
+  const sonnet = claude?.configured ? roleOption(CLAUDE_SONNET_ID, "Claude Sonnet", "claude") : null;
   const gpt55 = codex?.configured ? roleOption(CODEX_NEWEST_ID, "Codex GPT-5.5", "codex") : null;
   const spark = codex?.configured ? roleOption(CODEX_SPARK_ID, "Codex GPT-5.3 Spark", "codex", "separate coding pool") : null;
 

@@ -55,9 +55,48 @@ export interface CommandTurnDeps {
   getLocation?: () => string | null | undefined;
   fetchWeather?: (location: string, when: WeatherWhen) => Promise<WeatherResult>;
   getBoardCounts?: () => Record<string, number>;
+  now?: Date;
 }
 
 const contextStore = new RollingCommandContextStore();
+
+function parseReminderTimeTodayOrTomorrow(whenText: string, now: Date = new Date()): Date | null {
+  const m = whenText.trim().match(/^([0-9]{1,2})(?::([0-9]{2}))?\s*(a\.?m\.?|p\.?m\.?)?$/i);
+  if (!m) return null;
+
+  let hour = Number(m[1]);
+  const minute = m[2] ? Number(m[2]) : 0;
+  const meridiem = m[3]?.toLowerCase().replace(/\./g, "");
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute < 0 || minute > 59) return null;
+
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
+    if (meridiem === "pm" && hour !== 12) hour += 12;
+    if (meridiem === "am" && hour === 12) hour = 0;
+  } else if (hour < 0 || hour > 23) {
+    return null;
+  }
+
+  const target = new Date(now);
+  target.setHours(hour, minute, 0, 0);
+  if (target.getTime() <= now.getTime()) {
+    target.setDate(target.getDate() + 1);
+  }
+  return target;
+}
+
+function formatReminderAt(target: Date): string {
+  return target.toLocaleString(undefined, {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function reminderTitle(text: string): string {
+  const base = text.length > 70 ? text.slice(0, 67).trimEnd() + "..." : text;
+  return `Reminder: ${base}`;
+}
 
 /**
  * Gather the operator standup and render it to one spoken/notifiable string.
@@ -254,6 +293,35 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
       const result = await fetchWeather(deps, location, when);
       if (!result.ok) return r(`I couldn't get the weather for ${location} right now.`, undefined, "weather-error");
       return r(weatherReply(result.report), undefined, "weather");
+    }
+    case "scheduledReminder": {
+      const text = (intent.reminderText || "").trim();
+      const whenText = (intent.reminderWhenText || "").trim();
+      if (!text || !whenText) return null;
+      const target = parseReminderTimeTodayOrTomorrow(whenText, deps.now ?? new Date());
+      if (!target) return r(`I heard the reminder, but I couldn't understand the time: ${whenText}.`, undefined, "reminder-time-error");
+      const runAt = target.toISOString();
+      const title = reminderTitle(text);
+      const { DEFAULT_TASK_PROJECT } = await import("@/lib/routing/project-constants");
+      const task = await createTask(deps, {
+        title,
+        description: [
+          `Voice reminder scheduled for ${formatReminderAt(target)} (${runAt}).`,
+          "",
+          `Reminder: ${text}`,
+          "",
+          "This is a direct Voice Lane delayed reminder. HiveMatrix stores it with delayUntil so no agent needs to run until the reminder time.",
+        ].join("\n"),
+        project: DEFAULT_TASK_PROJECT,
+        projectPath: homedir(),
+        status: "backlog",
+        executor: "agent",
+        source: "voice",
+        delayUntil: runAt,
+        output: { voiceReminder: { text, whenText, runAt } },
+      });
+      contextStore.update(sessionId, (ctx) => rememberLastTask(ctx, task._id));
+      return r(`Scheduled reminder for ${formatReminderAt(target)}: ${text}.`, task._id, "scheduled-reminder");
     }
     case "createTask": {
       const text = (intent.taskText || "").trim();

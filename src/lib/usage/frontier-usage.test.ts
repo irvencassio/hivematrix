@@ -34,6 +34,8 @@ test.after(() => {
 test("isFrontierModel: bills for claude/gpt/codex, free for local qwen", () => {
   assert.equal(isFrontierModel("claude-opus-4-8"), true);
   assert.equal(isFrontierModel("claude-sonnet-4-6"), true);
+  assert.equal(isFrontierModel("sonnet"), true, "bare Claude alias bills");
+  assert.equal(isFrontierModel("opus"), true, "bare Claude alias bills");
   assert.equal(isFrontierModel("codex:gpt-5.4"), true);
   assert.equal(isFrontierModel("qwen/qwen3.6-27b"), false);
   assert.equal(isFrontierModel("nano-banana"), false);
@@ -61,8 +63,8 @@ test("getFrontierUsage aggregates cost/tokens and excludes local-only tasks", as
 });
 
 test("resolveModelId maps frontier-premium to Opus", () => {
-  assert.equal(resolveModelId("frontier-premium"), "claude-opus-4-8");
-  assert.equal(resolveModelId("frontier"), "claude-sonnet-4-6");
+  assert.equal(resolveModelId("frontier-premium"), "opus");
+  assert.equal(resolveModelId("frontier"), "sonnet");
 });
 
 test("getFrontierUsage includes Codex subscription windows when available", async () => {

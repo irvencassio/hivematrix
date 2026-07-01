@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.113 — 2026-07-01
+
+ship model routing, voice reminders, usage pacing, and console polish
+
 ## v0.1.112 — 2026-06-30
 
 ship OpenClaw chat dock and command project routing

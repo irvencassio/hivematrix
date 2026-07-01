@@ -3744,7 +3744,8 @@ export function createDaemonServer() {
         if (q.profile) { conditions.push("profile = ?"); params.push(q.profile); }
         if (q.project) { conditions.push("project = ?"); params.push(q.project); }
         const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
-        const rows = db.prepare(`SELECT * FROM tasks${where} ORDER BY position ASC LIMIT 300`).all(...params) as Array<Record<string, unknown>>;
+        const orderBy = q.status === "review" ? "updatedAt DESC" : "position ASC";
+        const rows = db.prepare(`SELECT * FROM tasks${where} ORDER BY ${orderBy} LIMIT 300`).all(...params) as Array<Record<string, unknown>>;
         json(res, 200, attachFlightContextToTasks(rows));
         return;
       }

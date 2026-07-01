@@ -64,8 +64,8 @@ test("role options expose Coding choices across Claude, Codex, and local Qwen", 
   const options = buildRoleModelOptions(backends(true, true, true));
   const coding = options.coding.map((m) => m.modelId);
   assert.deepEqual(coding, [
-    "claude-opus-4-8",
-    "claude-sonnet-4-6",
+    "opus",
+    "sonnet",
     "codex:gpt-5.5",
     "codex:gpt-5.3-codex-spark",
     "qwen/qwen3.6-27b",
@@ -78,6 +78,6 @@ test("role options expose Operational escape hatches without making them the def
   assert.deepEqual(operational, [
     "qwen/qwen3.6-27b",
     "codex:gpt-5.3-codex-spark",
-    "claude-sonnet-4-6",
+    "sonnet",
   ]);
 });

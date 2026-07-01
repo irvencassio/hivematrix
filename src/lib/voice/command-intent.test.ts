@@ -41,6 +41,19 @@ test("detects create-task and extracts the text", () => {
   assert.deepEqual(detectCommandIntent("remind me to call the bank"), { kind: "createTask", taskText: "call the bank" });
 });
 
+test("detects time-specific reminders as scheduled reminders before generic tasks", () => {
+  assert.deepEqual(detectCommandIntent("remind me at 5:35 PM to go look up something"), {
+    kind: "scheduledReminder",
+    reminderWhenText: "5:35 PM",
+    reminderText: "go look up something",
+  });
+  assert.deepEqual(detectCommandIntent("remind me at 2pm video bible idea"), {
+    kind: "scheduledReminder",
+    reminderWhenText: "2pm",
+    reminderText: "video bible idea",
+  });
+});
+
 test("detects Mail Lane delete requests without deleting immediately", () => {
   assert.deepEqual(detectCommandIntent("delete the latest email from Stripe"), {
     kind: "mailDeleteTask",

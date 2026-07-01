@@ -23,7 +23,7 @@ export interface WriterResolution {
   reason: string;
 }
 
-const FRONTIER_RE = /^(claude-|codex:|gpt-|o[0-9])/i;
+const FRONTIER_RE = /^(claude-|codex:|gpt-|o[0-9]|opus$|sonnet$|haiku$)/i;
 
 /** Pure: does this model id name a frontier (cloud) model vs a local one? */
 export function isFrontierModelId(id: string): boolean {

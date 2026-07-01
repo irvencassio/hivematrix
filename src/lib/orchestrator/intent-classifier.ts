@@ -90,7 +90,7 @@ function classifyWithCLI(description: string): string | null {
   try {
     // Use Haiku for fast, cheap classification
     const result = execSync(
-      `${JSON.stringify(binary)} -p ${JSON.stringify(prompt)} --model claude-haiku-4-5-20251001 --max-turns 1 --output-format text`,
+      `${JSON.stringify(binary)} -p ${JSON.stringify(prompt)} --model haiku --max-turns 1 --output-format text`,
       {
         encoding: "utf-8",
         timeout: CLASSIFIER_TIMEOUT_MS,
@@ -104,7 +104,7 @@ function classifyWithCLI(description: string): string | null {
 
     // Retry with Sonnet if Haiku didn't return a valid type
     const sonnetResult = execSync(
-      `${JSON.stringify(binary)} -p ${JSON.stringify(prompt)} --model claude-sonnet-4-6 --max-turns 1 --output-format text`,
+      `${JSON.stringify(binary)} -p ${JSON.stringify(prompt)} --model sonnet --max-turns 1 --output-format text`,
       {
         encoding: "utf-8",
         timeout: CLASSIFIER_TIMEOUT_MS,

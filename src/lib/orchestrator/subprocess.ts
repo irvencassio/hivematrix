@@ -19,7 +19,7 @@ import { outboundHttpRoutingPrompt, brainSearchRoutingPrompt, beeToolsRoutingPro
 import { prepareOutboundMcp } from "./outbound-mcp";
 import { spawnImageAgent } from "./image-agent";
 import { getAgentProfile } from "@/lib/config/agent-profiles";
-import { isCodexModel, isNanoBananaModel } from "@/lib/models/catalog";
+import { isCodexModel, isNanoBananaModel, claudeShortName } from "@/lib/models/catalog";
 import { claudeEffortMode, hasBudgetCeiling, normalizeBudgetUsd, resolveThinkingMode } from "@/lib/config/budget-policy";
 
 const CLAUDE_SEARCH_PATHS = [
@@ -325,7 +325,7 @@ export function buildClaudeSpawnArgs(input: {
   }
 
   const effort = claudeEffortMode(input.thinkingMode);
-  if (EFFORT_LEVELS.has(effort) && (!input.model || input.model.startsWith("claude-"))) {
+  if (EFFORT_LEVELS.has(effort) && (!input.model || claudeShortName(input.model) !== null)) {
     args.push("--effort", effort);
   }
 
