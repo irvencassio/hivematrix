@@ -139,60 +139,25 @@ function win(utilization: number, resetsInMs: number, now: number): Subscription
   return { utilization, remaining: 100 - utilization, resetsAt: new Date(now + resetsInMs).toISOString() };
 }
 
-test("classifyWindowStatus: green when utilization is on pace (50% elapsed, 40% used)", () => {
+test("classifyWindowStatus: day 7 stays green while sufficient 7-day budget remains", () => {
   const now = 0;
-  const w = win(40, SEVEN_DAY_WINDOW_MS / 2, now);
-  assert.equal(classifyWindowStatus(w, SEVEN_DAY_WINDOW_MS, now), "green");
+  assert.equal(classifyWindowStatus(win(69, 18.5 * 60 * 60 * 1000, now), SEVEN_DAY_WINDOW_MS, now), "green");
+  assert.equal(classifyWindowStatus(win(85.7, 18.5 * 60 * 60 * 1000, now), SEVEN_DAY_WINDOW_MS, now), "green");
+  assert.equal(classifyWindowStatus(win(86, 18.5 * 60 * 60 * 1000, now), SEVEN_DAY_WINDOW_MS, now), "red");
 });
 
-test("classifyWindowStatus: green when utilization is below pace (80% elapsed, 55% used)", () => {
+test("classifyWindowStatus: day 1 turns red only after the first daily allowance is exceeded", () => {
   const now = 0;
-  const w = win(55, SEVEN_DAY_WINDOW_MS * 0.2, now); // burnRatio = 55/80 = 0.69, util < 60
-  assert.equal(classifyWindowStatus(w, SEVEN_DAY_WINDOW_MS, now), "green");
+  const dayOneReset = (6 * 24 + 5) * 60 * 60 * 1000;
+  assert.equal(classifyWindowStatus(win(14, dayOneReset, now), SEVEN_DAY_WINDOW_MS, now), "green");
+  assert.equal(classifyWindowStatus(win(15, dayOneReset, now), SEVEN_DAY_WINDOW_MS, now), "red");
 });
 
-test("classifyWindowStatus: yellow when burn ratio is 1.25–1.5x pace (50% elapsed, 65% used)", () => {
+test("classifyWindowStatus: day 2 turns red only after the second daily allowance is exceeded", () => {
   const now = 0;
-  const w = win(65, SEVEN_DAY_WINDOW_MS / 2, now);
-  assert.equal(classifyWindowStatus(w, SEVEN_DAY_WINDOW_MS, now), "yellow");
-});
-
-test("classifyWindowStatus: yellow from absolute floor (60% used, well under pace)", () => {
-  const now = 0;
-  const w = win(62, SEVEN_DAY_WINDOW_MS * 0.1, now);
-  // elapsedFraction = 0.9 → expectedUtil = 90; ratio = 62/90 ≈ 0.69 — under pace
-  // but util >= 60 triggers yellow floor
-  assert.equal(classifyWindowStatus(w, SEVEN_DAY_WINDOW_MS, now), "yellow");
-});
-
-test("classifyWindowStatus: red when burn ratio >= 1.5x pace (50% elapsed, 80% used)", () => {
-  const now = 0;
-  const w = win(80, SEVEN_DAY_WINDOW_MS / 2, now);
-  assert.equal(classifyWindowStatus(w, SEVEN_DAY_WINDOW_MS, now), "red");
-});
-
-test("classifyWindowStatus: always red at 90%+ utilization regardless of pace", () => {
-  const now = 0;
-  const w = win(91, SEVEN_DAY_WINDOW_MS * 0.9, now); // 10% elapsed — very slow pace
-  assert.equal(classifyWindowStatus(w, SEVEN_DAY_WINDOW_MS, now), "red");
-});
-
-test("classifyWindowStatus: early window (<15% elapsed) — green at or below daily threshold (14%)", () => {
-  const now = 0;
-  const w = win(14, SEVEN_DAY_WINDOW_MS * 0.9, now); // 10% elapsed, 14 < 100/7 ≈ 14.29
-  assert.equal(classifyWindowStatus(w, SEVEN_DAY_WINDOW_MS, now), "green");
-});
-
-test("classifyWindowStatus: early window — red when exceeding daily threshold (15%)", () => {
-  const now = 0;
-  const w = win(15, SEVEN_DAY_WINDOW_MS * 0.9, now); // 10% elapsed, 15 > 100/7 ≈ 14.29
-  assert.equal(classifyWindowStatus(w, SEVEN_DAY_WINDOW_MS, now), "red");
-});
-
-test("classifyWindowStatus: early window — red above 50%", () => {
-  const now = 0;
-  const w = win(55, SEVEN_DAY_WINDOW_MS * 0.9, now);
-  assert.equal(classifyWindowStatus(w, SEVEN_DAY_WINDOW_MS, now), "red");
+  const dayTwoReset = (5 * 24 + 5) * 60 * 60 * 1000;
+  assert.equal(classifyWindowStatus(win(28.6, dayTwoReset, now), SEVEN_DAY_WINDOW_MS, now), "green");
+  assert.equal(classifyWindowStatus(win(29, dayTwoReset, now), SEVEN_DAY_WINDOW_MS, now), "red");
 });
 
 test("classifyWindowStatus: expired window falls back to absolute thresholds", () => {

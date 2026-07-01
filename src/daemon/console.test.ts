@@ -365,6 +365,17 @@ test("console surfaces observability: per-task strip + totals across providers",
   assert.match(js, /prov === "Codex" && !inTok && !outTok/);
 });
 
+test("Full dashboard opens dedicated Observability popup, not Settings", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // openObsDashboard must open the dedicated overlay — not Settings.
+  assert.doesNotMatch(js, /function openObsDashboard\(\)\s*\{[^}]*openSettings/, "openObsDashboard must not call openSettings");
+  assert.match(js, /function openObsDashboard\(\)\s*\{[^}]*obsOverlay/, "openObsDashboard targets obsOverlay");
+  // Dedicated popup, its container, and its dismiss handler.
+  assert.match(CONSOLE_HTML, /id="obsOverlay"/, "obsOverlay element present");
+  assert.match(CONSOLE_HTML, /id="obsDashModal"/, "obsDashModal container present");
+  assert.match(js, /function closeObsDashboard\(/, "closeObsDashboard present");
+});
+
 test("remote access UI offers both a temporary and a named (durable) tunnel with Access credentials", () => {
   // Both setup paths are present, not buried behind a collapsed disclosure.
   assert.match(CONSOLE_HTML, /Temporary tunnel/);
@@ -968,6 +979,67 @@ test("Usage UI introduces no dollar/cost copy", () => {
   const card = js.match(/function usageProviderCard\([\s\S]*?\n\}/)?.[0] ?? "";
   assert.ok(checkUsage.length > 100 && card.length > 50, "usage function bodies extracted");
   assert.doesNotMatch(checkUsage + card, /\$\d|\bcost\b/i, "no dollar amounts or cost copy in the Usage UI");
+});
+
+type UsageBarClass = (util: number, resetsAt: string, durationMs: number) => "ok" | "warn" | "hi";
+
+function consoleUsageBarClass(): UsageBarClass {
+  const js = extractScript(CONSOLE_HTML);
+  const body = js.match(/function usageBarClass\([\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(body.length > 100, "usageBarClass body extracted");
+  return new Function(body + "\nreturn usageBarClass;")() as UsageBarClass;
+}
+
+function withFrozenNow<T>(nowMs: number, run: () => T): T {
+  const original = Date.now;
+  Date.now = () => nowMs;
+  try {
+    return run();
+  } finally {
+    Date.now = original;
+  }
+}
+
+function resetIn(nowMs: number, ms: number): string {
+  return new Date(nowMs + ms).toISOString();
+}
+
+test("7-day usage bars are green on day 7 while sufficient daily budget remains", () => {
+  const cls = consoleUsageBarClass();
+  const now = Date.UTC(2026, 6, 1, 12, 0, 0);
+  const sevenDays = 7 * 24 * 60 * 60 * 1000;
+  const daySevenReset = resetIn(now, (18 * 60 + 29) * 60 * 1000);
+  withFrozenNow(now, () => {
+    assert.equal(cls(69, daySevenReset, sevenDays), "ok");
+    assert.equal(cls(85.7, daySevenReset, sevenDays), "ok");
+    assert.equal(cls(86, daySevenReset, sevenDays), "hi");
+  });
+});
+
+test("7-day usage bars turn red only after the current whole-day allowance is exceeded", () => {
+  const cls = consoleUsageBarClass();
+  const now = Date.UTC(2026, 6, 1, 12, 0, 0);
+  const hour = 60 * 60 * 1000;
+  const day = 24 * hour;
+  const sevenDays = 7 * day;
+  withFrozenNow(now, () => {
+    const dayOneReset = resetIn(now, 6 * day + 5 * hour);
+    assert.equal(cls(14, dayOneReset, sevenDays), "ok");
+    assert.equal(cls(15, dayOneReset, sevenDays), "hi");
+
+    const dayTwoReset = resetIn(now, 5 * day + 5 * hour);
+    assert.equal(cls(28.6, dayTwoReset, sevenDays), "ok");
+    assert.equal(cls(29, dayTwoReset, sevenDays), "hi");
+  });
+});
+
+test("5-hour usage bars can still use the warning color", () => {
+  const cls = consoleUsageBarClass();
+  const now = Date.UTC(2026, 6, 1, 12, 0, 0);
+  const fiveHours = 5 * 60 * 60 * 1000;
+  withFrozenNow(now, () => {
+    assert.equal(cls(65, resetIn(now, fiveHours / 2), fiveHours), "warn");
+  });
 });
 
 test("settings surfaces a real Terminal Lane readiness card with no secrets", () => {

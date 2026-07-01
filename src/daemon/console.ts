@@ -1232,6 +1232,23 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Observability full dashboard popup (opens from "Full dashboard" link, separate from Settings). -->
+<div class="overlay" id="obsOverlay">
+  <div class="modal">
+    <h1>Observability <span class="x" onclick="closeObsDashboard()">✕</span></h1>
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">
+      <span class="obs-win" id="obs_win_modal">
+        <button data-w="24h" onclick="setObsWindowModal('24h')">24h</button>
+        <button data-w="7d" class="on" onclick="setObsWindowModal('7d')">7d</button>
+        <button data-w="30d" onclick="setObsWindowModal('30d')">30d</button>
+      </span>
+      <button class="copybtn" onclick="renderObsDashboard('obsDashModal')">↻ Refresh</button>
+    </div>
+    <div class="muted" style="font-size:11px;margin-bottom:10px">Tokens, tasks, latency and prompt-cache across Claude, Codex (ChatGPT) and local Qwen. All on-device.</div>
+    <div id="obsDashModal"><div class="muted">Loading…</div></div>
+  </div>
+</div>
+
 <!-- Generic dialog (replaces native alert/confirm/prompt, which don't work in the webview). -->
 <input type="file" id="skillFileInput" accept=".md,text/markdown,.txt" style="display:none" onchange="onSkillFileBrowsed(this)" />
 <div class="overlay" id="dialogOverlay">
@@ -2799,8 +2816,10 @@ async function renderObservability() {
 }
 
 // --- Observability dashboard (full-width Settings tab) ---------------------
-function openObsDashboard() { openSettings(); switchSettingsTab("observability"); }
+function openObsDashboard() { document.getElementById("obsOverlay").classList.add("open"); renderObsDashboard("obsDashModal"); }
+function closeObsDashboard() { document.getElementById("obsOverlay").classList.remove("open"); }
 function setObsWindow(w) { _obsWindow = w; renderObsDashboard(); }
+function setObsWindowModal(w) { _obsWindow = w; renderObsDashboard("obsDashModal"); }
 function obsKpi(v, l) { return '<div class="obs-kpi"><div class="v">' + esc(String(v)) + '</div><div class="l">' + esc(l) + '</div></div>'; }
 
 // Compact number for axes/tooltips (12.3k, 4.1M).
@@ -2866,10 +2885,12 @@ function obsStackedBars(points, providers, valueFn, unit) {
   return svg + '</svg>';
 }
 
-async function renderObsDashboard() {
-  const el = document.getElementById("obsDash");
+async function renderObsDashboard(target) {
+  target = target || "obsDash";
+  const el = document.getElementById(target);
   if (!el) return;
-  document.querySelectorAll("#obs_win button").forEach(function (b) { b.classList.toggle("on", b.dataset.w === _obsWindow); });
+  const winSel = target === "obsDashModal" ? "#obs_win_modal button" : "#obs_win button";
+  document.querySelectorAll(winSel).forEach(function (b) { b.classList.toggle("on", b.dataset.w === _obsWindow); });
   el.innerHTML = '<div class="muted">Loading…</div>';
   let s, detail;
   try {
@@ -4136,6 +4157,15 @@ function usageBarClass(util, resetsAt, durationMs) {
     const now = Date.now();
     const timeUntilResetMs = new Date(resetsAt).getTime() - now;
     if (timeUntilResetMs > 0) {
+      const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+      if (Math.abs(durationMs - sevenDaysMs) < 1000) {
+        const dayMs = 24 * 60 * 60 * 1000;
+        const wholeDaysLeft = Math.min(7, Math.max(1, Math.ceil(timeUntilResetMs / dayMs)));
+        const cycleDay = 8 - wholeDaysLeft;
+        const allowedDays = Math.min(cycleDay, 6);
+        const redFloorUsedPct = Math.round((allowedDays / 7) * 1000) / 10;
+        return util <= redFloorUsedPct ? "ok" : "hi";
+      }
       if (util >= 90) return "hi";
       const elapsedMs = Math.max(0, durationMs - timeUntilResetMs);
       const elapsedFraction = elapsedMs / durationMs;

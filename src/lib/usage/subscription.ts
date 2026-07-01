@@ -49,9 +49,24 @@ export type UsageStatusColor = "green" | "yellow" | "red";
 export const FIVE_HOUR_WINDOW_MS = 5 * 60 * 60 * 1000;
 export const SEVEN_DAY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function isSevenDayWindow(windowDurationMs: number): boolean {
+  return Math.abs(windowDurationMs - SEVEN_DAY_WINDOW_MS) < 1000;
+}
+
+function classifyLiveSevenDayWindow(utilization: number, timeUntilResetMs: number): UsageStatusColor {
+  const wholeDaysLeft = Math.min(7, Math.max(1, Math.ceil(timeUntilResetMs / DAY_MS)));
+  const cycleDay = 8 - wholeDaysLeft;
+  const allowedDays = Math.min(cycleDay, 6);
+  const redFloorUsedPct = Math.round((allowedDays / 7) * 1000) / 10;
+  return utilization <= redFloorUsedPct ? "green" : "red";
+}
+
 /**
- * Classifies a subscription window as green/yellow/red using both the
- * absolute utilization and the pace relative to elapsed window time.
+ * Classifies a subscription window as green/yellow/red using window-aware pace.
+ * Live 7-day windows use whole-day green/red thresholds with no yellow state.
+ * Shorter windows keep the older burn-ratio warning behavior.
  *
  * Early in a window (< 15% elapsed) a single task spike is expected;
  * utilization above the per-unit threshold (100 / windowUnits) triggers red.
@@ -72,9 +87,15 @@ export function classifyWindowStatus(
   const resetsMs = new Date(win.resetsAt).getTime();
   const timeUntilResetMs = resetsMs - now;
 
-  if (timeUntilResetMs <= 0 || windowDurationMs <= 0) {
+  if (!Number.isFinite(timeUntilResetMs) || timeUntilResetMs <= 0 || windowDurationMs <= 0) {
     return util >= 80 ? "red" : util >= 60 ? "yellow" : "green";
   }
+
+  if (isSevenDayWindow(windowDurationMs)) {
+    return classifyLiveSevenDayWindow(util, timeUntilResetMs);
+  }
+
+  if (util >= 90) return "red";
 
   // windowUnits = number of natural periods (days for multi-day, hours for sub-day)
   const windowUnits = windowDurationMs >= 86400000
