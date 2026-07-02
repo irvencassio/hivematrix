@@ -22,12 +22,14 @@ test.after(() => {
 
 test("enables the channel and allowlists a phone (formatting-insensitive)", async () => {
   const r = await configureMessageBee({ enable: true, phone: "+1 (555) 123-4567" });
-  assert.equal(isChannelEnabled(), true);
+  const row = getDb().prepare("SELECT enabled FROM message_channels WHERE channel = 'imessage'").get() as { enabled: number };
+  assert.equal(row.enabled, 1, "stored channel preference is enabled");
+  assert.equal(isChannelEnabled(), false, "effective channel remains gated without a Pro license");
   const allow = listIdentities().filter((i) => i.status === "allowed" || i.status === "paired");
   assert.equal(allow.length, 1);
   assert.equal(allow[0].address, "+15551234567", "stored normalized to digits");
   // The returned state mirrors what the wizard renders.
-  assert.equal((r.data as { enabled: boolean }).enabled, true);
+  assert.equal((r.data as { enabled: boolean }).enabled, false);
   assert.ok(Array.isArray((r.data as { identities: unknown[] }).identities));
   assert.ok(typeof r.detail === "string" && r.detail.length > 0);
   assert.doesNotMatch(r.detail, /MessageBee/);
@@ -53,7 +55,9 @@ test("disables the channel when enable is false", async () => {
 test("rejects an invalid handle with a warning but still enables the channel", async () => {
   const r = await configureMessageBee({ enable: true, phone: "   " });
   // Whitespace-only is treated as no phone (no warning, no new identity).
-  assert.equal(isChannelEnabled(), true);
+  const row = getDb().prepare("SELECT enabled FROM message_channels WHERE channel = 'imessage'").get() as { enabled: number };
+  assert.equal(row.enabled, 1, "stored channel preference is enabled");
+  assert.equal(isChannelEnabled(), false, "effective channel remains gated without a Pro license");
   const bad = await configureMessageBee({ enable: true, phone: "###" });
   const warnings = (bad.data as { warnings?: string[] }).warnings;
   assert.ok(warnings && warnings.length === 1, "invalid handle warns");
