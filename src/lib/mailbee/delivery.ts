@@ -52,7 +52,7 @@ export function looksLikeAuthRequest(body: string): boolean {
   return authAction.test(t) && integration.test(t);
 }
 
-function replySubject(subject: string): string {
+export function replySubject(subject: string): string {
   const trimmed = subject.trim();
   if (!trimmed) return "Re: your email";
   return /^re:/i.test(trimmed) ? trimmed : `Re: ${trimmed}`;

@@ -1,15 +1,19 @@
 /**
- * Mail Lane poller — watch the inbox and turn new mail into trust-classified
- * triage tasks. Runs inside the daemon; gated by the channel being enabled.
- * Email is lower-frequency than SMS and Mail.app osascript is slow, so the
- * interval is generous.
+ * Mail Lane poller — watch the inbox and route new mail into Flash Lane (known
+ * senders) or triage tasks (unknown + triage-all). Runs inside the daemon; gated
+ * by the channel being enabled. Email is lower-frequency than SMS and Mail.app
+ * osascript is slow, so the interval is generous.
+ *
+ * The flashDispatch callback is injected by daemon/index.ts (only daemon/ imports
+ * from flash/) — falls back to a no-op if not wired.
  */
 
 import { homedir } from "os";
 import { Task } from "@/lib/db";
 import { DEFAULT_TASK_PROJECT } from "@/lib/routing/project-constants";
 import { routeEmail } from "./handoff";
-import { readInboxSince } from "./applemail";
+import { readInboxSince, sendMail } from "./applemail";
+import { looksLikeAuthRequest, replySubject } from "./delivery";
 import {
   isChannelEnabled, getLastId, setLastId, isKnownSender,
   isAuthenticatedDomain, triageAll, recordInbound, recordError,
@@ -17,13 +21,17 @@ import {
 
 const POLL_INTERVAL_MS = 30_000;
 
+/** Injected by daemon/index.ts; accepts (flashText, peer) and returns the Flash reply. */
+type FlashDispatch = (text: string, peer: string) => Promise<string>;
+let flashDispatch: FlashDispatch | null = null;
+
 export async function pollOnce(): Promise<void> {
   if (!isChannelEnabled()) return;
   try {
     const since = getLastId();
     const emails = await readInboxSince(since, 25);
     let maxId = since;
-    // Process oldest-first so task order matches arrival.
+    // Process oldest-first so session order matches arrival.
     for (const email of [...emails].sort((a, b) => a.id - b.id)) {
       maxId = Math.max(maxId, email.id);
       const route = routeEmail(email, {
@@ -31,6 +39,23 @@ export async function pollOnce(): Promise<void> {
         authenticatedDomain: isAuthenticatedDomain(email.from),
         triageAll: triageAll(),
       });
+
+      if (route.kind === "flash_turn") {
+        // Dispatch to Flash Lane; send reply via Mail Lane if trusted + no auth hallucination.
+        if (flashDispatch) {
+          try {
+            const reply = await flashDispatch(route.flashText, route.peer);
+            if (reply.trim() && route.autoSendEligible && !looksLikeAuthRequest(reply)) {
+              await sendMail(route.peer, replySubject(route.subject), reply);
+            }
+          } catch (err) {
+            recordError(`flash dispatch failed for mail from ${route.peer}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        recordInbound();
+        continue;
+      }
+
       if (route.kind !== "new_task") continue;
       await Task.create({
         title: route.title,
@@ -61,7 +86,8 @@ export async function pollOnce(): Promise<void> {
 let timer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 
-export function startMailBeePoller(intervalMs = POLL_INTERVAL_MS): () => void {
+export function startMailBeePoller(intervalMs = POLL_INTERVAL_MS, dispatch?: FlashDispatch): () => void {
+  flashDispatch = dispatch ?? null;
   if (timer) return stopMailBeePoller;
   timer = setInterval(() => {
     if (running) return;

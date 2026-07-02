@@ -9,6 +9,7 @@
 import { appendFileSync, readFileSync, readdirSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { scrubSecrets } from "../vault/redaction";
 
 export interface AuditEntry {
   ts: string;
@@ -23,6 +24,12 @@ export interface AuditEntry {
   filesChanged?: string[];
   diffStat?: string;
   turns?: number;
+}
+
+export interface RecordAuditOptions {
+  now?: () => string;
+  /** Vault canary values (and any other literal secrets) to redact from trace fields. */
+  redact?: string[];
 }
 
 const PROMPT_MAX = 4_000;
@@ -40,14 +47,16 @@ function clamp(s: string | undefined, max: number): string | undefined {
 }
 
 /** Append one audit entry as JSONL. Stamps `ts` if absent; clamps long fields. */
-export function recordAudit(entry: AuditEntry, now: () => string = () => new Date().toISOString()): void {
-  const ts = entry.ts || now();
+export function recordAudit(entry: AuditEntry, options: RecordAuditOptions = {}): void {
+  const now = options.now ?? (() => new Date().toISOString());
+  const redacted = scrubSecrets(entry, options.redact ?? []) as AuditEntry;
+  const ts = redacted.ts || now();
   const safe: AuditEntry = {
-    ...entry,
+    ...redacted,
     ts,
-    prompt: clamp(entry.prompt, PROMPT_MAX),
-    summary: clamp(entry.summary, SUMMARY_MAX),
-    diffStat: clamp(entry.diffStat, DIFF_MAX),
+    prompt: clamp(redacted.prompt, PROMPT_MAX),
+    summary: clamp(redacted.summary, SUMMARY_MAX),
+    diffStat: clamp(redacted.diffStat, DIFF_MAX),
   };
   try {
     appendFileSync(join(auditDir(), `audit-${ts.slice(0, 10)}.jsonl`), JSON.stringify(safe) + "\n");

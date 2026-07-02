@@ -205,6 +205,208 @@ export function stripThinkBlocks(text: string): { content: string; reasoning: st
   return { content: content.trimStart(), reasoning };
 }
 
+interface TextToolCall {
+  name: string;
+  arguments: string;
+}
+
+const TEXT_TOOL_NAME_ALIASES: Record<string, string> = {
+  Bash: "bash",
+  Read: "read_file",
+  Write: "write_file",
+  Edit: "edit_file",
+  Grep: "search",
+  Glob: "list_files",
+};
+
+function normalizeTextToolName(name: unknown): string | null {
+  if (typeof name !== "string") return null;
+  return TEXT_TOOL_NAME_ALIASES[name] ?? name;
+}
+
+function normalizeTextToolPath(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed.startsWith("/home/user/hivematrix/")) {
+    return trimmed.slice("/home/user/hivematrix/".length);
+  }
+  if (trimmed === "/home/user/hivematrix") return ".";
+  return trimmed === "~" || trimmed === "." ? "." : trimmed;
+}
+
+function escapeRegexTerm(term: string): string {
+  return term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function searchPatternFromTextQuery(query: string): string {
+  const decoded = (() => {
+    try {
+      return decodeURIComponent(query.replace(/\+/g, " "));
+    } catch {
+      return query;
+    }
+  })();
+  const terms = decoded
+    .split(/[\s,/]+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2)
+    .map(escapeRegexTerm);
+  return terms.length ? terms.join("|") : escapeRegexTerm(decoded.trim());
+}
+
+function readBalancedJsonObject(text: string, start: number): { raw: string; end: number } | null {
+  if (text[start] !== "{") return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === "\"") {
+      inString = true;
+    } else if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        return { raw: text.slice(start, i + 1), end: i + 1 };
+      }
+    }
+  }
+  return null;
+}
+
+export function extractTextToolCalls(text: string): { content: string; toolCalls: TextToolCall[] } {
+  const marker = "..TOOL";
+  const toolCalls: TextToolCall[] = [];
+  let content = "";
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const markerAt = text.indexOf(marker, cursor);
+    if (markerAt === -1) {
+      content += text.slice(cursor);
+      break;
+    }
+
+    const objectStart = text.indexOf("{", markerAt + marker.length);
+    if (objectStart === -1) {
+      content += text.slice(cursor);
+      break;
+    }
+
+    const parsedObject = readBalancedJsonObject(text, objectStart);
+    if (!parsedObject) {
+      content += text.slice(cursor);
+      break;
+    }
+
+    content += text.slice(cursor, markerAt);
+    cursor = parsedObject.end;
+
+    try {
+      const payload = JSON.parse(parsedObject.raw) as Record<string, unknown>;
+      const name = normalizeTextToolName(payload.name);
+      const args = payload.args && typeof payload.args === "object"
+        ? payload.args
+        : {};
+      if (name) {
+        toolCalls.push({ name, arguments: JSON.stringify(args) });
+      }
+    } catch {
+      content += text.slice(markerAt, parsedObject.end);
+    }
+  }
+
+  content = content.replace(
+    /^\s*\[find\]\s+path:\s+`([^`]+)`,\s+regex:\s+`([^`]+)`\s*$/gm,
+    (_match, path: string, pattern: string) => {
+      toolCalls.push({
+        name: "search",
+        arguments: JSON.stringify({ path: normalizeTextToolPath(path), pattern }),
+      });
+      return "";
+    }
+  );
+
+  content = content.replace(
+    /\[~\{type:'bash',\s*cmd:'((?:\\'|[^'])*)',\s*out:'true'\}\]/g,
+    (_match, command: string) => {
+      toolCalls.push({
+        name: "bash",
+        arguments: JSON.stringify({ command: command.replace(/\\'/g, "'") }),
+      });
+      return "";
+    }
+  );
+
+  content = content.replace(
+    /\[brain_search\?q=([^\]\n]+)\]/g,
+    (_match, query: string) => {
+      toolCalls.push({
+        name: "search",
+        arguments: JSON.stringify({ path: ".", pattern: searchPatternFromTextQuery(query) }),
+      });
+      return "";
+    }
+  );
+
+  content = content.replace(
+    /\[brain_search\]\s*q:([^\n]+)/g,
+    (_match, query: string) => {
+      toolCalls.push({
+        name: "search",
+        arguments: JSON.stringify({ path: ".", pattern: searchPatternFromTextQuery(query) }),
+      });
+      return "";
+    }
+  );
+
+  content = content.replace(
+    /```(?:bash|sh|zsh|shell)\s*\n([\s\S]*?)```/g,
+    (_match, command: string) => {
+      const trimmed = command.trim();
+      if (!trimmed) return "";
+      const readFile = trimmed.match(/^read\s+file\s+(.+)$/i);
+      if (readFile) {
+        toolCalls.push({
+          name: "read_file",
+          arguments: JSON.stringify({ path: readFile[1].trim() }),
+        });
+        return "";
+      }
+      toolCalls.push({
+        name: "bash",
+        arguments: JSON.stringify({ command: trimmed }),
+      });
+      return "";
+    }
+  );
+
+  content = content.replace(
+    /```python\s*\n\s*read_file\(path=(["'])(.*?)\1\)\s*```/g,
+    (_match, _quote: string, path: string) => {
+      toolCalls.push({
+        name: "read_file",
+        arguments: JSON.stringify({ path: normalizeTextToolPath(path) }),
+      });
+      return "";
+    }
+  );
+
+  return { content: content.replace(/\n{3,}/g, "\n\n").trim(), toolCalls };
+}
+
 export function buildGenericRequestBody(
   provider: ModelProvider,
   modelId: string,
@@ -413,7 +615,8 @@ async function runAgentLoop(
       onEvent(taskId, { type: "reasoning", content: turnReasoning });
     }
 
-    fullText += cleanTurnText;
+    const textTools = extractTextToolCalls(cleanTurnText);
+    fullText += textTools.content || cleanTurnText;
     const usage = getUsage(state);
     totalTokens += usage.totalTokens;
     inputTokens += usage.promptTokens;
@@ -421,23 +624,32 @@ async function runAgentLoop(
 
     // Get completed tool calls from this turn
     const toolCalls = getCompletedToolCalls(state);
+    const effectiveToolCalls = toolCalls.length > 0 ? toolCalls : textTools.toolCalls;
 
-    if (toolCalls.length > 0 && hasToolCalls) {
+    if ((toolCalls.length > 0 && hasToolCalls) || textTools.toolCalls.length > 0) {
       // Add assistant message with tool calls to conversation
-      messages.push({
-        role: "assistant",
-        content: cleanTurnText || null,
-        tool_calls: toolCalls.map((tc) => ({
-          id: tc.id,
-          type: "function",
-          function: { name: tc.name, arguments: tc.arguments },
-        })),
-      });
+      if (toolCalls.length > 0 && hasToolCalls) {
+        messages.push({
+          role: "assistant",
+          content: cleanTurnText || null,
+          tool_calls: toolCalls.map((tc) => ({
+            id: tc.id,
+            type: "function",
+            function: { name: tc.name, arguments: tc.arguments },
+          })),
+        });
+      } else {
+        messages.push({
+          role: "assistant",
+          content: textTools.content || "I will use the available tools.",
+        });
+      }
 
       let loopBreakTriggered = false;
+      const textToolResults: string[] = [];
 
       // Execute each tool call and add results
-      for (const tc of toolCalls) {
+      for (const tc of effectiveToolCalls) {
         // Normalise args to a stable key for loop detection
         let normArgs = tc.arguments;
         try {
@@ -473,10 +685,21 @@ async function runAgentLoop(
           content: result.slice(0, 500),
         });
 
+        if ("id" in tc) {
+          messages.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: result,
+          });
+        } else {
+          textToolResults.push(`Tool result for ${tc.name}:\n${result}`);
+        }
+      }
+
+      if (textToolResults.length > 0) {
         messages.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: result,
+          role: "user",
+          content: textToolResults.join("\n\n"),
         });
       }
 

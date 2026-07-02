@@ -4,13 +4,21 @@
  * Privacy is a selling point for the local-AI buyer, so the default is OFF and
  * nothing is recorded unless `config.telemetry.enabled` is true. Events land in
  * the local `telemetry_events` table only; nothing leaves the machine without
- * an explicit "send diagnostics". recordTelemetryEvent is sync, never throws,
- * and reads connectivity/version from a context the daemon sets at boot (so it
- * stays cheap and test-safe — no heavy singletons pulled in on the hot path).
+ * the operator explicitly enabling telemetry, at which point aggregate counters
+ * (never raw payloads) are batched and sent to the first-party endpoint daily.
+ * recordTelemetryEvent is sync, never throws, and reads connectivity/version
+ * from a context the daemon sets at boot (so it stays cheap and test-safe).
  */
 
+import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { loadHiveConfig, saveHiveConfig } from "@/lib/central/config";
+
+const TELEMETRY_PING_URL = "https://telemetry.hivematrix.app/v1/ping";
+
+// Random UUID generated once per daemon boot — never persisted, never tied to
+// a user identity. Used only to deduplicate duplicate pings within a session.
+const SESSION_ID = randomUUID();
 
 export interface TelemetryConfig {
   enabled: boolean;
@@ -93,4 +101,38 @@ export function getTelemetrySummary(): TelemetrySummary {
 export function clearTelemetry(): number {
   const info = getDb().prepare("DELETE FROM telemetry_events").run();
   return info.changes;
+}
+
+/**
+ * Send aggregate counters to the first-party telemetry endpoint.
+ * Only fires when telemetry is enabled. Never sends raw payloads — just
+ * category.event counts, version, connectivity, and a per-boot session ID.
+ * Fails silently on network error (endpoint may not be reachable yet).
+ */
+export async function flushTelemetryPing(): Promise<boolean> {
+  if (!isTelemetryEnabled()) return false;
+  try {
+    const summary = getTelemetrySummary();
+    const body = JSON.stringify({
+      sessionId: SESSION_ID,
+      version: context.version,
+      connectivity: context.connectivity,
+      counters: summary.byEvent,
+    });
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const res = await fetch(TELEMETRY_PING_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        signal: ctrl.signal,
+      });
+      return res.ok;
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch {
+    return false;
+  }
 }

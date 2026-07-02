@@ -82,6 +82,13 @@ async function main(): Promise<void> {
   // Start HTTP server
   await startDaemonServer(PORT);
 
+  // Telemetry ping — fires once after a 5-minute settle, then every 24 hours.
+  // Silently no-ops when telemetry is disabled (default). Uses only aggregate
+  // counters; no raw event payloads leave the machine.
+  const { flushTelemetryPing } = await import("@/lib/telemetry/telemetry");
+  setTimeout(() => { void flushTelemetryPing(); }, 5 * 60 * 1000);
+  setInterval(() => { void flushTelemetryPing(); }, 24 * 60 * 60 * 1000);
+
   // Recover orphaned tasks from a previous crash
   const { recoverOrphanedTasks } = await import("@/lib/orchestrator/recovery");
   await recoverOrphanedTasks();
@@ -90,15 +97,23 @@ async function main(): Promise<void> {
   const { startScheduler } = await import("@/lib/orchestrator/scheduler");
   startScheduler();
 
+  // Flash dispatch: shared callback for both inbound channel pollers. Wraps
+  // runFlashTurnText so messagebee/mailbee (lib/) never import from flash/ directly.
+  const { runFlashTurnText } = await import("@/lib/flash");
+  const makeFlashDispatch =
+    (channel: "imessage" | "mail") =>
+    (text: string, peer: string) =>
+      runFlashTurnText({ text, channel, peer }).then((r) => r.reply);
+
   // Start the Message Lane poll loop (self-gates: no-ops unless the imessage
-  // channel is enabled + chat.db is readable). SMS/iMessage in/out.
+  // channel is enabled + chat.db is readable). Allowlisted senders go to Flash Lane.
   const { startMessageBeePoller } = await import("@/lib/messagebee/poller");
-  startMessageBeePoller();
+  startMessageBeePoller(undefined, makeFlashDispatch("imessage"));
 
   // Start the Mail Lane poll loop (self-gates: no-ops unless the email channel is
-  // enabled). Watches Apple Mail; trust-classifies inbound into triage tasks.
+  // enabled). Known senders go to Flash Lane; unknown + triage-all → triage task.
   const { startMailBeePoller } = await import("@/lib/mailbee/poller");
-  startMailBeePoller();
+  startMailBeePoller(undefined, makeFlashDispatch("mail"));
 
   // Supervise the local model server when Qwen is "on this laptop": launch it,
   // health-probe it, relaunch on crash (self-gates on location === "local").
@@ -126,6 +141,11 @@ async function main(): Promise<void> {
   // Flight has completed. Paired with the Work Package orchestration loop above.
   const { startFlightLoopSchedulerLoop } = await import("@/lib/work-packages/flight-loop-scheduler");
   startFlightLoopSchedulerLoop();
+
+  // Flash Lane learning loop: every 15 minutes, distill sessions that have gone
+  // cold (6h inactivity) — extract reusable skills and file feedback to backlog.
+  const { startFlashLearningLoop } = await import("@/lib/flash/learning-loop");
+  startFlashLearningLoop();
 
   // Voice result return path: when a voice-escalated task finishes, speak the
   // result (Kokoro) and push a voice:result SSE event so the open Talk screen

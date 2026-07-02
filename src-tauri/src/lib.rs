@@ -22,6 +22,7 @@ use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::Manager;
+use tauri_plugin_deep_link::DeepLinkExt;
 
 const DAEMON_PORT: u16 = 3747;
 
@@ -151,6 +152,84 @@ fn spawn_bundled_daemon(app: &tauri::App) -> Option<Child> {
     }
 }
 
+/// Decode %XX sequences in a URL query-parameter value (base64 chars need this).
+fn percent_decode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut iter = s.chars();
+    while let Some(c) = iter.next() {
+        if c == '%' {
+            let h = iter.next().unwrap_or('0');
+            let l = iter.next().unwrap_or('0');
+            match (h.to_digit(16), l.to_digit(16)) {
+                (Some(hv), Some(lv)) => result.push(((hv * 16 + lv) as u8) as char),
+                _ => { result.push('%'); result.push(h); result.push(l); }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Handle `hivematrix://activate?key=<base64-or-json>` deep-links by forwarding
+/// the key to the daemon's /license/activate endpoint. Runs retries in a
+/// background thread so the deep-link handler returns immediately.
+fn handle_hivematrix_url(url: &str) {
+    if !url.starts_with("hivematrix://activate") {
+        return;
+    }
+    let key = url.splitn(2, '?').nth(1).and_then(|query| {
+        query.split('&')
+            .find(|p| p.starts_with("key="))
+            .map(|p| percent_decode(p.trim_start_matches("key=")))
+    });
+    let key = match key {
+        Some(k) if !k.is_empty() => k,
+        _ => { log::warn!("deep-link: hivematrix://activate missing key param"); return; }
+    };
+    std::thread::spawn(move || forward_activate_to_daemon(&key));
+}
+
+/// POST { key } to the daemon's /license/activate endpoint with retries to
+/// tolerate the race between app launch and daemon startup.
+fn forward_activate_to_daemon(key: &str) {
+    let key_json = match serde_json::to_string(key) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let body = format!(r#"{{"key":{key_json}}}"#);
+    let body_len = body.len();
+    let request = format!(
+        "POST /license/activate HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {body_len}\r\nConnection: close\r\n\r\n{body}"
+    );
+    for attempt in 0..5u32 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(800));
+        }
+        let addr: std::net::SocketAddr = match format!("127.0.0.1:{DAEMON_PORT}").parse() {
+            Ok(a) => a,
+            Err(_) => return,
+        };
+        let mut stream = match std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(1000)));
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(1000)));
+        if stream.write_all(request.as_bytes()).is_err() { continue; }
+        let mut resp = String::new();
+        let _ = stream.read_to_string(&mut resp);
+        if resp.contains("\"state\":") {
+            log::info!("deep-link: license activate succeeded");
+            return;
+        }
+        log::warn!("deep-link: activate attempt {} response: {}", attempt + 1,
+            resp.trim().chars().take(200).collect::<String>());
+    }
+    log::error!("deep-link: all activate attempts exhausted for key (first 20 chars): {}…",
+        key.chars().take(20).collect::<String>());
+}
+
 /// Whether the daemon's launchd agent is installed (i.e. onboarding ran). When
 /// it is, launchd owns the daemon's lifecycle. The app must NOT spawn its own
 /// child in that case: the child orphans (reparents to launchd) and squats
@@ -169,15 +248,24 @@ fn launchd_agent_installed() -> bool {
 /// Whether to install an available update now. True if a force flag is present
 /// (the in-app "Install" button drops it — consumed here) OR config.autoUpdate
 /// is true. Default is manual: the console shows an "Update" pill instead.
-fn should_install_update() -> bool {
+fn force_update_path() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
-    let force = std::path::Path::new(&home).join(".hivematrix/.force-update");
+    std::path::Path::new(&home).join(".hivematrix/.force-update")
+}
+
+fn clear_force_update_flag() {
+    let _ = std::fs::remove_file(force_update_path());
+}
+
+fn should_install_update() -> bool {
+    let force = force_update_path();
     if force.exists() {
         let _ = std::fs::remove_file(&force);
         return true;
     }
     // No JSON dep in the shell crate; whitespace-strip then substring-match the
     // daemon's pretty-printed config.json.
+    let home = std::env::var("HOME").unwrap_or_default();
     std::fs::read_to_string(std::path::Path::new(&home).join(".hivematrix/config.json"))
         .map(|t| t.split_whitespace().collect::<String>().contains("\"autoUpdate\":true"))
         .unwrap_or(false)
@@ -224,7 +312,10 @@ fn check_for_update(app: tauri::AppHandle) {
                 log::info!("updater: installed; daemon kickstart -> {kick:?}; relaunching");
                 app.restart();
             }
-            Ok(None) => log::info!("updater: no update available (feed not newer than {current})"),
+            Ok(None) => {
+                clear_force_update_flag();
+                log::info!("updater: no update available (feed not newer than {current})");
+            },
             Err(e) => log::warn!("updater: check FAILED: {e}"),
         }
     });
@@ -235,6 +326,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(DaemonChild(Mutex::new(None)))
         .setup(|app| {
             // Log in release too — to ~/Library/Logs/HiveMatrix/app.log — so the
@@ -272,6 +364,15 @@ pub fn run() {
             } else if let Some(child) = spawn_bundled_daemon(app) {
                 *app.state::<DaemonChild>().0.lock().unwrap() = Some(child);
             }
+
+            // Register handler for hivematrix:// deep-links (e.g. license activation).
+            // Called both when the app is already running (URL opens it) and on
+            // first launch via URL (the plugin replays stored URLs during setup).
+            app.deep_link().on_open_url(|event| {
+                for url in event.urls() {
+                    handle_hivematrix_url(url.as_str());
+                }
+            });
 
             // Check for an app update in the background (no-op until configured).
             #[cfg(desktop)]

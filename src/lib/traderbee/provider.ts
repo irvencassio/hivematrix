@@ -6,6 +6,8 @@
  */
 
 import { type Quote } from "./contracts";
+import { resolveSecret } from "@/lib/config/secrets";
+import type { VaultRef } from "@/lib/vault/refs";
 
 const DATA_BASE = "https://data.alpaca.markets/v2/stocks/snapshots";
 
@@ -19,6 +21,20 @@ export function getTraderBeeKeys(env: NodeJS.ProcessEnv = process.env): TraderBe
 
 export function isTraderBeeConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
   return getTraderBeeKeys(env) !== null;
+}
+
+/** Vault-aware key resolution: env first, then vault://env/* refs. */
+export async function resolveTraderBeeKeys(
+  opts: {
+    env?: NodeJS.ProcessEnv;
+    resolveRef?: (ref: VaultRef) => Promise<string>;
+  } = {},
+): Promise<TraderBeeKeys | null> {
+  const [keyId, secret] = await Promise.all([
+    resolveSecret("APCA_API_KEY_ID", opts),
+    resolveSecret("APCA_API_SECRET_KEY", opts),
+  ]);
+  return keyId && secret ? { keyId, secret } : null;
 }
 
 interface SnapshotRaw {
@@ -40,7 +56,7 @@ export function mapSnapshot(symbol: string, raw: unknown): Quote | null {
 /** Fetch quotes for symbols via Alpaca snapshots. null on no-keys/error; [] for no symbols. */
 export async function fetchQuotes(symbols: string[], opts: { signal?: AbortSignal } = {}): Promise<Quote[] | null> {
   if (symbols.length === 0) return [];
-  const keys = getTraderBeeKeys();
+  const keys = await resolveTraderBeeKeys();
   if (!keys) return null;
   const url = `${DATA_BASE}?symbols=${encodeURIComponent(symbols.join(","))}&feed=iex`;
   try {

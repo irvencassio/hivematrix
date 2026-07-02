@@ -453,11 +453,19 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     border-radius:6px; cursor:pointer; font-size:11px; padding:4px 8px; margin-top:6px; }
   .usage-action:hover { border-color:var(--accent-2); }
   .usage-action[disabled] { opacity:.45; cursor:default; }
-  .update-pill { cursor: pointer; background: var(--accent); color: var(--create-btn-text, #1a1a1a);
+  .update-pill { cursor: pointer; background: var(--panel-2); color: var(--text);
     border-radius: 999px; padding: 3px 11px; font-size: 11px; font-weight: 700; white-space: nowrap;
-    animation: updatePulse 2s ease-in-out infinite; }
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); }
+  .update-pill.update-available {
+    background: var(--warn); color: #1a1205;
+    border-color: color-mix(in srgb, var(--warn) 60%, var(--text));
+    animation: updatePulse 2s ease-in-out infinite;
+  }
   .update-pill:hover { filter: brightness(1.08); }
-  @keyframes updatePulse { 0%,100% { opacity: 1; } 50% { opacity: .72; } }
+  @keyframes updatePulse {
+    0%,100% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--warn) 35%, transparent); }
+    50% { transform: scale(1.025); box-shadow: 0 0 0 8px color-mix(in srgb, var(--warn) 0%, transparent); }
+  }
   .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45);
     display: flex; align-items: center; justify-content: center; z-index: 50;
     opacity: 0; visibility: hidden; pointer-events: none;
@@ -495,6 +503,56 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .ss-section-hd { font-weight:600; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
   .ss-chip { display:inline-flex; align-items:center; background:var(--panel-2); border:1px solid var(--border); border-radius:12px; padding:1px 6px 1px 9px; margin:2px 4px 2px 0; font-size:11px; gap:3px; }
   .ss-chip .x { cursor:pointer; color:var(--muted); font-size:10px; line-height:1; }
+  /* ── Zero-terminal onboarding wizard ───────────────────────────────────── */
+  .ob-wizard { width: 580px; }
+  .ob-prog { display: flex; gap: 6px; margin-bottom: 20px; }
+  .ob-prog-seg { flex: 1; height: 3px; border-radius: 2px; background: var(--border); transition: background .3s; }
+  .ob-prog-seg.done { background: var(--ok); }
+  .ob-prog-seg.active { background: var(--accent); }
+  .ob-step-panel { display: none; }
+  .ob-step-panel.active { display: block; }
+  .ob-step-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
+  .ob-heading { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+  .ob-subheading { font-size: 12px; color: var(--muted); margin-bottom: 14px; line-height: 1.55; }
+  .ob-perm-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .ob-perm-row:last-child { border-bottom: 0; }
+  .ob-pm { width: 18px; text-align: center; font-size: 14px; flex-shrink: 0; line-height: 1.7; }
+  .ob-pm.ok { color: var(--ok); } .ob-pm.no { color: var(--muted); }
+  .ob-perm-info { flex: 1; }
+  .ob-perm-title { font-weight: 600; }
+  .ob-perm-desc { color: var(--muted); margin-top: 1px; font-size: 11px; }
+  .ob-perm-actions { margin-top: 5px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ob-perm-actions button { font-size: 11px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  .ob-perm-granted { font-size: 11px; color: var(--ok); }
+  .ob-model-card { border: 1px solid var(--border); border-radius: 8px; padding: 11px 13px; margin-bottom: 8px;
+    display: flex; align-items: flex-start; gap: 10px; transition: border-color .2s; }
+  .ob-model-card.detected { border-color: color-mix(in srgb, var(--ok) 60%, var(--border)); }
+  .ob-model-icon { font-size: 18px; line-height: 1.4; }
+  .ob-model-body { flex: 1; min-width: 0; }
+  .ob-model-name { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .ob-model-status { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .ob-model-status.ok { color: var(--ok); }
+  .ob-model-expand { font-size: 11px; color: var(--accent-2); cursor: pointer; margin-top: 5px; user-select: none; }
+  .ob-model-detail { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .ob-model-detail.open { display: block; }
+  .ob-model-detail input { margin-bottom: 4px; width: 100%; box-sizing: border-box; }
+  .ob-model-detail .ob-btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ob-model-detail .ob-btn-row button { font-size: 11px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  .ob-model-mark { font-size: 14px; }
+  .ob-model-mark.ok { color: var(--ok); } .ob-model-mark.no { color: var(--muted); }
+  .ob-brain-preview { font-size: 11px; color: var(--muted); margin-top: 4px; min-height: 14px; }
+  .ob-brain-preview.ok { color: var(--ok); }
+  .ob-brain-preview.warn { color: var(--warn); }
+  .ob-brain-row { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 4px; }
+  .ob-brain-row input { flex: 1; margin-bottom: 0; }
+  .ob-brain-row button { flex-shrink: 0; font-size: 12px; padding: 6px 14px; border-radius: 6px; cursor: pointer;
+    background: var(--accent); color: var(--create-btn-text); border: 0; font-weight: 600; }
+  .ob-any-status { font-size: 11px; margin-bottom: 10px; }
+  .ob-any-status.ok { color: var(--ok); }
+  .ob-any-status.warn { color: var(--warn); }
+  .ob-nav { display: flex; align-items: center; gap: 8px; margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; }
   .ss-chip .x:hover { color:var(--err); }
   .mb-ignored-row .mb-ig-addr { font-weight: 600; }
   .mb-ignored-row .mb-ig-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; }
@@ -528,6 +586,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     box-shadow: var(--card-shadow); width: 100%; box-sizing: border-box; min-height: 52px; }
   .card:hover { border-color: var(--accent-2); }
   .card.sel { border-color: var(--accent); }
+  .card.in-progress { animation: taskCardPulse 2.6s ease-in-out infinite; box-shadow: 0 0 0 0 rgba(249, 193, 75, 0.24); }
+  .card.in-progress:hover { animation-duration: 1.6s; }
   .card .t { font-weight: 600; margin-bottom: 2px; padding-right: 58px; }
   .card .m { font-size: 11px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
   .flight-ctx { margin-top: 4px; font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -766,12 +826,18 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .project-dropdown:not(.hidden) { animation: dropdownAppear .14s ease; }
   /* Active/live status dot pulse */
   @keyframes dotPulse { 0%,100% { opacity:1; } 55% { opacity:.5; } }
+  @keyframes taskCardPulse {
+    0% { box-shadow: 0 0 0 0 rgba(249, 193, 75, 0.0); }
+    45% { box-shadow: 0 0 0 6px rgba(249, 193, 75, 0.20); }
+    90% { box-shadow: 0 0 0 12px rgba(249, 193, 75, 0.0); }
+    100% { box-shadow: 0 0 0 0 rgba(249, 193, 75, 0.0); }
+  }
   .dot.active { animation: dotPulse 2.8s ease-in-out infinite; }
   /* Obs window button transition */
   .obs-win button { transition: background .15s ease, color .15s ease; }
   /* Sch-view-btn transition */
   .sch-view-btn { transition: border-color .15s ease, color .15s ease, background .15s ease; }
-  /* ── OpenClaw center pane ───────────────────────────────────────────── */
+  /* ── Flash center pane ─────────────────────────────────────────────── */
   .oc-avail-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
   .oc-avail-dot.ok  { background:var(--ok); }
   .oc-avail-dot.off { background:var(--muted); }
@@ -862,7 +928,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <div class="overlay" id="settingsOverlay">
   <div class="modal">
     <h1>Settings <span class="x" onclick="closeSettings()">✕</span></h1>
-    <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-observability" onclick="switchSettingsTab('observability')">Observability</div><div class="tab" id="tab-lanes" onclick="switchSettingsTab('lanes')">Lanes</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div></div>
+    <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-observability" onclick="switchSettingsTab('observability')">Observability</div><div class="tab" id="tab-lanes" onclick="switchSettingsTab('lanes')">Lanes</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-license" onclick="switchSettingsTab('license')">License</div></div>
     <div id="settingsModels" style="display:none">
       <label class="flbl">Default model</label>
       <select id="s_default" style="width:100%" onchange="saveDefault()"></select>
@@ -1027,6 +1093,18 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </div>
       <div class="muted" style="font-size:11px;margin-top:2px">Shared with location-aware tasks (weather, "near me", local time) — e.g. texts to Message Lane.</div>
 
+      <label class="flbl" style="margin-top:16px">Privacy &amp; Diagnostics</label>
+      <div class="row" style="align-items:center;gap:8px">
+        <input type="checkbox" id="s_telemetry" onchange="saveTelemetry()" style="width:auto" />
+        <span class="muted">Send anonymous usage stats</span>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:2px">Off by default. Sends only aggregate feature counters (never event payloads or file contents) to a first-party endpoint once a day. Helps prioritize improvements.</div>
+      <div class="row" style="gap:6px;margin-top:8px">
+        <button class="sm" onclick="clearTelemetryData()" title="Delete all locally stored telemetry events">Clear local data</button>
+        <button class="sm" onclick="sendDiagnostics()" title="Build a diagnostics bundle and copy it to the clipboard">Copy diagnostics</button>
+      </div>
+      <div id="s_telemetry_status" class="muted" style="font-size:11px;margin-top:3px;min-height:14px"></div>
+
       <label class="flbl" style="margin-top:16px">Updates</label>
       <div class="row" style="align-items:center;gap:8px">
         <input type="checkbox" id="s_autoupdate" onchange="saveAutoUpdate()" style="width:auto" />
@@ -1073,6 +1151,21 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="row" style="margin-top:10px"><button class="create" onclick="refreshProjects()">↻ Re-scan</button></div>
       <div class="muted" style="font-size:11px;margin-top:8px">Projects discovered from git repos, Claude Code history, and VS Code recents. ★ = pre-selected (active project).</div>
     </div>
+    <div id="settingsLicense" style="display:none">
+      <div id="lic_status_banner"></div>
+      <div id="lic_detail" class="kv" style="margin-top:8px"></div>
+      <label class="flbl" style="margin-top:16px">License key</label>
+      <div class="muted" style="font-size:11px;margin-bottom:8px">Paste the license JSON sent to your email, or click the activation link in your purchase confirmation — it opens HiveMatrix automatically.</div>
+      <textarea id="lic_key_input" placeholder="Paste license JSON here…" style="width:100%;min-height:80px;font-family:ui-monospace,Menlo,monospace;font-size:11px;resize:vertical;background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:8px;box-sizing:border-box"></textarea>
+      <div class="row" style="margin-top:8px;gap:8px;align-items:center">
+        <button class="create" onclick="activateLicense()">Activate</button>
+        <button class="sm" onclick="renderLicense()">↻ Refresh</button>
+        <span id="lic_activate_status" class="muted" style="font-size:11px"></span>
+      </div>
+      <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--border)">
+        <div class="muted" style="font-size:12px">On the <b>Free</b> tier (local models only)? <a href="https://hivematrix.app/pricing" target="_blank" style="color:var(--accent)">Upgrade to Pro — $39/mo or $349/yr</a> — voice, all channels, directives, companion pairing. No per-task fees; bring your own model subscriptions.</div>
+      </div>
+    </div>
     <div id="settingsLanes" style="display:none">
       <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">System Readiness</label>
@@ -1111,6 +1204,26 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </div>
       <div class="muted" style="font-size:11px;margin:4px 0 8px">Lane capabilities the daemon runs in-process — not installable apps. These follow the connectivity mode; launchagent-backed ones can be turned on or off.</div>
       <div id="s_lanes" style="margin-top:8px"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <label class="flbl" style="margin:0">Credential Vault</label>
+        <button class="copybtn" onclick="renderVaultRefs()">↻ Refresh</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin:4px 0 8px">Vault aliases are never rendered with their values. Manage <code>vault://</code> refs only.</div>
+      <div id="vault_status" class="muted" style="font-size:11px;min-height:16px"></div>
+      <div class="row" style="margin-top:6px;gap:6px">
+        <input id="s_vault_scope" placeholder="scope (site, env, host)" style="width:28%" />
+        <input id="s_vault_name" placeholder="name (e.g. github.com)" style="width:32%" />
+        <input id="s_vault_label" placeholder="label (optional)" style="width:40%" />
+      </div>
+      <div class="row" style="margin-top:6px;gap:6px;align-items:center">
+        <input id="s_vault_value" type="password" placeholder="value (never shown in UI)" style="flex:1" />
+        <button class="create" onclick="setVaultRef()">Set / Update</button>
+      </div>
+      <div class="row" style="margin-top:8px;gap:6px">
+        <input id="s_vault_scope_filter" placeholder="Filter by scope" style="width:100%" oninput="renderVaultRefs()" />
+      </div>
+      <div id="s_vault_refs" style="margin-top:8px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">COO Dispatch</label>
@@ -1387,13 +1500,154 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Zero-terminal onboarding wizard: permissions → models → brain -->
+<div class="overlay" id="obWizardOverlay">
+  <div class="modal ob-wizard">
+    <h1>Set up HiveMatrix <span class="x" onclick="closeObWizard(true)">✕</span></h1>
+    <!-- 3-segment progress bar -->
+    <div class="ob-prog">
+      <div class="ob-prog-seg active" id="obProg0"></div>
+      <div class="ob-prog-seg" id="obProg1"></div>
+      <div class="ob-prog-seg" id="obProg2"></div>
+    </div>
+
+    <!-- ── Step 0: System Permissions ── -->
+    <div class="ob-step-panel active" id="obStep0">
+      <div class="ob-step-label">Step 1 of 3</div>
+      <div class="ob-heading">System Permissions</div>
+      <div class="ob-subheading">HiveMatrix needs a few macOS permissions to read messages, control the desktop, and hear your voice. Click each button to open the exact Settings pane — add HiveMatrix, then return here. All are optional; grant only what you need.</div>
+
+      <div class="ob-perm-row">
+        <span class="ob-pm no" id="ob_perm_fda">○</span>
+        <div class="ob-perm-info">
+          <div class="ob-perm-title">Full Disk Access</div>
+          <div class="ob-perm-desc">Lets HiveMatrix read your Messages database (chat.db) and Mail folder. Required for Message Lane and Mail Lane.</div>
+          <div class="ob-perm-actions">
+            <span class="ob-perm-granted" id="ob_perm_fda_granted" style="display:none">✓ Granted</span>
+            <button id="ob_perm_fda_open" onclick="obOpenPerm('fullDiskAccess')">Open Full Disk Access →</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="ob-perm-row">
+        <span class="ob-pm no" id="ob_perm_acc">○</span>
+        <div class="ob-perm-info">
+          <div class="ob-perm-title">Accessibility + Screen Recording</div>
+          <div class="ob-perm-desc">Required for Desktop Lane — lets HiveMatrix see the screen and click UI elements.</div>
+          <div class="ob-perm-actions">
+            <span class="ob-perm-granted" id="ob_perm_acc_granted" style="display:none">✓ Granted</span>
+            <button id="ob_perm_acc_open" onclick="obOpenPerms(['accessibility','screenRecording'])">Open Accessibility settings →</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="ob-perm-row">
+        <span class="ob-pm no" id="ob_perm_auto">○</span>
+        <div class="ob-perm-info">
+          <div class="ob-perm-title">Automation (Apple Mail)</div>
+          <div class="ob-perm-desc">Lets HiveMatrix draft and send email via Apple Mail. Required for Mail Lane. Open Mail.app first so it appears in the list.</div>
+          <div class="ob-perm-actions">
+            <span class="ob-perm-granted" id="ob_perm_auto_granted" style="display:none">✓ Granted</span>
+            <button id="ob_perm_auto_open" onclick="obOpenPerm('automation')">Open Automation settings →</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="ob-perm-row">
+        <span class="ob-pm no" id="ob_perm_mic">○</span>
+        <div class="ob-perm-info">
+          <div class="ob-perm-title">Microphone</div>
+          <div class="ob-perm-desc">Required for voice input (Talk mode). Grant this, then HiveMatrix will ask again the first time you start a voice session.</div>
+          <div class="ob-perm-actions">
+            <span class="ob-perm-granted" id="ob_perm_mic_granted" style="display:none">✓ Opened settings</span>
+            <button id="ob_perm_mic_open" onclick="obOpenPermMic()">Open Microphone settings →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Step 1: Model Backends ── -->
+    <div class="ob-step-panel" id="obStep1">
+      <div class="ob-step-label">Step 2 of 3</div>
+      <div class="ob-heading">Model Backends</div>
+      <div class="ob-subheading">HiveMatrix routes tasks between frontier models (Claude, ChatGPT) and a local model running on your Mac. Set up at least one. You bring your own subscription — HiveMatrix never meters tokens.</div>
+      <div class="ob-any-status" id="ob_models_status">Detecting…</div>
+
+      <div class="ob-model-card" id="ob_model_claude">
+        <div class="ob-model-icon">✦</div>
+        <div class="ob-model-body">
+          <div class="ob-model-name">Claude Code CLI <span class="ob-model-mark no" id="ob_claude_mark">—</span></div>
+          <div class="ob-model-status" id="ob_claude_status">Checking…</div>
+          <div class="ob-model-expand" onclick="obToggleDetail('ob_claude_detail')">▸ Install guide</div>
+          <div class="ob-model-detail" id="ob_claude_detail">
+            <div class="muted" style="font-size:11px">Install Claude Code from <strong>claude.ai/download</strong>, sign in with your Anthropic or Claude.ai account. No API key needed — uses your subscription. Once installed, HiveMatrix detects it automatically on next refresh.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ob-model-card" id="ob_model_codex">
+        <div class="ob-model-icon">⬡</div>
+        <div class="ob-model-body">
+          <div class="ob-model-name">Codex CLI (ChatGPT) <span class="ob-model-mark no" id="ob_codex_mark">—</span></div>
+          <div class="ob-model-status" id="ob_codex_status">Checking…</div>
+          <div class="ob-model-expand" onclick="obToggleDetail('ob_codex_detail')">▸ Install guide</div>
+          <div class="ob-model-detail" id="ob_codex_detail">
+            <div class="muted" style="font-size:11px">Install via: <code>npm install -g @openai/codex</code>. Log in with your ChatGPT Plus/Pro account (no API key needed). Once installed, HiveMatrix detects it automatically.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ob-model-card" id="ob_model_lmstudio">
+        <div class="ob-model-icon">⬡</div>
+        <div class="ob-model-body">
+          <div class="ob-model-name">Local Model (LM Studio / Rapid-MLX) <span class="ob-model-mark no" id="ob_lm_mark">—</span></div>
+          <div class="ob-model-status" id="ob_lm_status">Not configured</div>
+          <div class="ob-model-expand" onclick="obToggleDetail('ob_lm_detail')">▸ Configure local model</div>
+          <div class="ob-model-detail" id="ob_lm_detail">
+            <div class="muted" style="font-size:11px;margin-bottom:8px">Run any OpenAI-compatible local model (LM Studio, Ollama, Rapid-MLX). Start your server, then paste its URL and model name below.</div>
+            <input class="dialog-input" id="ob_lm_ep" placeholder="http://127.0.0.1:1234/v1" value="http://127.0.0.1:1234/v1" />
+            <input class="dialog-input" id="ob_lm_model" placeholder="model-id  e.g. qwen3.6-27b" />
+            <div class="ob-btn-row">
+              <button onclick="obSetupLocalModel()">Connect →</button>
+              <button onclick="obSetCloudOnly()">Cloud-only (no local model)</button>
+            </div>
+            <div class="err" id="ob_lm_err" style="margin-top:4px;font-size:11px"></div>
+            <div class="muted" id="ob_lm_conn_status" style="font-size:11px;margin-top:3px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Step 2: Brain Location ── -->
+    <div class="ob-step-panel" id="obStep2">
+      <div class="ob-step-label">Step 3 of 3</div>
+      <div class="ob-heading">Brain Location</div>
+      <div class="ob-subheading">HiveMatrix stores your memory, notes, and skills in a folder called your Brain. Choose where to put it — a new folder will be created if it doesn't already exist. If you already use Obsidian or have an existing brain folder, you can point HiveMatrix at it instead.</div>
+      <div class="ob-brain-row">
+        <input class="dialog-input" id="ob_brain_path" placeholder="~/HiveMatrix Brain" oninput="obBrainInputChange()" />
+        <button onclick="obSetBrain()">Use this path</button>
+      </div>
+      <div class="ob-brain-preview" id="ob_brain_preview"></div>
+      <div class="muted" id="ob_brain_status" style="font-size:11px;margin-top:6px"></div>
+      <div class="err" id="ob_brain_err" style="font-size:11px;margin-top:4px"></div>
+    </div>
+
+    <!-- ── Navigation ── -->
+    <div class="ob-nav">
+      <button class="cancel" onclick="closeObWizard(true)" style="font-size:11px;margin-right:auto">Skip for now</button>
+      <button class="cancel" id="obBackBtn" onclick="obBack()" style="display:none">← Back</button>
+      <button class="ok" id="obNextBtn" onclick="obNext()">Next →</button>
+    </div>
+  </div>
+</div>
+
 <main>
   <div class="col-resizer" id="resizeLeft" title="Drag to resize the left panel"></div>
   <div class="col-resizer" id="resizeRight" title="Drag to resize the right panel"></div>
   <section class="col board">
     <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
     <button class="addbtn" id="newTaskNav" onclick="showNewTaskPanel()">＋ New task</button>
-    <button class="ov-nav oc-nav" id="openclawNav" onclick="showOpenClawPanel()"><span class="oc-avail-dot off" id="ocNavAvailDot"></span>OpenClaw</button>
+    <button class="ov-nav oc-nav" id="flashNav" onclick="showFlashPanel()">◐ Flash</button>
     <div class="form" id="taskForm">
       <input id="t_title" type="hidden" value="" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
@@ -1579,10 +1833,10 @@ function requireToken() {
     + '<div style="color:var(--muted,#8b949e);font-size:11px;max-width:340px;text-align:center">Find this token in the local HiveMatrix console under Settings → Remote access.</div></div>';
   return false;
 }
-let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedFlight: null, selectedFlightLoop: null, selectedSkillOrCommand: null, projects: [], selectedProject: "", workPackages: [], schedView: 'timeline', tlWindow: 24 };
+let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedFlight: null, selectedFlightLoop: null, selectedSkillOrCommand: null, projects: [], selectedProject: "", workPackages: [], packCards: [], schedView: 'timeline', tlWindow: 24 };
 let _taskFormInSession = false;
 
-function setOpenClawSessionMode(open) {
+function setFlashSessionMode(open) {
   const session = document.getElementById("session");
   if (session) {
     session.classList.toggle("oc-session-mode", !!open);
@@ -1612,6 +1866,30 @@ function hmToast(message, kind) {
   requestAnimationFrame(() => t.classList.add("show"));
   setTimeout(() => { t.classList.remove("show"); setTimeout(() => t.remove(), 220); }, 1800);
 }
+function packMetricLabel(metric) {
+  if (typeof metric === "string") return metric;
+  if (!metric || typeof metric !== "object") return "";
+  const label = metric.label || metric.name || "";
+  const value = metric.value == null ? "" : String(metric.value);
+  const unit = metric.unit ? " " + metric.unit : "";
+  return (label ? label + ": " : "") + value + unit;
+}
+function renderPackDashboardCards() {
+  const cards = state.packCards || [];
+  if (!cards.length) return "";
+  return '<div class="ov-head" style="margin-top:18px">Packs</div>'
+    + '<div class="ov-grid">'
+    + cards.map(card => {
+      const metrics = (card.metrics || []).map(packMetricLabel).filter(Boolean).slice(0, 3).join(" · ");
+      const cta = typeof card.cta === "string" ? card.cta : (card.cta && (card.cta.label || card.cta.text)) || "";
+      return '<div class="ov-card">'
+        + '<div class="ov-num" style="font-size:14px;line-height:1.2">' + esc(card.title || card.packName || "Pack") + '</div>'
+        + '<div class="ov-lbl">' + esc(metrics || card.packName || "") + '</div>'
+        + (cta ? '<div class="ov-lbl" style="margin-top:4px;color:var(--accent)">' + esc(cta) + '</div>' : '')
+        + '</div>';
+    }).join("")
+    + '</div>';
+}
 // Header quick theme toggle — flips light/dark and persists (matrix/system stay in Settings).
 async function toggleThemeQuick() {
   const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
@@ -1625,8 +1903,8 @@ async function toggleThemeQuick() {
 // Center overview — at-a-glance board state when no task is selected, instead of
 // leaving the widest column empty.
 function renderOverview() {
-  if (state.selected || state.selectedFlight || state.selectedSkillOrCommand || _taskFormInSession || _ocState.panelOpen) return;
-  setOpenClawSessionMode(false);
+  if (state.selected || state.selectedFlight || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen) return;
+  setFlashSessionMode(false);
   const el = document.getElementById("session");
   if (!el) return;
   const statusToLane = {}; LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
@@ -1655,6 +1933,7 @@ function renderOverview() {
     + card("landed", flightDone, flightDone ? "ok" : "", "", "focusFlightsSection()")
     + card("blocked", flightBlocked, flightBlocked ? "err" : "", "", "focusFlightsSection()")
     + '</div>'
+    + renderPackDashboardCards()
     + '<div class="ov-hint">Select a task or Flight to inspect progress — or ＋ New task to start one.</div>'
     + '</div>';
 }
@@ -1667,8 +1946,8 @@ function showOverview() {
   state.selectedSkillOrCommand = null;
   _skSel = '';
   _ctxTask = null;
-  _ocState.panelOpen = false;
-  setOpenClawSessionMode(false);
+  _flashState.panelOpen = false;
+  setFlashSessionMode(false);
   renderBoard();
   renderSkillList();
   renderOverview();
@@ -1688,11 +1967,11 @@ function focusFlightsSection() {
 }
 function updateOverviewNav() {
   const nav = document.getElementById("overviewNav");
-  const overviewActive = !state.selected && !state.selectedFlight && !state.selectedSkillOrCommand && !_taskFormInSession && !_ocState.panelOpen;
+  const overviewActive = !state.selected && !state.selectedFlight && !state.selectedSkillOrCommand && !_taskFormInSession && !_flashState.panelOpen;
   if (nav) nav.classList.toggle("active", overviewActive);
   const newTaskNav = document.getElementById("newTaskNav");
   if (newTaskNav) newTaskNav.classList.toggle("active", _taskFormInSession);
-  updateOpenClawNav();
+  updateFlashNav();
 }
 function isEditableTarget(el) {
   if (!el) return false;
@@ -1932,8 +2211,8 @@ async function loadFlights() {
 async function selectFlight(id) {
   state.selectedFlight = id;
   state.selected = null;
-  _ocState.panelOpen = false;
-  setOpenClawSessionMode(false);
+  _flashState.panelOpen = false;
+  setFlashSessionMode(false);
   _ctxTask = null;
   renderBoard();
   await renderFlightDetail(id);
@@ -2217,7 +2496,7 @@ function renderBoard() {
       + '<span class="status-card-count">'+items.length+'</span>'
       + '</div>'
       + (isCollapsed ? '' : '<div class="status-card-body">'
-          + items.map(t => { const fctx = flightContextBadge(t); return '<div class="card'+(state.selected===t._id?' sel':'')+'" onclick="selectTask(\''+t._id+'\')">'
+          + items.map(t => { const fctx = flightContextBadge(t); return '<div class="card'+(state.selected===t._id?' sel':'')+(L.key === "in_progress" ? " in-progress" : "")+'" onclick="selectTask(\''+t._id+'\')">'
               + '<button class="card-archive" title="Archive task" onclick="event.stopPropagation();cardArchive(\''+t._id+'\')">Archive</button>'
               + '<div class="mdl-card-head" style="padding-right:58px;align-items:flex-start">'
               + '<span class="mdl-card-name" style="min-width:0">'+esc(t.title||t._id)+'</span>'
@@ -2455,8 +2734,8 @@ function taskActionsHtml(t) {
 async function selectTask(id) {
   state.selected = id;
   state.selectedFlight = null;
-  _ocState.panelOpen = false;
-  setOpenClawSessionMode(false);
+  _flashState.panelOpen = false;
+  setFlashSessionMode(false);
   // Switching tasks clears half-composed retry/reply state; staying on the same
   // task across a live refresh keeps files and draft text.
   if (_ctxTask !== id) {
@@ -3094,8 +3373,8 @@ function showSkillPanel(key) {
   state.selected = null;
   state.selectedFlight = null;
   state.selectedSkillOrCommand = key;
-  _ocState.panelOpen = false;
-  setOpenClawSessionMode(false);
+  _flashState.panelOpen = false;
+  setFlashSessionMode(false);
   if (_taskFormInSession) _closeNewTaskPanel();
   renderBoard();
   const session = document.getElementById('session');
@@ -3107,8 +3386,8 @@ function showSkillPanel(key) {
 function _closeSkillPanel() {
   state.selectedSkillOrCommand = null;
   _skSel = '';
-  _ocState.panelOpen = false;
-  setOpenClawSessionMode(false);
+  _flashState.panelOpen = false;
+  setFlashSessionMode(false);
   renderSkillList();
   renderSkillDetail();
   renderOverview();
@@ -3779,6 +4058,8 @@ function renderOnboarding() {
       ? "✓ Required setup complete."
       : remaining + " required step" + (remaining === 1 ? "" : "s") + " remaining — see the Setup panel on the dashboard.";
   }
+  // Auto-open the wizard on first run (only once per session, respects dismiss)
+  _obMaybeAutoOpen(o);
 }
 
 // Side rails are width-adjustable: drag the divider on a rail's inner edge.
@@ -3901,6 +4182,15 @@ async function wizardAction(id) {
     // Message Lane / Mail Lane have their own guided modals.
     if (id === 'messagebee') { openMessageBeeSetup(); return; }
     if (id === 'mailbee') { openMailBeeSetup(); return; }
+    if (id === 'telemetry') {
+      const choice = await hmConfirm(
+        'Send anonymous usage stats?\n\nOnly aggregate feature counters (never file contents or event payloads) are sent once a day to a first-party endpoint. Default is off.\n\nYou can change this anytime in Settings > General.',
+        { okLabel: 'Yes, opt in', cancelLabel: 'No thanks' }
+      );
+      await api('/onboarding/telemetry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !!choice }) });
+      await refresh();
+      return;
+    }
     let body = {};
     if (id === 'config') {
       body = { config: {} };
@@ -3933,6 +4223,260 @@ async function wizardAction(id) {
     if (r && r.ok === false) await hmAlert((r.detail || 'failed'), 'Setup: ' + id);
     await refresh();
   } catch (e) { await hmAlert('Setup failed: ' + e, 'Setup'); }
+}
+
+// ── Onboarding wizard: permissions → models → brain ──────────────────────────
+
+let _obStep = 0;
+let _obPollTimer = null;
+let _obAutoOpened = false;
+
+function openObWizard() {
+  _obStep = 0;
+  document.getElementById('obWizardOverlay').classList.add('open');
+  _obRenderStep();
+  clearInterval(_obPollTimer);
+  _obPollTimer = setInterval(_obPollPerms, 3000);
+}
+
+function closeObWizard(skip) {
+  clearInterval(_obPollTimer);
+  _obPollTimer = null;
+  document.getElementById('obWizardOverlay').classList.remove('open');
+  try { localStorage.setItem('hm_ob_wizard_dismissed', '1'); } catch(e) {}
+  if (!skip) refresh();
+}
+
+function _obRenderStep() {
+  for (let i = 0; i < 3; i++) {
+    const seg = document.getElementById('obProg' + i);
+    if (seg) seg.className = 'ob-prog-seg' + (i < _obStep ? ' done' : i === _obStep ? ' active' : '');
+    const panel = document.getElementById('obStep' + i);
+    if (panel) panel.classList.toggle('active', i === _obStep);
+  }
+  const back = document.getElementById('obBackBtn');
+  if (back) back.style.display = _obStep === 0 ? 'none' : '';
+  const next = document.getElementById('obNextBtn');
+  if (next) next.textContent = _obStep === 2 ? '✓ Finish' : 'Next →';
+  if (_obStep === 0) _obPollPerms();
+  if (_obStep === 1) obDetectModels();
+  if (_obStep === 2) _obInitBrain();
+}
+
+function obNext() {
+  if (_obStep < 2) { _obStep++; _obRenderStep(); }
+  else closeObWizard(false);
+}
+
+function obBack() {
+  if (_obStep > 0) { _obStep--; _obRenderStep(); }
+}
+
+// ── Step 0: permissions ───────────────────────────────────────────────────────
+
+async function obOpenPerm(pane) {
+  await openSystemPane(pane);
+  setTimeout(_obPollPerms, 800);
+}
+
+async function obOpenPerms(panes) {
+  for (const p of panes) await openSystemPane(p);
+  setTimeout(_obPollPerms, 800);
+}
+
+// Microphone can't be probed from the daemon without Swift; mark it as opened
+// after the user clicks so the wizard shows something useful.
+async function obOpenPermMic() {
+  await openSystemPane('microphone');
+  try { localStorage.setItem('hm_ob_mic_opened', '1'); } catch(e) {}
+  _obSetPermMark('ob_perm_mic', true);
+}
+
+function _obSetPermMark(id, ok) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = ok ? '✓' : '○';
+  el.className = 'ob-pm ' + (ok ? 'ok' : 'no');
+  const granted = document.getElementById(id + '_granted');
+  if (granted) granted.style.display = ok ? '' : 'none';
+  const open = document.getElementById(id + '_open');
+  if (open) open.style.display = ok ? 'none' : '';
+}
+
+async function _obPollPerms() {
+  try {
+    const o = await api('/onboarding');
+    if (!o || !o.steps) return;
+    // Full Disk Access: proxy via chat.db readability in the messagebee step detail
+    const mb = o.steps.find(s => s.id === 'messagebee');
+    _obSetPermMark('ob_perm_fda', mb && /chat\.db readable|enabled; reading|Messages database readable/i.test(mb.detail || ''));
+    // Accessibility + Screen Recording: desktopbee step done means both granted
+    const db = o.steps.find(s => s.id === 'desktopbee');
+    _obSetPermMark('ob_perm_acc', db && db.state === 'done');
+    // Automation (Mail): mailbee step detail reports controllability even when channel is off
+    const ml = o.steps.find(s => s.id === 'mailbee');
+    _obSetPermMark('ob_perm_auto', ml && /Mail controllable|enabled; watching/i.test(ml.detail || ''));
+    // Microphone: persisted in localStorage (can't probe TCC from daemon without Swift)
+    try { _obSetPermMark('ob_perm_mic', localStorage.getItem('hm_ob_mic_opened') === '1'); } catch(e) {}
+  } catch(e) { /* polling — ignore transient errors */ }
+}
+
+// ── Step 1: model backends ────────────────────────────────────────────────────
+
+async function obDetectModels() {
+  const statusEl = document.getElementById('ob_models_status');
+  if (statusEl) { statusEl.textContent = 'Detecting…'; statusEl.className = 'ob-any-status'; }
+  try {
+    const o = await api('/onboarding');
+    if (!o || !o.steps) return;
+    const frontier = o.steps.find(s => s.id === 'frontier');
+    const localMod = o.steps.find(s => s.id === 'local-model');
+    const fDetail = (frontier && frontier.detail) || '';
+    const hasClaude = /claude CLI/i.test(fDetail);
+    const hasCodex  = /codex CLI/i.test(fDetail);
+    const hasLocal  = !!(localMod && localMod.state === 'done');
+    _obSetModelCard('ob_model_claude', 'ob_claude_mark', 'ob_claude_status', hasClaude,
+      hasClaude ? 'Detected — ready to use' : 'Not found on this Mac');
+    _obSetModelCard('ob_model_codex',  'ob_codex_mark',  'ob_codex_status',  hasCodex,
+      hasCodex  ? 'Detected — ready to use' : 'Not found on this Mac');
+    _obSetModelCard('ob_model_lmstudio', 'ob_lm_mark', 'ob_lm_status', hasLocal,
+      hasLocal ? ((localMod && localMod.detail) || 'Configured') : 'Not configured');
+    const any = hasClaude || hasCodex || hasLocal;
+    if (statusEl) {
+      statusEl.textContent = any ? '✓ At least one model backend ready.' : 'No model backends found yet — set up at least one below.';
+      statusEl.className = 'ob-any-status' + (any ? ' ok' : ' warn');
+    }
+  } catch(e) {
+    if (statusEl) { statusEl.textContent = 'Detection error: ' + e; statusEl.className = 'ob-any-status warn'; }
+  }
+}
+
+function _obSetModelCard(cardId, markId, statusId, detected, statusText) {
+  const card = document.getElementById(cardId);
+  if (card) card.classList.toggle('detected', !!detected);
+  const mark = document.getElementById(markId);
+  if (mark) { mark.textContent = detected ? '✓' : '—'; mark.className = 'ob-model-mark ' + (detected ? 'ok' : 'no'); }
+  const status = document.getElementById(statusId);
+  if (status) { status.textContent = statusText; status.className = 'ob-model-status' + (detected ? ' ok' : ''); }
+}
+
+function obToggleDetail(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
+}
+
+async function obSetupLocalModel() {
+  const ep  = ((document.getElementById('ob_lm_ep')    || {}).value || '').trim() || 'http://127.0.0.1:1234/v1';
+  const mid = ((document.getElementById('ob_lm_model') || {}).value || '').trim();
+  if (!mid) { document.getElementById('ob_lm_err').textContent = 'Enter the model ID served by your local server.'; return; }
+  const errEl  = document.getElementById('ob_lm_err');
+  const connEl = document.getElementById('ob_lm_conn_status');
+  if (errEl) errEl.textContent = '';
+  if (connEl) connEl.textContent = 'Connecting…';
+  try {
+    const r = await api('/onboarding/local-model', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'endpoint', endpoint: ep, modelId: mid }),
+    });
+    if (r && r.ok) {
+      if (connEl) connEl.textContent = '✓ Connected: ' + mid;
+      await obDetectModels();
+    } else {
+      if (errEl) errEl.textContent = (r && r.detail) || 'Connection failed — is the local model server running?';
+      if (connEl) connEl.textContent = '';
+    }
+  } catch(e) {
+    if (errEl) errEl.textContent = String(e);
+    if (connEl) connEl.textContent = '';
+  }
+}
+
+async function obSetCloudOnly() {
+  try {
+    const r = await api('/onboarding/local-model', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'cloud-only' }),
+    });
+    if (r && r.ok) {
+      document.getElementById('ob_lm_conn_status').textContent = '✓ Cloud-only mode set';
+      await obDetectModels();
+    }
+  } catch(e) { /* ignore */ }
+}
+
+// ── Step 2: brain location ────────────────────────────────────────────────────
+
+function _obInitBrain() {
+  const input = document.getElementById('ob_brain_path');
+  if (!input || input.value) return; // don't overwrite if the user already typed
+  const o = state.onboarding;
+  const brainStep = o && o.steps && o.steps.find(s => s.id === 'brain');
+  const existing = brainStep && brainStep.state === 'done'
+    ? brainStep.detail.replace(/^brain root: /, '') : '';
+  // Default to ~/HiveMatrix Brain for new users; existing path for migrations
+  input.value = existing || '~/HiveMatrix Brain';
+  _obUpdateBrainPreview();
+}
+
+function obBrainInputChange() { _obUpdateBrainPreview(); }
+
+function _obUpdateBrainPreview() {
+  const input   = document.getElementById('ob_brain_path');
+  const preview = document.getElementById('ob_brain_preview');
+  if (!preview || !input) return;
+  const val = (input.value || '').trim();
+  if (!val) { preview.textContent = ''; preview.className = 'ob-brain-preview'; return; }
+  const o = state.onboarding;
+  const brainStep = o && o.steps && o.steps.find(s => s.id === 'brain');
+  const currentBrain = brainStep && brainStep.state === 'done'
+    ? brainStep.detail.replace(/^brain root: /, '') : null;
+  if (currentBrain && currentBrain === val) {
+    preview.textContent = '✓ Already set to this path';
+    preview.className = 'ob-brain-preview ok';
+  } else if (currentBrain) {
+    preview.textContent = 'Will move brain from ' + currentBrain;
+    preview.className = 'ob-brain-preview warn';
+  } else {
+    preview.textContent = 'Will be created if it doesn\'t exist';
+    preview.className = 'ob-brain-preview';
+  }
+}
+
+async function obSetBrain() {
+  const path = ((document.getElementById('ob_brain_path') || {}).value || '').trim();
+  if (!path) { document.getElementById('ob_brain_err').textContent = 'Path is required.'; return; }
+  const statusEl = document.getElementById('ob_brain_status');
+  const errEl    = document.getElementById('ob_brain_err');
+  if (statusEl) statusEl.textContent = 'Setting…';
+  if (errEl) errEl.textContent = '';
+  try {
+    const r = await api('/onboarding/brain', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ brainRootDir: path, createIfMissing: true, makeShortcut: false }),
+    });
+    if (r && r.ok) {
+      if (statusEl) statusEl.textContent = '✓ Brain folder set: ' + path;
+      state.onboarding = await api('/onboarding');
+      renderOnboarding();
+      _obUpdateBrainPreview();
+    } else {
+      if (errEl) errEl.textContent = (r && r.detail) || 'Failed to set brain path.';
+      if (statusEl) statusEl.textContent = '';
+    }
+  } catch(e) {
+    if (errEl) errEl.textContent = String(e);
+    if (statusEl) statusEl.textContent = '';
+  }
+}
+
+// ── Auto-open on first run ────────────────────────────────────────────────────
+
+function _obMaybeAutoOpen(onboarding) {
+  if (_obAutoOpened) return;
+  try { if (localStorage.getItem('hm_ob_wizard_dismissed')) return; } catch(e) {}
+  if (!onboarding || onboarding.requiredComplete) return;
+  _obAutoOpened = true;
+  openObWizard();
 }
 
 // --- Message Lane guided setup ---------------------------------------------
@@ -4128,11 +4672,12 @@ async function resolveApprovalItem(idx, decision, btn) {
 
 async function refresh() {
   try {
-    const [tasks, directives, conn, metrics, onboarding, appr] = await Promise.all([
-      api("/tasks"), api("/directives"), api("/connectivity"), api("/metrics"), api("/onboarding"), api("/approvals/pending"),
+    const [tasks, directives, conn, metrics, onboarding, appr, packCards] = await Promise.all([
+      api("/tasks"), api("/directives"), api("/connectivity"), api("/metrics"), api("/onboarding"), api("/approvals/pending"), api("/packs/dashboard-cards"),
     ]);
     state.tasks = tasks; state.directives = directives; state.conn = conn; state.metrics = metrics; state.onboarding = onboarding;
     state.approvals = (appr && appr.approvals) || [];
+    state.packCards = (packCards && packCards.cards) || [];
     await loadFlights();
     renderBoard();
     // Center column: drive it right after the board so a later panel error can't
@@ -4479,13 +5024,30 @@ async function checkUpdate(force) {
     const s = await api(force ? "/update/status?refresh=1" : "/update/status");
     const pill = document.getElementById("updatePill");
     const has = !!(s && s.updateAvailable && s.latest);
+    const applying = !!(s && s.applying && s.applyingVersion);
     if (pill) {
-      if (has) { pill.textContent = "⬆ Update " + s.latest; pill.dataset.latest = s.latest; pill.style.display = ""; }
-      else { pill.style.display = "none"; }
+      if (applying) {
+        pill.textContent = "⏳ Installing " + s.applyingVersion;
+        pill.dataset.latest = s.applyingVersion;
+        pill.style.display = "";
+        pill.classList.add("update-available");
+      } else if (has) {
+        pill.textContent = "⬆ Update " + s.latest;
+        pill.dataset.latest = s.latest;
+        pill.style.display = "";
+        pill.classList.add("update-available");
+      } else {
+        pill.style.display = "none";
+        pill.classList.remove("update-available");
+      }
     }
     // About tab reflection.
-    if (abStatus) abStatus.textContent = has ? ("update available — " + s.latest) : "up to date";
-    if (abBtn) abBtn.style.display = has ? "" : "none";
+    if (abStatus) abStatus.textContent = applying ? ("installing update — " + s.applyingVersion) : (has ? ("update available — " + s.latest) : "up to date");
+    if (abBtn) {
+      abBtn.style.display = has ? "" : "none";
+      abBtn.disabled = applying;
+      abBtn.textContent = applying ? "Installing…" : "⬆ Install update";
+    }
   } catch (e) {
     if (abStatus) abStatus.textContent = "couldn't check (offline?)";
   }
@@ -4497,7 +5059,7 @@ async function applyUpdate() {
   try {
     const r = await api("/update/apply", { method: "POST" });
     if (r && r.ok === false) { await hmAlert(r.detail || "Could not start the update.", "Update"); return; }
-    if (pill) { pill.textContent = "⏳ Updating…"; pill.style.cursor = "default"; }
+    if (pill) { pill.textContent = "⏳ Updating…"; pill.style.cursor = "default"; pill.classList.add("update-available"); }
   } catch (e) { await hmAlert("Could not start the update: " + e, "Update"); }
 }
 
@@ -4518,8 +5080,8 @@ function showNewTaskPanel() {
   if (!form || !session) return;
   state.selected = null;
   state.selectedFlight = null;
-  _ocState.panelOpen = false;
-  setOpenClawSessionMode(false);
+  _flashState.panelOpen = false;
+  setFlashSessionMode(false);
   _ctxTask = null;
   _taskFormInSession = true;
   renderBoard();
@@ -5238,6 +5800,8 @@ function openSettings() {
   syncWallpaperOpacityRow();
   document.getElementById("s_location").value = models.location || "";
   document.getElementById("s_autoupdate").checked = !!models.autoUpdate;
+  document.getElementById("s_telemetry").checked = !!models.telemetryEnabled;
+  document.getElementById("s_telemetry_status").textContent = "";
   const hasBothFrontier = models.backends.some(b => b.id === "claude" && b.configured)
                         && models.backends.some(b => b.id === "codex" && b.configured);
   document.getElementById("s_frontier_provider_row").style.display = hasBothFrontier ? "" : "none";
@@ -5326,18 +5890,44 @@ async function saveAutoUpdate() {
   await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ autoUpdate }) });
   await loadModels();
 }
+async function saveTelemetry() {
+  const enabled = document.getElementById("s_telemetry").checked;
+  const st = document.getElementById("s_telemetry_status");
+  try {
+    await api("/telemetry/config", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ enabled }) });
+    await loadModels();
+    st.textContent = enabled ? "Opted in — aggregate counters will be sent daily." : "Opted out — nothing leaves this Mac.";
+  } catch (e) { st.textContent = "Failed to save: " + e; }
+}
+async function clearTelemetryData() {
+  const st = document.getElementById("s_telemetry_status");
+  try {
+    const r = await api("/telemetry/clear", { method:"POST" });
+    st.textContent = "Cleared " + (r && r.cleared != null ? r.cleared : "?") + " event(s).";
+  } catch (e) { st.textContent = "Failed: " + e; }
+}
+async function sendDiagnostics() {
+  const st = document.getElementById("s_telemetry_status");
+  st.textContent = "Building…";
+  try {
+    const bundle = await api("/diagnostics/bundle");
+    await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2));
+    st.textContent = "Diagnostics bundle copied to clipboard.";
+  } catch (e) { st.textContent = "Failed: " + e; }
+}
 
 function switchSettingsTab(tab) {
-  const tabs = ["about", "features", "general", "models", "observability", "lanes", "remote"];
-  const panels = { models: "settingsModels", observability: "settingsObservability", lanes: "settingsLanes", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout" };
+  const tabs = ["about", "features", "general", "models", "observability", "lanes", "remote", "license"];
+  const panels = { models: "settingsModels", observability: "settingsObservability", lanes: "settingsLanes", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout", license: "settingsLicense" };
   for (const t of tabs) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderSystemReadiness(); renderLaneSetup(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); renderWorkPackages(); }
+  if (tab === "lanes") { renderSystemReadiness(); renderLaneSetup(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); renderWorkPackages(); renderVaultRefs(); }
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
+  if (tab === "license") renderLicense();
 }
 
 function settingsSwitch(on, onclick, opts) {
@@ -5352,45 +5942,11 @@ function settingsSwitch(on, onclick, opts) {
     + '</button>';
 }
 
-/*__OC_DIAGNOSTICS_START__*/
-function renderOcDiagnostics(features, ocSt) {
-  const ocFeature = features.find(f => f.key === 'openclaw.chatDock');
-  if (!ocFeature) return '';
-  const st = ocSt || {};
-  const pill = val => '<span style="color:' + (val ? 'var(--ok)' : 'var(--danger)') + ';font-weight:600;font-size:11px">' + (val ? 'yes' : 'no') + '</span>';
-  const dr = (label, value) => '<div style="display:flex;gap:8px;align-items:baseline;padding:2px 0">'
-    + '<span class="muted" style="min-width:132px;font-size:11px">' + esc(label) + '</span>'
-    + value + '</div>';
-  const flagEnabled = ocFeature.enabled === true;
-  const installed = st.installed === true;
-  const gatewayReachable = installed && !!(st.gateway && st.gateway.reachable === true);
-  const navEl = document.getElementById('openclawNav');
-  let centerEntryVal;
-  if (navEl) {
-    centerEntryVal = pill(window.getComputedStyle(navEl).display !== 'none');
-  } else {
-    centerEntryVal = '<span class="muted" style="font-size:11px">—</span>';
-  }
-  const rows = [
-    dr('Feature flag', pill(flagEnabled)),
-    dr('Installed', pill(installed)),
-    dr('Gateway reachable', installed ? pill(gatewayReachable) : '<span class="muted" style="font-size:11px">—</span>'),
-    dr('Center entry', centerEntryVal),
-  ].join('');
-  const note = (st.reason && !installed) ? '<div class="muted" style="font-size:11px;margin-top:4px">' + esc(st.reason) + '</div>' : '';
-  return '<div id="s_oc_diag" style="padding:8px 0 10px;border-top:1px solid var(--border)">'
-    + '<div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">'
-    + '<span style="font-size:11px;font-weight:600;color:var(--muted)">OpenClaw / Vale diagnostics</span>'
-    + '<button class="copybtn" onclick="renderFeatures()" style="font-size:11px;padding:2px 8px" title="Re-check OpenClaw status">↻</button>'
-    + '</div>'
-    + rows + note + '</div>';
-}
-/*__OC_DIAGNOSTICS_END__*/
 
 async function renderFeatures() {
   const el = document.getElementById("s_features");
   el.innerHTML = '<div class="muted">Loading…</div>';
-  const [r, auto, ocSt] = await Promise.all([api("/settings/features"), api("/settings/voice/auto-approval"), api("/openclaw/status").catch(() => null)]);
+  const [r, auto] = await Promise.all([api("/settings/features"), api("/settings/voice/auto-approval")]);
   const features = (r && r.features) || [];
   if (!features.length) { el.innerHTML = '<div class="muted">No optional features.</div>'; return; }
   const featureRows = features.map(f => {
@@ -5422,15 +5978,13 @@ async function renderFeatures() {
   // Video factory is no longer a Features toggle — it's a capability driven by a
   // scheduled job that runs the factory and pauses at the script-review checkpoint.
   // Nothing to render here.
-  const ocDiagRow = renderOcDiagnostics(features, ocSt);
-  el.innerHTML = featureRows + ocDiagRow + autoRow + voiceLogicRow;
+  el.innerHTML = featureRows + autoRow + voiceLogicRow;
 }
 
 async function toggleFeature(key, enabled) {
   await api("/settings/features", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, enabled }) });
   renderFeatures();
   initVoiceFeature();
-  if (key === 'openclaw.chatDock') initOpenclawDock();
 }
 
 async function toggleAutoApproval(enabled) {
@@ -5486,262 +6040,228 @@ async function initVoiceFeature() {
   } catch (e) { /* ignore */ }
 }
 
-// ── OpenClaw Chat center pane ──────────────────────────────────────────
-let _ocState = {
-  session: 'agent:main:main',
+// ── Flash Lane chat panel ──────────────────────────────────────────────
+let _flashState = {
   panelOpen: false,
-  flagEnabled: true,
-  enabled: false,
-  available: false,
-  statusError: '',
-  reason: '',
+  sessionId: null,
   sending: false,
-  lastMsgId: null,
   messages: []
 };
 
-function ocWarnPanel(reason) {
-  return '<div class="oc-warn-panel">'
-    + '<span class="oc-warn-icon" aria-hidden="true">⚠</span>'
-    + '<div class="oc-warn-body">'
-    + '<div class="oc-warn-title">OpenClaw unavailable</div>'
-    + '<div class="oc-warn-reason">' + esc(reason) + '</div>'
-    + '<button class="oc-warn-action" onclick="openSettings();switchSettingsTab(\'features\')">'
-    + 'Settings → Features</button>'
-    + '</div></div>';
-}
-
-function ocErrPanel(reason) {
-  return '<div class="oc-warn-panel">'
-    + '<span class="oc-warn-icon" aria-hidden="true">⚠</span>'
-    + '<div class="oc-warn-body">'
-    + '<div class="oc-warn-title">OpenClaw status error</div>'
-    + '<div class="oc-warn-reason">' + esc(reason) + '</div>'
-    + '<button class="oc-warn-action" onclick="initOpenclawDock()">Retry</button>'
-    + '</div></div>';
-}
-
-function ocPanelHtml() {
-  const dotClass = _ocState.statusError ? 'err' : (_ocState.available ? 'ok' : (_ocState.enabled ? 'err' : 'off'));
+function flashPanelHtml() {
   return '<div class="oc-center-pane">'
     + '<div class="oc-panel-head">'
-    + '<div><div class="oc-panel-title"><span class="oc-avail-dot ' + dotClass + '" id="ocPanelAvailDot"></span><span>OpenClaw</span></div>'
-    + '<div class="oc-panel-sub">Vale chat through the local OpenClaw gateway</div></div>'
-    + '<select id="ocPanelSessionSel" class="oc-session-sel" onchange="ocSessionChanged()">'
-    + '<option value="agent:main:main"' + (_ocState.session === 'agent:main:main' ? ' selected' : '') + '>agent:main:main</option>'
-    + '<option value="agent:main:hivematrix"' + (_ocState.session === 'agent:main:hivematrix' ? ' selected' : '') + '>agent:main:hivematrix</option>'
-    + '</select>'
+    + '<div><div class="oc-panel-title"><span class="oc-avail-dot ok"></span><span>Flash</span></div>'
+    + '<div class="oc-panel-sub">Native HiveMatrix agent loop</div></div>'
     + '<span class="oc-panel-head-spacer"></span>'
-    + '<button class="usage-refresh" onclick="initOpenclawDock()" title="Re-check OpenClaw status and refresh history">↻</button>'
     + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button>'
     + '</div>'
     + '<div class="oc-panel-body">'
-    + '<div class="oc-transcript" id="ocPanelTranscript"></div>'
-    + '<div class="oc-panel-composer-shell" onclick="ocFocusPanelInput()">'
-    + '<textarea class="oc-input" id="ocPanelInput" placeholder="Message OpenClaw…" rows="3" onkeydown="ocInputKeydown(event)" oninput="ocInputResize(this)"></textarea>'
+    + '<div class="oc-transcript" id="flashTranscript"></div>'
+    + '<div class="oc-panel-composer-shell" onclick="flashFocusInput()">'
+    + '<textarea class="oc-input" id="flashInput" placeholder="Message Flash…" rows="3" onkeydown="flashInputKeydown(event)" oninput="flashInputResize(this)"></textarea>'
     + '<div class="oc-panel-composer-actions">'
-    + '<button class="create" id="ocPanelSendBtn" onclick="event.stopPropagation();ocSend()" disabled>Send</button>'
-    + '<button class="copybtn" id="ocPanelTaskBtn" onclick="event.stopPropagation();ocCreateTask()" title="Create HiveMatrix task — uses selected transcript text, or the last message if nothing is selected">＋ Task</button>'
+    + '<button class="create" id="flashSendBtn" onclick="event.stopPropagation();flashSend()" disabled>Send</button>'
     + '</div></div></div></div>';
 }
 
-function renderOpenClawPanel() {
-  if (!_ocState.panelOpen) return;
+function renderFlashPanel() {
+  if (!_flashState.panelOpen) return;
   const session = document.getElementById('session');
   if (!session) return;
-  setOpenClawSessionMode(true);
-  const active = document.activeElement && document.activeElement.id === 'ocPanelInput';
-  const draft = active ? document.getElementById('ocPanelInput').value : '';
-  session.innerHTML = ocPanelHtml();
-  const input = document.getElementById('ocPanelInput');
-  if (input && draft) { input.value = draft; ocInputResize(input); }
-  if (_ocState.statusError) {
-    const t = document.getElementById('ocPanelTranscript');
-    if (t) t.innerHTML = ocErrPanel(_ocState.statusError);
-    return;
-  }
-  if (!_ocState.flagEnabled) {
-    const t = document.getElementById('ocPanelTranscript');
-    if (t) t.innerHTML = ocWarnPanel('OpenClaw Chat is disabled in Settings.');
-    return;
-  }
-  if (!_ocState.enabled || !_ocState.available) {
-    const t = document.getElementById('ocPanelTranscript');
-    if (t) t.innerHTML = ocWarnPanel(_ocState.reason || 'OpenClaw is not available on this Mac.');
-    return;
-  }
-  ocRenderMessages(_ocState.messages || [], false);
+  setFlashSessionMode(true);
+  const active = document.activeElement && document.activeElement.id === 'flashInput';
+  const draft = active ? ((document.getElementById('flashInput') || {}).value || '') : '';
+  session.innerHTML = flashPanelHtml();
+  const input = document.getElementById('flashInput');
+  if (input && draft) { input.value = draft; flashInputResize(input); }
+  flashRenderMessages();
   if (active && input) input.focus();
 }
 
-function showOpenClawPanel() {
+function showFlashPanel() {
   state.selected = null;
   state.selectedFlight = null;
   state.selectedSkillOrCommand = null;
   _skSel = '';
   _ctxTask = null;
   _taskFormInSession = false;
-  _ocState.panelOpen = true;
+  _flashState.panelOpen = true;
   renderBoard();
   renderSkillList();
-  renderOpenClawPanel();
-  initOpenclawDock();
+  renderFlashPanel();
+  updateFlashNav();
 }
 
-function updateOpenClawNav() {
-  const nav = document.getElementById('openclawNav');
-  const dot = document.getElementById('ocNavAvailDot');
-  const flagEnabled = _ocState.flagEnabled !== false;
-  if (nav) {
-    nav.style.display = flagEnabled ? '' : 'none';
-    nav.classList.toggle('active', _ocState.panelOpen);
-  }
-  if (dot) {
-    dot.className = 'oc-avail-dot ' + (_ocState.statusError ? 'err' : (_ocState.available ? 'ok' : (_ocState.enabled ? 'err' : 'off')));
-  }
+function updateFlashNav() {
+  const nav = document.getElementById('flashNav');
+  if (nav) nav.classList.toggle('active', _flashState.panelOpen);
 }
 
-async function initOpenclawDock() {
-  try {
-    const r = await api('/openclaw/status');
-    const flagEnabled = !!(r && r.flagEnabled);
-    const nav = document.getElementById('openclawNav');
-    if (nav) nav.style.display = flagEnabled ? '' : 'none';
-    _ocState.flagEnabled = flagEnabled;
-    _ocState.enabled = !!(r && r.enabled);
-    _ocState.available = !!(r && r.available);
-    _ocState.reason = (r && r.reason) || '';
-    _ocState.statusError = '';
-    updateOpenClawNav();
-    renderOpenClawPanel();
-    if (!flagEnabled || !_ocState.enabled || !_ocState.available) return;
-    await ocRefresh();
-  } catch (e) {
-    _ocState.statusError = 'Could not check OpenClaw status.';
-    _ocState.available = false;
-    updateOpenClawNav();
-    renderOpenClawPanel();
-  }
-}
-
-async function ocRefresh() {
-  const t = document.getElementById('ocPanelTranscript');
-  if (t) t.innerHTML = '<div class="oc-warn-panel"><span class="oc-warn-icon" aria-hidden="true">⏳</span><div class="oc-warn-body"><div class="oc-warn-reason">Loading…</div></div></div>';
-  try {
-    const r = await api('/openclaw/chat/history?sessionKey=' + encodeURIComponent(_ocState.session) + '&limit=50');
-    if (!r || !r.available) {
-      _ocState.reason = (r && r.reason) || 'OpenClaw unavailable.';
-      renderOpenClawPanel();
-      return;
-    }
-    ocRenderMessages(r.messages || [], r.truncated);
-  } catch (e) {
-    const t2 = document.getElementById('ocPanelTranscript');
-    if (t2) t2.innerHTML = ocWarnPanel('Could not load history. Is OpenClaw running?');
-  }
-}
-
-function ocRenderMessages(msgs, truncated) {
-  _ocState.messages = msgs || [];
-  const el = document.getElementById('ocPanelTranscript');
+function flashRenderMessages() {
+  const el = document.getElementById('flashTranscript');
   if (!el) return;
-  if (!msgs.length) { el.innerHTML = '<div class="muted" style="font-size:13px;padding:8px 0">No messages yet.</div>'; return; }
-  const rows = msgs.map(function(m) {
-    const ts = m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
-    return '<div class="oc-msg oc-msg-' + esc(m.role || 'assistant') + '">'
-      + '<div class="oc-msg-meta">' + esc(m.role || '') + (ts ? ' \xb7 ' + ts : '') + '</div>'
-      + '<div class="oc-msg-text">' + esc(m.content || '').replace(/\n/g, '<br>') + '</div>'
+  const msgs = _flashState.messages;
+  if (!msgs.length) {
+    el.innerHTML = '<div class="muted" style="font-size:13px;padding:8px 0">No messages yet. Say hello!</div>';
+    return;
+  }
+  el.innerHTML = msgs.map(function(m) {
+    const ts = m.ts ? new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '';
+    const roleLabel = m.role === 'assistant' ? 'Flash' : (m.role === 'user' ? 'You' : m.role);
+    let toolHtml = '';
+    if (m.toolLines && m.toolLines.length) {
+      toolHtml = '<div style="margin:4px 0 2px;font-size:11px;color:var(--muted)">'
+        + m.toolLines.map(function(tl) {
+          if (tl.type === 'escalated') {
+            return '<div style="color:var(--accent)">↗ Escalated to Work Package ' + esc(tl.workPackageId || '') + '</div>';
+          }
+          const icon = tl.type === 'result' ? (tl.ok ? '✓' : '✗') : '⏳';
+          const nameStr = esc(tl.name || '');
+          const summaryStr = tl.type === 'result' ? esc(tl.resultSummary || '') : esc(tl.summary || '');
+          const color = tl.type === 'result' ? (tl.ok ? 'var(--ok)' : 'var(--err)') : 'var(--muted)';
+          return '<div style="color:' + color + '">' + icon + ' ' + nameStr + (summaryStr ? ' — ' + summaryStr : '') + '</div>';
+        }).join('') + '</div>';
+    }
+    const streamingCursor = (m.streaming && m.role === 'assistant') ? '<span style="opacity:.5">▌</span>' : '';
+    const thumbBtn = (!m.streaming && m.role === 'assistant' && m.turnId)
+      ? '<button class="copybtn" style="font-size:10px;padding:2px 6px;margin-top:4px" onclick="flashThumbsDown(\'' + esc(m.turnId) + '\')" title="Mark as bad — added to regression eval set">👎</button>'
+      : '';
+    return '<div class="oc-msg oc-msg-' + esc(m.role) + '">'
+      + '<div class="oc-msg-meta">' + esc(roleLabel) + (ts ? ' · ' + ts : '') + '</div>'
+      + toolHtml
+      + '<div class="oc-msg-text">' + esc(m.content || '').replace(/\n/g, '<br>') + streamingCursor + '</div>'
+      + thumbBtn
       + '</div>';
   }).join('');
-  const trunc = truncated ? '<div class="muted" style="font-size:11px;padding:4px 0 8px">…history truncated</div>' : '';
-  el.innerHTML = trunc + rows;
   el.scrollTop = el.scrollHeight;
-  const last = msgs[msgs.length - 1];
-  _ocState.lastMsgId = last && last.id ? last.id : null;
 }
 
-async function ocSend() {
-  const input = document.getElementById('ocPanelInput');
-  const sendBtn = document.getElementById('ocPanelSendBtn');
-  if (!input || !input.value.trim() || _ocState.sending) return;
+async function flashSend() {
+  const input = document.getElementById('flashInput');
+  const sendBtn = document.getElementById('flashSendBtn');
+  if (!input || !input.value.trim() || _flashState.sending) return;
   const msg = input.value.trim();
-  _ocState.sending = true;
+  _flashState.sending = true;
   if (sendBtn) sendBtn.disabled = true;
   input.value = '';
-  ocInputResize(input);
+  flashInputResize(input);
+  updateFlashNav();
+
+  _flashState.messages.push({ role: 'user', content: msg, ts: Date.now() });
+  const assistantIdx = _flashState.messages.length;
+  _flashState.messages.push({ role: 'assistant', content: '', ts: Date.now(), streaming: true, toolLines: [] });
+  flashRenderMessages();
+
+  const reqBody = JSON.stringify(Object.assign(
+    { channel: 'console', peer: 'operator', text: msg },
+    _flashState.sessionId ? { sessionId: _flashState.sessionId } : {}
+  ));
+
+  let accText = '';
+  let toolLines = [];
+
   try {
-    const r = await api('/openclaw/chat/send', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionKey: _ocState.session, message: msg,
-        idempotencyKey: 'oc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) })
+    const res = await fetch('/flash/turn', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + HM_TOKEN },
+      body: reqBody
     });
-    if (!r || !r.ok) {
-      input.value = msg; ocInputResize(input);
-      hmToast((r && r.reason) || 'OpenClaw send failed.', 'err');
-    } else {
-      setTimeout(ocRefresh, 900);
+    if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let doneData = null;
+
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        let evt = '', dataStr = '';
+        for (const line of part.split('\n')) {
+          if (line.startsWith('event: ')) evt = line.slice(7).trim();
+          else if (line.startsWith('data: ')) dataStr = line.slice(6).trim();
+        }
+        if (!evt || !dataStr) continue;
+        let d;
+        try { d = JSON.parse(dataStr); } catch (e) { continue; }
+        if (evt === 'token') {
+          accText += d.delta || '';
+          _flashState.messages[assistantIdx] = { role: 'assistant', content: accText, ts: Date.now(), streaming: true, toolLines };
+          flashRenderMessages();
+        } else if (evt === 'tool_start') {
+          toolLines = toolLines.concat([{ type: 'start', name: d.name, summary: d.args_summary }]);
+          _flashState.messages[assistantIdx] = { role: 'assistant', content: accText, ts: Date.now(), streaming: true, toolLines };
+          flashRenderMessages();
+        } else if (evt === 'tool_result') {
+          toolLines = toolLines.map(function(tl) {
+            return (tl.name === d.name && tl.type === 'start')
+              ? { type: 'result', name: tl.name, ok: d.ok, summary: tl.summary, resultSummary: d.summary }
+              : tl;
+          });
+          _flashState.messages[assistantIdx] = { role: 'assistant', content: accText, ts: Date.now(), streaming: true, toolLines };
+          flashRenderMessages();
+        } else if (evt === 'escalated') {
+          toolLines = toolLines.concat([{ type: 'escalated', workPackageId: d.workPackageId }]);
+          _flashState.messages[assistantIdx] = { role: 'assistant', content: accText, ts: Date.now(), streaming: true, toolLines };
+          flashRenderMessages();
+        } else if (evt === 'done') {
+          doneData = d;
+        }
+      }
     }
-  } catch (e) {
-    input.value = msg; ocInputResize(input);
-    hmToast('OpenClaw send failed.', 'err');
+
+    if (doneData) {
+      _flashState.sessionId = doneData.sessionId;
+      _flashState.messages[assistantIdx] = {
+        role: 'assistant', content: doneData.fullText || accText, ts: Date.now(),
+        streaming: false, turnId: doneData.turnId, toolLines
+      };
+    } else {
+      _flashState.messages[assistantIdx] = { role: 'assistant', content: accText, ts: Date.now(), streaming: false, toolLines };
+    }
+    flashRenderMessages();
+  } catch (err) {
+    _flashState.messages[assistantIdx] = { role: 'system', content: 'Error: ' + (err.message || 'Send failed.'), ts: Date.now() };
+    flashRenderMessages();
+    hmToast('Flash send failed.', 'err');
   } finally {
-    _ocState.sending = false;
-    if (sendBtn) sendBtn.disabled = !(input.value.trim());
+    _flashState.sending = false;
+    if (sendBtn) sendBtn.disabled = !(input && input.value.trim());
+    updateFlashNav();
   }
 }
 
-function ocInputKeydown(e) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ocSend(); }
+function flashInputKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); flashSend(); }
 }
 
-function ocInputResize(el) {
+function flashInputResize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 180) + 'px';
-  const sendBtn = document.getElementById('ocPanelSendBtn');
+  const sendBtn = document.getElementById('flashSendBtn');
   if (sendBtn) sendBtn.disabled = !el.value.trim();
 }
 
-function ocFocusPanelInput() {
-  const input = document.getElementById('ocPanelInput');
+function flashFocusInput() {
+  const input = document.getElementById('flashInput');
   if (input) input.focus();
 }
 
-async function ocCreateTask() {
-  const btn = document.getElementById('ocPanelTaskBtn');
-  if (btn) btn.disabled = true;
+async function flashThumbsDown(turnId) {
   try {
-    // Prefer user-selected text inside the transcript; fall back to the last message's content.
-    let text = '';
-    const sel = window.getSelection();
-    const transcript = document.getElementById('ocPanelTranscript');
-    if (sel && sel.rangeCount > 0 && transcript && transcript.contains(sel.anchorNode)) {
-      text = sel.toString().trim();
-    }
-    if (!text && _ocState.messages.length > 0) {
-      text = (_ocState.messages[_ocState.messages.length - 1].content || '').trim();
-    }
-    if (!text) {
-      hmToast('Select transcript text or wait for a message first.', 'err');
-      return;
-    }
-    const body = { sessionKey: _ocState.session, text };
-    if (_ocState.lastMsgId) body.messageId = _ocState.lastMsgId;
-    const r = await api('/openclaw/chat/create-hivematrix-task', {
+    await api('/flash/turns/' + encodeURIComponent(turnId) + '/feedback', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ rating: 'bad' })
     });
-    if (r && r.ok) {
-      hmToast('HiveMatrix task created' + (r.taskId ? ' — ' + esc(String(r.taskId)) : '') + '.', 'ok');
-      refresh();
-    } else { hmToast((r && r.reason) || 'Task creation failed.', 'err'); }
-  } catch (e) { hmToast('Task creation failed.', 'err'); }
-  finally { if (btn) btn.disabled = false; }
-}
-
-function ocSessionChanged() {
-  const sel = document.getElementById('ocPanelSessionSel');
-  if (sel) _ocState.session = sel.value;
-  ocRefresh();
+    hmToast('Marked as bad — added to eval set.', 'ok');
+  } catch (e) {
+    hmToast('Could not record feedback.', 'err');
+  }
 }
 
 function talkStatus(msg, show) {
@@ -5786,6 +6306,57 @@ function renderAbout() {
   set("ab_version", "v" + (v.version || "?"));
   set("ab_build", String(v.build || "?"));
   set("ab_date", v.date || "?");
+}
+
+async function renderLicense() {
+  const banner = document.getElementById("lic_status_banner");
+  const det = document.getElementById("lic_detail");
+  if (!banner || !det) return;
+  banner.innerHTML = '<div class="muted" style="font-size:11px">Loading…</div>';
+  det.innerHTML = '';
+  const r = await api("/license/status");
+  if (!r) { banner.innerHTML = '<div class="muted">Could not load license status.</div>'; return; }
+  const stateColor = { valid: "var(--ok)", grace: "var(--warn)", expired: "var(--err)", invalid: "var(--err)", missing: "var(--muted)", unlicensed: "var(--muted)", machine_mismatch: "var(--err)" };
+  const color = stateColor[r.state] || "var(--muted)";
+  const tierLabel = r.edition ? r.edition.charAt(0).toUpperCase() + r.edition.slice(1) : "Free";
+  banner.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:6px;background:var(--bg2);border:1px solid var(--border)">'
+    + '<span style="background:' + color + ';color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;white-space:nowrap">' + esc(tierLabel.toUpperCase()) + '</span>'
+    + '<span style="font-size:12px">' + esc(r.reason) + '</span>'
+    + '</div>';
+  const rows = [];
+  if (r.expiresAt) rows.push(['expires', new Date(r.expiresAt).toLocaleDateString()]);
+  if (typeof r.daysRemaining === 'number') rows.push(['days remaining', String(r.daysRemaining)]);
+  if (r.graceUntil) rows.push(['grace until', new Date(r.graceUntil).toLocaleDateString()]);
+  if (r.features && r.features.length) rows.push(['features', r.features.join(', ')]);
+  det.innerHTML = rows.map(([k, v]) => '<span class="k">' + esc(k) + '</span><span>' + esc(String(v)) + '</span>').join('');
+}
+
+async function activateLicense() {
+  const inp = document.getElementById("lic_key_input");
+  const stat = document.getElementById("lic_activate_status");
+  const raw = inp.value.trim();
+  if (!raw) { stat.textContent = "Paste a license key first."; return; }
+  stat.textContent = "Activating…";
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch {
+    try { parsed = JSON.parse(atob(raw)); } catch {
+      stat.innerHTML = '<span style="color:var(--err)">Invalid format — expected JSON or base64-encoded JSON.</span>';
+      return;
+    }
+  }
+  if (!parsed || !parsed.payload || typeof parsed.signature !== "string") {
+    stat.innerHTML = '<span style="color:var(--err)">Invalid license: missing payload or signature.</span>';
+    return;
+  }
+  const r = await api("/license", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(parsed) });
+  if (!r) { stat.innerHTML = '<span style="color:var(--err)">Network error — is the daemon running?</span>'; return; }
+  if (r.state === "valid" || r.state === "grace") {
+    stat.innerHTML = '<span style="color:var(--ok)">✓ Activated — ' + esc((r.edition || 'pro').toUpperCase()) + ' license applied (' + esc(r.reason) + ')</span>';
+    inp.value = '';
+    await renderLicense();
+  } else {
+    stat.innerHTML = '<span style="color:var(--err)">' + esc(r.reason || r.error || 'Activation failed') + '</span>';
+  }
 }
 
 // --- Lane Apps manager (operator) ------------------------------------------
@@ -6058,6 +6629,132 @@ async function toggleLane(kind, enable) {
   const r = await api("/lanes/"+kind+"/autostart", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ enabled: enable }) });
   if (r && r.error) { hmAlert(r.error); }
   setTimeout(renderSettingsLanes, 800); // give launchctl a moment
+}
+
+async function renderVaultRefs() {
+  const status = document.getElementById("vault_status");
+  const el = document.getElementById("s_vault_refs");
+  if (!el) return;
+
+  const filter = (document.getElementById("s_vault_scope_filter").value || "").trim();
+  if (status) {
+    status.style.color = "var(--muted)";
+    status.textContent = "";
+  }
+  el.innerHTML = '<div class="muted">Loading vault refs…</div>';
+
+  try {
+    const query = filter ? "?scope=" + encodeURIComponent(filter) : "";
+    const r = await api("/vault/refs" + query);
+    const refs = (r && r.refs) || [];
+    if (!refs.length) {
+      el.innerHTML = '<div class="muted">' + (filter ? 'No refs for scope "' + esc(filter) + '".' : "No vault refs configured yet.") + '</div>';
+      return;
+    }
+    el.innerHTML = refs.map((entry) => {
+      const scope = esc(entry.scope || "?");
+      const name = esc(entry.name || "?");
+      const label = esc(entry.label || "");
+      const created = esc(entry.createdAt || "");
+      const updated = esc(entry.updatedAt || "");
+      const s = JSON.stringify(entry.scope || "");
+      const n = JSON.stringify(entry.name || "");
+      const createdRow = created ? '<div class="muted" style="font-size:10px">created: ' + created + "</div>" : "";
+      const updatedRow = updated ? '<div class="muted" style="font-size:10px">updated: ' + updated + "</div>" : "";
+      return '<div class="card" style="cursor:default">'
+        + '<div class="t">' + scope + " / " + name + (label ? ' <span class="muted" style="font-size:11px">(' + label + ")</span>" : "") + "</div>"
+        + '<div class="m" style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
+        + '<span class="badge">vault://' + scope + "/" + name + "</span>"
+        + '<button class="copybtn" onclick="removeVaultRef(' + s + "," + n + ')">Remove</button>'
+        + "</div>"
+        + (createdRow || "")
+        + (updatedRow || "")
+        + "</div>";
+    }).join("");
+  } catch (e) {
+    if (status) {
+      status.style.color = "var(--err)";
+      status.textContent = "Failed to load vault refs.";
+    }
+    el.innerHTML = '<div class="errbox">Could not load vault refs.</div>';
+  }
+}
+
+async function setVaultRef() {
+  const msg = document.getElementById("vault_status");
+  const scope = (document.getElementById("s_vault_scope").value || "").trim();
+  const name = (document.getElementById("s_vault_name").value || "").trim();
+  const label = (document.getElementById("s_vault_label").value || "").trim();
+  const valueEl = document.getElementById("s_vault_value");
+  const value = valueEl ? (valueEl.value || "").trim() : "";
+  if (!scope || !name || !value) {
+    if (msg) {
+      msg.style.color = "var(--err)";
+      msg.textContent = "Scope, name, and value are required.";
+    }
+    return;
+  }
+  if (msg) {
+    msg.style.color = "var(--accent)";
+    msg.textContent = "Saving…";
+  }
+  try {
+    const r = await api("/vault/refs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope, name, label, value }),
+    });
+    if (!r || !r.ok) {
+      if (msg) {
+        msg.style.color = "var(--err)";
+        msg.textContent = (r && r.error) ? String(r.error) : "Failed to save the vault entry.";
+      }
+      return;
+    }
+    if (valueEl) valueEl.value = "";
+    if (msg) {
+      msg.style.color = "var(--ok)";
+      msg.textContent = "Saved.";
+      setTimeout(() => {
+        if (msg && msg.textContent === "Saved.") msg.textContent = "";
+      }, 1500);
+    }
+    await renderVaultRefs();
+  } catch (e) {
+    if (msg) {
+      msg.style.color = "var(--err)";
+      msg.textContent = "Failed to save vault value.";
+    }
+  }
+}
+
+async function removeVaultRef(scope, name) {
+  const msg = document.getElementById("vault_status");
+  const safe = scope && name ? ('vault://' + scope + "/" + name) : "this vault entry";
+  if (!await hmConfirm("Remove " + safe + " from the vault?", { okLabel: "Remove", danger: true })) return;
+  try {
+    const r = await api("/vault/refs/" + encodeURIComponent(scope) + "/" + encodeURIComponent(name), { method: "DELETE" });
+    if (!r || r.ok === false) {
+      if (msg) {
+        msg.style.color = "var(--err)";
+        msg.textContent = (r && r.error) ? String(r.error) : "Delete failed.";
+      }
+      return;
+    }
+    if (msg) {
+      msg.style.color = "var(--ok)";
+      msg.textContent = "Removed.";
+      setTimeout(() => {
+        if (msg && msg.textContent === "Removed.") msg.textContent = "";
+      }, 1500);
+    }
+    await renderVaultRefs();
+  } catch (e) {
+    if (msg) {
+      msg.style.color = "var(--err)";
+      msg.textContent = "Delete failed.";
+    }
+  }
 }
 
 // --- COO Dispatch (operator) ------------------------------------------------
@@ -7242,7 +7939,7 @@ async function createTask() {
       hmToast("Staged as a Flight (" + n + " item" + (n === 1 ? "" : "s") + ").");
       state.selectedFlight = t.packageId || null;
       state.selected = null;
-      _ocState.panelOpen = false;
+      _flashState.panelOpen = false;
       renderWorkPackages();
     } else if (t.routed) {
       hmToast("Routed to " + String(t.routed).replace(/-/g, " ") + ".");
@@ -7342,7 +8039,6 @@ if (requireToken()) {
   refresh();
   connectSSE();
   initVoiceFeature();
-  initOpenclawDock();
   setInterval(refresh, 5000);
   checkUpdate();
   setInterval(checkUpdate, 5 * 60 * 1000);

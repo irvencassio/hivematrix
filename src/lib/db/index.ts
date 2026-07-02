@@ -737,6 +737,47 @@ const MIGRATIONS: string[] = [
     );
     CREATE INDEX IF NOT EXISTS idx_flight_loop_passes_loop ON flight_loop_passes(loopId, passNumber);
     CREATE INDEX IF NOT EXISTS idx_flight_loop_passes_pkg ON flight_loop_passes(packageId, startedAt);`,
+
+  // v29: Flash Lane — conversational agent loop sessions and turns. Per-channel-peer
+  // session scoping: same iMessage sender resumes their session; console + voice
+  // share one operator session per profile. Feedback stored in artifactsJson column.
+  `CREATE TABLE IF NOT EXISTS flash_sessions (
+      id TEXT PRIMARY KEY,
+      channel TEXT NOT NULL,
+      peer TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      lastActiveAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_flash_sessions_channel_peer ON flash_sessions(channel, peer, lastActiveAt);
+    CREATE INDEX IF NOT EXISTS idx_flash_sessions_last_active ON flash_sessions(lastActiveAt);
+
+    CREATE TABLE IF NOT EXISTS flash_turns (
+      id TEXT PRIMARY KEY,
+      sessionId TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      toolCallsJson TEXT,
+      artifactsJson TEXT,
+      ts TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_flash_turns_session ON flash_turns(sessionId, ts);`,
+
+  // v30: Flash Lane learning loop — track which sessions have been distilled so the
+  // scheduler doesn't re-distill already-processed sessions across daemon restarts.
+  `ALTER TABLE flash_sessions ADD COLUMN distilledAt TEXT;`,
+
+  // v31: Credential vault ref index — metadata only; actual secrets live in the macOS
+  // Keychain under service "hivematrix-vault", account "<scope>/<name>".
+  `CREATE TABLE IF NOT EXISTS vault_refs (
+    scope     TEXT NOT NULL,
+    name      TEXT NOT NULL,
+    label     TEXT NOT NULL DEFAULT '',
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL,
+    PRIMARY KEY (scope, name)
+  );
+  CREATE INDEX IF NOT EXISTS idx_vault_refs_scope ON vault_refs(scope);`,
 ];
 
 // ------------------------------------------------------------------

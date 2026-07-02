@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import type { ModelProvider } from "@/lib/config/providers";
 import { renderAttachmentBlock } from "@/lib/tasks/attachments";
-import { buildChatCompletionsUrls, buildGenericRequestBody, buildMessages, genericThinkingInstruction } from "./generic-agent";
+import { buildChatCompletionsUrls, buildGenericRequestBody, buildMessages, extractTextToolCalls, genericThinkingInstruction } from "./generic-agent";
 
 test("generic/local request body uses provider max tokens and leaves cost uncapped", () => {
   const provider: ModelProvider = {
@@ -55,4 +55,124 @@ test("generic/local messages keep formatted attachment paths as user content", a
   assert.ok(String(messages[1]?.content).includes(attachmentBlock));
   assert.match(String(messages[1]?.content), /path: \/Users\/me\/\.hivematrix\/uploads\/id-shot\.png/);
   assert.match(String(messages[1]?.content), /Use the absolute path above/);
+});
+
+test("generic/local extracts Qwen textual tool calls", () => {
+  const parsed = extractTextToolCalls(`I'll inspect files now.
+
+..TOOL{
+  "name": "Bash",
+  "args": {
+    "command": "find . -maxdepth 2 -type f | head"
+  }
+}
+`);
+
+  assert.equal(parsed.content, "I'll inspect files now.");
+  assert.deepEqual(parsed.toolCalls, [
+    {
+      name: "bash",
+      arguments: JSON.stringify({ command: "find . -maxdepth 2 -type f | head" }),
+    },
+  ]);
+});
+
+test("generic/local extracts multiple textual tool calls and canonical names", () => {
+  const parsed = extractTextToolCalls(`..TOOL{"name":"Read","args":{"path":"src/a.ts"}}
+then edit
+..TOOL{"name":"edit_file","args":{"path":"src/a.ts","old_string":"a","new_string":"b"}}`);
+
+  assert.equal(parsed.content, "then edit");
+  assert.deepEqual(parsed.toolCalls, [
+    { name: "read_file", arguments: JSON.stringify({ path: "src/a.ts" }) },
+    { name: "edit_file", arguments: JSON.stringify({ path: "src/a.ts", old_string: "a", new_string: "b" }) },
+  ]);
+});
+
+test("generic/local extracts Qwen bracket find calls", () => {
+  const parsed = extractTextToolCalls("Search next.\n\n[find] path: `~`, regex: `feedback|backlog`");
+
+  assert.equal(parsed.content, "Search next.");
+  assert.deepEqual(parsed.toolCalls, [
+    { name: "search", arguments: JSON.stringify({ path: ".", pattern: "feedback|backlog" }) },
+  ]);
+});
+
+test("generic/local extracts Qwen brain_search shorthand as repo search", () => {
+  const parsed = extractTextToolCalls("Let me find it.\n\n[brain_search?q=path expansion brainpower link copy]");
+
+  assert.equal(parsed.content, "Let me find it.");
+  assert.deepEqual(parsed.toolCalls, [
+    { name: "search", arguments: JSON.stringify({ path: ".", pattern: "path|expansion|brainpower|link|copy" }) },
+  ]);
+});
+
+test("generic/local extracts Qwen brain_search label shorthand as repo search", () => {
+  const parsed = extractTextToolCalls("Let me find it.\n\n[brain_search] q:Brainpower copy link path brain shortcut vscode");
+
+  assert.equal(parsed.content, "Let me find it.");
+  assert.deepEqual(parsed.toolCalls, [
+    { name: "search", arguments: JSON.stringify({ path: ".", pattern: "Brainpower|copy|link|path|brain|shortcut|vscode" }) },
+  ]);
+});
+
+test("generic/local extracts Qwen inline bash calls", () => {
+  const parsed = extractTextToolCalls("Explore.\n[~{type:'bash', cmd:'ls src/lib && echo done', out:'true'}]");
+
+  assert.equal(parsed.content, "Explore.");
+  assert.deepEqual(parsed.toolCalls, [
+    { name: "bash", arguments: JSON.stringify({ command: "ls src/lib && echo done" }) },
+  ]);
+});
+
+test("generic/local extracts fenced shell blocks as bash calls", () => {
+  const parsed = extractTextToolCalls(`I will create the file now.
+
+\`\`\`bash
+cat > src/lib/packs/example.ts <<'EOF'
+export const ok = true;
+EOF
+
+npm test -- src/lib/packs/example.test.ts
+\`\`\`
+
+Then I will summarize.`);
+
+  assert.equal(parsed.content, "I will create the file now.\n\nThen I will summarize.");
+  assert.deepEqual(parsed.toolCalls, [
+    {
+      name: "bash",
+      arguments: JSON.stringify({
+        command: "cat > src/lib/packs/example.ts <<'EOF'\nexport const ok = true;\nEOF\n\nnpm test -- src/lib/packs/example.test.ts",
+      }),
+    },
+  ]);
+});
+
+test("generic/local extracts fenced read file pseudo-command as read_file", () => {
+  const parsed = extractTextToolCalls(`I'll inspect first.
+
+\`\`\`bash
+read file ~/hivematrix/src/daemon/server.ts
+\`\`\`
+`);
+
+  assert.equal(parsed.content, "I'll inspect first.");
+  assert.deepEqual(parsed.toolCalls, [
+    { name: "read_file", arguments: JSON.stringify({ path: "~/hivematrix/src/daemon/server.ts" }) },
+  ]);
+});
+
+test("generic/local extracts fenced python read_file calls", () => {
+  const parsed = extractTextToolCalls(`Let me check.
+
+\`\`\`python
+read_file(path="/home/user/hivematrix/src/lib/packs/index.ts")
+\`\`\`
+`);
+
+  assert.equal(parsed.content, "Let me check.");
+  assert.deepEqual(parsed.toolCalls, [
+    { name: "read_file", arguments: JSON.stringify({ path: "src/lib/packs/index.ts" }) },
+  ]);
 });

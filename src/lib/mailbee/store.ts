@@ -10,6 +10,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { getDb, generateId } from "@/lib/db";
 import { emailDomain } from "./contracts";
+import { isFeaturePermitted } from "@/lib/license/gates";
 
 const CHANNEL = "email";
 
@@ -36,7 +37,9 @@ export function ensureChannel(): ChannelRow {
   return getRow()!;
 }
 
-export function isChannelEnabled(): boolean { return (getRow()?.enabled ?? 0) === 1; }
+export function isChannelEnabled(): boolean {
+  return (getRow()?.enabled ?? 0) === 1 && isFeaturePermitted("channel_mail");
+}
 
 export function setChannelEnabled(enabled: boolean): void {
   ensureChannel();

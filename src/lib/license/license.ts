@@ -7,8 +7,8 @@
  * banner) while failing *closed* on tampering/expiry-beyond-grace. A grace
  * period after expiry keeps a running appliance alive past renewal day.
  *
- * Stripe-checkout → license issuance is a future web service; this module only
- * verifies the issued artifact.
+ * Lemon Squeezy checkout → license issuance is a stateless webhook receiver (P3.2);
+ * this module only verifies the issued artifact locally.
  */
 
 import { verify } from "crypto";

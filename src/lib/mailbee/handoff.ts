@@ -1,11 +1,12 @@
 /**
  * Mail Lane routing — pure decision for one inbound email.
  *
- * Trust-classify first, then decide: known/trusted senders (or triage-all mode)
- * become triage tasks carrying the trust assessment; unknown senders are skipped
- * unless triage-all is on. The trust level drives downstream autonomy (only
- * "trusted" is auto-send-eligible); the task description front-loads the
- * assessment so the agent treats the body as untrusted input.
+ * Trust-classify first, then decide:
+ * - Known senders → Flash Lane conversational session (Flash escalates to a work
+ *   package internally for complex requests). Reply is sent only if trust is
+ *   "trusted" and not an auth-request hallucination.
+ * - Unknown senders + triage-all on → triage task (unchanged legacy path).
+ * - Unknown senders + triage-all off → ignore (unchanged).
  */
 
 import {
@@ -15,6 +16,14 @@ import {
 
 export type MailRoute =
   | { kind: "ignore"; reason: string }
+  | {
+      kind: "flash_turn";
+      flashText: string;
+      peer: string;
+      subject: string;
+      trust: MailTrustAssessment;
+      autoSendEligible: boolean;
+    }
   | {
       kind: "new_task";
       title: string;
@@ -30,20 +39,28 @@ export interface MailRouteContext {
   triageAll: boolean;
 }
 
-export function routeEmail(email: InboundEmail, ctx: MailRouteContext): MailRoute {
-  const trust = classifyMailTrust({
-    subject: email.subject,
-    text: email.body,
-    attachments: email.attachments,
-    trustHints: { knownSender: ctx.knownSender, authenticatedDomain: ctx.authenticatedDomain },
-  });
+/** Build the user message delivered to Flash for an inbound email. */
+function buildFlashEmailText(email: InboundEmail, trust: MailTrustAssessment): string {
+  return [
+    `From: ${email.fromName ? `${email.fromName} <${email.from}>` : email.from}`,
+    `Subject: ${email.subject || "(none)"}`,
+    `Trust: ${trust.level.toUpperCase()} — ${trust.reasons.join(" ")}`,
+    trust.promptInjectionSignals.length ? `⚠ injection signals: ${trust.promptInjectionSignals.join(", ")}` : "",
+    trust.riskyAttachments.length ? `⚠ risky attachments: ${trust.riskyAttachments.join(", ")}` : "",
+    "",
+    mayAutoSend(trust.level)
+      ? "Sender is trusted — a reply may be sent through Mail Lane if appropriate."
+      : "Sender is NOT trusted — do not send a reply autonomously; draft for human review.",
+    "Send via the HiveMatrix Mail Lane send path only. Never use Gmail, Google MCP, IMAP, or any external account. Never ask the sender to /mcp, /login, or authenticate anything — this daemon is headless.",
+    "",
+    "--- Email body ---",
+    email.body,
+  ].filter(Boolean).join("\n");
+}
 
-  // Don't flood the board with every external email unless triage-all is on.
-  if (!ctx.knownSender && !ctx.triageAll) {
-    return { kind: "ignore", reason: `external sender ${email.from} (triage-all off)` };
-  }
-
-  const description = [
+/** Build the task description for triage tasks (unknown-sender + triage-all path). */
+function buildTaskDescription(email: InboundEmail, trust: MailTrustAssessment): string {
+  return [
     `From: ${email.fromName ? `${email.fromName} <${email.from}>` : email.from}`,
     `Subject: ${email.subject || "(none)"}`,
     `Trust: ${trust.level.toUpperCase()} — ${trust.reasons.join(" ")}`,
@@ -61,11 +78,38 @@ export function routeEmail(email: InboundEmail, ctx: MailRouteContext): MailRout
     "--- Email body ---",
     email.body,
   ].filter(Boolean).join("\n");
+}
 
+export function routeEmail(email: InboundEmail, ctx: MailRouteContext): MailRoute {
+  const trust = classifyMailTrust({
+    subject: email.subject,
+    text: email.body,
+    attachments: email.attachments,
+    trustHints: { knownSender: ctx.knownSender, authenticatedDomain: ctx.authenticatedDomain },
+  });
+
+  // Don't flood the board with every external email unless triage-all is on.
+  if (!ctx.knownSender && !ctx.triageAll) {
+    return { kind: "ignore", reason: `external sender ${email.from} (triage-all off)` };
+  }
+
+  // Known senders → Flash Lane for a conversational reply.
+  if (ctx.knownSender) {
+    return {
+      kind: "flash_turn",
+      flashText: buildFlashEmailText(email, trust),
+      peer: email.from,
+      subject: email.subject,
+      trust,
+      autoSendEligible: mayAutoSend(trust.level),
+    };
+  }
+
+  // Unknown sender + triage-all on → triage task (legacy path).
   return {
     kind: "new_task",
     title: deriveEmailTaskTitle(email.subject, email.from),
-    description,
+    description: buildTaskDescription(email, trust),
     trust,
     autoSendEligible: mayAutoSend(trust.level),
   };

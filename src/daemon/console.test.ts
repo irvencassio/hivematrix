@@ -247,8 +247,8 @@ test("loading models refreshes About version metadata", () => {
 
 test("settings tabs are in a defined order ending with About", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /\["about", "features", "general", "models", "observability", "lanes", "remote"\]/);
-  assert.match(CONSOLE_HTML, /id="tab-about"[^>]*>About<\/div><div class="tab" id="tab-features"[^>]*>Features<\/div><div class="tab" id="tab-general"[^>]*>Personalization<\/div><div class="tab" id="tab-models"[^>]*>Models<\/div><div class="tab" id="tab-observability"[^>]*>Observability<\/div><div class="tab" id="tab-lanes"[^>]*>Lanes<\/div><div class="tab" id="tab-remote"[^>]*>Remote<\/div>/);
+  assert.match(js, /\["about", "features", "general", "models", "observability", "lanes", "remote", "license"\]/);
+  assert.match(CONSOLE_HTML, /id="tab-about"[^>]*>About<\/div><div class="tab" id="tab-features"[^>]*>Features<\/div><div class="tab" id="tab-general"[^>]*>Personalization<\/div><div class="tab" id="tab-models"[^>]*>Models<\/div><div class="tab" id="tab-observability"[^>]*>Observability<\/div><div class="tab" id="tab-lanes"[^>]*>Lanes<\/div><div class="tab" id="tab-remote"[^>]*>Remote<\/div><div class="tab" id="tab-license"[^>]*>License<\/div>/);
   assert.doesNotMatch(CONSOLE_HTML, /id="tab-projects"/, "Projects is no longer a Settings tab");
 });
 
@@ -621,6 +621,15 @@ test("center column shows an overview when no task is selected", () => {
   assert.match(js, /else renderOverview\(\)/, "refresh shows the overview when nothing is selected");
 });
 
+test("overview renders server-driven pack dashboard cards", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /packCards:\s*\[\]/, "state tracks pack dashboard cards");
+  assert.match(js, /api\("\/packs\/dashboard-cards"\)/, "refresh fetches pack dashboard cards");
+  assert.match(js, /function renderPackDashboardCards\(/, "generic pack card renderer exists");
+  assert.match(js, /renderPackDashboardCards\(\)/, "overview includes pack cards");
+  assert.match(js, /packMetricLabel/, "pack metrics render without pack-specific code");
+});
+
 test("task detail does not render an execution provenance panel", () => {
   const js = extractScript(CONSOLE_HTML);
   // The execution panel (provider / profile / models-used) was removed from the task detail
@@ -880,24 +889,24 @@ test("+ New task and task creation remain after removing the shortcut", () => {
   assert.match(js, /function showNewTaskPanel\(/, "center-column task panel flow preserved");
 });
 
-test("board column has OpenClaw nav directly under New task", () => {
-  assert.match(CONSOLE_HTML, /id="openclawNav"/, "OpenClaw nav control present");
-  assert.match(CONSOLE_HTML, /id="openclawNav"[^>]*onclick="showOpenClawPanel\(\)"/, "OpenClaw nav opens center pane");
+test("board column has Flash nav directly under New task", () => {
+  assert.match(CONSOLE_HTML, /id="flashNav"/, "Flash nav control present");
+  assert.match(CONSOLE_HTML, /id="flashNav"[^>]*onclick="showFlashPanel\(\)"/, "Flash nav opens center pane");
   const newTaskIdx = CONSOLE_HTML.indexOf("＋ New task");
-  const openClawIdx = CONSOLE_HTML.indexOf('id="openclawNav"');
+  const flashIdx = CONSOLE_HTML.indexOf('id="flashNav"');
   const taskFormIdx = CONSOLE_HTML.indexOf('id="taskForm"');
-  assert.ok(newTaskIdx >= 0 && openClawIdx > newTaskIdx, "OpenClaw sits below New task");
-  assert.ok(taskFormIdx >= 0 && openClawIdx < taskFormIdx, "OpenClaw sits above the task form");
+  assert.ok(newTaskIdx >= 0 && flashIdx > newTaskIdx, "Flash sits below New task");
+  assert.ok(taskFormIdx >= 0 && flashIdx < taskFormIdx, "Flash sits above the task form");
 });
 
-test("showOpenClawPanel renders OpenClaw in the center column", () => {
+test("showFlashPanel renders Flash in the center column", () => {
   const js = extractScript(CONSOLE_HTML);
-  const body = js.match(/function showOpenClawPanel\(\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
-  assert.ok(body.length > 50, "showOpenClawPanel defined");
+  const body = js.match(/function showFlashPanel\(\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(body.length > 50, "showFlashPanel defined");
   assert.match(body, /state\.selected = null/, "clears selected task");
   assert.match(body, /state\.selectedFlight = null/, "clears selected Flight");
-  assert.match(body, /renderOpenClawPanel\(\)/, "renders the center OpenClaw panel");
-  assert.match(body, /initOpenclawDock\(\)/, "refreshes OpenClaw availability/history");
+  assert.match(body, /renderFlashPanel\(\)/, "renders the center Flash panel");
+  assert.match(body, /updateFlashNav\(\)/, "updates Flash nav state");
 });
 
 test("board column has an Overview nav above + New task", () => {
@@ -1079,6 +1088,26 @@ test("settings surfaces a real Terminal Lane readiness card with no secrets", ()
   const render = js.match(/async function renderTerminalReadiness\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
   assert.ok(render.length > 50, "renderTerminalReadiness body extracted");
   assert.doesNotMatch(render, /credentialRef|password|private_key|ssh_key_passphrase/, "no secrets surfaced in the UI");
+});
+
+test("settings includes a vault section for alias management without exposing values", () => {
+  assert.match(CONSOLE_HTML, /id="vault_status"/, "vault status mount present");
+  assert.match(CONSOLE_HTML, /id="s_vault_refs"/, "vault refs mount present");
+  assert.match(CONSOLE_HTML, /id="s_vault_scope"/, "vault scope input present");
+  assert.match(CONSOLE_HTML, /id="s_vault_name"/, "vault name input present");
+  assert.match(CONSOLE_HTML, /id="s_vault_label"/, "vault label input present");
+  assert.match(CONSOLE_HTML, /id="s_vault_value"/, "vault value input present");
+  assert.match(CONSOLE_HTML, /id="s_vault_scope_filter"/, "vault scope filter present");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function renderVaultRefs\(/);
+  assert.match(js, /function setVaultRef\(/);
+  assert.match(js, /function removeVaultRef\(/);
+  assert.match(js, /api\("\/vault\/refs"/, "uses vault list endpoint");
+  assert.match(js, /["']\/vault\/refs\/["']\s*\+\s*encodeURIComponent\(scope\)\s*\+\s*["']\/["']\s*\+\s*encodeURIComponent\(name\)/, "remove uses encoded scope/name path");
+  assert.match(js, /Scope, name, and value are required\./);
+  const render = js.match(/async function renderVaultRefs\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(render.length > 50, "renderVaultRefs body extracted");
+  assert.doesNotMatch(render, /entry\.value|value\)/, "list renderer does not print stored values");
 });
 
 // ─── New Task project picker (2026-06-27) ────────────────────────────────────
@@ -1975,67 +2004,53 @@ test("Scheduled add-item button uses 'New scheduled item' copy", () => {
   assert.doesNotMatch(CONSOLE_HTML, /New directive/i, "add button must not say 'New directive'");
 });
 
-// ── OpenClaw Chat center-pane console tests ──────────────────────────────────
+// ── Flash center-pane console tests ────────────────────────────────────
 
-test("openclaw.chatDock feature toggle is off by default", () => {
-  // renderFeatures treats a feature as off when f.enabled !== true.
-  // The incapable branch (capable === false) uses a disabled switch;
-  // the normal off branch uses a clickable off switch.
-  // Either way the switch must NOT appear as aria-checked="true" by default.
+test("Flash center pane uses panel IDs and a large composer target", () => {
   const js = extractScript(CONSOLE_HTML);
-  // renderFeatures reads enabled via `f.enabled === true`
-  assert.match(js, /const on = f\.enabled === true/, "feature on state uses strict equality");
-  // The incapable guard means no toggle if openclaw is absent
-  assert.match(js, /const incapable = f\.capable === false/, "incapable guard checks capable flag");
-  // When incapable, settingsSwitch gets disabled:true and produces aria-disabled
-  assert.match(js, /settingsSwitch\(false, '', \{ disabled: true/, "disabled switch rendered for incapable features");
-});
-
-test("openclaw.chatDock toggle is greyed out when OpenClaw is not installed", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // settingsSwitch(…, {disabled:true}) adds aria-disabled="true" and is-disabled class.
-  assert.match(js, /aria-disabled="true"/, "disabled switch carries aria-disabled");
-  assert.match(js, /is-disabled/, "disabled switch gets is-disabled CSS class");
-  // The incapable path passes an empty onclick, preventing any toggle call.
-  assert.match(js, /settingsSwitch\(false, '', \{ disabled: true, title: f\.reason \|\| 'not available' \}\)/, "incapable feature renders non-clickable switch");
-});
-
-test("openclaw.chatDock feature appears in the Settings features list", () => {
-  // The feature definition in features.ts must include the openclaw.chatDock key
-  // and a label that surfaces in the rendered features panel.
-  const js = extractScript(CONSOLE_HTML);
-  // renderFeatures maps over features and renders esc(f.label) — the feature
-  // registry must contain this key for it to appear.
-  assert.match(js, /async function renderFeatures\(/, "renderFeatures function exists");
-  assert.match(CONSOLE_HTML, /OpenClaw Chat/, "Features panel mentions OpenClaw Chat label");
-});
-
-test("OpenClaw center pane uses panel IDs and a large composer target", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /id="ocPanelTranscript"/, "center panel transcript has a unique id");
-  assert.match(js, /id="ocPanelInput"/, "center panel textarea has a unique id");
-  assert.match(js, /id="ocPanelSendBtn"/, "center panel send button has a unique id");
-  assert.match(js, /id="ocPanelTaskBtn"/, "center panel task button has a unique id");
-  assert.match(js, /id="ocPanelSessionSel"/, "center panel session selector has a unique id");
-  assert.match(js, /id="ocPanelAvailDot"/, "center panel availability dot has a unique id");
+  assert.match(js, /id="flashTranscript"/, "center panel transcript has a unique id");
+  assert.match(js, /id="flashInput"/, "center panel textarea has a unique id");
+  assert.match(js, /id="flashSendBtn"/, "center panel send button has a unique id");
   assert.match(CONSOLE_HTML, /\.oc-panel-composer-shell[^}]*min-height:\s*96px/, "center composer has a large click target");
-  assert.match(js, /onclick="ocFocusPanelInput\(\)"/, "composer shell focuses the textarea");
+  assert.match(js, /onclick="flashFocusInput\(\)"/, "composer shell focuses the textarea");
 });
 
-test("OpenClaw center pane reserves bottom composer space while transcript scrolls", () => {
+test("Flash center pane reserves bottom composer space while transcript scrolls", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(CONSOLE_HTML, /\.col\.session\.oc-session-mode[^}]*overflow:\s*hidden/, "OpenClaw mode keeps the center column from page-scrolling past the composer");
-  assert.match(js, /session\.parentElement\.classList\.toggle\("oc-session-mode", !!open\)/, "OpenClaw mode is applied to the outer center column");
-  assert.match(CONSOLE_HTML, /\.oc-center-pane[^}]*calc\(100vh - 68px\)/, "OpenClaw workspace is bounded to the visible center column height");
+  assert.match(CONSOLE_HTML, /\.col\.session\.oc-session-mode[^}]*overflow:\s*hidden/, "Flash mode keeps the center column from page-scrolling past the composer");
+  assert.match(js, /session\.parentElement\.classList\.toggle\("oc-session-mode", !!open\)/, "Flash mode is applied to the outer center column");
+  assert.match(CONSOLE_HTML, /\.oc-center-pane[^}]*calc\(100vh - 68px\)/, "Flash workspace is bounded to the visible center column height");
   assert.match(CONSOLE_HTML, /\.oc-panel-body[^}]*min-height:\s*0/, "panel body can shrink inside the bounded center column");
   assert.match(CONSOLE_HTML, /\.oc-transcript[^}]*overflow-y:\s*auto/, "only the transcript scrolls");
   assert.match(CONSOLE_HTML, /\.oc-panel-composer-shell[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+88px/, "composer reserves a full-width input column and fixed action column");
   assert.match(CONSOLE_HTML, /\.oc-input[^}]*width:\s*100%/, "textarea fills the composer input column");
   assert.match(CONSOLE_HTML, /\.oc-input[^}]*min-width:\s*0/, "textarea can fit the grid without collapsing into vertical text");
-  assert.match(CONSOLE_HTML, /\.oc-panel-composer-shell[^}]*border-top:\s*1px solid var\(--border\)/, "composer remains in the panel flow at the bottom edge");
-  assert.match(CONSOLE_HTML, /\.oc-panel-composer-shell[^}]*flex:\s*0\s+0\s+auto/, "composer keeps reserved bottom space");
-}
-);
+});
+
+test("Flash send posts to /flash/turn and streams SSE events", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /async function flashSend\(\)/, "flashSend function defined");
+  assert.match(js, /fetch\('\/flash\/turn'/, "Flash posts turns to /flash/turn");
+  assert.match(js, /evt === 'token'/, "token events are handled");
+  assert.match(js, /evt === 'tool_start'/, "tool_start events are handled");
+  assert.match(js, /evt === 'tool_result'/, "tool_result events are handled");
+  assert.match(js, /evt === 'done'/, "done events are handled");
+});
+
+test("Flash send button is disabled for empty input and while in-flight", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /id="flashSendBtn"[^']*disabled/, "Send button starts disabled in the center panel");
+  assert.match(js, /if \(!input \|\| !input\.value\.trim\(\) \|\| _flashState\.sending\) return/, "flashSend bails on empty or in-flight");
+  assert.match(js, /_flashState\.sending = true/, "sending flag set before request");
+  assert.match(js, /_flashState\.sending = false/, "sending flag cleared in finally block");
+});
+
+test("Flash feedback records bad turns", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /async function flashThumbsDown\(turnId\)/, "bad-turn feedback function exists");
+  assert.match(js, /\/flash\/turns\/' \+ encodeURIComponent\(turnId\) \+ '\/feedback'/, "feedback endpoint is called with encoded turn id");
+  assert.match(js, /rating: 'bad'/, "feedback payload marks the turn bad");
+});
 
 test("primary left nav uses a single active color convention", () => {
   const js = extractScript(CONSOLE_HTML);
@@ -2044,126 +2059,7 @@ test("primary left nav uses a single active color convention", () => {
   assert.match(CONSOLE_HTML, /\.addbtn\.active[^}]*color:\s*var\(--accent\)/, "New task uses accent only when active");
   assert.match(js, /overviewActive = .* !_taskFormInSession/, "Overview is not active while New task is open");
   assert.match(js, /newTaskNav.*classList\.toggle\("active", _taskFormInSession\)/s, "New task active state follows the center form");
-});
-
-test("OpenClaw center pane session selector offers both default sessions", () => {
-  assert.match(CONSOLE_HTML, /value="agent:main:main"/, "default agent:main:main session present");
-  assert.match(CONSOLE_HTML, /value="agent:main:hivematrix"/, "agent:main:hivematrix session present");
-});
-
-test("OpenClaw nav is hidden when the chat feature flag is off", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /if \(nav\) nav\.style\.display = flagEnabled \? '' : 'none'/, "OpenClaw nav follows the feature flag");
-  assert.doesNotMatch(CONSOLE_HTML, /id="openclawDock"/, "bottom dock is not rendered as a second visible surface");
-});
-
-test("OpenClaw center pane refreshes history when feature is enabled and available", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /_ocState\.available = !!\(r && r\.available\)/, "available state is stored centrally");
-  assert.match(js, /await ocRefresh\(\)/, "history fetched after dock becomes available");
-});
-
-test("unavailable state shows a center-pane warning panel", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /function ocWarnPanel\(reason\)/, "ocWarnPanel helper defined");
-  assert.match(js, /oc-warn-panel/, "warn panel markup is produced");
-  assert.match(js, /OpenClaw unavailable/, "unavailable title in warn panel");
-  assert.match(js, /renderOpenClawPanel\(\)/, "status changes update the center pane");
-});
-
-test("unavailable state includes a Settings link in the warning panel", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // The warn panel offers a Settings → Features link so the user can check status.
-  assert.match(js, /openSettings\(\);switchSettingsTab\(\\'features\\'/, "warn panel links to Settings → Features");
-  assert.match(js, /Settings → Features/, "warn panel button copy is 'Settings → Features'");
-});
-
-test("Send button is disabled for empty input", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // ocInputResize disables the button when the textarea is empty.
-  assert.match(js, /sendBtn\.disabled = !el\.value\.trim\(\)/, "send button disabled when input is empty");
-  assert.match(js, /id="ocPanelSendBtn"[^']*disabled/, "Send button starts disabled in the center panel");
-});
-
-test("Send button is disabled while a message is in-flight", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // ocSend guards against concurrent sends via _ocState.sending.
-  assert.match(js, /if \(!input \|\| !input\.value\.trim\(\) \|\| _ocState\.sending\) return/, "ocSend bails on empty or in-flight");
-  assert.match(js, /_ocState\.sending = true/, "sending flag set before request");
-  assert.match(js, /if \(sendBtn\) sendBtn\.disabled = true/, "send button explicitly disabled during flight");
-  assert.match(js, /_ocState\.sending = false/, "sending flag cleared in finally block");
-});
-
-test("Send failure restores the draft message", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // If the send API returns !r.ok or throws, the message is put back into the input.
-  assert.match(js, /input\.value = msg; ocInputResize\(input\)/, "draft restored on send failure");
-});
-
-test("create-task calls the handoff endpoint with session key and text", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /async function ocCreateTask\(\)/, "ocCreateTask function defined");
-  assert.match(js, /\/openclaw\/chat\/create-hivematrix-task/, "calls the create-hivematrix-task endpoint");
-  assert.match(js, /sessionKey: _ocState\.session/, "includes the active session key");
-  assert.match(js, /text/, "includes the message text in request body");
-});
-
-test("create-task prefers user-selected transcript text over last message", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // The function first checks window.getSelection() inside the transcript element.
-  assert.match(js, /window\.getSelection\(\)/, "reads window selection");
-  assert.match(js, /ocPanelTranscript/, "uses the center transcript");
-  assert.match(js, /transcript\.contains\(sel\.anchorNode\)/, "selection must be inside the transcript");
-  assert.match(js, /sel\.toString\(\)\.trim\(\)/, "uses selection text when present");
-  // Falls back to the last message in _ocState.messages.
-  assert.match(js, /_ocState\.messages\[_ocState\.messages\.length - 1\]\.content/, "falls back to last message content");
-});
-
-test("create-task displays the returned HiveMatrix task ID in a toast", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // On success, a toast shows "HiveMatrix task created — <taskId>".
-  assert.match(js, /hmToast\('HiveMatrix task created'/, "success toast says 'HiveMatrix task created'");
-  assert.match(js, /r\.taskId/, "task ID from response is used in the toast");
-});
-
-test("create-task shows an error toast on failure without crashing", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // On API error or network failure, an error toast is shown.
-  assert.match(js, /hmToast\([^)]*'Task creation failed\.', 'err'\)/, "error toast shown on create-task failure");
-});
-
-test("create-task re-enables its button in all paths via finally", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // The create-task button is disabled before the call and re-enabled in finally.
-  assert.match(js, /if \(btn\) btn\.disabled = true/, "task button disabled before request");
-  assert.match(js, /finally \{ if \(btn\) btn\.disabled = false;/, "task button re-enabled in finally");
-});
-
-test("initOpenclawDock is called when the openclaw.chatDock flag is toggled", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // toggleFeature dispatches to initOpenclawDock after saving the flag.
-  assert.match(js, /if \(key === 'openclaw\.chatDock'\) initOpenclawDock\(\)/, "toggleFeature calls initOpenclawDock for chatDock key");
-});
-
-test("OpenClaw center pane CSS is responsive", () => {
-  assert.match(CONSOLE_HTML, /\.oc-center-pane/, "center pane CSS exists");
-  assert.match(CONSOLE_HTML, /@media \(max-width:760px\)[\s\S]*?\.oc-center-pane/, "center pane participates in narrow-screen rules");
-});
-
-test("center pane shows visible unavailable state when feature flag is on but OpenClaw is not installed", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // flagEnabled controls visibility; !enabled (not installed) shows unavailable strip, not hidden.
-  assert.match(js, /const flagEnabled = !!\(r && r\.flagEnabled\)/, "flagEnabled read from status response");
-  assert.match(js, /_ocState\.enabled = !!\(r && r\.enabled\)/, "enabled checked separately after flagEnabled guard");
-  assert.match(js, /_ocState\.reason = \(r && r\.reason\)/, "unavailable reason is stored for the center pane");
-});
-
-test("status probe error shows error panel with Retry button", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /function ocErrPanel\(reason\)/, "ocErrPanel helper defined");
-  assert.match(js, /OpenClaw status error/, "error title appears in ocErrPanel");
-  assert.match(js, /onclick="initOpenclawDock\(\)"/, "error panel Retry button calls initOpenclawDock");
-  assert.match(js, /_ocState\.statusError = 'Could not check OpenClaw status\.'/, "catch block stores status error for the center pane");
+  assert.match(js, /flashNav.*classList\.toggle\('active', _flashState\.panelOpen\)/s, "Flash active state follows the center panel");
 });
 
 test("runSelectedCommand sends both project and projectPath from the cmd multi-picker state", () => {
@@ -2214,138 +2110,4 @@ test("runSelectedCommand success message reports project mismatch when board fil
 
   // When no board filter is active the plain "see the board" fallback is used.
   assert.match(body, /see the board/, "default success message remains available for the no-filter case");
-});
-
-// ── OpenClaw / Vale diagnostics panel ────────────────────────────────────────
-
-test("renderFeatures fetches /openclaw/status for the diagnostics panel", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /api\("\/openclaw\/status"\)\.catch/, "renderFeatures fetches /openclaw/status and catches errors");
-  assert.match(js, /const \[r, auto, ocSt\] = await Promise\.all/, "renderFeatures destructures ocSt from Promise.all");
-});
-
-test("renderOcDiagnostics function is defined and called from renderFeatures", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /function renderOcDiagnostics\(/, "renderOcDiagnostics helper function is defined");
-  assert.match(js, /renderOcDiagnostics\(features, ocSt\)/, "renderFeatures passes features and ocSt to renderOcDiagnostics");
-  assert.match(js, /ocDiagRow/, "renderFeatures includes ocDiagRow in el.innerHTML");
-});
-
-test("OpenClaw diagnostics panel shows all four status items", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /Feature flag/, "diagnostics shows Feature flag row");
-  assert.match(js, /Installed/, "diagnostics shows Installed row");
-  assert.match(js, /Gateway reachable/, "diagnostics shows Gateway reachable row");
-  assert.match(js, /Center entry/, "diagnostics shows Center entry row");
-});
-
-test("OpenClaw diagnostics reads the center-pane nav visibility", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /document\.getElementById\('openclawNav'\)/, "diagnostics reads the OpenClaw nav element");
-  assert.match(js, /window\.getComputedStyle\(navEl\)\.display !== 'none'/, "diagnostics reads computed display of nav element");
-});
-
-test("OpenClaw diagnostics refresh button calls renderFeatures and is labeled Re-check", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /onclick="renderFeatures\(\)"[^>]*title="Re-check OpenClaw status"/, "diagnostics refresh button calls renderFeatures with Re-check title");
-  assert.match(js, /id="s_oc_diag"/, "diagnostics panel has s_oc_diag id for targeting");
-});
-
-// ── renderOcDiagnostics integration: status-shape → HTML output ───────────────
-// Extracts and calls renderOcDiagnostics with different /openclaw/status response
-// shapes to verify the OpenClaw diagnostics panel maps server data to the correct HTML.
-
-type MockDoc = { getElementById: (id: string) => { style?: { display?: string } } | null };
-type MockWindow = { innerWidth: number; getComputedStyle: (el: unknown) => { display: string } };
-
-function extractRenderOcDiagnostics(
-  html: string,
-): (
-  features: Array<{ key: string; enabled?: boolean; capable?: boolean; reason?: string }>,
-  ocSt: Record<string, unknown> | null,
-  mockDoc?: MockDoc,
-  mockWindow?: MockWindow,
-) => string {
-  const js = extractScript(html);
-  const escFn = js.match(/function esc\(s\)\{[^\n]+\}/)?.[0];
-  assert.ok(escFn, "esc must be defined in the console script");
-  const block = js.match(/\/\*__OC_DIAGNOSTICS_START__\*\/([\s\S]*?)\/\*__OC_DIAGNOSTICS_END__\*\//);
-  assert.ok(block, "console must contain sentinel-wrapped renderOcDiagnostics");
-  const fnBody = block![1].trim();
-
-  return (features, ocSt, mockDoc, mockWindow) => {
-    const doc: MockDoc = mockDoc ?? { getElementById: () => null };
-    const win: MockWindow = mockWindow ?? {
-      innerWidth: 1280,
-      getComputedStyle: () => ({ display: "block" }),
-    };
-    const factory = new Function(
-      "document",
-      "window",
-      `${escFn}\n${fnBody}\nreturn renderOcDiagnostics;`,
-    ) as (d: MockDoc, w: MockWindow) => (f: unknown, s: unknown) => string;
-    return factory(doc, win)(features, ocSt);
-  };
-}
-
-test("renderOcDiagnostics: returns empty string when openclaw.chatDock feature is absent from the list", () => {
-  const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
-  const html = fn([{ key: "voice", enabled: true }], { installed: true, available: true });
-  assert.equal(html, "", "must return empty string when openclaw.chatDock is not in the features list");
-});
-
-test("renderOcDiagnostics: fully available state — all four rows show yes / visible", () => {
-  const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
-  const features = [{ key: "openclaw.chatDock", enabled: true }];
-  const ocSt = { installed: true, available: true, gateway: { reachable: true }, reason: null };
-  const navEl = { style: { display: "block" } };
-  const html = fn(
-    features,
-    ocSt,
-    { getElementById: (id: string) => id === "openclawNav" ? navEl : null },
-    { innerWidth: 1280, getComputedStyle: () => ({ display: "block" }) },
-  );
-  assert.match(html, /id="s_oc_diag"/, "diagnostics wrapper is present");
-  // Feature flag row — enabled:true → "yes"
-  assert.match(html, /Feature flag[\s\S]*?yes/, "feature flag row shows yes when enabled:true");
-  // Installed row — installed:true → "yes"
-  assert.match(html, /Installed[\s\S]*?yes/, "installed row shows yes when installed:true");
-  // Gateway reachable row — reachable:true → "yes"
-  assert.match(html, /Gateway reachable[\s\S]*?yes/, "gateway reachable row shows yes when reachable:true");
-  // Center entry row — nav element found + display:block → "yes"
-  assert.match(html, /Center entry[\s\S]*?yes/, "center entry row shows yes when display is not none");
-});
-
-test("renderOcDiagnostics: installed but gateway unreachable — installed yes, gateway no", () => {
-  const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
-  const features = [{ key: "openclaw.chatDock", enabled: true }];
-  const ocSt = { installed: true, available: false, gateway: { reachable: false }, reason: "OpenClaw Gateway is not reachable." };
-  const html = fn(features, ocSt);
-  assert.match(html, /Installed[\s\S]*?yes/, "installed shows yes when binary exists");
-  assert.match(html, /Gateway reachable[\s\S]*?no/, "gateway reachable shows no when gateway is down");
-  assert.doesNotMatch(html, /OpenClaw Gateway is not reachable/, "reason note is only shown when not installed");
-});
-
-test("renderOcDiagnostics: not installed — installed no, gateway shows dash, reason note is displayed", () => {
-  const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
-  const features = [{ key: "openclaw.chatDock", enabled: false }];
-  const ocSt = { installed: false, available: false, gateway: null, reason: "OpenClaw is not installed." };
-  const html = fn(features, ocSt);
-  assert.match(html, /Feature flag[\s\S]*?no/, "feature flag row shows no when enabled:false");
-  assert.match(html, /Installed[\s\S]*?no/, "installed shows no when binary is absent");
-  assert.match(html, /Gateway reachable[\s\S]*?—/, "gateway row shows dash when not installed");
-  assert.match(html, /OpenClaw is not installed/, "reason note is rendered below the rows");
-});
-
-test("renderOcDiagnostics: center nav element not found — center entry row shows dash", () => {
-  const fn = extractRenderOcDiagnostics(CONSOLE_HTML);
-  const features = [{ key: "openclaw.chatDock", enabled: true }];
-  const ocSt = { installed: true, available: true, gateway: { reachable: true } };
-  const html = fn(
-    features,
-    ocSt,
-    { getElementById: () => null },
-    { innerWidth: 1280, getComputedStyle: () => ({ display: "block" }) },
-  );
-  assert.match(html, /Center entry[\s\S]*?—/, "center entry row shows dash when nav element is not in DOM");
 });

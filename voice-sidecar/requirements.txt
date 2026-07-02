@@ -30,6 +30,17 @@ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0
 pipecat-ai[webrtc,silero]==1.3.0   # realtime pipeline: SmallWebRTC + VAD/STT/LLM/TTS
 websockets==16.0
 
+# Flash Lane SSE client (flash_llm.py). aiohttp is already a transitive dep of
+# pipecat-ai but pinned here explicitly so it's guaranteed available in the
+# sidecar venv regardless of upstream changes.
+aiohttp>=3.10
+
+# whisper.cpp Python bindings (whisper_stt.py). Provides in-process transcription
+# with the model staying warm across turns. Requires a C++ toolchain + cmake if
+# no pre-built wheel is available for the current Python version; the sidecar
+# falls back to HIVE_STT_COMMAND automatically if this import fails.
+pywhispercpp>=0.4.2
+
 # Dev/test only — the Pipecat runner + prebuilt web client used to validate the
 # realtime pipeline from a browser (`python realtime.py -t webrtc`). The daemon
 # path (answer_offer) relays signaling itself and does NOT need these in prod.

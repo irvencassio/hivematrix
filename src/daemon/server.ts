@@ -15,6 +15,12 @@
  *   PATCH /tasks/:id                 — update task fields
  *   DELETE /tasks/:id                — cancel/delete task
  *   GET  /events                     — SSE stream (tasks:*, connectivity:*)
+ *   POST /flash/turn                 — Flash Lane: SSE streamed conversational turn
+ *   GET  /flash/sessions             — list Flash sessions
+ *   GET  /flash/sessions/:id/turns   — turns for a Flash session
+ *   POST /flash/turns/:id/feedback   — rate a Flash turn (good|bad)
+ *   GET  /onboarding/birth-ritual    — persona state (new|existing + name/emoji)
+ *   POST /onboarding/birth-ritual    — run birth ritual as SSE stream
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
@@ -287,6 +293,7 @@ export function createDaemonServer() {
         const taskCount = (db.prepare("SELECT COUNT(*) as n FROM tasks WHERE status IN ('backlog','assigned','in_progress')").get() as { n: number }).n;
         const { getBundledVersion } = await import("@/lib/version/bundle-version");
         const { getLicenseStatus } = await import("@/lib/license/license");
+        const { isFeatureEnabled } = await import("@/lib/config/features");
         json(res, 200, {
           status: "ok",
           version: getBundledVersion(),
@@ -294,6 +301,7 @@ export function createDaemonServer() {
           activeTasks: taskCount,
           uptime: process.uptime(),
           license: getLicenseStatus().state,
+          voice: { liveEnabled: isFeatureEnabled("voice") },
         });
         return;
       }
@@ -356,6 +364,7 @@ export function createDaemonServer() {
         const localEngine = await localEngineStatus();
         const localEngineCap = localEngineCapability();
         const { getLocation, getAutoUpdate, getAppIconChoice, getFrontierProvider, getRoleModelsForDisplay } = await import("@/lib/models/available");
+        const { getTelemetryConfig } = await import("@/lib/telemetry/telemetry");
         json(res, 200, {
           backends,
           localEngine,
@@ -375,6 +384,7 @@ export function createDaemonServer() {
           roleModelOptions: buildRoleModelOptions(backends),
           embeddings: getEmbeddingsConfig(),
           embeddingModelChoices: embeddingModelChoices(),
+          telemetryEnabled: getTelemetryConfig().enabled,
         });
         return;
       }
@@ -694,7 +704,7 @@ export function createDaemonServer() {
       // POST /update/apply — relaunch the desktop app so its updater installs the update
       if (req.method === "POST" && urlPath === "/update/apply") {
         const { applyUpdateViaRelaunch } = await import("@/lib/updater/feed-check");
-        json(res, 200, applyUpdateViaRelaunch());
+        json(res, 200, await applyUpdateViaRelaunch());
         return;
       }
 
@@ -794,6 +804,80 @@ export function createDaemonServer() {
         json(res, 200, await configureMailBee(body ?? {}));
         return;
       }
+      // POST /onboarding/telemetry — opt-in / opt-out anonymous usage stats
+      if (req.method === "POST" && urlPath === "/onboarding/telemetry") {
+        const body = await parseBody(req) as { enabled?: boolean };
+        const { setTelemetryEnabled } = await import("@/lib/telemetry/telemetry");
+        const cfg = setTelemetryEnabled(body?.enabled === true);
+        json(res, 200, { ok: true, enabled: cfg.enabled });
+        return;
+      }
+      // GET /onboarding/birth-ritual — persona state probe (new vs. existing)
+      if (req.method === "GET" && urlPath === "/onboarding/birth-ritual") {
+        const { configuredBrainRootDir } = await import("@/lib/brain/settings");
+        const { getPersonaStatus } = await import("@/lib/onboarding/birth-ritual");
+        const brainRoot = configuredBrainRootDir();
+        const status = getPersonaStatus(brainRoot);
+        json(res, 200, { ...status, brainRoot });
+        return;
+      }
+
+      // POST /onboarding/birth-ritual — run the birth ritual as an SSE stream.
+      // If persona already exists, returns a JSON response instead of SSE.
+      if (req.method === "POST" && urlPath === "/onboarding/birth-ritual") {
+        const { configuredBrainRootDir } = await import("@/lib/brain/settings");
+        const { getPersonaStatus, buildBirthRitualMessages } = await import("@/lib/onboarding/birth-ritual");
+        const { getOrCreateSession, appendTurn } = await import("@/lib/flash/store");
+        const { runFlashAgentLoop } = await import("@/lib/flash/loop");
+
+        const brainRoot = configuredBrainRootDir();
+        const existing = getPersonaStatus(brainRoot);
+        if (existing.state === "existing") {
+          json(res, 200, { ok: true, skipped: true, reason: "persona already exists", ...existing });
+          return;
+        }
+        if (!brainRoot) {
+          json(res, 400, { ok: false, error: "brain root not configured — complete the Brain step first" });
+          return;
+        }
+
+        // Run the ritual as SSE (same protocol as /flash/turn).
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        });
+
+        const session = getOrCreateSession("console", "birth_ritual");
+        const messages = buildBirthRitualMessages();
+
+        const writeSse = (event: string, data: unknown) => {
+          try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* disconnected */ }
+        };
+
+        const emit = {
+          token: (delta: string) => writeSse("token", { delta }),
+          toolStart: (name: string, args_summary: string) => writeSse("tool_start", { name, args_summary }),
+          toolResult: (name: string, ok: boolean, summary: string) => writeSse("tool_result", { name, ok, summary }),
+          escalated: (workPackageId: string) => writeSse("escalated", { workPackageId }),
+          done: () => { /* handled below */ },
+        };
+
+        const fullText = await runFlashAgentLoop(messages, emit, session.id, brainRoot);
+        appendTurn(session.id, "assistant", fullText);
+
+        const after = getPersonaStatus(brainRoot);
+        writeSse("done", {
+          sessionId: session.id,
+          fullText,
+          personaName: after.name,
+          personaEmoji: after.emoji,
+          avatarPath: after.avatarPath,
+        });
+        res.end();
+        return;
+      }
+
       // GET /messagebee/ignored — non-allowlisted senders seen recently (one-click allow)
       if (req.method === "GET" && urlPath === "/messagebee/ignored") {
         const { listIgnoredSenders } = await import("@/lib/messagebee/store");
@@ -814,7 +898,7 @@ export function createDaemonServer() {
       // POST /system/open-pane — open a macOS privacy pane natively (webview window.open can't)
       if (req.method === "POST" && urlPath === "/system/open-pane") {
         const body = await parseBody(req) as { pane?: string };
-        const allowed = ["accessibility", "screenRecording", "fullDiskAccess", "automation"];
+        const allowed = ["accessibility", "screenRecording", "fullDiskAccess", "automation", "microphone"];
         if (!body?.pane || !allowed.includes(body.pane)) { json(res, 400, { ok: false, detail: "invalid pane" }); return; }
         const { openSystemSettingsPane } = await import("@/lib/onboarding/actions");
         json(res, 200, openSystemSettingsPane(body.pane as "accessibility" | "screenRecording" | "fullDiskAccess" | "automation"));
@@ -878,6 +962,9 @@ export function createDaemonServer() {
       // GET /tunnel/qr — QR (SVG) of the pairing payload {url, token} for iOS.
       // Generated locally via qrencode; the token never leaves the machine.
       if (req.method === "GET" && urlPath === "/tunnel/qr") {
+        const { checkGate } = await import("@/lib/license/gates");
+        const pairingGate = checkGate("companion_pairing");
+        if (!pairingGate.permitted) { json(res, 403, { error: pairingGate.reason, upgradeRequired: pairingGate.upgradeRequired }); return; }
         const { tunnelStatus, pairingPayload, generateQrSvg } = await import("@/lib/tunnel/cloudflared");
         const { readRemoteAccessSettings } = await import("@/lib/tunnel/remote-access-settings");
         const st = tunnelStatus();
@@ -1251,6 +1338,26 @@ export function createDaemonServer() {
           return;
         }
         json(res, 200, installLicense(body as never));
+        return;
+      }
+      // POST /license/activate — deep-link activation from the Tauri shell.
+      // Accepts { key } where key is a base64-encoded or raw JSON SignedLicense.
+      if (req.method === "POST" && urlPath === "/license/activate") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const key = typeof body?.key === "string" ? body.key.trim() : "";
+        if (!key) { json(res, 400, { error: "missing key" }); return; }
+        let parsed: unknown;
+        try { parsed = JSON.parse(key); } catch {
+          try { parsed = JSON.parse(Buffer.from(key, "base64").toString("utf-8")); } catch {
+            json(res, 400, { error: "key is neither JSON nor base64-encoded JSON" }); return;
+          }
+        }
+        const lic = parsed as Record<string, unknown>;
+        if (!lic || !lic.payload || typeof lic.signature !== "string") {
+          json(res, 400, { error: "expected { payload, signature }" }); return;
+        }
+        const { installLicense } = await import("@/lib/license/license");
+        json(res, 200, installLicense(lic as never));
         return;
       }
 
@@ -2260,6 +2367,118 @@ export function createDaemonServer() {
         return;
       }
 
+      // ── Outcome Packs ───────────────────────────────────────────────
+      // Signed .hmpack install/list/uninstall. Packs compose existing
+      // directives, skills, and dashboard cards; uninstall removes only the
+      // objects the pack installed and leaves operator artifacts/brain docs.
+      if (req.method === "GET" && urlPath === "/packs/catalog") {
+        const { getPackCatalog } = await import("@/lib/packs/catalog");
+        json(res, 200, { packs: getPackCatalog() });
+        return;
+      }
+
+      const packCatalogInstallMatch = urlPath.match(/^\/packs\/catalog\/([^/]+)\/install$/);
+      if (req.method === "POST" && packCatalogInstallMatch) {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const { buildSignedCatalogPack } = await import("@/lib/packs/builder");
+        const { getPackCatalogEntry } = await import("@/lib/packs/catalog");
+        const { configuredPackPrivateKey, installPack } = await import("@/lib/packs/store");
+        const entry = getPackCatalogEntry(decodeURIComponent(packCatalogInstallMatch[1]));
+        if (!entry) {
+          json(res, 404, { ok: false, error: "Pack catalog entry not found." });
+          return;
+        }
+        const privateKeyPem = typeof body.privateKeyPem === "string" && body.privateKeyPem.trim()
+          ? body.privateKeyPem
+          : configuredPackPrivateKey();
+        if (!privateKeyPem) {
+          json(res, 400, { ok: false, error: "Pack signing private key is not configured." });
+          return;
+        }
+        const publicKeyPem = typeof body.publicKeyPem === "string" ? body.publicKeyPem : undefined;
+        let buffer: Buffer;
+        try {
+          buffer = buildSignedCatalogPack(entry, privateKeyPem);
+        } catch (e) {
+          json(res, 400, { ok: false, error: e instanceof Error ? e.message : "pack signing failed" });
+          return;
+        }
+        const result = await installPack({ buffer, publicKeyPem });
+        if ("ok" in result) {
+          json(res, 400, result);
+          return;
+        }
+        broadcast("packs:updated", { packName: result.pack.name });
+        broadcast("directives:updated", { source: "packs", packName: result.pack.name });
+        json(res, result.replaced ? 200 : 201, { ok: true, ...result });
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/packs/install") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        let buffer: Buffer | null = null;
+        try {
+          if (typeof body.dataBase64 === "string" && body.dataBase64.trim()) {
+            buffer = Buffer.from(body.dataBase64.trim(), "base64");
+          } else if (typeof body.path === "string" && body.path.trim()) {
+            const path = body.path.trim().replace(/^~\//, `${homedir()}/`);
+            buffer = readFileSync(path);
+          } else if (typeof body.url === "string" && body.url.trim()) {
+            const response = await fetch(body.url.trim());
+            if (!response.ok) {
+              json(res, 400, { ok: false, error: `pack download failed: HTTP ${response.status}` });
+              return;
+            }
+            buffer = Buffer.from(await response.arrayBuffer());
+          }
+        } catch (e) {
+          json(res, 400, { ok: false, error: e instanceof Error ? e.message : "pack read failed" });
+          return;
+        }
+        if (!buffer || buffer.length === 0) {
+          json(res, 400, { ok: false, error: "path, url, or dataBase64 is required" });
+          return;
+        }
+        const { installPack } = await import("@/lib/packs/store");
+        const publicKeyPem = typeof body.publicKeyPem === "string" ? body.publicKeyPem : undefined;
+        const result = await installPack({ buffer, publicKeyPem });
+        if ("ok" in result) {
+          json(res, 400, result);
+          return;
+        }
+        broadcast("packs:updated", { packName: result.pack.name });
+        broadcast("directives:updated", { source: "packs", packName: result.pack.name });
+        json(res, result.replaced ? 200 : 201, { ok: true, ...result });
+        return;
+      }
+
+      if (req.method === "GET" && urlPath === "/packs") {
+        const { listInstalledPacks } = await import("@/lib/packs/store");
+        json(res, 200, { packs: listInstalledPacks() });
+        return;
+      }
+
+      if (req.method === "GET" && urlPath === "/packs/dashboard-cards") {
+        const { getPackDashboardCards } = await import("@/lib/packs/store");
+        json(res, 200, { cards: getPackDashboardCards() });
+        return;
+      }
+
+      const packUninstallMatch = urlPath.match(/^\/packs\/([^/]+)\/uninstall$/);
+      if (req.method === "POST" && packUninstallMatch) {
+        const { uninstallPack } = await import("@/lib/packs/store");
+        const name = decodeURIComponent(packUninstallMatch[1]);
+        const ok = await uninstallPack(name);
+        if (!ok) {
+          json(res, 404, { ok: false, error: "Pack not found." });
+          return;
+        }
+        broadcast("packs:updated", { packName: name });
+        broadcast("directives:updated", { source: "packs", packName: name });
+        json(res, 200, { ok: true });
+        return;
+      }
+
       // ── Work Packages + Task Intake ─────────────────────────────────
       // Every new task can be run through a lightweight, deterministic intake
       // preflight. Small tasks stay normal tasks; broad/risky/colliding prompts
@@ -2910,142 +3129,52 @@ export function createDaemonServer() {
         return;
       }
 
-      // POST /voice/turn — one in-app push-to-talk turn, gated by the `voice`
-      // feature flag. Two input modes:
-      //   { text }         — transcript from on-device STT (iOS Speech framework);
-      //                      skips server STT entirely (no Whisper/model needed).
-      //   { audioBase64 }  — recorded audio → server STT (only when a backend is
-      //                      configured via HIVE_STT_COMMAND).
-      // Either way: → local LLM → cloned-voice TTS; returns transcript, reply, audio.
+      // POST /voice/turn — thin alias over Flash Lane for text-mode push-to-talk.
+      // Used by watch and glasses clients; no client changes required.
+      // Body: { text, lang? } or { audioBase64, lang? } (STT via sidecar when audio).
+      // Response: { transcript, reply, audioBase64?, sessionId }
       if (req.method === "POST" && urlPath === "/voice/turn") {
         const { isFeatureEnabled } = await import("@/lib/config/features");
         if (!isFeatureEnabled("voice")) { json(res, 403, { error: "voice feature is off — enable it in Settings → Features" }); return; }
-        const { voiceRuntime } = await import("@/lib/voice/runtime");
-        const { voiceLlmEnv } = await import("@/lib/voice/llm-env");
-        const { buildCliPath } = await import("@/lib/config/binary-detection");
-        const rt = voiceRuntime();
-        if (!rt) { json(res, 503, { error: "voice sidecar not available" }); return; }
         const body = await parseBody(req) as Record<string, unknown>;
-        const text = typeof body.text === "string" ? body.text.trim() : "";
-        const audioB64 = typeof body.audioBase64 === "string" ? body.audioBase64 : "";
-        if (!text && !audioB64) { json(res, 400, { error: "text or audioBase64 is required" }); return; }
         const lang = typeof body.lang === "string" ? body.lang : "en";
-        // Fast path: relay to the persistent worker (LLM + TTS kept warm across
-        // turns — no per-turn model reload). Falls back to turn_cli.py below if
-        // the worker can't be started.
-        try {
-          const { relayTurn, relayTurnText } = await import("@/lib/voice/turn-server");
-          const r = text ? await relayTurnText(text, lang) : await relayTurn(audioB64, lang);
-          if (r.escalated && r.transcript) {
-            void (async () => {
-              try {
-                // Guard: skip background task creation for intents that commandTurnOverride
-                // handles deterministically (browserLaneTask, mailDeleteTask, createTask,
-                // retryFailedTask, etc.) — both paths would otherwise create duplicate tasks.
-                const { detectCommandIntent } = await import("@/lib/voice/command-intent");
-                const precheck = detectCommandIntent(r.transcript!);
-                console.log(`[voice/turn] escalation precheck: kind=${precheck.kind}`);
-                if (precheck.kind !== "none") {
-                  console.log(`[voice/turn] skipping background task — commandTurnOverride handles ${precheck.kind}`);
-                  return;
-                }
+        let text = typeof body.text === "string" ? body.text.trim() : "";
+        const audioB64 = typeof body.audioBase64 === "string" ? body.audioBase64 : "";
 
-                const { routeVoiceSession } = await import("@/lib/voice/session");
-                const { Task, generateId } = await import("@/lib/db");
-                const { DEFAULT_TASK_PROJECT } = await import("@/lib/routing/project-constants");
-                const sessionId = generateId();
-                const voiceSession = {
-                  sessionId,
-                  surface: "ios" as const,
-                  startedAt: new Date().toISOString(),
-                  turns: [
-                    { role: "user" as const, text: r.transcript },
-                    ...(r.reply ? [{ role: "assistant" as const, text: r.reply }] : []),
-                  ],
-                };
-                const route = routeVoiceSession(voiceSession, { escalated: true });
-                if (route.kind === "task" || route.kind === "browserLaneTask") {
-                  const task = await Task.create(route.kind === "browserLaneTask"
-                    ? { _id: generateId(), ...route.task, output: { ...route.task.output, voice: { sessionId, surface: "ios" } } }
-                    : {
-                        _id: generateId(),
-                        title: route.title,
-                        description: route.description,
-                        project: DEFAULT_TASK_PROJECT,
-                        projectPath: homedir(),
-                        status: "backlog",
-                        executor: "agent",
-                        source: "voice",
-                        output: { voice: { sessionId, surface: "ios" } },
-                      });
-                  broadcast("tasks:created", { taskId: task._id });
-                }
-              } catch (e) {
-                console.error(`[turn] escalation task failed: ${e instanceof Error ? e.message : e}`);
-              }
-            })();
-          }
-          // Re-voice deterministic overrides in the SAME warm live voice (Kokoro)
-          // as the conversational reply — one consistent Talk voice. The cloned
-          // persona is reserved for produced narration, not the Talk surface.
-          const { synthesizeLiveVoice } = await import("@/lib/voice/turn-server");
-          const speak = (replyText: string): Promise<string> => synthesizeLiveVoice(replyText, lang);
-          // Voice skill picker: answer "what skills do I have / use the X skill"
-          // deterministically, overriding the LLM reply.
-          const { skillTurnOverride } = await import("@/lib/voice/skill-turn");
-          const ov = await skillTurnOverride(r.transcript || "", { synthesize: speak });
-          if (ov) { json(res, 200, { transcript: r.transcript, ...ov }); return; }
-          // Video script review by voice: "read me the script" / "approve the video".
-          const { videoVoiceOverride } = await import("@/lib/video/voice-turn");
-          const vv = await videoVoiceOverride(r.transcript || "", { synthesize: speak });
-          if (vv) { json(res, 200, { transcript: r.transcript, ...vv }); return; }
-          // Voice command layer ("Jarvis"): drive the board / approvals / directives /
-          // tasks / connectivity by voice, overriding the conversational reply.
-          const { commandTurnOverride } = await import("@/lib/voice/command-turn");
-          const cmd = await commandTurnOverride(r.transcript || "", { synthesize: speak });
-          if (cmd) {
-            console.log(`[voice/turn] commandTurnOverride matched: kind=${cmd.command.kind}${cmd.command.taskId ? ` taskId=${cmd.command.taskId}` : ""}`);
-            if (cmd.command.taskId) broadcast("tasks:created", { taskId: cmd.command.taskId });
-            json(res, 200, { transcript: r.transcript, ...cmd });
+        // STT path: transcribe audio before passing to flash
+        if (!text && audioB64) {
+          const { voiceRuntime } = await import("@/lib/voice/runtime");
+          if (!voiceRuntime()) { json(res, 503, { error: "voice sidecar not available" }); return; }
+          try {
+            const { relayTurn } = await import("@/lib/voice/turn-server");
+            const r = await relayTurn(audioB64, lang);
+            text = r.transcript ?? "";
+          } catch (e) {
+            json(res, 500, { error: `STT failed: ${e instanceof Error ? e.message : String(e)}` });
             return;
           }
-          json(res, 200, { transcript: r.transcript, reply: r.reply, audioBase64: r.audioBase64 });
-          return;
-        } catch (e) {
-          console.error(`[turn] warm worker failed, falling back to per-turn: ${e instanceof Error ? e.message : String(e)}`);
         }
-        const { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync } = await import("fs");
-        const { generateId } = await import("@/lib/db");
-        const { execFile } = await import("child_process");
-        const tmp = join(homedir(), ".hivematrix", "artifacts", "voice");
-        mkdirSync(tmp, { recursive: true });
-        const id = generateId();
-        const inPath = join(tmp, `${id}.webm`);
-        const outPath = join(tmp, `${id}-reply.m4a`);
-        // Text turn: no audio to write — pass the transcript via --text (skips STT).
-        const cliArgs = text
-          ? [join(rt.scriptsDir, "turn_cli.py"), outPath, "--text", text, "--lang", lang]
-          : [join(rt.scriptsDir, "turn_cli.py"), inPath, outPath, "--lang", lang];
-        if (!text) writeFileSync(inPath, Buffer.from(audioB64, "base64"));
-        await new Promise<void>((resolve) => {
-          execFile(rt.python, cliArgs, { cwd: rt.scriptsDir, timeout: 120_000, env: { ...process.env, ...voiceLlmEnv(), PATH: buildCliPath() } }, (err, stdout, stderr) => {
-            if (err) { json(res, 500, { error: ((stderr || err.message || "").trim()).slice(-300) }); resolve(); return; }
-            let meta: { transcript?: string; reply?: string } = {};
-            try { meta = JSON.parse((stdout.trim().split("\n").pop()) || "{}"); } catch { /* ignore */ }
-            void (async () => {
-              try {
-                const { skillTurnOverride } = await import("@/lib/voice/skill-turn");
-                const ov = await skillTurnOverride(meta.transcript ?? "");
-                if (ov) { json(res, 200, { transcript: meta.transcript ?? "", ...ov }); resolve(); return; }
-              } catch { /* fall through */ }
-              const replyB64 = existsSync(outPath) ? readFileSync(outPath).toString("base64") : "";
-              json(res, 200, { transcript: meta.transcript ?? "", reply: meta.reply ?? "", audioBase64: replyB64 });
-              resolve();
-            })();
-          });
+
+        if (!text) { json(res, 400, { error: "text or audioBase64 is required" }); return; }
+
+        const { runFlashTurnText } = await import("@/lib/flash");
+        const { reply, sessionId: flashSessionId } = await runFlashTurnText({
+          text,
+          channel: "voice",
+          peer: "operator",
         });
-        try { unlinkSync(inPath); } catch { /* ignore */ }
-        try { unlinkSync(outPath); } catch { /* ignore */ }
+
+        // Optional TTS: synthesize reply audio for clients that consume audioBase64
+        let audioBase64 = "";
+        try {
+          const { voiceRuntime } = await import("@/lib/voice/runtime");
+          if (voiceRuntime()) {
+            const { synthesizeLiveVoice } = await import("@/lib/voice/turn-server");
+            audioBase64 = await synthesizeLiveVoice(reply, lang);
+          }
+        } catch { /* TTS is optional — clients must handle missing audio */ }
+
+        json(res, 200, { transcript: text, reply, ...(audioBase64 ? { audioBase64 } : {}), sessionId: flashSessionId });
         return;
       }
 
@@ -3081,8 +3210,11 @@ export function createDaemonServer() {
       // POST/PATCH /voice/rtc/offer — realtime voice signaling relay (P5.2). The
       // client's SmallWebRTC offer (POST) / trickle-ICE updates (PATCH) are
       // forwarded to the headless Pipecat realtime server; its answer is returned.
-      // Media flows P2P (phone↔Mac), not through here. Gated by `voice` (+ cap).
+      // Media flows P2P (phone↔Mac), not through here. Gated by license tier + `voice` (+ cap).
       if ((req.method === "POST" || req.method === "PATCH") && urlPath === "/voice/rtc/offer") {
+        const { checkGate } = await import("@/lib/license/gates");
+        const voiceGate = checkGate("voice");
+        if (!voiceGate.permitted) { json(res, 403, { error: voiceGate.reason, upgradeRequired: voiceGate.upgradeRequired }); return; }
         const { isFeatureEnabled, featureCapability } = await import("@/lib/config/features");
         if (!isFeatureEnabled("voice")) { json(res, 403, { error: "voice feature is off — enable it in Settings → Features" }); return; }
         const cap = featureCapability("voice");
@@ -4320,6 +4452,9 @@ export function createDaemonServer() {
 
       // POST /directives — create a directive (optionally with criteria[])
       if (req.method === "POST" && urlPath === "/directives") {
+        const { checkGate } = await import("@/lib/license/gates");
+        const directivesGate = checkGate("directives");
+        if (!directivesGate.permitted) { json(res, 403, { error: directivesGate.reason, upgradeRequired: directivesGate.upgradeRequired }); return; }
         const store = await import("@/lib/orchestrator/directive-store");
         const body = await parseBody(req) as Record<string, unknown>;
         const directive = store.createDirective({
@@ -4397,6 +4532,113 @@ export function createDaemonServer() {
         const body = await parseBody(req) as Record<string, unknown>;
         const c = store.addCriterion(critMatch[1], String(body.description ?? ""), body.proverType as string | undefined);
         json(res, 201, c);
+        return;
+      }
+
+      // ── Flash Lane ────────────────────────────────────────────────────────────
+      // POST /flash/turn — ad-hoc conversational agent turn; response is SSE.
+      // Body: { sessionId?, channel, peer, text, attachments? }
+      // Events: token {delta}, tool_start {name,args_summary}, tool_result {name,ok,summary},
+      //         escalated {workPackageId}, done {sessionId,turnId,fullText,audioRef?}
+      if (req.method === "POST" && urlPath === "/flash/turn") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+        });
+        const { handleFlashTurn } = await import("@/lib/flash");
+        try {
+          await handleFlashTurn(body, res);
+        } catch (err) {
+          res.write(`event: error\ndata: ${JSON.stringify({ message: err instanceof Error ? err.message : String(err) })}\n\n`);
+        }
+        res.end();
+        return;
+      }
+
+      // GET /flash/sessions — paginated list of Flash sessions
+      if (req.method === "GET" && urlPath === "/flash/sessions") {
+        const { listSessions } = await import("@/lib/flash");
+        json(res, 200, { sessions: listSessions(50) });
+        return;
+      }
+
+      // GET /flash/sessions/:id/turns
+      const flashTurnsMatch = urlPath.match(/^\/flash\/sessions\/([^/]+)\/turns$/);
+      if (req.method === "GET" && flashTurnsMatch) {
+        const { getTurnsForSession } = await import("@/lib/flash");
+        json(res, 200, { turns: getTurnsForSession(flashTurnsMatch[1], 100) });
+        return;
+      }
+
+      // POST /flash/turns/:id/feedback — rate a turn {rating: "good"|"bad"}
+      const flashFeedbackMatch = urlPath.match(/^\/flash\/turns\/([^/]+)\/feedback$/);
+      if (req.method === "POST" && flashFeedbackMatch) {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const rating = body.rating === "good" || body.rating === "bad" ? body.rating : null;
+        if (!rating) { json(res, 400, { error: "rating must be 'good' or 'bad'" }); return; }
+        const { appendFeedbackToTurn, getTurnsForSession, recordBadTurnForEval } = await import("@/lib/flash");
+        try {
+          const turn = appendFeedbackToTurn(flashFeedbackMatch[1], rating);
+          if (rating === "bad") {
+            const turns = getTurnsForSession(turn.sessionId, 100);
+            const userTurn = [...turns].reverse().find((t) => t.role === "user");
+            if (userTurn) {
+              await recordBadTurnForEval(turn.sessionId, turn.id, userTurn.content);
+            }
+          }
+          json(res, 200, { ok: true, turn });
+        } catch (err) {
+          json(res, 404, { error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      // ── Credential Vault ──────────────────────────────────────────────────────
+      // GET  /vault/refs          — list all refs (never returns values)
+      // POST /vault/refs          — store a secret { scope, name, value, label? }
+      // DELETE /vault/refs/:scope/:name — remove a secret
+
+      if (req.method === "GET" && urlPath === "/vault/refs") {
+        const { getVaultStore } = await import("@/lib/vault");
+        const scope = parseQueryString(req.url ?? "").scope as string | undefined;
+        const entries = getVaultStore().list(scope);
+        json(res, 200, { ok: true, refs: entries });
+        return;
+      }
+
+      if (req.method === "POST" && urlPath === "/vault/refs") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const scope = typeof body.scope === "string" ? body.scope.trim() : "";
+        const name = typeof body.name === "string" ? body.name.trim() : "";
+        const value = typeof body.value === "string" ? body.value : null;
+        const label = typeof body.label === "string" ? body.label : "";
+        if (!scope || !name || !value) {
+          json(res, 400, { error: "scope, name, and value are required" });
+          return;
+        }
+        try {
+          const { getVaultStore } = await import("@/lib/vault");
+          const ref = await getVaultStore().set(scope, name, value, label);
+          json(res, 200, { ok: true, ref });
+        } catch (err) {
+          json(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+        return;
+      }
+
+      const vaultDeleteMatch = urlPath.match(/^\/vault\/refs\/([^/]+)\/([^/]+)$/);
+      if (req.method === "DELETE" && vaultDeleteMatch) {
+        const scope = decodeURIComponent(vaultDeleteMatch[1]);
+        const name = decodeURIComponent(vaultDeleteMatch[2]);
+        try {
+          const { getVaultStore } = await import("@/lib/vault");
+          await getVaultStore().delete(scope, name);
+          json(res, 200, { ok: true });
+        } catch (err) {
+          json(res, 404, { ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
         return;
       }
 

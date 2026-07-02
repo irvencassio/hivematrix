@@ -142,6 +142,23 @@ export function getOnboardingStatus(opts: {
     remediation: brainOk ? undefined : "Set config.memory.brainRootDir to your brain directory and ensure it exists (the wizard's Brain step does this).",
   });
 
+  // persona (optional) — birth ritual produces IDENTITY.md; migrated installs already have it
+  const personaOk = brainOk && existsSync(join(brainRoot, "persona", "IDENTITY.md"));
+  steps.push({
+    id: "persona",
+    title: "Persona (birth ritual)",
+    required: false,
+    state: personaOk ? "done" : "incomplete",
+    detail: personaOk
+      ? `persona established (${brainRoot}/persona/IDENTITY.md)`
+      : brainOk
+        ? "persona not yet created — run the birth ritual"
+        : "brain root must be set up first",
+    remediation: personaOk
+      ? undefined
+      : "Open Setup → Persona in the console and run the birth ritual to give your assistant a name and identity.",
+  });
+
   // frontier (optional) — API keys OR installed CLIs both count
   const hasFrontierKey = !!process.env.OPENAI_API_KEY || !!process.env.ANTHROPIC_API_KEY ||
     !!((cfg?.providers as Record<string, unknown>)?.openai);
@@ -216,6 +233,21 @@ export function getOnboardingStatus(opts: {
     state: mailbeeOk ? "done" : "incomplete",
     detail: mailbeeDetail,
     remediation: mailbeeOk ? undefined : "Optional: grant HiveMatrix Automation control of Mail.app, enable the channel, and add trusted senders in Settings > Mail Lane.",
+  });
+
+  // telemetry (optional) — opt-in anonymous usage stats
+  const telemetryEnabled = !!(cfg?.telemetry as Record<string, unknown> | undefined)?.enabled;
+  steps.push({
+    id: "telemetry",
+    title: "Anonymous usage stats (optional)",
+    required: false,
+    state: telemetryEnabled ? "done" : "incomplete",
+    detail: telemetryEnabled
+      ? "opted in — aggregate counters sent daily to first-party endpoint; no event payloads leave this Mac"
+      : "opted out — nothing leaves this Mac (recommended for privacy-first users)",
+    remediation: telemetryEnabled
+      ? undefined
+      : "Optional: enable in Settings > General > Anonymous usage stats to help improve HiveMatrix.",
   });
 
   const requiredComplete = steps.filter((s) => s.required).every((s) => s.state === "done");

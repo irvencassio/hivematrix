@@ -55,6 +55,43 @@ Qwen-Agent: optional compatibility adapter only, never an orchestrator.
 - Review Lane (`managerbee`) — control-plane heartbeat, routing/review diagnostics, escalations, approvals, and worker setup visibility.
 - Memory Lane (`brainbee`) — brain index, lane playbooks, memory bundle assembly, and playbook hygiene.
 
+## Flash Lane (`flash`; P1.1 — M1)
+
+Native ad-hoc conversational agent loop — the replacement for the OpenClaw chat dock.
+
+- **Session store** (`src/lib/flash/store.ts`, tables `flash_sessions` + `flash_turns`) — per-channel-peer session scoping; same iMessage sender resumes their session; console + voice share one operator session when peer is `"operator"`.
+- **Context assembly** (`src/lib/flash/context.ts`) — system prompt built from persona files (`<brainRoot>/persona/`), today's daily note, rolling session summary, and `brain_search` results for the current text.
+- **Agent loop** (`src/lib/flash/loop.ts`) — streams LM Studio (Qwen) via OpenAI-compatible SSE; executes lane tools + two flash-only tools (`persona_update`, `escalate_to_work_package`); budget: 12 tool calls / 3 min.
+- **Routing role** — `converse` (resolves to `local-primary` in all connectivity modes).
+- **Capability gate** — `flash` (available in all three connectivity modes; cloud-dependent tools degrade within the loop per their own gates).
+- **Endpoints** — `POST /flash/turn` (SSE stream: `token`, `tool_start`, `tool_result`, `escalated`, `done`), `GET /flash/sessions`, `GET /flash/sessions/:id/turns`, `POST /flash/turns/:id/feedback`.
+- **Eval** — bad turns auto-appended to `eval/flash-parity/prompts.jsonl` as regression cases.
+- **Learning loop** (`src/lib/flash/distill.ts`, `src/lib/flash/learning-loop.ts`) — polls every 15 min; distills sessions cold for 6h (no activity + not yet distilled). Cheap local-model pass extracts reusable how-tos into skills (`upsertSkill`, dedupe/refine on re-distillation), files failures/friction/gaps into the feedback backlog (`recordFeedbackDedup`), and appends notable events to `<brainRoot>/persona/memory/YYYY-MM-DD.md`. DB column `flash_sessions.distilledAt` prevents re-distillation across daemon restarts. Wired in `src/daemon/index.ts`.
+- **Scope** — flash/ may import routing/, orchestrator/, brain/, skills/, db/. Only daemon/ may import flash/.
+
+## Credential Vault (`vault`; P2.2)
+
+macOS Keychain-backed secret store with `vault://` ref addressing.
+
+- **Keychain layer** (`src/lib/vault/keychain.ts`) — macOS `security` CLI wrapper; service `hivematrix-vault`; account key `<scope>/<name>`.
+- **Ref system** (`src/lib/vault/refs.ts`) — `VaultRef = vault://<scope>/<name>`; `isVaultRef`, `makeRef`, `parseRef`, `describeRef`. Refs are safe in prompts, task payloads, SSE events, and audit logs.
+- **Store** (`src/lib/vault/store.ts`) — `VaultStore`: set/get/delete/list backed by Keychain + a SQLite `vault_refs` index (metadata only, never values).
+- **Resolution** — `resolveVaultRef(ref)` resolves a ref to its plaintext value. **Call only from lane execution code** (browser-lane login fill, terminal-lane host auth, config secrets). Never pass the resolved value to a model, SSE event, or audit log.
+- **Import restrictions:** only `src/lib/browser-lane/`, `src/lib/terminal-lane/`, `src/lib/config/`, and `src/daemon/` may import `@/lib/vault`. vault/ must NOT import from orchestrator/.
+- **Endpoints** — `GET /vault/refs`, `POST /vault/refs`, `DELETE /vault/refs/:scope/:name` (values never returned).
+- **Secrets registry** — `src/lib/config/secrets.ts` accepts `vaultRef` alongside `env` on each `SecretSpec`; `secretStatuses()` reports `source: "env" | "vault" | null`.
+
+## Packs (`packs`; M4)
+
+Installable outcome packs that deliver a job end-to-end.
+
+- **Pack format** — a signed Ed25519 tarball (`.hmpack`) containing `manifest.json` `{name, version, description, tier, requires: {lanes, permissions}, directives, skills, dashboardCard, uninstall}` + skill markdown files + directive templates (JSON matching the Directive primitive) + optional persona/HEARTBEAT.md additions.
+- **Signing** — Ed25519 (third keypair, operator-held). Daemon refuses unsigned packs. No open marketplace; first-party packs only at launch. Third-party skills imported individually remain `trusted:false` until operator approval (existing mechanism).
+- **Lifecycle** (`src/lib/packs/`) — install, list, uninstall; uninstall removes its directives/skills/config cleanly and leaves artifacts/brain docs in place; pack directives appear in the normal directive UI, tagged with the pack name.
+- **Dashboard cards** — each pack registers one console card (and companion equivalent) summarizing its job: counts, last run, money/time metrics where applicable, pending approvals. Schema: `{title, metrics[], cta}` — rendered generically so new packs need no app update.
+- **Bundled packs** — Support Inbox (P4.2a), Chief-of-Staff (P4.2b), Content Engine (P4.2c), Dev Copilot (P4.2d).
+- **Import restrictions:** only `src/daemon/` may import `@/lib/packs`. packs/ must NOT import from orchestrator/.
+
 ## Internal subsystems (no public brand)
 
 - Session/identity plane: SessionBroker, SessionStore (internal; no public brand)

@@ -32,6 +32,11 @@
         "https://github.com/irvencassio/hivematrix/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMzOTIyMDM4OTdCMTRDMkEKUldRcVRMR1hPQ0NTdzdNZGpsUmc1TXFsNlZMZm9FK05lenhsVmh0aHNDSkQxTVBUd0xnRkMrZSsK"
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": ["hivematrix"]
+      }
     }
   },
   "bundle": {

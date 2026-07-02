@@ -1,19 +1,21 @@
 /**
- * Message Lane poller — the loop that turns inbound texts into work and texts
- * needs_input questions back out.
+ * Message Lane poller — the loop that routes inbound texts into Flash Lane and
+ * texts needs_input questions back out.
  *
  * Inbound:  read chat.db since the high-water ROWID → route each message
- *           (allowlist gate) → resolve a waiting task or create a new one.
+ *           (allowlist gate) → resolve a waiting task OR dispatch to Flash Lane
+ *           for a conversational reply. Flash handles both quick answers and
+ *           complex work escalation via escalate_to_work_package internally.
  * Outbound: any Message Lane task that's waiting on its sender (needs_input) gets
  *           its question texted to that sender once.
  *
  * Runs inside the daemon; gated by the channel being enabled + chat.db readable.
+ * The flashDispatch callback is injected by daemon/index.ts (only daemon/ imports
+ * from flash/) — falls back to a no-op if not wired.
  */
 
-import { homedir } from "os";
 import { Task, type TaskDoc } from "@/lib/db";
 import { getPendingStuck, resolveStuck } from "@/lib/orchestrator/stuck";
-import { DEFAULT_TASK_PROJECT } from "@/lib/routing/project-constants";
 import { handlesMatch } from "./contracts";
 import { routeInbound, type PendingInput } from "./handoff";
 import { readInboundSince, sendIMessage } from "./imessage";
@@ -25,6 +27,10 @@ import {
   wasDoneNotified, markDoneNotified, recordIgnoredSender,
 } from "./store";
 import { getLocation } from "@/lib/models/available";
+
+/** Injected by daemon/index.ts; accepts (text, peer) and returns the Flash reply. */
+type FlashDispatch = (text: string, peer: string) => Promise<string>;
+let flashDispatch: FlashDispatch | null = null;
 
 const POLL_INTERVAL_MS = 3_000;
 
@@ -66,21 +72,21 @@ async function handleInbound(msg: { rowid: number; handle: string; text: string;
     return;
   }
 
-  // new_task — share the operator's location so location-aware asks (weather,
-  // "near me", local time) have it without the agent having to ask.
+  // flash_turn — dispatch to Flash Lane for a conversational reply.
+  // Append location so location-aware asks ("near me", local time) have it without
+  // the agent having to ask. Flash handles escalation to work packages internally.
+  if (!flashDispatch) return;
   const loc = getLocation();
-  const description = loc ? route.description + "\n\n[Operator location: " + loc + "]" : route.description;
-  await Task.create({
-    title: route.title,
-    description,
-    project: DEFAULT_TASK_PROJECT,
-    projectPath: homedir(),
-    status: "backlog",
-    executor: "agent",
-    source: "messagebee",
-    model: route.model ?? undefined,
-    output: { messagebee: { handle: msg.handle, service: msg.service } },
-  });
+  const text = loc ? route.text + "\n\n[Operator location: " + loc + "]" : route.text;
+  try {
+    const reply = await flashDispatch(text, route.peer);
+    if (reply.trim()) {
+      const sent = await sendIMessage(route.peer, reply);
+      if (sent) recordOutbound();
+    }
+  } catch (err) {
+    recordError(`flash dispatch failed for ${route.peer}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /** Text the RESULT of a finished messagebee task back to its sender (once). */
@@ -155,7 +161,8 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 
 /** Start the poll loop (idempotent). Returns a stop function. */
-export function startMessageBeePoller(intervalMs = POLL_INTERVAL_MS): () => void {
+export function startMessageBeePoller(intervalMs = POLL_INTERVAL_MS, dispatch?: FlashDispatch): () => void {
+  flashDispatch = dispatch ?? null;
   if (timer) return stopMessageBeePoller;
   timer = setInterval(() => {
     if (running) return; // never overlap two polls

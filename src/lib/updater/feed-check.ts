@@ -9,18 +9,20 @@
  */
 
 import { spawn } from "child_process";
-import { writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 import { getBundledVersion } from "@/lib/version/bundle-version";
 
 /** Flag file the desktop app checks to force one install even when auto-update is off. */
 export const FORCE_UPDATE_FLAG = join(homedir(), ".hivematrix", ".force-update");
+export const UPDATE_IN_PROGRESS_FLAG = join(homedir(), ".hivematrix", ".update-in-progress.json");
 
 // Must match plugins.updater.endpoints in src-tauri/tauri.conf.json.
 const FEED_URL =
   "https://github.com/irvencassio/hivematrix/releases/latest/download/latest.json";
 const TTL_MS = 60 * 1000;
+const APPLYING_TTL_MS = 5 * 60 * 1000;
 const APP_PROCESS_MATCH = "HiveMatrix.app/Contents/MacOS/app";
 
 export interface UpdateStatus {
@@ -28,10 +30,33 @@ export interface UpdateStatus {
   latest: string | null;
   updateAvailable: boolean;
   checkedAt: string;
+  applying?: boolean;
+  applyingVersion?: string;
   error?: string;
 }
 
 let cache: { at: number; status: UpdateStatus } | null = null;
+
+function clearPath(path: string): void {
+  try { rmSync(path, { force: true }); } catch { /* best effort */ }
+}
+
+function applyingVersion(path = UPDATE_IN_PROGRESS_FLAG, now = Date.now()): string | null {
+  if (!existsSync(path)) return null;
+  try {
+    const marker = JSON.parse(readFileSync(path, "utf-8")) as { version?: unknown; startedAt?: unknown };
+    const version = typeof marker.version === "string" ? marker.version : null;
+    const startedAt = typeof marker.startedAt === "number" ? marker.startedAt : 0;
+    if (version && now - startedAt <= APPLYING_TTL_MS) return version;
+  } catch { /* stale/corrupt marker */ }
+  clearPath(path);
+  return null;
+}
+
+function markApplying(version: string, path = UPDATE_IN_PROGRESS_FLAG): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({ version, startedAt: Date.now() }));
+}
 
 /** Compare dotted versions numerically: >0 if a newer than b. */
 export function compareVersions(a: string, b: string): number {
@@ -44,7 +69,7 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeof fetch } = {}): Promise<UpdateStatus> {
+export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeof fetch; updateInProgressPath?: string; forceFlagPath?: string } = {}): Promise<UpdateStatus> {
   const current = getBundledVersion();
   if (!opts.force && cache && Date.now() - cache.at < TTL_MS) return cache.status;
   const fetchImpl = opts.fetchImpl ?? fetch;
@@ -60,6 +85,14 @@ export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeo
       updateAvailable: !!latest && compareVersions(latest, current) > 0,
       checkedAt: new Date().toISOString(),
     };
+    const applying = applyingVersion(opts.updateInProgressPath);
+    if (status.updateAvailable && applying && applying === latest) {
+      status.applying = true;
+      status.applyingVersion = applying;
+    } else if (!status.updateAvailable) {
+      clearPath(opts.updateInProgressPath ?? UPDATE_IN_PROGRESS_FLAG);
+      clearPath(opts.forceFlagPath ?? FORCE_UPDATE_FLAG);
+    }
   } catch (e) {
     status = {
       current,
@@ -80,17 +113,37 @@ export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeo
  */
 export function applyUpdateViaRelaunch(
   spawnImpl: typeof spawn = spawn,
-): { ok: boolean; detail: string } {
+  opts: { fetchImpl?: typeof fetch; forceFlagPath?: string; updateInProgressPath?: string } = {},
+): Promise<{ ok: boolean; detail: string; version?: string }> {
+  return applyUpdateViaRelaunchAsync(spawnImpl, opts);
+}
+
+async function applyUpdateViaRelaunchAsync(
+  spawnImpl: typeof spawn,
+  opts: { fetchImpl?: typeof fetch; forceFlagPath?: string; updateInProgressPath?: string },
+): Promise<{ ok: boolean; detail: string; version?: string }> {
+  const forceFlagPath = opts.forceFlagPath ?? FORCE_UPDATE_FLAG;
+  const updateInProgressPath = opts.updateInProgressPath ?? UPDATE_IN_PROGRESS_FLAG;
   try {
+    const status = await getUpdateStatus({ force: true, fetchImpl: opts.fetchImpl, updateInProgressPath, forceFlagPath });
+    if (!status.updateAvailable || !status.latest) {
+      clearPath(forceFlagPath);
+      clearPath(updateInProgressPath);
+      return { ok: false, detail: "HiveMatrix is already up to date" };
+    }
     // Drop a force flag so the app installs this update even if auto-update is
     // off (manual "Install" must work regardless of the setting).
-    try { mkdirSync(join(homedir(), ".hivematrix"), { recursive: true }); writeFileSync(FORCE_UPDATE_FLAG, "1"); } catch { /* best effort */ }
+    try {
+      mkdirSync(dirname(forceFlagPath), { recursive: true });
+      writeFileSync(forceFlagPath, "1");
+      markApplying(status.latest, updateInProgressPath);
+    } catch { /* best effort */ }
     spawnImpl(
       "sh",
       ["-c", `sleep 1; pkill -f '${APP_PROCESS_MATCH}'; sleep 2; open -a HiveMatrix`],
       { detached: true, stdio: "ignore" },
     ).unref();
-    return { ok: true, detail: "relaunching HiveMatrix to install the update" };
+    return { ok: true, detail: `relaunching HiveMatrix to install ${status.latest}`, version: status.latest };
   } catch (e) {
     return { ok: false, detail: e instanceof Error ? e.message : String(e) };
   }

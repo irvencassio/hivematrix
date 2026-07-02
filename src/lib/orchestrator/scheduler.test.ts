@@ -1,8 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
-import { getUsageAvailabilityForTask, shouldClearStaleUsageDelay } from "./scheduler";
+import { getUsageAvailabilityForTask, resolveModelForAgentRole, shouldClearStaleUsageDelay } from "./scheduler";
 import type { UsageData } from "@/lib/usage/fetcher";
+
+function withTempHome<T>(config: Record<string, unknown>, run: () => T): T {
+  const originalHome = process.env.HOME;
+  const tempHome = mkdtempSync(join(tmpdir(), "hm-scheduler-test-"));
+  mkdirSync(join(tempHome, ".hivematrix"), { recursive: true });
+  writeFileSync(join(tempHome, ".hivematrix", "config.json"), JSON.stringify(config));
+  process.env.HOME = tempHome;
+  try {
+    return run();
+  } finally {
+    process.env.HOME = originalHome;
+    rmSync(tempHome, { recursive: true, force: true });
+  }
+}
 
 const usage: UsageData = {
   fetchedAt: "2026-05-15T13:40:10.577Z",
@@ -162,4 +179,18 @@ test("non usage-reset delays are not cleared", () => {
     ),
     false
   );
+});
+
+test("blank coding agent tasks resolve to the configured coding role model", () => {
+  withTempHome({ frontierModel: "qwen3.6-35b-4bit" }, () => {
+    assert.equal(resolveModelForAgentRole(null, "developer"), "qwen3.6-35b-4bit");
+    assert.equal(resolveModelForAgentRole(undefined, "cto"), "qwen3.6-35b-4bit");
+    assert.equal(resolveModelForAgentRole("", "qa"), "qwen3.6-35b-4bit");
+  });
+});
+
+test("explicit task model remains pinned over role defaults", () => {
+  withTempHome({ frontierModel: "qwen3.6-35b-4bit" }, () => {
+    assert.equal(resolveModelForAgentRole("claude-sonnet-4-6", "developer"), "claude-sonnet-4-6");
+  });
 });

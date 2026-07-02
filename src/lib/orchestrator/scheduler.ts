@@ -12,6 +12,7 @@ import { isCodexModel } from "@/lib/models/catalog";
 import { dispatchInventorBeeTask } from "@/lib/inventorbee/task-dispatch";
 import type { TaskDelayReason } from "@/lib/types";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
+import { getRoleModels } from "@/lib/models/available";
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let consecutiveErrors = 0;
@@ -130,6 +131,20 @@ export function getUsageAvailabilityForTask(
   }
 
   return { ok: true, ...subject };
+}
+
+export function resolveModelForAgentRole(currentModel: string | null | undefined, agentType: string | null | undefined): string | undefined {
+  const pinned = currentModel?.trim();
+  if (pinned) return pinned;
+  const roleModels = getRoleModels();
+  const normalizedAgent = String(agentType ?? "").trim();
+  if (normalizedAgent === "developer" || normalizedAgent === "cto" || normalizedAgent === "qa") {
+    return roleModels.coding.trim() || undefined;
+  }
+  if (normalizedAgent === "marketing") {
+    return roleModels.writer.trim() || undefined;
+  }
+  return undefined;
 }
 
 function toResetIso(value: string | null | undefined): string | null {
@@ -314,8 +329,31 @@ async function tick() {
 
       if (!task) break; // No more eligible tasks
 
+      // Auto-classify agent type if set to "auto" and feature is enabled.
+      // The resolved agent role also determines which role-model default applies
+      // when the task itself was intentionally created backend-agnostic.
+      let agentType = ((task as Record<string, unknown>).agentType as string) ?? "auto";
+      if (agentType === "auto") {
+        let specializationEnabled = false;
+        try {
+          const { readFileSync } = await import("fs");
+          const { join } = await import("path");
+          const { homedir } = await import("os");
+          const cfg = JSON.parse(readFileSync(join(homedir(), ".hivematrix", "config.json"), "utf-8"));
+          specializationEnabled = cfg.features?.agentSpecialization === true;
+        } catch { /* default off */ }
+
+        if (specializationEnabled) {
+          const { classifyTask } = await import("./intent-classifier");
+          agentType = await classifyTask(task.description);
+        } else {
+          agentType = "developer";
+        }
+      }
+      const effectiveModel = resolveModelForAgentRole(task.model ?? undefined, agentType);
+
       const usage = getUsageAvailabilityForTask(
-        { model: task.model ?? undefined, profile: task.profile ?? undefined },
+        { model: effectiveModel, profile: task.profile ?? undefined },
         usageCache,
         activeProfile
       );
@@ -325,7 +363,7 @@ async function tick() {
           getConnectivityPolicy().onUsageWindowExhausted(usage.provider);
         }
         const fallback = await getLocalFallbackDecision({
-          currentModelId: task.model ?? undefined,
+          currentModelId: effectiveModel,
           project: task.project,
           reason: "usage",
         });
@@ -333,7 +371,7 @@ async function tick() {
           const output = {
             ...(task.output ?? {}),
             fallbackReason: "usage_exhausted",
-            fallbackSourceModel: task.model ?? "claude-default",
+            fallbackSourceModel: effectiveModel ?? "claude-default",
             fallbackTargetModel: fallback.modelId,
             fallbackAt: new Date().toISOString(),
           };
@@ -375,6 +413,8 @@ async function tick() {
         assignedAt,
         delayUntil: null,
         delayReason: null,
+        ...(effectiveModel && effectiveModel !== task.model ? { model: effectiveModel } : {}),
+        ...(agentType !== ((task as Record<string, unknown>).agentType as string) ? { agentType } : {}),
       });
       if (task.missionId) {
         await syncMissionProgressDoc(task.missionId.toString());
@@ -383,29 +423,15 @@ async function tick() {
       broadcast({
         type: "task:updated",
         taskId: task._id.toString(),
-        fields: { status: "assigned", assignedAt, delayUntil: null, delayReason: null },
+        fields: {
+          status: "assigned",
+          assignedAt,
+          delayUntil: null,
+          delayReason: null,
+          ...(effectiveModel && effectiveModel !== task.model ? { model: effectiveModel } : {}),
+          ...(agentType !== ((task as Record<string, unknown>).agentType as string) ? { agentType } : {}),
+        },
       });
-
-      // Auto-classify agent type if set to "auto" and feature is enabled
-      let agentType = ((task as Record<string, unknown>).agentType as string) ?? "auto";
-      if (agentType === "auto") {
-        let specializationEnabled = false;
-        try {
-          const { readFileSync } = await import("fs");
-          const { join } = await import("path");
-          const { homedir } = await import("os");
-          const cfg = JSON.parse(readFileSync(join(homedir(), ".hivematrix", "config.json"), "utf-8"));
-          specializationEnabled = cfg.features?.agentSpecialization === true;
-        } catch { /* default off */ }
-
-        if (specializationEnabled) {
-          const { classifyTask } = await import("./intent-classifier");
-          agentType = await classifyTask(task.description);
-          await Task.findByIdAndUpdate(task._id.toString(), { agentType });
-        } else {
-          agentType = "developer";
-        }
-      }
 
       try {
         if (agentType === "inventor") {
@@ -419,7 +445,7 @@ async function tick() {
             task.project,
             task.workflow,
             task.resumeSessionId ?? undefined,
-            task.model ?? undefined,
+            effectiveModel,
             task.profile ?? undefined,
             (task as Record<string, unknown>).workflowStepIndex as number | undefined,
             (task as Record<string, unknown>).worktreeName as string | null | undefined,

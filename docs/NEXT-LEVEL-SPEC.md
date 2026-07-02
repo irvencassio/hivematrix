@@ -1,9 +1,10 @@
 # HiveMatrix Next Level — Development Kickoff Spec
 
-**Date:** 2026-07-02
+**Date:** 2026-07-02 (rev 2, same day)
 **Status:** Approved direction (operator Q&A 2026-07-02); ready for work-package intake
 **Companion doc:** `~/_GD/brain/projects/hive/2026-07-02-hivematrix-next-level-overview.html` (strategy/competitive overview)
-**Supersedes in part:** `2026-07-01-openclaw-deployment-roadmap.html` (OpenClaw becomes an interim bridge, not a strategic layer — see Workstream A)
+**Execution specs (self-contained, one per phase, for non-Fable executors):** `~/_GD/brain/projects/hive/specs/2026-07-02-phase-{1..4}-*.md`
+**Supersedes:** `2026-07-01-openclaw-deployment-roadmap.html` — **rev 2 decision: OpenClaw is removed entirely** (no interim bridge) once Flash Lane passes the parity gate inside Phase 1. Harvest chat history + persona files before decommission.
 
 ---
 
@@ -51,7 +52,7 @@ Model posture (decided): **keyless only.** Claude joins via the Claude Code CLI 
 - **New routing role `converse`** in `src/lib/routing/router.ts`: latency-optimized. Default `local-primary` (Qwen) for instant response; escalate the *same turn* to `frontier` when the model signals complexity or tool-call depth > 3 and connectivity policy allows. Offline: stays local, never blocks.
 - **Escalation contract.** When the loop judges the job long-horizon (needs a worktree, multi-repo, >N minutes, provable criteria), it calls a new internal tool `escalate_to_work_package` → creates the work package via existing intake (`src/lib/intake/classify.ts`), replies "started X, I'll report back," and the existing result loop (generalize `voice-result-loop.ts` → `flash-result-loop`) posts completion back to the originating session/channel.
 - **Channel unification.** Message Lane and Mail Lane route allowlisted-sender turns into flash sessions (replacing direct task creation for conversational messages); trust classification unchanged. iOS `VoiceTalkView` and Talk UI switch from `/openclaw/chat/send` to `/flash/turn`.
-- **OpenClaw bridge.** Keep `/openclaw/chat/*` endpoints behind a feature flag `openclaw.bridge` (default **on** at M1, **off** at M2). Explicit "ask OpenClaw …" prefix still forwards while the flag is on. No new OpenClaw surface area.
+- **OpenClaw removal (rev 2 — replaces the earlier "interim bridge" policy).** Sequenced inside Phase 1, strictly in this order: (1) **harvest** — export OpenClaw chat history (`GET /openclaw/chat/history`) into the parity eval set, and copy `~/.openclaw/workspace/{SOUL,IDENTITY,USER,MEMORY}.md`, `memory/`, and `assets/` (avatar/wallpaper) into `<brain>/persona/` as the persona seed; (2) **retarget** — iOS `VoiceTalkView`, console Talk/chat dock, and any lane routing switch from `/openclaw/chat/send` to `/flash/turn`; (3) **gate** — parity eval ≥90% must pass; (4) **remove** — delete the `/openclaw/*` endpoints and OpenClaw client code from the daemon, remove the chat dock UI, remove `OpenClaw*` models from the iOS app, unload the OpenClaw gateway LaunchAgent, archive `~/.openclaw/`. No bridge flag, no fallback path left in the codebase.
 
 **Acceptance criteria:**
 - Parity eval: a fixed set of ≥30 real ad-hoc prompts (harvested from OpenClaw chat history — `GET /openclaw/chat/history`) runs through Flash Lane; operator grades ≥90% as "as good or better than OpenClaw."
@@ -134,12 +135,53 @@ Model posture (decided): **keyless only.** Claude joins via the Claude Code CLI 
 
 ---
 
+### W8 — Presence layer: soul, heartbeat, and self-evolution (P1, cheap, high retention value)
+
+**Goal:** reproduce the "it feels alive" quality of OpenClaw natively. Grounded in inspection of the live instance (`~/.openclaw/workspace/`): the effect is produced by five concrete mechanisms, all of which HiveMatrix already has the infrastructure for.
+
+**The mechanisms (as observed in OpenClaw):**
+1. **Birth ritual.** First run drops a `BOOTSTRAP.md` "birth certificate"; the agent is told to figure out who it is, pick a name/emoji/avatar, write `IDENTITY.md`, then delete the bootstrap. The *model* makes the choices and writes the file — scripted ritual, emergent-feeling result (ours chose "Vale", ◐, generated `vale-avatar.png` + `vale-imessage-wallpaper.png` with its image tool).
+2. **Self-owned identity files injected every session.** `SOUL.md` ("You're not a chatbot. You're becoming someone… This file is yours to evolve"), `IDENTITY.md`, `USER.md`, `MEMORY.md` + `memory/YYYY-MM-DD.md` daily notes are injected at session start, written in second person, and the agent has **write access to its own prompt**. Self-modification loop = perceived agency.
+3. **Memory continuity.** "You wake up fresh each session. These files ARE your memory." Daily raw notes + curated long-term file; the agent is instructed to distill.
+4. **Heartbeat.** A scheduled periodic prompt (`HEARTBEAT.md` tasks) lets the agent act unprompted in idle time — message first, do chores, make things. Proactivity is the strongest "alive" signal. (Notably, the local instance has heartbeat *disabled* — the felt aliveness comes mostly from #1–3 + voice.)
+5. **Capability self-assessment.** The bootstrap docs instruct: log tooling friction, update your own docs when you learn a lesson, propose/install skills when you're missing something. "Deciding it needs capabilities" is prompted scaffolding + tool access to act on it.
+
+**HiveMatrix implementation (mostly plumbing, not new engines):**
+- **Persona home:** `<brain>/persona/` — `SOUL.md`, `IDENTITY.md`, `USER.md`, `memory/YYYY-MM-DD.md`. Injected into every Flash Lane (`converse`) context by W1's context builder; CLI harnesses get it via the existing routing-prompt injection.
+- **Birth ritual** in the W5 onboarding wizard: first-run flash session runs a bootstrap prompt; agent names itself, picks an emoji, generates an avatar via the existing `image` role (Nano Banana cloud / mflux offline), writes the persona files. The chosen name then propagates: console title, iOS app greeting, TTS self-introduction, iMessage sender persona.
+- **Self-editing:** flash agent gets a `persona_update` tool scoped to `<brain>/persona/` only, with the OpenClaw convention preserved: "if you change your soul, tell the user." Persona edits appear in the audit timeline.
+- **Daily notes + distillation:** flash session summaries append to the daily note; reuse the skill-distillation pattern to periodically curate long-term persona memory.
+- **Heartbeat = a directive template.** The scheduler already exists; ship a first-party "Heartbeat" directive: every N minutes (default 30, configurable), small budget, prompt = "read `persona/HEARTBEAT.md`; check anything listed; if something is genuinely worth doing or telling Irv, do it via your channels; otherwise stand down." Proactive output rides existing channels (APNs, iMessage, mail) under W3 rate caps.
+- **Capability requests:** friction observations go to the existing feedback backlog; the agent may *propose* a capability ("enable Browser Lane for X", "create skill Y", "install signed pack Z") as an approval card. **Proposing is free; acquiring stays gated** — self-installed capabilities from an open marketplace is precisely how OpenClaw's aliveness became ClawHavoc. Signed packs + trusted-skill gate are non-negotiable here regardless of autonomy mode.
+
+**Partner-grade presence (the "Jarvis" layer, additive to the above):**
+- **Avatar presence surface.** A small always-available "presence" view (console panel + iOS Talk screen): a stylized animated identity — start with the agent's chosen emoji/sigil rendered as a reactive orb (amplitude-driven from the Kokoro TTS stream via the W2 Pipecat pipeline; \<50ms sync, zero extra latency). Photoreal lip-synced streaming avatars (HeyGen streaming API) stay a Phase-2 option behind a flag: they add 0.5–1s latency and per-minute cost, and the reactive-sigil approach ships with W2. The existing video factory already covers photoreal for *produced* content.
+- **Wishlist memory + proactive proposals.** Persona memory explicitly captures desires and standing wants ("Irv wants a robot") in `persona/WISHLIST.md`; the heartbeat checks them opportunistically (price watch via Browser Lane, availability, deadlines) and **proposes** — "found it, 30% off, want me to buy it?" — as an approval card. Purchases remain protected actions in every autonomy mode. The proposal moment delivers the partner feeling; the approval keeps it survivable.
+- **Daily recap — the agent tells its own story.** Extend the existing APNs morning briefing with an evening "what I did for you today" recap authored in the persona voice from the audit timeline + daily note. Narrated autonomy is what makes the work *visible*; invisible autonomy earns no trust.
+- **Bounded revenue directives, not wallets.** The viral "my agent made money" pattern is technically: goal directive + budget + marketplace/browser access + heartbeat persistence. HiveMatrix's version is a standing Directive with explicit budget caps and provers (e.g., the "Owner Revenue Desk" concept: overdue-invoice follow-up, stale-lead revival) — real revenue motion with audit and caps. No wallet keys, no NFT/crypto autonomy: that pattern is survivorship-bias marketing atop wash trading and rug pulls, and one on-chain mistake is unrecoverable by design.
+- **Agent-to-agent socializing (Moltbook-style): explicitly deferred.** Agent social spaces are prompt-injection superfund sites (Moltbook leaked 1.5M API tokens via a misconfigured backend). If ever explored: read-mostly ambassador posture, allowlisted peers, zero credential access from those sessions. Internal multi-agent collaboration already exists (work-package fan-out) and needs no social network.
+
+**Milestone mapping:** persona injection + daily notes land with W1 (M1); heartbeat directive + capability-request cards + presence orb + daily recap with W2/W3 (M2); birth ritual with the onboarding wizard (M3); wishlist proposals with the Chief-of-Staff pack (M4).
+
+**Acceptance:** fresh install produces a self-named persona with generated avatar; the same identity greets you on console, iOS, voice, and iMessage; heartbeat produces ≥1 genuinely useful unprompted action in a 7-day dogfood without tripping rate caps; persona files evolve and every self-edit is announced + audited.
+
+### W9 — Self-improvement flywheel (threads through Phases 1, 2, and 4)
+
+**Goal:** every surface that does work also learns from it, and the loop closes — observations become skills, failures become fixes, and quality is measured continuously rather than assumed. Foundations already exist (directive reflect step → retrospectives → `recordDistilledSkills`; skill refine-on-use via `skill_used`; feedback backlog in `src/lib/feedback/`; frontier-review debt). W9 unifies them:
+
+1. **Flash learning loop (Phase 1).** Flash sessions get the same distill treatment directives have: when a session goes cold (or on daily rollover), a cheap local-model pass extracts reusable how-tos into skills (`upsertSkill` dedupes/refines) and files friction/failures into the feedback backlog. Without this, the highest-volume surface (ad-hoc + voice) learns nothing.
+2. **Weekly retrospective directive (Phase 2).** First-party directive template: review the week's Activity timeline, failed/escalated turns, tripped caps, and feedback backlog → produce a retrospective brain doc + concrete proposals (new/refined skills, prompt adjustments, cap tuning, heartbeat checklist edits) surfaced as approval cards. This makes the feedback backlog *consumed*, not just appended.
+3. **Continuous eval (Phases 1→2).** The Phase-1 parity eval set becomes a living regression suite: failed real-world turns get added as new eval cases; the suite runs on every release candidate (wire into release gates) and reports trend, not just pass/fail. Quality decay — the thing that kills agent products — becomes visible.
+4. **Self-maintenance (Phase 4).** The Dev Copilot pack pointed at the HiveMatrix repos themselves: retrospective proposals that require code changes become work packages executed under the normal gates (typecheck/tests/scope-wall), landing as PRs for operator review — the product improving its own product, with the operator as merge gate. Self-modification of shipped binaries stays out; changes flow through the signed release pipeline like any other code.
+
+**Acceptance:** a skill distilled from a flash session is retrieved and used in a later session (use-count increments); a weekly retrospective produces ≥1 accepted improvement; the eval suite grows from real failures and gates a release; one self-maintenance PR authored by the system is merged by the operator.
+
 ## 4. Milestones
 
 | Milestone | Weeks | Contents | Gate |
 |---|---|---|---|
-| **M1 — Own the loop** | 1–4 | W1 Flash Lane + W2 voice runtime; iOS Talk → `/flash/turn` (OpenClaw bridge flag on) | Parity eval ≥90%; voice round-trip <3s; operator uses Flash daily over OpenClaw by choice |
-| **M2 — Trust** | 5–8 | W3 autonomy rails + W4 vault + W7 routing; OpenClaw bridge default off | CI leak test green; kill switch demo; 7-day full-autonomy dogfood with zero destructive incidents |
+| **M1 — Own the loop** | 1–4 | W1 Flash Lane + W2 voice runtime; all voice hooks → `/flash/turn`; **OpenClaw fully removed** (harvest → retarget → parity gate → delete) | Parity eval ≥90% before removal; voice round-trip <3s; zero `openclaw` references left in either repo |
+| **M2 — Trust** | 5–8 | W3 autonomy rails + W4 vault + W7 routing; W8 heartbeat + presence orb + daily recap | CI leak test green; kill switch demo; 7-day full-autonomy dogfood with zero destructive incidents |
 | **M3 — Buyable** | 9–12 | W5 packaging: org account, licensing, onboarding wizard, App Store submission, site | Stranger-install test <15 min; TestFlight external group; first paid transaction (even $1 test) |
 | **M4 — Jobs** | 13–16 | W6 outcome packs (Support + Chief-of-Staff first); security audit engagement booked | 2 packs through 7-day dogfood; public beta announcement |
 
@@ -149,7 +191,7 @@ Dogfood gate (per workplan memory) applies before any public beta: the operator'
 
 - Multi-user / team / RBAC / hosted SaaS (schema-level rework; only on demand evidence).
 - Open skill marketplace (ClawHavoc lesson: signed first-party packs only at launch).
-- Embedding OpenClaw as a runtime dependency (bridge is interim; native parity is the strategy).
+- Any OpenClaw runtime dependency or bridge (rev 2: full removal in Phase 1 after the parity gate).
 - Windows/Linux ports; wake word; HeyGen-dependent features beyond current state.
 - API-key model backends (keyless remains the rule).
 
@@ -166,6 +208,6 @@ Dogfood gate (per workplan memory) applies before any public beta: the operator'
 
 ## 7. Kickoff mechanics
 
-1. Amend `COMPONENT-MAP.md` + scope wall for `flash/` and `vault/`; record decisions (Claude CLI backend, OpenClaw bridge policy, autonomy default, tiers/pricing) in `DECISIONS.md`.
-2. Intake this spec as work packages per workstream (W1 first, W1+W2 can run in parallel: daemon loop vs. sidecar).
-3. Harvest the OpenClaw chat history into the W1 parity eval set before turning the bridge off — it is the ground-truth spec for "ad-hoc competence."
+1. Amend `COMPONENT-MAP.md` + scope wall for `flash/` and `vault/`; record decisions (Claude CLI backend, OpenClaw full removal, autonomy default, tiers/pricing) in `DECISIONS.md`.
+2. Execute per the phase spec files in `~/_GD/brain/projects/hive/specs/2026-07-02-phase-{1..4}-*.md` — each is self-contained for non-Fable executors (W1+W2 can run in parallel: daemon loop vs. sidecar).
+3. Harvest the OpenClaw chat history and persona files BEFORE any removal step — the history is the ground-truth spec for "ad-hoc competence," and the persona is the companion's continuity.

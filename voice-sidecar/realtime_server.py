@@ -26,7 +26,15 @@ from pipecat.transports.smallwebrtc.request_handler import (
     SmallWebRTCRequestHandler,
 )
 
-from realtime import build_session, build_transport
+# HIVE_FLASH_ENABLED=1 switches the pipeline from direct local-model to Flash Lane
+# (/flash/turn SSE). When unset the original realtime.py pipeline is used so
+# existing non-Flash deployments are unaffected.
+_FLASH_ENABLED = os.environ.get("HIVE_FLASH_ENABLED", "").strip() in ("1", "true", "yes")
+
+if _FLASH_ENABLED:
+    from flash_pipeline import build_flash_session as build_session, build_transport  # noqa: F401
+else:
+    from realtime import build_session, build_transport  # noqa: F401
 
 
 def ice_servers():

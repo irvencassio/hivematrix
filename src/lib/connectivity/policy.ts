@@ -17,7 +17,7 @@ import { EventEmitter } from "events";
 
 export type ConnectivityMode = "cloud-ok" | "local-only" | "offline";
 
-export type CapabilityId = "frontier" | "local" | "webbee" | "browserbee" | "desktopbee" | "termbee" | "image" | "mailbee" | "messagebee" | "brain" | "codegraph" | "coo_router";
+export type CapabilityId = "frontier" | "local" | "webbee" | "browserbee" | "desktopbee" | "termbee" | "image" | "mailbee" | "messagebee" | "brain" | "codegraph" | "coo_router" | "flash";
 
 export interface CapabilityAvailability {
   available: boolean;
@@ -38,6 +38,8 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     brain:      { available: true },
     codegraph:  { available: true },
     coo_router: { available: true },
+    // Flash Lane: local-model conversational loop — always available if Qwen is loaded.
+    flash:      { available: true },
   },
   "local-only": {
     frontier:   { available: false, reason: "Frontier APIs unavailable in local-only mode" },
@@ -55,6 +57,7 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     // COO routing resolves rules + prepares plans locally; only lane *execution*
     // (e.g. Browser Lane workflow) is connectivity-gated, downstream of routing.
     coo_router: { available: true },
+    flash:      { available: true }, // local-primary model; cloud tools degrade gracefully
   },
   "offline": {
     frontier:   { available: false, reason: "No network connectivity" },
@@ -71,10 +74,11 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     brain:      { available: true }, // brain docs are local files
     codegraph:  { available: true }, // local symbol search works offline
     coo_router: { available: true }, // routing/preparation needs no network
+    flash:      { available: true }, // local model only; internet-dependent tools degrade
   },
 };
 
-export type ModelRole = "think" | "execute" | "code-critical" | "image" | "cheap-web";
+export type ModelRole = "think" | "execute" | "code-critical" | "image" | "cheap-web" | "converse";
 export type ModelTier = "frontier-premium" | "frontier" | "local-primary" | "local-secondary" | "nanai" | "unavailable";
 
 const ROLE_TIER_CLOUD_OK: Record<ModelRole, ModelTier> = {
@@ -83,6 +87,8 @@ const ROLE_TIER_CLOUD_OK: Record<ModelRole, ModelTier> = {
   execute:        "local-secondary",  // bulk/file ops → local Qwen
   "cheap-web":    "local-secondary",
   image:          "nanai",
+  // converse: local-primary for latency; Flash loop escalates to frontier on depth>3
+  converse:       "local-primary",
 };
 
 const ROLE_TIER_LOCAL_ONLY: Record<ModelRole, ModelTier> = {
@@ -91,6 +97,7 @@ const ROLE_TIER_LOCAL_ONLY: Record<ModelRole, ModelTier> = {
   execute:        "local-secondary",
   "cheap-web":    "local-secondary",
   image:          "unavailable",
+  converse:       "local-primary",
 };
 
 const ROLE_TIER_OFFLINE: Record<ModelRole, ModelTier> = {
@@ -99,6 +106,7 @@ const ROLE_TIER_OFFLINE: Record<ModelRole, ModelTier> = {
   execute:        "local-secondary",
   "cheap-web":    "local-secondary",
   image:          "unavailable",
+  converse:       "local-primary",
 };
 
 export interface PolicyState {

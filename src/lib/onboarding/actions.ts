@@ -37,6 +37,8 @@ export const TCC_DEEP_LINKS = {
   fullDiskAccess: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
   // Automation — required to drive Apple Mail via osascript (Mail Lane).
   automation: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+  // Microphone — required for voice input (Talk mode / voice sidecar).
+  microphone: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
 } as const;
 
 // ── Pure builders (unit-tested) ───────────────────────────────────────────────

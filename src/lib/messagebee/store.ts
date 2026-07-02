@@ -7,6 +7,7 @@
 
 import { getDb, generateId } from "@/lib/db";
 import { handlesMatch, normalizeHandle } from "./contracts";
+import { isFeaturePermitted } from "@/lib/license/gates";
 
 const CHANNEL = "imessage";
 
@@ -70,7 +71,7 @@ export function ensureChannel(): ChannelRow {
 }
 
 export function isChannelEnabled(): boolean {
-  return (getRow()?.enabled ?? 0) === 1;
+  return (getRow()?.enabled ?? 0) === 1 && isFeaturePermitted("channel_message");
 }
 
 export function setChannelEnabled(enabled: boolean, status = enabled ? "running" : "off"): void {

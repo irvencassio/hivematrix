@@ -3,8 +3,7 @@
 // Run via: node scripts/scope-wall.mjs
 // Exits 1 if any violation found. CI must pass this gate.
 
-import { execSync } from 'node:child_process'
-import { readdirSync, statSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join, relative } from 'node:path'
 
 const ROOT = new URL('..', import.meta.url).pathname
@@ -59,6 +58,12 @@ const RULES = [
     label: 'Google model provider (removed; Nano Banana and mflux are allowed by role, not provider)',
     allowFiles: ['COMPONENT-MAP.md', 'DECISIONS.md', 'QWEN-LOCAL-PROFILE.md', 'models/catalog', 'models/task-model'],
   },
+  // ── Import restriction: packs/ → daemon/ only ─────────────────
+  {
+    pattern: "from ['\"].*lib/packs|from ['\"]@/lib/packs",
+    label: 'packs/ imported outside daemon/ — only src/daemon/ may import @/lib/packs',
+    allowFiles: ['daemon/', 'lib/packs/'],
+  },
   // ── Scope freeze: no new Bee brands ──────────────────────────
   {
     pattern: '\b[A-Z][a-z]+Bee\b',
@@ -77,8 +82,14 @@ let warnings = 0
 
 function grepSrc(pattern, allowFiles) {
   try {
-    const cmd = `grep -rEn '${pattern}' '${SRC}' --include='*.ts' --include='*.tsx' --include='*.mjs' 2>/dev/null`
-    const out = execSync(cmd, { encoding: 'utf8' }).trim()
+    const out = execFileSync('grep', [
+      '-rEn',
+      pattern,
+      SRC,
+      "--include=*.ts",
+      "--include=*.tsx",
+      "--include=*.mjs",
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
     if (!out) return []
     return out.split('\n').filter(line => {
       if (!line) return false

@@ -18,20 +18,19 @@ test("empty message is ignored", () => {
   assert.equal(r.kind, "ignore");
 });
 
-test("allowlisted sender with no pending input starts a new task", () => {
+test("allowlisted sender with no pending input routes to Flash Lane", () => {
   const r = routeInbound(msg("draft the newsletter"), { allowlisted: true, pendingInput: [] });
-  assert.equal(r.kind, "new_task");
-  if (r.kind === "new_task") {
-    assert.equal(r.description, "draft the newsletter");
-    assert.match(r.title, /^SMS: draft the newsletter/);
-    assert.equal(r.model, null);
+  assert.equal(r.kind, "flash_turn");
+  if (r.kind === "flash_turn") {
+    assert.equal(r.text, "draft the newsletter");
+    assert.equal(r.peer, "+15551234567");
   }
 });
 
-test("new task honors an inline /model directive", () => {
+test("flash_turn strips an inline /model directive from the text", () => {
   const r = routeInbound(msg("/model opus ship the fix"), { allowlisted: true, pendingInput: [] });
-  assert.equal(r.kind, "new_task");
-  if (r.kind === "new_task") { assert.equal(r.model, "opus"); assert.equal(r.description, "ship the fix"); }
+  assert.equal(r.kind, "flash_turn");
+  if (r.kind === "flash_turn") { assert.equal(r.text, "ship the fix"); }
 });
 
 test("text resolves the most-recent pending input task", () => {

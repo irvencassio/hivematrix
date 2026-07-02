@@ -16,6 +16,7 @@ import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { buildCliPath } from "@/lib/config/binary-detection";
+import { getOrCreateToken, DAEMON_TOKEN_FILE } from "@/lib/auth/token";
 import { voiceRuntime } from "./runtime";
 import { voiceLlmEnv } from "./llm-env";
 
@@ -148,8 +149,22 @@ async function startServer(): Promise<number> {
   const rt = voiceRuntime();
   if (!rt) throw new Error("voice runtime not available — enable Voice in Settings");
   const tEnv = await turnEnv();
+  const daemonPort = process.env.HIVEMATRIX_PORT ?? "3747";
+  const daemonToken = getOrCreateToken(DAEMON_TOKEN_FILE);
   return new Promise<number>((resolve, reject) => {
-    const env = { ...process.env, ...voiceLlmEnv(), ...tEnv, PATH: buildCliPath() };
+    const env = {
+      ...process.env,
+      ...voiceLlmEnv(),
+      ...tEnv,
+      // Flash Lane: sidecar routes voice turns through /flash/turn for full
+      // context (persona + session history + tool bridge).
+      HIVE_FLASH_ENABLED: "1",
+      HIVE_DAEMON_URL: `http://127.0.0.1:${daemonPort}`,
+      HIVE_DAEMON_TOKEN: daemonToken,
+      HIVE_FLASH_CHANNEL: "voice",
+      HIVE_FLASH_PEER: "operator",
+      PATH: buildCliPath(),
+    };
     const proc = spawn(rt.python, [join(rt.scriptsDir, "realtime_server.py"), "--port", "0"], { cwd: rt.scriptsDir, env });
     let resolved = false;
     const onLine = (d: Buffer) => {

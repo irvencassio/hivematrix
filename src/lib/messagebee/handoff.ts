@@ -2,20 +2,21 @@
  * Message Lane routing — pure decision logic for one inbound message.
  *
  * An allowlisted sender's text either answers a task that's waiting on them
- * (needs_input) or starts a new task. A non-allowlisted sender is read-only:
- * their message never creates or resolves work (the security gate).
+ * (needs_input) or enters a Flash Lane conversational session. Flash handles
+ * both quick replies and complex work (via escalate_to_work_package internally).
+ * A non-allowlisted sender is read-only: their message never creates or resolves
+ * work (the security gate).
  */
 
 import {
   type InboundMessage,
   parseModelDirective,
-  deriveMessageTaskTitle,
 } from "./contracts";
 
 export type MessageRoute =
   | { kind: "ignore"; reason: string }
   | { kind: "reply_to_task"; taskId: string; stuckTimestamp: string; text: string }
-  | { kind: "new_task"; title: string; description: string; model: string | null };
+  | { kind: "flash_turn"; text: string; peer: string };
 
 export interface PendingInput {
   taskId: string;
@@ -45,13 +46,7 @@ export function routeInbound(msg: InboundMessage, ctx: RouteContext): MessageRou
     return { kind: "reply_to_task", taskId: latest.taskId, stuckTimestamp: latest.stuckTimestamp, text };
   }
 
-  // Otherwise start a new task; honor an inline `/model` directive.
-  const { model, cleanedText } = parseModelDirective(text);
-  const body = cleanedText || text;
-  return {
-    kind: "new_task",
-    title: deriveMessageTaskTitle(body),
-    description: body,
-    model,
-  };
+  // Route to Flash Lane — strip any /model directive (Flash uses its own routing).
+  const { cleanedText } = parseModelDirective(text);
+  return { kind: "flash_turn", text: cleanedText || text, peer: msg.handle };
 }
