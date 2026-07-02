@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.120", date: "2026-07-02", note: "auto-deploy HiveMatrix next level spec" },
   { version: "0.1.119", date: "2026-07-02", note: "auto-update rebuild" },
   { version: "0.1.118", date: "2026-07-02", note: "improve Flight autonomy and operator feedback" },
   { version: "0.1.117", date: "2026-07-01", note: "7-day usage bar green-red pacing" },

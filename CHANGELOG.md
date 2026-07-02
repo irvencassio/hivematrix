@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.120 — 2026-07-02
+
+auto-deploy HiveMatrix next level spec
+
 ## v0.1.119 — 2026-07-02
 
 auto-update rebuild
