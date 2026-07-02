@@ -482,7 +482,7 @@ async function pollOpenClaw(
  * Background async path: poll for the assistant reply after sending, then
  * synthesize and broadcast voice:result. Never throws — voice turn already acked.
  */
-async function deliverOpenClawReply(opts: {
+export async function deliverOpenClawReply(opts: {
   deps: CommandTurnDeps;
   sessionId: string;
   gatewayUrl: string;

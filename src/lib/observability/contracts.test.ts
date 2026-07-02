@@ -97,4 +97,28 @@ test("summarizeTelemetry: provider split, latency p50/p95, totals exclude nulls"
   assert.equal(anthropic.failed, 1);
   assert.equal(anthropic.latencyP50Ms, 1000);
   assert.equal(anthropic.latencyP95Ms, 3000);
+  // Codex with unavailable tokens → null in byProvider aggregate, never fake 0.
+  // This ensures the UI shows "—" not "0 / 0" for Codex token columns.
+  const codex = s.byProvider.find((p) => p.key === "openai-codex")!;
+  assert.ok(codex, "openai-codex must appear in byProvider when codex tasks exist");
+  assert.equal(codex.inputTokens, null, "unavailable Codex tokens must be null, not 0");
+  assert.equal(codex.outputTokens, null);
+  assert.equal(codex.totalTokens, null);
+});
+
+test("summarizeTelemetry: Codex byProvider shows recovered tokens; unavailable run adds 0, not null", () => {
+  const rows = [
+    // Session-log recovery succeeded for this run.
+    normalizeRun({ taskId: "cx1", runIndex: 0, model: "codex:gpt-5.5-codex", status: "done", inputTokens: 4000, outputTokens: 1500, startedAtMs: 0, completedAtMs: 30000 }),
+    // Recovery failed for this run — tokens stored as null.
+    normalizeRun({ taskId: "cx2", runIndex: 0, model: "codex:gpt-5.5-codex", status: "done", inputTokens: 0, outputTokens: 0 }),
+  ];
+  const s = summarizeTelemetry(rows);
+  const codex = s.byProvider.find((p) => p.key === "openai-codex")!;
+  assert.equal(codex.runs, 2);
+  // Only the row with recovered tokens contributes; the null row adds nothing.
+  assert.equal(codex.inputTokens, 4000);
+  assert.equal(codex.outputTokens, 1500);
+  // Cost stays null (Codex doesn't report cost).
+  assert.equal(codex.costUsd, null);
 });

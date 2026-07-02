@@ -365,6 +365,15 @@ test("console surfaces observability: per-task strip + totals across providers",
   assert.match(js, /prov === "Codex" && !inTok && !outTok/);
 });
 
+test("observability by-provider table uses fmtNum for tok in/out (null Codex tokens render as —)", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // Both renders (sidebar summary + full-dashboard modal) must pass inputTokens/outputTokens
+  // through fmtNum so that null values (Codex with unavailable session-log tokens) show
+  // "—" instead of the misleading "0 / 0". Count occurrences of the pattern.
+  const matches = [...js.matchAll(/fmtNum\(p\.inputTokens\)[^;]+fmtNum\(p\.outputTokens\)/g)];
+  assert.ok(matches.length >= 2, "both sidebar and dashboard table renders must use fmtNum for tok in/out");
+});
+
 test("Full dashboard opens dedicated Observability popup, not Settings", () => {
   const js = extractScript(CONSOLE_HTML);
   // openObsDashboard must open the dedicated overlay — not Settings.
@@ -726,6 +735,21 @@ test("reviewSortComparator: tasks with no timestamps sort below dated tasks", ()
   const sorted = tasks.slice().sort(cmp);
   assert.equal(sorted[0]._id, "with-date", "dated task floats above undated task");
   assert.equal(sorted[1]._id, "no-dates", "undated task sinks to bottom");
+});
+
+test("board task cards have stable width and height constraints across screen sizes", () => {
+  // width: 100% + box-sizing: border-box prevent cards from overflowing or narrowing
+  // inconsistently when the board column shrinks at medium/narrow viewports.
+  assert.match(CONSOLE_HTML, /\.card\s*\{[^}]*width:\s*100%/, ".card fills its column width");
+  assert.match(CONSOLE_HTML, /\.card\s*\{[^}]*box-sizing:\s*border-box/, ".card uses border-box so padding doesn't add to width");
+  assert.match(CONSOLE_HTML, /\.card\s*\{[^}]*min-height/, ".card has a minimum height so short-content cards don't collapse");
+  // Long task titles truncate instead of reflowing or pushing surrounding cards out of alignment.
+  assert.match(CONSOLE_HTML, /\.card \.mdl-card-name\s*\{[^}]*text-overflow:\s*ellipsis/, ".card title truncates with ellipsis");
+  assert.match(CONSOLE_HTML, /\.card \.mdl-card-name\s*\{[^}]*white-space:\s*nowrap/, ".card title stays on one line");
+  assert.match(CONSOLE_HTML, /\.card \.mdl-card-name\s*\{[^}]*overflow:\s*hidden/, ".card title clips at boundary");
+  // Responsive breakpoints narrow the board column at medium and small viewports.
+  assert.match(CONSOLE_HTML, /@media \(min-width: 761px\) and \(max-width: 1080px\)/, "medium viewport narrows board rail");
+  assert.match(CONSOLE_HTML, /@media \(max-width: 760px\)[\s\S]*grid-template-columns:\s*1fr/, "narrow viewport stacks to single column");
 });
 
 test("settings lanes sections have distinct, non-duplicate labels", () => {
@@ -1277,6 +1301,17 @@ function extractAdvanceBlockerMsg(html: string): (bl: unknown) => string {
   return factory();
 }
 
+function extractRenderBlockerBanner(html: string): (bl: unknown) => string {
+  const js = extractScript(html);
+  const block = js.match(/function renderBlockerBanner\(bl\) \{([\s\S]*?)\n\}\nasync function wpStart/);
+  assert.ok(block, "console script must define renderBlockerBanner before wpStart");
+  const factory = new Function(
+    "esc",
+    `function renderBlockerBanner(bl) {${block![1]}\n}\nreturn renderBlockerBanner;`,
+  ) as (esc: (s: unknown) => string) => (bl: unknown) => string;
+  return factory((s) => String(s));
+}
+
 test("advanceBlockerMsg: undefined blockers → Nothing eligible yet", () => {
   const fn = extractAdvanceBlockerMsg(CONSOLE_HTML);
   assert.equal(fn(undefined), "Nothing eligible yet");
@@ -1323,6 +1358,26 @@ test("advanceBlockerMsg: multiple categories → all listed in message", () => {
   const msg = fn({ review: ["r"], held: ["h"], dependency: [], activeWriter: [], noReadyItems: false });
   assert.match(msg, /held/i, "held present");
   assert.match(msg, /review/i, "review present");
+});
+
+test("renderBlockerBanner: held blockers remain visible even when no items are ready", () => {
+  const fn = extractRenderBlockerBanner(CONSOLE_HTML);
+  const html = fn({ review: [], held: ["h"], dependency: [], activeWriter: [], noReadyItems: true });
+  assert.match(html, /1 held/i, "the concrete held blocker is shown");
+  assert.match(html, /approve to unblock/i, "operator gets the actionable unblock hint");
+  assert.doesNotMatch(html, /all items are terminal, running, or held/i, "generic no-ready copy does not hide the held cause");
+});
+
+test("wpStart surfaces zero-start blockers in the selected Flight detail", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const startBlock = js.match(/async function wpStart\(pkgId\) \{[\s\S]*?\n\}\nasync function wpAdvance/);
+  assert.ok(startBlock, "wpStart is defined");
+  assert.match(startBlock![0], /advanceBlockerMsg\(r\.blockers\)/, "zero-start Start uses blocker-aware toast copy");
+  assert.match(
+    startBlock![0],
+    /state\.selectedFlight\s*===\s*pkgId[\s\S]*renderFlightDetail\(pkgId,\s*r\s*&&\s*r\.stall,\s*r\s*&&\s*r\.blockers\)/,
+    "selected Flight refresh receives stall/blockers from the Start response",
+  );
 });
 
 // ── Flight detail observability ───────────────────────────────────────────────
@@ -1719,6 +1774,33 @@ test("flightItemActions: review-reason class and _computeReviewReasonJs wired in
 test("flightItemActions: Accept / Land button shown only for review-status items (done items excluded)", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /it\.status\s*===\s*['"]review['"]/, "Accept button gated on review status — done items never show it");
+});
+
+test("flightItemActions: clean low-risk review items auto-land without manual Accept / Land", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const fn = new Function(
+    "esc",
+    "wpEditItem",
+    "wpCreateTask",
+    "wpAccept",
+    "wpItem",
+    `${js.match(/\/\*__REVIEW_REASON_START__\*\/[\s\S]*?function wpAccept\(/)![0].replace(/async function wpAccept\($/, "")}\nreturn flightItemActions;`,
+  ) as (
+    esc: (s: unknown) => string,
+    wpEditItem: unknown,
+    wpCreateTask: unknown,
+    wpAccept: unknown,
+    wpItem: unknown,
+  ) => (p: Record<string, unknown>, it: Record<string, unknown>) => string;
+  const actions = fn(String, null, null, null, null);
+
+  const html = actions(
+    { id: "pkg", loop: null },
+    { id: "item", status: "review", risk: "low", blocker: null, taskStatus: "review", createdTaskId: "task" },
+  );
+
+  assert.doesNotMatch(html, /Accept \/ Land/);
+  assert.match(html, /Auto-land/);
 });
 
 // ─── Wallpaper material shell tokens (2026-06-29) ────────────────────────────

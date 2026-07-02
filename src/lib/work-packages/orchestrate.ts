@@ -481,10 +481,13 @@ export async function acceptWorkPackageItem(packageId: string, itemId: string): 
 
 // ── Lightweight reconcile loop ────────────────────────────────────
 
-/** One pass: advance every package currently `running`. Cheap (indexed query). */
+/** One pass: advance packages that may still have autonomous work to reconcile. */
 export async function tickWorkPackages(): Promise<void> {
-  const running = listWorkPackages({ status: "running" });
-  for (const pkg of running) {
+  const candidates = new Map(
+    [...listWorkPackages({ status: "running" }), ...listWorkPackages({ status: "review" })]
+      .map((pkg) => [pkg.id, pkg]),
+  );
+  for (const pkg of candidates.values()) {
     try {
       await advanceWorkPackage(pkg.id);
     } catch (e) {

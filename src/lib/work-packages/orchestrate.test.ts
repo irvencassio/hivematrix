@@ -1231,6 +1231,32 @@ test("reconcileWorkPackage auto-land: auto-landed item advances package to done 
   assert.ok(result.package.completedAt, "package has completedAt");
 });
 
+test("tickWorkPackages auto-lands clean review packages without operator Accept / Land", async () => {
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Tick auto-land review package",
+    project: "test",
+    projectPath: "/tmp/auto-land-review-tick",
+    items: [{ title: "Only step", prompt: "do it", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  db.prepare(
+    "INSERT INTO tasks (_id, title, description, project, projectPath, status, reviewState) VALUES (?, 'T', 'D', 'test', '/tmp', 'review', 'ready_for_review')",
+  ).run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'review', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+  db.prepare("UPDATE work_packages SET status = 'review' WHERE _id = ?").run(pkg.id);
+
+  await tickWorkPackages();
+
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(detail.items[0].status, "done", "review-package tick should auto-land clean low-risk review items");
+  assert.equal(detail.status, "done", "review package should roll up to done after auto-land");
+  const task = await Task.findById(taskId);
+  assert.equal(String((task as Record<string, unknown>).status), "archived");
+});
+
 // ── shouldAutoLand — additional negative predicate cases (Task 5) ────────────
 // Boundary tests: conditions that MUST block auto-land.
 // All are RED until orchestrate.ts exports shouldAutoLand (Task 6).

@@ -67,4 +67,10 @@ test("observabilitySummary aggregates across providers", () => {
   assert.ok(s.byProvider.some((p) => p.key === "anthropic"));
   assert.ok(s.byProvider.some((p) => p.key === "local-qwen"));
   assert.ok(s.split.local >= 1 && s.split.frontier >= 1);
+  // Codex task was recorded with 0/0 tokens (= unavailable). The aggregate must
+  // surface null, not 0, so the UI shows "—" rather than a misleading "0 / 0".
+  const codex = s.byProvider.find((p) => p.key === "openai-codex")!;
+  assert.ok(codex, "openai-codex row present when codex tasks exist");
+  assert.equal(codex.inputTokens, null, "unavailable Codex tokens → null in summary, not 0");
+  assert.equal(codex.outputTokens, null);
 });

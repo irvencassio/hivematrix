@@ -1098,8 +1098,18 @@ export function createDaemonServer() {
           return;
         }
 
+        const sentAfter = new Date().toISOString();
         const result = await sendChatMessage({ gatewayUrl: discovery.gateway.url, sessionKey, message, idempotencyKey });
         json(res, 200, result);
+
+        if (result.ok) {
+          // Fire-and-forget: poll for OpenClaw's reply, synthesize audio, and push
+          // a voice:result SSE event to any listening client (e.g. the Talk screen).
+          const sessionId = typeof body.sessionId === "string" ? body.sessionId : crypto.randomUUID();
+          void import("@/lib/voice/command-turn").then(({ deliverOpenClawReply }) =>
+            deliverOpenClawReply({ deps: {}, sessionId, gatewayUrl: discovery.gateway!.url, sessionKey, sentAfter, assistant: "openclaw" })
+          );
+        }
         return;
       }
 

@@ -525,7 +525,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .status-card-body { padding: 6px 8px 8px; }
   .card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
     padding: 8px 10px; margin-bottom: 6px; cursor: pointer; transition: border-color .1s; position: relative;
-    box-shadow: var(--card-shadow); }
+    box-shadow: var(--card-shadow); width: 100%; box-sizing: border-box; min-height: 52px; }
   .card:hover { border-color: var(--accent-2); }
   .card.sel { border-color: var(--accent); }
   .card .t { font-weight: 600; margin-bottom: 2px; padding-right: 58px; }
@@ -537,6 +537,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     cursor: pointer; padding: 3px 7px; border-radius: 4px; opacity: 0; transition: opacity .1s; letter-spacing: .2px; }
   .card:hover .card-archive { opacity: 1; }
   .card .card-archive:hover { color: var(--accent-2); background: var(--border); border-color: var(--border); }
+  .card .mdl-card-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .attach-row { display: flex; align-items: center; gap: 6px; }
   .attach-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .attach-chip { display: flex; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--border);
@@ -1986,10 +1987,12 @@ function flightItemActions(p, it) {
   if (canCreate) b.push('<button class="appr-btn" onclick="wpCreateTask(\''+esc(p.id)+'\',\''+esc(it.id)+'\')">Create task</button>');
   if (it.status === "review") {
     const reviewReason = _computeReviewReasonJs(it, p.loop);
-    const reasonHtml = reviewReason
-      ? '<div class="review-reason" style="font-size:11px;color:var(--muted);margin-bottom:4px">'+esc(reviewReason)+'</div>'
-      : '';
-    b.push(reasonHtml + '<button class="primary-action" onclick="wpAccept(\''+esc(p.id)+'\',\''+esc(it.id)+'\')">Accept / Land</button>');
+    if (reviewReason) {
+      const reasonHtml = '<div class="review-reason" style="font-size:11px;color:var(--muted);margin-bottom:4px">'+esc(reviewReason)+'</div>';
+      b.push(reasonHtml + '<button class="primary-action" onclick="wpAccept(\''+esc(p.id)+'\',\''+esc(it.id)+'\')">Accept / Land</button>');
+    } else {
+      b.push('<div class="muted" style="font-size:11px;margin:4px 0">Auto-land pending</div>');
+    }
   }
   b.push('<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'held\')">Hold</button>');
   b.push('<button class="appr-btn" onclick="wpItem(\''+esc(p.id)+'\',\''+esc(it.id)+'\',\'ready\')">Ready</button>');
@@ -2039,6 +2042,12 @@ async function renderFlightDetail(id, stall, blockers) {
   if (!el) return;
   const p = await api("/work-packages/"+encodeURIComponent(id));
   if (!p || !p.id) { state.selectedFlight = null; renderOverview(); return; }
+  // Auto-start: a draft flight with items starts immediately — no manual trigger needed.
+  // Guard: only attempt if items are present; skip if data is incomplete or status already advanced.
+  if (p.status === "draft" && Array.isArray(p.items) && p.items.length > 0) {
+    const r = await api("/work-packages/"+encodeURIComponent(id)+"/start", { method: "POST" });
+    if (r && r.package) Object.assign(p, r.package);
+  }
   const pr = flightProgress(p);
   const canStart = ["draft","held","ready"].includes(p.status);
   const canAdvance = p.status === "running";
@@ -2085,7 +2094,6 @@ async function renderFlightDetail(id, stall, blockers) {
     + '<div class="flight-progress" title="'+pr.pct+'% landed"><i style="width:'+Math.max(0, Math.min(100, pr.pct))+'%"></i></div>'
     + '<div class="muted" style="font-size:11px;margin-top:4px">'+pr.landed+' of '+pr.total+' items landed.'+(pr.skipped > 0 ? ' '+pr.skipped+' skipped (high-risk scope).' : '')+'</div>'
     + '<div class="action-bar">'
-    + (canStart ? '<button class="primary-action" onclick="wpStart(\''+esc(p.id)+'\')">Start Flight</button>' : '')
     + (canAdvance ? '<button class="secondary-action" onclick="wpAdvance(\''+esc(p.id)+'\')">'+flightAdvanceLabel(p.intake)+'</button>' : '')
     + '<button class="secondary-action" onclick="wpEditPackage(\''+esc(p.id)+'\')">Edit</button>'
     + '<button class="danger-action" onclick="wpDeletePackage(\''+esc(p.id)+'\')">Delete</button>'
@@ -6535,7 +6543,6 @@ function renderWorkPackageCard(p) {
   const canStart = p.status === "draft" || p.status === "held";
   const canAdvance = p.status === "running";
   const pkgActions = [
-    canStart ? '<button class="create" onclick="wpStart(\''+esc(p.id)+'\')">Start Flight</button>' : '',
     canAdvance ? '<button class="appr-btn" onclick="wpAdvance(\''+esc(p.id)+'\')">Advance</button>' : '',
   ].filter(Boolean).join(" ");
   return '<div class="card" style="cursor:default">'
@@ -6563,19 +6570,23 @@ function advanceBlockerMsg(bl) {
 /*__ADVANCE_BLOCKER_MSG_END__*/
 function renderBlockerBanner(bl) {
   if (!bl) return '';
-  if (bl.noReadyItems) return '<div class="errbox" style="margin:8px 0">No items in ready state — all items are terminal, running, or held.</div>';
   var parts = [];
   if (bl.held.length) parts.push(bl.held.length + " held (approve to unblock)");
   if (bl.review.length) parts.push(bl.review.length + " awaiting review");
   if (bl.dependency.length) parts.push(bl.dependency.length + " waiting on dependencies");
   if (bl.activeWriter.length) parts.push(bl.activeWriter.length + " blocked by active writer");
+  if (!parts.length && bl.noReadyItems) return '<div class="errbox" style="margin:8px 0">No items in ready state — all items are terminal, running, or held.</div>';
   if (!parts.length) return '';
   return '<div class="errbox" style="margin:8px 0">Nothing started: ' + esc(parts.join(" · ")) + '</div>';
 }
 async function wpStart(pkgId) {
   const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/start", { method:"POST" });
-  if (r && r.package) { hmToast("Flight started ("+((r.started||[]).length)+" item(s) running)"); } else { hmToast((r && r.error) || "Start failed"); }
+  if (r && r.package) {
+    const n = (r.started||[]).length;
+    hmToast(n ? "Flight started ("+n+" item(s) running)" : advanceBlockerMsg(r.blockers));
+  } else { hmToast((r && r.error) || "Start failed"); }
   renderWorkPackages(); refresh();
+  if (state.selectedFlight === pkgId) await renderFlightDetail(pkgId, r && r.stall, r && r.blockers);
 }
 async function wpAdvance(pkgId) {
   const r = await api("/work-packages/"+encodeURIComponent(pkgId)+"/advance", { method:"POST" });

@@ -163,9 +163,10 @@ export interface ProviderTotals {
   runs: number;
   succeeded: number;
   failed: number;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
+  /** null when no run in the group reported token data (e.g. Codex with failed session-log recovery). */
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
   costUsd: number | null; // null when no provider reported cost
   latencyP50Ms: number | null;
   latencyP95Ms: number | null;
@@ -193,16 +194,20 @@ function totalsFor(key: string, rows: TaskTelemetry[]): ProviderTotals {
   const latencies = rows.map((r) => r.latencyMs).filter((v): v is number => v != null);
   const tps = rows.map((r) => r.tokensPerSec).filter((v): v is number => v != null);
   const costs = rows.map((r) => r.costUsd).filter((v): v is number => v != null);
-  const sum = (f: (r: TaskTelemetry) => number | null) =>
-    rows.reduce((acc, r) => acc + (f(r) ?? 0), 0);
+  // Sum only rows that reported a value; return null (not 0) when none did.
+  // This preserves the "never fake a 0" rule for Codex with unavailable tokens.
+  const nullableSum = (f: (r: TaskTelemetry) => number | null): number | null => {
+    const withValues = rows.filter((r) => f(r) != null);
+    return withValues.length ? withValues.reduce((acc, r) => acc + (f(r) ?? 0), 0) : null;
+  };
   return {
     key,
     runs: rows.length,
     succeeded: rows.filter((r) => r.status === "done" || r.status === "review").length,
     failed: rows.filter((r) => r.status === "failed").length,
-    inputTokens: sum((r) => r.inputTokens),
-    outputTokens: sum((r) => r.outputTokens),
-    totalTokens: sum((r) => r.totalTokens),
+    inputTokens: nullableSum((r) => r.inputTokens),
+    outputTokens: nullableSum((r) => r.outputTokens),
+    totalTokens: nullableSum((r) => r.totalTokens),
     costUsd: costs.length ? Math.round(costs.reduce((a, b) => a + b, 0) * 1e6) / 1e6 : null,
     latencyP50Ms: percentile(latencies, 50),
     latencyP95Ms: percentile(latencies, 95),
