@@ -20,6 +20,7 @@ import { execSync } from "child_process";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { assertReleaseNoteGateClaimsFromFile } from "./gates-check.mjs";
 
 const repo = process.cwd();
 const sh = (cmd, opts = {}) => execSync(cmd, { cwd: repo, stdio: "inherit", ...opts });
@@ -94,6 +95,11 @@ const today = new Date().toISOString().slice(0, 10);
 console.log(`Releasing HiveMatrix ${pkg.version} → ${version}${note ? ` (${note})` : ""}`);
 
 if (cap(`git tag -l v${version}`)) die(`tag v${version} already exists — never re-use a version for new code`);
+try {
+  assertReleaseNoteGateClaimsFromFile(note);
+} catch (err) {
+  die(err instanceof Error ? err.message : String(err));
+}
 
 // ── 1. Version bump (the app/package files that must agree) ─────────────────
 step(1, "bump version in package.json, package-lock.json, tauri.conf.json, version.ts");
