@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.126", date: "2026-07-03", note: "Make Codex optional and hide unavailable OpenClaw" },
   { version: "0.1.125", date: "2026-07-03", note: "Fix settings and DeepSeek local model UI" },
   { version: "0.1.124", date: "2026-07-03", note: "cloud-first local model setup" },
   { version: "0.1.123", date: "2026-07-03", note: "lock deep link dependencies" },
