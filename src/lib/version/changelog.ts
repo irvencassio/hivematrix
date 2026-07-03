@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.122", date: "2026-07-03", note: "ship phase gate ledger" },
   { version: "0.1.121", date: "2026-07-02", note: "Phase 4 outcome packs and companion surfaces" },
   { version: "0.1.120", date: "2026-07-02", note: "auto-deploy HiveMatrix next level spec" },
   { version: "0.1.119", date: "2026-07-02", note: "auto-update rebuild" },
