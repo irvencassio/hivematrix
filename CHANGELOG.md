@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.125 — 2026-07-03
+
+Fix settings and DeepSeek local model UI
+
 ## v0.1.124 — 2026-07-03
 
 cloud-first local model setup
