@@ -1,8 +1,8 @@
 /**
- * Live Qwen readiness + eval runner.
+ * Live local-model readiness + eval runner.
  *
  * Runs the actual HiveMatrix readiness probe and standing eval suite against
- * the configured local endpoint (LM Studio). This is the Phase 2 gate prover.
+ * the configured local endpoint. This is the Phase 2 local-model gate prover.
  *
  *   npx tsx scripts/qwen-readiness.mts
  *
@@ -18,14 +18,14 @@ function line(s = "") { process.stdout.write(s + "\n"); }
 async function main() {
   const profile = getQwenProfile();
   if (!profile) {
-    line("⊘ No Qwen profile in ~/.hivematrix/config.json");
-    line("  Local Qwen readiness skipped: HiveMatrix can run cloud-first before Rapid-MLX is installed.");
+    line("⊘ No local model profile in ~/.hivematrix/config.json");
+    line("  Local model readiness skipped: HiveMatrix can run cloud-first before a local model is installed.");
     line("  To enable this gate, run: npx tsx scripts/provision-local-engine.mts --apply");
     process.exit(0);
   }
 
   const { modelId, endpoint, provider, contextLimit } = profile.primary;
-  line("HiveMatrix Qwen Readiness Gate");
+  line("HiveMatrix Local Model Readiness Gate");
   line("================================");
   line(`Provider:     ${provider}`);
   line(`Endpoint:     ${endpoint}`);
@@ -37,7 +37,7 @@ async function main() {
   // --- Readiness probe ---
   line("Running readiness probe (6 checks)...");
   const health = await probeQwenReadiness({
-    provider: provider as "mlx" | "vllm" | "ollama" | "lmstudio",
+    provider: provider as "mlx" | "vllm" | "ollama" | "lmstudio" | "dwarfstar",
     endpoint,
     modelName: modelId,
     minDecodeRate: profile.minDecodeRate,

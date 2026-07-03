@@ -29,9 +29,14 @@ test("recordRun persists a normalized row and rolls up usage_totals", () => {
     taskId: "task-3", runIndex: 0, model: "codex:gpt-5.5-codex", status: "done",
     inputTokens: 0, outputTokens: 0, project: "demo",
   });
+  recordRun({
+    taskId: "task-4", runIndex: 0, model: "deepseek-v4-flash", status: "done",
+    inputTokens: 120, outputTokens: 480, costUsd: 0, project: "demo",
+    startedAtMs: 0, completedAtMs: 3000,
+  });
 
   const recent = listTaskTelemetry(10);
-  assert.equal(recent.length, 3);
+  assert.equal(recent.length, 4);
 
   // Codex row stored tokens as NULL (unavailable), not 0.
   const codex = recent.find((r) => r.provider === "openai-codex")!;
@@ -42,6 +47,10 @@ test("recordRun persists a normalized row and rolls up usage_totals", () => {
   const qwen = recent.find((r) => r.provider === "local-qwen")!;
   assert.equal(qwen.costUsd, null);
   assert.equal(qwen.tokensPerSec, 200); // 800 / 4s
+
+  const dwarfstar = recent.find((r) => r.provider === "local-dwarfstar")!;
+  assert.equal(dwarfstar.costUsd, null);
+  assert.equal(dwarfstar.tokensPerSec, 160); // 480 / 3s
 
   // usage_totals rolled up by provider.
   const totals = getDb().prepare("SELECT profile, taskCount, cost, inputTokens FROM usage_totals ORDER BY profile").all() as Array<Record<string, number>>;
@@ -66,6 +75,7 @@ test("observabilitySummary aggregates across providers", () => {
   assert.ok(s.runs >= 5);
   assert.ok(s.byProvider.some((p) => p.key === "anthropic"));
   assert.ok(s.byProvider.some((p) => p.key === "local-qwen"));
+  assert.ok(s.byProvider.some((p) => p.key === "local-dwarfstar"));
   assert.ok(s.split.local >= 1 && s.split.frontier >= 1);
   // Codex task was recorded with 0/0 tokens (= unavailable). The aggregate must
   // surface null, not 0, so the UI shows "—" rather than a misleading "0 / 0".

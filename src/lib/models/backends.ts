@@ -39,7 +39,12 @@ export function detectBackends(): BackendStatus[] {
   const qwen = getQwenProfile();
   const local = getLocalModelConfig();
   const engine = getLocalEngineConfig().engine;
-  const engineName = engine === "rapid-mlx" ? "Rapid-MLX" : engine === "ollama" ? "Ollama" : "LM Studio";
+  const localProvider = qwen?.primary.provider ?? local?.provider ?? null;
+  const engineName = localProvider === "dwarfstar" ? "Dwarf Star"
+    : localProvider === "vllm" ? "vLLM"
+    : localProvider === "mlx" || engine === "rapid-mlx" ? "Rapid-MLX"
+    : localProvider === "ollama" || engine === "ollama" ? "Ollama"
+    : "LM Studio";
   const localModelId = qwen?.primary.modelId ?? local?.modelName ?? null;
   const localEndpoint = qwen?.primary.endpoint ?? local?.endpoint
     ?? (engine === "rapid-mlx" ? "http://127.0.0.1:8000/v1" : "http://localhost:1234/v1");
@@ -53,6 +58,8 @@ export function detectBackends(): BackendStatus[] {
       ? `${localModelId} @ ${localEndpoint}${health?.ready ? " (healthy)" : ""}`
       : "no local model configured",
     connect: localConfigured ? undefined
+      : localProvider === "dwarfstar"
+        ? "Start Dwarf Star (`ds4-serve`) and set config.localModel/provider to dwarfstar."
       : engine === "rapid-mlx"
         ? "Start Rapid-MLX (rapid-mlx serve <model> --no-thinking) and set config.qwen.primary (modelId + endpoint)."
         : "Run the local server, load a model, and set config.qwen.primary (modelId + endpoint).",

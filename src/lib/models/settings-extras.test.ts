@@ -29,8 +29,8 @@ test("autoUpdate defaults off and round-trips", () => {
   assert.equal(s.getAutoUpdate(), false);
 });
 
-test("app icon choice defaults to dark-green and round-trips known values", () => {
-  assert.equal(s.getAppIconChoice(), "dark-green");
+test("app icon choice defaults to white and round-trips known values", () => {
+  assert.equal(s.getAppIconChoice(), "white");
   s.setAppIconChoice("white");
   assert.equal(s.getAppIconChoice(), "white");
   s.setAppIconChoice("dark-green");

@@ -8,7 +8,8 @@ import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { detectBackends, type BackendStatus, type BackendId } from "./backends";
-import { getLocalEngineConfig } from "./local-engine";
+import { SUPPORTED_LOCAL_TIER_PRESETS, type LocalTier } from "./local-engine";
+import { LOCAL_MODEL_PRESETS, type LocalModelPreset } from "./local-presets";
 import { claudeAliasId } from "./catalog";
 
 // Claude frontier models are referenced by the CLI's version-agnostic aliases,
@@ -29,6 +30,38 @@ export interface UiModel {
   note?: string;
 }
 
+function localTierLabel(tier: LocalTier): string {
+  if (tier.key === "coding") return `Local coding — ${tier.alias}`;
+  return `Local fast — ${tier.alias}`;
+}
+
+function localTierNote(tier: LocalTier): string {
+  if (tier.key === "coding") return "on-device 27B-dense — higher coding quality, slower";
+  return "on-device fast tier — daily, voice, and operational work";
+}
+
+function localPresetUiModels(existingModelIds: Set<string>): UiModel[] {
+  const tierModels = SUPPORTED_LOCAL_TIER_PRESETS
+    .filter((tier) => !existingModelIds.has(tier.alias))
+    .map((tier) => ({
+      id: `local-${tier.key}`,
+      name: localTierLabel(tier),
+      modelId: tier.alias,
+      backend: "local" as const,
+      note: localTierNote(tier),
+    }));
+  const presetModels = LOCAL_MODEL_PRESETS
+    .filter((preset) => !existingModelIds.has(preset.modelId))
+    .map((preset) => ({
+      id: preset.id,
+      name: preset.name,
+      modelId: preset.modelId,
+      backend: "local" as const,
+      note: preset.note,
+    }));
+  return [...tierModels, ...presetModels];
+}
+
 export function buildAvailableModels(backends: BackendStatus[] = detectBackends()): UiModel[] {
   const by = (id: BackendId) => backends.find((b) => b.id === id);
   const models: UiModel[] = [];
@@ -42,21 +75,7 @@ export function buildAvailableModels(backends: BackendStatus[] = detectBackends(
       backend: "local",
       note: "runs entirely on your machine",
     });
-    // Two-tier Rapid-MLX: when the local model IS the fast tier, also offer the
-    // coding tier (27B-dense) as a selectable local model — it routes to its own
-    // port via resolveProvider.
-    const le = getLocalEngineConfig();
-    const fast = le.tiers.find((t) => t.key === "fast");
-    const coding = le.tiers.find((t) => t.key === "coding");
-    if (le.engine === "rapid-mlx" && fast && coding && local.modelId === fast.alias && coding.alias !== fast.alias) {
-      models.push({
-        id: "local-coding",
-        name: `Local coding — ${coding.alias}`,
-        modelId: coding.alias,
-        backend: "local",
-        note: "on-device 27B-dense — higher coding quality, slower",
-      });
-    }
+    for (const tierModel of localPresetUiModels(new Set([local.modelId]))) models.push(tierModel);
   }
 
   const claude = by("claude");
@@ -183,7 +202,7 @@ export function setAutoUpdate(on: boolean): void {
 export type AppIconChoice = "dark-green" | "white";
 
 export function getAppIconChoice(): AppIconChoice {
-  return readConfig().appIconChoice === "white" ? "white" : "dark-green";
+  return readConfig().appIconChoice === "dark-green" ? "dark-green" : "white";
 }
 
 export function setAppIconChoice(choice: AppIconChoice): void {
@@ -273,15 +292,36 @@ function roleOption(modelId: string, name: string, backend: BackendId, note?: st
   return { modelId, name, backend, note };
 }
 
+function presetRoleOption(preset: LocalModelPreset): RoleModelOption {
+  return roleOption(preset.modelId, preset.name, "local", preset.note);
+}
+
+function localRoleOptions(local: BackendStatus | undefined): RoleModelOption[] {
+  if (!local?.configured || !local.modelId) return [];
+  const out: RoleModelOption[] = [
+    roleOption(local.modelId, `Local — ${local.modelId}`, "local", "runs on this Mac"),
+  ];
+  const seen = new Set(out.map((m) => m.modelId));
+  for (const tier of SUPPORTED_LOCAL_TIER_PRESETS) {
+    if (seen.has(tier.alias)) continue;
+    out.push(roleOption(tier.alias, localTierLabel(tier), "local", localTierNote(tier)));
+    seen.add(tier.alias);
+  }
+  for (const preset of LOCAL_MODEL_PRESETS) {
+    if (seen.has(preset.modelId)) continue;
+    out.push(presetRoleOption(preset));
+    seen.add(preset.modelId);
+  }
+  return out;
+}
+
 export function buildRoleModelOptions(backends: BackendStatus[] = detectBackends()): RoleModelOptions {
   const by = (id: BackendId) => backends.find((b) => b.id === id);
   const local = by("local");
   const claude = by("claude");
   const codex = by("codex");
 
-  const localOption = local?.configured && local.modelId
-    ? roleOption(local.modelId, `Local — ${local.modelId}`, "local", "runs on this Mac")
-    : null;
+  const localOptions = localRoleOptions(local);
   const opus = claude?.configured ? roleOption(CLAUDE_OPUS_ID, "Claude Opus", "claude") : null;
   const sonnet = claude?.configured ? roleOption(CLAUDE_SONNET_ID, "Claude Sonnet", "claude") : null;
   const gpt55 = codex?.configured ? roleOption(CODEX_NEWEST_ID, "Codex GPT-5.5", "codex") : null;
@@ -289,10 +329,10 @@ export function buildRoleModelOptions(backends: BackendStatus[] = detectBackends
 
   return {
     thinking: [opus, sonnet, gpt55, spark].filter((m): m is RoleModelOption => m !== null),
-    coding: [opus, sonnet, gpt55, spark, localOption].filter((m): m is RoleModelOption => m !== null),
-    operational: [localOption, spark, sonnet].filter((m): m is RoleModelOption => m !== null),
+    coding: [opus, sonnet, gpt55, spark, ...localOptions].filter((m): m is RoleModelOption => m !== null),
+    operational: [...localOptions, spark, sonnet].filter((m): m is RoleModelOption => m !== null),
     // Writer: frontier for quality, or the local model to lock everything free.
-    writer: [sonnet, opus, gpt55, localOption].filter((m): m is RoleModelOption => m !== null),
+    writer: [sonnet, opus, gpt55, ...localOptions].filter((m): m is RoleModelOption => m !== null),
   };
 }
 

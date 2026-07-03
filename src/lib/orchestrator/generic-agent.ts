@@ -21,10 +21,10 @@ import { brainDocPolicyText } from "@/lib/brain/settings";
 import { resolveThinkingMode } from "@/lib/config/budget-policy";
 
 const MAX_TURNS = 50;
-const LOCAL_OPENAI_COMPATIBLE_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai"]);
+const LOCAL_OPENAI_COMPATIBLE_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai", "dwarfstar"]);
 // Providers HiveMatrix serves locally (Qwen). nanai is excluded — it's cloud
 // image generation, not a self-hosted endpoint we wait on for cold start.
-const LOCAL_SERVED_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm"]);
+const LOCAL_SERVED_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm", "dwarfstar"]);
 
 // Loop-guard thresholds: how many identical tool calls before intervening
 const LOOP_WARN_THRESHOLD = 3;  // inject "you already have this" into tool result

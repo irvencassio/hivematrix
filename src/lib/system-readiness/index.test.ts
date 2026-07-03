@@ -97,6 +97,45 @@ test("reports Browser Lane attention and stale readiness", async () => {
   assert.match(browser?.summary ?? "", /1 stale/i);
 });
 
+test("reports Dwarf Star DeepSeek local model health by name", async () => {
+  const report = await getSystemReadinessReport({
+    ...baseDeps(),
+    readLocalModelHealth: () => ({
+      ready: true,
+      qwenReady: true,
+      provider: "dwarfstar",
+      modelName: "deepseek-v4-flash",
+      endpoint: "http://127.0.0.1:8000/v1",
+      checkedAt: "2026-07-03T12:00:00Z",
+      message: "ready",
+    }),
+  });
+  const local = report.checks.find((c) => c.id === "local-model");
+  assert.equal(local?.severity, "ok");
+  assert.match(local?.summary ?? "", /Dwarf Star DeepSeek/i);
+  assert.equal(local?.details?.provider, "dwarfstar");
+  assert.equal(local?.details?.endpoint, "http://127.0.0.1:8000/v1");
+});
+
+test("reports Dwarf Star DeepSeek not-ready action", async () => {
+  const report = await getSystemReadinessReport({
+    ...baseDeps(),
+    readLocalModelHealth: () => ({
+      ready: false,
+      qwenReady: false,
+      provider: "dwarfstar",
+      modelName: "deepseek-v4-flash",
+      endpoint: "http://127.0.0.1:8000/v1",
+      checkedAt: "2026-07-03T12:00:00Z",
+      message: "connection refused",
+    }),
+  });
+  const local = report.checks.find((c) => c.id === "local-model");
+  assert.equal(local?.severity, "warn");
+  assert.match(local?.summary ?? "", /Dwarf Star DeepSeek/i);
+  assert.match(local?.nextAction ?? "", /ds4-serve/i);
+});
+
 test("reports lane app install/update/broken states", async () => {
   const report = await getSystemReadinessReport({
     ...baseDeps(),

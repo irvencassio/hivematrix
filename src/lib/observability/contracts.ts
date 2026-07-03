@@ -12,7 +12,7 @@
  * and rollups exclude it. A fake 0 would silently corrupt every total.
  */
 
-export type Provider = "anthropic" | "openai-codex" | "local-qwen" | "other";
+export type Provider = "anthropic" | "openai-codex" | "local-qwen" | "local-dwarfstar" | "other";
 
 /** Map a model id to its provider. Codex models are prefixed `codex:`. */
 export function providerForModel(model: string | null | undefined): Provider {
@@ -20,12 +20,13 @@ export function providerForModel(model: string | null | undefined): Provider {
   if (!m) return "other";
   if (/^(codex|chatgpt)/.test(m) || /^(gpt|o[0-9])/.test(m)) return "openai-codex";
   if (/^(claude|opus|sonnet|haiku)/.test(m)) return "anthropic";
-  if (/(qwen|mistral|llama|mlx|local|deepseek|gemma|phi|nan)/.test(m)) return "local-qwen";
+  if (/(deepseek|dwarfstar|ds4)/.test(m)) return "local-dwarfstar";
+  if (/(qwen|mistral|llama|mlx|local|gemma|phi|nan)/.test(m)) return "local-qwen";
   return "other";
 }
 
 export function isLocalProvider(p: Provider): boolean {
-  return p === "local-qwen";
+  return p === "local-qwen" || p === "local-dwarfstar";
 }
 
 /** Raw, per-run inputs handed to the normalizer (any field may be missing). */

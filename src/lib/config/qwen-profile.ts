@@ -3,7 +3,7 @@ import { join } from "path";
 import { homedir } from "os";
 
 export type QwenLocation = "local" | "lan" | "public";
-export type QwenProvider = "mlx" | "vllm" | "ollama" | "lmstudio";
+export type QwenProvider = "mlx" | "vllm" | "ollama" | "lmstudio" | "dwarfstar";
 
 export interface QwenModelConfig {
   modelId: string;
@@ -33,7 +33,7 @@ const DEFAULT_PRIMARY: QwenModelConfig = {
 };
 
 function coerceProvider(p: unknown): QwenProvider {
-  if (p === "mlx" || p === "vllm" || p === "ollama" || p === "lmstudio") return p;
+  if (p === "mlx" || p === "vllm" || p === "ollama" || p === "lmstudio" || p === "dwarfstar") return p;
   return "mlx";
 }
 

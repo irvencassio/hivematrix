@@ -55,7 +55,12 @@ test("tierForAlias maps a model id to its tier (for endpoint routing)", () => {
   const c = getLocalEngineConfig({});
   assert.equal(tierForAlias("qwen3.6-35b-4bit", c)!.port, 8000);
   assert.equal(tierForAlias("qwen3.6-27b-4bit", c)!.port, 8001);
+  assert.equal(tierForAlias("deepseek-v4-flash", c), null);
   assert.equal(tierForAlias("claude-opus-4-8", c), null);
+});
+
+test("DeepSeek Flash is not a Rapid-MLX tier", () => {
+  assert.deepEqual(DEFAULT_TIERS.map((t) => t.key), ["fast", "coding"]);
 });
 
 test("capability: non-Apple-Silicon → cloud-only, no tiers", () => {

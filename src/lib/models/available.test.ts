@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildAvailableModels, buildRoleModelOptions, CLAUDE_OPUS_ID, CLAUDE_SONNET_ID, CODEX_NEWEST_ID } from "./available";
+import { DEEPSEEK_FLASH_API_MODEL_ID } from "./local-presets";
 import type { BackendStatus } from "./backends";
 
 function backends(local: boolean, claude: boolean, codex: boolean): BackendStatus[] {
@@ -13,14 +14,23 @@ function backends(local: boolean, claude: boolean, codex: boolean): BackendStatu
 const ids = (b: BackendStatus[]) => buildAvailableModels(b).map((m) => m.id);
 
 test("only configured backends produce models", () => {
-  assert.deepEqual(ids(backends(true, false, false)), ["local"]);
+  assert.deepEqual(ids(backends(true, false, false)), ["local", "local-fast", "local-coding", "dwarfstar-deepseek-flash"]);
   assert.deepEqual(ids(backends(false, false, false)), []);
 });
 
 test("local model carries the concrete configured id", () => {
-  const m = buildAvailableModels(backends(true, false, false))[0];
+  const m = buildAvailableModels(backends(true, false, false)).find((x) => x.id === "local");
+  assert.ok(m);
   assert.equal(m.modelId, "qwen/qwen3.6-27b");
-  assert.match(m.name, /qwen\/qwen3\.6-27b/);
+  assert.match(m!.name, /qwen\/qwen3\.6-27b/);
+});
+
+test("Settings exposes the supported DeepSeek Flash local model preset", () => {
+  const ms = buildAvailableModels(backends(true, false, false));
+  const deepseek = ms.find((m) => m.modelId === DEEPSEEK_FLASH_API_MODEL_ID);
+  assert.ok(deepseek);
+  assert.equal(deepseek.backend, "local");
+  assert.match(deepseek.name, /Dwarf Star DeepSeek/);
 });
 
 test("claude backend yields Opus + Sonnet with pinned ids", () => {
@@ -69,6 +79,9 @@ test("role options expose Coding choices across Claude, Codex, and local Qwen", 
     "codex:gpt-5.5",
     "codex:gpt-5.3-codex-spark",
     "qwen/qwen3.6-27b",
+    "qwen3.6-35b-4bit",
+    "qwen3.6-27b-4bit",
+    DEEPSEEK_FLASH_API_MODEL_ID,
   ]);
 });
 
@@ -77,6 +90,9 @@ test("role options expose Operational escape hatches without making them the def
   const operational = options.operational.map((m) => m.modelId);
   assert.deepEqual(operational, [
     "qwen/qwen3.6-27b",
+    "qwen3.6-35b-4bit",
+    "qwen3.6-27b-4bit",
+    DEEPSEEK_FLASH_API_MODEL_ID,
     "codex:gpt-5.3-codex-spark",
     "sonnet",
   ]);

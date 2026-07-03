@@ -407,6 +407,7 @@ export function createDaemonServer() {
         const { buildAvailableModels, buildRoleModelOptions, getDefaultModel, getThemeSettings } = await import("@/lib/models/available");
         const { embeddingModelChoices, getEmbeddingsConfig } = await import("@/lib/embeddings/provider");
         const { localEngineStatus, localEngineCapability } = await import("@/lib/models/local-engine");
+        const { readCachedLocalModelHealth } = await import("@/lib/local-model/health");
         const { versionInfo } = await import("@/lib/version");
         const backends = detectBackends();
         const available = buildAvailableModels(backends);
@@ -418,6 +419,7 @@ export function createDaemonServer() {
         json(res, 200, {
           backends,
           localEngine,
+          localModelHealth: readCachedLocalModelHealth(),
           localEngineCapability: localEngineCap,
           available,
           defaultModel: getDefaultModel(available),

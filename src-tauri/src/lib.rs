@@ -36,18 +36,18 @@ fn app_icon_choice_from_config_text(text: &str) -> AppIconChoice {
     serde_json::from_str::<serde_json::Value>(text)
         .ok()
         .and_then(|config| config.get("appIconChoice").and_then(|choice| choice.as_str()).map(str::to_owned))
-        .map(|choice| if choice == "white" { AppIconChoice::White } else { AppIconChoice::DarkGreen })
-        .unwrap_or(AppIconChoice::DarkGreen)
+        .map(|choice| if choice == "dark-green" { AppIconChoice::DarkGreen } else { AppIconChoice::White })
+        .unwrap_or(AppIconChoice::White)
 }
 
 fn app_icon_choice_from_config_file() -> AppIconChoice {
     let home = match std::env::var("HOME") {
         Ok(home) => home,
-        Err(_) => return AppIconChoice::DarkGreen,
+        Err(_) => return AppIconChoice::White,
     };
     std::fs::read_to_string(std::path::Path::new(&home).join(".hivematrix/config.json"))
         .map(|text| app_icon_choice_from_config_text(&text))
-        .unwrap_or(AppIconChoice::DarkGreen)
+        .unwrap_or(AppIconChoice::White)
 }
 
 fn app_icon_resource_name(choice: AppIconChoice) -> &'static str {
@@ -398,12 +398,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn app_icon_choice_defaults_to_dark_green_for_missing_or_invalid_config() {
-        assert_eq!(app_icon_choice_from_config_text(""), AppIconChoice::DarkGreen);
-        assert_eq!(app_icon_choice_from_config_text("{}"), AppIconChoice::DarkGreen);
+    fn app_icon_choice_defaults_to_white_for_missing_or_invalid_config() {
+        assert_eq!(app_icon_choice_from_config_text(""), AppIconChoice::White);
+        assert_eq!(app_icon_choice_from_config_text("{}"), AppIconChoice::White);
         assert_eq!(
             app_icon_choice_from_config_text(r#"{"appIconChoice":"purple"}"#),
-            AppIconChoice::DarkGreen
+            AppIconChoice::White
         );
     }
 

@@ -42,7 +42,7 @@ export interface QwenReadinessResult extends LocalModelHealth {
 }
 
 const HEALTH_FILE = join(homedir(), ".hivematrix", "local-model-health.json");
-const LOCAL_PROVIDER_SET = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai"]);
+const LOCAL_PROVIDER_SET = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai", "dwarfstar"]);
 const DEFAULT_LOCAL_FALLBACK: LocalFallbackSettings = {
   enabled: true,
   offlineEnabled: true,
@@ -597,7 +597,7 @@ async function probeDecodeRate(endpoint: string, modelName: string, timeoutMs: n
 
 /**
  * Run all 6 Qwen readiness checks against a live endpoint.
- * Used by the router before accepting a Qwen profile as eligible.
+ * Used by the router before accepting a local profile as eligible.
  */
 export async function probeQwenReadiness(
   config: ProbeOptions & { minDecodeRate?: number }
@@ -627,6 +627,7 @@ export async function probeQwenReadiness(
   ]);
 
   const qwenReady = base.ready && toolChain && thinkSeparation && decodeRateResult.ok;
+  const modelLabel = config.provider === "dwarfstar" ? "Dwarf Star DeepSeek" : "Local model";
   const issues: string[] = [];
   if (!base.streaming) issues.push("streaming failed");
   if (!base.toolCalls) issues.push("single tool call failed");
@@ -644,8 +645,8 @@ export async function probeQwenReadiness(
     qwenReady,
     minDecodeRate,
     message: qwenReady
-      ? `Qwen ready — all 5 checks passed (≥${minDecodeRate} tok/s)`
-      : `Qwen not ready: ${issues.join("; ")}`,
+      ? `${modelLabel} ready — all 6 checks passed (≥${minDecodeRate} tok/s)`
+      : `${modelLabel} not ready: ${issues.join("; ")}`,
   };
 }
 

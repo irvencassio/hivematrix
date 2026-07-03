@@ -1046,6 +1046,7 @@ test("per-window usage details remain available but secondary", () => {
 test("Models panel still shows local engine and embeddings", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /Local · on-device/, "local engine group kept in Models");
+  assert.match(js, /optional preset/, "local engine card labels optional local model presets");
   assert.match(js, /Embeddings/, "embeddings group kept in Models");
   assert.match(js, /getElementById\("modelStatus"\)/, "checkModels still fills modelStatus");
 });

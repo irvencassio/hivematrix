@@ -3045,14 +3045,15 @@ function toggleReply(id) {
 
 // --- Observability (per-task telemetry + totals) ---
 let _obsWindow = "7d";
-const OBS_LABELS = { "anthropic": "Claude", "openai-codex": "Codex", "local-qwen": "Qwen (local)", "other": "other" };
-const OBS_COLORS = { "anthropic": "#c8794f", "openai-codex": "#10a37f", "local-qwen": "#7a5cff", "other": "#8a93a6" };
-const OBS_ORDER = { "anthropic": 0, "openai-codex": 1, "local-qwen": 2, "other": 3 };
+const OBS_LABELS = { "anthropic": "Claude", "openai-codex": "Codex", "local-qwen": "Qwen (local)", "local-dwarfstar": "Dwarf Star", "other": "other" };
+const OBS_COLORS = { "anthropic": "#c8794f", "openai-codex": "#10a37f", "local-qwen": "#7a5cff", "local-dwarfstar": "#1f9f89", "other": "#8a93a6" };
+const OBS_ORDER = { "anthropic": 0, "openai-codex": 1, "local-qwen": 2, "local-dwarfstar": 3, "other": 4 };
 function obsProvider(model) {
   const m = (model || "").toLowerCase().trim();
   if (/^(codex|chatgpt)/.test(m) || /^(gpt|o[0-9])/.test(m)) return "Codex";
   if (/^(claude|opus|sonnet|haiku)/.test(m)) return "Claude";
-  if (/(qwen|mistral|llama|mlx|local|deepseek|gemma|phi|nan)/.test(m)) return "Qwen (local)";
+  if (/(deepseek|dwarfstar|ds4)/.test(m)) return "Dwarf Star";
+  if (/(qwen|mistral|llama|mlx|local|gemma|phi|nan)/.test(m)) return "Qwen (local)";
   return "—";
 }
 
@@ -5283,6 +5284,7 @@ function renderLocalEngine(le, cap) {
       + ' <b>' + esc(t.key) + '</b>'
       + '<span class="mdl-tier-alias">' + esc(t.alias) + ' :' + t.port
       + ' · reasoning ' + (t.reasoning ? 'on' : 'off') + (t.healthy ? '' : ' · not running')
+      + (t.optional ? ' · optional preset' : '')
       + (grey && c.reason ? ' · <span style="color:#c8922b">' + esc(c.reason) + '</span>' : '')
       + '</span>';
     return '<div class="mdl-tier">' + (grey ? '<span style="opacity:.5" title="' + esc(c.reason || '') + '">' + body + '</span>' : body) + '</div>';
@@ -5299,6 +5301,37 @@ function renderLocalEngine(le, cap) {
     + tierDivs
     + (footContent ? '<div class="mdl-card-foot">' + footContent + '</div>' : '')
     + '</div>';
+}
+
+function localHealthProviderName(provider) {
+  if (provider === "dwarfstar") return "Dwarf Star";
+  if (provider === "mlx") return "Rapid-MLX";
+  if (provider === "vllm") return "vLLM";
+  if (provider === "lmstudio") return "LM Studio";
+  if (provider === "ollama") return "Ollama";
+  if (provider === "nanai") return "Nan AI";
+  return provider || "local";
+}
+
+function renderLocalModelHealth(health) {
+  if (!health) return '<div class="mdl-card"><div class="mdl-card-head"><span class="mdl-card-name">Local model health</span><span class="st no">not checked</span></div><div class="mdl-card-foot">No cached local model readiness result yet.</div></div>';
+  const ready = health.qwenReady === true || health.ready === true;
+  const provider = localHealthProviderName(health.provider);
+  const bits = [
+    health.modelFound ? 'model listed' : 'model missing',
+    health.streaming ? 'streaming ok' : 'streaming not verified',
+    health.toolCalls ? 'tools ok' : 'tools not verified',
+  ];
+  if (typeof health.decodeRateTokPerSec === 'number') bits.push(health.decodeRateTokPerSec.toFixed(1) + ' tok/s');
+  return '<div class="mdl-card">'
+    + '<div class="mdl-card-head"><span class="mdl-card-name">Local model health — ' + esc(provider) + '</span>'
+    + '<span class="st ' + (ready ? 'ok' : 'no') + '">' + (ready ? '✓ ready' : 'not ready') + '</span></div>'
+    + '<div class="mdl-tier">' + (ready ? '<span style="color:var(--ok)">●</span>' : '<span style="color:var(--muted)">○</span>')
+    + ' <b>' + esc(health.modelName || 'model') + '</b><span class="mdl-tier-alias">' + esc(health.endpoint || '') + '</span></div>'
+    + '<div class="mdl-card-foot">' + esc(bits.join(' · '))
+    + (health.message ? '<br>' + esc(health.message) : '')
+    + (health.checkedAt ? '<br>checked ' + esc(new Date(health.checkedAt).toLocaleString()) : '')
+    + '</div></div>';
 }
 
 // One-click provisioner: sizes Rapid-MLX to this Mac, installs it, pulls the
@@ -5945,6 +5978,7 @@ function openSettings() {
     + '<span class="st '+(b.configured?'ok':'no')+'">'+(b.configured?'✓ '+esc(b.detail):'not set up')+'</span></div>'
     + (b.configured?'':'<div class="mdl-card-foot">'+esc(b.connect||'')+'</div>')+'</div>').join("")
     + renderLocalEngine(models.localEngine, models.localEngineCapability)
+    + renderLocalModelHealth(models.localModelHealth)
     + renderProvisionUI(models.localEngineCapability);
   const local = models.backends.find(b => b.id === "local");
   document.getElementById("s_endpoint").value = (local && local.endpoint) || "http://localhost:1234/v1";
@@ -5952,7 +5986,7 @@ function openSettings() {
   const v = models.version || {};
   document.getElementById("s_version").textContent = "HiveMatrix v" + (v.version||"?") + " · build " + (v.build||"?") + " · " + (v.date||"?");
   document.getElementById("s_theme").value = models.theme || "system";
-  document.getElementById("s_app_icon").value = models.appIconChoice || "dark-green";
+  document.getElementById("s_app_icon").value = models.appIconChoice || "white";
   const iconStatus = document.getElementById("app_icon_status");
   if (iconStatus) iconStatus.textContent = "";
   document.getElementById("s_token").value = HM_TOKEN || "(load the local console to see the token)";

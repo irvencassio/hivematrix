@@ -3,6 +3,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { readCachedLocalModelHealth } from "@/lib/local-model/health";
 import { tierForAlias, tierBaseUrl } from "@/lib/models/local-engine";
+import { localPresetForModel } from "@/lib/models/local-presets";
 
 // Direct cloud image provider removed. nanai retained as abstract image provider for Nano Banana.
 // TODO Phase 2: mlx supportsTools must be probe-driven via the readiness gate, not hardcoded false.
@@ -42,6 +43,11 @@ const PROVIDER_DEFAULTS: Record<string, { endpoint: string; supportsTools: boole
     endpoint: "http://localhost:8000/v1",
     supportsTools: true,
     maxTokens: 4096,
+  },
+  dwarfstar: {
+    endpoint: "http://127.0.0.1:8000/v1",
+    supportsTools: true,
+    maxTokens: 32768,
   },
   nanai: {
     endpoint: "",
@@ -95,10 +101,12 @@ export function detectProvider(modelId: string): string | null {
   const localModel = getLocalModelConfig();
   if (localModel?.modelName === modelId) {
     const provider = localModel.provider;
-    if (provider === "ollama" || provider === "lmstudio" || provider === "mlx" || provider === "vllm" || provider === "nanai") {
+    if (provider === "ollama" || provider === "lmstudio" || provider === "mlx" || provider === "vllm" || provider === "nanai" || provider === "dwarfstar") {
       return provider;
     }
   }
+  const preset = localPresetForModel(modelId);
+  if (preset) return preset.provider;
   // A Rapid-MLX local-engine tier alias (e.g. qwen3.6-27b-4bit) → mlx.
   if (tierForAlias(modelId)) return "mlx";
   return null;
@@ -124,8 +132,11 @@ export function resolveProvider(modelId: string): ModelProvider | null {
   // A local-engine tier alias routes to that tier's port (two-tier Rapid-MLX);
   // else the configured localModel endpoint; else the provider default.
   const tier = tierForAlias(modelId);
+  const preset = localPresetForModel(modelId);
   const endpoint = tier
     ? tierBaseUrl(tier)
+    : preset
+      ? preset.endpoint
     : localModel?.modelName === modelId
       ? localModel.endpoint
       : (userConfig?.endpoint ?? defaults?.endpoint);
@@ -138,7 +149,7 @@ export function resolveProvider(modelId: string): ModelProvider | null {
   const apiKey = process.env[envKeyMap[providerName] ?? ""] ?? "";
 
   // Cloud providers require an API key
-  const isLocal = providerName === "ollama" || providerName === "lmstudio" || providerName === "mlx" || providerName === "vllm" || providerName === "nanai";
+  const isLocal = providerName === "ollama" || providerName === "lmstudio" || providerName === "mlx" || providerName === "vllm" || providerName === "nanai" || providerName === "dwarfstar";
   if (!isLocal && !apiKey) return null;
 
   const localHealth = isLocal ? readCachedLocalModelHealth() : null;

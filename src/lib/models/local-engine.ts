@@ -38,6 +38,8 @@ export const DEFAULT_TIERS: LocalTier[] = [
   { key: "coding", alias: "qwen3.6-27b-4bit", port: 8001, reasoning: false },
 ];
 
+export const SUPPORTED_LOCAL_TIER_PRESETS: LocalTier[] = DEFAULT_TIERS;
+
 /** Roles → tier. Operational/voice want speed; coding wants the dense model;
  * thinking stays on the dense local model when offline (cloud handles it when up). */
 export const ROLE_TO_TIER: Record<RoleKey, TierKey> = {
@@ -100,7 +102,9 @@ export function tierBaseUrl(tier: LocalTier): string {
 /** The tier whose alias equals this model id, or null (used to route a chosen
  * local model to the right Rapid-MLX port). */
 export function tierForAlias(alias: string, cfg: LocalEngineConfig = getLocalEngineConfig()): LocalTier | null {
-  return cfg.tiers.find((t) => t.alias === alias) ?? null;
+  return cfg.tiers.find((t) => t.alias === alias)
+    ?? SUPPORTED_LOCAL_TIER_PRESETS.find((t) => t.alias === alias)
+    ?? null;
 }
 
 /** Resolve a role to its tier's endpoint + model, or null if unmapped. */
@@ -183,7 +187,7 @@ export function stopLocalEngine(): void {
   _procs.clear();
 }
 
-export interface TierStatus { key: TierKey; alias: string; port: number; healthy: boolean; reasoning: boolean; }
+export interface TierStatus { key: TierKey; alias: string; port: number; healthy: boolean; reasoning: boolean; optional?: boolean; }
 export interface LocalEngineStatus {
   engine: LocalEngineKind;
   /** True when at least the primary (fast) tier is reachable — i.e. local is usable. */
@@ -231,7 +235,7 @@ export interface LocalEngineCapability {
   reason?: string;
 }
 
-const ALL_TIER_KEYS: TierKey[] = ["fast", "coding"];
+const RESIDENT_TIER_KEYS: TierKey[] = ["fast", "coding"];
 
 /** Compute which tiers this Mac can run + the recommended resident profile. */
 export function localEngineCapability(env: Partial<HardwareProbe> = {}): LocalEngineCapability {
@@ -240,7 +244,7 @@ export function localEngineCapability(env: Partial<HardwareProbe> = {}): LocalEn
   const gb = Math.round(ramGB);
   const isArm = arch === "arm64";
 
-  const tiers: TierCapability[] = ALL_TIER_KEYS.map((key) => {
+  const tiers: TierCapability[] = RESIDENT_TIER_KEYS.map((key) => {
     if (!isArm) return { key, capable: false, residentCapable: false, reason: "Requires an Apple Silicon Mac" };
     const need = TIER_FOOTPRINT_GB[key] + HEADROOM_GB;
     if (ramGB < need) return { key, capable: false, residentCapable: false, reason: `Needs ~${need} GB RAM (this Mac has ${gb} GB)` };
@@ -275,9 +279,18 @@ export function localEngineCapability(env: Partial<HardwareProbe> = {}): LocalEn
 /** Live health of the local engine + each tier (probes each tier's port). Used
  * for the "Rapid-MLX up?" status in the console. Never throws. */
 export async function localEngineStatus(cfg: LocalEngineConfig = getLocalEngineConfig()): Promise<LocalEngineStatus> {
+  const configuredAliases = new Set(cfg.tiers.map((t) => t.alias));
+  const statusTiers = cfg.engine === "rapid-mlx"
+    ? [
+        ...cfg.tiers.map((t) => ({ tier: t, optional: false })),
+        ...SUPPORTED_LOCAL_TIER_PRESETS
+          .filter((t) => !configuredAliases.has(t.alias))
+          .map((t) => ({ tier: t, optional: true })),
+      ]
+    : cfg.tiers.map((t) => ({ tier: t, optional: false }));
   const tiers = await Promise.all(
-    cfg.tiers.map(async (t): Promise<TierStatus> => ({
-      key: t.key, alias: t.alias, port: t.port, healthy: await isHealthy(t.port), reasoning: t.reasoning,
+    statusTiers.map(async ({ tier: t, optional }): Promise<TierStatus> => ({
+      key: t.key, alias: t.alias, port: t.port, healthy: await isHealthy(t.port), reasoning: t.reasoning, optional,
     })),
   );
   const fast = tiers.find((t) => t.key === "fast");

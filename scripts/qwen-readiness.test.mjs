@@ -23,9 +23,9 @@ function runReadiness(config) {
   }
 }
 
-test("qwen readiness skips cleanly when no local Qwen profile exists", () => {
+test("local model readiness skips cleanly when no local model profile exists", () => {
   const result = runReadiness({ providers: {} });
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /No Qwen profile/i);
+  assert.match(result.stdout, /No local model profile/i);
   assert.match(result.stdout, /skipped/i);
 });
