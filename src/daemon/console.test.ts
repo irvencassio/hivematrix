@@ -253,11 +253,49 @@ test("loading models refreshes About version metadata", () => {
   );
 });
 
-test("settings tabs are in a defined order ending with About", () => {
+test("settings tabs are in a defined order with Setup near the front", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /\["about", "features", "general", "models", "observability", "lanes", "remote", "license"\]/);
-  assert.match(CONSOLE_HTML, /id="tab-about"[^>]*>About<\/div><div class="tab" id="tab-features"[^>]*>Features<\/div><div class="tab" id="tab-general"[^>]*>Personalization<\/div><div class="tab" id="tab-models"[^>]*>Models<\/div><div class="tab" id="tab-observability"[^>]*>Observability<\/div><div class="tab" id="tab-lanes"[^>]*>Lanes<\/div><div class="tab" id="tab-remote"[^>]*>Remote<\/div><div class="tab" id="tab-license"[^>]*>License<\/div>/);
+  assert.match(js, /\["about", "setup", "features", "general", "models", "observability", "lanes", "remote", "license"\]/);
+  assert.match(CONSOLE_HTML, /id="tab-about"[^>]*>About<\/div><div class="tab" id="tab-setup"[^>]*>Setup<\/div><div class="tab" id="tab-features"[^>]*>Features<\/div><div class="tab" id="tab-general"[^>]*>Personalization<\/div><div class="tab" id="tab-models"[^>]*>Models<\/div><div class="tab" id="tab-observability"[^>]*>Observability<\/div><div class="tab" id="tab-lanes"[^>]*>Lanes<\/div><div class="tab" id="tab-remote"[^>]*>Remote<\/div><div class="tab" id="tab-license"[^>]*>License<\/div>/);
   assert.doesNotMatch(CONSOLE_HTML, /id="tab-projects"/, "Projects is no longer a Settings tab");
+});
+
+test("Settings exposes Setup as a first-class actionable panel", () => {
+  assert.match(CONSOLE_HTML, /id="tab-setup"/, "Setup tab present");
+  assert.match(CONSOLE_HTML, /id="settingsSetup"/, "Setup panel present");
+  assert.match(CONSOLE_HTML, /Open setup wizard/);
+  assert.match(CONSOLE_HTML, /onclick="openObWizard\(\)"/, "Setup panel launches the existing wizard");
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function renderSettingsSetup\(/, "Setup panel renderer exists");
+  assert.match(js, /if \(tab === "setup"\) renderSettingsSetup\(\)/, "Setup tab refreshes its state");
+  assert.match(js, /Settings → Setup/, "About summary points users to Settings Setup");
+  assert.doesNotMatch(js, /see the Setup panel on the dashboard/, "About summary no longer points to the dashboard rail");
+});
+
+test("Settings model controls are robust before and without model backends", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const openSettings = extractBetween(js, "async function openSettings()", "function closeSettings()");
+  const renderSettings = extractBetween(js, "function renderSettingsModelControls()", "function closeSettings()");
+  const saveDefault = extractBetween(js, "async function saveDefault()", "async function saveFrontierProvider()");
+
+  assert.match(openSettings, /if \(!models\)[\s\S]*await loadModels\(\)/, "opening Settings loads models when needed");
+  assert.match(renderSettings, /\(no models configured\)/, "empty model list gets a clear option");
+  assert.match(renderSettings, /sd\.disabled = !available\.length/, "default selector is disabled with no available model");
+  assert.match(saveDefault, /if \(!modelId\)/, "saving a missing default model is guarded");
+});
+
+test("Settings frontier provider row handles Claude-only, Codex-only, and both", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const renderSettings = extractBetween(js, "function renderSettingsModelControls()", "function closeSettings()");
+
+  assert.match(renderSettings, /hasClaudeFrontier/);
+  assert.match(renderSettings, /hasCodexFrontier/);
+  assert.match(renderSettings, /hasAnyFrontier/);
+  assert.match(renderSettings, /hasBothFrontier/);
+  assert.match(renderSettings, /s_frontier_provider_row"\)\.style\.display = hasAnyFrontier \? "" : "none"/);
+  assert.match(renderSettings, /frontierSelect\.disabled = !hasBothFrontier/);
+  assert.match(renderSettings, /hasCodexFrontier && !hasClaudeFrontier \? "codex"/, "Codex-only state selects Codex");
+  assert.match(renderSettings, /hasClaudeFrontier && !hasCodexFrontier \? "claude"/, "Claude-only state selects Claude");
 });
 
 test("settings lane setup surfaces use lane names instead of bee product names", () => {
@@ -1049,6 +1087,43 @@ test("Models panel still shows local engine and embeddings", () => {
   assert.match(js, /optional preset/, "local engine card labels optional local model presets");
   assert.match(js, /Embeddings/, "embeddings group kept in Models");
   assert.match(js, /getElementById\("modelStatus"\)/, "checkModels still fills modelStatus");
+});
+
+test("Models panel can render Dwarf Star DeepSeek as the local choice", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const checkModels = extractBetween(js, "async function checkModels()", "async function reindexEmbeddings()");
+  const localChoice = extractBetween(js, "function renderLocalBackendChoice(", "function renderLocalEngine(");
+
+  assert.match(checkModels, /models\.backends[\s\S]*find\(b => b\.id === "local"\)/, "local backend is considered");
+  assert.match(checkModels, /isDwarfStarLocalBackend\(localBackend, models\.localModelHealth\)/, "Dwarf Star local choice is detected");
+  assert.match(checkModels, /renderLocalBackendChoice\(localBackend, models\.localModelHealth\)/, "backend-specific card can render");
+  assert.match(checkModels, /if \(!isDwarfStarLocal\)[\s\S]*renderLocalEngine\(le, cap\)/, "Rapid-MLX card is skipped for DeepSeek");
+  assert.match(localChoice, /Dwarf Star DeepSeek/, "DeepSeek card has a clear title");
+  assert.match(localChoice, /deepseek-v4-flash/, "DeepSeek card has the configured model fallback");
+  assert.match(localChoice, /ds4-serve/, "DeepSeek card gives Dwarf Star start guidance");
+});
+
+test("Settings Models renders DeepSeek local status instead of Rapid-MLX when selected", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const renderSettings = extractBetween(js, "function renderSettingsModelControls()", "function closeSettings()");
+
+  assert.match(renderSettings, /const isDwarfStarLocal = isDwarfStarLocalBackend\(local, m\.localModelHealth\)/);
+  assert.match(renderSettings, /renderLocalBackendChoice\(local, m\.localModelHealth\)/);
+  assert.match(renderSettings, /if \(!isDwarfStarLocal\)[\s\S]*renderLocalEngine\(m\.localEngine, m\.localEngineCapability\)/);
+  assert.match(renderSettings, /if \(!isDwarfStarLocal\)[\s\S]*renderProvisionUI\(m\.localEngineCapability\)/);
+});
+
+test("console generic local-model copy does not hardcode Qwen", () => {
+  const genericQwenCopy = [
+    "local Qwen",
+    "Local Qwen",
+    "Qwen (local)",
+    "Default — local Qwen",
+    "Local Model (LM Studio / Rapid-MLX)",
+  ];
+  for (const text of genericQwenCopy) {
+    assert.doesNotMatch(CONSOLE_HTML, new RegExp(text.replace(/[()]/g, "\\$&")), `misleading copy remains: ${text}`);
+  }
 });
 
 test("Settings Models includes configurable embedding model choices", () => {

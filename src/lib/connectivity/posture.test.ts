@@ -13,6 +13,8 @@ test("offline: local workhorses work, image degrades, cloud work queues — noth
   const r = describeLocalPosture("offline");
   const by = (id: string) => r.capabilities.find((c) => c.id === id)!;
   assert.equal(by("local").disposition, "works");
+  assert.equal(by("local").label, "Local model");
+  assert.doesNotMatch(by("local").note, /qwen/i);
   assert.equal(by("termbee").disposition, "works");
   assert.equal(by("termbee").label, "Terminal Lane");
   assert.equal(by("desktopbee").disposition, "works");

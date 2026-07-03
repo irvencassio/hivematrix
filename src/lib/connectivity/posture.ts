@@ -53,7 +53,7 @@ function countsFor(capabilities: CapabilityPosture[]): PostureCounts {
 export function describeLocalPosture(mode: ConnectivityMode): LocalPostureReport {
   const cloud = mode === "cloud-ok";
   const caps: CapabilityPosture[] = [
-    { id: "local", label: "Local Qwen", disposition: "works", action: "run_now", note: "Local Qwen runs in every mode." },
+    { id: "local", label: "Local model", disposition: "works", action: "run_now", note: "The configured local model runs in every mode." },
     { id: "desktopbee", label: "Desktop Lane", disposition: "works", action: "run_now", note: "Native desktop control works offline." },
     { id: "termbee", label: "Terminal Lane", disposition: "works", action: "run_now", note: "Terminal sessions work offline (the workhorse)." },
     {

@@ -928,7 +928,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <div class="overlay" id="settingsOverlay">
   <div class="modal">
     <h1>Settings <span class="x" onclick="closeSettings()">✕</span></h1>
-    <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-observability" onclick="switchSettingsTab('observability')">Observability</div><div class="tab" id="tab-lanes" onclick="switchSettingsTab('lanes')">Lanes</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-license" onclick="switchSettingsTab('license')">License</div></div>
+    <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-setup" onclick="switchSettingsTab('setup')">Setup</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-observability" onclick="switchSettingsTab('observability')">Observability</div><div class="tab" id="tab-lanes" onclick="switchSettingsTab('lanes')">Lanes</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-license" onclick="switchSettingsTab('license')">License</div></div>
     <div id="settingsModels" style="display:none">
       <label class="flbl">Default model</label>
       <select id="s_default" style="width:100%" onchange="saveDefault()"></select>
@@ -996,7 +996,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
           <button class="copybtn" onclick="renderObsDashboard()">↻ Refresh</button>
         </div>
       </div>
-      <div class="muted" style="font-size:11px;margin-bottom:10px">Tokens, tasks, latency and prompt-cache across Claude, Codex (ChatGPT) and local Qwen. All on-device.</div>
+      <div class="muted" style="font-size:11px;margin-bottom:10px">Tokens, tasks, latency and prompt-cache across Claude, Codex (ChatGPT) and the local model. On-device local work stays on this Mac.</div>
       <div id="obsDash"><div class="muted">Loading…</div></div>
     </div>
     <div id="settingsRemote" style="display:none">
@@ -1139,6 +1139,17 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="ab_setup" class="muted" style="font-size:12px">…</div>
       <label class="flbl" style="margin-top:18px">Soak / Health</label>
       <div id="metrics"></div>
+    </div>
+    <div id="settingsSetup" style="display:none">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+        <label class="flbl" style="margin:0">Setup</label>
+        <button class="create" onclick="openObWizard()">Open setup wizard</button>
+      </div>
+      <div id="settings_setup_summary" class="muted" style="font-size:12px;margin-bottom:10px">Loading…</div>
+      <label class="flbl">Required</label>
+      <div id="settings_setup_required"></div>
+      <label class="flbl" style="margin-top:14px">Optional</label>
+      <div id="settings_setup_optional"></div>
     </div>
     <div id="settingsProjects" style="display:none">
       <div class="kv"><span class="k">discovered</span><span id="s_proj_count">…</span></div>
@@ -1358,7 +1369,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </span>
       <button class="copybtn" onclick="renderObsDashboard('obsDashModal')">↻ Refresh</button>
     </div>
-    <div class="muted" style="font-size:11px;margin-bottom:10px">Tokens, tasks, latency and prompt-cache across Claude, Codex (ChatGPT) and local Qwen. All on-device.</div>
+    <div class="muted" style="font-size:11px;margin-bottom:10px">Tokens, tasks, latency and prompt-cache across Claude, Codex (ChatGPT) and the local model. On-device local work stays on this Mac.</div>
     <div id="obsDashModal"><div class="muted">Loading…</div></div>
   </div>
 </div>
@@ -1600,11 +1611,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="ob-model-card" id="ob_model_lmstudio">
         <div class="ob-model-icon">⬡</div>
         <div class="ob-model-body">
-          <div class="ob-model-name">Local Model (LM Studio / Rapid-MLX) <span class="ob-model-mark no" id="ob_lm_mark">—</span></div>
+          <div class="ob-model-name">Local model <span class="ob-model-mark no" id="ob_lm_mark">—</span></div>
           <div class="ob-model-status" id="ob_lm_status">Not configured</div>
           <div class="ob-model-expand" onclick="obToggleDetail('ob_lm_detail')">▸ Configure local model</div>
           <div class="ob-model-detail" id="ob_lm_detail">
-            <div class="muted" style="font-size:11px;margin-bottom:8px">Run any OpenAI-compatible local model (LM Studio, Ollama, Rapid-MLX). Start your server, then paste its URL and model name below.</div>
+            <div class="muted" style="font-size:11px;margin-bottom:8px">Run any OpenAI-compatible local model (LM Studio, Ollama, Rapid-MLX, or Dwarf Star). Start your server, then paste its URL and model name below.</div>
             <div class="ob-btn-row" style="margin-bottom:8px">
               <button id="ob_lm_provision" onclick="obProvisionLocalEngine()">Provision Rapid-MLX →</button>
               <span class="muted" style="font-size:11px">Installs the recommended local model for this Mac.</span>
@@ -3045,7 +3056,7 @@ function toggleReply(id) {
 
 // --- Observability (per-task telemetry + totals) ---
 let _obsWindow = "7d";
-const OBS_LABELS = { "anthropic": "Claude", "openai-codex": "Codex", "local-qwen": "Qwen (local)", "local-dwarfstar": "Dwarf Star", "other": "other" };
+const OBS_LABELS = { "anthropic": "Claude", "openai-codex": "Codex", "local-qwen": "Local model", "local-dwarfstar": "Dwarf Star", "other": "other" };
 const OBS_COLORS = { "anthropic": "#c8794f", "openai-codex": "#10a37f", "local-qwen": "#7a5cff", "local-dwarfstar": "#1f9f89", "other": "#8a93a6" };
 const OBS_ORDER = { "anthropic": 0, "openai-codex": 1, "local-qwen": 2, "local-dwarfstar": 3, "other": 4 };
 function obsProvider(model) {
@@ -3053,7 +3064,7 @@ function obsProvider(model) {
   if (/^(codex|chatgpt)/.test(m) || /^(gpt|o[0-9])/.test(m)) return "Codex";
   if (/^(claude|opus|sonnet|haiku)/.test(m)) return "Claude";
   if (/(deepseek|dwarfstar|ds4)/.test(m)) return "Dwarf Star";
-  if (/(qwen|mistral|llama|mlx|local|gemma|phi|nan)/.test(m)) return "Qwen (local)";
+  if (/(qwen|mistral|llama|mlx|local|gemma|phi|nan)/.test(m)) return "Local model";
   return "—";
 }
 
@@ -3221,7 +3232,7 @@ async function renderObsDashboard(target) {
     + obsStackedBars(s.points, providers, function (p, pr) { const c = p.byProvider[pr]; return c ? c.runs : 0; }, s.unit)
     + obsLegend(providers) + '</div>';
 
-  html += '<div class="obs-chart"><h4>Prompt cache</h4><div class="sub">cached input reuse — Claude &amp; Codex cache prompts; local Qwen runs on-device</div>';
+  html += '<div class="obs-chart"><h4>Prompt cache</h4><div class="sub">cached input reuse — Claude &amp; Codex cache prompts; local model work runs on-device</div>';
   const crows = (s.cache || []).slice().sort(function (a, b) { return (OBS_ORDER[a.provider] ?? 9) - (OBS_ORDER[b.provider] ?? 9); });
   if (!crows.length) html += '<div class="muted">No cache data.</div>';
   for (const c of crows) {
@@ -4065,18 +4076,52 @@ function renderOnboarding() {
   if (sec && sum) {
     sum.textContent = o.requiredComplete ? "Setup ✓" : "Setup";
     // Once required setup is complete, the wizard is just a wall of green checks —
-    // drop it off the rail entirely. It still lives on under Settings → About.
+    // drop it off the rail entirely. It still lives on under Settings → Setup.
     sec.style.display = o.requiredComplete ? "none" : "";
   }
   const abSetup = document.getElementById("ab_setup");
   if (abSetup) {
     const remaining = o.steps.filter(s => s.required && s.state !== "done").length;
     abSetup.textContent = o.requiredComplete
-      ? "✓ Required setup complete."
-      : remaining + " required step" + (remaining === 1 ? "" : "s") + " remaining — see the Setup panel on the dashboard.";
+      ? "✓ Required setup complete. Review or rerun setup from Settings → Setup."
+      : remaining + " required step" + (remaining === 1 ? "" : "s") + " remaining — open Settings → Setup.";
   }
+  renderSettingsSetup();
   // Auto-open the wizard on first run (only once per session, respects dismiss)
   _obMaybeAutoOpen(o);
+}
+
+function renderSettingsSetup() {
+  const summary = document.getElementById("settings_setup_summary");
+  const reqEl = document.getElementById("settings_setup_required");
+  const optEl = document.getElementById("settings_setup_optional");
+  if (!summary || !reqEl || !optEl) return;
+  const o = state.onboarding;
+  if (!o || !Array.isArray(o.steps)) {
+    summary.textContent = "Setup status is loading.";
+    reqEl.innerHTML = '<div class="muted" style="font-size:12px">Loading…</div>';
+    optEl.innerHTML = '<div class="muted" style="font-size:12px">Loading…</div>';
+    return;
+  }
+  const remaining = o.steps.filter(s => s.required && s.state !== "done").length;
+  summary.textContent = o.requiredComplete
+    ? "Required setup complete. You can reopen the wizard anytime."
+    : remaining + " required step" + (remaining === 1 ? "" : "s") + " remaining.";
+  const row = s => {
+    const done = s.state === "done";
+    const mark = done ? "✓" : "○";
+    const color = done ? "var(--ok)" : (s.required ? "var(--err)" : "var(--muted)");
+    const action = done ? "" : '<button class="copybtn" onclick="wizardAction(\'' + esc(s.id) + '\')">Set up</button>';
+    return '<div class="card" style="cursor:default;margin-bottom:6px">'
+      + '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:10px">'
+      + '<div><div style="font-weight:600;color:' + color + '">' + mark + ' ' + esc(s.title) + '</div>'
+      + '<div class="muted" style="font-size:11px;margin-top:2px">' + esc(s.detail || s.remediation || '') + '</div></div>'
+      + action + '</div></div>';
+  };
+  const required = o.steps.filter(s => s.required);
+  const optional = o.steps.filter(s => !s.required);
+  reqEl.innerHTML = required.length ? required.map(row).join("") : '<div class="muted" style="font-size:12px">No required setup steps.</div>';
+  optEl.innerHTML = optional.length ? optional.map(row).join("") : '<div class="muted" style="font-size:12px">No optional setup steps.</div>';
 }
 
 // Side rails are width-adjustable: drag the divider on a rail's inner edge.
@@ -5017,7 +5062,7 @@ async function checkUsage(forceRefresh) {
       }
       summaryEl.innerHTML = cards
         ? '<div class="usage-cards">' + cards + '</div>'
-        : '<div class="muted">No frontier usage yet — local Qwen work runs on-device.</div>';
+        : '<div class="muted">No frontier usage yet — local model work runs on-device.</div>';
     }
 
     const el = document.getElementById("usage");
@@ -5062,7 +5107,7 @@ async function checkUsage(forceRefresh) {
         + u.byModel.map(m => '<div class="urow"><span>' + esc(m.label) + '</span>'
           + '<span class="um">' + m.tasks + ' task' + (m.tasks===1?'':'s') + '</span></div>').join("");
     } else if (!sub || (!sub.fiveHour && !sub.sevenDay)) {
-      html += '<div class="muted">No frontier usage yet — local Qwen work runs on-device.</div>';
+      html += '<div class="muted">No frontier usage yet — local model work runs on-device.</div>';
     }
 
     html += '</div>';
@@ -5080,13 +5125,20 @@ async function checkModels() {
   try { [serving, emb] = await Promise.all([api("/local-model/status"), api("/embeddings")]); } catch (e) { /* transient */ }
 
   const le = models.localEngine, cap = models.localEngineCapability;
+  const localBackend = ((models.backends || []).find(b => b.id === "local")) || null;
+  const isDwarfStarLocal = isDwarfStarLocalBackend(localBackend, models.localModelHealth);
   let html = "";
 
   // — Local (on-device) —
-  if (le || (cap && !cap.localCapable)) {
+  if (le || isDwarfStarLocal || (cap && !cap.localCapable)) {
     html += '<div class="mdl-grp">Local · on-device</div>';
-    html += renderLocalEngine(le, cap) || "";
-    if (serving && serving.managed) {
+    if (isDwarfStarLocal) {
+      html += renderLocalBackendChoice(localBackend, models.localModelHealth);
+    }
+    if (!isDwarfStarLocal) {
+      html += renderLocalEngine(le, cap) || "";
+    }
+    if (!isDwarfStarLocal && serving && serving.managed) {
       const bits = [];
       if (serving.modelId) bits.push(esc(serving.modelId));
       if (serving.restarts) bits.push(serving.restarts + " restart" + (serving.restarts === 1 ? "" : "s"));
@@ -5119,7 +5171,13 @@ async function checkModels() {
   // Header pill — at-a-glance "is the local engine running".
   const pill = document.getElementById("localPill");
   if (pill) {
-    if (le && (!cap || cap.localCapable)) {
+    if (isDwarfStarLocal) {
+      const health = models.localModelHealth || null;
+      const ready = !!(health && (health.qwenReady === true || health.ready === true || health.ok === true));
+      pill.textContent = "🧠 DeepSeek";
+      pill.style.display = "";
+      pill.title = ready ? "Dwarf Star DeepSeek ready" : "Dwarf Star DeepSeek not ready";
+    } else if (le && (!cap || cap.localCapable)) {
       const up = !!le.up;
       const live = (le.tiers || []).filter(t => t.healthy).map(t => t.key);
       pill.textContent = "🧠 local";
@@ -5269,6 +5327,62 @@ function _closeNewTaskPanel() {
 // --- Models / Settings ---
 let models = null;            // { backends, available, defaultModel, version }
 const modelById = {};         // UiModel.id → {modelId, fast}
+
+function localBackendText(backend, health) {
+  return [
+    backend && backend.name,
+    backend && backend.detail,
+    backend && backend.modelId,
+    backend && backend.endpoint,
+    backend && backend.connect,
+    health && health.provider,
+    health && health.modelName,
+    health && health.endpoint,
+    health && health.message,
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function isDwarfStarLocalBackend(backend, health) {
+  return /dwarf\s*star|dwarfstar|deepseek|ds4/.test(localBackendText(backend, health));
+}
+
+function renderLocalBackendChoice(backend, health) {
+  const isDwarfStar = isDwarfStarLocalBackend(backend, health);
+  const provider = health ? localHealthProviderName(health.provider) : (isDwarfStar ? "Dwarf Star" : "local");
+  const title = isDwarfStar ? "Dwarf Star DeepSeek" : ((backend && backend.name) || ("Local model — " + provider));
+  const model = (health && health.modelName) || (backend && backend.modelId) || (isDwarfStar ? "deepseek-v4-flash" : "local model");
+  const endpoint = (health && health.endpoint) || (backend && backend.endpoint) || "";
+  const ready = health
+    ? (health.qwenReady === true || health.ready === true || health.ok === true)
+    : !!(backend && backend.configured);
+  const checked = health && health.checkedAt ? new Date(health.checkedAt).toLocaleString() : "";
+  const bits = [];
+  if (health) {
+    bits.push(health.modelFound ? "model listed" : "model missing");
+    bits.push(health.streaming ? "streaming ok" : "streaming not verified");
+    bits.push(health.toolCalls ? "tools ok" : "tools not verified");
+    if (typeof health.decodeRateTokPerSec === "number") bits.push(health.decodeRateTokPerSec.toFixed(1) + " tok/s");
+  } else if (backend && backend.detail) {
+    bits.push(backend.detail);
+  }
+  if (isDwarfStar && !ready) {
+    bits.push("Start ds4-serve, then rerun local model readiness.");
+  } else if (backend && backend.connect && !backend.configured) {
+    bits.push(backend.connect);
+  }
+  return '<div class="mdl-card">'
+    + '<div class="mdl-card-head"><span class="mdl-card-name">Local model — ' + esc(title) + '</span>'
+    + '<span class="st ' + (ready ? "ok" : "no") + '">' + (ready ? "✓ ready" : (health ? "not ready" : "not checked")) + '</span></div>'
+    + '<div class="mdl-tier">' + (ready ? '<span style="color:var(--ok)">●</span>' : '<span style="color:var(--muted)">○</span>')
+    + ' <b>' + esc(model) + '</b><span class="mdl-tier-alias">' + (endpoint ? esc(endpoint) : esc(provider)) + '</span></div>'
+    + (bits.length || (health && health.message) || checked
+      ? '<div class="mdl-card-foot">' + esc(bits.join(" · "))
+        + (health && health.message ? '<br>' + esc(health.message) : '')
+        + (checked ? '<br>checked ' + esc(checked) : '')
+        + '</div>'
+      : '')
+    + '</div>';
+}
 
 // Live status of the local inference engine (Rapid-MLX) + each tier, so you can
 // see at a glance that local is up and serving everything.
@@ -5463,6 +5577,8 @@ async function loadModels() {
   // the version-bearing payload arrives.
   const about = document.getElementById("settingsAbout");
   if (about && about.style.display !== "none") renderAbout();
+  const settingsOverlay = document.getElementById("settingsOverlay");
+  if (settingsOverlay && settingsOverlay.classList.contains("open")) renderSettingsModelControls();
 }
 
 // --- Projects ---
@@ -5966,45 +6082,75 @@ function renderAttachChips() {
   }).join("");
 }
 
-function openSettings() {
+async function openSettings() {
   document.getElementById("settingsOverlay").classList.add("open");
   switchSettingsTab("about"); // open on About by default
-  if (!models) return;
+  if (!models) {
+    try { await loadModels(); } catch (e) { /* Settings can still show setup/features. */ }
+  }
+  renderSettingsModelControls();
+  loadTunnel();
+}
+
+function renderSettingsModelControls() {
+  const m = models || {};
+  const available = Array.isArray(m.available) ? m.available : [];
+  const backends = Array.isArray(m.backends) ? m.backends : [];
+  const local = backends.find(b => b.id === "local");
+  const isDwarfStarLocal = isDwarfStarLocalBackend(local, m.localModelHealth);
   const sd = document.getElementById("s_default");
-  sd.innerHTML = models.available.map(m => '<option value="'+esc(m.modelId)+'">'+esc(m.name)+'</option>').join("");
-  if (models.defaultModel) sd.value = models.defaultModel;
-  document.getElementById("s_backends").innerHTML = models.backends.map(b =>
+  sd.disabled = !available.length;
+  if (available.length) {
+    sd.innerHTML = available.map(m => '<option value="'+esc(m.modelId)+'">'+esc(m.name)+'</option>').join("");
+    if (m.defaultModel) sd.value = m.defaultModel;
+  } else {
+    sd.innerHTML = '<option value="">(no models configured)</option>';
+  }
+  document.getElementById("s_backends").innerHTML = backends.length ? backends.map(b =>
     '<div class="mdl-card"><div class="mdl-card-head"><span class="mdl-card-name">'+esc(b.name)+'</span>'
     + '<span class="st '+(b.configured?'ok':'no')+'">'+(b.configured?'✓ '+esc(b.detail):'not set up')+'</span></div>'
-    + (b.configured?'':'<div class="mdl-card-foot">'+esc(b.connect||'')+'</div>')+'</div>').join("")
-    + renderLocalEngine(models.localEngine, models.localEngineCapability)
-    + renderLocalModelHealth(models.localModelHealth)
-    + renderProvisionUI(models.localEngineCapability);
-  const local = models.backends.find(b => b.id === "local");
+    + (b.configured?'':'<div class="mdl-card-foot">'+esc(b.connect||'')+'</div>')+'</div>').join("") : '<div class="mdl-card"><div class="mdl-card-foot" style="border:none;margin:0;padding:0">Model status unavailable.</div></div>';
+  if (isDwarfStarLocal) {
+    document.getElementById("s_backends").innerHTML += renderLocalBackendChoice(local, m.localModelHealth);
+  }
+  if (!isDwarfStarLocal) {
+    document.getElementById("s_backends").innerHTML += renderLocalEngine(m.localEngine, m.localEngineCapability);
+  }
+  document.getElementById("s_backends").innerHTML += renderLocalModelHealth(m.localModelHealth);
+  if (!isDwarfStarLocal) document.getElementById("s_backends").innerHTML += renderProvisionUI(m.localEngineCapability);
   document.getElementById("s_endpoint").value = (local && local.endpoint) || "http://localhost:1234/v1";
   renderEmbeddingSettings();
-  const v = models.version || {};
+  const v = m.version || {};
   document.getElementById("s_version").textContent = "HiveMatrix v" + (v.version||"?") + " · build " + (v.build||"?") + " · " + (v.date||"?");
-  document.getElementById("s_theme").value = models.theme || "system";
-  document.getElementById("s_app_icon").value = models.appIconChoice || "white";
+  document.getElementById("s_theme").value = m.theme || "system";
+  document.getElementById("s_app_icon").value = m.appIconChoice || "white";
   const iconStatus = document.getElementById("app_icon_status");
   if (iconStatus) iconStatus.textContent = "";
   document.getElementById("s_token").value = HM_TOKEN || "(load the local console to see the token)";
   // Wallpaper: reflect the current image + path so settings shows what's active.
-  const hasWp = !!models.hasWallpaper;
-  document.getElementById("s_wallpaper").value = hasWp ? (models.wallpaperPath || "") : "";
+  const hasWp = !!m.hasWallpaper;
+  document.getElementById("s_wallpaper").value = hasWp ? (m.wallpaperPath || "") : "";
   if (hasWp) showWallpaperPreview(); else document.getElementById("wallpaper_preview").style.display = "none";
   syncWallpaperOpacityRow();
-  document.getElementById("s_location").value = models.location || "";
-  document.getElementById("s_autoupdate").checked = !!models.autoUpdate;
-  document.getElementById("s_telemetry").checked = !!models.telemetryEnabled;
+  document.getElementById("s_location").value = m.location || "";
+  document.getElementById("s_autoupdate").checked = !!m.autoUpdate;
+  document.getElementById("s_telemetry").checked = !!m.telemetryEnabled;
   document.getElementById("s_telemetry_status").textContent = "";
-  const hasBothFrontier = models.backends.some(b => b.id === "claude" && b.configured)
-                        && models.backends.some(b => b.id === "codex" && b.configured);
-  document.getElementById("s_frontier_provider_row").style.display = hasBothFrontier ? "" : "none";
-  if (hasBothFrontier) document.getElementById("s_frontier_provider").value = models.frontierProvider || "claude";
+  const hasClaudeFrontier = backends.some(b => b.id === "claude" && b.configured);
+  const hasCodexFrontier = backends.some(b => b.id === "codex" && b.configured);
+  const hasAnyFrontier = hasClaudeFrontier || hasCodexFrontier;
+  const hasBothFrontier = hasClaudeFrontier && hasCodexFrontier;
+  document.getElementById("s_frontier_provider_row").style.display = hasAnyFrontier ? "" : "none";
+  const frontierSelect = document.getElementById("s_frontier_provider");
+  if (frontierSelect) {
+    const effectiveFrontierProvider = hasCodexFrontier && !hasClaudeFrontier ? "codex"
+      : hasClaudeFrontier && !hasCodexFrontier ? "claude"
+        : m.frontierProvider || "claude";
+    frontierSelect.value = effectiveFrontierProvider;
+    frontierSelect.disabled = !hasBothFrontier;
+    frontierSelect.title = hasBothFrontier ? "Choose which frontier CLI handles Mixed and Cloud-only work." : "Only one frontier CLI is available.";
+  }
   renderRoleModels();
-  loadTunnel();
 }
 function closeSettings() { document.getElementById("settingsOverlay").classList.remove("open"); }
 
@@ -6056,7 +6202,7 @@ function renderRoleModels() {
   };
   fill("s_role_thinking", opts.thinking || [], provider === "codex" ? "Default — Codex GPT-5.5" : "Default — Opus", rm.thinking);
   fill("s_role_coding", opts.coding || [], provider === "codex" ? "Default — Codex Spark" : "Default — Sonnet", rm.coding);
-  fill("s_role_operational", opts.operational || [], "Default — local Qwen", rm.operational);
+  fill("s_role_operational", opts.operational || [], "Default — local model", rm.operational);
   fill("s_role_writer", opts.writer || [], provider === "codex" ? "Default — Codex GPT-5.5 online, local offline" : "Default — Sonnet online, local offline", rm.writer);
 }
 
@@ -6114,13 +6260,14 @@ async function sendDiagnostics() {
 }
 
 function switchSettingsTab(tab) {
-  const tabs = ["about", "features", "general", "models", "observability", "lanes", "remote", "license"];
-  const panels = { models: "settingsModels", observability: "settingsObservability", lanes: "settingsLanes", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout", license: "settingsLicense" };
+  const tabs = ["about", "setup", "features", "general", "models", "observability", "lanes", "remote", "license"];
+  const panels = { models: "settingsModels", observability: "settingsObservability", lanes: "settingsLanes", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout", setup: "settingsSetup", license: "settingsLicense" };
   for (const t of tabs) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
   if (tab === "lanes") { renderSystemReadiness(); renderLaneSetup(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); renderWorkPackages(); renderVaultRefs(); }
+  if (tab === "setup") renderSettingsSetup();
   if (tab === "features") renderFeatures();
   if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -8042,6 +8189,7 @@ function showWallpaperPreview() {
 
 async function saveDefault() {
   const modelId = document.getElementById("s_default").value;
+  if (!modelId) { hmToast("No model is configured yet", "err"); return; }
   await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ defaultModel: modelId }) });
   await loadModels();
   hmToast("Default model saved", "ok");
