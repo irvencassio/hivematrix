@@ -85,7 +85,7 @@ test("microphone opened is not represented as granted", () => {
   assert.match(row.detail, /request.*first Talk Mode/i);
 });
 
-test("local model provisioning and persona state appear as setup sections", () => {
+test("local model provisioning is optional until the user starts Rapid-MLX setup", () => {
   const status = buildFirstRunSetupStatus({
     localModel: {
       plan: {
@@ -110,7 +110,10 @@ test("local model provisioning and persona state appear as setup sections", () =
     },
   });
 
-  assert.equal(item(status.models, "localModel").state, "needs_action");
+  const localModel = item(status.models, "localModel");
+  assert.equal(localModel.state, "not_requested");
+  assert.equal(localModel.action, "provision_local_model");
+  assert.match(localModel.detail, /Optional: provision Rapid-MLX/i);
   assert.match(item(status.models, "localModel").detail, /fast/);
   assert.equal(item(status.memory, "persona").state, "needs_action");
   assert.match(item(status.memory, "persona").detail, /birth ritual/i);

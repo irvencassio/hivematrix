@@ -19,9 +19,10 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import {
-  localEngineCapability, probeHardware, DEFAULT_TIERS, resolveRapidBinary,
+  localEngineCapability, probeHardware, DEFAULT_TIERS, resolveRapidBinary, tierBaseUrl,
   type LocalTier, type TierKey, type HardwareProbe,
 } from "./local-engine";
+import type { QwenProfile } from "@/lib/config/qwen-profile";
 import { provisioningPython } from "@/lib/voice/provision";
 
 const execFileP = promisify(execFile);
@@ -72,6 +73,32 @@ export function planLocalEngine(env: Partial<HardwareProbe> = {}): ProvisionPlan
     recommendedTiers: cap.recommendedTiers,
     tiers, reason: cap.reason,
   };
+}
+
+export function qwenProfileForProvisionPlan(plan: ProvisionPlan): QwenProfile | null {
+  if (!plan.localCapable || plan.tiers.length === 0) return null;
+  const primaryTier = plan.tiers.find((t) => t.key === "coding") ?? plan.tiers[0];
+  const secondaryTier = plan.tiers.find((t) => t.key !== primaryTier.key) ?? null;
+  const modelForTier = (tier: LocalTier) => ({
+    modelId: tier.alias,
+    endpoint: tierBaseUrl(tier),
+    provider: "mlx" as const,
+    contextLimit: 262144,
+  });
+  return {
+    location: "local",
+    primary: modelForTier(primaryTier),
+    secondary: secondaryTier ? modelForTier(secondaryTier) : null,
+    thinkingEnabled: true,
+    minDecodeRate: 15,
+    probeTimeoutMs: 60_000,
+  };
+}
+
+function ensureQwenProfile(cfg: Record<string, unknown>, plan: ProvisionPlan): void {
+  if (cfg.qwen && typeof cfg.qwen === "object") return;
+  const profile = qwenProfileForProvisionPlan(plan);
+  if (profile) cfg.qwen = profile;
 }
 
 type Logger = (line: string) => void;
@@ -131,6 +158,7 @@ export async function provisionLocalEngine(opts: { onLog?: Logger; env?: Partial
     await run(bin, ["pull", t.alias], onLog);
   }
   cfg.localEngine = { engine: "rapid-mlx", binary: bin, tiers: plan.tiers };
+  ensureQwenProfile(cfg, plan);
   writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
   onLog("Wrote localEngine config. Restart the daemon to serve the configured tiers.");
   return plan;

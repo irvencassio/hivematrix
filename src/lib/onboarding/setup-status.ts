@@ -239,9 +239,9 @@ function buildLocalModel(input: FirstRunSetupStatusInput): SetupItem {
     return {
       id: "localModel",
       title: "Local model provisioning",
-      state: plan.localCapable ? "needs_action" : "configured",
+      state: plan.localCapable ? "not_requested" : "configured",
       detail: plan.localCapable
-        ? `Provision Rapid-MLX for this Mac: ${tiers}.`
+        ? `Optional: provision Rapid-MLX for this Mac when you want local models: ${tiers}.`
         : `Local model not required: ${plan.reason ?? "this Mac is cloud-only"}.`,
       action: plan.localCapable ? "provision_local_model" : undefined,
     };

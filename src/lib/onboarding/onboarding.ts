@@ -83,9 +83,9 @@ export function getOnboardingStatus(opts: {
   });
 
   // local-model — satisfied by a configured Rapid-MLX localEngine, a legacy
-  // local model (LM Studio/Qwen profile), OR an explicit cloud-only posture
-  // (where the absence of a local model is intentional). On a machine that
-  // can't run a local model, cloud-only is the expected, satisfied state.
+  // local model (LM Studio/Qwen profile), OR the default cloud-first posture.
+  // Users can still explicitly choose local-only, in which case this becomes
+  // a real required setup step again.
   const qwen = cfg?.qwen as Record<string, unknown> | undefined;
   const localEngine = cfg?.localEngine as Record<string, unknown> | undefined;
   const engineTiers = Array.isArray(localEngine?.tiers) ? (localEngine!.tiers as unknown[]) : [];
@@ -94,9 +94,11 @@ export function getOnboardingStatus(opts: {
     !!(cfg?.localModel as Record<string, unknown>)?.modelName;
   const modelConfigured = engineConfigured || legacyConfigured;
   const cap = localEngineCapability();
-  // cloud-only by explicit posture, OR because the hardware can't run local.
+  // cloud-only by explicit posture, because the hardware can't run local, OR
+  // cloud-first by default once the app has a config file.
   const cloudOnly = cfg?.runMode === "cloud-only" || !cap.localCapable;
-  const localOk = modelConfigured || cloudOnly;
+  const cloudFirst = !!cfg && cfg.runMode !== "local-only";
+  const localOk = modelConfigured || cloudOnly || cloudFirst;
   const engineModel = engineConfigured
     ? (engineTiers.map((t) => (t as Record<string, unknown>)?.alias).filter(Boolean).join(" + ") || "rapid-mlx")
     : null;
@@ -111,8 +113,10 @@ export function getOnboardingStatus(opts: {
         ? `model: ${(qwen?.primary as Record<string, unknown>)?.modelId ?? (cfg?.localModel as Record<string, unknown>)?.modelName}`
         : !cap.localCapable
           ? `cloud-only — ${cap.reason ?? "this Mac can't run a local model"}`
-          : cloudOnly
-            ? "cloud-only mode — no local model required"
+        : cloudOnly
+          ? "cloud-only mode — no local model required"
+          : cloudFirst
+            ? "cloud-first mode — local model can be provisioned later"
             : "no local model configured",
     remediation: localOk ? undefined
       : `Run the provisioner to size + install the local engine for this Mac (recommended: ${cap.recommendedTiers.join(" + ") || "cloud-only"}): npx tsx scripts/provision-local-engine.mts --apply`,

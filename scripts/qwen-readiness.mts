@@ -18,8 +18,10 @@ function line(s = "") { process.stdout.write(s + "\n"); }
 async function main() {
   const profile = getQwenProfile();
   if (!profile) {
-    line("✗ No Qwen profile in ~/.hivematrix/config.json");
-    process.exit(1);
+    line("⊘ No Qwen profile in ~/.hivematrix/config.json");
+    line("  Local Qwen readiness skipped: HiveMatrix can run cloud-first before Rapid-MLX is installed.");
+    line("  To enable this gate, run: npx tsx scripts/provision-local-engine.mts --apply");
+    process.exit(0);
   }
 
   const { modelId, endpoint, provider, contextLimit } = profile.primary;

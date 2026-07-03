@@ -65,6 +65,17 @@ test("local-model step is satisfied by cloud-only posture (no local model)", () 
   assert.match(step(status, "local-model").detail, /cloud-only/);
 });
 
+test("local-model step is satisfied by the cloud-first default", () => {
+  const status = withHome((home) => {
+    mkdirSync(join(home, ".hivematrix"), { recursive: true });
+    writeFileSync(join(home, ".hivematrix", "config.json"), JSON.stringify({
+      memory: { brainRootDir: join(home, "brain") },
+    }));
+  }, () => getOnboardingStatus({ now: "T" }));
+  assert.equal(step(status, "local-model").state, "done");
+  assert.match(step(status, "local-model").detail, /cloud-first/i);
+});
+
 test("desktopbee done only when helper built AND both permissions granted", () => {
   const base = (opts: Parameters<typeof getOnboardingStatus>[0]) =>
     withHome(() => {}, () => getOnboardingStatus({ now: "T", ...opts }));
