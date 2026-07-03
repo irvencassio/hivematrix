@@ -38,6 +38,9 @@ final class TerminalViewController: NSViewController {
             terminal.heightAnchor.constraint(greaterThanOrEqualToConstant: 460),
         ])
         reloadProfiles()
+
+        // Show agent runs (POST /run) live in this terminal view.
+        TerminalRunService.shared.display = self
     }
 
     private func reloadProfiles() {
@@ -98,5 +101,15 @@ final class TerminalViewController: NSViewController {
         terminal.wantsLayer = true
         terminal.layer?.backgroundColor = NSColor.black.cgColor
         return terminal
+    }
+}
+
+extension TerminalViewController: TerminalDisplaySink {
+    /// Echo each agent command + its output into the visible terminal so the
+    /// operator can watch. Terminals need CR+LF, so normalize newlines.
+    func showRun(command: String, output: String) {
+        let normalized = output.replacingOccurrences(of: "\n", with: "\r\n")
+        let text = "\r\n\u{1b}[36m$ \(command)\u{1b}[0m\r\n\(normalized)\r\n"
+        terminalView?.feed(text: text)
     }
 }

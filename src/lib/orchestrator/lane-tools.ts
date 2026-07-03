@@ -761,7 +761,7 @@ async function executeBrowserLaneRead(args: Record<string, unknown>, ctx: LaneTo
     return `${data.answer ?? "(no answer)"}${cites}${esc}`;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return `Error: Browser Lane read service unreachable — ${msg}. Is the Browser Lane read backend running (default http://127.0.0.1:4011)?`;
+    return `Error: Browser Lane read service unreachable — ${msg}. Open the Browser Lane app (it serves reads on http://127.0.0.1:4011/answer) and retry.`;
   }
 }
 

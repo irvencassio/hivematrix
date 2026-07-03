@@ -46,6 +46,13 @@ final class BrowserViewController: NSViewController {
     private let popupCloseButton = NSButton(title: "Close popup", target: nil, action: nil)
     private var popupWebView: WKWebView?
 
+    // --- Agent read state (POST /answer from the loopback server) ---
+    // One read at a time drives the visible webView so the operator can watch;
+    // extra requests queue. `activeRead` is set while a navigation is in flight.
+    private var activeRead: ((BrowserReadResult) -> Void)?
+    private var readQueue: [(query: String, completion: (BrowserReadResult) -> Void)] = []
+    private var readTimeout: DispatchWorkItem?
+
     private static let safariUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"
 
     /// One persistent website data store, shared across every WKWebView Browser Lane
@@ -203,6 +210,9 @@ final class BrowserViewController: NSViewController {
         } else {
             load(BrowserLaneSettings.shared.defaultURL)
         }
+
+        // Become the read driver so the loopback /answer server can drive this view.
+        BrowserReadService.shared.driver = self
     }
 
     private func showPopup(_ popup: WKWebView, initialURL: URL?) {
@@ -318,6 +328,13 @@ extension BrowserViewController: WKNavigationDelegate {
         } else {
             addressField.stringValue = webView.url?.absoluteString ?? addressField.stringValue
             statusLabel.stringValue = webView.url?.host ?? "Loaded"
+            // If a read navigation just finished, extract and return it.
+            if activeRead != nil {
+                // Small settle delay lets client-rendered results paint before extraction.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                    self?.extractActiveRead()
+                }
+            }
         }
         updateAuthRecovery(for: webView.url)
     }
@@ -365,5 +382,97 @@ extension BrowserViewController: WKUIDelegate {
             closePopup()
             statusLabel.stringValue = "Sign-in popup closed"
         }
+    }
+}
+
+// MARK: - Agent reads (POST /answer)
+
+extension BrowserViewController: BrowserReadDriver {
+    /// Serialized so each read owns the visible view for its duration. Called on
+    /// the main thread by BrowserReadService.
+    func performRead(query: String, completion: @escaping (BrowserReadResult) -> Void) {
+        readQueue.append((query: query, completion: completion))
+        startNextReadIfIdle()
+    }
+
+    private func startNextReadIfIdle() {
+        guard activeRead == nil, !readQueue.isEmpty else { return }
+        let next = readQueue.removeFirst()
+        activeRead = next.completion
+
+        guard let url = BrowserURLBuilder.url(for: next.query) else {
+            finishRead(.failed("invalid_query"))
+            return
+        }
+        addressField.stringValue = url.absoluteString
+        statusLabel.stringValue = "Agent read: \(url.host ?? next.query)"
+        updateAuthRecovery(for: url)
+        webView.load(URLRequest(url: url))
+
+        // Fallback if didFinish never arrives (SPA / stalled load): extract what
+        // is there after a bounded wait rather than hanging the agent.
+        let timeout = DispatchWorkItem { [weak self] in self?.extractActiveRead(timedOut: true) }
+        readTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: timeout)
+    }
+
+    /// Pull visible text + on-page links out of the loaded page.
+    private func extractActiveRead(timedOut: Bool = false) {
+        guard activeRead != nil else { return }
+        let js = """
+        (function() {
+          var links = [];
+          var seen = {};
+          var anchors = document.querySelectorAll('a[href]');
+          for (var i = 0; i < anchors.length && links.length < 20; i++) {
+            var a = anchors[i];
+            var href = a.href || '';
+            var title = (a.innerText || a.textContent || '').trim().replace(/\\s+/g, ' ');
+            if (href.indexOf('http') !== 0 || !title || seen[href]) continue;
+            seen[href] = true;
+            links.push({ title: title.slice(0, 180), url: href });
+          }
+          var text = (document.body ? (document.body.innerText || '') : '').replace(/\\n{3,}/g, '\\n\\n').slice(0, 8000);
+          return JSON.stringify({ title: document.title || '', url: location.href, text: text, links: links });
+        })()
+        """
+        webView.evaluateJavaScript(js) { [weak self] value, _ in
+            guard let self else { return }
+            guard self.activeRead != nil else { return }
+            guard
+                let json = value as? String,
+                let data = json.data(using: .utf8),
+                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                self.finishRead(.failed(timedOut ? "read_timeout" : "extraction_failed"))
+                return
+            }
+            let pageTitle = obj["title"] as? String ?? ""
+            let pageUrl = obj["url"] as? String ?? self.webView.url?.absoluteString ?? ""
+            let text = obj["text"] as? String ?? ""
+            let now = ISO8601DateFormatter().string(from: Date())
+            var citations: [(title: String, url: String, retrievedAt: String)] = []
+            if let links = obj["links"] as? [[String: Any]] {
+                for link in links {
+                    if let u = link["url"] as? String {
+                        let t = (link["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? u
+                        citations.append((title: t, url: u, retrievedAt: now))
+                    }
+                }
+            }
+            let header = pageTitle.isEmpty ? pageUrl : "\(pageTitle) — \(pageUrl)"
+            let answer = text.isEmpty ? "(no readable text extracted from \(pageUrl))" : "\(header)\n\n\(text)"
+            self.finishRead(BrowserReadResult(status: "completed", answer: answer, citations: citations, errorCode: nil))
+        }
+    }
+
+    private func finishRead(_ result: BrowserReadResult) {
+        readTimeout?.cancel()
+        readTimeout = nil
+        let completion = activeRead
+        activeRead = nil
+        statusLabel.stringValue = result.status == "completed" ? "Agent read complete" : "Agent read failed: \(result.errorCode ?? "")"
+        completion?(result)
+        startNextReadIfIdle()
     }
 }

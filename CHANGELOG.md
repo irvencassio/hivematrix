@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.127 — 2026-07-03
+
+Browser Lane and Terminal Lane apps now host the agent read/run backends (127.0.0.1:4011 and :4012) so DeepSeek tasks complete and are watchable in-app; local model health config-matching and test-isolation fix; voice routes to the configured Dwarf Star DeepSeek model
+
 ## v0.1.126 — 2026-07-03
 
 Make Codex optional and hide unavailable OpenClaw

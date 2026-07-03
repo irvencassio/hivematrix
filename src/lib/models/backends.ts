@@ -14,7 +14,7 @@
 import { findBinary, CLAUDE_BINARY_SEARCH_PATHS, CODEX_BINARY_SEARCH_PATHS } from "@/lib/config/binary-detection";
 import { getQwenProfile } from "@/lib/config/qwen-profile";
 import { getLocalModelConfig } from "@/lib/config/constants";
-import { readCachedLocalModelHealth } from "@/lib/local-model/health";
+import { readConfigMatchedLocalModelHealth } from "@/lib/local-model/health";
 import { getLocalEngineConfig } from "./local-engine";
 
 export type BackendId = "local" | "claude" | "codex";
@@ -48,7 +48,7 @@ export function detectBackends(): BackendStatus[] {
   const localModelId = qwen?.primary.modelId ?? local?.modelName ?? null;
   const localEndpoint = qwen?.primary.endpoint ?? local?.endpoint
     ?? (engine === "rapid-mlx" ? "http://127.0.0.1:8000/v1" : "http://localhost:1234/v1");
-  const health = readCachedLocalModelHealth();
+  const health = readConfigMatchedLocalModelHealth();
   const localConfigured = !!localModelId;
   out.push({
     id: "local",

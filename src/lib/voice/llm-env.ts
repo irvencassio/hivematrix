@@ -33,15 +33,29 @@ const APP_META: Record<string, string> = {
 };
 
 export function voiceLlmEnv(): Record<string, string> {
-  // Voice uses the FAST/operational local tier. Prefer the local-engine config
-  // (Rapid-MLX, the chosen engine — reasoning off); fall back to the Qwen
-  // profile for legacy/other local servers.
+  const profile = getQwenProfile();
+
+  // When the configured local model is an explicit OpenAI-compatible server
+  // (Dwarf Star DeepSeek, vLLM, LM Studio, Ollama), route voice to that SAME
+  // model+endpoint. Otherwise the default Rapid-MLX engine kind would send voice
+  // to a stale tier alias (e.g. a Qwen tier) that isn't the model actually
+  // loaded — it only "works" because the server ignores the model name.
+  if (profile && profile.primary.provider !== "mlx") {
+    const model = profile.secondary ?? profile.primary;
+    return {
+      HIVE_LLM_BASE_URL: openAiBaseUrl(model.endpoint),
+      HIVE_LLM_MODEL: model.modelId,
+      HIVE_LLM_API_KEY: "local",
+      ...APP_META,
+    };
+  }
+
+  // Rapid-MLX engine: use the FAST/operational local tier (reasoning off).
   const le = getLocalEngineConfig();
   if (le.engine === "rapid-mlx") {
     const t = localTargetForRole("operational", le);
     if (t) return { HIVE_LLM_BASE_URL: t.endpoint, HIVE_LLM_MODEL: t.model, HIVE_LLM_API_KEY: "local", ...APP_META };
   }
-  const profile = getQwenProfile();
   if (!profile) return { ...APP_META };
   const model = profile.secondary ?? profile.primary;
   return {

@@ -2,7 +2,7 @@ import { getDb } from "@/lib/db";
 import { getBrowserLaneReadinessDashboard, type BrowserLaneReadinessDashboard } from "@/lib/browser-lane/store";
 import { getBrowserLaneReadinessConfig } from "@/lib/browser-lane/readiness-schedule";
 import { getAllLaneAppStates } from "@/lib/lane-apps";
-import { readCachedLocalModelHealth, type LocalModelHealth } from "@/lib/local-model/health";
+import { readConfigMatchedLocalModelHealth, type LocalModelHealth } from "@/lib/local-model/health";
 import { getWorkflowInbox, type WorkflowInbox } from "@/lib/workflows/inbox";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { getBundledVersion } from "@/lib/version/bundle-version";
@@ -362,7 +362,7 @@ export async function getSystemReadinessReport(deps: SystemReadinessDeps = {}): 
     ?? (() => getBrowserLaneReadinessDashboard({ staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours }) as unknown as MinimalBrowserDashboard);
   const getLaneApps = deps.getLaneApps ?? (() => getAllLaneAppStates());
   const getInbox = deps.getWorkflowInbox ?? (() => getWorkflowInbox({ limit: 50 }));
-  const readLocal = deps.readLocalModelHealth ?? (() => readCachedLocalModelHealth());
+  const readLocal = deps.readLocalModelHealth ?? (() => readConfigMatchedLocalModelHealth());
 
   const checks: SystemReadinessCheck[] = [
     daemonCheck({ version, connectivity }),

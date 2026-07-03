@@ -5,6 +5,7 @@ import {
   listSessions as listLocalSessions,
   runCommand as runLocalCommand,
 } from "./session";
+import { createTerminalLaneAppClient, type TerminalLaneAppClient } from "./app-client";
 
 export interface LocalTermBeeClient {
   createSession(opts: { id?: string; cwd?: string; profileId?: string; openCommand?: string }): string;
@@ -28,6 +29,12 @@ export interface TermBeeProvider {
 
 interface ProviderOptions {
   local?: LocalTermBeeClient;
+  /**
+   * When set, terminal operations are sent to the visible Terminal Lane app
+   * first and fall back to `local` only if the app is unreachable. Omitted in
+   * unit tests so they exercise the local engine deterministically.
+   */
+  app?: TerminalLaneAppClient;
 }
 
 function defaultLocalClient(): LocalTermBeeClient {
@@ -41,20 +48,35 @@ function defaultLocalClient(): LocalTermBeeClient {
 
 export function createTermBeeProvider(opts: ProviderOptions = {}): TermBeeProvider {
   const local = opts.local ?? defaultLocalClient();
+  const app = opts.app;
+
+  // Prefer the visible app (so runs are watchable); on any transport error the
+  // app is treated as absent and the in-process engine takes over.
+  async function viaApp<T>(run: (client: TerminalLaneAppClient) => Promise<T>, fallback: () => T | Promise<T>): Promise<T> {
+    if (app) {
+      try {
+        return await run(app);
+      } catch {
+        // App not running / unreachable — fall through to the local engine.
+      }
+    }
+    return fallback();
+  }
+
   return {
     async createSession(sessionOpts = {}) {
-      return local.createSession(sessionOpts);
+      return viaApp((c) => c.createSession(sessionOpts), () => local.createSession(sessionOpts));
     },
     async listSessions() {
-      return local.listSessions();
+      return viaApp((c) => c.listSessions(), () => local.listSessions());
     },
     async killSession(id: string) {
-      return local.killSession(id);
+      return viaApp((c) => c.killSession(id), () => local.killSession(id));
     },
     async runCommand(id: string, command: string, timeoutMs?: number) {
-      return local.runCommand(id, command, timeoutMs);
+      return viaApp((c) => c.runCommand(id, command, timeoutMs), () => local.runCommand(id, command, timeoutMs));
     },
   };
 }
 
-export const defaultTermBeeProvider = createTermBeeProvider();
+export const defaultTermBeeProvider = createTermBeeProvider({ app: createTerminalLaneAppClient() });

@@ -41,7 +41,11 @@ export interface QwenReadinessResult extends LocalModelHealth {
   minDecodeRate: number;
 }
 
-const HEALTH_FILE = join(homedir(), ".hivematrix", "local-model-health.json");
+// Resolved lazily (not a module-load const) so a test/process that overrides
+// $HOME writes to that home's cache instead of polluting the real one.
+function healthFilePath(): string {
+  return join(homedir(), ".hivematrix", "local-model-health.json");
+}
 const LOCAL_PROVIDER_SET = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai", "dwarfstar"]);
 const DEFAULT_LOCAL_FALLBACK: LocalFallbackSettings = {
   enabled: true,
@@ -344,17 +348,46 @@ export async function probeLocalModel(config: ProbeOptions): Promise<LocalModelH
 
 export function readCachedLocalModelHealth(): LocalModelHealth | null {
   try {
-    const parsed = JSON.parse(readFileSync(HEALTH_FILE, "utf-8")) as LocalModelHealth;
+    const parsed = JSON.parse(readFileSync(healthFilePath(), "utf-8")) as LocalModelHealth;
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
     return null;
   }
 }
 
+/**
+ * True when a cached health record describes the currently-configured local
+ * model (same provider, endpoint, and model name). The config is the source of
+ * truth: after switching provider/endpoint (e.g. from an old nan-ai-model on
+ * :3000 to Dwarf Star DeepSeek on :8000) the previous cache is stale and must
+ * not be trusted, even if it says `ready`.
+ */
+export function healthMatchesConfig(
+  health: LocalModelHealth | null,
+  config: LocalModelConfig | null = getLocalModelConfig()
+): boolean {
+  if (!health || !config) return false;
+  return (
+    health.provider === config.provider &&
+    health.endpoint === normalizeBaseUrl(config.endpoint) &&
+    health.modelName === config.modelName
+  );
+}
+
+/**
+ * Read the cached health only when it matches the current local-model config.
+ * Returns null for a stale cache so display/readiness never report a
+ * decommissioned endpoint as ready. Routing (providers.ts) does its own match.
+ */
+export function readConfigMatchedLocalModelHealth(): LocalModelHealth | null {
+  const cached = readCachedLocalModelHealth();
+  return healthMatchesConfig(cached) ? cached : null;
+}
+
 export function writeCachedLocalModelHealth(health: LocalModelHealth): void {
   try {
     mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
-    writeFileSync(HEALTH_FILE, JSON.stringify(health, null, 2));
+    writeFileSync(healthFilePath(), JSON.stringify(health, null, 2));
   } catch {
     // best effort
   }

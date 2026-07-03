@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createTermBeeProvider, type LocalTermBeeClient } from "./provider";
+import type { TerminalLaneAppClient } from "./app-client";
 
 test("provider delegates session lifecycle to the local shell engine", async () => {
   const localCalls: string[] = [];
@@ -64,4 +65,50 @@ test("provider has no Canopy / external-bridge dependency", async () => {
     fs.readFileSync(new URL("./provider.ts", import.meta.url), "utf-8"),
   );
   assert.doesNotMatch(source, /canopy/i, "provider.ts must not reference Canopy");
+});
+
+test("provider prefers the visible Terminal Lane app when it is reachable", async () => {
+  const localCalls: string[] = [];
+  const appCalls: string[] = [];
+  const local: LocalTermBeeClient = {
+    createSession: (o) => { localCalls.push(`create:${o.id}`); return o.id ?? "x"; },
+    listSessions: () => { localCalls.push("list"); return []; },
+    killSession: (id) => { localCalls.push(`kill:${id}`); return true; },
+    runCommand: async (id, c) => { localCalls.push(`run:${id}:${c}`); return { output: "local", exitCode: 0, timedOut: false }; },
+  };
+  const app: TerminalLaneAppClient = {
+    createSession: async (o) => { appCalls.push(`create:${o.id}`); return o.id ?? "app"; },
+    listSessions: async () => { appCalls.push("list"); return [{ id: "a1", cwd: "/tmp", alive: true, createdAt: "2026-07-03T00:00:00.000Z" }]; },
+    killSession: async (id) => { appCalls.push(`kill:${id}`); return true; },
+    runCommand: async (id, c) => { appCalls.push(`run:${id}:${c}`); return { output: "app-output", exitCode: 0, timedOut: false }; },
+  };
+
+  const provider = createTermBeeProvider({ local, app });
+  const result = await provider.runCommand("s1", "pwd");
+
+  assert.deepEqual(result, { output: "app-output", exitCode: 0, timedOut: false });
+  assert.deepEqual(appCalls, ["run:s1:pwd"]);
+  assert.deepEqual(localCalls, [], "local engine must not be touched while the app answers");
+});
+
+test("provider falls back to the local engine when the app is unreachable", async () => {
+  const localCalls: string[] = [];
+  const local: LocalTermBeeClient = {
+    createSession: (o) => o.id ?? "x",
+    listSessions: () => [],
+    killSession: () => true,
+    runCommand: async (id, c) => { localCalls.push(`run:${id}:${c}`); return { output: "local-output", exitCode: 0, timedOut: false }; },
+  };
+  const app: TerminalLaneAppClient = {
+    createSession: async () => { throw new Error("ECONNREFUSED"); },
+    listSessions: async () => { throw new Error("ECONNREFUSED"); },
+    killSession: async () => { throw new Error("ECONNREFUSED"); },
+    runCommand: async () => { throw new Error("ECONNREFUSED"); },
+  };
+
+  const provider = createTermBeeProvider({ local, app });
+  const result = await provider.runCommand("s1", "pwd");
+
+  assert.deepEqual(result, { output: "local-output", exitCode: 0, timedOut: false });
+  assert.deepEqual(localCalls, ["run:s1:pwd"], "unreachable app must degrade to the local engine");
 });

@@ -57,6 +57,25 @@ test("generic/local messages keep formatted attachment paths as user content", a
   assert.match(String(messages[1]?.content), /Use the absolute path above/);
 });
 
+test("generic/local developer prompt steers simple Python games away from brittle pygame loops", async () => {
+  const messages = await buildMessages("Create a snake game in python", "/tmp", "developer", "low");
+  const system = String(messages[0]?.content ?? "");
+
+  assert.match(system, /DeepSeek\/DwarfStar-style local agents/i);
+  assert.match(system, /purpose-built, narrow execution paths/i);
+  assert.match(system, /native coding agent/i);
+  assert.match(system, /on-disk KV cache/i);
+  assert.match(system, /tools plus system prompt vertically/i);
+  assert.match(system, /OpenAI-compatible server bridge/i);
+  assert.match(system, /Preserve correctness before speed/i);
+  assert.match(system, /Python 3\.14/i);
+  assert.match(system, /pygame/i);
+  assert.match(system, /tkinter/i);
+  assert.match(system, /do not create a venv/i);
+  assert.match(system, /pivot/i);
+  assert.match(system, /final verification command/i);
+});
+
 test("generic/local extracts Qwen textual tool calls", () => {
   const parsed = extractTextToolCalls(`I'll inspect files now.
 

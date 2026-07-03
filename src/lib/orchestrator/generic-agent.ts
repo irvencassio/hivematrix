@@ -70,6 +70,19 @@ export function genericThinkingInstruction(thinkingMode?: string | null): string
   return "Use your maximum supported reasoning depth for this task. Do not reduce scope to conserve tokens or budget.";
 }
 
+export function genericDeliverableReliabilityInstruction(): string {
+  return `--- Deliverable Reliability ---
+- DeepSeek/DwarfStar-style local agents are purpose-built, narrow execution paths. Upstream ds4's native coding agent keeps inference inside the agent, represents sessions with on-disk KV cache, and designs tools plus system prompt vertically for DeepSeek V4 Flash/PRO.
+- If this run reaches Dwarf Star through an OpenAI-compatible server bridge, keep the same vertical DeepSeek discipline instead of acting like a generic package-running sandbox.
+- Preserve correctness before speed. Do not settle for the first idea when it produces brittle code, repeated failures, dead code, or fragile special-case probes.
+- Prefer the standard library or existing project dependencies for small deliverables. Add a new dependency only when it materially improves the result and you have verified it imports and runs in this environment.
+- For Python tasks, check the active interpreter first. Python 3.14 can have limited third-party wheel support; avoid native GUI/game packages such as pygame unless they are already working end-to-end.
+- For simple Python games such as snake, pong, tetris, or breakout, do not create a venv or install packages unless the user explicitly asks. Use standard-library tkinter or a terminal/curses implementation.
+- If a third-party package import, install, font, or native-extension support fails, pivot to a dependency-free standard-library implementation instead of repeatedly probing package internals.
+- Do not run system-wide pip installs. Use a virtual environment only when a third-party dependency is truly required by the task and the user has not ruled it out.
+- Do not claim completion until the final verification command passes. If the last command fails, fix it or report the blocker plainly instead of summarizing success.`;
+}
+
 async function buildSystemPrompt(projectPath: string, agentType: string, thinkingMode?: string | null): Promise<string> {
   const profile = getAgentProfile(agentType);
   let prompt = `${profile.systemPrompt}\n\n--- Brain Doc Policy ---\n${brainDocPolicyText()}`;
@@ -103,6 +116,7 @@ async function buildSystemPrompt(projectPath: string, agentType: string, thinkin
   // Add project directory context for profiles with tools
   if (profile.tools.length > 0) {
     prompt += `\n\nWorking directory: ${projectPath}`;
+    prompt += `\n\n${genericDeliverableReliabilityInstruction()}`;
   }
 
   if (memoryBundle) {
