@@ -1521,10 +1521,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <span class="ob-pm no" id="ob_perm_fda">○</span>
         <div class="ob-perm-info">
           <div class="ob-perm-title">Full Disk Access</div>
-          <div class="ob-perm-desc">Lets HiveMatrix read your Messages database (chat.db) and Mail folder. Required for Message Lane and Mail Lane.</div>
+          <div class="ob-perm-desc" id="ob_perm_fda_detail">Lets HiveMatrix read your Messages database (chat.db) and Mail folder. Required for Message Lane and Mail Lane.</div>
           <div class="ob-perm-actions">
             <span class="ob-perm-granted" id="ob_perm_fda_granted" style="display:none">✓ Granted</span>
-            <button id="ob_perm_fda_open" onclick="obOpenPerm('fullDiskAccess')">Open Full Disk Access →</button>
+            <button id="ob_perm_fda_open" onclick="obProbeFullDiskAccess()">Check Full Disk Access →</button>
           </div>
         </div>
       </div>
@@ -1533,10 +1533,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <span class="ob-pm no" id="ob_perm_acc">○</span>
         <div class="ob-perm-info">
           <div class="ob-perm-title">Accessibility + Screen Recording</div>
-          <div class="ob-perm-desc">Required for Desktop Lane — lets HiveMatrix see the screen and click UI elements.</div>
+          <div class="ob-perm-desc" id="ob_perm_acc_detail">Required for Desktop Lane — lets HiveMatrix see the screen and click UI elements.</div>
           <div class="ob-perm-actions">
             <span class="ob-perm-granted" id="ob_perm_acc_granted" style="display:none">✓ Granted</span>
-            <button id="ob_perm_acc_open" onclick="obOpenPerms(['accessibility','screenRecording'])">Open Accessibility settings →</button>
+            <button id="ob_perm_acc_open" onclick="obRequestDesktopPerms()">Open Desktop Permissions →</button>
           </div>
         </div>
       </div>
@@ -1545,10 +1545,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <span class="ob-pm no" id="ob_perm_auto">○</span>
         <div class="ob-perm-info">
           <div class="ob-perm-title">Automation (Apple Mail)</div>
-          <div class="ob-perm-desc">Lets HiveMatrix draft and send email via Apple Mail. Required for Mail Lane. Open Mail.app first so it appears in the list.</div>
+          <div class="ob-perm-desc" id="ob_perm_auto_detail">Lets HiveMatrix draft and send email via Apple Mail. Required for Mail Lane. Open Mail.app first so it appears in the list.</div>
           <div class="ob-perm-actions">
             <span class="ob-perm-granted" id="ob_perm_auto_granted" style="display:none">✓ Granted</span>
-            <button id="ob_perm_auto_open" onclick="obOpenPerm('automation')">Open Automation settings →</button>
+            <button id="ob_perm_auto_open" onclick="obProbeMailAutomation()">Check Mail Automation →</button>
           </div>
         </div>
       </div>
@@ -1557,7 +1557,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <span class="ob-pm no" id="ob_perm_mic">○</span>
         <div class="ob-perm-info">
           <div class="ob-perm-title">Microphone</div>
-          <div class="ob-perm-desc">Required for voice input (Talk mode). Grant this, then HiveMatrix will ask again the first time you start a voice session.</div>
+          <div class="ob-perm-desc" id="ob_perm_mic_detail">Required for voice input (Talk mode). Grant this, then HiveMatrix will ask again the first time you start a voice session.</div>
           <div class="ob-perm-actions">
             <span class="ob-perm-granted" id="ob_perm_mic_granted" style="display:none">✓ Opened settings</span>
             <button id="ob_perm_mic_open" onclick="obOpenPermMic()">Open Microphone settings →</button>
@@ -1605,6 +1605,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
           <div class="ob-model-expand" onclick="obToggleDetail('ob_lm_detail')">▸ Configure local model</div>
           <div class="ob-model-detail" id="ob_lm_detail">
             <div class="muted" style="font-size:11px;margin-bottom:8px">Run any OpenAI-compatible local model (LM Studio, Ollama, Rapid-MLX). Start your server, then paste its URL and model name below.</div>
+            <div class="ob-btn-row" style="margin-bottom:8px">
+              <button id="ob_lm_provision" onclick="obProvisionLocalEngine()">Provision Rapid-MLX →</button>
+              <span class="muted" style="font-size:11px">Installs the recommended local model for this Mac.</span>
+            </div>
+            <div class="muted" id="ob_lm_provision_log" style="font-size:11px;margin:-3px 0 8px"></div>
             <input class="dialog-input" id="ob_lm_ep" placeholder="http://127.0.0.1:1234/v1" value="http://127.0.0.1:1234/v1" />
             <input class="dialog-input" id="ob_lm_model" placeholder="model-id  e.g. qwen3.6-27b" />
             <div class="ob-btn-row">
@@ -1630,6 +1635,17 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="ob-brain-preview" id="ob_brain_preview"></div>
       <div class="muted" id="ob_brain_status" style="font-size:11px;margin-top:6px"></div>
       <div class="err" id="ob_brain_err" style="font-size:11px;margin-top:4px"></div>
+      <div class="ob-model-card" style="margin-top:12px">
+        <div class="ob-model-icon">✦</div>
+        <div class="ob-model-body">
+          <div class="ob-model-name">HiveMatrix personality <span class="ob-model-mark no" id="ob_persona_mark">—</span></div>
+          <div class="ob-model-status" id="ob_persona_status">Checking…</div>
+          <div class="ob-btn-row" style="margin-top:8px">
+            <button id="ob_birth_ritual" onclick="obRunBirthRitual()">Run birth ritual →</button>
+          </div>
+          <div class="muted" id="ob_birth_log" style="font-size:11px;margin-top:6px;white-space:pre-wrap;max-height:120px;overflow:auto"></div>
+        </div>
+      </div>
     </div>
 
     <!-- ── Navigation ── -->
@@ -4284,6 +4300,63 @@ async function obOpenPerms(panes) {
   setTimeout(_obPollPerms, 800);
 }
 
+function _obSetupItem(setup, section, id) {
+  const items = setup && setup[section];
+  return Array.isArray(items) ? (items.find(item => item && item.id === id) || null) : null;
+}
+
+function _obSetupStateReady(item) {
+  return !!item && (item.state === 'granted' || item.state === 'ready' || item.state === 'configured');
+}
+
+function _obSetDetail(id, item, fallback) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = (item && item.detail) || fallback || '';
+}
+
+function _obRenderSetupPerms(setup) {
+  const fda = _obSetupItem(setup, 'permissions', 'fullDiskAccess');
+  const desktop = _obSetupItem(setup, 'permissions', 'desktopControl');
+  const mail = _obSetupItem(setup, 'permissions', 'mailAutomation');
+  const mic = _obSetupItem(setup, 'permissions', 'microphone');
+  _obSetPermMark('ob_perm_fda', _obSetupStateReady(fda));
+  _obSetPermMark('ob_perm_acc', _obSetupStateReady(desktop));
+  _obSetPermMark('ob_perm_auto', _obSetupStateReady(mail));
+  _obSetDetail('ob_perm_fda_detail', fda, 'Lets HiveMatrix read your Messages database (chat.db) and Mail folder.');
+  _obSetDetail('ob_perm_acc_detail', desktop, 'Required for Desktop Lane — lets HiveMatrix see the screen and click UI elements.');
+  _obSetDetail('ob_perm_auto_detail', mail, 'Lets HiveMatrix draft and send email via Apple Mail.');
+  _obSetDetail('ob_perm_mic_detail', mic, 'Required for voice input (Talk mode).');
+  // Microphone is intentionally local-only: opening Settings is useful, but it
+  // is not proof macOS has granted capture access.
+  try { _obSetPermMark('ob_perm_mic', localStorage.getItem('hm_ob_mic_opened') === '1'); } catch(e) {}
+}
+
+async function obProbeFullDiskAccess() {
+  try {
+    const setup = await api('/onboarding/setup/full-disk-access/probe', { method: 'POST' });
+    _obRenderSetupPerms(setup);
+    const fda = _obSetupItem(setup, 'permissions', 'fullDiskAccess');
+    if (!_obSetupStateReady(fda)) await openSystemPane('fullDiskAccess');
+  } catch(e) { await hmAlert('Full Disk Access check failed: ' + e, 'Setup'); }
+}
+
+async function obRequestDesktopPerms() {
+  try {
+    const setup = await api('/onboarding/setup/desktop-permissions/request', { method: 'POST' });
+    _obRenderSetupPerms(setup);
+  } catch(e) { await hmAlert('Desktop permission request failed: ' + e, 'Setup'); }
+}
+
+async function obProbeMailAutomation() {
+  try {
+    const setup = await api('/onboarding/setup/mail-automation/probe', { method: 'POST' });
+    _obRenderSetupPerms(setup);
+    const mail = _obSetupItem(setup, 'permissions', 'mailAutomation');
+    if (!_obSetupStateReady(mail)) await openSystemPane('automation');
+  } catch(e) { await hmAlert('Mail Automation check failed: ' + e, 'Setup'); }
+}
+
 // Microphone can't be probed from the daemon without Swift; mark it as opened
 // after the user clicks so the wizard shows something useful.
 async function obOpenPermMic() {
@@ -4305,19 +4378,8 @@ function _obSetPermMark(id, ok) {
 
 async function _obPollPerms() {
   try {
-    const o = await api('/onboarding');
-    if (!o || !o.steps) return;
-    // Full Disk Access: proxy via chat.db readability in the messagebee step detail
-    const mb = o.steps.find(s => s.id === 'messagebee');
-    _obSetPermMark('ob_perm_fda', mb && /chat\.db readable|enabled; reading|Messages database readable/i.test(mb.detail || ''));
-    // Accessibility + Screen Recording: desktopbee step done means both granted
-    const db = o.steps.find(s => s.id === 'desktopbee');
-    _obSetPermMark('ob_perm_acc', db && db.state === 'done');
-    // Automation (Mail): mailbee step detail reports controllability even when channel is off
-    const ml = o.steps.find(s => s.id === 'mailbee');
-    _obSetPermMark('ob_perm_auto', ml && /Mail controllable|enabled; watching/i.test(ml.detail || ''));
-    // Microphone: persisted in localStorage (can't probe TCC from daemon without Swift)
-    try { _obSetPermMark('ob_perm_mic', localStorage.getItem('hm_ob_mic_opened') === '1'); } catch(e) {}
+    const setup = await api('/onboarding/setup');
+    _obRenderSetupPerms(setup);
   } catch(e) { /* polling — ignore transient errors */ }
 }
 
@@ -4327,20 +4389,20 @@ async function obDetectModels() {
   const statusEl = document.getElementById('ob_models_status');
   if (statusEl) { statusEl.textContent = 'Detecting…'; statusEl.className = 'ob-any-status'; }
   try {
-    const o = await api('/onboarding');
-    if (!o || !o.steps) return;
-    const frontier = o.steps.find(s => s.id === 'frontier');
-    const localMod = o.steps.find(s => s.id === 'local-model');
+    const setup = await api('/onboarding/setup');
+    const o = state.onboarding;
+    const frontier = o && o.steps && o.steps.find(s => s.id === 'frontier');
+    const localMod = _obSetupItem(setup, 'models', 'localModel');
     const fDetail = (frontier && frontier.detail) || '';
     const hasClaude = /claude CLI/i.test(fDetail);
     const hasCodex  = /codex CLI/i.test(fDetail);
-    const hasLocal  = !!(localMod && localMod.state === 'done');
+    const hasLocal  = _obSetupStateReady(localMod);
     _obSetModelCard('ob_model_claude', 'ob_claude_mark', 'ob_claude_status', hasClaude,
       hasClaude ? 'Detected — ready to use' : 'Not found on this Mac');
     _obSetModelCard('ob_model_codex',  'ob_codex_mark',  'ob_codex_status',  hasCodex,
       hasCodex  ? 'Detected — ready to use' : 'Not found on this Mac');
     _obSetModelCard('ob_model_lmstudio', 'ob_lm_mark', 'ob_lm_status', hasLocal,
-      hasLocal ? ((localMod && localMod.detail) || 'Configured') : 'Not configured');
+      (localMod && localMod.detail) || (hasLocal ? 'Configured' : 'Not configured'));
     const any = hasClaude || hasCodex || hasLocal;
     if (statusEl) {
       statusEl.textContent = any ? '✓ At least one model backend ready.' : 'No model backends found yet — set up at least one below.';
@@ -4404,10 +4466,46 @@ async function obSetCloudOnly() {
   } catch(e) { /* ignore */ }
 }
 
+async function obProvisionLocalEngine() {
+  const btn = document.getElementById('ob_lm_provision');
+  const log = document.getElementById('ob_lm_provision_log');
+  if (btn) btn.disabled = true;
+  if (log) log.textContent = 'Starting Rapid-MLX provisioning…';
+  try {
+    await api('/local-engine/provision', { method: 'POST' });
+    obPollLocalEngineProvision();
+  } catch(e) {
+    if (log) log.textContent = 'Provisioning failed to start: ' + e;
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function obPollLocalEngineProvision() {
+  const btn = document.getElementById('ob_lm_provision');
+  const logEl = document.getElementById('ob_lm_provision_log');
+  let r;
+  try { r = await api('/local-engine/provision'); } catch(e) {
+    if (logEl) logEl.textContent = 'Provisioning status unavailable.';
+    if (btn) btn.disabled = false;
+    return;
+  }
+  const s = (r && r.status) || {};
+  const log = (s.log || []).slice(-8).join('\n');
+  const tail = s.phase === 'error' ? '\n✗ ' + (s.error || 'failed')
+    : s.phase === 'done' ? '\n✓ done — restart the daemon to serve the new tiers'
+      : s.phase === 'running' ? '\nProvisioning…'
+        : '';
+  if (logEl) logEl.textContent = (log + tail).trim() || 'Provisioning idle.';
+  if (s.phase === 'running') { setTimeout(obPollLocalEngineProvision, 1500); return; }
+  if (btn) btn.disabled = false;
+  await obDetectModels();
+}
+
 // ── Step 2: brain location ────────────────────────────────────────────────────
 
 function _obInitBrain() {
   const input = document.getElementById('ob_brain_path');
+  _obRenderPersonaSetup();
   if (!input || input.value) return; // don't overwrite if the user already typed
   const o = state.onboarding;
   const brainStep = o && o.steps && o.steps.find(s => s.id === 'brain');
@@ -4416,6 +4514,71 @@ function _obInitBrain() {
   // Default to ~/HiveMatrix Brain for new users; existing path for migrations
   input.value = existing || '~/HiveMatrix Brain';
   _obUpdateBrainPreview();
+}
+
+async function _obRenderPersonaSetup() {
+  const mark = document.getElementById('ob_persona_mark');
+  const status = document.getElementById('ob_persona_status');
+  const btn = document.getElementById('ob_birth_ritual');
+  try {
+    const setup = await api('/onboarding/setup');
+    const persona = _obSetupItem(setup, 'memory', 'persona');
+    const ready = _obSetupStateReady(persona);
+    if (mark) { mark.textContent = ready ? '✓' : '—'; mark.className = 'ob-model-mark ' + (ready ? 'ok' : 'no'); }
+    if (status) { status.textContent = (persona && persona.detail) || 'Personality has not been created yet.'; status.className = 'ob-model-status' + (ready ? ' ok' : ''); }
+    if (btn) btn.style.display = ready ? 'none' : '';
+  } catch(e) {
+    if (status) status.textContent = 'Personality status unavailable.';
+  }
+}
+
+async function obRunBirthRitual() {
+  const btn = document.getElementById('ob_birth_ritual');
+  const log = document.getElementById('ob_birth_log');
+  if (btn) btn.disabled = true;
+  if (log) log.textContent = 'Starting birth ritual…';
+  try {
+    const res = await fetch('/onboarding/birth-ritual', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + HM_TOKEN },
+    });
+    const ct = res.headers.get('content-type') || '';
+    if (ct.indexOf('application/json') >= 0) {
+      const j = await res.json();
+      if (!res.ok || j.ok === false) throw new Error(j.error || j.detail || ('HTTP ' + res.status));
+      if (log) log.textContent = j.reason || 'Personality already exists.';
+      await _obRenderPersonaSetup();
+      return;
+    }
+    if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '', acc = '';
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        let evt = '', dataStr = '';
+        for (const line of part.split('\n')) {
+          if (line.startsWith('event: ')) evt = line.slice(7).trim();
+          else if (line.startsWith('data: ')) dataStr = line.slice(6).trim();
+        }
+        if (!evt || !dataStr) continue;
+        let d; try { d = JSON.parse(dataStr); } catch(e) { continue; }
+        if (evt === 'token') acc += d.delta || '';
+        else if (evt === 'done') acc = (d.personaName ? '✓ ' + d.personaName + '\n\n' : '✓ Birth ritual complete.\n\n') + (d.fullText || acc);
+        if (log) log.textContent = acc || 'Birth ritual running…';
+      }
+    }
+    await _obRenderPersonaSetup();
+  } catch(e) {
+    if (log) log.textContent = 'Birth ritual failed: ' + e;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function obBrainInputChange() { _obUpdateBrainPreview(); }

@@ -158,7 +158,8 @@ export function getServingStatus(): ServingStatus {
 }
 
 function spawnServer(command: ServeCommand): void {
-  const env = { ...process.env, PATH: `${EXTRA_PATHS.join(":")}:${process.env.PATH ?? ""}` };
+  const basePath = process.env.PATH ? `${process.env.PATH}:` : "";
+  const env = { ...process.env, PATH: `${basePath}${EXTRA_PATHS.join(":")}` };
   try {
     const proc = spawn(command.cmd, command.args, { env, stdio: "ignore", detached: false });
     child = proc;

@@ -289,6 +289,183 @@ test("POST /messagebee/probe is an explicit chat.db probe", async (t) => {
   assert.equal(probeCalls, 1);
 });
 
+test("GET /onboarding/setup is passive for disabled lane probes", async (t) => {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-onboarding-setup-passive-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  const { _setMessagebeeStatusDepsForTests } = await import("@/lib/messagebee/status");
+  const { _setMailbeeStatusDepsForTests } = await import("@/lib/mailbee/status");
+  _resetDbForTests();
+  let messageProbeCalls = 0;
+  let mailProbeCalls = 0;
+  _setMessagebeeStatusDepsForTests({
+    probeChatDbAccess: () => {
+      messageProbeCalls++;
+      throw new Error("passive setup must not probe chat.db");
+    },
+  });
+  _setMailbeeStatusDepsForTests({
+    canControlMail: async () => {
+      mailProbeCalls++;
+      throw new Error("passive setup must not probe Mail.app");
+    },
+  });
+
+  t.after(() => {
+    _setMessagebeeStatusDepsForTests(null);
+    _setMailbeeStatusDepsForTests(null);
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/onboarding/setup`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { permissions: Array<{ id: string; state: string }> };
+  assert.ok(body.permissions.find((p) => p.id === "fullDiskAccess"));
+  assert.ok(body.permissions.find((p) => p.id === "mailAutomation"));
+  assert.equal(messageProbeCalls, 0);
+  assert.equal(mailProbeCalls, 0);
+});
+
+test("POST /onboarding/setup/full-disk-access/probe checks chat.db even when Message Lane is disabled", async (t) => {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-onboarding-fda-probe-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  const { _setMessagebeeStatusDepsForTests } = await import("@/lib/messagebee/status");
+  _resetDbForTests();
+  let probeCalls = 0;
+  _setMessagebeeStatusDepsForTests({
+    probeChatDbAccess: () => {
+      probeCalls++;
+      return { ok: true, detail: "Messages database readable" };
+    },
+  });
+
+  t.after(() => {
+    _setMessagebeeStatusDepsForTests(null);
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/onboarding/setup/full-disk-access/probe`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { permissions: Array<{ id: string; state: string; detail: string }> };
+  const row = body.permissions.find((p) => p.id === "fullDiskAccess");
+  assert.equal(row?.state, "granted");
+  assert.match(row?.detail ?? "", /Messages database readable/);
+  assert.equal(probeCalls, 1);
+});
+
+test("POST /onboarding/setup/mail-automation/probe checks Apple Mail Automation explicitly", async (t) => {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-onboarding-mail-probe-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  const { _setMailbeeStatusDepsForTests } = await import("@/lib/mailbee/status");
+  _resetDbForTests();
+  let probeCalls = 0;
+  _setMailbeeStatusDepsForTests({
+    canControlMail: async () => {
+      probeCalls++;
+      return true;
+    },
+  });
+
+  t.after(() => {
+    _setMailbeeStatusDepsForTests(null);
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/onboarding/setup/mail-automation/probe`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { permissions: Array<{ id: string; state: string }> };
+  assert.equal(body.permissions.find((p) => p.id === "mailAutomation")?.state, "granted");
+  assert.equal(probeCalls, 1);
+});
+
+test("POST /onboarding/setup/desktop-permissions/request asks helper to prompt for permissions", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const helperRequests: unknown[] = [];
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const url = String(input);
+    if (!url.startsWith("http://127.0.0.1:3748/")) {
+      return originalFetch(input, init);
+    }
+    if (url.endsWith("/health")) {
+      return new Response(JSON.stringify({ ok: true, version: "test" }), { status: 200 });
+    }
+    if (url.endsWith("/action")) {
+      helperRequests.push(JSON.parse(String(init?.body ?? "{}")));
+      return new Response(JSON.stringify({
+        ok: true,
+        action: "desktop.permissions",
+        data: { accessibility: true, screenRecording: true },
+      }), { status: 200 });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/onboarding/setup/desktop-permissions/request`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { permissions: Array<{ id: string; state: string }> };
+  assert.equal(body.permissions.find((p) => p.id === "desktopControl")?.state, "granted");
+  assert.equal((helperRequests[0] as { params?: { prompt?: boolean } }).params?.prompt, true);
+});
+
 test("POST /messagebee/send refuses while Message Lane is disabled", async (t) => {
   const originalHome = process.env.HOME;
   const originalDbPath = process.env.HIVEMATRIX_DB_PATH;

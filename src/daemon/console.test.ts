@@ -27,6 +27,14 @@ function extractMdToHtml(html: string): (src: string) => string {
   return factory();
 }
 
+function extractBetween(src: string, start: string, end: string): string {
+  const startIx = src.indexOf(start);
+  assert.notEqual(startIx, -1, `missing start marker: ${start}`);
+  const endIx = src.indexOf(end, startIx + start.length);
+  assert.notEqual(endIx, -1, `missing end marker: ${end}`);
+  return src.slice(startIx, endIx);
+}
+
 test("console browser script is valid JavaScript (no TypeScript leaks)", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.ok(js.length > 1000, "script block should be substantial");
@@ -308,6 +316,59 @@ test("in-app Talk button is gated by the voice feature flag", () => {
   assert.match(js, /async function toggleTalk\(/);
   assert.match(js, /\/voice\/turn/, "posts a turn to the daemon");
   assert.match(js, /MediaRecorder/, "captures the mic");
+});
+
+test("onboarding wizard polls setup status instead of legacy onboarding details", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const pollPerms = extractBetween(js, "async function _obPollPerms()", "// ── Step 1: model backends");
+  const renderPerms = extractBetween(js, "function _obRenderSetupPerms(setup)", "async function obProbeFullDiskAccess()");
+
+  assert.match(pollPerms, /api\('\/onboarding\/setup'\)/, "permission polling uses the setup status endpoint");
+  assert.doesNotMatch(pollPerms, /api\('\/onboarding'\)/, "permission polling no longer derives state from legacy onboarding steps");
+  assert.match(renderPerms, /fullDiskAccess/, "full disk access is read from setup permission items");
+  assert.match(renderPerms, /desktopControl/, "desktop control is read from setup permission items");
+  assert.match(renderPerms, /mailAutomation/, "mail automation is read from setup permission items");
+  assert.match(renderPerms, /hm_ob_mic_opened/, "microphone remains a localStorage opened marker");
+  assert.doesNotMatch(renderPerms, /chat\.db readable|Messages database readable|enabled; reading|enabled; watching|Mail controllable/, "setup marks do not use lane detail regexes");
+});
+
+test("onboarding wizard uses explicit permission probe and request routes", () => {
+  const js = extractScript(CONSOLE_HTML);
+
+  assert.match(js, /\/onboarding\/setup\/full-disk-access\/probe/, "full disk access has an explicit probe");
+  assert.match(js, /\/onboarding\/setup\/mail-automation\/probe/, "mail automation has an explicit probe");
+  assert.match(js, /\/onboarding\/setup\/desktop-permissions\/request/, "desktop permission open path asks the helper to prompt/check");
+  assert.match(CONSOLE_HTML, /onclick="obProbeFullDiskAccess\(\)"/, "Full Disk Access button checks the setup route");
+  assert.match(CONSOLE_HTML, /onclick="obProbeMailAutomation\(\)"/, "Mail Automation button checks the setup route");
+  assert.match(CONSOLE_HTML, /onclick="obRequestDesktopPerms\(\)"/, "Desktop Control button uses the setup request route");
+});
+
+test("onboarding wizard displays setup localModel status on the model card", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const detectModels = extractBetween(js, "async function obDetectModels()", "function _obSetModelCard");
+
+  assert.match(detectModels, /api\('\/onboarding\/setup'\)/, "model detection consults setup status");
+  assert.match(detectModels, /localModel/, "local model card uses setup model id localModel");
+  assert.match(detectModels, /localMod[^;]+detail/, "local model detail is displayed when available");
+});
+
+test("onboarding wizard exposes one-click local engine provisioning", () => {
+  const js = extractScript(CONSOLE_HTML);
+
+  assert.match(CONSOLE_HTML, /id="ob_lm_provision"/, "first-run local model card has a provisioning button");
+  assert.match(CONSOLE_HTML, /id="ob_lm_provision_log"/, "first-run local model card has provisioning status output");
+  assert.match(js, /async function obProvisionLocalEngine\(/, "first-run provision action exists");
+  assert.match(js, /\/local-engine\/provision/, "first-run provision action uses the shared provision endpoint");
+});
+
+test("onboarding wizard exposes persona birth ritual setup", () => {
+  const js = extractScript(CONSOLE_HTML);
+
+  assert.match(CONSOLE_HTML, /id="ob_persona_status"/, "brain step has persona status");
+  assert.match(CONSOLE_HTML, /id="ob_birth_ritual"/, "brain step has birth ritual action");
+  assert.match(js, /function _obRenderPersonaSetup\(/, "persona setup renderer exists");
+  assert.match(js, /async function obRunBirthRitual\(/, "birth ritual action exists");
+  assert.match(js, /\/onboarding\/birth-ritual/, "birth ritual action uses existing endpoint");
 });
 
 test("Features tab lists optional capabilities with on/off toggles", () => {

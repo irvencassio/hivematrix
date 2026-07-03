@@ -123,6 +123,56 @@ function serveMermaidAsset(res: ServerResponse): void {
   res.end(buf);
 }
 
+async function buildFirstRunSetupResponse(opts: {
+  fullDiskAccessProbe?: boolean;
+  mailAutomationProbe?: boolean;
+  desktopPrompt?: boolean;
+} = {}): Promise<unknown> {
+  const { getOnboardingStatus } = await import("@/lib/onboarding/onboarding");
+  const { buildFirstRunSetupStatus } = await import("@/lib/onboarding/setup-status");
+  const { probeDesktopBeeHelper, dispatchDesktopBeeAction } = await import("@/lib/desktopbee/client");
+  const { getMessagebeeStatus } = await import("@/lib/messagebee/status");
+  const { getMailbeeStatus } = await import("@/lib/mailbee/status");
+  const { planLocalEngine, getProvisionStatus } = await import("@/lib/models/provision");
+  const { configuredBrainRootDir } = await import("@/lib/brain/settings");
+  const { getPersonaStatus } = await import("@/lib/onboarding/birth-ritual");
+
+  let helperBuilt = false;
+  let helperReachable = false;
+  let desktopPermissions: { accessibility: boolean; screenRecording: boolean } | null = null;
+  const health = await probeDesktopBeeHelper().catch(() => null);
+  if (health) {
+    helperBuilt = true;
+    helperReachable = true;
+    const r = await dispatchDesktopBeeAction(
+      { action: "desktop.permissions", params: { prompt: opts.desktopPrompt === true } }
+    ).catch(() => null);
+    const d = r?.data as { accessibility?: boolean; screenRecording?: boolean } | undefined;
+    if (d) desktopPermissions = { accessibility: !!d.accessibility, screenRecording: !!d.screenRecording };
+  }
+
+  const messagebee = getMessagebeeStatus({ probe: opts.fullDiskAccessProbe === true });
+  const mailbee = await getMailbeeStatus({ probe: opts.mailAutomationProbe === true });
+  const onboarding = getOnboardingStatus({ helperBuilt, desktopPermissions, messagebee, mailbee });
+  const brainRoot = configuredBrainRootDir();
+
+  return buildFirstRunSetupStatus({
+    onboarding,
+    messagebee,
+    fullDiskAccessProbe: opts.fullDiskAccessProbe ? messagebee : null,
+    mailbee,
+    mailAutomationProbe: opts.mailAutomationProbe ? mailbee : null,
+    desktop: { helperBuilt, helperReachable, permissions: desktopPermissions },
+    localModel: {
+      configured: onboarding.steps.find((s) => s.id === "local-model")?.state === "done",
+      detail: onboarding.steps.find((s) => s.id === "local-model")?.detail,
+      plan: planLocalEngine(),
+      status: getProvisionStatus(),
+    },
+    persona: getPersonaStatus(brainRoot),
+  });
+}
+
 function parseBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -729,6 +779,34 @@ export function createDaemonServer() {
         const { getMailbeeStatus } = await import("@/lib/mailbee/status");
         const mailbee = await getMailbeeStatus();
         json(res, 200, getOnboardingStatus({ helperBuilt, desktopPermissions, messagebee, mailbee }));
+        return;
+      }
+
+      // GET /onboarding/setup — first-run wizard model. Passive: no Mail launch,
+      // no chat.db probe while Message Lane is disabled, no TCC prompts.
+      if (req.method === "GET" && urlPath === "/onboarding/setup") {
+        json(res, 200, await buildFirstRunSetupResponse());
+        return;
+      }
+
+      // POST /onboarding/setup/full-disk-access/probe — explicit user-clicked
+      // check for Messages chat.db readability, independent of Message Lane.
+      if (req.method === "POST" && urlPath === "/onboarding/setup/full-disk-access/probe") {
+        json(res, 200, await buildFirstRunSetupResponse({ fullDiskAccessProbe: true }));
+        return;
+      }
+
+      // POST /onboarding/setup/mail-automation/probe — explicit user-clicked
+      // Apple Mail Automation probe. This is allowed to launch/probe Mail.
+      if (req.method === "POST" && urlPath === "/onboarding/setup/mail-automation/probe") {
+        json(res, 200, await buildFirstRunSetupResponse({ mailAutomationProbe: true }));
+        return;
+      }
+
+      // POST /onboarding/setup/desktop-permissions/request — explicit
+      // user-clicked Desktop Lane permission request through the Swift helper.
+      if (req.method === "POST" && urlPath === "/onboarding/setup/desktop-permissions/request") {
+        json(res, 200, await buildFirstRunSetupResponse({ desktopPrompt: true }));
         return;
       }
 
@@ -4203,6 +4281,8 @@ export function createDaemonServer() {
         // Title is optional — derive it from the instructions when absent/blank.
         const title = typeof body.title === "string" ? body.title.trim() : "";
         body.title = title || deriveTaskTitle(description);
+        if (typeof body.project !== "string" || !body.project.trim()) body.project = "hivematrix";
+        if (typeof body.projectPath !== "string") body.projectPath = "";
         const task = await Task.create({ _id: generateId(), ...body });
         broadcast("tasks:created", { taskId: task._id });
         json(res, 201, task);
