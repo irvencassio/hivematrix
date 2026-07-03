@@ -15,36 +15,56 @@ const { resolveModelId } = await import("./model-resolver");
 
 test.after(() => rmSync(TMP, { recursive: true, force: true }));
 
+function frontierBackends(claude: boolean, codex: boolean) {
+  return [
+    { id: "local" as const, name: "Local", configured: false, detail: "" },
+    { id: "claude" as const, name: "Claude Code", configured: claude, detail: "" },
+    { id: "codex" as const, name: "Codex", configured: codex, detail: "" },
+  ];
+}
+
 test("frontier-premium uses thinkModel override, else Opus default", () => {
   writeCfg({});
-  assert.equal(resolveModelId("frontier-premium"), "opus");
+  assert.equal(resolveModelId("frontier-premium", { frontierBackends: frontierBackends(true, false) }), "opus");
   writeCfg({ thinkModel: "claude-sonnet-4-6" });
-  assert.equal(resolveModelId("frontier-premium"), "claude-sonnet-4-6");
+  assert.equal(resolveModelId("frontier-premium", { frontierBackends: frontierBackends(true, false) }), "claude-sonnet-4-6");
 });
 
 test("frontier uses frontierModel (coding) override, else Sonnet default", () => {
   writeCfg({});
-  assert.equal(resolveModelId("frontier"), "sonnet");
+  assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(true, false) }), "sonnet");
   writeCfg({ frontierModel: "claude-opus-4-8" });
-  assert.equal(resolveModelId("frontier"), "claude-opus-4-8");
+  assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(true, false) }), "claude-opus-4-8");
 });
 
 test("codex provider defaults thinking to GPT-5.5 and coding to Spark", () => {
   writeCfg({ frontierProvider: "codex" });
-  assert.equal(resolveModelId("frontier-premium"), "codex:gpt-5.5");
-  assert.equal(resolveModelId("frontier"), "codex:gpt-5.3-codex-spark");
+  assert.equal(resolveModelId("frontier-premium", { frontierBackends: frontierBackends(true, true) }), "codex:gpt-5.5");
+  assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(true, true) }), "codex:gpt-5.3-codex-spark");
+});
+
+test("codex provider falls back to Claude when Codex CLI is missing", () => {
+  writeCfg({ frontierProvider: "codex" });
+  assert.equal(resolveModelId("frontier-premium", { frontierBackends: frontierBackends(true, false) }), "opus");
+  assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(true, false) }), "sonnet");
+});
+
+test("frontier defaults return null when no frontier backend is configured", () => {
+  writeCfg({ frontierProvider: "codex" });
+  assert.equal(resolveModelId("frontier-premium", { frontierBackends: frontierBackends(false, false) }), null);
+  assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(false, false) }), null);
 });
 
 test("role model overrides win even when frontier provider is Codex", () => {
   writeCfg({ frontierProvider: "codex", thinkModel: "claude-opus-4-8", frontierModel: "codex:gpt-5.5" });
-  assert.equal(resolveModelId("frontier-premium"), "claude-opus-4-8");
-  assert.equal(resolveModelId("frontier"), "codex:gpt-5.5");
+  assert.equal(resolveModelId("frontier-premium", { frontierBackends: frontierBackends(true, true) }), "claude-opus-4-8");
+  assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(true, true) }), "codex:gpt-5.5");
 });
 
 test("cloud-only resolution ignores local role overrides", () => {
   writeCfg({ frontierProvider: "claude", frontierModel: "qwen/qwen3.6-27b" });
-  assert.equal(resolveModelId("frontier"), "qwen/qwen3.6-27b");
-  assert.equal(resolveModelId("frontier", { noLocalOverrides: true }), "sonnet");
+  assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(true, false) }), "qwen/qwen3.6-27b");
+  assert.equal(resolveModelId("frontier", { noLocalOverrides: true, frontierBackends: frontierBackends(true, false) }), "sonnet");
 });
 
 test("local-secondary honors operationalModel override before the Qwen profile", () => {

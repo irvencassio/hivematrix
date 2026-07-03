@@ -452,13 +452,14 @@ export function createDaemonServer() {
 
       // GET /settings/features — feature flags + on/off state + machine capability.
       if (req.method === "GET" && urlPath === "/settings/features") {
-        const { getFeatureFlags, KNOWN_FEATURES, featureCapability } = await import("@/lib/config/features");
+        const { getFeatureFlags, KNOWN_FEATURES, featureCapability, shouldShowFeature } = await import("@/lib/config/features");
         const { discoverOpenclaw } = await import("@/lib/openclaw/discovery");
         const [flags, openclawDiscovery] = await Promise.all([
           Promise.resolve(getFeatureFlags()),
           discoverOpenclaw(),
         ]);
-        json(res, 200, { features: KNOWN_FEATURES.map((f) => {
+        const visibleFeatures = KNOWN_FEATURES.filter((f) => shouldShowFeature(f.key, { openclawInstalled: openclawDiscovery.installed }));
+        json(res, 200, { features: visibleFeatures.map((f) => {
           let cap = featureCapability(f.key);
           let enabled = flags[f.key] === true;
           if (f.key === "openclaw.chatDock") {

@@ -53,6 +53,14 @@ const MIN_RAM_GB = 16;
 
 export interface FeatureCapability { capable: boolean; reason?: string }
 
+export function shouldShowFeature(
+  key: string,
+  env: { openclawInstalled?: boolean } = {},
+): boolean {
+  if (key === "openclaw.chatDock" && env.openclawInstalled === false) return false;
+  return true;
+}
+
 /** Can this machine run the feature? `env` is injectable for tests. */
 export function featureCapability(
   key: string,

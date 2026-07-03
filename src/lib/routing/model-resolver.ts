@@ -15,12 +15,15 @@ import { homedir } from "os";
 import type { ModelTier } from "@/lib/connectivity/policy";
 import { getQwenProfile } from "@/lib/config/qwen-profile";
 import { CLAUDE_OPUS_ID, CLAUDE_SONNET_ID, CODEX_NEWEST_ID, CODEX_SPARK_ID } from "@/lib/models/available";
+import { detectBackends, type BackendStatus } from "@/lib/models/backends";
 
 const NANO_BANANA = "nano-banana";
 
 export interface ResolveModelOptions {
   /** Ignore local/non-frontier role overrides, used by Cloud-only posture. */
   noLocalOverrides?: boolean;
+  /** Injectable for tests; production detects the installed CLI backends. */
+  frontierBackends?: BackendStatus[];
 }
 
 function readConfig(): Record<string, unknown> {
@@ -35,6 +38,27 @@ function isFrontierOverride(modelId: string): boolean {
   return /^(claude-|codex:|gpt-|o[0-9]|opus$|sonnet$|haiku$)/i.test(modelId);
 }
 
+function backendConfigured(backends: BackendStatus[], id: "claude" | "codex"): boolean {
+  return backends.some((b) => b.id === id && b.configured);
+}
+
+function availableFrontierProvider(cfg: Record<string, unknown>, backends: BackendStatus[]): "claude" | "codex" | null {
+  const hasClaude = backendConfigured(backends, "claude");
+  const hasCodex = backendConfigured(backends, "codex");
+  const preferred = cfg.frontierProvider === "codex" ? "codex" : "claude";
+  if (preferred === "codex" && hasCodex) return "codex";
+  if (preferred === "claude" && hasClaude) return "claude";
+  if (hasClaude) return "claude";
+  if (hasCodex) return "codex";
+  return null;
+}
+
+function modelSupportedByBackends(modelId: string, backends: BackendStatus[]): boolean {
+  if (/^codex:|^gpt-|^o[0-9]/i.test(modelId)) return backendConfigured(backends, "codex");
+  if (/^claude-|^opus$|^sonnet$|^haiku$/i.test(modelId)) return backendConfigured(backends, "claude");
+  return true;
+}
+
 /**
  * Concrete model ID for a tier, or null if no model is configured for it.
  * `unavailable` always returns null (caller should queue/skip).
@@ -43,15 +67,23 @@ export function resolveModelId(tier: ModelTier, options: ResolveModelOptions = {
   switch (tier) {
     case "frontier-premium": {
       const cfg = readConfig();
+      const backends = options.frontierBackends ?? detectBackends();
       const m = (cfg.thinkModel as string | undefined)?.trim();
-      if (m && (!options.noLocalOverrides || isFrontierOverride(m))) return m;
-      return cfg.frontierProvider === "codex" ? CODEX_NEWEST_ID : CLAUDE_OPUS_ID;
+      if (m && (!options.noLocalOverrides || isFrontierOverride(m)) && modelSupportedByBackends(m, backends)) return m;
+      const provider = availableFrontierProvider(cfg, backends);
+      if (provider === "codex") return CODEX_NEWEST_ID;
+      if (provider === "claude") return CLAUDE_OPUS_ID;
+      return null;
     }
     case "frontier": {
       const cfg = readConfig();
+      const backends = options.frontierBackends ?? detectBackends();
       const fav = (cfg.frontierModel as string | undefined)?.trim();
-      if (fav && (!options.noLocalOverrides || isFrontierOverride(fav))) return fav;
-      return cfg.frontierProvider === "codex" ? CODEX_SPARK_ID : CLAUDE_SONNET_ID;
+      if (fav && (!options.noLocalOverrides || isFrontierOverride(fav)) && modelSupportedByBackends(fav, backends)) return fav;
+      const provider = availableFrontierProvider(cfg, backends);
+      if (provider === "codex") return CODEX_SPARK_ID;
+      if (provider === "claude") return CLAUDE_SONNET_ID;
+      return null;
     }
     case "local-primary": {
       const profile = getQwenProfile();

@@ -110,6 +110,17 @@ test("frontier step reflects env credentials", () => {
   assert.equal(step(status, "frontier").state, "done");
 });
 
+test("Codex CLI is optional setup, not a required HiveMatrix backend", () => {
+  const status = withHome(() => {}, () => getOnboardingStatus({ now: "T" }));
+  const codex = step(status, "codex-cli");
+
+  assert.equal(codex.required, false);
+  assert.equal(codex.title, "Codex CLI (optional)");
+  assert.match(codex.detail, /Optional/i);
+  assert.match(`${codex.detail}\n${codex.remediation ?? ""}`, /codex CLI|codex login/i);
+  assert.equal(status.requiredComplete, false, "fresh machine still fails only required setup, not Codex specifically");
+});
+
 test("messagebee uses diagnostic chat.db detail when unreadable", () => {
   const status = withHome(() => {}, () => getOnboardingStatus({
     now: "T",

@@ -272,6 +272,16 @@ test("Settings exposes Setup as a first-class actionable panel", () => {
   assert.doesNotMatch(js, /see the Setup panel on the dashboard/, "About summary no longer points to the dashboard rail");
 });
 
+test("Settings Setup can open the Codex CLI setup guide", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const wizardAction = extractBetween(js, "async function wizardAction(id)", "// ── Onboarding wizard");
+
+  assert.match(wizardAction, /id === 'codex-cli'/, "Codex setup action is handled");
+  assert.match(wizardAction, /openObWizard\(\)/, "Codex setup opens the setup wizard");
+  assert.match(wizardAction, /_obStep = 1/, "Codex setup jumps to the model backend step");
+  assert.match(wizardAction, /ob_codex_detail/, "Codex setup opens the Codex install guide");
+});
+
 test("Settings model controls are robust before and without model backends", () => {
   const js = extractScript(CONSOLE_HTML);
   const openSettings = extractBetween(js, "async function openSettings()", "function closeSettings()");

@@ -4244,6 +4244,14 @@ async function wizardAction(id) {
     // Message Lane / Mail Lane have their own guided modals.
     if (id === 'messagebee') { openMessageBeeSetup(); return; }
     if (id === 'mailbee') { openMailBeeSetup(); return; }
+    if (id === 'codex-cli') {
+      openObWizard();
+      _obStep = 1;
+      _obRenderStep();
+      const detail = document.getElementById('ob_codex_detail');
+      if (detail) detail.classList.add('open');
+      return;
+    }
     if (id === 'telemetry') {
       const choice = await hmConfirm(
         'Send anonymous usage stats?\n\nOnly aggregate feature counters (never file contents or event payloads) are sent once a day to a first-party endpoint. Default is off.\n\nYou can change this anytime in Settings > General.',

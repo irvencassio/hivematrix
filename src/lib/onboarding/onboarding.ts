@@ -186,6 +186,17 @@ export function getOnboardingStatus(opts: {
     remediation: hasFrontier ? undefined : "Optional: install the claude or codex CLI, or provide an ANTHROPIC_API_KEY/OPENAI_API_KEY for cloud-ok mode.",
   });
 
+  steps.push({
+    id: "codex-cli",
+    title: "Codex CLI (optional)",
+    required: false,
+    state: codexPath ? "done" : "incomplete",
+    detail: codexPath
+      ? `Optional Codex CLI detected (${codexPath})`
+      : "Optional: install only if you want ChatGPT/Codex routing.",
+    remediation: codexPath ? undefined : "Install the Codex CLI, then run `codex login` with a ChatGPT Plus/Pro account.",
+  });
+
   // desktopbee (optional compatibility id) — Desktop Lane
   const perms = opts.desktopPermissions;
   const desktopOk = opts.helperBuilt === true && !!perms && perms.accessibility && perms.screenRecording;
