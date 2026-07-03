@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.123 — 2026-07-03
+
+lock deep link dependencies
+
 ## v0.1.122 — 2026-07-03
 
 ship phase gate ledger
