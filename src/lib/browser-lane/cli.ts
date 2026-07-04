@@ -107,7 +107,7 @@ export function parseBrowserLaneCli(argv: string[]): BrowserLaneCliCommand {
       if (subcommand === "list") return { command: "trace-list" };
       if (subcommand === "latest") return { command: "trace-latest" };
       if (subcommand === "show") return { command: "trace-show", traceRunId: requireValue(rest[1], "trace run id") };
-      fail("trace command must be: hive browser trace list|latest|show");
+      return fail("trace command must be: hive browser trace list|latest|show");
     }
     case "search":
       return {

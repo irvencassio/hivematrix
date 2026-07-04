@@ -8,7 +8,7 @@ const TMP = mkdtempSync(join(tmpdir(), "hivematrix-content-research-"));
 process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
 const { getDb, _resetDbForTests } = await import("@/lib/db");
-const { getWorkflowRun, findWorkflowRunByDraft } = await import("./runs");
+const { getWorkflowRun } = await import("./runs");
 const { listWorkflowActions, getWorkflowAction } = await import("./actions");
 const { buildResearchBriefMarkdown, prepareContentResearchBrief } = await import("./content-research");
 

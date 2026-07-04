@@ -93,7 +93,7 @@ function buildHealthResult(
   partial: Partial<LocalModelHealth> & Pick<LocalModelHealth, "message" | "ok">
 ): LocalModelHealth {
   const endpoint = normalizeBaseUrl(config.endpoint);
-  let offlineReady = false;
+  let offlineReady: boolean;
   try {
     offlineReady = isLoopbackHost(new URL(endpoint).hostname);
   } catch {

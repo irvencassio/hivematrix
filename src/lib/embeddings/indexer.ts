@@ -8,7 +8,7 @@ import { promises as fs } from "fs";
 import { join, relative } from "path";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { embedTexts, getEmbeddingsConfig, isEmbeddingsEnabled } from "./provider";
-import { loadIndex, saveIndex, planReindex, contentHash, type IndexFile } from "./index-store";
+import { loadIndex, saveIndex, planReindex, contentHash } from "./index-store";
 
 const TEXT_EXTENSIONS = new Set([".md", ".markdown", ".txt", ".html", ".htm", ".mdx"]);
 const SKIP_DIRS = new Set([".git", "node_modules", ".obsidian", ".trash"]);

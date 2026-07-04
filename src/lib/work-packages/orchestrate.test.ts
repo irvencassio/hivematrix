@@ -12,7 +12,7 @@ const ORIGINAL_HOME = process.env.HOME;
 process.env.HOME = TMP;
 
 const { _resetDbForTests, getDb, Task } = await import("@/lib/db");
-const { createWorkPackage, getWorkPackage, updateWorkPackageItem, detectStuckState } = await import("./store");
+const { createWorkPackage, getWorkPackage, detectStuckState } = await import("./store");
 const { planNextItems, classifyBlockers, startWorkPackage, advanceWorkPackage, tickWorkPackages, reconcileWorkPackage, acceptWorkPackageItem, reconcileStuckFlight, coordinateFlightDecisions, releaseStaleCollisionHolds, maybeAutostartFlight, autostartDraftFlights } = await import("./orchestrate");
 const { setAutonomyLevel } = await import("@/lib/config/autonomy");
 const { readItemBlocker } = await import("./parent-blocker");
@@ -1053,7 +1053,7 @@ test("reconcileStuckFlight: idempotent on a clean running Flight (no stuck items
 // shouldAutoLand is captured here from the module object; it will be `undefined`
 // until implemented. Tests that call it throw TypeError → expected RED state.
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const shouldAutoLand = ((await import("./orchestrate")) as any).shouldAutoLand as
   | ((
       item: { risk: string; blocker: string | null; executionMode: string },

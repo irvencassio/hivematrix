@@ -45,7 +45,7 @@ export function buildDiagnosticsBundle(
       .prepare("SELECT runId, directiveId, payload, recordedAt FROM run_journal WHERE step = 'run_failed' ORDER BY _id DESC LIMIT 5")
       .all() as Array<{ runId: string; directiveId: string; payload: string; recordedAt: string }>
   ).map((r) => {
-    let reason = "";
+    let reason: string;
     try {
       reason = String((JSON.parse(r.payload) as { reason?: unknown }).reason ?? "");
     } catch {

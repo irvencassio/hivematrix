@@ -20,7 +20,7 @@ const dbDir = mkdtempSync(join(tmpdir(), "heygen-portal-verify-db-"));
 process.env.HOME = home;
 process.env.HIVEMATRIX_DB_PATH = join(dbDir, "verify.db");
 
-let code = 1;
+let code;
 try {
   const { runHeyGenPortalDryRun } = await import("@/lib/video/verify-portal-pipeline");
   const report = await runHeyGenPortalDryRun();

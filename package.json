@@ -22,10 +22,13 @@
     "mermaid": "^11.15.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "esbuild": "^0.28.1",
+    "eslint": "^10.6.0",
     "tsx": "^4.21.0",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.62.1"
   }
 }

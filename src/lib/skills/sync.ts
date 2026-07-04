@@ -85,7 +85,7 @@ async function ensureRepoClone(src: SkillSource, onLog: Logger): Promise<boolean
 /** Skill files in a repo: flat `<slug>.md` and `<slug>/SKILL.md`. */
 async function collectSkillFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
-  let entries: import("fs").Dirent[] = [];
+  let entries: import("fs").Dirent[];
   try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return out; }
   for (const e of entries) {
     if (e.name.startsWith(".")) continue;

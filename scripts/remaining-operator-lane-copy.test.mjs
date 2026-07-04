@@ -18,8 +18,8 @@ test("voice sidecar spoken-turn labels read 'assistant:' not 'bee:'", () => {
 test("console Talk status text labels the reply 'assistant:' not 'bee:'", () => {
   const console_ = read("src/daemon/console.ts");
 
-  assert.match(console_, /"  ·  assistant: " \+ res\.reply/);
-  assert.doesNotMatch(console_, /"  ·  bee: " \+ res\.reply/);
+  assert.match(console_, /" {2}· {2}assistant: " \+ res\.reply/);
+  assert.doesNotMatch(console_, /" {2}· {2}bee: " \+ res\.reply/);
 });
 
 test("user guide documents /lanes first, /bees only as a compatibility alias", () => {

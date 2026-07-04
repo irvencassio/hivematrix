@@ -54,7 +54,7 @@ const RULES = [
   },
   // ── Removed model providers ───────────────────────────────────
   {
-    pattern: "gemini|google-generative|generativeai|\'google\'.*provider|provider.*\'google\'",
+    pattern: "gemini|google-generative|generativeai|'google'.*provider|provider.*'google'",
     label: 'Google model provider (removed; Nano Banana and mflux are allowed by role, not provider)',
     allowFiles: ['COMPONENT-MAP.md', 'DECISIONS.md', 'QWEN-LOCAL-PROFILE.md', 'models/catalog', 'models/task-model'],
   },

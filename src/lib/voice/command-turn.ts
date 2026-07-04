@@ -204,7 +204,7 @@ export async function commandTurnOverride(transcript: string, deps: CommandTurnD
   const intent = detectCommandIntent(transcript || "");
   if (intent.kind === "none") return null;
 
-  let result: { reply: string; taskId?: string; detail?: string } | null = null;
+  let result: { reply: string; taskId?: string; detail?: string } | null;
   const sessionId = deps.sessionId ?? "default";
   try {
     result = await runCommand(intent, deps, sessionId);

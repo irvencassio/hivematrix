@@ -134,7 +134,6 @@ export async function runVisionStep(index: number, step: VisionStep, seams: Visi
   let note: string;
 
   if (!grounding.found) {
-    verdict = "failed";
     note = `grounding failed: ${grounding.note}`;
   } else {
     await seams.click(grounding.x!, grounding.y!);

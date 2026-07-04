@@ -975,7 +975,7 @@ export const Task = {
         return chain;
       },
       limit(n: number) { limitVal = n; return chain; },
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+       
       select(_fields?: string) { return chain; },
       lean() { return chain; },
       then<TResult1 = TaskDoc[], TResult2 = never>(
@@ -1006,7 +1006,7 @@ export const Task = {
         sortClause = ` ORDER BY ${Object.entries(sort).map(([k, v]) => `${k} ${v === 1 ? "ASC" : "DESC"}`).join(", ")}`;
         return chain;
       },
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+       
       select(_fields?: string) { return chain; },
       lean() { return chain; },
       then<TResult1 = TaskDoc | null, TResult2 = never>(

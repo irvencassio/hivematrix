@@ -13,7 +13,7 @@
 
 import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { tmpdir, homedir } from "os";
+import { tmpdir } from "os";
 import { execFileSync } from "child_process";
 
 // CRITICAL: isolate backup/restore to a throwaway DB so this NEVER touches the

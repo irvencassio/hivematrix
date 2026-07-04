@@ -14,7 +14,6 @@ const {
   getLoop,
   getLoopPasses,
   notifySelfPacedLoop,
-  updateLoopAfterPass,
 } = await import("./flight-loop-store");
 const { tickFlightLoops } = await import("./flight-loop-scheduler");
 

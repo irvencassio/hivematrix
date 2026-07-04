@@ -9,7 +9,7 @@ process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
 const { getDb, _resetDbForTests } = await import("@/lib/db");
 const { seedHeyGenBrowserSite } = await import("@/lib/browser-lane/heygen");
-const { upsertBrowserReadinessProbe, recordBrowserReadinessRun } = await import("@/lib/browser-lane/store");
+const { recordBrowserReadinessRun } = await import("@/lib/browser-lane/store");
 const { dispatchHeyGenVideoWorkflow } = await import("./heygen-workflow");
 
 before(() => { _resetDbForTests(); getDb(); });

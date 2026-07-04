@@ -120,7 +120,7 @@ function resolvePath(p: string, projectPath: string): string {
 
 /** Turn the harness JSON into a concise, agent-actionable report. */
 function summarize(stdout: string, ok: boolean): string {
-  let parsed: HarnessOutput | null = null;
+  let parsed: HarnessOutput | null;
   try {
     parsed = JSON.parse(stdout.trim().split("\n").pop() ?? "");
   } catch {

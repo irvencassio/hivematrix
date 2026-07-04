@@ -159,7 +159,7 @@ async function defaultGatewayCall(
     }
     const stderr = typeof maybe.stderr === "string" ? maybe.stderr.trim().split("\n").find((line) => line.trim()) : "";
     const message = typeof maybe.message === "string" ? maybe.message : "OpenClaw Gateway CLI call failed";
-    throw new Error(stderr || message);
+    throw new Error(stderr || message, { cause: err });
   }
 }
 

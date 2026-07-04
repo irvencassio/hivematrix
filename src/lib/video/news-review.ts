@@ -54,13 +54,6 @@ async function closeTask(taskId: string | undefined, status: string): Promise<vo
     await Task.findByIdAndUpdate(taskId, { status, reviewState: null });
   } catch { /* task is a nicety; the draft is the source of truth */ }
 }
-async function setTaskPrompt(taskId: string | undefined, prompt: string): Promise<void> {
-  if (!taskId) return;
-  try {
-    const { Task } = await import("@/lib/db");
-    await Task.findByIdAndUpdate(taskId, { description: prompt });
-  } catch { /* ignore */ }
-}
 async function setTaskFields(taskId: string | undefined, fields: Record<string, unknown>): Promise<void> {
   if (!taskId) return;
   try {

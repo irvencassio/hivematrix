@@ -105,7 +105,7 @@ test("approving the source run unlocks execution; rejecting keeps it blocked", a
 
   // Reject → still blocked.
   reviewWorkflowRun(run.id, "reject", {});
-  let blocked = await executeWorkflowAction(a.id, {}, { prepare: async () => ({ ok: true, status: "prepared", workflow: null }) });
+  const blocked = await executeWorkflowAction(a.id, {}, { prepare: async () => ({ ok: true, status: "prepared", workflow: null }) });
   assert.equal(blocked.status, "review_required");
 
   // Approve → unlocked.

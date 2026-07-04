@@ -93,7 +93,7 @@ test("prependAttachmentBlock keeps paths before long reply text", () => {
   const longReply = "x".repeat(3000);
   const text = prependAttachmentBlock(longReply, [{ filename: "shot.png", path: "/tmp/shot.png" }]);
 
-  assert.match(text.slice(0, 2000), /^Attached files:\n- shot\.png\n  path: \/tmp\/shot\.png/);
+  assert.match(text.slice(0, 2000), /^Attached files:\n- shot\.png\n {2}path: \/tmp\/shot\.png/);
   assert.match(text.slice(0, 2000), /Use the absolute path above to read each attachment from disk/);
   assert.ok(text.endsWith(longReply));
 });
