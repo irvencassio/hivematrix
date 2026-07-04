@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { decompose, parseSteps } from "./decompose";
-import type { ChatComplete } from "@/lib/models/chat-client";
+import { decompose, parseSteps, DECOMPOSE_MAX_TOKENS, DECOMPOSE_MAX_TOKENS_THINKING } from "./decompose";
+import type { ChatComplete, ChatMessage } from "@/lib/models/chat-client";
 
 function fakeClient(reply: string): ChatComplete {
   return async () => reply;
@@ -25,12 +25,60 @@ test("decompose returns fragments from the resolved client", async () => {
   assert.deepEqual(out, ["Step A", "Step B", "Step C"]);
 });
 
-test("decompose returns null when offline (deterministic fallback)", async () => {
+test("decompose returns null when offline with no local model (deterministic fallback)", async () => {
   const out = await decompose(
     { description: "do stuff" },
-    { client: fakeClient('["A","B"]'), connectivityMode: "offline" },
+    { client: fakeClient('["A","B"]'), connectivityMode: "offline", localModelAvailable: false },
   );
   assert.equal(out, null);
+});
+
+test("decompose uses a local loopback model even when offline", async () => {
+  const out = await decompose(
+    { description: "do stuff" },
+    { client: fakeClient('["A","B"]'), connectivityMode: "offline", localModelAvailable: true },
+  );
+  assert.deepEqual(out, ["A", "B"]);
+});
+
+test("decompose feeds the goal + success criteria to the model when goalFlight is set", async () => {
+  let capturedUser = "";
+  const client: ChatComplete = async (messages: ChatMessage[]) => {
+    capturedUser = messages.find((m) => m.role === "user")?.content ?? "";
+    return '["Scaffold the store", "Add the cart", "Wire Stripe checkout"]';
+  };
+  const out = await decompose(
+    { description: "Build a store with a cart and Stripe checkout" },
+    {
+      client,
+      connectivityMode: "cloud-ok",
+      goalFlight: { goal: "Build a store", successCriteria: ["a cart", "Stripe checkout"] },
+    },
+  );
+  assert.deepEqual(out, ["Scaffold the store", "Add the cart", "Wire Stripe checkout"]);
+  const user = capturedUser;
+  assert.match(user, /Goal: Build a store/);
+  assert.match(user, /a cart/);
+  assert.match(user, /Stripe checkout/);
+});
+
+test("decompose sizes the token budget up for a reasoning (thinking) model", async () => {
+  let seenMaxTokens = 0;
+  const client: ChatComplete = async (_messages, opts) => {
+    seenMaxTokens = opts?.maxTokens ?? 0;
+    return '["A","B"]';
+  };
+  await decompose(
+    { description: "do stuff" },
+    { client, connectivityMode: "cloud-ok", thinkingEnabled: true },
+  );
+  assert.equal(seenMaxTokens, DECOMPOSE_MAX_TOKENS_THINKING);
+
+  await decompose(
+    { description: "do stuff" },
+    { client, connectivityMode: "cloud-ok", thinkingEnabled: false },
+  );
+  assert.equal(seenMaxTokens, DECOMPOSE_MAX_TOKENS);
 });
 
 test("decompose returns null when no client is configured", async () => {

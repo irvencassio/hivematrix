@@ -15,7 +15,7 @@
 
 import { spawn } from "child_process";
 import { existsSync } from "fs";
-import { getQwenProfile } from "@/lib/config/qwen-profile";
+import { getQwenProfile, isQwenEndpointLocal } from "@/lib/config/qwen-profile";
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -155,4 +155,16 @@ export function resolveCompletionClient(_mode?: string): ChatComplete | null {
     return (messages, opts) => cliChatComplete(codex, messages, opts);
   }
   return null;
+}
+
+/**
+ * True when a local, loopback-served completion model (e.g. DeepSeek/DwarfStar on
+ * 127.0.0.1) is configured. Such a backend is keyless, free, and reachable even
+ * fully offline — callers use this to decide whether model-advised work (goal
+ * decomposition) may run without the flag and in offline mode.
+ */
+export function hasLocalCompletionModel(): boolean {
+  const profile = getQwenProfile();
+  if (!profile) return false;
+  return isQwenEndpointLocal(profile.primary.endpoint);
 }

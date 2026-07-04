@@ -280,3 +280,21 @@ test("classifyIntakeAsync preserves goalFlight metadata when model provides bett
   assert.ok(r.goalFlight!.goal.length > 0, "goal is non-empty");
   assert.ok(Array.isArray(r.goalFlight!.successCriteria), "successCriteria array preserved");
 });
+
+test("classifyIntakeAsync feeds the Goal Flight goal + success criteria to the model", async () => {
+  let capturedUser = "";
+  const r = await classifyIntakeAsync(
+    { description: "Create a web site that lets users browse products, add to cart, and checkout with Stripe." },
+    {
+      client: async (messages) => {
+        capturedUser = messages.find((m) => m.role === "user")?.content ?? "";
+        return '["Design product catalog", "Build shopping cart", "Integrate Stripe checkout"]';
+      },
+      connectivityMode: "cloud-ok",
+    },
+  );
+  assert.equal(r.kind, "work_package_candidate");
+  // The model turn must carry the goal-aware structure, not just the raw prompt.
+  assert.match(capturedUser, /Goal:/, "goal is passed to the model");
+  assert.match(capturedUser, /Success criteria/, "success criteria are passed to the model");
+});

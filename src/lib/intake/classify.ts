@@ -370,11 +370,22 @@ export async function classifyIntakeAsync(
       enabled = isFeatureEnabled("taskIntakeModelDecomposition");
     } catch { enabled = false; }
   }
+  // A configured local model (DeepSeek/DwarfStar on loopback) is keyless, free,
+  // and low-latency — use it to split goals even when the flag is off. The
+  // deterministic policy still stamps risk, gating, and concurrency downstream.
+  if (!enabled) {
+    try {
+      const { hasLocalCompletionModel } = await import("@/lib/models/chat-client");
+      enabled = hasLocalCompletionModel();
+    } catch { enabled = false; }
+  }
   if (!enabled) return base;
 
   try {
     const { decompose } = await import("./decompose");
-    const fragments = await decompose(input, effective ?? {});
+    // Feed the extracted Goal Flight context so the split covers the success
+    // criteria the Flight loop later checks against.
+    const fragments = await decompose(input, { ...(effective ?? {}), goalFlight: base.goalFlight ?? null });
     if (!fragments || fragments.length < 2) return base;
     const items = proposedItemsFromFragments(fragments);
     if (items.length < 2) return base;
