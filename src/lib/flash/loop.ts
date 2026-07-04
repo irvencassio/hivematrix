@@ -66,6 +66,28 @@ const FLASH_ONLY_TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "deep_think",
+      description:
+        "Deep reasoning for HARD questions: runs several independent attempts on the local model, " +
+        "cross-checks them for agreement, and reconciles disagreements with a skeptical revision pass. " +
+        "Slow (1-3 minutes) but far more reliable than a single answer. Use for strategy decisions, " +
+        "tricky analysis, math/logic, or anything where a wrong answer is costly. " +
+        "NOT for simple lookups, casual chat, or things a tool can answer directly.",
+      parameters: {
+        type: "object",
+        properties: {
+          question: {
+            type: "string",
+            description: "The question, fully self-contained — include all context needed to answer it, since this runs fresh without the conversation history.",
+          },
+        },
+        required: ["question"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "escalate_to_work_package",
       description:
         "Escalate a complex multi-step request to a Work Package for structured agent execution. " +
@@ -264,6 +286,21 @@ async function handleGenerateAvatar(
   return `Avatar generation attempted but failed: ${result.detail}. You can describe yourself in text instead — the operator can add an image manually later.`;
 }
 
+async function handleDeepThink(args: Record<string, unknown>): Promise<string> {
+  const question = String(args.question ?? "").trim();
+  if (!question) return "Error: question is required";
+  const { deepThink } = await import("@/lib/models/deep-think");
+  // Bounded to fit inside the flash turn budget (3 min wall): 3 rollouts,
+  // 60s per call, 150s total. The result carries calibration metadata so the
+  // model can present the answer with honest confidence.
+  const r = await deepThink(question, { samples: 3, callTimeoutMs: 60_000, maxWallMs: 150_000 });
+  return (
+    `${r.answer}\n\n` +
+    `[deep-think: ${r.candidates} attempts, ${Math.round(r.agreement * 100)}% agreement, ` +
+    `confidence ${r.confidence}${r.reflected ? ", revised after disagreement" : ""}, ${Math.round(r.elapsedMs / 1000)}s]`
+  );
+}
+
 async function handleEscalateToWorkPackage(
   args: Record<string, unknown>,
   emit: FlashEmitter,
@@ -383,6 +420,8 @@ export async function runFlashAgentLoop(
       try {
         if (name === "persona_update") {
           result = await handlePersonaUpdate(argsObj, emit, brainRoot);
+        } else if (name === "deep_think") {
+          result = await handleDeepThink(argsObj);
         } else if (name === "generate_avatar") {
           result = await handleGenerateAvatar(argsObj, brainRoot);
         } else if (name === "escalate_to_work_package") {
