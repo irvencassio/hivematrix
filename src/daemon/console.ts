@@ -4257,6 +4257,7 @@ async function wizardAction(id) {
       if (detail) detail.classList.add('open');
       return;
     }
+    if (id === 'persona') { await runPersonaBirthRitual(); return; }
     if (id === 'telemetry') {
       const choice = await hmConfirm(
         'Send anonymous usage stats?\n\nOnly aggregate feature counters (never file contents or event payloads) are sent once a day to a first-party endpoint. Default is off.\n\nYou can change this anytime in Settings > General.',
@@ -4588,6 +4589,55 @@ async function _obRenderPersonaSetup() {
     if (btn) btn.style.display = ready ? 'none' : '';
   } catch(e) {
     if (status) status.textContent = 'Personality status unavailable.';
+  }
+}
+
+// Settings → Setup "Persona" card entry point. The legacy obRunBirthRitual() below
+// targets the old wizard's DOM ids, which don't exist on the Setup card, so this
+// variant streams the same endpoint and reports progress via toasts instead.
+async function runPersonaBirthRitual() {
+  const ok = await hmConfirm(
+    'Run the birth ritual?\n\nYour local model will choose a name, an emoji sigil, and an identity, then write SOUL.md, IDENTITY.md and USER.md into your brain\'s persona folder. This can take a minute.',
+    { okLabel: 'Run it' }
+  );
+  if (!ok) return;
+  hmToast('Birth ritual started…');
+  try {
+    const res = await fetch('/onboarding/birth-ritual', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + HM_TOKEN },
+    });
+    const ct = res.headers.get('content-type') || '';
+    if (ct.indexOf('application/json') >= 0) {
+      const j = await res.json();
+      if (!res.ok || j.ok === false) throw new Error(j.error || j.detail || ('HTTP ' + res.status));
+      hmToast(j.reason || 'Persona already exists.');
+      await refresh();
+      return;
+    }
+    if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '', name = '';
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        let evt = '', dataStr = '';
+        for (const line of part.split('\n')) {
+          if (line.startsWith('event: ')) evt = line.slice(7).trim();
+          else if (line.startsWith('data: ')) dataStr = line.slice(6).trim();
+        }
+        if (evt === 'done' && dataStr) { try { name = JSON.parse(dataStr).personaName || ''; } catch(e) { /* ignore */ } }
+      }
+    }
+    hmToast(name ? ('✓ ' + name + ' is born') : '✓ Birth ritual complete', 'ok');
+    await refresh();
+  } catch(e) {
+    await hmAlert('Birth ritual failed: ' + e, 'Persona');
   }
 }
 

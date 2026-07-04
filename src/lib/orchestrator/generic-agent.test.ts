@@ -42,6 +42,22 @@ test("generic/local dwarfstar body forwards the task thinking mode as reasoning_
   assert.equal(buildGenericRequestBody(provider, "deepseek-v4-flash", msgs).reasoning_effort, "max");
 });
 
+test("generic/local dwarfstar 'off' thinking mode sends the disable off-switch, not reasoning_effort", () => {
+  const provider: ModelProvider = {
+    name: "dwarfstar",
+    endpoint: "http://127.0.0.1:8000/v1",
+    apiKey: "",
+    supportsTools: true,
+    maxTokens: 8192,
+  };
+  const msgs = [{ role: "user", content: "Read this file" }];
+
+  const body = buildGenericRequestBody(provider, "deepseek-v4-flash", msgs, undefined, "off");
+  assert.deepEqual(body.thinking, { type: "disabled" });
+  assert.equal(body.think, false);
+  assert.equal("reasoning_effort" in body, false);
+});
+
 test("generic/local max thinking is represented as a portable system instruction", () => {
   assert.match(genericThinkingInstruction("auto"), /maximum supported reasoning/i);
   assert.match(genericThinkingInstruction("max"), /maximum supported reasoning/i);

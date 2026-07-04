@@ -35,6 +35,37 @@ test("localChatComplete falls through to /v1/chat/completions on a 404", async (
   assert.match(calls[1], /\/v1\/chat\/completions$/);
 });
 
+test("localChatComplete sends the thinking off-switch when reasoningEffort is 'off'", async () => {
+  let sentBody: Record<string, unknown> = {};
+  const fetchImpl = (async (_url: string, init?: RequestInit) => {
+    sentBody = JSON.parse(String(init?.body ?? "{}"));
+    return jsonResponse(200, { choices: [{ message: { content: "ok" } }] });
+  }) as unknown as typeof fetch;
+
+  await localChatComplete(
+    [{ role: "user", content: "hi" }],
+    { endpoint: "http://localhost:8080/v1", model: "m", reasoningEffort: "off", fetchImpl },
+  );
+  assert.deepEqual(sentBody.thinking, { type: "disabled" });
+  assert.equal(sentBody.think, false);
+  assert.equal("reasoning_effort" in sentBody, false);
+});
+
+test("localChatComplete sends reasoning_effort for a normal thinking tier", async () => {
+  let sentBody: Record<string, unknown> = {};
+  const fetchImpl = (async (_url: string, init?: RequestInit) => {
+    sentBody = JSON.parse(String(init?.body ?? "{}"));
+    return jsonResponse(200, { choices: [{ message: { content: "ok" } }] });
+  }) as unknown as typeof fetch;
+
+  await localChatComplete(
+    [{ role: "user", content: "hi" }],
+    { endpoint: "http://localhost:8080/v1", model: "m", reasoningEffort: "low", fetchImpl },
+  );
+  assert.equal(sentBody.reasoning_effort, "low");
+  assert.equal("thinking" in sentBody, false);
+});
+
 test("localChatComplete throws on a non-2xx that has no fallback", async () => {
   const fetchImpl = (async () => jsonResponse(500, { error: "boom" })) as unknown as typeof fetch;
   await assert.rejects(

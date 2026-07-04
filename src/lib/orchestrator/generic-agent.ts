@@ -20,7 +20,7 @@ import { formatSkillIndex, skillRunsOn } from "@/lib/skills/contracts";
 import { getAgentProfile } from "@/lib/config/agent-profiles";
 import { buildBrainMemoryBundle, buildBrainIndexBlock } from "@/lib/brain/memory-bundle";
 import { brainDocPolicyText } from "@/lib/brain/settings";
-import { resolveThinkingMode, dwarfstarReasoningEffort } from "@/lib/config/budget-policy";
+import { resolveThinkingMode, dwarfstarThinkingFields, autoTurnThinkingMode } from "@/lib/config/budget-policy";
 
 const MAX_TURNS = 50;
 const LOCAL_OPENAI_COMPATIBLE_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai", "dwarfstar"]);
@@ -448,10 +448,11 @@ export function buildGenericRequestBody(
 
   // DwarfStar (local DeepSeek) defaults every request to high-effort thinking,
   // which dominates per-turn latency. Forward the task's thinking mode as
-  // `reasoning_effort` so lighter tasks actually decode faster. Only sent to
-  // dwarfstar — other local backends may reject the field.
+  // `reasoning_effort` — or, for the "off" tier, the `thinking:{type:"disabled"}`
+  // off-switch that skips <think> entirely (ds4's biggest latency lever). Only
+  // sent to dwarfstar — other local backends may reject these fields.
   if (provider.name === "dwarfstar") {
-    body.reasoning_effort = dwarfstarReasoningEffort(thinkingMode);
+    Object.assign(body, dwarfstarThinkingFields(thinkingMode));
   }
 
   if (provider.supportsTools && profileTools && profileTools.length > 0) {
@@ -567,6 +568,11 @@ async function runAgentLoop(
   const readCache = new Map<string, string>();
   // When true, next API call strips tools entirely so the model must produce text.
   let forceTextOnlyTurn = false;
+  // True once this loop has executed at least one tool call. Drives the DwarfStar
+  // per-turn thinking heuristic: skip <think> on the mechanical tool-continuation
+  // turns in the middle, keep it for the first (planning) and forced-text
+  // (synthesis) boundaries. See autoTurnThinkingMode.
+  let sawToolCall = false;
   // Deterministic verification-gate bookkeeping: how many times we've bounced a
   // "done" back for a crashing smoke run, and whether the last run was clean.
   let smokeRetries = 0;
@@ -579,11 +585,18 @@ async function runAgentLoop(
 
     turns++;
 
+    // DwarfStar only: adapt the thinking mode per turn — skip <think> on the
+    // mechanical tool-continuation turns, keep it on the planning/synthesis
+    // boundaries. Other backends ignore thinkingMode in the request body.
+    const turnThinkingMode = provider.name === "dwarfstar"
+      ? autoTurnThinkingMode(thinkingMode, { continuationAfterTool: sawToolCall && !forceTextOnlyTurn })
+      : thinkingMode;
+
     // Call API with single retry on transient errors (429, 500, 502, 503)
     let response: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        response = await callChatCompletions(provider, modelId, messages, controller.signal, forceTextOnlyTurn ? [] : profileTools, thinkingMode);
+        response = await callChatCompletions(provider, modelId, messages, controller.signal, forceTextOnlyTurn ? [] : profileTools, turnThinkingMode);
       } catch (err) {
         if (controller.signal.aborted) return { code: 1, result: "Aborted", turns, totalTokens, inputTokens, outputTokens };
         if (attempt === 0) {
@@ -666,6 +679,9 @@ async function runAgentLoop(
     const effectiveToolCalls = toolCalls.length > 0 ? toolCalls : textTools.toolCalls;
 
     if ((toolCalls.length > 0 && hasToolCalls) || textTools.toolCalls.length > 0) {
+      // A tool ran this turn → subsequent turns are mechanical continuations
+      // (drives the DwarfStar per-turn thinking heuristic).
+      sawToolCall = true;
       // Add assistant message with tool calls to conversation
       if (toolCalls.length > 0 && hasToolCalls) {
         messages.push({
