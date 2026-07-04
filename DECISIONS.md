@@ -1063,3 +1063,26 @@ full suite 2629/2629; typecheck + scope-wall clean.
 **Future (not built):** deepThink for directive plan-phase (planner runs as a
 spawned harness task today), POST /think endpoint, agreement-driven escalation
 to a second local tier (Qwen cross-model ensemble).
+
+## BUILD (2026-07-04) — voice beef-up: deep-think, goals, memory, heartbeat by voice
+
+Four new capabilities on the push-to-talk command layer (`command-intent.ts` +
+`command-turn.ts`) — the TS path every voice surface shares; the Python sidecar
+is untouched (it carries a concurrent session's in-flight work):
+
+1. **deepThink** — "think hard about X": immediate ack, background
+   models/deep-think pass, answer read back via voice:result with honest
+   confidence framing. Multi-attempt local reasoning from the phone.
+2. **goals / addGoal** — "what are my goals" speaks persona/GOALS.md; "add a
+   goal to X" / "my goal is X" appends dated + deduped. Voice-writable goal
+   ledger. "standing goals" still → directives.
+3. **remember** — "remember/note that X" → timestamped bullet in
+   persona/memory/YYYY-MM-DD.md. "remember to X" stays a task.
+4. **heartbeatNow** — "run a heartbeat / pulse now" fires one pass and speaks
+   the report; runner daemon-injected via CommandTurnDeps (voice/ never imports
+   flash/).
+
+**Provers:** 10 tests (intent collisions incl. remember-that vs remember-to,
+executor incl. async voice:result broadcast); suite 2639/2639; typecheck +
+scope-wall clean. The server-side dep injection hunk rides in server.ts with
+the pending /trust endpoints (entangled file, committed separately).
