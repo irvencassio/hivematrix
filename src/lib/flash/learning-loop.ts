@@ -12,6 +12,7 @@
 
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { runPatternDetection } from "@/lib/feedback/pattern-detection";
+import { runCapabilityGapDetection } from "@/lib/feedback/capability-gaps";
 import { runPersonaEvolution } from "./persona-evolution";
 import { getColdSessions } from "./store";
 import { distillSession } from "./distill";
@@ -34,6 +35,10 @@ async function runDistillPass(nowMs = Date.now()): Promise<void> {
   if (nowMs - lastPatternRunMs >= PATTERN_INTERVAL_MS) {
     lastPatternRunMs = nowMs;
     runPatternDetection();
+    // Capability self-assessment: surface missing-capability gaps as labeled
+    // proposals (self-serviceable skills vs. gated lane/pack acquisition). Never
+    // acquires anything — acquisition stays a separate, gated operator action.
+    runCapabilityGapDetection();
   }
 
   // Weekly, high-trust: let the agent evolve its own SOUL.md operating notes from
