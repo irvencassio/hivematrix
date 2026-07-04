@@ -290,7 +290,7 @@ test("Settings model controls are robust before and without model backends", () 
 
   assert.match(openSettings, /if \(!models\)[\s\S]*await loadModels\(\)/, "opening Settings loads models when needed");
   assert.match(renderSettings, /\(no models configured\)/, "empty model list gets a clear option");
-  assert.match(renderSettings, /sd\.disabled = !available\.length/, "default selector is disabled with no available model");
+  assert.match(renderSettings, /sd\.disabled = !selectable\.length/, "default selector is disabled with no selectable model");
   assert.match(saveDefault, /if \(!modelId\)/, "saving a missing default model is guarded");
 });
 
