@@ -1723,15 +1723,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <select id="t_model"></select>
         <label class="flbl">Mode</label>
         <select id="t_route">
-          <option value="auto" selected>Auto — route by content</option>
-          <option value="work_package">Flight — multi-step autonomous run</option>
-          <option value="browser-lane">Browser Lane — web browsing &amp; automation</option>
-          <option value="terminal-lane">Terminal Lane — run on a host</option>
-          <option value="mail">Mail Lane — compose &amp; send email</option>
-          <option value="message">Message Lane — iMessage &amp; SMS</option>
-          <option value="desktop">Desktop Lane — screen &amp; GUI automation</option>
+          <option value="auto" selected>Auto — detect Flight, lanes &amp; steps</option>
           <option value="normal">Direct — one plain task</option>
         </select>
+        <div class="muted" style="font-size:11px;margin-top:2px">Auto splits multi-step goals into a Flight and routes browsing/terminal work to the right lane. Pick Direct to force a single plain task.</div>
       </details>
       <label class="flbl">Attachments</label>
       <div class="attach-row attach-drop" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onAttachDrop(event)">
