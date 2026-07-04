@@ -11,16 +11,28 @@
  */
 
 import { configuredBrainRootDir } from "@/lib/brain/settings";
+import { runPatternDetection } from "@/lib/feedback/pattern-detection";
 import { getColdSessions } from "./store";
 import { distillSession } from "./distill";
 
 const COLD_THRESHOLD_MS = 6 * 60 * 60 * 1000; // 6 hours
 const POLL_INTERVAL_MS = 15 * 60 * 1000;       // 15 minutes
 const STARTUP_DELAY_MS = 60_000;               // 1 minute — let daemon settle first
+const PATTERN_INTERVAL_MS = 24 * 60 * 60 * 1000; // pattern detection is a slow, once-a-day pass
 
 let loopTimer: ReturnType<typeof setInterval> | null = null;
+let lastPatternRunMs = 0;
 
-async function runDistillPass(): Promise<void> {
+async function runDistillPass(nowMs = Date.now()): Promise<void> {
+  // Slow anticipatory pass: cluster the feedback backlog into "this keeps
+  // happening — address the root cause" proposals, at most once a day. Runs
+  // independent of cold sessions so an idle-but-accumulating backlog still gets
+  // surfaced. Best-effort (never throws).
+  if (nowMs - lastPatternRunMs >= PATTERN_INTERVAL_MS) {
+    lastPatternRunMs = nowMs;
+    runPatternDetection();
+  }
+
   const brainRoot = configuredBrainRootDir();
   const cold = getColdSessions(COLD_THRESHOLD_MS);
   if (cold.length === 0) return;
