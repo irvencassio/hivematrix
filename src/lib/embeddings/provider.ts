@@ -76,6 +76,13 @@ const DEFAULT_TEMPORAL_HALF_LIFE_DAYS = 30;
 export const RAPID_MLX_QWEN3_EMBEDDING_ENDPOINT = "http://localhost:8002/v1";
 export const RAPID_MLX_QWEN3_EMBEDDING_MODEL = "mlx-community/Qwen3-Embedding-8B-4bit-DWQ";
 
+// On-demand preset: Ollama loads the model on first request (~1s for 0.6B on
+// Apple Silicon) and auto-unloads after its keep_alive idle window, so the
+// embedder costs ~0 RAM between brain-index passes. Best code-retrieval score
+// in its size class (MTEB Code 75.41). Switching models requires a reindex —
+// embedding dims differ (1024 vs 4096 for the 8B presets).
+export const OLLAMA_QWEN3_EMBEDDING_06B_MODEL = "qwen3-embedding:0.6b";
+
 function configPath(): string {
   return join(homedir(), ".hivematrix", "config.json");
 }
@@ -167,6 +174,14 @@ function normalizeEmbeddingsConfig(raw: Partial<EmbeddingsConfig> = {}): Embeddi
 
 export function embeddingModelChoices(): EmbeddingModelChoice[] {
   return [
+    {
+      id: "ollama-qwen3-embedding-06b",
+      name: "Ollama Qwen3 Embedding 0.6B (on-demand)",
+      endpoint: DEFAULT_EMBEDDINGS_ENDPOINT,
+      model: OLLAMA_QWEN3_EMBEDDING_06B_MODEL,
+      provider: "ollama",
+      note: "recommended: loads on first request (~1s), auto-unloads when idle",
+    },
     {
       id: "rapid-mlx-qwen3-8b",
       name: "Rapid-MLX Qwen3 Embedding 8B",

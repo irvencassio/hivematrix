@@ -1,0 +1,121 @@
+{
+  "label": "coder-next-6bit",
+  "model": "mlx-community/Qwen3-Coder-Next-6bit",
+  "endpoint": "http://127.0.0.1:8090/v1",
+  "effort": "medium",
+  "tasks": {
+    "T1-curses-recall": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 5.5,
+        "completion_tokens": 347,
+        "tok_per_s": 63.2
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 5.5,
+        "completion_tokens": 434,
+        "tok_per_s": 78.6
+      }
+    ],
+    "T2-ttlcache-pytest": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 4.2,
+        "completion_tokens": 304,
+        "tok_per_s": 72.1
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 4.0,
+        "completion_tokens": 314,
+        "tok_per_s": 78.0
+      }
+    ],
+    "T3-node-dupes": [
+      {
+        "seed": 1,
+        "score": 0.25,
+        "notes": [
+          "runs failed: Error: fs.createReadStream is not a function\n"
+        ],
+        "elapsed_s": 3.8,
+        "completion_tokens": 273,
+        "tok_per_s": 71.8
+      },
+      {
+        "seed": 2,
+        "score": 0.25,
+        "notes": [
+          "runs failed: Error: fs.createReadStream is not a function\n"
+        ],
+        "elapsed_s": 3.7,
+        "completion_tokens": 288,
+        "tok_per_s": 78.1
+      }
+    ],
+    "T4-toolchain": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 1.4,
+        "completion_tokens": 54,
+        "tok_per_s": 37.9
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 0.8,
+        "completion_tokens": 54,
+        "tok_per_s": 63.7
+      }
+    ],
+    "T5-bugfix-traceback": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 1.3,
+        "completion_tokens": 80,
+        "tok_per_s": 61.5
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 1.1,
+        "completion_tokens": 80,
+        "tok_per_s": 74.7
+      }
+    ],
+    "T6-datetime-precision": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 4.3,
+        "completion_tokens": 305,
+        "tok_per_s": 71.3
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 3.9,
+        "completion_tokens": 306,
+        "tok_per_s": 77.8
+      }
+    ]
+  },
+  "started": "2026-07-04 08:08:16"
+}

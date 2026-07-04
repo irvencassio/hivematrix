@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.132", date: "2026-07-04", note: "Standardize local models after the tools/model-bench bake-off: DeepSeek V4 Flash q2-q4 primary (128GB machines) with Qwen3.6-35B-A3B via Rapid-MLX as the lower-memory option (MLX tool calling enabled), fix Mixed-mode routing that ignored the configured local model and pointed Claude sessions at the local endpoint, mandatory code-verification gate on every coding agent, on-demand Qwen3-Embedding-0.6B via Ollama for brain search, and a RAM-aware install-local-model.sh for new machines" },
   { version: "0.1.131", date: "2026-07-04", note: "Maintenance: de-duplicate the 0.1.130 changelog entry that concurrent releases left doubled" },
   { version: "0.1.130", date: "2026-07-04", note: "Fix mobile pairing: the QR now shows a clear reason instead of a blank box when it can't render, Settings reflects saved Cloudflare Access credentials, and saving just the secret no longer wipes the client id; add a local license-issue script (counterpart to license-keygen) and harden messagebee onboarding tests against an installed Pro license" },
   { version: "0.1.129", date: "2026-07-04", note: "Fix slow local DeepSeek tasks: forward each task's thinking mode to Dwarf Star as reasoning_effort so lighter work decodes faster, give goal decomposition a real 60s timeout (12s default aborted every thinking-mode split and silently fell back), and quadruple the ds4-server KV disk cache budget to stop per-turn prefill re-thrashing" },

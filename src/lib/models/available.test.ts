@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildAvailableModels, buildRoleModelOptions, CLAUDE_OPUS_ID, CLAUDE_SONNET_ID, CODEX_NEWEST_ID } from "./available";
-import { DEEPSEEK_FLASH_API_MODEL_ID } from "./local-presets";
+import { DEEPSEEK_FLASH_API_MODEL_ID, QWEN36_35B_API_MODEL_ID } from "./local-presets";
 import type { BackendStatus } from "./backends";
 
 function backends(local: boolean, claude: boolean, codex: boolean): BackendStatus[] {
@@ -14,7 +14,7 @@ function backends(local: boolean, claude: boolean, codex: boolean): BackendStatu
 const ids = (b: BackendStatus[]) => buildAvailableModels(b).map((m) => m.id);
 
 test("only configured backends produce models", () => {
-  assert.deepEqual(ids(backends(true, false, false)), ["local", "local-fast", "local-coding", "dwarfstar-deepseek-flash"]);
+  assert.deepEqual(ids(backends(true, false, false)), ["local", "local-fast", "local-coding", "dwarfstar-deepseek-flash", "rapid-mlx-qwen36-35b"]);
   assert.deepEqual(ids(backends(false, false, false)), []);
 });
 
@@ -82,6 +82,7 @@ test("role options expose Coding choices across Claude, Codex, and local Qwen", 
     "qwen3.6-35b-4bit",
     "qwen3.6-27b-4bit",
     DEEPSEEK_FLASH_API_MODEL_ID,
+    QWEN36_35B_API_MODEL_ID,
   ]);
 });
 
@@ -93,6 +94,7 @@ test("role options expose Operational escape hatches without making them the def
     "qwen3.6-35b-4bit",
     "qwen3.6-27b-4bit",
     DEEPSEEK_FLASH_API_MODEL_ID,
+    QWEN36_35B_API_MODEL_ID,
     "codex:gpt-5.3-codex-spark",
     "sonnet",
   ]);

@@ -36,7 +36,9 @@ const PROVIDER_DEFAULTS: Record<string, { endpoint: string; supportsTools: boole
   },
   mlx: {
     endpoint: "http://localhost:8080/v1",
-    supportsTools: false,
+    // rapid-mlx parses tool calls across model formats; verified 2/2 on the
+    // two-step tool-chain bench with Qwen3.6-35B (tools/model-bench, 2026-07-04).
+    supportsTools: true,
     maxTokens: 4096,
   },
   vllm: {

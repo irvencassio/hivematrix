@@ -1,0 +1,117 @@
+{
+  "label": "qwen36-35b-8bit",
+  "model": "mlx-community/Qwen3.6-35B-A3B-8bit",
+  "endpoint": "http://127.0.0.1:8090/v1",
+  "effort": "medium",
+  "tasks": {
+    "T1-curses-recall": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 59.8,
+        "completion_tokens": 4674,
+        "tok_per_s": 78.1
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 6.6,
+        "completion_tokens": 562,
+        "tok_per_s": 85.5
+      }
+    ],
+    "T2-ttlcache-pytest": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 2.8,
+        "completion_tokens": 234,
+        "tok_per_s": 83.3
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 2.8,
+        "completion_tokens": 242,
+        "tok_per_s": 87.9
+      }
+    ],
+    "T3-node-dupes": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 56.2,
+        "completion_tokens": 4056,
+        "tok_per_s": 72.1
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 3.5,
+        "completion_tokens": 301,
+        "tok_per_s": 86.2
+      }
+    ],
+    "T4-toolchain": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 1.9,
+        "completion_tokens": 62,
+        "tok_per_s": 32.4
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 1.0,
+        "completion_tokens": 62,
+        "tok_per_s": 60.8
+      }
+    ],
+    "T5-bugfix-traceback": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 1.1,
+        "completion_tokens": 90,
+        "tok_per_s": 82.4
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 1.1,
+        "completion_tokens": 90,
+        "tok_per_s": 82.0
+      }
+    ],
+    "T6-datetime-precision": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 1.0,
+        "completion_tokens": 81,
+        "tok_per_s": 81.3
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 1.0,
+        "completion_tokens": 81,
+        "tok_per_s": 81.2
+      }
+    ]
+  },
+  "started": "2026-07-04 07:58:08"
+}

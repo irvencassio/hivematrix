@@ -13,6 +13,7 @@ import {
 } from "./openai-stream-adapter";
 import { TOOL_DEFINITIONS, executeTool, type ToolContext, type ChatTool } from "./tool-bridge";
 import { availableLaneTools, capabilityRoutingGuide } from "./lane-tools";
+import { verificationGatePrompt } from "./verification-gate";
 import { listSkills } from "@/lib/skills/store";
 import { formatSkillIndex, skillRunsOn } from "@/lib/skills/contracts";
 import { getAgentProfile } from "@/lib/config/agent-profiles";
@@ -117,6 +118,10 @@ async function buildSystemPrompt(projectPath: string, agentType: string, thinkin
   if (profile.tools.length > 0) {
     prompt += `\n\nWorking directory: ${projectPath}`;
     prompt += `\n\n${genericDeliverableReliabilityInstruction()}`;
+    // Code verification gate — same layer the Claude CLI bridge injects. Local
+    // quantized models hallucinate API names more than frontier ones, so the
+    // catch-and-correct pass matters most on exactly this path.
+    prompt += `\n\n${verificationGatePrompt()}`;
   }
 
   if (memoryBundle) {

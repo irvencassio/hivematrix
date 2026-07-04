@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.132 — 2026-07-04
+
+Standardize local models after the tools/model-bench bake-off: DeepSeek V4 Flash q2-q4 primary (128GB machines) with Qwen3.6-35B-A3B via Rapid-MLX as the lower-memory option (MLX tool calling enabled), fix Mixed-mode routing that ignored the configured local model and pointed Claude sessions at the local endpoint, mandatory code-verification gate on every coding agent, on-demand Qwen3-Embedding-0.6B via Ollama for brain search, and a RAM-aware install-local-model.sh for new machines
+
 ## v0.1.131 — 2026-07-04
 
 Maintenance: de-duplicate the 0.1.130 changelog entry that concurrent releases left doubled

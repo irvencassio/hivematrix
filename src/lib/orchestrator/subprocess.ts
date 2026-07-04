@@ -4,6 +4,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { ALLOWED_TOOLS, getOpsAllowedTools, MAX_TURNS, getActiveProfile, getLocalModelConfig } from "@/lib/config/constants";
 import { resolveProvider } from "@/lib/config/providers";
+import { verificationGatePrompt } from "@/lib/orchestrator/verification-gate";
 import { NO_REPO_LOCK_PROJECTS } from "@/lib/routing/aliases";
 import { getDb } from "@/lib/db";
 import { buildBrainMemoryBundle } from "@/lib/brain/memory-bundle";
@@ -528,6 +529,13 @@ export async function spawnAgent(
   const brainDocPolicy = `--- Brain Doc Policy ---\n${brainDocPolicyText()}`;
   args.push("--append-system-prompt", brainDocPolicy);
   overheadBytes.agentGuide += Buffer.byteLength(brainDocPolicy);
+
+  // Code verification gate: generated code (any language) must be executed and
+  // static-checked before the agent reports completion. Local quantized models
+  // hallucinate API names; this layer makes the catch-and-correct pass mandatory.
+  const verificationGate = verificationGatePrompt();
+  args.push("--append-system-prompt", verificationGate);
+  overheadBytes.agentGuide += Buffer.byteLength(verificationGate);
 
   // Outbound routing: teach the CLI agent to send email/SMS through the daemon's
   // trust-gated endpoints (its Bash tool can reach loopback) instead of

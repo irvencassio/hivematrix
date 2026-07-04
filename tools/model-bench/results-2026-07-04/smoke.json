@@ -1,0 +1,19 @@
+{
+  "label": "smoke",
+  "model": "deepseek-v4-flash",
+  "endpoint": "http://127.0.0.1:8000/v1",
+  "effort": "medium",
+  "tasks": {
+    "T5-bugfix-traceback": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 7.5,
+        "completion_tokens": 211,
+        "tok_per_s": 28.0
+      }
+    ]
+  },
+  "started": "2026-07-04 07:35:02"
+}

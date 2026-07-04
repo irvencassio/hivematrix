@@ -14,6 +14,7 @@ import { readLatestCodexTokenUsage } from "@/lib/usage/codex";
 import { isChannelEnabled as isMailLaneEnabled } from "@/lib/mailbee/store";
 import { isChannelEnabled as isMessageLaneEnabled } from "@/lib/messagebee/store";
 import { outboundHttpRoutingPrompt, brainSearchRoutingPrompt, beeToolsRoutingPrompt, type OutboundRoutingPromptOptions } from "./outbound-routing";
+import { verificationGatePrompt } from "./verification-gate";
 
 let fakePidCounter = -5000;
 
@@ -26,7 +27,7 @@ let fakePidCounter = -5000;
 export function buildCodexPrompt(description: string, opts: OutboundRoutingPromptOptions = {}): string {
   const mailLaneEnabled = opts.mailLaneEnabled ?? isMailLaneEnabled();
   const messageLaneEnabled = opts.messageLaneEnabled ?? isMessageLaneEnabled();
-  return `${outboundHttpRoutingPrompt(undefined, { mailLaneEnabled, messageLaneEnabled })}\n\n${brainSearchRoutingPrompt()}\n\n${beeToolsRoutingPrompt()}\n\n--- Your task ---\n${description}`;
+  return `${outboundHttpRoutingPrompt(undefined, { mailLaneEnabled, messageLaneEnabled })}\n\n${brainSearchRoutingPrompt()}\n\n${beeToolsRoutingPrompt()}\n\n${verificationGatePrompt()}\n\n--- Your task ---\n${description}`;
 }
 
 /**

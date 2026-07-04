@@ -1,0 +1,117 @@
+{
+  "label": "ds4-flash-q2q4",
+  "model": "deepseek-v4-flash",
+  "endpoint": "http://127.0.0.1:8000/v1",
+  "effort": "medium",
+  "tasks": {
+    "T1-curses-recall": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 56.3,
+        "completion_tokens": 2047,
+        "tok_per_s": 36.4
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 33.0,
+        "completion_tokens": 1190,
+        "tok_per_s": 36.0
+      }
+    ],
+    "T2-ttlcache-pytest": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 69.3,
+        "completion_tokens": 2466,
+        "tok_per_s": 35.6
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 75.0,
+        "completion_tokens": 2442,
+        "tok_per_s": 32.5
+      }
+    ],
+    "T3-node-dupes": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 44.1,
+        "completion_tokens": 1395,
+        "tok_per_s": 31.6
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 16.6,
+        "completion_tokens": 507,
+        "tok_per_s": 30.6
+      }
+    ],
+    "T4-toolchain": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 6.6,
+        "completion_tokens": 147,
+        "tok_per_s": 22.4
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 6.5,
+        "completion_tokens": 145,
+        "tok_per_s": 22.2
+      }
+    ],
+    "T5-bugfix-traceback": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 6.4,
+        "completion_tokens": 173,
+        "tok_per_s": 27.1
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 11.7,
+        "completion_tokens": 343,
+        "tok_per_s": 29.3
+      }
+    ],
+    "T6-datetime-precision": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 19.2,
+        "completion_tokens": 586,
+        "tok_per_s": 30.6
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 19.7,
+        "completion_tokens": 601,
+        "tok_per_s": 30.5
+      }
+    ]
+  },
+  "started": "2026-07-04 08:42:50"
+}

@@ -1,0 +1,119 @@
+{
+  "label": "ds4-flash-q2",
+  "model": "deepseek-v4-flash",
+  "endpoint": "http://127.0.0.1:8000/v1",
+  "effort": "medium",
+  "tasks": {
+    "T1-curses-recall": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 50.3,
+        "completion_tokens": 1826,
+        "tok_per_s": 36.3
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 39.4,
+        "completion_tokens": 1400,
+        "tok_per_s": 35.5
+      }
+    ],
+    "T2-ttlcache-pytest": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 65.1,
+        "completion_tokens": 2223,
+        "tok_per_s": 34.1
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 123.1,
+        "completion_tokens": 3933,
+        "tok_per_s": 31.9
+      }
+    ],
+    "T3-node-dupes": [
+      {
+        "seed": 1,
+        "score": 0.25,
+        "notes": [
+          "runs failed: file:///private/var/folders/f_/qbl093xj44v4rqxt7gxqf1zc0000gn/T/tmpbf7jf6p_/dupes.js:1\nimport { readdir, lstat, createReadStream } from 'fs/promises';\n                         ^^^^^^^^^^^^^^^^\nSyntaxE"
+        ],
+        "elapsed_s": 56.0,
+        "completion_tokens": 1751,
+        "tok_per_s": 31.2
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 23.8,
+        "completion_tokens": 727,
+        "tok_per_s": 30.5
+      }
+    ],
+    "T4-toolchain": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 6.7,
+        "completion_tokens": 146,
+        "tok_per_s": 21.7
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 6.8,
+        "completion_tokens": 151,
+        "tok_per_s": 22.3
+      }
+    ],
+    "T5-bugfix-traceback": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 7.7,
+        "completion_tokens": 211,
+        "tok_per_s": 27.3
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 13.3,
+        "completion_tokens": 385,
+        "tok_per_s": 29.0
+      }
+    ],
+    "T6-datetime-precision": [
+      {
+        "seed": 1,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 18.9,
+        "completion_tokens": 566,
+        "tok_per_s": 29.9
+      },
+      {
+        "seed": 2,
+        "score": 1.0,
+        "notes": [],
+        "elapsed_s": 20.7,
+        "completion_tokens": 620,
+        "tok_per_s": 29.9
+      }
+    ]
+  },
+  "started": "2026-07-04 07:35:23"
+}
