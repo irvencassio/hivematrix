@@ -6133,10 +6133,13 @@ function renderSettingsModelControls() {
     document.getElementById("s_backends").innerHTML += renderLocalBackendChoice(local, m.localModelHealth);
   }
   if (!isDwarfStarLocal) {
+    // renderLocalBackendChoice already folds the readiness-check details into
+    // the Dwarf Star card, so the separate health card is only needed on the
+    // engine/provision path — adding it for Dwarf Star just duplicates the card.
     document.getElementById("s_backends").innerHTML += renderLocalEngine(m.localEngine, m.localEngineCapability);
+    document.getElementById("s_backends").innerHTML += renderLocalModelHealth(m.localModelHealth);
+    document.getElementById("s_backends").innerHTML += renderProvisionUI(m.localEngineCapability);
   }
-  document.getElementById("s_backends").innerHTML += renderLocalModelHealth(m.localModelHealth);
-  if (!isDwarfStarLocal) document.getElementById("s_backends").innerHTML += renderProvisionUI(m.localEngineCapability);
   document.getElementById("s_endpoint").value = (local && local.endpoint) || "http://localhost:1234/v1";
   renderEmbeddingSettings();
   const v = m.version || {};
