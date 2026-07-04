@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.131 — 2026-07-04
+
+Maintenance: de-duplicate the 0.1.130 changelog entry that concurrent releases left doubled
+
 ## v0.1.130 — 2026-07-04
 
 Fix mobile pairing: the QR now shows a clear reason instead of a blank box when it can't render, Settings reflects saved Cloudflare Access credentials, and saving just the secret no longer wipes the client id; add a local license-issue script (counterpart to license-keygen) and harden messagebee onboarding tests against an installed Pro license
