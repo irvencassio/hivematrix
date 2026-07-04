@@ -249,6 +249,18 @@ if (!existsSync(mermaidAsset)) {
 mkdirSync(join(OUT, "assets"), { recursive: true });
 cpSync(mermaidAsset, join(OUT, "assets", "mermaid.min.js"));
 
+// Deterministic code smoke-runner used by the verification gate (code-smoke.ts
+// resolves it at Resources/daemon/scripts/hive-verify-smoke.py). Stdlib-only, so
+// it runs under any python3 on PATH.
+log("staging verification-gate smoke-runner");
+const smokeSrc = join(ROOT, "scripts", "hive-verify-smoke.py");
+if (!existsSync(smokeSrc)) {
+  console.error(`✗ ${smokeSrc} not found — verification gate would silently no-op.`);
+  process.exit(1);
+}
+mkdirSync(join(OUT, "scripts"), { recursive: true });
+cpSync(smokeSrc, join(OUT, "scripts", "hive-verify-smoke.py"));
+
 // ── 5. Build info ─────────────────────────────────────────────────────────────
 const info = {
   generatedAt: new Date().toISOString().replace(/\.\d+Z$/, "Z"),

@@ -147,6 +147,11 @@ export interface ToolContext {
   parentTaskId?: string;
   parentProject?: string;
   currentAgentType?: string;
+  /**
+   * Absolute paths of files the agent has written or edited this run. Populated by
+   * the write/edit tools so the verification gate can smoke-run exactly what changed.
+   */
+  touchedFiles?: Set<string>;
 }
 
 /**
@@ -172,9 +177,9 @@ export async function executeTool(
       case "read_file":
         return executeReadFile(args, projectPath);
       case "write_file":
-        return executeWriteFile(args, projectPath);
+        return executeWriteFile(args, projectPath, context);
       case "edit_file":
-        return executeEditFile(args, projectPath);
+        return executeEditFile(args, projectPath, context);
       case "search":
         return await executeSearch(args, projectPath);
       case "list_files":
@@ -255,7 +260,7 @@ function executeReadFile(args: Record<string, unknown>, projectPath: string): st
     .slice(0, 100_000); // Cap at 100KB
 }
 
-function executeWriteFile(args: Record<string, unknown>, projectPath: string): string {
+function executeWriteFile(args: Record<string, unknown>, projectPath: string, context?: ToolContext): string {
   const filePath = resolvePath(args.path as string, projectPath);
   const content = args.content as string;
   if (content === undefined) return "Error: No content provided";
@@ -264,10 +269,11 @@ function executeWriteFile(args: Record<string, unknown>, projectPath: string): s
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
   writeFileSync(filePath, content);
+  context?.touchedFiles?.add(filePath);
   return `File written: ${relative(projectPath, filePath)} (${content.length} bytes)`;
 }
 
-function executeEditFile(args: Record<string, unknown>, projectPath: string): string {
+function executeEditFile(args: Record<string, unknown>, projectPath: string, context?: ToolContext): string {
   const filePath = resolvePath(args.path as string, projectPath);
   if (!existsSync(filePath)) return `Error: File not found: ${filePath}`;
 
@@ -282,6 +288,7 @@ function executeEditFile(args: Record<string, unknown>, projectPath: string): st
   if (count > 1) return `Error: old_string found ${count} times — must be unique`;
 
   writeFileSync(filePath, content.replace(oldStr, newStr));
+  context?.touchedFiles?.add(filePath);
   return `Edited: ${relative(projectPath, filePath)}`;
 }
 

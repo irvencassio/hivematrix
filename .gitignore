@@ -10,3 +10,5 @@ build/
 .env.local
 .DS_Store
 .rapidmlx-eval/
+__pycache__/
+*.pyc

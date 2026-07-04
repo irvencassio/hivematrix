@@ -14,6 +14,7 @@ import {
 import { TOOL_DEFINITIONS, executeTool, type ToolContext, type ChatTool } from "./tool-bridge";
 import { availableLaneTools, capabilityRoutingGuide } from "./lane-tools";
 import { verificationGatePrompt } from "./verification-gate";
+import { runCodeSmoke } from "./code-smoke";
 import { listSkills } from "@/lib/skills/store";
 import { formatSkillIndex, skillRunsOn } from "@/lib/skills/contracts";
 import { getAgentProfile } from "@/lib/config/agent-profiles";
@@ -30,6 +31,11 @@ const LOCAL_SERVED_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm", "dw
 // Loop-guard thresholds: how many identical tool calls before intervening
 const LOOP_WARN_THRESHOLD = 3;  // inject "you already have this" into tool result
 const LOOP_BREAK_THRESHOLD = 5; // also inject a user-turn forcing a final answer
+
+// How many times the code-smoke gate may bounce a "done" back to the model to fix
+// a crashing program before we give up and let the task end (reported as failed).
+// Bounded so a model that can't fix its own bug can't loop forever.
+const MAX_SMOKE_RETRIES = 2;
 
 // Incrementing fake PID for generic agents (negative to avoid collision with real PIDs)
 let fakePidCounter = -1000;
@@ -561,6 +567,10 @@ async function runAgentLoop(
   const readCache = new Map<string, string>();
   // When true, next API call strips tools entirely so the model must produce text.
   let forceTextOnlyTurn = false;
+  // Deterministic verification-gate bookkeeping: how many times we've bounced a
+  // "done" back for a crashing smoke run, and whether the last run was clean.
+  let smokeRetries = 0;
+  let smokeReport = "";
 
   while (turns < MAX_TURNS) {
     if (controller.signal.aborted) {
@@ -742,7 +752,33 @@ async function runAgentLoop(
         forceTextOnlyTurn = true;
       }
     } else {
-      // No tool calls — model is done (or we forced a text-only turn)
+      // No tool calls — model claims it's done. Before accepting that, run the
+      // deterministic verification gate: execute any Python files it touched in a
+      // real pseudo-terminal. This catches runtime crashes (e.g. the curses
+      // bottom-right-corner `addwstr() returned ERR`) that py_compile/import/mypy
+      // all pass. On a crash, feed the traceback back and force a fix — up to a
+      // bounded number of times so a model that can't self-repair still terminates.
+      const touched = toolContext?.touchedFiles ? [...toolContext.touchedFiles] : [];
+      if (touched.length > 0 && !forceTextOnlyTurn) {
+        const smoke = await runCodeSmoke(projectPath, touched);
+        if (smoke.ran && !smoke.ok) {
+          smokeReport = smoke.report; // remember the crash for the final summary
+          if (smokeRetries < MAX_SMOKE_RETRIES) {
+            smokeRetries += 1;
+            onEvent(taskId, {
+              type: "tool_result",
+              content: `[Verification gate] smoke run failed (attempt ${smokeRetries}/${MAX_SMOKE_RETRIES}); sending crash back to the model.`,
+            });
+            messages.push({ role: "user", content: smoke.report });
+            continue; // keep tools enabled so the model can fix the code
+          }
+          // Retries exhausted: accept the turn but the code still crashes. The
+          // final result records that so the task isn't reported as clean.
+          break;
+        }
+        smokeReport = ""; // clean run (or nothing crashed) — no failure to surface
+      }
+      // Passed the gate (or nothing to verify): model is done.
       break;
     }
 
@@ -752,7 +788,14 @@ async function runAgentLoop(
     if (forceTextOnlyTurn) break;
   }
 
-  return { code: 0, result: fullText.slice(-2000), turns, totalTokens, inputTokens, outputTokens };
+  // If the code never passed the smoke gate, surface it in the result so the task
+  // is not reported as a clean success on top of code that crashes when run.
+  let finalResult = fullText.slice(-2000);
+  if (smokeRetries >= MAX_SMOKE_RETRIES && smokeReport) {
+    finalResult += `\n\n[Verification gate] Code still fails to run after ${MAX_SMOKE_RETRIES} fix attempts:\n${smokeReport.slice(0, 1500)}`;
+  }
+
+  return { code: 0, result: finalResult, turns, totalTokens, inputTokens, outputTokens };
 }
 
 /**
@@ -794,6 +837,7 @@ export function spawnGenericAgent(
     parentTaskId: taskId,
     parentProject: project,
     currentAgentType: agentType,
+    touchedFiles: new Set<string>(),
   };
 
   // Start the agent loop asynchronously
