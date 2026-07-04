@@ -20,9 +20,11 @@
  *   reflect  → record a reflection; re-arm the directive per trigger policy
  *   done/failed → terminal
  *
- * The planner here is intentionally deterministic for v1 (one task per unmet
- * criterion, capped). An LLM `think`-role planner can replace planRun() later
- * without changing the state machine.
+ * Planning is model-driven: a `think`-role planner phase task proposes the run's
+ * bounded task set, with the directive's own history (recent run outcomes + last
+ * reflection) in its prompt so each episode builds on the previous ones. The
+ * deterministic one-task-per-criterion path remains the fallback whenever the
+ * planner task fails or returns unparseable output.
  */
 
 import { Task, type TaskDoc } from "@/lib/db";
@@ -38,6 +40,7 @@ import {
   journal,
   getCriteria,
   getJournal,
+  getRecentTerminalRuns,
   markCriterionProven,
   allCriteriaProven,
 } from "./directive-store";
@@ -290,6 +293,36 @@ function extractTaskText(task: DirectiveRunTask): string | null {
   return null;
 }
 
+/**
+ * The planner's memory of prior episodes: last reflection + recent run
+ * outcomes, so each run builds on what already happened instead of replanning
+ * from a blank slate. Empty string when this is the first run.
+ */
+function buildRunHistoryBlock(directiveId: string, currentRunId: string): string {
+  let recent: RunRow[];
+  try {
+    recent = getRecentTerminalRuns(directiveId, 3).filter((r) => r._id !== currentRunId);
+  } catch {
+    return "";
+  }
+  if (recent.length === 0) return "";
+
+  const lines: string[] = ["Previous runs (newest first):"];
+  for (const r of recent) {
+    const outcome = r.phase === "done" ? "done" : `failed (${r.failReason ?? "unknown"})`;
+    lines.push(`- ${r.startedAt}: ${outcome}${r.planSummary ? ` — planned: ${r.planSummary.slice(0, 120)}` : ""}`);
+  }
+  const lastReflection = recent.find((r) => r.reflectionText?.trim())?.reflectionText;
+  if (lastReflection) {
+    lines.push("", "Last reflection:", lastReflection.slice(0, 800));
+  }
+  lines.push(
+    "",
+    "Use this history: do not repeat an approach that already failed; build on what the last run left off.",
+  );
+  return `\n${lines.join("\n")}\n`;
+}
+
 function buildPlannerPrompt(
   directive: DirectiveRow,
   run: RunRow,
@@ -318,6 +351,7 @@ function buildPlannerPrompt(
     "",
     "Unproven criteria:",
     criteriaText,
+    buildRunHistoryBlock(directive._id, run._id),
     feedbackBlock,
     "Return only fenced JSON with this shape:",
     "```json",

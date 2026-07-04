@@ -155,6 +155,19 @@ export function getActiveRuns(): RunRow[] {
     .all() as RunRow[];
 }
 
+/**
+ * A directive's most recent finished runs, newest first — the planner's memory
+ * of prior episodes (last reflection + outcomes) per the Directive primitive
+ * ("plan reviews directive state: open criteria, last reflection, new events").
+ */
+export function getRecentTerminalRuns(directiveId: string, limit = 3): RunRow[] {
+  return getDb()
+    .prepare(
+      "SELECT * FROM runs WHERE directiveId = ? AND phase IN ('done', 'failed') ORDER BY startedAt DESC LIMIT ?",
+    )
+    .all(directiveId, limit) as RunRow[];
+}
+
 export function setRunPhase(id: string, phase: RunPhase, fields: Partial<RunRow> = {}): void {
   const merged: Partial<RunRow> = { ...fields, phase };
   const keys = Object.keys(merged);

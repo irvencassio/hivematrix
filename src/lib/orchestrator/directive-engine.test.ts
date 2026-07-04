@@ -17,6 +17,9 @@ const {
   getJournal,
   getActiveRuns,
   getRun,
+  getRecentTerminalRuns,
+  createRun,
+  setRunPhase,
   deleteDirective,
 } = await import("./directive-store");
 const {
@@ -767,5 +770,51 @@ test("full checkpoint completion rejection fails the run with criteria unproven"
   assert.ok(
     getJournal(run._id).some((j) => j.step === "checkpoint_rejected" && j.payload.includes('"gate":"completion"'))
   );
+  deleteDirective(d._id);
+});
+
+test("getRecentTerminalRuns returns finished runs newest-first, excluding active ones", () => {
+  const d = mkDirective();
+  const r1 = createRun(d._id);
+  setRunPhase(r1._id, "done", {
+    reflectionText: "Run 1 proved the index criterion.",
+    planSummary: "Planned 1 task: refresh index",
+    completedAt: "2026-07-01T10:00:00Z",
+  });
+  const r2 = createRun(d._id);
+  setRunPhase(r2._id, "failed", { failReason: "checkpoint_rejected", failedAt: "2026-07-02T10:00:00Z" });
+  const r3 = createRun(d._id); // still in plan phase — must not appear
+
+  const recent = getRecentTerminalRuns(d._id, 3);
+  assert.equal(recent.length, 2);
+  assert.ok(recent.every((r) => r._id !== r3._id));
+  assert.equal(recent.some((r) => r.reflectionText?.includes("Run 1 proved")), true);
+  deleteDirective(d._id);
+});
+
+test("planner prompt carries the directive's run history: prior outcomes + last reflection", async () => {
+  const d = mkDirective();
+  addCriterion(d._id, "Keep the index fresh");
+
+  // A finished prior episode with a reflection the next planner must see.
+  const prior = createRun(d._id);
+  setRunPhase(prior._id, "done", {
+    reflectionText: "Rebuilding from scratch was wasteful; incremental updates worked.",
+    planSummary: "Planned 1 task: rebuild index",
+    completedAt: "2026-07-03T10:00:00Z",
+  });
+
+  await directiveTick(new Date("2026-07-04T09:00:00Z"));
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-07-04T09:00:01Z"));
+
+  const plannerTask = (await getRunTasks(d._id, run._id)).find(
+    (t) => ((t.output ?? {}) as Record<string, unknown>).directivePhase === "planner"
+  )!;
+  assert.ok(plannerTask, "planner phase task should exist");
+  const desc = String(plannerTask.description);
+  assert.match(desc, /Previous runs \(newest first\):/);
+  assert.match(desc, /incremental updates worked/);
+  assert.match(desc, /do not repeat an approach that already failed/);
   deleteDirective(d._id);
 });
