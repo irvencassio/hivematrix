@@ -173,29 +173,49 @@ async function buildFirstRunSetupResponse(opts: {
   });
 }
 
-function parseBody(req: IncomingMessage): Promise<unknown> {
+// Cap buffered request bodies: roomy enough for voice audio / pack uploads,
+// bounded so a runaway or hostile client can't buffer the daemon into OOM.
+const DEFAULT_MAX_BODY_BYTES = 64 * 1024 * 1024;
+function maxBodyBytes(): number {
+  const n = parseInt(process.env.HIVEMATRIX_MAX_BODY_BYTES ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_BODY_BYTES;
+}
+
+/** Buffer the request body, rejecting with a 413-tagged error past the cap. */
+function collectBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
+    const limit = maxBodyBytes();
     const chunks: Buffer[] = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}"));
-      } catch {
-        reject(new Error("Invalid JSON body"));
+    let size = 0;
+    let overLimit = false;
+    req.on("data", (chunk: Buffer) => {
+      if (overLimit) return; // keep draining so the 413 response can go out
+      size += chunk.length;
+      if (size > limit) {
+        overLimit = true;
+        chunks.length = 0;
+        reject(Object.assign(new Error("Request body too large"), { statusCode: 413 }));
+        return;
       }
+      chunks.push(chunk);
     });
+    req.on("end", () => { if (!overLimit) resolve(Buffer.concat(chunks)); });
     req.on("error", reject);
   });
 }
 
+async function parseBody(req: IncomingMessage): Promise<unknown> {
+  const body = await collectBody(req);
+  try {
+    return JSON.parse(body.toString("utf-8") || "{}");
+  } catch {
+    throw new Error("Invalid JSON body");
+  }
+}
+
 /** Read the raw request body as a string (no parsing). */
-function readRawBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    req.on("error", reject);
-  });
+async function readRawBody(req: IncomingMessage): Promise<string> {
+  return (await collectBody(req)).toString("utf-8");
 }
 
 function parseQueryString(url: string): Record<string, string> {
@@ -588,6 +608,46 @@ export function createDaemonServer() {
       // POST /briefing/test — deprecated; Morning Briefing has been retired.
       if (req.method === "POST" && urlPath === "/briefing/test") {
         json(res, 410, { error: "Morning Briefing has been retired. Use Scheduled items instead." });
+        return;
+      }
+
+      // GET/POST /settings/heartbeat — W8 presence layer: unprompted pulse + daily moments.
+      if (req.method === "GET" && urlPath === "/settings/heartbeat") {
+        const { getHeartbeatConfig } = await import("@/lib/flash/heartbeat");
+        json(res, 200, { heartbeat: getHeartbeatConfig() });
+        return;
+      }
+      if (req.method === "POST" && urlPath === "/settings/heartbeat") {
+        const { setHeartbeatConfig } = await import("@/lib/flash/heartbeat");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const patch: Record<string, unknown> = {};
+        if ("enabled" in body) patch.enabled = body.enabled === true;
+        if (typeof body.intervalMinutes === "number") patch.intervalMinutes = body.intervalMinutes;
+        if ("quietHours" in body) patch.quietHours = body.quietHours;
+        if ("morningBriefHour" in body) patch.morningBriefHour = body.morningBriefHour;
+        if ("eveningRecapHour" in body) patch.eveningRecapHour = body.eveningRecapHour;
+        json(res, 200, { heartbeat: setHeartbeatConfig(patch) });
+        return;
+      }
+      // POST /heartbeat/run — fire one pass now (pulse by default; body.moment for a daily moment).
+      if (req.method === "POST" && urlPath === "/heartbeat/run") {
+        const { runHeartbeatOnce, runDailyMomentOnce } = await import("@/lib/flash/heartbeat");
+        const { notify } = await import("@/lib/notify/notify");
+        const { sendApnsPush } = await import("@/lib/notify/apns");
+        const { composeBriefing } = await import("@/lib/voice/command-turn");
+        const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
+        const deps = {
+          notify: (t: string) => notify(t),
+          composeStatus: () => composeBriefing(),
+          sendApnsPush: (o: { title: string; body: string; data?: Record<string, unknown> }) => sendApnsPush(o),
+        };
+        if (body.moment === "morning-brief" || body.moment === "evening-recap") {
+          const result = await runDailyMomentOnce(body.moment, deps);
+          json(res, 200, { moment: body.moment, ...result });
+          return;
+        }
+        const result = await runHeartbeatOnce(deps);
+        json(res, 200, result);
         return;
       }
 
@@ -1306,7 +1366,7 @@ export function createDaemonServer() {
           const sessionId = typeof body.sessionId === "string" ? body.sessionId : crypto.randomUUID();
           void import("@/lib/voice/command-turn").then(({ deliverOpenClawReply }) =>
             deliverOpenClawReply({ deps: {}, sessionId, gatewayUrl: discovery.gateway!.url, sessionKey, sentAfter, assistant: "openclaw" })
-          );
+          ).catch((e) => { console.error(`[voice] openclaw reply delivery failed: ${e instanceof Error ? e.message : e}`); });
         }
         return;
       }
@@ -2535,7 +2595,7 @@ export function createDaemonServer() {
             const path = body.path.trim().replace(/^~\//, `${homedir()}/`);
             buffer = readFileSync(path);
           } else if (typeof body.url === "string" && body.url.trim()) {
-            const response = await fetch(body.url.trim());
+            const response = await fetch(body.url.trim(), { signal: AbortSignal.timeout(60_000) });
             if (!response.ok) {
               json(res, 400, { ok: false, error: `pack download failed: HTTP ${response.status}` });
               return;
@@ -4795,7 +4855,13 @@ export function createDaemonServer() {
       json(res, 404, { error: "Not found" });
     } catch (err) {
       console.error("[daemon] Request error:", err);
-      json(res, 500, { error: err instanceof Error ? err.message : "Internal error" });
+      const statusCode = (err as { statusCode?: unknown })?.statusCode;
+      const status = typeof statusCode === "number" ? statusCode : 500;
+      if (!res.headersSent) {
+        json(res, status, { error: err instanceof Error ? err.message : "Internal error" });
+      } else {
+        res.end();
+      }
     }
   });
 

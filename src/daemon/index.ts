@@ -147,6 +147,19 @@ async function main(): Promise<void> {
   const { startFlashLearningLoop } = await import("@/lib/flash/learning-loop");
   startFlashLearningLoop();
 
+  // Heartbeat (W8 presence layer): every N minutes one unprompted flash pass over
+  // persona/HEARTBEAT.md + a live status snapshot; the agent acts within the
+  // autonomy dial and messages the operator only when something is worth saying.
+  // Daily moments (morning brief / evening recap) ride the same loop. Self-gates
+  // on config (heartbeat.enabled). Delivery deps injected here so flash/ keeps
+  // its import surface (same inversion as makeFlashDispatch above).
+  const { startHeartbeatLoop } = await import("@/lib/flash/heartbeat");
+  startHeartbeatLoop({
+    notify: async (t) => (await import("@/lib/notify/notify")).notify(t),
+    composeStatus: async () => (await import("@/lib/voice/command-turn")).composeBriefing(),
+    sendApnsPush: async (o) => (await import("@/lib/notify/apns")).sendApnsPush(o),
+  });
+
   // Voice result return path: when a voice-escalated task finishes, speak the
   // result (Kokoro) and push a voice:result SSE event so the open Talk screen
   // gets the answer it was told was "being looked into".
