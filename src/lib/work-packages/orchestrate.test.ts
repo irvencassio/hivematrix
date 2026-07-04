@@ -6,18 +6,24 @@ import { join } from "node:path";
 
 const TMP = mkdtempSync(join(tmpdir(), "hivematrix-wp-orch-"));
 process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
+// Isolate autonomy config (~/.hivematrix/config.json) so auto-land/auto-start
+// behaviour is driven by these tests, not the developer's real settings.
+const ORIGINAL_HOME = process.env.HOME;
+process.env.HOME = TMP;
 
 const { _resetDbForTests, getDb, Task } = await import("@/lib/db");
 const { createWorkPackage, getWorkPackage, updateWorkPackageItem, detectStuckState } = await import("./store");
-const { planNextItems, classifyBlockers, startWorkPackage, advanceWorkPackage, tickWorkPackages, reconcileWorkPackage, acceptWorkPackageItem, reconcileStuckFlight, coordinateFlightDecisions } = await import("./orchestrate");
+const { planNextItems, classifyBlockers, startWorkPackage, advanceWorkPackage, tickWorkPackages, reconcileWorkPackage, acceptWorkPackageItem, reconcileStuckFlight, coordinateFlightDecisions, releaseStaleCollisionHolds, maybeAutostartFlight, autostartDraftFlights } = await import("./orchestrate");
+const { setAutonomyLevel } = await import("@/lib/config/autonomy");
 const { readItemBlocker } = await import("./parent-blocker");
 import type { WorkPackageItem } from "./store";
 import type { ProposedItem } from "@/lib/intake/classify";
 
-test.before(() => { _resetDbForTests(); getDb(); });
+test.before(() => { _resetDbForTests(); getDb(); setAutonomyLevel("standard"); });
 test.after(() => {
   _resetDbForTests();
   delete process.env.HIVEMATRIX_DB_PATH;
+  if (ORIGINAL_HOME) process.env.HOME = ORIGINAL_HOME;
   rmSync(TMP, { recursive: true, force: true });
 });
 
@@ -1554,4 +1560,187 @@ test("reconcileWorkPackage no-auto-land: release loop blocks auto-land for other
     "review",
     "release loop must block auto-land — release items require explicit operator sign-off before landing",
   );
+});
+
+// --- Stale collision-hold release ---
+
+function mkCollisionHeldFlight(suffix: string, activeTaskIds: string[]) {
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Collision-held " + suffix,
+    project: "test",
+    projectPath: "/tmp/collision-" + suffix,
+    status: "held",
+    intake: {
+      kind: "held" as const,
+      confidence: 0.9,
+      reasons: ["active same-project work"],
+      risk: "low" as const,
+      suggestedMode: "hold" as const,
+      projectCollision: { active: true, activeTaskIds, recommendation: "hold" as const },
+    },
+    items: [{ title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  // createWorkPackage stamps the FLIGHT status from input, but items derive their
+  // own start status; force the collision-held case: flight held, item still draft.
+  db.prepare("UPDATE work_packages SET status = 'held' WHERE _id = ?").run(pkg.id);
+  return getWorkPackage(pkg.id)!;
+}
+
+test("releaseStaleCollisionHolds: releases a collision-held Flight once the blocking task is terminal", async () => {
+  const { generateId } = await import("@/lib/db");
+  const blockerId = generateId();
+  const db = getDb();
+  db.prepare("INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'Blocker', 'D', 'test', '/tmp', 'done')").run(blockerId);
+  const pkg = mkCollisionHeldFlight("done-blocker", [blockerId]);
+  assert.equal(pkg.status, "held", "precondition: Flight is held");
+
+  const released = releaseStaleCollisionHolds();
+
+  assert.ok(released.includes(pkg.id), "released the Flight whose blocker is terminal");
+  assert.equal(getWorkPackage(pkg.id)!.status, "draft", "held → draft (operator still Starts it)");
+});
+
+test("releaseStaleCollisionHolds: does NOT release while the blocking task is still active", async () => {
+  const { generateId } = await import("@/lib/db");
+  const blockerId = generateId();
+  const db = getDb();
+  db.prepare("INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'Blocker', 'D', 'test', '/tmp', 'in_progress')").run(blockerId);
+  const pkg = mkCollisionHeldFlight("active-blocker", [blockerId]);
+
+  const released = releaseStaleCollisionHolds();
+
+  assert.ok(!released.includes(pkg.id), "not released while blocker is in flight");
+  assert.equal(getWorkPackage(pkg.id)!.status, "held", "stays held");
+});
+
+test("releaseStaleCollisionHolds: projectPath scope only releases matching-project Flights", async () => {
+  const { generateId } = await import("@/lib/db");
+  const blockerId = generateId();
+  const db = getDb();
+  db.prepare("INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'Blocker', 'D', 'test', '/tmp', 'done')").run(blockerId);
+  const pkg = mkCollisionHeldFlight("scope", [blockerId]);
+
+  const releasedOther = releaseStaleCollisionHolds("/tmp/some-other-project");
+  assert.ok(!releasedOther.includes(pkg.id), "scoped to a different project → untouched");
+  assert.equal(getWorkPackage(pkg.id)!.status, "held", "still held under mismatched scope");
+
+  const released = releaseStaleCollisionHolds(pkg.projectPath);
+  assert.ok(released.includes(pkg.id), "scoped to the Flight's own project → released");
+});
+
+test("releaseStaleCollisionHolds: leaves a mid-run held Flight (final-gated item) untouched", async () => {
+  const { generateId } = await import("@/lib/db");
+  const blockerId = generateId();
+  const db = getDb();
+  db.prepare("INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'Blocker', 'D', 'test', '/tmp', 'done')").run(blockerId);
+  const pkg = mkCollisionHeldFlight("mid-run", [blockerId]);
+  // Simulate a Flight that was already started: an item completed and spawned a task.
+  const doneTaskId = generateId();
+  db.prepare("INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'Ran', 'D', 'test', '/tmp', 'done')").run(doneTaskId);
+  db.prepare("UPDATE work_package_items SET status = 'done', createdTaskId = ? WHERE _id = ?").run(doneTaskId, pkg.items[0].id);
+
+  const released = releaseStaleCollisionHolds();
+
+  assert.ok(!released.includes(pkg.id), "a started Flight is not a fresh collision hold — never auto-released");
+  assert.equal(getWorkPackage(pkg.id)!.status, "held", "mid-run held Flight stays held");
+});
+
+test("tickWorkPackages: releases a cleared collision hold as part of its sweep", async () => {
+  const { generateId } = await import("@/lib/db");
+  const blockerId = generateId();
+  const db = getDb();
+  db.prepare("INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'Blocker', 'D', 'test', '/tmp', 'done')").run(blockerId);
+  const pkg = mkCollisionHeldFlight("tick", [blockerId]);
+
+  await tickWorkPackages();
+
+  assert.equal(getWorkPackage(pkg.id)!.status, "draft", "tick sweep released the stale collision hold");
+});
+
+// --- Autonomy: auto-start staged Flights + auto-land gating ---
+
+function mkStagedDraftFlight(suffix: string) {
+  return createWorkPackage({
+    title: "Autostart " + suffix,
+    project: "test",
+    projectPath: "/tmp/autostart-" + suffix,
+    items: [{ title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+}
+
+test("maybeAutostartFlight: standard autonomy leaves a draft Flight staged", async () => {
+  setAutonomyLevel("standard");
+  const pkg = mkStagedDraftFlight("std");
+  const started = await maybeAutostartFlight(pkg.id);
+  assert.equal(started, false, "standard autonomy does not auto-start");
+  assert.equal(getWorkPackage(pkg.id)!.status, "draft", "Flight stays draft — operator Starts it");
+});
+
+test("maybeAutostartFlight: autonomous autonomy starts a draft Flight and runs its item", async () => {
+  setAutonomyLevel("autonomous");
+  const pkg = mkStagedDraftFlight("auto");
+  const started = await maybeAutostartFlight(pkg.id);
+  assert.equal(started, true, "autonomous autonomy auto-starts");
+  const detail = getWorkPackage(pkg.id)!;
+  assert.equal(detail.status, "running", "Flight moved to running without an operator Start");
+  assert.equal(detail.items[0].status, "running", "its item spawned a task and is running");
+  setAutonomyLevel("standard");
+});
+
+test("maybeAutostartFlight: never starts a collision-held Flight even under autonomous", async () => {
+  setAutonomyLevel("autonomous");
+  const pkg = createWorkPackage({
+    title: "Autostart held",
+    project: "test",
+    projectPath: "/tmp/autostart-held",
+    status: "held",
+    intake: {
+      kind: "held" as const, confidence: 0.9, reasons: ["collision"], risk: "low" as const, suggestedMode: "hold" as const,
+      projectCollision: { active: true, activeTaskIds: ["x"], recommendation: "hold" as const },
+    },
+    items: [{ title: "Item A", prompt: "Do A", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  getDb().prepare("UPDATE work_packages SET status = 'held' WHERE _id = ?").run(pkg.id);
+  const started = await maybeAutostartFlight(pkg.id);
+  assert.equal(started, false, "a held Flight is not auto-started");
+  assert.equal(getWorkPackage(pkg.id)!.status, "held", "stays held until the hold clears");
+  setAutonomyLevel("standard");
+});
+
+test("autostartDraftFlights: starts every staged Flight under autonomous, none under manual", async () => {
+  setAutonomyLevel("manual");
+  const a = mkStagedDraftFlight("sweep-a");
+  const b = mkStagedDraftFlight("sweep-b");
+  assert.deepEqual(await autostartDraftFlights(), [], "manual autonomy starts nothing");
+  assert.equal(getWorkPackage(a.id)!.status, "draft");
+
+  setAutonomyLevel("autonomous");
+  const started = await autostartDraftFlights();
+  assert.ok(started.includes(a.id) && started.includes(b.id), "autonomous starts both staged Flights");
+  assert.equal(getWorkPackage(a.id)!.status, "running");
+  assert.equal(getWorkPackage(b.id)!.status, "running");
+  setAutonomyLevel("standard");
+});
+
+test("reconcileWorkPackage auto-land: manual autonomy holds a clean low-risk item in review", async () => {
+  setAutonomyLevel("manual");
+  const { generateId } = await import("@/lib/db");
+  const db = getDb();
+  const pkg = createWorkPackage({
+    title: "Manual no-autoland",
+    project: "test",
+    projectPath: "/tmp/manual-autoland",
+    items: [{ title: "Micro step", prompt: "do micro", risk: "low", executionMode: "sequential", dependsOn: [], scopeHints: [] }],
+  });
+  const item = pkg.items[0];
+  const taskId = generateId();
+  db.prepare("INSERT INTO tasks (_id, title, description, project, projectPath, status) VALUES (?, 'T', 'D', 'test', '/tmp', 'review')").run(taskId);
+  db.prepare("UPDATE work_package_items SET status = 'running', createdTaskId = ? WHERE _id = ?").run(taskId, item.id);
+
+  await reconcileWorkPackage(pkg.id);
+
+  assert.equal(getWorkPackage(pkg.id)!.items[0].status, "review",
+    "manual autonomy: even a clean low-risk item waits for operator Accept");
+  setAutonomyLevel("standard");
 });

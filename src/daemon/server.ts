@@ -497,6 +497,27 @@ export function createDaemonServer() {
         json(res, 200, { features: flags });
         return;
       }
+      // GET/POST /settings/autonomy — how much approval Flights require to run/land.
+      if (req.method === "GET" && urlPath === "/settings/autonomy") {
+        const { getAutonomyLevel, AUTONOMY_LEVELS } = await import("@/lib/config/autonomy");
+        json(res, 200, { level: getAutonomyLevel(), levels: AUTONOMY_LEVELS });
+        return;
+      }
+      if (req.method === "POST" && urlPath === "/settings/autonomy") {
+        const { setAutonomyLevel, AUTONOMY_LEVELS } = await import("@/lib/config/autonomy");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const level = setAutonomyLevel(body.level);
+        // Raising autonomy to autonomous should pick up already-staged Flights now,
+        // not only ones created afterwards.
+        try {
+          const { autostartDraftFlights } = await import("@/lib/work-packages/orchestrate");
+          for (const pid of await autostartDraftFlights()) broadcast("work-packages:updated", { packageId: pid });
+        } catch (e) {
+          console.error(`[work-packages] autostart-on-setting failed: ${e instanceof Error ? e.message : e}`);
+        }
+        json(res, 200, { level, levels: AUTONOMY_LEVELS });
+        return;
+      }
       // GET/POST /settings/voice/auto-approval — conservative voice approval policy.
       if (req.method === "GET" && urlPath === "/settings/voice/auto-approval") {
         const { getAutoApprovalPolicy } = await import("@/lib/voice/auto-approval-policy");
@@ -4253,7 +4274,7 @@ export function createDaemonServer() {
               ? await forceWorkPackage(intakeInput)
               : (intake.kind === "work_package_candidate" ? intake.packageCandidate : null);
             if (candidate) {
-              const { createWorkPackage } = await import("@/lib/work-packages/store");
+              const { createWorkPackage, getWorkPackage } = await import("@/lib/work-packages/store");
               // Hold the package when intake flags a same-project collision; else draft.
               const status = intake.projectCollision?.recommendation === "hold" ? "held" : "draft";
               const pkg = createWorkPackage({
@@ -4266,12 +4287,24 @@ export function createDaemonServer() {
                 items: candidate.items,
               });
               broadcast("work-packages:created", { packageId: pkg.id });
+              // Autonomy: under the `autonomous` level, a freshly-staged Flight
+              // begins without an operator Start (a collision-held Flight waits;
+              // it auto-starts later when the hold clears). No-op at other levels.
+              let autostarted = false;
+              try {
+                const { maybeAutostartFlight } = await import("@/lib/work-packages/orchestrate");
+                autostarted = await maybeAutostartFlight(pkg.id);
+                if (autostarted) broadcast("work-packages:updated", { packageId: pkg.id });
+              } catch (e) {
+                console.error(`[work-packages] autostart-on-create failed: ${e instanceof Error ? e.message : e}`);
+              }
               json(res, 201, {
                 routed: "work_package",
                 packageId: pkg.id,
-                status: pkg.status,
+                status: getWorkPackage(pkg.id)?.status ?? pkg.status,
                 itemCount: pkg.items.length,
                 collision: intake.projectCollision ?? null,
+                autostarted,
                 intake,
               });
               return;
@@ -4318,6 +4351,26 @@ export function createDaemonServer() {
             }
           } catch (e) {
             console.error(`[work-packages] advance hook failed: ${e instanceof Error ? e.message : e}`);
+          }
+        }
+        // Collision-hold release hook: a Flight staged while this task was in
+        // flight is held purely by a same-project concurrency snapshot. When this
+        // task reaches a terminal state, release any such Flight (held → draft)
+        // so it stops sitting stuck. The 15s orchestration loop is the backstop.
+        if (["done", "failed", "cancelled", "archived"].includes(String((task as Record<string, unknown>).status))) {
+          try {
+            const projectPath = typeof (task as Record<string, unknown>).projectPath === "string"
+              ? (task as Record<string, unknown>).projectPath as string
+              : undefined;
+            const { releaseStaleCollisionHolds, maybeAutostartFlight } = await import("@/lib/work-packages/orchestrate");
+            for (const pid of releaseStaleCollisionHolds(projectPath)) {
+              // Under `autonomous` autonomy, a Flight whose collision hold just
+              // cleared starts immediately rather than waiting for the operator.
+              await maybeAutostartFlight(pid).catch(() => {});
+              broadcast("work-packages:updated", { packageId: pid });
+            }
+          } catch (e) {
+            console.error(`[work-packages] collision-hold release hook failed: ${e instanceof Error ? e.message : e}`);
           }
         }
         json(res, 200, task);

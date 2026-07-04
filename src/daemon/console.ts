@@ -1111,6 +1111,18 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <span class="muted">Automatically install updates on launch</span>
       </div>
       <div class="muted" style="font-size:11px;margin-top:2px">Off = you'll see an "Update" button in the header to install when you choose.</div>
+
+      <label class="flbl" style="margin-top:16px">Autonomy</label>
+      <div class="row" style="align-items:center; gap:10px">
+        <span class="muted">How much you approve</span>
+        <select id="s_autonomy" onchange="saveAutonomy()" style="width:auto">
+          <option value="manual">Manual — approve everything</option>
+          <option value="standard">Standard — review results</option>
+          <option value="autonomous">Autonomous — run on its own</option>
+        </select>
+      </div>
+      <div id="s_autonomy_desc" class="muted" style="font-size:11px;margin-top:3px;min-height:16px"></div>
+      <div class="muted" style="font-size:11px;margin-top:2px">Release, deploy, destructive, and high-risk steps always stop for your approval — at every level.</div>
     </div>
     <div id="settingsFeatures" style="display:none">
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -2348,12 +2360,9 @@ async function renderFlightDetail(id, stall, blockers) {
   if (!el) return;
   const p = await api("/work-packages/"+encodeURIComponent(id));
   if (!p || !p.id) { state.selectedFlight = null; renderOverview(); return; }
-  // Auto-start: a draft flight with items starts immediately — no manual trigger needed.
-  // Guard: only attempt if items are present; skip if data is incomplete or status already advanced.
-  if (p.status === "draft" && Array.isArray(p.items) && p.items.length > 0) {
-    const r = await api("/work-packages/"+encodeURIComponent(id)+"/start", { method: "POST" });
-    if (r && r.package) Object.assign(p, r.package);
-  }
+  // Whether a Flight starts on its own is governed by the Autonomy setting on the
+  // server, not by opening this view. A staged Flight shows an explicit Start
+  // button below; under Autonomous autonomy the server starts it without a click.
   const pr = flightProgress(p);
   const canStart = ["draft","held","ready"].includes(p.status);
   const canAdvance = p.status === "running";
@@ -2400,6 +2409,7 @@ async function renderFlightDetail(id, stall, blockers) {
     + '<div class="flight-progress" title="'+pr.pct+'% landed"><i style="width:'+Math.max(0, Math.min(100, pr.pct))+'%"></i></div>'
     + '<div class="muted" style="font-size:11px;margin-top:4px">'+pr.landed+' of '+pr.total+' items landed.'+(pr.skipped > 0 ? ' '+pr.skipped+' skipped (high-risk scope).' : '')+'</div>'
     + '<div class="action-bar">'
+    + (canStart ? '<button class="create" onclick="wpStart(\''+esc(p.id)+'\')">'+(p.status==="held"?"Approve &amp; start":"Start")+'</button>' : '')
     + (canAdvance ? '<button class="secondary-action" onclick="wpAdvance(\''+esc(p.id)+'\')">'+flightAdvanceLabel(p.intake)+'</button>' : '')
     + '<button class="secondary-action" onclick="wpEditPackage(\''+esc(p.id)+'\')">Edit</button>'
     + '<button class="danger-action" onclick="wpDeletePackage(\''+esc(p.id)+'\')">Delete</button>'
@@ -6098,6 +6108,7 @@ async function openSettings() {
   }
   renderSettingsModelControls();
   loadTunnel();
+  loadAutonomy();
 }
 
 function renderSettingsModelControls() {
@@ -7592,6 +7603,7 @@ function renderWorkPackageCard(p) {
   const canStart = p.status === "draft" || p.status === "held";
   const canAdvance = p.status === "running";
   const pkgActions = [
+    canStart ? '<button class="appr-btn" onclick="wpStart(\''+esc(p.id)+'\')">'+(p.status==="held"?"Approve &amp; start":"Start")+'</button>' : '',
     canAdvance ? '<button class="appr-btn" onclick="wpAdvance(\''+esc(p.id)+'\')">Advance</button>' : '',
   ].filter(Boolean).join(" ");
   return '<div class="card" style="cursor:default">'
@@ -8112,6 +8124,36 @@ async function saveTheme() {
   // The panel-translucency slider applies to the Matrix rain too, so reveal it here.
   syncWallpaperOpacityRow();
   hmToast("Theme: " + theme, "ok");
+}
+// Autonomy: load the current level + descriptions, and persist a change. The
+// descriptions come from the server so UI and policy never drift.
+let autonomyLevelMeta = [];
+async function loadAutonomy() {
+  const sel = document.getElementById("s_autonomy");
+  if (!sel) return;
+  try {
+    const r = await api("/settings/autonomy");
+    if (r && r.level) {
+      autonomyLevelMeta = Array.isArray(r.levels) ? r.levels : [];
+      sel.value = r.level;
+      renderAutonomyDesc(r.level);
+    }
+  } catch (e) { /* settings can still render without it */ }
+}
+function renderAutonomyDesc(level) {
+  const el = document.getElementById("s_autonomy_desc");
+  if (!el) return;
+  const meta = autonomyLevelMeta.find(function(l){ return l.key === level; });
+  el.textContent = meta ? meta.description : "";
+}
+async function saveAutonomy() {
+  const level = document.getElementById("s_autonomy").value;
+  renderAutonomyDesc(level);
+  const r = await api("/settings/autonomy", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ level }) });
+  if (r && r.level) {
+    hmToast("Autonomy: " + level, "ok");
+    renderWorkPackages(); refresh();
+  } else { hmToast((r && r.error) || "Could not save autonomy"); }
 }
 async function saveAppIconChoice() {
   const appIconChoice = document.getElementById("s_app_icon").value;

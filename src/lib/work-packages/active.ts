@@ -20,3 +20,19 @@ export function activeSameProjectTasks(projectPath: string, excludeTaskId?: stri
     .filter((r) => r._id !== excludeTaskId)
     .map((r) => ({ taskId: r._id, title: r.title, worktreeName: r.worktreeName }));
 }
+
+/**
+ * True if any of the given task ids is still in flight (assigned / in_progress).
+ * Used to decide whether a Flight's same-project collision hold still applies:
+ * once every task that triggered the hold is terminal, the hold can be released.
+ */
+export function anyTaskActive(taskIds: string[]): boolean {
+  if (taskIds.length === 0) return false;
+  const db = getDb();
+  const idPlaceholders = taskIds.map(() => "?").join(", ");
+  const statusPlaceholders = ACTIVE_STATUSES.map(() => "?").join(", ");
+  const row = db.prepare(
+    `SELECT 1 FROM tasks WHERE _id IN (${idPlaceholders}) AND status IN (${statusPlaceholders}) LIMIT 1`,
+  ).get(...taskIds, ...ACTIVE_STATUSES);
+  return !!row;
+}

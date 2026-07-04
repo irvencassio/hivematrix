@@ -13,7 +13,7 @@
  */
 
 import { Task, getDb } from "@/lib/db";
-import { activeSameProjectTasks } from "./active";
+import { activeSameProjectTasks, anyTaskActive } from "./active";
 import {
   createTaskFromItem,
   getWorkPackage,
@@ -34,6 +34,7 @@ import {
 import { resolveParentDecision } from "./coordinator";
 import { appendCoordinatorAnswer } from "@/lib/tasks/reply-continuation";
 import type { IntakeActiveTask } from "@/lib/intake/classify";
+import { autonomyAutoLandsReviews, autonomyAutoStartsFlights, getAutonomyLevel } from "@/lib/config/autonomy";
 
 export interface AutoLandDecision {
   autoLand: boolean;
@@ -52,7 +53,12 @@ export function shouldAutoLand(
   actualTaskStatus: string | null,
   loop: { profile: string } | null,
   taskReviewState: string | null = null,
+  autoLandEnabled = true,
 ): AutoLandDecision {
+  // Manual autonomy: the operator accepts every result, so nothing auto-lands.
+  // The remaining checks are the invariant safety floor, kept at every level.
+  if (!autoLandEnabled)
+    return { autoLand: false, reason: "manual autonomy — operator reviews every item" };
   if (item.risk !== "low")
     return { autoLand: false, reason: `risk is ${item.risk}` };
   if (actualTaskStatus !== "review")
@@ -229,6 +235,7 @@ export async function reconcileWorkPackage(id: string): Promise<void> {
         actualTaskStatus,
         loop,
         taskReviewState,
+        autonomyAutoLandsReviews(),
       );
       if (autoLand) {
         effectiveNext = "done";
@@ -479,10 +486,107 @@ export async function acceptWorkPackageItem(packageId: string, itemId: string): 
   return advanceWorkPackage(packageId);
 }
 
+// ── Stale collision-hold release ──────────────────────────────────
+
+/** The task ids that put a freshly-staged Flight into a `hold` collision. */
+function readCollisionHoldTaskIds(intake: Record<string, unknown>): string[] | null {
+  const c = intake?.projectCollision;
+  if (!c || typeof c !== "object") return null;
+  const col = c as Record<string, unknown>;
+  if (col.recommendation !== "hold") return null;
+  return Array.isArray(col.activeTaskIds)
+    ? col.activeTaskIds.filter((x): x is string => typeof x === "string")
+    : [];
+}
+
+/**
+ * A Flight is "freshly staged" — held only by a collision, never started — when
+ * every item is still draft/held and none has spawned a task. This distinguishes
+ * a stale collision hold from a Flight that reached `held` mid-run via rollup
+ * (e.g. a final-gated release item), which must NOT be released.
+ */
+function isFreshlyStaged(detail: WorkPackageDetail): boolean {
+  return detail.items.every(
+    (i) => (i.status === "draft" || i.status === "held") && i.createdTaskId === null,
+  );
+}
+
+/**
+ * Release Flights held solely by a same-project collision once the blocking work
+ * has finished. A collision hold is a point-in-time concurrency snapshot ("one
+ * non-worktree writer per repo") stamped at creation with no self-release path —
+ * without this sweep a Flight staged while another task was in flight stays
+ * `held` forever. When none of the tasks that triggered the hold are still
+ * active, demote held → draft: the exact state the Flight would have had with no
+ * collision (the operator still Starts it; run-time concurrency re-serializes
+ * writers). Optionally scoped to one project for the fast task-completion path.
+ * Returns the ids of the Flights that were released.
+ */
+export function releaseStaleCollisionHolds(projectPath?: string): string[] {
+  const released: string[] = [];
+  for (const rec of listWorkPackages({ status: "held" })) {
+    if (projectPath && rec.projectPath !== projectPath) continue;
+    const holdTaskIds = readCollisionHoldTaskIds(rec.intake);
+    if (holdTaskIds === null) continue;
+    const detail = getWorkPackage(rec.id);
+    if (!detail || !isFreshlyStaged(detail)) continue;
+    if (anyTaskActive(holdTaskIds)) continue;
+    updateWorkPackage(rec.id, { status: "draft" });
+    released.push(rec.id);
+  }
+  return released;
+}
+
+// ── Autonomy: auto-start staged Flights ───────────────────────────
+
+/**
+ * Under `autonomous` autonomy, begin a freshly-staged Flight without an operator
+ * Start. Only a draft Flight that has never been started (no item has spawned a
+ * task) and has a promotable draft item is eligible; a Flight held at the
+ * collision or final gate is left alone. Returns true if it was started. The
+ * per-item safety floor still applies downstream: startWorkPackage promotes only
+ * draft items (held/final-gated items stay held), and concurrency re-serializes
+ * writers in advanceWorkPackage.
+ */
+export async function maybeAutostartFlight(id: string): Promise<boolean> {
+  if (!autonomyAutoStartsFlights(getAutonomyLevel())) return false;
+  const detail = getWorkPackage(id);
+  if (!detail || detail.status !== "draft") return false;
+  if (!isFreshlyStaged(detail)) return false;
+  if (!detail.items.some((i) => i.status === "draft")) return false;
+  await startWorkPackage(id);
+  return true;
+}
+
+/** Sweep every staged draft Flight and auto-start each one autonomy permits. */
+export async function autostartDraftFlights(): Promise<string[]> {
+  if (!autonomyAutoStartsFlights(getAutonomyLevel())) return [];
+  const started: string[] = [];
+  for (const rec of listWorkPackages({ status: "draft" })) {
+    try {
+      if (await maybeAutostartFlight(rec.id)) started.push(rec.id);
+    } catch (e) {
+      console.error(`[work-packages] autostart failed for ${rec.id}: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  return started;
+}
+
 // ── Lightweight reconcile loop ────────────────────────────────────
 
 /** One pass: advance packages that may still have autonomous work to reconcile. */
 export async function tickWorkPackages(): Promise<void> {
+  // Release Flights whose same-project collision hold has cleared (the blocking
+  // task finished). The PATCH /tasks terminal hook is the instant path; this is
+  // the backstop for completions that happen outside the API.
+  try {
+    releaseStaleCollisionHolds();
+  } catch (e) {
+    console.error(`[work-packages] collision-hold release failed: ${e instanceof Error ? e.message : e}`);
+  }
+  // Autonomy: auto-start any staged Flight the operator no longer needs to Start
+  // (runs after release so a just-unblocked collision Flight starts this tick).
+  await autostartDraftFlights();
   const candidates = new Map(
     [...listWorkPackages({ status: "running" }), ...listWorkPackages({ status: "review" })]
       .map((pkg) => [pkg.id, pkg]),
