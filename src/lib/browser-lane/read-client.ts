@@ -35,9 +35,13 @@ export function resolveBrowserLaneReadBaseUrl(): string {
 }
 
 export async function requestBrowserLaneRead(request: BrowserLaneReadRequest): Promise<Response> {
+  // Service answer budget + transport buffer: a hung Browser Lane app must
+  // fail the read, not stall the calling agent task forever.
+  const timeoutMs = (request.maxLatencyMs ?? 8_000) + 7_000;
   return fetch(`${resolveBrowserLaneReadBaseUrl()}/answer`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(timeoutMs),
     body: JSON.stringify({
       jobType: "answer_query",
       intent: "fresh_public_data",

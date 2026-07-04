@@ -186,7 +186,9 @@ export function startMessageBeePoller(intervalMs = POLL_INTERVAL_MS, dispatch?: 
   timer = setInterval(() => {
     if (running) return; // never overlap two polls
     running = true;
-    void pollOnce().finally(() => { running = false; });
+    void pollOnce()
+      .catch((e) => { console.error(`[messagebee] poll failed: ${e instanceof Error ? e.message : e}`); })
+      .finally(() => { running = false; });
   }, intervalMs);
   if (typeof timer.unref === "function") timer.unref();
   return stopMessageBeePoller;

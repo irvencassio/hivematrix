@@ -92,7 +92,9 @@ export function startMailBeePoller(intervalMs = POLL_INTERVAL_MS, dispatch?: Fla
   timer = setInterval(() => {
     if (running) return;
     running = true;
-    void pollOnce().finally(() => { running = false; });
+    void pollOnce()
+      .catch((e) => { console.error(`[mailbee] poll failed: ${e instanceof Error ? e.message : e}`); })
+      .finally(() => { running = false; });
   }, intervalMs);
   if (typeof timer.unref === "function") timer.unref();
   return stopMailBeePoller;
