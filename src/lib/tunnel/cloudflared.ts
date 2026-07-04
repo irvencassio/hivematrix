@@ -213,6 +213,29 @@ export function configureNamedTunnel(hostname: string): TunnelStatus {
   return tunnelStatus();
 }
 
+// A Cloudflare Access service token has a fixed shape: the client id is 32 hex
+// chars followed by ".access" and the secret is 64 hex chars. Rejecting
+// anything else at save time (a pasted URL, a hostname, the connector token)
+// beats the opaque Cloudflare 403 it causes at pairing time — the secret field
+// is masked and never echoed back, so a bad value is otherwise invisible.
+const ACCESS_CLIENT_ID_RE = /^[0-9a-f]{32}\.access$/i;
+const ACCESS_CLIENT_SECRET_RE = /^[0-9a-f]{64}$/i;
+
+/** Returns a user-facing error for a malformed Access credential, or null if OK. */
+export function validateCloudflareAccessCredentials(clientId?: string, clientSecret?: string): string | null {
+  if (clientId && !ACCESS_CLIENT_ID_RE.test(clientId)) {
+    return /^https?:\/\//i.test(clientId)
+      ? "Client ID looks like a URL — expected a service-token client id: 32 hex characters ending in \".access\"."
+      : "Client ID doesn't look like a Cloudflare Access service-token client id (expected 32 hex characters ending in \".access\").";
+  }
+  if (clientSecret && !ACCESS_CLIENT_SECRET_RE.test(clientSecret)) {
+    return /^https?:\/\//i.test(clientSecret)
+      ? "Client secret looks like a URL — expected the 64-character hex secret shown once when the service token was created."
+      : "Client secret doesn't look like a Cloudflare Access service-token secret (expected 64 hex characters).";
+  }
+  return null;
+}
+
 export function updateNamedTunnelAccess(settings: RemoteAccessSettings): TunnelStatus {
   // Only overwrite a credential when a non-empty value is supplied — a blank
   // field means "leave unchanged", so saving just the secret can never wipe the
@@ -220,10 +243,60 @@ export function updateNamedTunnelAccess(settings: RemoteAccessSettings): TunnelS
   const patch: RemoteAccessSettings = {};
   const id = settings.cloudflareAccessClientId?.trim();
   const secret = settings.cloudflareAccessClientSecret?.trim();
+  const invalid = validateCloudflareAccessCredentials(id, secret);
+  if (invalid) throw new Error(invalid);
   if (id) patch.cloudflareAccessClientId = id;
   if (secret) patch.cloudflareAccessClientSecret = secret;
   mergeRemoteAccessSettings(patch);
   return tunnelStatus();
+}
+
+export interface AccessVerification {
+  /** False when there was nothing to verify (no hostname or incomplete credentials). */
+  attempted: boolean;
+  /** True/false once Cloudflare answered; null when the check couldn't complete. */
+  ok: boolean | null;
+  status: number | null;
+  message: string;
+}
+
+/**
+ * Live-check the saved Access credentials: hit the configured public hostname
+ * with the CF-Access headers. Cloudflare Access answers 403 for a token it
+ * rejects and passes the request through to the daemon otherwise, so any
+ * non-403 response means the token was accepted.
+ */
+export async function verifyCloudflareAccess(timeoutMs = 8_000): Promise<AccessVerification> {
+  const settings = readRemoteAccessSettings();
+  const { namedHostname, cloudflareAccessClientId, cloudflareAccessClientSecret } = settings;
+  if (!namedHostname) {
+    return { attempted: false, ok: null, status: null, message: "Credentials saved. Configure a public hostname to verify them against Cloudflare." };
+  }
+  if (!cloudflareAccessClientId || !cloudflareAccessClientSecret) {
+    return { attempted: false, ok: null, status: null, message: "Credentials saved. Add both the client id and secret to verify them against Cloudflare." };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(namedHostname, {
+      method: "HEAD",
+      redirect: "manual",
+      headers: {
+        "CF-Access-Client-Id": cloudflareAccessClientId,
+        "CF-Access-Client-Secret": cloudflareAccessClientSecret,
+      },
+      signal: controller.signal,
+    });
+    if (res.status === 403) {
+      return { attempted: true, ok: false, status: 403, message: "Cloudflare rejected the service token (403). Check the client id and secret against the Access service token." };
+    }
+    return { attempted: true, ok: true, status: res.status, message: `Cloudflare accepted the service token (HTTP ${res.status}).` };
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    return { attempted: true, ok: null, status: null, message: `Credentials saved, but ${namedHostname} could not be reached to verify them (${detail}).` };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function stopTunnel(): boolean {

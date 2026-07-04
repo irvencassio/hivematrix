@@ -1053,12 +1053,21 @@ export function createDaemonServer() {
       }
       // POST /tunnel/access-credentials — persist optional Cloudflare Access service-token credentials for mobile pairing.
       if (req.method === "POST" && urlPath === "/tunnel/access-credentials") {
-        const { updateNamedTunnelAccess } = await import("@/lib/tunnel/cloudflared");
+        const { updateNamedTunnelAccess, verifyCloudflareAccess } = await import("@/lib/tunnel/cloudflared");
         const body = await parseBody(req) as Record<string, unknown>;
-        json(res, 200, updateNamedTunnelAccess({
-          cloudflareAccessClientId: String(body.cloudflareAccessClientId ?? ""),
-          cloudflareAccessClientSecret: String(body.cloudflareAccessClientSecret ?? ""),
-        }));
+        let status;
+        try {
+          status = updateNamedTunnelAccess({
+            cloudflareAccessClientId: String(body.cloudflareAccessClientId ?? ""),
+            cloudflareAccessClientSecret: String(body.cloudflareAccessClientSecret ?? ""),
+          });
+        } catch (e) {
+          // Malformed credential (e.g. a URL pasted as the secret) — reject
+          // before persisting so a bad value can't silently break pairing.
+          json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+          return;
+        }
+        json(res, 200, { ...status, accessVerification: await verifyCloudflareAccess() });
         return;
       }
       // GET /tunnel/qr — QR (SVG) of the pairing payload {url, token} for iOS.

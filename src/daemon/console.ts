@@ -8103,10 +8103,29 @@ async function configureNamedTunnel() {
 async function saveCloudflareAccessCredentials() {
   const cloudflareAccessClientId = document.getElementById("s_cf_access_id").value.trim();
   const cloudflareAccessClientSecret = document.getElementById("s_cf_access_secret").value.trim();
-  tunnel = await api("/tunnel/access-credentials", { method: "POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ cloudflareAccessClientId, cloudflareAccessClientSecret }) });
+  const cfDetail = document.getElementById("s_cf_access_detail");
+  if (cfDetail) { cfDetail.style.color = "var(--accent)"; cfDetail.textContent = "Saving & verifying against Cloudflare…"; }
+  let resp = null;
+  try {
+    resp = await api("/tunnel/access-credentials", { method: "POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ cloudflareAccessClientId, cloudflareAccessClientSecret }) });
+  } catch (e) { /* network failure → generic error below */ }
+  if (!resp || resp.error) {
+    // Rejected (e.g. a URL pasted as the secret) — keep the typed values so the
+    // user can fix them, and say why instead of silently persisting garbage.
+    if (cfDetail) { cfDetail.style.color = "var(--err)"; cfDetail.textContent = (resp && resp.error) || "Save failed — daemon unreachable"; }
+    return;
+  }
+  tunnel = resp;
   document.getElementById("s_cf_access_secret").value = "";
-  loadTunnel();
+  const verification = resp.accessVerification;
+  await loadTunnel();
+  // loadTunnel() rewrites the detail line; overwrite it with the live-check
+  // verdict so the user learns immediately whether Cloudflare took the token.
+  if (cfDetail && verification) {
+    cfDetail.style.color = verification.ok === true ? "var(--ok)" : verification.ok === false ? "var(--err)" : "";
+    cfDetail.textContent = verification.message;
+  }
 }
 async function startNamedTunnel() {
   const connectorToken = document.getElementById("s_named_token").value.trim();
