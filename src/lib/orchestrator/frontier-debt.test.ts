@@ -55,3 +55,26 @@ test("enqueue → drain creates a frontier review task and clears pending", asyn
 
   getConnectivityPolicy().setManualOverride(null);
 });
+
+test("drain loop logs a failed drain and keeps running", async (t) => {
+  const { startFrontierDebtLoop, stopFrontierDebtLoop } = await import("./frontier-debt");
+  const errors: string[] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => { errors.push(args.join(" ")); });
+  t.after(() => stopFrontierDebtLoop());
+
+  let calls = 0;
+  startFrontierDebtLoop(20, async () => {
+    calls += 1;
+    if (calls === 1) throw new Error("db locked");
+    return 0;
+  });
+
+  const end = Date.now() + 2_000;
+  while (calls < 2 && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+
+  assert.ok(calls >= 2, `loop should keep running after a failed drain (calls=${calls})`);
+  assert.ok(
+    errors.some((e) => e.includes("[frontier-debt]") && e.includes("db locked")),
+    "the drain failure should be logged, not swallowed",
+  );
+});

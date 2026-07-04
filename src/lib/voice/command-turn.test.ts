@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { commandTurnOverride } from "./command-turn";
+import { commandTurnOverride, deliverOpenClawReply } from "./command-turn";
 import type { ApprovalQueueItem } from "@/lib/approvals/queue";
 
 const approvals: ApprovalQueueItem[] = [
@@ -351,4 +351,24 @@ test("the weather voice path never reads Claude project memory", () => {
 test("non-command chit-chat still falls through (returns null)", async () => {
   const out = await commandTurnOverride("tell me a joke", { synthesize: async () => "" });
   assert.equal(out, null);
+});
+
+test("deliverOpenClawReply survives a throwing broadcast dep: logs, does not reject", async (t) => {
+  const errors: string[] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => { errors.push(args.join(" ")); });
+
+  await assert.doesNotReject(deliverOpenClawReply({
+    deps: {
+      synthesize: async () => "",
+      pollOpenClawReply: async () => ({ found: true, text: "hello", reason: null }),
+      broadcast: () => { throw new Error("socket gone"); },
+    },
+    sessionId: "vale-broadcast-crash",
+    gatewayUrl: "ws://127.0.0.1:18789",
+    sessionKey: "agent:main:main",
+    sentAfter: new Date().toISOString(),
+    assistant: "vale",
+  }));
+
+  assert.ok(errors.some((e) => e.includes("socket gone")), "broadcast failure should be logged");
 });

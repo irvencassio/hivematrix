@@ -220,13 +220,19 @@ export function startLocalServingSupervisor(
 ): () => void {
   if (timer) return stopLocalServingSupervisor;
   relaunchThrottleMs = opts.throttleMs ?? RELAUNCH_THROTTLE_MS;
-  // Run a tick immediately, then on an interval.
-  void tick();
-  timer = setInterval(() => {
+  const runTick = () => {
     if (ticking) return;
     ticking = true;
-    void tick().finally(() => { ticking = false; });
-  }, opts.intervalMs ?? CHECK_INTERVAL_MS);
+    tick()
+      .catch((err) => {
+        state.lastError = err instanceof Error ? err.message : String(err);
+        console.error(`[serving] tick failed: ${state.lastError}`);
+      })
+      .finally(() => { ticking = false; });
+  };
+  // Run a tick immediately, then on an interval.
+  runTick();
+  timer = setInterval(runTick, opts.intervalMs ?? CHECK_INTERVAL_MS);
   if (typeof timer.unref === "function") timer.unref();
   return stopLocalServingSupervisor;
 }

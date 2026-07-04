@@ -2260,3 +2260,28 @@ test("runSelectedCommand success message reports project mismatch when board fil
   // When no board filter is active the plain "see the board" fallback is used.
   assert.match(body, /see the board/, "default success message remains available for the no-filter case");
 });
+
+test("provisionLocalEngine surfaces a failed provision request and re-enables the button", async () => {
+  const js = extractScript(CONSOLE_HTML);
+  const src = fnBody(js, "provisionLocalEngine");
+
+  const btn = { disabled: false };
+  const log = { innerHTML: "" };
+  const doc = { getElementById: (id: string) => (id === "provisionBtn" ? btn : id === "provisionLog" ? log : null) };
+  let polled = 0;
+
+  const run = new Function("document", "api", "pollProvision", `${src}; return provisionLocalEngine();`) as
+    (document: unknown, api: unknown, pollProvision: unknown) => Promise<void>;
+  await run(doc, async () => { throw new Error("daemon down"); }, () => { polled += 1; });
+
+  assert.equal(btn.disabled, false, "button must be re-enabled after a failed provision request");
+  assert.match(log.innerHTML, /failed/i, "the failure must be shown in the provision log");
+  assert.equal(polled, 0, "status polling must not start after a failed provision request");
+});
+
+test("talk audio playback handles the async play() rejection (sync try/catch cannot see it)", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // Audio.play() returns a promise; autoplay blocking rejects it AFTER the
+  // sync try/catch has exited, so the rejection must be handled with .catch().
+  assert.match(js, /\.play\(\)\.catch\(/, "Audio playback must attach a .catch to the play() promise");
+});

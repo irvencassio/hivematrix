@@ -324,7 +324,7 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
           sessionKey: result.sessionKey,
           sentAfter: result.sentAt,
           assistant,
-        });
+        }).catch((e) => { console.error(`[voice] ${displayName} reply delivery failed: ${e instanceof Error ? e.message : e}`); });
       }
       return r(
         `I asked ${displayName}. I'll read it back when it's ready.`,
@@ -466,7 +466,9 @@ function capOpenClawText(text: string): string {
 }
 
 function defaultOpenClawBroadcast(event: string, data: unknown): void {
-  void import("@/lib/ws/broadcaster").then(({ broadcastEvent }) => broadcastEvent(event, data));
+  void import("@/lib/ws/broadcaster")
+    .then(({ broadcastEvent }) => broadcastEvent(event, data))
+    .catch((e) => { console.error(`[voice] ${event} broadcast failed: ${e instanceof Error ? e.message : e}`); });
 }
 
 async function pollOpenClaw(
@@ -513,7 +515,11 @@ export async function deliverOpenClawReply(opts: {
   } catch { /* speak-less fallback */ }
 
   const broadcastFn = deps.broadcast ?? defaultOpenClawBroadcast;
-  broadcastFn("voice:result", { sessionId, text, audioBase64, ok: pollResult.found });
+  try {
+    broadcastFn("voice:result", { sessionId, text, audioBase64, ok: pollResult.found });
+  } catch (e) {
+    console.error(`[voice] ${displayName} reply broadcast failed: ${e instanceof Error ? e.message : e}`);
+  }
 }
 
 async function boardCounts(): Promise<Record<string, number>> {

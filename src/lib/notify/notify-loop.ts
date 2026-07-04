@@ -105,15 +105,26 @@ let escTimer: ReturnType<typeof setInterval> | null = null;
 let tgRunning = false;
 
 /** Start the notification loop (idempotent). Returns a stop fn. */
-export function startNotifyLoop(intervalMs = ESCALATION_INTERVAL_MS): () => void {
+export function startNotifyLoop(
+  intervalMs = ESCALATION_INTERVAL_MS,
+  ticks: { escalation?: () => Promise<void>; telegram?: () => Promise<void> } = {},
+): () => void {
   if (escTimer) return stopNotifyLoop;
+  const esc = ticks.escalation ?? escalationTick;
+  const tg = ticks.telegram ?? telegramTick;
+  const logTickError = (name: string) => (e: unknown) => {
+    console.error(`[notify] ${name} tick failed: ${e instanceof Error ? e.message : e}`);
+  };
   let escRunning = false;
   escTimer = setInterval(() => {
-    if (!escRunning) { escRunning = true; void escalationTick().finally(() => { escRunning = false; }); }
+    if (!escRunning) {
+      escRunning = true;
+      void esc().catch(logTickError("escalation")).finally(() => { escRunning = false; });
+    }
     // Telegram long-poll runs back-to-back, not on the escalation cadence.
-    if (!tgRunning && getTelegramConfig()) {
+    if (!tgRunning && (ticks.telegram || getTelegramConfig())) {
       tgRunning = true;
-      void telegramTick().finally(() => { tgRunning = false; });
+      void tg().catch(logTickError("telegram")).finally(() => { tgRunning = false; });
     }
   }, intervalMs);
   if (typeof escTimer.unref === "function") escTimer.unref();

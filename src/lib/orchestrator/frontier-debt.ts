@@ -102,12 +102,14 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 
 /** Start the drain loop (idempotent). Self-gates: only replays under cloud-ok. */
-export function startFrontierDebtLoop(intervalMs = INTERVAL_MS): () => void {
+export function startFrontierDebtLoop(intervalMs = INTERVAL_MS, drain: () => Promise<number> = drainFrontierDebt): () => void {
   if (timer) return stopFrontierDebtLoop;
   timer = setInterval(() => {
     if (running) return;
     running = true;
-    void drainFrontierDebt().catch(() => 0).finally(() => { running = false; });
+    void drain()
+      .catch((e) => { console.error(`[frontier-debt] drain failed: ${e instanceof Error ? e.message : e}`); })
+      .finally(() => { running = false; });
   }, intervalMs);
   if (typeof timer.unref === "function") timer.unref();
   return stopFrontierDebtLoop;

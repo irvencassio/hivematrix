@@ -2166,7 +2166,7 @@ function flightBadgeClass(status) {
 function flightBlockerHtml(blocker, taskId) {
   if (!blocker) return '';
   if (blocker.indexOf('NEEDS_PARENT_DECISION:') === 0) {
-    var b = {}; try { b = JSON.parse(blocker.slice('NEEDS_PARENT_DECISION:'.length)); } catch (e) {}
+    var b = {}; try { b = JSON.parse(blocker.slice('NEEDS_PARENT_DECISION:'.length)); } catch (e) { console.warn("[flight] malformed NEEDS_PARENT_DECISION blocker:", e); }
     return '<div class="reply-section" style="display:block;margin-top:6px;border:1px solid var(--accent-2);border-radius:8px;padding:8px 12px">'
       + '<div class="reply-head" style="margin-bottom:4px">🛫 Needs Flight decision</div>'
       + '<div class="muted" style="font-size:11px">The Flight coordinator is resolving this from the parent context — no action needed from you.</div>'
@@ -2174,7 +2174,7 @@ function flightBlockerHtml(blocker, taskId) {
       + '</div>';
   }
   if (blocker.indexOf('NEEDS_OPERATOR_DECISION:') === 0) {
-    var o = {}; try { o = JSON.parse(blocker.slice('NEEDS_OPERATOR_DECISION:'.length)); } catch (e) {}
+    var o = {}; try { o = JSON.parse(blocker.slice('NEEDS_OPERATOR_DECISION:'.length)); } catch (e) { console.warn("[flight] malformed NEEDS_OPERATOR_DECISION blocker:", e); }
     var head = '<div class="reply-head">✋ Needs your reply</div>'
       + '<div class="reply-question">'+esc(o.question || o.ambiguity || 'A decision is needed.')+'</div>';
     // One-click accept: requeue the child with the recommended default (or any
@@ -5537,7 +5537,14 @@ function renderProvisionUI(cap) {
 async function provisionLocalEngine() {
   const btn = document.getElementById("provisionBtn");
   if (btn) btn.disabled = true;
-  try { await api("/local-engine/provision", { method: "POST" }); } catch (e) {}
+  try {
+    await api("/local-engine/provision", { method: "POST" });
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    const el = document.getElementById("provisionLog");
+    if (el) el.innerHTML = '<div class="muted" style="font-size:11px">✗ provision request failed — is the daemon reachable?</div>';
+    return;
+  }
   pollProvision();
 }
 
@@ -6714,7 +6721,7 @@ async function toggleTalk() {
       const res = await api("/voice/turn", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audioBase64: b64 }) });
       if (res && res.error) { talkStatus(res.error, true); }
       else {
-        if (res && res.audioBase64) { try { new Audio("data:audio/mp4;base64," + res.audioBase64).play(); } catch (e) {} }
+        if (res && res.audioBase64) { new Audio("data:audio/mp4;base64," + res.audioBase64).play().catch(e => console.warn("[talk] audio playback failed:", e)); }
         talkStatus((res && res.transcript ? "you: " + res.transcript : "") + (res && res.reply ? "  ·  assistant: " + res.reply : ""), true);
       }
     } catch (e) { talkStatus("voice turn failed", true); }
@@ -7722,7 +7729,7 @@ async function wpAdvance(pkgId) {
 // option as the operator reply, which requeues the child for more work.
 async function wpAcceptDecision(taskId, enc) {
   let text = enc;
-  try { text = decodeURIComponent(enc); } catch (e) {}
+  try { text = decodeURIComponent(enc); } catch (e) { console.warn("[flight] undecodable decision option, sending raw:", e); }
   const r = await api("/tasks/"+encodeURIComponent(taskId)+"/reply", { method:"POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
   if (r && r.ok) { hmToast("Answer sent — child requeued.", "ok"); }
   else { hmToast((r && r.error) || "Reply failed"); return; }

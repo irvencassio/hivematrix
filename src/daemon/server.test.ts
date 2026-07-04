@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { CONSOLE_HTML } from "./console";
 import { consoleHtmlHeaders, createDaemonServer, normalizeHomeProjectPath } from "./server";
@@ -2578,4 +2579,43 @@ test("POST /commands/run preserves explicit project; omitted project defaults to
   assert.equal(r3.status, 400, "path outside HOME is rejected with 400");
   const taskCount = (getDb().prepare("SELECT COUNT(*) AS n FROM tasks WHERE source = 'command'").get() as { n: number }).n;
   assert.equal(taskCount, 2, "only the two valid requests created tasks");
+});
+
+test("oversized request bodies are rejected with 413, not buffered until OOM", async (t) => {
+  const originalLimit = process.env.HIVEMATRIX_MAX_BODY_BYTES;
+  process.env.HIVEMATRIX_MAX_BODY_BYTES = "1024";
+  t.after(() => {
+    if (originalLimit) process.env.HIVEMATRIX_MAX_BODY_BYTES = originalLimit;
+    else delete process.env.HIVEMATRIX_MAX_BODY_BYTES;
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/settings/features`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ key: "x".repeat(8_192) }),
+  });
+  assert.equal(res.status, 413);
+  const body = await res.json() as { error?: string };
+  assert.match(body.error ?? "", /too large/i);
+});
+
+test("daemon catch-all checks headersSent before writing a 500", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
+  const ix = src.indexOf('console.error("[daemon] Request error:');
+  assert.notEqual(ix, -1, "catch-all error log must exist");
+  // A route that throws after starting its response must not crash the daemon
+  // with ERR_HTTP_HEADERS_SENT when the catch-all writes its JSON 500.
+  assert.match(src.slice(ix, ix + 600), /headersSent/, "catch-all must check res.headersSent");
+});
+
+test("pack download fetch is bounded by an abort timeout", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
+  // A stalled remote server must not hang the /packs install route forever.
+  assert.match(src, /fetch\(body\.url\.trim\(\),\s*\{\s*signal:\s*AbortSignal\.timeout\(/, "pack download fetch must pass AbortSignal.timeout");
 });
