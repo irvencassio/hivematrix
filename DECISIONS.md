@@ -943,3 +943,35 @@ separate branded assistant.
 
 Verification: scope-wall 0 violations for the Voice Lane compatibility id; docs
 only — no runtime code yet (that's P1+).
+
+## BUILD (2026-07-04) — W8 presence layer: Heartbeat + daily moments + operator modeling
+
+Built the NEXT-LEVEL-SPEC W8 heartbeat natively into Flash Lane (no new public
+brand; no OpenClaw runtime):
+
+1. **Heartbeat pulse** (`src/lib/flash/heartbeat.ts`) — every N min (default 30,
+   quiet-hours aware) one unprompted flash turn over `persona/HEARTBEAT.md`
+   (seeded on first enable) + a live `composeBriefing()` status snapshot. The
+   model must reply `HEARTBEAT_STAND_DOWN` unless something is genuinely worth
+   doing/saying — silence is the default. The **Autonomy dial shapes each pass**:
+   manual = observe/report only; standard = routine low-risk actions; autonomous
+   = act freely inside the lanes' existing hard gates, no extra approval
+   friction (operator decision 2026-07-04: fully-autonomous must skip extra
+   approvals). Reports fan out via notify() AND land as replyable assistant
+   turns in the operator console session — proactive pings are conversations.
+2. **Daily moments** — persona-voice morning brief (default 8h; "what happened /
+   what's blocked / the ONE decision today / what I suggest") and evening recap
+   (default 21h; "what I did for you today"), APNs-first with notify() fallback.
+   This replaces the retired Morning Briefing brand WITHOUT resurrecting it —
+   `startMorningBriefingLoop` stays unused and the `index.test.ts` ban holds.
+3. **Operator modeling** (`src/lib/flash/distill.ts`) — distillation now extracts
+   durable operator facts into `persona/USER.md` ("Learned about the operator":
+   dated, deduped, bounded 40). Operator-peer sessions only; every write is
+   announced via `flash:persona_updated`. USER.md stops being a dead template.
+4. **Surfaces** — `GET/POST /settings/heartbeat`, `POST /heartbeat/run`
+   ({moment} optional); Settings → Heartbeat card (enable, interval, quiet
+   hours, moment hours, run-now buttons). Delivery deps (notify/APNs/
+   composeBriefing) are daemon-injected so flash/ keeps its import surface.
+
+**Provers:** 18 new unit tests (heartbeat 12, distill merge 6); full suite
+2582/2582 green; typecheck + scope-wall clean; daemon bundle builds (223.6 MB).
