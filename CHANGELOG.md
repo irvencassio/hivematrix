@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.130 — 2026-07-04
+
+Remote access pairing QR + Cloudflare Access credential UX, and a local license-issue script (counterpart to license-keygen); harden messagebee onboarding tests against an installed Pro license
+
 ## v0.1.129 — 2026-07-04
 
 Fix slow local DeepSeek tasks: forward each task's thinking mode to Dwarf Star as reasoning_effort so lighter work decodes faster, give goal decomposition a real 60s timeout (12s default aborted every thinking-mode split and silently fell back), and quadruple the ds4-server KV disk cache budget to stop per-turn prefill re-thrashing
