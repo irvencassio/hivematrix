@@ -10,6 +10,13 @@ export const CODEX_BINARY_SEARCH_PATHS = [
   join(homedir(), ".local", "bin", "codex"),
 ];
 
+export const DS4_AGENT_BINARY_SEARCH_PATHS = [
+  "/opt/homebrew/bin/ds4-agent",
+  "/usr/local/bin/ds4-agent",
+  join(homedir(), ".local", "bin", "ds4-agent"),
+  join(homedir(), ".ds4", "bin", "ds4-agent"),
+];
+
 export const CLAUDE_BINARY_SEARCH_PATHS = [
   "/usr/local/bin/claude",
   "/opt/homebrew/bin/claude",

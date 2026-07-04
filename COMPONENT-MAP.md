@@ -36,10 +36,11 @@ Next.js UI, client of the daemon. Centered shell: board left, session center, co
 
 ## Worker contract and harnesses
 
-One worker contract. Three peer harnesses selected by routing policy:
+One worker contract. Four peer harnesses selected by routing policy:
 - Claude Code
 - Codex
 - Qwen Code
+- ds4-agent (`src/lib/orchestrator/ds4-agent.ts`) — DwarfStar's native DeepSeek coding agent, the lowest-latency local path (in-process KV-cache sessions, native tool handling, `/save`+`/switch` resume). **Opt-in and off by default** (config `ds4Agent.enabled`). DeepSeek-only with fixed, vertical tools that can NOT run the lanes (termbee/browserbee/vault), so routing selects it ONLY for autonomous DeepSeek coding tasks with no lane-tool needs (`ds4AgentEligible`); everything else — Qwen included — stays on the generic HTTP path. Runs worktree-sandboxed with the verification gate re-run post-hoc on the diff.
 
 Qwen-Agent: optional compatibility adapter only, never an orchestrator.
 
