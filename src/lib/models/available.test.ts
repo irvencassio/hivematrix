@@ -11,11 +11,28 @@ function backends(local: boolean, claude: boolean, codex: boolean): BackendStatu
     { id: "codex", name: "Codex", configured: codex, detail: "" },
   ];
 }
-const ids = (b: BackendStatus[]) => buildAvailableModels(b).map((m) => m.id);
+// Selectable (non-disabled) model ids — greyed "set up X" placeholders are
+// asserted separately.
+const ids = (b: BackendStatus[]) => buildAvailableModels(b).filter((m) => !m.disabled).map((m) => m.id);
 
-test("only configured backends produce models", () => {
+test("only configured backends produce selectable models", () => {
   assert.deepEqual(ids(backends(true, false, false)), ["local", "local-fast", "local-coding", "dwarfstar-deepseek-flash", "rapid-mlx-qwen36-35b"]);
   assert.deepEqual(ids(backends(false, false, false)), []);
+});
+
+test("unconfigured frontier providers appear as greyed, unselectable placeholders", () => {
+  const all = buildAvailableModels(backends(true, false, false)); // local only, no frontier
+  const claudeSetup = all.find((m) => m.id === "claude-setup");
+  const codexSetup = all.find((m) => m.id === "codex-setup");
+  assert.ok(claudeSetup?.disabled, "Claude shown as a disabled setup entry");
+  assert.ok(codexSetup?.disabled, "Codex shown as a disabled setup entry");
+  assert.equal(claudeSetup!.backend, "claude"); // groups under "Cloud frontier"
+  assert.equal(codexSetup!.backend, "codex");
+  assert.match(claudeSetup!.note ?? "", /sign in|enable/i);
+  // A configured frontier provider is NOT duplicated as a setup placeholder.
+  const withClaude = buildAvailableModels(backends(true, true, false));
+  assert.equal(withClaude.find((m) => m.id === "claude-setup"), undefined);
+  assert.ok(withClaude.find((m) => m.id === "codex-setup")?.disabled, "codex still greyed when only claude is set up");
 });
 
 test("local model carries the concrete configured id", () => {
@@ -34,7 +51,7 @@ test("Settings exposes the supported DeepSeek Flash local model preset", () => {
 });
 
 test("claude backend yields Opus + Sonnet with pinned ids", () => {
-  const ms = buildAvailableModels(backends(false, true, false));
+  const ms = buildAvailableModels(backends(false, true, false)).filter((m) => !m.disabled);
   const byId = Object.fromEntries(ms.map((m) => [m.id, m.modelId]));
   assert.equal(byId["claude-opus"], CLAUDE_OPUS_ID);
   assert.equal(byId["claude-sonnet"], CLAUDE_SONNET_ID);

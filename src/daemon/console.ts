@@ -5570,14 +5570,14 @@ async function loadModels() {
   models = await api("/models");
   if (!models) return;
   applyTheme(models.theme || "system", !!models.hasWallpaper);
-  for (const m of models.available) modelById[m.id] = { modelId: m.modelId, fast: !!m.fast };
+  for (const m of models.available) { if (m.disabled) continue; modelById[m.id] = { modelId: m.modelId, fast: !!m.fast }; }
   // Populate the New Task dropdown, grouped intent-first.
   const sel = document.getElementById("t_model");
   const catOf = m => m.backend === "mixed" ? "Recommended" : m.backend === "local" ? "Local (on-device)" : "Cloud frontier";
   const order = ["Recommended", "Local (on-device)", "Cloud frontier"];
   const groups = {};
   for (const m of models.available) { (groups[catOf(m)] = groups[catOf(m)] || []).push(m); }
-  const opt = m => '<option value="'+esc(m.id)+'">'+esc(m.name)+(m.note?' — '+esc(m.note):'')+'</option>';
+  const opt = m => '<option value="'+esc(m.id)+'"'+(m.disabled?' disabled':'')+'>'+esc(m.name)+(m.note?' — '+esc(m.note):'')+'</option>';
   sel.innerHTML = order.filter(g => groups[g]).map(g =>
     '<optgroup label="'+g+'">'+groups[g].map(opt).join("")+'</optgroup>').join("")
     || '<option value="">(no models configured)</option>';
@@ -6113,9 +6113,10 @@ function renderSettingsModelControls() {
   const local = backends.find(b => b.id === "local");
   const isDwarfStarLocal = isDwarfStarLocalBackend(local, m.localModelHealth);
   const sd = document.getElementById("s_default");
-  sd.disabled = !available.length;
-  if (available.length) {
-    sd.innerHTML = available.map(m => '<option value="'+esc(m.modelId)+'">'+esc(m.name)+'</option>').join("");
+  const selectable = available.filter(m => !m.disabled); // greyed "set up X" placeholders aren't valid defaults
+  sd.disabled = !selectable.length;
+  if (selectable.length) {
+    sd.innerHTML = selectable.map(m => '<option value="'+esc(m.modelId)+'">'+esc(m.name)+'</option>').join("");
     if (m.defaultModel) sd.value = m.defaultModel;
   } else {
     sd.innerHTML = '<option value="">(no models configured)</option>';

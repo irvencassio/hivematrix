@@ -28,6 +28,8 @@ export interface UiModel {
   backend: BackendId | "mixed";
   fast?: boolean;
   note?: string;
+  /** Not set up — shown greyed/unselectable so the capability stays discoverable. */
+  disabled?: boolean;
 }
 
 function localTierLabel(tier: LocalTier): string {
@@ -91,6 +93,17 @@ export function buildAvailableModels(backends: BackendStatus[] = detectBackends(
     models.push({ id: "codex-fast", name: "Codex — GPT-5.5, fast mode", modelId: CODEX_NEWEST_ID, backend: "codex", fast: true, note: "lower reasoning effort, faster" });
   }
 
+  // Frontier providers that aren't set up are shown DISABLED (greyed), not
+  // hidden, so the capability is discoverable with a one-line "how to enable".
+  if (!claude?.configured) {
+    models.push({ id: "claude-setup", name: "Claude Opus / Sonnet", modelId: "", backend: "claude", disabled: true,
+      note: claude?.connect || "install the Claude CLI and sign in to enable" });
+  }
+  if (!codex?.configured) {
+    models.push({ id: "codex-setup", name: "ChatGPT / Codex — GPT-5.5", modelId: "", backend: "codex", disabled: true,
+      note: codex?.connect || "install the Codex CLI and run 'codex login' to enable" });
+  }
+
   // Mixed needs a local backend AND a frontier backend.
   const hasFrontier = !!(claude?.configured || codex?.configured);
   if (local?.configured && hasFrontier) {
@@ -130,12 +143,13 @@ function readConfig(): Record<string, unknown> {
 
 /** The configured default model id, falling back to the first available. */
 export function getDefaultModel(available: UiModel[] = buildAvailableModels()): string | null {
+  const selectable = available.filter((m) => !m.disabled);
   const cfg = readConfig();
   const configured = typeof cfg.defaultModel === "string" ? cfg.defaultModel : null;
-  if (configured && available.some((m) => m.modelId === configured || m.id === configured)) {
+  if (configured && selectable.some((m) => m.modelId === configured || m.id === configured)) {
     return configured;
   }
-  return available[0]?.modelId ?? null;
+  return selectable[0]?.modelId ?? null;
 }
 
 export function setDefaultModel(modelId: string): void {
