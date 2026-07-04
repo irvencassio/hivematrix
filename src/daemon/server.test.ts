@@ -2680,3 +2680,17 @@ test("pack download fetch is bounded by an abort timeout", () => {
   // A stalled remote server must not hang the /packs install route forever.
   assert.match(src, /fetch\(body\.url\.trim\(\),\s*\{\s*signal:\s*AbortSignal\.timeout\(/, "pack download fetch must pass AbortSignal.timeout");
 });
+
+test("every SSE stream registers a response error handler (an unhandled stream 'error' event would crash the daemon)", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
+  const sites = [...src.matchAll(/text\/event-stream/g)];
+  assert.ok(sites.length >= 3, `expected at least 3 SSE endpoints, found ${sites.length}`);
+  for (const m of sites) {
+    const window = src.slice(m.index!, m.index! + 1500);
+    assert.match(
+      window,
+      /res\.on\("error"/,
+      `SSE endpoint near offset ${m.index} must attach res.on("error", ...) — the daemon exits on uncaughtException`,
+    );
+  }
+});

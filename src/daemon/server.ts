@@ -1023,6 +1023,7 @@ export function createDaemonServer() {
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
         });
+        res.on("error", () => { /* client disconnected mid-stream */ });
 
         const session = getOrCreateSession("console", "birth_ritual");
         const messages = buildBirthRitualMessages();
@@ -4069,7 +4070,12 @@ export function createDaemonServer() {
         });
         res.write(`event: connected\ndata: ${JSON.stringify({ connectivity: policy.mode })}\n\n`);
         sseClients.add(res);
-        req.on("close", () => sseClients.delete(res));
+        // A stream "error" with no listener is an uncaughtException (daemon exit);
+        // a flaky client must only ever cost us its own slot in the set.
+        const dropSseClient = () => sseClients.delete(res);
+        req.on("close", dropSseClient);
+        req.on("error", dropSseClient);
+        res.on("error", dropSseClient);
         return;
       }
 
@@ -4784,6 +4790,7 @@ export function createDaemonServer() {
           "Cache-Control": "no-cache",
           "Connection": "keep-alive",
         });
+        res.on("error", () => { /* client disconnected mid-stream */ });
         res.write(": keepalive\n\n");
         const text = typeof body.text === "string" ? body.text.trim() : "";
         const channel = typeof body.channel === "string" ? body.channel : "console";

@@ -118,7 +118,7 @@ class AgentManager {
           last50Lines,
           "watchdog"
         )
-          .catch(() => {})
+          .catch((e) => { console.error(`[watchdog] raiseStuck failed for ${agent.taskId}: ${e instanceof Error ? e.message : e}`); })
           .finally(() => this.stuckRaisedFor.delete(agent.taskId));
       }
     }, 60_000);
