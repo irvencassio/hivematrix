@@ -1004,3 +1004,32 @@ local-model or deterministic; autonomy-dial aware):
 
 **Provers:** 16 new tests (directive history 2, goals 3, pattern detection 5,
 persona evolution 6); full suite 2605/2605; typecheck + scope-wall clean.
+
+## BUILD (2026-07-04) — adaptive autonomy: trust ramp + capability self-assessment
+
+Two increments answering "self-learning + add capabilities automatically" while
+holding the ClawHavoc safety line.
+
+1. **Trust ramp** (`src/lib/approvals/trust-ledger.ts`) — the autonomy dial is a
+   blunt switch; this makes autonomy earn itself. Per action class, the ledger
+   records operator approve/deny outcomes (`resolveApproval` folds in every real
+   decision, skipping auto-decisions so the ramp can't train itself). Under
+   AUTONOMOUS mode, a class with ≥3 clean approvals + 0 denials auto-approves
+   without the operator flipping a toggle (`maybeAutoApproveRequest` consults it
+   after the explicit policy, audit-logs `auto_approved`). A single denial revokes
+   the class. **Hard floor:** only `checkpoint`/`lowRiskTool` are ever
+   trust-eligible — content, external, risky-tool (bash/MCP), stuck, and every
+   protected action can NEVER auto-approve at any trust level, even in autonomous
+   (`trustKey` returns null, so no history accrues). Escape hatch: `resetTrust`;
+   endpoints `GET /trust`, `POST /trust/reset`.
+2. **Capability self-assessment** (`src/lib/feedback/capability-gaps.ts`) — reads
+   the backlog for missing-capability friction, classifies the remedy
+   (skill|lane|pack|unknown) + whether it's self-serviceable, and files one
+   labeled proposal per gap. **Proposing is free; acquiring is gated.** Only
+   skills are self-serviceable (first-party, sandboxed, already auto-distilled);
+   lanes (credentials) and packs (must be signed) ALWAYS require operator
+   approval, even under fully autonomous. The module never installs/enables
+   anything. Runs daily in the flash learning loop next to pattern detection.
+
+**Provers:** 13 new tests (trust 8, capability gaps 5); full suite 2618/2618;
+typecheck + scope-wall clean.

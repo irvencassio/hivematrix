@@ -98,6 +98,8 @@ Installable outcome packs that deliver a job end-to-end.
 
 - Session/identity plane: SessionBroker, SessionStore (internal; no public brand)
 - Updater: signed, notarized .app from day one (Tauri shell + Sparkle/Tauri-updater channel; no git-based updater, Q4); daemon-side migrate-backup-restart-probe-rollback with stable/beta rings
+- **Trust ramp** (`src/lib/approvals/trust-ledger.ts`) — adaptive layer over the autonomy dial. Per action class, records operator approve/deny history; under `autonomous` a class with ≥3 clean approvals + 0 denials auto-approves (no toggle), a denial revokes it. Hard floor: only `checkpoint`/`lowRiskTool` are ever trust-eligible — content/external/risky-tool/stuck/protected NEVER auto-approve at any trust level. Wired into `orchestrator/approval.ts` (record on `resolveApproval`, consult in `maybeAutoApproveRequest`, `auto_approved` audit). Endpoints `GET /trust`, `POST /trust/reset`.
+- **Capability self-assessment** (`src/lib/feedback/capability-gaps.ts`) — mines the backlog for missing-capability friction, classifies the remedy (skill|lane|pack|unknown) + self-serviceability, files labeled proposals. Proposing is free; acquiring is gated — only first-party skills are self-serviceable (already auto-distilled); lanes/packs always need operator approval, even under autonomous. Never installs/enables anything. Runs daily in the flash learning loop.
 
 ## Deferred from v1 (designs kept, no code)
 
