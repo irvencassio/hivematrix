@@ -147,20 +147,41 @@ export function currentMaxRowid(path = chatDbPath()): number {
 // lookup hangs on recent macOS (AppleEvent timed out / -1712), which is why
 // Message Lane replies silently never delivered. `with timeout` bounds it so a
 // stuck Messages can't block the whole send for the default 2 minutes.
-// argv: handle, text, then 0+ attachment file paths. Text is sent only when
-// non-empty (so a voice note can be sent with no caption); each attachment is
-// sent as its own message via `send (POSIX file ...)` — the iMessage equivalent
-// of Mail Lane's attachment loop. Audio (.m4a) arrives as a playable bubble.
+// argv: handle, text, sendAs, then 0+ attachment file paths. Text is sent only
+// when non-empty (so a voice note can be sent with no caption); each attachment
+// is sent as its own message via `send (POSIX file ...)` — the iMessage
+// equivalent of Mail Lane's attachment loop. Audio (.m4a) arrives as a playable
+// bubble.
+//
+// sendAs pins WHICH of the Mac's iMessage accounts sends the message: the first
+// account whose id contains sendAs (e.g. the agent's dedicated Apple ID). When
+// empty — or no account matches — it falls back to the 1st iMessage account
+// (the historical behavior). This matters once the box has more than one
+// iMessage account signed in (e.g. the dedicated agent identity alongside a
+// personal one): "1st account" is otherwise nondeterministic and could send as
+// the wrong identity — including texting a shared number as a self-send.
 export const SEND_SCRIPT = `on run argv
   set targetHandle to item 1 of argv
   set targetMessage to item 2 of argv
+  set sendAs to item 3 of argv
   with timeout of 30 seconds
     tell application "Messages"
-      set targetAccount to 1st account whose service type = iMessage
+      set targetAccount to missing value
+      if sendAs is not "" then
+        repeat with acct in (every account whose service type = iMessage)
+          if (id of acct) contains sendAs then
+            set targetAccount to acct
+            exit repeat
+          end if
+        end repeat
+      end if
+      if targetAccount is missing value then
+        set targetAccount to 1st account whose service type = iMessage
+      end if
       set targetParticipant to participant targetHandle of targetAccount
       if targetMessage is not "" then send targetMessage to targetParticipant
-      if (count of argv) > 2 then
-        repeat with i from 3 to (count of argv)
+      if (count of argv) > 3 then
+        repeat with i from 4 to (count of argv)
           try
             send (POSIX file (item i of argv)) to targetParticipant
           end try
@@ -173,13 +194,14 @@ end run`;
 /**
  * Send an iMessage to a handle, optionally with file attachments (e.g. a voice
  * note). Resolves false on failure (never throws). Text may be empty when only
- * attachments are being sent.
+ * attachments are being sent. `sendAs` optionally pins the sending account (see
+ * SEND_SCRIPT); "" uses the first iMessage account.
  */
-export function sendIMessage(handle: string, text: string, attachments: string[] = [], timeoutMs = 30_000): Promise<boolean> {
+export function sendIMessage(handle: string, text: string, attachments: string[] = [], sendAs = "", timeoutMs = 30_000): Promise<boolean> {
   return new Promise((resolve) => {
     execFile(
       "osascript",
-      ["-e", SEND_SCRIPT, handle, text, ...attachments],
+      ["-e", SEND_SCRIPT, handle, text, sendAs, ...attachments],
       { timeout: timeoutMs },
       (err, _stdout, stderr) => {
         if (err) {

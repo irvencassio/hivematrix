@@ -21,7 +21,7 @@ import { routeInbound, type PendingInput } from "./handoff";
 import { readInboundSince, sendIMessage } from "./imessage";
 import { wantsVoiceReply } from "@/lib/voice/tts";
 import {
-  isChannelEnabled, getLastRowid, setLastRowid, isAllowed, isSelf,
+  isChannelEnabled, getLastRowid, setLastRowid, isAllowed, isSelf, getSelfHandles,
   recordInbound, recordOutbound, recordError,
   wasStuckNotified, markStuckNotified,
   wasDoneNotified, markDoneNotified, recordIgnoredSender,
@@ -47,7 +47,9 @@ async function sendGuarded(handle: string, text: string, attachments: string[] =
     recordError(`refused to text self-handle ${handle} (would loop); set a distinct agent identity for two-way texting`);
     return false;
   }
-  return sendIMessage(handle, text, attachments);
+  // Pin the sending account to the agent's own identity so a multi-account box
+  // (dedicated agent Apple ID + personal) sends as the right one, not "1st account".
+  return sendIMessage(handle, text, attachments, getSelfHandles()[0] ?? "");
 }
 
 /** Pending needs_input requests for Message Lane tasks owned by a given sender. */

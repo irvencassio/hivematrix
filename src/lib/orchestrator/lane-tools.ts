@@ -670,8 +670,11 @@ export async function executeMailBeeDraft(args: Record<string, unknown>, io?: Ma
 
 export interface MessageBeeSendIO {
   isChannelEnabled?(): boolean;
+  isSelf?(handle: string): boolean;
   isAllowed(handle: string): boolean;
-  sendIMessage(handle: string, text: string, attachments?: string[]): Promise<boolean>;
+  /** The agent's own handles; the first pins the sending account (see SEND_SCRIPT). */
+  getSelfHandles?(): string[];
+  sendIMessage(handle: string, text: string, attachments?: string[], sendAs?: string): Promise<boolean>;
   recordOutbound(): void;
 }
 
@@ -680,7 +683,9 @@ async function defaultMessageBeeIO(): Promise<MessageBeeSendIO> {
   const im = await import("@/lib/messagebee/imessage");
   return {
     isChannelEnabled: store.isChannelEnabled,
+    isSelf: store.isSelf,
     isAllowed: store.isAllowed,
+    getSelfHandles: store.getSelfHandles,
     sendIMessage: im.sendIMessage,
     recordOutbound: store.recordOutbound,
   };
@@ -699,11 +704,16 @@ export async function executeMessageBeeSend(args: Record<string, unknown>, io?: 
     return "Error: Message Lane is disabled. Enable Message Lane before sending SMS/iMessage.";
   }
 
+  if (deps.isSelf?.(to)) {
+    return `Error: refusing to send SMS/iMessage to ${to} because it is configured as a Message Lane self handle. This would echo back as inbound and loop.`;
+  }
+
   if (!deps.isAllowed(to)) {
     return `Error: ${to} is not on the Message Lane allowlist. SMS/iMessage can only be sent to allowlisted handles — add ${to} in Message Lane settings first, then retry.`;
   }
 
-  const sent = await deps.sendIMessage(to, text, attachments);
+  const sendAs = deps.getSelfHandles?.()[0] ?? "";
+  const sent = await deps.sendIMessage(to, text, attachments, sendAs);
   if (sent) deps.recordOutbound();
   const what = attachments.length ? `Message (with ${attachments.length} attachment(s))` : "Message";
   return sent

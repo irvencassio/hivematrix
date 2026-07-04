@@ -23,6 +23,16 @@ test("send script uses the modern account/participant API, not the timing-out bu
   assert.match(SEND_SCRIPT, /with timeout of \d+ seconds/, "send is bounded");
 });
 
+test("send script pins the sending account to sendAs, falling back to the 1st account", () => {
+  // On a multi-account box (e.g. a dedicated agent Apple ID next to a personal
+  // one), the send must come from a deterministic identity, not "1st account".
+  assert.match(SEND_SCRIPT, /set sendAs to item 3 of argv/);
+  assert.match(SEND_SCRIPT, /\(id of acct\) contains sendAs/, "matches an account by its id");
+  assert.match(SEND_SCRIPT, /if targetAccount is missing value then/, "falls back when no match");
+  // Attachments now start at item 4 (item 3 is sendAs).
+  assert.match(SEND_SCRIPT, /repeat with i from 4 to \(count of argv\)/);
+});
+
 test("appleDateToIso handles seconds and nanoseconds since 2001", () => {
   // 0 seconds since 2001 epoch
   assert.equal(appleDateToIso(0), new Date(0).toISOString());
