@@ -4,6 +4,9 @@ import { Task } from "@/lib/db";
 import { broadcast } from "@/lib/ws/broadcaster";
 import { notifySuperwhisperPermissionRequest } from "@/lib/integrations/superwhisper-hive";
 import { classifyAutoApprovalRequest, evaluateAutoApprovalPolicy, getAutoApprovalPolicy } from "@/lib/voice/auto-approval-policy";
+import { trustAllowsAutoApproval, readTrustLedger, recordApprovalOutcome } from "@/lib/approvals/trust-ledger";
+import { getAutonomyLevel } from "@/lib/config/autonomy";
+import { recordAudit } from "@/lib/audit/audit";
 
 const APPROVALS_DIR = join(process.env.HOME!, ".hivematrix", "approvals");
 const HOOKS_DIR = join(process.env.HOME!, ".hivematrix", "hooks");
@@ -263,6 +266,17 @@ export async function resolveApproval(
     return;
   }
 
+  // Trust ramp: fold this operator decision into the trust ledger so a class the
+  // operator keeps approving can later auto-approve under autonomous mode (and a
+  // denial revokes it). Best-effort; only trust-eligible classes accumulate.
+  // Skip auto-decisions (via "voice-auto"/"earned-trust") — trust is earned from
+  // the operator's own choices, not from the ramp approving itself.
+  if (via !== "timeout" && !via.startsWith("voice-auto") && !via.startsWith("earned-trust")) {
+    try {
+      recordApprovalOutcome({ category: classifyAutoApprovalRequest({ timestamp }) }, allowed);
+    } catch { /* best effort */ }
+  }
+
   // Update DB — set decision on approvals that don't have one yet
   try {
     await Task.findByIdAndUpdate(taskId, {
@@ -358,16 +372,32 @@ export function requestCheckpointApproval(opts: { id: string; gate: string; goal
 }
 
 function maybeAutoApproveRequest(request: ApprovalRequest, decisionFile: string): void {
-  const decision = evaluateAutoApprovalPolicy(getAutoApprovalPolicy(), {
-    category: classifyAutoApprovalRequest(request),
-    toolName: request.tool,
-  });
-  if (!decision.allowed) return;
+  const category = classifyAutoApprovalRequest(request);
+
+  // 1) Explicit auto-approval policy (operator-set toggles).
+  let reason: string | null = null;
+  const explicit = evaluateAutoApprovalPolicy(getAutoApprovalPolicy(), { category, toolName: request.tool });
+  if (explicit.allowed) {
+    reason = `voice-auto (${explicit.reason})`;
+  } else {
+    // 2) Trust ramp: under autonomous mode, a class that earned a clean approval
+    //    history auto-approves without the operator flipping a toggle. The same
+    //    safety floor applies — only checkpoint/lowRiskTool are ever eligible.
+    try {
+      const trust = trustAllowsAutoApproval({ category, tool: request.tool }, getAutonomyLevel(), readTrustLedger());
+      if (trust.allowed) reason = `earned-trust (${trust.reason})`;
+    } catch { /* trust is an optimization; never block on it */ }
+  }
+  if (!reason) return;
+
   try {
     writeFileSync(decisionFile, "approve", { flag: "wx" });
   } catch {
     return;
   }
+  try {
+    recordAudit({ ts: new Date().toISOString(), event: "auto_approved", taskId: request.taskId, summary: `${request.tool}: ${reason}` });
+  } catch { /* best effort */ }
   broadcast({
     type: "approval:resolved",
     taskId: request.taskId,
@@ -379,7 +409,7 @@ function maybeAutoApproveRequest(request: ApprovalRequest, decisionFile: string)
     taskId: request.taskId,
     log: {
       type: "text",
-      content: `Approval granted via voice-auto (${decision.reason})`,
+      content: `Approval granted via ${reason}`,
     },
   });
 }
