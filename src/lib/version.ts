@@ -3,7 +3,7 @@
  * Bump BUILD_NUMBER + BUILD_DATE when cutting a build.
  */
 export const VERSION = "0.1.130";
-export const BUILD_NUMBER = 674;
+export const BUILD_NUMBER = 675;
 export const BUILD_DATE = "2026-07-04";
 
 export interface VersionInfo {

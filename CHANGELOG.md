@@ -4,6 +4,10 @@ Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.
 
 ## v0.1.130 — 2026-07-04
 
+Fix mobile pairing: the QR now shows a clear reason instead of a blank box when it can't render, Settings reflects saved Cloudflare Access credentials, and saving just the secret no longer wipes the client id
+
+## v0.1.130 — 2026-07-04
+
 Remote access pairing QR + Cloudflare Access credential UX, and a local license-issue script (counterpart to license-keygen); harden messagebee onboarding tests against an installed Pro license
 
 ## v0.1.129 — 2026-07-04
