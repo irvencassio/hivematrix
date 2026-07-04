@@ -328,7 +328,11 @@ export function buildRoleModelOptions(backends: BackendStatus[] = detectBackends
   const spark = codex?.configured ? roleOption(CODEX_SPARK_ID, "Codex GPT-5.3 Spark", "codex", "separate coding pool") : null;
 
   return {
-    thinking: [opus, sonnet, gpt55, spark].filter((m): m is RoleModelOption => m !== null),
+    // Thinking defaults to frontier-premium (a weak plan poisons everything
+    // downstream), but local is offered last for a fully on-box posture — the
+    // resolver already honors a local thinkModel override, and offline routing
+    // already sends this role to local-primary anyway.
+    thinking: [opus, sonnet, gpt55, spark, ...localOptions].filter((m): m is RoleModelOption => m !== null),
     coding: [opus, sonnet, gpt55, spark, ...localOptions].filter((m): m is RoleModelOption => m !== null),
     operational: [...localOptions, spark, sonnet].filter((m): m is RoleModelOption => m !== null),
     // Writer: frontier for quality, or the local model to lock everything free.

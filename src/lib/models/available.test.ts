@@ -86,6 +86,24 @@ test("role options expose Coding choices across Claude, Codex, and local Qwen", 
   ]);
 });
 
+test("role options offer local for Thinking too, but keep frontier-premium first", () => {
+  const options = buildRoleModelOptions(backends(true, true, true));
+  const thinking = options.thinking.map((m) => m.modelId);
+  // Frontier stays at the front so the default (empty → frontier-premium) is
+  // unchanged; local is appended as an opt-in on-box choice.
+  assert.deepEqual(thinking, [
+    "opus",
+    "sonnet",
+    "codex:gpt-5.5",
+    "codex:gpt-5.3-codex-spark",
+    "qwen/qwen3.6-27b",
+    "qwen3.6-35b-4bit",
+    "qwen3.6-27b-4bit",
+    DEEPSEEK_FLASH_API_MODEL_ID,
+    QWEN36_35B_API_MODEL_ID,
+  ]);
+});
+
 test("role options expose Operational escape hatches without making them the default", () => {
   const options = buildRoleModelOptions(backends(true, true, true));
   const operational = options.operational.map((m) => m.modelId);
