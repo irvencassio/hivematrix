@@ -87,7 +87,7 @@ export async function telegramTick(): Promise<void> {
     const parsed = parseCallbackData(cq.data);
     if (!parsed) { await answerCallback(cfg, cq.id, "Malformed action"); continue; }
 
-    let ok = false;
+    let ok: boolean;
     if (parsed.kind === "stuck") {
       ok = await resolveStuck(parsed.id, parsed.timestamp, parsed.decision, "telegram");
     } else {

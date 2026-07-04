@@ -10,7 +10,7 @@
 
 import { readFileSync } from "fs";
 import { seedHeyGenBrowserSite } from "@/lib/browser-lane/heygen";
-import { getBrowserLaneReadinessDashboard, recordBrowserReadinessRun } from "@/lib/browser-lane/store";
+import { recordBrowserReadinessRun } from "@/lib/browser-lane/store";
 import { dispatchHeyGenVideoWorkflow } from "./heygen-workflow";
 import { applyHeyGenPortalCompletion, markPortalTaskCreated } from "./portal-completion";
 import { publishDraftVideo } from "./news-review";

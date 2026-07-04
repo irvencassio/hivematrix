@@ -295,6 +295,7 @@ const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
 /** Remove NUL bytes — argv strings passed to child_process.spawn cannot contain them. */
 export function stripNullBytes(s: string): string {
+  // eslint-disable-next-line no-control-regex -- NUL is exactly the character being stripped
   return s.includes("\u0000") ? s.replace(/\u0000/g, "") : s;
 }
 

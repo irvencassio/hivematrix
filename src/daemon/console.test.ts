@@ -70,7 +70,7 @@ test("result markdown renders pipe tables as real tables", () => {
 test("result markdown prepares Mermaid fences for client-side rendering", () => {
   const mdToHtml = extractMdToHtml(CONSOLE_HTML);
   const html = mdToHtml("```mermaid\ngraph TD\n  A[Start] --> B[Done]\n```");
-  assert.match(html, /<pre class="mermaid">graph TD\n  A\[Start\] --&gt; B\[Done\]<\/pre>/);
+  assert.match(html, /<pre class="mermaid">graph TD\n {2}A\[Start\] --&gt; B\[Done\]<\/pre>/);
 
   assert.match(CONSOLE_HTML, /src="\/assets\/mermaid\.min\.js"/, "console loads bundled Mermaid");
   const js = extractScript(CONSOLE_HTML);
@@ -1383,7 +1383,7 @@ test("Flight detail renders pass history rows", () => {
 test("Flight loop controls are in the Flight detail, not a hidden Settings panel", () => {
   const js = extractScript(CONSOLE_HTML);
   // Setup loop button is emitted from flightLoopSectionHtml, not settings
-  assert.match(js, /wpSetupLoop\(\\\''\+esc\(pkgId\)/, "setup loop button wired to pkgId in loop section");
+  assert.match(js, /wpSetupLoop\(\\''\+esc\(pkgId\)/, "setup loop button wired to pkgId in loop section");
   // Loop section fetches from the correct API paths
   assert.match(js, /\/loop\/run-pass/, "run-pass endpoint referenced");
   assert.match(js, /\/loop\/pause/, "pause endpoint referenced");
@@ -1795,13 +1795,6 @@ test("stuckStateBannerHtml and wpReconcile are present in the console script", (
   assert.match(js, /stuck-banner/, "stuck-banner CSS class used");
   assert.match(CONSOLE_HTML, /\.stuck-banner\s*\{/, "stuck-banner CSS defined");
 });
-
-function extractStuckBannerFn(html: string) {
-  const js = extractScript(html);
-  const block = js.match(/\/\*__RECONCILE_START__\*\/([\s\S]*?)\/\*__RECONCILE_END__\*\//);
-  assert.ok(block, "console must contain sentinel-wrapped wpReconcile");
-  return block![1];
-}
 
 test("stuckStateBannerHtml: returns empty string for null stuckState", () => {
   const js = extractScript(CONSOLE_HTML);
@@ -2251,7 +2244,7 @@ test("runSelectedCommand success message reports project mismatch when board fil
 
   // When the filter is set and differs from the task project the message must
   // mention the task project ("in <project>") so the operator knows where to look.
-  assert.match(body, /in '\s*\+.*taskProject|'in '\s*\+\s*taskProject|in " \+ taskProject|"in " \+ taskProject|in\s+\'\s*\+\s*taskProject|in.*taskProject.*board filter|in.*taskProject/, "mismatch message includes the task project");
+  assert.match(body, /in '\s*\+.*taskProject|'in '\s*\+\s*taskProject|in " \+ taskProject|"in " \+ taskProject|in\s+'\s*\+\s*taskProject|in.*taskProject.*board filter|in.*taskProject/, "mismatch message includes the task project");
 
   // The mismatch message must also name the active board filter so the operator
   // can reconcile which view they are looking at.

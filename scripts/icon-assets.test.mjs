@@ -44,7 +44,7 @@ test("desktop app icon is inset (not full-bleed) with transparent corners", () =
   const icon = inspectPng(join(root, "src-tauri/icons/icon.png"));
   assert.deepEqual(icon.size, [512, 512]);
   assert.equal(icon.corner[3], 0, "corner should be transparent, not a white matte");
-  const [x0, y0, x1, y1] = icon.bbox;
+  const [x0, y0, x1] = icon.bbox;
   const ratio = (x1 - x0) / icon.size[0];
   assert.ok(ratio > 0.74 && ratio < 0.86, `glyph should fill ~0.805 of the canvas (got ${ratio.toFixed(3)})`);
   assert.ok(x0 > 20 && y0 > 20, "glyph should sit inside a transparent margin");

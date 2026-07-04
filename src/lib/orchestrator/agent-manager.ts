@@ -19,7 +19,6 @@ import { deliverTrustedMailBeeReply } from "@/lib/mailbee/delivery";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { isCodexModel } from "@/lib/models/catalog";
 import { getLocalFallbackDecision, type LocalFallbackReason } from "@/lib/local-model/fallback";
 import {
   notifySuperwhisperSession,

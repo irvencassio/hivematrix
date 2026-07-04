@@ -21,7 +21,7 @@ export function slugify(value: string): string {
 /** Targets referenced by `[[name]]` / `[[name|alias]]` in a doc, slugified + deduped. */
 export function extractWikiLinks(content: string): string[] {
   const out = new Set<string>();
-  const re = /\[\[([^\[\]|]+?)(?:\|[^\]]*)?\]\]/g;
+  const re = /\[\[([^[\]|]+?)(?:\|[^\]]*)?\]\]/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
     const t = slugify(m[1]);

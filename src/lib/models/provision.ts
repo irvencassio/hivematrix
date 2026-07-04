@@ -15,11 +15,11 @@
 
 import { spawn, execFile } from "child_process";
 import { promisify } from "util";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import {
-  localEngineCapability, probeHardware, DEFAULT_TIERS, resolveRapidBinary, tierBaseUrl,
+  localEngineCapability, DEFAULT_TIERS, resolveRapidBinary, tierBaseUrl,
   type LocalTier, type TierKey, type HardwareProbe,
 } from "./local-engine";
 import type { QwenProfile } from "@/lib/config/qwen-profile";

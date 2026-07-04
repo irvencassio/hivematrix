@@ -178,7 +178,7 @@ export function startNamedTunnel(connectorToken: string, hostname: string): Prom
   if (s.proc && !s.proc.killed) stopTunnel();
   const publicUrl = normalizePublicUrl(hostname) ?? hostname;
   mergeRemoteAccessSettings({ namedHostname: publicUrl });
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const proc = spawn(bin, ["tunnel", "--no-autoupdate", "run", "--token", connectorToken], {
       env: { ...process.env, PATH: buildCliPath() },
     });

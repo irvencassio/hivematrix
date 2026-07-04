@@ -87,7 +87,7 @@ async function main() {
   const TYPED = "HiveMatrix Desktop Lane proof: AX-driven keyboard input.";
   const SETVAL = "HiveMatrix Desktop Lane proof: AX setValue on the text area.";
 
-  let pass1 = false, pass2 = false;
+  let pass2 = false;
 
   // ---- Recipe 1: AX input via CGEvent ----
   line("Recipe 1 — TextEdit: launch doc, type via AX/CGEvent, verify via AX, capture");
@@ -104,7 +104,7 @@ async function main() {
   line("  [" + (cap1.ok ? "✓":"✗") + "] capture → " + (cap1.captureRef ?? cap1.error));
   const q1 = await act({ action: "desktop.ax.query", app: "TextEdit", params: { maxDepth: 12 } });
   const text1 = q1.ok ? collectText((q1.data as any).tree) : "";
-  pass1 = text1.includes("AX-driven keyboard input");
+  const pass1 = text1.includes("AX-driven keyboard input");
   line("  [" + (pass1 ? "✓":"✗") + "] AX verify: typed text " + (pass1 ? "found in AX tree" : "NOT found"));
   line("");
 

@@ -10,8 +10,6 @@ import {
 } from "@/lib/brain/settings";
 
 const DEFAULT_SECTION_MAX_CHARS = 2_500;
-const DEFAULT_RECAP_MAX_CHARS = 1_500;
-const DEFAULT_RECAP_LIMIT = 2;
 const DEFAULT_BUNDLE_MAX_CHARS = 12_000;
 
 // The brain root commonly lives on a cloud mount (e.g. ~/_GD → Google Drive).
@@ -140,8 +138,6 @@ export async function buildBrainMemoryBundle(options: BrainMemoryBundleOptions =
   const brainRootDir = getBrainRootDir(options.brainRootDir);
   if (!brainRootDir) return "";
   const sectionMaxChars = options.sectionMaxChars ?? DEFAULT_SECTION_MAX_CHARS;
-  const recapMaxChars = options.recapMaxChars ?? DEFAULT_RECAP_MAX_CHARS;
-  const recapLimit = options.recapLimit ?? DEFAULT_RECAP_LIMIT;
   const bundleMaxChars = options.bundleMaxChars ?? DEFAULT_BUNDLE_MAX_CHARS;
   const canonicalProject = slugify(options.canonicalProject ?? "hive");
   const project = options.project?.trim();

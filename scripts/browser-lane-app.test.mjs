@@ -117,7 +117,7 @@ test("Browser Lane bundle icon is inset (~0.805) with a transparent margin", () 
     const icon = inspectPng(join(root, "browser-lane-app/Resources", file));
     assert.deepEqual(icon.size, [1024, 1024]);
     assert.equal(icon.corner[3], 0, `${file} corner should be transparent, not a matte`);
-    const [x0, y0, x1, y1] = icon.bbox;
+    const [x0, y0, x1] = icon.bbox;
     const ratio = (x1 - x0) / icon.size[0];
     assert.ok(ratio > 0.74 && ratio < 0.86, `${file} squircle should fill ~0.805 of the canvas (got ${ratio.toFixed(3)})`);
     assert.ok(x0 > 40 && y0 > 40, `${file} squircle should sit inside a transparent margin (got x0=${x0}, y0=${y0})`);
@@ -283,7 +283,7 @@ test("Browser Lane WebKit view persists the session and supports OAuth popups", 
 test("Browser Lane keeps Google SSO popups as real opener-preserving WebKit popups", () => {
   const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
   const browser = readFileSync(join(sourceDir, "BrowserViewController.swift"), "utf8");
-  const popupDelegate = browser.match(/func webView\(\s*_ webView: WKWebView,\s*createWebViewWith[\s\S]*?\n    \}/)?.[0] ?? "";
+  const popupDelegate = browser.match(/func webView\(\s*_ webView: WKWebView,\s*createWebViewWith[\s\S]*?\n {4}\}/)?.[0] ?? "";
 
   assert.match(browser, /popupWebView/);
   assert.match(browser, /popupContainer/);

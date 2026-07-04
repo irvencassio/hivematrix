@@ -52,7 +52,7 @@ export function probeChatDbAccess(path = chatDbPath()): ChatDbAccessProbe {
   if (!existsSync(path)) {
     return { ok: false, reason: "missing", detail: `Messages database not found: ${path}` };
   }
-  let db: Database.Database | null = null;
+  let db: Database.Database;
   try {
     db = new Database(path, { readonly: true, fileMustExist: true });
   } catch (error) {

@@ -83,7 +83,7 @@ export function verifyLicense(
   if (!signed) return { state: "missing", permitted: true, reason: "no license installed" };
   if (!publicKeyPem.trim()) return { state: "unlicensed", permitted: true, reason: "no issuer public key configured" };
 
-  let sigOk = false;
+  let sigOk: boolean;
   try {
     sigOk = verify(null, Buffer.from(canonicalize(signed.payload), "utf8"), publicKeyPem, Buffer.from(signed.signature, "base64"));
   } catch {

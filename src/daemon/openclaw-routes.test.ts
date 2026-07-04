@@ -118,7 +118,7 @@ for (const [method, path] of AUTH_ROUTES) {
 // ── /openclaw/status ─────────────────────────────────────────────────────────
 
 test("GET /openclaw/status: installed:false when OpenClaw binary is missing", async (t) => {
-  const { tmp, hmDir, dbPath } = setupTmp("status-missing");
+  const { tmp, dbPath } = setupTmp("status-missing");
   const origHome = process.env.HOME;
   const origDb = process.env.HIVEMATRIX_DB_PATH;
   const origBin = process.env.OPENCLAW_BIN;

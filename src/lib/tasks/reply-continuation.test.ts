@@ -19,6 +19,6 @@ test("appendReplyContinuation formats structured attachments with stable paths",
 
   assert.match(next, /--- Operator reply \(continue\) ---/);
   assert.match(next, /See the screenshot\./);
-  assert.match(next, /- shot\.png\n  path: \/Users\/me\/\.hivematrix\/uploads\/id-shot\.png/);
+  assert.match(next, /- shot\.png\n {2}path: \/Users\/me\/\.hivematrix\/uploads\/id-shot\.png/);
   assert.match(next, /Use the absolute path above/);
 });

@@ -24,7 +24,6 @@ import {
   type BrainChunk,
   type StoredEmbedding,
   type ChunkWithEmbedding,
-  type ChunkIndexPlan,
 } from "./index-db";
 
 // Local shape for the BM25 result returned by fts5Search (mirrors RawBm25Hit).

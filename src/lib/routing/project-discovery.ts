@@ -32,13 +32,6 @@ export interface DiscoveredProject {
 const CACHED_PROJECTS_PATH = join(homedir(), ".hivematrix", "discovered-projects.json");
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — discovery is expensive
 
-// Directories to skip during git scan (noise reduction)
-const SKIP_DIRS = new Set([
-  "node_modules", ".git", ".github", ".vscode", ".idea",
-  "dist", "build", "out", "target", "vendor", "__pycache__",
-  ".cache", ".npm", ".yarn",
-]);
-
 // ─── Cache ───────────────────────────────────────────────────────────────────
 
 function loadCache(): { projects: DiscoveredProject[]; timestamp: number } | null {
@@ -203,10 +196,6 @@ function scanVSCodeRecents(): Map<string, string> {
       // skip
     }
   }
-
-  // Also check VS Code's recently opened list (macOS-specific location)
-  const recentsPath = join(home, "Library", "Application Support", "Code", "CachedData");
-  const statePath = join(home, "Library", "Application Support", "Code", "User", "state.vscdb");
 
   // Simplest reliable source: the `File > Open Recent` plist on macOS
   try {

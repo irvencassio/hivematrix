@@ -313,7 +313,6 @@ async function executeSearch(args: Record<string, unknown>, projectPath: string)
   }
 }
 
-const MAX_SUBTASK_DEPTH = 2;
 const MAX_SUBTASKS_PER_PARENT = 10;
 
 async function executeCreateTask(args: Record<string, unknown>, context?: ToolContext): Promise<string> {
