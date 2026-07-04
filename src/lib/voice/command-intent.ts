@@ -37,10 +37,18 @@ export type CommandKind =
   | "createTask"       // "create a task to <X>" / "remind me to <X>"
   | "connectivity"     // "are we online / connectivity status"
   | "setConnectivity"  // "go offline / cloud only / go local / auto"
+  | "deepThink"        // "think hard about X" — multi-attempt local reasoning, read back when ready
+  | "goals"            // "what are my goals" — read persona/GOALS.md
+  | "addGoal"          // "add a goal to X / my goal is X" — append to persona/GOALS.md
+  | "remember"         // "remember that X / note that X" — append to persona daily memory
+  | "heartbeatNow"     // "run a pulse / heartbeat now" — fire one heartbeat pass
   | "none";
 
 export interface CommandIntent {
   kind: CommandKind;
+  thinkText?: string;  // deepThink
+  goalText?: string;   // addGoal
+  rememberText?: string; // remember
   taskText?: string;   // createTask
   mode?: ConnMode;     // setConnectivity
   ordinal?: number;    // approve / deny target, 1-based
@@ -182,6 +190,35 @@ export function detectCommandIntent(text: string): CommandIntent {
 
   const openclawIntent = detectOpenClawIntent(orig);
   if (openclawIntent) return openclawIntent;
+
+  // --- Deep think: multi-attempt reasoning on the local model, read back when
+  // ready. Runs early so "think hard about the briefing" deep-thinks. ---
+  const think = orig.match(
+    /^(?:think\s+(?:hard|deep|deeply|carefully|longer)\s+(?:about|on|through)?|deep\s*think(?:\s+about)?|give\s+me\s+your\s+best\s+thinking\s+on)\s*[:,]?\s*(.+)$/i,
+  );
+  if (think && clean(think[1])) return { kind: "deepThink", thinkText: clean(think[1]) };
+
+  // --- Persona memory: goals + notes. "remember to X" stays a task (below);
+  // "remember that X" is a memory. ---
+  const addGoal = orig.match(
+    /^(?:add\s+(?:a\s+)?(?:new\s+)?goal(?:\s+(?:to|of))?|my\s+goal\s+is(?:\s+to)?|new\s+goal|set\s+a\s+goal(?:\s+to)?)\s*[:,-]?\s*(.+)$/i,
+  );
+  if (addGoal && clean(addGoal[1])) return { kind: "addGoal", goalText: clean(addGoal[1]) };
+  const remember = orig.match(/^(?:remember|note)\s+(?:that\s+|this[:,]?\s+)(.+)$/i)
+    ?? orig.match(/^take\s+a\s+note[:,]?\s+(.+)$/i);
+  if (remember && clean(remember[1])) return { kind: "remember", rememberText: clean(remember[1]) };
+
+  // --- Goals query (before the directives/"standing goals" match) ---
+  if (!/\b(standing|scheduled)\b/.test(t) &&
+      (/\bwhat\s+are\s+my\s+goals\b/.test(t) || /\bread\s+(?:me\s+)?my\s+goals\b/.test(t) ||
+       /\bwhat\s+am\s+i\s+working\s+towards?\b/.test(t) || /^(?:my\s+)?goals\??$/.test(t))) {
+    return { kind: "goals" };
+  }
+
+  // --- Heartbeat: fire one unprompted pass now ---
+  if (/\b(?:run|do|fire)\s+(?:a\s+|the\s+)?(?:heartbeat|pulse)\b/.test(t) || /^pulse(?:\s+now)?$/.test(t) || /\bheartbeat\s+now\b/.test(t)) {
+    return { kind: "heartbeatNow" };
+  }
 
   // --- Jarvis V2 operator intents ---
   if (/\b(good morning|brief me|briefing|morning briefing|what needs me|what needs my attention|standup|status briefing)\b/.test(t)) {

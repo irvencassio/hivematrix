@@ -242,3 +242,45 @@ test("resolved + scheduled + task + connectivity replies", () => {
   assert.match(connectivityReply("offline"), /offline/);
   assert.match(setConnectivityReply("auto"), /automatic/);
 });
+
+test("deepThink intent: 'think hard about X' variants capture the question", () => {
+  assert.deepEqual(detectCommandIntent("think hard about whether to price at 39 or 49"), {
+    kind: "deepThink", thinkText: "whether to price at 39 or 49",
+  });
+  assert.equal(detectCommandIntent("think deeply about the launch plan").kind, "deepThink");
+  assert.equal(detectCommandIntent("deep think the pricing model").kind, "deepThink");
+  assert.equal(detectCommandIntent("give me your best thinking on hiring").kind, "deepThink");
+  // Plain "think" is not enough — everyday speech must fall through
+  assert.equal(detectCommandIntent("I think we should ship").kind, "none");
+});
+
+test("goals intents: query reads goals; standing/scheduled goals stay directives", () => {
+  assert.equal(detectCommandIntent("what are my goals").kind, "goals");
+  assert.equal(detectCommandIntent("read me my goals").kind, "goals");
+  assert.equal(detectCommandIntent("what am I working toward").kind, "goals");
+  assert.equal(detectCommandIntent("what are my standing goals").kind, "directives");
+});
+
+test("addGoal intent captures the goal text", () => {
+  assert.deepEqual(detectCommandIntent("add a goal to get the annuity license by August"), {
+    kind: "addGoal", goalText: "get the annuity license by August",
+  });
+  assert.equal(detectCommandIntent("my goal is to hit 10k MRR").kind, "addGoal");
+  assert.equal(detectCommandIntent("my goal is to hit 10k MRR").goalText, "hit 10k MRR");
+});
+
+test("remember intent: 'remember that' is memory; 'remember to' stays a task", () => {
+  assert.deepEqual(detectCommandIntent("remember that I prefer terse replies"), {
+    kind: "remember", rememberText: "I prefer terse replies",
+  });
+  assert.equal(detectCommandIntent("note that the demo is on Tuesday").kind, "remember");
+  assert.equal(detectCommandIntent("take a note: renew the cert").kind, "remember");
+  assert.equal(detectCommandIntent("remember to call the accountant").kind, "createTask");
+});
+
+test("heartbeatNow intent", () => {
+  assert.equal(detectCommandIntent("run a heartbeat").kind, "heartbeatNow");
+  assert.equal(detectCommandIntent("run the pulse").kind, "heartbeatNow");
+  assert.equal(detectCommandIntent("pulse now").kind, "heartbeatNow");
+  assert.equal(detectCommandIntent("what's your pulse on the market").kind, "none");
+});

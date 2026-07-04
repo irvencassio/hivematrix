@@ -3,8 +3,10 @@
  * detected command intent into real daemon actions and a spoken reply.
  */
 
-import { readFileSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { join } from "path";
 import { homedir } from "os";
+import { configuredBrainRootDir } from "@/lib/brain/settings";
 import {
   detectCommandIntent,
   boardReply, approvalsReply, resolvedReply, noApprovalToResolveReply,
@@ -72,6 +74,12 @@ export interface CommandTurnDeps {
   getLocation?: () => string | null | undefined;
   fetchWeather?: (location: string, when: WeatherWhen) => Promise<WeatherResult>;
   getBoardCounts?: () => Record<string, number>;
+  /** Multi-attempt local reasoning (models/deep-think). Injectable for tests. */
+  deepThink?: (question: string) => Promise<{ answer: string; confidence: "high" | "medium" | "low"; reflected: boolean }>;
+  /** Fire one heartbeat pass — injected by the daemon (voice/ must not import flash/). */
+  runHeartbeat?: () => Promise<{ ran: boolean; stoodDown: boolean; report: string | null }>;
+  /** Brain root for persona files (goals, memory notes). Default: brain settings. */
+  getBrainRoot?: () => string | null;
   now?: Date;
 }
 
@@ -386,6 +394,50 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
       contextStore.update(sessionId, (ctx) => rememberLastTask(ctx, task._id));
       return r(createdTaskReply(title), task._id);
     }
+    case "deepThink": {
+      const question = (intent.thinkText || "").trim();
+      if (!question) return null;
+      // Ack now; think in the background and read the answer back via voice:result
+      // (same async speak-back path as the assistant ask).
+      void deliverDeepThinkReply({ deps, sessionId, question }).catch((e) => {
+        console.error(`[voice] deep-think delivery failed: ${e instanceof Error ? e.message : e}`);
+      });
+      return r(
+        "That's worth thinking through properly. Give me a couple of minutes — I'll read it back.",
+        undefined,
+        "deep-think:started",
+      );
+    }
+    case "goals": {
+      const goals = readSpokenGoals(deps);
+      if (goals === null) return r("I can't reach the memory folder right now.", undefined, "goals-error");
+      if (goals.length === 0) return r("No goals written down yet. Say \"add a goal\" and I'll start the list.");
+      const spoken = goals.slice(0, 6).map((g, i) => `${i + 1}. ${g}`).join(" ");
+      return r(`You're working toward: ${spoken}`);
+    }
+    case "addGoal": {
+      const goal = (intent.goalText || "").trim();
+      if (!goal) return null;
+      const result = appendGoal(deps, goal);
+      if (result === "unavailable") return r("I can't reach the memory folder right now.", undefined, "goals-error");
+      if (result === "duplicate") return r("That's already on the goal list.");
+      return r(`Added to your goals: ${goal}.`);
+    }
+    case "remember": {
+      const note = (intent.rememberText || "").trim();
+      if (!note) return null;
+      const ok = appendMemoryNote(deps, note);
+      return ok
+        ? r("Noted. I'll remember that.")
+        : r("I can't reach the memory folder right now.", undefined, "memory-error");
+    }
+    case "heartbeatNow": {
+      if (!deps.runHeartbeat) return r("The heartbeat isn't wired up on this build.");
+      const result = await deps.runHeartbeat();
+      if (!result.ran) return r("I couldn't run a pulse — the memory folder isn't reachable.");
+      if (result.stoodDown || !result.report) return r("I ran a pulse — nothing needs your attention.");
+      return r(result.report, undefined, "heartbeat-report");
+    }
     case "connectivity": {
       const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
       return r(connectivityReply(getConnectivityPolicy().mode));
@@ -484,6 +536,130 @@ async function pollOpenClaw(
  * Background async path: poll for the assistant reply after sending, then
  * synthesize and broadcast voice:result. Never throws — voice turn already acked.
  */
+// --- Persona memory helpers (goals + notes) --------------------------------
+
+function brainRootFor(deps: CommandTurnDeps): string | null {
+  if (deps.getBrainRoot) return deps.getBrainRoot();
+  try {
+    return configuredBrainRootDir();
+  } catch {
+    return null;
+  }
+}
+
+const GOALS_HEADER = "## Active goals";
+
+/** Parse spoken goal lines from GOALS.md: bullets with the leading date stripped. */
+export function parseSpokenGoals(content: string): string[] {
+  return content
+    .split("\n")
+    .filter((l) => l.trim().startsWith("- "))
+    .map((l) => l.trim().replace(/^-\s*/, "").replace(/^\d{4}-\d{2}-\d{2}:\s*/, "").trim())
+    .filter(Boolean);
+}
+
+function readSpokenGoals(deps: CommandTurnDeps): string[] | null {
+  const root = brainRootFor(deps);
+  if (!root) return null;
+  try {
+    const path = join(root, "persona", "GOALS.md");
+    if (!existsSync(path)) return [];
+    return parseSpokenGoals(readFileSync(path, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function appendGoal(deps: CommandTurnDeps, goal: string): "added" | "duplicate" | "unavailable" {
+  const root = brainRootFor(deps);
+  if (!root) return "unavailable";
+  try {
+    const dir = join(root, "persona");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "GOALS.md");
+    const existing = existsSync(path) ? readFileSync(path, "utf-8") : "";
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+    if (parseSpokenGoals(existing).some((g) => norm(g) === norm(goal))) return "duplicate";
+    const date = (deps.now ?? new Date()).toISOString().slice(0, 10);
+    const base = existing.trim()
+      ? existing.replace(/\s+$/, "")
+      : `# GOALS — what the operator is working toward\n\nMaintained by the agent from real conversations. Edit freely; the agent anchors briefs and priorities to this file.\n\n${GOALS_HEADER}`;
+    const withHeader = base.includes(GOALS_HEADER) ? base : `${base}\n\n${GOALS_HEADER}`;
+    writeFileSync(path, `${withHeader}\n- ${date}: ${goal}\n`, "utf-8");
+    return "added";
+  } catch {
+    return "unavailable";
+  }
+}
+
+function appendMemoryNote(deps: CommandTurnDeps, note: string): boolean {
+  const root = brainRootFor(deps);
+  if (!root) return false;
+  try {
+    const dir = join(root, "persona", "memory");
+    mkdirSync(dir, { recursive: true });
+    const now = deps.now ?? new Date();
+    const date = now.toISOString().slice(0, 10);
+    const time = now.toISOString().slice(11, 16);
+    appendFileSync(join(dir, `${date}.md`), `- ${time} (voice): ${note}\n`, "utf-8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// --- Deep think: async speak-back -------------------------------------------
+
+const SPOKEN_ANSWER_MAX = 1200;
+
+/** Frame a deep-think result as one spoken message with honest confidence. */
+export function spokenDeepThinkReply(result: { answer: string; confidence: "high" | "medium" | "low"; reflected: boolean }): string {
+  const answer = result.answer.length > SPOKEN_ANSWER_MAX
+    ? result.answer.slice(0, SPOKEN_ANSWER_MAX).trimEnd() + "… The full answer is in the session."
+    : result.answer;
+  const framing =
+    result.confidence === "high"
+      ? "I thought it through from several angles and they agree."
+      : result.confidence === "medium"
+        ? "My attempts mostly agreed; I reconciled the differences."
+        : result.reflected
+          ? "Heads up — my attempts disagreed, so I re-checked this. Hold it loosely."
+          : "Heads up — I'm not confident in this one. Hold it loosely.";
+  return `${framing} ${answer}`;
+}
+
+/** Run deep think in the background, then synthesize + broadcast voice:result. */
+export async function deliverDeepThinkReply(opts: {
+  deps: CommandTurnDeps;
+  sessionId: string;
+  question: string;
+}): Promise<void> {
+  const { deps, sessionId, question } = opts;
+  let text: string;
+  let ok = true;
+  try {
+    const think = deps.deepThink
+      ?? (async (q: string) => (await import("@/lib/models/deep-think")).deepThink(q, { samples: 3 }));
+    text = spokenDeepThinkReply(await think(question));
+  } catch (e) {
+    ok = false;
+    text = `I couldn't finish thinking that through: ${e instanceof Error ? e.message : "the local model is unavailable"}.`;
+  }
+
+  let audioBase64 = "";
+  try {
+    const path = deps.synthesize ? await deps.synthesize(text) : (await synthesizeSpeech(text)).path;
+    audioBase64 = path ? readFileSync(path).toString("base64") : "";
+  } catch { /* speak-less fallback */ }
+
+  const broadcastFn = deps.broadcast ?? defaultOpenClawBroadcast;
+  try {
+    broadcastFn("voice:result", { sessionId, text, audioBase64, ok });
+  } catch (e) {
+    console.error(`[voice] deep-think broadcast failed: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 export async function deliverOpenClawReply(opts: {
   deps: CommandTurnDeps;
   sessionId: string;

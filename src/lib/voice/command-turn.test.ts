@@ -372,3 +372,91 @@ test("deliverOpenClawReply survives a throwing broadcast dep: logs, does not rej
 
   assert.ok(errors.some((e) => e.includes("socket gone")), "broadcast failure should be logged");
 });
+
+// --- Voice memory + goals + heartbeat + deep think ---------------------------
+
+test("goals + addGoal: voice reads and writes persona/GOALS.md with dedupe", async () => {
+  const { mkdtempSync, rmSync, readFileSync: rf } = await import("node:fs");
+  const { join: j } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const root = mkdtempSync(j(tmpdir(), "hm-voice-goals-"));
+  const deps = { getBrainRoot: () => root, synthesize: async () => "" };
+
+  const empty = await commandTurnOverride("what are my goals", deps);
+  assert.match(empty!.reply, /No goals written down yet/);
+
+  const added = await commandTurnOverride("add a goal to get the annuity license by August", deps);
+  assert.match(added!.reply, /Added to your goals/);
+  assert.match(rf(j(root, "persona", "GOALS.md"), "utf-8"), /## Active goals[\s\S]*annuity license by August/);
+
+  const dup = await commandTurnOverride("my goal is to get the annuity license by August", deps);
+  assert.match(dup!.reply, /already on the goal list/i);
+
+  const readBack = await commandTurnOverride("what are my goals", deps);
+  assert.match(readBack!.reply, /You're working toward: 1\. get the annuity license by August/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("remember: appends a dated voice note to persona memory", async () => {
+  const { mkdtempSync, rmSync, readFileSync: rf } = await import("node:fs");
+  const { join: j } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const root = mkdtempSync(j(tmpdir(), "hm-voice-note-"));
+  const now = new Date("2026-07-04T15:30:00Z");
+  const out = await commandTurnOverride("remember that the demo is on Tuesday", {
+    getBrainRoot: () => root, synthesize: async () => "", now,
+  });
+  assert.match(out!.reply, /Noted/);
+  const note = rf(j(root, "persona", "memory", "2026-07-04.md"), "utf-8");
+  assert.match(note, /- 15:30 \(voice\): the demo is on Tuesday/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("heartbeatNow: uses the injected runner and speaks the outcome", async () => {
+  const quiet = await commandTurnOverride("run a heartbeat", {
+    synthesize: async () => "",
+    runHeartbeat: async () => ({ ran: true, stoodDown: true, report: null }),
+  });
+  assert.match(quiet!.reply, /nothing needs your attention/i);
+
+  const loud = await commandTurnOverride("pulse now", {
+    synthesize: async () => "",
+    runHeartbeat: async () => ({ ran: true, stoodDown: false, report: "Two approvals are waiting and the build is red." }),
+  });
+  assert.match(loud!.reply, /Two approvals are waiting/);
+
+  const unwired = await commandTurnOverride("run a heartbeat", { synthesize: async () => "" });
+  assert.match(unwired!.reply, /isn't wired up/);
+});
+
+test("deepThink: acks immediately, then broadcasts the framed answer via voice:result", async () => {
+  const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+  let resolveThink!: (v: { answer: string; confidence: "high" | "medium" | "low"; reflected: boolean }) => void;
+  const thinkPromise = new Promise<{ answer: string; confidence: "high" | "medium" | "low"; reflected: boolean }>((res) => { resolveThink = res; });
+
+  const out = await commandTurnOverride("think hard about whether to price at 39 or 49", {
+    synthesize: async () => "",
+    broadcast: (event, data) => events.push({ event, data: data as Record<string, unknown> }),
+    deepThink: () => thinkPromise,
+  });
+  assert.match(out!.reply, /thinking through|worth thinking/i);
+  assert.equal(out!.command.detail, "deep-think:started");
+  assert.equal(events.length, 0); // nothing broadcast yet
+
+  resolveThink({ answer: "Charge 49 — the anchor supports it.", confidence: "high", reflected: false });
+  await new Promise((r) => setTimeout(r, 20)); // let the background delivery flush
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "voice:result");
+  assert.match(String(events[0].data.text), /several angles and they agree.*Charge 49/);
+  assert.equal(events[0].data.ok, true);
+});
+
+test("spokenDeepThinkReply frames low confidence honestly and caps length", async () => {
+  const { spokenDeepThinkReply } = await import("./command-turn");
+  const low = spokenDeepThinkReply({ answer: "Maybe.", confidence: "low", reflected: true });
+  assert.match(low, /attempts disagreed.*re-checked.*Hold it loosely/);
+  const long = spokenDeepThinkReply({ answer: "x".repeat(2000), confidence: "high", reflected: false });
+  assert.ok(long.length < 1400);
+  assert.match(long, /full answer is in the session/);
+});
