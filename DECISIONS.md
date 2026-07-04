@@ -1086,3 +1086,31 @@ is untouched (it carries a concurrent session's in-flight work):
 executor incl. async voice:result broadcast); suite 2639/2639; typecheck +
 scope-wall clean. The server-side dep injection hunk rides in server.ts with
 the pending /trust endpoints (entangled file, committed separately).
+
+## REVIEW + HARDENING (2026-07-04) — adversarial pass over the proactive-partner stack
+
+Ran an independent adversarial review over the day's ~15 commits; 9 verified
+findings, all fixed same-day (commit 7b218ea). The two that mattered most:
+
+1. **Heartbeat autonomy was prose-only** — the unprompted pulse carried the full
+   outward tool set (mail_send/terminal_run/...) at every autonomy level, with
+   operator-editable + inbound-derived text in its prompt. Now HARD-gated:
+   `runFlashAgentLoop({allowedTools})` filters at offer AND dispatch; manual =
+   read-only, standard = +escalate, autonomous = full (lane gates still inside);
+   daily moments always read-only.
+2. **Learning was once-per-lifetime** — cold-session selection excluded any
+   session ever distilled, and sessions are everlasting per channel+peer, so
+   USER.md/GOALS.md modeling fired exactly once. Now: re-distill when active
+   since last distillation, consuming only new turns.
+
+Also: section-safe persona writes via the new shared `brain/persona-section.ts`
+(bullets were landing in — and evicting from — operator-authored sections);
+anchored voice intents; trust spot-checks every 10th grant (denial-based
+revocation was unreachable) + removed the dead lowRiskTool path; persisted
+learning-loop throttles (restarts made "weekly" mean "every release"); count-free
+SOUL notes (live counts defeated dedup); daily-moment enable-seeding and
+manual-send marking; async voice pulse; atomic config writes; deep-think rollout
+wall enforcement. Verdict on "redo completely": not warranted — architecture
+follows the approved W8/W9 specs; the defects were seams, all now regression-tested.
+
+**Provers:** 2647/2647 tests, typecheck + scope-wall clean.
