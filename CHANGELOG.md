@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.136 — 2026-07-04
+
+Harden inbound pollers and Browser Lane reads: mail/message poll loops log failures instead of swallowing them, and the Browser Lane read client bounds its fetch with a timeout so a hung app fails the read instead of stalling the calling task
+
 ## v0.1.135 — 2026-07-04
 
 Proactive-partner layer: heartbeat presence (pulse plus morning brief and evening recap), operator modeling and voice-writable goal ledger, backlog pattern detection, capability self-assessment, autonomy trust-ramp, deep-think reasoning on the local model, and voice deep-think/goals/memory/heartbeat commands; hardened by an adversarial review pass (enforced heartbeat tool gating, continuous learning, contestable trust, atomic config writes)

@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.136", date: "2026-07-04", note: "Harden inbound pollers and Browser Lane reads: mail/message poll loops log failures instead of swallowing them, and the Browser Lane read client bounds its fetch with a timeout so a hung app fails the read instead of stalling the calling task" },
   { version: "0.1.135", date: "2026-07-04", note: "Proactive-partner layer: heartbeat presence (pulse plus morning brief and evening recap), operator modeling and voice-writable goal ledger, backlog pattern detection, capability self-assessment, autonomy trust-ramp, deep-think reasoning on the local model, and voice deep-think/goals/memory/heartbeat commands; hardened by an adversarial review pass (enforced heartbeat tool gating, continuous learning, contestable trust, atomic config writes)" },
   { version: "0.1.134", date: "2026-07-04", note: "loop-guard smoke verification prevents false-complete coding tasks" },
   { version: "0.1.133", date: "2026-07-04", note: "DeepSeek agentic parity: per-request thinking off-switch (thinking:disabled) reachable over HTTP with an auto skip-in-the-middle/think-at-the-ends heuristic across agent turns, plus an opt-in native ds4-agent as a 4th DeepSeek coding harness (KV-cache /save+/switch sessions), off by default and gated to no-lane coding tasks so Qwen/Codex/Claude paths are untouched" },
