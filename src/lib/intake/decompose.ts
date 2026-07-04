@@ -126,22 +126,22 @@ export function buildMessages(description: string, goal?: DecomposeGoalContext |
 }
 
 /**
- * Decompose a prompt into step fragments using the configured keyless backend.
+ * Decompose a prompt into step fragments using the keyless local backend.
  * Returns null (→ deterministic fallback) when no client is configured, when
- * offline with no local model reachable, on malformed output, on fewer than two
- * steps, or on any error.
+ * offline with no local loopback model reachable, on malformed output, on fewer
+ * than two steps, or on any error.
  *
  * A local loopback model (DeepSeek/DwarfStar on 127.0.0.1) is keyless and
  * reachable even fully offline, so decomposition uses it in every connectivity
- * mode; only the cloud CLI backend is disabled offline.
+ * mode. A non-local (remote) endpoint is treated as unreachable when offline.
  */
 export async function decompose(input: IntakeInput, deps: DecomposeDeps = {}): Promise<string[] | null> {
   const mode = deps.connectivityMode ?? getConnectivityPolicy().mode;
 
-  const client = deps.client !== undefined ? deps.client : resolveCompletionClient(mode);
+  const client = deps.client !== undefined ? deps.client : resolveCompletionClient();
   if (!client) return null;
 
-  // Offline: only a local loopback model is reachable; the cloud CLI is not.
+  // Offline: only a local loopback model is reachable; a remote endpoint is not.
   const localAvailable = deps.localModelAvailable ?? hasLocalCompletionModel();
   if (mode === "offline" && !localAvailable) return null;
 

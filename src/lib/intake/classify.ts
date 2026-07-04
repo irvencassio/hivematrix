@@ -341,12 +341,13 @@ export function _setIntakeDecomposeDepsForTests(deps: import("./decompose").Deco
 
 /**
  * Async intake: runs the deterministic classifier, then — only for a broad
- * `work_package_candidate`, and only when enabled — asks the keyless local/CLI
- * model for a cleaner step breakdown. Falls back to the deterministic split on
+ * `work_package_candidate`, and only when a keyless local model is present —
+ * asks it for a cleaner step breakdown. Falls back to the deterministic split on
  * any failure. Small/normal tasks never call a model (cost + latency stay zero).
  *
- * Enabled when: explicit `deps` passed, a test dep is injected, or the
- * `taskIntakeModelDecomposition` feature flag is on.
+ * Local-only by design: enabled when an explicit/test `deps` is injected, or a
+ * keyless loopback completion model (DeepSeek/DwarfStar on 127.0.0.1) is
+ * configured. No local model → deterministic split; nothing ever leaves the box.
  */
 export async function classifyIntakeAsync(
   input: IntakeInput,
@@ -363,16 +364,12 @@ export async function classifyIntakeAsync(
   if (!alreadyCandidate && !isBroadPrompt(input.description)) return base;
 
   const effective = deps ?? _testDecomposeDeps ?? undefined;
-  let enabled = effective != null;
-  if (!enabled) {
-    try {
-      const { isFeatureEnabled } = await import("@/lib/config/features");
-      enabled = isFeatureEnabled("taskIntakeModelDecomposition");
-    } catch { enabled = false; }
-  }
   // A configured local model (DeepSeek/DwarfStar on loopback) is keyless, free,
-  // and low-latency — use it to split goals even when the flag is off. The
-  // deterministic policy still stamps risk, gating, and concurrency downstream.
+  // low-latency, and never leaves the machine — so decomposition is always on
+  // when one is present, and off otherwise. The deterministic policy still
+  // stamps risk, gating, and concurrency downstream, so the model can't weaken
+  // safety; it only supplies cleaner step text.
+  let enabled = effective != null;
   if (!enabled) {
     try {
       const { hasLocalCompletionModel } = await import("@/lib/models/chat-client");

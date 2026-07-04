@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { localChatComplete, cliChatComplete } from "./chat-client";
+import { localChatComplete } from "./chat-client";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -41,24 +41,4 @@ test("localChatComplete throws on a non-2xx that has no fallback", async () => {
     () => localChatComplete([{ role: "user", content: "x" }], { endpoint: "http://localhost:8080/v1", model: "m", fetchImpl }),
     /50|failed|local/i,
   );
-});
-
-test("cliChatComplete runs the keyless CLI one-shot and returns stdout (no key, injected runner)", async () => {
-  const seen: Array<{ binary: string; args: string[] }> = [];
-  const runCli = async (binary: string, args: string[]) => {
-    seen.push({ binary, args });
-    return '["step a","step b"]';
-  };
-  const out = await cliChatComplete("codex", [{ role: "user", content: "decompose this" }], { runCli });
-  assert.equal(out, '["step a","step b"]');
-  assert.equal(seen.length, 1);
-  assert.equal(seen[0].binary, "codex");
-  // codex one-shot: `codex exec --skip-git-repo-check -- <prompt>`
-  assert.ok(seen[0].args.includes("exec"));
-  assert.ok(seen[0].args.includes("--"));
-});
-
-test("cliChatComplete surfaces a CLI failure as a throw (caller falls back)", async () => {
-  const runCli = async () => { throw new Error("codex not logged in"); };
-  await assert.rejects(() => cliChatComplete("codex", [{ role: "user", content: "x" }], { runCli }), /codex|not logged|failed/i);
 });

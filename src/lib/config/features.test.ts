@@ -2,15 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { KNOWN_FEATURES, parseFeatures, shouldShowFeature } from "./features";
 
-test("the model-decomposition flag is a known feature and defaults off", () => {
-  assert.ok(KNOWN_FEATURES.some((f) => f.key === "taskIntakeModelDecomposition"));
+test("known features default off when no config is present", () => {
+  assert.ok(KNOWN_FEATURES.length > 0);
   const parsed = parseFeatures({});
-  assert.equal(parsed.taskIntakeModelDecomposition, false);
+  for (const f of KNOWN_FEATURES) assert.equal(parsed[f.key], false);
 });
 
-test("parseFeatures reflects an explicitly enabled model-decomposition flag", () => {
-  const parsed = parseFeatures({ features: { taskIntakeModelDecomposition: true } });
-  assert.equal(parsed.taskIntakeModelDecomposition, true);
+test("parseFeatures reflects an explicitly enabled flag", () => {
+  const parsed = parseFeatures({ features: { ado: true } });
+  assert.equal(parsed.ado, true);
 });
 
 test("OpenClaw Chat is hidden when OpenClaw is not installed", () => {
