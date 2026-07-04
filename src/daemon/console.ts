@@ -903,15 +903,15 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <button class="gear" id="projectRescanBtn" title="Re-scan projects" onclick="refreshProjects()">↻</button>
   </div>
   <div class="hzone mode" style="margin-left:auto">
-    <span class="hgroup" title="Connectivity — the select is your preference; the pill is the current effective mode (e.g. what (auto) resolved to)">
-      <span class="muted hlabel">connectivity</span>
-      <select id="modeSel">
+    <span class="hgroup" title="Connectivity — auto by default; the pill shows the current effective mode. Click it to override.">
+      <span class="muted hlabel" id="connLabel" style="display:none">override</span>
+      <select id="modeSel" style="display:none">
         <option value="">(auto)</option>
         <option value="cloud-ok">cloud-ok</option>
         <option value="local-only">local-only</option>
         <option value="offline">offline</option>
       </select>
-      <span class="pill" id="modePill">…</span>
+      <span class="pill" id="modePill" style="cursor:pointer" onclick="toggleConnOverride()" title="Connectivity mode — click to override">…</span>
     </span>
     <span class="usage-pill" id="localPill" style="display:none" title="">🧠 local</span>
     <span class="update-pill" id="updatePill" style="display:none" onclick="applyUpdate()" title="Click to install and restart">⬆ Update</span>
@@ -5303,6 +5303,18 @@ document.getElementById("modeSel").addEventListener("change", async (e) => {
     body: JSON.stringify({ mode: e.target.value || null }) });
   refresh();
 });
+
+// Connectivity auto-resolves, so the manual override stays hidden behind the
+// pill — click the pill to reveal the select, keeping the header uncluttered
+// (and the cloud-ok/local-only vocabulary out of the way of the Model dropdown).
+function toggleConnOverride() {
+  const sel = document.getElementById("modeSel");
+  const lbl = document.getElementById("connLabel");
+  const show = sel.style.display === "none";
+  sel.style.display = show ? "" : "none";
+  if (lbl) lbl.style.display = show ? "" : "none";
+  if (show) sel.focus();
+}
 
 function toggleForm(id) { document.getElementById(id).classList.toggle("open"); }
 function cancelForm(id) {

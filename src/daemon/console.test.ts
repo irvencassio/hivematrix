@@ -710,6 +710,8 @@ test("unified skills section contains long metadata inside the context column", 
 test("header is grouped into zones with a theme toggle and grouped connectivity", () => {
   assert.match(CONSOLE_HTML, /class="hzone"/, "header uses zones");
   assert.match(CONSOLE_HTML, /class="hgroup"[\s\S]*id="modeSel"[\s\S]*id="modePill"/, "connectivity select + effective-mode pill grouped as one unit");
+  assert.match(CONSOLE_HTML, /id="modeSel"[^>]*style="display:none"/, "manual connectivity override is hidden by default");
+  assert.match(CONSOLE_HTML, /id="modePill"[^>]*onclick="toggleConnOverride\(\)"/, "clicking the pill reveals the override");
   assert.match(CONSOLE_HTML, /id="themeToggle"[^>]*onclick="toggleThemeQuick\(\)"/, "header has a quick theme toggle");
   assert.match(CONSOLE_HTML, /@media \(max-width: 760px\)[\s\S]*\.hlabel \{ display: none/, "header labels hide on narrow widths");
 });
