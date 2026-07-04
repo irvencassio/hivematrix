@@ -18,6 +18,7 @@ import { promisify } from "util";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { writeJsonAtomic } from "@/lib/config/atomic-write";
 import {
   localEngineCapability, DEFAULT_TIERS, resolveRapidBinary, tierBaseUrl,
   type LocalTier, type TierKey, type HardwareProbe,
@@ -146,7 +147,7 @@ export async function provisionLocalEngine(opts: { onLog?: Logger; env?: Partial
   if (!plan.localCapable) {
     onLog(plan.reason ?? "This Mac can't run a local model — cloud-only.");
     cfg.localEngine = { engine: "rapid-mlx", binary: null, tiers: [] };
-    writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+    writeJsonAtomic(configPath(), cfg);
     onLog("Wrote cloud-only localEngine block.");
     return plan;
   }
@@ -159,7 +160,7 @@ export async function provisionLocalEngine(opts: { onLog?: Logger; env?: Partial
   }
   cfg.localEngine = { engine: "rapid-mlx", binary: bin, tiers: plan.tiers };
   ensureQwenProfile(cfg, plan);
-  writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+  writeJsonAtomic(configPath(), cfg);
   onLog("Wrote localEngine config. Restart the daemon to serve the configured tiers.");
   return plan;
 }

@@ -539,6 +539,47 @@ test("POST /messagebee/test-send refuses while Message Lane is disabled", async 
   assert.match(String(body.error), /Message Lane is disabled/i);
 });
 
+test("POST /messagebee/self-handles stores normalized loop-guard identities", async (t) => {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-message-self-handles-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  t.after(() => {
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/messagebee/self-handles`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ handles: ["+1 (555) 000-1111", "Me@icloud.com"] }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { selfHandles: string[] };
+  assert.deepEqual(body.selfHandles, ["+15550001111", "me@icloud.com"]);
+
+  const statusRes = await fetch(`http://127.0.0.1:${port}/messagebee`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const status = await statusRes.json() as { selfHandles: string[] };
+  assert.deepEqual(status.selfHandles, ["+15550001111", "me@icloud.com"]);
+});
+
 test("command project paths resolve from the current user home", () => {
   assert.equal(
     normalizeHomeProjectPath("~/hivematrix", "/Users/example"),
@@ -2612,6 +2653,26 @@ test("daemon catch-all checks headersSent before writing a 500", () => {
   // A route that throws after starting its response must not crash the daemon
   // with ERR_HTTP_HEADERS_SENT when the catch-all writes its JSON 500.
   assert.match(src.slice(ix, ix + 600), /headersSent/, "catch-all must check res.headersSent");
+});
+
+test("POST /flash/turn sends an immediate SSE keepalive before model work", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
+  const route = src.slice(src.indexOf('urlPath === "/flash/turn"'), src.indexOf("// GET /flash/sessions"));
+  assert.match(route, /res\.write\(": keepalive\\n\\n"\)/, "flash turn route must write an immediate SSE keepalive");
+  assert.ok(
+    route.indexOf('res.write(": keepalive\\n\\n")') < route.indexOf("handleFlashTurn"),
+    "keepalive must be written before importing/running the Flash turn handler",
+  );
+});
+
+test("POST /flash/turn runs voice command overrides before Flash model work", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
+  const route = src.slice(src.indexOf('urlPath === "/flash/turn"'), src.indexOf("// GET /flash/sessions"));
+  assert.match(route, /commandTurnOverride/, "voice flash turns should try deterministic command overrides");
+  assert.ok(
+    route.indexOf("commandTurnOverride") < route.indexOf("handleFlashTurn"),
+    "voice command override must run before the Flash turn handler",
+  );
 });
 
 test("pack download fetch is bounded by an abort timeout", () => {

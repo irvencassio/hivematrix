@@ -16,6 +16,7 @@ Wrappers here are reused by tests; the live transport connect is driven by
 import asyncio
 import os
 import tempfile
+import traceback
 import uuid
 import wave
 
@@ -85,6 +86,9 @@ class CommandSTT(SegmentedSTTService):
             w.writeframes(audio)
         try:
             text = await asyncio.to_thread(transcribe, path)
+        except Exception:
+            traceback.print_exc()
+            text = ""
         finally:
             try:
                 os.remove(path)

@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import traceback
 from typing import Optional
 
 
@@ -51,5 +52,6 @@ def transcribe(audio_path: str, model: Optional[str] = None) -> str:
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
+        print(f"[voice][stt] STT command failed (exit={result.returncode}): {detail[-500:]}", file=__import__("sys").stderr, flush=True)
         raise RuntimeError(f"STT command failed ({result.returncode}): {detail[-500:]}")
     return (result.stdout or "").strip()

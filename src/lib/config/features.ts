@@ -4,9 +4,10 @@
  * pure-ish and a setter merges one flag without disturbing the rest of config.
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { readFileSync, mkdirSync } from "fs";
 import { homedir, arch, totalmem } from "os";
 import { join } from "path";
+import { writeJsonAtomic } from "./atomic-write";
 
 /** Known feature flags. Add a row to surface a new toggle in settings. */
 export const KNOWN_FEATURES = [
@@ -87,6 +88,6 @@ export function setFeature(key: FeatureKey, enabled: boolean): Record<string, bo
   const features = (config.features && typeof config.features === "object" ? config.features : {}) as Record<string, unknown>;
   features[key] = enabled;
   config.features = features;
-  writeFileSync(configPath(), JSON.stringify(config, null, 2));
+  writeJsonAtomic(configPath(), config);
   return parseFeatures(config);
 }

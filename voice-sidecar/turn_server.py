@@ -24,6 +24,7 @@ import base64
 import os
 import subprocess
 import tempfile
+import traceback
 
 from aiohttp import web
 
@@ -95,7 +96,8 @@ async def handle_turn(request: web.Request) -> web.Response:
         return web.json_response({"error": "text or audioBase64 is required"}, status=400)
     try:
         result = await asyncio.to_thread(_one_turn, audio_b64, lang, text or None)
-    except Exception as e:  # noqa: BLE001 — return a clean error, keep the worker alive
+    except Exception as e:
+        traceback.print_exc()
         return web.json_response({"error": (str(e) or "turn failed")[-300:]}, status=500)
     return web.json_response(result)
 
@@ -126,7 +128,8 @@ async def handle_synth(request: web.Request) -> web.Response:
         return web.json_response({"error": "text is required"}, status=400)
     try:
         result = await asyncio.to_thread(_synth_only, text, lang)
-    except Exception as e:  # noqa: BLE001 — clean error, keep the worker alive
+    except Exception as e:
+        traceback.print_exc()
         return web.json_response({"error": (str(e) or "synth failed")[-300:]}, status=500)
     return web.json_response(result)
 
@@ -141,13 +144,13 @@ def _warm() -> None:
             try:
                 transcribe(wav)
             except Exception:
-                pass
+                traceback.print_exc()
         try:
             os.remove(wav)
         except OSError:
             pass
     except Exception:
-        pass
+        traceback.print_exc()
 
 
 async def run(host: str, port: int) -> None:

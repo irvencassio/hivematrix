@@ -629,6 +629,20 @@ export function createDaemonServer() {
         json(res, 200, { heartbeat: setHeartbeatConfig(patch) });
         return;
       }
+      // GET /trust — the earned-trust ledger (which action classes auto-approve under autonomous).
+      if (req.method === "GET" && urlPath === "/trust") {
+        const { readTrustLedger, DEFAULT_TRUST_THRESHOLD } = await import("@/lib/approvals/trust-ledger");
+        json(res, 200, { ledger: readTrustLedger(), threshold: DEFAULT_TRUST_THRESHOLD });
+        return;
+      }
+      // POST /trust/reset — revoke earned trust for one class ({key}) or all (no body). Operator escape hatch.
+      if (req.method === "POST" && urlPath === "/trust/reset") {
+        const { resetTrust, readTrustLedger } = await import("@/lib/approvals/trust-ledger");
+        const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
+        resetTrust(typeof body.key === "string" && body.key ? body.key : undefined);
+        json(res, 200, { ledger: readTrustLedger() });
+        return;
+      }
       // POST /heartbeat/run — fire one pass now (pulse by default; body.moment for a daily moment).
       if (req.method === "POST" && urlPath === "/heartbeat/run") {
         const { runHeartbeatOnce, runDailyMomentOnce } = await import("@/lib/flash/heartbeat");
@@ -954,7 +968,7 @@ export function createDaemonServer() {
       }
       // POST /onboarding/messagebee — compatibility route for Message Lane setup.
       if (req.method === "POST" && urlPath === "/onboarding/messagebee") {
-        const body = await parseBody(req) as { enable?: boolean; phone?: string; displayName?: string };
+        const body = await parseBody(req) as { enable?: boolean; phone?: string; displayName?: string; selfHandles?: string[] };
         const { configureMessageBee } = await import("@/lib/onboarding/actions");
         json(res, 200, await configureMessageBee(body ?? {}));
         return;
@@ -1055,6 +1069,18 @@ export function createDaemonServer() {
         upsertIdentity(address, "allowed");
         clearIgnoredSender(address);
         json(res, 200, { ok: true, address });
+        return;
+      }
+      // POST /messagebee/self-handles — configure daemon/operator identities to
+      // suppress same-Apple-ID iMessage echoes.
+      if (req.method === "POST" && urlPath === "/messagebee/self-handles") {
+        const body = await parseBody(req) as { handles?: unknown; handle?: unknown };
+        const handles = Array.isArray(body.handles)
+          ? body.handles.map((h) => String(h))
+          : (typeof body.handle === "string" ? [body.handle] : []);
+        const { setSelfHandles, getSelfHandles } = await import("@/lib/messagebee/store");
+        setSelfHandles(handles);
+        json(res, 200, { ok: true, selfHandles: getSelfHandles() });
         return;
       }
       // POST /system/open-pane — open a macOS privacy pane natively (webview window.open can't)
@@ -3219,8 +3245,9 @@ export function createDaemonServer() {
         const handle = String(body.handle ?? "").trim();
         const text = String(body.text ?? "HiveMatrix test message").trim();
         if (!handle) { json(res, 400, { error: "handle is required" }); return; }
-        const { isChannelEnabled } = await import("@/lib/messagebee/store");
+        const { isChannelEnabled, isSelf } = await import("@/lib/messagebee/store");
         if (!isChannelEnabled()) { json(res, 400, { ok: false, error: "Message Lane is disabled. Enable Message Lane before sending SMS/iMessage." }); return; }
+        if (isSelf(handle)) { json(res, 400, { ok: false, error: "Refusing to send a test message to a configured Message Lane self handle because it would echo back and loop." }); return; }
         const { sendIMessage } = await import("@/lib/messagebee/imessage");
         const ok = await sendIMessage(handle, text);
         json(res, ok ? 200 : 502, { ok });
@@ -4757,6 +4784,41 @@ export function createDaemonServer() {
           "Cache-Control": "no-cache",
           "Connection": "keep-alive",
         });
+        res.write(": keepalive\n\n");
+        const text = typeof body.text === "string" ? body.text.trim() : "";
+        const channel = typeof body.channel === "string" ? body.channel : "console";
+        if (text && channel === "voice") {
+          const { commandTurnOverride } = await import("@/lib/voice/command-turn");
+          // Daemon-injected deps: voice/ must not import flash/, so the heartbeat
+          // runner (with its notify/status wiring) is provided here.
+          const command = await commandTurnOverride(text, {
+            runHeartbeat: async () => {
+              const { runHeartbeatOnce } = await import("@/lib/flash/heartbeat");
+              const { notify } = await import("@/lib/notify/notify");
+              const { composeBriefing } = await import("@/lib/voice/command-turn");
+              return runHeartbeatOnce({ notify: (t) => notify(t), composeStatus: () => composeBriefing() });
+            },
+          });
+          if (command) {
+            const peer = typeof body.peer === "string" && body.peer ? body.peer : "operator";
+            const { getOrCreateSession, appendTurn } = await import("@/lib/flash/store");
+            const session = getOrCreateSession("voice", peer, typeof body.sessionId === "string" ? body.sessionId : undefined);
+            appendTurn(session.id, "user", text);
+            const assistantTurn = appendTurn(session.id, "assistant", command.reply);
+            const tokenPayload = JSON.stringify({ delta: command.reply });
+            const donePayload = JSON.stringify({
+              sessionId: session.id,
+              turnId: assistantTurn.id,
+              fullText: command.reply,
+              ...(command.audioBase64 ? { audioBase64: command.audioBase64 } : {}),
+              command: command.command,
+            });
+            res.write(`event: token\ndata: ${tokenPayload}\n\n`);
+            res.write(`event: done\ndata: ${donePayload}\n\n`);
+            res.end();
+            return;
+          }
+        }
         const { handleFlashTurn } = await import("@/lib/flash");
         try {
           await handleFlashTurn(body, res);

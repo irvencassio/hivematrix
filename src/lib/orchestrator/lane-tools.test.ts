@@ -243,6 +243,7 @@ test("readAttachments accepts an array or a comma/newline list", async () => {
 function msgIO(allowed: boolean): { io: MessageBeeSendIO; calls: string[] } {
   const calls: string[] = [];
   const io: MessageBeeSendIO = {
+    isSelf: () => false,
     isAllowed: () => allowed,
     sendIMessage: async () => { calls.push("send"); return true; },
     recordOutbound: () => { calls.push("record"); },
@@ -278,9 +279,24 @@ test("messagebee_send refuses while Message Lane is disabled before sending", as
   assert.match(out, /Message Lane is disabled/i);
 });
 
+test("messagebee_send refuses a configured self handle before allowlist/send", async () => {
+  const calls: string[] = [];
+  const io: MessageBeeSendIO = {
+    isSelf: () => true,
+    isAllowed: () => { calls.push("allow"); return true; },
+    sendIMessage: async () => { calls.push("send"); return true; },
+    recordOutbound: () => { calls.push("record"); },
+  };
+  const out = await executeMessageBeeSend({ to: "+14155551234", text: "standby" }, io);
+  assert.deepEqual(calls, []);
+  assert.match(out, /self handle/i);
+  assert.match(out, /loop/i);
+});
+
 test("messagebee_send forwards a voice-note attachment with no text required", async () => {
   let gotAttachments: string[] | undefined;
   const io: MessageBeeSendIO = {
+    isSelf: () => false,
     isAllowed: () => true,
     sendIMessage: async (_h, _t, attachments) => { gotAttachments = attachments; return true; },
     recordOutbound: () => {},

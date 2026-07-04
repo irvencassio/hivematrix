@@ -1,5 +1,5 @@
 import { probeChatDbAccess as defaultProbeChatDbAccess, type ChatDbAccessProbe } from "./imessage";
-import { isChannelEnabled, listIdentities, type MessageIdentity } from "./store";
+import { getSelfHandles, isChannelEnabled, listIdentities, type MessageIdentity } from "./store";
 
 type ProbeChatDbAccess = () => ChatDbAccessProbe;
 
@@ -10,6 +10,7 @@ export interface MessagebeeStatus {
   chatDbProbeSkipped: boolean;
   chatDbProbeReason?: "channel_disabled";
   identities: MessageIdentity[];
+  selfHandles: string[];
 }
 
 let probeChatDbAccessForStatus: ProbeChatDbAccess = defaultProbeChatDbAccess;
@@ -29,6 +30,7 @@ export function getMessagebeeStatus(opts: { probe?: boolean } = {}): MessagebeeS
       chatDbProbeSkipped: true,
       chatDbProbeReason: "channel_disabled",
       identities: listIdentities(),
+      selfHandles: getSelfHandles(),
     };
   }
 
@@ -39,5 +41,6 @@ export function getMessagebeeStatus(opts: { probe?: boolean } = {}): MessagebeeS
     chatDbDetail: probe.detail,
     chatDbProbeSkipped: false,
     identities: listIdentities(),
+    selfHandles: getSelfHandles(),
   };
 }

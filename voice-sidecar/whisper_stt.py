@@ -18,6 +18,7 @@ import asyncio
 import glob
 import os
 import tempfile
+import traceback
 import uuid
 import wave
 from typing import Optional
@@ -118,6 +119,9 @@ class WhisperCppSTT(SegmentedSTTService):
             else:
                 from stt import transcribe as _cmd_transcribe  # command-seam fallback
                 text = await asyncio.to_thread(_cmd_transcribe, tmp)
+        except Exception:
+            traceback.print_exc()
+            text = ""
         finally:
             try:
                 os.remove(tmp)

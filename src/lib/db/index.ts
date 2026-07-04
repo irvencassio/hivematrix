@@ -790,14 +790,25 @@ function openDb(): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 
-  const currentVersion = (db.pragma("user_version", { simple: true }) as number) ?? 0;
-
-  for (let i = currentVersion; i < MIGRATIONS.length; i++) {
-    db.exec(MIGRATIONS[i]);
-    db.pragma(`user_version = ${i + 1}`);
-  }
+  runMigrations(db);
 
   return db;
+}
+
+/**
+ * Apply pending migrations, each atomically with its user_version bump — a
+ * crash mid-migration must not leave half a schema behind or re-run an
+ * already-applied migration on the next start. Exported for tests.
+ */
+export function runMigrations(db: Database.Database, migrations: readonly string[] = MIGRATIONS): void {
+  const currentVersion = (db.pragma("user_version", { simple: true }) as number) ?? 0;
+
+  for (let i = currentVersion; i < migrations.length; i++) {
+    db.transaction(() => {
+      db.exec(migrations[i]);
+      db.pragma(`user_version = ${i + 1}`);
+    })();
+  }
 }
 
 export function getDb(): Database.Database {

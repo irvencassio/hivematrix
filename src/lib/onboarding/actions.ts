@@ -305,9 +305,14 @@ export async function configureMessageBee(opts: {
   enable?: boolean;
   phone?: string;
   displayName?: string;
+  selfHandles?: string[];
 }): Promise<ActionResult> {
   const store = await import("@/lib/messagebee/store");
   const { normalizeHandle } = await import("@/lib/messagebee/contracts");
+
+  if (Array.isArray(opts.selfHandles)) {
+    store.setSelfHandles(opts.selfHandles);
+  }
 
   if (opts.enable === false) {
     store.setChannelEnabled(false);
@@ -319,6 +324,7 @@ export async function configureMessageBee(opts: {
         chatDbReadable: false,
         chatDbDetail: "Message Lane disabled",
         identities: store.listIdentities(),
+        selfHandles: store.getSelfHandles(),
         deepLinks: { fullDiskAccess: TCC_DEEP_LINKS.fullDiskAccess },
       },
     };
@@ -355,6 +361,7 @@ export async function configureMessageBee(opts: {
       chatDbReadable,
       chatDbDetail: chatDbProbe.detail,
       identities,
+      selfHandles: store.getSelfHandles(),
       deepLinks: { fullDiskAccess: TCC_DEEP_LINKS.fullDiskAccess },
       warnings: warnings.length ? warnings : undefined,
     },

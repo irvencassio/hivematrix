@@ -19,9 +19,10 @@
  * never removes a hard gate.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { writeJsonAtomic } from "./atomic-write";
 
 export type AutonomyLevel = "manual" | "standard" | "autonomous";
 
@@ -84,7 +85,7 @@ export function setAutonomyLevel(level: unknown): AutonomyLevel {
   const next = parseAutonomyLevel(level);
   const config = readConfig();
   config.autonomy = next;
-  writeFileSync(configPath(), JSON.stringify(config, null, 2));
+  writeJsonAtomic(configPath(), config);
   return next;
 }
 

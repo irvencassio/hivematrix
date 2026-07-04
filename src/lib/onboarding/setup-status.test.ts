@@ -24,6 +24,7 @@ test("full disk access grant is independent from Message Lane enablement", () =>
       chatDbDetail: "Messages database readable",
       chatDbProbeSkipped: false,
       identities: [],
+      selfHandles: [],
     },
   });
 

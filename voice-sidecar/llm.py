@@ -17,6 +17,7 @@ import json
 import os
 import re
 import subprocess
+import traceback
 
 from openai import OpenAI
 
@@ -370,7 +371,8 @@ def _osascript(script: str, timeout: int = 12) -> tuple[bool, str]:
         return True, re.sub(r"\n{3,}", "\n\n", r.stdout.strip())
     except subprocess.TimeoutExpired:
         return False, "the app did not respond in time"
-    except Exception as e:  # noqa: BLE001 — never break the turn
+    except Exception as e:
+        traceback.print_exc()
         return False, str(e)[:200]
 
 
@@ -438,7 +440,8 @@ def _attributed_body_to_text(data: bytes | None) -> str | None:
             length = marker; t = t[1:]
         s = t[:length].decode("utf-8", "replace").replace("￼", "").strip()
         return s or None
-    except Exception:  # noqa: BLE001 — a malformed blob just yields no text
+    except Exception:
+        traceback.print_exc()
         return None
 
 
@@ -468,7 +471,8 @@ def _get_recent_imessages(limit: int = 5, contact: str = "") -> str:
         return "The Messages database did not respond in time."
     except FileNotFoundError:
         return "sqlite3 is not available to read Messages."
-    except Exception as e:  # noqa: BLE001 — never break the turn
+    except Exception as e:
+        traceback.print_exc()
         return f"Could not read messages: {e}"
     if r.returncode != 0:
         err = (r.stderr or "").strip()
@@ -719,7 +723,8 @@ class LocalLLM:
                 model=self.model, messages=messages, max_tokens=SPOKEN_MAX_TOKENS, temperature=0.4,
                 tools=tools, tool_choice="auto", extra_body=THINKING_OFF,
             )
-        except Exception:  # noqa: BLE001 — server without tool support → plain reply
+        except Exception:
+            traceback.print_exc()
             return self.respond(user_text, system, history)
         msg = first.choices[0].message
         calls = getattr(msg, "tool_calls", None)

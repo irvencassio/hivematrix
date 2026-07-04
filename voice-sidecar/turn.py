@@ -5,6 +5,7 @@ transport. The realtime Pipecat pipeline (pipeline.py) and the headless test
 (test_turn.py) both drive it. `respond` is injected (a callable str -> str) so
 the LLM can be the real LocalLLM or a stub.
 """
+import traceback
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -22,7 +23,11 @@ class TurnResult:
 def run_turn(audio_in: str, respond: Callable[[str], str],
              stt_model: Optional[str] = None) -> TurnResult:
     """Run a single turn. Returns empty transcript/reply for silence."""
-    transcript = transcribe(audio_in, model=stt_model)
+    try:
+        transcript = transcribe(audio_in, model=stt_model)
+    except Exception:
+        traceback.print_exc()
+        return TurnResult(transcript="", reply="", audio_out=None)
     if not transcript:
         return TurnResult(transcript="", reply="", audio_out=None)
     reply = respond(transcript)

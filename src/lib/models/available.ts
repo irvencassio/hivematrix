@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { writeJsonAtomic } from "@/lib/config/atomic-write";
 import { detectBackends, type BackendStatus, type BackendId } from "./backends";
 import { SUPPORTED_LOCAL_TIER_PRESETS, type LocalTier } from "./local-engine";
 import { LOCAL_MODEL_PRESETS, type LocalModelPreset } from "./local-presets";
@@ -156,7 +157,7 @@ export function setDefaultModel(modelId: string): void {
   const cfg = readConfig();
   cfg.defaultModel = modelId;
   mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
-  writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+  writeJsonAtomic(configPath(), cfg);
 }
 
 // --- Theme + wallpaper (Settings → Appearance) ---
@@ -181,7 +182,7 @@ export function getThemeSettings(): ThemeSettings {
 
 function writeConfig(cfg: Record<string, unknown>): void {
   mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
-  writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+  writeJsonAtomic(configPath(), cfg);
 }
 
 /** Panel translucency over a wallpaper (0–100). */
@@ -229,7 +230,7 @@ export function setTheme(theme: ThemeMode): void {
   const cfg = readConfig();
   cfg.theme = theme;
   mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
-  writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+  writeJsonAtomic(configPath(), cfg);
 }
 
 /** Set the wallpaper to a file path, or null to clear. */
@@ -237,7 +238,7 @@ export function setWallpaperPath(path: string | null): void {
   const cfg = readConfig();
   if (path) cfg.wallpaperPath = path; else delete cfg.wallpaperPath;
   mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
-  writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+  writeJsonAtomic(configPath(), cfg);
 }
 
 /** Save an uploaded wallpaper (base64) to ~/.hivematrix and set it. Returns the path. */
@@ -409,5 +410,5 @@ export function setLocalEndpoint(endpoint: string): void {
     (qwen.primary as Record<string, unknown>).endpoint = endpoint;
   }
   mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
-  writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+  writeJsonAtomic(configPath(), cfg);
 }

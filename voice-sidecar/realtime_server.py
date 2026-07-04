@@ -17,6 +17,7 @@ caller); prints `REALTIME_READY <port>` on stdout. ICE/TURN from HIVE_TURN_* env
 import argparse
 import asyncio
 import os
+import traceback
 
 from aiohttp import web
 
@@ -73,6 +74,7 @@ async def handle_offer(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
+        traceback.print_exc()
         return web.json_response({"error": "expected JSON"}, status=400)
     req = SmallWebRTCRequest(
         sdp=body.get("sdp"), type=body.get("type"),
@@ -88,6 +90,7 @@ async def handle_patch(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
+        traceback.print_exc()
         return web.json_response({"error": "expected JSON"}, status=400)
     preq = SmallWebRTCPatchRequest(**body)
     await handler().handle_patch_request(preq)
@@ -115,7 +118,7 @@ async def run(host: str, port: int):
         from tts import warmup as _tts_warmup
         asyncio.create_task(asyncio.to_thread(_tts_warmup, os.environ.get("HIVE_RT_TTS_QUALITY", "fast")))
     except Exception:
-        pass
+        traceback.print_exc()
     await asyncio.Event().wait()
 
 

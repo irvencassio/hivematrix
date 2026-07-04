@@ -70,8 +70,11 @@ if [ "$BUILT_COMMIT" != "$HEAD_SHA" ]; then
   echo "  Re-run bash scripts/build-app.sh from the commit you intend to publish." >&2
   exit 1
 fi
-if [ "$BUILT_DIRTY" = "True" ] || [ "$BUILT_DIRTY" = "true" ]; then
-  echo "✗ Built app was produced from a dirty worktree. Commit or discard changes, rebuild, then publish." >&2
+# Demand an explicit clean flag: sourceDirty prints True / False / None (missing
+# field). Anything but a clean False is unknown provenance and must not publish.
+if [ "$BUILT_DIRTY" != "False" ] && [ "$BUILT_DIRTY" != "false" ]; then
+  echo "✗ Built app worktree flag is '$BUILT_DIRTY' (need sourceDirty=false in the app's build-info.json)." >&2
+  echo "  Commit or discard changes, re-run bash scripts/build-app.sh, then publish." >&2
   exit 1
 fi
 

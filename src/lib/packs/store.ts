@@ -56,8 +56,13 @@ function readState(): PackState {
     if (parsed && typeof parsed === "object" && Array.isArray((parsed as PackState).packs)) {
       return parsed as PackState;
     }
-  } catch {
-    // no installed packs yet
+  } catch (e) {
+    // Absent file = no installed packs yet. Anything else (corrupt JSON,
+    // permissions, I/O) must leave a trail — a silent [] here reads as "no
+    // packs" in the console and invites duplicate re-installs.
+    if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") {
+      console.warn(`[packs] could not read installed.json (treating as no packs): ${e instanceof Error ? e.message : e}`);
+    }
   }
   return { packs: [] };
 }

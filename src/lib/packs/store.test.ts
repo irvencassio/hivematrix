@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign as cryptoSign, createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { canonicalize } from "./signing";
@@ -160,4 +160,20 @@ test("installPack replaces an existing version and uninstall cleans pack-owned o
   assert.equal(await uninstallPack("support-inbox"), true);
   assert.equal(listInstalledPacks().length, 0);
   assert.equal(existsSync(join(home, ".hivematrix", "packs", "installed", "support-inbox")), false);
+});
+
+test("corrupt installed.json is logged, not silently treated as no packs", async (t) => {
+  const home = await withTempRuntime(t);
+  const warns: string[] = [];
+  t.mock.method(console, "warn", (...args: unknown[]) => { warns.push(args.join(" ")); });
+
+  mkdirSync(join(home, ".hivematrix", "packs"), { recursive: true });
+  writeFileSync(join(home, ".hivematrix", "packs", "installed.json"), "{ this is not json");
+
+  const { listInstalledPacks } = await import("./store");
+  assert.deepEqual(listInstalledPacks(), [], "degrades to no packs");
+  assert.ok(
+    warns.some((w) => w.includes("[packs]") && w.includes("installed.json")),
+    "the corruption is logged so a re-install duplicate hunt has a trail",
+  );
 });

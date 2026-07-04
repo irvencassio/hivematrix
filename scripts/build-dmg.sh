@@ -27,7 +27,9 @@ NOTARY_ARGS=(
   --keychain "$NOTARY_KEYCHAIN"
 )
 APP="src-tauri/target/release/bundle/macos/HiveMatrix.app"
-STAGE="$(mktemp -d)/dmg"
+STAGE_ROOT="$(mktemp -d)"
+STAGE="$STAGE_ROOT/dmg"
+trap 'rm -rf "$STAGE_ROOT"' EXIT
 OUT="src-tauri/target/release/bundle/HiveMatrix-${VERSION}.dmg"
 
 [ -d "$APP" ] || { echo "✗ $APP not found — run 'cargo tauri build' first" >&2; exit 1; }

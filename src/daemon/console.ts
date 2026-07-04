@@ -918,6 +918,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <span class="hsep"></span>
     <span class="muted" id="talkStatus" style="display:none;font-size:11px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
     <button class="gear" id="talkBtn" style="display:none" title="Push to talk" onclick="toggleTalk()">🎤 Talk</button>
+    <button class="gear" id="retryVoiceBtn" style="display:none" title="Voice failed — retry" onclick="retryVoice()">✖</button>
     <button class="gear" id="themeToggle" title="Toggle light / dark theme" onclick="toggleThemeQuick()">🌗</button>
     <button class="gear gear-lg ctx-toggle" id="ctxToggle" title="Hide / show the right panel" onclick="toggleContext()">◨</button>
     <button class="gear gear-lg" title="Settings" onclick="openSettings()">⚙</button>
@@ -6735,26 +6736,50 @@ async function toggleTalk() {
   if (_talkRec && _talkRec.state === "recording") { _talkRec.stop(); return; }
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-  catch (e) { talkStatus("mic blocked — allow microphone access", true); return; }
+  catch (e) { talkStatus("mic blocked — allow microphone access", true); voiceFallback("Microphone permission denied. Type your message instead."); return; }
   _talkChunks = [];
   _talkRec = new MediaRecorder(stream);
   _talkRec.ondataavailable = e => { if (e.data && e.data.size) _talkChunks.push(e.data); };
+  _talkRec.onerror = () => { voiceFallback("Recording error. Type your message instead."); };
   _talkRec.onstop = async () => {
     stream.getTracks().forEach(t => t.stop());
     btn.textContent = "… thinking"; talkStatus("transcribing…", true);
     try {
       const b64 = await blobToB64(new Blob(_talkChunks, { type: "audio/webm" }));
       const res = await api("/voice/turn", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audioBase64: b64 }) });
-      if (res && res.error) { talkStatus(res.error, true); }
+      if (res && res.error) { talkStatus(res.error, true); voiceFallback(res.error + " Type your message instead."); }
       else {
         if (res && res.audioBase64) { new Audio("data:audio/mp4;base64," + res.audioBase64).play().catch(e => console.warn("[talk] audio playback failed:", e)); }
         talkStatus((res && res.transcript ? "you: " + res.transcript : "") + (res && res.reply ? "  ·  assistant: " + res.reply : ""), true);
       }
-    } catch (e) { talkStatus("voice turn failed", true); }
+    } catch (e) { talkStatus("voice turn failed", true); voiceFallback("Voice turn failed. Type your message instead."); }
     btn.textContent = "🎤 Talk";
   };
   _talkRec.start();
   btn.textContent = "■ Stop"; talkStatus("listening… (click Stop when done)", true);
+}
+
+function voiceFallback(fallbackMsg) {
+  showFlashPanel();
+  const input = document.getElementById("flashInput");
+  if (input) {
+    input.value = fallbackMsg + "\n";
+    input.focus();
+    flashInputResize(input);
+  }
+  const retryBtn = document.getElementById("retryVoiceBtn");
+  if (retryBtn) retryBtn.style.display = "";
+  const talkBtn = document.getElementById("talkBtn");
+  if (talkBtn) talkBtn.style.display = "none";
+  talkStatus(fallbackMsg, true);
+}
+
+function retryVoice() {
+  const retryBtn = document.getElementById("retryVoiceBtn");
+  if (retryBtn) retryBtn.style.display = "none";
+  const talkBtn = document.getElementById("talkBtn");
+  if (talkBtn) talkBtn.style.display = "";
+  talkStatus("", false);
 }
 
 function renderAbout() {

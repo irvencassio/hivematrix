@@ -6,9 +6,10 @@
  * unconfigured or on any error, so every caller falls back to keyword retrieval.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { writeJsonAtomic } from "@/lib/config/atomic-write";
 import { readToken } from "@/lib/auth/token";
 
 export interface IndexConfig {
@@ -97,7 +98,7 @@ function readConfig(): Record<string, unknown> {
 
 function writeConfig(cfg: Record<string, unknown>): void {
   mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
-  writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+  writeJsonAtomic(configPath(), cfg);
 }
 
 function normalizeIndexConfig(raw: unknown): IndexConfig | undefined {

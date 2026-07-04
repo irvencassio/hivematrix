@@ -15,7 +15,7 @@ process.env.HOME = TMP;
 
 const { getDb, _resetDbForTests } = await import("@/lib/db");
 const { configureMessageBee } = await import("./actions");
-const { isChannelEnabled, listIdentities } = await import("@/lib/messagebee/store");
+const { getSelfHandles, isChannelEnabled, listIdentities } = await import("@/lib/messagebee/store");
 
 _resetDbForTests();
 getDb();
@@ -58,6 +58,12 @@ test("disables the channel when enable is false", async () => {
   assert.equal(r.ok, true);
   assert.equal((r.data as { enabled: boolean }).enabled, false);
   assert.match(r.detail, /disabled/i);
+});
+
+test("stores self handles during guided setup", async () => {
+  const r = await configureMessageBee({ enable: false, selfHandles: ["+1 (555) 000-1111", "Me@icloud.com"] });
+  assert.deepEqual(getSelfHandles(), ["+15550001111", "me@icloud.com"]);
+  assert.deepEqual((r.data as { selfHandles: string[] }).selfHandles, ["+15550001111", "me@icloud.com"]);
 });
 
 test("rejects an invalid handle with a warning but still enables the channel", async () => {

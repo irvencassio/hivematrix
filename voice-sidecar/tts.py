@@ -21,6 +21,7 @@ build — it ignores the input text and parrots the reference clip. Do not use i
 import os
 import subprocess
 import tempfile
+import traceback
 import uuid
 
 SAMPLE_RATE = 16000
@@ -100,6 +101,7 @@ def synthesize(text: str, out_path: str | None = None, voice: str | None = None,
         try:
             return _synthesize_kokoro(clean, _out_path(out_path), voice, lang)
         except Exception:
+            traceback.print_exc()
             # Kokoro made no audio (short-phrase quirk) or is unavailable — fall back
             # to macOS `say`. It's instant, so the fast path stays fast (the clone
             # would add ~2.5s for what is usually a tiny phrase).
@@ -179,7 +181,7 @@ def _synthesize_kokoro(text: str, out_path: str, voice: str | None, lang: str = 
     # order; concatenate if it split into several. Empty → raise (no audio made).
     parts = sorted(glob.glob(os.path.join(out_dir, f"{prefix}_*.wav")))
     if not parts:
-        raise RuntimeError("kokoro produced no audio")
+        raise RuntimeError(f"kokoro produced no audio for text={text[:80]!r}")
     if len(parts) == 1:
         os.replace(parts[0], out_path)
         return out_path
@@ -224,7 +226,7 @@ def warmup(quality: str = "fast", lang: str = "en") -> None:
             except OSError:
                 pass
     except Exception:
-        pass
+        traceback.print_exc()
 
 
 def _synthesize_cloned(text: str, out_path: str, ref_audio: str,
