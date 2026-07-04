@@ -3,7 +3,51 @@ import assert from "node:assert/strict";
 import {
   buildVoiceBrowserLaneTask,
   detectVoiceBrowserLaneIntent,
+  detectGeneralBrowserLaneIntent,
 } from "./browser-lane-intent";
+
+test("general detector routes a plain browsing prompt (no 'browser lane' phrase) to Browser Lane", () => {
+  // The voice detector requires the literal lead-in and returns null here…
+  assert.equal(detectVoiceBrowserLaneIntent("go to acme.com and download the latest invoice"), null);
+  // …but the general detector recognizes target + interaction.
+  assert.deepEqual(detectGeneralBrowserLaneIntent("go to acme.com and download the latest invoice"), {
+    mode: "open",
+    url: "https://acme.com",
+    objective: "go to acme.com and download the latest invoice",
+  });
+});
+
+test("general detector opens an explicit URL with a nav verb", () => {
+  assert.deepEqual(
+    detectGeneralBrowserLaneIntent("open https://news.ycombinator.com and summarize the top story"),
+    { mode: "open", url: "https://news.ycombinator.com", objective: "open https://news.ycombinator.com and summarize the top story" },
+  );
+});
+
+test("general detector treats a login/account interaction as a workflow", () => {
+  const intent = detectGeneralBrowserLaneIntent("log into portal.example.com and check my orders");
+  assert.equal(intent?.mode, "workflow");
+  assert.equal((intent as { startUrl: string }).startUrl, "https://portal.example.com");
+  assert.equal((intent as { requiresLogin: boolean }).requiresLogin, true);
+});
+
+test("general detector matches explicit web-search phrasing without a target", () => {
+  assert.deepEqual(detectGeneralBrowserLaneIntent("search the web for the best pizza in Chicago"), {
+    mode: "search",
+    query: "search the web for the best pizza in Chicago",
+  });
+});
+
+test("general detector does NOT hijack code tasks that mention a URL or filename", () => {
+  assert.equal(detectGeneralBrowserLaneIntent("refactor the fetch in src/api/client.ts that calls https://api.acme.com"), null);
+  assert.equal(detectGeneralBrowserLaneIntent("fix the failing unit test in server.ts"), null);
+  // A domain with no browsing verb is not enough to fire.
+  assert.equal(detectGeneralBrowserLaneIntent("document how acme.com rate-limits our webhook"), null);
+});
+
+test("general detector ignores secrets in the prompt", () => {
+  assert.equal(detectGeneralBrowserLaneIntent("go to acme.com and enter the password hunter2"), null);
+});
 
 test("detects explicit Browser Lane search requests", () => {
   assert.deepEqual(detectVoiceBrowserLaneIntent("Use browser lane to search Tesla Model S price"), {

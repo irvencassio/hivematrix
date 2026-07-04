@@ -197,6 +197,44 @@ export function detectVoiceBrowserLaneIntent(text: string): VoiceBrowserLaneInte
   return null;
 }
 
+// General browser-lane detection — independent of the "browser lane" lead-in
+// the voice detector requires. Fires when the task names a concrete web target
+// (URL or a domain with a known TLD) AND a browsing/interaction verb, so an
+// ordinary browsing request ("go to acme.com and download the invoice") routes
+// to Browser Lane instead of a generic agent that reaches for Chrome MCP.
+const WEB_URL = /\bhttps?:\/\/[^\s"'<>]+/i;
+const WEB_DOMAIN = /\b((?:[a-z0-9-]+\.)+(?:com|org|net|io|co|ai|dev|app|gov|edu|store|shop|xyz))(?:\/[^\s"'<>]*)?\b/i;
+const NAV_VERB = /\b(?:go\s+to|goto|open|navigate\s+to|visit|browse(?:\s+to)?|pull\s+up|head\s+to)\b/i;
+const INTERACT_VERB = /\b(?:download|upload|fill\s+(?:out|in)|submit|book|order|purchase|check\s?out|apply|register|subscribe|scrape|screenshot|reserve|add\s+to\s+cart)\b/i;
+const LOGIN_CUE = /\b(?:log\s?in|sign\s?in|log\s?into|sign\s?into|my\s+(?:orders|account|profile|inbox)|dashboard)\b/i;
+const WEB_SEARCH_CUE = /\b(?:search\s+(?:the\s+)?web|search\s+online|(?:look\s*up|find|research)\b[^.]*\bonline)\b/i;
+// Dev/code work that may legitimately contain a URL but must NOT be hijacked.
+const DEV_CUES = /\b(?:refactor|debug|implement|compile|unit\s+test|pytest|npm|yarn|pnpm|eslint|typescript|stack\s?trace|rebase|merge\s+conflict|pull\s+request|\bPR\b|commit|=>|import\s+.*\bfrom\b|const\s+\w+\s*=)\b/i;
+const CODE_PATH = /\b[\w./-]+\.(?:ts|tsx|jsx|js|py|go|rs|java|rb|php|cpp|css|scss|sh|yml|yaml|toml)\b/i;
+
+export function detectGeneralBrowserLaneIntent(text: string): VoiceBrowserLaneIntent | null {
+  const value = clean(text);
+  if (!value || SECRETISH.test(value)) return null;
+  // Don't hijack code tasks that merely mention a URL or a dotted filename.
+  if (DEV_CUES.test(value) || CODE_PATH.test(value)) return null;
+
+  // Explicit web-search phrasing needs no target.
+  if (WEB_SEARCH_CUE.test(value)) return { mode: "search", query: value.slice(0, 200) };
+
+  const url = value.match(WEB_URL)?.[0];
+  const domain = value.match(WEB_DOMAIN)?.[0];
+  const target = url && isHttpUrl(url) ? url : domain ? `https://${domain}` : null;
+  if (!target) return null;
+  if (!NAV_VERB.test(value) && !INTERACT_VERB.test(value) && !LOGIN_CUE.test(value)) return null;
+
+  // A login/account interaction is a Browser Lane workflow (may hit a sign-in
+  // wall); a plain open/download is the lighter "open" mode.
+  if (LOGIN_CUE.test(value)) {
+    return { mode: "workflow", objective: value.slice(0, 200), startUrl: target, requiresLogin: true };
+  }
+  return { mode: "open", url: target, objective: value.slice(0, 200) };
+}
+
 export function buildVoiceBrowserLaneTask(
   args: VoiceBrowserLaneIntent,
   opts: { titlePrefix?: string; projectPath?: string; voice?: Record<string, unknown> } = {},

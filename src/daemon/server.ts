@@ -4166,10 +4166,15 @@ export function createDaemonServer() {
         // phrasing, so ordinary dev tasks that merely contain "search" are never
         // hijacked. Skipped when the request is already a browser-lane task (avoids
         // reprocessing lane-tools' own loopback posts).
-        const { detectVoiceBrowserLaneIntent, buildVoiceBrowserLaneTask } = await import("@/lib/voice/browser-lane-intent");
+        const { detectVoiceBrowserLaneIntent, detectGeneralBrowserLaneIntent, buildVoiceBrowserLaneTask } = await import("@/lib/voice/browser-lane-intent");
         if ((route === "browser-lane" || (route === "auto" && !broad)) && body.source !== "browser-lane" &&
             (body.executor === undefined || body.executor === "agent")) {
+          // Voice phrasing ("use Browser Lane to …") first, then general
+          // browsing intent (a web target + a browse/interact verb), then — only
+          // when the operator explicitly picked Browser Lane — treat the whole
+          // prompt as a search.
           const intent = detectVoiceBrowserLaneIntent(description)
+            ?? detectGeneralBrowserLaneIntent(description)
             ?? (route === "browser-lane" ? { mode: "search" as const, query: description.trim().slice(0, 200) } : null);
           if (intent) {
             const built = buildVoiceBrowserLaneTask(intent, {
