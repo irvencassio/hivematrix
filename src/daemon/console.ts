@@ -8026,6 +8026,13 @@ async function loadTunnel() {
     btn.style.display = "none"; live.style.display = "none"; return;
   }
   btn.style.display = "";
+  // Reflect saved Cloudflare Access credentials so it's clear they persisted
+  // (the secret is never sent back — we only signal that one is stored).
+  const idField = document.getElementById("s_cf_access_id");
+  if (idField && document.activeElement !== idField) idField.value = tunnel.cloudflareAccessClientId || "";
+  const secretField = document.getElementById("s_cf_access_secret");
+  if (secretField && document.activeElement !== secretField)
+    secretField.placeholder = tunnel.cloudflareAccessSecretSaved ? "•••••••• saved — type to replace" : "optional service-token client secret";
   if (tunnel.running && tunnel.url) {
     dot.className = "dot on"; label.textContent = "Remote access ON";
     const modeLabel = tunnel.mode === "named"
@@ -8040,14 +8047,28 @@ async function loadTunnel() {
     if (cfDetail) cfDetail.textContent = tunnel.cloudflareAccessConfigured
       ? "Cloudflare Access service-token credentials are saved and will be included in the QR."
       : "Only needed when Cloudflare Access protects the hostname for iOS/API calls.";
-    // QR from the daemon (token via query); cache-bust per URL.
-    document.getElementById("s_qr").innerHTML = tunnel.qrInstalled
-      ? '<img src="/tunnel/qr?token=' + encodeURIComponent(HM_TOKEN) + '&u=' + encodeURIComponent(tunnel.url) + '" style="width:100%;height:100%" alt="pairing QR" />'
-      : '<div class="muted" style="font-size:11px">QR unavailable — brew install qrencode</div>';
+    // Load the QR via fetch so any failure (Pro-license gate, no tunnel, missing
+    // qrencode) surfaces its reason instead of a silently-broken <img>.
+    loadTunnelQr();
   } else {
     dot.className = "dot off"; label.textContent = "Remote access OFF";
     detail.textContent = "Start a tunnel to reach this daemon from your phone.";
     btn.textContent = "Start temporary tunnel"; live.style.display = "none";
+  }
+}
+async function loadTunnelQr() {
+  const box = document.getElementById("s_qr");
+  if (!box) return;
+  box.innerHTML = '<div class="muted" style="font-size:11px;padding:8px;text-align:center">Loading QR…</div>';
+  try {
+    const r = await fetch("/tunnel/qr", { headers: { "Authorization": "Bearer " + HM_TOKEN } });
+    if (r.ok) { box.innerHTML = await r.text(); return; }
+    // Endpoint returns a JSON reason (Pro-license gate, no tunnel, qrencode missing).
+    let reason = "QR unavailable";
+    try { const j = await r.json(); if (j && j.error) reason = j.error; } catch (e) { /* non-JSON */ }
+    box.innerHTML = '<div class="muted" style="font-size:11px;padding:8px;text-align:center">' + esc(reason) + '</div>';
+  } catch (e) {
+    box.innerHTML = '<div class="muted" style="font-size:11px;padding:8px;text-align:center">QR request failed</div>';
   }
 }
 async function toggleTunnel() {

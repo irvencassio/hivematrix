@@ -95,6 +95,10 @@ export interface TunnelStatus {
   owner: TunnelOwner | null;
   canStop: boolean;
   cloudflareAccessConfigured: boolean;
+  /** Saved Access client id (NOT a secret) so the UI can reflect saved state. */
+  cloudflareAccessClientId: string | null;
+  /** True when an Access client secret is stored. The secret itself is never returned. */
+  cloudflareAccessSecretSaved: boolean;
 }
 
 export function tunnelStatus(): TunnelStatus {
@@ -116,6 +120,8 @@ export function tunnelStatus(): TunnelStatus {
     owner,
     canStop: childRunning && s.owner === "hivematrix",
     cloudflareAccessConfigured: !!(settings.cloudflareAccessClientId && settings.cloudflareAccessClientSecret),
+    cloudflareAccessClientId: settings.cloudflareAccessClientId ?? null,
+    cloudflareAccessSecretSaved: !!settings.cloudflareAccessClientSecret,
   };
 }
 
@@ -208,10 +214,15 @@ export function configureNamedTunnel(hostname: string): TunnelStatus {
 }
 
 export function updateNamedTunnelAccess(settings: RemoteAccessSettings): TunnelStatus {
-  mergeRemoteAccessSettings({
-    cloudflareAccessClientId: settings.cloudflareAccessClientId,
-    cloudflareAccessClientSecret: settings.cloudflareAccessClientSecret,
-  });
+  // Only overwrite a credential when a non-empty value is supplied — a blank
+  // field means "leave unchanged", so saving just the secret can never wipe the
+  // stored client id (or vice versa). This was the "it doesn't seem to save" bug.
+  const patch: RemoteAccessSettings = {};
+  const id = settings.cloudflareAccessClientId?.trim();
+  const secret = settings.cloudflareAccessClientSecret?.trim();
+  if (id) patch.cloudflareAccessClientId = id;
+  if (secret) patch.cloudflareAccessClientSecret = secret;
+  mergeRemoteAccessSettings(patch);
   return tunnelStatus();
 }
 

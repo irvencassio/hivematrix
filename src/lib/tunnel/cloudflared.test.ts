@@ -61,6 +61,48 @@ test("configured named tunnel persists hostname and exposes a QR-capable status 
   }
 });
 
+test("updateNamedTunnelAccess saves a secret without wiping a previously-saved client id", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hm-cloudflared-"));
+  const previousHome = process.env.HOME;
+  process.env.HOME = root;
+
+  try {
+    const mod = await import(`./cloudflared.ts?case=${Date.now()}`);
+    // Save both, then save ONLY the secret (blank id) — the id must survive.
+    mod.updateNamedTunnelAccess({ cloudflareAccessClientId: "cid-123", cloudflareAccessClientSecret: "sec-1" });
+    const status = mod.updateNamedTunnelAccess({ cloudflareAccessClientId: "", cloudflareAccessClientSecret: "sec-2" });
+
+    assert.equal(status.cloudflareAccessClientId, "cid-123", "client id preserved when only the secret is re-saved");
+    assert.equal(status.cloudflareAccessSecretSaved, true);
+    assert.equal(status.cloudflareAccessConfigured, true);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("tunnelStatus exposes saved-credential state but never the secret value", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hm-cloudflared-"));
+  const previousHome = process.env.HOME;
+  process.env.HOME = root;
+
+  try {
+    const mod = await import(`./cloudflared.ts?case=${Date.now()}`);
+    mod.updateNamedTunnelAccess({ cloudflareAccessClientId: "cid-xyz", cloudflareAccessClientSecret: "super-secret" });
+    const status = mod.tunnelStatus();
+
+    assert.equal(status.cloudflareAccessClientId, "cid-xyz");
+    assert.equal(status.cloudflareAccessSecretSaved, true);
+    // The secret must not appear anywhere in the serialized status.
+    assert.ok(!JSON.stringify(status).includes("super-secret"), "secret is never serialized into status");
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("stopping a configured named tunnel does not erase persisted hostname", async () => {
   const root = mkdtempSync(join(tmpdir(), "hm-cloudflared-"));
   const previousHome = process.env.HOME;
