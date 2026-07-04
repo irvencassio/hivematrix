@@ -975,3 +975,32 @@ brand; no OpenClaw runtime):
 
 **Provers:** 18 new unit tests (heartbeat 12, distill merge 6); full suite
 2582/2582 green; typecheck + scope-wall clean; daemon bundle builds (223.6 MB).
+
+## BUILD (2026-07-04) — proactive-partner Tier 2: episodic planner, goal ledger, pattern detection, persona evolution
+
+Continued the W8/W9 direction with four self-thinking increments (all keyless,
+local-model or deterministic; autonomy-dial aware):
+
+1. **Episodic directive planner** (`directive-engine.ts` + `directive-store.getRecentTerminalRuns`)
+   — the plan prompt now carries the directive's recent run outcomes + last
+   reflection, so each episode builds on the previous ("do not repeat an approach
+   that already failed") instead of replanning blank. Deterministic fallback
+   unchanged. The stale "intentionally deterministic v1" header was corrected.
+2. **Goal ledger** (`distill.ts` → `persona/GOALS.md`) — distillation extracts
+   stated operator goals/deadlines (distinct from facts) into GOALS.md, injected
+   into every flash turn + the morning brief so proactive output anchors to real
+   goals. Brain/persona doc ONLY — the scope wall forbids a personal Goals
+   product surface; the Chief-of-Staff pack is the future sanctioned home.
+3. **Pattern detection** (`src/lib/feedback/pattern-detection.ts`, daily via the
+   learning loop) — clusters the recurring open backlog and files ONE deduped
+   enhancement proposal per chronic pattern ("this keeps happening — root-cause it
+   with a directive or skill"). Feeds the self-improvement directive. Proposing is
+   free; acquiring stays gated.
+4. **Persona evolution** (`src/lib/flash/persona-evolution.ts`, weekly) — turns the
+   same chronic clusters into bounded, append-only SOUL.md operating notes.
+   Autonomous → apply + announce (flash:persona_updated + `persona_evolved`
+   audit + .bak backup); standard/manual → propose. A model never rewrites the
+   soul (note generation is injected; default is deterministic synthesis).
+
+**Provers:** 16 new tests (directive history 2, goals 3, pattern detection 5,
+persona evolution 6); full suite 2605/2605; typecheck + scope-wall clean.
