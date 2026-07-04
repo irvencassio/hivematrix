@@ -24,6 +24,13 @@ export interface ChannelMeta {
   notifiedStuck: string[]; // "taskId:timestamp" keys already sent to the sender
   notifiedDone: string[];  // "taskId:updatedAt" keys whose RESULT was texted back
   recentIgnored: IgnoredSender[]; // non-allowlisted senders, for one-click allow
+  // The agent's OWN iMessage handles on this box (email + phone). When the daemon
+  // runs on the same Apple ID a human also uses, sending to one of these creates a
+  // Note-to-Self: the send lands as is_from_me=1 AND echoes back as is_from_me=0,
+  // which the is_from_me=0 inbound filter does NOT catch. Reading that echo as a
+  // fresh operator message would loop forever. selfHandles gates both directions:
+  // never route inbound that matches self, never send outbound to self.
+  selfHandles: string[];
 }
 
 export interface MessageIdentity {
@@ -40,7 +47,7 @@ interface ChannelRow {
 }
 
 function readMeta(row: ChannelRow | undefined): ChannelMeta {
-  const empty: ChannelMeta = { lastRowid: 0, notifiedStuck: [], notifiedDone: [], recentIgnored: [] };
+  const empty: ChannelMeta = { lastRowid: 0, notifiedStuck: [], notifiedDone: [], recentIgnored: [], selfHandles: [] };
   if (!row) return empty;
   try {
     const m = JSON.parse(row.metadata) as Partial<ChannelMeta>;
@@ -49,6 +56,7 @@ function readMeta(row: ChannelRow | undefined): ChannelMeta {
       notifiedStuck: m.notifiedStuck ?? [],
       notifiedDone: m.notifiedDone ?? [],
       recentIgnored: m.recentIgnored ?? [],
+      selfHandles: m.selfHandles ?? [],
     };
   } catch {
     return empty;
@@ -165,6 +173,29 @@ export function clearIgnoredSender(address: string): void {
   const meta = readMeta(getRow());
   meta.recentIgnored = meta.recentIgnored.filter((i) => i.address !== address);
   writeMeta(meta);
+}
+
+// ── self handles (the agent's own iMessage identities) ───────────────────────
+
+/** The agent's own handles on this box. Sending to any of these self-echoes and
+ *  loops (see ChannelMeta.selfHandles). */
+export function getSelfHandles(): string[] {
+  return readMeta(getRow()).selfHandles;
+}
+
+/** Replace the self-handle set (normalized, de-duped). Empty entries dropped. */
+export function setSelfHandles(handles: string[]): void {
+  ensureChannel();
+  const meta = readMeta(getRow());
+  const norm = handles.map((h) => normalizeHandle(h)).filter(Boolean);
+  meta.selfHandles = [...new Set(norm)];
+  writeMeta(meta);
+}
+
+/** Whether a handle is one of the agent's own identities (loop-guard both ways). */
+export function isSelf(handle: string): boolean {
+  const self = readMeta(getRow()).selfHandles;
+  return self.some((s) => handlesMatch(s, handle));
 }
 
 // ── sender allowlist (identities) ────────────────────────────────────────────

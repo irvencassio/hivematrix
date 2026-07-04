@@ -21,7 +21,7 @@ import { routeInbound, type PendingInput } from "./handoff";
 import { readInboundSince, sendIMessage } from "./imessage";
 import { wantsVoiceReply } from "@/lib/voice/tts";
 import {
-  isChannelEnabled, getLastRowid, setLastRowid, isAllowed,
+  isChannelEnabled, getLastRowid, setLastRowid, isAllowed, isSelf,
   recordInbound, recordOutbound, recordError,
   wasStuckNotified, markStuckNotified,
   wasDoneNotified, markDoneNotified, recordIgnoredSender,
@@ -37,6 +37,17 @@ const POLL_INTERVAL_MS = 3_000;
 function taskHandle(task: TaskDoc | null): string | null {
   const mb = (task?.output as { messagebee?: { handle?: string } } | undefined)?.messagebee;
   return mb?.handle ?? null;
+}
+
+/** Send, but never to one of the agent's own handles. Texting self on a shared
+ *  Apple ID echoes back as inbound and loops; refuse and log instead. Returns
+ *  false without sending when the target is a self-handle. */
+async function sendGuarded(handle: string, text: string, attachments: string[] = []): Promise<boolean> {
+  if (isSelf(handle)) {
+    recordError(`refused to text self-handle ${handle} (would loop); set a distinct agent identity for two-way texting`);
+    return false;
+  }
+  return sendIMessage(handle, text, attachments);
 }
 
 /** Pending needs_input requests for Message Lane tasks owned by a given sender. */
@@ -55,6 +66,12 @@ async function pendingInputForSender(handle: string): Promise<PendingInput[]> {
 
 /** Process one inbound message end-to-end. */
 async function handleInbound(msg: { rowid: number; handle: string; text: string; service: string }): Promise<void> {
+  // Loop-guard: on a shared Apple ID, the agent's own outbound to its own number
+  // echoes back as is_from_me=0. Never treat that echo as an inbound message — it
+  // would trigger a reply that echoes again, forever. Drop it silently (not even
+  // surfaced as an ignored sender: it isn't a real correspondent).
+  if (isSelf(msg.handle)) return;
+
   const route = routeInbound(
     { rowid: msg.rowid, handle: msg.handle, text: msg.text, receivedAt: new Date().toISOString(), service: msg.service },
     { allowlisted: isAllowed(msg.handle), pendingInput: await pendingInputForSender(msg.handle) },
@@ -81,7 +98,7 @@ async function handleInbound(msg: { rowid: number; handle: string; text: string;
   try {
     const reply = await flashDispatch(text, route.peer);
     if (reply.trim()) {
-      const sent = await sendIMessage(route.peer, reply);
+      const sent = await sendGuarded(route.peer, reply);
       if (sent) recordOutbound();
     }
   } catch (err) {
@@ -119,7 +136,7 @@ async function notifyCompletedResults(): Promise<void> {
       }
     }
 
-    const sent = await sendIMessage(handle, body, attachments);
+    const sent = await sendGuarded(handle, body, attachments);
     if (sent) { recordOutbound(); markDoneNotified(key); }
   }
 }
@@ -134,7 +151,7 @@ async function notifyPendingInputs(): Promise<void> {
     const handle = taskHandle(task);
     if (!handle) continue;
     const question = stuck.reason?.trim() || "HiveMatrix needs your input on a task. Reply to continue.";
-    const sent = await sendIMessage(handle, question);
+    const sent = await sendGuarded(handle, question);
     if (sent) { recordOutbound(); markStuckNotified(key); }
   }
 }
