@@ -33,6 +33,7 @@ Next.js UI, client of the daemon. Centered shell: board left, session center, co
 - Image role: Nano Banana when cloud-ok; local MLX fallback (mflux — FLUX.2 Klein / Qwen-Image class) in local-only/offline (Q5)
 - Router roles: think | execute | code-critical | image | cheap-web
 - Frontier-review-debt queue for work executed locally during exhaustion
+- **Deep Think** (`src/lib/models/deep-think.ts`) — test-time compute scaling on the keyless local model: N temperature-diverse parallel rollouts (thinking ON) → self-consistency agreement signal → list-wise synthesis → critique-revise only on disagreement; calibrated confidence out. Exposed as the flash `deep_think` tool for hard questions. Local-only by construction.
 
 ## Worker contract and harnesses
 

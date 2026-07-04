@@ -1033,3 +1033,33 @@ holding the ClawHavoc safety line.
 
 **Provers:** 13 new tests (trust 8, capability gaps 5); full suite 2618/2618;
 typecheck + scope-wall clean.
+
+## BUILD (2026-07-04) — Deep Think: test-time compute scaling on the local model
+
+Researched 2026 agent test-time-scaling results (arXiv:2506.12928 "Scaling
+Test-time Compute for LLM Agents" + self-certainty/best-of-N follow-ups). The
+findings that matter for a keyless local stack: parallel sampling + simple
+self-consistency beats external reward models; list-wise merging beats
+per-candidate scoring; reflection helps only when applied selectively ("know
+when to reflect"); diversified rollouts pay. Local DeepSeek tokens are free on
+this Mac, so structured extra inference is the "smarter" lever — no cloud, no
+bigger model.
+
+**Built** `src/lib/models/deep-think.ts` on the keyless chat-client (uses the
+0.1.133 per-request thinking toggle): N temperature-diverse parallel rollouts
+with thinking ON → pairwise-agreement self-consistency signal → temperature-0
+list-wise synthesis over all candidates → skeptical critique-revise pass ONLY
+when candidates disagreed. Returns calibrated confidence (high/medium/low).
+Budget-capped, degrades gracefully, injectable client for tests.
+
+**Wired** as flash tool `deep_think` — the conversational agent self-selects it
+for strategy/analysis/logic where a wrong answer is costly; the reply carries
+the calibration metadata (attempts, agreement %, confidence, revised-or-not).
+
+**Provers:** 10 unit tests (similarity/agreement math, prompt shapes, rollout
+diversity, reflect-on-disagreement, partial/total failure paths, fallbacks);
+full suite 2629/2629; typecheck + scope-wall clean.
+
+**Future (not built):** deepThink for directive plan-phase (planner runs as a
+spawned harness task today), POST /think endpoint, agreement-driven escalation
+to a second local tier (Qwen cross-model ensemble).
