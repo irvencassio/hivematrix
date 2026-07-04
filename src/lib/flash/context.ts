@@ -16,7 +16,7 @@ import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { searchBrain } from "@/lib/brain/search";
 import type { FlashMessage, FlashTurnRow } from "./types";
 
-const PERSONA_FILES = ["SOUL.md", "IDENTITY.md", "USER.md"] as const;
+const PERSONA_FILES = ["SOUL.md", "IDENTITY.md", "USER.md", "GOALS.md"] as const;
 const MAX_PERSONA_CHARS = 6000;
 const MAX_TURNS_IN_CONTEXT = 20;
 const MAX_BRAIN_RESULTS = 3;

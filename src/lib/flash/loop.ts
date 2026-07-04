@@ -32,13 +32,13 @@ const FLASH_ONLY_TOOLS = [
     function: {
       name: "persona_update",
       description:
-        "Write a persona file (SOUL.md, IDENTITY.md, or USER.md) in the brain persona directory. " +
-        "Use only when the operator explicitly asks to update identity/persona. " +
+        "Write a persona file (SOUL.md, IDENTITY.md, USER.md, or GOALS.md) in the brain persona directory. " +
+        "Use when the operator asks to update identity/persona, or to record a goal they state in GOALS.md. " +
         "Every call emits a visible notice and an audit event.",
       parameters: {
         type: "object",
         properties: {
-          file: { type: "string", enum: ["SOUL.md", "IDENTITY.md", "USER.md"] },
+          file: { type: "string", enum: ["SOUL.md", "IDENTITY.md", "USER.md", "GOALS.md"] },
           content: { type: "string", description: "Full new content for the file" },
           reason: { type: "string", description: "Brief reason shown to the operator" },
         },
@@ -209,8 +209,8 @@ async function handlePersonaUpdate(
   const content = String(args.content ?? "");
   const reason = String(args.reason ?? "");
 
-  if (!["SOUL.md", "IDENTITY.md", "USER.md"].includes(file)) {
-    return `Error: invalid persona file "${file}" — must be SOUL.md, IDENTITY.md, or USER.md`;
+  if (!["SOUL.md", "IDENTITY.md", "USER.md", "GOALS.md"].includes(file)) {
+    return `Error: invalid persona file "${file}" — must be SOUL.md, IDENTITY.md, USER.md, or GOALS.md`;
   }
   if (!brainRoot) return "Error: brain root not configured";
 

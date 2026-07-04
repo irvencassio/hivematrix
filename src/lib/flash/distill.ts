@@ -9,10 +9,13 @@
  *      backlog (via recordFeedbackDedup).
  *   3. Append notable events to <brainRoot>/persona/memory/YYYY-MM-DD.md.
  *   4. Operator-peer sessions only: extract durable facts about the operator
- *      (name, preferences, goals, working rhythm) into persona/USER.md — the
- *      active operator model the birth ritual leaves as a template. Deduped,
- *      bounded, and announced via the flash:persona_updated event (the W8
- *      "if you change your persona, tell the user" convention).
+ *      (name, preferences, working rhythm) into persona/USER.md and stated
+ *      goals/deadlines into persona/GOALS.md — the active operator model + goal
+ *      ledger the birth ritual leaves as templates. Deduped, bounded, and
+ *      announced via the flash:persona_updated event (the W8 "if you change
+ *      your persona, tell the user" convention). GOALS.md is a brain/persona
+ *      doc only — never a product UI (COMPONENT-MAP forbids that; see the
+ *      scope-wall rule).
  *
  * Never throws — best-effort. Marks the session distilledAt on success or
  * permanent failure to prevent retry loops.
@@ -54,6 +57,7 @@ interface DistillResult {
   failures: DistillFailure[];
   notable_events: string[];
   operator_facts: string[];
+  operator_goals: string[];
 }
 
 export interface DistillSummary {
@@ -62,6 +66,7 @@ export interface DistillSummary {
   skillsRefined: number;
   feedbackFiled: number;
   operatorFactsLearned: number;
+  operatorGoalsLearned: number;
 }
 
 // ------------------------------------------------------------------
@@ -110,7 +115,8 @@ Extract learnings. Respond ONLY with valid JSON — no markdown fence, no commen
     }
   ],
   "notable_events": ["One-line summary of a notable action or decision"],
-  "operator_facts": ["Durable fact about the operator themself"]
+  "operator_facts": ["Durable fact about the operator themself"],
+  "operator_goals": ["A goal or deadline the operator is working toward"]
 }
 
 Rules:
@@ -118,9 +124,11 @@ Rules:
 - failures: "bug" = something broke or errored; "enhancement" = friction/unmet need/capability gap. 0–5 items.
 - notable_events: Decisions, completed actions, context worth recalling later. 0–3 items.
 - operator_facts: Durable facts about the OPERATOR as a person — their name, stated preferences,
-  goals, deadlines, working rhythm, recurring frustrations. NOT task details. Only what is stated
+  working rhythm, recurring frustrations. NOT task details, NOT goals. Only what is stated
   or clearly evidenced in the transcript; never guess. 0–3 items.
-- If nothing worth extracting, return {"skills":[],"failures":[],"notable_events":[],"operator_facts":[]}.
+- operator_goals: Concrete objectives or deadlines the operator is working toward (e.g. "ship X by
+  August", "grow revenue to Y"). Only ones the operator actually stated. NOT one-off task requests. 0–3 items.
+- If nothing worth extracting, return {"skills":[],"failures":[],"notable_events":[],"operator_facts":[],"operator_goals":[]}.
 - Never invent anything absent from the transcript.`;
 }
 
@@ -187,9 +195,12 @@ function parseDistillResult(raw: string): DistillResult {
       operator_facts: Array.isArray(obj.operator_facts)
         ? obj.operator_facts.filter((e) => typeof e === "string" && e.trim())
         : [],
+      operator_goals: Array.isArray(obj.operator_goals)
+        ? obj.operator_goals.filter((e) => typeof e === "string" && e.trim())
+        : [],
     };
   } catch {
-    return { skills: [], failures: [], notable_events: [], operator_facts: [] };
+    return { skills: [], failures: [], notable_events: [], operator_facts: [], operator_goals: [] };
   }
 }
 
@@ -198,6 +209,7 @@ function parseDistillResult(raw: string): DistillResult {
 // ------------------------------------------------------------------
 
 const LEARNED_SECTION_HEADER = "## Learned about the operator";
+const GOALS_SECTION_HEADER = "## Active goals";
 const MAX_LEARNED_FACTS = 40;
 
 function normalizeFact(fact: string): string {
@@ -205,22 +217,21 @@ function normalizeFact(fact: string): string {
 }
 
 /**
- * Pure: merge freshly-learned operator facts into USER.md content. Facts land
- * as dated bullets under "## Learned about the operator", newest last, deduped
- * against every existing bullet (normalized containment either way), bounded
- * to the most recent MAX_LEARNED_FACTS. Returns the new content + how many
- * facts were actually added.
+ * Pure: merge dated bullets into a persona file section. Bullets land under
+ * `header`, newest last, deduped against every existing bullet (normalized
+ * containment either way), bounded to the most recent MAX_LEARNED_FACTS.
+ * Returns the new content + how many bullets were actually added.
  */
-export function mergeOperatorFacts(
+function mergeDatedSection(
   existing: string,
   facts: string[],
   date: string,
+  header: string,
+  seed: string,
 ): { content: string; added: number } {
-  const base = existing.trim()
-    ? existing.replace(/\s+$/, "")
-    : "# USER — who the operator is\n\nMaintained by the agent from real conversations.";
+  const base = existing.trim() ? existing.replace(/\s+$/, "") : seed;
 
-  const hasSection = base.includes(LEARNED_SECTION_HEADER);
+  const hasSection = base.includes(header);
   const existingBullets = base
     .split("\n")
     .filter((l) => l.trim().startsWith("- "))
@@ -241,14 +252,14 @@ export function mergeOperatorFacts(
   }
   if (fresh.length === 0) return { content: existing, added: 0 };
 
-  let content = hasSection ? base : `${base}\n\n${LEARNED_SECTION_HEADER}`;
+  let content = hasSection ? base : `${base}\n\n${header}`;
   for (const fact of fresh) content += `\n- ${date}: ${fact}`;
   content += "\n";
 
-  // Bound the learned section: keep the newest MAX_LEARNED_FACTS bullets.
-  const sectionStart = content.indexOf(LEARNED_SECTION_HEADER);
-  const head = content.slice(0, sectionStart + LEARNED_SECTION_HEADER.length);
-  const tail = content.slice(sectionStart + LEARNED_SECTION_HEADER.length);
+  // Bound the section: keep the newest MAX_LEARNED_FACTS bullets.
+  const sectionStart = content.indexOf(header);
+  const head = content.slice(0, sectionStart + header.length);
+  const tail = content.slice(sectionStart + header.length);
   const tailLines = tail.split("\n");
   const bulletIdx = tailLines
     .map((l, i) => (l.trim().startsWith("- ") ? i : -1))
@@ -262,20 +273,56 @@ export function mergeOperatorFacts(
   return { content, added: fresh.length };
 }
 
-/** Merge facts into <brainRoot>/persona/USER.md on disk; announces via SSE. */
-function learnOperatorFacts(brainRoot: string, facts: string[]): number {
+/** Pure: merge operator facts into USER.md content (dated/deduped/bounded). */
+export function mergeOperatorFacts(
+  existing: string,
+  facts: string[],
+  date: string,
+): { content: string; added: number } {
+  return mergeDatedSection(
+    existing,
+    facts,
+    date,
+    LEARNED_SECTION_HEADER,
+    "# USER — who the operator is\n\nMaintained by the agent from real conversations.",
+  );
+}
+
+/** Pure: merge learned goals into GOALS.md content (dated/deduped/bounded). */
+export function mergeOperatorGoals(
+  existing: string,
+  goals: string[],
+  date: string,
+): { content: string; added: number } {
+  return mergeDatedSection(
+    existing,
+    goals,
+    date,
+    GOALS_SECTION_HEADER,
+    "# GOALS — what the operator is working toward\n\nMaintained by the agent from real conversations. Edit freely; the agent anchors briefs and priorities to this file.",
+  );
+}
+
+/** Merge dated learnings into a persona file on disk; announces via SSE. */
+function learnIntoPersonaFile(
+  brainRoot: string,
+  file: "USER.md" | "GOALS.md",
+  items: string[],
+  merge: (existing: string, items: string[], date: string) => { content: string; added: number },
+  reasonNoun: string,
+): number {
   try {
     const dir = join(brainRoot, "persona");
     mkdirSync(dir, { recursive: true });
-    const path = join(dir, "USER.md");
+    const path = join(dir, file);
     const existing = existsSync(path) ? readFileSync(path, "utf-8") : "";
     const date = new Date().toISOString().slice(0, 10);
-    const { content, added } = mergeOperatorFacts(existing, facts, date);
+    const { content, added } = merge(existing, items, date);
     if (added === 0) return 0;
     writeFileSync(path, content, "utf-8");
     broadcastEvent("flash:persona_updated", {
-      file: "USER.md",
-      reason: `learned ${added} fact(s) about the operator from a distilled session`,
+      file,
+      reason: `learned ${added} ${reasonNoun} from a distilled session`,
       ts: new Date().toISOString(),
     });
     return added;
@@ -313,7 +360,7 @@ export async function distillSession(
   sessionId: string,
   brainRoot?: string | null,
 ): Promise<DistillSummary> {
-  const empty: DistillSummary = { skipped: false, skillsCreated: 0, skillsRefined: 0, feedbackFiled: 0, operatorFactsLearned: 0 };
+  const empty: DistillSummary = { skipped: false, skillsCreated: 0, skillsRefined: 0, feedbackFiled: 0, operatorFactsLearned: 0, operatorGoalsLearned: 0 };
 
   try {
     const session = getSession(sessionId);
@@ -382,24 +429,42 @@ export async function distillSession(
       appendToMemoryNote(root, result.notable_events.slice(0, 3), date);
     }
 
-    // Operator model: only sessions where the peer IS the operator (console/
-    // voice). Channel peers (iMessage senders) and the heartbeat's own sessions
-    // must not write facts about someone else into USER.md.
+    // Operator model + goal ledger: only sessions where the peer IS the operator
+    // (console/voice). Channel peers (iMessage senders) and the heartbeat's own
+    // sessions must not write someone else's facts/goals into the persona files.
     let operatorFactsLearned = 0;
-    if (root && session.peer === "operator" && result.operator_facts.length > 0) {
-      operatorFactsLearned = learnOperatorFacts(root, result.operator_facts.slice(0, 3));
+    let operatorGoalsLearned = 0;
+    if (root && session.peer === "operator") {
+      if (result.operator_facts.length > 0) {
+        operatorFactsLearned = learnIntoPersonaFile(
+          root,
+          "USER.md",
+          result.operator_facts.slice(0, 3),
+          mergeOperatorFacts,
+          "operator fact(s)",
+        );
+      }
+      if (result.operator_goals.length > 0) {
+        operatorGoalsLearned = learnIntoPersonaFile(
+          root,
+          "GOALS.md",
+          result.operator_goals.slice(0, 3),
+          mergeOperatorGoals,
+          "operator goal(s)",
+        );
+      }
     }
 
     markSessionDistilled(sessionId);
 
-    const changed = skillsCreated + skillsRefined + feedbackFiled + operatorFactsLearned;
+    const changed = skillsCreated + skillsRefined + feedbackFiled + operatorFactsLearned + operatorGoalsLearned;
     if (changed > 0) {
       console.log(
-        `[flash:distill] ${sessionId}: +${skillsCreated} skills, ${skillsRefined} refined, ${feedbackFiled} feedback, ${operatorFactsLearned} operator facts`,
+        `[flash:distill] ${sessionId}: +${skillsCreated} skills, ${skillsRefined} refined, ${feedbackFiled} feedback, ${operatorFactsLearned} operator facts, ${operatorGoalsLearned} goals`,
       );
     }
 
-    return { skipped: false, skillsCreated, skillsRefined, feedbackFiled, operatorFactsLearned };
+    return { skipped: false, skillsCreated, skillsRefined, feedbackFiled, operatorFactsLearned, operatorGoalsLearned };
   } catch (err) {
     console.warn(`[flash:distill] unexpected error for session ${sessionId}:`, err);
     try { markSessionDistilled(sessionId); } catch { /* ignore */ }

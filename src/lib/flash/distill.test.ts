@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mergeOperatorFacts } from "./distill";
+import { mergeOperatorFacts, mergeOperatorGoals } from "./distill";
 
 test("mergeOperatorFacts seeds USER.md with a header + learned section when empty", () => {
   const { content, added } = mergeOperatorFacts("", ["Prefers terse answers"], "2026-07-04");
@@ -53,4 +53,32 @@ test("mergeOperatorFacts bounds the learned section to the newest 40 bullets", (
 test("mergeOperatorFacts ignores empty/whitespace facts", () => {
   const { added } = mergeOperatorFacts("", ["  ", "", "\n"], "2026-07-04");
   assert.equal(added, 0);
+});
+
+test("mergeOperatorGoals seeds GOALS.md with its own header + section", () => {
+  const { content, added } = mergeOperatorGoals("", ["Ship the annuity license by August"], "2026-07-04");
+  assert.equal(added, 1);
+  assert.match(content, /# GOALS — what the operator is working toward/);
+  assert.match(content, /## Active goals/);
+  assert.match(content, /- 2026-07-04: Ship the annuity license by August/);
+});
+
+test("mergeOperatorGoals dedupes against known goals and bounds the section", () => {
+  const existing = "# GOALS\n\n## Active goals\n- 2026-07-01: Ship the annuity license by August\n";
+  const { content, added } = mergeOperatorGoals(
+    existing,
+    ["ship the annuity license by august", "Grow MRR to 10k"],
+    "2026-07-04",
+  );
+  assert.equal(added, 1);
+  assert.match(content, /Grow MRR to 10k/);
+  assert.equal((content.match(/annuity license/gi) ?? []).length, 1);
+});
+
+test("facts and goals use independent sections and do not cross-contaminate", () => {
+  const seededFacts = mergeOperatorFacts("", ["Prefers terse answers"], "2026-07-04").content;
+  // Feeding a goal string into the goals merge on the facts-seeded doc keeps them separate
+  const { content } = mergeOperatorGoals(seededFacts, ["Ship X by Q3"], "2026-07-04");
+  assert.match(content, /## Learned about the operator[\s\S]*Prefers terse answers/);
+  assert.match(content, /## Active goals[\s\S]*Ship X by Q3/);
 });
