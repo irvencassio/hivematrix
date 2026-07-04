@@ -12,8 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
-  { version: "0.1.130", date: "2026-07-04", note: "Fix mobile pairing: the QR now shows a clear reason instead of a blank box when it can't render, Settings reflects saved Cloudflare Access credentials, and saving just the secret no longer wipes the client id" },
-  { version: "0.1.130", date: "2026-07-04", note: "Remote access pairing QR + Cloudflare Access credential UX, and a local license-issue script (counterpart to license-keygen); harden messagebee onboarding tests against an installed Pro license" },
+  { version: "0.1.130", date: "2026-07-04", note: "Fix mobile pairing: the QR now shows a clear reason instead of a blank box when it can't render, Settings reflects saved Cloudflare Access credentials, and saving just the secret no longer wipes the client id; add a local license-issue script (counterpart to license-keygen) and harden messagebee onboarding tests against an installed Pro license" },
   { version: "0.1.129", date: "2026-07-04", note: "Fix slow local DeepSeek tasks: forward each task's thinking mode to Dwarf Star as reasoning_effort so lighter work decodes faster, give goal decomposition a real 60s timeout (12s default aborted every thinking-mode split and silently fell back), and quadruple the ds4-server KV disk cache budget to stop per-turn prefill re-thrashing" },
   { version: "0.1.128", date: "2026-07-04", note: "Optimize DeepSeek goal decomposition: goal-aware flight intake split, offline local-model support, reasoning token budget" },
   { version: "0.1.127", date: "2026-07-03", note: "Browser Lane and Terminal Lane apps now host the agent read/run backends (127.0.0.1:4011 and :4012) so DeepSeek tasks complete and are watchable in-app; local model health config-matching and test-isolation fix; voice routes to the configured Dwarf Star DeepSeek model" },
