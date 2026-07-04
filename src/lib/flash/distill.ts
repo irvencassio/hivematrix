@@ -8,17 +8,23 @@
  *   2. File failures, friction, and unmet capability needs into the feedback
  *      backlog (via recordFeedbackDedup).
  *   3. Append notable events to <brainRoot>/persona/memory/YYYY-MM-DD.md.
+ *   4. Operator-peer sessions only: extract durable facts about the operator
+ *      (name, preferences, goals, working rhythm) into persona/USER.md — the
+ *      active operator model the birth ritual leaves as a template. Deduped,
+ *      bounded, and announced via the flash:persona_updated event (the W8
+ *      "if you change your persona, tell the user" convention).
  *
  * Never throws — best-effort. Marks the session distilledAt on success or
  * permanent failure to prevent retry loops.
  */
 
-import { appendFileSync, mkdirSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { getQwenProfile } from "@/lib/config/qwen-profile";
 import { upsertSkill } from "@/lib/skills/store";
 import { recordFeedbackDedup } from "@/lib/feedback/feedback";
+import { broadcastEvent } from "@/lib/ws/broadcaster";
 import { getTurnsForSession, getSession, markSessionDistilled } from "./store";
 import type { FlashTurnRow } from "./types";
 
@@ -47,6 +53,7 @@ interface DistillResult {
   skills: DistillSkill[];
   failures: DistillFailure[];
   notable_events: string[];
+  operator_facts: string[];
 }
 
 export interface DistillSummary {
@@ -54,6 +61,7 @@ export interface DistillSummary {
   skillsCreated: number;
   skillsRefined: number;
   feedbackFiled: number;
+  operatorFactsLearned: number;
 }
 
 // ------------------------------------------------------------------
@@ -101,14 +109,18 @@ Extract learnings. Respond ONLY with valid JSON — no markdown fence, no commen
       "detail": "what broke / what was missing and why it matters"
     }
   ],
-  "notable_events": ["One-line summary of a notable action or decision"]
+  "notable_events": ["One-line summary of a notable action or decision"],
+  "operator_facts": ["Durable fact about the operator themself"]
 }
 
 Rules:
 - skills: Only if genuinely reusable across future sessions. Body = actionable recipe. 0–3 items.
 - failures: "bug" = something broke or errored; "enhancement" = friction/unmet need/capability gap. 0–5 items.
 - notable_events: Decisions, completed actions, context worth recalling later. 0–3 items.
-- If nothing worth extracting, return {"skills":[],"failures":[],"notable_events":[]}.
+- operator_facts: Durable facts about the OPERATOR as a person — their name, stated preferences,
+  goals, deadlines, working rhythm, recurring frustrations. NOT task details. Only what is stated
+  or clearly evidenced in the transcript; never guess. 0–3 items.
+- If nothing worth extracting, return {"skills":[],"failures":[],"notable_events":[],"operator_facts":[]}.
 - Never invent anything absent from the transcript.`;
 }
 
@@ -172,9 +184,103 @@ function parseDistillResult(raw: string): DistillResult {
       notable_events: Array.isArray(obj.notable_events)
         ? obj.notable_events.filter((e) => typeof e === "string" && e.trim())
         : [],
+      operator_facts: Array.isArray(obj.operator_facts)
+        ? obj.operator_facts.filter((e) => typeof e === "string" && e.trim())
+        : [],
     };
   } catch {
-    return { skills: [], failures: [], notable_events: [] };
+    return { skills: [], failures: [], notable_events: [], operator_facts: [] };
+  }
+}
+
+// ------------------------------------------------------------------
+// Operator model (persona/USER.md) writer
+// ------------------------------------------------------------------
+
+const LEARNED_SECTION_HEADER = "## Learned about the operator";
+const MAX_LEARNED_FACTS = 40;
+
+function normalizeFact(fact: string): string {
+  return fact.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Pure: merge freshly-learned operator facts into USER.md content. Facts land
+ * as dated bullets under "## Learned about the operator", newest last, deduped
+ * against every existing bullet (normalized containment either way), bounded
+ * to the most recent MAX_LEARNED_FACTS. Returns the new content + how many
+ * facts were actually added.
+ */
+export function mergeOperatorFacts(
+  existing: string,
+  facts: string[],
+  date: string,
+): { content: string; added: number } {
+  const base = existing.trim()
+    ? existing.replace(/\s+$/, "")
+    : "# USER — who the operator is\n\nMaintained by the agent from real conversations.";
+
+  const hasSection = base.includes(LEARNED_SECTION_HEADER);
+  const existingBullets = base
+    .split("\n")
+    .filter((l) => l.trim().startsWith("- "))
+    .map((l) => normalizeFact(l));
+
+  const fresh: string[] = [];
+  for (const fact of facts) {
+    const cleaned = fact.trim().replace(/\s+/g, " ");
+    if (!cleaned) continue;
+    const norm = normalizeFact(cleaned);
+    if (!norm) continue;
+    const known = existingBullets.some((b) => b.includes(norm) || norm.includes(b));
+    const duplicate = fresh.some((f) => {
+      const fn = normalizeFact(f);
+      return fn.includes(norm) || norm.includes(fn);
+    });
+    if (!known && !duplicate) fresh.push(cleaned);
+  }
+  if (fresh.length === 0) return { content: existing, added: 0 };
+
+  let content = hasSection ? base : `${base}\n\n${LEARNED_SECTION_HEADER}`;
+  for (const fact of fresh) content += `\n- ${date}: ${fact}`;
+  content += "\n";
+
+  // Bound the learned section: keep the newest MAX_LEARNED_FACTS bullets.
+  const sectionStart = content.indexOf(LEARNED_SECTION_HEADER);
+  const head = content.slice(0, sectionStart + LEARNED_SECTION_HEADER.length);
+  const tail = content.slice(sectionStart + LEARNED_SECTION_HEADER.length);
+  const tailLines = tail.split("\n");
+  const bulletIdx = tailLines
+    .map((l, i) => (l.trim().startsWith("- ") ? i : -1))
+    .filter((i) => i >= 0);
+  if (bulletIdx.length > MAX_LEARNED_FACTS) {
+    const drop = new Set(bulletIdx.slice(0, bulletIdx.length - MAX_LEARNED_FACTS));
+    const kept = tailLines.filter((_, i) => !drop.has(i));
+    content = head + kept.join("\n");
+  }
+
+  return { content, added: fresh.length };
+}
+
+/** Merge facts into <brainRoot>/persona/USER.md on disk; announces via SSE. */
+function learnOperatorFacts(brainRoot: string, facts: string[]): number {
+  try {
+    const dir = join(brainRoot, "persona");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "USER.md");
+    const existing = existsSync(path) ? readFileSync(path, "utf-8") : "";
+    const date = new Date().toISOString().slice(0, 10);
+    const { content, added } = mergeOperatorFacts(existing, facts, date);
+    if (added === 0) return 0;
+    writeFileSync(path, content, "utf-8");
+    broadcastEvent("flash:persona_updated", {
+      file: "USER.md",
+      reason: `learned ${added} fact(s) about the operator from a distilled session`,
+      ts: new Date().toISOString(),
+    });
+    return added;
+  } catch {
+    return 0; // best-effort; Drive mount may be dehydrating
   }
 }
 
@@ -207,7 +313,7 @@ export async function distillSession(
   sessionId: string,
   brainRoot?: string | null,
 ): Promise<DistillSummary> {
-  const empty: DistillSummary = { skipped: false, skillsCreated: 0, skillsRefined: 0, feedbackFiled: 0 };
+  const empty: DistillSummary = { skipped: false, skillsCreated: 0, skillsRefined: 0, feedbackFiled: 0, operatorFactsLearned: 0 };
 
   try {
     const session = getSession(sessionId);
@@ -276,16 +382,24 @@ export async function distillSession(
       appendToMemoryNote(root, result.notable_events.slice(0, 3), date);
     }
 
+    // Operator model: only sessions where the peer IS the operator (console/
+    // voice). Channel peers (iMessage senders) and the heartbeat's own sessions
+    // must not write facts about someone else into USER.md.
+    let operatorFactsLearned = 0;
+    if (root && session.peer === "operator" && result.operator_facts.length > 0) {
+      operatorFactsLearned = learnOperatorFacts(root, result.operator_facts.slice(0, 3));
+    }
+
     markSessionDistilled(sessionId);
 
-    const changed = skillsCreated + skillsRefined + feedbackFiled;
+    const changed = skillsCreated + skillsRefined + feedbackFiled + operatorFactsLearned;
     if (changed > 0) {
       console.log(
-        `[flash:distill] ${sessionId}: +${skillsCreated} skills, ${skillsRefined} refined, ${feedbackFiled} feedback`,
+        `[flash:distill] ${sessionId}: +${skillsCreated} skills, ${skillsRefined} refined, ${feedbackFiled} feedback, ${operatorFactsLearned} operator facts`,
       );
     }
 
-    return { skipped: false, skillsCreated, skillsRefined, feedbackFiled };
+    return { skipped: false, skillsCreated, skillsRefined, feedbackFiled, operatorFactsLearned };
   } catch (err) {
     console.warn(`[flash:distill] unexpected error for session ${sessionId}:`, err);
     try { markSessionDistilled(sessionId); } catch { /* ignore */ }

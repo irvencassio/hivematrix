@@ -1123,6 +1123,31 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </div>
       <div id="s_autonomy_desc" class="muted" style="font-size:11px;margin-top:3px;min-height:16px"></div>
       <div class="muted" style="font-size:11px;margin-top:2px">Release, deploy, destructive, and high-risk steps always stop for your approval — at every level.</div>
+
+      <label class="flbl" style="margin-top:16px">Heartbeat</label>
+      <div class="row" style="align-items:center;gap:8px">
+        <input type="checkbox" id="s_hb_enabled" onchange="saveHeartbeat()" style="width:auto" />
+        <span class="muted">Unprompted pulse: the agent checks its HEARTBEAT.md checklist and only speaks up when something matters</span>
+      </div>
+      <div class="row" style="align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap">
+        <span class="muted" style="font-size:11px">Every</span>
+        <input type="number" id="s_hb_interval" min="5" max="720" style="width:60px" onchange="saveHeartbeat()" />
+        <span class="muted" style="font-size:11px">min · quiet</span>
+        <input type="number" id="s_hb_quiet_start" min="0" max="23" placeholder="—" style="width:48px" onchange="saveHeartbeat()" />
+        <span class="muted" style="font-size:11px">–</span>
+        <input type="number" id="s_hb_quiet_end" min="0" max="23" placeholder="—" style="width:48px" onchange="saveHeartbeat()" />
+        <span class="muted" style="font-size:11px">h · morning brief</span>
+        <input type="number" id="s_hb_morning" min="0" max="23" placeholder="off" style="width:48px" onchange="saveHeartbeat()" />
+        <span class="muted" style="font-size:11px">h · evening recap</span>
+        <input type="number" id="s_hb_evening" min="0" max="23" placeholder="off" style="width:48px" onchange="saveHeartbeat()" />
+        <span class="muted" style="font-size:11px">h</span>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:3px">Reports respect the Autonomy dial above (Autonomous acts on its own; Manual observes and proposes), arrive on your notify channels, and appear in the session as messages you can reply to. Daily moments always deliver; leave an hour blank to turn one off.</div>
+      <div class="row" style="margin-top:6px;gap:6px">
+        <button class="sm" onclick="runHeartbeatNow()">💓 Pulse now</button>
+        <button class="sm" onclick="runHeartbeatNow('morning-brief')">☀️ Send morning brief</button>
+        <button class="sm" onclick="runHeartbeatNow('evening-recap')">🌙 Send evening recap</button>
+      </div>
     </div>
     <div id="settingsFeatures" style="display:none">
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -6173,6 +6198,7 @@ async function openSettings() {
   renderSettingsModelControls();
   loadTunnel();
   loadAutonomy();
+  loadHeartbeat();
 }
 
 function renderSettingsModelControls() {
@@ -8241,6 +8267,50 @@ async function saveAutonomy() {
     hmToast("Autonomy: " + level, "ok");
     renderWorkPackages(); refresh();
   } else { hmToast((r && r.error) || "Could not save autonomy"); }
+}
+// Heartbeat (W8 presence layer): pulse + daily moments settings + run-now buttons.
+async function loadHeartbeat() {
+  const enabled = document.getElementById("s_hb_enabled");
+  if (!enabled) return;
+  try {
+    const r = await api("/settings/heartbeat");
+    const hb = r && r.heartbeat;
+    if (!hb) return;
+    enabled.checked = hb.enabled === true;
+    document.getElementById("s_hb_interval").value = hb.intervalMinutes;
+    document.getElementById("s_hb_quiet_start").value = hb.quietHours ? hb.quietHours.startHour : "";
+    document.getElementById("s_hb_quiet_end").value = hb.quietHours ? hb.quietHours.endHour : "";
+    document.getElementById("s_hb_morning").value = hb.morningBriefHour === null ? "" : hb.morningBriefHour;
+    document.getElementById("s_hb_evening").value = hb.eveningRecapHour === null ? "" : hb.eveningRecapHour;
+  } catch (e) { /* settings can still render without it */ }
+}
+async function saveHeartbeat() {
+  const num = function (id) {
+    const raw = document.getElementById(id).value;
+    return raw === "" ? null : parseInt(raw, 10);
+  };
+  const qs = num("s_hb_quiet_start"), qe = num("s_hb_quiet_end");
+  const patch = {
+    enabled: document.getElementById("s_hb_enabled").checked,
+    quietHours: qs !== null && qe !== null ? { startHour: qs, endHour: qe } : null,
+    morningBriefHour: num("s_hb_morning"),
+    eveningRecapHour: num("s_hb_evening"),
+  };
+  const interval = num("s_hb_interval");
+  if (interval !== null) patch.intervalMinutes = interval;
+  const r = await api("/settings/heartbeat", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(patch) });
+  if (r && r.heartbeat) {
+    hmToast(r.heartbeat.enabled ? "Heartbeat on — every " + r.heartbeat.intervalMinutes + " min" : "Heartbeat off", "ok");
+    loadHeartbeat();
+  } else { hmToast((r && r.error) || "Could not save heartbeat"); }
+}
+async function runHeartbeatNow(moment) {
+  hmToast(moment ? "Composing " + moment.replace("-", " ") + "…" : "Running heartbeat pulse…", "ok");
+  const body = moment ? JSON.stringify({ moment }) : "{}";
+  const r = await api("/heartbeat/run", { method:"POST", headers:{"Content-Type":"application/json"}, body });
+  if (r && (r.report || r.text)) hmToast((moment ? "Delivered: " : "💓 ") + String(r.report || r.text).slice(0, 120), "ok");
+  else if (r && r.stoodDown) hmToast("Heartbeat ran — nothing worth reporting (stood down)", "ok");
+  else hmToast((r && r.error) || "Heartbeat run failed");
 }
 async function saveAppIconChoice() {
   const appIconChoice = document.getElementById("s_app_icon").value;
