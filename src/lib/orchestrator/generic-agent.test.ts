@@ -3,7 +3,15 @@ import assert from "node:assert/strict";
 
 import type { ModelProvider } from "@/lib/config/providers";
 import { renderAttachmentBlock } from "@/lib/tasks/attachments";
-import { buildChatCompletionsUrls, buildGenericRequestBody, buildMessages, extractTextToolCalls, genericThinkingInstruction } from "./generic-agent";
+import {
+  buildChatCompletionsUrls,
+  buildGenericRequestBody,
+  buildMessages,
+  buildSmokeGateFinalResult,
+  extractTextToolCalls,
+  genericThinkingInstruction,
+  shouldRunCompletionSmokeGate,
+} from "./generic-agent";
 
 test("generic/local request body uses provider max tokens and leaves cost uncapped", () => {
   const provider: ModelProvider = {
@@ -108,6 +116,20 @@ test("generic/local developer prompt steers simple Python games away from brittl
   assert.match(system, /do not create a venv/i);
   assert.match(system, /pivot/i);
   assert.match(system, /final verification command/i);
+});
+
+test("generic/local completion smoke gate still runs after loop-guarded text-only turns", () => {
+  assert.equal(shouldRunCompletionSmokeGate(["snake_game.py"], true), true);
+  assert.equal(shouldRunCompletionSmokeGate(["snake_game.py"], false), true);
+  assert.equal(shouldRunCompletionSmokeGate([], true), false);
+});
+
+test("generic/local exhausted smoke failures return nonzero with the crash report", () => {
+  const result = buildSmokeGateFinalResult("done", 2, "Traceback: boom", 2);
+
+  assert.equal(result.code, 1);
+  assert.match(result.result, /Code still fails to run after 2 fix attempts/);
+  assert.match(result.result, /Traceback: boom/);
 });
 
 test("generic/local extracts Qwen textual tool calls", () => {

@@ -37,6 +37,24 @@ const LOOP_BREAK_THRESHOLD = 5; // also inject a user-turn forcing a final answe
 // Bounded so a model that can't fix its own bug can't loop forever.
 const MAX_SMOKE_RETRIES = 2;
 
+export function shouldRunCompletionSmokeGate(touchedFiles: readonly string[], _forceTextOnlyTurn: boolean): boolean {
+  return touchedFiles.length > 0;
+}
+
+export function buildSmokeGateFinalResult(
+  finalText: string,
+  smokeRetries: number,
+  smokeReport: string,
+  maxSmokeRetries = MAX_SMOKE_RETRIES,
+): { code: 0 | 1; result: string } {
+  let result = finalText;
+  const failedAfterRetries = smokeRetries >= maxSmokeRetries && !!smokeReport;
+  if (failedAfterRetries) {
+    result += `\n\n[Verification gate] Code still fails to run after ${maxSmokeRetries} fix attempts:\n${smokeReport.slice(0, 1500)}`;
+  }
+  return { code: failedAfterRetries ? 1 : 0, result };
+}
+
 // Incrementing fake PID for generic agents (negative to avoid collision with real PIDs)
 let fakePidCounter = -1000;
 
@@ -775,12 +793,13 @@ async function runAgentLoop(
       // all pass. On a crash, feed the traceback back and force a fix — up to a
       // bounded number of times so a model that can't self-repair still terminates.
       const touched = toolContext?.touchedFiles ? [...toolContext.touchedFiles] : [];
-      if (touched.length > 0 && !forceTextOnlyTurn) {
+      if (shouldRunCompletionSmokeGate(touched, forceTextOnlyTurn)) {
         const smoke = await runCodeSmoke(projectPath, touched);
         if (smoke.ran && !smoke.ok) {
           smokeReport = smoke.report; // remember the crash for the final summary
           if (smokeRetries < MAX_SMOKE_RETRIES) {
             smokeRetries += 1;
+            forceTextOnlyTurn = false;
             onEvent(taskId, {
               type: "tool_result",
               content: `[Verification gate] smoke run failed (attempt ${smokeRetries}/${MAX_SMOKE_RETRIES}); sending crash back to the model.`,
@@ -788,8 +807,8 @@ async function runAgentLoop(
             messages.push({ role: "user", content: smoke.report });
             continue; // keep tools enabled so the model can fix the code
           }
-          // Retries exhausted: accept the turn but the code still crashes. The
-          // final result records that so the task isn't reported as clean.
+          // Retries exhausted: finish with a nonzero exit so the task lands as
+          // failed instead of review/done.
           break;
         }
         smokeReport = ""; // clean run (or nothing crashed) — no failure to surface
@@ -797,21 +816,13 @@ async function runAgentLoop(
       // Passed the gate (or nothing to verify): model is done.
       break;
     }
-
-    // After a forced text-only turn the model can't call tools, so it will
-    // always land in the branch above. Reset the flag defensively in case
-    // the model somehow still returns tool calls (shouldn't happen, but safe).
-    if (forceTextOnlyTurn) break;
   }
 
   // If the code never passed the smoke gate, surface it in the result so the task
   // is not reported as a clean success on top of code that crashes when run.
-  let finalResult = fullText.slice(-2000);
-  if (smokeRetries >= MAX_SMOKE_RETRIES && smokeReport) {
-    finalResult += `\n\n[Verification gate] Code still fails to run after ${MAX_SMOKE_RETRIES} fix attempts:\n${smokeReport.slice(0, 1500)}`;
-  }
+  const finalResult = buildSmokeGateFinalResult(fullText.slice(-2000), smokeRetries, smokeReport);
 
-  return { code: 0, result: finalResult, turns, totalTokens, inputTokens, outputTokens };
+  return { code: finalResult.code, result: finalResult.result, turns, totalTokens, inputTokens, outputTokens };
 }
 
 /**
