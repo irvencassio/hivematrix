@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { renderAttachmentBlock } from "@/lib/tasks/attachments";
-import { buildClaudeSpawnArgs } from "./subprocess";
+import { buildClaudeSpawnArgs, isLocalEndpointModel } from "./subprocess";
 
 test("Claude spawn args omit max-budget flag when budget is uncapped", () => {
   const args = buildClaudeSpawnArgs({
@@ -55,6 +55,19 @@ test("Claude spawn args omit fast-mode override when disabled", () => {
   });
 
   assert.equal(args.includes("--settings"), false);
+});
+
+test("local endpoint override applies to local models but never Claude aliases", () => {
+  // Local models (however named) get ANTHROPIC_BASE_URL pointed at the provider.
+  assert.equal(isLocalEndpointModel("deepseek-v4-flash"), true);
+  assert.equal(isLocalEndpointModel("qwen/qwen3.6-27b"), true);
+  // Claude full ids and bare CLI aliases must go to the real API — routing
+  // "sonnet" at the local server made the CLI report the model as missing.
+  assert.equal(isLocalEndpointModel("claude-sonnet-5"), false);
+  assert.equal(isLocalEndpointModel("sonnet"), false);
+  assert.equal(isLocalEndpointModel("opus"), false);
+  assert.equal(isLocalEndpointModel("haiku"), false);
+  assert.equal(isLocalEndpointModel(undefined), false);
 });
 
 test("Claude prompt args preserve formatted attachment paths", () => {

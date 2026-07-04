@@ -93,6 +93,17 @@ function buildClaudeEnv(profile?: string): Record<string, string> {
   return env;
 }
 
+/**
+ * True when the model should be served from the local provider endpoint
+ * (ANTHROPIC_BASE_URL override). Claude models may be bare aliases
+ * ("sonnet"/"opus") that don't start with "claude-" — never point those at the
+ * local endpoint, or the CLI reports the model as nonexistent/inaccessible
+ * when the local server rejects it.
+ */
+export function isLocalEndpointModel(model: string | undefined): boolean {
+  return Boolean(model && claudeShortName(model) === null && !model.startsWith("claude-"));
+}
+
 export interface AuthStatus {
   loggedIn: boolean;
   email?: string;
@@ -359,7 +370,9 @@ export async function spawnAgent(
     const { routeByRole } = await import("@/lib/routing/router");
     const { resolveModelId } = await import("@/lib/routing/model-resolver");
     const route = routeByRole("code-critical", getConnectivityPolicy());
-    const resolved = resolveModelId(route.tier, { noLocalOverrides: true });
+    // Honor role overrides, including local ones — Mixed mode explicitly allows
+    // a local model as the Coding choice (see role-model-overrides design).
+    const resolved = resolveModelId(route.tier);
     onEvent(taskId, { type: "log", content: `[mixed] routed code-critical → ${route.tier}${route.frontierReviewDebt ? " (frontier review queued)" : ""} → ${resolved ?? "unavailable"}` });
     if (route.frontierReviewDebt) {
       // Record the debt so it can be replayed as a frontier review when cloud-ok returns.
@@ -386,7 +399,9 @@ export async function spawnAgent(
     const { resolveModelId } = await import("@/lib/routing/model-resolver");
     const policy = getConnectivityPolicy();
     const route = routeByRole("code-critical", policy, { noLocal: true });
-    const resolved = resolveModelId(route.tier);
+    // noLocalOverrides: a local model configured as a role override must not
+    // leak into the cloud-only posture.
+    const resolved = resolveModelId(route.tier, { noLocalOverrides: true });
     onEvent(taskId, { type: "log", content: `[cloud-only] routed code-critical → ${route.tier} → ${resolved ?? "unavailable"}` });
     model = resolved ?? undefined;
     if (!model) {
@@ -650,8 +665,7 @@ export async function spawnAgent(
   // Loopback daemon port for the outbound-channel curls in the routing prompt.
   env.HIVE_DAEMON_PORT = process.env.HIVEMATRIX_PORT ?? "3747";
 
-  // For local models, inject the provider endpoint as env vars
-  if (model && !model.startsWith("claude-")) {
+  if (isLocalEndpointModel(model)) {
     const localConfig = getLocalModelConfig();
     if (localConfig?.endpoint) {
       env.ANTHROPIC_BASE_URL = localConfig.endpoint;
