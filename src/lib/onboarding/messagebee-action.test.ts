@@ -6,6 +6,12 @@ import { tmpdir } from "node:os";
 
 const TMP = mkdtempSync(join(tmpdir(), "hm-mb-action-test-"));
 process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
+// Isolate HOME (before importing anything that reads the license) so the gate
+// lookups don't pick up the operator's real ~/.hivematrix/license.json — these
+// tests assert the Free-tier (Pro-gated) path and must not depend on whether a
+// license happens to be installed on the machine running them.
+const _prevHome = process.env.HOME;
+process.env.HOME = TMP;
 
 const { getDb, _resetDbForTests } = await import("@/lib/db");
 const { configureMessageBee } = await import("./actions");
@@ -17,6 +23,8 @@ getDb();
 test.after(() => {
   _resetDbForTests();
   delete process.env.HIVEMATRIX_DB_PATH;
+  if (_prevHome === undefined) delete process.env.HOME;
+  else process.env.HOME = _prevHome;
   rmSync(TMP, { recursive: true, force: true });
 });
 
