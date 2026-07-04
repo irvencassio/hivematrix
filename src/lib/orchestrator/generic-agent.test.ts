@@ -22,6 +22,24 @@ test("generic/local request body uses provider max tokens and leaves cost uncapp
   assert.equal(body.model, "qwen-local");
   assert.equal(body.max_tokens, 16384);
   assert.equal("maxBudgetUsd" in body, false);
+  // Non-dwarfstar backends never receive reasoning_effort (they may reject it).
+  assert.equal("reasoning_effort" in body, false);
+});
+
+test("generic/local dwarfstar body forwards the task thinking mode as reasoning_effort", () => {
+  const provider: ModelProvider = {
+    name: "dwarfstar",
+    endpoint: "http://127.0.0.1:8000/v1",
+    apiKey: "",
+    supportsTools: true,
+    maxTokens: 8192,
+  };
+  const msgs = [{ role: "user", content: "Do the task" }];
+
+  assert.equal(buildGenericRequestBody(provider, "deepseek-v4-flash", msgs, undefined, "low").reasoning_effort, "low");
+  assert.equal(buildGenericRequestBody(provider, "deepseek-v4-flash", msgs, undefined, "xhigh").reasoning_effort, "high");
+  // Unset / "auto" default falls to the model's own default tier ("max").
+  assert.equal(buildGenericRequestBody(provider, "deepseek-v4-flash", msgs).reasoning_effort, "max");
 });
 
 test("generic/local max thinking is represented as a portable system instruction", () => {

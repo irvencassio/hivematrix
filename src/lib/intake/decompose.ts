@@ -28,6 +28,12 @@ export const MAX_STEPS = 12;
 export const DECOMPOSE_MAX_TOKENS = 1024;
 export const DECOMPOSE_MAX_TOKENS_THINKING = 4096;
 
+// A local reasoning model spends ~20s prefilling the prompt before its first
+// token, plus the thinking pass, so the chat client's 12s default aborts every
+// decompose. This budget lets the array actually land; on genuine unavailability
+// the call still fails and intake uses the deterministic split.
+export const DECOMPOSE_TIMEOUT_MS = 60_000;
+
 /** Goal Flight context that makes the split goal-aware and criteria-covering. */
 export interface DecomposeGoalContext {
   goal: string;
@@ -143,7 +149,17 @@ export async function decompose(input: IntakeInput, deps: DecomposeDeps = {}): P
   const maxTokens = thinking ? DECOMPOSE_MAX_TOKENS_THINKING : DECOMPOSE_MAX_TOKENS;
 
   try {
-    const reply = await client(buildMessages(input.description, deps.goalFlight ?? null), { maxTokens, temperature: 0 });
+    // A reasoning model spends ~20s just prefilling the prompt before it emits a
+    // token, so the chat client's 12s default would abort every thinking-mode
+    // decompose and silently fall back to the regex split. Give the reasoning
+    // pass room to land, and cap its effort — this is a mechanical list, not a
+    // task that benefits from deep thinking.
+    const reply = await client(buildMessages(input.description, deps.goalFlight ?? null), {
+      maxTokens,
+      temperature: 0,
+      timeoutMs: DECOMPOSE_TIMEOUT_MS,
+      reasoningEffort: "low",
+    });
     const steps = parseSteps(reply);
     if (steps.length < 2) return null;
     return steps.slice(0, MAX_STEPS);

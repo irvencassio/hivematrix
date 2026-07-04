@@ -31,6 +31,12 @@ export interface ChatOpts {
   timeoutMs?: number;
   model?: string;
   endpoint?: string;
+  /**
+   * DeepSeek/DwarfStar reasoning tier. The server defaults to high-effort
+   * thinking; a lighter value cuts <think> tokens (and latency) for mechanical
+   * calls. Ignored by backends that don't honor the field.
+   */
+  reasoningEffort?: "low" | "medium" | "high" | "max";
   fetchImpl?: typeof fetch;
   runCli?: CliRunner;
 }
@@ -62,6 +68,7 @@ export async function localChatComplete(messages: ChatMessage[], opts: ChatOpts 
     stream: false,
     max_tokens: opts.maxTokens ?? 1024,
     temperature: opts.temperature ?? 0,
+    ...(opts.reasoningEffort ? { reasoning_effort: opts.reasoningEffort } : {}),
   });
 
   let lastErr: unknown = null;

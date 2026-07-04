@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { decompose, parseSteps, DECOMPOSE_MAX_TOKENS, DECOMPOSE_MAX_TOKENS_THINKING } from "./decompose";
+import { decompose, parseSteps, DECOMPOSE_MAX_TOKENS, DECOMPOSE_MAX_TOKENS_THINKING, DECOMPOSE_TIMEOUT_MS } from "./decompose";
 import type { ChatComplete, ChatMessage } from "@/lib/models/chat-client";
 
 function fakeClient(reply: string): ChatComplete {
@@ -79,6 +79,23 @@ test("decompose sizes the token budget up for a reasoning (thinking) model", asy
     { client, connectivityMode: "cloud-ok", thinkingEnabled: false },
   );
   assert.equal(seenMaxTokens, DECOMPOSE_MAX_TOKENS);
+});
+
+test("decompose gives the reasoning pass a real timeout and caps its effort", async () => {
+  let seen: { timeoutMs?: number; reasoningEffort?: string } = {};
+  const client: ChatComplete = async (_messages, opts) => {
+    seen = { timeoutMs: opts?.timeoutMs, reasoningEffort: opts?.reasoningEffort };
+    return '["A","B"]';
+  };
+  await decompose(
+    { description: "do stuff" },
+    { client, connectivityMode: "cloud-ok", thinkingEnabled: true },
+  );
+  // Must exceed the chat client's 12s default, which otherwise aborts every
+  // thinking-mode decompose before the model's ~20s prefill even finishes.
+  assert.equal(seen.timeoutMs, DECOMPOSE_TIMEOUT_MS);
+  assert.ok((seen.timeoutMs ?? 0) > 12_000);
+  assert.equal(seen.reasoningEffort, "low");
 });
 
 test("decompose returns null when no client is configured", async () => {

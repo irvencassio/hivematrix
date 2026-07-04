@@ -18,7 +18,7 @@ import { formatSkillIndex, skillRunsOn } from "@/lib/skills/contracts";
 import { getAgentProfile } from "@/lib/config/agent-profiles";
 import { buildBrainMemoryBundle, buildBrainIndexBlock } from "@/lib/brain/memory-bundle";
 import { brainDocPolicyText } from "@/lib/brain/settings";
-import { resolveThinkingMode } from "@/lib/config/budget-policy";
+import { resolveThinkingMode, dwarfstarReasoningEffort } from "@/lib/config/budget-policy";
 
 const MAX_TURNS = 50;
 const LOCAL_OPENAI_COMPATIBLE_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai", "dwarfstar"]);
@@ -425,7 +425,8 @@ export function buildGenericRequestBody(
   provider: ModelProvider,
   modelId: string,
   messages: Array<Record<string, unknown>>,
-  profileTools?: ChatTool[]
+  profileTools?: ChatTool[],
+  thinkingMode?: string | null
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: modelId,
@@ -433,6 +434,14 @@ export function buildGenericRequestBody(
     stream: true,
     max_tokens: provider.maxTokens,
   };
+
+  // DwarfStar (local DeepSeek) defaults every request to high-effort thinking,
+  // which dominates per-turn latency. Forward the task's thinking mode as
+  // `reasoning_effort` so lighter tasks actually decode faster. Only sent to
+  // dwarfstar — other local backends may reject the field.
+  if (provider.name === "dwarfstar") {
+    body.reasoning_effort = dwarfstarReasoningEffort(thinkingMode);
+  }
 
   if (provider.supportsTools && profileTools && profileTools.length > 0) {
     body.tools = profileTools;
@@ -458,7 +467,8 @@ async function callChatCompletions(
   modelId: string,
   messages: Array<Record<string, unknown>>,
   signal: AbortSignal,
-  profileTools?: ChatTool[]
+  profileTools?: ChatTool[],
+  thinkingMode?: string | null
 ): Promise<Response> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -468,7 +478,7 @@ async function callChatCompletions(
     headers["Authorization"] = `Bearer ${provider.apiKey}`;
   }
 
-  const body = buildGenericRequestBody(provider, modelId, messages, profileTools);
+  const body = buildGenericRequestBody(provider, modelId, messages, profileTools, thinkingMode);
   let lastError: unknown = null;
   let lastResponse: Response | null = null;
 
@@ -558,7 +568,7 @@ async function runAgentLoop(
     let response: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        response = await callChatCompletions(provider, modelId, messages, controller.signal, forceTextOnlyTurn ? [] : profileTools);
+        response = await callChatCompletions(provider, modelId, messages, controller.signal, forceTextOnlyTurn ? [] : profileTools, thinkingMode);
       } catch (err) {
         if (controller.signal.aborted) return { code: 1, result: "Aborted", turns, totalTokens, inputTokens, outputTokens };
         if (attempt === 0) {

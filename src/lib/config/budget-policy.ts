@@ -48,3 +48,18 @@ export function codexReasoningEffort(value: unknown): "low" | "medium" | "high" 
   if (mode === "low" || mode === "medium" || mode === "high") return mode;
   return "xhigh";
 }
+
+/**
+ * Map a thinking mode to the DeepSeek/DwarfStar `reasoning_effort` request field.
+ * The dwarfstar server defaults every chat request to high-effort thinking, which
+ * dominates local-turn latency (hundreds–thousands of <think> tokens at ~28 t/s).
+ * Sending an explicit effort makes the per-task thinking mode actually reach the
+ * model so lighter tasks decode faster. "max" needs a very large context and
+ * otherwise degrades to high server-side.
+ */
+export function dwarfstarReasoningEffort(value: unknown): "low" | "medium" | "high" | "max" {
+  const mode = resolveThinkingMode(value);
+  if (mode === "low" || mode === "medium" || mode === "high") return mode;
+  if (mode === "xhigh") return "high";
+  return "max"; // "max" / "ultrathink" / default
+}
