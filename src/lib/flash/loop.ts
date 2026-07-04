@@ -334,11 +334,29 @@ async function handleEscalateToWorkPackage(
 // Main agent loop
 // ------------------------------------------------------------------
 
+/**
+ * Read-only tool names — the set an observe-only pass (manual-autonomy
+ * heartbeat, daily briefs) is allowed to call. HARD enforcement: gating the
+ * tool list is the guarantee; prompt guidance alone is not (the prompt embeds
+ * operator-editable and inbound-derived text).
+ */
+export const READ_ONLY_FLASH_TOOLS: ReadonlySet<string> = new Set([
+  "brain_search",
+  "workflow_inbox",
+  "code_graph",
+]);
+
+export interface FlashLoopOptions {
+  /** When set, only tools passing the filter are OFFERED to the model. */
+  allowedTools?: (name: string) => boolean;
+}
+
 export async function runFlashAgentLoop(
   messages: FlashMessage[],
   emit: FlashEmitter,
   sessionId: string,
   brainRoot: string | null,
+  options: FlashLoopOptions = {},
 ): Promise<string> {
   const profile = getQwenProfile();
   if (!profile) {
@@ -349,7 +367,10 @@ export async function runFlashAgentLoop(
 
   const policy = getConnectivityPolicy();
   const laneTools = availableLaneTools(policy);
-  const allTools = [...laneTools, ...FLASH_ONLY_TOOLS];
+  let allTools = [...laneTools, ...FLASH_ONLY_TOOLS];
+  if (options.allowedTools) {
+    allTools = allTools.filter((t) => options.allowedTools!(t.function.name));
+  }
 
   const ctx = {
     projectPath: brainRoot ?? homedir(),
@@ -418,6 +439,11 @@ export async function runFlashAgentLoop(
       let ok = true;
 
       try {
+        // Execution-time gate too: a model can emit a call for a tool it was
+        // never offered; the filter must hold at dispatch, not just at offer.
+        if (options.allowedTools && !options.allowedTools(name)) {
+          throw new Error(`tool ${name} is not permitted in this pass`);
+        }
         if (name === "persona_update") {
           result = await handlePersonaUpdate(argsObj, emit, brainRoot);
         } else if (name === "deep_think") {

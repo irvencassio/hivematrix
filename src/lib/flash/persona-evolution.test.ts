@@ -64,7 +64,7 @@ test("synthesizeOperatingNotes turns top clusters into concise notes", () => {
   );
   assert.equal(notes.length, 2);
   assert.match(notes[0], /Browser auth expired/);
-  assert.match(notes[0], /5×/);
+  assert.doesNotMatch(notes[0], /5×/); // live counts would defeat dedup as clusters grow
 });
 
 test("autonomous: evolution appends notes to SOUL.md and announces (no proposals)", async () => {

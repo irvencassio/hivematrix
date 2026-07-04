@@ -36,6 +36,8 @@ export async function runFlashTurnText(opts: {
   channel: FlashTurnInput["channel"];
   peer: string;
   sessionId?: string;
+  /** Restrict which tools this turn may use (offer + dispatch). */
+  allowedTools?: (name: string) => boolean;
 }): Promise<{ reply: string; sessionId: string; turnId: string }> {
   const brainRoot = configuredBrainRootDir();
   const session = getOrCreateSession(opts.channel, opts.peer, opts.sessionId);
@@ -55,7 +57,9 @@ export async function runFlashTurnText(opts: {
     done: () => {},
   };
 
-  const fullText = await runFlashAgentLoop(messages, emit, session.id, brainRoot);
+  const fullText = await runFlashAgentLoop(messages, emit, session.id, brainRoot, {
+    allowedTools: opts.allowedTools,
+  });
   const assistantTurn = appendTurn(session.id, "assistant", fullText);
   return { reply: fullText, sessionId: session.id, turnId: assistantTurn.id };
 }

@@ -4,7 +4,7 @@ import { Task } from "@/lib/db";
 import { broadcast } from "@/lib/ws/broadcaster";
 import { notifySuperwhisperPermissionRequest } from "@/lib/integrations/superwhisper-hive";
 import { classifyAutoApprovalRequest, evaluateAutoApprovalPolicy, getAutoApprovalPolicy } from "@/lib/voice/auto-approval-policy";
-import { trustAllowsAutoApproval, readTrustLedger, recordApprovalOutcome } from "@/lib/approvals/trust-ledger";
+import { trustAllowsAutoApproval, readTrustLedger, recordApprovalOutcome, recordTrustAutoApproval } from "@/lib/approvals/trust-ledger";
 import { getAutonomyLevel } from "@/lib/config/autonomy";
 import { recordAudit } from "@/lib/audit/audit";
 
@@ -385,7 +385,10 @@ function maybeAutoApproveRequest(request: ApprovalRequest, decisionFile: string)
     //    safety floor applies — only checkpoint/lowRiskTool are ever eligible.
     try {
       const trust = trustAllowsAutoApproval({ category, tool: request.tool }, getAutonomyLevel(), readTrustLedger());
-      if (trust.allowed) reason = `earned-trust (${trust.reason})`;
+      if (trust.allowed && trust.key) {
+        reason = `earned-trust (${trust.reason})`;
+        recordTrustAutoApproval(trust.key); // drives the every-Nth spot-check
+      }
     } catch { /* trust is an optimization; never block on it */ }
   }
   if (!reason) return;

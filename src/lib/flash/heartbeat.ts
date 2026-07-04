@@ -38,6 +38,7 @@ import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { getAutonomyLevel, type AutonomyLevel } from "@/lib/config/autonomy";
 import { broadcastEvent } from "@/lib/ws/broadcaster";
 import { appendTurn, getOrCreateSession } from "./store";
+import { READ_ONLY_FLASH_TOOLS } from "./loop";
 import { runFlashTurnText } from "./index";
 
 export const HEARTBEAT_STAND_DOWN = "HEARTBEAT_STAND_DOWN";
@@ -129,7 +130,16 @@ export function getHeartbeatConfig(): HeartbeatConfig {
 
 export function setHeartbeatConfig(patch: Partial<HeartbeatConfig>): HeartbeatConfig {
   const config = loadHiveConfig();
-  const next = parseHeartbeatConfig({ ...getHeartbeatConfig(), ...patch });
+  const current = getHeartbeatConfig();
+  const next = parseHeartbeatConfig({ ...current, ...patch });
+  // Enabling seeds the daily-moment markers to "now": moments start at their
+  // NEXT scheduled hour instead of firing a stale "morning brief" (followed one
+  // tick later by the recap) the evening the feature is switched on.
+  if (next.enabled && !current.enabled) {
+    const nowIso = new Date().toISOString();
+    if (!("lastMorningBriefAt" in patch)) next.lastMorningBriefAt = current.lastMorningBriefAt ?? nowIso;
+    if (!("lastEveningRecapAt" in patch)) next.lastEveningRecapAt = current.lastEveningRecapAt ?? nowIso;
+  }
   config.heartbeat = next;
   saveHiveConfig(config);
   return next;
@@ -296,6 +306,18 @@ function defaultAppendOperatorTurn(text: string): void {
   appendTurn(operatorSession.id, "assistant", text);
 }
 
+/**
+ * Pure: which tools a heartbeat pulse may use at each autonomy level. Returns
+ * undefined for autonomous (full set — lane gates still apply inside).
+ */
+export function heartbeatToolFilter(autonomy: AutonomyLevel): ((name: string) => boolean) | undefined {
+  if (autonomy === "autonomous") return undefined;
+  if (autonomy === "standard") {
+    return (name) => READ_ONLY_FLASH_TOOLS.has(name) || name === "escalate_to_work_package";
+  }
+  return (name) => READ_ONLY_FLASH_TOOLS.has(name); // manual: observe only
+}
+
 export interface HeartbeatRunResult {
   ran: boolean;
   stoodDown: boolean;
@@ -320,16 +342,33 @@ export async function runHeartbeatOnce(deps: HeartbeatDeps = {}): Promise<Heartb
     statusSnapshot = deps.composeStatus ? await deps.composeStatus() : "";
   } catch { /* snapshot is best-effort */ }
 
+  const autonomy = getAutonomyLevel();
   const prompt = buildHeartbeatPrompt({
     checklist,
     statusSnapshot,
-    autonomy: getAutonomyLevel(),
+    autonomy,
     now,
   });
 
   const runTurn = deps.runTurn ?? runFlashTurnText;
-  const result = await runTurn({ text: prompt, channel: "console", peer: "heartbeat" });
+  const result = await runTurn({
+    text: prompt,
+    channel: "console",
+    peer: "heartbeat",
+    // HARD tool gate (the prompt guidance alone is not a guarantee — the prompt
+    // embeds operator-editable and inbound-derived text): manual = read-only
+    // observation; standard = read-only + propose work; autonomous = full set
+    // (the lanes' own trust/protected-action gates still apply inside).
+    allowedTools: heartbeatToolFilter(autonomy),
+  });
   const report = extractHeartbeatReport(result.reply);
+
+  // The heartbeat session never goes idle while enabled — without pruning its
+  // turns (each carrying the full prompt) grow forever.
+  try {
+    const { pruneSessionTurns } = await import("./store");
+    pruneSessionTurns(result.sessionId, 100);
+  } catch { /* best effort */ }
 
   if (report === null) {
     broadcastEvent("flash:heartbeat", { stoodDown: true, ts: now.toISOString() });
@@ -365,7 +404,13 @@ export async function runDailyMomentOnce(
 
   const prompt = buildDailyMomentPrompt({ moment, statusSnapshot, now });
   const runTurn = deps.runTurn ?? runFlashTurnText;
-  const result = await runTurn({ text: prompt, channel: "console", peer: "heartbeat" });
+  const result = await runTurn({
+    text: prompt,
+    channel: "console",
+    peer: "heartbeat",
+    // Daily moments are reports, not action passes — read-only tools always.
+    allowedTools: (name) => READ_ONLY_FLASH_TOOLS.has(name),
+  });
   const text = result.reply.replace(/<think>[\s\S]*?<\/think>/g, "").trim() || statusSnapshot || "(no report)";
 
   try {
@@ -384,6 +429,15 @@ export async function runDailyMomentOnce(
     try { await deps.notify(`${icon} ${title}\n${text}`); } catch { /* best effort */ }
   }
   broadcastEvent("flash:heartbeat", { moment, report: text, ts: now.toISOString() });
+  // Mark the moment as run so a manual send (console button / POST /heartbeat/run)
+  // isn't followed by the scheduled one the same day.
+  try {
+    setHeartbeatConfig(
+      moment === "morning-brief"
+        ? { lastMorningBriefAt: now.toISOString() }
+        : { lastEveningRecapAt: now.toISOString() },
+    );
+  } catch { /* best effort */ }
   return { text, pushed };
 }
 

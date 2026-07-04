@@ -25,15 +25,19 @@ import { join } from "path";
 import type { AutoApprovalCategory } from "@/lib/voice/auto-approval-policy";
 import type { AutonomyLevel } from "@/lib/config/autonomy";
 
-/** Categories that MAY earn trust. Mirrors the auto-approval allowlist exactly. */
-const TRUST_ELIGIBLE: ReadonlySet<AutoApprovalCategory> = new Set(["checkpoint", "lowRiskTool"]);
-
 /** Approvals of a class needed before it auto-approves under autonomous mode. */
 export const DEFAULT_TRUST_THRESHOLD = 3;
+
+/** Every Nth trust auto-approval is re-prompted to the operator instead, so a
+ * trusted class stays contestable — without this, auto-approvals bypass
+ * resolveApproval forever and denial-based revocation could never trigger. */
+export const SPOT_CHECK_EVERY = 10;
 
 export interface TrustEntry {
   approvals: number;
   denials: number;
+  /** Auto-approvals granted by earned trust (drives the spot-check cadence). */
+  autoApprovals?: number;
   lastApprovalAt?: string;
   lastDenialAt?: string;
 }
@@ -42,16 +46,14 @@ export type TrustLedger = Record<string, TrustEntry>;
 
 /**
  * Pure: the stable ledger key for an approval class, or null when the class is
- * NOT trust-eligible (the safety floor). Checkpoints are one class regardless of
- * gate (mirrors classifyAutoApprovalRequest, which collapses every checkpoint to
- * the "checkpoint" category); lowRiskTool is keyed by tool name so distinct tools
- * earn trust independently.
+ * NOT trust-eligible (the safety floor). Only `checkpoint` can ever earn trust —
+ * classifyAutoApprovalRequest collapses every checkpoint gate to one category,
+ * and no other category it produces (content/tool) is eligible. (A per-tool
+ * "lowRiskTool" class existed briefly but was unreachable dead code: nothing in
+ * the classify path ever produces that category.)
  */
-export function trustKey(category: AutoApprovalCategory, tool?: string): string | null {
-  if (!TRUST_ELIGIBLE.has(category)) return null;
-  if (category !== "lowRiskTool") return category;
-  const suffix = (tool ?? "").trim().toLowerCase().replace(/\s+/g, "-").slice(0, 60);
-  return suffix ? `${category}:${suffix}` : category;
+export function trustKey(category: AutoApprovalCategory, _tool?: string): string | null {
+  return category === "checkpoint" ? "checkpoint" : null;
 }
 
 /** Pure: has this class earned auto-approval? Clean record = >= threshold approvals AND zero denials. */
@@ -88,7 +90,22 @@ export function trustAllowsAutoApproval(
       key,
     };
   }
+  // Periodic spot-check: every Nth auto-approval goes back to the operator so
+  // a trusted class stays contestable (denials remain reachable).
+  if (((entry!.autoApprovals ?? 0) + 1) % SPOT_CHECK_EVERY === 0) {
+    return { allowed: false, reason: `spot-check: re-prompting after ${entry!.autoApprovals} auto-approvals of ${key}`, key };
+  }
   return { allowed: true, reason: `earned trust for ${key} (${entry!.approvals} clean approvals)`, key };
+}
+
+/** Count one trust-granted auto-approval against its class (spot-check cadence). */
+export function recordTrustAutoApproval(key: string): void {
+  try {
+    const ledger = readTrustLedger();
+    const entry = ledger[key] ?? { approvals: 0, denials: 0 };
+    ledger[key] = { ...entry, autoApprovals: (entry.autoApprovals ?? 0) + 1 };
+    writeTrustLedger(ledger);
+  } catch { /* best effort */ }
 }
 
 /**
@@ -99,7 +116,14 @@ export function trustAllowsAutoApproval(
 export function applyOutcome(entry: TrustEntry | undefined, approved: boolean, at: string): TrustEntry {
   const base: TrustEntry = entry ?? { approvals: 0, denials: 0 };
   return approved
-    ? { ...base, approvals: base.approvals + 1, lastApprovalAt: at }
+    ? {
+        ...base,
+        approvals: base.approvals + 1,
+        // An operator approval also advances the grant counter — this is what
+        // moves a spot-check past its boundary instead of re-prompting forever.
+        autoApprovals: (base.autoApprovals ?? 0) + 1,
+        lastApprovalAt: at,
+      }
     : { ...base, denials: base.denials + 1, lastDenialAt: at };
 }
 

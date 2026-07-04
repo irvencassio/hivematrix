@@ -30,16 +30,11 @@ import { broadcastEvent } from "@/lib/ws/broadcaster";
 import { recordAudit } from "@/lib/audit/audit";
 import { listFeedback, recordFeedbackDedup } from "@/lib/feedback/feedback";
 import { clusterFeedback, type FeedbackCluster } from "@/lib/feedback/pattern-detection";
+import { SOUL_NOTES_SPEC, mergeDatedSection } from "@/lib/brain/persona-section";
 
 export const PERSONA_EVOLUTION_SOURCE = "persona-evolution";
-const OPERATING_NOTES_HEADER = "## Learned operating notes";
-const MAX_NOTES = 25;
 const MAX_NOTES_PER_PASS = 2;
 const CLUSTER_MIN_COUNT = 3;
-
-function normalizeNote(note: string): string {
-  return note.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
-}
 
 /**
  * Pure default note generator: turn the top chronic clusters into concise
@@ -48,59 +43,23 @@ function normalizeNote(note: string): string {
 export function synthesizeOperatingNotes(clusters: FeedbackCluster[], limit = MAX_NOTES_PER_PASS): string[] {
   return clusters.slice(0, limit).map((c) => {
     const verb = c.kind === "bug" ? "has repeatedly gone wrong" : "keeps coming up";
-    return `When working near "${c.exemplarTitle}": this ${verb} (${c.count}×). Anticipate it and handle the root cause early.`;
+    // No live counts in the note text: a count that grows (3× → 4×) would defeat
+    // the containment dedup and append a near-duplicate note every pass.
+    return `When working near "${c.exemplarTitle}": this ${verb}. Anticipate it and handle the root cause early.`;
   });
 }
 
 /**
- * Pure: append dated operating notes to SOUL.md content under a dedicated
- * section, deduped against existing notes (normalized containment) and bounded
- * to the newest MAX_NOTES. Never rewrites the pre-existing soul body.
+ * Pure: append dated operating notes to SOUL.md content under the dedicated
+ * section (deduped, bounded — see brain/persona-section). Never rewrites the
+ * pre-existing soul body.
  */
 export function mergeOperatingNotes(
   existing: string,
   notes: string[],
   date: string,
 ): { content: string; added: number } {
-  const base = existing.trim()
-    ? existing.replace(/\s+$/, "")
-    : "# SOUL\n\nYou are becoming someone. This file is yours to evolve.";
-
-  const existingNotes = base
-    .split("\n")
-    .filter((l) => l.trim().startsWith("- "))
-    .map((l) => normalizeNote(l));
-
-  const fresh: string[] = [];
-  for (const note of notes) {
-    const cleaned = note.trim().replace(/\s+/g, " ");
-    const norm = normalizeNote(cleaned);
-    if (!cleaned || !norm) continue;
-    const known = existingNotes.some((n) => n.includes(norm) || norm.includes(n));
-    const dup = fresh.some((f) => {
-      const fn = normalizeNote(f);
-      return fn.includes(norm) || norm.includes(fn);
-    });
-    if (!known && !dup) fresh.push(cleaned);
-  }
-  if (fresh.length === 0) return { content: existing, added: 0 };
-
-  const hasSection = base.includes(OPERATING_NOTES_HEADER);
-  let content = hasSection ? base : `${base}\n\n${OPERATING_NOTES_HEADER}`;
-  for (const note of fresh) content += `\n- ${date}: ${note}`;
-  content += "\n";
-
-  // Bound the notes section: keep the newest MAX_NOTES bullets.
-  const start = content.indexOf(OPERATING_NOTES_HEADER);
-  const head = content.slice(0, start + OPERATING_NOTES_HEADER.length);
-  const tail = content.slice(start + OPERATING_NOTES_HEADER.length);
-  const tailLines = tail.split("\n");
-  const bulletIdx = tailLines.map((l, i) => (l.trim().startsWith("- ") ? i : -1)).filter((i) => i >= 0);
-  if (bulletIdx.length > MAX_NOTES) {
-    const drop = new Set(bulletIdx.slice(0, bulletIdx.length - MAX_NOTES));
-    content = head + tailLines.filter((_, i) => !drop.has(i)).join("\n");
-  }
-  return { content, added: fresh.length };
+  return mergeDatedSection(existing, notes, date, SOUL_NOTES_SPEC);
 }
 
 export interface PersonaEvolutionDeps {

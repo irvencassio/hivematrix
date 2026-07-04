@@ -76,7 +76,12 @@ export function listSessions(limit = 50): FlashSessionRow[] {
     .all(limit) as FlashSessionRow[];
 }
 
-export function getTurnsForSession(sessionId: string, limit = 100): FlashTurnRow[] {
+export function getTurnsForSession(sessionId: string, limit = 100, sinceIso?: string): FlashTurnRow[] {
+  if (sinceIso) {
+    return getDb()
+      .prepare("SELECT * FROM flash_turns WHERE sessionId = ? AND ts > ? ORDER BY ts ASC LIMIT ?")
+      .all(sessionId, sinceIso, limit) as FlashTurnRow[];
+  }
   return getDb()
     .prepare("SELECT * FROM flash_turns WHERE sessionId = ? ORDER BY ts ASC LIMIT ?")
     .all(sessionId, limit) as FlashTurnRow[];
@@ -89,16 +94,30 @@ export function updateSessionSummary(sessionId: string, summary: string): void {
 }
 
 /**
- * Return sessions that have not been distilled and have been inactive longer
- * than `olderThanMs` milliseconds. Used by the learning loop scheduler.
+ * Return sessions that are distillable and have been inactive longer than
+ * `olderThanMs` milliseconds. Distillable = never distilled OR active again
+ * since the last distillation — sessions are everlasting (one per
+ * channel+peer), so a plain "distilledAt IS NULL" would make learning a
+ * once-per-lifetime event; the re-distill condition keeps operator modeling
+ * continuous. Used by the learning loop scheduler.
  */
 export function getColdSessions(olderThanMs: number): FlashSessionRow[] {
   const cutoff = new Date(Date.now() - olderThanMs).toISOString();
   return getDb()
     .prepare(
-      "SELECT * FROM flash_sessions WHERE distilledAt IS NULL AND lastActiveAt < ? ORDER BY lastActiveAt ASC",
+      "SELECT * FROM flash_sessions WHERE (distilledAt IS NULL OR lastActiveAt > distilledAt) AND lastActiveAt < ? ORDER BY lastActiveAt ASC",
     )
     .all(cutoff) as FlashSessionRow[];
+}
+
+/** Keep only the newest `keep` turns of a session (heartbeat sessions never go idle and would otherwise grow forever). */
+export function pruneSessionTurns(sessionId: string, keep: number): number {
+  const result = getDb()
+    .prepare(
+      "DELETE FROM flash_turns WHERE sessionId = ? AND id NOT IN (SELECT id FROM flash_turns WHERE sessionId = ? ORDER BY ts DESC LIMIT ?)",
+    )
+    .run(sessionId, sessionId, keep);
+  return result.changes;
 }
 
 /** Mark a session as distilled so the scheduler skips it on future passes. */

@@ -11,6 +11,7 @@
  */
 
 import { configuredBrainRootDir } from "@/lib/brain/settings";
+import { loadHiveConfig, saveHiveConfig } from "@/lib/central/config";
 import { runPatternDetection } from "@/lib/feedback/pattern-detection";
 import { runCapabilityGapDetection } from "@/lib/feedback/capability-gaps";
 import { runPersonaEvolution } from "./persona-evolution";
@@ -24,16 +25,40 @@ const PATTERN_INTERVAL_MS = 24 * 60 * 60 * 1000;     // pattern detection: once 
 const PERSONA_EVO_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // persona evolution: once a week (slow, high-trust)
 
 let loopTimer: ReturnType<typeof setInterval> | null = null;
-let lastPatternRunMs = 0;
-let lastPersonaEvoRunMs = 0;
+
+/**
+ * Slow-pass throttles persist in config (`learningLoop.{lastPatternRunAt,
+ * lastPersonaEvoRunAt}`) — the daemon restarts on every release, so in-memory
+ * markers would turn "daily" and "weekly" into "every restart".
+ */
+function slowPassDue(key: "lastPatternRunAt" | "lastPersonaEvoRunAt", intervalMs: number, nowMs: number): boolean {
+  try {
+    const ll = loadHiveConfig().learningLoop as Record<string, unknown> | undefined;
+    const last = typeof ll?.[key] === "string" ? Date.parse(ll[key] as string) : NaN;
+    return !Number.isFinite(last) || nowMs - last >= intervalMs;
+  } catch {
+    return false; // unreadable config → skip the slow pass rather than spam it
+  }
+}
+
+function markSlowPassRan(key: "lastPatternRunAt" | "lastPersonaEvoRunAt", nowMs: number): void {
+  try {
+    const config = loadHiveConfig();
+    const ll = (config.learningLoop && typeof config.learningLoop === "object")
+      ? config.learningLoop as Record<string, unknown>
+      : {};
+    config.learningLoop = { ...ll, [key]: new Date(nowMs).toISOString() };
+    saveHiveConfig(config);
+  } catch { /* best effort */ }
+}
 
 async function runDistillPass(nowMs = Date.now()): Promise<void> {
   // Slow anticipatory pass: cluster the feedback backlog into "this keeps
   // happening — address the root cause" proposals, at most once a day. Runs
   // independent of cold sessions so an idle-but-accumulating backlog still gets
   // surfaced. Best-effort (never throws).
-  if (nowMs - lastPatternRunMs >= PATTERN_INTERVAL_MS) {
-    lastPatternRunMs = nowMs;
+  if (slowPassDue("lastPatternRunAt", PATTERN_INTERVAL_MS, nowMs)) {
+    markSlowPassRan("lastPatternRunAt", nowMs);
     runPatternDetection();
     // Capability self-assessment: surface missing-capability gaps as labeled
     // proposals (self-serviceable skills vs. gated lane/pack acquisition). Never
@@ -44,8 +69,8 @@ async function runDistillPass(nowMs = Date.now()): Promise<void> {
   // Weekly, high-trust: let the agent evolve its own SOUL.md operating notes from
   // chronic friction. Under autonomous it appends + announces; otherwise it files
   // proposals. Runs after pattern detection so the freshest clusters feed it.
-  if (nowMs - lastPersonaEvoRunMs >= PERSONA_EVO_INTERVAL_MS) {
-    lastPersonaEvoRunMs = nowMs;
+  if (slowPassDue("lastPersonaEvoRunAt", PERSONA_EVO_INTERVAL_MS, nowMs)) {
+    markSlowPassRan("lastPersonaEvoRunAt", nowMs);
     await runPersonaEvolution().catch((e) =>
       console.warn("[flash:learning-loop] persona evolution error:", e),
     );

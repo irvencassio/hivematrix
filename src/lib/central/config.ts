@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -22,5 +22,11 @@ export function loadHiveConfig(): HiveConfig {
 
 export function saveHiveConfig(config: HiveConfig): void {
   mkdirSync(getConfigDir(), { recursive: true });
-  writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+  // Atomic write (tmp + rename): out-of-process readers (the PreToolUse approval
+  // hook greps this file from Claude Code task processes) must never observe a
+  // half-written config — and the heartbeat now rewrites it on an interval.
+  const path = getConfigPath();
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(config, null, 2));
+  renameSync(tmp, path);
 }

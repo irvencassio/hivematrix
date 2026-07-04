@@ -28,6 +28,7 @@ import { getQwenProfile } from "@/lib/config/qwen-profile";
 import { upsertSkill } from "@/lib/skills/store";
 import { recordFeedbackDedup } from "@/lib/feedback/feedback";
 import { broadcastEvent } from "@/lib/ws/broadcaster";
+import { GOALS_SECTION_SPEC, USER_SECTION_SPEC, mergeDatedSection } from "@/lib/brain/persona-section";
 import { getTurnsForSession, getSession, markSessionDistilled } from "./store";
 import type { FlashTurnRow } from "./types";
 
@@ -208,84 +209,13 @@ function parseDistillResult(raw: string): DistillResult {
 // Operator model (persona/USER.md) writer
 // ------------------------------------------------------------------
 
-const LEARNED_SECTION_HEADER = "## Learned about the operator";
-const GOALS_SECTION_HEADER = "## Active goals";
-const MAX_LEARNED_FACTS = 40;
-
-function normalizeFact(fact: string): string {
-  return fact.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
-}
-
-/**
- * Pure: merge dated bullets into a persona file section. Bullets land under
- * `header`, newest last, deduped against every existing bullet (normalized
- * containment either way), bounded to the most recent MAX_LEARNED_FACTS.
- * Returns the new content + how many bullets were actually added.
- */
-function mergeDatedSection(
-  existing: string,
-  facts: string[],
-  date: string,
-  header: string,
-  seed: string,
-): { content: string; added: number } {
-  const base = existing.trim() ? existing.replace(/\s+$/, "") : seed;
-
-  const hasSection = base.includes(header);
-  const existingBullets = base
-    .split("\n")
-    .filter((l) => l.trim().startsWith("- "))
-    .map((l) => normalizeFact(l));
-
-  const fresh: string[] = [];
-  for (const fact of facts) {
-    const cleaned = fact.trim().replace(/\s+/g, " ");
-    if (!cleaned) continue;
-    const norm = normalizeFact(cleaned);
-    if (!norm) continue;
-    const known = existingBullets.some((b) => b.includes(norm) || norm.includes(b));
-    const duplicate = fresh.some((f) => {
-      const fn = normalizeFact(f);
-      return fn.includes(norm) || norm.includes(fn);
-    });
-    if (!known && !duplicate) fresh.push(cleaned);
-  }
-  if (fresh.length === 0) return { content: existing, added: 0 };
-
-  let content = hasSection ? base : `${base}\n\n${header}`;
-  for (const fact of fresh) content += `\n- ${date}: ${fact}`;
-  content += "\n";
-
-  // Bound the section: keep the newest MAX_LEARNED_FACTS bullets.
-  const sectionStart = content.indexOf(header);
-  const head = content.slice(0, sectionStart + header.length);
-  const tail = content.slice(sectionStart + header.length);
-  const tailLines = tail.split("\n");
-  const bulletIdx = tailLines
-    .map((l, i) => (l.trim().startsWith("- ") ? i : -1))
-    .filter((i) => i >= 0);
-  if (bulletIdx.length > MAX_LEARNED_FACTS) {
-    const drop = new Set(bulletIdx.slice(0, bulletIdx.length - MAX_LEARNED_FACTS));
-    const kept = tailLines.filter((_, i) => !drop.has(i));
-    content = head + kept.join("\n");
-  }
-
-  return { content, added: fresh.length };
-}
-
 /** Pure: merge operator facts into USER.md content (dated/deduped/bounded). */
 export function mergeOperatorFacts(
   existing: string,
   facts: string[],
   date: string,
 ): { content: string; added: number } {
-  return mergeDatedSection(
-    existing,
-    facts,
-    date,
-    LEARNED_SECTION_HEADER,
-    "# USER — who the operator is\n\nMaintained by the agent from real conversations.",
-  );
+  return mergeDatedSection(existing, facts, date, USER_SECTION_SPEC);
 }
 
 /** Pure: merge learned goals into GOALS.md content (dated/deduped/bounded). */
@@ -294,13 +224,7 @@ export function mergeOperatorGoals(
   goals: string[],
   date: string,
 ): { content: string; added: number } {
-  return mergeDatedSection(
-    existing,
-    goals,
-    date,
-    GOALS_SECTION_HEADER,
-    "# GOALS — what the operator is working toward\n\nMaintained by the agent from real conversations. Edit freely; the agent anchors briefs and priorities to this file.",
-  );
+  return mergeDatedSection(existing, goals, date, GOALS_SECTION_SPEC);
 }
 
 /** Merge dated learnings into a persona file on disk; announces via SSE. */
@@ -366,7 +290,10 @@ export async function distillSession(
     const session = getSession(sessionId);
     if (!session) return { ...empty, skipped: true };
 
-    const turns = getTurnsForSession(sessionId, 200);
+    // Re-distills consume only turns SINCE the last distillation — sessions are
+    // everlasting, so this is what makes learning incremental instead of
+    // re-reading (and re-learning) the same history every pass.
+    const turns = getTurnsForSession(sessionId, 200, session.distilledAt ?? undefined);
     const contentTurns = turns.filter((t) => t.role !== "tool" && t.content.trim());
     if (contentTurns.length < MIN_CONTENT_TURNS) {
       markSessionDistilled(sessionId);

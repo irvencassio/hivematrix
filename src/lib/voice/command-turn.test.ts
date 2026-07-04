@@ -412,18 +412,25 @@ test("remember: appends a dated voice note to persona memory", async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test("heartbeatNow: uses the injected runner and speaks the outcome", async () => {
-  const quiet = await commandTurnOverride("run a heartbeat", {
+test("heartbeatNow: acks immediately, delivers the outcome via voice:result (async, non-blocking)", async () => {
+  const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+  const mkDeps = (result: { ran: boolean; stoodDown: boolean; report: string | null }) => ({
     synthesize: async () => "",
-    runHeartbeat: async () => ({ ran: true, stoodDown: true, report: null }),
+    broadcast: (event: string, data: unknown) => events.push({ event, data: data as Record<string, unknown> }),
+    runHeartbeat: async () => result,
   });
-  assert.match(quiet!.reply, /nothing needs your attention/i);
 
-  const loud = await commandTurnOverride("pulse now", {
-    synthesize: async () => "",
-    runHeartbeat: async () => ({ ran: true, stoodDown: false, report: "Two approvals are waiting and the build is red." }),
-  });
-  assert.match(loud!.reply, /Two approvals are waiting/);
+  const quiet = await commandTurnOverride("run a heartbeat", mkDeps({ ran: true, stoodDown: true, report: null }));
+  assert.match(quiet!.reply, /Running a pulse/);
+  assert.equal(quiet!.command.detail, "heartbeat:started");
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(events.length, 1);
+  assert.match(String(events[0].data.text), /nothing needs your attention/i);
+
+  events.length = 0;
+  await commandTurnOverride("pulse now", mkDeps({ ran: true, stoodDown: false, report: "Two approvals are waiting and the build is red." }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.match(String(events[0].data.text), /Two approvals are waiting/);
 
   const unwired = await commandTurnOverride("run a heartbeat", { synthesize: async () => "" });
   assert.match(unwired!.reply, /isn't wired up/);

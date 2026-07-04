@@ -7,6 +7,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join } from "path";
 import { homedir } from "os";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
+import { GOALS_SECTION_SPEC, mergeDatedSection, parseSectionBullets } from "@/lib/brain/persona-section";
 import {
   detectCommandIntent,
   boardReply, approvalsReply, resolvedReply, noApprovalToResolveReply,
@@ -433,10 +434,12 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
     }
     case "heartbeatNow": {
       if (!deps.runHeartbeat) return r("The heartbeat isn't wired up on this build.");
-      const result = await deps.runHeartbeat();
-      if (!result.ran) return r("I couldn't run a pulse — the memory folder isn't reachable.");
-      if (result.stoodDown || !result.report) return r("I ran a pulse — nothing needs your attention.");
-      return r(result.report, undefined, "heartbeat-report");
+      // A pulse is a full agent turn (minutes) — ack now, read the outcome back
+      // via voice:result, same async pattern as deep think.
+      void deliverHeartbeatReply({ deps, sessionId }).catch((e) => {
+        console.error(`[voice] heartbeat delivery failed: ${e instanceof Error ? e.message : e}`);
+      });
+      return r("Running a pulse — I'll tell you if anything needs you.", undefined, "heartbeat:started");
     }
     case "connectivity": {
       const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
@@ -547,24 +550,13 @@ function brainRootFor(deps: CommandTurnDeps): string | null {
   }
 }
 
-const GOALS_HEADER = "## Active goals";
-
-/** Parse spoken goal lines from GOALS.md: bullets with the leading date stripped. */
-export function parseSpokenGoals(content: string): string[] {
-  return content
-    .split("\n")
-    .filter((l) => l.trim().startsWith("- "))
-    .map((l) => l.trim().replace(/^-\s*/, "").replace(/^\d{4}-\d{2}-\d{2}:\s*/, "").trim())
-    .filter(Boolean);
-}
-
 function readSpokenGoals(deps: CommandTurnDeps): string[] | null {
   const root = brainRootFor(deps);
   if (!root) return null;
   try {
     const path = join(root, "persona", "GOALS.md");
     if (!existsSync(path)) return [];
-    return parseSpokenGoals(readFileSync(path, "utf-8"));
+    return parseSectionBullets(readFileSync(path, "utf-8"));
   } catch {
     return null;
   }
@@ -578,14 +570,10 @@ function appendGoal(deps: CommandTurnDeps, goal: string): "added" | "duplicate" 
     mkdirSync(dir, { recursive: true });
     const path = join(dir, "GOALS.md");
     const existing = existsSync(path) ? readFileSync(path, "utf-8") : "";
-    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
-    if (parseSpokenGoals(existing).some((g) => norm(g) === norm(goal))) return "duplicate";
     const date = (deps.now ?? new Date()).toISOString().slice(0, 10);
-    const base = existing.trim()
-      ? existing.replace(/\s+$/, "")
-      : `# GOALS — what the operator is working toward\n\nMaintained by the agent from real conversations. Edit freely; the agent anchors briefs and priorities to this file.\n\n${GOALS_HEADER}`;
-    const withHeader = base.includes(GOALS_HEADER) ? base : `${base}\n\n${GOALS_HEADER}`;
-    writeFileSync(path, `${withHeader}\n- ${date}: ${goal}\n`, "utf-8");
+    const { content, added } = mergeDatedSection(existing, [goal], date, GOALS_SECTION_SPEC);
+    if (added === 0) return "duplicate";
+    writeFileSync(path, content, "utf-8");
     return "added";
   } catch {
     return "unavailable";
@@ -626,6 +614,38 @@ export function spokenDeepThinkReply(result: { answer: string; confidence: "high
           ? "Heads up — my attempts disagreed, so I re-checked this. Hold it loosely."
           : "Heads up — I'm not confident in this one. Hold it loosely.";
   return `${framing} ${answer}`;
+}
+
+/** Run a heartbeat pulse in the background, then synthesize + broadcast voice:result. */
+export async function deliverHeartbeatReply(opts: { deps: CommandTurnDeps; sessionId: string }): Promise<void> {
+  const { deps, sessionId } = opts;
+  let text: string;
+  let ok = true;
+  try {
+    const result = await deps.runHeartbeat!();
+    text = !result.ran
+      ? "I couldn't run the pulse — the memory folder isn't reachable."
+      : result.stoodDown || !result.report
+        ? "I ran a pulse — nothing needs your attention."
+        : result.report;
+    ok = result.ran;
+  } catch (e) {
+    ok = false;
+    text = `The pulse failed: ${e instanceof Error ? e.message : "unknown error"}.`;
+  }
+
+  let audioBase64 = "";
+  try {
+    const path = deps.synthesize ? await deps.synthesize(text) : (await synthesizeSpeech(text)).path;
+    audioBase64 = path ? readFileSync(path).toString("base64") : "";
+  } catch { /* speak-less fallback */ }
+
+  const broadcastFn = deps.broadcast ?? defaultOpenClawBroadcast;
+  try {
+    broadcastFn("voice:result", { sessionId, text, audioBase64, ok });
+  } catch (e) {
+    console.error(`[voice] heartbeat broadcast failed: ${e instanceof Error ? e.message : e}`);
+  }
 }
 
 /** Run deep think in the background, then synthesize + broadcast voice:result. */

@@ -284,3 +284,18 @@ test("heartbeatNow intent", () => {
   assert.equal(detectCommandIntent("pulse now").kind, "heartbeatNow");
   assert.equal(detectCommandIntent("what's your pulse on the market").kind, "none");
 });
+
+test("review regressions: heartbeat is anchored; tasks/reminders keep their verbs", () => {
+  assert.equal(detectCommandIntent("create a task to run a heartbeat check on the API").kind, "createTask");
+  assert.equal(detectCommandIntent("remind me to do a pulse check with the team").kind, "createTask");
+  assert.equal(detectCommandIntent("run a heartbeat").kind, "heartbeatNow");
+  assert.equal(detectCommandIntent("heartbeat now").kind, "heartbeatNow");
+  assert.equal(detectCommandIntent("run the pulse now!").kind, "heartbeatNow");
+});
+
+test("review regressions: 'deep thinking...' does not mangle-match; trivial notes fall through", () => {
+  const dt = detectCommandIntent("deep thinking about my goals");
+  assert.notEqual(dt.thinkText, "ing about my goals");
+  assert.equal(detectCommandIntent("note that down").kind, "none");
+  assert.equal(detectCommandIntent("note that the demo is Tuesday").kind, "remember");
+});

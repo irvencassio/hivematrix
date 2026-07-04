@@ -143,15 +143,28 @@ export async function deepThink(question: string, opts: DeepThinkOpts = {}): Pro
     { role: "user" as const, content: userText },
   ];
 
-  // 1) Diversified parallel rollouts, thinking ON.
+  // 1) Diversified parallel rollouts, thinking ON. The wall is enforced HERE
+  // too: a local server that serializes requests would otherwise queue rollouts
+  // past the budget (each per-call timeout only starts when its fetch fires).
+  // Reserve one call's worth of budget for the synthesis/reflection phase.
+  const rolloutDeadlineMs = Math.max(10_000, Math.min(wallMs - callTimeoutMs, samples * callTimeoutMs));
+  const withDeadline = <T,>(p: Promise<T>): Promise<T> =>
+    Promise.race([
+      p,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("deep-think rollout deadline")), rolloutDeadlineMs).unref?.(),
+      ),
+    ]);
   const rollouts = await Promise.allSettled(
     Array.from({ length: samples }, (_, i) =>
-      complete(baseMessages(question), {
-        temperature: ROLLOUT_TEMPERATURES[i % ROLLOUT_TEMPERATURES.length],
-        reasoningEffort: "high",
-        maxTokens: 2048,
-        timeoutMs: callTimeoutMs,
-      }),
+      withDeadline(
+        complete(baseMessages(question), {
+          temperature: ROLLOUT_TEMPERATURES[i % ROLLOUT_TEMPERATURES.length],
+          reasoningEffort: "high",
+          maxTokens: 2048,
+          timeoutMs: callTimeoutMs,
+        }),
+      ),
     ),
   );
   const candidates = rollouts
