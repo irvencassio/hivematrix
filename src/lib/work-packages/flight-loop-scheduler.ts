@@ -94,7 +94,9 @@ export function startFlightLoopSchedulerLoop(intervalMs = LOOP_INTERVAL_MS): () 
   timer = setInterval(() => {
     if (looping) return;
     looping = true;
-    void tickFlightLoops().finally(() => { looping = false; });
+    void tickFlightLoops()
+      .catch((e) => { console.error(`[flight-loops] tick failed: ${e instanceof Error ? e.message : e}`); })
+      .finally(() => { looping = false; });
   }, intervalMs);
   if (typeof timer.unref === "function") timer.unref();
   return stopFlightLoopSchedulerLoop;

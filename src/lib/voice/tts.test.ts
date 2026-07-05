@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,6 +41,17 @@ test("synthesizeSpeech produces a non-empty .m4a via macOS say", { skip: process
     assert.equal(res.engine, "say");
     assert.equal(res.path, join(dir, "voice-test.m4a"));
     assert.ok(statSync(res.path).size > 0, "audio file should be non-empty");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("synthesizeSpeech transcodes macOS say output to iOS-playable AAC", { skip: process.platform !== "darwin" }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tts-aac-"));
+  try {
+    const res = await synthesizeSpeech("Hello from HiveMatrix.", { outDir: dir, id: "aac", engine: "say" });
+    const info = execFileSync("afinfo", [res.path], { encoding: "utf-8" });
+    assert.match(info, /Data format:\s+1 ch,\s+\d+ Hz,\s+aac\b/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

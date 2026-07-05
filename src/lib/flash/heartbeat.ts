@@ -492,7 +492,9 @@ export function startHeartbeatLoop(deps: HeartbeatDeps = {}, intervalMs = CHECK_
   timer = setInterval(() => {
     if (running) return;
     running = true;
-    void tick(deps).finally(() => { running = false; });
+    void tick(deps)
+      .catch((e) => { console.error(`[heartbeat] tick failed: ${e instanceof Error ? e.message : e}`); })
+      .finally(() => { running = false; });
   }, intervalMs);
   if (typeof timer.unref === "function") timer.unref();
   return stopHeartbeatLoop;

@@ -106,11 +106,24 @@ class WhisperCppSTT(SegmentedSTTService):
 
     async def run_stt(self, audio: bytes):
         tmp = os.path.join(tempfile.gettempdir(), f"wh-stt-{uuid.uuid4().hex}.wav")
-        with wave.open(tmp, "wb") as w:
-            w.setnchannels(1)
-            w.setsampwidth(2)
-            w.setframerate(self.sample_rate or STT_RATE)
-            w.writeframes(audio)
+        with open(tmp, "wb") as w:
+            w.write(audio)
+        duration = 0.0
+        try:
+            with wave.open(tmp, "rb") as r:
+                frames = r.getnframes()
+                rate = r.getframerate() or self.sample_rate or STT_RATE
+                duration = frames / rate if rate else 0.0
+        except Exception:
+            duration = 0.0
+        print(f"[voice][stt] segment bytes={len(audio)} duration={duration:.2f}s", flush=True)
+        if duration < float(os.environ.get("HIVE_STT_MIN_SEGMENT_SECS", "0.25")):
+            print("[voice][stt] segment too short; skipping", flush=True)
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return
         try:
             if _PYWHISPERCPP_AVAILABLE:
                 text = await asyncio.to_thread(
@@ -127,5 +140,6 @@ class WhisperCppSTT(SegmentedSTTService):
                 os.remove(tmp)
             except OSError:
                 pass
+        print(f"[voice][stt] transcript={text!r}", flush=True)
         if text:
             yield TranscriptionFrame(text, "", time_now_iso8601())

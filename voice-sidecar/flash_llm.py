@@ -121,22 +121,29 @@ class FlashLLMProcessor(FrameProcessor):
 
                     # Read SSE line-by-line. readline() blocks until \n, which
                     # is correct for SSE (each data line ends with \n).
+                    sse_event = ""
                     while True:
                         raw = await resp.content.readline()
                         if not raw:
                             break  # connection closed
                         line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                        if line.startswith("event:"):
+                            sse_event = line[6:].strip()
+                            continue
                         if not line.startswith("data:"):
                             continue
                         data = line[5:].lstrip()
                         if not data or data == "[DONE]":
+                            sse_event = ""
                             continue
                         try:
                             event = json.loads(data)
                         except json.JSONDecodeError:
+                            sse_event = ""
                             continue
 
-                        etype = event.get("type") or event.get("event")
+                        etype = event.get("type") or event.get("event") or sse_event
+                        sse_event = ""
 
                         if etype == "token":
                             delta = event.get("delta") or event.get("text") or ""

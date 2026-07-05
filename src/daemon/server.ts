@@ -3356,6 +3356,23 @@ export function createDaemonServer() {
 
         if (!text) { json(res, 400, { error: "text or audioBase64 is required" }); return; }
 
+        const { commandTurnOverride } = await import("@/lib/voice/command-turn");
+        const command = await commandTurnOverride(text);
+        if (command) {
+          const { getOrCreateSession, appendTurn } = await import("@/lib/flash/store");
+          const session = getOrCreateSession("voice", "operator");
+          appendTurn(session.id, "user", text);
+          appendTurn(session.id, "assistant", command.reply);
+          json(res, 200, {
+            transcript: text,
+            reply: command.reply,
+            ...(command.audioBase64 ? { audioBase64: command.audioBase64 } : {}),
+            sessionId: session.id,
+            command: command.command,
+          });
+          return;
+        }
+
         const { runFlashTurnText } = await import("@/lib/flash");
         const { reply, sessionId: flashSessionId } = await runFlashTurnText({
           text,
@@ -3366,11 +3383,21 @@ export function createDaemonServer() {
         // Optional TTS: synthesize reply audio for clients that consume audioBase64
         let audioBase64 = "";
         try {
+          let audioPath = "";
           const { voiceRuntime } = await import("@/lib/voice/runtime");
           if (voiceRuntime()) {
-            const { synthesizeLiveVoice } = await import("@/lib/voice/turn-server");
-            audioBase64 = await synthesizeLiveVoice(reply, lang);
+            try {
+              const { synthesizeLiveVoice } = await import("@/lib/voice/turn-server");
+              audioPath = await synthesizeLiveVoice(reply, lang);
+            } catch (e) {
+              console.error(`[voice] live synth failed, falling back to say: ${e instanceof Error ? e.message : e}`);
+            }
           }
+          if (!audioPath) {
+            const { synthesizeSpeech } = await import("@/lib/voice/tts");
+            audioPath = (await synthesizeSpeech(reply, { engine: "say" })).path;
+          }
+          audioBase64 = audioPath ? readFileSync(audioPath).toString("base64") : "";
         } catch { /* TTS is optional — clients must handle missing audio */ }
 
         json(res, 200, { transcript: text, reply, ...(audioBase64 ? { audioBase64 } : {}), sessionId: flashSessionId });

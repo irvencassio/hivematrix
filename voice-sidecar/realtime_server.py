@@ -22,6 +22,7 @@ import traceback
 from aiohttp import web
 
 from pipecat.transports.smallwebrtc.request_handler import (
+    IceCandidate,
     SmallWebRTCRequest,
     SmallWebRTCPatchRequest,
     SmallWebRTCRequestHandler,
@@ -92,9 +93,48 @@ async def handle_patch(request: web.Request) -> web.Response:
     except Exception:
         traceback.print_exc()
         return web.json_response({"error": "expected JSON"}, status=400)
-    preq = SmallWebRTCPatchRequest(**body)
+    try:
+        preq = _patch_request_from_json(body)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
     await handler().handle_patch_request(preq)
     return web.json_response({"ok": True})
+
+
+def _patch_request_from_json(body: dict) -> SmallWebRTCPatchRequest:
+    pc_id = body.get("pc_id") or body.get("pcId")
+    if not isinstance(pc_id, str) or not pc_id:
+        raise ValueError("expected pc_id")
+    raw_candidates = body.get("candidates", [])
+    if raw_candidates is None:
+        raw_candidates = []
+    if not isinstance(raw_candidates, list):
+        raise ValueError("expected candidates list")
+    candidates = [_ice_candidate_from_json(c) for c in raw_candidates]
+    candidates = [c for c in candidates if c is not None]
+    return SmallWebRTCPatchRequest(pc_id=pc_id, candidates=candidates)
+
+
+def _ice_candidate_from_json(candidate) -> IceCandidate | None:
+    if isinstance(candidate, IceCandidate):
+        return candidate
+    if candidate is None:
+        return None
+    if not isinstance(candidate, dict):
+        raise ValueError("expected candidate object")
+
+    sdp = candidate.get("candidate")
+    if not sdp:
+        return None
+    sdp_mid = candidate.get("sdp_mid", candidate.get("sdpMid"))
+    sdp_mline_index = candidate.get("sdp_mline_index", candidate.get("sdpMLineIndex"))
+    if sdp_mid is None or sdp_mline_index is None:
+        raise ValueError("candidate missing sdp mid or m-line index")
+    return IceCandidate(
+        candidate=str(sdp),
+        sdp_mid=str(sdp_mid),
+        sdp_mline_index=int(sdp_mline_index),
+    )
 
 
 async def handle_health(_request: web.Request) -> web.Response:

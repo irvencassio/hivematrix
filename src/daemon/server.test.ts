@@ -2675,6 +2675,76 @@ test("POST /flash/turn runs voice command overrides before Flash model work", ()
   );
 });
 
+test("POST /voice/turn returns synthesized audio bytes, not the generated file path", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
+  const route = src.slice(src.indexOf('urlPath === "/voice/turn"'), src.indexOf("// POST /voice/provision"));
+  assert.match(route, /readFileSync\(audioPath\)\.toString\("base64"\)/, "voice turn must read the synthesized file as base64");
+  assert.match(route, /synthesizeSpeech\(reply,\s*\{\s*engine:\s*"say"/, "voice turn must fall back to reliable AAC say output");
+  assert.ok(
+    route.indexOf("synthesizeLiveVoice") < route.indexOf('toString("base64")'),
+    "voice turn should synthesize first, then serialize the file bytes",
+  );
+});
+
+test("POST /voice/turn runs saved-location voice commands before the Flash model", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
+  const route = src.slice(src.indexOf('urlPath === "/voice/turn"'), src.indexOf("// POST /voice/provision"));
+  assert.match(route, /commandTurnOverride/, "voice turn must try deterministic commands such as weather");
+  assert.ok(
+    route.indexOf("commandTurnOverride") < route.indexOf("runFlashTurnText"),
+    "saved-location commands must run before the generic Flash text turn",
+  );
+});
+
+test("Flash realtime voice pipeline emits VAD frames before segmented STT", () => {
+  const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+  const src = readFileSync(join(root, "voice-sidecar", "flash_pipeline.py"), "utf8");
+  const pipeline = src.slice(src.indexOf("pipeline = Pipeline(["), src.indexOf("])", src.indexOf("pipeline = Pipeline([")));
+
+  assert.match(src, /from pipecat\.processors\.audio\.vad_processor import VADProcessor/);
+  assert.match(pipeline, /VADProcessor|vad/);
+  assert.ok(
+    pipeline.indexOf("vad") < pipeline.indexOf("stt"),
+    "VAD processor must run before WhisperCppSTT so SegmentedSTTService receives speech boundaries",
+  );
+});
+
+test("realtime STT adapters write Pipecat WAV segments directly", () => {
+  const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+  for (const file of ["voice-sidecar/whisper_stt.py", "voice-sidecar/realtime.py"]) {
+    const src = readFileSync(join(root, file), "utf8");
+    const runStt = src.slice(src.indexOf("async def run_stt"), src.indexOf("try:", src.indexOf("async def run_stt")));
+
+    assert.match(runStt, /open\(.*,\s*"wb"\)/, `${file} must write the provided WAV segment bytes`);
+    assert.doesNotMatch(runStt, /wave\.open\(.*,\s*"wb"\)/, `${file} must not wrap an already-encoded WAV segment`);
+    assert.doesNotMatch(runStt, /writeframes\(audio\)/, `${file} must not treat Pipecat's segment bytes as raw PCM`);
+  }
+});
+
+test("Flash realtime processor honors SSE event lines for token and done payloads", () => {
+  const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+  const src = readFileSync(join(root, "voice-sidecar", "flash_llm.py"), "utf8");
+  const loop = src.slice(src.indexOf("while True:"), src.indexOf("# tool_start / tool_result"));
+
+  assert.match(loop, /sse_event\s*=\s*""/, "processor must track the current SSE event name");
+  assert.match(loop, /line\.startswith\("event:"\)/, "processor must read standard SSE event lines");
+  assert.match(loop, /etype\s*=\s*event\.get\("type"\)\s+or\s+event\.get\("event"\)\s+or\s+sse_event/, "JSON-less SSE event names must drive token/done handling");
+  assert.match(loop, /sse_event\s*=\s*""/, "event name must be cleared after its data payload");
+});
+
+test("realtime TTS frames include the Pipecat audio context id", () => {
+  const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+  const src = readFileSync(join(root, "voice-sidecar", "realtime.py"), "utf8");
+  const runTts = src.slice(src.indexOf("async def run_tts"), src.indexOf("def make_vad"));
+
+  assert.match(runTts, /async def run_tts\(self,\s*text:\s*str,\s*context_id:\s*str\)/);
+  assert.match(
+    runTts,
+    /TTSAudioRawFrame\([^)]*context_id\s*=\s*context_id/s,
+    "Pipecat 1.3 requires raw TTS frames to carry the active audio context id",
+  );
+});
+
 test("pack download fetch is bounded by an abort timeout", () => {
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
   // A stalled remote server must not hang the /packs install route forever.

@@ -68,14 +68,31 @@ function synthesizeCloned(txtPath: string, outPath: string, timeoutMs: number): 
   });
 }
 
+function transcodeToAacM4a(inputPath: string, outPath: string, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile("afconvert", ["-f", "m4af", "-d", "aac", "-b", "64000", inputPath, outPath], { timeout: timeoutMs }, (err, _stdout, stderr) => {
+      if (err) { reject(new Error(`afconvert failed: ${(stderr || err.message || "").trim()}`)); return; }
+      resolve();
+    });
+  });
+}
+
 function synthesizeSay(txtPath: string, outPath: string, voice: string | undefined, timeoutMs: number): Promise<TtsResult> {
   return new Promise((resolve, reject) => {
+    const rawPath = outPath.replace(/\.m4a$/i, ".raw.m4a");
     const args: string[] = [];
     if (voice) args.push("-v", voice);
-    args.push("-o", outPath, "-f", txtPath);
-    execFile("say", args, { timeout: timeoutMs }, (err, _stdout, stderr) => {
+    args.push("-o", rawPath, "-f", txtPath);
+    execFile("say", args, { timeout: timeoutMs }, async (err, _stdout, stderr) => {
       if (err) { reject(new Error(`say failed: ${(stderr || err.message || "").trim()}`)); return; }
-      resolve({ path: outPath, engine: "say" });
+      try {
+        await transcodeToAacM4a(rawPath, outPath, timeoutMs);
+        resolve({ path: outPath, engine: "say" });
+      } catch (e) {
+        reject(e);
+      } finally {
+        try { unlinkSync(rawPath); } catch { /* ignore */ }
+      }
     });
   });
 }

@@ -103,26 +103,34 @@ fn apply_macos_vibrancy(window: &tauri::WebviewWindow) {
 /// reaped on app exit.
 struct DaemonChild(Mutex<Option<Child>>);
 
-/// Minimal HTTP GET /health. Returns true only when *our* daemon answers ok, so
-/// a foreign listener squatting on the port isn't mistaken for a healthy daemon.
-fn daemon_health_ok() -> bool {
+/// Minimal HTTP GET /health. Returns the daemon's reported version only when
+/// HiveMatrix answers ok, so a foreign listener squatting on the port isn't
+/// mistaken for a healthy daemon.
+fn daemon_health_version() -> Option<String> {
     let addr = match format!("127.0.0.1:{DAEMON_PORT}").parse() {
         Ok(a) => a,
-        Err(_) => return false,
+        Err(_) => return None,
     };
     let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(300)) {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(_) => return None,
     };
     let _ = stream.set_read_timeout(Some(Duration::from_millis(600)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(600)));
     let req = "GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
     if stream.write_all(req.as_bytes()).is_err() {
-        return false;
+        return None;
     }
     let mut buf = String::new();
     let _ = stream.read_to_string(&mut buf);
-    buf.contains("\"status\":\"ok\"")
+    if !buf.contains("\"status\":\"ok\"") {
+        return None;
+    }
+    let marker = "\"version\":\"";
+    let start = buf.find(marker)? + marker.len();
+    let rest = &buf[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
 }
 
 /// Spawn the bundled daemon (no system Node / repo checkout needed).
@@ -245,6 +253,40 @@ fn launchd_agent_installed() -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(target_os = "macos")]
+fn launchd_domain_label(label: &str) -> Option<String> {
+    let uid = Command::new("id").arg("-u").output().ok()?;
+    let uid = String::from_utf8_lossy(&uid.stdout).trim().to_string();
+    if uid.is_empty() { None } else { Some(format!("gui/{uid}/{label}")) }
+}
+
+#[cfg(target_os = "macos")]
+fn cleanup_legacy_hotfix_daemon() {
+    if let Some(label) = launchd_domain_label("com.hivematrix.daemon.hotfix") {
+        match Command::new("launchctl").arg("bootout").arg(&label).status() {
+            Ok(status) if status.success() => log::info!("daemon hotfix cleanup: removed legacy submitted job"),
+            _ => {}
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn cleanup_legacy_hotfix_daemon() {}
+
+#[cfg(target_os = "macos")]
+fn kickstart_launchd_daemon() {
+    if let Some(label) = launchd_domain_label("com.hivematrix.daemon") {
+        match Command::new("launchctl").arg("kickstart").arg("-k").arg(&label).status() {
+            Ok(status) if status.success() => log::info!("daemon launchd kickstart succeeded"),
+            Ok(status) => log::warn!("daemon launchd kickstart exited with {status:?}"),
+            Err(e) => log::warn!("daemon launchd kickstart failed: {e}"),
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn kickstart_launchd_daemon() {}
+
 /// Whether to install an available update now. True if a force flag is present
 /// (the in-app "Install" button drops it — consumed here) OR config.autoUpdate
 /// is true. Default is manual: the console shows an "Update" pill instead.
@@ -353,9 +395,20 @@ pub fn run() {
                 apply_macos_vibrancy(&window);
             }
 
+            cleanup_legacy_hotfix_daemon();
+
             // Ensure a daemon is up so the webview's health-poll redirects.
-            if daemon_health_ok() {
-                log::info!("daemon already healthy on :{DAEMON_PORT}");
+            let app_version = app.package_info().version.to_string();
+            if let Some(daemon_version) = daemon_health_version() {
+                if daemon_version == app_version {
+                    log::info!("daemon already healthy on :{DAEMON_PORT} (version {daemon_version})");
+                } else if launchd_agent_installed() {
+                    log::warn!("daemon on :{DAEMON_PORT} is stale ({daemon_version}); app is {app_version}; asking launchd to restart bundled daemon");
+                    kickstart_launchd_daemon();
+                } else if let Some(child) = spawn_bundled_daemon(app) {
+                    log::warn!("daemon on :{DAEMON_PORT} is stale ({daemon_version}); spawned bundled daemon for app {app_version}");
+                    *app.state::<DaemonChild>().0.lock().unwrap() = Some(child);
+                }
             } else if launchd_agent_installed() {
                 // launchd owns the daemon; it will (re)start it. Spawning our own
                 // child here would orphan and squat the port. The webview

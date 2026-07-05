@@ -929,7 +929,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <div class="overlay" id="settingsOverlay">
   <div class="modal">
     <h1>Settings <span class="x" onclick="closeSettings()">✕</span></h1>
-    <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-setup" onclick="switchSettingsTab('setup')">Setup</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-observability" onclick="switchSettingsTab('observability')">Observability</div><div class="tab" id="tab-lanes" onclick="switchSettingsTab('lanes')">Lanes</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-license" onclick="switchSettingsTab('license')">License</div></div>
+    <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-setup" onclick="switchSettingsTab('setup')">Setup</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-lanes" onclick="switchSettingsTab('lanes')">Lanes</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-license" onclick="switchSettingsTab('license')">License</div></div>
     <div id="settingsModels" style="display:none">
       <label class="flbl">Default model</label>
       <select id="s_default" style="width:100%" onchange="saveDefault()"></select>
@@ -985,21 +985,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <span class="muted" id="s_embedding_status" style="font-size:11px">Local vectors stay on this Mac.</span>
       </div>
     </div>
-    <div id="settingsObservability" style="display:none">
-      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">
-        <label class="flbl" style="margin:0">Observability</label>
-        <div class="row" style="gap:6px;align-items:center">
-          <span class="obs-win" id="obs_win">
-            <button data-w="24h" onclick="setObsWindow('24h')">24h</button>
-            <button data-w="7d" class="on" onclick="setObsWindow('7d')">7d</button>
-            <button data-w="30d" onclick="setObsWindow('30d')">30d</button>
-          </span>
-          <button class="copybtn" onclick="renderObsDashboard()">↻ Refresh</button>
-        </div>
-      </div>
-      <div class="muted" style="font-size:11px;margin-bottom:10px">Tokens, tasks, latency and prompt-cache across Claude, Codex (ChatGPT) and the local model. On-device local work stays on this Mac.</div>
-      <div id="obsDash"><div class="muted">Loading…</div></div>
-    </div>
+    >
     <div id="settingsRemote" style="display:none">
       <div class="remote-status"><span class="dot" id="s_remote_dot"></span><span id="s_remote_label">…</span></div>
       <div id="s_tunnel_detail" class="muted" style="font-size:11px;margin-top:4px"></div>
@@ -6374,8 +6360,8 @@ async function sendDiagnostics() {
 }
 
 function switchSettingsTab(tab) {
-  const tabs = ["about", "setup", "features", "general", "models", "observability", "lanes", "remote", "license"];
-  const panels = { models: "settingsModels", observability: "settingsObservability", lanes: "settingsLanes", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout", setup: "settingsSetup", license: "settingsLicense" };
+  const tabs = ["about", "setup", "features", "general", "models", "lanes", "remote", "license"];
+  const panels = { models: "settingsModels", lanes: "settingsLanes", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout", setup: "settingsSetup", license: "settingsLicense" };
   for (const t of tabs) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
@@ -6383,7 +6369,6 @@ function switchSettingsTab(tab) {
   if (tab === "lanes") { renderSystemReadiness(); renderLaneSetup(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); renderWorkPackages(); renderVaultRefs(); }
   if (tab === "setup") renderSettingsSetup();
   if (tab === "features") renderFeatures();
-  if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
   if (tab === "license") renderLicense();
 }

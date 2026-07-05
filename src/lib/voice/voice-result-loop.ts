@@ -141,7 +141,9 @@ export function startVoiceResultLoop(deps: VoiceResultDeps = {}, intervalMs = PO
   timer = setInterval(() => {
     if (running) return;
     running = true;
-    void deliverVoiceResults(deps).finally(() => { running = false; });
+    void deliverVoiceResults(deps)
+      .catch((e) => { console.error(`[voice-result] tick failed: ${e instanceof Error ? e.message : e}`); })
+      .finally(() => { running = false; });
   }, intervalMs);
   if (typeof timer.unref === "function") timer.unref();
   return stopVoiceResultLoop;
