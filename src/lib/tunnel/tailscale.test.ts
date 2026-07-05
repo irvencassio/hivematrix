@@ -39,7 +39,8 @@ test("parseTailscaleStatusJSON extracts running + ipv4 + magicDNS + pairingUrl",
   assert.equal(s.running, true);
   assert.equal(s.ipv4, "100.101.102.103");
   assert.equal(s.magicDNSName, "mac.tail1234.ts.net"); // trailing dot stripped
-  assert.equal(s.pairingUrl, "http://100.101.102.103:3747");
+  // Reachable via `tailscale serve` as HTTPS on the MagicDNS name, not raw IP:port.
+  assert.equal(s.pairingUrl, "https://mac.tail1234.ts.net");
 });
 
 test("parseTailscaleStatusJSON is safe on malformed input and stopped backend", () => {
@@ -50,6 +51,14 @@ test("parseTailscaleStatusJSON is safe on malformed input and stopped backend", 
   assert.equal(stopped.running, false);
   assert.equal(stopped.ipv4, null);
   assert.equal(stopped.pairingUrl, null);
+
+  // Running with an IP but no MagicDNS name → no reliable serve URL.
+  const noDns = parseTailscaleStatusJSON(
+    JSON.stringify({ BackendState: "Running", Self: { TailscaleIPs: ["100.64.0.9"] } }),
+    3747,
+  );
+  assert.equal(noDns.ipv4, "100.64.0.9");
+  assert.equal(noDns.pairingUrl, null);
 });
 
 test("filterStunOnly drops any entry containing a turn/turns url", () => {

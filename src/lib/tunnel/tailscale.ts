@@ -80,7 +80,13 @@ export function parseTailscaleStatusJSON(
   const ips = Array.isArray(self.TailscaleIPs) ? (self.TailscaleIPs as unknown[]) : [];
   const ipv4 = (ips.find((ip) => typeof ip === "string" && isTailnetAddress(ip)) as string | undefined) ?? null;
   const dns = typeof self.DNSName === "string" && self.DNSName ? self.DNSName.replace(/\.$/, "") : null;
-  const pairingUrl = ipv4 ? `http://${ipv4}:${port}` : null;
+  // The daemon binds loopback and is exposed via `tailscale serve`, which
+  // publishes it as HTTPS on the node's MagicDNS name (port 443) → 127.0.0.1:port.
+  // So the reachable pairing endpoint is https://<magicDNS>, NOT http://<ip>:port
+  // (the raw tailnet IP:port is never served with a loopback bind). `port` is kept
+  // for callers that expose the daemon differently.
+  void port;
+  const pairingUrl = dns ? `https://${dns}` : null;
   return { running, ipv4, magicDNSName: dns, pairingUrl };
 }
 

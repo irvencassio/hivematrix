@@ -61,8 +61,15 @@ TOKEN="$(tr -d '\n' <"$TOKEN_FILE" 2>/dev/null)"
 
 echo
 echo "── Pair the phone over Tailscale ──────────────────────────────"
-[ -n "$DNS" ] && echo "  URL (MagicDNS):   https://$DNS"
-[ -n "$IP4" ] && echo "  URL (tailnet IP): http://$IP4:$PORT"
+# `tailscale serve` publishes the loopback daemon as HTTPS on the MagicDNS name
+# (port 443). That is the reachable pairing URL — NOT http://<ip>:$PORT, which a
+# loopback-bound daemon never answers.
+if [ -n "$DNS" ]; then
+  echo "  URL (MagicDNS):   https://$DNS"
+else
+  echo "  URL:              (no MagicDNS name — enable MagicDNS in the Tailscale admin)"
+fi
+[ -n "$IP4" ] && echo "  Tailnet IP:       $IP4  (reachable once 'tailscale serve' is active)"
 if [ -n "$TOKEN" ]; then
   echo "  Access token:     $TOKEN"
 else
