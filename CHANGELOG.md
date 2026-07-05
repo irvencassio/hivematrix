@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.139 — 2026-07-05
+
+First hivematrix-core.json feed release on the Developer ID identity com.irvcassio.hivematrix.core; new-task box shows pickable command options; arms auto-update for the new identity
+
 ## v0.1.138 — 2026-07-05
 
 Fix auto-update so new versions take effect: after install the bundled daemon restarts into the new version, and the daemon self-heals when updated from an older build
