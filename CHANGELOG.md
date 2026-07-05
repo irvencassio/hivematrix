@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.140 — 2026-07-05
+
+Fix Tailscale pairing URL: advertise the MagicDNS HTTPS serve endpoint (https://<magicDNS>) instead of a dead loopback-bound http://<tailnet-ip>:port
+
 ## v0.1.139 — 2026-07-05
 
 First hivematrix-core.json feed release on the Developer ID identity com.irvcassio.hivematrix.core; new-task box shows pickable command options; arms auto-update for the new identity
