@@ -1097,7 +1097,9 @@ export function createDaemonServer() {
       // GET /tunnel — cloudflared status
       if (req.method === "GET" && urlPath === "/tunnel") {
         const { tunnelStatus } = await import("@/lib/tunnel/cloudflared");
-        json(res, 200, tunnelStatus());
+        const { tailscaleStatus } = await import("@/lib/tunnel/tailscale");
+        const port = parseInt(process.env.HIVEMATRIX_PORT ?? "3747", 10);
+        json(res, 200, { ...tunnelStatus(), tailscale: tailscaleStatus(port) });
         return;
       }
       // POST /tunnel/start — start a quick tunnel to this daemon
@@ -3429,7 +3431,15 @@ export function createDaemonServer() {
         const { isFeatureEnabled } = await import("@/lib/config/features");
         if (!isFeatureEnabled("voice")) { json(res, 403, { error: "voice feature is off — enable it in Settings → Features" }); return; }
         const { realtimeIceServers } = await import("@/lib/voice/realtime-session");
-        json(res, 200, { iceServers: await realtimeIceServers() });
+        const { hostOnMesh, filterStunOnly } = await import("@/lib/tunnel/tailscale");
+        // On-mesh (Tailscale) clients get direct P2P — STUN only, no TURN relay.
+        // Detection is subprocess-free: an explicit ?transport=direct opt-in, or a
+        // tailnet Host header (100.x / *.ts.net). Off-mesh keeps STUN+TURN.
+        const qs = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
+        const direct = qs.get("transport") === "direct" || hostOnMesh(req.headers.host);
+        let ice = await realtimeIceServers();
+        if (direct) ice = filterStunOnly(ice);
+        json(res, 200, { iceServers: ice, transport: direct ? "direct" : "relay" });
         return;
       }
 
