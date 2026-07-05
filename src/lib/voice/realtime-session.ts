@@ -156,9 +156,9 @@ async function startServer(): Promise<number> {
       ...process.env,
       ...voiceLlmEnv(),
       ...tEnv,
-      // Flash Lane: sidecar routes voice turns through /flash/turn for full
-      // context (persona + session history + tool bridge).
-      HIVE_FLASH_ENABLED: "1",
+      // Flash Lane: the sidecar always routes voice turns through /flash/turn for
+      // full context (persona + session history + tool bridge). These wire the
+      // sidecar back to this daemon.
       HIVE_DAEMON_URL: `http://127.0.0.1:${daemonPort}`,
       HIVE_DAEMON_TOKEN: daemonToken,
       HIVE_FLASH_CHANNEL: "voice",

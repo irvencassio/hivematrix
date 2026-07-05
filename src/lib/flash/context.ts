@@ -14,9 +14,20 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { searchBrain } from "@/lib/brain/search";
-import type { FlashMessage, FlashTurnRow } from "./types";
+import { extractPersonaName } from "@/lib/onboarding/birth-ritual";
+import type { FlashChannel, FlashMessage, FlashTurnRow } from "./types";
 
 const PERSONA_FILES = ["SOUL.md", "IDENTITY.md", "USER.md", "GOALS.md"] as const;
+
+/** Channels whose replies are read aloud by TTS — they need spoken-style output. */
+const SPOKEN_CHANNELS: ReadonlySet<FlashChannel> = new Set(["voice", "watch", "glasses"]);
+
+/** Spoken-style guidance folded in for TTS surfaces (formerly hardcoded in the
+ * sidecar's realtime.py prompt; now the single Flash pipeline owns it). */
+const SPOKEN_STYLE =
+  "You are speaking aloud — your reply will be read by text-to-speech. " +
+  "Answer in one or two short, natural spoken sentences, and make the FIRST sentence " +
+  "brief so it can be spoken immediately. No markdown, no lists, no code blocks, no emoji.";
 const MAX_PERSONA_CHARS = 6000;
 const MAX_TURNS_IN_CONTEXT = 20;
 const MAX_BRAIN_RESULTS = 3;
@@ -29,6 +40,12 @@ function readSafe(path: string, maxChars = MAX_PERSONA_CHARS): string {
 
 function todayString(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/** The persona's chosen name from IDENTITY.md, or null if not yet born. */
+function loadPersonaName(brainRoot: string): string | null {
+  const content = readSafe(join(brainRoot, "persona", "IDENTITY.md"), 2000);
+  return content ? extractPersonaName(content) : null;
 }
 
 function loadPersonaSection(brainRoot: string): string {
@@ -73,13 +90,20 @@ export async function assembleSystemPrompt(
   userText: string,
   sessionSummary: string,
   brainRoot?: string | null,
+  channel?: FlashChannel,
 ): Promise<string> {
   const root = brainRoot ?? configuredBrainRootDir();
+  const name = root ? loadPersonaName(root) : null;
+  const identityLine = name
+    ? `You are ${name}, the operator's AI partner running inside HiveMatrix on their Mac. That is your name — when the operator addresses you as "${name}" (aloud or in text), it is you they mean; respond naturally as yourself.`
+    : "You are a capable AI assistant running inside HiveMatrix on the operator's Mac.";
   const sections: string[] = [
-    "You are a capable AI assistant running inside HiveMatrix on the operator's Mac.",
+    identityLine,
     "Respond helpfully and concisely. Use available tools when they would genuinely help.",
     "Do not invent tool results — always call the tool and wait for the response.",
   ];
+
+  if (channel && SPOKEN_CHANNELS.has(channel)) sections.push(SPOKEN_STYLE);
 
   if (root) {
     const persona = loadPersonaSection(root);

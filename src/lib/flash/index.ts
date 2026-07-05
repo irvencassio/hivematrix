@@ -45,7 +45,7 @@ export async function runFlashTurnText(opts: {
   appendTurn(session.id, "user", opts.text);
 
   const recentTurns = getRecentTurns(session.id, 20);
-  const systemPrompt = await assembleSystemPrompt(opts.text, session.summary, brainRoot);
+  const systemPrompt = await assembleSystemPrompt(opts.text, session.summary, brainRoot, opts.channel);
   const historyTurns = recentTurns.filter((t) => !(t.role === "user" && t.content === opts.text));
   const messages = buildInitialMessages(systemPrompt, historyTurns, opts.text);
 
@@ -97,7 +97,7 @@ export async function handleFlashTurn(
 
   // Context: persona + daily note + brain search + rolling session summary + turns
   const recentTurns = getRecentTurns(session.id, 20);
-  const systemPrompt = await assembleSystemPrompt(input.text, session.summary, brainRoot);
+  const systemPrompt = await assembleSystemPrompt(input.text, session.summary, brainRoot, input.channel);
   // Exclude the turn we just appended (it's already the last user message)
   const historyTurns = recentTurns.filter((t) => !(t.role === "user" && t.content === input.text));
   const messages = buildInitialMessages(systemPrompt, historyTurns, input.text);

@@ -1,17 +1,21 @@
-"""Realtime voice pipeline (P5.1) — the server half of the iOS live client.
+"""Realtime voice pipeline — shared SmallWebRTC primitives + a direct-model harness.
 
-A Pipecat pipeline over peer-to-peer **SmallWebRTC** (no cloud SFU): the client's
-mic audio → Silero VAD → local STT → local LLM (the daemon's configured
-model) → cloned-voice VoxCPM2 TTS → back to the client. Pipecat owns turn-taking
-and native barge-in; the iOS client supplies hardware echo cancellation. The
-daemon relays WebRTC signaling (SDP/ICE) between the iOS client and this process
-and provides the ICE servers (Cloudflare STUN/TURN) for remote use.
+Two roles:
 
-This is the realtime/networked path. The desktop CLI (talk.py / live.py) stays
-the zero-dependency local path; both reuse stt.py / tts.py / the cloned voice.
+1. **Shared primitives** (imported by flash_pipeline.py): `VoxCPMTTS`, `make_vad`,
+   and `build_transport` — the Silero-VAD SmallWebRTC transport and cloned/Kokoro
+   TTS frame source used by the production Flash Lane pipeline.
 
-Wrappers here are reused by tests; the live transport connect is driven by
-`answer_offer()` (called by the daemon with the client's SDP offer).
+2. **Direct-model dev harness** (`build_pipeline` / `build_session` / `answer_offer`,
+   CommandSTT + a hardcoded spoken prompt → local LLM → TTS): a daemon-INDEPENDENT
+   path for testing the raw WebRTC/STT/TTS loop without /flash/turn. Reached only by
+   serve_local.py and `python realtime.py -t webrtc`. The PRODUCT voice path does
+   NOT use this — realtime_server.py always builds the Flash pipeline, which owns
+   the persona/session/tool context and its own system prompt. Keep the two prompts
+   from diverging in intent: this one exists purely for isolated pipeline testing.
+
+The desktop CLI (talk.py / live.py) is a separate zero-dependency local path; all
+three reuse stt.py / tts.py / the cloned voice.
 """
 import asyncio
 import os
