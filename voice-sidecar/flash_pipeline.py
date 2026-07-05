@@ -24,6 +24,7 @@ from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 
 # Reuse the VAD factory, TTS service, and transport builder from realtime.py
@@ -43,15 +44,17 @@ def build_flash_pipeline(
     """Assemble the Flash Lane realtime pipeline. Returns (task, runner).
 
     No LLMContextAggregatorPair — Flash Lane owns context server-side (persona +
-    rolling session summary). Pipecat manages VAD turn-taking and barge-in;
-    Flash manages everything above the audio boundary.
+    rolling session summary). The explicit VAD processor emits the speech
+    boundary frames that SegmentedSTTService needs to run transcription.
     """
     stt = WhisperCppSTT()
+    vad = VADProcessor(vad_analyzer=make_vad())
     flash = FlashLLMProcessor(session_id=session_id)
     tts = VoxCPMTTS(quality=tts_quality)
 
     pipeline = Pipeline([
         transport.input(),
+        vad,
         stt,
         flash,
         tts,
