@@ -44,6 +44,23 @@ export function getOrCreateSession(
   return { id, channel, peer, summary: "", createdAt: now, lastActiveAt: now };
 }
 
+/**
+ * Always start a NEW session for this channel+peer, without resuming the most
+ * recent one. Because its lastActiveAt is now, it also becomes the session that
+ * a subsequent getOrCreateSession(channel, peer) call resumes — so both the
+ * streamed (/flash/turn) and turn-based (/voice/turn) paths pick up the fresh
+ * conversation. Used by the "New conversation" control.
+ */
+export function createSession(channel: string, peer: string): FlashSessionRow {
+  const db = getDb();
+  const id = generateId();
+  const now = new Date().toISOString();
+  db.prepare(
+    "INSERT INTO flash_sessions (id, channel, peer, summary, createdAt, lastActiveAt) VALUES (?, ?, ?, '', ?, ?)",
+  ).run(id, channel, peer, now, now);
+  return { id, channel, peer, summary: "", createdAt: now, lastActiveAt: now };
+}
+
 export function appendTurn(
   sessionId: string,
   role: string,

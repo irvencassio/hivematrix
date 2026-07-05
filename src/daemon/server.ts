@@ -4878,6 +4878,19 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /flash/session/new — start a fresh conversation for a channel+peer
+      // (the iOS "New conversation" control). Returns the new session id, which
+      // both /flash/turn and /voice/turn then resume as the active session.
+      if (req.method === "POST" && urlPath === "/flash/session/new") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const channel = typeof body.channel === "string" && body.channel ? body.channel : "voice";
+        const peer = typeof body.peer === "string" && body.peer ? body.peer : "operator";
+        const { createSession } = await import("@/lib/flash");
+        const session = createSession(channel, peer);
+        json(res, 200, { sessionId: session.id });
+        return;
+      }
+
       // POST /flash/turns/:id/feedback — rate a turn {rating: "good"|"bad"}
       const flashFeedbackMatch = urlPath.match(/^\/flash\/turns\/([^/]+)\/feedback$/);
       if (req.method === "POST" && flashFeedbackMatch) {

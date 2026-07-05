@@ -14,6 +14,7 @@ import type { FlashEmitter, FlashTurnInput } from "./types";
 import {
   appendFeedbackToTurn,
   appendTurn,
+  createSession,
   getOrCreateSession,
   getRecentTurns,
   getSession,
@@ -24,7 +25,7 @@ import { assembleSystemPrompt, buildInitialMessages } from "./context";
 import { runFlashAgentLoop } from "./loop";
 
 // Re-export store helpers for the server routes
-export { appendFeedbackToTurn, getSession, getTurnsForSession, listSessions };
+export { appendFeedbackToTurn, createSession, getSession, getTurnsForSession, listSessions };
 
 /**
  * Run a flash turn and return the reply directly (no SSE).
