@@ -404,6 +404,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   /* Command meta chips + inspect/run controls (reused by the unified detail panel) */
   .command-chip { min-width:0; max-width:100%; display:inline-block; border:1px solid var(--border); background:var(--panel); color:var(--muted); border-radius:999px; padding:2px 7px; font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .command-chip.primary { color:var(--accent-2); border-color:color-mix(in srgb, var(--accent-2) 42%, var(--border)); }
+  .compat-chip { min-width:0; max-width:100%; display:inline-block; border:1px solid color-mix(in srgb, var(--ok) 35%, var(--border)); color:var(--ok); background:var(--panel); border-radius:999px; padding:0 5px; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle; }
   .command-run { background:var(--accent); color:var(--create-btn-text); border:0; flex:1; }
   .command-view { display:none; max-height:200px; overflow:auto; font-size:11px; background:var(--code-bg); color:var(--code-text); padding:8px; border-radius:6px; margin:0 10px 10px; white-space:pre-wrap; }
   /* Unified Skills & Commands section */
@@ -422,7 +423,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .sk-row-name { font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .sk-row-desc { font-size:10.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .sk-row .sk-desc { overflow:hidden; text-overflow:ellipsis; }
-  .sk-row-right { display:flex; align-items:center; gap:3px; flex:none; }
+  .sk-row-right { display:flex; align-items:center; gap:3px; flex:none; max-width:48%; overflow:hidden; }
   .sk-badge { display:inline-block; font-size:10px; color:var(--muted); border:1px solid var(--border); border-radius:999px; padding:0 5px; margin-left:4px; white-space:nowrap; }
   .sk-badge.src { color:var(--accent-2); border-color:color-mix(in srgb, var(--accent-2) 42%, var(--border)); }
   .sk-badge.warn { color:var(--warn); border-color:color-mix(in srgb, var(--warn) 45%, var(--border)); }
@@ -3336,7 +3337,7 @@ function skCatalog() {
   }));
   const loc = _commands.map(c => ({
     source: 'local', key: 'local:' + c.invokeName, name: c.displayName || c.invokeName,
-    description: c.description || '', kind: c.kind, invokeName: c.invokeName, useCount: 0, raw: c,
+    description: c.description || '', kind: c.kind, invokeName: c.invokeName, compat: c.compat, useCount: 0, raw: c,
   }));
   return lib.concat(loc);
 }
@@ -3365,6 +3366,27 @@ function skTypeLabel(it) {
   if (it.source === 'local') return it.kind === 'skill' ? 'folder' : 'cmd';
   return it.kind === 'script' ? 'ops' : 'skill';
 }
+function compatValues(it) {
+  const raw = it && it.raw ? it.raw : it;
+  const vals = raw && Array.isArray(raw.compat) ? raw.compat : [];
+  return vals.length ? vals : ['all'];
+}
+function compatLabel(value) {
+  if (value === 'claude') return 'Claude';
+  if (value === 'codex') return 'ChatGPT';
+  if (value === 'qwen') return 'Qwen(local)';
+  if (value === 'deepseek') return 'DeepSeek(local)';
+  return 'All';
+}
+function compatSearchText(it) {
+  return compatValues(it).map(v => v + ' ' + compatLabel(v)).join(' ');
+}
+function compatChips(it) {
+  return compatValues(it).map(v => {
+    const label = compatLabel(v);
+    return '<span class="compat-chip" title="Runs on ' + esc(label) + '">' + esc(label) + '</span>';
+  }).join('');
+}
 function renderSkillList() {
   const box = document.getElementById('skList');
   if (!box) return;
@@ -3373,7 +3395,7 @@ function renderSkillList() {
   if (q) {
     const terms = q.split(/\s+/).filter(Boolean);
     items = items.filter(it => {
-      const hay = (it.name + ' ' + it.description + ' ' + (it.kind || '')).toLowerCase();
+      const hay = (it.name + ' ' + it.description + ' ' + (it.kind || '') + ' ' + compatSearchText(it)).toLowerCase();
       return terms.every(t => hay.includes(t));
     });
   }
@@ -3396,6 +3418,7 @@ function renderSkillList() {
       + '</div>'
       + '<div class="sk-row-right">'
       + '<span class="sk-badge src">' + esc(skTypeLabel(it)) + '</span>'
+      + compatChips(it)
       + (it.useCount > 0 ? '<span class="sk-badge">' + it.useCount + '×</span>' : '')
       + (alert ? '<span style="font-size:11px;margin-left:2px" title="' + (it.scan === 'block' ? 'scan blocked' : 'review before use') + '">' + alert + '</span>' : '')
       + '</div>'
@@ -3557,7 +3580,7 @@ function libMetaLine(s) {
   const untrusted = s.trusted === false ? '<span style="color:var(--warn)">⚠ untrusted (review before agents use it)</span> · ' : '';
   const prov = s.scope ? '[' + esc(s.scope) + (s.signed ? ' ✓signed' : '') + '] ' : '';
   return scan + untrusted + prov
-    + 'runs on: ' + esc((s.compat && s.compat.length ? s.compat : ['all']).join(', '))
+    + 'runs on: ' + compatChips({ raw: s })
     + (s.hasInput ? ' · takes input' : '');
 }
 function skParamLabel(name) {
@@ -3805,6 +3828,7 @@ function inspectCommand() {
   if (!view) return;
   view.textContent = 'invoke: /' + c.invokeName + '\nkind: ' + c.kind
     + '\ncatalog: local profile catalog'
+    + '\nruns on: ' + compatValues({ raw: c }).map(compatLabel).join(", ")
     + '\nsource: ' + c.sourcePath
     + (c.allowedTools ? '\nallowed-tools: ' + c.allowedTools : '')
     + (c.model ? '\nmodel: ' + c.model : '');
@@ -3821,7 +3845,7 @@ function commandMetaChips(c) {
   if (c.argumentHint) chips.push(["", "args " + c.argumentHint]);
   if (c.hasBundledFiles) chips.push(["", String(c.bundledFileCount || 0) + " bundled"]);
   if (c.description) chips.push(["", c.description]);
-  return chips.map(([cls, text]) => '<span class="command-chip' + (cls ? ' ' + cls : '')
+  return compatChips({ raw: c }) + chips.map(([cls, text]) => '<span class="command-chip' + (cls ? ' ' + cls : '')
     + '" title="' + esc(text) + '">' + esc(text) + '</span>').join("");
 }
 // --- prune (unused skills) --------------------------------------------------

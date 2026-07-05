@@ -35,6 +35,22 @@ function extractBetween(src: string, start: string, end: string): string {
   return src.slice(startIx, endIx);
 }
 
+function extractFunctionBlock(src: string, name: string): string {
+  const start = src.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `missing function ${name}`);
+  const bodyStart = src.indexOf("{", start);
+  assert.notEqual(bodyStart, -1, `missing body for ${name}`);
+  let depth = 0;
+  for (let i = bodyStart; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}") {
+      depth--;
+      if (depth === 0) return src.slice(start, i + 1);
+    }
+  }
+  throw new Error(`unterminated function ${name}`);
+}
+
 test("console browser script is valid JavaScript (no TypeScript leaks)", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.ok(js.length > 1000, "script block should be substantial");
@@ -704,6 +720,12 @@ test("skills & commands render in one unified, searchable section", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /function renderSkillCatalog\(/, "catalog loader present");
   assert.match(js, /function commandMetaChips\(/, "metadata chips helper present");
+  assert.match(js, /function compatLabel\(/, "compatibility label helper present");
+  assert.match(js, /function compatChips\(/, "compatibility chips helper present");
+  assert.match(js, /Qwen\(local\)/, "Qwen local compatibility label present");
+  assert.match(js, /DeepSeek\(local\)/, "DeepSeek local compatibility label present");
+  assert.match(js, /ChatGPT/, "Codex compatibility is labeled as ChatGPT");
+  assert.match(js, /compatSearchText\(it\)/, "compatibility participates in catalog search");
   assert.match(js, /catalog: local profile catalog/, "command inspect copy is provider-neutral");
   assert.doesNotMatch(js, /catalog: Claude local profile/, "command inspect copy does not overclaim Claude execution");
   // The old separate Commands section / dropdown is gone.
@@ -716,6 +738,39 @@ test("unified skills section contains long metadata inside the context column", 
   assert.match(CONSOLE_HTML, /\.sk-list \{[^}]*overflow:auto;/);
   assert.match(CONSOLE_HTML, /\.sk-row \.sk-desc \{[^}]*overflow:hidden;[^}]*text-overflow:ellipsis;/);
   assert.match(CONSOLE_HTML, /\.command-chip \{[^}]*min-width:0;[^}]*max-width:100%;[^}]*display:inline-block;/);
+  assert.match(CONSOLE_HTML, /\.compat-chip \{[^}]*max-width:100%;[^}]*overflow:hidden;[^}]*text-overflow:ellipsis;/);
+  assert.match(CONSOLE_HTML, /\.sk-row-right \{[^}]*max-width:48%;[^}]*overflow:hidden;/);
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /compatChips\(it\)/, "catalog rows render compatibility chips");
+  assert.match(js, /compatChips\(\{ raw: s \}\)/, "library detail metadata renders compatibility chips");
+  assert.match(js, /compatChips\(\{ raw: c \}\)/, "local command metadata renders compatibility chips");
+});
+
+test("skills compatibility helpers label, search, and render chips behaviorally", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const esc = js.match(/function esc\(s\)\{[^\n]+\}/);
+  assert.ok(esc, "console script must define esc");
+  const factory = new Function([
+    esc![0],
+    extractFunctionBlock(js, "compatValues"),
+    extractFunctionBlock(js, "compatLabel"),
+    extractFunctionBlock(js, "compatSearchText"),
+    extractFunctionBlock(js, "compatChips"),
+    "return { compatLabel, compatSearchText, compatChips };",
+  ].join("\n")) as () => {
+    compatLabel: (value: string) => string;
+    compatSearchText: (it: unknown) => string;
+    compatChips: (it: unknown) => string;
+  };
+  const helpers = factory();
+  assert.equal(helpers.compatLabel("codex"), "ChatGPT");
+  assert.equal(helpers.compatLabel("qwen"), "Qwen(local)");
+  assert.equal(helpers.compatLabel("deepseek"), "DeepSeek(local)");
+  assert.match(helpers.compatSearchText({ raw: { compat: ["codex"] } }), /codex ChatGPT/);
+  const chips = helpers.compatChips({ raw: { compat: ["qwen", "deepseek"] } });
+  assert.match(chips, /class="compat-chip"/);
+  assert.match(chips, /Qwen\(local\)/);
+  assert.match(chips, /DeepSeek\(local\)/);
 });
 
 test("header is grouped into zones with a theme toggle and grouped connectivity", () => {

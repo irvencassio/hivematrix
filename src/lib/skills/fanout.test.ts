@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { planFanout, fanOutSkills, type HarnessTarget } from "./fanout";
+import { planFanout, fanOutSkills, harnessTargets, type HarnessTarget } from "./fanout";
 import { renderStandardSkillMd } from "./standard";
 import type { Skill } from "./contracts";
 
@@ -29,6 +29,29 @@ test("planFanout: trust gate + compat gate + removal of dropped slugs", () => {
   assert.deepEqual(claude.write.sort(), ["claude-only", "shared"]); // untrusted excluded
   assert.deepEqual(qwen.write.sort(), ["shared"]);                  // claude-only excluded by compat
   assert.deepEqual(claude.remove, ["old-gone"]);                    // previously managed, now gone
+});
+
+test("harnessTargets includes DeepSeek local skill target", () => {
+  const targets = harnessTargets("/home/me");
+  const deepseek = targets.find((t) => t.id === "deepseek");
+  assert.ok(deepseek, "deepseek target is present");
+  assert.equal(deepseek.dir, "/home/me/.deepseek/skills");
+});
+
+test("planFanout: deepseek-specific skill only writes to DeepSeek plus all-targets", () => {
+  const targets: HarnessTarget[] = [
+    { id: "claude", dir: "/c" },
+    { id: "qwen", dir: "/q" },
+    { id: "deepseek", dir: "/d" },
+  ];
+  const skills = [
+    skill({ name: "shared", compat: ["all"], trusted: true }),
+    skill({ name: "deepseek-only", compat: ["deepseek"], trusted: true }),
+  ];
+  const plans = planFanout(skills, targets, {});
+  assert.deepEqual(plans.find((p) => p.id === "claude")!.write.sort(), ["shared"]);
+  assert.deepEqual(plans.find((p) => p.id === "qwen")!.write.sort(), ["shared"]);
+  assert.deepEqual(plans.find((p) => p.id === "deepseek")!.write.sort(), ["deepseek-only", "shared"]);
 });
 
 test("renderStandardSkillMd emits spec frontmatter (name=slug, metadata) + body", () => {

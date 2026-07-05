@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
-  "description": "Skill compatibility registry mapping skill IDs to supported AI harnesses. Each skill entry has boolean flags for 'claude', 'codex', and 'qwen' indicating which harnesses can run it.",
-  "knownHarnesses": ["claude", "codex", "qwen"],
+  "description": "Skill compatibility registry mapping skill IDs to supported AI harnesses. Each skill entry has boolean flags for 'claude', 'codex', 'qwen', and optionally 'deepseek' indicating which harnesses can run it.",
+  "knownHarnesses": ["claude", "codex", "qwen", "deepseek"],
   "skills": {
     "android-screenshots": {
       "claude": true,

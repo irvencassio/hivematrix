@@ -16,6 +16,7 @@
  */
 
 export type LocalCommandKind = "command" | "skill";
+export type LocalCommandCompat = "all" | "claude" | "codex" | "qwen" | "deepseek";
 
 export interface LocalCommand {
   /** The slash target: "import-all" or subdir-namespaced "ns:name". */
@@ -32,6 +33,8 @@ export interface LocalCommand {
   allowedTools: string;
   /** Frontmatter `model` — commands only. */
   model?: string;
+  /** Normalized provider compatibility for catalog filtering/display. */
+  compat: LocalCommandCompat[];
   /** Absolute path to the .md / SKILL.md on disk. */
   sourcePath: string;
   /** A skill folder bundles files beyond SKILL.md (scripts etc.). */
@@ -85,10 +88,38 @@ function unquote(v: string): string {
   return t;
 }
 
+function uniqueCompat(values: LocalCommandCompat[]): LocalCommandCompat[] {
+  return values.filter((v, i) => values.indexOf(v) === i);
+}
+
+function compatForModelToken(token: string): LocalCommandCompat | null {
+  const t = token.trim().toLowerCase();
+  if (!t) return null;
+  if (t === "*" || t === "all" || t === "any") return "all";
+  if (t === "opus" || t === "sonnet" || t === "haiku" || t.startsWith("claude")) return "claude";
+  if (t === "codex" || t === "chatgpt" || t.startsWith("gpt-") || t.startsWith("openai")) return "codex";
+  if (t.startsWith("qwen")) return "qwen";
+  if (t.startsWith("deepseek") || t.startsWith("ds4") || t.startsWith("dwarf-star")) return "deepseek";
+  return null;
+}
+
+/** Infer provider compatibility from local command/frontmatter model hints. */
+export function inferLocalCommandCompat(model?: string): LocalCommandCompat[] {
+  const raw = unquote(model ?? "");
+  if (!raw.trim()) return ["all"];
+  const tokens = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  const mapped = tokens.map(compatForModelToken);
+  if (mapped.some((v) => v === null)) return ["all"];
+  const compat = uniqueCompat(mapped.filter((v): v is LocalCommandCompat => v !== null));
+  if (!compat.length || compat.includes("all")) return ["all"];
+  return compat;
+}
+
 /** Build a LocalCommand from a flat command `.md`. invokeName is precomputed by
  *  the scanner from the path. All frontmatter is optional. */
 export function parseCommandFile(content: string, invokeName: string, sourcePath: string): LocalCommand {
   const { fm } = splitFrontmatter(content);
+  const model = fm["model"] ? unquote(fm["model"]) : undefined;
   return {
     invokeName,
     displayName: invokeName,
@@ -97,7 +128,8 @@ export function parseCommandFile(content: string, invokeName: string, sourcePath
     description: unquote(fm["description"] ?? ""),
     argumentHint: unquote(fm["argument-hint"] ?? ""),
     allowedTools: unquote(fm["allowed-tools"] ?? ""),
-    model: fm["model"] ? unquote(fm["model"]) : undefined,
+    model,
+    compat: inferLocalCommandCompat(model),
     sourcePath,
     hasBundledFiles: false,
     bundledFileCount: 0,
@@ -122,6 +154,7 @@ export function parseSkillManifest(
     description: unquote(fm["description"] ?? ""),
     argumentHint: unquote(fm["argument-hint"] ?? ""),
     allowedTools: unquote(fm["allowed-tools"] ?? ""),
+    compat: inferLocalCommandCompat(fm["model"]),
     sourcePath,
     hasBundledFiles: bundledFileCount > 0,
     bundledFileCount,

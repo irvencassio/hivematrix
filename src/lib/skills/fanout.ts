@@ -1,8 +1,8 @@
 /**
  * Cross-harness fan-out — render trusted skills into the dirs Claude Code, Codex,
- * and qwen-code each read from. SKILL.md is one open standard, but every harness
- * looks in a DIFFERENT directory, so portability = writing the canonical skill to
- * all three (`<dir>/<slug>/SKILL.md`).
+ * qwen-code, and DeepSeek local each read from. SKILL.md is one open standard,
+ * but every harness looks in a DIFFERENT directory, so portability = writing the
+ * canonical skill to each compatible target (`<dir>/<slug>/SKILL.md`).
  *
  * Safety: only TRUSTED skills are written (an unapproved pulled skill never
  * auto-loads into a harness), compat is honored per harness, and we only manage
@@ -24,6 +24,7 @@ export function harnessTargets(home = homedir()): HarnessTarget[] {
     { id: "claude", dir: join(home, ".claude", "skills") },
     { id: "codex", dir: join(home, ".agents", "skills") }, // Codex ("ChatGPT") uses .agents/skills
     { id: "qwen", dir: join(home, ".qwen", "skills") },
+    { id: "deepseek", dir: join(home, ".deepseek", "skills") },
   ];
 }
 

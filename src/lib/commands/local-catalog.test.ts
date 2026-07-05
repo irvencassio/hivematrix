@@ -58,6 +58,28 @@ test("parseCommandFile reads frontmatter + keeps the namespaced invokeName", () 
   assert.equal(c.description, "x");
   assert.equal(c.argumentHint, "<a>");
   assert.equal(c.hasBundledFiles, false);
+  assert.deepEqual(c.compat, ["all"]);
+});
+
+test("parseCommandFile infers model compatibility", () => {
+  assert.deepEqual(parseCommandFile("---\nmodel: all\n---\nbody", "c", "/p").compat, ["all"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: any\n---\nbody", "c", "/p").compat, ["all"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: '*'\n---\nbody", "c", "/p").compat, ["all"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: opus\n---\nbody", "c", "/p").compat, ["claude"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: sonnet\n---\nbody", "c", "/p").compat, ["claude"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: haiku\n---\nbody", "c", "/p").compat, ["claude"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: claude-opus-4\n---\nbody", "c", "/p").compat, ["claude"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: codex\n---\nbody", "c", "/p").compat, ["codex"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: gpt-5\n---\nbody", "c", "/p").compat, ["codex"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: chatgpt\n---\nbody", "c", "/p").compat, ["codex"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: openai-gpt-5\n---\nbody", "c", "/p").compat, ["codex"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: qwen3\n---\nbody", "c", "/p").compat, ["qwen"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: deepseek-v4\n---\nbody", "c", "/p").compat, ["deepseek"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: ds4\n---\nbody", "c", "/p").compat, ["deepseek"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: dwarf-star-v4\n---\nbody", "c", "/p").compat, ["deepseek"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: qwen3, deepseek-v4\n---\nbody", "c", "/p").compat, ["qwen", "deepseek"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: unknown-future-model\n---\nbody", "c", "/p").compat, ["all"]);
+  assert.deepEqual(parseCommandFile("---\nmodel: qwen3, unknown-future-model\n---\nbody", "c", "/p").compat, ["all"]);
 });
 
 test("parseSkillManifest reads name + bundled flag", () => {
@@ -66,6 +88,7 @@ test("parseSkillManifest reads name + bundled flag", () => {
   assert.equal(s.invokeName, "puller");
   assert.equal(s.hasBundledFiles, true);
   assert.equal(s.bundledFileCount, 1);
+  assert.deepEqual(s.compat, ["all"]);
 });
 
 test("scanLocalCommands discovers both sources, namespacing, bundled detection", async () => {
@@ -79,6 +102,7 @@ test("scanLocalCommands discovers both sources, namespacing, bundled detection",
   assert.equal(puller?.hasBundledFiles, true, "pull.sh counted as a bundled file");
   const ia = all.find((c) => c.invokeName === "import-all");
   assert.equal(ia?.model, "opus");
+  assert.deepEqual(ia?.compat, ["claude"]);
 });
 
 test("scanLocalCommands excludes user-invocable:false skills", async () => {

@@ -14,6 +14,7 @@ export interface SkillCompatibilityEntry {
   claude: boolean;
   codex: boolean;
   qwen: boolean;
+  deepseek?: boolean;
   kind: string;
   description: string;
 }

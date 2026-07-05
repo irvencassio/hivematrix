@@ -10,7 +10,7 @@
  */
 
 /** Harnesses a skill can run under. "all" = harness-agnostic instructions. */
-export const SKILL_HARNESSES = ["claude", "codex", "qwen"] as const;
+export const SKILL_HARNESSES = ["claude", "codex", "qwen", "deepseek"] as const;
 export type SkillHarness = (typeof SKILL_HARNESSES)[number] | "all";
 
 /**

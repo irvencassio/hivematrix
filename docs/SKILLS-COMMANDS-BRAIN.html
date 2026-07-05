@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HiveMatrix Brain Doc - Skills &amp; Commands Sharing</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1f2633;
+    --border: #303846;
+    --text: #e6edf3;
+    --muted: #9aa7b8;
+    --accent: #58a6ff;
+    --ok: #3fb950;
+    --warn: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 44px 28px 28px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #172033, var(--bg));
+  }
+  main { max-width: 1040px; margin: 0 auto; padding: 28px; }
+  h1 { margin: 0; font-size: clamp(30px, 5vw, 52px); line-height: 1.05; letter-spacing: 0; }
+  h2 { margin: 34px 0 12px; font-size: 22px; letter-spacing: 0; }
+  h3 { margin: 22px 0 8px; font-size: 16px; letter-spacing: 0; color: var(--accent); }
+  p { margin: 0 0 14px; color: var(--text); }
+  code { background: #0a0f17; border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; color: #d2e7ff; }
+  .kicker { color: var(--accent); font-weight: 700; text-transform: uppercase; font-size: 12px; letter-spacing: .08em; margin-bottom: 10px; }
+  .sub { max-width: 760px; margin-top: 14px; color: var(--muted); font-size: 17px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 16px 0; }
+  .card { border: 1px solid var(--border); background: var(--panel); border-radius: 8px; padding: 15px 16px; }
+  .card h3 { margin-top: 0; }
+  .label-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 16px; }
+  .chip { display: inline-block; border: 1px solid color-mix(in srgb, var(--ok) 36%, var(--border)); color: var(--ok); border-radius: 999px; padding: 3px 9px; font-size: 12px; white-space: nowrap; }
+  .chip.warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0 18px; font-size: 14px; }
+  th, td { text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); padding: 9px 10px; }
+  th { color: var(--muted); font-weight: 700; background: var(--panel); }
+  ul { margin: 8px 0 18px 22px; padding: 0; }
+  li { margin: 6px 0; }
+  .note { border-left: 3px solid var(--accent); padding: 10px 12px; background: var(--panel); color: var(--muted); }
+  footer { color: var(--muted); border-top: 1px solid var(--border); margin-top: 36px; padding-top: 18px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="kicker">HiveMatrix brain doc</div>
+  <h1>Skills &amp; Commands Sharing</h1>
+  <p class="sub">A practical map for sharing, importing, and browsing reusable skills and slash commands across Claude, ChatGPT, Qwen(local), and DeepSeek(local).</p>
+</header>
+
+<main>
+  <section>
+    <h2>Non-technical explanation</h2>
+    <p>HiveMatrix has two kinds of reusable know-how. A <strong>skill</strong> is a portable recipe agents can read and follow. A <strong>command</strong> is a local slash command or folder skill that a profile runtime already knows how to run.</p>
+    <p>The catalog browser puts both in one searchable place. The important addition is a clear compatibility label, so an operator can tell whether an item is universal or tied to Claude, ChatGPT, Qwen(local), or DeepSeek(local).</p>
+  </section>
+
+  <section>
+    <h2>Compatibility labels</h2>
+    <div class="label-row">
+      <span class="chip">All</span>
+      <span class="chip">Claude</span>
+      <span class="chip">ChatGPT</span>
+      <span class="chip">Qwen(local)</span>
+      <span class="chip">DeepSeek(local)</span>
+    </div>
+    <table>
+      <thead><tr><th>Browser label</th><th>Internal value</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>All</td><td><code>all</code></td><td>Harness-agnostic instructions or commands with no model restriction.</td></tr>
+        <tr><td>Claude</td><td><code>claude</code></td><td>Best run by Claude Code or Claude-profile assets.</td></tr>
+        <tr><td>ChatGPT</td><td><code>codex</code></td><td>ChatGPT/Codex-compatible assets. The internal id remains <code>codex</code> for continuity.</td></tr>
+        <tr><td>Qwen(local)</td><td><code>qwen</code></td><td>Local Qwen-compatible instructions or commands.</td></tr>
+        <tr><td>DeepSeek(local)</td><td><code>deepseek</code></td><td>Local DeepSeek or Dwarf Star compatible instructions or commands.</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Local command compatibility is inferred from frontmatter such as <code>model: opus</code>, <code>model: gpt-5</code>, <code>model: qwen3</code>, or <code>model: deepseek-v4</code>. Unknown or missing model values fall back to <code>All</code> so old commands remain visible.</p>
+  </section>
+
+  <section>
+    <h2>Share out</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Copy a skill</h3>
+        <p>Library skills can be copied as shareable markdown from the catalog. This preserves frontmatter such as name, description, kind, and compatibility.</p>
+      </div>
+      <div class="card">
+        <h3>Publish a skill</h3>
+        <p>The catalog can publish an existing reviewed skill to personal, team, org, or public scopes when the configured source and scan gates allow it. Shared skills keep provenance and can be imported by another HiveMatrix install.</p>
+      </div>
+      <div class="card">
+        <h3>Local commands</h3>
+        <p>Local slash commands remain native to the profile directory. Share the command markdown or the folder skill source when another machine should run the same local command.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Import</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>URL or paste</h3>
+        <p>Remote or pasted skill markdown imports into the brain skill library as untrusted until the operator reviews and trusts it.</p>
+      </div>
+      <div class="card">
+        <h3>Shared scopes</h3>
+        <p>Configured personal, team, org, or public sources can be browsed before import. Imported shared skills are scanned and marked with trust state.</p>
+      </div>
+      <div class="card">
+        <h3>Local profile skills</h3>
+        <p>Folder skills under a local profile can be bulk-imported into the brain library. The imported recipe is portable; bundled scripts stay at the source path, so native command execution remains the high-fidelity path for assets.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Catalog browser behavior</h2>
+    <ul>
+      <li>One catalog combines brain-library skills and local profile commands.</li>
+      <li>Search includes name, description, kind, and compatibility labels.</li>
+      <li>List rows and detail panels show compatibility chips.</li>
+      <li>Commands can be launched as slash-command tasks only after they are found in a fresh local catalog scan.</li>
+      <li>Library skills can be viewed, copied, published, trusted, deleted, and run through the existing skill routes.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Source map</h2>
+    <table>
+      <thead><tr><th>Area</th><th>Files</th></tr></thead>
+      <tbody>
+        <tr><td>Library skill contracts</td><td><code>src/lib/skills/contracts.ts</code>, <code>src/lib/skills/store.ts</code></td></tr>
+        <tr><td>Skill fan-out</td><td><code>src/lib/skills/fanout.ts</code>, <code>src/lib/skills/standard.ts</code></td></tr>
+        <tr><td>Skill share/import sync</td><td><code>src/lib/skills/sync.ts</code></td></tr>
+        <tr><td>Local commands catalog</td><td><code>src/lib/commands/contracts.ts</code>, <code>src/lib/commands/local-catalog.ts</code></td></tr>
+        <tr><td>Daemon routes</td><td><code>src/daemon/server.ts</code> routes for <code>/skills</code>, <code>/commands</code>, and import/publish actions.</td></tr>
+        <tr><td>Catalog browser</td><td><code>src/daemon/console.ts</code> unified Skills &amp; Commands section.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Verification checklist</h2>
+    <ul>
+      <li><code>npm run typecheck</code></li>
+      <li><code>npm test</code></li>
+      <li><code>node scripts/scope-wall.mjs</code></li>
+    </ul>
+  </section>
+
+  <footer>
+    Brain doc source map: skills live under <code>src/lib/skills/</code>, local command discovery lives under <code>src/lib/commands/</code>, and the browser surface lives in <code>src/daemon/console.ts</code>.
+  </footer>
+</main>
+</body>
+</html>
