@@ -1,11 +1,54 @@
 import { exec } from "child_process";
 import { promisify } from "util";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { dirname, resolve, relative } from "path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from "fs";
+import { dirname, resolve, relative, extname } from "path";
 import { AGENT_PROFILE_IDS } from "@/lib/config/agent-profiles";
 import { readToken } from "@/lib/auth/token";
 
 const execAsync = promisify(exec);
+
+const DEFAULT_READ_LINE_LIMIT = 240;
+const MAX_READ_LINE_LIMIT = 800;
+const READ_FILE_MAX_CHARS = 20_000;
+const TEXT_TOOL_MAX_CHARS = 20_000;
+const GENERATED_DIR_EXCLUDES = [
+  ".git",
+  ".claude",
+  "node_modules",
+  "dist",
+  "build",
+  ".next",
+  "target",
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".cache",
+  ".turbo",
+  "coverage",
+];
+const BINARY_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".heic",
+  ".avif",
+  ".ico",
+  ".icns",
+  ".pdf",
+  ".zip",
+  ".gz",
+  ".tar",
+  ".tgz",
+  ".mp3",
+  ".mp4",
+  ".mov",
+  ".m4a",
+  ".wav",
+  ".sqlite",
+  ".db",
+]);
 
 /** OpenAI-style function tool definition shared by the local agent tool set. */
 export interface ChatTool {
@@ -212,6 +255,49 @@ function resolvePath(p: string, projectPath: string): string {
   return resolve(projectPath, p);
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+async function commandExists(command: string): Promise<boolean> {
+  try {
+    await execAsync(`command -v ${shellQuote(command)} >/dev/null 2>&1`, { timeout: 2_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function rgExcludeArgs(): string {
+  return GENERATED_DIR_EXCLUDES.map((dir) => `-g ${shellQuote(`!**/${dir}/**`)}`).join(" ");
+}
+
+function findPruneExpression(): string {
+  return GENERATED_DIR_EXCLUDES.map((dir) => `-name ${shellQuote(dir)}`).join(" -o ");
+}
+
+function cappedTextOutput(output: string, maxChars = TEXT_TOOL_MAX_CHARS): string {
+  if (output.length <= maxChars) return output;
+  return `${output.slice(0, maxChars)}\n\n[truncated: tool output exceeded ${maxChars} chars; narrow the path, glob, or query to continue.]`;
+}
+
+function safePositiveInteger(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.floor(value));
+}
+
+function looksBinary(buffer: Buffer): boolean {
+  if (buffer.includes(0)) return true;
+  const sample = buffer.subarray(0, Math.min(buffer.length, 4096));
+  if (sample.length === 0) return false;
+  let suspicious = 0;
+  for (const byte of sample) {
+    const isAllowedControl = byte === 9 || byte === 10 || byte === 12 || byte === 13;
+    if (byte < 32 && !isAllowedControl) suspicious += 1;
+  }
+  return suspicious / sample.length > 0.03;
+}
+
 async function executeBash(args: Record<string, unknown>, projectPath: string): Promise<string> {
   const command = args.command as string;
   if (!command) return "Error: No command provided";
@@ -243,21 +329,50 @@ async function executeBash(args: Record<string, unknown>, projectPath: string): 
 }
 
 function executeReadFile(args: Record<string, unknown>, projectPath: string): string {
+  if (typeof args.path !== "string" || !args.path) return "Error: No path provided";
   const filePath = resolvePath(args.path as string, projectPath);
   if (!existsSync(filePath)) return `Error: File not found: ${filePath}`;
+  if (!statSync(filePath).isFile()) return `Error: Not a regular file: ${filePath}`;
 
-  const content = readFileSync(filePath, "utf-8");
+  const relPath = relative(projectPath, filePath) || filePath;
+  const ext = extname(filePath).toLowerCase();
+  if (BINARY_EXTENSIONS.has(ext)) {
+    return `Error: File appears to be binary or image data and cannot be read as text: ${relPath}. Use a visual inspection/OCR path or ask for a textual description instead.`;
+  }
+
+  const buffer = readFileSync(filePath);
+  if (looksBinary(buffer)) {
+    return `Error: File appears to be binary or image data and cannot be read as text: ${relPath}. Use a visual inspection/OCR path or ask for a textual description instead.`;
+  }
+
+  const content = buffer.toString("utf-8");
   const lines = content.split("\n");
 
-  const offset = ((args.offset as number) ?? 1) - 1; // Convert to 0-based
-  const limit = (args.limit as number) ?? lines.length;
+  const offsetLine = safePositiveInteger(args.offset, 1);
+  const offset = offsetLine - 1; // Convert to 0-based
+  const requestedLimit = safePositiveInteger(args.limit, DEFAULT_READ_LINE_LIMIT);
+  const limit = Math.min(requestedLimit, MAX_READ_LINE_LIMIT);
   const sliced = lines.slice(Math.max(0, offset), offset + limit);
 
   // Format with line numbers
-  return sliced
+  let output = sliced
     .map((line, i) => `${offset + i + 1}\t${line}`)
-    .join("\n")
-    .slice(0, 100_000); // Cap at 100KB
+    .join("\n");
+
+  const truncatedByLines = offset + sliced.length < lines.length;
+  const truncatedByLimitClamp = requestedLimit > MAX_READ_LINE_LIMIT;
+  let truncatedByChars = false;
+  if (output.length > READ_FILE_MAX_CHARS) {
+    output = output.slice(0, READ_FILE_MAX_CHARS);
+    truncatedByChars = true;
+  }
+
+  if (truncatedByLines || truncatedByLimitClamp || truncatedByChars) {
+    const nextOffset = offset + sliced.length + 1;
+    output += `\n\n[truncated: showing lines ${offset + 1}-${offset + sliced.length} of ${lines.length}; ask for a narrower read with offset=${nextOffset} and limit=${Math.min(DEFAULT_READ_LINE_LIMIT, Math.max(1, lines.length - offset - sliced.length))} to continue.]`;
+  }
+
+  return output;
 }
 
 function executeWriteFile(args: Record<string, unknown>, projectPath: string, context?: ToolContext): string {
@@ -299,15 +414,23 @@ async function executeSearch(args: Record<string, unknown>, projectPath: string)
   const searchPath = args.path ? resolvePath(args.path as string, projectPath) : projectPath;
   const globFilter = (args.glob as string) ?? "";
 
-  // Use grep for search (faster than walking the tree). Async so a grep over a
-  // large tree never blocks the daemon event loop.
-  const globArg = globFilter ? `--include="${globFilter}"` : "";
   try {
+    if (await commandExists("rg")) {
+      const globArg = globFilter ? `-g ${shellQuote(globFilter)}` : "";
+      const { stdout } = await execAsync(
+        `rg --line-number --hidden --no-heading ${globArg} ${rgExcludeArgs()} -e ${shellQuote(pattern)} ${shellQuote(searchPath)} 2>/dev/null | head -100`,
+        { encoding: "utf-8", timeout: 30_000, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 * 5 }
+      );
+      return cappedTextOutput(stdout) || "No matches found";
+    }
+
+    const includeArg = globFilter ? `--include=${shellQuote(globFilter)}` : "";
+    const excludeArgs = GENERATED_DIR_EXCLUDES.map((dir) => `--exclude-dir=${shellQuote(dir)}`).join(" ");
     const { stdout } = await execAsync(
-      `grep -rn ${globArg} -E ${JSON.stringify(pattern)} ${JSON.stringify(searchPath)} 2>/dev/null | head -100`,
+      `grep -rn ${includeArg} ${excludeArgs} -E ${shellQuote(pattern)} ${shellQuote(searchPath)} 2>/dev/null | head -100`,
       { encoding: "utf-8", timeout: 30_000, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 * 5 }
     );
-    return stdout.slice(0, 50_000) || "No matches found";
+    return cappedTextOutput(stdout) || "No matches found";
   } catch {
     return "No matches found";
   }
@@ -390,13 +513,21 @@ async function executeListFiles(args: Record<string, unknown>, projectPath: stri
 
   const basePath = args.path ? resolvePath(args.path as string, projectPath) : projectPath;
 
-  // Use find + glob pattern; async so a find over a large tree never blocks.
   try {
+    if (await commandExists("rg")) {
+      const { stdout } = await execAsync(
+        `rg --files --hidden -g ${shellQuote(pattern)} ${rgExcludeArgs()} ${shellQuote(basePath)} 2>/dev/null | head -200`,
+        { encoding: "utf-8", timeout: 15_000, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 }
+      );
+      return cappedTextOutput(stdout) || "No files found";
+    }
+
+    const prune = findPruneExpression();
     const { stdout } = await execAsync(
-      `find ${JSON.stringify(basePath)} -path "*/${pattern}" -o -name "${pattern}" 2>/dev/null | head -200`,
+      `find ${shellQuote(basePath)} \\( ${prune} \\) -prune -o -type f -path ${shellQuote(`*/${pattern}`)} -print 2>/dev/null | head -200`,
       { encoding: "utf-8", timeout: 15_000, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 }
     );
-    return stdout.slice(0, 50_000) || "No files found";
+    return cappedTextOutput(stdout) || "No files found";
   } catch {
     return "No files found";
   }

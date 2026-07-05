@@ -23,6 +23,7 @@ import { brainDocPolicyText } from "@/lib/brain/settings";
 import { resolveThinkingMode, dwarfstarThinkingFields, autoTurnThinkingMode } from "@/lib/config/budget-policy";
 
 const MAX_TURNS = 50;
+const MODEL_TOOL_RESULT_MAX_CHARS = 12_000;
 const LOCAL_OPENAI_COMPATIBLE_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai", "dwarfstar"]);
 // Providers HiveMatrix serves locally (Qwen). nanai is excluded — it's cloud
 // image generation, not a self-hosted endpoint we wait on for cold start.
@@ -53,6 +54,11 @@ export function buildSmokeGateFinalResult(
     result += `\n\n[Verification gate] Code still fails to run after ${maxSmokeRetries} fix attempts:\n${smokeReport.slice(0, 1500)}`;
   }
   return { code: failedAfterRetries ? 1 : 0, result };
+}
+
+export function modelToolResultContent(result: string, maxChars = MODEL_TOOL_RESULT_MAX_CHARS): string {
+  if (result.length <= maxChars) return result;
+  return `${result.slice(0, maxChars)}\n\n[truncated: tool result was ${result.length} chars; ask for a narrower read/search/listing with offset, limit, path, or glob if more detail is needed.]`;
 }
 
 // Incrementing fake PID for generic agents (negative to avoid collision with real PIDs)
@@ -753,6 +759,7 @@ async function runAgentLoop(
           }
         }
 
+        const modelResult = modelToolResultContent(result);
         onEvent(taskId, {
           type: "tool_result",
           content: result.slice(0, 500),
@@ -762,10 +769,10 @@ async function runAgentLoop(
           messages.push({
             role: "tool",
             tool_call_id: tc.id,
-            content: result,
+            content: modelResult,
           });
         } else {
-          textToolResults.push(`Tool result for ${tc.name}:\n${result}`);
+          textToolResults.push(`Tool result for ${tc.name}:\n${modelResult}`);
         }
       }
 

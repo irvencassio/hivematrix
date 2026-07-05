@@ -62,6 +62,30 @@ test("getUpdateStatus reports an in-progress update for the same latest version"
   }
 });
 
+test("getUpdateStatus reports stale apply markers as daemon restart needed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hm-feed-check-"));
+  const updateInProgressPath = join(dir, ".update-in-progress.json");
+  const startedAt = 1_000;
+  writeFileSync(updateInProgressPath, JSON.stringify({ version: "99.0.0", startedAt }));
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ version: "99.0.0" }) }) as unknown as Response;
+  try {
+    const s = await getUpdateStatus({
+      force: true,
+      fetchImpl,
+      updateInProgressPath,
+      forceFlagPath: join(dir, ".force-update"),
+      nowMs: startedAt + 10 * 60 * 1000,
+    });
+    assert.equal(s.updateAvailable, true);
+    assert.equal(s.applying, false);
+    assert.equal(s.needsDaemonRestart, true);
+    assert.match(s.detail ?? "", /daemon/i);
+    assert.match(s.detail ?? "", /restart/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("applyUpdateViaRelaunch spawns a detached relauncher and marks update state", async () => {
   const dir = mkdtempSync(join(tmpdir(), "hm-feed-check-"));
   const calls: Array<{ cmd: string; args: string[]; opts: unknown }> = [];

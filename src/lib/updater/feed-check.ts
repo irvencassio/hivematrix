@@ -32,6 +32,8 @@ export interface UpdateStatus {
   checkedAt: string;
   applying?: boolean;
   applyingVersion?: string;
+  needsDaemonRestart?: boolean;
+  detail?: string;
   error?: string;
 }
 
@@ -41,13 +43,13 @@ function clearPath(path: string): void {
   try { rmSync(path, { force: true }); } catch { /* best effort */ }
 }
 
-function applyingVersion(path = UPDATE_IN_PROGRESS_FLAG, now = Date.now()): string | null {
+function applyingMarker(path = UPDATE_IN_PROGRESS_FLAG, now = Date.now()): { version: string; stale: boolean } | null {
   if (!existsSync(path)) return null;
   try {
     const marker = JSON.parse(readFileSync(path, "utf-8")) as { version?: unknown; startedAt?: unknown };
     const version = typeof marker.version === "string" ? marker.version : null;
     const startedAt = typeof marker.startedAt === "number" ? marker.startedAt : 0;
-    if (version && now - startedAt <= APPLYING_TTL_MS) return version;
+    if (version) return { version, stale: now - startedAt > APPLYING_TTL_MS };
   } catch { /* stale/corrupt marker */ }
   clearPath(path);
   return null;
@@ -69,9 +71,10 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeof fetch; updateInProgressPath?: string; forceFlagPath?: string } = {}): Promise<UpdateStatus> {
+export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeof fetch; updateInProgressPath?: string; forceFlagPath?: string; nowMs?: number } = {}): Promise<UpdateStatus> {
   const current = getBundledVersion();
-  if (!opts.force && cache && Date.now() - cache.at < TTL_MS) return cache.status;
+  const now = opts.nowMs ?? Date.now();
+  if (!opts.force && cache && now - cache.at < TTL_MS) return cache.status;
   const fetchImpl = opts.fetchImpl ?? fetch;
   let status: UpdateStatus;
   try {
@@ -85,10 +88,16 @@ export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeo
       updateAvailable: !!latest && compareVersions(latest, current) > 0,
       checkedAt: new Date().toISOString(),
     };
-    const applying = applyingVersion(opts.updateInProgressPath);
-    if (status.updateAvailable && applying && applying === latest) {
-      status.applying = true;
-      status.applyingVersion = applying;
+    const applying = applyingMarker(opts.updateInProgressPath, now);
+    if (status.updateAvailable && applying && applying.version === latest) {
+      status.applyingVersion = applying.version;
+      if (applying.stale) {
+        status.applying = false;
+        status.needsDaemonRestart = true;
+        status.detail = `HiveMatrix ${latest} appears installed, but the daemon is still serving ${current}. Restart the bundled daemon to finish the update.`;
+      } else {
+        status.applying = true;
+      }
     } else if (!status.updateAvailable) {
       clearPath(opts.updateInProgressPath ?? UPDATE_IN_PROGRESS_FLAG);
       clearPath(opts.forceFlagPath ?? FORCE_UPDATE_FLAG);
@@ -102,7 +111,7 @@ export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeo
       error: e instanceof Error ? e.message : String(e),
     };
   }
-  cache = { at: Date.now(), status };
+  cache = { at: now, status };
   return status;
 }
 

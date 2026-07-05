@@ -242,6 +242,14 @@ test("settings has an About tab with version/build/date and update status", () =
   assert.match(js, /if \(tab === "about"\)/, "About tab wired in switchSettingsTab");
 });
 
+test("update indicator surfaces stale daemon restart state", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const checkUpdate = js.match(/async function checkUpdate\(force\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(checkUpdate, /needsDaemonRestart/, "reads the stale-daemon status flag");
+  assert.match(checkUpdate, /Finish update/, "shows an explicit finish-update action");
+  assert.match(checkUpdate, /daemon restart needed|Restart the bundled daemon/, "explains daemon handoff problem");
+});
+
 test("loading models refreshes About version metadata", () => {
   const js = extractScript(CONSOLE_HTML);
   const loadModels = js.match(/async function loadModels\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
@@ -255,9 +263,12 @@ test("loading models refreshes About version metadata", () => {
 
 test("settings tabs are in a defined order with Setup near the front", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /\["about", "setup", "features", "general", "models", "observability", "lanes", "remote", "license"\]/);
-  assert.match(CONSOLE_HTML, /id="tab-about"[^>]*>About<\/div><div class="tab" id="tab-setup"[^>]*>Setup<\/div><div class="tab" id="tab-features"[^>]*>Features<\/div><div class="tab" id="tab-general"[^>]*>Personalization<\/div><div class="tab" id="tab-models"[^>]*>Models<\/div><div class="tab" id="tab-observability"[^>]*>Observability<\/div><div class="tab" id="tab-lanes"[^>]*>Lanes<\/div><div class="tab" id="tab-remote"[^>]*>Remote<\/div><div class="tab" id="tab-license"[^>]*>License<\/div>/);
+  assert.match(js, /\["about", "setup", "features", "general", "models", "lanes", "remote", "license"\]/);
+  assert.match(CONSOLE_HTML, /id="tab-about"[^>]*>About<\/div><div class="tab" id="tab-setup"[^>]*>Setup<\/div><div class="tab" id="tab-features"[^>]*>Features<\/div><div class="tab" id="tab-general"[^>]*>Personalization<\/div><div class="tab" id="tab-models"[^>]*>Models<\/div><div class="tab" id="tab-lanes"[^>]*>Lanes<\/div><div class="tab" id="tab-remote"[^>]*>Remote<\/div><div class="tab" id="tab-license"[^>]*>License<\/div>/);
   assert.doesNotMatch(CONSOLE_HTML, /id="tab-projects"/, "Projects is no longer a Settings tab");
+  assert.doesNotMatch(CONSOLE_HTML, /id="tab-observability"/, "Observability now lives on the main screen, not Settings");
+  assert.doesNotMatch(CONSOLE_HTML, /id="settingsObservability"/, "Settings Observability panel removed");
+  assert.doesNotMatch(js, /tab === "observability"/, "Settings no longer routes to Observability");
 });
 
 test("Settings exposes Setup as a first-class actionable panel", () => {

@@ -135,7 +135,9 @@ export function startYouTubeWatcherPoller(): () => void {
   timer = setInterval(() => {
     if (running) return;
     running = true;
-    void pollOnce().finally(() => { running = false; });
+    void pollOnce()
+      .catch((e) => { console.error(`[youtube] tick failed: ${e instanceof Error ? e.message : e}`); })
+      .finally(() => { running = false; });
   }, intervalMs);
   if (typeof timer.unref === "function") timer.unref();
   return stopYouTubeWatcherPoller;

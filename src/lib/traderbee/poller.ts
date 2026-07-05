@@ -47,7 +47,9 @@ export function startTraderBeePoller(intervalMs = POLL_INTERVAL_MS): () => void 
   timer = setInterval(() => {
     if (running || !isTraderBeeConfigured()) return;
     running = true;
-    void pollOnce().finally(() => { running = false; });
+    void pollOnce()
+      .catch((e) => { console.error(`[traderbee] tick failed: ${e instanceof Error ? e.message : e}`); })
+      .finally(() => { running = false; });
   }, intervalMs);
   if (typeof timer.unref === "function") timer.unref();
   return stopTraderBeePoller;

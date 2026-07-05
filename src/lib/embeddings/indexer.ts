@@ -108,7 +108,9 @@ export function startEmbeddingsIndexer(): () => void {
   const tick = () => {
     if (running || !isEmbeddingsEnabled()) return;
     running = true;
-    void reindexBrain().finally(() => { running = false; });
+    void reindexBrain()
+      .catch((e) => { console.error(`[embeddings] tick failed: ${e instanceof Error ? e.message : e}`); })
+      .finally(() => { running = false; });
   };
   timer = setInterval(tick, intervalMs);
   if (typeof timer.unref === "function") timer.unref();

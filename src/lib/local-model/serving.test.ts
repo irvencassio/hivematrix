@@ -12,6 +12,20 @@ import {
 } from "./serving";
 import type { QwenProfile } from "@/lib/config/qwen-profile";
 
+// Fixed test ports collide when two checkouts/sessions run the suite at once
+// (EADDRINUSE flakes). Bind :0, take the kernel-assigned port, release it —
+// each run gets its own port and a just-freed port is reliably closed for the
+// negative probes too.
+async function freePort(): Promise<number> {
+  return new Promise((resolve) => {
+    const srv = createServer();
+    srv.listen(0, "127.0.0.1", () => {
+      const port = (srv.address() as { port: number }).port;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
 const profile = (over: Partial<QwenProfile["primary"]> & { location?: QwenProfile["location"] } = {}): QwenProfile => ({
   location: over.location ?? "local",
   primary: {
@@ -50,13 +64,14 @@ test("decideServeTick covers every branch", () => {
 });
 
 test("waitForServerReady returns false quickly when nothing is listening", async () => {
-  // Unused port → never comes up; bounded window so the test is fast.
-  const ready = await waitForServerReady("http://127.0.0.1:38766", { timeoutMs: 600, intervalMs: 150, probeTimeoutMs: 200 });
+  // Just-freed port → never comes up; bounded window so the test is fast.
+  const port = await freePort();
+  const ready = await waitForServerReady(`http://127.0.0.1:${port}`, { timeoutMs: 600, intervalMs: 150, probeTimeoutMs: 200 });
   assert.equal(ready, false);
 });
 
 test("waitForServerReady resolves true once a server starts mid-wait", { timeout: 10_000 }, async () => {
-  const PORT = 38767;
+  const PORT = await freePort();
   let server: Server | null = null;
   // Start the server ~400ms in, after the first failed probe.
   const startTimer = setTimeout(() => {
@@ -75,12 +90,13 @@ test("waitForServerReady resolves true once a server starts mid-wait", { timeout
 test("waitForServerReady bails out when the abort signal fires", async () => {
   const ac = new AbortController();
   setTimeout(() => ac.abort(), 200);
-  const ready = await waitForServerReady("http://127.0.0.1:38768", { timeoutMs: 5_000, intervalMs: 150, probeTimeoutMs: 200, signal: ac.signal });
+  const port = await freePort();
+  const ready = await waitForServerReady(`http://127.0.0.1:${port}`, { timeoutMs: 5_000, intervalMs: 150, probeTimeoutMs: 200, signal: ac.signal });
   assert.equal(ready, false);
 });
 
 test("supervisor launches the local server, and relaunches it after a crash", { timeout: 25_000 }, async () => {
-  const PORT = 38765;
+  const PORT = await freePort();
   const home = mkdtempSync(join(tmpdir(), "mb-serving-"));
   const origHome = process.env.HOME;
   // Fake "model server": replies 200 to /v1/models so isServerUp() passes.

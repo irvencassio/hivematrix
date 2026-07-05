@@ -379,7 +379,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .obs-strip { display:flex; flex-wrap:wrap; gap:14px; margin:8px 0 4px; padding:8px 10px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; }
   .obs-cell { display:flex; flex-direction:column; font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
   .obs-cell b { font-size:13px; color:var(--text); text-transform:none; letter-spacing:0; }
-  /* Observability dashboard (Settings tab) */
+  /* Observability dashboard (dedicated popup) */
   .obs-win { display:inline-flex; border:1px solid var(--border); border-radius:7px; overflow:hidden; }
   .obs-win button { border:0; background:var(--panel-2); color:var(--muted); font-size:11px; padding:3px 9px; cursor:pointer; }
   .obs-win button + button { border-left:1px solid var(--border); }
@@ -929,7 +929,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <div class="overlay" id="settingsOverlay">
   <div class="modal">
     <h1>Settings <span class="x" onclick="closeSettings()">✕</span></h1>
-    <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-setup" onclick="switchSettingsTab('setup')">Setup</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-observability" onclick="switchSettingsTab('observability')">Observability</div><div class="tab" id="tab-lanes" onclick="switchSettingsTab('lanes')">Lanes</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-license" onclick="switchSettingsTab('license')">License</div></div>
+    <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-setup" onclick="switchSettingsTab('setup')">Setup</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-lanes" onclick="switchSettingsTab('lanes')">Lanes</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-license" onclick="switchSettingsTab('license')">License</div></div>
     <div id="settingsModels" style="display:none">
       <label class="flbl">Default model</label>
       <select id="s_default" style="width:100%" onchange="saveDefault()"></select>
@@ -984,21 +984,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <button class="sm" onclick="saveEmbeddingsSettings()">Save embeddings</button>
         <span class="muted" id="s_embedding_status" style="font-size:11px">Local vectors stay on this Mac.</span>
       </div>
-    </div>
-    <div id="settingsObservability" style="display:none">
-      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">
-        <label class="flbl" style="margin:0">Observability</label>
-        <div class="row" style="gap:6px;align-items:center">
-          <span class="obs-win" id="obs_win">
-            <button data-w="24h" onclick="setObsWindow('24h')">24h</button>
-            <button data-w="7d" class="on" onclick="setObsWindow('7d')">7d</button>
-            <button data-w="30d" onclick="setObsWindow('30d')">30d</button>
-          </span>
-          <button class="copybtn" onclick="renderObsDashboard()">↻ Refresh</button>
-        </div>
-      </div>
-      <div class="muted" style="font-size:11px;margin-bottom:10px">Tokens, tasks, latency and prompt-cache across Claude, Codex (ChatGPT) and the local model. On-device local work stays on this Mac.</div>
-      <div id="obsDash"><div class="muted">Loading…</div></div>
     </div>
     <div id="settingsRemote" style="display:none">
       <div class="remote-status"><span class="dot" id="s_remote_dot"></span><span id="s_remote_label">…</span></div>
@@ -3161,10 +3146,9 @@ async function renderObservability() {
   el.innerHTML = html;
 }
 
-// --- Observability dashboard (full-width Settings tab) ---------------------
+// --- Observability dashboard (dedicated popup) ------------------------------
 function openObsDashboard() { document.getElementById("obsOverlay").classList.add("open"); renderObsDashboard("obsDashModal"); }
 function closeObsDashboard() { document.getElementById("obsOverlay").classList.remove("open"); }
-function setObsWindow(w) { _obsWindow = w; renderObsDashboard(); }
 function setObsWindowModal(w) { _obsWindow = w; renderObsDashboard("obsDashModal"); }
 function obsKpi(v, l) { return '<div class="obs-kpi"><div class="v">' + esc(String(v)) + '</div><div class="l">' + esc(l) + '</div></div>'; }
 
@@ -5336,28 +5320,38 @@ async function checkUpdate(force) {
     const pill = document.getElementById("updatePill");
     const has = !!(s && s.updateAvailable && s.latest);
     const applying = !!(s && s.applying && s.applyingVersion);
+    const needsDaemonRestart = !!(s && s.needsDaemonRestart);
     if (pill) {
-      if (applying) {
+      if (needsDaemonRestart) {
+        pill.textContent = "↻ Finish update " + (s.applyingVersion || s.latest);
+        pill.dataset.latest = s.applyingVersion || s.latest;
+        pill.style.display = "";
+        pill.title = s.detail || "Restart the bundled daemon to finish the update";
+        pill.classList.add("update-available");
+      } else if (applying) {
         pill.textContent = "⏳ Installing " + s.applyingVersion;
         pill.dataset.latest = s.applyingVersion;
         pill.style.display = "";
+        pill.title = "Installing update";
         pill.classList.add("update-available");
       } else if (has) {
         pill.textContent = "⬆ Update " + s.latest;
         pill.dataset.latest = s.latest;
         pill.style.display = "";
+        pill.title = "Click to install and restart";
         pill.classList.add("update-available");
       } else {
         pill.style.display = "none";
+        pill.title = "Click to install and restart";
         pill.classList.remove("update-available");
       }
     }
     // About tab reflection.
-    if (abStatus) abStatus.textContent = applying ? ("installing update — " + s.applyingVersion) : (has ? ("update available — " + s.latest) : "up to date");
+    if (abStatus) abStatus.textContent = needsDaemonRestart ? (s.detail || "daemon restart needed to finish update") : applying ? ("installing update — " + s.applyingVersion) : (has ? ("update available — " + s.latest) : "up to date");
     if (abBtn) {
       abBtn.style.display = has ? "" : "none";
       abBtn.disabled = applying;
-      abBtn.textContent = applying ? "Installing…" : "⬆ Install update";
+      abBtn.textContent = needsDaemonRestart ? "↻ Finish update" : applying ? "Installing…" : "⬆ Install update";
     }
   } catch (e) {
     if (abStatus) abStatus.textContent = "couldn't check (offline?)";
@@ -6374,8 +6368,8 @@ async function sendDiagnostics() {
 }
 
 function switchSettingsTab(tab) {
-  const tabs = ["about", "setup", "features", "general", "models", "observability", "lanes", "remote", "license"];
-  const panels = { models: "settingsModels", observability: "settingsObservability", lanes: "settingsLanes", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout", setup: "settingsSetup", license: "settingsLicense" };
+  const tabs = ["about", "setup", "features", "general", "models", "lanes", "remote", "license"];
+  const panels = { models: "settingsModels", lanes: "settingsLanes", general: "settingsGeneral", remote: "settingsRemote", features: "settingsFeatures", about: "settingsAbout", setup: "settingsSetup", license: "settingsLicense" };
   for (const t of tabs) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
@@ -6383,7 +6377,6 @@ function switchSettingsTab(tab) {
   if (tab === "lanes") { renderSystemReadiness(); renderLaneSetup(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); renderWorkPackages(); renderVaultRefs(); }
   if (tab === "setup") renderSettingsSetup();
   if (tab === "features") renderFeatures();
-  if (tab === "observability") renderObsDashboard();
   if (tab === "about") { renderAbout(); checkUpdate(); }
   if (tab === "license") renderLicense();
 }

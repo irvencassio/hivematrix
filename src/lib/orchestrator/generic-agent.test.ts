@@ -10,6 +10,7 @@ import {
   buildSmokeGateFinalResult,
   extractTextToolCalls,
   genericThinkingInstruction,
+  modelToolResultContent,
   shouldRunCompletionSmokeGate,
 } from "./generic-agent";
 
@@ -130,6 +131,14 @@ test("generic/local exhausted smoke failures return nonzero with the crash repor
   assert.equal(result.code, 1);
   assert.match(result.result, /Code still fails to run after 2 fix attempts/);
   assert.match(result.result, /Traceback: boom/);
+});
+
+test("generic/local caps tool results before appending them to model messages", () => {
+  const result = modelToolResultContent("x".repeat(20_000), 1_000);
+
+  assert.ok(result.length < 1_300);
+  assert.match(result, /truncated/i);
+  assert.match(result, /ask for a narrower read/i);
 });
 
 test("generic/local extracts Qwen textual tool calls", () => {

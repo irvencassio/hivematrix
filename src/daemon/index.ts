@@ -192,6 +192,14 @@ async function main(): Promise<void> {
   const { startTraderBeePoller } = await import("@/lib/traderbee/poller");
   startTraderBeePoller();
 
+  // Update self-heal: if the .app bundle on disk is newer than this running
+  // daemon's own code, the shell swapped the bundle underneath us (an updater
+  // without the post-install daemon handoff). Kickstart via launchd so we
+  // relaunch into the new bundle. No-op for a dev/source run. This makes updates
+  // "take" even when the installing shell predates the handoff.
+  const { startSelfHealLoop } = await import("@/lib/updater/self-heal");
+  startSelfHealLoop();
+
   // Frontier-review-debt loop: replay code-critical work that ran locally as a
   // frontier review when cloud-ok returns. Also drain immediately on that edge.
   const { startFrontierDebtLoop, drainFrontierDebt } = await import("@/lib/orchestrator/frontier-debt");
