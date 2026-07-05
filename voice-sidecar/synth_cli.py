@@ -40,7 +40,8 @@ def main() -> int:
         wav = a.out + ".wav"
         synthesize(text, out_path=wav, quality=a.quality, lang=a.lang)
         fmt = "caff" if ext == ".caf" else "m4af"  # default to MPEG-4/AAC
-        subprocess.run(["afconvert", "-f", fmt, "-d", "aac", wav, a.out], check=True)
+        # 64 kbps (max for 24 kHz mono) — default ~32 kbps sounds thin.
+        subprocess.run(["afconvert", "-f", fmt, "-d", "aac", "-b", "64000", wav, a.out], check=True)
         try:
             os.remove(wav)
         except OSError:

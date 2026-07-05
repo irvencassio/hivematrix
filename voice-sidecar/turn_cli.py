@@ -49,7 +49,8 @@ def main() -> int:
             os.replace(wav, a.out)
         else:
             fmt = "caff" if ext == ".caf" else "m4af"
-            subprocess.run(["afconvert", "-f", fmt, "-d", "aac", wav, a.out], check=True)
+            # 64 kbps (max for 24 kHz mono) — default ~32 kbps sounds thin.
+            subprocess.run(["afconvert", "-f", fmt, "-d", "aac", "-b", "64000", wav, a.out], check=True)
             try:
                 os.remove(wav)
             except OSError:

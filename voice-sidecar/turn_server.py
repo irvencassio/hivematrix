@@ -41,7 +41,10 @@ def _synth_to_m4a_b64(reply: str, lang: str, work: str) -> str:
     wav = synthesize(reply, quality="fast", lang=lang)
     m4a = os.path.join(work, "reply.m4a")
     try:
-        subprocess.run(["afconvert", "-f", "m4af", "-d", "aac", wav, m4a], check=True)
+        # 64 kbps AAC (the max afconvert allows for 24 kHz mono) — the default is
+        # ~32 kbps, which sounds thin/harsh next to the streaming Opus voice. This
+        # makes the push-to-talk/chat reply match the smooth live-conversation voice.
+        subprocess.run(["afconvert", "-f", "m4af", "-d", "aac", "-b", "64000", wav, m4a], check=True)
         src = m4a
     except Exception:
         src = wav  # fall back to WAV if afconvert is unavailable
