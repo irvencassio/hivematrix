@@ -17,17 +17,19 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-NOTARY_PROFILE="hivematrix"
-NOTARY_APPLE_ID="cassio.irv@gmail.com"
-NOTARY_TEAM_ID="8B3CHTY93V"   # Developer ID Application: Irven Cassio
-NOTARY_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 IDENTITY="Developer ID Application: Irven Cassio (8B3CHTY93V)"
-NOTARY_ARGS=(
-  --apple-id "$NOTARY_APPLE_ID"
-  --team-id "$NOTARY_TEAM_ID"
-  --keychain-profile "$NOTARY_PROFILE"
-  --keychain "$NOTARY_KEYCHAIN"
-)
+# Notary credentials resolved centrally (env override or default keychain
+# profile), so the mechanism is chosen + printed in one place. Sets NOTARY_ARGS
+# + NOTARY_MECHANISM.
+# shellcheck source=scripts/notary-credentials.sh
+source "$(dirname "$0")/notary-credentials.sh"
+resolve_notary_args
+if [ "$NOTARY_MECHANISM" = "none" ] && [ -z "${HM_SKIP_NOTARIZE:-}" ]; then
+  echo "✗ No notary credentials. Set NOTARYTOOL_KEYCHAIN_PROFILE, install the 'hivematrix'" >&2
+  echo "  keychain profile (scripts/setup-notary.sh), or export APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD." >&2
+  exit 1
+fi
+echo "==> Notary credential mechanism: $NOTARY_MECHANISM"
 # shellcheck disable=SC1090
 source "$HOME/.cargo/env"
 
@@ -83,16 +85,21 @@ else
   ditto -c -k --keepParent "$APP" "$TARGET"
 fi
 
-echo "==> Submitting to Apple notary service (a few minutes)…"
-xcrun notarytool submit "$TARGET" "${NOTARY_ARGS[@]}" --wait
+if [ -n "${HM_SKIP_NOTARIZE:-}" ]; then
+  echo "==> HM_SKIP_NOTARIZE set — local dry run: app is SIGNED but NOT notarized/stapled."
+  echo "    (Do not distribute this build; Gatekeeper will reject it on other machines.)"
+else
+  echo "==> Submitting to Apple notary service (a few minutes)…"
+  xcrun notarytool submit "$TARGET" "${NOTARY_ARGS[@]}" --wait
 
-echo "==> Stapling…"
-# Staple the real bundle (.app), and the .dmg too if present.
-xcrun stapler staple "$APP"
-[ -n "$DMG" ] && xcrun stapler staple "$DMG" || true
+  echo "==> Stapling…"
+  # Staple the real bundle (.app), and the .dmg too if present.
+  xcrun stapler staple "$APP"
+  [ -n "$DMG" ] && xcrun stapler staple "$DMG" || true
 
-echo "==> Gatekeeper assessment…"
-spctl --assess --type execute --verbose=2 "$APP" 2>&1 | tail -2
+  echo "==> Gatekeeper assessment…"
+  spctl --assess --type execute --verbose=2 "$APP" 2>&1 | tail -2
+fi
 
 # Regenerate the updater artifact from the FINAL app (re-sealed + stapled) and
 # re-sign it with the updater key — the tarball Tauri emitted mid-build
@@ -110,7 +117,11 @@ if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}${TAURI_SIGNING_PRIVATE_KEY_PATH:-}" ]; t
   echo "   Updater artifact: $TARBALL (+ .sig)"
 fi
 
-# Distributable zip of the stapled app.
+# Distributable zip of the (stapled, unless dry-run) app.
 DIST="src-tauri/target/release/bundle/HiveMatrix.app.zip"
 ditto -c -k --keepParent "$APP" "$DIST"
-echo "✓ Done. Notarized + stapled. Distributable: $DIST"
+if [ -n "${HM_SKIP_NOTARIZE:-}" ]; then
+  echo "✓ Done (signed, NOT notarized — local dry run). Distributable: $DIST"
+else
+  echo "✓ Done. Notarized + stapled. Distributable: $DIST"
+fi

@@ -21,7 +21,7 @@ test("autodeploy wrapper delegates to the existing release lane with an incremen
 
   assert.match(body, /NEXT_VERSION=/);
   assert.match(body, /package\.json/);
-  assert.match(body, /node scripts\/release\.mjs "\$VERSION" "\$NOTE"/);
+  assert.match(body, /bash scripts\/developer-id-release\.sh --release --marketing-version "\$VERSION" --note "\$NOTE"/);
   assert.match(body, /git fetch origin main/);
   assert.match(body, /git rev-parse --abbrev-ref HEAD/);
 });
@@ -30,7 +30,9 @@ test("autodeploy wrapper prints release source-of-truth files and Node-RED searc
   const body = read("scripts/autodeploy-main.sh");
 
   for (const path of [
-    "scripts/release.mjs",
+    "scripts/developer-id-release.sh",
+    "scripts/release-version.mjs",
+    "scripts/verify-provisioning-profile.mjs",
     "scripts/build-app.sh",
     "scripts/build-dmg.sh",
     "scripts/setup-notary.sh",

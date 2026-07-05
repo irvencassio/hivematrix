@@ -4,9 +4,29 @@ The DMG is a complete appliance: it bundles the daemon runtime (Node + native
 addon), the Desktop Lane helper, and a first-run wizard. A user installs the DMG,
 runs setup once, and the app self-supervises (launchd) and self-updates.
 
+## Canonical command (use this)
+One deterministic, agent-callable command does the whole pipeline
+(bump → gates → build → sign → notarize → staple → publish → verify):
+```bash
+./scripts/developer-id-release.sh --release            # auto patch-bump + publish
+./scripts/developer-id-release.sh --verify-only        # prereqs + gates, no build
+./scripts/developer-id-release.sh --build-only --skip-notarize   # local dry build
+```
+See `docs/agent-commands/developer-id-release.md` for flags, inputs, outputs, and
+exit codes. The sections below document the underlying sub-scripts it orchestrates.
+
+Identity (Developer ID; NOT App Store): bundle id `com.irvcassio.hivematrix.core`,
+team `8B3CHTY93V`. The core identity has its own update feed asset
+`hivematrix-core.json`; the legacy `latest.json` (`com.cassio.hivematrix`) is
+frozen so old installs are never auto-migrated across bundle IDs — see
+`docs/superpowers/specs/2026-07-05-developer-id-release-design.md`.
+
 ## One-time setup
 - Apple **Developer ID Application** cert in the login keychain (present: `8B3CHTY93V`).
-- `notarytool` keychain profile named `hivematrix` (`bash scripts/setup-notary.sh`).
+- `notarytool` keychain profile named `hivematrix` (`bash scripts/setup-notary.sh`),
+  or `NOTARYTOOL_KEYCHAIN_PROFILE` / `APPLE_ID`+`APPLE_APP_SPECIFIC_PASSWORD` env.
+- The **`HiveMatrix Core`** Developer ID provisioning profile installed (release gate;
+  verify with `node scripts/verify-provisioning-profile.mjs`).
 - Rust + `cargo-tauri`.
 
 ## Build a signed, notarized DMG

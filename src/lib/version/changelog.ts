@@ -1,8 +1,8 @@
 /**
  * Release notes — the browsable changelog surfaced in the console (Release notes
  * view) and GET /releases. SOURCE OF TRUTH for both; CHANGELOG.md is generated
- * from this by scripts/gen-changelog.mjs. scripts/release.mjs prepends a new
- * entry on each release. Newest first.
+ * from this by scripts/gen-changelog.mjs. scripts/release-version.mjs (driven by
+ * scripts/developer-id-release.sh) prepends a new entry on each release. Newest first.
  */
 
 export interface ReleaseNote {

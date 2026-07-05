@@ -16,16 +16,10 @@ cd "$(dirname "$0")/.."
 
 VERSION="${1:-0.1.0}"
 IDENTITY="Developer ID Application: Irven Cassio (8B3CHTY93V)"
-NOTARY_APPLE_ID="cassio.irv@gmail.com"
-NOTARY_TEAM_ID="8B3CHTY93V"   # Developer ID Application: Irven Cassio
-NOTARY_PROFILE="hivematrix"
-NOTARY_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
-NOTARY_ARGS=(
-  --apple-id "$NOTARY_APPLE_ID"
-  --team-id "$NOTARY_TEAM_ID"
-  --keychain-profile "$NOTARY_PROFILE"
-  --keychain "$NOTARY_KEYCHAIN"
-)
+# Notary credentials resolved centrally (sets NOTARY_ARGS + NOTARY_MECHANISM).
+# shellcheck source=scripts/notary-credentials.sh
+source "$(dirname "$0")/notary-credentials.sh"
+resolve_notary_args
 APP="src-tauri/target/release/bundle/macos/HiveMatrix.app"
 STAGE_ROOT="$(mktemp -d)"
 STAGE="$STAGE_ROOT/dmg"
@@ -46,12 +40,22 @@ hdiutil create -volname "HiveMatrix" -srcfolder "$STAGE" -ov -format UDZO "$OUT"
 echo "==> Signing the .dmg"
 codesign --force --sign "$IDENTITY" --timestamp "$OUT"
 
-echo "==> Notarizing (waits for Apple)"
-xcrun notarytool submit "$OUT" "${NOTARY_ARGS[@]}" --wait
+if [ -n "${HM_SKIP_NOTARIZE:-}" ]; then
+  echo "==> HM_SKIP_NOTARIZE set — local dry run: .dmg is SIGNED but NOT notarized/stapled."
+  echo "✓ Signed (un-notarized) .dmg: $OUT"
+else
+  echo "==> Notary credential mechanism: $NOTARY_MECHANISM"
+  if [ "$NOTARY_MECHANISM" = "none" ]; then
+    echo "✗ No notary credentials (set NOTARYTOOL_KEYCHAIN_PROFILE, the hivematrix profile, or APPLE_ID+APPLE_APP_SPECIFIC_PASSWORD)." >&2
+    exit 1
+  fi
+  echo "==> Notarizing (waits for Apple)"
+  xcrun notarytool submit "$OUT" "${NOTARY_ARGS[@]}" --wait
 
-echo "==> Stapling + verifying"
-xcrun stapler staple "$OUT"
-xcrun stapler validate "$OUT"
-spctl --assess --type open --context context:primary-signature -v "$OUT" 2>&1 | tail -2
+  echo "==> Stapling + verifying"
+  xcrun stapler staple "$OUT"
+  xcrun stapler validate "$OUT"
+  spctl --assess --type open --context context:primary-signature -v "$OUT" 2>&1 | tail -2
 
-echo "✓ Notarized .dmg: $OUT"
+  echo "✓ Notarized .dmg: $OUT"
+fi

@@ -15,6 +15,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 REPO="irvencassio/hivematrix"
+# Core-identity feed asset. Distinct from the frozen legacy `latest.json` so old
+# com.cassio.hivematrix installs never auto-jump across bundle IDs (which would
+# reset every macOS TCC grant). Must match the updater endpoint in
+# src-tauri/tauri.conf.json and src/lib/updater/feed-check.ts.
+FEED_ASSET="hivematrix-core.json"
 VERSION="$(python3 -c "import json;print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
 TAG="v$VERSION"
 BUNDLE="src-tauri/target/release/bundle"
@@ -81,8 +86,8 @@ fi
 # Asset filenames as they'll appear on the release (gh strips paths).
 TARBALL_NAME="$(basename "$TARBALL")"
 
-echo "==> Generating latest.json for $TAG (darwin-aarch64)…"
-MANIFEST="$BUNDLE/latest.json"
+echo "==> Generating $FEED_ASSET for $TAG (darwin-aarch64)…"
+MANIFEST="$BUNDLE/$FEED_ASSET"
 SIGNATURE="$(cat "$SIG")" \
 URL="https://github.com/$REPO/releases/download/$TAG/$TARBALL_NAME" \
 VERSION="$VERSION" \
@@ -132,9 +137,9 @@ else
 fi
 
 echo "==> Verifying live update feed for $TAG..."
-VERSION="$VERSION" SOURCE_COMMIT="$HEAD_SHA" python3 - <<'PY'
+VERSION="$VERSION" SOURCE_COMMIT="$HEAD_SHA" FEED_ASSET="$FEED_ASSET" python3 - <<'PY'
 import json, os, sys, urllib.request
-url = "https://github.com/irvencassio/hivematrix/releases/latest/download/latest.json"
+url = f"https://github.com/irvencassio/hivematrix/releases/latest/download/{os.environ['FEED_ASSET']}"
 with urllib.request.urlopen(url, timeout=20) as r:
     feed = json.load(r)
 errors = []
@@ -148,4 +153,4 @@ if errors:
 print("✓ live latest.json matches version + sourceCommit")
 PY
 
-echo "✓ Published $TAG. Update feed: https://github.com/$REPO/releases/latest/download/latest.json"
+echo "✓ Published $TAG. Update feed: https://github.com/$REPO/releases/latest/download/$FEED_ASSET"

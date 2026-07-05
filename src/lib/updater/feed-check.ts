@@ -2,8 +2,8 @@
  * Lightweight update indicator backing the console's "update available" pill.
  *
  * Checks the SAME GitHub release feed the Tauri app-updater consumes
- * (releases/latest/download/latest.json) and compares its version to the
- * running bundle. The console polls getUpdateStatus(); applyUpdateViaRelaunch()
+ * (releases/latest/download/hivematrix-core.json) and compares its version to
+ * the running bundle. The console polls getUpdateStatus(); applyUpdateViaRelaunch()
  * relaunches the desktop app so its updater pulls + installs (the daemon can't
  * touch the App-Management-protected /Applications bundle itself).
  */
@@ -19,8 +19,11 @@ export const FORCE_UPDATE_FLAG = join(homedir(), ".hivematrix", ".force-update")
 export const UPDATE_IN_PROGRESS_FLAG = join(homedir(), ".hivematrix", ".update-in-progress.json");
 
 // Must match plugins.updater.endpoints in src-tauri/tauri.conf.json.
+// The core identity (com.irvcassio.hivematrix.core) polls its own feed asset so
+// the frozen old com.cassio.hivematrix `latest.json` never auto-jumps installs
+// across bundle IDs (which would reset every macOS TCC grant).
 const FEED_URL =
-  "https://github.com/irvencassio/hivematrix/releases/latest/download/latest.json";
+  "https://github.com/irvencassio/hivematrix/releases/latest/download/hivematrix-core.json";
 const TTL_MS = 60 * 1000;
 const APPLYING_TTL_MS = 5 * 60 * 1000;
 const APP_PROCESS_MATCH = "HiveMatrix.app/Contents/MacOS/app";

@@ -2,7 +2,7 @@
 
 This ledger is the source of truth for phase-gate claims in release notes. A
 release note that claims a phase milestone, such as "Phase 1" or "M1", must have
-that phase row marked `PASSED` before `scripts/release.mjs` will publish it.
+that phase row marked `PASSED` before `scripts/developer-id-release.sh` will publish it.
 
 Last seeded: 2026-07-03
 

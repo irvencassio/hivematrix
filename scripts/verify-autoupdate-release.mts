@@ -13,7 +13,10 @@ import { readFileSync } from "node:fs";
 import { evaluateAutoUpdateProof, type AutoUpdateProof } from "../src/lib/updater/release-proof";
 
 const REPO = "irvencassio/hivematrix";
-const FEED_URL = `https://github.com/${REPO}/releases/latest/download/latest.json`;
+// Core-identity feed asset — must match src-tauri/tauri.conf.json,
+// scripts/publish-release.sh (FEED_ASSET), and src/lib/updater/feed-check.ts.
+const FEED_ASSET = "hivematrix-core.json";
+const FEED_URL = `https://github.com/${REPO}/releases/latest/download/${FEED_ASSET}`;
 
 /**
  * GitHub's `releases/latest/download/<asset>` CDN redirect lags the release

@@ -1256,7 +1256,7 @@ test("goal_quality unmet criteria with autoCreateItems=true prevent all_checks_c
 
 // --- Release profile artifact evidence ---
 
-test("release profile: evidence includes releaseArtifacts with releaseMjsExists, packageVersion, gitTagAtHead", async () => {
+test("release profile: evidence includes releaseArtifacts with releaseScriptExists, packageVersion, gitTagAtHead", async () => {
   const dir = mkdtempSync(join(tmpdir(), "hm-release-artifacts-"));
   try {
     writeFileSync(join(dir, "package.json"), JSON.stringify({
@@ -1278,21 +1278,21 @@ test("release profile: evidence includes releaseArtifacts with releaseMjsExists,
     assert.ok("releaseArtifacts" in evidence, "evidence.releaseArtifacts present for release profile");
     const ra = evidence.releaseArtifacts as Record<string, unknown>;
     assert.equal(ra.packageVersion, "1.2.3", "packageVersion read from package.json");
-    assert.equal(ra.releaseMjsExists, false, "releaseMjsExists false when file absent");
+    assert.equal(ra.releaseScriptExists, false, "releaseScriptExists false when no release script present");
     assert.ok(ra.gitTagAtHead === null || typeof ra.gitTagAtHead === "string", "gitTagAtHead is string or null");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("release profile: releaseMjsExists true when scripts/release.mjs is present", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "hm-release-mjs-"));
+test("release profile: releaseScriptExists true when scripts/developer-id-release.sh is present", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hm-release-script-"));
   try {
     writeFileSync(join(dir, "package.json"), JSON.stringify({
       scripts: { typecheck: "node -e \"process.exit(0)\"" },
     }));
     mkdirSync(join(dir, "scripts"));
-    writeFileSync(join(dir, "scripts", "release.mjs"), "// release");
+    writeFileSync(join(dir, "scripts", "developer-id-release.sh"), "# release");
     const pkg = createWorkPackage({
       title: "Release-mjs pkg",
       project: "test",
@@ -1306,7 +1306,7 @@ test("release profile: releaseMjsExists true when scripts/release.mjs is present
 
     const evidence = result.pass.evidence as Record<string, unknown>;
     const ra = evidence.releaseArtifacts as Record<string, unknown>;
-    assert.equal(ra.releaseMjsExists, true, "releaseMjsExists true when scripts/release.mjs is present");
+    assert.equal(ra.releaseScriptExists, true, "releaseScriptExists true when scripts/developer-id-release.sh is present");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

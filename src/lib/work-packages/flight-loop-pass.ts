@@ -253,14 +253,17 @@ function gatherGitEvidence(projectPath: string): { status: string; diffStat: str
 }
 
 export interface ReleaseArtifactEvidence {
-  releaseMjsExists: boolean;
+  /** A canonical release script is present (developer-id-release.sh, or legacy release.mjs). */
+  releaseScriptExists: boolean;
   packageVersion: string | null;
   /** Git tag pointing at HEAD, e.g. "v0.1.102"; null if no tag or git unavailable. */
   gitTagAtHead: string | null;
 }
 
 function gatherReleaseArtifactEvidence(projectPath: string): ReleaseArtifactEvidence {
-  const releaseMjsExists = existsSync(join(projectPath, "scripts", "release.mjs"));
+  const releaseScriptExists =
+    existsSync(join(projectPath, "scripts", "developer-id-release.sh")) ||
+    existsSync(join(projectPath, "scripts", "release.mjs"));
   let packageVersion: string | null = null;
   let gitTagAtHead: string | null = null;
 
@@ -283,7 +286,7 @@ function gatherReleaseArtifactEvidence(projectPath: string): ReleaseArtifactEvid
     gitTagAtHead = tags.length > 0 ? tags[0] : null;
   } catch { /* no git */ }
 
-  return { releaseMjsExists, packageVersion, gitTagAtHead };
+  return { releaseScriptExists, packageVersion, gitTagAtHead };
 }
 
 function gatherTaskOutputs(
