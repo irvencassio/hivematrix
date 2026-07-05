@@ -6,6 +6,14 @@ description: >-
   build, notarization, provisioning-profile, or code-signing task. Encodes the
   exact machine facts (profile names/IDs/locations, keychain, notary profile) so
   agents stop rediscovering them.
+argument-hint: --verify-only | --build-only | --release [--marketing-version X.Y.Z] [--skip-notarize] [--note "text"]
+options: |
+  --verify-only              (mode) Prereqs + gates only; no build, no publish
+  --build-only               (mode) Local signed build (notarized); no publish/commit
+  --release                  (mode) Full: bump → build → notarize → staple → publish core feed → verify
+  --marketing-version=X.Y.Z  Set the marketing version (else auto patch-bump on --release)
+  --skip-notarize            Local dry run only; refused with --release
+  --note=text                Release note (changelog + commit message)
 ---
 
 # HiveMatrix Developer ID Release

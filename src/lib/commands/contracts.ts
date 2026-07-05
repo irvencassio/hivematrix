@@ -15,6 +15,8 @@
  * the dependency-free `:`-split parser shape from src/lib/skills/contracts.ts.
  */
 
+import { resolveCommandOptions, type CommandOptionsSpec } from "./options";
+
 export type LocalCommandKind = "command" | "skill";
 export type LocalCommandCompat = "all" | "claude" | "codex" | "qwen" | "deepseek";
 
@@ -29,6 +31,12 @@ export interface LocalCommand {
   description: string;
   /** Frontmatter `argument-hint`, shown to the operator (informational). */
   argumentHint: string;
+  /**
+   * Structured, pickable options for the new-task box — resolved from the
+   * `options:` frontmatter DSL (Tier 2) or parsed from `argument-hint` (Tier 1).
+   * `source: "none"` when neither yields anything.
+   */
+  options: CommandOptionsSpec;
   /** Frontmatter `allowed-tools` (raw string, informational). */
   allowedTools: string;
   /** Frontmatter `model` — commands only. */
@@ -127,6 +135,7 @@ export function parseCommandFile(content: string, invokeName: string, sourcePath
     scope: "user",
     description: unquote(fm["description"] ?? ""),
     argumentHint: unquote(fm["argument-hint"] ?? ""),
+    options: resolveCommandOptions({ optionsRaw: fm["options"], argumentHint: unquote(fm["argument-hint"] ?? "") }),
     allowedTools: unquote(fm["allowed-tools"] ?? ""),
     model,
     compat: inferLocalCommandCompat(model),
@@ -153,6 +162,7 @@ export function parseSkillManifest(
     scope: "user",
     description: unquote(fm["description"] ?? ""),
     argumentHint: unquote(fm["argument-hint"] ?? ""),
+    options: resolveCommandOptions({ optionsRaw: fm["options"], argumentHint: unquote(fm["argument-hint"] ?? "") }),
     allowedTools: unquote(fm["allowed-tools"] ?? ""),
     compat: inferLocalCommandCompat(fm["model"]),
     sourcePath,

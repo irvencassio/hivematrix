@@ -2344,3 +2344,17 @@ test("talk audio playback handles the async play() rejection (sync try/catch can
   // sync try/catch has exited, so the rejection must be handled with .catch().
   assert.match(js, /\.play\(\)\.catch\(/, "Audio playback must attach a .catch to the play() promise");
 });
+
+test("command options picker: panels render options and Run assembles from picks", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // Both command panels render the structured options block from c.options.
+  const panels = js.match(/_cmdOptionsHtml\(c\.options\)/g) || [];
+  assert.ok(panels.length >= 2, "both command renderers call _cmdOptionsHtml(c.options)");
+  // The picker helpers exist and Run assembles the arg string from the picks.
+  assert.match(js, /function _cmdOptionsHtml\(/);
+  assert.match(js, /function _assembleCmdArgs\(/);
+  assert.match(js, /function _optPick\(/, "pick-one groups are supported");
+  assert.match(js, /const args = _assembleCmdArgs\(\);/, "runSelectedCommand assembles from the picker");
+  // Raw box overrides the picks (backward compatible with /commands/run).
+  assert.match(js, /if \(raw\) return raw;/);
+});

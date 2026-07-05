@@ -3512,7 +3512,8 @@ function _localCmdPanelHtml(it) {
     + (it.description ? '<div class="sub">' + esc(it.description) + '</div>' : '')
     + '<div style="font-size:11px;color:var(--muted);margin:0 0 12px">' + commandMetaChips(c) + '</div>'
     + '<div class="form open">'
-    + '<label class="flbl">Arguments</label>'
+    + _cmdOptionsHtml(c.options)
+    + '<label class="flbl">' + (_hasOpts(c.options) ? 'Advanced (raw args — overrides picks)' : 'Arguments') + '</label>'
     + '<input id="cmdArgs" placeholder="' + (c.argumentHint ? esc(c.argumentHint) : 'Optional arguments') + '" />'
     + '<label class="flbl">Project</label>'
     + '<div id="cmd_project_wrapper" class="project-search">'
@@ -3615,7 +3616,8 @@ function localDetailHtml(it) {
   const c = it.raw;
   return '<div class="sk-dhead"><span class="sk-dhead-icon">' + skIcon(it) + '</span><b>' + esc(it.name) + '</b>' + skBadges(it) + '</div>'
     + '<div class="sk-dmeta">' + commandMetaChips(c) + '</div>'
-    + '<input id="cmdArgs" placeholder="' + (c.argumentHint ? esc(c.argumentHint) : 'Optional arguments') + '" />'
+    + _cmdOptionsHtml(c.options)
+    + '<input id="cmdArgs" placeholder="' + (_hasOpts(c.options) ? 'Advanced (raw args — overrides picks)' : (c.argumentHint ? esc(c.argumentHint) : 'Optional arguments')) + '" />'
     + '<label class="flbl" style="margin:6px 0 2px">Project</label>'
     + '<div id="cmd_project_wrapper" class="project-search">'
     + '<input id="cmd_project_search" type="text" placeholder="Search projects…" autocomplete="off" oninput="mpFilter(\'cmd\')" onfocus="mpOpen(\'cmd\')" onkeydown="mpKeydown(event,\'cmd\')" />'
@@ -3795,10 +3797,77 @@ async function pollScriptRun(runId) {
     await new Promise(r => setTimeout(r, 1000));
   }
 }
+// --- Command options picker (new-task box) ---------------------------------
+// Renders a command's structured options (from LocalCommand.options, resolved
+// server-side from the options frontmatter or the argument-hint) as pickable
+// controls, and assembles the chosen flags back into the args string the
+// existing /commands/run consumes. The raw "Advanced" box always overrides.
+function _hasOpts(spec){ return !!(spec && spec.source && spec.source !== 'none' && (((spec.options||[]).length) || ((spec.positionals||[]).length))); }
+function _ea(s){ return esc(s).replace(/"/g, '&quot;'); }
+function _q(v){ v = String(v); return /\\s/.test(v) ? '"' + v.replace(/"/g, '') + '"' : v; }
+function _optChipHtml(o, inGroup){
+  const title = o.description ? ' title="' + _ea(o.description) + '"' : '';
+  const onclick = inGroup ? '_optPick(this)' : '_optToggle(this)';
+  let chip = '<button type="button" class="opt-chip" data-flag="' + _ea(o.name) + '" data-kind="' + _ea(o.kind) + '"' + (o.group ? ' data-group="' + _ea(o.group) + '"' : '') + title + ' onclick="' + onclick + '" style="padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:inherit;cursor:pointer;font-size:12px">' + esc(o.name) + '</button>';
+  if (o.kind === 'value') chip += '<input class="opt-val" data-for="' + _ea(o.name) + '" placeholder="' + _ea(o.valuePlaceholder || 'value') + '" style="display:none;width:120px;font-size:12px;margin-left:3px" />';
+  else if (o.kind === 'choice') chip += '<select class="opt-choice" data-for="' + _ea(o.name) + '" style="display:none;font-size:12px;margin-left:3px">' + (o.choices||[]).map(function(x){ return '<option value="' + _ea(x) + '">' + esc(x) + '</option>'; }).join('') + '</select>';
+  return (o.kind === 'value' || o.kind === 'choice') ? '<span class="opt-wrap" style="display:inline-flex;align-items:center">' + chip + '</span>' : chip;
+}
+function _cmdOptionsHtml(spec){
+  if (!_hasOpts(spec)) return '';
+  const groups = {}; const indep = [];
+  (spec.options||[]).forEach(function(o){ if (o.group) { (groups[o.group] = groups[o.group] || []).push(o); } else indep.push(o); });
+  let h = '<label class="flbl">Options</label>'
+    + '<div style="font-size:10px;color:var(--muted);margin:-2px 0 4px">Click to include; segmented sets are pick-one. The Advanced box below overrides.</div>'
+    + '<div id="cmdOptions" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">';
+  Object.keys(groups).forEach(function(g){
+    h += '<span class="opt-grp" data-group="' + _ea(g) + '" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden">';
+    groups[g].forEach(function(o){ h += _optChipHtml(o, true); });
+    h += '</span>';
+  });
+  indep.forEach(function(o){ h += _optChipHtml(o, false); });
+  h += '</div>';
+  if ((spec.positionals||[]).length){
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">';
+    spec.positionals.forEach(function(p){ h += '<input class="opt-pos" data-pos="' + _ea(p.name) + '" placeholder="' + _ea(p.name + (p.required ? ' (required)' : '')) + '"' + (p.description ? ' title="' + _ea(p.description) + '"' : '') + ' style="flex:1;min-width:130px;font-size:12px" />'; });
+    h += '</div>';
+  }
+  return h;
+}
+function _optSetActive(el, on){
+  el.classList.toggle('active', on);
+  el.style.background = on ? 'var(--accent)' : 'var(--panel)';
+  el.style.color = on ? '#fff' : 'inherit';
+  const kind = el.getAttribute('data-kind');
+  if (kind === 'value' || kind === 'choice'){
+    const sib = el.parentNode.querySelector(kind === 'value' ? '.opt-val' : '.opt-choice');
+    if (sib){ sib.style.display = on ? '' : 'none'; if (on) { try { sib.focus(); } catch(e){} } }
+  }
+}
+function _optToggle(el){ _optSetActive(el, !el.classList.contains('active')); }
+function _optPick(el){
+  const grp = el.getAttribute('data-group');
+  const box = el.closest('.opt-grp') || document;
+  box.querySelectorAll('.opt-chip[data-group="' + grp + '"]').forEach(function(x){ _optSetActive(x, x === el); });
+}
+function _assembleCmdArgs(){
+  const raw = ((document.getElementById('cmdArgs') || {}).value || '').trim();
+  if (raw) return raw;
+  const parts = [];
+  document.querySelectorAll('.opt-pos').forEach(function(inp){ const v = (inp.value||'').trim(); if (v) parts.push(_q(v)); });
+  const box = document.getElementById('cmdOptions');
+  if (box) box.querySelectorAll('.opt-chip.active').forEach(function(chip){
+    const flag = chip.getAttribute('data-flag'); const kind = chip.getAttribute('data-kind');
+    if (kind === 'flag') parts.push(flag);
+    else if (kind === 'value'){ const inp = chip.parentNode.querySelector('.opt-val'); const v = inp && inp.value ? inp.value.trim() : ''; parts.push(v ? flag + ' ' + _q(v) : flag); }
+    else if (kind === 'choice'){ const sel = chip.parentNode.querySelector('.opt-choice'); parts.push(sel && sel.value ? flag + ' ' + _q(sel.value) : flag); }
+  });
+  return parts.join(' ');
+}
 async function runSelectedCommand() {
   const it = skSelected(); if (!it || it.source !== 'local') return;
   const c = it.raw;
-  const args = (document.getElementById('cmdArgs') || {}).value || '';
+  const args = _assembleCmdArgs();
   const projectPath = ((document.getElementById('commandPath') || {}).value || '$HOME').trim() || '$HOME';
   const cmdProject = _mpS('cmd');
   const projectName = (cmdProject.name || '').trim();
