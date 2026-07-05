@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.142", date: "2026-07-05", note: "Developer ID release" },
   { version: "0.1.141", date: "2026-07-05", note: "Developer ID release" },
   { version: "0.1.140", date: "2026-07-05", note: "Fix Tailscale pairing URL: advertise the MagicDNS HTTPS serve endpoint (https://<magicDNS>) instead of a dead loopback-bound http://<tailnet-ip>:port" },
   { version: "0.1.139", date: "2026-07-05", note: "First hivematrix-core.json feed release on the Developer ID identity com.irvcassio.hivematrix.core; new-task box shows pickable command options; arms auto-update for the new identity" },
