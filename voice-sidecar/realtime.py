@@ -79,11 +79,8 @@ class CommandSTT(SegmentedSTTService):
 
     async def run_stt(self, audio: bytes):
         path = os.path.join(tempfile.gettempdir(), f"rt-stt-{uuid.uuid4().hex}.wav")
-        with wave.open(path, "wb") as w:
-            w.setnchannels(1)
-            w.setsampwidth(2)
-            w.setframerate(self.sample_rate or STT_RATE)  # negotiated at start; fallback for standalone use
-            w.writeframes(audio)
+        with open(path, "wb") as w:
+            w.write(audio)
         try:
             text = await asyncio.to_thread(transcribe, path)
         except Exception:
@@ -115,17 +112,19 @@ class VoxCPMTTS(TTSService):
 
     async def run_tts(self, text: str, context_id: str):
         path = os.path.join(tempfile.gettempdir(), f"rt-tts-{uuid.uuid4().hex}.wav")
-        await asyncio.to_thread(synthesize, text, path, None, TTS_RATE, None, None, self._quality)
-        with wave.open(path, "rb") as w:
-            rate = w.getframerate()
-            pcm = w.readframes(w.getnframes())
         try:
-            os.remove(path)
-        except OSError:
-            pass
+            await asyncio.to_thread(synthesize, text, path, None, TTS_RATE, None, None, self._quality)
+            with wave.open(path, "rb") as w:
+                rate = w.getframerate()
+                pcm = w.readframes(w.getnframes())
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
         chunk = int(rate * 0.02) * 2  # 20 ms of s16 mono
         for i in range(0, len(pcm), chunk):
-            yield TTSAudioRawFrame(pcm[i:i + chunk], rate, 1)
+            yield TTSAudioRawFrame(pcm[i:i + chunk], rate, 1, context_id=context_id)
 
 
 def make_vad() -> SileroVADAnalyzer:
