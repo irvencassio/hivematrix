@@ -11,7 +11,7 @@
 
 import { readFileSync } from "fs";
 import { detectSkillIntent, buildSkillVoiceReply } from "./skill-intent";
-import { synthesizeSpeech } from "./tts";
+import { synthesizeReplyVoice } from "./turn-server";
 import { listSkills, readSkill } from "@/lib/skills/store";
 import { applySkillInput, type Skill, type SkillIndexEntry } from "@/lib/skills/contracts";
 import { runScriptSkill, type RunScriptResult } from "@/lib/skills/run-script";
@@ -49,7 +49,7 @@ export async function skillTurnOverride(transcript: string, deps: SkillTurnDeps 
 
   let audioBase64 = "";
   try {
-    const path = deps.synthesize ? await deps.synthesize(sk.reply) : (await synthesizeSpeech(sk.reply)).path;
+    const path = deps.synthesize ? await deps.synthesize(sk.reply) : await synthesizeReplyVoice(sk.reply);
     audioBase64 = path ? readFileSync(path).toString("base64") : "";
   } catch { /* speak-less fallback: client shows the text reply */ }
 

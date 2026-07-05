@@ -3385,20 +3385,11 @@ export function createDaemonServer() {
         // Optional TTS: synthesize reply audio for clients that consume audioBase64
         let audioBase64 = "";
         try {
-          let audioPath = "";
-          const { voiceRuntime } = await import("@/lib/voice/runtime");
-          if (voiceRuntime()) {
-            try {
-              const { synthesizeLiveVoice } = await import("@/lib/voice/turn-server");
-              audioPath = await synthesizeLiveVoice(reply, lang);
-            } catch (e) {
-              console.error(`[voice] live synth failed, falling back to say: ${e instanceof Error ? e.message : e}`);
-            }
-          }
-          if (!audioPath) {
-            const { synthesizeSpeech } = await import("@/lib/voice/tts");
-            audioPath = (await synthesizeSpeech(reply, { engine: "say" })).path;
-          }
+          // Speak the reply in the SAME live voice (Kokoro) as the streaming
+          // path; synthesizeReplyVoice falls back to `say` only if the worker
+          // can't produce audio, so push-to-talk and streaming voices match.
+          const { synthesizeReplyVoice } = await import("@/lib/voice/turn-server");
+          const audioPath = await synthesizeReplyVoice(reply, lang);
           audioBase64 = audioPath ? readFileSync(audioPath).toString("base64") : "";
         } catch { /* TTS is optional — clients must handle missing audio */ }
 

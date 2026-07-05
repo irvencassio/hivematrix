@@ -2679,9 +2679,12 @@ test("POST /voice/turn returns synthesized audio bytes, not the generated file p
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
   const route = src.slice(src.indexOf('urlPath === "/voice/turn"'), src.indexOf("// POST /voice/provision"));
   assert.match(route, /readFileSync\(audioPath\)\.toString\("base64"\)/, "voice turn must read the synthesized file as base64");
-  assert.match(route, /synthesizeSpeech\(reply,\s*\{\s*engine:\s*"say"/, "voice turn must fall back to reliable AAC say output");
+  // Turn-by-turn replies use the SAME live voice (Kokoro) as the streaming path
+  // via synthesizeReplyVoice, which internally falls back to `say`. The route
+  // itself must not re-implement a voiceRuntime()/synthesizeSpeech fallback.
+  assert.match(route, /synthesizeReplyVoice\(reply,\s*lang\)/, "voice turn must speak in the unified live voice");
   assert.ok(
-    route.indexOf("synthesizeLiveVoice") < route.indexOf('toString("base64")'),
+    route.indexOf("synthesizeReplyVoice") < route.indexOf('toString("base64")'),
     "voice turn should synthesize first, then serialize the file bytes",
   );
 });

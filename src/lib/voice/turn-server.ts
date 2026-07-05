@@ -17,7 +17,7 @@ import { randomBytes } from "crypto";
 import { buildCliPath } from "@/lib/config/binary-detection";
 import { voiceRuntime } from "./runtime";
 import { voiceLlmEnv } from "./llm-env";
-import { voiceOutputDir } from "./tts";
+import { voiceOutputDir, synthesizeSpeech } from "./tts";
 
 let _proc: ChildProcess | null = null;
 let _port: number | null = null;
@@ -114,6 +114,24 @@ export async function synthesizeLiveVoice(text: string, lang = "en"): Promise<st
   const path = join(dir, `voice-live-${randomBytes(6).toString("hex")}.m4a`);
   writeFileSync(path, Buffer.from(b64, "base64"));
   return path;
+}
+
+/**
+ * Unified turn-by-turn synthesis: speak `text` in the SAME warm live voice
+ * (Kokoro) the streaming path uses, so push-to-talk and deterministic
+ * command/skill/briefing replies match the conversational voice. Falls back to
+ * the local `say`/cloned engine only if the live worker can't produce audio, so
+ * a turn is never left silent. Returns the .m4a path (or "" if nothing worked).
+ */
+export async function synthesizeReplyVoice(text: string, lang = "en"): Promise<string> {
+  const clean = (text ?? "").trim();
+  if (!clean) return "";
+  try {
+    return await synthesizeLiveVoice(clean, lang);
+  } catch (e) {
+    console.error(`[voice] live reply synth failed, falling back to say: ${e instanceof Error ? e.message : e}`);
+    return (await synthesizeSpeech(clean, { engine: "say" })).path;
+  }
 }
 
 /** Stop the turn worker (e.g. when the Voice feature is disabled). */

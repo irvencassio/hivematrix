@@ -24,7 +24,7 @@ import {
 } from "./command-context";
 import { buildVoiceBriefing, usageReply, type BriefingUsage, type BriefingBrowserReadiness, type BriefingWorkflowInbox } from "./briefing";
 import { getWeather, weatherReply, weatherNeedsLocationReply, type WeatherWhen, type WeatherResult } from "./weather";
-import { synthesizeSpeech } from "./tts";
+import { synthesizeReplyVoice } from "./turn-server";
 import { buildVoiceBrowserLaneTask } from "./browser-lane-intent";
 import { buildVoiceMailDeleteTask } from "./mail-delete-intent";
 import type { ApprovalQueueItem } from "@/lib/approvals/queue";
@@ -218,7 +218,7 @@ export async function commandTurnOverride(transcript: string, deps: CommandTurnD
 
   let audioBase64 = "";
   try {
-    const path = deps.synthesize ? await deps.synthesize(result.reply) : (await synthesizeSpeech(result.reply)).path;
+    const path = deps.synthesize ? await deps.synthesize(result.reply) : await synthesizeReplyVoice(result.reply);
     audioBase64 = path ? readFileSync(path).toString("base64") : "";
   } catch { /* speak-less fallback: the client shows the text reply */ }
 
@@ -636,7 +636,7 @@ export async function deliverHeartbeatReply(opts: { deps: CommandTurnDeps; sessi
 
   let audioBase64 = "";
   try {
-    const path = deps.synthesize ? await deps.synthesize(text) : (await synthesizeSpeech(text)).path;
+    const path = deps.synthesize ? await deps.synthesize(text) : await synthesizeReplyVoice(text);
     audioBase64 = path ? readFileSync(path).toString("base64") : "";
   } catch { /* speak-less fallback */ }
 
@@ -668,7 +668,7 @@ export async function deliverDeepThinkReply(opts: {
 
   let audioBase64 = "";
   try {
-    const path = deps.synthesize ? await deps.synthesize(text) : (await synthesizeSpeech(text)).path;
+    const path = deps.synthesize ? await deps.synthesize(text) : await synthesizeReplyVoice(text);
     audioBase64 = path ? readFileSync(path).toString("base64") : "";
   } catch { /* speak-less fallback */ }
 
@@ -706,7 +706,7 @@ export async function deliverOpenClawReply(opts: {
   try {
     const path = deps.synthesize
       ? await deps.synthesize(text)
-      : (await synthesizeSpeech(text)).path;
+      : await synthesizeReplyVoice(text);
     audioBase64 = path ? readFileSync(path).toString("base64") : "";
   } catch { /* speak-less fallback */ }
 
