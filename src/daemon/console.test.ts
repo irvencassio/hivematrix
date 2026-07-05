@@ -521,16 +521,22 @@ test("Full dashboard opens dedicated Observability popup, not Settings", () => {
   assert.match(js, /function closeObsDashboard\(/, "closeObsDashboard present");
 });
 
-test("remote access UI offers both a temporary and a named (durable) tunnel with Access credentials", () => {
-  // Both setup paths are present, not buried behind a collapsed disclosure.
-  assert.match(CONSOLE_HTML, /Temporary tunnel/);
+test("remote access UI offers a Tailscale mesh and a named (durable) Cloudflare tunnel, not the throwaway temporary tunnel", () => {
+  // Tailscale is the recommended private-mesh path; the named Cloudflare tunnel
+  // remains for the Apple Watch / off-mesh devices. The throwaway trycloudflare
+  // "temporary tunnel" was removed.
+  assert.match(CONSOLE_HTML, /<span>Tailscale<\/span>/);
+  assert.match(CONSOLE_HTML, /id="s_ts_url"/);
+  assert.match(CONSOLE_HTML, /tailscale serve --bg 3747/);
   assert.match(CONSOLE_HTML, /Named tunnel/);
+  assert.doesNotMatch(CONSOLE_HTML, /Temporary tunnel/, "the throwaway temporary tunnel UI must be gone");
+  assert.doesNotMatch(CONSOLE_HTML, /trycloudflare/, "no trycloudflare quick-test tunnel");
   assert.doesNotMatch(CONSOLE_HTML, /Advanced: Named Cloudflare tunnel/, "named tunnel should not be hidden under an Advanced disclosure");
   assert.match(CONSOLE_HTML, /Cloudflare Access Client ID/);
   assert.match(CONSOLE_HTML, /Cloudflare Access Client Secret/);
   assert.match(CONSOLE_HTML, /\/tunnel\/configure-named/);
   assert.match(CONSOLE_HTML, /\/tunnel\/access-credentials/);
-  // Remote setup lives on its own settings tab now.
+  // Remote setup lives on its own settings tab.
   assert.match(CONSOLE_HTML, /id="settingsRemote"/);
   assert.match(CONSOLE_HTML, /switchSettingsTab\('remote'\)/);
 });

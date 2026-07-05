@@ -989,12 +989,15 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="settingsRemote" style="display:none">
       <div class="remote-status"><span class="dot" id="s_remote_dot"></span><span id="s_remote_label">…</span></div>
       <div id="s_tunnel_detail" class="muted" style="font-size:11px;margin-top:4px"></div>
-      <div class="muted" style="font-size:11px;margin-top:6px">Reach this daemon from your phone over a Cloudflare tunnel. Two ways to set it up:</div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Reach this daemon from your phone. Tailscale is a private mesh (recommended); a named Cloudflare tunnel is for the Apple Watch and other off-mesh devices.</div>
 
       <div class="remote-card">
-        <div class="remote-card-h"><span>Temporary tunnel</span><span class="badge">quick test</span></div>
-        <div class="muted" style="font-size:11px;margin:4px 0 8px">A throwaway <code>trycloudflare.com</code> URL — fastest way to pair once. Goes away when you stop it.</div>
-        <button class="create" id="s_tunnel_btn" onclick="toggleTunnel()">Start temporary tunnel</button>
+        <div class="remote-card-h"><span>Tailscale</span><span class="badge">private mesh · recommended</span></div>
+        <div class="muted" id="s_ts_status" style="font-size:11px;margin:4px 0 8px">Checking Tailscale…</div>
+        <label class="flbl" style="margin-top:0">Reachable URL (this Mac)</label>
+        <div class="row"><input id="s_ts_url" readonly placeholder="run: tailscale serve --bg 3747" style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
+          <button class="copybtn" onclick="copyField('s_ts_url')">Copy</button></div>
+        <div class="muted" style="font-size:11px;margin-top:4px">On the Mac run <code>tailscale serve --bg 3747</code> (needs tailnet HTTPS certs enabled). Then on your phone with Tailscale connected, open HiveMatrix → Settings → Remote and use this URL. Nothing is exposed to the internet.</div>
       </div>
 
       <div class="remote-card">
@@ -8235,14 +8238,20 @@ function copyField(id){ var i=document.getElementById(id); i.select(); document.
 async function loadTunnel() {
   tunnel = await api("/tunnel");
   const dot = document.getElementById("s_remote_dot"), label = document.getElementById("s_remote_label");
-  const detail = document.getElementById("s_tunnel_detail"), btn = document.getElementById("s_tunnel_btn"), live = document.getElementById("s_tunnel_live");
+  const detail = document.getElementById("s_tunnel_detail"), live = document.getElementById("s_tunnel_live");
   if (!tunnel) return;
+  // Tailscale (private mesh) — surfaced independently of the Cloudflare tunnel.
+  const ts = tunnel.tailscale || {};
+  const tsStatus = document.getElementById("s_ts_status"), tsUrl = document.getElementById("s_ts_url");
+  if (tsStatus) tsStatus.textContent = !ts.installed ? "Tailscale not installed on this Mac — install from tailscale.com."
+    : !ts.running ? "Tailscale installed but not connected — open the Tailscale app and sign in."
+    : ts.magicDNSName ? ("Connected as " + ts.magicDNSName) : "Connected (enable MagicDNS for a hostname).";
+  if (tsUrl && document.activeElement !== tsUrl) tsUrl.value = ts.pairingUrl || "";
   if (!tunnel.installed) {
     dot.className = "dot err"; label.textContent = "cloudflared not installed";
     detail.textContent = "Install with: brew install cloudflared";
-    btn.style.display = "none"; live.style.display = "none"; return;
+    live.style.display = "none"; return;
   }
-  btn.style.display = "";
   // Reflect saved Cloudflare Access credentials so it's clear they persisted
   // (the secret is never sent back — we only signal that one is stored).
   const idField = document.getElementById("s_cf_access_id");
@@ -8256,7 +8265,6 @@ async function loadTunnel() {
       ? (tunnel.owner === "hivematrix" ? "Named tunnel running from HiveMatrix" : "Named tunnel configured for pairing")
       : "Temporary ad-hoc tunnel running";
     detail.textContent = modeLabel + (tunnel.cloudflareAccessConfigured ? " · Cloudflare Access credentials included in QR" : "") + (tunnel.qrInstalled ? "" : " (install qrencode for the QR: brew install qrencode)");
-    btn.textContent = tunnel.canStop ? "Stop tunnel" : "Start temporary tunnel";
     live.style.display = "block";
     document.getElementById("s_tunnel_url").value = tunnel.url;
     if (tunnel.mode === "named") document.getElementById("s_named_host").value = tunnel.url;
@@ -8269,8 +8277,8 @@ async function loadTunnel() {
     loadTunnelQr();
   } else {
     dot.className = "dot off"; label.textContent = "Remote access OFF";
-    detail.textContent = "Start a tunnel to reach this daemon from your phone.";
-    btn.textContent = "Start temporary tunnel"; live.style.display = "none";
+    detail.textContent = "Use Tailscale above, or configure a named Cloudflare tunnel below, to reach this daemon from your phone.";
+    live.style.display = "none";
   }
 }
 async function loadTunnelQr() {
@@ -8287,16 +8295,6 @@ async function loadTunnelQr() {
   } catch (e) {
     box.innerHTML = '<div class="muted" style="font-size:11px;padding:8px;text-align:center">QR request failed</div>';
   }
-}
-async function toggleTunnel() {
-  const btn = document.getElementById("s_tunnel_btn");
-  const stopping = tunnel && tunnel.canStop;
-  btn.disabled = true; btn.textContent = stopping ? "Stopping…" : "Starting…";
-  try {
-    tunnel = await api(stopping ? "/tunnel/stop" : "/tunnel/start", { method: "POST" });
-  } catch (e) { /* */ }
-  btn.disabled = false;
-  loadTunnel();
 }
 async function configureNamedTunnel() {
   const hostname = document.getElementById("s_named_host").value.trim();
