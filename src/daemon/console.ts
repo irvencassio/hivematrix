@@ -500,6 +500,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .mb-chip { display: inline-flex; align-items: center; gap: 3px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px;
     padding: 1px 6px 1px 9px; margin: 2px 4px 2px 0; font-size: 11px; }
   .mb-chip .x { cursor: pointer; color: var(--muted); font-size: 10px; line-height: 1; }
+  .mb-chip .x:hover { color: var(--err); }
+  .mb-chip .act { cursor: pointer; color: var(--muted); font-size: 10px; line-height: 1; font-weight: 700; }
+  .mb-chip .act:hover { color: var(--accent); }
   .mb-ignored-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11px; }
   .ss-section { margin-top:12px; }
   .ss-section-hd { font-weight:600; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
@@ -560,6 +563,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .mb-ignored-row .mb-ig-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; }
   .mb-ignored-row button { font-size: 10px; padding: 2px 9px; border-radius: 6px; cursor: pointer;
     background: var(--accent); color: var(--create-btn-text, #1a1a1a); border: 0; font-weight: 700; }
+  .mb-ignored-row button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
   .tabs { display: flex; gap: 6px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
   .tab { padding: 6px 12px; cursor: pointer; font-size: 12px; color: var(--muted); border-bottom: 2px solid transparent; transition: color .15s ease, border-color .15s ease; }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
@@ -1459,6 +1463,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <input class="dialog-input" id="mb_phone" placeholder="+15551234567 or you@icloud.com" style="margin-top:6px;margin-bottom:4px" />
         <div id="mb_identities"></div>
         <div id="mb_ignored" style="margin-top:6px"></div>
+        <div id="mb_blocked" style="margin-top:6px"></div>
       </div>
     </div>
     <div class="mb-step">
@@ -4834,7 +4839,7 @@ async function openMessageBeeSetup() {
     if (r) renderMessageBeeState(r);
   } catch (e) { /* modal can still show onboarding-derived fallback */ }
 }
-// Show non-allowlisted senders that have texted, each with a one-click Allow —
+// Show non-allowlisted senders that have texted, each with one-click Allow/Disallow —
 // catches the common "set up with my number but iMessage sent as my email" case.
 async function renderIgnoredSenders() {
   const el = document.getElementById('mb_ignored');
@@ -4847,7 +4852,8 @@ async function renderIgnoredSenders() {
       + ig.map(i => '<div class="mb-ignored-row">'
         + '<span class="mb-ig-addr">' + esc(i.address) + '</span>'
         + (i.text ? '<span class="muted mb-ig-text">"' + esc(i.text) + '"</span>' : '')
-        + '<button onclick="allowIgnored(\'' + esc(i.address).replace(/'/g, "\\'") + '\')">Allow</button></div>').join('');
+        + '<button onclick="allowIgnored(\'' + mbJsArg(i.address) + '\')">Allow</button>'
+        + '<button class="secondary" onclick="blockIgnored(\'' + mbJsArg(i.address) + '\')">Disallow</button></div>').join('');
   } catch (e) { el.innerHTML = ''; }
 }
 async function allowIgnored(address) {
@@ -4857,6 +4863,19 @@ async function allowIgnored(address) {
     const r = await api('/onboarding/messagebee', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enable: true }) });
     if (r && r.data) renderMessageBeeState(r.data);
     document.getElementById('mb_status').textContent = 'Allowlisted ' + address + ' — text again and it will create a task.';
+    await refresh();
+  } catch (e) { document.getElementById('mb_err').textContent = String(e); }
+}
+async function blockIgnored(address) {
+  try {
+    await api('/messagebee/identities', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address, status: 'blocked' }),
+    });
+    await renderIgnoredSenders();
+    const r = await api('/messagebee');
+    if (r) renderMessageBeeState(r);
+    document.getElementById('mb_status').textContent = 'Disallowed ' + address + ' — future texts from it will stay hidden.';
     await refresh();
   } catch (e) { document.getElementById('mb_err').textContent = String(e); }
 }
@@ -4887,6 +4906,11 @@ function mbJsArg(s) {
 function mbChip(label, removeFn) {
   return '<span class="mb-chip">' + esc(label)
     + ' <span class="x" onclick="' + removeFn + '(\'' + mbJsArg(label) + '\')" title="Remove">✕</span></span>';
+}
+function mbBlockedChip(label) {
+  return '<span class="mb-chip">' + esc(label)
+    + ' <span class="act" onclick="allowBlockedMessageBeeIdentity(\'' + mbJsArg(label) + '\')" title="Allow sender">Allow</span>'
+    + ' <span class="act" onclick="unblockMessageBeeIdentity(\'' + mbJsArg(label) + '\')" title="Remove disallow">Unblock</span></span>';
 }
 function renderMessageBeeSelfHandles(handles) {
   const el = document.getElementById('mb_self_handles');
@@ -4924,6 +4948,41 @@ async function removeMessageBeeIdentity(address) {
     if (status) status.textContent = '';
   }
 }
+async function allowBlockedMessageBeeIdentity(address) {
+  const err = document.getElementById('mb_err'); if (err) err.textContent = '';
+  const status = document.getElementById('mb_status'); if (status) status.textContent = 'Allowing…';
+  try {
+    await api('/messagebee/identities', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address, status: 'allowed' }),
+    });
+    const r = await api('/messagebee');
+    if (r) renderMessageBeeState(r);
+    await renderIgnoredSenders();
+    if (status) status.textContent = 'Allowed ' + address + '.';
+    await refresh();
+  } catch (e) {
+    if (err) err.textContent = String(e);
+    if (status) status.textContent = '';
+  }
+}
+async function unblockMessageBeeIdentity(address) {
+  const err = document.getElementById('mb_err'); if (err) err.textContent = '';
+  const status = document.getElementById('mb_status'); if (status) status.textContent = 'Unblocking…';
+  try {
+    await api('/messagebee/identities', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address, status: 'pending' }),
+    });
+    const r = await api('/messagebee');
+    if (r) renderMessageBeeState(r);
+    if (status) status.textContent = 'Unblocked ' + address + '. It can prompt again if it texts HiveMatrix.';
+    await refresh();
+  } catch (e) {
+    if (err) err.textContent = String(e);
+    if (status) status.textContent = '';
+  }
+}
 async function removeMessageBeeSelfHandle(handle) {
   const err = document.getElementById('mb_err'); if (err) err.textContent = '';
   const status = document.getElementById('mb_status'); if (status) status.textContent = 'Removing…';
@@ -4944,6 +5003,15 @@ async function removeMessageBeeSelfHandle(handle) {
     if (status) status.textContent = '';
   }
 }
+async function renderBlockedMessageBeeIdentities(ids) {
+  const el = document.getElementById('mb_blocked');
+  if (!el) return;
+  const blocked = Array.isArray(ids) ? ids.filter(i => i.status === 'blocked') : [];
+  el.innerHTML = blocked.length
+    ? '<div class="muted" style="font-size:11px;margin:6px 0 3px">Disallowed senders:</div>'
+      + blocked.map(i => mbBlockedChip(i.address)).join('')
+    : '';
+}
 // Reflect status into the setup marks. data is the POST result (or null = derive from onboarding).
 function renderMessageBeeState(data) {
   const fallbackDetail = ((mbStep() || {}).detail || '');
@@ -4963,6 +5031,9 @@ function renderMessageBeeState(data) {
     document.getElementById('mb_identities').innerHTML = allow.length
       ? allow.map(i => mbChip(i.address, 'removeMessageBeeIdentity')).join('')
       : '';
+    renderBlockedMessageBeeIdentities(ids);
+  } else {
+    renderBlockedMessageBeeIdentities([]);
   }
   renderMessageBeeSelfHandles(data ? (data.selfHandles || []) : []);
 }

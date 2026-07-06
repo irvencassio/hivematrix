@@ -60,3 +60,13 @@ test("ignored senders: recorded, deduped by address (latest wins), clearable", (
   assert.equal(after.length, 1);
   assert.equal(after[0].address, "+15551234567");
 });
+
+test("blocked identities match the blocklist without becoming allowlisted", () => {
+  store.upsertIdentity("+1 (408) 396-7431", "blocked");
+  assert.equal(store.isBlocked("+14083967431"), true, "blocked phone matches by normalized form");
+  assert.equal(store.isAllowed("+14083967431"), false, "blocked phone is not allowlisted");
+
+  store.upsertIdentity("+14083967431", "allowed");
+  assert.equal(store.isBlocked("4083967431"), false, "status changes remove block behavior");
+  assert.equal(store.isAllowed("4083967431"), true, "same identity can be allowed later");
+});

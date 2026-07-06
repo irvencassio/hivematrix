@@ -201,6 +201,7 @@ export function isSelf(handle: string): boolean {
 // ── sender allowlist (identities) ────────────────────────────────────────────
 
 const ALLOWED_STATUSES: IdentityStatus[] = ["allowed", "paired"];
+const BLOCKED_STATUSES: IdentityStatus[] = ["blocked"];
 
 export function listIdentities(): MessageIdentity[] {
   const rows = getDb().prepare(
@@ -213,6 +214,13 @@ export function listIdentities(): MessageIdentity[] {
 export function isAllowed(handle: string): boolean {
   return listIdentities()
     .filter((i) => ALLOWED_STATUSES.includes(i.status))
+    .some((i) => handlesMatch(i.address, handle));
+}
+
+/** Whether a raw inbound handle is blocked from surfacing in setup prompts. */
+export function isBlocked(handle: string): boolean {
+  return listIdentities()
+    .filter((i) => BLOCKED_STATUSES.includes(i.status))
     .some((i) => handlesMatch(i.address, handle));
 }
 

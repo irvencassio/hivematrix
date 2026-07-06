@@ -1255,8 +1255,9 @@ export function createDaemonServer() {
         if (!address) { json(res, 400, { error: "address is required" }); return; }
         const status = ["pending", "allowed", "paired", "blocked"].includes(body.status as string)
           ? (body.status as "pending" | "allowed" | "paired" | "blocked") : "allowed";
-        const { upsertIdentity, listIdentities } = await import("@/lib/messagebee/store");
+        const { upsertIdentity, listIdentities, clearIgnoredSender } = await import("@/lib/messagebee/store");
         upsertIdentity(address, status, typeof body.displayName === "string" ? body.displayName : null);
+        if (status === "allowed" || status === "blocked") clearIgnoredSender(address);
         json(res, 200, { ok: true, identities: listIdentities() });
         return;
       }

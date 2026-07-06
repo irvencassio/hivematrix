@@ -21,7 +21,7 @@ import { routeInbound, type PendingInput } from "./handoff";
 import { readInboundSince, sendIMessage } from "./imessage";
 import { wantsVoiceReply } from "@/lib/voice/tts";
 import {
-  isChannelEnabled, getLastRowid, setLastRowid, isAllowed, isSelf, getSelfHandles,
+  isChannelEnabled, getLastRowid, setLastRowid, isAllowed, isBlocked, isSelf, getSelfHandles,
   recordInbound, recordOutbound, recordError,
   wasStuckNotified, markStuckNotified,
   wasDoneNotified, markDoneNotified, recordIgnoredSender,
@@ -81,7 +81,7 @@ async function handleInbound(msg: { rowid: number; handle: string; text: string;
 
   if (route.kind === "ignore") {
     // Surface non-allowlisted senders so the operator can one-click allow them.
-    if (!isAllowed(msg.handle)) recordIgnoredSender(msg.handle, msg.text);
+    if (!isAllowed(msg.handle) && !isBlocked(msg.handle)) recordIgnoredSender(msg.handle, msg.text);
     return;
   }
 
