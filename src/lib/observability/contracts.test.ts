@@ -14,8 +14,6 @@ test("providerForModel maps each runner correctly", () => {
   assert.equal(providerForModel("codex:gpt-5.5-codex"), "openai-codex");
   assert.equal(providerForModel("gpt-5.5"), "openai-codex");
   assert.equal(providerForModel("qwen3-coder-30b"), "local-qwen");
-  assert.equal(providerForModel("deepseek-v4-flash"), "local-dwarfstar");
-  assert.equal(providerForModel("DwarfStar DeepSeek V4 Flash"), "local-dwarfstar");
   assert.equal(providerForModel("mistral-small"), "local-qwen");
   assert.equal(providerForModel(""), "other");
   assert.equal(providerForModel(null), "other");
@@ -58,14 +56,6 @@ test("Codex with recovered tokens reports them; cost stays null (not reported)",
 test("Local Qwen: tokens through, cost is null (free, not 0), tokens/sec computed", () => {
   const r = normalizeRun({ ...base, model: "qwen3-coder-30b", inputTokens: 500, outputTokens: 2000, costUsd: 0.99 });
   assert.equal(r.provider, "local-qwen");
-  assert.equal(r.outputTokens, 2000);
-  assert.equal(r.costUsd, null, "local is free — null, never a fabricated cost");
-  assert.equal(r.tokensPerSec, 500); // 2000 / 4s
-});
-
-test("Local Dwarf Star: tokens through, cost is null (free, not 0), tokens/sec computed", () => {
-  const r = normalizeRun({ ...base, model: "deepseek-v4-flash", inputTokens: 500, outputTokens: 2000, costUsd: 0.99 });
-  assert.equal(r.provider, "local-dwarfstar");
   assert.equal(r.outputTokens, 2000);
   assert.equal(r.costUsd, null, "local is free — null, never a fabricated cost");
   assert.equal(r.tokensPerSec, 500); // 2000 / 4s

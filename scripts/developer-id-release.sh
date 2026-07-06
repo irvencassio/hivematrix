@@ -2,7 +2,7 @@
 #
 # developer-id-release.sh — the ONE canonical HiveMatrix macOS release command.
 # Deterministic, non-interactive, callable by any worker model (Claude, Codex,
-# DeepSeek/local). Developer ID signing + Apple notarization for the public
+# Qwen/local). Developer ID signing + Apple notarization for the public
 # website DMG / external updater lane. NOT the Mac App Store.
 #
 # Usage:

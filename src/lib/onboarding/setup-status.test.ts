@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildFirstRunSetupStatus } from "./setup-status";
+import { LOCAL_MEMORY_PRESETS } from "@/lib/models/local-engine";
+
+const PRESET_32GB = LOCAL_MEMORY_PRESETS.find((preset) => preset.id === "32gb")!;
 
 function item<T extends { id: string }>(items: T[], id: string): T {
   const found = items.find((i) => i.id === id);
@@ -92,9 +95,12 @@ test("local model provisioning is optional until the user starts Rapid-MLX setup
       plan: {
         arch: "arm64",
         ramGB: 32,
+        presetId: "32gb",
+        mode: "local_agent_light",
         localCapable: true,
         recommendedTiers: ["fast"],
         tiers: [],
+        preset: PRESET_32GB,
       },
       status: {
         phase: "idle",

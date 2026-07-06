@@ -81,7 +81,7 @@ test("decompose sizes the token budget up for a reasoning (thinking) model", asy
   assert.equal(seenMaxTokens, DECOMPOSE_MAX_TOKENS);
 });
 
-test("decompose gives the reasoning pass a real timeout and caps its effort", async () => {
+test("decompose gives the reasoning pass a real timeout", async () => {
   let seen: { timeoutMs?: number; reasoningEffort?: string } = {};
   const client: ChatComplete = async (_messages, opts) => {
     seen = { timeoutMs: opts?.timeoutMs, reasoningEffort: opts?.reasoningEffort };
@@ -95,7 +95,7 @@ test("decompose gives the reasoning pass a real timeout and caps its effort", as
   // thinking-mode decompose before the model's ~20s prefill even finishes.
   assert.equal(seen.timeoutMs, DECOMPOSE_TIMEOUT_MS);
   assert.ok((seen.timeoutMs ?? 0) > 12_000);
-  assert.equal(seen.reasoningEffort, "low");
+  assert.equal(seen.reasoningEffort, undefined);
 });
 
 test("decompose returns null when no client is configured", async () => {

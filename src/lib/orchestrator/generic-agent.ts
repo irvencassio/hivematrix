@@ -20,14 +20,14 @@ import { formatSkillIndex, skillRunsOn } from "@/lib/skills/contracts";
 import { getAgentProfile } from "@/lib/config/agent-profiles";
 import { buildBrainMemoryBundle, buildBrainIndexBlock } from "@/lib/brain/memory-bundle";
 import { brainDocPolicyText } from "@/lib/brain/settings";
-import { resolveThinkingMode, dwarfstarThinkingFields, autoTurnThinkingMode } from "@/lib/config/budget-policy";
+import { resolveThinkingMode } from "@/lib/config/budget-policy";
 
 const MAX_TURNS = 50;
 const MODEL_TOOL_RESULT_MAX_CHARS = 12_000;
-const LOCAL_OPENAI_COMPATIBLE_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai", "dwarfstar"]);
+const LOCAL_OPENAI_COMPATIBLE_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai"]);
 // Providers HiveMatrix serves locally (Qwen). nanai is excluded — it's cloud
 // image generation, not a self-hosted endpoint we wait on for cold start.
-const LOCAL_SERVED_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm", "dwarfstar"]);
+const LOCAL_SERVED_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm"]);
 
 // Loop-guard thresholds: how many identical tool calls before intervening
 const LOOP_WARN_THRESHOLD = 3;  // inject "you already have this" into tool result
@@ -103,8 +103,6 @@ export function genericThinkingInstruction(thinkingMode?: string | null): string
 
 export function genericDeliverableReliabilityInstruction(): string {
   return `--- Deliverable Reliability ---
-- DeepSeek/DwarfStar-style local agents are purpose-built, narrow execution paths. Upstream ds4's native coding agent keeps inference inside the agent, represents sessions with on-disk KV cache, and designs tools plus system prompt vertically for DeepSeek V4 Flash/PRO.
-- If this run reaches Dwarf Star through an OpenAI-compatible server bridge, keep the same vertical DeepSeek discipline instead of acting like a generic package-running sandbox.
 - Preserve correctness before speed. Do not settle for the first idea when it produces brittle code, repeated failures, dead code, or fragile special-case probes.
 - Prefer the standard library or existing project dependencies for small deliverables. Add a new dependency only when it materially improves the result and you have verified it imports and runs in this environment.
 - For Python tasks, check the active interpreter first. Python 3.14 can have limited third-party wheel support; avoid native GUI/game packages such as pygame unless they are already working end-to-end.
@@ -470,15 +468,6 @@ export function buildGenericRequestBody(
     max_tokens: provider.maxTokens,
   };
 
-  // DwarfStar (local DeepSeek) defaults every request to high-effort thinking,
-  // which dominates per-turn latency. Forward the task's thinking mode as
-  // `reasoning_effort` — or, for the "off" tier, the `thinking:{type:"disabled"}`
-  // off-switch that skips <think> entirely (ds4's biggest latency lever). Only
-  // sent to dwarfstar — other local backends may reject these fields.
-  if (provider.name === "dwarfstar") {
-    Object.assign(body, dwarfstarThinkingFields(thinkingMode));
-  }
-
   if (provider.supportsTools && profileTools && profileTools.length > 0) {
     body.tools = profileTools;
   }
@@ -592,11 +581,6 @@ async function runAgentLoop(
   const readCache = new Map<string, string>();
   // When true, next API call strips tools entirely so the model must produce text.
   let forceTextOnlyTurn = false;
-  // True once this loop has executed at least one tool call. Drives the DwarfStar
-  // per-turn thinking heuristic: skip <think> on the mechanical tool-continuation
-  // turns in the middle, keep it for the first (planning) and forced-text
-  // (synthesis) boundaries. See autoTurnThinkingMode.
-  let sawToolCall = false;
   // Deterministic verification-gate bookkeeping: how many times we've bounced a
   // "done" back for a crashing smoke run, and whether the last run was clean.
   let smokeRetries = 0;
@@ -609,18 +593,11 @@ async function runAgentLoop(
 
     turns++;
 
-    // DwarfStar only: adapt the thinking mode per turn — skip <think> on the
-    // mechanical tool-continuation turns, keep it on the planning/synthesis
-    // boundaries. Other backends ignore thinkingMode in the request body.
-    const turnThinkingMode = provider.name === "dwarfstar"
-      ? autoTurnThinkingMode(thinkingMode, { continuationAfterTool: sawToolCall && !forceTextOnlyTurn })
-      : thinkingMode;
-
     // Call API with single retry on transient errors (429, 500, 502, 503)
     let response: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        response = await callChatCompletions(provider, modelId, messages, controller.signal, forceTextOnlyTurn ? [] : profileTools, turnThinkingMode);
+        response = await callChatCompletions(provider, modelId, messages, controller.signal, forceTextOnlyTurn ? [] : profileTools, thinkingMode);
       } catch (err) {
         if (controller.signal.aborted) return { code: 1, result: "Aborted", turns, totalTokens, inputTokens, outputTokens };
         if (attempt === 0) {
@@ -703,9 +680,6 @@ async function runAgentLoop(
     const effectiveToolCalls = toolCalls.length > 0 ? toolCalls : textTools.toolCalls;
 
     if ((toolCalls.length > 0 && hasToolCalls) || textTools.toolCalls.length > 0) {
-      // A tool ran this turn → subsequent turns are mechanical continuations
-      // (drives the DwarfStar per-turn thinking heuristic).
-      sawToolCall = true;
       // Add assistant message with tool calls to conversation
       if (toolCalls.length > 0 && hasToolCalls) {
         messages.push({

@@ -59,7 +59,6 @@ test("Claude spawn args omit fast-mode override when disabled", () => {
 
 test("local endpoint override applies to local models but never Claude aliases", () => {
   // Local models (however named) get ANTHROPIC_BASE_URL pointed at the provider.
-  assert.equal(isLocalEndpointModel("deepseek-v4-flash"), true);
   assert.equal(isLocalEndpointModel("qwen/qwen3.6-27b"), true);
   // Claude full ids and bare CLI aliases must go to the real API — routing
   // "sonnet" at the local server made the CLI report the model as missing.

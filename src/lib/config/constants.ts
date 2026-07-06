@@ -142,9 +142,9 @@ export function isSshDiagnosticsEnabled(): boolean {
   }
 }
 
-// Local model configuration (LM Studio / Ollama / MLX / vLLM / Nan AI / Dwarf Star)
+// Local model configuration (LM Studio / Ollama / MLX / vLLM / Nan AI)
 export interface LocalModelConfig {
-  provider: "lmstudio" | "ollama" | "mlx" | "vllm" | "nanai" | "dwarfstar";
+  provider: "lmstudio" | "ollama" | "mlx" | "vllm" | "nanai";
   endpoint: string;
   modelName: string;
 }

@@ -74,10 +74,6 @@ test("parseCommandFile infers model compatibility", () => {
   assert.deepEqual(parseCommandFile("---\nmodel: chatgpt\n---\nbody", "c", "/p").compat, ["codex"]);
   assert.deepEqual(parseCommandFile("---\nmodel: openai-gpt-5\n---\nbody", "c", "/p").compat, ["codex"]);
   assert.deepEqual(parseCommandFile("---\nmodel: qwen3\n---\nbody", "c", "/p").compat, ["qwen"]);
-  assert.deepEqual(parseCommandFile("---\nmodel: deepseek-v4\n---\nbody", "c", "/p").compat, ["deepseek"]);
-  assert.deepEqual(parseCommandFile("---\nmodel: ds4\n---\nbody", "c", "/p").compat, ["deepseek"]);
-  assert.deepEqual(parseCommandFile("---\nmodel: dwarf-star-v4\n---\nbody", "c", "/p").compat, ["deepseek"]);
-  assert.deepEqual(parseCommandFile("---\nmodel: qwen3, deepseek-v4\n---\nbody", "c", "/p").compat, ["qwen", "deepseek"]);
   assert.deepEqual(parseCommandFile("---\nmodel: unknown-future-model\n---\nbody", "c", "/p").compat, ["all"]);
   assert.deepEqual(parseCommandFile("---\nmodel: qwen3, unknown-future-model\n---\nbody", "c", "/p").compat, ["all"]);
 });

@@ -1,5 +1,5 @@
 /**
- * Deep Think — test-time compute scaling on the local DeepSeek/Qwen model.
+ * Deep Think — test-time compute scaling on the local Qwen model.
  *
  * The operator's tokens are free (M-series, keyless loopback), so the lever for
  * "smarter" is structured extra inference, not a bigger model. This harness
@@ -7,7 +7,7 @@
  * literature for agents:
  *
  *   1. Diversified parallel rollouts — N candidates at varied temperatures,
- *      thinking mode ON (DeepSeek reasoning is the whole point here).
+ *      thinking mode ON (Qwen reasoning is the whole point here).
  *   2. Self-consistency signal — cheap pairwise agreement across candidates;
  *      high agreement = the answer is stable, low = the problem is genuinely hard.
  *   3. List-wise synthesis — one temperature-0 pass that sees ALL candidates,

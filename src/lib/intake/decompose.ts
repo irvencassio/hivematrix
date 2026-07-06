@@ -20,7 +20,7 @@ import type { IntakeInput } from "./classify";
 
 export const MAX_STEPS = 12;
 
-// Token budget for the step list. A reasoning model (DeepSeek/DwarfStar with
+// Token budget for the step list. A reasoning model (Qwen with
 // thinking enabled) spends tokens inside <think> before emitting the JSON array,
 // so a tight budget can be exhausted mid-thought and yield no parseable steps.
 // The output itself is small (≤12 short strings); the extra headroom covers the
@@ -131,7 +131,7 @@ export function buildMessages(description: string, goal?: DecomposeGoalContext |
  * offline with no local loopback model reachable, on malformed output, on fewer
  * than two steps, or on any error.
  *
- * A local loopback model (DeepSeek/DwarfStar on 127.0.0.1) is keyless and
+ * A local loopback model (Qwen on 127.0.0.1) is keyless and
  * reachable even fully offline, so decomposition uses it in every connectivity
  * mode. A non-local (remote) endpoint is treated as unreachable when offline.
  */
@@ -158,7 +158,6 @@ export async function decompose(input: IntakeInput, deps: DecomposeDeps = {}): P
       maxTokens,
       temperature: 0,
       timeoutMs: DECOMPOSE_TIMEOUT_MS,
-      reasoningEffort: "low",
     });
     const steps = parseSteps(reply);
     if (steps.length < 2) return null;

@@ -31,39 +31,7 @@ test("generic/local request body uses provider max tokens and leaves cost uncapp
   assert.equal(body.model, "qwen-local");
   assert.equal(body.max_tokens, 16384);
   assert.equal("maxBudgetUsd" in body, false);
-  // Non-dwarfstar backends never receive reasoning_effort (they may reject it).
-  assert.equal("reasoning_effort" in body, false);
-});
-
-test("generic/local dwarfstar body forwards the task thinking mode as reasoning_effort", () => {
-  const provider: ModelProvider = {
-    name: "dwarfstar",
-    endpoint: "http://127.0.0.1:8000/v1",
-    apiKey: "",
-    supportsTools: true,
-    maxTokens: 8192,
-  };
-  const msgs = [{ role: "user", content: "Do the task" }];
-
-  assert.equal(buildGenericRequestBody(provider, "deepseek-v4-flash", msgs, undefined, "low").reasoning_effort, "low");
-  assert.equal(buildGenericRequestBody(provider, "deepseek-v4-flash", msgs, undefined, "xhigh").reasoning_effort, "high");
-  // Unset / "auto" default falls to the model's own default tier ("max").
-  assert.equal(buildGenericRequestBody(provider, "deepseek-v4-flash", msgs).reasoning_effort, "max");
-});
-
-test("generic/local dwarfstar 'off' thinking mode sends the disable off-switch, not reasoning_effort", () => {
-  const provider: ModelProvider = {
-    name: "dwarfstar",
-    endpoint: "http://127.0.0.1:8000/v1",
-    apiKey: "",
-    supportsTools: true,
-    maxTokens: 8192,
-  };
-  const msgs = [{ role: "user", content: "Read this file" }];
-
-  const body = buildGenericRequestBody(provider, "deepseek-v4-flash", msgs, undefined, "off");
-  assert.deepEqual(body.thinking, { type: "disabled" });
-  assert.equal(body.think, false);
+  // Local backends never receive provider-specific reasoning fields.
   assert.equal("reasoning_effort" in body, false);
 });
 
@@ -104,12 +72,6 @@ test("generic/local developer prompt steers simple Python games away from brittl
   const messages = await buildMessages("Create a snake game in python", "/tmp", "developer", "low");
   const system = String(messages[0]?.content ?? "");
 
-  assert.match(system, /DeepSeek\/DwarfStar-style local agents/i);
-  assert.match(system, /purpose-built, narrow execution paths/i);
-  assert.match(system, /native coding agent/i);
-  assert.match(system, /on-disk KV cache/i);
-  assert.match(system, /tools plus system prompt vertically/i);
-  assert.match(system, /OpenAI-compatible server bridge/i);
   assert.match(system, /Preserve correctness before speed/i);
   assert.match(system, /Python 3\.14/i);
   assert.match(system, /pygame/i);

@@ -1,108 +1,133 @@
 #!/usr/bin/env bash
-# HiveMatrix local-model installer for a new machine.
+# HiveMatrix local-model installer for a new Mac.
 #
-# Picks the standard local model by RAM (per the 2026-07-04 bake-off,
-# tools/model-bench/):
-#   >= 120GB unified memory  -> DeepSeek V4 Flash q2-q4 via ds4/DwarfStar (:8000)
-#   <  120GB                 -> Qwen3.6-35B-A3B via rapid-mlx (:8090)
-#                               (8bit >= 48GB, else 4bit)
-# Then prints the HiveMatrix Settings selection to finish wiring.
+# This script removes the retired ds4/DwarfStar install path, then provisions
+# Qwen through Rapid-MLX according to the same memory presets HiveMatrix uses at
+# runtime:
+#   < 32GB  -> frontier-only, no local model
+#   32/48GB -> Qwen3.6-35B-A3B fast tier (:8000)
+#   64GB+   -> Qwen3.6-35B-A3B fast (:8000) + Qwen3.6-27B coding (:8001)
 set -euo pipefail
 
 RAM_GB=$(( $(sysctl -n hw.memsize) / 1024 / 1024 / 1024 ))
+USER_ID="$(id -u)"
+USER_NAME="$(whoami)"
 echo "Detected ${RAM_GB}GB unified memory."
 
-install_ds4() {
-  local dir="$HOME/dwarfstar-ds4"
-  if [ ! -d "$dir" ]; then
-    echo "Cloning ds4 (DwarfStar)..."
-    git clone https://github.com/antirez/ds4 "$dir"
-    (cd "$dir" && make)
+uninstall_retired_ds4() {
+  local plist="$HOME/Library/LaunchAgents/com.${USER_NAME}.dwarfstar.ds4.plist"
+  if [ -f "$plist" ]; then
+    echo "Unloading retired ds4 LaunchAgent..."
+    launchctl bootout "gui/${USER_ID}" "$plist" >/dev/null 2>&1 || true
+    rm -f "$plist"
   fi
-  if [ ! -e "$dir/ds4flash.gguf" ]; then
-    echo "Downloading DeepSeek V4 Flash q2-q4 (~91GB)..."
-    (cd "$dir" && ./download_model.sh q2-q4-imatrix)
+
+  if pgrep -f "ds4-server|ds4-agent" >/dev/null 2>&1; then
+    echo "Stopping retired ds4 processes..."
+    pkill -f "ds4-server|ds4-agent" >/dev/null 2>&1 || true
   fi
-  local plist="$HOME/Library/LaunchAgents/com.$(whoami).dwarfstar.ds4.plist"
-  if [ ! -f "$plist" ]; then
-    cat > "$plist" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>com.$(whoami).dwarfstar.ds4</string>
-  <key>WorkingDirectory</key><string>$dir</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>$dir/ds4-server</string>
-    <string>--ctx</string><string>100000</string>
-    <string>--host</string><string>127.0.0.1</string>
-    <string>--port</string><string>8000</string>
-    <string>--kv-disk-dir</string><string>$HOME/.ds4/server-kv</string>
-    <string>--kv-disk-space-mb</string><string>131072</string>
-  </array>
-  <key>KeepAlive</key><true/>
-  <key>RunAtLoad</key><true/>
-  <key>StandardOutPath</key><string>$HOME/.ds4/ds4-serve.launchd.log</string>
-  <key>StandardErrorPath</key><string>$HOME/.ds4/ds4-serve.launchd.log</string>
-  <key>EnvironmentVariables</key><dict><key>HOME</key><string>$HOME</string></dict>
-</dict>
-</plist>
-EOF
-    mkdir -p "$HOME/.ds4"
-    launchctl bootstrap "gui/$(id -u)" "$plist"
+
+  if [ -d "$HOME/dwarfstar-ds4" ]; then
+    echo "Removing ~/dwarfstar-ds4..."
+    rm -rf "$HOME/dwarfstar-ds4"
   fi
-  echo
-  echo "DeepSeek V4 Flash q2-q4 serving on http://127.0.0.1:8000/v1"
-  echo "In HiveMatrix Settings -> Models, pick: Dwarf Star DeepSeek V4 Flash."
+  if [ -d "$HOME/.ds4" ]; then
+    echo "Removing ~/.ds4..."
+    rm -rf "$HOME/.ds4"
+  fi
 }
 
-install_rapid_mlx_qwen() {
-  local quant="8bit"
-  [ "$RAM_GB" -lt 48 ] && quant="4bit"
-  if ! command -v rapid-mlx >/dev/null 2>&1; then
-    echo "Installing rapid-mlx..."
-    python3 -m pip install --user rapid-mlx --break-system-packages || python3 -m pip install --user rapid-mlx
-    export PATH="$PATH:$HOME/Library/Python/3.12/bin:$HOME/Library/Python/3.13/bin"
+rapid_mlx_bin() {
+  command -v rapid-mlx 2>/dev/null || true
+}
+
+ensure_rapid_mlx() {
+  local bin
+  bin="$(rapid_mlx_bin)"
+  if [ -n "$bin" ]; then
+    echo "$bin"
+    return
   fi
-  echo "Pulling Qwen3.6-35B-A3B ${quant}..."
-  rapid-mlx pull "qwen3.6-35b-${quant}"
-  local plist="$HOME/Library/LaunchAgents/com.$(whoami).rapidmlx.qwen.plist"
-  if [ ! -f "$plist" ]; then
-    local bin
-    bin=$(command -v rapid-mlx)
-    cat > "$plist" <<EOF
+
+  echo "Installing rapid-mlx..." >&2
+  python3 -m pip install --user rapid-mlx --break-system-packages || python3 -m pip install --user rapid-mlx
+  export PATH="$PATH:$HOME/.local/bin:$HOME/Library/Python/3.12/bin:$HOME/Library/Python/3.13/bin"
+  bin="$(rapid_mlx_bin)"
+  if [ -z "$bin" ]; then
+    echo "rapid-mlx installed but not found on PATH. Add ~/.local/bin or ~/Library/Python/*/bin to PATH, then retry." >&2
+    exit 1
+  fi
+  echo "$bin"
+}
+
+write_launch_agent() {
+  local label="$1"
+  local plist="$2"
+  local bin="$3"
+  local alias="$4"
+  local port="$5"
+
+  if [ -f "$plist" ]; then
+    launchctl bootout "gui/${USER_ID}" "$plist" >/dev/null 2>&1 || true
+  fi
+
+  cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.$(whoami).rapidmlx.qwen</string>
+  <key>Label</key><string>${label}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$bin</string>
+    <string>${bin}</string>
     <string>serve</string>
-    <string>qwen3.6-35b-${quant}</string>
-    <string>--port</string><string>8090</string>
+    <string>${alias}</string>
+    <string>--port</string><string>${port}</string>
+    <string>--no-thinking</string>
   </array>
   <key>KeepAlive</key><true/>
   <key>RunAtLoad</key><true/>
-  <key>StandardOutPath</key><string>$HOME/.hivematrix/rapidmlx-qwen.log</string>
-  <key>StandardErrorPath</key><string>$HOME/.hivematrix/rapidmlx-qwen.log</string>
+  <key>StandardOutPath</key><string>${HOME}/.hivematrix/${label}.log</string>
+  <key>StandardErrorPath</key><string>${HOME}/.hivematrix/${label}.log</string>
+  <key>EnvironmentVariables</key><dict><key>HOME</key><string>${HOME}</string></dict>
 </dict>
 </plist>
 EOF
-    mkdir -p "$HOME/.hivematrix"
-    launchctl bootstrap "gui/$(id -u)" "$plist"
-  fi
-  echo
-  echo "Qwen3.6-35B-A3B (${quant}) serving on http://127.0.0.1:8090/v1"
-  echo "In HiveMatrix Settings -> Models, pick: Qwen3.6-35B (Rapid-MLX)."
+  launchctl bootstrap "gui/${USER_ID}" "$plist" >/dev/null 2>&1 || launchctl kickstart -k "gui/${USER_ID}/${label}" >/dev/null 2>&1 || true
 }
 
-if [ "$RAM_GB" -ge 120 ]; then
-  echo "-> Installing DeepSeek V4 Flash q2-q4 via ds4 (recommended for ${RAM_GB}GB)."
-  install_ds4
-else
-  echo "-> Installing Qwen3.6-35B-A3B via rapid-mlx (recommended for ${RAM_GB}GB)."
-  install_rapid_mlx_qwen
+install_qwen_tier() {
+  local bin="$1"
+  local tier="$2"
+  local alias="$3"
+  local port="$4"
+  local label="com.${USER_NAME}.rapidmlx.qwen.${tier}"
+  local plist="$HOME/Library/LaunchAgents/${label}.plist"
+
+  echo "Pulling ${alias}..."
+  "$bin" pull "$alias"
+  mkdir -p "$HOME/.hivematrix"
+  write_launch_agent "$label" "$plist" "$bin" "$alias" "$port"
+  echo "${alias} serving on http://127.0.0.1:${port}/v1"
+}
+
+uninstall_retired_ds4
+
+if [ "$RAM_GB" -lt 32 ]; then
+  echo "-> ${RAM_GB}GB is below the local-Qwen tier. HiveMatrix will use frontier-only mode."
+  exit 0
 fi
+
+RAPID_MLX="$(ensure_rapid_mlx)"
+
+echo "-> Installing Qwen fast tier with Rapid-MLX."
+install_qwen_tier "$RAPID_MLX" "fast" "qwen3.6-35b-4bit" "8000"
+
+if [ "$RAM_GB" -ge 64 ]; then
+  echo "-> Installing Qwen coding tier with Rapid-MLX."
+  install_qwen_tier "$RAPID_MLX" "coding" "qwen3.6-27b-4bit" "8001"
+fi
+
+echo
+echo "HiveMatrix local Qwen is configured through Rapid-MLX."
+echo "Run: npx tsx scripts/qwen-readiness.mts"

@@ -56,7 +56,7 @@ test("getQwenProfile applies defaults for missing fields", () => {
   const profile = withTempHome(cfg, () => getQwenProfile());
   assert.ok(profile !== null);
   assert.equal(profile!.location, "local");
-  assert.equal(profile!.thinkingEnabled, true);
+  assert.equal(profile!.thinkingEnabled, false);
   assert.equal(profile!.minDecodeRate, 15);
   assert.equal(profile!.probeTimeoutMs, 60000);
   assert.equal(profile!.secondary, null);

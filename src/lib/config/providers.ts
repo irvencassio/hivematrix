@@ -46,11 +46,6 @@ const PROVIDER_DEFAULTS: Record<string, { endpoint: string; supportsTools: boole
     supportsTools: true,
     maxTokens: 4096,
   },
-  dwarfstar: {
-    endpoint: "http://127.0.0.1:8000/v1",
-    supportsTools: true,
-    maxTokens: 32768,
-  },
   nanai: {
     endpoint: "",
     supportsTools: true,
@@ -103,7 +98,7 @@ export function detectProvider(modelId: string): string | null {
   const localModel = getLocalModelConfig();
   if (localModel?.modelName === modelId) {
     const provider = localModel.provider;
-    if (provider === "ollama" || provider === "lmstudio" || provider === "mlx" || provider === "vllm" || provider === "nanai" || provider === "dwarfstar") {
+    if (provider === "ollama" || provider === "lmstudio" || provider === "mlx" || provider === "vllm" || provider === "nanai") {
       return provider;
     }
   }
@@ -151,7 +146,7 @@ export function resolveProvider(modelId: string): ModelProvider | null {
   const apiKey = process.env[envKeyMap[providerName] ?? ""] ?? "";
 
   // Cloud providers require an API key
-  const isLocal = providerName === "ollama" || providerName === "lmstudio" || providerName === "mlx" || providerName === "vllm" || providerName === "nanai" || providerName === "dwarfstar";
+  const isLocal = providerName === "ollama" || providerName === "lmstudio" || providerName === "mlx" || providerName === "vllm" || providerName === "nanai";
   if (!isLocal && !apiKey) return null;
 
   const localHealth = isLocal ? readCachedLocalModelHealth() : null;

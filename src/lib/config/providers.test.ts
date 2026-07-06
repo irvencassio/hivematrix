@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { detectProvider, resolveProvider } from "./providers";
-import { DEEPSEEK_FLASH_API_MODEL_ID, DEEPSEEK_FLASH_GGUF_NAME } from "@/lib/models/local-presets";
 
 function withTempHome<T>(config: Record<string, unknown>, run: () => T): T {
   const originalHome = process.env.HOME;
@@ -56,31 +55,4 @@ test("resolveProvider uses the configured local-model endpoint for Nan AI", () =
 
   assert.equal(provider?.name, "nanai");
   assert.equal(provider?.endpoint, "http://127.0.0.1:3000/v1");
-});
-
-test("detectProvider resolves Dwarf Star as a local provider", () => {
-  const provider = withTempHome({
-    localModel: {
-      provider: "dwarfstar",
-      endpoint: "http://127.0.0.1:8000/v1",
-      modelName: "deepseek-v4-flash",
-    },
-  }, () => detectProvider("deepseek-v4-flash"));
-
-  assert.equal(provider, "dwarfstar");
-});
-
-test("resolveProvider routes the supported DeepSeek Flash preset to Dwarf Star", () => {
-  const provider = withTempHome({}, () => resolveProvider(DEEPSEEK_FLASH_API_MODEL_ID));
-
-  assert.equal(provider?.name, "dwarfstar");
-  assert.equal(provider?.endpoint, "http://127.0.0.1:8000/v1");
-  assert.equal(provider?.maxTokens, 32768);
-});
-
-test("resolveProvider accepts the DeepSeek Flash GGUF name as a Dwarf Star preset alias", () => {
-  const provider = withTempHome({}, () => resolveProvider(DEEPSEEK_FLASH_GGUF_NAME));
-
-  assert.equal(provider?.name, "dwarfstar");
-  assert.equal(provider?.endpoint, "http://127.0.0.1:8000/v1");
 });

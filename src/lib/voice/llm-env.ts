@@ -36,7 +36,7 @@ export function voiceLlmEnv(): Record<string, string> {
   const profile = getQwenProfile();
 
   // When the configured local model is an explicit OpenAI-compatible server
-  // (Dwarf Star DeepSeek, vLLM, LM Studio, Ollama), route voice to that SAME
+  // (Rapid-MLX, vLLM, LM Studio, Ollama), route voice to that SAME
   // model+endpoint. Otherwise the default Rapid-MLX engine kind would send voice
   // to a stale tier alias (e.g. a Qwen tier) that isn't the model actually
   // loaded — it only "works" because the server ignores the model name.

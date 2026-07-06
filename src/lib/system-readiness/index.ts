@@ -231,15 +231,12 @@ function localModelCheck(health: MinimalLocalModelHealth | null): SystemReadines
     return check("local-model", "Local model", "info", "No cached local model readiness result yet.", "Run the local model readiness check if local/offline routing quality matters.");
   }
   const ready = health.qwenReady === true || health.ready === true;
-  const providerLabel = health.provider === "dwarfstar" ? "Dwarf Star"
-    : health.provider === "mlx" ? "Rapid-MLX"
+  const providerLabel = health.provider === "mlx" ? "Rapid-MLX"
     : health.provider === "vllm" ? "vLLM"
     : health.provider === "lmstudio" ? "LM Studio"
     : health.provider === "ollama" ? "Ollama"
     : health.provider ?? "local";
-  const modelLabel = health.provider === "dwarfstar" && /deepseek/i.test(String(health.modelName ?? ""))
-    ? `Dwarf Star DeepSeek (${health.modelName})`
-    : `${providerLabel} ${health.modelName ?? "model"}`;
+  const modelLabel = `${providerLabel} ${health.modelName ?? "model"}`;
   const detail = {
     provider: health.provider,
     endpoint: health.endpoint,
@@ -249,9 +246,7 @@ function localModelCheck(health: MinimalLocalModelHealth | null): SystemReadines
     message: cleanSnippet(health.message),
   };
   if (!ready) {
-    const next = health.provider === "dwarfstar"
-      ? "Start ds4-serve on the configured endpoint and rerun local model readiness before relying on DeepSeek."
-      : "Run qwen readiness and fix the local endpoint before relying on local-only mode.";
+    const next = "Run qwen readiness and fix the local endpoint before relying on local-only mode.";
     return check("local-model", "Local model", "warn", `${modelLabel} is not ready: ${cleanSnippet(health.message) || "readiness failed"}.`, next, detail);
   }
   const rate = typeof health.decodeRateTokPerSec === "number" ? ` at ${health.decodeRateTokPerSec.toFixed(1)} tok/s` : "";

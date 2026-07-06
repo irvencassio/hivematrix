@@ -16,7 +16,7 @@ export interface LocalFallbackDecision {
 }
 
 function isLocalProvider(provider: string | null): boolean {
-  return provider === "ollama" || provider === "lmstudio" || provider === "mlx" || provider === "vllm" || provider === "nanai" || provider === "dwarfstar";
+  return provider === "ollama" || provider === "lmstudio" || provider === "mlx" || provider === "vllm" || provider === "nanai";
 }
 
 export function isEligibleForLocalFallback(modelId: string | null | undefined): boolean {

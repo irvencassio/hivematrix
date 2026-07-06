@@ -716,7 +716,7 @@ export function createDaemonServer() {
         if (typeof body.wallpaperOpacity === "number") m.setWallpaperOpacity(body.wallpaperOpacity);
         if (typeof body.location === "string") m.setLocation(body.location);
         if (typeof body.autoUpdate === "boolean") m.setAutoUpdate(body.autoUpdate);
-        if (body.appIconChoice === "dark-green" || body.appIconChoice === "white") m.setAppIconChoice(body.appIconChoice);
+        if (body.appIconChoice === "black" || body.appIconChoice === "white") m.setAppIconChoice(body.appIconChoice);
         if (body.frontierProvider === "claude" || body.frontierProvider === "codex") m.setFrontierProvider(body.frontierProvider);
         let embeddings = null;
         if (body.embeddings && typeof body.embeddings === "object") {

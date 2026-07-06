@@ -226,6 +226,8 @@ export interface TierCapability {
 export interface LocalEngineCapability {
   arch: string;
   ramGB: number;
+  presetId: LocalMemoryPresetId;
+  mode: LocalPresetMode;
   /** arm64 + enough RAM for at least one tier. False → run cloud-only. */
   localCapable: boolean;
   tiers: TierCapability[];
@@ -237,43 +239,153 @@ export interface LocalEngineCapability {
 
 const RESIDENT_TIER_KEYS: TierKey[] = ["fast", "coding"];
 
+export type LocalMemoryTier = "less_than_32gb" | "32gb" | "48gb" | "64gb" | "128gb";
+export type LocalMemoryPresetId = LocalMemoryTier;
+export type LocalPresetMode =
+  | "frontier_only"
+  | "local_agent_light"
+  | "local_agent_standard"
+  | "dual_local_compact"
+  | "dual_local_quality";
+
+export interface LocalRolePreset {
+  enabled: boolean;
+  model: string;
+  quant: string;
+  defaultContext: number;
+  maxRecommendedContext: number;
+  role: string;
+}
+
+export interface EmbeddingPreset {
+  enabled: boolean;
+  model: string;
+  role: string;
+}
+
+export interface LocalMemoryPreset {
+  id: LocalMemoryPresetId;
+  minGB: number;
+  mode: LocalPresetMode;
+  localEnabled: boolean;
+  recommendedTiers: TierKey[];
+  localAgentFast: LocalRolePreset;
+  localCoderQuality: LocalRolePreset;
+  localEmbeddings: EmbeddingPreset;
+  frontierPrimary: { enabled: boolean; role: string };
+  rationale: string;
+}
+
+const DISABLED_ROLE: LocalRolePreset = {
+  enabled: false,
+  model: "",
+  quant: "",
+  defaultContext: 0,
+  maxRecommendedContext: 0,
+  role: "disabled",
+};
+
+export const LOCAL_MEMORY_PRESETS: LocalMemoryPreset[] = [
+  {
+    id: "less_than_32gb",
+    minGB: 0,
+    mode: "frontier_only",
+    localEnabled: false,
+    recommendedTiers: [],
+    localAgentFast: DISABLED_ROLE,
+    localCoderQuality: DISABLED_ROLE,
+    localEmbeddings: { enabled: false, model: "", role: "disabled by default" },
+    frontierPrimary: { enabled: true, role: "remote frontier model" },
+    rationale: "below 32GB, local large-model operation is not realistic enough for HiveMatrix defaults",
+  },
+  {
+    id: "32gb",
+    minGB: 32,
+    mode: "local_agent_light",
+    localEnabled: true,
+    recommendedTiers: ["fast"],
+    localAgentFast: { enabled: true, model: "qwen3.6-35b-a3b", quant: "UD-Q4_K_M or IQ4_XS", defaultContext: 8192, maxRecommendedContext: 16384, role: "fast local agent/planner" },
+    localCoderQuality: DISABLED_ROLE,
+    localEmbeddings: { enabled: true, model: "bge-small or nomic-embed-text", role: "small local retrieval embedding model" },
+    frontierPrimary: { enabled: true, role: "fallback when local is unavailable or insufficient" },
+    rationale: "32GB can run Qwen3.6-35B-A3B at Q4 with a small embedding model, but should not keep Qwen3.6-27B hot",
+  },
+  {
+    id: "48gb",
+    minGB: 48,
+    mode: "local_agent_standard",
+    localEnabled: true,
+    recommendedTiers: ["fast"],
+    localAgentFast: { enabled: true, model: "qwen3.6-35b-a3b", quant: "Q5_K_M or Q6_K if available, otherwise UD-Q4_K_M", defaultContext: 16384, maxRecommendedContext: 32768, role: "primary local agent/planner" },
+    localCoderQuality: DISABLED_ROLE,
+    localEmbeddings: { enabled: true, model: "bge-small or nomic-embed-text", role: "small local retrieval embedding model" },
+    frontierPrimary: { enabled: true, role: "fallback when local is unavailable or insufficient" },
+    rationale: "48GB should optimize for a strong single local agent model rather than splitting memory across two large models",
+  },
+  {
+    id: "64gb",
+    minGB: 64,
+    mode: "dual_local_compact",
+    localEnabled: true,
+    recommendedTiers: ["fast", "coding"],
+    localAgentFast: { enabled: true, model: "qwen3.6-35b-a3b", quant: "UD-Q4_K_M or Q5_K_M", defaultContext: 16384, maxRecommendedContext: 32768, role: "fast planner, triage, subagent, summarizer" },
+    localCoderQuality: { enabled: true, model: "qwen3.6-27b", quant: "Q5_K_M or Q6_K", defaultContext: 16384, maxRecommendedContext: 32768, role: "coding quality model" },
+    localEmbeddings: { enabled: true, model: "bge-small or nomic-embed-text", role: "small local retrieval embedding model" },
+    frontierPrimary: { enabled: true, role: "fallback when local is unavailable or insufficient" },
+    rationale: "64GB can run both Qwen models if context is capped and the system accepts some memory pressure",
+  },
+  {
+    id: "128gb",
+    minGB: 128,
+    mode: "dual_local_quality",
+    localEnabled: true,
+    recommendedTiers: ["fast", "coding"],
+    localAgentFast: { enabled: true, model: "qwen3.6-35b-a3b", quant: "Q6_K or Q8_0, prefer Q6_K when both models are hot", defaultContext: 32768, maxRecommendedContext: 65536, role: "fast local agent/planner" },
+    localCoderQuality: { enabled: true, model: "qwen3.6-27b", quant: "Q8_0 or UD-Q8_K_XL", defaultContext: 32768, maxRecommendedContext: 65536, role: "primary local coding model" },
+    localEmbeddings: { enabled: true, model: "bge-small, nomic-embed-text, or mxbai-embed-large", role: "small local retrieval embedding model" },
+    frontierPrimary: { enabled: true, role: "fallback when local is unavailable or insufficient" },
+    rationale: "128GB is the first tier where both models can be kept usable at the same time while preserving high coding quality",
+  },
+];
+
+export function memoryTierForGB(ramGB: number): LocalMemoryTier {
+  if (!Number.isFinite(ramGB) || ramGB < 32) return "less_than_32gb";
+  if (ramGB >= 128) return "128gb";
+  if (ramGB >= 64) return "64gb";
+  if (ramGB >= 48) return "48gb";
+  return "32gb";
+}
+
+export function selectLocalMemoryPreset(env: Partial<HardwareProbe> = {}): LocalMemoryPreset {
+  const ramGB = env.ramGB ?? totalmem() / 1e9;
+  const tier = memoryTierForGB(ramGB);
+  return LOCAL_MEMORY_PRESETS.find((preset) => preset.id === tier) ?? LOCAL_MEMORY_PRESETS[0];
+}
+
 /** Compute which tiers this Mac can run + the recommended resident profile. */
 export function localEngineCapability(env: Partial<HardwareProbe> = {}): LocalEngineCapability {
   const arch = env.arch ?? osArch();
   const ramGB = env.ramGB ?? totalmem() / 1e9;
   const gb = Math.round(ramGB);
   const isArm = arch === "arm64";
+  const preset = selectLocalMemoryPreset({ ramGB });
 
   const tiers: TierCapability[] = RESIDENT_TIER_KEYS.map((key) => {
     if (!isArm) return { key, capable: false, residentCapable: false, reason: "Requires an Apple Silicon Mac" };
-    const need = TIER_FOOTPRINT_GB[key] + HEADROOM_GB;
-    if (ramGB < need) return { key, capable: false, residentCapable: false, reason: `Needs ~${need} GB RAM (this Mac has ${gb} GB)` };
-    return { key, capable: true, residentCapable: false }; // residentCapable resolved below
+    if (!preset.recommendedTiers.includes(key)) {
+      const role = key === "coding" ? preset.localCoderQuality : preset.localAgentFast;
+      return { key, capable: role.enabled, residentCapable: false, reason: role.enabled ? "Available on demand, but not enabled by default for this memory tier" : "Disabled by default for this memory tier" };
+    }
+    return { key, capable: true, residentCapable: true };
   });
 
-  const capableKeys = tiers.filter((t) => t.capable).map((t) => t.key);
-  const bothFootprint = TIER_FOOTPRINT_GB.fast + TIER_FOOTPRINT_GB.coding + HEADROOM_GB; // 49 GB
-  const bothResident = isArm && capableKeys.length === 2 && ramGB >= bothFootprint;
-
-  let recommendedTiers: TierKey[];
-  if (bothResident) recommendedTiers = ["fast", "coding"];
-  else if (capableKeys.includes("fast")) recommendedTiers = ["fast"]; // fast is the daily/voice driver
-  else if (capableKeys.includes("coding")) recommendedTiers = ["coding"];
-  else recommendedTiers = [];
-
-  for (const t of tiers) {
-    t.residentCapable = recommendedTiers.includes(t.key);
-    if (t.capable && !t.residentCapable && !t.reason) {
-      t.reason = `Available on-demand — needs ~${bothFootprint} GB RAM to stay resident with the ${recommendedTiers.join("+")} tier (this Mac has ${gb} GB)`;
-    }
-  }
-
-  const localCapable = recommendedTiers.length > 0;
+  const recommendedTiers = isArm ? preset.recommendedTiers : [];
+  const localCapable = isArm && preset.localEnabled && recommendedTiers.length > 0;
   const reason = localCapable ? undefined
-    : isArm ? `Needs ~${TIER_FOOTPRINT_GB.coding + HEADROOM_GB} GB RAM for a local model (this Mac has ${gb} GB) — running cloud-only`
+    : isArm ? `Detected ${gb} GB RAM; local model disabled by ${preset.mode} — running cloud-only`
             : "Requires an Apple Silicon Mac — running cloud-only";
 
-  return { arch, ramGB, localCapable, tiers, recommendedTiers, reason };
+  return { arch, ramGB, presetId: preset.id, mode: preset.mode, localCapable, tiers, recommendedTiers, reason };
 }
 
 /** Live health of the local engine + each tier (probes each tier's port). Used

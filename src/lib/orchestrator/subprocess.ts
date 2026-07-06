@@ -16,7 +16,6 @@ import { StreamParser, type StreamEvent } from "./stream-parser";
 import { generateHookSettings, cleanupHookFiles } from "./approval";
 import { spawnGenericAgent } from "./generic-agent";
 import { spawnCodexAgent } from "./codex-agent";
-import { spawnDs4Agent, ds4AgentConfig, ds4AgentEligible } from "./ds4-agent";
 import { outboundHttpRoutingPrompt, brainSearchRoutingPrompt, beeToolsRoutingPrompt } from "./outbound-routing";
 import { prepareOutboundMcp } from "./outbound-mcp";
 import { spawnImageAgent } from "./image-agent";
@@ -450,14 +449,6 @@ export async function spawnAgent(
   if (model && !model.startsWith("claude-")) {
     const provider = resolveProvider(model);
     if (provider) {
-      // Optional 4th peer harness: DwarfStar's native ds4-agent for autonomous
-      // DeepSeek coding. Off by default; only DeepSeek + coding profile + no lane
-      // tools qualify. Everything else (Qwen incl.) stays on the generic HTTP path.
-      const ds4cfg = ds4AgentConfig();
-      if (ds4AgentEligible({ enabled: ds4cfg.enabled, providerName: provider.name, agentType, laneToolsRequired: false })) {
-        onEvent(taskId, { type: "log", content: `[ds4-agent] native DeepSeek harness for ${model}` });
-        return spawnDs4Agent(taskId, description, projectPath, onEvent, onExit, model, resumeSessionId, ds4cfg);
-      }
       return spawnGenericAgent(
         taskId,
         description,

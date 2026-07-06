@@ -96,14 +96,14 @@ test("reports Browser Lane attention and stale readiness", async () => {
   assert.match(browser?.summary ?? "", /1 stale/i);
 });
 
-test("reports Dwarf Star DeepSeek local model health by name", async () => {
+test("reports Rapid-MLX Qwen local model health by name", async () => {
   const report = await getSystemReadinessReport({
     ...baseDeps(),
     readLocalModelHealth: () => ({
       ready: true,
       qwenReady: true,
-      provider: "dwarfstar",
-      modelName: "deepseek-v4-flash",
+      provider: "mlx",
+      modelName: "qwen3.6-35b-4bit",
       endpoint: "http://127.0.0.1:8000/v1",
       checkedAt: "2026-07-03T12:00:00Z",
       message: "ready",
@@ -111,19 +111,19 @@ test("reports Dwarf Star DeepSeek local model health by name", async () => {
   });
   const local = report.checks.find((c) => c.id === "local-model");
   assert.equal(local?.severity, "ok");
-  assert.match(local?.summary ?? "", /Dwarf Star DeepSeek/i);
-  assert.equal(local?.details?.provider, "dwarfstar");
+  assert.match(local?.summary ?? "", /Rapid-MLX qwen3\.6-35b-4bit/i);
+  assert.equal(local?.details?.provider, "mlx");
   assert.equal(local?.details?.endpoint, "http://127.0.0.1:8000/v1");
 });
 
-test("reports Dwarf Star DeepSeek not-ready action", async () => {
+test("reports Qwen not-ready action", async () => {
   const report = await getSystemReadinessReport({
     ...baseDeps(),
     readLocalModelHealth: () => ({
       ready: false,
       qwenReady: false,
-      provider: "dwarfstar",
-      modelName: "deepseek-v4-flash",
+      provider: "mlx",
+      modelName: "qwen3.6-35b-4bit",
       endpoint: "http://127.0.0.1:8000/v1",
       checkedAt: "2026-07-03T12:00:00Z",
       message: "connection refused",
@@ -131,8 +131,8 @@ test("reports Dwarf Star DeepSeek not-ready action", async () => {
   });
   const local = report.checks.find((c) => c.id === "local-model");
   assert.equal(local?.severity, "warn");
-  assert.match(local?.summary ?? "", /Dwarf Star DeepSeek/i);
-  assert.match(local?.nextAction ?? "", /ds4-serve/i);
+  assert.match(local?.summary ?? "", /Rapid-MLX qwen3\.6-35b-4bit/i);
+  assert.match(local?.nextAction ?? "", /qwen readiness/i);
 });
 
 test("reports lane app install/update/broken states", async () => {
@@ -189,4 +189,3 @@ test("seed_coo_rules repair is explicit, idempotent, and refreshes the report", 
   const after = repaired.report.checks.find((c) => c.id === "coo-routing-rules");
   assert.equal(after?.severity, "ok");
 });
-

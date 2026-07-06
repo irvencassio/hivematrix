@@ -12,7 +12,7 @@ import {
   stripThinkBlocks,
 } from "./deep-think";
 
-test("stripThinkBlocks removes DeepSeek thinking traces", () => {
+test("stripThinkBlocks removes local model thinking traces", () => {
   assert.equal(stripThinkBlocks("<think>long chain\nof thought</think>The answer is 42."), "The answer is 42.");
   assert.equal(stripThinkBlocks("no thinking here"), "no thinking here");
 });

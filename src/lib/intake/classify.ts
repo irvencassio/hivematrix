@@ -346,7 +346,7 @@ export function _setIntakeDecomposeDepsForTests(deps: import("./decompose").Deco
  * any failure. Small/normal tasks never call a model (cost + latency stay zero).
  *
  * Local-only by design: enabled when an explicit/test `deps` is injected, or a
- * keyless loopback completion model (DeepSeek/DwarfStar on 127.0.0.1) is
+ * keyless loopback completion model (Qwen on 127.0.0.1) is
  * configured. No local model → deterministic split; nothing ever leaves the box.
  */
 export async function classifyIntakeAsync(
@@ -364,7 +364,7 @@ export async function classifyIntakeAsync(
   if (!alreadyCandidate && !isBroadPrompt(input.description)) return base;
 
   const effective = deps ?? _testDecomposeDeps ?? undefined;
-  // A configured local model (DeepSeek/DwarfStar on loopback) is keyless, free,
+  // A configured local model (Qwen on loopback) is keyless, free,
   // low-latency, and never leaves the machine — so decomposition is always on
   // when one is present, and off otherwise. The deterministic policy still
   // stamps risk, gating, and concurrency downstream, so the model can't weaken

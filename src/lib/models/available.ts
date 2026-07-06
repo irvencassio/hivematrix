@@ -214,10 +214,10 @@ export function setAutoUpdate(on: boolean): void {
   writeConfig(cfg);
 }
 
-export type AppIconChoice = "dark-green" | "white";
+export type AppIconChoice = "black" | "white";
 
 export function getAppIconChoice(): AppIconChoice {
-  return readConfig().appIconChoice === "dark-green" ? "dark-green" : "white";
+  return readConfig().appIconChoice === "black" ? "black" : "white";
 }
 
 export function setAppIconChoice(choice: AppIconChoice): void {

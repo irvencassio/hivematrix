@@ -3,7 +3,7 @@ import { join } from "path";
 import { homedir } from "os";
 
 export type QwenLocation = "local" | "lan" | "public";
-export type QwenProvider = "mlx" | "vllm" | "ollama" | "lmstudio" | "dwarfstar";
+export type QwenProvider = "mlx" | "vllm" | "ollama" | "lmstudio";
 
 export interface QwenModelConfig {
   modelId: string;
@@ -24,6 +24,7 @@ export interface QwenProfile {
 const DEFAULT_CONTEXT_LIMIT = 32768;
 const DEFAULT_MIN_DECODE_RATE = 15;
 const DEFAULT_PROBE_TIMEOUT_MS = 60_000;
+const DEFAULT_THINKING_ENABLED = false;
 
 const DEFAULT_PRIMARY: QwenModelConfig = {
   modelId: "Qwen3-Coder-Next-80B-A3B",
@@ -33,7 +34,7 @@ const DEFAULT_PRIMARY: QwenModelConfig = {
 };
 
 function coerceProvider(p: unknown): QwenProvider {
-  if (p === "mlx" || p === "vllm" || p === "ollama" || p === "lmstudio" || p === "dwarfstar") return p;
+  if (p === "mlx" || p === "vllm" || p === "ollama" || p === "lmstudio") return p;
   return "mlx";
 }
 
@@ -69,7 +70,7 @@ export function getQwenProfile(): QwenProfile | null {
       location,
       primary,
       secondary,
-      thinkingEnabled: r.thinkingEnabled !== false,
+      thinkingEnabled: typeof r.thinkingEnabled === "boolean" ? r.thinkingEnabled : DEFAULT_THINKING_ENABLED,
       minDecodeRate:
         typeof r.minDecodeRate === "number" && r.minDecodeRate > 0
           ? r.minDecodeRate

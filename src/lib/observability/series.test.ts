@@ -25,16 +25,15 @@ test("series buckets across all three providers within the window", () => {
   recordAt(hoursAgo(0), { taskId: "a", model: "claude-opus-4-8", inputTokens: 1000, outputTokens: 200, cacheReadTokens: 800, cacheCreationTokens: 150, costUsd: 0.02 });
   recordAt(hoursAgo(1), { taskId: "b", model: "codex:gpt-5.5-codex", inputTokens: 500, outputTokens: 100, cacheReadTokens: 200 });
   recordAt(hoursAgo(2), { taskId: "c", model: "qwen3-coder-30b", inputTokens: 300, outputTokens: 80 });
-  recordAt(hoursAgo(3), { taskId: "d", model: "deepseek-v4-flash", inputTokens: 400, outputTokens: 120 });
   recordAt(hoursAgo(40), { taskId: "old", model: "claude-opus-4-8", inputTokens: 999, outputTokens: 99, costUsd: 0.5 });
 
   const s = observabilitySeries("24h");
   assert.equal(s.unit, "hour");
   assert.equal(s.points.length, 24);
   // All three providers present; the 40h-old row is excluded from totals.
-  assert.deepEqual(s.providers.slice().sort(), ["anthropic", "local-dwarfstar", "local-qwen", "openai-codex"]);
-  assert.equal(s.totals.runs, 4);
-  assert.equal(s.totals.tokens.input, 2200);
+  assert.deepEqual(s.providers.slice().sort(), ["anthropic", "local-qwen", "openai-codex"]);
+  assert.equal(s.totals.runs, 3);
+  assert.equal(s.totals.tokens.input, 1800);
   // Only Claude reports cost; the old high-cost row is outside the window.
   assert.equal(s.totals.costUsd, 0.02);
 });
@@ -55,8 +54,6 @@ test("cache rollup: supported providers get a hit-rate, local does not", () => {
   // Local engines: caching not supported → null hit-rate.
   assert.equal(byProv["local-qwen"].supported, false);
   assert.equal(byProv["local-qwen"].hitRatePct, null);
-  assert.equal(byProv["local-dwarfstar"].supported, false);
-  assert.equal(byProv["local-dwarfstar"].hitRatePct, null);
 });
 
 test("7d/30d windows bucket by day with a continuous zero-filled axis", () => {

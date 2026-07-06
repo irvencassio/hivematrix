@@ -33,8 +33,8 @@ test("app icon choice defaults to white and round-trips known values", () => {
   assert.equal(s.getAppIconChoice(), "white");
   s.setAppIconChoice("white");
   assert.equal(s.getAppIconChoice(), "white");
-  s.setAppIconChoice("dark-green");
-  assert.equal(s.getAppIconChoice(), "dark-green");
+  s.setAppIconChoice("black");
+  assert.equal(s.getAppIconChoice(), "black");
 });
 
 test("wallpaper opacity defaults to 82 and clamps to 0–100", () => {

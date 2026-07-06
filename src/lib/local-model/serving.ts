@@ -64,7 +64,6 @@ export function resolveServeCommand(profile: QwenProfile, override = readServeCo
     lmstudio: { cmd: "lms", args: ["server", "start", "--port", port] },
     ollama: { cmd: "ollama", args: ["serve"] },
     vllm: null, // vLLM is a LAN/GPU-box story, not a Mac-local default
-    dwarfstar: null, // Dwarf Star is managed by its own optimized runtime unless serveCommand overrides it
   };
   return byProvider[provider];
 }

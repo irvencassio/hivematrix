@@ -29,7 +29,7 @@ const DAEMON_PORT: u16 = 3747;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AppIconChoice {
-    DarkGreen,
+    Black,
     White,
 }
 
@@ -37,7 +37,7 @@ fn app_icon_choice_from_config_text(text: &str) -> AppIconChoice {
     serde_json::from_str::<serde_json::Value>(text)
         .ok()
         .and_then(|config| config.get("appIconChoice").and_then(|choice| choice.as_str()).map(str::to_owned))
-        .map(|choice| if choice == "dark-green" { AppIconChoice::DarkGreen } else { AppIconChoice::White })
+        .map(|choice| if choice == "black" { AppIconChoice::Black } else { AppIconChoice::White })
         .unwrap_or(AppIconChoice::White)
 }
 
@@ -53,7 +53,7 @@ fn app_icon_choice_from_config_file() -> AppIconChoice {
 
 fn app_icon_resource_name(choice: AppIconChoice) -> &'static str {
     match choice {
-        AppIconChoice::DarkGreen => "icons/app-icon-dark-green.png",
+        AppIconChoice::Black => "icons/app-icon-dark-green.png",
         AppIconChoice::White => "icons/app-icon-white.png",
     }
 }
@@ -600,7 +600,7 @@ mod tests {
 
     #[test]
     fn app_icon_choice_maps_to_bundled_resource_names() {
-        assert_eq!(app_icon_resource_name(AppIconChoice::DarkGreen), "icons/app-icon-dark-green.png");
+        assert_eq!(app_icon_resource_name(AppIconChoice::Black), "icons/app-icon-dark-green.png");
         assert_eq!(app_icon_resource_name(AppIconChoice::White), "icons/app-icon-white.png");
     }
 

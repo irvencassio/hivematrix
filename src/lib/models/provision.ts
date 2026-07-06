@@ -20,8 +20,8 @@ import { join } from "path";
 import { homedir } from "os";
 import { writeJsonAtomic } from "@/lib/config/atomic-write";
 import {
-  localEngineCapability, DEFAULT_TIERS, resolveRapidBinary, tierBaseUrl,
-  type LocalTier, type TierKey, type HardwareProbe,
+  localEngineCapability, DEFAULT_TIERS, resolveRapidBinary, tierBaseUrl, selectLocalMemoryPreset,
+  type LocalTier, type TierKey, type HardwareProbe, type LocalMemoryPresetId, type LocalPresetMode, type LocalMemoryPreset,
 } from "./local-engine";
 import type { QwenProfile } from "@/lib/config/qwen-profile";
 import { provisioningPython } from "@/lib/voice/provision";
@@ -46,10 +46,13 @@ async function pythonVersion(py: string): Promise<string> {
 export interface ProvisionPlan {
   arch: string;
   ramGB: number;
+  presetId: LocalMemoryPresetId;
+  mode: LocalPresetMode;
   localCapable: boolean;
   recommendedTiers: TierKey[];
   /** Resolved tier definitions to serve resident (alias/port/reasoning). */
   tiers: LocalTier[];
+  preset: LocalMemoryPreset;
   reason?: string;
 }
 
@@ -65,34 +68,52 @@ function readConfig(): Record<string, unknown> {
 /** Pure: what this Mac should run, as resolved LocalTier objects. */
 export function planLocalEngine(env: Partial<HardwareProbe> = {}): ProvisionPlan {
   const cap = localEngineCapability(env);
+  const preset = selectLocalMemoryPreset({ ramGB: cap.ramGB });
   const tiers = cap.recommendedTiers
     .map((k) => DEFAULT_TIERS.find((d) => d.key === k))
     .filter((t): t is LocalTier => !!t);
   return {
-    arch: cap.arch, ramGB: cap.ramGB,
+    arch: cap.arch, ramGB: cap.ramGB, presetId: cap.presetId, mode: cap.mode,
     localCapable: cap.localCapable,
     recommendedTiers: cap.recommendedTiers,
-    tiers, reason: cap.reason,
+    tiers, preset, reason: cap.reason,
   };
 }
 
 export function qwenProfileForProvisionPlan(plan: ProvisionPlan): QwenProfile | null {
   if (!plan.localCapable || plan.tiers.length === 0) return null;
-  const primaryTier = plan.tiers.find((t) => t.key === "coding") ?? plan.tiers[0];
-  const secondaryTier = plan.tiers.find((t) => t.key !== primaryTier.key) ?? null;
+  const primaryTier = plan.tiers.find((t) => t.key === "fast") ?? plan.tiers[0];
+  const secondaryTier = plan.tiers.find((t) => t.key === "coding") ?? null;
   const modelForTier = (tier: LocalTier) => ({
     modelId: tier.alias,
     endpoint: tierBaseUrl(tier),
     provider: "mlx" as const,
-    contextLimit: 262144,
+    contextLimit: tier.key === "coding"
+      ? plan.preset.localCoderQuality.defaultContext
+      : plan.preset.localAgentFast.defaultContext,
   });
   return {
     location: "local",
     primary: modelForTier(primaryTier),
     secondary: secondaryTier ? modelForTier(secondaryTier) : null,
-    thinkingEnabled: true,
+    thinkingEnabled: false,
     minDecodeRate: 15,
     probeTimeoutMs: 60_000,
+  };
+}
+
+export function resolvedLocalModelPreset(plan: ProvisionPlan): Record<string, unknown> {
+  return {
+    id: plan.presetId,
+    mode: plan.mode,
+    memoryTier: plan.presetId,
+    localEnabled: plan.localCapable,
+    roles: {
+      frontier_primary: plan.preset.frontierPrimary,
+      local_agent_fast: plan.preset.localAgentFast,
+      local_coder_quality: plan.preset.localCoderQuality,
+      local_embeddings: plan.preset.localEmbeddings,
+    },
   };
 }
 
@@ -147,6 +168,7 @@ export async function provisionLocalEngine(opts: { onLog?: Logger; env?: Partial
   if (!plan.localCapable) {
     onLog(plan.reason ?? "This Mac can't run a local model — cloud-only.");
     cfg.localEngine = { engine: "rapid-mlx", binary: null, tiers: [] };
+    cfg.localModelPreset = resolvedLocalModelPreset(plan);
     writeJsonAtomic(configPath(), cfg);
     onLog("Wrote cloud-only localEngine block.");
     return plan;
@@ -159,6 +181,7 @@ export async function provisionLocalEngine(opts: { onLog?: Logger; env?: Partial
     await run(bin, ["pull", t.alias], onLog);
   }
   cfg.localEngine = { engine: "rapid-mlx", binary: bin, tiers: plan.tiers };
+  cfg.localModelPreset = resolvedLocalModelPreset(plan);
   ensureQwenProfile(cfg, plan);
   writeJsonAtomic(configPath(), cfg);
   onLog("Wrote localEngine config. Restart the daemon to serve the configured tiers.");

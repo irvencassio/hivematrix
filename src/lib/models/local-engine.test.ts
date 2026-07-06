@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   getLocalEngineConfig, buildServeArgs, localTargetForRole, tierBaseUrl, tierForAlias, DEFAULT_TIERS,
-  localEngineCapability,
+  localEngineCapability, memoryTierForGB, selectLocalMemoryPreset,
 } from "./local-engine";
 
 test("defaults: rapid-mlx engine, fast + coding tiers, reasoning OFF", () => {
@@ -55,12 +55,17 @@ test("tierForAlias maps a model id to its tier (for endpoint routing)", () => {
   const c = getLocalEngineConfig({});
   assert.equal(tierForAlias("qwen3.6-35b-4bit", c)!.port, 8000);
   assert.equal(tierForAlias("qwen3.6-27b-4bit", c)!.port, 8001);
-  assert.equal(tierForAlias("deepseek-v4-flash", c), null);
   assert.equal(tierForAlias("claude-opus-4-8", c), null);
 });
 
-test("DeepSeek Flash is not a Rapid-MLX tier", () => {
-  assert.deepEqual(DEFAULT_TIERS.map((t) => t.key), ["fast", "coding"]);
+test("memory tiers select explicit Qwen presets", () => {
+  assert.equal(memoryTierForGB(16), "less_than_32gb");
+  assert.equal(memoryTierForGB(32), "32gb");
+  assert.equal(memoryTierForGB(48), "48gb");
+  assert.equal(memoryTierForGB(64), "64gb");
+  assert.equal(memoryTierForGB(128), "128gb");
+  assert.equal(selectLocalMemoryPreset({ ramGB: 32 }).localAgentFast.model, "qwen3.6-35b-a3b");
+  assert.equal(selectLocalMemoryPreset({ ramGB: 128 }).localCoderQuality.quant, "Q8_0 or UD-Q8_K_XL");
 });
 
 test("capability: non-Apple-Silicon → cloud-only, no tiers", () => {
@@ -78,27 +83,39 @@ test("capability: 16 GB → cloud-only (neither tier fits with headroom)", () =>
   assert.match(cap.reason ?? "", /local model/);
 });
 
-test("capability: 32 GB → coding tier only resident (35B needs ~34 GB)", () => {
+test("capability: 32 GB → fast Qwen agent tier only", () => {
   const cap = localEngineCapability({ arch: "arm64", ramGB: 32 });
   assert.equal(cap.localCapable, true);
-  assert.deepEqual(cap.recommendedTiers, ["coding"]);
-  assert.equal(cap.tiers.find((t) => t.key === "fast")!.capable, false);
-  assert.equal(cap.tiers.find((t) => t.key === "coding")!.residentCapable, true);
+  assert.equal(cap.presetId, "32gb");
+  assert.equal(cap.mode, "local_agent_light");
+  assert.deepEqual(cap.recommendedTiers, ["fast"]);
+  assert.equal(cap.tiers.find((t) => t.key === "fast")!.residentCapable, true);
+  assert.equal(cap.tiers.find((t) => t.key === "coding")!.residentCapable, false);
 });
 
-test("capability: 48 GB → one tier resident (fast), coding available on-demand only", () => {
+test("capability: 48 GB → fast Qwen agent tier only", () => {
   const cap = localEngineCapability({ arch: "arm64", ramGB: 48 });
   assert.equal(cap.localCapable, true);
+  assert.equal(cap.presetId, "48gb");
   assert.deepEqual(cap.recommendedTiers, ["fast"]);
   const coding = cap.tiers.find((t) => t.key === "coding")!;
-  assert.equal(coding.capable, true);          // runnable on demand
-  assert.equal(coding.residentCapable, false); // but not resident alongside fast
-  assert.match(coding.reason ?? "", /on-demand/);
+  assert.equal(coding.capable, false);
+  assert.equal(coding.residentCapable, false);
+  assert.match(coding.reason ?? "", /Disabled by default/);
 });
 
 test("capability: 64 GB → both tiers resident", () => {
   const cap = localEngineCapability({ arch: "arm64", ramGB: 64 });
   assert.equal(cap.localCapable, true);
+  assert.equal(cap.presetId, "64gb");
   assert.deepEqual(cap.recommendedTiers, ["fast", "coding"]);
   assert.ok(cap.tiers.every((t) => t.capable && t.residentCapable));
+});
+
+test("capability: 128 GB → dual local quality preset", () => {
+  const cap = localEngineCapability({ arch: "arm64", ramGB: 128 });
+  assert.equal(cap.localCapable, true);
+  assert.equal(cap.presetId, "128gb");
+  assert.equal(cap.mode, "dual_local_quality");
+  assert.deepEqual(cap.recommendedTiers, ["fast", "coding"]);
 });

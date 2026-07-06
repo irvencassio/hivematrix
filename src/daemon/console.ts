@@ -1055,8 +1055,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="row" style="align-items:center; gap:10px; margin-top:8px">
         <span class="muted">App icon</span>
         <select id="s_app_icon" onchange="saveAppIconChoice()" style="width:auto">
-          <option value="dark-green">Dark green</option>
           <option value="white">White</option>
+          <option value="black">Black</option>
         </select>
       </div>
       <div id="app_icon_status" class="muted" style="font-size:11px;margin-top:3px;min-height:16px"></div>
@@ -1634,7 +1634,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
           <div class="ob-model-status" id="ob_lm_status">Not configured</div>
           <div class="ob-model-expand" onclick="obToggleDetail('ob_lm_detail')">▸ Configure local model</div>
           <div class="ob-model-detail" id="ob_lm_detail">
-            <div class="muted" style="font-size:11px;margin-bottom:8px">Run any OpenAI-compatible local model (LM Studio, Ollama, Rapid-MLX, or Dwarf Star). Start your server, then paste its URL and model name below.</div>
+            <div class="muted" style="font-size:11px;margin-bottom:8px">Run any OpenAI-compatible local model (LM Studio, Ollama, or Rapid-MLX). Start your server, then paste its URL and model name below.</div>
             <div class="ob-btn-row" style="margin-bottom:8px">
               <button id="ob_lm_provision" onclick="obProvisionLocalEngine()">Provision Rapid-MLX →</button>
               <span class="muted" style="font-size:11px">Installs the recommended local model for this Mac.</span>
@@ -3042,14 +3042,13 @@ function toggleReply(id) {
 
 // --- Observability (per-task telemetry + totals) ---
 let _obsWindow = "7d";
-const OBS_LABELS = { "anthropic": "Claude", "openai-codex": "Codex", "local-qwen": "Local model", "local-dwarfstar": "Dwarf Star", "other": "other" };
-const OBS_COLORS = { "anthropic": "#c8794f", "openai-codex": "#10a37f", "local-qwen": "#7a5cff", "local-dwarfstar": "#1f9f89", "other": "#8a93a6" };
-const OBS_ORDER = { "anthropic": 0, "openai-codex": 1, "local-qwen": 2, "local-dwarfstar": 3, "other": 4 };
+const OBS_LABELS = { "anthropic": "Claude", "openai-codex": "Codex", "local-qwen": "Local model", "other": "other" };
+const OBS_COLORS = { "anthropic": "#c8794f", "openai-codex": "#10a37f", "local-qwen": "#7a5cff", "other": "#8a93a6" };
+const OBS_ORDER = { "anthropic": 0, "openai-codex": 1, "local-qwen": 2, "other": 3 };
 function obsProvider(model) {
   const m = (model || "").toLowerCase().trim();
   if (/^(codex|chatgpt)/.test(m) || /^(gpt|o[0-9])/.test(m)) return "Codex";
   if (/^(claude|opus|sonnet|haiku)/.test(m)) return "Claude";
-  if (/(deepseek|dwarfstar|ds4)/.test(m)) return "Dwarf Star";
   if (/(qwen|mistral|llama|mlx|local|gemma|phi|nan)/.test(m)) return "Local model";
   return "—";
 }
@@ -3344,7 +3343,6 @@ function compatLabel(value) {
   if (value === 'claude') return 'Claude';
   if (value === 'codex') return 'ChatGPT';
   if (value === 'qwen') return 'Qwen(local)';
-  if (value === 'deepseek') return 'DeepSeek(local)';
   return 'All';
 }
 function compatSearchText(it) {
@@ -5401,20 +5399,13 @@ async function checkModels() {
   try { [serving, emb] = await Promise.all([api("/local-model/status"), api("/embeddings")]); } catch (e) { /* transient */ }
 
   const le = models.localEngine, cap = models.localEngineCapability;
-  const localBackend = ((models.backends || []).find(b => b.id === "local")) || null;
-  const isDwarfStarLocal = isDwarfStarLocalBackend(localBackend, models.localModelHealth);
   let html = "";
 
   // — Local (on-device) —
-  if (le || isDwarfStarLocal || (cap && !cap.localCapable)) {
+  if (le || (cap && !cap.localCapable)) {
     html += '<div class="mdl-grp">Local · on-device</div>';
-    if (isDwarfStarLocal) {
-      html += renderLocalBackendChoice(localBackend, models.localModelHealth);
-    }
-    if (!isDwarfStarLocal) {
-      html += renderLocalEngine(le, cap) || "";
-    }
-    if (!isDwarfStarLocal && serving && serving.managed) {
+    html += renderLocalEngine(le, cap) || "";
+    if (serving && serving.managed) {
       const bits = [];
       if (serving.modelId) bits.push(esc(serving.modelId));
       if (serving.restarts) bits.push(serving.restarts + " restart" + (serving.restarts === 1 ? "" : "s"));
@@ -5447,13 +5438,7 @@ async function checkModels() {
   // Header pill — at-a-glance "is the local engine running".
   const pill = document.getElementById("localPill");
   if (pill) {
-    if (isDwarfStarLocal) {
-      const health = models.localModelHealth || null;
-      const ready = !!(health && (health.qwenReady === true || health.ready === true || health.ok === true));
-      pill.textContent = "🧠 DeepSeek";
-      pill.style.display = "";
-      pill.title = ready ? "Dwarf Star DeepSeek ready" : "Dwarf Star DeepSeek not ready";
-    } else if (le && (!cap || cap.localCapable)) {
+    if (le && (!cap || cap.localCapable)) {
       const up = !!le.up;
       const live = (le.tiers || []).filter(t => t.healthy).map(t => t.key);
       pill.textContent = "🧠 local";
@@ -5640,15 +5625,10 @@ function localBackendText(backend, health) {
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
-function isDwarfStarLocalBackend(backend, health) {
-  return /dwarf\s*star|dwarfstar|deepseek|ds4/.test(localBackendText(backend, health));
-}
-
 function renderLocalBackendChoice(backend, health) {
-  const isDwarfStar = isDwarfStarLocalBackend(backend, health);
-  const provider = health ? localHealthProviderName(health.provider) : (isDwarfStar ? "Dwarf Star" : "local");
-  const title = isDwarfStar ? "Dwarf Star DeepSeek" : ((backend && backend.name) || ("Local model — " + provider));
-  const model = (health && health.modelName) || (backend && backend.modelId) || (isDwarfStar ? "deepseek-v4-flash" : "local model");
+  const provider = health ? localHealthProviderName(health.provider) : "local";
+  const title = (backend && backend.name) || ("Local model — " + provider);
+  const model = (health && health.modelName) || (backend && backend.modelId) || "local model";
   const endpoint = (health && health.endpoint) || (backend && backend.endpoint) || "";
   const ready = health
     ? (health.qwenReady === true || health.ready === true || health.ok === true)
@@ -5663,9 +5643,7 @@ function renderLocalBackendChoice(backend, health) {
   } else if (backend && backend.detail) {
     bits.push(backend.detail);
   }
-  if (isDwarfStar && !ready) {
-    bits.push("Start ds4-serve, then rerun local model readiness.");
-  } else if (backend && backend.connect && !backend.configured) {
+  if (backend && backend.connect && !backend.configured) {
     bits.push(backend.connect);
   }
   return '<div class="mdl-card">'
@@ -5716,7 +5694,6 @@ function renderLocalEngine(le, cap) {
 }
 
 function localHealthProviderName(provider) {
-  if (provider === "dwarfstar") return "Dwarf Star";
   if (provider === "mlx") return "Rapid-MLX";
   if (provider === "vllm") return "vLLM";
   if (provider === "lmstudio") return "LM Studio";
@@ -6404,7 +6381,6 @@ function renderSettingsModelControls() {
   const available = Array.isArray(m.available) ? m.available : [];
   const backends = Array.isArray(m.backends) ? m.backends : [];
   const local = backends.find(b => b.id === "local");
-  const isDwarfStarLocal = isDwarfStarLocalBackend(local, m.localModelHealth);
   const sd = document.getElementById("s_default");
   const selectable = available.filter(m => !m.disabled); // greyed "set up X" placeholders aren't valid defaults
   sd.disabled = !selectable.length;
@@ -6418,17 +6394,9 @@ function renderSettingsModelControls() {
     '<div class="mdl-card"><div class="mdl-card-head"><span class="mdl-card-name">'+esc(b.name)+'</span>'
     + '<span class="st '+(b.configured?'ok':'no')+'">'+(b.configured?'✓ '+esc(b.detail):'not set up')+'</span></div>'
     + (b.configured?'':'<div class="mdl-card-foot">'+esc(b.connect||'')+'</div>')+'</div>').join("") : '<div class="mdl-card"><div class="mdl-card-foot" style="border:none;margin:0;padding:0">Model status unavailable.</div></div>';
-  if (isDwarfStarLocal) {
-    document.getElementById("s_backends").innerHTML += renderLocalBackendChoice(local, m.localModelHealth);
-  }
-  if (!isDwarfStarLocal) {
-    // renderLocalBackendChoice already folds the readiness-check details into
-    // the Dwarf Star card, so the separate health card is only needed on the
-    // engine/provision path — adding it for Dwarf Star just duplicates the card.
-    document.getElementById("s_backends").innerHTML += renderLocalEngine(m.localEngine, m.localEngineCapability);
-    document.getElementById("s_backends").innerHTML += renderLocalModelHealth(m.localModelHealth);
-    document.getElementById("s_backends").innerHTML += renderProvisionUI(m.localEngineCapability);
-  }
+  document.getElementById("s_backends").innerHTML += renderLocalEngine(m.localEngine, m.localEngineCapability);
+  document.getElementById("s_backends").innerHTML += renderLocalModelHealth(m.localModelHealth);
+  document.getElementById("s_backends").innerHTML += renderProvisionUI(m.localEngineCapability);
   document.getElementById("s_endpoint").value = (local && local.endpoint) || "http://localhost:1234/v1";
   renderEmbeddingSettings();
   const v = m.version || {};

@@ -37,7 +37,7 @@ async function main() {
   // --- Readiness probe ---
   line("Running readiness probe (6 checks)...");
   const health = await probeQwenReadiness({
-    provider: provider as "mlx" | "vllm" | "ollama" | "lmstudio" | "dwarfstar",
+    provider: provider as "mlx" | "vllm" | "ollama" | "lmstudio",
     endpoint,
     modelName: modelId,
     minDecodeRate: profile.minDecodeRate,

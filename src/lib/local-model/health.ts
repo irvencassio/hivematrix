@@ -46,7 +46,7 @@ export interface QwenReadinessResult extends LocalModelHealth {
 function healthFilePath(): string {
   return join(homedir(), ".hivematrix", "local-model-health.json");
 }
-const LOCAL_PROVIDER_SET = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai", "dwarfstar"]);
+const LOCAL_PROVIDER_SET = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai"]);
 const DEFAULT_LOCAL_FALLBACK: LocalFallbackSettings = {
   enabled: true,
   offlineEnabled: true,
@@ -255,7 +255,7 @@ export async function probeLocalModel(config: ProbeOptions): Promise<LocalModelH
   const endpoint = normalizeBaseUrl(config.endpoint);
   const modelName = config.modelName.trim();
   const timeoutMs = Math.max(1000, config.timeoutMs ?? 5000);
-  // Reasoning models (Qwen3, DeepSeek-R1, etc.) often spend tens of seconds
+  // Reasoning models (Qwen3, etc.) often spend tens of seconds
   // thinking before emitting a tool call. Give the tool-call probe its own,
   // generous budget so we don't falsely cache `toolCalls: false` on timeout.
   const toolCallTimeoutMs = Math.max(1000, config.toolCallTimeoutMs ?? 60_000);
@@ -359,7 +359,7 @@ export function readCachedLocalModelHealth(): LocalModelHealth | null {
  * True when a cached health record describes the currently-configured local
  * model (same provider, endpoint, and model name). The config is the source of
  * truth: after switching provider/endpoint (e.g. from an old nan-ai-model on
- * :3000 to Dwarf Star DeepSeek on :8000) the previous cache is stale and must
+ * :3000 to Rapid-MLX Qwen on :8000) the previous cache is stale and must
  * not be trusted, even if it says `ready`.
  */
 export function healthMatchesConfig(
@@ -660,7 +660,7 @@ export async function probeQwenReadiness(
   ]);
 
   const qwenReady = base.ready && toolChain && thinkSeparation && decodeRateResult.ok;
-  const modelLabel = config.provider === "dwarfstar" ? "Dwarf Star DeepSeek" : "Local model";
+  const modelLabel = "Local model";
   const issues: string[] = [];
   if (!base.streaming) issues.push("streaming failed");
   if (!base.toolCalls) issues.push("single tool call failed");

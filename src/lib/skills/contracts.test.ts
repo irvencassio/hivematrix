@@ -50,15 +50,6 @@ test("compat round-trips and skillRunsOn gates by harness", () => {
   assert.equal(skillRunsOn([], "qwen"), true); // empty = any
 });
 
-test("deepseek compat round-trips and skillRunsOn gates by harness", () => {
-  const s = skill({ compat: ["deepseek"] });
-  const parsed = parseSkillFile(renderSkillFile(s))!;
-  assert.deepEqual(parsed.compat, ["deepseek"]);
-  assert.equal(skillRunsOn(parsed.compat, "deepseek"), true);
-  assert.equal(skillRunsOn(parsed.compat, "qwen"), false);
-  assert.equal(skillRunsOn(["all"], "deepseek"), true);
-});
-
 test("a skill with no compat frontmatter defaults to all harnesses", () => {
   const parsed = parseSkillFile("---\nname: x\ndescription: d\n---\nbody")!;
   assert.deepEqual(parsed.compat, ["all"]);

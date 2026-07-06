@@ -364,8 +364,8 @@ test("Personalization settings include app icon choice", () => {
   assert.match(CONSOLE_HTML, /id="settingsGeneral"/);
   assert.match(CONSOLE_HTML, /App icon/);
   assert.match(CONSOLE_HTML, /id="s_app_icon"/);
-  assert.match(CONSOLE_HTML, /value="dark-green">Dark green<\/option>/);
   assert.match(CONSOLE_HTML, /value="white">White<\/option>/);
+  assert.match(CONSOLE_HTML, /value="black">Black<\/option>/);
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /async function saveAppIconChoice\(/);
   assert.match(js, /appIconChoice/);
@@ -755,7 +755,6 @@ test("skills & commands render in one unified, searchable section", () => {
   assert.match(js, /function compatLabel\(/, "compatibility label helper present");
   assert.match(js, /function compatChips\(/, "compatibility chips helper present");
   assert.match(js, /Qwen\(local\)/, "Qwen local compatibility label present");
-  assert.match(js, /DeepSeek\(local\)/, "DeepSeek local compatibility label present");
   assert.match(js, /ChatGPT/, "Codex compatibility is labeled as ChatGPT");
   assert.match(js, /compatSearchText\(it\)/, "compatibility participates in catalog search");
   assert.match(js, /catalog: local profile catalog/, "command inspect copy is provider-neutral");
@@ -797,12 +796,10 @@ test("skills compatibility helpers label, search, and render chips behaviorally"
   const helpers = factory();
   assert.equal(helpers.compatLabel("codex"), "ChatGPT");
   assert.equal(helpers.compatLabel("qwen"), "Qwen(local)");
-  assert.equal(helpers.compatLabel("deepseek"), "DeepSeek(local)");
   assert.match(helpers.compatSearchText({ raw: { compat: ["codex"] } }), /codex ChatGPT/);
-  const chips = helpers.compatChips({ raw: { compat: ["qwen", "deepseek"] } });
+  const chips = helpers.compatChips({ raw: { compat: ["qwen"] } });
   assert.match(chips, /class="compat-chip"/);
   assert.match(chips, /Qwen\(local\)/);
-  assert.match(chips, /DeepSeek\(local\)/);
 });
 
 test("header is grouped into zones with a theme toggle and grouped connectivity", () => {
@@ -1199,28 +1196,22 @@ test("Models panel still shows local engine and embeddings", () => {
   assert.match(js, /getElementById\("modelStatus"\)/, "checkModels still fills modelStatus");
 });
 
-test("Models panel can render Dwarf Star DeepSeek as the local choice", () => {
+test("Models panel renders the Rapid-MLX local engine", () => {
   const js = extractScript(CONSOLE_HTML);
   const checkModels = extractBetween(js, "async function checkModels()", "async function reindexEmbeddings()");
-  const localChoice = extractBetween(js, "function renderLocalBackendChoice(", "function renderLocalEngine(");
 
-  assert.match(checkModels, /models\.backends[\s\S]*find\(b => b\.id === "local"\)/, "local backend is considered");
-  assert.match(checkModels, /isDwarfStarLocalBackend\(localBackend, models\.localModelHealth\)/, "Dwarf Star local choice is detected");
-  assert.match(checkModels, /renderLocalBackendChoice\(localBackend, models\.localModelHealth\)/, "backend-specific card can render");
-  assert.match(checkModels, /if \(!isDwarfStarLocal\)[\s\S]*renderLocalEngine\(le, cap\)/, "Rapid-MLX card is skipped for DeepSeek");
-  assert.match(localChoice, /Dwarf Star DeepSeek/, "DeepSeek card has a clear title");
-  assert.match(localChoice, /deepseek-v4-flash/, "DeepSeek card has the configured model fallback");
-  assert.match(localChoice, /ds4-serve/, "DeepSeek card gives Dwarf Star start guidance");
+  assert.match(checkModels, /renderLocalEngine\(le, cap\)/, "local engine card renders");
+  assert.doesNotMatch(checkModels, /renderLocalBackendChoice/, "no backend-specific local-model branch remains");
 });
 
-test("Settings Models renders DeepSeek local status instead of Rapid-MLX when selected", () => {
+test("Settings Models renders local engine, health, and provisioning controls", () => {
   const js = extractScript(CONSOLE_HTML);
   const renderSettings = extractBetween(js, "function renderSettingsModelControls()", "function closeSettings()");
 
-  assert.match(renderSettings, /const isDwarfStarLocal = isDwarfStarLocalBackend\(local, m\.localModelHealth\)/);
-  assert.match(renderSettings, /renderLocalBackendChoice\(local, m\.localModelHealth\)/);
-  assert.match(renderSettings, /if \(!isDwarfStarLocal\)[\s\S]*renderLocalEngine\(m\.localEngine, m\.localEngineCapability\)/);
-  assert.match(renderSettings, /if \(!isDwarfStarLocal\)[\s\S]*renderProvisionUI\(m\.localEngineCapability\)/);
+  assert.match(renderSettings, /renderLocalEngine\(m\.localEngine, m\.localEngineCapability\)/);
+  assert.match(renderSettings, /renderLocalModelHealth\(m\.localModelHealth\)/);
+  assert.match(renderSettings, /renderProvisionUI\(m\.localEngineCapability\)/);
+  assert.doesNotMatch(renderSettings, /renderLocalBackendChoice/);
 });
 
 test("console generic local-model copy does not hardcode Qwen", () => {

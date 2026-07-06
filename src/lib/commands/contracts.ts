@@ -18,7 +18,7 @@
 import { resolveCommandOptions, type CommandOptionsSpec } from "./options";
 
 export type LocalCommandKind = "command" | "skill";
-export type LocalCommandCompat = "all" | "claude" | "codex" | "qwen" | "deepseek";
+export type LocalCommandCompat = "all" | "claude" | "codex" | "qwen";
 
 export interface LocalCommand {
   /** The slash target: "import-all" or subdir-namespaced "ns:name". */
@@ -107,7 +107,6 @@ function compatForModelToken(token: string): LocalCommandCompat | null {
   if (t === "opus" || t === "sonnet" || t === "haiku" || t.startsWith("claude")) return "claude";
   if (t === "codex" || t === "chatgpt" || t.startsWith("gpt-") || t.startsWith("openai")) return "codex";
   if (t.startsWith("qwen")) return "qwen";
-  if (t.startsWith("deepseek") || t.startsWith("ds4") || t.startsWith("dwarf-star")) return "deepseek";
   return null;
 }
 
