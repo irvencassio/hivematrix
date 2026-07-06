@@ -11,7 +11,7 @@ const read = (p: string) => readFileSync(join(here, p), "utf8");
 // replies (push-to-talk, deterministic command/skill/briefing) must use the SAME
 // voice so they don't sound different from the live stream. synthesizeReplyVoice
 // is the single Kokoro-first (say-fallback) entry point; guard that every
-// turn-by-turn default routes through it and none fall back to the cloned/`say`
+// turn-by-turn default routes through it and none fall back to the emergency `say`
 // engine directly via synthesizeSpeech.
 
 test("turn-server exposes a Kokoro-first synthesizeReplyVoice with a say fallback", () => {
@@ -20,7 +20,7 @@ test("turn-server exposes a Kokoro-first synthesizeReplyVoice with a say fallbac
   // Kokoro first...
   assert.match(src, /return await synthesizeLiveVoice\(clean, lang\)/);
   // ...say only as a fallback.
-  assert.match(src, /synthesizeSpeech\(clean, \{ engine: "say" \}\)/);
+  assert.match(src, /synthesizeSpeech\(clean\)/);
 });
 
 test("command-turn default synthesis uses the unified live voice, not synthesizeSpeech", () => {

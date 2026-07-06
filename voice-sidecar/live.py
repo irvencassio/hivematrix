@@ -3,7 +3,7 @@
 
 Unlike talk.py (press Enter to start/stop), this listens continuously. A VAD
 (vad.py) decides when you start and stop talking; on stop it runs the streaming
-turn (STT → Qwen → cloned-voice TTS) and speaks the reply. If you start talking
+turn (STT → Qwen → Kokoro TTS) and speaks the reply. If you start talking
 while the assistant is still speaking, playback stops immediately — barge-in.
 
 Local mic only (no WebRTC; that's the iOS/remote transport, P2.5). Needs mic
@@ -101,7 +101,6 @@ def main() -> int:
                     help="allow interrupting the assistant by talking over it (headphones only — "
                          "without echo cancellation the mic hears the assistant and self-interrupts)")
     ap.add_argument("--barge-rms", type=float, default=1500, help="RMS to trigger barge-in while speaking")
-    ap.add_argument("--quality", default="fast", help="TTS quality: fast | high")
     args = ap.parse_args()
 
     from llm import LocalLLM
@@ -123,7 +122,7 @@ def main() -> int:
         write_wav(wav, frames)
         try:
             res = stream_turn(wav, llm.respond_stream, on_audio=player.play,
-                              tts_quality=args.quality, should_cancel=cancel.is_set)
+                              should_cancel=cancel.is_set)
         finally:
             try:
                 os.remove(wav)

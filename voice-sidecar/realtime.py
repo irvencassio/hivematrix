@@ -2,9 +2,9 @@
 
 Two roles:
 
-1. **Shared primitives** (imported by flash_pipeline.py): `VoxCPMTTS`, `make_vad`,
-   and `build_transport` — the Silero-VAD SmallWebRTC transport and cloned/Kokoro
-   TTS frame source used by the production Flash Lane pipeline.
+1. **Shared primitives** (imported by flash_pipeline.py): `KokoroTTS`, `make_vad`,
+   and `build_transport` — the Silero-VAD SmallWebRTC transport and Kokoro TTS frame
+   source used by the production Flash Lane pipeline.
 
 2. **Direct-model dev harness** (`build_pipeline` / `build_session` / `answer_offer`,
    CommandSTT + a hardcoded spoken prompt → local LLM → TTS): a daemon-INDEPENDENT
@@ -15,7 +15,7 @@ Two roles:
    from diverging in intent: this one exists purely for isolated pipeline testing.
 
 The desktop CLI (talk.py / live.py) is a separate zero-dependency local path; all
-three reuse stt.py / tts.py / the cloned voice.
+three reuse stt.py / tts.py / the Kokoro voice.
 """
 import asyncio
 import os
@@ -45,7 +45,7 @@ from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.utils.time import time_now_iso8601
 
 from stt import backend_label, transcribe
-from tts import synthesize, VOXCPM_MODEL
+from tts import synthesize, KOKORO_MODEL
 
 # Spoken-style system prompt (mirrors llm.py): short, no markdown — goes to TTS.
 _APP_VERSION = os.environ.get("HIVE_APP_VERSION", "")
@@ -64,7 +64,7 @@ LLM_MODEL = os.environ.get("HIVE_LLM_MODEL", "qwen/qwen3.6-27b")
 LLM_API_KEY = os.environ.get("HIVE_LLM_API_KEY", "local")
 
 STT_RATE = int(os.environ.get("HIVE_STT_SAMPLE_RATE", "16000"))
-TTS_RATE = 24000   # VoxCPM2 output rate (frames are also self-describing)
+TTS_RATE = 24000   # Kokoro output rate (frames are also self-describing)
 
 
 class CommandSTT(SegmentedSTTService):
@@ -98,18 +98,17 @@ class CommandSTT(SegmentedSTTService):
         yield TranscriptionFrame(text, "", time_now_iso8601()) if text else None
 
 
-class VoxCPMTTS(TTSService):
-    """Cloned-voice TTS (VoxCPM2 + operator profile + 15% pace) as a frame source.
-    Synthesis is batch-per-sentence; we slice the WAV into ~20 ms frames so
-    playback streams and Pipecat can cut it off cleanly on barge-in."""
+class KokoroTTS(TTSService):
+    """Kokoro TTS as a frame source. Synthesis is batch-per-sentence; we slice the
+    WAV into ~20 ms frames so playback streams and Pipecat can cut it off cleanly on
+    barge-in."""
 
-    def __init__(self, quality: str = "fast", **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(
             sample_rate=TTS_RATE,
-            settings=TTSSettings(model=VOXCPM_MODEL, voice="cloned", language="en"),
+            settings=TTSSettings(model=KOKORO_MODEL, voice="kokoro", language="en"),
             **kwargs,
         )
-        self._quality = quality
 
     def can_generate_metrics(self) -> bool:
         return False
@@ -117,7 +116,7 @@ class VoxCPMTTS(TTSService):
     async def run_tts(self, text: str, context_id: str):
         path = os.path.join(tempfile.gettempdir(), f"rt-tts-{uuid.uuid4().hex}.wav")
         try:
-            await asyncio.to_thread(synthesize, text, path, None, TTS_RATE, None, None, self._quality)
+            await asyncio.to_thread(synthesize, text, path)
             with wave.open(path, "rb") as w:
                 rate = w.getframerate()
                 pcm = w.readframes(w.getnframes())
@@ -152,11 +151,11 @@ def build_transport(connection: SmallWebRTCConnection) -> SmallWebRTCTransport:
     return SmallWebRTCTransport(webrtc_connection=connection, params=params)
 
 
-def build_pipeline(transport: SmallWebRTCTransport, tts_quality: str = "fast"):
+def build_pipeline(transport: SmallWebRTCTransport):
     """Assemble the realtime pipeline + task. Returns (task, runner)."""
     stt = CommandSTT()
     llm = OpenAILLMService(model=LLM_MODEL, base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
-    tts = VoxCPMTTS(quality=tts_quality)
+    tts = KokoroTTS()
 
     context = LLMContext([{"role": "system", "content": SYSTEM_PROMPT}])
     # Pipecat 1.3: the USER aggregator owns VAD (builds a VADController from this),
@@ -183,11 +182,11 @@ def build_pipeline(transport: SmallWebRTCTransport, tts_quality: str = "fast"):
 GREETING = "Hi, I'm your local assistant. How can I help?"
 
 
-async def build_session(transport: SmallWebRTCTransport, tts_quality: str = "fast"):
+async def build_session(transport: SmallWebRTCTransport):
     """Build the pipeline on a transport and wire a greeting on connect. Returns
     (task, runner); the caller decides whether to await runner.run (runner path)
     or fire it as a background task (request-handler path)."""
-    task, runner = build_pipeline(transport, tts_quality=tts_quality)
+    task, runner = build_pipeline(transport)
 
     @transport.event_handler("on_client_connected")
     async def _greet(_transport, _client):
@@ -196,7 +195,7 @@ async def build_session(transport: SmallWebRTCTransport, tts_quality: str = "fas
     return task, runner
 
 
-async def answer_offer(offer: dict, ice_servers=None, tts_quality: str = "fast") -> dict:
+async def answer_offer(offer: dict, ice_servers=None) -> dict:
     """Accept a client's WebRTC SDP offer, start the pipeline, and return the SDP
     answer. `offer` = {"sdp": ..., "type": "offer"}. `ice_servers` is a list of
     STUN/TURN URLs (Cloudflare) for remote; None = LAN-only. The daemon calls
@@ -204,7 +203,7 @@ async def answer_offer(offer: dict, ice_servers=None, tts_quality: str = "fast")
     connection = SmallWebRTCConnection(ice_servers=ice_servers or [])
     await connection.initialize(sdp=offer["sdp"], type=offer["type"])
     transport = build_transport(connection)
-    task, runner = build_pipeline(transport, tts_quality=tts_quality)
+    task, runner = build_pipeline(transport)
 
     @transport.event_handler("on_client_connected")
     async def _greet(_transport, _conn):

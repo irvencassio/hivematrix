@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Persistent push-to-talk worker. Keeps STT and cloned-voice TTS
-(VoxCPM) models warm across turns, so each Talk turn is just transcribe + LLM +
-synth — NO per-turn model reload (the old turn_cli.py spawned fresh every turn,
-reloading both models). The daemon's /voice/turn relays one turn here.
+"""Persistent push-to-talk worker. Keeps STT and the Kokoro TTS models warm across
+turns, so each Talk turn is just transcribe + LLM + synth — NO per-turn model
+reload (the old turn_cli.py spawned fresh every turn, reloading both models). The
+daemon's /voice/turn relays one turn here.
 
     POST /turn  {"audioBase64": "...", "lang": "en"}   # recorded audio → server STT
     POST /turn  {"text": "...", "lang": "en"}          # on-device transcript, skips STT
@@ -12,8 +12,7 @@ reloading both models). The daemon's /voice/turn relays one turn here.
     GET  /health -> {"ok": true}
 
 The /synth endpoint is the SAME warm Kokoro voice as /turn, so the daemon can
-re-voice deterministic command/skill/briefing replies in one consistent Talk voice
-(not the cloned persona, which is reserved for produced narration).
+re-voice deterministic command/skill/briefing replies in one consistent Talk voice.
 
 Prints `TURN_READY <port>` on stdout once the models are warm. LLM endpoint comes
 from HIVE_LLM_* (the daemon points it at the fast Rapid-MLX tier, reasoning off).
@@ -34,11 +33,11 @@ from tts import synthesize
 
 
 def _synth_to_m4a_b64(reply: str, lang: str, work: str) -> str:
-    """Synthesize `reply` with the warm live voice (Kokoro, quality='fast') and
-    return base64-encoded AAC/m4a — the format iOS already plays. Empty in → empty out."""
+    """Synthesize `reply` with the warm live voice (Kokoro) and return base64-encoded
+    AAC/m4a — the format iOS already plays. Empty in → empty out."""
     if not reply.strip():
         return ""
-    wav = synthesize(reply, quality="fast", lang=lang)
+    wav = synthesize(reply, lang=lang)
     m4a = os.path.join(work, "reply.m4a")
     try:
         # 64 kbps AAC (the max afconvert allows for 24 kHz mono) — the default is
@@ -140,7 +139,7 @@ async def handle_synth(request: web.Request) -> web.Response:
 def _warm() -> None:
     """Preload STT + TTS so the first real turn isn't cold."""
     try:
-        wav = synthesize("Ready.", quality="fast", lang="en")  # warms Kokoro (live TTS)
+        wav = synthesize("Ready.", lang="en")  # warms Kokoro (live TTS)
         # Only warm STT when a backend is configured. On-device-STT clients send
         # text and never touch server STT, so a missing HIVE_STT_COMMAND is normal.
         if os.environ.get("HIVE_STT_COMMAND", "").strip():

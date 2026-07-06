@@ -120,7 +120,7 @@ export async function synthesizeLiveVoice(text: string, lang = "en"): Promise<st
  * Unified turn-by-turn synthesis: speak `text` in the SAME warm live voice
  * (Kokoro) the streaming path uses, so push-to-talk and deterministic
  * command/skill/briefing replies match the conversational voice. Falls back to
- * the local `say`/cloned engine only if the live worker can't produce audio, so
+ * the emergency macOS `say` engine only if the live worker can't produce audio, so
  * a turn is never left silent. Returns the .m4a path (or "" if nothing worked).
  */
 export async function synthesizeReplyVoice(text: string, lang = "en"): Promise<string> {
@@ -130,7 +130,7 @@ export async function synthesizeReplyVoice(text: string, lang = "en"): Promise<s
     return await synthesizeLiveVoice(clean, lang);
   } catch (e) {
     console.error(`[voice] live reply synth failed, falling back to say: ${e instanceof Error ? e.message : e}`);
-    return (await synthesizeSpeech(clean, { engine: "say" })).path;
+    return (await synthesizeSpeech(clean)).path;
   }
 }
 

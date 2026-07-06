@@ -82,7 +82,7 @@ def run_demo(question: str) -> int:
     subprocess.run(["say", "-o", aiff, question], check=True)
     player = Player()
     print(f"you (demo): {question}")
-    res = stream_turn(aiff, LocalLLM().respond_stream, on_audio=player.play, tts_quality="high")
+    res = stream_turn(aiff, LocalLLM().respond_stream, on_audio=player.play)
     try:
         os.remove(aiff)
     except OSError:

@@ -37,7 +37,7 @@ test("synthesizeSpeech rejects empty text", async () => {
 test("synthesizeSpeech produces a non-empty .m4a via macOS say", { skip: process.platform !== "darwin" }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "tts-"));
   try {
-    const res = await synthesizeSpeech("Hello from HiveMatrix.", { outDir: dir, id: "test", engine: "say" });
+    const res = await synthesizeSpeech("Hello from HiveMatrix.", { outDir: dir, id: "test" });
     assert.equal(res.engine, "say");
     assert.equal(res.path, join(dir, "voice-test.m4a"));
     assert.ok(statSync(res.path).size > 0, "audio file should be non-empty");
@@ -49,7 +49,7 @@ test("synthesizeSpeech produces a non-empty .m4a via macOS say", { skip: process
 test("synthesizeSpeech transcodes macOS say output to iOS-playable AAC", { skip: process.platform !== "darwin" }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "tts-aac-"));
   try {
-    const res = await synthesizeSpeech("Hello from HiveMatrix.", { outDir: dir, id: "aac", engine: "say" });
+    const res = await synthesizeSpeech("Hello from HiveMatrix.", { outDir: dir, id: "aac" });
     const info = execFileSync("afinfo", [res.path], { encoding: "utf-8" });
     assert.match(info, /Data format:\s+1 ch,\s+\d+ Hz,\s+aac\b/);
   } finally {

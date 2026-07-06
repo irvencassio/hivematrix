@@ -32,7 +32,6 @@ def stream_turn(audio_in: str,
                 token_stream_fn: Callable[[str], Iterable[str]],
                 on_audio: Optional[Callable[[str], None]] = None,
                 stt_model: Optional[str] = None,
-                tts_quality: str = "fast",
                 should_cancel: Optional[Callable[[], bool]] = None) -> StreamTurnResult:
     """Run a streaming turn. `should_cancel`, if given, is polled before each
     sentence's TTS and before its playback — so a live caller (live.py) can stop
@@ -50,7 +49,7 @@ def stream_turn(audio_in: str,
     for sentence in iter_sentences(token_stream_fn(transcript)):
         if cancelled():
             break
-        wav = synthesize(sentence, quality=tts_quality)
+        wav = synthesize(sentence)
         if res.ttfa_s is None:
             res.ttfa_s = time.time() - start
         res.sentences.append(sentence)

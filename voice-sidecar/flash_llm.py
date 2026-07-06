@@ -59,7 +59,7 @@ _FLASH_TIMEOUT = aiohttp.ClientTimeout(total=180, connect=5)
 class FlashLLMProcessor(FrameProcessor):
     """Routes transcribed voice turns through the daemon's /flash/turn SSE.
 
-    Sits between WhisperCppSTT and VoxCPMTTS in the Flash pipeline. Receives
+    Sits between WhisperCppSTT and KokoroTTS in the Flash pipeline. Receives
     TranscriptionFrame, calls /flash/turn, and streams TextFrames to TTS.
     No local context aggregation — Flash Lane owns context server-side.
     """

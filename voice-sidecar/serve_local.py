@@ -2,7 +2,7 @@
 
 Proves the SmallWebRTC pipeline end-to-end from a browser ON THE MAC, before any
 iOS work: open the page, allow the mic, and talk to your local assistant — STT →
-local LLM → cloned voice, with Pipecat VAD turn-taking + barge-in.
+local LLM → Kokoro voice, with Pipecat VAD turn-taking + barge-in.
 
     .venv/bin/python serve_local.py          # then open http://127.0.0.1:7860
 

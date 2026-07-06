@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """One voice turn for the in-app push-to-talk surface (Phase 4 app integration).
 
-Input audio (any format ffmpeg reads) → STT → local LLM → cloned-voice TTS. Or pass
-a ready transcript with --text (on-device STT) to skip server STT. Writes the reply
-audio to <out> and prints {"transcript", "reply"} as JSON. Uses the 'fast' cloned
-tier for lower latency. The daemon's /voice/turn endpoint drives it.
+Input audio (any format ffmpeg reads) → STT → local LLM → Kokoro TTS. Or pass a
+ready transcript with --text (on-device STT) to skip server STT. Writes the reply
+audio to <out> and prints {"transcript", "reply"} as JSON. The daemon's /voice/turn
+endpoint drives it.
 
     python turn_cli.py input.webm reply.m4a [--lang en]   # audio → server STT
     python turn_cli.py reply.m4a --text "hello" [--lang en]  # on-device transcript
@@ -43,7 +43,7 @@ def main() -> int:
     # Match turn_server: speak an acknowledgment (not a refusal) when escalating.
     escalated, reply = resolve_escalation(transcript, reply)
     if reply.strip():
-        wav = synthesize(reply, quality="fast", lang=a.lang)
+        wav = synthesize(reply, lang=a.lang)
         ext = os.path.splitext(a.out)[1].lower()
         if ext == ".wav":
             os.replace(wav, a.out)

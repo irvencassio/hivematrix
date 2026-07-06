@@ -9,7 +9,7 @@ import sys
 from huggingface_hub import snapshot_download
 
 REPOS = [
-    "mlx-community/VoxCPM2-bf16",  # cloned-voice TTS
+    "mlx-community/Kokoro-82M-bf16",  # the Voice Lane TTS voice
 ]
 
 

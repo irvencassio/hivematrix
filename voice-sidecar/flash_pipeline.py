@@ -9,7 +9,7 @@ Pipeline:
     → Silero VAD (turn-taking + barge-in boundary detection)
     → WhisperCppSTT (local, offline, model stays warm)
     → FlashLLMProcessor (POST /flash/turn SSE; streams token deltas)
-    → VoxCPMTTS quality=fast  (Kokoro-82M; ~0.1 s/sentence once warm)
+    → KokoroTTS  (Kokoro-82M; ~0.1 s/sentence once warm)
     → SmallWebRTC audio out
 
 Drop-in replacement for realtime.py's build_session / answer_offer API.
@@ -28,8 +28,8 @@ from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 
 # Reuse the VAD factory, TTS service, and transport builder from realtime.py
-# so changes to VAD tuning / TTS quality apply uniformly to both pipelines.
-from realtime import VoxCPMTTS, build_transport, make_vad  # noqa: F401 (re-exported)
+# so changes to VAD tuning / TTS apply uniformly to both pipelines.
+from realtime import KokoroTTS, build_transport, make_vad  # noqa: F401 (re-exported)
 from flash_llm import FlashLLMProcessor
 from whisper_stt import WhisperCppSTT
 
@@ -39,7 +39,6 @@ GREETING = "Hi, I'm ready. How can I help?"
 def build_flash_pipeline(
     transport,
     session_id: Optional[str] = None,
-    tts_quality: str = "fast",
 ):
     """Assemble the Flash Lane realtime pipeline. Returns (task, runner).
 
@@ -50,7 +49,7 @@ def build_flash_pipeline(
     stt = WhisperCppSTT()
     vad = VADProcessor(vad_analyzer=make_vad())
     flash = FlashLLMProcessor(session_id=session_id)
-    tts = VoxCPMTTS(quality=tts_quality)
+    tts = KokoroTTS()
 
     pipeline = Pipeline([
         transport.input(),
@@ -67,12 +66,9 @@ def build_flash_pipeline(
 async def build_flash_session(
     transport,
     session_id: Optional[str] = None,
-    tts_quality: str = "fast",
 ):
     """Build the Flash pipeline and wire a greeting on connect. Returns (task, runner)."""
-    task, runner = build_flash_pipeline(
-        transport, session_id=session_id, tts_quality=tts_quality
-    )
+    task, runner = build_flash_pipeline(transport, session_id=session_id)
 
     @transport.event_handler("on_client_connected")
     async def _greet(_transport, _client):
@@ -85,7 +81,6 @@ async def answer_flash_offer(
     offer: dict,
     ice_servers=None,
     session_id: Optional[str] = None,
-    tts_quality: str = "fast",
 ) -> dict:
     """Accept a WebRTC SDP offer, start the Flash pipeline, return the SDP answer.
 
@@ -95,9 +90,7 @@ async def answer_flash_offer(
     connection = SmallWebRTCConnection(ice_servers=ice_servers or [])
     await connection.initialize(sdp=offer["sdp"], type=offer["type"])
     transport = build_transport(connection)
-    task, runner = build_flash_pipeline(
-        transport, session_id=session_id, tts_quality=tts_quality
-    )
+    task, runner = build_flash_pipeline(transport, session_id=session_id)
 
     @transport.event_handler("on_client_connected")
     async def _greet(_transport, _conn):

@@ -86,29 +86,16 @@ the terminal for **Microphone** access — grant it. Needs LM Studio serving
 `qwen/qwen3.6-27b` on `:1234` with **reasoning OFF**. This is the fastest way to
 actually try the assistant (no iOS / WebRTC).
 
-## Make it sound like you (cloned voice)
+## The voice
 
-Record a ~30s reference once; after that everything speaks in your voice — no
-caller changes (the `synthesize()` seam auto-switches from `say` to the cloned
-engine when the profile exists).
+One voice: **Kokoro-82M** (`mlx-community/Kokoro-82M-bf16`) via mlx-audio — a fast,
+natural, FIXED voice (~0.1s/reply once warm). Everything speaks through the
+`synthesize()` seam in `tts.py`; there is no per-caller voice choice. Set the voice
+with `HIVE_KOKORO_VOICE` (default `af_heart`; e.g. `am_michael`, `bf_emma`).
 
-```sh
-.venv/bin/python record_voice.py          # reads a script, saves ~/.hivematrix/voice/profile.wav
-.venv/bin/python talk.py --demo "say hello in my voice"
-```
-
-Engine: **VoxCPM2** (`mlx-community/VoxCPM2-bf16`) via mlx-audio, zero-shot from
-the reference. Operator-tuned to cfg=3.0, temp=0.5. Two **quality tiers**
-(`synthesize(..., quality=)`):
-
-| tier | steps | warm | used for |
-|---|---|---|---|
-| `high` | 32 | ~4.6s | produced audio — voice notes, video narration (fidelity) |
-| `fast` | 8 | ~2.5s | the live `talk.py` loop (latency) |
-
-Tools to (re)tune: `compare_voices.py` (model A/B), `tune_voxcpm.py` (param sweep).
-Force an engine with `HIVE_TTS_ENGINE=say|cloned`. Remove
-`~/.hivematrix/voice/profile.wav` to fall back to `say`.
+macOS `say` is an emergency last resort only — it runs if Kokoro is unavailable so a
+turn is never silent, and the headless tests force it with `HIVE_TTS_ENGINE=say` so
+they load no model. It is not a selectable voice.
 
 ## Status
 
@@ -117,7 +104,7 @@ Force an engine with `HIVE_TTS_ENGINE=say|cloned`. Remove
 - [x] Turn loop STT→LLM→TTS, headless test (`turn.py` / `test_turn.py`)
 - [x] Streaming turn (`streaming.py` / `stream_turn.py` / `test_streaming.py`)
 - [x] Mac mic demo (`talk.py`) — push-to-talk, talk-to-it loop (user validates live)
-- [x] Cloned voice (Chatterbox via mlx-audio) behind `synthesize()`; `record_voice.py` profile (record ~30s to enable)
+- [x] Kokoro voice (mlx-audio) behind `synthesize()` — the one Voice Lane voice
 - [ ] Pipecat realtime wrapper: VAD + barge-in + WebRTC transport (P2.2 — needs a device to validate)
 - [ ] Daemon tool calls + `POST /voice/session` handoff wired into the live loop (P2.2)
 - [ ] Streaming/interruptions, sub-800 ms (P2.3)

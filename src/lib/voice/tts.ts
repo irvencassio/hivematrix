@@ -1,71 +1,40 @@
 /**
- * Text-to-speech for the voice persona (DECISIONS Q12 / Voice Lane).
+ * Emergency text-to-speech fallback for the voice persona (DECISIONS Q12 / Voice Lane).
  *
- * The engine is swappable behind `synthesizeSpeech()`. Today it uses macOS `say`
- * (built-in, zero setup) so the iMessage voice-reply pipeline works end-to-end
- * right now. P1.1/P1.2 of the voice/video plan swap in a local cloned-voice
- * engine (F5-TTS / Chatterbox via mlx-audio) behind this same signature — callers
- * don't change. Output is an .m4a (AAC) under ~/.hivematrix/uploads, the same
- * non-sandboxed dir the iMessage send path can attach from.
+ * The real voice is Kokoro, produced by the warm turn worker (voice/turn-server.ts →
+ * the sidecar's turn_server.py /synth). This module is only the LAST RESORT: when the
+ * warm worker can't produce audio, `synthesizeReplyVoice` calls `synthesizeSpeech`
+ * here to voice the reply with macOS `say` so a turn is never left silent. It is not a
+ * second voice you choose — Kokoro is the voice.
+ *
+ * Output is an .m4a (AAC) under ~/.hivematrix/uploads, the same non-sandboxed dir the
+ * iMessage send path can attach from. Text passes via a temp file (never argv).
  */
 
 import { execFile } from "child_process";
-import { mkdirSync, writeFileSync, unlinkSync, existsSync } from "fs";
+import { mkdirSync, writeFileSync, unlinkSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { randomBytes } from "crypto";
-import { buildCliPath } from "@/lib/config/binary-detection";
-import { voiceRuntime } from "./runtime";
-
-export type TtsEngine = "say" | "cloned";
 
 export interface TtsOptions {
-  /** Engine voice id. For `say`, a macOS voice name (e.g. "Samantha"). */
+  /** macOS `say` voice name (e.g. "Samantha"). */
   voice?: string;
   /** Output directory. Default ~/.hivematrix/uploads. */
   outDir?: string;
   /** Filename stem; default random. */
   id?: string;
   timeoutMs?: number;
-  /** Force an engine. Default: cloned when available, else say. */
-  engine?: TtsEngine;
 }
 
 export interface TtsResult {
   path: string;
-  engine: TtsEngine;
+  engine: "say";
 }
 
 /** Where synthesized audio lands — an allowlisted dir for the iMessage send path. */
 export function voiceOutputDir(base: string = homedir()): string {
   return join(base, ".hivematrix", "uploads");
-}
-
-/** The cloned voice profile the operator recorded (voice-sidecar/record_voice.py). */
-export function voiceProfilePath(base: string = homedir()): string {
-  return join(base, ".hivematrix", "voice", "profile.wav");
-}
-
-/** True when a recorded profile AND a usable voice runtime are both present. */
-export function clonedVoiceAvailable(): boolean {
-  return existsSync(voiceProfilePath()) && voiceRuntime() !== null;
-}
-
-/** Synthesize via the sidecar's cloned voice. Resolves null on any failure. */
-function synthesizeCloned(txtPath: string, outPath: string, timeoutMs: number): Promise<TtsResult | null> {
-  return new Promise((resolve) => {
-    const rt = voiceRuntime();
-    if (!rt) { resolve(null); return; }
-    const args = [join(rt.scriptsDir, "synth_cli.py"), "--text-file", txtPath, "--out", outPath, "--quality", "high"];
-    execFile(rt.python, args, { cwd: rt.scriptsDir, timeout: timeoutMs, env: { ...process.env, PATH: buildCliPath() } }, (err, _stdout, stderr) => {
-      if (err || !existsSync(outPath)) {
-        console.error(`[voice] cloned synth failed, falling back to say: ${(stderr || err?.message || "").trim()}`);
-        resolve(null);
-        return;
-      }
-      resolve({ path: outPath, engine: "cloned" });
-    });
-  });
 }
 
 function transcodeToAacM4a(inputPath: string, outPath: string, timeoutMs: number): Promise<void> {
@@ -98,10 +67,9 @@ function synthesizeSay(txtPath: string, outPath: string, voice: string | undefin
 }
 
 /**
- * Synthesize `text` to an .m4a and return its absolute path. Uses the operator's
- * cloned VoxCPM2 voice when available (a recorded profile + the Python sidecar),
- * else falls back to macOS `say`. Cloning runs out-of-process in the sidecar, so
- * the daemon stays Node-only. Text passes via a temp file (never argv).
+ * Synthesize `text` to an .m4a with macOS `say` and return its absolute path. This
+ * is the emergency fallback used when the warm Kokoro worker can't produce audio.
+ * Text passes via a temp file (never argv).
  */
 export async function synthesizeSpeech(text: string, opts: TtsOptions = {}): Promise<TtsResult> {
   const clean = (text ?? "").trim();
@@ -115,14 +83,9 @@ export async function synthesizeSpeech(text: string, opts: TtsOptions = {}): Pro
   const txtPath = join(dir, `voice-${id}.txt`);
   writeFileSync(txtPath, clean);
 
-  const sayTimeout = opts.timeoutMs ?? 30_000;
+  const timeout = opts.timeoutMs ?? 30_000;
   try {
-    // Cloned voice (out-of-process, slower) unless the caller forced `say`.
-    if (opts.engine !== "say" && clonedVoiceAvailable()) {
-      const cloned = await synthesizeCloned(txtPath, outPath, Math.max(sayTimeout, 120_000));
-      if (cloned) return cloned;
-    }
-    return await synthesizeSay(txtPath, outPath, opts.voice, sayTimeout);
+    return await synthesizeSay(txtPath, outPath, opts.voice, timeout);
   } finally {
     try { unlinkSync(txtPath); } catch { /* ignore */ }
   }
