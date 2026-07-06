@@ -20,10 +20,14 @@ from HIVE_LLM_* (the daemon points it at the fast Rapid-MLX tier, reasoning off)
 import argparse
 import asyncio
 import base64
+import json
 import os
+import re
 import subprocess
 import tempfile
+import time
 import traceback
+import uuid
 
 from aiohttp import web
 
@@ -118,6 +122,119 @@ def _synth_only(text: str, lang: str) -> dict:
             pass
 
 
+# ── Voice email endpoint ──────────────────────────────────────────────────
+
+async def handle_email(request: web.Request) -> web.Response:
+    """POST /email — voice-dictated email for mail_send/mail_draft.
+
+    Accepts:
+      {"text": "..."}           — on-device transcript (skips STT)
+      {"audioBase64": "..."}    — raw audio → server-side STT
+
+    Returns:
+      {"transcript": "...", "to": "...", "subject": "...", "body": "...",
+       "emailJsonPath": "..."}  — email metadata for the daemon outbox
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "expected JSON"}, status=400)
+
+    audio_b64 = body.get("audioBase64") or ""
+    raw_text = body.get("text")
+    text = raw_text.strip() if isinstance(raw_text, str) else ""
+
+    if not text and not audio_b64:
+        return web.json_response({"error": "text or audioBase64 is required"}, status=400)
+
+    try:
+        result = await asyncio.to_thread(_one_email, audio_b64, text or None)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"error": (str(e) or "email failed")[-300:]}, status=500)
+    return web.json_response(result)
+
+
+def _one_email(audio_b64: str, text: str | None = None) -> dict:
+    """Blocking: transcribe → parse intent → write email outbox JSON."""
+    work = tempfile.mkdtemp(prefix="hm-email-")
+    try:
+        if text is not None:
+            transcript = text
+        else:
+            inp = os.path.join(work, "in.webm")
+            with open(inp, "wb") as f:
+                f.write(base64.b64decode(audio_b64))
+            transcript = transcribe(inp)
+
+        transcript = transcript.strip()
+        if not transcript:
+            return {"transcript": "", "to": "", "subject": "", "body": "", "emailJsonPath": ""}
+
+        # Parse email intent from the transcript
+        to, subject, body = "", "", transcript
+        t = transcript.lower().strip()
+        for prefix in ("send email to ", "email to ", "email "):
+            if t.startswith(prefix):
+                after = t[len(prefix):].strip()
+                kw_positions = [
+                    (after.find(' about '), 'about'),
+                    (after.find(' saying '), 'saying'),
+                ]
+                kw_positions = [(p, kw) for p, kw in kw_positions if p >= 0]
+                if kw_positions:
+                    kw_pos, kw_type = min(kw_positions, key=lambda x: x[0])
+                    to = after[:kw_pos].strip()
+                    rest = after[kw_pos:].strip()
+                    if kw_type == 'about':
+                        rest = rest[6:].strip()
+                        m2 = re.match(r'([^.!?]+[.!?])', rest)
+                        if m2:
+                            subject = m2.group(1).strip()
+                            body = rest[m2.end():].strip()
+                        else:
+                            subject = rest
+                            body = ''
+                    else:
+                        rest = rest[7:].strip()
+                        body = rest
+                else:
+                    to = after.strip()
+                    if ',' in after:
+                        parts = after.split(',', 1)
+                        to = parts[0].strip()
+                        body = parts[1].strip()
+                    else:
+                        body = ''
+                break
+
+        # Write email metadata to the daemon outbox
+        out_dir = os.path.expanduser("~/.hivematrix/voice-email-outbox")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"email-{uuid.uuid4().hex}.json")
+        with open(out_path, "w") as f:
+            json.dump({
+                "to": to or "", "subject": subject or "", "body": body,
+                "transcript": transcript, "timestamp": time.time(),
+                "source": "voice-email",
+                "sendMode": "send",
+            }, f, indent=2)
+
+        print(f"[voice][email] transcript={transcript!r} to={to!r} sub={subject!r}", flush=True)
+        print(f"[voice][email] wrote {out_path}", flush=True)
+        return {
+            "transcript": transcript, "to": to, "subject": subject, "body": body,
+            "emailJsonPath": out_path,
+        }
+    finally:
+        try:
+            for entry in os.listdir(work):
+                os.remove(os.path.join(work, entry))
+            os.rmdir(work)
+        except OSError:
+            pass
+
+
 async def handle_synth(request: web.Request) -> web.Response:
     try:
         body = await request.json()
@@ -159,6 +276,7 @@ async def run(host: str, port: int) -> None:
     app = web.Application(client_max_size=64 * 1024 * 1024)
     app.router.add_post("/turn", handle_turn)
     app.router.add_post("/synth", handle_synth)
+    app.router.add_post("/email", handle_email)
     app.router.add_get("/health", lambda _r: web.json_response({"ok": True}))
     runner = web.AppRunner(app)
     await runner.setup()

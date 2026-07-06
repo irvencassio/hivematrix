@@ -115,6 +115,12 @@ async function main(): Promise<void> {
   const { startMailBeePoller } = await import("@/lib/mailbee/poller");
   startMailBeePoller(undefined, makeFlashDispatch("mail"));
 
+  // Start the Voice-email outbox watcher — polls ~/.hivematrix/voice-email-outbox/
+  // for JSON files from voice_email.py or turn_server.py /email, and sends each
+  // one via Apple Mail. Self-gates: no-ops when the outbox directory is absent.
+  const { startVoiceEmailOutboxPoller } = await import("@/lib/voice/voice-email-outbox");
+  startVoiceEmailOutboxPoller();
+
   // Supervise the local model server when Qwen is "on this laptop": launch it,
   // health-probe it, relaunch on crash (self-gates on location === "local").
   const { startLocalServingSupervisor } = await import("@/lib/local-model/serving");
