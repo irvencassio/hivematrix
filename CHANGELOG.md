@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.143 — 2026-07-06
+
+Simplify voice/video: Kokoro-only TTS; remove the video factory / HeyGen pipeline entirely.
+
 ## v0.1.142 — 2026-07-05
 
 Developer ID release
