@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.146", date: "2026-07-06", note: "auto-deploy HiveMatrix" },
   { version: "0.1.145", date: "2026-07-06", note: "Message Lane setup removal controls" },
   { version: "0.1.144", date: "2026-07-06", note: "Message Lane self handles and voice email bridge" },
   { version: "0.1.143", date: "2026-07-06", note: "Simplify voice/video: Kokoro-only TTS; remove the video factory / HeyGen pipeline entirely." },
