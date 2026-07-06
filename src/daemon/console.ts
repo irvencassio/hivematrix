@@ -937,6 +937,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <h1>Settings <span class="x" onclick="closeSettings()">✕</span></h1>
     <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-setup" onclick="switchSettingsTab('setup')">Setup</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-lanes" onclick="switchSettingsTab('lanes')">Lanes</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-license" onclick="switchSettingsTab('license')">License</div></div>
     <div id="settingsModels" style="display:none">
+      <div class="muted" style="font-size:11px;margin-bottom:12px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;line-height:1.45">
+        <b style="color:var(--text)">How HiveMatrix routes work:</b> thinking &amp; coding go to the frontier for quality; bulk and always-on ambient work (audits, digests, file ops) stays on-device — free, private, 24/7. <b>Mixed</b> is the recommended default.</div>
       <label class="flbl">Default model</label>
       <select id="s_default" style="width:100%" onchange="saveDefault()"></select>
 

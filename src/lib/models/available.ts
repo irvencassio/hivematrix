@@ -105,15 +105,17 @@ export function buildAvailableModels(backends: BackendStatus[] = detectBackends(
       note: codex?.connect || "install the Codex CLI and run 'codex login' to enable" });
   }
 
-  // Mixed needs a local backend AND a frontier backend.
+  // Mixed needs a local backend AND a frontier backend. This is the recommended
+  // posture: thinking + coding go to the frontier (quality where it counts), while
+  // bulk and always-on ambient work stays on-device (free, private, 24/7).
   const hasFrontier = !!(claude?.configured || codex?.configured);
   if (local?.configured && hasFrontier) {
     models.push({
       id: "mixed",
-      name: "Mixed — frontier thinking + local processing",
+      name: "Mixed — frontier codes & thinks, local runs the rest",
       modelId: MIXED_ID,
       backend: "mixed",
-      note: "router-driven: frontier when available, local otherwise",
+      note: "recommended · thinking + coding on the frontier, bulk & ambient work on-device",
     });
   }
 
@@ -122,10 +124,10 @@ export function buildAvailableModels(backends: BackendStatus[] = detectBackends(
   if (hasFrontier) {
     models.push({
       id: "cloud-only",
-      name: "Cloud-only — frontier, no local model",
+      name: "Cloud-only — everything on the frontier",
       modelId: CLOUD_ONLY_ID,
       backend: "mixed",
-      note: "every role runs on frontier; local model never used",
+      note: "no local model; highest quality, highest cost",
     });
   }
 
