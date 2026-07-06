@@ -3114,6 +3114,22 @@ async function renderObservability() {
       + '</tr>';
   }
   html += '</table>';
+  // Route scorecard — the empirical "local vs frontier per route" view: first-pass
+  // rate (one-and-done), rework (runs/task), and cost per task.
+  if (Array.isArray(data.scorecard) && data.scorecard.length) {
+    const pct = v => (v == null ? '—' : Math.round(v * 100) + '%');
+    const dollars = v => (v == null ? '<span class="muted" title="on-device / not reported">—</span>' : '$' + Number(v).toFixed(v < 0.01 ? 4 : 2));
+    html += '<div class="obs-sc-h" style="margin:8px 0 3px;font-size:11px;color:var(--muted)">Route scorecard <span title="How often each route lands a task on the first attempt, its rework, and cost per task.">ⓘ</span></div>';
+    html += '<table class="obs-tbl"><tr><th>route</th><th title="distinct tasks">tasks</th><th title="succeeded on first attempt">1st-pass</th><th title="runs per task — rework signal">runs/task</th><th title="provider cost per task">$/task</th></tr>';
+    for (const s of data.scorecard) {
+      const label = OBS_LABELS[s.route] || s.route;
+      html += '<tr><td>' + esc(label) + '</td><td>' + s.tasks + '</td>'
+        + '<td>' + pct(s.firstPassRate) + '</td>'
+        + '<td>' + Number(s.avgRunsPerTask).toFixed(2) + '</td>'
+        + '<td>' + dollars(s.costPerTask) + '</td></tr>';
+    }
+    html += '</table>';
+  }
   el.innerHTML = html;
 }
 

@@ -4,6 +4,7 @@ import {
   providerForModel,
   normalizeRun,
   summarizeTelemetry,
+  routeScorecard,
   percentile,
   type RunTelemetryInput,
 } from "./contracts";
@@ -121,4 +122,45 @@ test("summarizeTelemetry: Codex byProvider shows recovered tokens; unavailable r
   assert.equal(codex.outputTokens, 1500);
   // Cost stays null (Codex doesn't report cost).
   assert.equal(codex.costUsd, null);
+});
+
+test("routeScorecard computes first-pass rate, rework, and cost per task", () => {
+  const rows = [
+    // Task A on local: first attempt fails, retry succeeds → 2 runs, first-pass miss.
+    normalizeRun({ taskId: "A", runIndex: 0, model: "qwen3.6-27b", status: "failed" }),
+    normalizeRun({ taskId: "A", runIndex: 1, model: "qwen3.6-27b", status: "done" }),
+    // Task C on local: one-and-done → first-pass hit.
+    normalizeRun({ taskId: "C", runIndex: 0, model: "qwen3.6-27b", status: "done" }),
+    // Task B on frontier: one run, done, with a reported cost.
+    normalizeRun({ taskId: "B", runIndex: 0, model: "claude-opus-4-8", status: "done", costUsd: 0.02 }),
+  ];
+  const sc = routeScorecard(rows);
+
+  const local = sc.find((r) => r.route === "local-qwen")!;
+  assert.equal(local.tasks, 2);            // A, C
+  assert.equal(local.runs, 3);             // A×2 + C×1
+  assert.equal(local.avgRunsPerTask, 1.5);
+  assert.equal(local.firstAttempts, 2);    // A@0, C@0
+  assert.equal(local.firstPassRate, 0.5);  // C passed, A failed
+  assert.equal(local.costUsd, null);       // on-device → free/unreported
+  assert.equal(local.costPerTask, null);
+
+  const frontier = sc.find((r) => r.route === "anthropic")!;
+  assert.equal(frontier.tasks, 1);
+  assert.equal(frontier.firstPassRate, 1);
+  assert.equal(frontier.costUsd, 0.02);
+  assert.equal(frontier.costPerTask, 0.02);
+
+  // Busiest route first.
+  assert.equal(sc[0].route, "local-qwen");
+});
+
+test("routeScorecard first-pass rate is null when a route never took a first attempt", () => {
+  // A route that only ever handled retries (runIndex > 0) has no first attempts.
+  const rows = [
+    normalizeRun({ taskId: "X", runIndex: 1, model: "claude-sonnet-4-6", status: "done", costUsd: 0.01 }),
+  ];
+  const sc = routeScorecard(rows);
+  assert.equal(sc[0].firstAttempts, 0);
+  assert.equal(sc[0].firstPassRate, null);
 });

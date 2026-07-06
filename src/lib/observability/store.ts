@@ -10,9 +10,11 @@ import { getDb } from "@/lib/db";
 import {
   type TaskTelemetry,
   type ObservabilityTotals,
+  type RouteScorecardRow,
   type RunTelemetryInput,
   normalizeRun,
   summarizeTelemetry,
+  routeScorecard,
 } from "./contracts";
 
 type Row = Record<string, unknown>;
@@ -118,4 +120,9 @@ export function getTaskTelemetry(taskId: string): TaskTelemetry[] {
 /** Totals over the most recent `window` rows (default 1000). */
 export function observabilitySummary(window = 1000): ObservabilityTotals {
   return summarizeTelemetry(listTaskTelemetry(window));
+}
+
+/** Per-route scorecard (first-pass rate, rework, cost/task) over the most recent `window` rows. */
+export function observabilityScorecard(window = 1000): RouteScorecardRow[] {
+  return routeScorecard(listTaskTelemetry(window));
 }

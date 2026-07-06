@@ -182,6 +182,60 @@ export interface ObservabilityTotals {
   costUsd: number | null;
 }
 
+// --- Route scorecard ----------------------------------------------------------
+//
+// The routing-decision view: for each route (provider), how often does it land a
+// task on the FIRST attempt, how much rework does it need, and what does it cost
+// per task? This is the empirical answer to "local vs frontier, per workload" —
+// measurement first; a routing policy can consume it later.
+
+export interface RouteScorecardRow {
+  route: Provider;
+  /** Distinct tasks this route touched (any run). */
+  tasks: number;
+  /** Total runs (includes retries/escalations). */
+  runs: number;
+  /** runs / tasks — a rework signal (1.0 = every task one-and-done here). */
+  avgRunsPerTask: number;
+  /** Distinct tasks whose FIRST attempt (runIndex 0) ran on this route. */
+  firstAttempts: number;
+  /** Of firstAttempts, the fraction that succeeded on that first run. null when firstAttempts=0. */
+  firstPassRate: number | null;
+  /** Total provider-reported cost across this route's runs. null when none reported (local/Codex). */
+  costUsd: number | null;
+  /** costUsd / tasks. null when no cost was reported. */
+  costPerTask: number | null;
+}
+
+/** Pure: normalized rows → one scorecard row per route (provider), busiest first. */
+export function routeScorecard(rows: TaskTelemetry[]): RouteScorecardRow[] {
+  const byRoute = new Map<Provider, TaskTelemetry[]>();
+  for (const r of rows) {
+    const list = byRoute.get(r.provider) ?? byRoute.set(r.provider, []).get(r.provider)!;
+    list.push(r);
+  }
+  const out: RouteScorecardRow[] = [];
+  for (const [route, rs] of byRoute) {
+    const tasks = new Set(rs.map((r) => r.taskId)).size;
+    const firstRuns = rs.filter((r) => r.runIndex === 0);
+    const firstAttempts = new Set(firstRuns.map((r) => r.taskId)).size;
+    const firstPasses = firstRuns.filter((r) => r.status === "done" || r.status === "review").length;
+    const costs = rs.map((r) => r.costUsd).filter((v): v is number => v != null);
+    const costUsd = costs.length ? Math.round(costs.reduce((a, b) => a + b, 0) * 1e6) / 1e6 : null;
+    out.push({
+      route,
+      tasks,
+      runs: rs.length,
+      avgRunsPerTask: tasks ? Math.round((rs.length / tasks) * 100) / 100 : 0,
+      firstAttempts,
+      firstPassRate: firstAttempts ? Math.round((firstPasses / firstAttempts) * 1000) / 1000 : null,
+      costUsd,
+      costPerTask: costUsd != null && tasks ? Math.round((costUsd / tasks) * 1e6) / 1e6 : null,
+    });
+  }
+  return out.sort((a, b) => b.runs - a.runs);
+}
+
 /** Nearest-rank percentile over a numeric array (returns null when empty). */
 export function percentile(values: number[], p: number): number | null {
   const xs = values.filter((v) => typeof v === "number" && Number.isFinite(v)).sort((a, b) => a - b);

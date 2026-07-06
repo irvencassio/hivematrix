@@ -794,7 +794,7 @@ export function createDaemonServer() {
       // GET /observability — normalized per-run telemetry + totals across all
       // three providers (Claude / Codex / local Qwen). ?taskId=… for one task.
       if (req.method === "GET" && urlPath === "/observability") {
-        const { listTaskTelemetry, getTaskTelemetry, observabilitySummary } = await import("@/lib/observability/store");
+        const { listTaskTelemetry, getTaskTelemetry, observabilitySummary, observabilityScorecard } = await import("@/lib/observability/store");
         const oq = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
         const taskId = oq.get("taskId");
         if (taskId) {
@@ -802,7 +802,7 @@ export function createDaemonServer() {
           return;
         }
         const limit = parseInt(oq.get("limit") ?? "50", 10) || 50;
-        json(res, 200, { totals: observabilitySummary(), recent: listTaskTelemetry(limit) });
+        json(res, 200, { totals: observabilitySummary(), scorecard: observabilityScorecard(), recent: listTaskTelemetry(limit) });
         return;
       }
 
