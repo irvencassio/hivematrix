@@ -91,16 +91,10 @@ const ROLE_TIER_CLOUD_OK: Record<ModelRole, ModelTier> = {
   converse:       "local-primary",
 };
 
-const ROLE_TIER_LOCAL_ONLY: Record<ModelRole, ModelTier> = {
-  think:          "local-primary",
-  "code-critical": "local-primary",
-  execute:        "local-secondary",
-  "cheap-web":    "local-secondary",
-  image:          "unavailable",
-  converse:       "local-primary",
-};
-
-const ROLE_TIER_OFFLINE: Record<ModelRole, ModelTier> = {
+// local-only and offline route identically — no frontier either way, so every
+// role lands on its local tier (image has no local generator → unavailable). One
+// map, so the two modes can never silently drift apart when routing is edited.
+const ROLE_TIER_NO_CLOUD: Record<ModelRole, ModelTier> = {
   think:          "local-primary",
   "code-critical": "local-primary",
   execute:        "local-secondary",
@@ -186,8 +180,8 @@ export class ConnectivityPolicy extends EventEmitter {
   resolveModelTier(role: ModelRole): ModelTier {
     switch (this.mode) {
       case "cloud-ok":   return ROLE_TIER_CLOUD_OK[role];
-      case "local-only": return ROLE_TIER_LOCAL_ONLY[role];
-      case "offline":    return ROLE_TIER_OFFLINE[role];
+      case "local-only": return ROLE_TIER_NO_CLOUD[role];
+      case "offline":    return ROLE_TIER_NO_CLOUD[role];
     }
   }
 
