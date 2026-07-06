@@ -549,6 +549,15 @@ test("MessageBee modal fetches structured status before reporting readability", 
   assert.doesNotMatch(js, /!\s*\/Full Disk Access\/i\.test/);
 });
 
+test("MessageBee setup exposes self handles separately from allowlisted senders", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(CONSOLE_HTML, /id="mb_self_handles"/);
+  assert.match(CONSOLE_HTML, /id="mb_self_input"/);
+  assert.match(CONSOLE_HTML, /Agent identities/);
+  assert.match(js, /renderMessageBeeSelfHandles/);
+  assert.match(js, /api\('\/messagebee\/self-handles'/);
+});
+
 test("reply and retry drafts survive live detail refreshes", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.ok(js.includes("onCtxDraft(\\'reply\\',this)"));

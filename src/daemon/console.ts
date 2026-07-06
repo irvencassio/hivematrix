@@ -1460,6 +1460,15 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <div id="mb_ignored" style="margin-top:6px"></div>
       </div>
     </div>
+    <div class="mb-step">
+      <span class="mb-mark no" id="mb_self_mark">○</span>
+      <div class="mb-body">
+        <div class="t">Agent identities</div>
+        <div class="muted">Message Lane ignores messages from these iMessage addresses to prevent self-reply loops. Use the agent's sending email or phone, not your sender identity.</div>
+        <input class="dialog-input" id="mb_self_input" placeholder="agent@icloud.com or +15551234567" style="margin-top:6px;margin-bottom:4px" />
+        <div id="mb_self_handles"></div>
+      </div>
+    </div>
     <div class="mb-step" style="border-bottom:0">
       <span class="mb-mark no" id="mb_chan_mark">○</span>
       <div class="mb-body">
@@ -4814,6 +4823,7 @@ async function openMessageBeeSetup() {
   document.getElementById('mb_err').textContent = '';
   document.getElementById('mb_status').textContent = '';
   document.getElementById('mb_phone').value = '';
+  document.getElementById('mb_self_input').value = '';
   renderMessageBeeState(null);
   renderIgnoredSenders();
   document.getElementById('mbOverlay').classList.add('open');
@@ -4864,7 +4874,32 @@ async function openSystemPane(pane) {
   } catch (e) { await hmAlert('Could not open System Settings: ' + e, 'Open System Settings'); return false; }
 }
 async function openFullDiskAccess() { await openSystemPane('fullDiskAccess'); }
-// Reflect status into the three step marks. data is the POST result (or null = derive from onboarding).
+function parseMessageBeeSelfHandles() {
+  const input = document.getElementById('mb_self_input');
+  const raw = input ? input.value.trim() : '';
+  if (!raw) return [];
+  return raw.split(/[,\n]/).map(v => v.trim()).filter(Boolean);
+}
+function renderMessageBeeSelfHandles(handles) {
+  const el = document.getElementById('mb_self_handles');
+  const markEl = document.getElementById('mb_self_mark');
+  if (!el || !markEl) return;
+  const list = Array.isArray(handles) ? handles.filter(Boolean) : [];
+  markEl.textContent = list.length ? '✓' : '○';
+  markEl.className = 'mb-mark ' + (list.length ? 'ok' : 'no');
+  el.innerHTML = list.length
+    ? list.map(h => '<span class="mb-chip">' + esc(h) + '</span>').join('')
+    : '<span class="muted" style="font-size:11px">No agent identities set.</span>';
+}
+async function saveMessageBeeSelfHandlesIfNeeded() {
+  const handles = parseMessageBeeSelfHandles();
+  if (!handles.length) return null;
+  return api('/messagebee/self-handles', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ handles }),
+  });
+}
+// Reflect status into the setup marks. data is the POST result (or null = derive from onboarding).
 function renderMessageBeeState(data) {
   const fallbackDetail = ((mbStep() || {}).detail || '');
   const fdaReadable = data ? !!data.chatDbReadable : /\b(chat\.db readable|enabled; reading|Messages database readable)\b/i.test(fallbackDetail);
@@ -4884,6 +4919,7 @@ function renderMessageBeeState(data) {
       ? allow.map(i => '<span class="mb-chip">' + esc(i.address) + '</span>').join('')
       : '';
   }
+  renderMessageBeeSelfHandles(data ? (data.selfHandles || []) : []);
 }
 async function submitMessageBee() {
   const err = document.getElementById('mb_err'); err.textContent = '';
@@ -4891,14 +4927,18 @@ async function submitMessageBee() {
   const phone = document.getElementById('mb_phone').value.trim();
   status.textContent = 'Enabling…';
   try {
+    const savedSelf = await saveMessageBeeSelfHandlesIfNeeded();
     const r = await api('/onboarding/messagebee', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enable: true, phone: phone || undefined }),
     });
     if (!r) { err.textContent = 'No response from daemon.'; status.textContent = ''; return; }
-    renderMessageBeeState(r.data || {});
+    const data = r.data || {};
+    if (savedSelf && savedSelf.selfHandles) data.selfHandles = savedSelf.selfHandles;
+    renderMessageBeeState(data);
     status.textContent = r.detail || (r.ok ? 'Configured.' : 'Done.');
     document.getElementById('mb_phone').value = '';
+    document.getElementById('mb_self_input').value = '';
     await refresh();
   } catch (e) { err.textContent = String(e); status.textContent = ''; }
 }
