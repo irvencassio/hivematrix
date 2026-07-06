@@ -16,7 +16,7 @@ A markdown brief artifact on a durable **workflow run** (status `needs_review`):
 - **Sources considered** — the sources you provided + matching local brain docs
 - **Key points** — short excerpts from local context (secret-scrubbed)
 - **Open questions** — templated prompts to sharpen the angle
-- **Suggested next action** — e.g. draft a script for the HeyGen portal video workflow
+- **Suggested next action** — how to use the brief once it is approved
 
 ## Prepare a brief
 
@@ -42,10 +42,10 @@ Open the run (`GET /workflows/runs/:id`, or the Workflows panel). Read the brief
 the open questions, and refine. **A person must review the brief before it is used or
 published** — this is the workflow's only handoff.
 
-## Feed it into a video
+## Use the brief
 
-Once the brief is approved, draft a script and create a HeyGen portal video with the
-HeyGen portal workflow (see `docs/runbooks/heygen-portal-video-pipeline.md`).
+Once the brief is approved, use it to guide the content — the brief is a standalone
+deliverable with no downstream side effects.
 
 ## Notes
 

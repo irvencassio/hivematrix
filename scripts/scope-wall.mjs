@@ -24,6 +24,13 @@ const RULES = [
     pattern: "PersonalDivider|'personal'.*divider|divider.*personal",
     label: 'Personal dashboard divider (removed from Hive 2)',
   },
+  {
+    // Video factory / HeyGen video pipeline removed 2026-07-05 (Kokoro-only voice,
+    // no video). Narrow to video-factory symbols so Browser Lane's generic HeyGen
+    // site recognition (a browsable site, not the factory) is still allowed.
+    pattern: 'lib/video/|runVideoFactory|/video/make|/video/heygen-workflow|/video/portal-complete|/video/publish-draft|dispatchHeyGenVideoWorkflow|heygen-portal-video|content-video-script',
+    label: 'Video factory / HeyGen video pipeline (removed 2026-07-05 — Kokoro-only, no video)',
+  },
   // ── Retired Bee brands ────────────────────────────────────────
   // VoiceBee un-deferred 2026-06-16 (Q12) — now an active voice ingress/egress
   // lane; see DECISIONS.md Q12 + the voice/video persona plan in brain.

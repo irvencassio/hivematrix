@@ -932,6 +932,15 @@ role. The AI avatar is **demoted to an optional component** (HeyGen, used sparin
 for hero presenter shots only) per the 2026 trust-penalty evidence; default is
 faceless screen + cloned voice. No `VideoBee`/`AvatarBee` brand is created.
 
+> **SUPERSEDED 2026-07-05 (Decision B only):** The video factory / HeyGen video
+> pipeline was removed entirely to simplify the codebase (worker models were
+> confused by the unused surface). TTS collapsed to the single **Kokoro** voice
+> (no cloned VoxCPM2 voice). The generic workflows infrastructure and the two
+> independent content workflows (research brief, YouTube summary) stay. HeyGen
+> remains only as a generic Browser-Lane-browsable site, not a video capability.
+> See `docs/superpowers/specs/2026-07-05-voice-video-simplification-design.md`.
+> The rest of Q12 (Voice Lane) stands.
+
 **Scope wall + COMPONENT-MAP amended** in this change: removed the Voice Lane
 hard-fail rule; `voicebee` compatibility id added to the no-new-brands allowlist; Voice Lane
 listed as a Q12 lane and dropped from the deferred list.
