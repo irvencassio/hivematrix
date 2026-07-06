@@ -558,6 +558,20 @@ test("MessageBee setup exposes self handles separately from allowlisted senders"
   assert.match(js, /api\('\/messagebee\/self-handles'/);
 });
 
+test("MessageBee setup lets existing sender and self-handle chips be removed", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function mbJsArg\(/);
+  assert.match(js, /function mbChip\(label, removeFn\)/);
+  assert.match(js, /async function removeMessageBeeIdentity\(/);
+  assert.match(js, /async function removeMessageBeeSelfHandle\(/);
+  assert.ok(js.includes(`onclick="' + removeFn + '(\\'' + mbJsArg(label) + '\\')"`));
+  assert.match(js, /mbChip\(h, 'removeMessageBeeSelfHandle'\)/);
+  assert.match(js, /mbChip\(i\.address, 'removeMessageBeeIdentity'\)/);
+  assert.match(js, /api\('\/messagebee\/identities'/);
+  assert.match(js, /status:\s*'pending'/);
+  assert.match(js, /api\('\/messagebee\/self-handles'/);
+});
+
 test("reply and retry drafts survive live detail refreshes", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.ok(js.includes("onCtxDraft(\\'reply\\',this)"));

@@ -497,8 +497,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .mb-step .mb-body .t { font-weight: 600; margin-bottom: 2px; }
   .mb-step button { margin-top: 5px; font-size: 11px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
     background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
-  .mb-chip { display: inline-block; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px;
-    padding: 1px 9px; margin: 2px 4px 2px 0; font-size: 11px; }
+  .mb-chip { display: inline-flex; align-items: center; gap: 3px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1px 6px 1px 9px; margin: 2px 4px 2px 0; font-size: 11px; }
+  .mb-chip .x { cursor: pointer; color: var(--muted); font-size: 10px; line-height: 1; }
   .mb-ignored-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11px; }
   .ss-section { margin-top:12px; }
   .ss-section-hd { font-weight:600; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
@@ -4880,6 +4881,13 @@ function parseMessageBeeSelfHandles() {
   if (!raw) return [];
   return raw.split(/[,\n]/).map(v => v.trim()).filter(Boolean);
 }
+function mbJsArg(s) {
+  return esc(s).replace(/"/g, '&quot;').replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+function mbChip(label, removeFn) {
+  return '<span class="mb-chip">' + esc(label)
+    + ' <span class="x" onclick="' + removeFn + '(\'' + mbJsArg(label) + '\')" title="Remove">✕</span></span>';
+}
 function renderMessageBeeSelfHandles(handles) {
   const el = document.getElementById('mb_self_handles');
   const markEl = document.getElementById('mb_self_mark');
@@ -4888,7 +4896,7 @@ function renderMessageBeeSelfHandles(handles) {
   markEl.textContent = list.length ? '✓' : '○';
   markEl.className = 'mb-mark ' + (list.length ? 'ok' : 'no');
   el.innerHTML = list.length
-    ? list.map(h => '<span class="mb-chip">' + esc(h) + '</span>').join('')
+    ? list.map(h => mbChip(h, 'removeMessageBeeSelfHandle')).join('')
     : '<span class="muted" style="font-size:11px">No agent identities set.</span>';
 }
 async function saveMessageBeeSelfHandlesIfNeeded() {
@@ -4898,6 +4906,43 @@ async function saveMessageBeeSelfHandlesIfNeeded() {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ handles }),
   });
+}
+async function removeMessageBeeIdentity(address) {
+  const err = document.getElementById('mb_err'); if (err) err.textContent = '';
+  const status = document.getElementById('mb_status'); if (status) status.textContent = 'Removing…';
+  try {
+    await api('/messagebee/identities', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address, status: 'pending' }),
+    });
+    const r = await api('/messagebee');
+    if (r) renderMessageBeeState(r);
+    if (status) status.textContent = 'Removed ' + address + ' from allowed senders.';
+    await refresh();
+  } catch (e) {
+    if (err) err.textContent = String(e);
+    if (status) status.textContent = '';
+  }
+}
+async function removeMessageBeeSelfHandle(handle) {
+  const err = document.getElementById('mb_err'); if (err) err.textContent = '';
+  const status = document.getElementById('mb_status'); if (status) status.textContent = 'Removing…';
+  try {
+    const current = await api('/messagebee');
+    const handles = ((current && current.selfHandles) || []).filter(h => String(h).toLowerCase() !== String(handle).toLowerCase());
+    const saved = await api('/messagebee/self-handles', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ handles }),
+    });
+    const next = current || {};
+    next.selfHandles = (saved && saved.selfHandles) || handles;
+    renderMessageBeeState(next);
+    if (status) status.textContent = 'Removed ' + handle + ' from agent identities.';
+    await refresh();
+  } catch (e) {
+    if (err) err.textContent = String(e);
+    if (status) status.textContent = '';
+  }
 }
 // Reflect status into the setup marks. data is the POST result (or null = derive from onboarding).
 function renderMessageBeeState(data) {
@@ -4916,7 +4961,7 @@ function renderMessageBeeState(data) {
     const allow = ids.filter(i => i.status === 'allowed' || i.status === 'paired');
     mark(document.getElementById('mb_phone_mark'), allow.length > 0);
     document.getElementById('mb_identities').innerHTML = allow.length
-      ? allow.map(i => '<span class="mb-chip">' + esc(i.address) + '</span>').join('')
+      ? allow.map(i => mbChip(i.address, 'removeMessageBeeIdentity')).join('')
       : '';
   }
   renderMessageBeeSelfHandles(data ? (data.selfHandles || []) : []);
