@@ -549,7 +549,7 @@ async function runAgentLoop(
   agentType: string,
   toolContext?: ToolContext,
   thinkingMode?: string | null
-): Promise<{ code: number; result: string; turns: number; totalTokens: number; inputTokens: number; outputTokens: number }> {
+): Promise<{ code: number; result: string; turns: number; totalTokens: number; inputTokens: number; outputTokens: number; smokeReport?: string }> {
   const messages = await buildMessages(description, projectPath, agentType, thinkingMode);
   const profileTools = getProfileTools(agentType);
 
@@ -809,7 +809,17 @@ async function runAgentLoop(
   // is not reported as a clean success on top of code that crashes when run.
   const finalResult = buildSmokeGateFinalResult(fullText.slice(-2000), smokeRetries, smokeReport);
 
-  return { code: finalResult.code, result: finalResult.result, turns, totalTokens, inputTokens, outputTokens };
+  return {
+    code: finalResult.code,
+    result: finalResult.result,
+    turns,
+    totalTokens,
+    inputTokens,
+    outputTokens,
+    // Non-empty only when the code still failed verification after all local
+    // retries — the caller escalates it to the frontier as a fix task.
+    smokeReport: finalResult.code === 1 && smokeReport ? smokeReport : undefined,
+  };
 }
 
 /**
@@ -869,7 +879,18 @@ export function spawnGenericAgent(
     toolContext,
     thinkingMode
   )
-    .then(({ code, result, turns, totalTokens, inputTokens, outputTokens }) => {
+    .then(({ code, result, turns, totalTokens, inputTokens, outputTokens, smokeReport }) => {
+      // Local coding failed verification after all retries → hand the draft +
+      // diagnostics to the frontier as a fix task (no-op unless cloud-ok). Fire
+      // and forget: escalation must never affect this task's own exit.
+      if (smokeReport) {
+        void import("./escalation")
+          .then((m) => m.maybeEscalateToFrontier(taskId, smokeReport))
+          .then((escId) => {
+            if (escId) onEvent(taskId, { type: "log", content: `[escalation] verification failed locally → frontier fix task ${escId} queued` });
+          })
+          .catch(() => { /* escalation is best-effort */ });
+      }
       agent.lastResult = {
         cost: 0, // OpenAI-compat APIs don't report cost directly
         result,
