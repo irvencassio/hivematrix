@@ -1137,11 +1137,18 @@ quality-critical, latency-sensitive — the local model's weakest workload; fron
 wins on quality-per-dollar once rework and the operator's own review time are
 counted. Chasing local code parity spends engineering hours the Solo-Founder plan
 needs for revenue. Full analysis: `~/_GD/brain/2026-07-06-hivematrix-task-pipeline-review.html`.
-**Code:** `execute`-role coding routing (`src/lib/routing/router.ts`) to flip to
-frontier-default when this is implemented; the repair ladder's static stage shipped
-2026-07-06 (`scripts/hive-verify-smoke.py` ruff Stage-0, `code-smoke.ts`,
-`generic-agent.ts` retries 2→4). Router inversion itself is pending (not yet coded).
-**Status:** policy decided; router change deferred to the execution pass.
+**Code (verified 2026-07-06):** The inversion is ALREADY realized where it is safe.
+User-dispatched coding (`model:"mixed"`) routes via `code-critical` → frontier in
+cloud-ok (`subprocess.ts:374`); cloud-only posture forces frontier. The only role on
+local is `execute`, which is the autonomous directive/ambient path
+(`directive-engine.ts:622/651/691`) — Weaver scorecards, audits, distill, file ops —
+which SHOULD stay local per this decision. `execute` does not distinguish code from
+non-code, so a wholesale `execute`→frontier flip is WRONG (it would push ambient
+cognition onto frontier). The repair-ladder static stage shipped 2026-07-06
+(`hive-verify-smoke.py` ruff Stage-0, `code-smoke.ts`, `generic-agent.ts` retries 2→4).
+**Status:** policy decided AND already in force for the user coding path. Remaining
+work is NOT a tier flip — it is a code/non-code signal on `execute`-role tasks so that
+autonomous *coding* can escalate to frontier while ambient work stays local. Deferred.
 
 ## Q14 — Complexity budget: a five-concept kernel, no new stores without a decision (2026-07-06)
 
