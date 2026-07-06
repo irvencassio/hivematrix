@@ -1123,3 +1123,45 @@ wall enforcement. Verdict on "redo completely": not warranted — architecture
 follows the approved W8/W9 specs; the defects were seams, all now regression-tested.
 
 **Provers:** 2647/2647 tests, typecheck + scope-wall clean.
+
+## Q13 — The Inversion: local model does not write shipped code (2026-07-06)
+
+**Decision:** In Mixed mode, code work routes to the frontier by default. The local
+model's role is (a) 24×7 ambient cognition — heartbeat, distill, operator modeling,
+Weaver, cheap-web, non-code extraction/file-ops — where its free, always-on tokens
+are a real economic advantage; and (b) a draft/fallback stage inside the repair
+ladder, never the owner of code that ships. Local coding remains only as an offline
+fallback, and when it runs it accrues frontier-review-debt that auto-fires on
+cloud-ok (already built — `frontier-debt.ts`). Rationale: coding is bursty,
+quality-critical, latency-sensitive — the local model's weakest workload; frontier
+wins on quality-per-dollar once rework and the operator's own review time are
+counted. Chasing local code parity spends engineering hours the Solo-Founder plan
+needs for revenue. Full analysis: `~/_GD/brain/2026-07-06-hivematrix-task-pipeline-review.html`.
+**Code:** `execute`-role coding routing (`src/lib/routing/router.ts`) to flip to
+frontier-default when this is implemented; the repair ladder's static stage shipped
+2026-07-06 (`scripts/hive-verify-smoke.py` ruff Stage-0, `code-smoke.ts`,
+`generic-agent.ts` retries 2→4). Router inversion itself is pending (not yet coded).
+**Status:** policy decided; router change deferred to the execution pass.
+
+## Q14 — Complexity budget: a five-concept kernel, no new stores without a decision (2026-07-06)
+
+**Decision:** HiveMatrix is maintained by one person; complexity is the top predictor
+of "things break as tweaks and enhancements land." The system is defined by five
+concepts — **Event, Task, Directive, Policy, Persona/Memory** — and everything else
+is an adapter over them. New concepts, orchestration primitives, or persistent stores
+require a DECISIONS.md entry that names what gets deleted. The Subtraction Pass targets
+(future work): fold Work Packages into Directives; retire the in-house local *coding*
+harness (keep the conversational flash loop); collapse the router to a lookup table;
+unify the four permission systems (autonomy dial + trust ledger + directive
+approvalPolicy + bee-tool gates) into one `decidePolicy()` choke point WITH the
+protected-action hard floor intact; converge lanes onto one channel-adapter interface.
+The four operator personas (solo founder / 1-person dev / self-improver / small-biz
+owner) are the same kernel with different directive packs, channels, and persona
+content — differentiation is configuration, not code. Do NOT simplify: the directive
+engine, telemetry, and the heartbeat/distill/persona stack — those are the product.
+**Code:** scope-wall extended 2026-07-06 with a warn-only "new persistent store"
+tripwire (`scripts/scope-wall.mjs`) — a CREATE TABLE outside `db/index.ts` /
+`brain/index-db.ts` now flags for a decision. The structural merges are pending.
+**Status:** budget adopted + tripwire live; the Subtraction merges are future work.
+
+**Provers (2026-07-06 slice):** 26/26 verification-gate tests, typecheck + scope-wall clean.

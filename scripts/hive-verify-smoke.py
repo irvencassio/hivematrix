@@ -24,8 +24,24 @@ invocation.
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 
+
+# Static rules that predict a real defect (pyflakes family): undefined names
+# (F821, the missing `import os` class), redefinitions (F811), local-used-before-
+# assignment (F823), f-string/format mistakes, break/continue/return/yield outside
+# their construct, etc. These catch the "misremembered or forgotten API" failures
+# quantized models produce — including in library modules with no __main__ entry
+# point, which the pty stage never runs.
+#
+# Deliberately EXCLUDED so the gate never blocks completion on a non-bug:
+#   F401 unused import, F841 unused local var — real smells, but they do not crash
+#   and would make the model churn. Style rules (E/W) are excluded for the same reason.
+RUFF_SELECT = "F"
+RUFF_IGNORE = "F401,F841"
+RUFF_TIMEOUT_S = 20
 
 RUN_MS = 1500          # how long to let an entry-point program run before quitting
 GRACE_MS = 1000        # extra time to let it tear down after we ask it to quit
@@ -43,6 +59,41 @@ TRACEBACK_MARKER = "Traceback (most recent call last):"
 # Exceptions that mean "we (or the OS) asked it to stop", not "the code is broken".
 # Never fail a smoke run on these — they are teardown artefacts, not defects.
 TEARDOWN_EXCEPTIONS = ("KeyboardInterrupt", "SystemExit")
+
+
+def _ruff_check(path):
+    """Fast, deterministic static pass. Returns a fail-result dict if ruff finds a
+    correctness error, else None (clean, ruff absent, or ruff itself errored — in
+    which case we fall through to the runtime stage rather than block the task).
+
+    This runs for EVERY file, entry-point or module, so an undefined name in a
+    library module (which py_compile happily accepts and the pty stage never runs)
+    is still caught. It is also strictly faster than the pty run for entry points.
+    """
+    ruff = shutil.which("ruff")
+    if not ruff:
+        return None  # not installed → skip; runtime stage still applies
+    try:
+        proc = subprocess.run(
+            [ruff, "check", "--select", RUFF_SELECT, "--ignore", RUFF_IGNORE,
+             "--output-format", "concise", "--no-cache", path],
+            capture_output=True,
+            text=True,
+            timeout=RUFF_TIMEOUT_S,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None  # ruff misbehaved → don't wrongly fail the task
+    # ruff exits 1 when it finds lint errors, 0 when clean, 2 on internal error.
+    if proc.returncode == 1 and proc.stdout.strip():
+        detail = proc.stdout.strip()
+        # Drop the trailing "Found N errors." summary line for a tighter report.
+        lines = [ln for ln in detail.splitlines() if not ln.startswith("Found ")]
+        return {
+            "status": "fail",
+            "detail": "ruff static check (undefined names / bad imports):\n"
+            + "\n".join(lines).strip()[-2000:],
+        }
+    return None
 
 
 def _has_main_guard(path):
@@ -179,6 +230,14 @@ def _traceback_tail(text):
 
 
 def smoke_file(path):
+    # Stage 0 — static analysis (ruff) on every file. Cheapest, catches undefined
+    # names / forgotten imports even in never-run library modules. A failure here
+    # short-circuits: no point running code we already know references a missing name.
+    static = _ruff_check(path)
+    if static is not None:
+        return {"path": path, "kind": "static (ruff)", **static}
+
+    # Stage 1 — runtime: run entry points under a pty, py_compile bare modules.
     kind = "entry-point" if _has_main_guard(path) else "module"
     if kind == "module":
         result = _py_compile(path)

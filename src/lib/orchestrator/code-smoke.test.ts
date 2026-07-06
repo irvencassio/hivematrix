@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +11,17 @@ import { runCodeSmoke, isRunnableFile, smokeScriptPath } from "./code-smoke";
 // they need python3 on PATH. Skip cleanly if it (or the harness) is unavailable
 // rather than failing CI on an environment without Python.
 const harnessAvailable = !!smokeScriptPath();
+
+// The static stage uses ruff if present. Tests that assert ruff-specific behavior
+// skip when it is absent (the harness degrades to the runtime stage in that case).
+const ruffAvailable = (() => {
+  try {
+    execFileSync("ruff", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 test("isRunnableFile matches Python, ignores others", () => {
   assert.equal(isRunnableFile("game.py"), true);
@@ -30,6 +42,43 @@ test("runCodeSmoke returns ran:false when there is nothing runnable", async () =
   }
 });
 
+test(
+  "static stage FAILS a library module with an undefined name (py_compile would pass it)",
+  { skip: !harnessAvailable || !ruffAvailable },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smoke-mod-"));
+    try {
+      // No __main__ guard → the runtime stage only py_compiles this, which is
+      // green despite `os` never being imported. The ruff static stage catches it.
+      const mod = ["def save(score):", "    return os.path.expanduser('~/x')", ""].join("\n");
+      writeFileSync(join(dir, "helper.py"), mod);
+      const res = await runCodeSmoke(dir, ["helper.py"]);
+      assert.equal(res.ran, true);
+      assert.equal(res.ok, false);
+      assert.match(res.report, /Code Verification Gate: FAILED/);
+      assert.match(res.report, /F821|Undefined name|ruff/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "static stage does NOT block on a mere unused import (F401 is excluded)",
+  { skip: !harnessAvailable || !ruffAvailable },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smoke-unused-"));
+    try {
+      const mod = ["import os", "import sys", "print(sys.version)", ""].join("\n");
+      writeFileSync(join(dir, "lib.py"), mod);
+      const res = await runCodeSmoke(dir, ["lib.py"]);
+      assert.equal(res.ok, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
 test("runCodeSmoke FAILS on a curses program that crashes on first render", { skip: !harnessAvailable }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "smoke-bad-"));
   try {
@@ -49,7 +98,7 @@ test("runCodeSmoke FAILS on a curses program that crashes on first render", { sk
     const res = await runCodeSmoke(dir, ["bad.py"]);
     assert.equal(res.ran, true);
     assert.equal(res.ok, false);
-    assert.match(res.report, /smoke run FAILED/);
+    assert.match(res.report, /Code Verification Gate: FAILED/);
     assert.match(res.report, /addwstr\(\) returned ERR/);
   } finally {
     rmSync(dir, { recursive: true, force: true });

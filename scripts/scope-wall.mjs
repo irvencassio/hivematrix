@@ -71,6 +71,18 @@ const RULES = [
     label: 'packs/ imported outside daemon/ — only src/daemon/ may import @/lib/packs',
     allowFiles: ['daemon/', 'lib/packs/'],
   },
+  // ── Complexity budget: no new persistent store without a decision ─
+  // Concept-creep is the top predictor of "things break as tweaks land"
+  // (see brain/2026-07-06 pipeline review, Subtraction Pass). New data stores /
+  // orchestration primitives must be a conscious choice, not a quiet addition.
+  // Schema lives in exactly two sanctioned files (the app DB + the brain index);
+  // a CREATE TABLE anywhere else is a new store that needs a DECISIONS.md entry.
+  {
+    pattern: 'CREATE TABLE',
+    label: 'New persistent store outside the sanctioned schema files — add a DECISIONS.md entry (concept budget, 2026-07-06)',
+    allowFiles: ['db/index.ts', 'brain/index-db.ts', '.test.'],
+    warnOnly: true,
+  },
   // ── Scope freeze: no new Bee brands ──────────────────────────
   {
     pattern: '\b[A-Z][a-z]+Bee\b',

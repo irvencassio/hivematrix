@@ -137,10 +137,11 @@ function summarize(stdout: string, ok: boolean): string {
   }
   if (lines.length === 0) return ""; // nothing to report on success
   return [
-    "--- Code Verification Gate: smoke run FAILED ---",
-    "Your code was executed in a real terminal and crashed. This is a real runtime",
-    "bug, not a false alarm (py_compile/import/mypy do not catch it). Fix the code",
-    "and do not report completion until it runs clean:",
+    "--- Code Verification Gate: FAILED ---",
+    "Your code failed verification — either a static check (ruff caught an undefined",
+    "name or bad import that py_compile/mypy miss) or a real runtime crash when run in",
+    "a terminal. These are genuine defects, not false alarms. Fix the code and do not",
+    "report completion until it passes clean:",
     "",
     ...lines,
   ].join("\n");

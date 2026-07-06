@@ -36,7 +36,13 @@ const LOOP_BREAK_THRESHOLD = 5; // also inject a user-turn forcing a final answe
 // How many times the code-smoke gate may bounce a "done" back to the model to fix
 // a crashing program before we give up and let the task end (reported as failed).
 // Bounded so a model that can't fix its own bug can't loop forever.
-const MAX_SMOKE_RETRIES = 2;
+//
+// Set to 4, not 2: local model turns are free (on-device), and the gate now leads
+// with a fast, exact static diagnostic (ruff: "F821 Undefined name `os`") that a
+// model can usually act on — so a few more cheap cycles convert real first-pass
+// misses (a forgotten import) into fixes instead of dead-ending the task. The
+// frontier-escalation path (escalation package) is a separate, larger change.
+const MAX_SMOKE_RETRIES = 4;
 
 export function shouldRunCompletionSmokeGate(touchedFiles: readonly string[], _forceTextOnlyTurn: boolean): boolean {
   return touchedFiles.length > 0;

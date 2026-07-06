@@ -8,9 +8,11 @@ test("verification gate covers execute, static-check, deps, and re-verify", () =
   assert.match(p, /--- Code Verification Gate ---/);
   // execute step names concrete runners
   assert.match(p, /pytest|npm test/);
-  // mypy is the tool that catches hallucinated stdlib attrs (curses.nap class)
+  // ruff leads the static step: it catches undefined names / forgotten imports
+  // (the `import os` class) that mypy and py_compile silently pass. mypy remains
+  // named for type errors.
+  assert.match(p, /ruff check --select F/);
   assert.match(p, /mypy/);
-  assert.match(p, /attr-defined/);
   // agents must install missing deps, not switch approach
   assert.match(p, /pip install/);
   assert.match(p, /rather than failing/);
