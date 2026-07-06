@@ -2282,150 +2282,6 @@ export function createDaemonServer() {
         return;
       }
 
-      // POST /video/heygen-workflow — turn a script into a HeyGen Browser Lane
-      // video task, routed through COO dispatch so readiness/exec gates apply. A
-      // task is created only when HeyGen readiness is green + fresh; otherwise the
-      // exact readiness blocker is returned. Login/2FA/CAPTCHA/file-picker/preview/
-      // export are operator handoffs in the job — never automated.
-      if (req.method === "POST" && urlPath === "/video/heygen-workflow") {
-        const body = await parseBody(req) as Record<string, unknown>;
-        const script = typeof body.script === "string" ? body.script.trim() : "";
-        const title = typeof body.title === "string" ? body.title.trim() : "";
-        if (!script || !title) { json(res, 400, { ok: false, error: "script and title are required" }); return; }
-        const input = {
-          script,
-          title,
-          creativeNotes: typeof body.creativeNotes === "string" ? body.creativeNotes : undefined,
-          assetPaths: Array.isArray(body.assetPaths) ? body.assetPaths.filter((p): p is string => typeof p === "string") : undefined,
-          project: typeof body.project === "string" ? body.project : undefined,
-        };
-        const parentDraftId = typeof body.parentDraftId === "string" ? body.parentDraftId : undefined;
-        const force = body.force === true;
-        const { dispatchHeyGenVideoWorkflow } = await import("@/lib/video/heygen-workflow");
-        const { seedHeyGenBrowserSite } = await import("@/lib/browser-lane/heygen");
-        seedHeyGenBrowserSite(); // idempotent: ensure the site/probe/rule exist
-        try {
-          if (body.create === true) {
-            let projectPath: string;
-            try { projectPath = normalizeHomeProjectPath(body.projectPath); }
-            catch (e) { json(res, 400, { ok: false, error: `create requires a valid projectPath under $HOME: ${e instanceof Error ? e.message : String(e)}` }); return; }
-            // Dup guard: don't create a second portal child while one is pending,
-            // unless the caller forces it (e.g. an explicit retry).
-            if (parentDraftId) {
-              const { getDraft } = await import("@/lib/video/draft-store");
-              const { portalChildPending } = await import("@/lib/video/portal-completion");
-              const draft = getDraft(parentDraftId);
-              if (draft && portalChildPending(draft, force)) {
-                json(res, 200, { ok: true, result: { status: "portal_pending", taskId: draft.portalTaskId, draftId: parentDraftId, deduped: true } });
-                return;
-              }
-            }
-            const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
-            const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
-            const result = await dispatchHeyGenVideoWorkflow(input, {
-              create: true,
-              projectPath,
-              browserAvailable: getConnectivityPolicy().getCapability("browserbee").available,
-              staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours,
-              persistTask: async ({ envelope, projectPath: root, route }) => {
-                const { Task } = await import("@/lib/db");
-                const { buildBrowserBeeTaskDescription } = await import("@/lib/browser-lane/jobs");
-                const description = buildBrowserBeeTaskDescription(envelope, { requestedProjectPath: root });
-                const task = await Task.create({
-                  title: envelope.title,
-                  description,
-                  project: envelope.project,
-                  projectPath: root,
-                  model: envelope.backingModel,
-                  status: "backlog",
-                  executor: "agent",
-                  source: "browser-lane",
-                  output: { browserbeeRequest: envelope, coo: { ruleId: route.ruleId, capability: route.capability }, heygen: { title, ...(parentDraftId ? { parentDraftId } : {}) } },
-                });
-                broadcast("tasks:created", { taskId: task._id });
-                // Link the child to the parent draft (→ portal_pending) when provided.
-                if (parentDraftId) {
-                  const { markPortalTaskCreated } = await import("@/lib/video/portal-completion");
-                  await markPortalTaskCreated(parentDraftId, task._id, {
-                    updateTask: async (id, fields) => { await Task.findByIdAndUpdate(id, fields); },
-                  });
-                }
-                return { id: task._id };
-              },
-            });
-            // Record/transition the durable workflow run for this portal video.
-            try {
-              const { linkHeyGenPortalRunOnDispatch } = await import("@/lib/workflows/heygen-run-link");
-              linkHeyGenPortalRunOnDispatch(result, { draftId: parentDraftId, title });
-            } catch { /* the ledger is a nicety; the dispatch result is the source of truth */ }
-            json(res, 200, { ok: true, result });
-          } else {
-            const { getBrowserLaneReadinessConfig } = await import("@/lib/browser-lane/readiness-schedule");
-            const result = await dispatchHeyGenVideoWorkflow(input, { staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours });
-            json(res, 200, { ok: true, result });
-          }
-        } catch (e) {
-          json(res, 500, { ok: false, error: e instanceof Error ? e.message : String(e) });
-        }
-        return;
-      }
-
-      // POST /video/portal-complete — hand a HeyGen portal child task's result back
-      // to the parent video draft (final URL / local path / manual note, or a
-      // failed/cancelled outcome). Idempotent; never accepts/returns secrets and
-      // never falsely marks YouTube publishing done.
-      if (req.method === "POST" && urlPath === "/video/portal-complete") {
-        const body = await parseBody(req) as Record<string, unknown>;
-        try {
-          const { applyHeyGenPortalCompletion } = await import("@/lib/video/portal-completion");
-          const { Task } = await import("@/lib/db");
-          const result = await applyHeyGenPortalCompletion(body, {
-            updateTask: async (id, fields) => { await Task.findByIdAndUpdate(id, fields); },
-          });
-          // Mark the child Browser Lane task terminal to match the outcome.
-          const childTaskId = typeof body.childTaskId === "string" ? body.childTaskId : undefined;
-          if (result.ok && childTaskId) {
-            const childStatus = body.childStatus === "failed" ? "failed" : body.childStatus === "cancelled" ? "cancelled" : "done";
-            try { await Task.findByIdAndUpdate(childTaskId, { status: childStatus, reviewState: null }); } catch { /* draft is the source of truth */ }
-          }
-          // Transition the workflow run to match the completion outcome.
-          if (result.ok && typeof body.parentDraftId === "string") {
-            try {
-              const { linkHeyGenPortalRunOnCompletion } = await import("@/lib/workflows/heygen-run-link");
-              linkHeyGenPortalRunOnCompletion(body.parentDraftId, { status: result.status, childStatus: body.childStatus as never });
-            } catch { /* ledger is a nicety */ }
-          }
-          json(res, result.ok ? 200 : 404, result);
-        } catch (e) {
-          json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
-        }
-        return;
-      }
-
-      // POST /video/publish-draft — publish-only path: upload a portal_completed
-      // draft's existing local MP4 to YouTube WITHOUT re-rendering through HeyGen.
-      // needs_publish_input (no local file) → 409; already published → idempotent 200.
-      if (req.method === "POST" && urlPath === "/video/publish-draft") {
-        const body = await parseBody(req) as Record<string, unknown>;
-        const draftId = typeof body.draftId === "string" ? body.draftId.trim() : "";
-        if (!draftId) { json(res, 400, { ok: false, error: "draftId is required" }); return; }
-        try {
-          const { publishDraftVideo } = await import("@/lib/video/news-review");
-          const result = await publishDraftVideo(draftId);
-          if (result.ok && result.published) {
-            try {
-              const { linkHeyGenPortalRunOnPublish } = await import("@/lib/workflows/heygen-run-link");
-              linkHeyGenPortalRunOnPublish(draftId, result);
-            } catch { /* ledger is a nicety */ }
-          }
-          const status = result.ok ? 200 : result.code === "no_draft" ? 404 : 409;
-          json(res, status, result);
-        } catch (e) {
-          json(res, 500, { ok: false, error: e instanceof Error ? e.message : String(e) });
-        }
-        return;
-      }
-
       // GET /workflows — the typed registry of repeatable business workflows
       // (discovery metadata only: lane, readiness, handoffs, runbook). Secret-free.
       if (req.method === "GET" && urlPath === "/workflows") {
@@ -3457,83 +3313,6 @@ export function createDaemonServer() {
         return;
       }
 
-      // POST /video/news/draft — draft the AI-news video script and PAUSE for human
-      // review (the checkpoint before the expensive HeyGen render). Creates a
-      // needs_input review task; the operator's Reply drives render/edit/regenerate/
-      // cancel. Gated by the `video` feature flag.
-      if (req.method === "POST" && urlPath === "/video/news/draft") {
-        const { isFeatureEnabled } = await import("@/lib/config/features");
-        if (!isFeatureEnabled("video")) { json(res, 403, { error: "video feature is off — enable it in Settings → Features" }); return; }
-        const body = await parseBody(req) as Record<string, unknown>;
-        const { draftNewsVideo } = await import("@/lib/video/news-review");
-        try {
-          const draft = await draftNewsVideo({
-            privacy: typeof body.privacy === "string" ? body.privacy : undefined,
-            source: typeof body.source === "string" ? body.source : undefined,
-            writer: typeof body.writer === "string" ? body.writer : undefined,
-          });
-          if (draft.taskId) broadcast("tasks:created", { taskId: draft.taskId });
-          json(res, 200, { draft });
-        } catch (e) { json(res, 500, { error: e instanceof Error ? e.message : String(e) }); }
-        return;
-      }
-      // GET /video/drafts — video script drafts + their review status.
-      if (req.method === "GET" && urlPath === "/video/drafts") {
-        const { listDrafts } = await import("@/lib/video/draft-store");
-        json(res, 200, { drafts: listDrafts() });
-        return;
-      }
-      // GET /video/drafts/:id — one draft + its current script text (review panel).
-      const videoDraftMatch = urlPath.match(/^\/video\/drafts\/([^/]+)$/);
-      if (req.method === "GET" && videoDraftMatch) {
-        const { getDraft } = await import("@/lib/video/draft-store");
-        const d = getDraft(videoDraftMatch[1]);
-        if (!d) { json(res, 404, { error: "not found" }); return; }
-        const { readFileSync, existsSync } = await import("fs");
-        const script = existsSync(d.paths.script) ? readFileSync(d.paths.script, "utf-8") : "";
-        json(res, 200, { draft: d, script });
-        return;
-      }
-
-      // POST /video/make — agent/daemon-driven video creation, gated by the
-      // `video` feature flag. Drives the out-of-process Node video factory
-      // (topic→script→cloned-voice narration→captions→render). Long-running.
-      if (req.method === "POST" && urlPath === "/video/make") {
-        const { isFeatureEnabled } = await import("@/lib/config/features");
-        if (!isFeatureEnabled("video")) { json(res, 403, { error: "video feature is off — enable it in Settings → Features" }); return; }
-        const { runVideoFactory } = await import("@/lib/video/factory");
-        const { generateId } = await import("@/lib/db");
-        const { mkdirSync, writeFileSync } = await import("fs");
-        const body = await parseBody(req) as Record<string, unknown>;
-        const topic = typeof body.topic === "string" && body.topic.trim() ? body.topic.trim() : undefined;
-        const script = typeof body.script === "string" && body.script.trim() ? body.script.trim() : undefined;
-        if (!topic && !script) { json(res, 400, { error: "topic or script is required" }); return; }
-        const id = generateId();
-        const dir = join(homedir(), ".hivematrix", "artifacts", "video");
-        mkdirSync(dir, { recursive: true });
-        const out = join(dir, `${id}.mp4`);
-        let scriptFile: string | undefined;
-        if (script) { scriptFile = join(dir, `${id}.txt`); writeFileSync(scriptFile, script); }
-        try {
-          const r = await runVideoFactory({
-            topic, scriptFile, out,
-            lang: typeof body.lang === "string" ? body.lang : undefined,
-            title: typeof body.title === "string" ? body.title : undefined,
-            seconds: typeof body.seconds === "number" ? body.seconds : undefined,
-            screen: typeof body.screen === "string" ? body.screen : undefined,
-            presenter: typeof body.presenter === "string" ? body.presenter : undefined,
-            renderMode: body.renderMode === "agent" ? "agent" : undefined,
-            style: typeof body.style === "string" ? body.style : undefined,
-            orientation: body.orientation === "portrait" || body.orientation === "landscape" ? body.orientation : undefined,
-            creativeBrief: typeof body.creativeBrief === "string" ? body.creativeBrief : undefined,
-          });
-          json(res, 201, { ok: true, path: r.path });
-        } catch (e) {
-          json(res, 500, { ok: false, error: e instanceof Error ? e.message : String(e) });
-        }
-        return;
-      }
-
       // GET /audit — compliance trail (prompt + outcome + diff), newest first,
       // filterable by ?taskId=&status=&event=&limit=. Never returns secrets.
       if (req.method === "GET" && urlPath === "/audit") {
@@ -4258,24 +4037,6 @@ export function createDaemonServer() {
           json(res, 201, task);
           return;
         }
-        // "Make me an AI-news video" → route straight to the structured draft +
-        // review (one task with the full script + Edit-the-draft), instead of a
-        // general agent that would spawn a second review task plus a summary.
-        // Skipped for broad multi-step prompts (those become a Work Package) and
-        // when an explicit non-auto route is chosen.
-        const { isAiNewsVideoRequest } = await import("@/lib/video/news-intent");
-        if (route === "auto" && !broad && body.executor !== "video-review" && isAiNewsVideoRequest(description)) {
-          try {
-            const { draftNewsVideo } = await import("@/lib/video/news-review");
-            const draft = await draftNewsVideo({});
-            if (draft.taskId) broadcast("tasks:created", { taskId: draft.taskId });
-            json(res, 201, { routed: "video-review", taskId: draft.taskId, draftId: draft.id, title: draft.title });
-            return;
-          } catch (e) {
-            console.error(`[tasks] AI-news video route failed; creating a normal task: ${e instanceof Error ? e.message : e}`);
-            // fall through to a normal task
-          }
-        }
         // "use browser lane to …" / "search the web for …" / "read|open <url> … in
         // browser lane" → route to the Browser Lane, at parity with the voice path.
         // iOS (and any /tasks caller) previously had no Browser Lane route, so these
@@ -4388,7 +4149,7 @@ export function createDaemonServer() {
         // Package DRAFT with proposed child items (never an auto-running swarm);
         // everything else falls through to the unchanged normal-task path.
         if ((route === "work_package" || route === "auto") &&
-            body.executor !== "workflow" && body.executor !== "terminal-lane" && body.executor !== "video-review") {
+            body.executor !== "workflow" && body.executor !== "terminal-lane") {
           try {
             const { classifyIntakeAsync, forceWorkPackage } = await import("@/lib/intake/classify");
             const { activeSameProjectTasks } = await import("@/lib/work-packages/active");
@@ -4518,33 +4279,6 @@ export function createDaemonServer() {
         const tid = replyMatch[1];
         const body = await parseBody(req) as Record<string, unknown>;
         const text = String(body.text ?? "").trim();
-        // Video script review: a reply to a video-draft review task drives
-        // approve / edit / regenerate / cancel — not the generic agent re-queue.
-        let videoDraftId: string | undefined;
-        try {
-          const { Task } = await import("@/lib/db");
-          const t = await Task.findById(tid);
-          const rawOut = t ? (t as Record<string, unknown>).output : undefined;
-          const parsed = typeof rawOut === "string" ? JSON.parse(rawOut) : rawOut;
-          const d = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).videoDraftId : undefined;
-          if (typeof d === "string" && d) videoDraftId = d;
-        } catch { /* detection failed → treat as a normal task */ }
-        if (videoDraftId) {
-          // Creating the Browser Lane portal child task is an outward workflow step
-          // — require an EXPLICIT word ("approve" / an edited script / "cancel"),
-          // never a blank submission.
-          if (!text) { json(res, 400, { error: "Reply \"approve\" to create the Browser Lane portal task, paste an edited script, give a change to rework it, or \"cancel\"." }); return; }
-          try {
-            const { resolveVideoDraft } = await import("@/lib/video/news-review");
-            const out = await resolveVideoDraft(videoDraftId, text);
-            broadcast("tasks:updated", { taskId: tid });
-            json(res, 200, { ok: true, video: out?.decision.action ?? "ignored", reply: out?.reply });
-          } catch (e) {
-            console.error(`[video-review] resolve failed: ${e instanceof Error ? e.message : e}`);
-            json(res, 500, { error: "video review action failed" });
-          }
-          return;
-        }
         const { normalizeTaskAttachments, prependAttachmentBlock } = await import("@/lib/tasks/attachments");
         const attachments = normalizeTaskAttachments(Array.isArray(body.attachments) ? body.attachments as unknown[] : []);
         if (!text && !attachments.length) { json(res, 400, { error: "text or attachment is required" }); return; }

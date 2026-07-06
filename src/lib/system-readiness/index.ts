@@ -7,8 +7,6 @@ import { getWorkflowInbox, type WorkflowInbox } from "@/lib/workflows/inbox";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { getBundledVersion } from "@/lib/version/bundle-version";
 import { seedDefaultCooRoutingRules } from "@/lib/coo/store";
-import { seedHeyGenBrowserSite } from "@/lib/browser-lane/heygen";
-import { reviewPrompt } from "@/lib/video/review";
 
 export type SystemReadinessSeverity = "ok" | "info" | "warn" | "critical";
 
@@ -32,8 +30,6 @@ export interface SystemReadinessReport {
 
 export const SYSTEM_READINESS_REPAIR_ACTIONS = [
   "seed_coo_rules",
-  "seed_heygen_browser_site",
-  "refresh_legacy_video_reviews",
 ] as const;
 export type SystemReadinessRepairActionId = (typeof SYSTEM_READINESS_REPAIR_ACTIONS)[number];
 
@@ -124,16 +120,6 @@ const REPAIR_COPY: Record<SystemReadinessRepairActionId, SystemReadinessRepairAc
     label: "Seed COO rules",
     description: "Install the canonical default COO routing rules without overwriting operator edits.",
   },
-  seed_heygen_browser_site: {
-    id: "seed_heygen_browser_site",
-    label: "Seed HeyGen site",
-    description: "Register the HeyGen Browser Lane site/probe/rule while preserving SSO metadata.",
-  },
-  refresh_legacy_video_reviews: {
-    id: "refresh_legacy_video_reviews",
-    label: "Refresh video review copy",
-    description: "Update stale video review prompts to the current Browser Lane approval wording.",
-  },
 };
 
 function cooRoutingCheck(): SystemReadinessCheck {
@@ -163,7 +149,6 @@ function browserReadinessCheck(dashboard: MinimalBrowserDashboard): SystemReadin
       "No Browser Lane sites are configured.",
       "Add the key business sites and mark or probe readiness before routing authenticated browser work.",
       { sites: 0 },
-      [REPAIR_COPY.seed_heygen_browser_site],
     );
   }
   if (totals.needsAttention > 0 || totals.stale > 0) {
@@ -273,41 +258,6 @@ function localModelCheck(health: MinimalLocalModelHealth | null): SystemReadines
   return check("local-model", "Local model", "ok", `${modelLabel} ready${rate}.`, undefined, detail);
 }
 
-function legacyVideoReviewCheck(): SystemReadinessCheck {
-  const rows = getDb().prepare(`
-    SELECT _id, title, description, error, status, reviewState, updatedAt
-    FROM tasks
-    WHERE status IN ('review', 'needs_input')
-    ORDER BY datetime(updatedAt) DESC, rowid DESC
-    LIMIT 100
-  `).all() as Array<{ _id: string; title: string; description: string; error: string | null; status: string; reviewState: string | null; updatedAt: string }>;
-  const legacy = rows.filter((row) => {
-    const blob = `${row.title}\n${row.description}\n${row.error ?? ""}`.toLowerCase();
-    return blob.includes("make-avatar.mjs") || blob.includes("heygen costs") || blob.includes("render + publish") || blob.includes("before it renders");
-  }).slice(0, 8);
-  if (!legacy.length) {
-    return check("legacy-video-review-tasks", "Legacy video review tasks", "ok", "No active legacy API-render video review tasks found.");
-  }
-  return check(
-    "legacy-video-review-tasks",
-    "Legacy video review tasks",
-    "warn",
-    `${legacy.length} legacy video review task${legacy.length === 1 ? "" : "s"} still mention old API render flow.`,
-    "Cancel/recreate or reply again so current Browser Lane approval handling can take over.",
-    {
-      tasks: legacy.map((row) => ({
-        id: row._id,
-        title: cleanSnippet(row.title, 100),
-        status: row.status,
-        reviewState: row.reviewState,
-        error: cleanSnippet(row.error, 140),
-        updatedAt: row.updatedAt,
-      })),
-    },
-    [REPAIR_COPY.refresh_legacy_video_reviews],
-  );
-}
-
 function recentFailedTasksCheck(): SystemReadinessCheck {
   const rows = getDb().prepare(`
     SELECT _id, title, source, error, updatedAt
@@ -371,7 +321,6 @@ export async function getSystemReadinessReport(deps: SystemReadinessDeps = {}): 
     browserReadinessCheck(getBrowserDashboard()),
     laneAppsCheck(await getLaneApps()),
     workflowInboxCheck(getInbox()),
-    legacyVideoReviewCheck(),
     recentFailedTasksCheck(),
   ];
   checks.sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) || a.label.localeCompare(b.label));
@@ -389,53 +338,6 @@ function isRepairAction(value: unknown): value is SystemReadinessRepairActionId 
   return typeof value === "string" && (SYSTEM_READINESS_REPAIR_ACTIONS as readonly string[]).includes(value);
 }
 
-function legacyVideoWhere(): string {
-  return `
-    status IN ('review', 'needs_input')
-    AND source = 'video'
-    AND (
-      lower(description) LIKE '%make-avatar.mjs%'
-      OR lower(description) LIKE '%heygen costs%'
-      OR lower(description) LIKE '%render + publish%'
-      OR lower(description) LIKE '%before it renders%'
-      OR lower(coalesce(error, '')) LIKE '%make-avatar.mjs%'
-    )
-  `;
-}
-
-function refreshLegacyVideoReviews(): number {
-  const rows = getDb().prepare(`
-    SELECT _id, output, error
-    FROM tasks
-    WHERE ${legacyVideoWhere()}
-    ORDER BY datetime(updatedAt) DESC, rowid DESC
-    LIMIT 100
-  `).all() as Array<{ _id: string; output: string; error: string | null }>;
-  let changed = 0;
-  for (const row of rows) {
-    let output: Record<string, unknown>;
-    try {
-      output = JSON.parse(row.output || "{}") as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-    const script = typeof output.reviewScript === "string" ? output.reviewScript.trim() : "";
-    if (!script) continue;
-    const shouldClearError = /make-avatar\.mjs|heygen costs|render failed/i.test(row.error ?? "");
-    getDb().prepare(`
-      UPDATE tasks
-      SET description = ?,
-          error = CASE WHEN ? THEN NULL ELSE error END,
-          status = 'review',
-          reviewState = 'needs_input',
-          updatedAt = datetime('now')
-      WHERE _id = ?
-    `).run(reviewPrompt(script), shouldClearError ? 1 : 0, row._id);
-    changed += 1;
-  }
-  return changed;
-}
-
 export async function performSystemReadinessRepair(input: { action: unknown }, deps: SystemReadinessDeps = {}): Promise<SystemReadinessRepairResult> {
   if (!isRepairAction(input.action)) {
     throw new Error(`Unsupported system readiness repair action: ${String(input.action ?? "")}`);
@@ -446,16 +348,6 @@ export async function performSystemReadinessRepair(input: { action: unknown }, d
     case "seed_coo_rules":
       changed = seedDefaultCooRoutingRules("system-readiness-repair");
       message = changed ? `Seeded ${changed} COO routing rule${changed === 1 ? "" : "s"}.` : "COO routing rules were already seeded.";
-      break;
-    case "seed_heygen_browser_site": {
-      const seeded = seedHeyGenBrowserSite();
-      changed = 1;
-      message = `Registered HeyGen Browser Lane site, probe, and COO rule (${seeded.ruleId}).`;
-      break;
-    }
-    case "refresh_legacy_video_reviews":
-      changed = refreshLegacyVideoReviews();
-      message = changed ? `Refreshed ${changed} legacy video review task${changed === 1 ? "" : "s"}.` : "No refreshable legacy video review tasks found.";
       break;
   }
   return {

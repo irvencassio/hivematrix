@@ -87,22 +87,6 @@ export interface OutboundRoutingPromptOptions {
 }
 
 /**
- * Injected only when the `video` feature is enabled — tells the agent to produce
- * videos via the local video factory rather than improvising. The render runs
- * out-of-process and returns the output mp4 path.
- */
-export function videoRoutingPrompt(): string {
-  const port = daemonPort();
-  return [
-    "--- Video creation (video factory) ---",
-    "To make a polished, portal-like creative video with HeyGen Video Agent scene composition, animated text cards, transitions, and pacing, POST to the local daemon — do NOT try to render video yourself:",
-    `  curl -s -X POST "http://127.0.0.1:${port}/video/make" -H "Content-Type: application/json" \\`,
-    `    --data '{"topic":"WHAT THE VIDEO IS ABOUT","renderMode":"agent","lang":"en","seconds":45,"orientation":"landscape","creativeBrief":"Add short animated text cards between the main points and use energetic portal-style pacing."}'`,
-    'Use "script" instead of "topic" to supply exact source narration. Omit "renderMode":"agent" only for local cloned-voice how-to renders with screen footage. The JSON response includes the output mp4 "path".',
-  ].join("\n");
-}
-
-/**
  * The system-prompt block injected into the Claude Code / Codex agent so it
  * routes outbound email + messaging through Mail Lane/Message Lane instead of
  * improvising. Mirrors the local agent's capabilityRoutingGuide, but expressed

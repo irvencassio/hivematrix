@@ -671,7 +671,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .board-sec { margin: 0; }
   .board-sec-header { font-size: 14px; font-weight: 600; margin: 20px 0 6px; color: var(--text); display: flex; align-items: center; gap: 8px; }
   /* Standardized task-detail action row. One set of tokens for every reply/review/
-     retry/steer/video control so heights, radius, padding, and min-width match. */
+     retry/steer control so heights, radius, padding, and min-width match. */
   .action-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
   .action-bar > button { min-height: 30px; min-width: 72px; border-radius: 6px; padding: 6px 14px;
     font-size: 12px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center;
@@ -696,7 +696,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   }
   .reply-question { background: var(--reply-q-bg); border: 1px solid var(--accent-2); border-radius: 6px;
     padding: 8px 12px; font-size: 12px; color: var(--text); margin-bottom: 8px; }
-  /* Reply/retry/steer/video textarea fills the column (it's a block child of the
+  /* Reply/retry/steer textarea fills the column (it's a block child of the
      section, so flex:1 was a no-op) and keeps a stable minimum height. */
   .reply-input { width: 100%; box-sizing: border-box; background: var(--panel-2); border: 1px solid var(--border);
     border-radius: 6px; color: var(--text); font: 12px/1.4 inherit; padding: 8px 10px; min-height: 64px; resize: vertical; }
@@ -960,7 +960,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         </div>
         <div class="role-row"><span class="role-name">⚙️ Operational <span class="muted">bulk execution · file ops (on-device)</span></span>
           <select id="s_role_operational" onchange="saveRoleModel('operational', this.value)"></select></div>
-        <div class="role-row"><span class="role-name">✍️ Writer <span class="muted">video scripts · briefings · summaries · drafts</span></span>
+        <div class="role-row"><span class="role-name">✍️ Writer <span class="muted">briefings · summaries · drafts</span></span>
           <select id="s_role_writer" onchange="saveRoleModel('writer', this.value)"></select></div>
       </div>
 
@@ -1268,7 +1268,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </div>
       <div class="muted" style="font-size:11px;margin:4px 0 8px">Route a request through your COO rules. Browser Lane is the canonical browser automation path; risky lanes (mail, message, desktop, terminal) return approval-required and never act here.</div>
       <textarea id="coo_text" rows="2" placeholder="Objective — e.g. Upload today's script on the site" style="width:100%;box-sizing:border-box"></textarea>
-      <input id="coo_domains" placeholder="Target domain(s), comma-separated — e.g. app.heygen.com" style="width:100%;box-sizing:border-box;margin-top:6px" />
+      <input id="coo_domains" placeholder="Target domain(s), comma-separated — e.g. github.com" style="width:100%;box-sizing:border-box;margin-top:6px" />
       <label class="flbl" style="margin:6px 0 2px;display:block">Project <span class="muted" style="font-size:10px;font-weight:400">(required to create a task)</span></label>
       <div id="coo_project_wrapper" class="project-search" style="margin-bottom:0">
         <input id="coo_project_search" type="text" placeholder="Search projects…" autocomplete="off" oninput="mpFilter('coo')" onfocus="mpOpen('coo')" onkeydown="mpKeydown(event,'coo')" />
@@ -1324,24 +1324,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="coo_rules_list" style="margin-top:8px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
-        <label class="flbl" style="margin:0">HeyGen portal videos</label>
-        <button class="copybtn" onclick="renderPortalVideos()">↻ Refresh</button>
-      </div>
-      <div class="muted" style="font-size:11px;margin:4px 0 6px">HeyGen portal lifecycle: a Browser Lane task does the portal work; record its completion here, then publish a completed local video to YouTube without re-rendering. Runbook: docs/runbooks/heygen-portal-video-pipeline.md</div>
-      <div id="portal_videos" style="margin-top:6px"></div>
-      <details style="margin-top:8px"><summary class="muted" style="font-size:11px;cursor:pointer">Record portal completion</summary>
-        <div style="margin-top:6px">
-          <input id="portal_parentDraftId" placeholder="Draft id (parentDraftId)" style="width:100%;box-sizing:border-box" />
-          <input id="portal_childTaskId" placeholder="Child task id (optional)" style="width:100%;box-sizing:border-box;margin-top:6px" />
-          <input id="portal_localVideoPath" placeholder="Local video path — e.g. ~/out/final.mp4 (publishable)" style="width:100%;box-sizing:border-box;margin-top:6px" />
-          <input id="portal_finalVideoUrl" placeholder="HeyGen video URL (manual — no local file)" style="width:100%;box-sizing:border-box;margin-top:6px" />
-          <input id="portal_manualCompletionNote" placeholder="Manual completion note (optional)" style="width:100%;box-sizing:border-box;margin-top:6px" />
-          <div class="row" style="margin-top:6px"><button class="create" onclick="submitPortalCompletion()">Record completion</button></div>
-          <div id="portal_complete_result" class="muted" style="font-size:11px;margin-top:4px"></div>
-        </div>
-      </details>
-      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
-      <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Workflows</label>
         <button class="copybtn" onclick="renderWorkflows()">↻ Refresh</button>
       </div>
@@ -1353,15 +1335,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="workflow_inbox" style="margin-top:4px"></div>
       <div id="workflows_list" style="margin-top:10px"></div>
       <div class="row" style="margin-top:8px;gap:6px;align-items:center">
-        <input id="brief_topic" placeholder="Research brief topic — e.g. AI video tools for solo founders" style="flex:1;box-sizing:border-box" />
+        <input id="brief_topic" placeholder="Research brief topic — e.g. AI tools for solo founders" style="flex:1;box-sizing:border-box" />
         <button class="create" onclick="prepareResearchBrief()">Prepare research brief</button>
       </div>
       <div id="brief_result" class="muted" style="font-size:11px;margin-top:4px"></div>
-      <div class="row" style="margin-top:6px;gap:6px;align-items:center">
-        <input id="script_topic" placeholder="Video script topic (uses local brief context if available)" style="flex:1;box-sizing:border-box" />
-        <button class="create" onclick="prepareVideoScript()">Prepare video script</button>
-      </div>
-      <div id="script_result" class="muted" style="font-size:11px;margin-top:4px"></div>
       <div class="muted" style="font-size:11px;margin:8px 0 4px">Proposed next actions</div>
       <div id="workflow_actions" style="margin-top:4px"></div>
       <div class="muted" style="font-size:11px;margin:8px 0 4px">Recent runs</div>
@@ -2747,21 +2724,7 @@ function taskActionsHtml(t) {
   }
   // Reply box. needs_input → the fully-standout card (auto-open). Otherwise a
   // subtler "reply to continue" box (toggled open from the ↩ Reply button).
-  if (!steerable && t.executor === "video-review") {
-    // Dedicated script-review controls: edit + Save (stays in review), Approve to
-    // create the Browser Lane HeyGen portal task, or Cancel. Explicit buttons so
-    // "submit" is unmissable and editing never silently creates the portal task.
-    html += '<div id="replySection_'+t._id+'" class="reply-section open needs">'
-      + '<div class="reply-head">🎬 Review the script</div>'
-      + '<div class="reply-subhead">Click <b>Edit script</b>, revise it, then <b>Save edits</b> (stays here to re-read) — or <b>Approve</b> to create a Browser Lane HeyGen portal task. A short note instead = rework.</div>'
-      + '<div class="action-bar"><button class="ghost-action" onclick="loadDraftIntoReply()">✎ Edit script</button></div>'
-      + '<textarea id="replyText" class="reply-input" placeholder="Edit the script here (or type a short note like \'drop story 2\' to rework)…" rows="8" oninput="onCtxDraft(\'reply\',this)"></textarea>'
-      + '<div class="action-bar">'
-      + '<button class="primary-action" onclick="replyTask(\''+t._id+'\')">💾 Save edits / Send</button>'
-      + '<button class="secondary-action" onclick="videoReviewAction(\''+t._id+'\',\'approve\')">✅ Approve → Browser Lane</button>'
-      + '<button class="danger-action" onclick="videoReviewAction(\''+t._id+'\',\'cancel\')">✕ Cancel</button>'
-      + '</div></div>';
-  } else if (!steerable) {
+  if (!steerable) {
     const isOpen = t.reviewState === "needs_input";
     const q = t.pendingQuestion ? '<div class="reply-question">'+esc(t.pendingQuestion)+'</div>' : '';
     html += '<div id="replySection_'+t._id+'" class="reply-section'+(isOpen?' open needs':' subtle')+'">'
@@ -3049,18 +3012,6 @@ async function replyTask(id) {
   const r = await api("/tasks/"+id+"/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, attachments }) });
   if (r && r.ok) { _ctxAttach.reply = []; _ctxAttachError.reply = ""; _ctxDraft.reply = ""; if (el) el.value = ""; refresh(); selectTask(id); }
   else { hmAlert(r?.error || "Failed to send reply"); el.disabled = false; }
-}
-
-// One-click video-review decisions (approval creates the Browser Lane portal task).
-async function videoReviewAction(id, action) {
-  if (action === "approve") {
-    if (!await hmConfirm("Approve this script and create a Browser Lane HeyGen portal task? Publishing happens later after the portal video is completed.")) return;
-  } else if (action === "cancel") {
-    if (!await hmConfirm("Cancel this video draft? Nothing is rendered or published.")) return;
-  }
-  const r = await api("/tasks/"+id+"/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: action }) });
-  if (r && r.ok) { hmToast(action === "approve" ? "Approved — Browser Lane portal task requested." : "Cancelled.", "ok"); refresh(); selectTask(id); }
-  else { hmAlert((r && r.error) || "Action failed"); }
 }
 
 function toggleReply(id) {
@@ -6376,10 +6327,6 @@ async function openReleases() {
 }
 function closeReleases() { document.getElementById("releasesOverlay").classList.remove("open"); }
 
-// The news-video draft is reached through normal task creation / voice intent
-// (src/lib/video/news-intent.ts) — not a bespoke board button. A future Command
-// Library surface will host repeatable actions like this; see the design doc.
-
 // Mixed-mode role models: thinking → frontier-premium, coding → frontier,
 // operational → local. Shown only when a Mixed posture is possible (local +
 // frontier both configured). Empty value = the router's built-in default.
@@ -6470,7 +6417,7 @@ function switchSettingsTab(tab) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderSystemReadiness(); renderLaneSetup(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderPortalVideos(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); renderWorkPackages(); renderVaultRefs(); }
+  if (tab === "lanes") { renderSystemReadiness(); renderLaneSetup(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); renderWorkPackages(); renderVaultRefs(); }
   if (tab === "setup") renderSettingsSetup();
   if (tab === "features") renderFeatures();
   if (tab === "about") { renderAbout(); checkUpdate(); }
@@ -6522,9 +6469,6 @@ async function renderFeatures() {
     + '<div class="muted" style="font-size:11px;margin-top:2px">Runs canned text scenarios through Talk routing. No mic, STT, or audio playback.</div></div>'
     + '<button class="copybtn" onclick="runVoiceLogicTest(this)">Run test</button>'
     + '</div><div id="s_voice_logic_result" style="margin-top:8px"></div></div>';
-  // Video factory is no longer a Features toggle — it's a capability driven by a
-  // scheduled job that runs the factory and pauses at the script-review checkpoint.
-  // Nothing to render here.
   el.innerHTML = featureRows + autoRow + voiceLogicRow;
 }
 
@@ -7665,69 +7609,6 @@ async function runTerminalReadiness() {
   renderTerminalReadiness(); // re-render the dashboard after the sweep
 }
 
-// --- HeyGen portal videos (operator) ----------------------------------------
-// Portal lifecycle: a Browser Lane child task does the portal work; the operator
-// records its completion, then publishes a completed LOCAL video to YouTube
-// without re-rendering. needs_publish_input stays manual (no local file).
-const PORTAL_STATES = ["portal_pending", "portal_completed", "needs_publish_input"];
-async function renderPortalVideos() {
-  const el = document.getElementById("portal_videos");
-  if (!el) return;
-  el.innerHTML = '<div class="muted">Loading…</div>';
-  const r = await api("/video/drafts");
-  const drafts = ((r && r.drafts) || []).filter(d => PORTAL_STATES.includes(d.status) || (d.status === "published" && d.portalCompletedAt));
-  if (!drafts.length) { el.innerHTML = '<div class="muted" style="font-size:11px">No HeyGen portal videos right now.</div>'; return; }
-  el.innerHTML = drafts.map(d => {
-    let action = '', note = '';
-    if (d.status === "portal_pending") {
-      note = 'Waiting on the portal task'+(d.portalTaskId ? ' ('+esc(d.portalTaskId)+')' : '')+'.';
-    } else if (d.status === "portal_completed") {
-      note = 'Ready to publish — uploads the existing local video, no re-render.';
-      action = '<button class="create" onclick="publishPortalDraft(\''+esc(d.id)+'\')">Publish to YouTube</button>';
-    } else if (d.status === "needs_publish_input") {
-      note = 'No local file — manual only.'+(d.portalVideoUrl ? ' HeyGen URL: '+esc(d.portalVideoUrl) : '')+(d.manualCompletionNote ? ' Note: '+esc(d.manualCompletionNote) : '');
-    } else if (d.status === "published") {
-      note = d.youtubeUrl ? 'Published: '+esc(d.youtubeUrl) : 'Published.';
-    }
-    return '<div class="card" style="cursor:default">'
-      + '<div class="t">'+esc(d.title)+' <span class="badge">'+esc(d.status)+'</span></div>'
-      + '<div class="muted" style="font-size:11px;margin-top:2px">'+note+'</div>'
-      + (action ? '<div class="row" style="margin-top:6px;justify-content:flex-end">'+action+'</div>' : '')
-      + '</div>';
-  }).join("");
-}
-async function publishPortalDraft(draftId) {
-  const r = await api("/video/publish-draft", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ draftId: draftId }) });
-  if (r && r.ok) { hmToast(r.alreadyPublished ? "Already published." : "Published to YouTube"+(r.youtubeUrl ? ": "+r.youtubeUrl : "")+".", "ok"); }
-  else { hmAlert((r && r.reason) || (r && r.error) || "Publish failed"); }
-  renderPortalVideos();
-}
-async function submitPortalCompletion() {
-  const out = document.getElementById("portal_complete_result");
-  const body = {
-    parentDraftId: (document.getElementById("portal_parentDraftId").value || "").trim(),
-    childTaskId: (document.getElementById("portal_childTaskId").value || "").trim() || undefined,
-    localVideoPath: (document.getElementById("portal_localVideoPath").value || "").trim() || undefined,
-    finalVideoUrl: (document.getElementById("portal_finalVideoUrl").value || "").trim() || undefined,
-    manualCompletionNote: (document.getElementById("portal_manualCompletionNote").value || "").trim() || undefined,
-  };
-  if (!body.parentDraftId) { if (out) out.innerHTML = '<span class="err">Draft id is required.</span>'; return; }
-  const r = await api("/video/portal-complete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
-  if (out) out.innerHTML = (r && r.ok) ? 'Recorded — draft is now '+esc(r.status)+'.' : '<span class="err">'+esc((r && r.reason) || (r && r.error) || "Failed")+'</span>';
-  renderPortalVideos();
-}
-async function createPortalTask(draftId) {
-  // Load the draft's script + title, then route through COO/Browser Lane readiness gates.
-  const d = await api("/video/drafts/"+encodeURIComponent(draftId));
-  const draft = d && d.draft; const script = (d && d.script) || "";
-  if (!draft || !script) { hmAlert("Draft has no script to send to the portal."); return; }
-  const r = await api("/video/heygen-workflow", { method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ script: script, title: draft.title, parentDraftId: draftId, create: true, projectPath: "~" }) });
-  if (r && r.ok) { hmToast("Portal task: "+esc((r.result && r.result.status) || "created")+".", "ok"); }
-  else { hmAlert((r && r.error) || "Create portal task failed"); }
-  renderPortalVideos();
-}
-
 // --- Workflows registry (discovery) -----------------------------------------
 async function renderWorkflows() {
   const el = document.getElementById("workflows_list");
@@ -7981,44 +7862,6 @@ async function prepareResearchBrief() {
   const preview = String(md).split("\n").slice(0, 4).join(" · ");
   if (out) out.innerHTML = 'Brief ready (run '+esc(r.runId)+'): '+esc(preview);
   renderWorkflowRuns(); renderWorkflowActions();
-}
-async function prepareVideoScript() {
-  const out = document.getElementById("script_result");
-  const topic = (document.getElementById("script_topic").value || "").trim();
-  if (!topic) { if (out) out.innerHTML = '<span class="err">Enter a topic first.</span>'; return; }
-  if (out) out.innerHTML = '<span class="muted">Drafting script…</span>';
-  // Topic-only path: seed a minimal brief so the draft can be assembled. Approve/edit later.
-  const r = await api("/workflows/content.video_script_from_brief/prepare", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ topic: topic, briefMarkdown: "Drafting from the topic; no prior research brief." }) });
-  if (!r || !r.ok) { if (out) out.innerHTML = '<span class="err">'+esc((r && r.error) || "Draft failed")+'</span>'; return; }
-  const md = (r.result && r.result.markdown) || "";
-  // Editable draft + review controls. The script is a DRAFT requiring review before the
-  // proposed HeyGen action can run.
-  if (out) out.innerHTML =
-      '<div class="muted">Draft script ready — <b>requires review</b> (run '+esc(r.runId)+').</div>'
-    + '<textarea id="script_edit_'+esc(r.runId)+'" rows="6" style="width:100%;box-sizing:border-box;margin-top:4px">'+esc(md)+'</textarea>'
-    + '<div class="row" style="margin-top:4px;gap:6px;flex-wrap:wrap">'
-    + '<button class="copybtn" onclick="saveScriptRevision(\''+esc(r.runId)+'\')">Save revision</button>'
-    + '<button class="create" onclick="reviewWorkflowRun(\''+esc(r.runId)+'\',\'approve\')">Approve</button>'
-    + '<button class="copybtn" onclick="reviewWorkflowRun(\''+esc(r.runId)+'\',\'request_changes\')">Request changes</button>'
-    + '<button class="cancel" onclick="reviewWorkflowRun(\''+esc(r.runId)+'\',\'reject\')">Reject</button>'
-    + '</div><div id="script_review_'+esc(r.runId)+'" class="muted" style="font-size:11px;margin-top:2px"></div>';
-  renderWorkflowRuns(); renderWorkflowActions();
-}
-async function saveScriptRevision(runId) {
-  const ta = document.getElementById("script_edit_"+runId);
-  const note = document.getElementById("script_review_"+runId);
-  const value = ta ? ta.value : "";
-  const r = await api("/workflows/runs/"+encodeURIComponent(runId)+"/artifact", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ key: "scriptMarkdown", value: value }) });
-  if (note) note.innerHTML = (r && r.ok) ? 'Revision saved.' : '<span class="err">'+esc((r && r.error) || "Save failed")+'</span>';
-}
-async function reviewWorkflowRun(runId, decision) {
-  const note = document.getElementById("script_review_"+runId);
-  const r = await api("/workflows/runs/"+encodeURIComponent(runId)+"/review", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ decision: decision }) });
-  if (r && r.ok) {
-    const msg = decision === "approve" ? 'Approved and ready — the proposed HeyGen action can now run.' : decision === "reject" ? 'Rejected — the action stays blocked.' : 'Changes requested — the action stays blocked.';
-    if (note) note.innerHTML = msg;
-  } else { if (note) note.innerHTML = '<span class="err">'+esc((r && r.error) || "Review failed")+'</span>'; }
-  renderWorkflowRuns(); renderWorkflowActions(); renderWorkflowInbox();
 }
 // --- Workflow inbox / COO queue (read-only; never executes) ------------------
 // Actionable order: needs review → changes requested → ready → blocked → failed →
@@ -8609,7 +8452,7 @@ async function createTask() {
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: projectName, model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent", route }) });
     // POST /tasks may return a normal task ({_id}), a special route
-    // ({routed,taskId} for workflow / terminal-lane / browser-lane / video), or a staged Work
+    // ({routed,taskId} for workflow / terminal-lane / browser-lane), or a staged Work
     // Package ({routed:"work_package", packageId}). All of these are success.
     const ok = t && (t._id || t.taskId || t.routed || t.packageId);
     if (!ok) { err.textContent = (t && t.error) ? String(t.error) : "Create failed."; return; }

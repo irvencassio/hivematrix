@@ -17,7 +17,6 @@ test("voice logic scenarios pass without audio or live mutations", async () => {
   assert.equal(byName.get("browser lane task")?.actual, "command:browserLaneTask");
   assert.equal(byName.get("mail delete review")?.actual, "command:mailDeleteTask");
   assert.equal(byName.get("skill listing")?.actual, "skill:list");
-  assert.equal(byName.get("video review read")?.actual, "video:video-read");
   assert.equal(byName.get("generic handoff")?.actual, "handoff:task");
 
   for (const scenario of result.scenarios) {

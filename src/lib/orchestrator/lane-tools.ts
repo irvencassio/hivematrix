@@ -329,7 +329,7 @@ export function availableLaneTools(policy = getConnectivityPolicy()): ChatTool[]
 /** Intent → tool mapping, shown for one available lane. */
 const CAPABILITY_ROUTING_LINES: Record<string, string> = {
   workflow_inbox: "See what workflow work is pending (needs review / ready / blocked / failed / recently completed) → **workflow_inbox** (read-only; never executes).",
-  coo_dispatch: "Route a browser/site/workflow request through COO routing rules (Browser Lane is the canonical browser automation path) → **coo_dispatch**. Routing + prepare work in every mode; create=true makes the routed Browser Lane task when browser execution is available, otherwise it reports the work is waiting for connectivity (it never silently reroutes). When the request matches a registered workflow (e.g. the HeyGen portal video), the result names the workflow id + runbook.",
+  coo_dispatch: "Route a browser/site/workflow request through COO routing rules (Browser Lane is the canonical browser automation path) → **coo_dispatch**. Routing + prepare work in every mode; create=true makes the routed Browser Lane task when browser execution is available, otherwise it reports the work is waiting for connectivity (it never silently reroutes). When the request matches a registered workflow (e.g. the YouTube summary), the result names the workflow id + runbook.",
   mail_send: "Send an email → **mail_send** (sends to trusted recipients; drafts for approval otherwise). Save a draft only → **mail_draft**.",
   message_send: "Send an SMS / iMessage → **message_send** (allowlisted recipients only).",
   hivematrix_browser: "Read/search the live web or drive logged-in/multi-step browser workflows → **hivematrix_browser**.",

@@ -11,6 +11,5 @@ test("pre-release operator-path smoke checklist passes", async () => {
   const names = checks.map((c) => c.name).join("\n");
   assert.match(names, /lane-apps status returns Browser Lane \+ Terminal Lane/);
   assert.match(names, /leaks no secret values/);
-  assert.match(names, /video approval routes through Browser Lane portal/);
   assert.match(names, /workflow inbox loads/);
 });

@@ -102,10 +102,10 @@ test("formatCooDispatchResult surfaces a matched registered workflow (id + runbo
   const out = formatCooDispatchResult({
     status: "prepared", request: { text: "x" }, route: null, lane: "browser", capability: "workflow.run",
     workItem: null, approval: null, readiness: null,
-    workflow: { id: "heygen.portal_video_from_script", name: "HeyGen portal video from script", lane: "browser", runbook: "docs/runbooks/heygen-portal-video-pipeline.md" },
+    workflow: { id: "content.youtube_summary", name: "YouTube video summary", lane: "review", runbook: "docs/runbooks/youtube-summary.md" },
     reason: "Prepared.", auditId: "a1", taskId: null,
   } as never);
-  assert.match(out, /heygen\.portal_video_from_script/);
+  assert.match(out, /content\.youtube_summary/);
   assert.match(out, /runbook|docs\/runbooks/i);
 });
 

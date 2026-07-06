@@ -13,7 +13,6 @@ import { writeJsonAtomic } from "./atomic-write";
 export const KNOWN_FEATURES = [
   { key: "ado", label: "Azure DevOps", description: "Register the Azure DevOps MCP server so agents can operate repos, PRs, pipelines, and work items." },
   { key: "voice", label: "Voice Lane", description: "Live voice conversation, phone-answering, and spoken replies in the Kokoro voice. Advanced — runs the local voice sidecar." },
-  { key: "video", label: "Video factory", description: "Turn a script or topic into a narrated, captioned how-to/explainer video in your cloned voice. Advanced — runs the local video pipeline." },
   { key: "openclaw.chatDock", label: "OpenClaw Chat", description: "Show OpenClaw chat as a center-pane workspace in the HiveMatrix console. OpenClaw must be installed and its Gateway must be reachable on this Mac." },
 ] as const;
 
@@ -45,10 +44,10 @@ export function parseFeatures(config: Record<string, unknown>): Record<string, b
   return out;
 }
 
-// Features that run heavy local models (Apple Silicon + RAM). The voice/video
-// pipelines need MLX (whisper + cloned-voice TTS + the video stack), so they're
-// gated; the UI greys the toggle out on machines that can't run them.
-const HEAVY_FEATURES = new Set<string>(["voice", "video"]);
+// Features that run heavy local models (Apple Silicon + RAM). The voice pipeline
+// needs MLX (whisper + Kokoro TTS), so it's gated; the UI greys the toggle out on
+// machines that can't run it.
+const HEAVY_FEATURES = new Set<string>(["voice"]);
 const MIN_RAM_GB = 16;
 
 export interface FeatureCapability { capable: boolean; reason?: string }

@@ -9,7 +9,7 @@ process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
 const { getDb, _resetDbForTests } = await import("@/lib/db");
 const { getWorkflowRun } = await import("./runs");
-const { listWorkflowActions, getWorkflowAction } = await import("./actions");
+const { listWorkflowActions } = await import("./actions");
 const { buildResearchBriefMarkdown, prepareContentResearchBrief } = await import("./content-research");
 
 before(() => { _resetDbForTests(); getDb(); });
@@ -19,7 +19,7 @@ beforeEach(() => { getDb().exec("DELETE FROM workflow_runs; DELETE FROM workflow
 const fakeSearch = async () => ({
   root: "/brain", query: "x", terms: ["x"], filesScanned: 2, truncated: false,
   hits: [
-    { path: "projects/ai-video.md", score: 3, snippet: "Local notes on AI video tooling and HeyGen." },
+    { path: "projects/ai-tools.md", score: 3, snippet: "Local notes on AI tooling for solo founders." },
     { path: "ideas/shorts.md", score: 2, snippet: "Shorts perform best under 60 seconds." },
   ],
 });
@@ -77,65 +77,13 @@ test("prepareContentResearchBrief requires a topic", async () => {
   await assert.rejects(() => prepareContentResearchBrief({ topic: "  " }, { search: fakeSearch }), /topic/i);
 });
 
-test("preparing a brief proposes the SCRIPT workflow (not HeyGen) and does NOT auto-execute it", async () => {
-  const result = await prepareContentResearchBrief({ topic: "AI video tools" }, { search: fakeSearch });
-  // The brief now bridges to the script-development step.
-  assert.ok(result.proposedAction, "result should include the proposed action");
-  assert.equal(result.proposedAction.targetWorkflowId, "content.video_script_from_brief");
+test("preparing a brief is a standalone deliverable — no downstream proposal or auto-execution", async () => {
+  const result = await prepareContentResearchBrief({ topic: "AI tools" }, { search: fakeSearch });
+  // The brief is a standalone deliverable now — it proposes no downstream workflow.
+  assert.equal(result.proposedAction, null, "the brief no longer proposes a downstream workflow");
 
+  // Nothing downstream was proposed or created during brief prep.
   const actions = listWorkflowActions({ sourceRunId: result.runId });
-  assert.equal(actions.length, 1);
-  const action = actions[0];
-  assert.equal(action.status, "proposed");           // not executed
-  assert.equal(action.resultRunId, null);             // nothing run yet
-  assert.match(action.title, /AI video tools/);
-  // It carries the brief linkage so the script workflow can load it.
-  assert.equal(action.suggestedInputs.sourceRunId, result.runId);
-
-  // Nothing downstream was created during brief prep.
-  const scriptRuns = getDb().prepare("SELECT COUNT(*) AS n FROM workflow_runs WHERE workflowId = 'content.video_script_from_brief'").get() as { n: number };
-  assert.equal(scriptRuns.n, 0);
-
-  assert.doesNotMatch(JSON.stringify(getWorkflowAction(action.id)), /password|cookie|secret|credentialRef|\btoken\b/i);
-});
-
-test("chain: review gate enforced — approve brief, prepare script, revise + approve, then HeyGen prepares with the revised script and no Browser Lane task", async () => {
-  const { executeWorkflowAction } = await import("./actions");
-  const { reviewWorkflowRun, reviseWorkflowRunArtifact, getWorkflowRunRecord } = await import("./runs");
-  const brief = await prepareContentResearchBrief({ topic: "AI video tools", audience: "solo founders" }, { search: fakeSearch });
-  assert.ok(brief.proposedAction);
-
-  // The brief run is needs_review → executing its action is blocked until approved.
-  const blocked = await executeWorkflowAction(brief.proposedAction.id, {});
-  assert.equal(blocked.status, "review_required");
-
-  // Approve the brief → the script action unlocks.
-  reviewWorkflowRun(brief.runId, "approve", {});
-  const scriptExec = await executeWorkflowAction(brief.proposedAction.id, {});
-  assert.equal(scriptExec.ok, true);
-  assert.ok(scriptExec.resultRunId);
-  const scriptRun = getWorkflowRun(scriptExec.resultRunId);
-  assert.equal(scriptRun?.workflowId, "content.video_script_from_brief");
-  assert.equal(scriptRun?.status, "needs_review");
-
-  // The script's HeyGen action is blocked until the script is approved.
-  const heygenAction = listWorkflowActions({ sourceRunId: scriptExec.resultRunId })[0];
-  assert.equal(heygenAction.targetWorkflowId, "heygen.portal_video_from_script");
-  const stillBlocked = await executeWorkflowAction(heygenAction.id, {});
-  assert.equal(stillBlocked.status, "review_required");
-
-  // Revise the script, then approve. Execution must use the REVISED script.
-  reviseWorkflowRunArtifact(scriptExec.resultRunId, "scriptText", "REVISED narration for the final cut.");
-  reviewWorkflowRun(scriptExec.resultRunId, "approve", {});
-  let dispatchedScript = "";
-  const heygenExec = await executeWorkflowAction(heygenAction.id, {}, {
-    prepare: async (_wid, inputs) => { dispatchedScript = String(inputs.script); return { ok: true, status: "prepared", workflow: null }; },
-  });
-  assert.equal(heygenExec.ok, true);
-  assert.match(dispatchedScript, /REVISED narration/);
-
-  // No Browser Lane task was created.
-  const tasks = getDb().prepare("SELECT COUNT(*) AS n FROM tasks WHERE source = 'browser-lane'").get() as { n: number };
-  assert.equal(tasks.n, 0);
-  void getWorkflowRunRecord;
+  assert.equal(actions.length, 0);
+  assert.doesNotMatch(JSON.stringify(getWorkflowRun(result.runId)), /password|cookie|secret|credentialRef|\btoken\b/i);
 });

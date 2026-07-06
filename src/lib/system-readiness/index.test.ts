@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { _resetDbForTests, Task, getDb } from "@/lib/db";
-import { upsertBrowserSite } from "@/lib/browser-lane/store";
 import { getSystemReadinessReport, performSystemReadinessRepair } from "./index";
 
 const TMP = mkdtempSync(join(tmpdir(), "hm-system-readiness-"));
@@ -150,19 +149,7 @@ test("reports lane app install/update/broken states", async () => {
   assert.match(apps?.summary ?? "", /missing/i);
 });
 
-test("reports legacy video review tasks and recent failed tasks with redacted snippets", async () => {
-  await Task.create({
-    _id: "legacy-video",
-    title: "Review video script: AI News",
-    description: "Review this AI-news video script before it renders (HeyGen costs ~$0.05/sec)",
-    project: "hivematrix",
-    projectPath: "/Users/tester",
-    status: "review",
-    reviewState: "needs_input",
-    source: "video",
-    executor: "video-review",
-    error: "Render failed: Command failed: make-avatar.mjs token=SECRET123",
-  });
+test("reports recent failed tasks with redacted snippets", async () => {
   await Task.create({
     _id: "failed-task",
     title: "Broken task",
@@ -181,13 +168,10 @@ test("reports legacy video review tasks and recent failed tasks with redacted sn
   `).run();
 
   const report = await getSystemReadinessReport(baseDeps());
-  const legacy = report.checks.find((c) => c.id === "legacy-video-review-tasks");
   const failed = report.checks.find((c) => c.id === "recent-failed-tasks");
-  assert.equal(legacy?.severity, "warn");
-  assert.match(legacy?.summary ?? "", /legacy video/i);
   assert.equal(failed?.severity, "warn");
   assert.match(failed?.summary ?? "", /1 failed/i);
-  assert.doesNotMatch(JSON.stringify(report), /hunter2|SECRET123/);
+  assert.doesNotMatch(JSON.stringify(report), /hunter2/);
   assert.match(JSON.stringify(report), /\[redacted\]/);
 });
 
@@ -206,56 +190,3 @@ test("seed_coo_rules repair is explicit, idempotent, and refreshes the report", 
   assert.equal(after?.severity, "ok");
 });
 
-test("seed_heygen_browser_site repair preserves existing Google SSO metadata", async () => {
-  upsertBrowserSite({
-    id: "heygen",
-    displayName: "HeyGen",
-    homeUrl: "https://app.heygen.com/home",
-    loginUrl: "https://app.heygen.com/login",
-    allowedDomains: ["app.heygen.com", "heygen.com", "accounts.google.com", "google.com"],
-    authStrategy: "google_sso",
-    providerAccount: "cassio.irv@gmail.com",
-    notes: "Operator confirmed Google SSO works.",
-  });
-
-  const repaired = await performSystemReadinessRepair({ action: "seed_heygen_browser_site" }, baseDeps());
-  assert.equal(repaired.ok, true);
-  const row = getDb().prepare("SELECT authStrategy, providerAccount, allowedDomains, notes FROM browser_sites WHERE _id = 'heygen'").get() as {
-    authStrategy: string;
-    providerAccount: string | null;
-    allowedDomains: string;
-    notes: string;
-  };
-  assert.equal(row.authStrategy, "google_sso");
-  assert.equal(row.providerAccount, "cassio.irv@gmail.com");
-  const domains = JSON.parse(row.allowedDomains) as string[];
-  assert.ok(domains.includes("accounts.google.com"));
-  assert.ok(domains.includes("app.heygen.com"));
-  assert.match(row.notes, /Google SSO works/);
-});
-
-test("refresh_legacy_video_reviews repair rewrites old video copy without approving", async () => {
-  await Task.create({
-    _id: "legacy-video-repair",
-    title: "Review video script: AI News",
-    description: "Review this AI-news video script before it renders (HeyGen costs ~$0.05/sec)",
-    project: "hivematrix",
-    projectPath: "/Users/tester",
-    status: "review",
-    reviewState: "needs_input",
-    source: "video",
-    executor: "video-review",
-    error: "Render failed: Command failed: make-avatar.mjs",
-    output: { reviewScript: "Here is the current approved script." },
-  });
-
-  const repaired = await performSystemReadinessRepair({ action: "refresh_legacy_video_reviews" }, baseDeps());
-  assert.equal(repaired.ok, true);
-  assert.equal(repaired.changed, 1);
-  const task = await Task.findById("legacy-video-repair");
-  assert.equal(task?.status, "review");
-  assert.equal(task?.reviewState, "needs_input");
-  assert.match(task?.description ?? "", /Browser Lane creates the HeyGen portal task/);
-  assert.doesNotMatch(task?.description ?? "", /HeyGen costs|before it renders/i);
-  assert.equal(task?.error, null);
-});

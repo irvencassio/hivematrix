@@ -363,9 +363,9 @@ test("create=true still creates when Browser Lane execution is available (browse
 
 test("dispatch identifies the matching registered workflow from the request domain", () => {
   browserRule();
-  const result = dispatchCooRequest({ text: "make a heygen video", domains: ["app.heygen.com"] });
-  assert.equal(result.workflow?.id, "heygen.portal_video_from_script");
-  assert.equal(result.workflow?.runbook, "docs/runbooks/heygen-portal-video-pipeline.md");
+  const result = dispatchCooRequest({ text: "summarize this youtube video", domains: ["youtube.com"] });
+  assert.equal(result.workflow?.id, "content.youtube_summary");
+  assert.equal(result.workflow?.runbook, "docs/runbooks/youtube-summary.md");
 });
 
 test("dispatch leaves workflow null when nothing in the registry matches", () => {

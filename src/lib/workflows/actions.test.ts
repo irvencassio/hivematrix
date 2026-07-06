@@ -17,7 +17,9 @@ const {
   updateWorkflowActionStatus,
 } = await import("./actions");
 
-const HEYGEN = "heygen.portal_video_from_script";
+// A registered, generic target workflow (required input: url). Proves the action
+// gate/handler path is generic — routed by workflow id, not bespoke per-workflow code.
+const TARGET = "content.youtube_summary";
 const BRIEF = "content.research_brief";
 
 before(() => { _resetDbForTests(); getDb(); });
@@ -33,14 +35,13 @@ test("proposeWorkflowAction validates the target workflow and redacts suggested 
   assert.throws(() => proposeWorkflowAction({ sourceRunId: run.id, targetWorkflowId: "does.not.exist", title: "x" }), /workflow|unknown|registry/i);
 
   const action = proposeWorkflowAction({
-    sourceRunId: run.id, targetWorkflowId: HEYGEN, title: "Video: AI tools", reason: "turn the brief into a video",
-    suggestedInputs: { title: "Video: AI tools", scriptDraft: "draft from brief", sessionCookie: "leak-me" },
+    sourceRunId: run.id, targetWorkflowId: TARGET, title: "Summary: AI tools", reason: "summarize the video",
+    suggestedInputs: { title: "Summary: AI tools", noteDraft: "draft from brief", sessionCookie: "leak-me" },
   });
   assert.equal(action.status, "proposed");
-  assert.equal(action.targetWorkflowId, HEYGEN);
+  assert.equal(action.targetWorkflowId, TARGET);
   // Required inputs default to the target def's required fields.
-  assert.ok(action.requiredInputs.includes("script"));
-  assert.ok(action.requiredInputs.includes("title"));
+  assert.ok(action.requiredInputs.includes("url"));
   // Suggested inputs are redacted.
   assert.equal(action.suggestedInputs.sessionCookie, "[redacted]");
   assert.doesNotMatch(JSON.stringify(action), /leak-me/);
@@ -48,7 +49,7 @@ test("proposeWorkflowAction validates the target workflow and redacts suggested 
 
 test("list/get reflect proposed actions for a run", () => {
   const run = sourceRun();
-  const a = proposeWorkflowAction({ sourceRunId: run.id, targetWorkflowId: HEYGEN, title: "v" });
+  const a = proposeWorkflowAction({ sourceRunId: run.id, targetWorkflowId: TARGET, title: "v" });
   assert.equal(listWorkflowActions({ sourceRunId: run.id }).length, 1);
   assert.equal(getWorkflowAction(a.id)?.id, a.id);
 });
@@ -56,14 +57,14 @@ test("list/get reflect proposed actions for a run", () => {
 test("executing an action with missing required inputs returns needs_input (no execution)", async () => {
   const run = sourceRun();
   const a = proposeWorkflowAction({
-    sourceRunId: run.id, targetWorkflowId: HEYGEN, title: "Video: AI tools",
-    suggestedInputs: { title: "Video: AI tools", scriptDraft: "draft only — not a real script" },
+    sourceRunId: run.id, targetWorkflowId: TARGET, title: "Summary: AI tools",
+    suggestedInputs: { title: "Summary: AI tools", noteDraft: "draft only — not a real url" },
   });
   let prepareCalls = 0;
   const result = await executeWorkflowAction(a.id, {}, { prepare: async () => { prepareCalls += 1; return { ok: true, status: "prepared", workflow: null }; } });
   assert.equal(result.ok, false);
   assert.equal(result.status, "needs_input");
-  assert.ok(result.missing?.includes("script"), "script is the exact missing field");
+  assert.ok(result.missing?.includes("url"), "url is the exact missing field");
   assert.ok(!result.missing?.includes("title"), "title was suggested, so it is satisfied");
   assert.equal(prepareCalls, 0, "must not execute the target when inputs are insufficient");
   assert.equal(getWorkflowAction(a.id)?.status, "proposed"); // unchanged
@@ -71,25 +72,25 @@ test("executing an action with missing required inputs returns needs_input (no e
 
 test("executing with sufficient inputs calls the registered handler path and completes", async () => {
   const run = sourceRun();
-  const a = proposeWorkflowAction({ sourceRunId: run.id, targetWorkflowId: HEYGEN, title: "Video: AI tools", suggestedInputs: { title: "Video: AI tools" } });
+  const a = proposeWorkflowAction({ sourceRunId: run.id, targetWorkflowId: TARGET, title: "Summary: AI tools", suggestedInputs: { title: "Summary: AI tools" } });
   const seen: Array<{ id: string; inputs: Record<string, unknown> }> = [];
-  const result = await executeWorkflowAction(a.id, { script: "Hello. This is the real script." }, {
+  const result = await executeWorkflowAction(a.id, { url: "https://youtu.be/abc123" }, {
     prepare: async (workflowId, inputs) => { seen.push({ id: workflowId, inputs }); return { ok: true, status: "prepared", workflow: null, runId: "target-run-1" }; },
   });
   assert.equal(result.ok, true);
   assert.equal(result.status, "prepared");
-  // The generic handler path was used — by workflow id, not bespoke HeyGen code.
-  assert.equal(seen[0].id, HEYGEN);
-  assert.equal(seen[0].inputs.script, "Hello. This is the real script.");
-  assert.equal(seen[0].inputs.title, "Video: AI tools");
+  // The generic handler path was used — by workflow id, not bespoke code.
+  assert.equal(seen[0].id, TARGET);
+  assert.equal(seen[0].inputs.url, "https://youtu.be/abc123");
+  assert.equal(seen[0].inputs.title, "Summary: AI tools");
   const after = getWorkflowAction(a.id);
   assert.equal(after?.status, "completed");
   assert.equal(after?.resultRunId, "target-run-1");
 });
 
 test("execution is blocked with review_required when the source run is needs_review and unapproved", async () => {
-  const run = createWorkflowRun({ workflowId: BRIEF, title: "script", status: "needs_review" });
-  const a = proposeWorkflowAction({ sourceRunId: run.id, targetWorkflowId: HEYGEN, title: "v", suggestedInputs: { title: "v", script: "real script" } });
+  const run = createWorkflowRun({ workflowId: BRIEF, title: "brief", status: "needs_review" });
+  const a = proposeWorkflowAction({ sourceRunId: run.id, targetWorkflowId: TARGET, title: "v", suggestedInputs: { title: "v", url: "https://youtu.be/real" } });
   let prepareCalls = 0;
   const result = await executeWorkflowAction(a.id, {}, { prepare: async () => { prepareCalls += 1; return { ok: true, status: "prepared", workflow: null, runId: "x" }; } });
   assert.equal(result.ok, false);
@@ -100,8 +101,8 @@ test("execution is blocked with review_required when the source run is needs_rev
 });
 
 test("approving the source run unlocks execution; rejecting keeps it blocked", async () => {
-  const run = createWorkflowRun({ workflowId: BRIEF, title: "script", status: "needs_review" });
-  const a = proposeWorkflowAction({ sourceRunId: run.id, targetWorkflowId: HEYGEN, title: "v", suggestedInputs: { title: "v", script: "real script" } });
+  const run = createWorkflowRun({ workflowId: BRIEF, title: "brief", status: "needs_review" });
+  const a = proposeWorkflowAction({ sourceRunId: run.id, targetWorkflowId: TARGET, title: "v", suggestedInputs: { title: "v", url: "https://youtu.be/real" } });
 
   // Reject → still blocked.
   reviewWorkflowRun(run.id, "reject", {});
@@ -116,27 +117,27 @@ test("approving the source run unlocks execution; rejecting keeps it blocked", a
 });
 
 test("sourceArtifactMap pulls the CURRENT (revised) source artifact over the stale suggested input", async () => {
-  const run = createWorkflowRun({ workflowId: BRIEF, title: "script", status: "needs_review" });
-  linkWorkflowRunArtifact(run.id, "scriptText", "ORIGINAL script");
+  const run = createWorkflowRun({ workflowId: BRIEF, title: "brief", status: "needs_review" });
+  linkWorkflowRunArtifact(run.id, "sourceUrl", "https://youtu.be/ORIGINAL");
   const a = proposeWorkflowAction({
-    sourceRunId: run.id, targetWorkflowId: HEYGEN, title: "Video", suggestedInputs: { title: "Video", script: "ORIGINAL script" },
-    sourceArtifactMap: { script: "scriptText", title: "title" },
+    sourceRunId: run.id, targetWorkflowId: TARGET, title: "Summary", suggestedInputs: { title: "Summary", url: "https://youtu.be/ORIGINAL" },
+    sourceArtifactMap: { url: "sourceUrl", title: "title" },
   });
-  // Operator revises the script, then approves.
-  reviseWorkflowRunArtifact(run.id, "scriptText", "REVISED script");
+  // Operator revises the source url, then approves.
+  reviseWorkflowRunArtifact(run.id, "sourceUrl", "https://youtu.be/REVISED");
   reviewWorkflowRun(run.id, "approve", {});
 
   let seen: Record<string, unknown> = {};
   const result = await executeWorkflowAction(a.id, {}, { prepare: async (_wid, inputs) => { seen = inputs; return { ok: true, status: "prepared", workflow: null, runId: "r" }; } });
   assert.equal(result.ok, true);
-  assert.equal(seen.script, "REVISED script", "execution used the revised script, not the stale suggestion");
+  assert.equal(seen.url, "https://youtu.be/REVISED", "execution used the revised url, not the stale suggestion");
 });
 
 test("assessWorkflowAction agrees with the gate without executing", async () => {
   const { assessWorkflowAction } = await import("./actions");
   // review-blocked source run
   const blocked = createWorkflowRun({ workflowId: BRIEF, title: "s", status: "needs_review" });
-  const ab = proposeWorkflowAction({ sourceRunId: blocked.id, targetWorkflowId: HEYGEN, title: "v", suggestedInputs: { title: "v", script: "real" } });
+  const ab = proposeWorkflowAction({ sourceRunId: blocked.id, targetWorkflowId: TARGET, title: "v", suggestedInputs: { title: "v", url: "https://youtu.be/real" } });
   assert.equal(assessWorkflowAction(getWorkflowAction(ab.id)!).readiness, "review_required");
 
   // approved + has inputs → ready
@@ -144,14 +145,14 @@ test("assessWorkflowAction agrees with the gate without executing", async () => 
   assert.equal(assessWorkflowAction(getWorkflowAction(ab.id)!).readiness, "ready");
 
   // missing required input → needs_input with exact fields
-  const open = createWorkflowRun({ workflowId: HEYGEN, title: "x", status: "done" });
-  const an = proposeWorkflowAction({ sourceRunId: open.id, targetWorkflowId: HEYGEN, title: "v", suggestedInputs: { title: "v" } });
+  const open = createWorkflowRun({ workflowId: TARGET, title: "x", status: "done" });
+  const an = proposeWorkflowAction({ sourceRunId: open.id, targetWorkflowId: TARGET, title: "v", suggestedInputs: { title: "v" } });
   const assessment = assessWorkflowAction(getWorkflowAction(an.id)!);
   assert.equal(assessment.readiness, "needs_input");
-  assert.ok(assessment.missing?.includes("script"));
+  assert.ok(assessment.missing?.includes("url"));
 
   // completed action
-  const ac = proposeWorkflowAction({ sourceRunId: open.id, targetWorkflowId: HEYGEN, title: "v", suggestedInputs: { title: "v", script: "s" } });
+  const ac = proposeWorkflowAction({ sourceRunId: open.id, targetWorkflowId: TARGET, title: "v", suggestedInputs: { title: "v", url: "https://youtu.be/s" } });
   updateWorkflowActionStatus(ac.id, "completed", { resultRunId: "r" });
   assert.equal(assessWorkflowAction(getWorkflowAction(ac.id)!).readiness, "completed");
 });

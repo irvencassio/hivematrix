@@ -1211,24 +1211,6 @@ test("POST /tasks does not mis-route dev tasks whose description begins 'Browser
   }
 });
 
-test("POST /tasks does not promote an AI-news video prompt into a Work Package (regression)", async (t) => {
-  withTempHome(t);
-  const { _resetDbForTests } = await import("@/lib/db");
-  _resetDbForTests();
-  const { isAiNewsVideoRequest } = await import("@/lib/video/news-intent");
-  assert.equal(isAiNewsVideoRequest("make me an AI news video"), true);
-
-  const { base, headers } = await startServer(t);
-  const res = await fetch(`${base}/tasks`, {
-    method: "POST", headers,
-    body: JSON.stringify({ description: "make me an AI news video" }),
-  });
-  assert.equal(res.status, 201);
-  const body = await res.json() as Record<string, unknown>;
-  // AI-news is handled before intake; it must never be classified as a package.
-  assert.notEqual(body.routed, "work_package");
-});
-
 test("console source includes the main-screen Flights surface and no auto-run-all control", () => {
   assert.match(CONSOLE_HTML, /work_packages_list/);
   assert.match(CONSOLE_HTML, /renderWorkPackages/);

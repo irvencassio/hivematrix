@@ -4,7 +4,6 @@ import { skillTurnOverride } from "./skill-turn";
 import { getWeather, type WeatherResult, type WeatherWhen } from "./weather";
 import type { Skill, SkillIndexEntry } from "@/lib/skills/contracts";
 import type { ApprovalQueueItem } from "@/lib/approvals/queue";
-import { videoVoiceOverride } from "@/lib/video/voice-turn";
 
 export interface VoiceLogicScenarioResult {
   name: string;
@@ -33,7 +32,7 @@ export interface VoiceLogicScenarioOptions {
   fetchWeather?: (location: string, when: WeatherWhen) => Promise<WeatherResult>;
 }
 
-type ScenarioKind = "skill" | "video" | "command" | "handoff";
+type ScenarioKind = "skill" | "command" | "handoff";
 
 interface Scenario {
   name: string;
@@ -46,7 +45,6 @@ interface Scenario {
 interface ScenarioDeps {
   command: CommandTurnDeps;
   skill: Parameters<typeof skillTurnOverride>[1];
-  video: Parameters<typeof videoVoiceOverride>[1];
   sideEffects: string[];
 }
 
@@ -88,7 +86,6 @@ const scenarios: Scenario[] = [
   { name: "skill listing", utterance: "what skills do I have", kind: "skill", expected: "skill:list" },
   { name: "skill search release", utterance: "find a skill for release", kind: "skill", expected: "skill:list" },
   { name: "skill use deploy release", utterance: "use the deploy release skill", kind: "skill", expected: "skill:use" },
-  { name: "video review read", utterance: "read me the video script", kind: "video", expected: "video:video-read" },
   { name: "briefing", utterance: "good morning", kind: "command", expected: "command:briefing" },
   { name: "brief me", utterance: "brief me on what needs attention", kind: "command", expected: "command:briefing" },
   { name: "standup", utterance: "status briefing", kind: "command", expected: "command:briefing" },
@@ -206,10 +203,6 @@ function buildDeps(sideEffects: string[], scenario: Scenario, options: VoiceLogi
       readSkill: async () => skillBody,
       createInstructionTask: async (payload) => ({ _id: (await createTask(payload))._id }),
     },
-    video: {
-      synthesize,
-      latestDraft: () => null,
-    },
     command: {
       sessionId: `voice-logic-diagnostic-${slug(scenario.name)}`,
       synthesize,
@@ -261,13 +254,6 @@ async function runScenario(scenario: Scenario, deps: ScenarioDeps, now: () => st
     const out = await skillTurnOverride(scenario.utterance, deps.skill);
     if (out) {
       actual = `skill:${out.skill.action ?? "list"}`;
-      reply = out.reply;
-      audioBase64 = out.audioBase64;
-    }
-  } else if (scenario.kind === "video") {
-    const out = await videoVoiceOverride(scenario.utterance, deps.video);
-    if (out) {
-      actual = `video:${out.command.kind}`;
       reply = out.reply;
       audioBase64 = out.audioBase64;
     }

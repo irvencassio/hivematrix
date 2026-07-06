@@ -577,17 +577,6 @@ export async function spawnAgent(
   args.push("--append-system-prompt", beeRouting);
   overheadBytes.agentGuide += Buffer.byteLength(beeRouting);
 
-  // Video factory — only advertised when the operator enabled the `video` feature.
-  try {
-    const { isFeatureEnabled } = await import("@/lib/config/features");
-    if (isFeatureEnabled("video")) {
-      const { videoRoutingPrompt } = await import("./outbound-routing");
-      const videoRouting = videoRoutingPrompt();
-      args.push("--append-system-prompt", videoRouting);
-      overheadBytes.agentGuide += Buffer.byteLength(videoRouting);
-    }
-  } catch { /* non-critical */ }
-
   // Repo conventions: Claude Code reads CLAUDE.md natively but NOT AGENTS.md (the
   // converged standard). Inject it so coding tasks follow house style.
   try {

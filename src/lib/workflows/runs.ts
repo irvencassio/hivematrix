@@ -1,8 +1,7 @@
 /**
  * Workflow Run Ledger — durable run state, events, artifacts, and blockers for
- * registered workflows. Generic (works for any workflow); the HeyGen linkage lives
- * in heygen-run-link.ts. Never stores secrets: metadata + artifacts are key-redacted
- * on write.
+ * registered workflows. Generic (works for any workflow). Never stores secrets:
+ * metadata + artifacts are key-redacted on write.
  */
 
 import { generateId, getDb } from "@/lib/db";

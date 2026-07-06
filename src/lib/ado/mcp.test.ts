@@ -4,7 +4,7 @@ import { parseAdoConfig, buildAdoMcpServer } from "./mcp";
 import { parseFeatures, featureCapability } from "@/lib/config/features";
 
 test("parseFeatures defaults flags off; reads true only for explicit true", () => {
-  const base = { ado: false, voice: false, video: false, "openclaw.chatDock": false };
+  const base = { ado: false, voice: false, "openclaw.chatDock": false };
   assert.deepEqual(parseFeatures({}), base);
   assert.deepEqual(parseFeatures({ features: { ado: true } }), { ...base, ado: true });
   assert.deepEqual(parseFeatures({ features: { ado: "yes" } }), base);
@@ -16,7 +16,6 @@ test("featureCapability gates heavy features on Apple Silicon + RAM", () => {
   assert.equal(featureCapability("voice", { arch: "x64", ramGB: 64 }).capable, false);  // not Apple Silicon
   assert.equal(featureCapability("voice", { arch: "arm64", ramGB: 8 }).capable, false); // too little RAM
   assert.equal(featureCapability("voice", { arch: "arm64", ramGB: 64 }).capable, true);
-  assert.equal(featureCapability("video", { arch: "arm64", ramGB: 128 }).capable, true);
 });
 
 test("parseAdoConfig requires an org; defaults authMode to azcli (Entra)", () => {

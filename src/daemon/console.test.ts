@@ -229,18 +229,6 @@ test("task-detail keeps one clear primary; toggles secondary, delete danger", ()
   assert.doesNotMatch(CONSOLE_HTML, /reply-primary/, "reply-primary consolidated into primary-action");
 });
 
-test("video review controls use the standardized action row with a single primary", () => {
-  const js = extractScript(CONSOLE_HTML);
-  const m = js.match(/executor === "video-review"\)\s*\{([\s\S]*?)\} else if \(!steerable\)/);
-  assert.ok(m, "video-review branch present");
-  const block = m![1];
-  assert.match(block, /class="action-bar"/, "video review uses .action-bar");
-  assert.match(block, /class="ghost-action"[^>]*loadDraftIntoReply/, "Edit script is a ghost action");
-  assert.match(block, /class="danger-action"[^>]*videoReviewAction\([^)]*cancel/, "Cancel is a danger action");
-  const primaries = block.match(/class="primary-action"/g) || [];
-  assert.equal(primaries.length, 1, "exactly one primary action in the video review block");
-});
-
 test("upload-disable targets the primary submit button, not the first button in the row", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /setCtxSubmitDisabled[\s\S]*?querySelector\(".primary-action"\)/, "disable targets .primary-action");

@@ -67,15 +67,7 @@ export async function runSmoke({ quiet = false } = {}) {
     const inbox = getWorkflowInbox();
     add("workflow inbox loads", !!inbox && !!inbox.groups && !!inbox.counts);
 
-    // 8. Video approval path is portal-only (no API renderer / make-avatar on approve).
-    const newsReview = readFileSync(new URL("../src/lib/video/news-review.ts", import.meta.url), "utf8");
-    const approveBody = newsReview.match(/export async function resolveVideoDraft\(id[\s\S]*?\n\}/)?.[0] ?? "";
-    const portalCreator = newsReview.match(/async function createHeyGenPortalTaskForDraft[\s\S]*?\n\}/)?.[0] ?? "";
-    const rendererRe = /make-avatar\.mjs|createAvatarVideo|renderAvatar|api\.heygen\.com/i;
-    add("video approval routes through Browser Lane portal (no API renderer)",
-      approveBody.length > 200 && !rendererRe.test(approveBody) && !rendererRe.test(portalCreator) && /createHeyGenPortalTaskForDraft/.test(approveBody));
-
-    // 9. Daemon declares the Settings → Lanes endpoints.
+    // 8. Daemon declares the Settings → Lanes endpoints.
     const server = readFileSync(new URL("../src/daemon/server.ts", import.meta.url), "utf8");
     const endpoints = ['"/lane-apps"', '"/lane-setup"', '"/browser-lane/dashboard"', '"/terminal-lane/dashboard"', '"/workflows/inbox"'];
     const missing = endpoints.filter((e) => !server.includes(e));

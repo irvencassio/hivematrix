@@ -129,7 +129,7 @@ function extractGoalFlightMetadata(text: string, title: string): GoalFlightMetad
 
 // Lane / workflow executors own their own routing — intake never re-promotes them.
 const WORKFLOW_EXECUTORS = new Set(["workflow"]);
-const LANE_EXECUTORS = new Set(["terminal-lane", "browser-lane", "video-review", "desktopbee"]);
+const LANE_EXECUTORS = new Set(["terminal-lane", "browser-lane", "desktopbee"]);
 
 /** True when the text is plausibly read-only (no strong write verb present). */
 function isReadOnly(text: string): boolean {

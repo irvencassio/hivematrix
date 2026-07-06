@@ -1,8 +1,8 @@
 /**
  * Workflow definition: Content research brief.
  *
- * Pure data — discovery metadata only (def-only module, like heygen-portal.ts, so
- * the registry can import it without pulling in the prepare logic / runs store).
+ * Pure data — discovery metadata only (def-only module, so the registry can import
+ * it without pulling in the prepare logic / runs store).
  * Low-risk: local research only, no external side effects, human-reviewed output.
  */
 
