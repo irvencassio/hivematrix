@@ -3131,6 +3131,22 @@ async function renderObservability() {
     }
     html += '</table>';
   }
+  // Bandit: per-class routing suggestions from the same telemetry. Advisory only —
+  // shows confident picks (classes with enough data); the rest defer to default routing.
+  if (Array.isArray(data.routing)) {
+    const confident = data.routing.filter(r => r && r.route);
+    if (confident.length) {
+      html += '<div class="obs-sc-h" style="margin:8px 0 3px;font-size:11px;color:var(--muted)">Suggested routing <span title="What the telemetry says is the best route per task class. Advisory — not auto-applied.">ⓘ</span></div>';
+      html += '<div style="font-size:11px;line-height:1.5">';
+      for (const r of confident) {
+        const routeLabel = OBS_LABELS[r.route] || r.route;
+        html += '<div><b>' + esc(r.taskClass) + '</b> → ' + esc(routeLabel)
+          + (r.explore ? ' <span class="muted">(exploring)</span>' : '')
+          + '</div>';
+      }
+      html += '</div>';
+    }
+  }
   el.innerHTML = html;
 }
 

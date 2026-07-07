@@ -16,6 +16,7 @@ import {
   summarizeTelemetry,
   routeScorecard,
 } from "./contracts";
+import { aggregateArms, recommendRoutes, type RouteRecommendation } from "@/lib/routing/bandit";
 
 type Row = Record<string, unknown>;
 
@@ -125,4 +126,14 @@ export function observabilitySummary(window = 1000): ObservabilityTotals {
 /** Per-route scorecard (first-pass rate, rework, cost/task) over the most recent `window` rows. */
 export function observabilityScorecard(window = 1000): RouteScorecardRow[] {
   return routeScorecard(listTaskTelemetry(window));
+}
+
+/**
+ * Per-class routing recommendations (the bandit's advice) over the most recent
+ * `window` rows. Advisory only — epsilon=0 so the display is the stable "what the
+ * data says is best" pick, not a flickering exploration sample. Classes without
+ * enough data recommend route=null (defer to the default router).
+ */
+export function routingRecommendations(window = 1000): RouteRecommendation[] {
+  return recommendRoutes(aggregateArms(listTaskTelemetry(window)), { epsilon: 0 });
 }
