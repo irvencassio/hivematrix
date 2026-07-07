@@ -880,14 +880,14 @@ export function spawnGenericAgent(
     thinkingMode
   )
     .then(({ code, result, turns, totalTokens, inputTokens, outputTokens, smokeReport }) => {
-      // Local coding failed verification after all retries → hand the draft +
-      // diagnostics to the frontier as a fix task (no-op unless cloud-ok). Fire
-      // and forget: escalation must never affect this task's own exit.
+      // Local coding failed verification after all retries → escalate the draft +
+      // diagnostics up the cheap-first ladder (other local model, then frontier).
+      // Fire and forget: escalation must never affect this task's own exit.
       if (smokeReport) {
         void import("./escalation")
-          .then((m) => m.maybeEscalateToFrontier(taskId, smokeReport))
+          .then((m) => m.maybeEscalate(taskId, smokeReport))
           .then((escId) => {
-            if (escId) onEvent(taskId, { type: "log", content: `[escalation] verification failed locally → frontier fix task ${escId} queued` });
+            if (escId) onEvent(taskId, { type: "log", content: `[escalation] verification failed → fix task ${escId} queued` });
           })
           .catch(() => { /* escalation is best-effort */ });
       }

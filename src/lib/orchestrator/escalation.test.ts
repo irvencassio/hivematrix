@@ -4,21 +4,43 @@ import { mkdtempSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { shouldEscalate, escalationTaskDescription, ESCALATION_SOURCE } from "./escalation";
+import { chooseEscalationRung, alternateLocalModel, escalationTaskDescription, ESCALATION_SOURCE } from "./escalation";
 
 // Isolate the DB under a temp HOME before anything calls getDb().
 const home = mkdtempSync(join(tmpdir(), "escal-"));
 mkdirSync(join(home, ".hivematrix"), { recursive: true });
 process.env.HOME = home;
 
-test("shouldEscalate: only when cloud-ok, has a report, and source isn't an escalation", () => {
-  assert.equal(shouldEscalate({ cloudOk: true, hasReport: true, sourceIsEscalation: false }), true);
-  // No cloud → don't escalate (fix couldn't run now); task stays failed on the board.
-  assert.equal(shouldEscalate({ cloudOk: false, hasReport: true, sourceIsEscalation: false }), false);
-  // No diagnostics → nothing to hand the frontier.
-  assert.equal(shouldEscalate({ cloudOk: true, hasReport: false, sourceIsEscalation: false }), false);
-  // Never escalate an escalation (loop guard).
-  assert.equal(shouldEscalate({ cloudOk: true, hasReport: true, sourceIsEscalation: true }), false);
+test("alternateLocalModel: hop the fast tier to the coding tier, nothing else", () => {
+  // Fast tier (or the configured local) → the 27b coding specialist.
+  assert.equal(alternateLocalModel("qwen3.6-35b-4bit"), "qwen3.6-27b-4bit");
+  // Already the coding tier → no better local option.
+  assert.equal(alternateLocalModel("qwen3.6-27b-4bit"), null);
+  // A frontier/unknown model isn't a local tier → nothing to hop to.
+  assert.equal(alternateLocalModel("mixed"), null);
+  assert.equal(alternateLocalModel(null), null);
+});
+
+test("chooseEscalationRung: local hop first (once), then frontier, then stop", () => {
+  // First failure on the fast tier → local hop (works even offline).
+  assert.deepEqual(
+    chooseEscalationRung({ priorHop: null, currentModel: "qwen3.6-35b-4bit", cloudOk: false }),
+    { model: "qwen3.6-27b-4bit", hop: "local", titlePrefix: "Local fix" },
+  );
+  // The local hop failed → frontier, but only if the cloud is reachable.
+  assert.deepEqual(
+    chooseEscalationRung({ priorHop: "local", currentModel: "qwen3.6-27b-4bit", cloudOk: true }),
+    { model: "mixed", hop: "frontier", titlePrefix: "Frontier fix" },
+  );
+  // Local hop failed but offline → ladder exhausted (task stays failed).
+  assert.equal(chooseEscalationRung({ priorHop: "local", currentModel: "qwen3.6-27b-4bit", cloudOk: false }), null);
+  // A coding-tier first failure skips the (nonexistent) local hop → frontier.
+  assert.deepEqual(
+    chooseEscalationRung({ priorHop: null, currentModel: "qwen3.6-27b-4bit", cloudOk: true }),
+    { model: "mixed", hop: "frontier", titlePrefix: "Frontier fix" },
+  );
+  // A frontier rung already tried → stop (never loop).
+  assert.equal(chooseEscalationRung({ priorHop: "frontier", currentModel: "mixed", cloudOk: true }), null);
 });
 
 test("escalationTaskDescription packages spec + diagnostics and demands a minimal diff", () => {
