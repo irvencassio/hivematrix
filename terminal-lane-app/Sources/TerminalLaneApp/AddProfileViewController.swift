@@ -1,87 +1,68 @@
 import AppKit
 
 final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
-    private let idField = NSTextField()
-    private let nameField = NSTextField()
-    private let authMethodPopup = NSPopUpButton()
-    private let hostField = NSTextField()
-    private let userField = NSTextField()
-    private let portField = NSTextField()
-    private let shellField = NSTextField()
-    private let cwdField = NSTextField()
-    private let keyPathField = NSTextField()
-    private let passwordField = NSSecureTextField()
-    private let keychainInfoLabel = NSTextField(labelWithString: "")
-    private let statusLabel = NSTextField(labelWithString: "")
-    private var form: NSGridView!
+    private let idField = TerminalLaneUI.field(placeholder: "aiserver")
+    private let nameField = TerminalLaneUI.field(placeholder: "AI Server")
+    private let authMethodPopup = TerminalLaneUI.popUp()
+    private let hostField = TerminalLaneUI.field(placeholder: "10.80.114.11")
+    private let userField = TerminalLaneUI.field(placeholder: "istai")
+    private let portField = TerminalLaneUI.field(placeholder: "22")
+    private let shellField = TerminalLaneUI.field()
+    private let cwdField = TerminalLaneUI.field()
+    private let keyPathField = TerminalLaneUI.field(placeholder: "~/.ssh/id_ed25519")
+    private let passwordField: NSSecureTextField = TerminalLaneUI.secureField(placeholder: "Stored only in the macOS Keychain")
+    private let keychainInfoLabel = TerminalLaneUI.caption("")
+    private let statusLabel = TerminalLaneUI.statusPill()
 
-    // Row indices in `form` (0-based).
-    private let hostRowIndex = 3
-    private let userRowIndex = 4
-    private let portRowIndex = 5
-    private let keyPathRowIndex = 8
-    private let passwordRowIndex = 9
-    private let keychainInfoRowIndex = 10
+    private let formContainer = NSView()
+    private var formStack: NSStackView!
 
     // When set (from the Profiles screen), we are editing; createdAt is preserved.
     private var editingProfile: TerminalLaneProfile?
 
     override func loadView() {
         view = NSView()
-        let title = NSTextField(labelWithString: "Add / Edit Profile")
-        title.font = .systemFont(ofSize: 34, weight: .bold)
         authMethodPopup.addItems(withTitles: TerminalLaneAuthMethod.allCases.map(\.label))
         authMethodPopup.target = self
         authMethodPopup.action = #selector(authMethodChanged)
         shellField.stringValue = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         cwdField.stringValue = FileManager.default.homeDirectoryForCurrentUser.path
-        keyPathField.placeholderString = "~/.ssh/id_ed25519"
-        passwordField.placeholderString = "Stored only in the macOS Keychain"
-        keychainInfoLabel.font = .systemFont(ofSize: 11)
-        keychainInfoLabel.textColor = .secondaryLabelColor
-        keychainInfoLabel.lineBreakMode = .byWordWrapping
-        keychainInfoLabel.preferredMaxLayoutWidth = 420
-        // Keychain lookups are keyed by host + user + port, so retarget the
-        // existing-password hint as those fields change.
         for field in [hostField, userField, portField] { field.delegate = self }
 
-        form = NSGridView(views: [
-            [label("Profile id"), idField],
-            [label("Display name"), nameField],
-            [label("Auth method"), authMethodPopup],
-            [label("Host"), hostField],
-            [label("User"), userField],
-            [label("Port"), portField],
-            [label("Shell"), shellField],
-            [label("Working dir"), cwdField],
-            [label("Key file path"), keyPathField],
-            [label("Password"), passwordField],
-            [label(""), keychainInfoLabel],
+        formContainer.translatesAutoresizingMaskIntoConstraints = false
+
+        let title = TerminalLaneUI.largeTitle("Add / Edit Profile")
+        let localDefaults = TerminalLaneUI.secondaryButton("Use Local Mac defaults", target: self, action: #selector(useLocalDefaults))
+        let test = TerminalLaneUI.secondaryButton("Test connection", target: self, action: #selector(testConnection))
+        let save = TerminalLaneUI.primaryButton("Save profile", target: self, action: #selector(saveProfile))
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let buttons = NSStackView(views: [localDefaults, spacer, test, save])
+        buttons.orientation = .horizontal
+        buttons.spacing = 10
+        buttons.translatesAutoresizingMaskIntoConstraints = false
+
+        formStack = NSStackView(views: [title, formContainer, buttons, statusLabel])
+        formStack.orientation = .vertical
+        formStack.alignment = .leading
+        formStack.spacing = 18
+        formStack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(formStack)
+
+        NSLayoutConstraint.activate([
+            formStack.topAnchor.constraint(equalTo: view.topAnchor, constant: TerminalLaneUI.contentMargin),
+            formStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: TerminalLaneUI.contentMargin),
+            formStack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -TerminalLaneUI.contentMargin),
+            formStack.widthAnchor.constraint(lessThanOrEqualToConstant: 720),
+            buttons.widthAnchor.constraint(equalTo: formStack.widthAnchor),
+            formContainer.widthAnchor.constraint(equalTo: formStack.widthAnchor),
         ])
-        form.column(at: 0).xPlacement = .trailing
-        form.column(at: 1).width = 420
 
         loadEditTargetIfAny()
         authMethodChanged()
-
-        let localDefaults = NSButton(title: "Use Local Mac defaults", target: self, action: #selector(useLocalDefaults))
-        let save = NSButton(title: "Save profile", target: self, action: #selector(saveProfile))
-        let test = NSButton(title: "Test connection", target: self, action: #selector(testConnection))
-        let buttons = NSStackView(views: [localDefaults, save, test, statusLabel])
-        buttons.orientation = .horizontal
-        buttons.spacing = 10
-        let stack = NSStackView(views: [title, form, buttons])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 14
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -32),
-        ])
     }
+
+    // MARK: Form building
 
     private func selectedAuthMethod() -> TerminalLaneAuthMethod {
         let index = authMethodPopup.indexOfSelectedItem
@@ -91,6 +72,76 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
 
     private func selectAuthMethod(_ method: TerminalLaneAuthMethod) {
         authMethodPopup.selectItem(withTitle: method.label)
+    }
+
+    private func section(_ caption: String, _ card: NSView) -> NSStackView {
+        let stack = NSStackView(views: [TerminalLaneUI.sectionCaption(caption), card])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        return stack
+    }
+
+    /// Rebuild the card layout for the selected auth method so only the relevant
+    /// fields show — cleaner than hiding rows in a fixed grid.
+    private func rebuildForm() {
+        let method = selectedAuthMethod()
+        formContainer.subviews.forEach { $0.removeFromSuperview() }
+
+        var sections: [NSView] = []
+        sections.append(section("Identity", TerminalLaneUI.card([
+            TerminalLaneUI.row("Profile id", idField),
+            TerminalLaneUI.row("Display name", nameField),
+            TerminalLaneUI.row("Auth method", authMethodPopup),
+        ])))
+
+        if method != .local {
+            sections.append(section("Connection", TerminalLaneUI.card([
+                TerminalLaneUI.row("Host", hostField),
+                TerminalLaneUI.row("User", userField),
+                TerminalLaneUI.row("Port", portField),
+            ])))
+        }
+
+        if method.needsKeyPath {
+            sections.append(section("Key", TerminalLaneUI.card([
+                TerminalLaneUI.row("Key file path", keyPathField),
+            ])))
+        }
+
+        if method == .password_keychain {
+            let card = TerminalLaneUI.card([TerminalLaneUI.row("Password", passwordField)])
+            let wrap = NSStackView(views: [TerminalLaneUI.sectionCaption("Authentication"), card, keychainInfoLabel])
+            wrap.orientation = .vertical
+            wrap.alignment = .leading
+            wrap.spacing = 6
+            card.widthAnchor.constraint(equalTo: wrap.widthAnchor).isActive = true
+            keychainInfoLabel.widthAnchor.constraint(equalTo: wrap.widthAnchor).isActive = true
+            sections.append(wrap)
+            updateKeychainInfo()
+        }
+
+        sections.append(section("Shell", TerminalLaneUI.card([
+            TerminalLaneUI.row("Shell", shellField),
+            TerminalLaneUI.row("Working dir", cwdField),
+        ])))
+
+        let container = NSStackView(views: sections)
+        container.orientation = .vertical
+        container.alignment = .leading
+        container.spacing = 18
+        container.translatesAutoresizingMaskIntoConstraints = false
+        formContainer.addSubview(container)
+        NSLayoutConstraint.activate([
+            container.topAnchor.constraint(equalTo: formContainer.topAnchor),
+            container.bottomAnchor.constraint(equalTo: formContainer.bottomAnchor),
+            container.leadingAnchor.constraint(equalTo: formContainer.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: formContainer.trailingAnchor),
+        ])
+        for case let section as NSStackView in sections {
+            section.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+        }
     }
 
     private func loadEditTargetIfAny() {
@@ -113,9 +164,11 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
         passwordField.stringValue = "" // secret values are never read back from Keychain into the form
     }
 
+    // MARK: Keychain hints
+
     // The Keychain item is keyed by host + user + port (Internet Password) —
-    // shared with other SSH tools on this Mac, so an item saved by one of them
-    // is found and reused here.
+    // shared with other SSH tools on this Mac, so an item already saved for
+    // user@host is found and reused here.
     private func existingKeychainPassword() -> Bool {
         let host = hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let user = userField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -134,15 +187,17 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
         }
         let port = Int(portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 22
         if TerminalLaneKeychain.shared.hasPassword(host: host, user: user, port: port) {
-            keychainInfoLabel.stringValue = "✓ The macOS Keychain already has an SSH password for \(user)@\(host) — leave the field blank to keep it, or type a new one to replace it."
+            keychainInfoLabel.stringValue = "✓ The macOS Keychain already has an SSH password for \(user)@\(host) — leave the field blank to keep it, or type a new one to replace it. Sessions connect natively with it."
         } else {
-            keychainInfoLabel.stringValue = "No Keychain item for \(user)@\(host) yet — the password you enter is saved there (never in the profile)."
+            keychainInfoLabel.stringValue = "No Keychain item for \(user)@\(host) yet — the password you enter is saved there (never in the profile) and used to auto-connect."
         }
     }
 
     func controlTextDidChange(_ notification: Notification) {
         updateKeychainInfo()
     }
+
+    // MARK: Actions
 
     @objc private func saveProfile() {
         do {
@@ -157,75 +212,68 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
                 passwordField.stringValue = ""
             }
             updateKeychainInfo()
-            statusLabel.textColor = .secondaryLabelColor
-            statusLabel.stringValue = "Saved locally…"
+            setStatus("Saved locally…", color: .secondaryLabelColor)
             TerminalLaneDaemonClient.shared.sync(profile: profile) { [weak self] result in
                 DispatchQueue.main.async {
                     switch result {
-                    case .success(let message):
-                        self?.statusLabel.textColor = .systemGreen
-                        self?.statusLabel.stringValue = message
-                    case .failure(let error):
-                        // Distinct from success: the local save stood, the sync did not.
-                        self?.statusLabel.textColor = .systemRed
-                        self?.statusLabel.stringValue = error.localizedDescription
+                    case .success(let message): self?.setStatus(message, color: .systemGreen)
+                    case .failure(let error): self?.setStatus(error.localizedDescription, color: .systemRed)
                     }
                 }
             }
         } catch {
-            statusLabel.textColor = .systemRed
-            statusLabel.stringValue = error.localizedDescription
+            setStatus(error.localizedDescription, color: .systemRed)
         }
     }
 
     @objc private func testConnection() {
         let profile: TerminalLaneProfile
-        do {
-            profile = try makeProfile(status: "checking")
-        } catch {
-            statusLabel.textColor = .systemRed
-            statusLabel.stringValue = error.localizedDescription
+        do { profile = try makeProfile(status: "checking") }
+        catch { setStatus(error.localizedDescription, color: .systemRed); return }
+
+        // password_keychain is verified natively (Citadel) with the Keychain
+        // password — the daemon can't authenticate a password non-interactively.
+        if profile.authMethod == .password_keychain, let key = profile.keychainKey {
+            guard let password = TerminalLaneKeychain.shared.readPassword(host: key.host, user: key.user, port: key.port) else {
+                setStatus("No password in the macOS Keychain for \(key.user)@\(key.host) — enter one and Save first.", color: .systemOrange)
+                return
+            }
+            setStatus("Connecting…", color: .secondaryLabelColor)
+            Task { @MainActor in
+                do {
+                    try await TerminalLaneSSHService().verify(host: key.host, port: key.port, user: key.user, password: password)
+                    setStatus("✓ Connected — the Keychain password authenticated.", color: .systemGreen)
+                } catch {
+                    setStatus(error.localizedDescription, color: .systemRed)
+                }
+            }
             return
         }
+
         TerminalLaneDaemonClient.shared.runReadiness(profileId: profile.id) { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
-                case .success(let message):
-                    self?.statusLabel.textColor = .secondaryLabelColor
-                    self?.statusLabel.stringValue = message
-                case .failure(let error):
-                    self?.statusLabel.textColor = .systemRed
-                    self?.statusLabel.stringValue = error.localizedDescription
+                case .success(let message): self?.setStatus(message, color: .secondaryLabelColor)
+                case .failure(let error): self?.setStatus(error.localizedDescription, color: .systemRed)
                 }
             }
         }
     }
 
     @objc private func authMethodChanged() {
+        rebuildForm()
         let method = selectedAuthMethod()
-        let isLocal = method == .local
-        form?.row(at: hostRowIndex).isHidden = isLocal
-        form?.row(at: userRowIndex).isHidden = isLocal
-        form?.row(at: portRowIndex).isHidden = isLocal
-        form?.row(at: keyPathRowIndex).isHidden = !method.needsKeyPath
-        // Only password_keychain captures a Keychain password.
-        let showPassword = method == .password_keychain
-        form?.row(at: passwordRowIndex).isHidden = !showPassword
-        form?.row(at: keychainInfoRowIndex).isHidden = !showPassword
-        if showPassword { updateKeychainInfo() }
-
-        statusLabel.textColor = .secondaryLabelColor
         switch method {
         case .local:
-            statusLabel.stringValue = "Local profiles run a shell on this Mac (localhost); no key material is needed."
+            setStatus("Local profiles run a shell on this Mac (localhost); no key material is needed.", color: .secondaryLabelColor)
         case .ssh_key_agent:
-            statusLabel.stringValue = "Uses your ssh-agent / default keys. Auto-connectable. No secret is stored."
+            setStatus("Uses your ssh-agent / default keys. Auto-connectable. No secret is stored.", color: .secondaryLabelColor)
         case .ssh_key_file:
-            statusLabel.stringValue = "Connects with the key file at the path above (metadata only). Auto-connectable."
+            setStatus("Connects with the key file at the path above (metadata only). Auto-connectable.", color: .secondaryLabelColor)
         case .password_keychain:
-            statusLabel.stringValue = "Password lives in the macOS Keychain, keyed by user@host:port. Not auto-connectable yet — connect manually, or use key auth."
+            setStatus("Password lives in the macOS Keychain, keyed by user@host:port. Sessions auto-connect natively with it.", color: .secondaryLabelColor)
         case .manual_password:
-            statusLabel.stringValue = "You'll be prompted for the password when you open the terminal; nothing is stored."
+            setStatus("You'll be prompted for the password when you open the terminal; nothing is stored.", color: .secondaryLabelColor)
         }
     }
 
@@ -244,6 +292,11 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
         passwordField.stringValue = ""
         editingProfile = nil
         authMethodChanged()
+    }
+
+    private func setStatus(_ text: String, color: NSColor) {
+        statusLabel.textColor = color
+        statusLabel.stringValue = text
     }
 
     private func makeProfile(status: String) throws -> TerminalLaneProfile {
@@ -302,10 +355,6 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
             createdAt: editingProfile?.createdAt ?? TerminalLaneProfile.nowString(),
             updatedAt: TerminalLaneProfile.nowString()
         )
-    }
-
-    private func label(_ text: String) -> NSTextField {
-        NSTextField(labelWithString: text)
     }
 
     private struct ValidationError: LocalizedError {

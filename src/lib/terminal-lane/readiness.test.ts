@@ -46,15 +46,27 @@ test("ssh_key_file readiness probes with the identity file, never a secret", asy
   assert.equal(calls[0].args.some((a) => /password|passphrase|secret/i.test(a)), false);
 });
 
-test("password_keychain readiness does NOT spawn raw ssh expecting a password", async () => {
+test("password_keychain readiness does a TCP reachability probe, never raw ssh with a password", async () => {
   let spawned = false;
+  const probed: Array<{ host: string; port: number }> = [];
   const result = await runTerminalReadinessProbe({
-    profile: { id: "pw", displayName: "PW", authMethod: "password_keychain", host: "h.example", user: "u", credentialRef: "hivematrix.terminal.pw" },
+    profile: { id: "pw", displayName: "PW", authMethod: "password_keychain", host: "h.example", user: "u", port: 2222, credentialRef: "hivematrix.terminal.pw" },
     run: async () => { spawned = true; return { exitCode: 0, stdout: "", stderr: "" }; },
+    tcpProbe: async (host, port) => { probed.push({ host, port }); return "open"; },
   });
   assert.equal(spawned, false, "must not spawn ssh for a password profile");
-  assert.equal(result.state.status, "needs_auth");
-  assert.match(result.summary, /not auto-connectable|key auth|connect manually/i);
+  assert.deepEqual(probed, [{ host: "h.example", port: 2222 }]);
+  assert.equal(result.state.status, "ready");
+  assert.match(result.summary, /reachable|verified when you open/i);
+});
+
+test("password_keychain readiness reports blocked when the SSH port is unreachable", async () => {
+  const result = await runTerminalReadinessProbe({
+    profile: { id: "pw", displayName: "PW", authMethod: "password_keychain", host: "h.example", user: "u", credentialRef: "hivematrix.terminal.pw" },
+    tcpProbe: async () => "timeout",
+  });
+  assert.equal(result.state.status, "blocked");
+  assert.match(result.summary, /unreachable|timed out/i);
 });
 
 test("manual_password readiness does NOT spawn ssh and explains it prompts", async () => {

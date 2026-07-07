@@ -86,10 +86,12 @@ test("terminalAuthCapability reports honest auto-connectability", () => {
   assert.equal(cap({ id: "l", displayName: "L", authMethod: "local" }).autoConnect, true);
   assert.equal(cap({ id: "a", displayName: "A", authMethod: "ssh_key_agent", host: "h.x", user: "u" }).autoConnect, true);
   assert.equal(cap({ id: "f", displayName: "F", authMethod: "ssh_key_file", host: "h.x", user: "u", keyPath: "/k" }).autoConnect, true);
-  // The honest fix: password_keychain is NOT auto-connectable yet.
+  // password_keychain now auto-connects via the app's native SSH runtime,
+  // authenticating with the Keychain password (Canopy-style).
   const pw = cap({ id: "p", displayName: "P", authMethod: "password_keychain", host: "h.x", user: "u", credentialRef: "hivematrix.terminal.p" });
-  assert.equal(pw.autoConnect, false);
-  assert.match(pw.reason ?? "", /not auto-connectable|manual|key/i);
+  assert.equal(pw.autoConnect, true);
+  assert.equal(pw.needsKeychain, true);
+  assert.equal(pw.reason, null);
   // manual_password connects but prompts (not auto).
   assert.equal(cap({ id: "m", displayName: "M", authMethod: "manual_password", host: "h.x", user: "u" }).autoConnect, false);
 });

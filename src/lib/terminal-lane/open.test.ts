@@ -31,11 +31,12 @@ test("resolveTerminalOpenRequest takes a profileId only and returns no secret", 
   assert.doesNotMatch(JSON.stringify(r), /password|passphrase|private_key|credentialRef|secret/i);
 });
 
-test("password_keychain is reported not auto-connectable, with a clear reason", () => {
+test("password_keychain auto-connects (native SSH) and still leaks no secret", () => {
   const r = resolveTerminalOpenRequest({ profileId: "pw" }, { getProfile: lookup(PROFILES) });
   assert.equal(r.ok, true);
-  assert.equal(r.autoConnect, false);
-  assert.match(r.reason ?? "", /not auto-connectable|key auth|connect manually/i);
+  assert.equal(r.autoConnect, true);
+  assert.equal(r.connectMode, "SSH (password — Keychain)");
+  assert.equal(r.reason, null);
   // Even for a password profile, no secret crosses the boundary.
   assert.doesNotMatch(JSON.stringify(r), /password=|--password|sshpass/i);
 });

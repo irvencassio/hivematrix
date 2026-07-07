@@ -15,6 +15,9 @@ test("Terminal Lane macOS app scaffold pins identity and package dependencies", 
 
   assert.match(pkg, /SwiftTerm/);
   assert.match(pkg, /TerminalLaneApp/);
+  // Native SSH runtime (Citadel) so password profiles auto-connect like Canopy.
+  assert.match(pkg, /Citadel/);
+  assert.match(pkg, /macOS\("15/);
   assert.match(info, /com\.irvcassio\.hivematrix\.terminallane/);
   assert.match(info, /Terminal Lane/);
   assert.doesNotMatch(entitlements, /keychain-access-groups/);
@@ -40,6 +43,8 @@ test("Terminal Lane app has profile, readiness, traces, settings, and terminal s
     assert.ok(existsSync(join(source, file)), `${file} should exist`);
   }
 
+  assert.ok(existsSync(join(source, "TerminalLaneSSHService.swift")), "native SSH service should exist");
+  assert.ok(existsSync(join(source, "TerminalLaneUI.swift")), "shared UI design system should exist");
   const screens = readFileSync(join(source, "Screens.swift"), "utf8");
   assert.match(screens, /case terminal, profiles, addProfile, readiness, traces, settings/);
   const content = readFileSync(join(source, "ContentViewController.swift"), "utf8");
@@ -111,8 +116,11 @@ test("Terminal Lane terminal screen shows connect mode and never autotypes a sec
   assert.match(terminal, /openCommand/);
   // Surfaces connect mode + honest auto-connect support.
   assert.match(terminal, /autoConnect/);
-  assert.match(terminal, /not auto-connectable|connect manually|key auth/i);
-  // Never autotypes / injects a secret into the PTY.
+  assert.match(terminal, /auto-connect|Connecting|prompted to authenticate/i);
+  // password_keychain connects through the native SSH runtime, not /usr/bin/ssh.
+  assert.match(terminal, /TerminalLaneSSHService|usesNativeSSH/);
+  assert.match(terminal, /import Citadel/);
+  // Never autotypes a password into a spawned ssh, or smuggles a secret VALUE.
   assert.doesNotMatch(terminal, /sshpass|--password|credentialValue|kSecValueData/i);
 });
 
@@ -124,8 +132,8 @@ test("Terminal Lane Add/Edit profile is auth-method driven and keeps secrets in 
   // Auth-method-driven field gating (replaces the old kind-only gate).
   assert.match(addProfile, /authMethod/);
   assert.match(addProfile, /authMethodChanged|authMethodPopup/);
-  // Honest copy for the non-auto-connectable password method.
-  assert.match(addProfile, /not auto-connectable/i);
+  // Password profiles now auto-connect natively with the Keychain password.
+  assert.match(addProfile, /auto-connect|natively|Keychain/i);
   // Local needs no key material.
   assert.match(addProfile, /no key material|no key or login/i);
   // Editing preserves createdAt.

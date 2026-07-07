@@ -50,6 +50,17 @@ final class TerminalLaneKeychain {
         return SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess
     }
 
+    /// Reads the stored SSH password for user@host:port, or nil if there is none.
+    func readPassword(host: String, user: String, port: Int) -> String? {
+        var query = searchQuery(host: host, user: user, port: port)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
     func savePassword(_ value: String, host: String, user: String, port: Int, displayName: String) throws {
         let data = Data(value.utf8)
         let search = searchQuery(host: host, user: user, port: port)

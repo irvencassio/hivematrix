@@ -9,9 +9,11 @@ const AISERVER = {
   host: "10.80.114.11", user: "istai", port: 22, credentialRef: null, credentialPresent: false,
   autoConnect: true, openCommand: "ssh -p 22 istai@10.80.114.11",
 };
+// manual_password stays non-auto-connectable (it prompts), so it exercises the
+// auth_not_ready routing path. password_keychain now auto-connects natively.
 const PROD = {
-  id: "prod-db", displayName: "Prod Database", kind: "ssh", authMethod: "password_keychain",
-  host: "10.0.0.5", user: "ops", port: 22, credentialRef: "hivematrix.terminal.prod-db", credentialPresent: true,
+  id: "prod-db", displayName: "Prod Database", kind: "ssh", authMethod: "manual_password",
+  host: "10.0.0.5", user: "ops", port: 22, credentialRef: null, credentialPresent: false,
   autoConnect: false, openCommand: "ssh ops@10.0.0.5",
 };
 
@@ -40,7 +42,12 @@ test("resolveTerminalProfileForQuery matches by id, displayName, and host", () =
 });
 
 test("the matched profile projection carries no secret material", () => {
-  const p = resolveTerminalProfileForQuery("prod-db", [PROD]);
+  const withCred = {
+    id: "prod-db", displayName: "Prod Database", kind: "ssh", authMethod: "password_keychain",
+    host: "10.0.0.5", user: "ops", port: 22, credentialRef: "hivematrix.terminal.prod-db", credentialPresent: true,
+    autoConnect: true, openCommand: "ssh ops@10.0.0.5",
+  };
+  const p = resolveTerminalProfileForQuery("prod-db", [withCred]);
   assert.ok(p);
   assert.doesNotMatch(JSON.stringify(p), /\bpassword\b|\bpassphrase\b|private_key|credentialRef/i);
   // It still reports that a credential is configured (a boolean, not the value).

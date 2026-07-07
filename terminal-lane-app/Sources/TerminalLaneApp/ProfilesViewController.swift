@@ -10,42 +10,68 @@ final class ProfilesViewController: NSViewController, NSTableViewDataSource, NST
 
     override func loadView() {
         view = NSView()
-        let title = NSTextField(labelWithString: "Profiles")
-        title.font = .systemFont(ofSize: 34, weight: .bold)
+        let title = TerminalLaneUI.largeTitle("Profiles")
 
         configureColumns()
         tableView.dataSource = self
         tableView.delegate = self
+        tableView.style = .inset
         tableView.usesAlternatingRowBackgroundColors = true
+        tableView.rowHeight = 30
         tableView.target = self
         tableView.doubleAction = #selector(editProfile)
 
         let scroll = NSScrollView()
         scroll.documentView = tableView
         scroll.hasVerticalScroller = true
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 320).isActive = true
 
-        let edit = NSButton(title: "Edit", target: self, action: #selector(editProfile))
-        let duplicate = NSButton(title: "Duplicate", target: self, action: #selector(duplicateProfile))
-        let delete = NSButton(title: "Delete", target: self, action: #selector(deleteProfile))
-        let refresh = NSButton(title: "Refresh", target: self, action: #selector(reload))
-        let buttons = NSStackView(views: [edit, duplicate, delete, refresh, statusLabel])
+        // Wrap the table in a rounded card to match the rest of the app.
+        let card = NSBox()
+        card.boxType = .custom
+        card.titlePosition = .noTitle
+        card.fillColor = .controlBackgroundColor
+        card.borderColor = .separatorColor
+        card.borderWidth = 1
+        card.cornerRadius = 10
+        card.contentViewMargins = .zero
+        card.translatesAutoresizingMaskIntoConstraints = false
+        let cardBody = NSView()
+        cardBody.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: cardBody.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: cardBody.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: cardBody.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: cardBody.trailingAnchor),
+        ])
+        card.contentView = cardBody
+        card.heightAnchor.constraint(greaterThanOrEqualToConstant: 340).isActive = true
+
+        let edit = TerminalLaneUI.secondaryButton("Edit", target: self, action: #selector(editProfile))
+        let duplicate = TerminalLaneUI.secondaryButton("Duplicate", target: self, action: #selector(duplicateProfile))
+        let delete = TerminalLaneUI.destructiveButton("Delete", target: self, action: #selector(deleteProfile))
+        let refresh = TerminalLaneUI.secondaryButton("Refresh", target: self, action: #selector(reload))
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let buttons = NSStackView(views: [edit, duplicate, delete, refresh, spacer, statusLabel])
         buttons.orientation = .horizontal
         buttons.spacing = 10
 
-        let stack = NSStackView(views: [title, buttons, scroll])
+        let stack = NSStackView(views: [title, buttons, card])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 12
+        stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
-            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -28),
-            scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: TerminalLaneUI.contentMargin),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: TerminalLaneUI.contentMargin),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -TerminalLaneUI.contentMargin),
+            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -TerminalLaneUI.contentMargin),
+            buttons.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            card.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
         reload()
     }
@@ -53,10 +79,10 @@ final class ProfilesViewController: NSViewController, NSTableViewDataSource, NST
     private func configureColumns() {
         let columns: [(String, String, CGFloat)] = [
             ("name", "Profile", 200),
-            ("auth", "Auth method", 160),
-            ("auto", "Auto-connect", 100),
+            ("auth", "Auth method", 190),
+            ("auto", "Auto-connect", 110),
             ("sync", "Sync", 120),
-            ("cred", "Credential", 90),
+            ("cred", "Keychain", 90),
         ]
         for (id, title, width) in columns {
             let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))

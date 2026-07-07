@@ -29,12 +29,18 @@ enum TerminalLaneAuthMethod: String, Codable, CaseIterable {
     var kind: TerminalLaneProfileKind { self == .local ? .local : .ssh }
 
     /// Whether HiveMatrix can connect this profile without an interactive prompt.
+    /// password_keychain auto-connects via the native SSH runtime, authenticating
+    /// with the password read from the macOS Keychain (Canopy-style).
     var autoConnect: Bool {
         switch self {
-        case .local, .ssh_key_agent, .ssh_key_file: return true
-        case .password_keychain, .manual_password: return false
+        case .local, .ssh_key_agent, .ssh_key_file, .password_keychain: return true
+        case .manual_password: return false
         }
     }
+
+    /// Whether connecting this profile uses the native SSH runtime (Citadel)
+    /// rather than spawning /usr/bin/ssh in a local PTY.
+    var usesNativeSSH: Bool { self == .password_keychain }
 
     var needsCredential: Bool { self == .password_keychain || self == .ssh_key_file }
     var needsKeyPath: Bool { self == .ssh_key_file }
@@ -42,9 +48,7 @@ enum TerminalLaneAuthMethod: String, Codable, CaseIterable {
     /// Honest, actionable reason shown when auto-connect is unavailable.
     var connectReason: String? {
         switch self {
-        case .local, .ssh_key_agent, .ssh_key_file: return nil
-        case .password_keychain:
-            return "Saved, but not auto-connectable yet — Terminal Lane can't use a stored secret to auto-connect. Use key auth, or connect manually."
+        case .local, .ssh_key_agent, .ssh_key_file, .password_keychain: return nil
         case .manual_password:
             return "Opens an interactive session and prompts on connect; nothing is stored."
         }

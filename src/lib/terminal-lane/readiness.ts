@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import net from "node:net";
 
 import { normalizeTerminalProfile, normalizeTerminalReadinessState, type TerminalProfile, type TerminalReadinessState } from "./contracts";
 
@@ -10,6 +11,10 @@ export interface TerminalReadinessRunnerResult {
 
 export type TerminalReadinessRunner = (file: string, args: string[], opts?: { timeoutMs?: number }) => Promise<TerminalReadinessRunnerResult>;
 
+/** TCP reachability outcome for a host:port — used for password profiles the daemon can't auth non-interactively. */
+export type TerminalTcpOutcome = "open" | "closed" | "timeout";
+export type TerminalTcpProbe = (host: string, port: number, timeoutMs: number) => Promise<TerminalTcpOutcome>;
+
 export interface TerminalReadinessProbeResult {
   profile: TerminalProfile;
   state: TerminalReadinessState;
@@ -20,21 +25,25 @@ export interface TerminalReadinessProbeResult {
 export async function runTerminalReadinessProbe(input: {
   profile: unknown;
   run?: TerminalReadinessRunner;
+  tcpProbe?: TerminalTcpProbe;
   timeoutMs?: number;
 }): Promise<TerminalReadinessProbeResult> {
   const profile = normalizeTerminalProfile(input.profile);
 
-  // Password-based methods are NOT probed with raw ssh: a non-interactive
-  // BatchMode probe can never use a stored/typed password, and we never autotype
-  // one. Report an honest, actionable state without spawning ssh at all.
+  // password_keychain auto-connects in the app (native SSH with the Keychain
+  // password), but the daemon can't authenticate a password non-interactively.
+  // Verify what the daemon honestly can — that the SSH port is reachable — and
+  // leave auth verification to the app's connect.
   if (profile.authMethod === "password_keychain") {
-    const state = normalizeTerminalReadinessState("needs_auth");
-    return {
-      profile,
-      state,
-      summary: "Password auth isn't auto-connectable yet — Terminal Lane can't use a stored password. Switch to key/agent auth, or connect manually.",
-      command: { file: "(none)", args: [] },
-    };
+    const host = profile.host ?? "";
+    const port = profile.port ?? 22;
+    const probe = input.tcpProbe ?? defaultTcpProbe;
+    const outcome = host ? await probe(host, port, input.timeoutMs ?? 8_000) : "closed";
+    const state = normalizeTerminalReadinessState(outcome === "open" ? "ready" : "blocked");
+    const summary = outcome === "open"
+      ? "SSH port reachable — password auth is verified when you open a session (the app connects natively with the Keychain password)."
+      : `SSH port ${host}:${port} ${outcome === "timeout" ? "timed out" : "unreachable"} — check the network and host/port.`;
+    return { profile, state, summary, command: { file: "(tcp)", args: [host, String(port)] } };
   }
   if (profile.authMethod === "manual_password") {
     const state = normalizeTerminalReadinessState("needs_auth");
@@ -85,6 +94,24 @@ function classifyExit(exitCode: number | null, text: string): "ready" | "needs_a
   if (/permission denied|publickey|password|passphrase|authentication/i.test(text)) return "needs_auth";
   if (/could not resolve|name or service not known|no route to host|connection timed out|operation timed out/i.test(text)) return "blocked";
   return "probe_failed";
+}
+
+async function defaultTcpProbe(host: string, port: number, timeoutMs: number): Promise<TerminalTcpOutcome> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let settled = false;
+    const finish = (outcome: TerminalTcpOutcome) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(outcome);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => finish("open"));
+    socket.once("timeout", () => finish("timeout"));
+    socket.once("error", () => finish("closed"));
+    socket.connect(port, host);
+  });
 }
 
 async function defaultRunner(file: string, args: string[], opts: { timeoutMs?: number } = {}): Promise<TerminalReadinessRunnerResult> {

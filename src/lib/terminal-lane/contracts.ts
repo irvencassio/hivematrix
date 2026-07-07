@@ -4,10 +4,11 @@ export const TERMINAL_READINESS_STATUSES = ["ready", "needs_auth", "probe_failed
 export type TerminalReadinessStatus = (typeof TERMINAL_READINESS_STATUSES)[number];
 export type TerminalReadinessColor = "green" | "yellow" | "orange" | "red" | "gray";
 
-// Honest auth model. password_keychain is intentionally NOT auto-connectable
-// yet: Terminal Lane has no native SSH runtime that can consume a stored
-// password, so we never pretend a saved password auto-connects (raw /usr/bin/ssh
-// can't use it). See the design doc.
+// Honest auth model. password_keychain IS auto-connectable: the Terminal Lane
+// app has a native SSH runtime (Citadel) that authenticates with the password
+// read from the macOS Keychain — the same approach Canopy uses. The password
+// still never leaves the Keychain / the app; the daemon only holds metadata and
+// verifies reachability. manual_password remains interactive-only.
 export const TERMINAL_AUTH_METHODS = ["local", "ssh_key_agent", "ssh_key_file", "password_keychain", "manual_password"] as const;
 export type TerminalAuthMethod = (typeof TERMINAL_AUTH_METHODS)[number];
 
@@ -46,7 +47,7 @@ export function terminalAuthCapability(profile: Pick<TerminalProfile, "authMetho
     case "ssh_key_file":
       return { autoConnect: true, needsKeychain: false, reason: null };
     case "password_keychain":
-      return { autoConnect: false, needsKeychain: true, reason: "Saved, but not auto-connectable yet — Terminal Lane can't use a stored password to auto-connect. Use key auth, or connect manually." };
+      return { autoConnect: true, needsKeychain: true, reason: null };
     case "manual_password":
       return { autoConnect: false, needsKeychain: false, reason: "Opens an interactive session and prompts for the password; nothing is stored." };
   }

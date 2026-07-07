@@ -27,7 +27,7 @@ const CONNECT_MODE: Record<TerminalAuthMethod, string> = {
   local: "Local shell",
   ssh_key_agent: "SSH (key/agent)",
   ssh_key_file: "SSH (key file)",
-  password_keychain: "SSH (password — manual)",
+  password_keychain: "SSH (password — Keychain)",
   manual_password: "SSH (password — manual)",
 };
 
