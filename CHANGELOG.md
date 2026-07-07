@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.150 — 2026-07-07
+
+Fixes: duplicate local model removed from the New Task picker (deduped by family); console now auto-reloads after an in-place app update so removed UI (Flights) no longer lingers as a stale page.
+
 ## v0.1.149 — 2026-07-07
 
 Green-on-white app icon (single identity, no light/dark toggle). Flights/Work Packages removed entirely — broad and multi-step prompts now self-plan via Superpowers (the frontier coding harness plans and executes its own subtasks). New Task Mode is Auto or Direct; Settings simplified.
