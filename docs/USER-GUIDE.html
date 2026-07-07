@@ -92,10 +92,11 @@
   <li><a href="#connectivity">4 · Connectivity modes</a></li>
   <li><a href="#tasks">5 · Tasks</a></li>
   <li><a href="#directives">6 · Directives</a></li>
-  <li><a href="#remote">7 · Remote access (iPhone)</a></li>
-  <li><a href="#setup">8 · First-time setup</a></li>
-  <li><a href="#settings">9 · The Settings screen</a></li>
-  <li><a href="#ref">10 · Quick reference</a></li>
+  <li><a href="#skills-commands">7 · Skills &amp; commands</a></li>
+  <li><a href="#remote">8 · Remote access (iPhone)</a></li>
+  <li><a href="#setup">9 · First-time setup</a></li>
+  <li><a href="#settings">10 · The Settings screen</a></li>
+  <li><a href="#ref">11 · Quick reference</a></li>
 </ul>
 
 <h2 id="bigpic"><span class="n">1</span>The big picture</h2>
@@ -226,7 +227,152 @@ trigger policy (manual, or a repeat interval like <code>PT4H</code> / <code>P1D<
 goal, executes them (honoring your default run mode, including Cloud-only), and tracks proven criteria in a run journal.
 Create one from the right-hand <span class="ui">＋ New directive</span> panel.</p>
 
-<h2 id="remote"><span class="n">7</span>Remote access (iPhone)</h2>
+<h2 id="skills-commands"><span class="n">7</span>Skills &amp; commands</h2>
+<p>Named, reusable recipes you can launch from the <span class="ui">Run command</span> / <span class="ui">Run skill</span> panel (or later, by typing <code>/name</code>). They come in <strong>four flavors</strong>, sorted by where they live and whether an LLM is in the loop:</p>
+
+<table>
+  <thead><tr><th>Flavor</th><th>Where it lives</th><th>Shape</th><th>Run result</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>cmd</strong><br><span class="meta">flat slash command</span></td>
+      <td><code>~/.claude/commands/&lt;name&gt;.md</code><br>(subdirs namespace to <code>ns:name</code>)</td>
+      <td>Single markdown file: optional frontmatter (<code>description</code>, <code>argument-hint</code>, <code>allowed-tools</code>, <code>model</code>) + a prompt body. Nothing else on disk.</td>
+      <td>Creates a <strong>task on the board</strong>; the model follows the prompt.</td>
+    </tr>
+    <tr>
+      <td><strong>folder</strong><br><span class="meta">folder skill (bundle)</span></td>
+      <td><code>~/.claude/skills/&lt;name&gt;/SKILL.md</code><br>+ sibling files (scripts, refs)</td>
+      <td>A <code>SKILL.md</code> plus any files it needs at runtime. The bundle travels together, so the recipe can call <code>./pull.sh</code>, read a <code>references/*.md</code>, or ship a template.</td>
+      <td>Creates a <strong>task on the board</strong>; the agent can execute the bundled files by relative path.</td>
+    </tr>
+    <tr>
+      <td><strong>skill</strong><br><span class="meta">brain instruction skill</span></td>
+      <td><code>~/_GD/brain/skills/&lt;name&gt;.md</code><br>(<code>kind: instruction</code>)</td>
+      <td>A distilled recipe with frontmatter (<code>name</code>, <code>description</code>, <code>tags</code>, <code>compat</code>, <code>trusted</code>) + a body that says <em>when</em> and <em>how</em> to apply. Discoverable by every model/harness; <em>trusted</em> skills are auto-shown to agents at run time.</td>
+      <td>Creates a <strong>task on the board</strong>; an agent applies the recipe (and calls <code>skill_used</code> so it earns its keep).</td>
+    </tr>
+    <tr>
+      <td><strong>ops</strong><br><span class="meta">brain script skill</span></td>
+      <td><code>~/_GD/brain/skills/&lt;name&gt;.md</code><br>(<code>kind: script</code>, <code>interpreter: bash&nbsp;|&nbsp;node&nbsp;|&nbsp;python3</code>)</td>
+      <td>Same on-disk shape as a skill, but the body is a deterministic script. No model in the loop. Only runs when <em>trusted</em> (imported ops stay untrusted until you approve).</td>
+      <td><strong>Runs in-panel</strong> with a live log — no board task, no LLM call. Same input → same output, every time.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout info">
+  <strong>Two panels, two homes.</strong> The console has a <em>Run command</em> picker for your local Claude profile (<code>cmd</code>, <code>folder</code>) and a <em>Run skill</em> picker for the HiveMatrix brain library (<code>skill</code>, <code>ops</code> — grouped as "Skills" and "⚙ Ops / scripts"). Import a folder skill into the brain library from the command panel if you want every model/harness to see it, or want to distill it into a shared recipe.
+</div>
+
+<h3>When to use which — samples</h3>
+<div class="grid2">
+  <div class="card">
+    <h3>cmd — a prompt you already trust</h3>
+    <p>Best when the recipe is <em>just words</em> and you already invoke it as a slash command in Claude Code. No bundled assets, no determinism guarantee — the model reads the prompt body and does the work. Frontmatter is optional; a bare markdown file with the prompt is a perfectly valid <code>cmd</code>.</p>
+<pre><code>---
+name: import-all
+description: Run all daily data imports in sequence
+argument-hint: "(no args)"
+---
+Run each step below sequentially: StoreMaster SharePoint,
+Vodafone, Store GPS, Meta Raw, then Meta Raw 7-Day.
+&lt;body: the prompt the agent follows&gt;</code></pre>
+    <p class="meta"><strong>Samples:</strong> <code>/import-all</code> (daily data pull), <code>/pushall</code> (flush every repo), <code>/topemail</code> (recent mail across accounts) — each is a single <code>.md</code> under <code>~/.claude/commands/</code>. Subdirs namespace to <code>ns:name</code> (e.g. <code>~/.claude/commands/hive/deploy.md</code> → <code>/hive:deploy</code>).</p>
+    <p class="meta"><strong>Reach for it when:</strong> the recipe is short, model-driven, and doesn't ship helper files. If the prompt already exists in your Claude Code profile, that's your <code>cmd</code> — no port needed.</p>
+  </div>
+  <div class="card">
+    <h3>folder — a recipe that ships with files</h3>
+    <p>Best when the recipe needs a helper script, a long reference, or a template at runtime. The folder bundles them so the agent finds them at a known relative path.</p>
+    <p class="meta"><strong>Sample:</strong> <code>/knox-cli</code> — a <code>SKILL.md</code> that instructs the agent when to use knox tools, alongside supporting docs (<code>~/.claude/skills/knox-cli/</code>). Bundled files travel with the recipe.</p>
+    <p class="meta"><strong>Reach for it when:</strong> the recipe references files by path, or a helper script would be duplicated if you inlined it.</p>
+  </div>
+  <div class="card">
+    <h3>skill — a durable playbook every agent should know</h3>
+    <p>Best when the recipe is a <em>reusable pattern</em> HiveMatrix should apply across projects — usually distilled from a directive retrospective. <strong>Trusted</strong> skills are injected into agent context automatically so agents follow them without being asked; imported (untrusted) ones stay dormant until you approve them in the Run skill panel.</p>
+<pre><code>---
+name: bible-study
+description: Use when studying a Bible passage…
+kind: instruction
+compat: all
+tags: [study, reference]
+trusted: true
+---
+&lt;body: when to apply, and how&gt;</code></pre>
+    <p class="meta"><strong>Samples:</strong> <code>bible-study</code>, <code>calendar</code>, <code>weekly-ai-roundup</code> — each is a body of instructions the agent applies when the description matches the task. Harness-agnostic (<code>compat: all</code>) means Claude, Codex, and local Qwen can all use them; <code>useCount</code> ticks up when the agent calls <code>skill_used</code>, so unused skills surface for pruning.</p>
+    <p class="meta"><strong>Reach for it when:</strong> multiple models/harnesses should apply the same judgment, or the recipe should surface itself when relevant (not just when invoked). Fastest path to author one: run a directive, then ask HiveMatrix to distill the retrospective into a skill.</p>
+  </div>
+  <div class="card">
+    <h3>ops — a deterministic operation, no model needed</h3>
+    <p>Best when the "how" is fixed and you want the <em>same output every time</em>: releases, backups, health checks, integration proofs. No LLM in the loop — just an interpreter running a script the operator can read. The body <em>is</em> the program; HiveMatrix pipes it to <code>bash</code>, <code>node</code>, or <code>python3</code> and streams the log into the panel.</p>
+<pre><code>---
+name: hive-run-all-proofs
+description: Run every HiveMatrix proof/health check…
+kind: script
+interpreter: bash
+compat: all
+trusted: true
+---
+set -uo pipefail
+cd "${HIVEMATRIX_REPO:-$HOME/hivematrix}"
+&lt;body: the exact commands, in the exact order&gt;</code></pre>
+    <p class="meta"><strong>Samples:</strong> <code>hive-run-all-proofs</code>, <code>hive-qwen-readiness</code>, <code>hive-scope-wall</code>, <code>hive-verify-release</code>, <code>release-hivematrix</code> — every one is a bash script you can read line-for-line before running. Nothing gets improvised at run time.</p>
+    <p class="meta"><strong>Trust matters more here.</strong> An instruction skill just tells an agent what to consider; an ops script <em>runs on your machine</em>. Imported ops land <code>trusted: false</code> and are refused by the runner until you approve them in the Run skill panel — read the body first, then flip the switch.</p>
+    <p class="meta"><strong>Reach for it when:</strong> you'd be annoyed if the model reinterpreted the steps — you want the exact commands, in the exact order, with a diffable log and a clean exit code you can gate a release on.</p>
+  </div>
+</div>
+
+<h3>Picking one over another — head-to-head</h3>
+<table>
+  <thead><tr><th>If you want…</th><th>Reach for</th><th>Not</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>A prompt you already invoke as <code>/name</code> in Claude Code</td>
+      <td><strong>cmd</strong></td>
+      <td>skill</td>
+      <td>A skill wouldn't add anything the flat prompt file doesn't — and would need a second copy in the brain library.</td>
+    </tr>
+    <tr>
+      <td>The recipe to ship a helper script, template, or long reference</td>
+      <td><strong>folder</strong></td>
+      <td>cmd</td>
+      <td>A single <code>.md</code> can't bundle files; the folder lets the agent call <code>./pull.sh</code> or read <code>references/api.md</code> by relative path.</td>
+    </tr>
+    <tr>
+      <td>Every model/harness (Claude, Codex, Qwen) to apply the same judgment</td>
+      <td><strong>skill</strong></td>
+      <td>cmd / folder</td>
+      <td><code>cmd</code>/<code>folder</code> live in <code>~/.claude/</code> and are Claude-profile only; a brain <code>skill</code> is harness-agnostic (<code>compat: all</code>).</td>
+    </tr>
+    <tr>
+      <td>An agent to <em>self-select</em> the recipe when the task matches — without being told</td>
+      <td><strong>skill</strong> (trusted)</td>
+      <td>cmd / folder</td>
+      <td>Trusted skills are surfaced to the agent by description; <code>cmd</code>/<code>folder</code> only fire when the operator picks them.</td>
+    </tr>
+    <tr>
+      <td>Deterministic, diffable execution — same output every time, gating a release</td>
+      <td><strong>ops</strong></td>
+      <td>skill</td>
+      <td>An LLM might reinterpret the steps. An <code>ops</code> script is the exact commands, in the exact order, with a clean exit code you can gate CI on.</td>
+    </tr>
+    <tr>
+      <td>A quick throwaway "run this prompt once" — no need to save it</td>
+      <td><strong>a plain task</strong></td>
+      <td>cmd</td>
+      <td>Type the prompt into the task composer. A <code>cmd</code> is worth it only when you'll run the same recipe again.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout ok">
+  <strong>Rule of thumb.</strong> Needs <em>judgment</em> → <strong>skill</strong> (or <code>cmd</code> / <code>folder</code> if it's already a Claude Code slash command). Needs <em>determinism</em> → <strong>ops</strong>. Ships with <em>files</em> → <strong>folder</strong>. None of the above → the flat <code>cmd</code>.
+</div>
+
+<div class="callout warn">
+  <strong>Where do launched tasks show up?</strong> <code>cmd</code>, <code>folder</code>, and instruction <code>skill</code> launches create tasks on the board. If you haven't picked a project, they land under the synthetic <code>ops</code> project bucket, so a filtered board can look empty — the launch toast will call this out (e.g. <em>"Launched /import-all in ops — current board filter is digibot"</em>). Script <code>ops</code> runs don't create a board task; watch the in-panel log instead.
+</div>
+
+<h2 id="remote"><span class="n">8</span>Remote access (iPhone)</h2>
 <p>The daemon is loopback-only; <code>cloudflared</code> bridges it to the internet when you choose.</p>
 <ol>
   <li>Settings → <strong>Remote Access</strong> → <span class="ui">Start tunnel</span> for a quick test URL, or use a
@@ -241,7 +387,7 @@ Create one from the right-hand <span class="ui">＋ New directive</span> panel.<
   quick-vs-named breakdown and the multi-user setup.
 </div>
 
-<h2 id="setup"><span class="n">8</span>First-time setup</h2>
+<h2 id="setup"><span class="n">9</span>First-time setup</h2>
 <p>Onboarding (right-hand <strong>Setup</strong> panel) tracks these. In order:</p>
 <div class="step"><b>1 · Configuration file</b> <code>~/.hivematrix/config.json</code> holds model + provider settings. Created on first run.</div>
 <div class="step"><b>2 · Local model (Qwen)</b> Install <strong>LM Studio</strong>, load <code>qwen/qwen3.6-27b</code> (MLX 8-bit) and start its server on <code>:1234</code>. HiveMatrix probes readiness (tool-calling, decode rate) before using it. Pin the model with no TTL and set LM Studio to launch at login for always-on.</div>
@@ -250,7 +396,7 @@ Create one from the right-hand <span class="ui">＋ New directive</span> panel.<
 <div class="step"><b>5 · Frontier model access</b> Sign in to the <code>claude</code> and/or <code>codex</code> CLIs (subscriptions). Detected automatically and shown under Settings → Backends.</div>
 <div class="step"><b>6 · Desktop Lane (desktop control)</b> Grant the Swift helper <strong>Accessibility</strong> and <strong>Screen Recording</strong> in System Settings → Privacy &amp; Security. (Rebuilding the helper can invalidate a prior grant — re-toggle it if the Desktop Lane shows no permission.)</div>
 
-<h2 id="settings"><span class="n">9</span>The Settings screen</h2>
+<h2 id="settings"><span class="n">10</span>The Settings screen</h2>
 <p>Open with the <span class="ui">⚙</span> gear (top of the console). Four tabs:</p>
 
 <h3>Models tab</h3>
@@ -259,7 +405,7 @@ Create one from the right-hand <span class="ui">＋ New directive</span> panel.<
   <li><strong>Backends</strong> — live detection of Local (LM Studio/Qwen), Claude CLI, and Codex CLI, with a ✓ when configured.</li>
   <li><strong>Local server endpoint</strong> — the OpenAI-compatible URL for the local model (default <code>http://localhost:1234/v1</code>).</li>
   <li><strong>Appearance</strong> — theme (System / Light / Dark) and an optional wallpaper (path or upload).</li>
-  <li><strong>Remote Access</strong> — tunnel status, Start/Stop, the public URL, pairing QR, the access token, and the Advanced named-tunnel form. (See §7.)</li>
+  <li><strong>Remote Access</strong> — tunnel status, Start/Stop, the public URL, pairing QR, the access token, and the Advanced named-tunnel form. (See §8.)</li>
 </ul>
 
 <h3>Projects tab</h3>
@@ -279,7 +425,7 @@ Settings → Capability Lanes.</p>
 <p>Shows the current mode and lets you force <em>cloud-ok / local-only / offline</em> (or return to auto). Useful to go
 private (local-only) or to test offline behavior.</p>
 
-<h2 id="ref"><span class="n">10</span>Quick reference</h2>
+<h2 id="ref"><span class="n">11</span>Quick reference</h2>
 <div class="kvs">
   <div><span class="k">Daemon</span><span><code>127.0.0.1:3747</code> (launchd: <code>com.hivematrix.daemon</code>)</span></div>
   <div><span class="k">Data</span><span><code>~/.hivematrix/hivematrix.db</code> (SQLite, WAL) · config <code>~/.hivematrix/config.json</code></span></div>

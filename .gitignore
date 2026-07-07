@@ -12,3 +12,4 @@ build/
 .rapidmlx-eval/
 __pycache__/
 *.pyc
+.Codex-resumes/
