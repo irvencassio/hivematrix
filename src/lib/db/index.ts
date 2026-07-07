@@ -697,6 +697,11 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (scope, name)
   );
   CREATE INDEX IF NOT EXISTS idx_vault_refs_scope ON vault_refs(scope);`,
+
+  // v32: Terminal Lane per-server access mode (readwrite default | readonly).
+  // App-side enforcement classifies commands against editable allow/block lists;
+  // the daemon only stores/syncs the mode.
+  `ALTER TABLE terminal_profiles ADD COLUMN accessMode TEXT NOT NULL DEFAULT 'readwrite';`,
 ];
 
 // ------------------------------------------------------------------
