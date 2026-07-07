@@ -5303,27 +5303,6 @@ function localHealthProviderName(provider) {
   return provider || "local";
 }
 
-function renderLocalModelHealth(health) {
-  if (!health) return '<div class="mdl-card"><div class="mdl-card-head"><span class="mdl-card-name">Local model health</span><span class="st no">not checked</span></div><div class="mdl-card-foot">No cached local model readiness result yet.</div></div>';
-  const ready = health.qwenReady === true || health.ready === true;
-  const provider = localHealthProviderName(health.provider);
-  const bits = [
-    health.modelFound ? 'model listed' : 'model missing',
-    health.streaming ? 'streaming ok' : 'streaming not verified',
-    health.toolCalls ? 'tools ok' : 'tools not verified',
-  ];
-  if (typeof health.decodeRateTokPerSec === 'number') bits.push(health.decodeRateTokPerSec.toFixed(1) + ' tok/s');
-  return '<div class="mdl-card">'
-    + '<div class="mdl-card-head"><span class="mdl-card-name">Local model health — ' + esc(provider) + '</span>'
-    + '<span class="st ' + (ready ? 'ok' : 'no') + '">' + (ready ? '✓ ready' : 'not ready') + '</span></div>'
-    + '<div class="mdl-tier">' + (ready ? '<span style="color:var(--ok)">●</span>' : '<span style="color:var(--muted)">○</span>')
-    + ' <b>' + esc(health.modelName || 'model') + '</b><span class="mdl-tier-alias">' + esc(health.endpoint || '') + '</span></div>'
-    + '<div class="mdl-card-foot">' + esc(bits.join(' · '))
-    + (health.message ? '<br>' + esc(health.message) : '')
-    + (health.checkedAt ? '<br>checked ' + esc(new Date(health.checkedAt).toLocaleString()) : '')
-    + '</div></div>';
-}
-
 // One-click provisioner: sizes Rapid-MLX to this Mac, installs it, pulls the
 // models that fit, writes config. Shown only when the Mac can run local.
 function renderProvisionUI(cap) {
@@ -5996,7 +5975,6 @@ function renderSettingsModelControls() {
     + '<span class="st '+(b.configured?'ok':'no')+'">'+(b.configured?'✓ '+esc(b.detail):'not set up')+'</span></div>'
     + (b.configured?'':'<div class="mdl-card-foot">'+esc(b.connect||'')+'</div>')+'</div>').join("") : '<div class="mdl-card"><div class="mdl-card-foot" style="border:none;margin:0;padding:0">Model status unavailable.</div></div>';
   document.getElementById("s_backends").innerHTML += renderLocalEngine(m.localEngine, m.localEngineCapability);
-  document.getElementById("s_backends").innerHTML += renderLocalModelHealth(m.localModelHealth);
   document.getElementById("s_backends").innerHTML += renderProvisionUI(m.localEngineCapability);
   document.getElementById("s_endpoint").value = (local && local.endpoint) || "http://localhost:1234/v1";
   renderEmbeddingSettings();

@@ -1187,12 +1187,12 @@ test("Models panel renders the Rapid-MLX local engine", () => {
   assert.doesNotMatch(checkModels, /renderLocalBackendChoice/, "no backend-specific local-model branch remains");
 });
 
-test("Settings Models renders local engine, health, and provisioning controls", () => {
+test("Settings Models renders local engine and provisioning controls without cached health card", () => {
   const js = extractScript(CONSOLE_HTML);
   const renderSettings = extractBetween(js, "function renderSettingsModelControls()", "function closeSettings()");
 
   assert.match(renderSettings, /renderLocalEngine\(m\.localEngine, m\.localEngineCapability\)/);
-  assert.match(renderSettings, /renderLocalModelHealth\(m\.localModelHealth\)/);
+  assert.doesNotMatch(renderSettings, /renderLocalModelHealth\(m\.localModelHealth\)/);
   assert.match(renderSettings, /renderProvisionUI\(m\.localEngineCapability\)/);
   assert.doesNotMatch(renderSettings, /renderLocalBackendChoice/);
 });
