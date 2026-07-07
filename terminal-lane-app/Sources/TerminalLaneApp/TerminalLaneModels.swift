@@ -1,8 +1,15 @@
 import Foundation
+import TerminalLaneCore
 
 enum TerminalLaneProfileKind: String, Codable, CaseIterable {
     case local
     case ssh
+}
+
+enum TerminalLaneAccessMode: String, Codable, CaseIterable {
+    case readwrite
+    case readonly
+    var label: String { self == .readonly ? "Read-only" : "Read-write" }
 }
 
 // Honest auth model. password_keychain is intentionally NOT auto-connectable
@@ -60,6 +67,7 @@ struct TerminalLaneProfile: Codable, Equatable {
     var displayName: String
     var kind: TerminalLaneProfileKind
     var authMethod: TerminalLaneAuthMethod
+    var accessMode: TerminalLaneAccessMode
     var host: String?
     var user: String?
     var port: Int?
@@ -75,6 +83,7 @@ struct TerminalLaneProfile: Codable, Equatable {
 
     var autoConnect: Bool { authMethod.autoConnect }
     var credentialPresent: Bool { (credentialRef?.isEmpty == false) }
+    var coreAccessMode: AccessMode { accessMode == .readonly ? .readonly : .readwrite }
 
     /// Canonical credentialRef marker for this profile. It signals "the password
     /// lives in the macOS Keychain" and satisfies the daemon contract; the
@@ -89,11 +98,12 @@ struct TerminalLaneProfile: Codable, Equatable {
 
     // Backward-compatible decode: older profiles.json has no authMethod/keyPath.
     enum CodingKeys: String, CodingKey {
-        case id, displayName, kind, authMethod, host, user, port, shell, cwd, keyPath, credentialRef, openCommand, notes, lastSyncStatus, createdAt, updatedAt
+        case id, displayName, kind, authMethod, accessMode, host, user, port, shell, cwd, keyPath, credentialRef, openCommand, notes, lastSyncStatus, createdAt, updatedAt
     }
 
-    init(id: String, displayName: String, kind: TerminalLaneProfileKind, authMethod: TerminalLaneAuthMethod, host: String?, user: String?, port: Int?, shell: String?, cwd: String?, keyPath: String?, credentialRef: String?, openCommand: String, notes: String, lastSyncStatus: String, createdAt: String, updatedAt: String) {
+    init(id: String, displayName: String, kind: TerminalLaneProfileKind, authMethod: TerminalLaneAuthMethod, accessMode: TerminalLaneAccessMode, host: String?, user: String?, port: Int?, shell: String?, cwd: String?, keyPath: String?, credentialRef: String?, openCommand: String, notes: String, lastSyncStatus: String, createdAt: String, updatedAt: String) {
         self.id = id; self.displayName = displayName; self.kind = kind; self.authMethod = authMethod
+        self.accessMode = accessMode
         self.host = host; self.user = user; self.port = port; self.shell = shell; self.cwd = cwd
         self.keyPath = keyPath; self.credentialRef = credentialRef; self.openCommand = openCommand
         self.notes = notes; self.lastSyncStatus = lastSyncStatus; self.createdAt = createdAt; self.updatedAt = updatedAt
@@ -122,6 +132,7 @@ struct TerminalLaneProfile: Codable, Equatable {
         } else {
             authMethod = kind == .local ? .local : ((credentialRef?.isEmpty == false) ? .password_keychain : .ssh_key_agent)
         }
+        accessMode = (try? c.decode(TerminalLaneAccessMode.self, forKey: .accessMode)) ?? .readwrite
     }
 
     static func nowString() -> String {
@@ -134,6 +145,7 @@ struct TerminalLaneProfile: Codable, Equatable {
             displayName: "Local Mac",
             kind: .local,
             authMethod: .local,
+            accessMode: .readwrite,
             host: nil,
             user: NSUserName(),
             port: nil,

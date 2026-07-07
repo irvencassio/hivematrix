@@ -15,6 +15,7 @@ interface TerminalProfileRow {
   displayName: string;
   kind: TerminalProfile["kind"];
   authMethod: TerminalAuthMethod | null;
+  accessMode: "readwrite" | "readonly" | null;
   host: string | null;
   user: string | null;
   port: number | null;
@@ -121,8 +122,8 @@ export function upsertTerminalProfile(input: unknown): TerminalProfile {
   // createdAt is intentionally NOT in the UPDATE set, so it is preserved across
   // edits; only updatedAt is bumped.
   getDb().prepare(`
-    INSERT INTO terminal_profiles (_id, displayName, kind, authMethod, host, user, port, shell, cwd, keyPath, credentialRef, openCommand, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO terminal_profiles (_id, displayName, kind, authMethod, host, user, port, shell, cwd, keyPath, credentialRef, openCommand, notes, accessMode)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(_id) DO UPDATE SET
       displayName = excluded.displayName,
       kind = excluded.kind,
@@ -136,6 +137,7 @@ export function upsertTerminalProfile(input: unknown): TerminalProfile {
       credentialRef = excluded.credentialRef,
       openCommand = excluded.openCommand,
       notes = excluded.notes,
+      accessMode = excluded.accessMode,
       updatedAt = datetime('now')
   `).run(
     profile.id,
@@ -151,6 +153,7 @@ export function upsertTerminalProfile(input: unknown): TerminalProfile {
     profile.credentialRef,
     profile.openCommand,
     profile.notes,
+    profile.accessMode,
   );
   // Stale credential rows: if the (edited) profile no longer references a
   // credential, drop the orphaned metadata so credentialPresent stays honest.
@@ -334,6 +337,7 @@ function rowToProfile(row: TerminalProfileRow): TerminalProfile {
     displayName: row.displayName,
     kind: row.kind,
     authMethod,
+    accessMode: (row.accessMode ?? "readwrite") as "readwrite" | "readonly",
     host: row.host,
     user: row.user,
     port: row.port,

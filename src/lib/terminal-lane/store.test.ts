@@ -144,6 +144,13 @@ test("deleteTerminalProfile removes a profile and its rows, but refuses the loca
   assert.ok(getTerminalProfile("local"), "local default preserved");
 });
 
+test("accessMode persists through upsert and defaults to readwrite", () => {
+  upsertTerminalProfile({ id: "ro", displayName: "RO", authMethod: "ssh_key_agent", host: "h.x", user: "u", accessMode: "readonly" });
+  assert.equal(getTerminalProfile("ro")!.accessMode, "readonly");
+  upsertTerminalProfile({ id: "rw", displayName: "RW", authMethod: "ssh_key_agent", host: "h.x", user: "u" });
+  assert.equal(getTerminalProfile("rw")!.accessMode, "readwrite");
+});
+
 test("rowToProfile heals legacy rows whose kind and authMethod disagree", async () => {
   const { runTerminalReadinessProbe } = await import("./readiness");
   // Legacy corruption seen in the field: kind=ssh with authMethod=local and an

@@ -15,6 +15,7 @@ final class TerminalLaneDaemonClient {
                 "displayName": profile.displayName,
                 "kind": profile.kind.rawValue,
                 "authMethod": profile.authMethod.rawValue,
+                "accessMode": profile.accessMode.rawValue,
                 "host": profile.host as Any,
                 "user": profile.user as Any,
                 "port": profile.port as Any,

@@ -81,6 +81,14 @@ test("ssh_key_file open command includes the identity file, never a secret", () 
   assert.doesNotMatch(JSON.stringify(p), /password|passphrase|private_key/i);
 });
 
+test("accessMode defaults to readwrite and validates its value", () => {
+  const def = normalizeTerminalProfile({ id: "a", displayName: "A", authMethod: "ssh_key_agent", host: "h.x", user: "u" });
+  assert.equal(def.accessMode, "readwrite");
+  const ro = normalizeTerminalProfile({ id: "b", displayName: "B", authMethod: "password_keychain", host: "h.x", user: "u", credentialRef: "hivematrix.terminal.b", accessMode: "readonly" });
+  assert.equal(ro.accessMode, "readonly");
+  assert.throws(() => normalizeTerminalProfile({ id: "c", displayName: "C", authMethod: "local", accessMode: "sideways" }), /accessMode/i);
+});
+
 test("terminalAuthCapability reports honest auto-connectability", () => {
   const cap = (input: Record<string, unknown>) => terminalAuthCapability(normalizeTerminalProfile(input));
   assert.equal(cap({ id: "l", displayName: "L", authMethod: "local" }).autoConnect, true);

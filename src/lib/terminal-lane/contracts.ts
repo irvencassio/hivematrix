@@ -17,6 +17,7 @@ export interface TerminalProfile {
   displayName: string;
   kind: "local" | "ssh";
   authMethod: TerminalAuthMethod;
+  accessMode: "readwrite" | "readonly";
   host: string | null;
   user: string | null;
   port: number | null;
@@ -130,6 +131,12 @@ function validateCredentialRef(ref: string | null): string | null {
   return ref;
 }
 
+function normalizeAccessMode(value: unknown): "readwrite" | "readonly" {
+  if (value == null || value === "") return "readwrite";
+  if (value !== "readwrite" && value !== "readonly") fail("accessMode must be readwrite or readonly");
+  return value;
+}
+
 export function shellQuote(value: string): string {
   if (/^[A-Za-z0-9._~@%+=:,/-]+$/.test(value)) return value;
   return `'${value.replaceAll("'", "'\\''")}'`;
@@ -218,6 +225,7 @@ export function normalizeTerminalProfile(input: unknown): TerminalProfile {
     displayName: readString(record, "displayName")!,
     kind,
     authMethod,
+    accessMode: normalizeAccessMode(record.accessMode),
     host: kind === "local" ? null : host,
     user: kind === "local" ? user : user,
     port: kind === "local" ? null : port,
