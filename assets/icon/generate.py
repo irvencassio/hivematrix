@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """Generate HiveMatrix icon asset sets from the SVG masters."""
-import os, shutil, subprocess
+import os, shutil, subprocess, sys
+
+# cairosvg (used for the alpha-preserving iOS dark/tinted renders) resolves
+# libcairo by bare name through dyld, which only honors DYLD_LIBRARY_PATH set at
+# process launch. Re-exec once with Homebrew's lib dir on the path.
+_LIBDIRS = [p for p in ("/opt/homebrew/lib", "/usr/local/lib") if os.path.isdir(p)]
+if _LIBDIRS and os.environ.get("_HM_ICON_REEXEC") != "1":
+    env = dict(os.environ, _HM_ICON_REEXEC="1")
+    existing = env.get("DYLD_LIBRARY_PATH", "")
+    env["DYLD_LIBRARY_PATH"] = ":".join(_LIBDIRS + ([existing] if existing else []))
+    os.execve(sys.executable, [sys.executable, *sys.argv], env)
+
 from PIL import Image, ImageDraw
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +36,15 @@ def render_svg(svg_name):
         raise RuntimeError(f"qlmanage did not render {svg_name}")
     shutil.copy2(rendered, png)
     return png
+
+def render_svg_alpha(svg_name, size=1024):
+    """Render an SVG preserving transparency (qlmanage flattens alpha onto white,
+    which is wrong for the iOS dark/tinted appearances)."""
+    import cairosvg
+    png = os.path.join(OUT, f"_{svg_name}.png")
+    cairosvg.svg2png(url=os.path.join(HERE, svg_name), write_to=png,
+                     output_width=size, output_height=size)
+    return Image.open(png).convert("RGBA")
 
 def resize(img, size):
     return img.resize((size, size), Image.LANCZOS)
@@ -57,6 +77,12 @@ mac_master = apply_squircle_alpha(Image.open(render_svg("icon-macos-master.svg")
 # --- iOS: 1024, NO alpha (App Store requirement), full-bleed (iOS rounds it) ---
 ios = resize(ios_master, 1024).convert("RGB")
 ios.save(os.path.join(OUT, "AppIcon.png"))
+
+# iOS 17+ dark + tinted appearances. Apple wants these designed on a TRANSPARENT
+# background (system composites over its dark material / applies the tint), so
+# unlike the primary icon they KEEP alpha.
+render_svg_alpha("icon-ios-dark.svg").save(os.path.join(OUT, "AppIcon-Dark.png"))
+render_svg_alpha("icon-ios-tinted.svg").save(os.path.join(OUT, "AppIcon-Tinted.png"))
 
 # --- Desktop PNGs (from rounded mac master, keep alpha) ---
 png_sizes = {
@@ -109,12 +135,28 @@ for name in list(png_sizes.keys()) + ["icon.ico", "icon.icns", "app-icon-dark-gr
     shutil.copy2(os.path.join(OUT, name), os.path.join(TAURI_ICONS, name))
 print("copied desktop icons ->", TAURI_ICONS)
 
-# Push the primary iOS icon into the sibling hivematrix-ios repo (if present) so
-# iPhone/iPad carry the same green-on-white identity as the Mac.
-IOS_ICON_DST = os.path.abspath(os.path.join(
-    REPO, "..", "hivematrix-ios", "HiveMatrix", "Assets.xcassets", "AppIcon.appiconset", "AppIcon.png"))
-if os.path.isdir(os.path.dirname(IOS_ICON_DST)):
-    shutil.copy2(os.path.join(OUT, "AppIcon.png"), IOS_ICON_DST)
-    print("copied iOS icon ->", IOS_ICON_DST)
+# Push the iOS icon set into the sibling hivematrix-ios repo (if present) so
+# iPhone/iPad carry the same green-on-white identity as the Mac, plus the dark +
+# tinted appearances the system swaps to on the Home Screen.
+IOS_APPICONSET = os.path.abspath(os.path.join(
+    REPO, "..", "hivematrix-ios", "HiveMatrix", "Assets.xcassets", "AppIcon.appiconset"))
+if os.path.isdir(IOS_APPICONSET):
+    for name in ("AppIcon.png", "AppIcon-Dark.png", "AppIcon-Tinted.png"):
+        shutil.copy2(os.path.join(OUT, name), os.path.join(IOS_APPICONSET, name))
+    contents = {
+        "images": [
+            {"filename": "AppIcon.png", "idiom": "universal", "platform": "ios", "size": "1024x1024"},
+            {"filename": "AppIcon-Dark.png", "idiom": "universal", "platform": "ios", "size": "1024x1024",
+             "appearances": [{"appearance": "luminosity", "value": "dark"}]},
+            {"filename": "AppIcon-Tinted.png", "idiom": "universal", "platform": "ios", "size": "1024x1024",
+             "appearances": [{"appearance": "luminosity", "value": "tinted"}]},
+        ],
+        "info": {"author": "xcode", "version": 1},
+    }
+    import json
+    with open(os.path.join(IOS_APPICONSET, "Contents.json"), "w") as fh:
+        json.dump(contents, fh, indent=2)
+        fh.write("\n")
+    print("copied iOS icon set (light/dark/tinted) ->", IOS_APPICONSET)
 else:
     print("iOS repo not found; skipped iOS icon copy")
