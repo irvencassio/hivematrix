@@ -14,6 +14,7 @@ import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { loadHiveConfig, saveHiveConfig } from "@/lib/central/config";
 import { runPatternDetection } from "@/lib/feedback/pattern-detection";
 import { runCapabilityGapDetection } from "@/lib/feedback/capability-gaps";
+import { runPipelineSelfAudit } from "@/lib/feedback/pipeline-audit";
 import { runPersonaEvolution } from "./persona-evolution";
 import { getColdSessions } from "./store";
 import { distillSession } from "./distill";
@@ -64,6 +65,12 @@ async function runDistillPass(nowMs = Date.now()): Promise<void> {
     // proposals (self-serviceable skills vs. gated lane/pack acquisition). Never
     // acquires anything — acquisition stays a separate, gated operator action.
     runCapabilityGapDetection();
+    // Pipeline self-audit: the accountability layer inspects its OWN machinery
+    // (scoreboard, route scorecard, loop-health) and files any regression as feedback
+    // — the COO filing its own bug reports, deduped so it never spams a row.
+    await runPipelineSelfAudit().catch((e) =>
+      console.warn("[flash:learning-loop] pipeline self-audit error:", e),
+    );
   }
 
   // Weekly, high-trust: let the agent evolve its own SOUL.md operating notes from
