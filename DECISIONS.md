@@ -1128,7 +1128,7 @@ follows the approved W8/W9 specs; the defects were seams, all now regression-tes
 
 **Decision:** In Mixed mode, code work routes to the frontier by default. The local
 model's role is (a) 24×7 ambient cognition — heartbeat, distill, operator modeling,
-Weaver, cheap-web, non-code extraction/file-ops — where its free, always-on tokens
+accountability pulses, cheap-web, non-code extraction/file-ops — where its free, always-on tokens
 are a real economic advantage; and (b) a draft/fallback stage inside the repair
 ladder, never the owner of code that ships. Local coding remains only as an offline
 fallback, and when it runs it accrues frontier-review-debt that auto-fires on
@@ -1141,7 +1141,7 @@ needs for revenue. Full analysis: `~/_GD/brain/2026-07-06-hivematrix-task-pipeli
 User-dispatched coding (`model:"mixed"`) routes via `code-critical` → frontier in
 cloud-ok (`subprocess.ts:374`); cloud-only posture forces frontier. The only role on
 local is `execute`, which is the autonomous directive/ambient path
-(`directive-engine.ts:622/651/691`) — Weaver scorecards, audits, distill, file ops —
+(`directive-engine.ts:622/651/691`) — accountability scorecards, audits, distill, file ops —
 which SHOULD stay local per this decision. `execute` does not distinguish code from
 non-code, so a wholesale `execute`→frontier flip is WRONG (it would push ambient
 cognition onto frontier). The repair-ladder static stage shipped 2026-07-06
