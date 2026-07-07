@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.151 — 2026-07-07
+
+Deep Think in directive planning: when planning runs on the local model, the plan is produced with test-time compute (diverse rollouts + self-consistency on Qwen) for higher quality — free tokens, latency-tolerant.
+
 ## v0.1.150 — 2026-07-07
 
 Fixes: duplicate local model removed from the New Task picker (deduped by family); console now auto-reloads after an in-place app update so removed UI (Flights) no longer lingers as a stale page.
