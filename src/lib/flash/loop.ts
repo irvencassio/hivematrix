@@ -22,6 +22,46 @@ const MAX_TOOL_CALLS = 12;
 const MAX_WALL_MS = 3 * 60 * 1000;
 const MODEL_TIMEOUT_MS = 120_000;
 
+/** Consecutive identical sentences before we call it a degenerate repetition loop. */
+export const REPEAT_LIMIT = 4;
+
+/** Split text into trimmed sentence/line units (on . ! ? or newline). */
+function sentenceUnits(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Pure: is the model degenerating into repetition? True when the last substantive
+ * sentence has repeated >= REPEAT_LIMIT times in a row at the tail. A small local
+ * model with no repetition penalty can loop a sentence up to max_tokens — this lets
+ * the stream stop early instead of showing the operator a wall of the same line.
+ */
+export function isRepeatingTail(text: string, limit = REPEAT_LIMIT): boolean {
+  const units = sentenceUnits(text);
+  if (units.length < limit) return false;
+  const last = units[units.length - 1];
+  if (last.length < 20) return false; // ignore short interjections ("ok.", "yes.")
+  let run = 0;
+  for (let i = units.length - 1; i >= 0 && units[i] === last; i--) run++;
+  return run >= limit;
+}
+
+/** Pure: collapse a run of >= limit identical trailing sentences down to one, so a
+ *  degenerate generation isn't stored verbatim in the conversation history. */
+export function collapseRepetition(text: string, limit = REPEAT_LIMIT): string {
+  const units = sentenceUnits(text);
+  if (units.length < limit) return text;
+  const last = units[units.length - 1];
+  let run = 0;
+  for (let i = units.length - 1; i >= 0 && units[i] === last; i--) run++;
+  if (run < limit) return text;
+  const kept = units.slice(0, units.length - run + 1); // keep exactly one copy
+  return kept.join(" ");
+}
+
 // ------------------------------------------------------------------
 // Flash-only tool definitions
 // ------------------------------------------------------------------
@@ -134,6 +174,10 @@ async function* streamFromLocalModel(
     stream: true,
     temperature: 0.7,
     max_tokens: 2048,
+    // Discourage the local model from looping a phrase (esp. when it wants a
+    // capability it lacks). OpenAI-compatible; ignored by servers that don't support it.
+    frequency_penalty: 0.4,
+    presence_penalty: 0.3,
     ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
   });
 
@@ -388,6 +432,7 @@ export async function runFlashAgentLoop(
     const accumulatedTools = new Map<number, ToolCallRecord>();
     let turnText = "";
     let finishReason = "stop";
+    let degenerated = false;
 
     try {
       for await (const event of streamFromLocalModel(
@@ -400,6 +445,12 @@ export async function runFlashAgentLoop(
           turnText += event.content;
           fullText += event.content;
           emit.token(event.content);
+          // Stop a runaway repetition loop early instead of streaming the same
+          // sentence up to max_tokens. Only check on a sentence boundary (cheap).
+          if (/[.!?\n]/.test(event.content) && isRepeatingTail(turnText)) {
+            degenerated = true;
+            break;
+          }
         } else if (event.type === "tool_call_delta") {
           const existing = accumulatedTools.get(event.index) ?? {
             id: event.id ?? `call_${event.index}`,
@@ -418,6 +469,13 @@ export async function runFlashAgentLoop(
       const errMsg = `\n\n[Flash model error: ${err instanceof Error ? err.message : String(err)}]`;
       emit.token(errMsg);
       return fullText + errMsg;
+    }
+
+    // The model looped a sentence — end the turn now and collapse the repeated tail
+    // out of the returned text (the client already saw the emitted tokens, but the
+    // stored history and any summary shouldn't carry the wall of duplicates).
+    if (degenerated) {
+      return collapseRepetition(fullText);
     }
 
     const toolCalls = [...accumulatedTools.values()].filter((tc) => tc.function.name);

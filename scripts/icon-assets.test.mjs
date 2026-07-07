@@ -50,14 +50,16 @@ test("desktop app icon is inset (not full-bleed) with transparent corners", () =
   assert.ok(x0 > 20 && y0 > 20, "glyph should sit inside a transparent margin");
 });
 
-test("white alternate runtime icon exists and is inset with a white tile", () => {
-  const path = join(root, "src-tauri/icons/app-icon-white.png");
-  assert.equal(existsSync(path), true, "white alternate icon must be bundled");
+// The app icon is a single green-on-white identity (the light/dark chooser + white
+// alternate were retired). Assert the runtime dock icon is the green-on-white tile.
+test("runtime dock icon is bundled with an opaque white tile interior", () => {
+  const path = join(root, "src-tauri/icons/app-icon-dark-green.png");
+  assert.equal(existsSync(path), true, "runtime dock icon must be bundled");
   const icon = inspectPng(path);
   assert.deepEqual(icon.size, [512, 512]);
   assert.equal(icon.corner[3], 0, "corner should be transparent (inset, not full-bleed)");
   assert.ok(
     icon.tileTop[3] > 245 && icon.tileTop[0] > 245 && icon.tileTop[1] > 245 && icon.tileTop[2] > 245,
-    "tile interior should be opaque white",
+    "tile interior should be opaque white (green-on-white identity)",
   );
 });
