@@ -2,6 +2,7 @@ import AppKit
 import Citadel
 import NIOCore
 import SwiftTerm
+import TerminalLaneCore
 
 final class TerminalViewController: NSViewController {
     private let profilePopup = TerminalLaneUI.popUp()
@@ -11,13 +12,14 @@ final class TerminalViewController: NSViewController {
     private let terminalContainer = NSView()
 
     // Local + system-ssh (agent/key-file/manual) run in a local PTY.
-    private var localTerminalView: LocalProcessTerminalView?
+    private var localTerminalView: PolicedLocalProcessTerminalView?
     // password_keychain runs over the native SSH runtime, bridged into a plain
     // SwiftTerm view.
     private var sshTerminalView: TerminalView?
     private var sshCoordinator: SSHTerminalCoordinator?
     private var sshService: TerminalLaneSSHService?
     private var stdinWriter: TTYStdinWriter?
+    private var activeProfile: TerminalLaneProfile?
 
     override func loadView() {
         view = NSView()
@@ -105,15 +107,22 @@ final class TerminalViewController: NSViewController {
         ])
     }
 
-    private func makeLocalTerminalView() -> LocalProcessTerminalView {
-        let terminal = LocalProcessTerminalView(frame: .zero)
+    private func makeLocalTerminalView() -> PolicedLocalProcessTerminalView {
+        let terminal = PolicedLocalProcessTerminalView(frame: .zero)
         terminal.wantsLayer = true
         terminal.layer?.backgroundColor = NSColor.black.cgColor
+        terminal.gate = { [weak self] data, term in
+            guard let self else { return true }
+            if !data.contains(0x0D) { return true }
+            let pending = Self.pendingLine(of: term.getTerminal())
+            return self.gateOnEnter(pendingLine: pending, terminal: term)
+        }
         return terminal
     }
 
     @objc private func openSelectedProfile() {
         guard let profile = currentProfile() else { return }
+        activeProfile = profile
         view.window?.title = "Terminal Lane — \(profile.displayName)"
 
         if profile.authMethod.usesNativeSSH {
@@ -208,7 +217,15 @@ final class TerminalViewController: NSViewController {
     }
 
     fileprivate func sendSSHInput(_ data: ArraySlice<UInt8>) {
-        guard let writer = stdinWriter else { return }
+        guard let writer = stdinWriter, let terminal = sshTerminalView else { return }
+        if data.contains(0x0D) {
+            let pending = Self.pendingLine(of: terminal.getTerminal())
+            if !gateOnEnter(pendingLine: pending, terminal: terminal) {
+                let clear = ByteBuffer(bytes: [0x15]) // Ctrl-U clears the remote input line
+                Task { try? await writer.write(clear) }
+                return
+            }
+        }
         let buffer = ByteBuffer(bytes: Array(data))
         Task { try? await writer.write(buffer) }
     }
@@ -227,6 +244,73 @@ final class TerminalViewController: NSViewController {
     }
 
     private var activeTerminalView: TerminalView? { sshTerminalView ?? localTerminalView }
+
+    // MARK: Command policy gate
+
+    /// Returns true if the Enter should be forwarded (command allowed), false if
+    /// it was blocked (caller must clear the line and not forward).
+    private func gateOnEnter(pendingLine: String, terminal: TerminalView) -> Bool {
+        guard let profile = activeProfile else { return true }
+        let command = Self.stripPrompt(pendingLine)
+        if command.isEmpty { return true }
+        let decision = TerminalLanePolicy.shared.policy.decide(commandLine: command, mode: profile.coreAccessMode)
+        let ip = profile.host ?? "local"
+        switch decision {
+        case .allow:
+            logCommand(profile: profile, ip: ip, decision: "RAN", command: command)
+            return true
+        case .blocked(let reason):
+            logCommand(profile: profile, ip: ip, decision: "BLOCKED", command: command)
+            let notice = "\r\n\u{1b}[31m⛔ Blocked — '\(profile.displayName)' is \(profile.accessMode.label.lowercased()) (\(reason))\u{1b}[0m\r\n"
+            terminal.feed(text: notice)
+            return false
+        }
+    }
+
+    private func logCommand(profile: TerminalLaneProfile, ip: String, decision: String, command: String) {
+        let entry = CommandLogEntry(
+            timestamp: Date(),
+            server: profile.displayName,
+            ip: ip,
+            mode: profile.accessMode.rawValue,
+            decision: decision,
+            command: command
+        )
+        TerminalLanePolicy.shared.log.append(entry)
+    }
+
+    /// Read the current input line from the terminal buffer at the cursor row.
+    private static func pendingLine(of terminal: Terminal) -> String {
+        let row = terminal.buffer.y
+        guard let line = terminal.getLine(row: row) else { return "" }
+        return line.translateToString(trimRight: true)
+    }
+
+    /// Strip the shell prompt prefix, keeping the typed command.
+    static func stripPrompt(_ line: String) -> String {
+        let markers = ["❯ ", "$ ", "% ", "# ", "> "]
+        for marker in markers {
+            if let r = line.range(of: marker, options: .backwards) {
+                return String(line[r.upperBound...]).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return line.trimmingCharacters(in: .whitespaces)
+    }
+}
+
+/// LocalProcessTerminalView that runs an input gate on Enter. If the gate blocks,
+/// it clears the current line (Ctrl-U to the local PTY) and does not forward Enter.
+final class PolicedLocalProcessTerminalView: LocalProcessTerminalView {
+    /// Return true to forward the keystrokes, false if blocked.
+    var gate: ((_ data: ArraySlice<UInt8>, _ terminal: TerminalView) -> Bool)?
+
+    override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        if data.contains(0x0D), let gate, !gate(data, self) {
+            super.send(source: source, data: ArraySlice([0x15])) // Ctrl-U, no newline
+            return
+        }
+        super.send(source: source, data: data)
+    }
 }
 
 /// Bridges SwiftTerm's plain TerminalView to the native SSH PTY.
