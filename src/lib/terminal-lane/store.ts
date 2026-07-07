@@ -323,11 +323,17 @@ function latestRun(profileId: string): LatestRunRow | null {
 }
 
 function rowToProfile(row: TerminalProfileRow): TerminalProfile {
+  const inferred: TerminalAuthMethod = row.kind === "local" ? "local" : row.credentialRef ? "password_keychain" : "ssh_key_agent";
+  let authMethod = (row.authMethod ?? inferred) as TerminalAuthMethod;
+  // Heal legacy rows whose kind and authMethod disagree (e.g. kind=ssh with
+  // authMethod=local). Contract normalization derives kind from authMethod, so
+  // an unhealed mismatch makes every readiness run for the row fail.
+  if ((row.kind === "ssh") !== (authMethod !== "local")) authMethod = inferred;
   return {
     id: row._id,
     displayName: row.displayName,
     kind: row.kind,
-    authMethod: (row.authMethod ?? (row.kind === "local" ? "local" : row.credentialRef ? "password_keychain" : "ssh_key_agent")) as TerminalAuthMethod,
+    authMethod,
     host: row.host,
     user: row.user,
     port: row.port,

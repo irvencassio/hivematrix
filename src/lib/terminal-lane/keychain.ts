@@ -2,15 +2,25 @@ import { spawn } from "node:child_process";
 
 import { ContractValidationError } from "@/lib/central/contracts";
 
-const SERVICE_NAME = "HiveMatrix Terminal Lane";
-
 export interface KeychainRunResult {
   stdout: string;
   stderr: string;
 }
 
 export type KeychainRunner = (file: string, args: string[], opts?: { stdin?: string }) => Promise<KeychainRunResult>;
-export type TerminalSecretKind = "password" | "ssh_key_passphrase" | "private_key";
+
+/**
+ * Identity of an SSH password in the macOS Keychain: an Internet Password item
+ * keyed by host + user + port + the SSH protocol — the same identity other SSH
+ * tools on this Mac use, so an item saved for user@host by one of them is found
+ * and reused here. The profile's credentialRef is a marker only
+ * (see terminalCredentialRef); it never addresses the Keychain.
+ */
+export interface TerminalPasswordKey {
+  host: string;
+  user: string;
+  port?: number | null;
+}
 
 export class TerminalLaneKeychain {
   private readonly run: KeychainRunner;
@@ -19,32 +29,45 @@ export class TerminalLaneKeychain {
     this.run = opts.run ?? defaultRunner;
   }
 
-  async saveSecret(input: { profileId: string; credentialRef: string; kind: TerminalSecretKind; value: string }): Promise<void> {
-    validateRef(input.credentialRef);
-    validateKind(input.kind);
-    await this.run("security", [
-      "add-generic-password",
+  async savePassword(input: TerminalPasswordKey & { value: string }): Promise<void> {
+    const key = normalizeKey(input);
+    if (/[\r\n]/.test(input.value)) {
+      throw new ContractValidationError("password must not contain newline characters");
+    }
+    // `security -i` reads the command from stdin, keeping the secret out of argv
+    // (visible in `ps`) while -U updates an existing item in place.
+    const command = [
+      "add-internet-password",
       "-U",
-      "-s",
-      SERVICE_NAME,
-      "-a",
-      accountKey(input.profileId, input.kind),
-      "-w",
-    ], { stdin: input.value });
+      "-s", quote(key.host),
+      "-a", quote(key.user),
+      "-P", String(key.port),
+      "-r", '"ssh "',
+      "-w", quote(input.value),
+    ].join(" ");
+    await this.run("security", ["-i"], { stdin: command });
   }
 
-  async readSecret(input: { profileId: string; credentialRef: string; kind: TerminalSecretKind }): Promise<string> {
-    validateRef(input.credentialRef);
-    validateKind(input.kind);
-    const result = await this.run("security", [
-      "find-generic-password",
-      "-s",
-      SERVICE_NAME,
-      "-a",
-      accountKey(input.profileId, input.kind),
-      "-w",
-    ]);
-    return result.stdout.trimEnd();
+  async readPassword(key: TerminalPasswordKey): Promise<string | null> {
+    const normalized = normalizeKey(key);
+    try {
+      const result = await this.run("security", [
+        "find-internet-password",
+        "-s", normalized.host,
+        "-a", normalized.user,
+        "-P", String(normalized.port),
+        "-r", "ssh ",
+        "-w",
+      ]);
+      return result.stdout.replace(/\n$/, "");
+    } catch (error) {
+      if (isNotFound(error)) return null;
+      throw error;
+    }
+  }
+
+  async hasPassword(key: TerminalPasswordKey): Promise<boolean> {
+    return (await this.readPassword(key)) != null;
   }
 
   redactedDiagnostic(call: { file: string; args: string[] }): string {
@@ -52,22 +75,35 @@ export class TerminalLaneKeychain {
   }
 }
 
-function validateRef(ref: string): void {
-  if (!/^hivematrix\.terminal\.[a-z0-9._:-]+$/.test(ref)) {
-    throw new ContractValidationError("credentialRef must start with hivematrix.terminal.");
-  }
-}
-
-function validateKind(kind: string): void {
-  if (!["password", "ssh_key_passphrase", "private_key"].includes(kind)) {
-    throw new ContractValidationError(`Unsupported Terminal Lane Keychain secret kind: ${kind}`);
-  }
-}
-
-function accountKey(profileId: string, kind: TerminalSecretKind): string {
+/**
+ * Canonical credentialRef marker for a profile. It signals "the password for
+ * this profile lives in the macOS Keychain" and satisfies the profile contract;
+ * the Keychain item itself is addressed by host/user/port (TerminalPasswordKey).
+ */
+export function terminalCredentialRef(profileId: string): string {
   const normalized = profileId.trim().toLowerCase().replace(/\s+/g, "-");
-  if (!/^[a-z0-9._:-]+$/.test(normalized)) throw new ContractValidationError("profileId is not a valid Keychain account prefix");
-  return `${normalized}:${kind}`;
+  if (!/^[a-z0-9._:-]+$/.test(normalized)) throw new ContractValidationError("profile id is not a valid credentialRef suffix");
+  return `hivematrix.terminal.${normalized}`;
+}
+
+function normalizeKey(key: TerminalPasswordKey): { host: string; user: string; port: number } {
+  const host = key.host?.trim() ?? "";
+  const user = key.user?.trim() ?? "";
+  if (!host) throw new ContractValidationError("host is required to address a Keychain SSH password");
+  if (!user) throw new ContractValidationError("user is required to address a Keychain SSH password");
+  const port = key.port ?? 22;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ContractValidationError("port must be an integer from 1 to 65535");
+  return { host, user, port };
+}
+
+// Quoting for security(1)'s interactive command parser (double quotes with
+// backslash escapes). Newlines are rejected before this is called.
+function quote(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function isNotFound(error: unknown): boolean {
+  return error instanceof Error && /could not be found in the keychain/i.test(error.message);
 }
 
 async function defaultRunner(file: string, args: string[], opts: { stdin?: string } = {}): Promise<KeychainRunResult> {

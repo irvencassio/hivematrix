@@ -100,9 +100,9 @@ final class ProfilesViewController: NSViewController, NSTableViewDataSource, NST
         copy.createdAt = TerminalLaneProfile.nowString()
         copy.updatedAt = TerminalLaneProfile.nowString()
         copy.lastSyncStatus = "not synced"
-        // A duplicate never copies the Keychain secret; the new id starts without one.
-        copy.credentialRef = nil
-        copy.authMethod = original.authMethod == .password_keychain ? .manual_password : original.authMethod
+        // The Keychain item is keyed by host/user/port, so a duplicate keeps
+        // using the same stored password; only the marker ref is re-derived.
+        copy.credentialRef = original.authMethod == .password_keychain ? TerminalLaneProfile.derivedCredentialRef(profileId: copy.id) : nil
         do { try TerminalLaneProfileStore.shared.upsert(copy); reload() }
         catch { statusLabel.textColor = .systemRed; statusLabel.stringValue = error.localizedDescription }
     }
@@ -149,7 +149,14 @@ final class ProfilesViewController: NSViewController, NSTableViewDataSource, NST
         case "auth": text = profile.authMethod.label
         case "auto": text = profile.autoConnect ? "Yes" : "Manual"
         case "sync": text = profile.lastSyncStatus
-        case "cred": text = profile.credentialPresent ? "✓" : "—"
+        case "cred":
+            // Real Keychain presence for password profiles (attribute-only
+            // lookup, never the secret) — not just the marker ref.
+            if profile.authMethod == .password_keychain, let key = profile.keychainKey {
+                text = TerminalLaneKeychain.shared.hasPassword(host: key.host, user: key.user, port: key.port) ? "✓" : "—"
+            } else {
+                text = profile.credentialPresent ? "✓" : "—"
+            }
         default: text = ""
         }
         let cell = NSTextField(labelWithString: text)

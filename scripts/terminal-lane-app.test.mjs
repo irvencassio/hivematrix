@@ -82,6 +82,15 @@ test("Terminal Lane profile model has an honest authMethod enum and stores no se
   assert.match(keychain, /HiveMatrix Terminal Lane/);
   assert.match(keychain, /SecItemAdd/);
   assert.match(keychain, /SecItemUpdate/);
+  // SSH passwords are Internet Password items keyed by host/user/port/protocol —
+  // shared with other SSH tools on this Mac — with a permissive ACL so SPM
+  // rebuilds and the daemon can still read them.
+  assert.match(keychain, /kSecClassInternetPassword/);
+  assert.match(keychain, /kSecAttrProtocolSSH/);
+  assert.match(keychain, /kSecAttrServer/);
+  assert.match(keychain, /kSecAttrPort/);
+  assert.match(keychain, /permissiveAccess/);
+  assert.match(keychain, /hasPassword/);
 });
 
 test("Terminal Lane daemon client distinguishes sync failure from local save and supports delete", () => {
@@ -124,13 +133,18 @@ test("Terminal Lane Add/Edit profile is auth-method driven and keeps secrets in 
   assert.match(addProfile, /editingProfile|TerminalLaneEditTarget/);
   // Secret material is entered securely and saved to Keychain only.
   assert.match(addProfile, /NSSecureTextField/);
-  assert.match(addProfile, /saveCredential/);
+  assert.match(addProfile, /savePassword/);
+  // The credentialRef is auto-derived — the operator never types a ref, and the
+  // Keychain item is found by host/user/port (existing items are reused).
+  assert.match(addProfile, /derivedCredentialRef/);
+  assert.match(addProfile, /hasPassword/);
+  assert.doesNotMatch(addProfile, /credentialRefField/);
   // The profile/daemon payload never carries the secret value.
   assert.doesNotMatch(addProfile, /sshpass|--password|kSecValueData/i);
 
   assert.match(settings, /Daemon URL/);
   assert.match(settings, /TerminalLaneSettings\.shared/);
-  assert.match(settings, /Keychain service/);
+  assert.match(settings, /Keychain items/);
 });
 
 test("Terminal Lane Profiles screen is an editable table with delete/duplicate", () => {

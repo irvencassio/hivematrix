@@ -1,6 +1,6 @@
 import AppKit
 
-final class AddProfileViewController: NSViewController {
+final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
     private let idField = NSTextField()
     private let nameField = NSTextField()
     private let authMethodPopup = NSPopUpButton()
@@ -10,8 +10,8 @@ final class AddProfileViewController: NSViewController {
     private let shellField = NSTextField()
     private let cwdField = NSTextField()
     private let keyPathField = NSTextField()
-    private let credentialRefField = NSTextField()
-    private let credentialValueField = NSSecureTextField()
+    private let passwordField = NSSecureTextField()
+    private let keychainInfoLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
     private var form: NSGridView!
 
@@ -20,8 +20,8 @@ final class AddProfileViewController: NSViewController {
     private let userRowIndex = 4
     private let portRowIndex = 5
     private let keyPathRowIndex = 8
-    private let credentialRowIndex = 9
-    private let credentialValueRowIndex = 10
+    private let passwordRowIndex = 9
+    private let keychainInfoRowIndex = 10
 
     // When set (from the Profiles screen), we are editing; createdAt is preserved.
     private var editingProfile: TerminalLaneProfile?
@@ -30,13 +30,20 @@ final class AddProfileViewController: NSViewController {
         view = NSView()
         let title = NSTextField(labelWithString: "Add / Edit Profile")
         title.font = .systemFont(ofSize: 34, weight: .bold)
-        authMethodPopup.addItems(withTitles: TerminalLaneAuthMethod.allCases.map(\.rawValue))
+        authMethodPopup.addItems(withTitles: TerminalLaneAuthMethod.allCases.map(\.label))
         authMethodPopup.target = self
         authMethodPopup.action = #selector(authMethodChanged)
         shellField.stringValue = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         cwdField.stringValue = FileManager.default.homeDirectoryForCurrentUser.path
-        credentialRefField.placeholderString = "hivematrix.terminal.profile.primary"
         keyPathField.placeholderString = "~/.ssh/id_ed25519"
+        passwordField.placeholderString = "Stored only in the macOS Keychain"
+        keychainInfoLabel.font = .systemFont(ofSize: 11)
+        keychainInfoLabel.textColor = .secondaryLabelColor
+        keychainInfoLabel.lineBreakMode = .byWordWrapping
+        keychainInfoLabel.preferredMaxLayoutWidth = 420
+        // Keychain lookups are keyed by host + user + port, so retarget the
+        // existing-password hint as those fields change.
+        for field in [hostField, userField, portField] { field.delegate = self }
 
         form = NSGridView(views: [
             [label("Profile id"), idField],
@@ -48,8 +55,8 @@ final class AddProfileViewController: NSViewController {
             [label("Shell"), shellField],
             [label("Working dir"), cwdField],
             [label("Key file path"), keyPathField],
-            [label("Credential ref"), credentialRefField],
-            [label("Key vault material"), credentialValueField],
+            [label("Password"), passwordField],
+            [label(""), keychainInfoLabel],
         ])
         form.column(at: 0).xPlacement = .trailing
         form.column(at: 1).width = 420
@@ -77,7 +84,13 @@ final class AddProfileViewController: NSViewController {
     }
 
     private func selectedAuthMethod() -> TerminalLaneAuthMethod {
-        TerminalLaneAuthMethod(rawValue: authMethodPopup.titleOfSelectedItem ?? "local") ?? .local
+        let index = authMethodPopup.indexOfSelectedItem
+        guard index >= 0, index < TerminalLaneAuthMethod.allCases.count else { return .local }
+        return TerminalLaneAuthMethod.allCases[index]
+    }
+
+    private func selectAuthMethod(_ method: TerminalLaneAuthMethod) {
+        authMethodPopup.selectItem(withTitle: method.label)
     }
 
     private func loadEditTargetIfAny() {
@@ -90,27 +103,60 @@ final class AddProfileViewController: NSViewController {
         idField.stringValue = profile.id
         idField.isEditable = false // id is the key; cannot change on edit
         nameField.stringValue = profile.displayName
-        authMethodPopup.selectItem(withTitle: profile.authMethod.rawValue)
+        selectAuthMethod(profile.authMethod)
         hostField.stringValue = profile.host ?? ""
         userField.stringValue = profile.user ?? ""
         portField.stringValue = profile.port.map(String.init) ?? ""
         shellField.stringValue = profile.shell ?? ""
         cwdField.stringValue = profile.cwd ?? ""
         keyPathField.stringValue = profile.keyPath ?? ""
-        credentialRefField.stringValue = profile.credentialRef ?? ""
-        credentialValueField.stringValue = "" // secret values are never read back from Keychain into the form
+        passwordField.stringValue = "" // secret values are never read back from Keychain into the form
+    }
+
+    // The Keychain item is keyed by host + user + port (Internet Password) —
+    // shared with other SSH tools on this Mac, so an item saved by one of them
+    // is found and reused here.
+    private func existingKeychainPassword() -> Bool {
+        let host = hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let user = userField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty, !user.isEmpty else { return false }
+        let port = Int(portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 22
+        return TerminalLaneKeychain.shared.hasPassword(host: host, user: user, port: port)
+    }
+
+    private func updateKeychainInfo() {
+        guard selectedAuthMethod() == .password_keychain else { return }
+        let host = hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let user = userField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty, !user.isEmpty else {
+            keychainInfoLabel.stringValue = "Enter host and user to look up the macOS Keychain."
+            return
+        }
+        let port = Int(portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 22
+        if TerminalLaneKeychain.shared.hasPassword(host: host, user: user, port: port) {
+            keychainInfoLabel.stringValue = "✓ The macOS Keychain already has an SSH password for \(user)@\(host) — leave the field blank to keep it, or type a new one to replace it."
+        } else {
+            keychainInfoLabel.stringValue = "No Keychain item for \(user)@\(host) yet — the password you enter is saved there (never in the profile)."
+        }
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        updateKeychainInfo()
     }
 
     @objc private func saveProfile() {
         do {
             let profile = try makeProfile(status: "saving")
-            let credentialMaterial = credentialValueField.stringValue
-            // Only password_keychain stores a Keychain secret in this MVP; the
-            // secret VALUE goes to Keychain and never into the profile/daemon.
-            if profile.authMethod == .password_keychain, let ref = profile.credentialRef, !credentialMaterial.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                try TerminalLaneKeychain.shared.saveCredential(profileId: profile.id, credentialRef: ref, value: credentialMaterial)
-            }
+            // The profile (metadata) saves first so a Keychain hiccup can't lose it.
             try TerminalLaneProfileStore.shared.upsert(profile)
+            let password = passwordField.stringValue
+            if profile.authMethod == .password_keychain, let key = profile.keychainKey,
+               !password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // Only the VALUE goes to Keychain — never into the profile/daemon.
+                try TerminalLaneKeychain.shared.savePassword(password, host: key.host, user: key.user, port: key.port, displayName: profile.displayName)
+                passwordField.stringValue = ""
+            }
+            updateKeychainInfo()
             statusLabel.textColor = .secondaryLabelColor
             statusLabel.stringValue = "Saved locally…"
             TerminalLaneDaemonClient.shared.sync(profile: profile) { [weak self] result in
@@ -162,10 +208,11 @@ final class AddProfileViewController: NSViewController {
         form?.row(at: userRowIndex).isHidden = isLocal
         form?.row(at: portRowIndex).isHidden = isLocal
         form?.row(at: keyPathRowIndex).isHidden = !method.needsKeyPath
-        // Only password_keychain captures a Keychain secret in this MVP.
-        let showCredential = method == .password_keychain
-        form?.row(at: credentialRowIndex).isHidden = !showCredential
-        form?.row(at: credentialValueRowIndex).isHidden = !showCredential
+        // Only password_keychain captures a Keychain password.
+        let showPassword = method == .password_keychain
+        form?.row(at: passwordRowIndex).isHidden = !showPassword
+        form?.row(at: keychainInfoRowIndex).isHidden = !showPassword
+        if showPassword { updateKeychainInfo() }
 
         statusLabel.textColor = .secondaryLabelColor
         switch method {
@@ -176,7 +223,7 @@ final class AddProfileViewController: NSViewController {
         case .ssh_key_file:
             statusLabel.stringValue = "Connects with the key file at the path above (metadata only). Auto-connectable."
         case .password_keychain:
-            statusLabel.stringValue = "Saved, but not auto-connectable yet — Terminal Lane can't use a stored secret to auto-connect. Use key auth, or connect manually."
+            statusLabel.stringValue = "Password lives in the macOS Keychain, keyed by user@host:port. Not auto-connectable yet — connect manually, or use key auth."
         case .manual_password:
             statusLabel.stringValue = "You'll be prompted for the password when you open the terminal; nothing is stored."
         }
@@ -187,15 +234,14 @@ final class AddProfileViewController: NSViewController {
         idField.stringValue = profile.id
         idField.isEditable = true
         nameField.stringValue = profile.displayName
-        authMethodPopup.selectItem(withTitle: TerminalLaneAuthMethod.local.rawValue)
+        selectAuthMethod(.local)
         hostField.stringValue = ""
         userField.stringValue = profile.user ?? NSUserName()
         portField.stringValue = ""
         shellField.stringValue = profile.shell ?? ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         cwdField.stringValue = profile.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
         keyPathField.stringValue = ""
-        credentialRefField.stringValue = ""
-        credentialValueField.stringValue = ""
+        passwordField.stringValue = ""
         editingProfile = nil
         authMethodChanged()
     }
@@ -209,8 +255,7 @@ final class AddProfileViewController: NSViewController {
         let port = Int(portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
         let shell = shellField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let keyPath = keyPathField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let credentialRef = credentialRefField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let credentialMaterial = credentialValueField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = passwordField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !id.isEmpty else { throw ValidationError("Profile id is required.") }
         if method != .local {
@@ -220,11 +265,8 @@ final class AddProfileViewController: NSViewController {
         if method.needsKeyPath, keyPath.isEmpty {
             throw ValidationError("Enter the key file path for an SSH key (file) profile.")
         }
-        if method == .password_keychain {
-            if credentialRef.isEmpty { throw ValidationError("Enter a credential ref (e.g. hivematrix.terminal.<id>) for a key-vault profile.") }
-            if editingProfile == nil, credentialMaterial.isEmpty {
-                throw ValidationError("Enter the key vault material to store in Keychain.")
-            }
+        if method == .password_keychain, password.isEmpty, !existingKeychainPassword() {
+            throw ValidationError("Enter the SSH password — the macOS Keychain has no item for \(user)@\(host) yet.")
         }
 
         let target = "\(user)@\(host)"
@@ -251,7 +293,8 @@ final class AddProfileViewController: NSViewController {
             shell: shell.isEmpty ? nil : shell,
             cwd: cwdField.stringValue.isEmpty ? nil : cwdField.stringValue,
             keyPath: method.needsKeyPath && !keyPath.isEmpty ? keyPath : nil,
-            credentialRef: method == .password_keychain && !credentialRef.isEmpty ? credentialRef : nil,
+            // Auto-derived marker; the Keychain item is keyed by host/user/port.
+            credentialRef: method == .password_keychain ? TerminalLaneProfile.derivedCredentialRef(profileId: id) : nil,
             openCommand: openCommand,
             notes: method == .local ? "Local shell on this Mac." : "",
             lastSyncStatus: status,

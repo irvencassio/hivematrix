@@ -17,7 +17,7 @@ final class SettingsViewController: NSViewController {
             [label("Daemon URL"), daemonURLField],
             [label("Auth token"), label(settings.tokenPath)],
             [label("Profiles"), label(settings.profileStorePath)],
-            [label("Keychain service"), label(TerminalLaneKeychain.service)],
+            [label("Keychain items"), label("SSH passwords, one per user@host:port (Internet Password, label “\(TerminalLaneKeychain.labelPrefix)”)")],
         ])
         form.column(at: 0).xPlacement = .trailing
         form.column(at: 1).width = 540

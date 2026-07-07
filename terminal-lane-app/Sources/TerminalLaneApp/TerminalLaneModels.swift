@@ -21,7 +21,7 @@ enum TerminalLaneAuthMethod: String, Codable, CaseIterable {
         case .local: return "Local shell"
         case .ssh_key_agent: return "SSH key (agent)"
         case .ssh_key_file: return "SSH key (file)"
-        case .password_keychain: return "SSH key vault (manual)"
+        case .password_keychain: return "SSH password (Keychain)"
         case .manual_password: return "SSH manual login"
         }
     }
@@ -71,6 +71,17 @@ struct TerminalLaneProfile: Codable, Equatable {
 
     var autoConnect: Bool { authMethod.autoConnect }
     var credentialPresent: Bool { (credentialRef?.isEmpty == false) }
+
+    /// Canonical credentialRef marker for this profile. It signals "the password
+    /// lives in the macOS Keychain" and satisfies the daemon contract; the
+    /// Keychain item itself is addressed by host + user + port.
+    static func derivedCredentialRef(profileId: String) -> String { "hivematrix.terminal.\(profileId)" }
+
+    /// Keychain identity of this profile's SSH password, when it has one.
+    var keychainKey: (host: String, user: String, port: Int)? {
+        guard kind == .ssh, let host, !host.isEmpty, let user, !user.isEmpty else { return nil }
+        return (host, user, port ?? 22)
+    }
 
     // Backward-compatible decode: older profiles.json has no authMethod/keyPath.
     enum CodingKeys: String, CodingKey {

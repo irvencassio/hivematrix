@@ -1,6 +1,8 @@
 # Terminal Lane macOS App Runbook
 
-Terminal Lane is the native macOS surface for maintaining shell profiles and opening persistent local or SSH sessions. Secrets are stored in macOS Keychain only; HiveMatrix stores profile metadata and `credentialRef` pointers.
+Terminal Lane is the native macOS surface for maintaining shell profiles and opening persistent local or SSH sessions. Secrets are stored in macOS Keychain only; HiveMatrix stores profile metadata and an auto-derived `credentialRef` marker (`hivematrix.terminal.<profileId>`).
+
+SSH passwords are Keychain **Internet Password** items keyed by host + user + port + protocol — the same identity other SSH tools on this Mac use, so an item already saved for `user@host` is found and reused; nothing needs to be re-entered. Items are written with a permissive ACL (SPM builds change binary hash every rebuild, and the daemon reads the same items), and remain protected by the Keychain unlock.
 
 ## Build And Install
 

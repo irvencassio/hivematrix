@@ -143,3 +143,22 @@ test("deleteTerminalProfile removes a profile and its rows, but refuses the loca
   assert.throws(() => deleteTerminalProfile("local"), /local default|cannot delete/i);
   assert.ok(getTerminalProfile("local"), "local default preserved");
 });
+
+test("rowToProfile heals legacy rows whose kind and authMethod disagree", async () => {
+  const { runTerminalReadinessProbe } = await import("./readiness");
+  // Legacy corruption seen in the field: kind=ssh with authMethod=local and an
+  // ssh openCommand. Written directly — upsert would reject it today.
+  getDb().prepare(`
+    INSERT INTO terminal_profiles (_id, displayName, kind, authMethod, host, user, port, shell, cwd, keyPath, credentialRef, openCommand, notes)
+    VALUES ('legacy', 'Legacy', 'ssh', 'local', 'h.example', 'u', 22, NULL, NULL, NULL, NULL, 'ssh -p 22 u@h.example', '')
+  `).run();
+
+  const profile = listTerminalProfiles().find((p) => p.id === "legacy")!;
+  assert.equal(profile.authMethod, "ssh_key_agent");
+  // The healed profile must survive contract normalization (readiness re-normalizes).
+  const result = await runTerminalReadinessProbe({
+    profile,
+    run: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+  });
+  assert.equal(result.state.status, "ready");
+});
