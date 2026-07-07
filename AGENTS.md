@@ -66,3 +66,28 @@ Before declaring work complete:
 | "I know what the code should look like" | Knowing ≠ testing. Write the failing test first. |
 | "The plan is obvious, skip to implementation" | The plan is the artifact. Save it. |
 | "Qwen can handle this without a detailed plan" | The coding agent writes the plan; Qwen executes it. The plan is the constraint that keeps Qwen on track. |
+
+## Complexity Budget — Fewer Concepts, Not More Tests
+
+HiveMatrix is maintained by one person. Complexity is the top predictor of "things
+break as tweaks and enhancements land," so new complexity must be a conscious,
+documented choice — not a quiet addition. Part of this is enforced by the scope-wall;
+the rest is expected of you.
+
+The kernel is five concepts — **Event, Task, Directive, Policy, Persona/Memory** — and
+everything else is an adapter over them (see DECISIONS.md Q14, the Subtraction Pass).
+
+1. **No new persistent store, orchestration primitive, or product concept without a
+   DECISIONS.md entry that names what it replaces or deletes.** A new store (a
+   `CREATE TABLE` outside the two sanctioned schema files, `db/index.ts` and
+   `brain/index-db.ts`) fails the scope-wall — that's a prompt to write the decision,
+   not to work around the check.
+2. **Reuse the shared scaffolding; don't re-roll it.** Interval loops →
+   `startPollLoop` (`lanes/poll-loop.ts`). The auto-approval decision → `decidePolicy`
+   (`approvals/decide-policy.ts`). Broad/multi-step work → a Task with `workflow:"work"`
+   (the frontier harness self-plans via Superpowers), never a bespoke decomposer.
+3. **The one-maintainer test.** If you can't re-explain a subsystem in one paragraph
+   after a month away, it's too big — split or delete before adding to it.
+
+When a change adds a concept, say in the commit what it deletes. When the same outcome
+can come from extending an existing primitive instead of adding one, extend.
