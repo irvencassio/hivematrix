@@ -3,8 +3,9 @@ import { join } from "path";
 import { Task } from "@/lib/db";
 import { broadcast } from "@/lib/ws/broadcaster";
 import { notifySuperwhisperPermissionRequest } from "@/lib/integrations/superwhisper-hive";
-import { classifyAutoApprovalRequest, evaluateAutoApprovalPolicy, getAutoApprovalPolicy } from "@/lib/voice/auto-approval-policy";
-import { trustAllowsAutoApproval, readTrustLedger, recordApprovalOutcome, recordTrustAutoApproval } from "@/lib/approvals/trust-ledger";
+import { classifyAutoApprovalRequest, getAutoApprovalPolicy } from "@/lib/voice/auto-approval-policy";
+import { readTrustLedger, recordApprovalOutcome, recordTrustAutoApproval } from "@/lib/approvals/trust-ledger";
+import { decidePolicy } from "@/lib/approvals/decide-policy";
 import { getAutonomyLevel } from "@/lib/config/autonomy";
 import { recordAudit } from "@/lib/audit/audit";
 
@@ -374,24 +375,23 @@ export function requestCheckpointApproval(opts: { id: string; gate: string; goal
 function maybeAutoApproveRequest(request: ApprovalRequest, decisionFile: string): void {
   const category = classifyAutoApprovalRequest(request);
 
-  // 1) Explicit auto-approval policy (operator-set toggles).
-  let reason: string | null = null;
-  const explicit = evaluateAutoApprovalPolicy(getAutoApprovalPolicy(), { category, toolName: request.tool });
-  if (explicit.allowed) {
-    reason = `voice-auto (${explicit.reason})`;
-  } else {
-    // 2) Trust ramp: under autonomous mode, a class that earned a clean approval
-    //    history auto-approves without the operator flipping a toggle. The same
-    //    safety floor applies — only checkpoint/lowRiskTool are ever eligible.
-    try {
-      const trust = trustAllowsAutoApproval({ category, tool: request.tool }, getAutonomyLevel(), readTrustLedger());
-      if (trust.allowed && trust.key) {
-        reason = `earned-trust (${trust.reason})`;
-        recordTrustAutoApproval(trust.key); // drives the every-Nth spot-check
-      }
-    } catch { /* trust is an optimization; never block on it */ }
+  // Single decision point: composes the explicit operator policy and the trust
+  // ramp (which carries the hard safety floor). Wrapped so a trust-ledger read
+  // failure can never block — trust is an optimization, never a correctness dep.
+  let verdict: ReturnType<typeof decidePolicy>;
+  try {
+    verdict = decidePolicy({
+      category,
+      tool: request.tool,
+      policy: getAutoApprovalPolicy(),
+      autonomyLevel: getAutonomyLevel(),
+      ledger: readTrustLedger(),
+    });
+  } catch {
+    return;
   }
-  if (!reason) return;
+  if (!verdict.autoApprove) return;
+  if (verdict.recordTrustKey) recordTrustAutoApproval(verdict.recordTrustKey); // drives the every-Nth spot-check
 
   try {
     writeFileSync(decisionFile, "approve", { flag: "wx" });
@@ -399,7 +399,7 @@ function maybeAutoApproveRequest(request: ApprovalRequest, decisionFile: string)
     return;
   }
   try {
-    recordAudit({ ts: new Date().toISOString(), event: "auto_approved", taskId: request.taskId, summary: `${request.tool}: ${reason}` });
+    recordAudit({ ts: new Date().toISOString(), event: "auto_approved", taskId: request.taskId, summary: `${request.tool}: ${verdict.reason}` });
   } catch { /* best effort */ }
   broadcast({
     type: "approval:resolved",
@@ -412,7 +412,7 @@ function maybeAutoApproveRequest(request: ApprovalRequest, decisionFile: string)
     taskId: request.taskId,
     log: {
       type: "text",
-      content: `Approval granted via ${reason}`,
+      content: `Approval granted via ${verdict.reason}`,
     },
   });
 }
