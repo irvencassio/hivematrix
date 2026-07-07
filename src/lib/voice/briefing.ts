@@ -60,6 +60,17 @@ export interface BriefingPipelineHealth {
   concern: string | null;
 }
 
+/** Outcome scoreboard for the brief — measurable progress against goals. */
+export interface BriefingScoreboard {
+  goalsTracked: number;
+  criteriaProven: number;
+  criteriaTotal: number;
+  tasksDone: number;
+  tasksFailed: number;
+  windowDays: number;
+  firstPassRate: number | null;
+}
+
 export interface VoiceBriefingInput {
   approvals?: BriefingApproval[];
   failedTasks?: BriefingTask[];
@@ -68,6 +79,7 @@ export interface VoiceBriefingInput {
   browserReadiness?: BriefingBrowserReadiness | null;
   workflowInbox?: BriefingWorkflowInbox | null;
   pipelineHealth?: BriefingPipelineHealth | null;
+  scoreboard?: BriefingScoreboard | null;
 }
 
 /** Lower bound on tasks before a route's first-pass rate is worth comparing. */
@@ -149,11 +161,36 @@ export function buildVoiceBriefing(input: VoiceBriefingInput): string {
   const browserLine = browserReadinessReply(input.browserReadiness);
   if (browserLine) parts.push(browserLine);
 
+  const scoreboardLine = scoreboardReply(input.scoreboard);
+  if (scoreboardLine) parts.push(scoreboardLine);
+
   const pipelineLine = pipelineHealthReply(input.pipelineHealth);
   if (pipelineLine) parts.push(pipelineLine);
 
   parts.push(usageReply(input.usage));
   return parts.join(" ");
+}
+
+/**
+ * Compact success scoreboard: measurable progress against goals — prover-gated
+ * criteria met, this week's task outcomes, and pipeline first-pass. Returns "" when
+ * there's no signal yet, so early briefings stay short. This is how the partner
+ * layer reports progress with numbers instead of vibes.
+ */
+export function scoreboardReply(s: BriefingScoreboard | null | undefined): string {
+  if (!s) return "";
+  const bits: string[] = [];
+  if (s.criteriaTotal > 0) bits.push(`${s.criteriaProven}/${s.criteriaTotal} directive criteria proven`);
+  if (s.tasksDone + s.tasksFailed > 0) {
+    bits.push(`${s.tasksDone} ${s.tasksDone === 1 ? "task" : "tasks"} done${s.tasksFailed > 0 ? `, ${s.tasksFailed} failed` : ""} (${s.windowDays}d)`);
+  }
+  if (s.firstPassRate !== null) bits.push(`${Math.round(s.firstPassRate * 100)}% first-pass`);
+  if (bits.length === 0) {
+    // No metrics yet, but goals exist — nudge toward making them measurable.
+    return s.goalsTracked > 0 ? `Scoreboard: ${s.goalsTracked} ${s.goalsTracked === 1 ? "goal" : "goals"} tracked, no measured progress yet.` : "";
+  }
+  const goalNote = s.goalsTracked > 0 ? ` · ${s.goalsTracked} ${s.goalsTracked === 1 ? "goal" : "goals"} tracked` : "";
+  return `Scoreboard: ${bits.join(" · ")}${goalNote}.`;
 }
 
 /**

@@ -22,7 +22,7 @@ import {
   resolveApprovalReference,
   type ContextApproval,
 } from "./command-context";
-import { buildVoiceBriefing, usageReply, pipelineConcern, type BriefingUsage, type BriefingBrowserReadiness, type BriefingWorkflowInbox, type BriefingPipelineHealth } from "./briefing";
+import { buildVoiceBriefing, usageReply, pipelineConcern, type BriefingUsage, type BriefingBrowserReadiness, type BriefingWorkflowInbox, type BriefingPipelineHealth, type BriefingScoreboard } from "./briefing";
 import { getWeather, weatherReply, weatherNeedsLocationReply, type WeatherWhen, type WeatherResult } from "./weather";
 import { synthesizeReplyVoice } from "./turn-server";
 import { buildVoiceBrowserLaneTask } from "./browser-lane-intent";
@@ -67,6 +67,7 @@ export interface CommandTurnDeps {
   getBrowserReadiness?: () => Promise<BriefingBrowserReadiness | null> | BriefingBrowserReadiness | null;
   getWorkflowInbox?: () => Promise<BriefingWorkflowInbox | null> | BriefingWorkflowInbox | null;
   getPipelineHealth?: () => Promise<BriefingPipelineHealth | null> | BriefingPipelineHealth | null;
+  getScoreboard?: () => Promise<BriefingScoreboard | null> | BriefingScoreboard | null;
   askOpenClaw?: (request: OpenClawVoiceRequest) => Promise<OpenClawVoiceResult>;
   /** Poll for the next OpenClaw assistant reply after sentAfter. */
   pollOpenClawReply?: (opts: { gatewayUrl: string; sessionKey: string; sentAfter: string }) => Promise<{ found: boolean; text: string | null; reason: string | null }>;
@@ -131,7 +132,7 @@ function reminderTitle(text: string): string {
  * both read the same data and phrasing.
  */
 export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<string> {
-  const [approvals, directives, failedTasks, usage, browserReadiness, workflowInbox, pipelineHealth] = await Promise.all([
+  const [approvals, directives, failedTasks, usage, browserReadiness, workflowInbox, pipelineHealth, scoreboard] = await Promise.all([
     approvalQueue(deps),
     listDirectives(deps),
     listFailedTasks(deps),
@@ -139,6 +140,7 @@ export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<strin
     getBrowserReadiness(deps),
     getWorkflowInboxCounts(deps),
     getPipelineHealth(deps),
+    getScoreboardForBrief(deps),
   ]);
   return buildVoiceBriefing({
     approvals: approvals.map((item) => ({ title: item.title, kind: item.kind })),
@@ -148,7 +150,24 @@ export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<strin
     browserReadiness,
     workflowInbox,
     pipelineHealth,
+    scoreboard,
   });
+}
+
+/**
+ * Success scoreboard for the brief — measurable progress against goals (prover-gated
+ * directive criteria + this week's task outcomes + first-pass), plus the GOALS.md
+ * count so aspiration and measurement sit together. Read-only; degrades to null.
+ */
+async function getScoreboardForBrief(deps: CommandTurnDeps): Promise<BriefingScoreboard | null> {
+  if (deps.getScoreboard) return deps.getScoreboard();
+  try {
+    const { getScoreboard } = await import("@/lib/feedback/scoreboard");
+    const goals = readSpokenGoals(deps);
+    return getScoreboard(goals?.length ?? 0);
+  } catch {
+    return null;
+  }
 }
 
 /**

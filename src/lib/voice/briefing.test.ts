@@ -127,6 +127,29 @@ test("pipelineConcern stays quiet on thin samples, small gaps, or healthy local"
   ]), null);
 });
 
+test("briefing speaks a success scoreboard: criteria proven, task outcomes, first-pass", () => {
+  const briefing = buildVoiceBriefing({
+    scoreboard: { goalsTracked: 4, criteriaProven: 3, criteriaTotal: 8, tasksDone: 12, tasksFailed: 2, windowDays: 7, firstPassRate: 0.74 },
+  });
+  assert.match(briefing, /Scoreboard/);
+  assert.match(briefing, /3\/8 directive criteria proven/);
+  assert.match(briefing, /12 tasks done, 2 failed \(7d\)/);
+  assert.match(briefing, /74% first-pass/);
+  assert.match(briefing, /4 goals tracked/);
+});
+
+test("scoreboard: no metrics but goals exist → nudge; nothing at all → silent", () => {
+  const nudge = buildVoiceBriefing({
+    scoreboard: { goalsTracked: 2, criteriaProven: 0, criteriaTotal: 0, tasksDone: 0, tasksFailed: 0, windowDays: 7, firstPassRate: null },
+  });
+  assert.match(nudge, /2 goals tracked, no measured progress yet/);
+  const silent = buildVoiceBriefing({
+    scoreboard: { goalsTracked: 0, criteriaProven: 0, criteriaTotal: 0, tasksDone: 0, tasksFailed: 0, windowDays: 7, firstPassRate: null },
+  });
+  assert.doesNotMatch(silent, /Scoreboard/);
+  assert.doesNotMatch(buildVoiceBriefing({}), /Scoreboard/);
+});
+
 test("briefing mentions when readiness is stale and when it was last refreshed", () => {
   const stale = buildVoiceBriefing({
     browserReadiness: { needsAttention: 0, byColor: { green: 1, yellow: 0, orange: 0, red: 0, gray: 2 }, topSites: [], staleCount: 2, lastSweepAt: null },
