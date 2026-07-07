@@ -1168,7 +1168,17 @@ content — differentiation is configuration, not code. Do NOT simplify: the dir
 engine, telemetry, and the heartbeat/distill/persona stack — those are the product.
 **Code:** scope-wall extended 2026-07-06 with a warn-only "new persistent store"
 tripwire (`scripts/scope-wall.mjs`) — a CREATE TABLE outside `db/index.ts` /
-`brain/index-db.ts` now flags for a decision. The structural merges are pending.
-**Status:** budget adopted + tripwire live; the Subtraction merges are future work.
+`brain/index-db.ts` now flags for a decision.
+**S4 permission unification — step 1 shipped 2026-07-06** (`src/lib/approvals/decide-policy.ts`):
+the auto-approval decision (explicit policy → earned trust → hard floor) is extracted
+from `approval.ts`'s I/O path into one pure, tested `decidePolicy()`; `maybeAutoApprove
+Request` delegates. Hard floor unchanged (in `trustAllowsAutoApproval` +
+`NEVER_AUTO_APPROVE`). **S4 follow-ups (separate sessions, each its own inputs — do NOT
+force into one signature blindly):** route these still-independent gates through the
+same choke point — work-package auto-land (`shouldAutoLand`, orchestrate.ts), directive
+checkpoint policy (`applyCheckpoint`, directive-engine.ts), desktop tiers (`decideApproval`,
+desktopbee/actions.ts), mail/message recipient allowlists (lane-tools.ts). Keep the
+per-gate hard floors intact through the merge. **WP→Directive fold: still pending.**
+**Status:** budget + tripwire live; decidePolicy step 1 done; remaining merges are future work.
 
 **Provers (2026-07-06 slice):** 26/26 verification-gate tests, typecheck + scope-wall clean.
