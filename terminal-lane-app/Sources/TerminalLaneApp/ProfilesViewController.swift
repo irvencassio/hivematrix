@@ -80,6 +80,7 @@ final class ProfilesViewController: NSViewController, NSTableViewDataSource, NST
         let columns: [(String, String, CGFloat)] = [
             ("name", "Profile", 200),
             ("auth", "Auth method", 190),
+            ("access", "Access", 110),
             ("auto", "Auto-connect", 110),
             ("sync", "Sync", 120),
             ("cred", "Keychain", 90),
@@ -173,6 +174,7 @@ final class ProfilesViewController: NSViewController, NSTableViewDataSource, NST
         switch tableColumn?.identifier.rawValue {
         case "name": text = profile.displayName
         case "auth": text = profile.authMethod.label
+        case "access": text = profile.accessMode.label
         case "auto": text = profile.autoConnect ? "Yes" : "Manual"
         case "sync": text = profile.lastSyncStatus
         case "cred":

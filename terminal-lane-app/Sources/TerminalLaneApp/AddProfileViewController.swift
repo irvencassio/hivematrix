@@ -4,6 +4,7 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
     private let idField = TerminalLaneUI.field(placeholder: "aiserver")
     private let nameField = TerminalLaneUI.field(placeholder: "AI Server")
     private let authMethodPopup = TerminalLaneUI.popUp()
+    private let accessModePopup = TerminalLaneUI.popUp()
     private let hostField = TerminalLaneUI.field(placeholder: "10.80.114.11")
     private let userField = TerminalLaneUI.field(placeholder: "istai")
     private let portField = TerminalLaneUI.field(placeholder: "22")
@@ -25,6 +26,7 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
         authMethodPopup.addItems(withTitles: TerminalLaneAuthMethod.allCases.map(\.label))
         authMethodPopup.target = self
         authMethodPopup.action = #selector(authMethodChanged)
+        accessModePopup.addItems(withTitles: TerminalLaneAccessMode.allCases.map(\.label))
         shellField.stringValue = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         cwdField.stringValue = FileManager.default.homeDirectoryForCurrentUser.path
         for field in [hostField, userField, portField] { field.delegate = self }
@@ -101,6 +103,7 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
                 TerminalLaneUI.row("Host", hostField),
                 TerminalLaneUI.row("User", userField),
                 TerminalLaneUI.row("Port", portField),
+                TerminalLaneUI.row("Access mode", accessModePopup),
             ])))
         }
 
@@ -155,6 +158,7 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
         idField.isEditable = false // id is the key; cannot change on edit
         nameField.stringValue = profile.displayName
         selectAuthMethod(profile.authMethod)
+        accessModePopup.selectItem(withTitle: profile.accessMode.label)
         hostField.stringValue = profile.host ?? ""
         userField.stringValue = profile.user ?? ""
         portField.stringValue = profile.port.map(String.init) ?? ""
@@ -287,6 +291,7 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
         idField.isEditable = true
         nameField.stringValue = profile.displayName
         selectAuthMethod(.local)
+        accessModePopup.selectItem(withTitle: TerminalLaneAccessMode.readwrite.label)
         hostField.stringValue = ""
         userField.stringValue = profile.user ?? NSUserName()
         portField.stringValue = ""
@@ -334,6 +339,10 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
             throw ValidationError("Enter the SSH password — the macOS Keychain has no item for \(user)@\(host) yet.")
         }
 
+        let accessMode: TerminalLaneAccessMode = (method == .local)
+            ? .readwrite
+            : (TerminalLaneAccessMode.allCases.first { $0.label == accessModePopup.titleOfSelectedItem } ?? .readwrite)
+
         let target = "\(user)@\(host)"
         let openCommand: String
         switch method {
@@ -352,7 +361,7 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
             displayName: nameField.stringValue.isEmpty ? id : nameField.stringValue,
             kind: method.kind,
             authMethod: method,
-            accessMode: .readwrite,
+            accessMode: accessMode,
             host: method == .local ? nil : host,
             user: method == .local ? NSUserName() : user,
             port: method == .local ? nil : port,
