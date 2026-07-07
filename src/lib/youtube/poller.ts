@@ -25,6 +25,7 @@ import { fetchPlaylistItems } from "./api";
 import { fetchTranscript } from "./transcript";
 import { newVideos, renderVideoDoc, videoDocFilename, type PlaylistVideo } from "./contracts";
 import { seenIds, markSeen, isWritten, markWritten, recordPoll } from "./store";
+import { startPollLoop } from "@/lib/lanes/poll-loop";
 
 interface YouTubeTaskOutput {
   youtube?: { video: PlaylistVideo; fromTranscript: boolean };
@@ -124,25 +125,17 @@ export async function pollOnce(): Promise<void> {
   }
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
-let running = false;
+let stopFn: (() => void) | null = null;
 
 /** Start the watcher loop (idempotent). Interval comes from config (minutes). */
 export function startYouTubeWatcherPoller(): () => void {
-  if (timer) return stopYouTubeWatcherPoller;
+  if (stopFn) return stopYouTubeWatcherPoller;
   const cfg = getYouTubeConfig();
   const intervalMs = Math.max(1, cfg?.pollIntervalMinutes ?? 30) * 60_000;
-  timer = setInterval(() => {
-    if (running) return;
-    running = true;
-    void pollOnce()
-      .catch((e) => { console.error(`[youtube] tick failed: ${e instanceof Error ? e.message : e}`); })
-      .finally(() => { running = false; });
-  }, intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
+  stopFn = startPollLoop({ name: "youtube", intervalMs, tick: pollOnce });
   return stopYouTubeWatcherPoller;
 }
 
 export function stopYouTubeWatcherPoller(): void {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (stopFn) { stopFn(); stopFn = null; }
 }

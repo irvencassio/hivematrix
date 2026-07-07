@@ -23,14 +23,27 @@ const LOOP_FILES = [
   "local-model/serving.ts",
 ];
 
+// The shared scaffolding is the single source of the .catch guarantee for every
+// loop that delegates to it (see lanes/poll-loop.ts).
+test("startPollLoop centralizes the tick .catch guarantee", () => {
+  const src = readFileSync(join(here, "lanes/poll-loop.ts"), "utf8");
+  assert.match(src, /\.catch\(/, "startPollLoop must .catch tick failures");
+  assert.doesNotMatch(src, /void [A-Za-z0-9_]+\([^)]*\)\s*\.finally\(/, "no floating rejection in the shared loop");
+});
+
 for (const rel of LOOP_FILES) {
-  test(`${rel} loop logs tick failures instead of floating them`, () => {
+  test(`${rel} loop guards tick failures (own .catch or via startPollLoop)`, () => {
     const src = readFileSync(join(here, rel), "utf8");
     assert.doesNotMatch(
       src,
       /void [A-Za-z0-9_]+\([^)]*\)\s*\.finally\(/,
-      "a tick chain must include a .catch before .finally",
+      "a hand-rolled tick chain must include a .catch before .finally",
     );
-    assert.match(src, /\.catch\(/, "the loop must log tick failures via .catch");
+    // Either the loop manages its own .catch, or it delegates the lifecycle (and the
+    // guarantee) to startPollLoop.
+    assert.ok(
+      /\.catch\(/.test(src) || /startPollLoop\(/.test(src),
+      "the loop must log tick failures via its own .catch or by using startPollLoop",
+    );
   });
 }

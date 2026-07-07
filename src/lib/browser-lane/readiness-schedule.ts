@@ -13,6 +13,7 @@
 
 import { loadHiveConfig, saveHiveConfig } from "@/lib/central/config";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
+import { startPollLoop } from "@/lib/lanes/poll-loop";
 import type { BrowserLaneProbeServiceResult } from "./probe-service";
 import type { BrowserReadinessColor } from "./contracts";
 
@@ -106,8 +107,7 @@ export async function runReadinessSweepNow(deps: ReadinessSweepDeps & { siteId?:
 }
 
 const CHECK_INTERVAL_MS = 60_000;
-let timer: ReturnType<typeof setInterval> | null = null;
-let running = false;
+let stopFn: (() => void) | null = null;
 
 async function tick(deps: ReadinessSweepDeps): Promise<void> {
   const config = getBrowserLaneReadinessConfig();
@@ -128,16 +128,11 @@ async function tick(deps: ReadinessSweepDeps): Promise<void> {
 
 /** Start the readiness sweep loop (idempotent). Self-gates on config. */
 export function startBrowserLaneReadinessLoop(deps: ReadinessSweepDeps = {}, intervalMs = CHECK_INTERVAL_MS): () => void {
-  if (timer) return stopBrowserLaneReadinessLoop;
-  timer = setInterval(() => {
-    if (running) return;
-    running = true;
-    void tick(deps).finally(() => { running = false; });
-  }, intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
+  if (stopFn) return stopBrowserLaneReadinessLoop;
+  stopFn = startPollLoop({ name: "browser-lane", intervalMs, tick: () => tick(deps) });
   return stopBrowserLaneReadinessLoop;
 }
 
 export function stopBrowserLaneReadinessLoop(): void {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (stopFn) { stopFn(); stopFn = null; }
 }

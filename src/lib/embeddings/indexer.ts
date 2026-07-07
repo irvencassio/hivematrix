@@ -9,6 +9,7 @@ import { join, relative } from "path";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { embedTexts, getEmbeddingsConfig, isEmbeddingsEnabled } from "./provider";
 import { loadIndex, saveIndex, planReindex, contentHash } from "./index-store";
+import { startPollLoop } from "@/lib/lanes/poll-loop";
 
 const TEXT_EXTENSIONS = new Set([".md", ".markdown", ".txt", ".html", ".htm", ".mdx"]);
 const SKIP_DIRS = new Set([".git", "node_modules", ".obsidian", ".trash"]);
@@ -97,26 +98,21 @@ export async function reindexBrain(opts: { embedder?: Embedder; model?: string }
   return { indexed, pruned: plan.toPrune.length, reset: plan.reset, total: files.length };
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
-let running = false;
+let stopFn: (() => void) | null = null;
 
 /** Start the background reindex loop (idempotent). Self-gates on config. */
 export function startEmbeddingsIndexer(): () => void {
-  if (timer) return stopEmbeddingsIndexer;
+  if (stopFn) return stopEmbeddingsIndexer;
   const cfg = getEmbeddingsConfig();
   const intervalMs = Math.max(5, cfg?.pollIntervalMinutes ?? 60) * 60_000;
-  const tick = () => {
-    if (running || !isEmbeddingsEnabled()) return;
-    running = true;
-    void reindexBrain()
-      .catch((e) => { console.error(`[embeddings] tick failed: ${e instanceof Error ? e.message : e}`); })
-      .finally(() => { running = false; });
-  };
-  timer = setInterval(tick, intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
+  stopFn = startPollLoop({
+    name: "embeddings",
+    intervalMs,
+    tick: async () => { if (!isEmbeddingsEnabled()) return; await reindexBrain(); },
+  });
   return stopEmbeddingsIndexer;
 }
 
 export function stopEmbeddingsIndexer(): void {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (stopFn) { stopFn(); stopFn = null; }
 }

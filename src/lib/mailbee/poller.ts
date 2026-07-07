@@ -11,6 +11,7 @@
 import { homedir } from "os";
 import { Task } from "@/lib/db";
 import { DEFAULT_TASK_PROJECT } from "@/lib/routing/project-constants";
+import { startPollLoop } from "@/lib/lanes/poll-loop";
 import { routeEmail } from "./handoff";
 import { readInboxSince, sendMail } from "./applemail";
 import { looksLikeAuthRequest, replySubject } from "./delivery";
@@ -83,23 +84,15 @@ export async function pollOnce(): Promise<void> {
   }
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
-let running = false;
+let stopFn: (() => void) | null = null;
 
 export function startMailBeePoller(intervalMs = POLL_INTERVAL_MS, dispatch?: FlashDispatch): () => void {
   flashDispatch = dispatch ?? null;
-  if (timer) return stopMailBeePoller;
-  timer = setInterval(() => {
-    if (running) return;
-    running = true;
-    void pollOnce()
-      .catch((e) => { console.error(`[mailbee] poll failed: ${e instanceof Error ? e.message : e}`); })
-      .finally(() => { running = false; });
-  }, intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
+  if (stopFn) return stopMailBeePoller;
+  stopFn = startPollLoop({ name: "mail-lane", intervalMs, tick: pollOnce });
   return stopMailBeePoller;
 }
 
 export function stopMailBeePoller(): void {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (stopFn) { stopFn(); stopFn = null; }
 }

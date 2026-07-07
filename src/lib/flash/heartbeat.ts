@@ -40,6 +40,7 @@ import { broadcastEvent } from "@/lib/ws/broadcaster";
 import { appendTurn, getOrCreateSession } from "./store";
 import { READ_ONLY_FLASH_TOOLS } from "./loop";
 import { runFlashTurnText } from "./index";
+import { startPollLoop } from "@/lib/lanes/poll-loop";
 
 export const HEARTBEAT_STAND_DOWN = "HEARTBEAT_STAND_DOWN";
 
@@ -441,8 +442,7 @@ export async function runDailyMomentOnce(
   return { text, pushed };
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
-let running = false;
+let stopFn: (() => void) | null = null;
 
 async function tick(deps: HeartbeatDeps): Promise<void> {
   const config = getHeartbeatConfig();
@@ -488,18 +488,11 @@ async function tick(deps: HeartbeatDeps): Promise<void> {
 
 /** Start the heartbeat loop (idempotent). Self-gates on config. Returns a stop fn. */
 export function startHeartbeatLoop(deps: HeartbeatDeps = {}, intervalMs = CHECK_INTERVAL_MS): () => void {
-  if (timer) return stopHeartbeatLoop;
-  timer = setInterval(() => {
-    if (running) return;
-    running = true;
-    void tick(deps)
-      .catch((e) => { console.error(`[heartbeat] tick failed: ${e instanceof Error ? e.message : e}`); })
-      .finally(() => { running = false; });
-  }, intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
+  if (stopFn) return stopHeartbeatLoop;
+  stopFn = startPollLoop({ name: "heartbeat", intervalMs, tick: () => tick(deps) });
   return stopHeartbeatLoop;
 }
 
 export function stopHeartbeatLoop(): void {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (stopFn) { stopFn(); stopFn = null; }
 }

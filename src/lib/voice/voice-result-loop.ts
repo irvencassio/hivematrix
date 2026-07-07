@@ -15,6 +15,7 @@
 
 import { readFileSync } from "fs";
 import { broadcastEvent } from "@/lib/ws/broadcaster";
+import { startPollLoop } from "@/lib/lanes/poll-loop";
 
 const TERMINAL = new Set(["review", "done", "failed"]);
 const POLL_INTERVAL_MS = 4_000;
@@ -132,23 +133,15 @@ function defaultReadAudioBase64(path: string): string {
   return path ? readFileSync(path).toString("base64") : "";
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
-let running = false;
+let stopFn: (() => void) | null = null;
 
 /** Start the voice-result delivery loop (idempotent). Returns a stop fn. */
 export function startVoiceResultLoop(deps: VoiceResultDeps = {}, intervalMs = POLL_INTERVAL_MS): () => void {
-  if (timer) return stopVoiceResultLoop;
-  timer = setInterval(() => {
-    if (running) return;
-    running = true;
-    void deliverVoiceResults(deps)
-      .catch((e) => { console.error(`[voice-result] tick failed: ${e instanceof Error ? e.message : e}`); })
-      .finally(() => { running = false; });
-  }, intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
+  if (stopFn) return stopVoiceResultLoop;
+  stopFn = startPollLoop({ name: "voice-result", intervalMs, tick: async () => { await deliverVoiceResults(deps); } });
   return stopVoiceResultLoop;
 }
 
 export function stopVoiceResultLoop(): void {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (stopFn) { stopFn(); stopFn = null; }
 }

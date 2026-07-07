@@ -8,6 +8,7 @@ import { notify } from "@/lib/notify/notify";
 import { evaluateAlerts } from "./contracts";
 import { fetchQuotes, isTraderBeeConfigured } from "./provider";
 import { getWatchlist, wasFiredRecently, recordFired, recordPoll } from "./store";
+import { startPollLoop } from "@/lib/lanes/poll-loop";
 
 const POLL_INTERVAL_MS = 5 * 60_000; // 5 min — IEX data, gentle on the free tier
 
@@ -39,22 +40,18 @@ export async function pollOnce(now: () => string = () => new Date().toISOString(
   }
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
-let running = false;
+let stopFn: (() => void) | null = null;
 
 export function startTraderBeePoller(intervalMs = POLL_INTERVAL_MS): () => void {
-  if (timer) return stopTraderBeePoller;
-  timer = setInterval(() => {
-    if (running || !isTraderBeeConfigured()) return;
-    running = true;
-    void pollOnce()
-      .catch((e) => { console.error(`[traderbee] tick failed: ${e instanceof Error ? e.message : e}`); })
-      .finally(() => { running = false; });
-  }, intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
+  if (stopFn) return stopTraderBeePoller;
+  stopFn = startPollLoop({
+    name: "traderbee",
+    intervalMs,
+    tick: () => { if (!isTraderBeeConfigured()) return; return pollOnce(); },
+  });
   return stopTraderBeePoller;
 }
 
 export function stopTraderBeePoller(): void {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (stopFn) { stopFn(); stopFn = null; }
 }

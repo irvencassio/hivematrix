@@ -12,6 +12,7 @@
 
 import { loadHiveConfig, saveHiveConfig } from "@/lib/central/config";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
+import { startPollLoop } from "@/lib/lanes/poll-loop";
 
 export interface MorningBriefingConfig {
   enabled: boolean;
@@ -92,8 +93,7 @@ export async function runBriefingNow(deps: BriefingDeps = {}): Promise<{ text: s
 }
 
 const CHECK_INTERVAL_MS = 60_000; // re-check every minute; cheap and granular enough for an hourly target
-let timer: ReturnType<typeof setInterval> | null = null;
-let running = false;
+let stopFn: (() => void) | null = null;
 
 async function tick(deps: BriefingDeps): Promise<void> {
   const config = getMorningBriefingConfig();
@@ -115,16 +115,11 @@ async function tick(deps: BriefingDeps): Promise<void> {
 
 /** Start the morning-briefing loop (idempotent). Self-gates on config. Returns a stop fn. */
 export function startMorningBriefingLoop(deps: BriefingDeps = {}, intervalMs = CHECK_INTERVAL_MS): () => void {
-  if (timer) return stopMorningBriefingLoop;
-  timer = setInterval(() => {
-    if (running) return;
-    running = true;
-    void tick(deps).finally(() => { running = false; });
-  }, intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
+  if (stopFn) return stopMorningBriefingLoop;
+  stopFn = startPollLoop({ name: "briefing", intervalMs, tick: () => tick(deps) });
   return stopMorningBriefingLoop;
 }
 
 export function stopMorningBriefingLoop(): void {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (stopFn) { stopFn(); stopFn = null; }
 }

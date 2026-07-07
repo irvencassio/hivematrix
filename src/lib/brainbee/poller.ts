@@ -7,11 +7,12 @@
 import { existsSync } from "fs";
 import { preferredBrainRootDir } from "@/lib/brain/settings";
 import { broadcast } from "@/lib/ws/broadcaster";
+import { startPollLoop } from "@/lib/lanes/poll-loop";
 import { curatePlaybooksUnder, type PlaybookCurationSummary } from "./curate";
 
 const CURATION_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
 
-let timer: ReturnType<typeof setInterval> | null = null;
+let stopFn: (() => void) | null = null;
 let running = false;
 let lastSummary: PlaybookCurationSummary | null = null;
 
@@ -52,16 +53,12 @@ export async function curateOnce(): Promise<PlaybookCurationSummary | null> {
 }
 
 export function startBrainBeePoller(intervalMs: number = CURATION_INTERVAL_MS): () => void {
-  if (timer) return stopBrainBeePoller;
+  if (stopFn) return stopBrainBeePoller;
   void curateOnce(); // an initial pass on boot
-  timer = setInterval(() => void curateOnce(), intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
+  stopFn = startPollLoop({ name: "brainbee", intervalMs, tick: async () => { await curateOnce(); } });
   return stopBrainBeePoller;
 }
 
 export function stopBrainBeePoller(): void {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
+  if (stopFn) { stopFn(); stopFn = null; }
 }

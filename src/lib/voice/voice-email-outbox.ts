@@ -17,6 +17,7 @@ import { readdirSync, readFileSync, renameSync, unlinkSync, existsSync, mkdirSyn
 import { join } from "path";
 import { homedir } from "os";
 import { sendMail, draftMail } from "@/lib/mailbee/applemail";
+import { startPollLoop } from "@/lib/lanes/poll-loop";
 
 const OUTBOX_DIR = join(homedir(), ".hivematrix", "voice-email-outbox");
 const POLL_INTERVAL_MS = 5_000; // fast — voice dictation is interactive
@@ -92,22 +93,14 @@ export async function pollVoiceEmailOutbox(): Promise<void> {
   }
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
-let running = false;
+let stopFn: (() => void) | null = null;
 
 export function startVoiceEmailOutboxPoller(intervalMs = POLL_INTERVAL_MS): () => void {
-  if (timer) return stopVoiceEmailOutboxPoller;
-  timer = setInterval(() => {
-    if (running) return;
-    running = true;
-    void pollVoiceEmailOutbox()
-      .catch((e) => { console.error(`[voice-email] poll failed: ${e instanceof Error ? e.message : e}`); })
-      .finally(() => { running = false; });
-  }, intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
+  if (stopFn) return stopVoiceEmailOutboxPoller;
+  stopFn = startPollLoop({ name: "voice-email", intervalMs, tick: pollVoiceEmailOutbox });
   return stopVoiceEmailOutboxPoller;
 }
 
 export function stopVoiceEmailOutboxPoller(): void {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (stopFn) { stopFn(); stopFn = null; }
 }

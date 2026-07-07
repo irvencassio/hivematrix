@@ -27,6 +27,7 @@ import {
   wasDoneNotified, markDoneNotified, recordIgnoredSender,
 } from "./store";
 import { getLocation } from "@/lib/models/available";
+import { startPollLoop } from "@/lib/lanes/poll-loop";
 
 /** Injected by daemon/index.ts; accepts (text, peer) and returns the Flash reply. */
 type FlashDispatch = (text: string, peer: string) => Promise<string>;
@@ -176,24 +177,16 @@ export async function pollOnce(): Promise<void> {
   }
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
-let running = false;
+let stopFn: (() => void) | null = null;
 
 /** Start the poll loop (idempotent). Returns a stop function. */
 export function startMessageBeePoller(intervalMs = POLL_INTERVAL_MS, dispatch?: FlashDispatch): () => void {
   flashDispatch = dispatch ?? null;
-  if (timer) return stopMessageBeePoller;
-  timer = setInterval(() => {
-    if (running) return; // never overlap two polls
-    running = true;
-    void pollOnce()
-      .catch((e) => { console.error(`[messagebee] poll failed: ${e instanceof Error ? e.message : e}`); })
-      .finally(() => { running = false; });
-  }, intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
+  if (stopFn) return stopMessageBeePoller;
+  stopFn = startPollLoop({ name: "message-lane", intervalMs, tick: pollOnce });
   return stopMessageBeePoller;
 }
 
 export function stopMessageBeePoller(): void {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (stopFn) { stopFn(); stopFn = null; }
 }

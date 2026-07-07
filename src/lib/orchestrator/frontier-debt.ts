@@ -10,6 +10,7 @@
 
 import { getDb, generateId, Task } from "@/lib/db";
 import { getConnectivityPolicy, type ConnectivityMode } from "@/lib/connectivity/policy";
+import { startPollLoop } from "@/lib/lanes/poll-loop";
 
 export interface DebtRow {
   _id: string;
@@ -98,23 +99,15 @@ export async function drainFrontierDebt(): Promise<number> {
 }
 
 const INTERVAL_MS = 10_000;
-let timer: ReturnType<typeof setInterval> | null = null;
-let running = false;
+let stopFn: (() => void) | null = null;
 
 /** Start the drain loop (idempotent). Self-gates: only replays under cloud-ok. */
 export function startFrontierDebtLoop(intervalMs = INTERVAL_MS, drain: () => Promise<number> = drainFrontierDebt): () => void {
-  if (timer) return stopFrontierDebtLoop;
-  timer = setInterval(() => {
-    if (running) return;
-    running = true;
-    void drain()
-      .catch((e) => { console.error(`[frontier-debt] drain failed: ${e instanceof Error ? e.message : e}`); })
-      .finally(() => { running = false; });
-  }, intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
+  if (stopFn) return stopFrontierDebtLoop;
+  stopFn = startPollLoop({ name: "frontier-debt", intervalMs, tick: async () => { await drain(); } });
   return stopFrontierDebtLoop;
 }
 
 export function stopFrontierDebtLoop(): void {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (stopFn) { stopFn(); stopFn = null; }
 }
