@@ -104,6 +104,36 @@ let directivePlannerForTests: DirectivePlanner | null = null;
 let directiveReviewerForTests: DirectiveReviewer | null = null;
 let directiveRetrospectiveForTests: DirectiveRetrospectiveWriter | null = null;
 
+/**
+ * Deep-planning hook: when planning would run on the LOCAL model (no cloud), the
+ * plan is produced by Deep Think (test-time compute — N diverse rollouts →
+ * self-consistency → synthesis on the local Qwen) instead of one single-shot call.
+ * Latency doesn't matter for a directive plan, and the extra local tokens are free,
+ * so this is the cheapest lever to make local planning meaningfully better. Returns
+ * the synthesized plan text (parsed downstream) or null to fall back to the normal
+ * planner task. Injected in tests so no real model is called.
+ */
+type DeepPlanner = (prompt: string) => Promise<string | null>;
+let deepPlannerForTests: DeepPlanner | null = null;
+
+export function _setDeepPlannerForTests(fn: DeepPlanner | null): void {
+  deepPlannerForTests = fn;
+}
+
+async function runDeepThinkPlanner(prompt: string): Promise<string | null> {
+  if (deepPlannerForTests) return deepPlannerForTests(prompt);
+  try {
+    const { deepThink } = await import("@/lib/models/deep-think");
+    const result = await deepThink(prompt, {
+      samples: 3,
+      systemContext: "You are a planner. Return ONLY the plan as the exact JSON schema the instructions specify — no prose, no code fences.",
+    });
+    return result.answer;
+  } catch {
+    return null; // Deep Think unavailable → caller falls back to the planner task
+  }
+}
+
 export function _setDirectivePlannerForTests(planner: DirectivePlanner | null): void {
   directivePlannerForTests = planner;
 }
@@ -543,6 +573,27 @@ async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
         return;
       }
       journal(run._id, directive._id, "planning_fallback", { reason: parsed.error ?? "invalid planner output" });
+    }
+  }
+
+  // Deep planning (local only): when the plan would run on the local model rather
+  // than the frontier, produce it with Deep Think (test-time compute on Qwen) for a
+  // stronger plan. Best-effort and synchronous — a directive plan can afford minutes,
+  // and the local tokens are free. Any miss falls through to the normal planner task.
+  if (useProductionPlannerTask && !getConnectivityPolicy().canUseCloud()) {
+    const refs = criteria.map((c) => ({ _id: c._id, description: c.description }));
+    const text = await runDeepThinkPlanner(buildPlannerPrompt(directive, run, refs));
+    if (text) {
+      const parsed = parseDirectivePlanOutput(text, refs);
+      if (parsed.plan) {
+        const gate = await applyCheckpoint(directive, run, "plan", summarizePlan(parsed.plan));
+        if (gate === "hold") return;
+        if (gate === "reject") { failRunRejected(run, directive, "plan", new Date().toISOString()); return; }
+        journal(run._id, directive._id, "deep_planned", { planSummary: summarizePlan(parsed.plan) });
+        await createAutonomyPlanTasks(directive, run, parsed.plan);
+        return;
+      }
+      journal(run._id, directive._id, "planning_fallback", { reason: "deep-think plan unparseable" });
     }
   }
 

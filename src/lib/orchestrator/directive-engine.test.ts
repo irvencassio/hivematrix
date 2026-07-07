@@ -25,6 +25,7 @@ const {
 const {
   directiveTick,
   _setDirectivePlannerForTests,
+  _setDeepPlannerForTests,
   _setDirectiveReviewerForTests,
   _setDirectiveRetrospectiveForTests,
   _setDirectiveCheckpointResolverForTests,
@@ -45,6 +46,7 @@ test.after(() => {
 
 test.beforeEach(() => {
   _setDirectivePlannerForTests(null);
+  _setDeepPlannerForTests(null);
   _setDirectiveReviewerForTests(null);
   _setDirectiveRetrospectiveForTests(null);
   _setDirectiveCheckpointResolverForTests(null);
@@ -52,6 +54,7 @@ test.beforeEach(() => {
 
 test.afterEach(() => {
   _setDirectivePlannerForTests(null);
+  _setDeepPlannerForTests(null);
   _setDirectiveReviewerForTests(null);
   _setDirectiveRetrospectiveForTests(null);
   _setDirectiveCheckpointResolverForTests(null);
@@ -258,6 +261,36 @@ test("plan phase accepts autonomy planner output and records DAG metadata", asyn
   const planned = getJournal(run._id).find((j) => j.step === "task_dag_planned");
   assert.ok(planned, "journal should include accepted autonomy plan");
   _setDirectivePlannerForTests(null);
+});
+
+test("plan phase uses Deep Think when planning locally (no cloud)", async () => {
+  const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
+  const policy = getConnectivityPolicy();
+  policy.setManualOverride("local-only"); // force local planning → the Deep Think path
+  try {
+    const d = mkDirective();
+    const c1 = addCriterion(d._id, "Do the thing");
+    let sawPrompt = "";
+    _setDeepPlannerForTests(async (prompt) => {
+      sawPrompt = prompt;
+      return JSON.stringify({
+        tasks: [{ title: "Deep task", description: "planned by deep think", agentType: "developer", dependsOn: [], criterionRefs: [c1._id], goalIndex: 0 }],
+      });
+    });
+
+    await directiveTick(new Date("2026-06-11T14:00:00Z"));
+    const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+    await directiveTick(new Date("2026-06-11T14:00:01Z"));
+
+    const tasks = (await Task.find({ directiveId: d._id })).filter((t) => (t.output as Record<string, unknown>)?.runId === run._id);
+    assert.equal(tasks.length, 1);
+    assert.match(String(tasks[0].title), /Deep task/);
+    assert.ok(sawPrompt.length > 0, "the deep planner received the planner prompt");
+    assert.ok(getJournal(run._id).find((j) => j.step === "deep_planned"), "journals deep_planned");
+  } finally {
+    _setDeepPlannerForTests(null);
+    policy.setManualOverride(null);
+  }
 });
 
 test("production planner phase task plans execution DAG after terminal JSON output", async () => {
