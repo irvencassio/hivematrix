@@ -742,7 +742,8 @@ export function createDaemonServer() {
           return;
         }
         const limit = parseInt(oq.get("limit") ?? "50", 10) || 50;
-        json(res, 200, { totals: observabilitySummary(), scorecard: observabilityScorecard(), routing: routingRecommendations(), recent: listTaskTelemetry(limit) });
+        const { getLearnedRoutes } = await import("@/lib/routing/operator-prefs");
+        json(res, 200, { totals: observabilitySummary(), scorecard: observabilityScorecard(), routing: routingRecommendations(), operatorRoutes: getLearnedRoutes(), recent: listTaskTelemetry(limit) });
         return;
       }
 
@@ -3788,6 +3789,17 @@ export function createDaemonServer() {
         body.title = title || deriveTaskTitle(description);
         if (typeof body.project !== "string" || !body.project.trim()) body.project = "hivematrix";
         if (typeof body.projectPath !== "string") body.projectPath = "";
+        // Operator preference: if this class of task has a stable learned route (you
+        // keep re-routing it to the same model) and you didn't override the default,
+        // adopt it — over the GLOBAL default only, never over an explicit pick.
+        try {
+          const { getLearnedRoute } = await import("@/lib/routing/operator-prefs");
+          const { getDefaultModel } = await import("@/lib/models/available");
+          const pref = getLearnedRoute(typeof body.source === "string" ? body.source : "task");
+          if (pref && (typeof body.model !== "string" || !body.model || body.model === getDefaultModel())) {
+            body.model = pref;
+          }
+        } catch { /* preference is an optimization, never a dependency */ }
         const task = await Task.create({ _id: generateId(), ...body });
         broadcast("tasks:created", { taskId: task._id });
         json(res, 201, task);
@@ -3798,8 +3810,23 @@ export function createDaemonServer() {
       if (req.method === "PATCH" && taskMatch) {
         const { Task } = await import("@/lib/db");
         const body = await parseBody(req) as Record<string, unknown>;
+        // Operator re-route signal: if the operator changes a task's model, record it
+        // as a routing preference for that class so the router can learn the pattern.
+        let reroute: { cls: string; model: string } | null = null;
+        if (typeof body.model === "string" && body.model) {
+          const before = await Task.findById(taskMatch[1]);
+          if (before && before.model !== body.model) {
+            reroute = { cls: String(before.source ?? "task"), model: body.model };
+          }
+        }
         const task = await Task.findByIdAndUpdate(taskMatch[1], body);
         if (!task) { json(res, 404, { error: "Not found" }); return; }
+        if (reroute) {
+          try {
+            const { recordRoutePreference } = await import("@/lib/routing/operator-prefs");
+            recordRoutePreference(reroute.cls, reroute.model);
+          } catch { /* preference learning is best-effort */ }
+        }
         broadcast("tasks:updated", { taskId: task._id, status: task.status });
         json(res, 200, task);
         return;
