@@ -176,3 +176,31 @@ test("Terminal Lane installs a standard Edit menu so Cmd-C/V/X/A work in text fi
     assert.match(appDelegate, new RegExp(sel.replace(":", "\\:")), `${sel} wired`);
   }
 });
+
+test("Terminal Lane command policy + audit log are wired", () => {
+  const source = join(root, "terminal-lane-app", "Sources", "TerminalLaneApp");
+  const core = join(root, "terminal-lane-app", "TerminalLaneCore", "Sources", "TerminalLaneCore");
+  assert.ok(existsSync(join(core, "CommandPolicy.swift")), "CommandPolicy.swift exists");
+  assert.ok(existsSync(join(core, "CommandLog.swift")), "CommandLog.swift exists");
+  assert.ok(existsSync(join(source, "TerminalLanePolicyStore.swift")), "policy store exists");
+  assert.ok(existsSync(join(source, "LogViewerController.swift")), "log viewer exists");
+
+  const models = readFileSync(join(source, "TerminalLaneModels.swift"), "utf8");
+  assert.match(models, /enum TerminalLaneAccessMode/);
+  assert.match(models, /var accessMode/);
+
+  const terminal = readFileSync(join(source, "TerminalViewController.swift"), "utf8");
+  assert.match(terminal, /TerminalLanePolicy\.shared/);
+  assert.match(terminal, /CommandLogEntry/);
+  assert.match(terminal, /0x15/); // Ctrl-U line clear on block
+
+  const daemon = readFileSync(join(source, "TerminalLaneDaemonClient.swift"), "utf8");
+  assert.match(daemon, /accessMode/);
+
+  const settings = readFileSync(join(source, "SettingsViewController.swift"), "utf8");
+  assert.match(settings, /View log/);
+  assert.match(settings, /readOnlyAllowlist|allowlistView/);
+
+  const pkg = readFileSync(join(root, "terminal-lane-app", "Package.swift"), "utf8");
+  assert.match(pkg, /TerminalLaneCore/);
+});
