@@ -1173,12 +1173,19 @@ tripwire (`scripts/scope-wall.mjs`) — a CREATE TABLE outside `db/index.ts` /
 the auto-approval decision (explicit policy → earned trust → hard floor) is extracted
 from `approval.ts`'s I/O path into one pure, tested `decidePolicy()`; `maybeAutoApprove
 Request` delegates. Hard floor unchanged (in `trustAllowsAutoApproval` +
-`NEVER_AUTO_APPROVE`). **S4 follow-ups (separate sessions, each its own inputs — do NOT
-force into one signature blindly):** route these still-independent gates through the
-same choke point — work-package auto-land (`shouldAutoLand`, orchestrate.ts), directive
-checkpoint policy (`applyCheckpoint`, directive-engine.ts), desktop tiers (`decideApproval`,
-desktopbee/actions.ts), mail/message recipient allowlists (lane-tools.ts). Keep the
-per-gate hard floors intact through the merge. **WP→Directive fold: still pending.**
-**Status:** budget + tripwire live; decidePolicy step 1 done; remaining merges are future work.
+`NEVER_AUTO_APPROVE`) and now pinned by an exhaustive floor-invariant test.
+**What legitimately converges here — DONE:** the auto-approval (checkpoint-class)
+decision. Directive checkpoints (`directive-engine.ts:164`) and content publication
+(`content/pipeline.ts:104`) already flow through `decidePolicy` transitively via
+`requestCheckpointApproval`.
+**Verified NOT to unify (they are DIFFERENT decisions — collapsing them would ADD
+complexity, not remove it):** mail/message recipient allowlists (`lane-tools.ts` — a
+hard allowlist membership check, not a trust-ramp; mail drafts on miss, message errors
++ self-loop guard), work-package auto-land (`shouldAutoLand`, orchestrate.ts — risk/
+executionMode-based), and desktop action tiers (`decideApproval`, desktopbee — app-
+allowlist tiers). Each keeps its own hard floor. Do NOT force these into `decidePolicy`.
+**WP→Directive fold: still pending** (the one genuinely large structural merge left).
+**Status:** budget + tripwire live; the S4 auto-approval unification is effectively complete;
+the WP→Directive fold is the remaining Subtraction merge.
 
 **Provers (2026-07-06 slice):** 26/26 verification-gate tests, typecheck + scope-wall clean.
