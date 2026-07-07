@@ -8041,6 +8041,26 @@ function connectSSE() {
   } catch (e) { /* polling covers it */ }
 }
 
+// Auto-reload when the daemon version changes out from under this page. After an
+// in-place app update the daemon restarts into the new build but the webview keeps
+// showing the page it already loaded (stale UI — e.g. removed sections lingering).
+// Poll /health; when the version differs from the one this page booted with, reload
+// so the fresh console is fetched. The first successful poll just records the baseline.
+let HM_BOOT_DAEMON_VERSION = null;
+async function checkDaemonVersionReload() {
+  try {
+    const r = await fetch("/health", { cache: "no-store" });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!j || !j.version) return;
+    if (HM_BOOT_DAEMON_VERSION && j.version !== HM_BOOT_DAEMON_VERSION) {
+      location.reload();
+      return;
+    }
+    HM_BOOT_DAEMON_VERSION = j.version;
+  } catch { /* offline / transient — try again next tick */ }
+}
+
 if (requireToken()) {
   loadModels();
   wireCtxSections();
@@ -8058,8 +8078,10 @@ if (requireToken()) {
   setInterval(checkUpdate, 5 * 60 * 1000);
   checkUsage();
   checkModels();
+  checkDaemonVersionReload();
   setInterval(checkUsage, 30 * 1000);
   setInterval(checkModels, 30 * 1000);
+  setInterval(checkDaemonVersionReload, 20 * 1000);
 }
 </script>
 </body>

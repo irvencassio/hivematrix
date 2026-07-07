@@ -43,26 +43,38 @@ function localTierNote(tier: LocalTier): string {
   return "on-device fast tier — daily, voice, and operational work";
 }
 
-function localPresetUiModels(existingModelIds: Set<string>): UiModel[] {
-  const tierModels = SUPPORTED_LOCAL_TIER_PRESETS
-    .filter((tier) => !existingModelIds.has(tier.alias))
-    .map((tier) => ({
-      id: `local-${tier.key}`,
-      name: localTierLabel(tier),
-      modelId: tier.alias,
-      backend: "local" as const,
-      note: localTierNote(tier),
-    }));
-  const presetModels = LOCAL_MODEL_PRESETS
-    .filter((preset) => !existingModelIds.has(preset.modelId))
-    .map((preset) => ({
-      id: preset.id,
-      name: preset.name,
-      modelId: preset.modelId,
-      backend: "local" as const,
-      note: preset.note,
-    }));
-  return [...tierModels, ...presetModels];
+/**
+ * Normalize a local model id to its base family so the SAME model in different
+ * quant/provider forms isn't offered twice. Both the configured "qwen3.6-35b-4bit"
+ * (a tier alias) and the "mlx-community/Qwen3.6-35B-A3B-8bit" preset collapse to
+ * "qwen3.6-35b". Non-qwen ids fall back to their bare basename (no over-merging).
+ */
+function localModelFamily(modelId: string): string {
+  const base = (modelId.split("/").pop() ?? modelId).toLowerCase();
+  const m = base.match(/qwen[\d.]+-\d+b/); // qwen<version>-<size>b
+  return m ? m[0] : base;
+}
+
+/**
+ * Local model options for the picker, deduped by FAMILY against what's already
+ * shown (seeded with the configured local model's family). Prevents the same base
+ * model appearing twice as a tier alias and a preset in a different quantization.
+ */
+function localPresetUiModels(seenFamilies: Set<string>): UiModel[] {
+  const out: UiModel[] = [];
+  for (const tier of SUPPORTED_LOCAL_TIER_PRESETS) {
+    const fam = localModelFamily(tier.alias);
+    if (seenFamilies.has(fam)) continue;
+    seenFamilies.add(fam);
+    out.push({ id: `local-${tier.key}`, name: localTierLabel(tier), modelId: tier.alias, backend: "local", note: localTierNote(tier) });
+  }
+  for (const preset of LOCAL_MODEL_PRESETS) {
+    const fam = localModelFamily(preset.modelId);
+    if (seenFamilies.has(fam)) continue;
+    seenFamilies.add(fam);
+    out.push({ id: preset.id, name: preset.name, modelId: preset.modelId, backend: "local", note: preset.note });
+  }
+  return out;
 }
 
 export function buildAvailableModels(backends: BackendStatus[] = detectBackends()): UiModel[] {
@@ -78,7 +90,7 @@ export function buildAvailableModels(backends: BackendStatus[] = detectBackends(
       backend: "local",
       note: "runs entirely on your machine",
     });
-    for (const tierModel of localPresetUiModels(new Set([local.modelId]))) models.push(tierModel);
+    for (const tierModel of localPresetUiModels(new Set([localModelFamily(local.modelId)]))) models.push(tierModel);
   }
 
   const claude = by("claude");

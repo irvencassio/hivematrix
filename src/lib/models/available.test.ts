@@ -15,9 +15,25 @@ function backends(local: boolean, claude: boolean, codex: boolean): BackendStatu
 // asserted separately.
 const ids = (b: BackendStatus[]) => buildAvailableModels(b).filter((m) => !m.disabled).map((m) => m.id);
 
-test("only configured backends produce selectable models", () => {
-  assert.deepEqual(ids(backends(true, false, false)), ["local", "local-fast", "local-coding", "rapid-mlx-qwen36-35b"]);
+test("only configured backends produce selectable models (deduped by family)", () => {
+  // Local model is qwen3.6-27b here, so the 27b coding tier collapses into it and
+  // the 35b rapid-mlx preset collapses into the 35b fast tier — no family twice.
+  assert.deepEqual(ids(backends(true, false, false)), ["local", "local-fast"]);
   assert.deepEqual(ids(backends(false, false, false)), []);
+});
+
+test("local models are deduped by family — the same base model is never offered twice", () => {
+  // Configured local is the 35b fast tier; the 35b rapid-mlx preset (8-bit) is the
+  // same family and must NOT appear as a second Qwen-35B entry. The 27b coding tier
+  // is a different family and stays.
+  const backs = [
+    { id: "local" as const, name: "Local", configured: true, detail: "", modelId: "qwen3.6-35b-4bit" },
+    { id: "claude" as const, name: "Claude Code", configured: false, detail: "" },
+    { id: "codex" as const, name: "Codex", configured: false, detail: "" },
+  ];
+  const localIds = buildAvailableModels(backs).filter((m) => m.backend === "local").map((m) => m.id);
+  assert.deepEqual(localIds, ["local", "local-coding"]);
+  assert.ok(!localIds.includes("rapid-mlx-qwen36-35b"), "the redundant 35B preset is deduped away");
 });
 
 test("unconfigured frontier providers appear as greyed, unselectable placeholders", () => {
