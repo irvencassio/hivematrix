@@ -352,6 +352,7 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
             displayName: nameField.stringValue.isEmpty ? id : nameField.stringValue,
             kind: method.kind,
             authMethod: method,
+            accessMode: .readwrite,
             host: method == .local ? nil : host,
             user: method == .local ? NSUserName() : user,
             port: method == .local ? nil : port,
