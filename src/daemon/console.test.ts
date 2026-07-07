@@ -360,15 +360,11 @@ test("project selectors expose a visible re-scan action", () => {
   assert.match(js, /async function refreshProjects\(\)[\s\S]*loadProjects\(true\)/, "refresh bypasses the project cache");
 });
 
-test("Personalization settings include app icon choice", () => {
-  assert.match(CONSOLE_HTML, /id="settingsGeneral"/);
-  assert.match(CONSOLE_HTML, /App icon/);
-  assert.match(CONSOLE_HTML, /id="s_app_icon"/);
-  assert.match(CONSOLE_HTML, /value="white">White<\/option>/);
-  assert.match(CONSOLE_HTML, /value="black">Black<\/option>/);
+test("app icon is a single fixed identity (no light/dark toggle)", () => {
+  // The choice was removed — the icon is always the green-on-white hive mark.
+  assert.doesNotMatch(CONSOLE_HTML, /id="s_app_icon"/);
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /async function saveAppIconChoice\(/);
-  assert.match(js, /appIconChoice/);
+  assert.doesNotMatch(js, /saveAppIconChoice/);
 });
 
 test("in-app Talk button is gated by the voice feature flag", () => {

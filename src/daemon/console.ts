@@ -1054,14 +1054,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
           <option value="matrix">Matrix</option>
         </select>
       </div>
-      <div class="row" style="align-items:center; gap:10px; margin-top:8px">
-        <span class="muted">App icon</span>
-        <select id="s_app_icon" onchange="saveAppIconChoice()" style="width:auto">
-          <option value="white">White</option>
-          <option value="black">Black</option>
-        </select>
-      </div>
-      <div id="app_icon_status" class="muted" style="font-size:11px;margin-top:3px;min-height:16px"></div>
       <label class="flbl" style="margin-top:10px">Wallpaper</label>
       <div id="wallpaper_preview" style="display:none;margin-bottom:6px">
         <img id="wallpaper_preview_img" style="width:100%;max-height:160px;object-fit:cover;border-radius:6px;border:1px solid var(--border)" />
@@ -6437,9 +6429,6 @@ function renderSettingsModelControls() {
   const v = m.version || {};
   document.getElementById("s_version").textContent = "HiveMatrix v" + (v.version||"?") + " · build " + (v.build||"?") + " · " + (v.date||"?");
   document.getElementById("s_theme").value = m.theme || "system";
-  document.getElementById("s_app_icon").value = m.appIconChoice || "white";
-  const iconStatus = document.getElementById("app_icon_status");
-  if (iconStatus) iconStatus.textContent = "";
   document.getElementById("s_token").value = HM_TOKEN || "(load the local console to see the token)";
   // Wallpaper: reflect the current image + path so settings shows what's active.
   const hasWp = !!m.hasWallpaper;
@@ -8422,20 +8411,6 @@ async function runHeartbeatNow(moment) {
   if (r && (r.report || r.text)) hmToast((moment ? "Delivered: " : "💓 ") + String(r.report || r.text).slice(0, 120), "ok");
   else if (r && r.stoodDown) hmToast("Heartbeat ran — nothing worth reporting (stood down)", "ok");
   else hmToast((r && r.error) || "Heartbeat run failed");
-}
-async function saveAppIconChoice() {
-  const appIconChoice = document.getElementById("s_app_icon").value;
-  const statusEl = document.getElementById("app_icon_status");
-  if (statusEl) {
-    statusEl.style.color = "var(--accent)";
-    statusEl.textContent = "Saving...";
-  }
-  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ appIconChoice }) });
-  await loadModels();
-  if (statusEl) {
-    statusEl.style.color = "var(--ok)";
-    statusEl.textContent = "Saved. Reopen HiveMatrix to update the Dock icon.";
-  }
 }
 // Reveal/hide the panel-translucency slider to match the current wallpaper/theme
 // state. openSettings() calls this on open; the wallpaper set/clear handlers must

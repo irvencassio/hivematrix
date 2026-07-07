@@ -434,7 +434,7 @@ export function createDaemonServer() {
         const theme = getThemeSettings();
         const localEngine = await localEngineStatus();
         const localEngineCap = localEngineCapability();
-        const { getLocation, getAutoUpdate, getAppIconChoice, getFrontierProvider, getRoleModelsForDisplay } = await import("@/lib/models/available");
+        const { getLocation, getAutoUpdate, getFrontierProvider, getRoleModelsForDisplay } = await import("@/lib/models/available");
         const { getTelemetryConfig } = await import("@/lib/telemetry/telemetry");
         json(res, 200, {
           backends,
@@ -450,7 +450,6 @@ export function createDaemonServer() {
           wallpaperOpacity: theme.wallpaperOpacity,
           location: getLocation(),
           autoUpdate: getAutoUpdate(),
-          appIconChoice: getAppIconChoice(),
           frontierProvider: getFrontierProvider(),
           roleModels: getRoleModelsForDisplay(),
           roleModelOptions: buildRoleModelOptions(backends),
@@ -716,7 +715,6 @@ export function createDaemonServer() {
         if (typeof body.wallpaperOpacity === "number") m.setWallpaperOpacity(body.wallpaperOpacity);
         if (typeof body.location === "string") m.setLocation(body.location);
         if (typeof body.autoUpdate === "boolean") m.setAutoUpdate(body.autoUpdate);
-        if (body.appIconChoice === "black" || body.appIconChoice === "white") m.setAppIconChoice(body.appIconChoice);
         if (body.frontierProvider === "claude" || body.frontierProvider === "codex") m.setFrontierProvider(body.frontierProvider);
         let embeddings = null;
         if (body.embeddings && typeof body.embeddings === "object") {
@@ -745,7 +743,7 @@ export function createDaemonServer() {
         json(res, 200, { ok: true, defaultModel: m.getDefaultModel(available), theme: theme.theme,
           hasWallpaper: !!theme.wallpaperPath, wallpaperPath: theme.wallpaperPath,
           wallpaperOpacity: theme.wallpaperOpacity, location: m.getLocation(), autoUpdate: m.getAutoUpdate(),
-          appIconChoice: m.getAppIconChoice(), embeddings });
+          embeddings });
         return;
       }
 

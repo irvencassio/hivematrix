@@ -1,23 +1,23 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <radialGradient id="bg" cx="50%" cy="44%" r="72%">
-      <stop offset="0" stop-color="#0e451f"/>
-      <stop offset="52%" stop-color="#06250f"/>
-      <stop offset="100%" stop-color="#020c06"/>
+    <radialGradient id="bg" cx="50%" cy="42%" r="75%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="70%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#eef6ef"/>
     </radialGradient>
     <radialGradient id="halo" cx="50%" cy="50%" r="50%">
-      <stop offset="0" stop-color="#3bff5e" stop-opacity="0.50"/>
-      <stop offset="55%" stop-color="#1fd23f" stop-opacity="0.14"/>
-      <stop offset="100%" stop-color="#1fd23f" stop-opacity="0"/>
+      <stop offset="0" stop-color="#26c247" stop-opacity="0.12"/>
+      <stop offset="60%" stop-color="#26c247" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#26c247" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="hex" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#86ff95"/>
-      <stop offset="1" stop-color="#17b333"/>
+      <stop offset="0" stop-color="#3fd45f"/>
+      <stop offset="1" stop-color="#0f9a2b"/>
     </linearGradient>
     <clipPath id="squircle">
       <rect x="0" y="0" width="1024" height="1024" rx="230" ry="230"/>
     </clipPath>
-    <g id="flower" stroke="#03190c" stroke-width="0.7" stroke-linejoin="round">
+    <g id="flower" stroke="#0a5c22" stroke-width="0.7" stroke-linejoin="round">
       <polygon points="63.5,50 56.75,38.31 43.25,38.31 36.5,50 43.25,61.69 56.75,61.69" fill="url(#hex)"/>
       <polygon points="88.26,35.7 81.51,24.01 68.01,24.01 61.26,35.7 68.01,47.39 81.51,47.39" fill="url(#hex)"/>
       <polygon points="63.5,21.4 56.75,9.71 43.25,9.71 36.5,21.4 43.25,33.09 56.75,33.09" fill="url(#hex)"/>
@@ -32,7 +32,7 @@
     <ellipse cx="512" cy="498" rx="455" ry="455" fill="url(#halo)"/>
   </g>
   <g transform="translate(84,84) scale(8.56)">
-    <use href="#flower" transform="translate(50,50) scale(1.16) translate(-50,-50)" opacity="0.16"/>
+    <use href="#flower" transform="translate(50,50) scale(1.16) translate(-50,-50)" opacity="0.10"/>
     <use href="#flower"/>
   </g>
 </svg>
