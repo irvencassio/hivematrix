@@ -16,6 +16,7 @@ import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { getQwenProfile, type QwenProfile, type QwenProvider } from "@/lib/config/qwen-profile";
+import { buildServeArgs, resolveRapidBinary, tierForAlias } from "@/lib/models/local-engine";
 
 const CHECK_INTERVAL_MS = 8_000;
 const RELAUNCH_THROTTLE_MS = 12_000; // don't hammer a crash-looping server
@@ -59,6 +60,11 @@ export function resolveServeCommand(profile: QwenProfile, override = readServeCo
 
   const { modelId, endpoint, provider } = profile.primary;
   const port = String(portFromEndpoint(endpoint));
+  const rapidTier = provider === "mlx" ? tierForAlias(modelId) : null;
+  if (rapidTier) {
+    const rapid = resolveRapidBinary();
+    return rapid ? { cmd: rapid, args: buildServeArgs(rapidTier) } : null;
+  }
   const byProvider: Record<QwenProvider, ServeCommand | null> = {
     mlx: { cmd: "mlx_lm.server", args: ["--model", modelId, "--host", "127.0.0.1", "--port", port] },
     lmstudio: { cmd: "lms", args: ["server", "start", "--port", port] },

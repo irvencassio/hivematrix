@@ -49,6 +49,37 @@ test("resolveServeCommand maps providers and skips remote/vllm", () => {
   assert.equal(resolveServeCommand(profile({ location: "lan" }), null), null); // remote: unmanaged
 });
 
+test("resolveServeCommand launches Rapid-MLX tier aliases with rapid-mlx", () => {
+  const home = mkdtempSync(join(tmpdir(), "hm-rapid-serve-"));
+  const origHome = process.env.HOME;
+  const fakeRapid = join(home, "bin", "rapid-mlx");
+  mkdirSync(join(home, "bin"), { recursive: true });
+  writeFileSync(fakeRapid, "#!/bin/sh\n");
+  mkdirSync(join(home, ".hivematrix"), { recursive: true });
+  writeFileSync(join(home, ".hivematrix", "config.json"), JSON.stringify({
+    localEngine: {
+      engine: "rapid-mlx",
+      binary: fakeRapid,
+      tiers: [{ key: "fast", alias: "qwen3.6-35b-4bit", port: 8000, reasoning: false }],
+    },
+  }));
+  process.env.HOME = home;
+
+  try {
+    assert.deepEqual(resolveServeCommand(profile({
+      provider: "mlx",
+      modelId: "qwen3.6-35b-4bit",
+      endpoint: "http://127.0.0.1:8000/v1",
+    }), null), {
+      cmd: fakeRapid,
+      args: ["serve", "qwen3.6-35b-4bit", "--host", "127.0.0.1", "--port", "8000", "--no-thinking"],
+    });
+  } finally {
+    process.env.HOME = origHome;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("resolveServeCommand honors an override array", () => {
   assert.deepEqual(resolveServeCommand(profile(), ["node", "x.js", "5"]), { cmd: "node", args: ["x.js", "5"] });
 });
