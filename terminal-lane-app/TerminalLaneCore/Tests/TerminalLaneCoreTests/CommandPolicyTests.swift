@@ -34,16 +34,23 @@ final class CommandPolicyTests: XCTestCase {
     }
 
     func testSudoWrappersDoNotBypassBlocklist() {
-        // sudo with an argument-taking flag: -u root consumes "root", command is shutdown
-        if case .blocked = policy.decide(commandLine: "sudo -u root shutdown -h now", mode: .readwrite) {} else { XCTFail("sudo -u root shutdown must block") }
-        // env assignment placed after sudo
-        if case .blocked = policy.decide(commandLine: "sudo FOO=bar reboot", mode: .readwrite) {} else { XCTFail("sudo FOO=bar reboot must block") }
-        // long-form flag with argument
-        if case .blocked = policy.decide(commandLine: "sudo --user=root poweroff", mode: .readwrite) {} else { XCTFail("sudo --user=root poweroff must block") }
-        // plain sudo still works
-        if case .blocked = policy.decide(commandLine: "sudo halt", mode: .readwrite) {} else { XCTFail("sudo halt must block") }
+        for line in [
+            "sudo -u root shutdown -h now",
+            "sudo FOO=bar reboot",
+            "sudo --user=root poweroff",
+            "sudo halt",
+            "sudo FOO=bar -u root shutdown",   // env interleaved before an arg-flag
+            "FOO=bar sudo -u root shutdown",    // env before sudo
+        ] {
+            if case .blocked = policy.decide(commandLine: line, mode: .readwrite) {} else { XCTFail("must block: \(line)") }
+        }
         // sudo + allowed command still runs in readonly
         XCTAssertEqual(policy.decide(commandLine: "sudo -u deploy cat /var/log/syslog", mode: .readonly), .allow)
+        // an interactive root shell (no trailing command) is blocked in readonly
+        if case .blocked = policy.decide(commandLine: "sudo -i", mode: .readonly) {} else { XCTFail("sudo -i must block in readonly") }
+        if case .blocked = policy.decide(commandLine: "sudo", mode: .readonly) {} else { XCTFail("bare sudo must block in readonly") }
+        // a genuinely blank line is a harmless no-op (allowed)
+        XCTAssertEqual(policy.decide(commandLine: "   ", mode: .readonly), .allow)
     }
 
     func testEmptyIsAllowed() {

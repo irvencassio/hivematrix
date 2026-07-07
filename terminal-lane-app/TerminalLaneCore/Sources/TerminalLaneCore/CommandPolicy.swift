@@ -69,23 +69,33 @@ public struct CommandPolicy: Codable, Equatable, Sendable {
             "-u", "--user", "-g", "--group", "-p", "--prompt",
             "-C", "--close-from", "-r", "--role", "-t", "--type", "-U", "--other-user",
         ]
-        // Repeatedly peel env assignments and sudo wrappers (sudo may carry its
-        // own env assignments and option flags) until the real command is first.
-        var changed = true
-        while changed {
-            changed = false
-            while let first = tokens.first, isEnvAssignment(first) { tokens.removeFirst(); changed = true }
-            if let first = tokens.first, basename(first) == "sudo" {
-                tokens.removeFirst()
-                changed = true
-                while let f = tokens.first, f.hasPrefix("-") {
+        func stripEnv() { while let f = tokens.first, isEnvAssignment(f) { tokens.removeFirst() } }
+
+        var sawSudo = false
+        stripEnv()
+        while let first = tokens.first, basename(first) == "sudo" {
+            sawSudo = true
+            tokens.removeFirst()
+            // Scan sudo's own options; sudo accepts env assignments interleaved
+            // with flags, and some flags consume the next token as their value.
+            scan: while let f = tokens.first {
+                if isEnvAssignment(f) { tokens.removeFirst(); continue }
+                if f == "--" { tokens.removeFirst(); break scan }   // end of options
+                if f.hasPrefix("-") {
                     tokens.removeFirst()
-                    if f == "--" { break }                       // end of options
                     if sudoArgFlags.contains(f), !tokens.isEmpty { tokens.removeFirst() }
+                    continue
                 }
+                break scan   // reached the command (or a nested sudo)
             }
+            stripEnv()
         }
-        guard let cmd = tokens.first, !cmd.isEmpty else { return nil }
+        guard let cmd = tokens.first, !cmd.isEmpty else {
+            // A sudo wrapper with no resolved command (e.g. `sudo -i`) is an
+            // interactive root shell — classify it as "sudo" so read-only blocks
+            // it; a genuinely blank segment stays nil (a harmless no-op).
+            return sawSudo ? "sudo" : nil
+        }
         return basename(cmd)
     }
 
