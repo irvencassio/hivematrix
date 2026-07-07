@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.153 — 2026-07-07
+
+Internal simplification: 12 duplicated poll-loops (Message Lane, Mail Lane, Browser Lane readiness, and background loops) converged onto one shared scaffolding; complexity-budget convention documented for the coding agents. No user-facing behavior change.
+
 ## v0.1.152 — 2026-07-07
 
 Escalation ladder now tries the other local model (on-device coding specialist) before spending a frontier token — works even offline. Success scoreboard added to the brief: measurable progress against goals (directive criteria proven, weekly task outcomes, first-pass rate). Deep Think now powers local directive planning.
