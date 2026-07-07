@@ -13,6 +13,7 @@ let package = Package(
         // Native Swift SSH client (SwiftNIO) so password profiles auto-connect
         // with the Keychain password — the same runtime Canopy uses.
         .package(url: "https://github.com/orlandos-nl/Citadel.git", exact: "0.12.0"),
+        .package(path: "TerminalLaneCore"),
     ],
     targets: [
         .executableTarget(
@@ -20,6 +21,7 @@ let package = Package(
             dependencies: [
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(name: "Citadel", package: "Citadel"),
+                .product(name: "TerminalLaneCore", package: "TerminalLaneCore"),
             ],
             path: "Sources/TerminalLaneApp"
         ),
