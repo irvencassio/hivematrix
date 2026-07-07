@@ -33,6 +33,19 @@ final class CommandPolicyTests: XCTestCase {
         XCTAssertEqual(policy.decide(commandLine: "LANG=C cat z", mode: .readonly), .allow)
     }
 
+    func testSudoWrappersDoNotBypassBlocklist() {
+        // sudo with an argument-taking flag: -u root consumes "root", command is shutdown
+        if case .blocked = policy.decide(commandLine: "sudo -u root shutdown -h now", mode: .readwrite) {} else { XCTFail("sudo -u root shutdown must block") }
+        // env assignment placed after sudo
+        if case .blocked = policy.decide(commandLine: "sudo FOO=bar reboot", mode: .readwrite) {} else { XCTFail("sudo FOO=bar reboot must block") }
+        // long-form flag with argument
+        if case .blocked = policy.decide(commandLine: "sudo --user=root poweroff", mode: .readwrite) {} else { XCTFail("sudo --user=root poweroff must block") }
+        // plain sudo still works
+        if case .blocked = policy.decide(commandLine: "sudo halt", mode: .readwrite) {} else { XCTFail("sudo halt must block") }
+        // sudo + allowed command still runs in readonly
+        XCTAssertEqual(policy.decide(commandLine: "sudo -u deploy cat /var/log/syslog", mode: .readonly), .allow)
+    }
+
     func testEmptyIsAllowed() {
         XCTAssertEqual(policy.decide(commandLine: "   ", mode: .readonly), .allow)
         XCTAssertEqual(policy.decide(commandLine: "", mode: .readonly), .allow)

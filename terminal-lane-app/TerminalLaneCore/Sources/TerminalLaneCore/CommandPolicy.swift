@@ -64,10 +64,26 @@ public struct CommandPolicy: Codable, Equatable, Sendable {
 
     static func leadingCommand(of segment: String) -> String? {
         var tokens = segment.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
-        while let first = tokens.first, isEnvAssignment(first) { tokens.removeFirst() }
-        if let first = tokens.first, basename(first) == "sudo" {
-            tokens.removeFirst()
-            while let f = tokens.first, f.hasPrefix("-") { tokens.removeFirst() }
+        // sudo option flags that consume a following argument token.
+        let sudoArgFlags: Set<String> = [
+            "-u", "--user", "-g", "--group", "-p", "--prompt",
+            "-C", "--close-from", "-r", "--role", "-t", "--type", "-U", "--other-user",
+        ]
+        // Repeatedly peel env assignments and sudo wrappers (sudo may carry its
+        // own env assignments and option flags) until the real command is first.
+        var changed = true
+        while changed {
+            changed = false
+            while let first = tokens.first, isEnvAssignment(first) { tokens.removeFirst(); changed = true }
+            if let first = tokens.first, basename(first) == "sudo" {
+                tokens.removeFirst()
+                changed = true
+                while let f = tokens.first, f.hasPrefix("-") {
+                    tokens.removeFirst()
+                    if f == "--" { break }                       // end of options
+                    if sudoArgFlags.contains(f), !tokens.isEmpty { tokens.removeFirst() }
+                }
+            }
         }
         guard let cmd = tokens.first, !cmd.isEmpty else { return nil }
         return basename(cmd)
