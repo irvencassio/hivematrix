@@ -216,8 +216,12 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
             TerminalLaneDaemonClient.shared.sync(profile: profile) { [weak self] result in
                 DispatchQueue.main.async {
                     switch result {
-                    case .success(let message): self?.setStatus(message, color: .systemGreen)
-                    case .failure(let error): self?.setStatus(error.localizedDescription, color: .systemRed)
+                    case .success(let message):
+                        self?.persistSyncStatus(for: profile, status: "synced")
+                        self?.setStatus(message, color: .systemGreen)
+                    case .failure(let error):
+                        self?.persistSyncStatus(for: profile, status: "sync failed")
+                        self?.setStatus(error.localizedDescription, color: .systemRed)
                     }
                 }
             }
@@ -297,6 +301,14 @@ final class AddProfileViewController: NSViewController, NSTextFieldDelegate {
     private func setStatus(_ text: String, color: NSColor) {
         statusLabel.textColor = color
         statusLabel.stringValue = text
+    }
+
+    // Write the final sync state back to the store so the Profiles table's
+    // Sync column reflects reality instead of showing "saving" forever.
+    private func persistSyncStatus(for profile: TerminalLaneProfile, status: String) {
+        var updated = profile
+        updated.lastSyncStatus = status
+        try? TerminalLaneProfileStore.shared.upsert(updated)
     }
 
     private func makeProfile(status: String) throws -> TerminalLaneProfile {
