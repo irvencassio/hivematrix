@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.148", date: "2026-07-07", note: "Pipeline hardening: ruff static-analysis verification gate + local repair-ladder; local-failure→frontier escalation package; route scorecard + advisory routing bandit; unified decidePolicy approval choke point; frontier-owns-code intake (broad prompts dispatch as one task, Work Packages opt-in); self-aware pipeline health in the heartbeat/brief." },
   { version: "0.1.147", date: "2026-07-06", note: "Use Qwen Rapid-MLX for local chat" },
   { version: "0.1.146", date: "2026-07-06", note: "auto-deploy HiveMatrix" },
   { version: "0.1.145", date: "2026-07-06", note: "Message Lane setup removal controls" },
