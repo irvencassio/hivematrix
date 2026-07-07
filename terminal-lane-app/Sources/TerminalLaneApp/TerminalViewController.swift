@@ -304,13 +304,7 @@ final class TerminalViewController: NSViewController {
 
     /// Strip the shell prompt prefix, keeping the typed command.
     static func stripPrompt(_ line: String) -> String {
-        let markers = ["❯ ", "$ ", "% ", "# ", "> "]
-        for marker in markers {
-            if let r = line.range(of: marker, options: .backwards) {
-                return String(line[r.upperBound...]).trimmingCharacters(in: .whitespaces)
-            }
-        }
-        return line.trimmingCharacters(in: .whitespaces)
+        PromptLine.command(from: line)
     }
 }
 
