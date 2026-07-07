@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.155", date: "2026-07-07", note: "Fix voice/flash reply repetition loop; add iOS dark + tinted app-icon appearances" },
   { version: "0.1.154", date: "2026-07-07", note: "The router now learns from your re-routes (change a task's model repeatedly for a kind of task and it adopts that as the default). Pipeline self-audit: the accountability layer inspects its own metrics daily and files regressions as feedback — the system watching itself." },
   { version: "0.1.153", date: "2026-07-07", note: "Internal simplification: 12 duplicated poll-loops (Message Lane, Mail Lane, Browser Lane readiness, and background loops) converged onto one shared scaffolding; complexity-budget convention documented for the coding agents. No user-facing behavior change." },
   { version: "0.1.152", date: "2026-07-07", note: "Escalation ladder now tries the other local model (on-device coding specialist) before spending a frontier token — works even offline. Success scoreboard added to the brief: measurable progress against goals (directive criteria proven, weekly task outcomes, first-pass rate). Deep Think now powers local directive planning." },

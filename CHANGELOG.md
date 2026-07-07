@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.155 — 2026-07-07
+
+Fix voice/flash reply repetition loop; add iOS dark + tinted app-icon appearances
+
 ## v0.1.154 — 2026-07-07
 
 The router now learns from your re-routes (change a task's model repeatedly for a kind of task and it adopts that as the default). Pipeline self-audit: the accountability layer inspects its own metrics daily and files regressions as feedback — the system watching itself.
