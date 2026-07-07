@@ -14,7 +14,7 @@ test("defaults: rapid-mlx engine, fast + coding tiers, reasoning OFF", () => {
   assert.ok(c.tiers.every((t) => t.reasoning === false));
 });
 
-test("config overrides merge over defaults (per tier by key)", () => {
+test("configured localEngine tiers are authoritative when present", () => {
   const c = getLocalEngineConfig({
     localEngine: {
       engine: "rapid-mlx",
@@ -23,19 +23,17 @@ test("config overrides merge over defaults (per tier by key)", () => {
     },
   });
   assert.equal(c.binary, "/x/rapid-mlx");
-  const fast = c.tiers.find((t) => t.key === "fast")!;
-  assert.equal(fast.alias, "my-fast");
-  assert.equal(fast.port, 9000);
-  assert.equal(fast.reasoning, true);
-  // untouched tier keeps its default
-  assert.equal(c.tiers.find((t) => t.key === "coding")!.alias, "qwen3.6-27b-4bit");
+  assert.deepEqual(c.tiers.map((t) => t.key), ["fast"]);
+  assert.equal(c.tiers[0].alias, "my-fast");
+  assert.equal(c.tiers[0].port, 9000);
+  assert.equal(c.tiers[0].reasoning, true);
 });
 
 test("buildServeArgs adds --no-thinking only when reasoning off", () => {
   assert.deepEqual(buildServeArgs(DEFAULT_TIERS[0]),
-    ["serve", "qwen3.6-35b-4bit", "--port", "8000", "--no-thinking"]);
+    ["serve", "qwen3.6-35b-4bit", "--host", "127.0.0.1", "--port", "8000", "--no-thinking"]);
   assert.deepEqual(buildServeArgs({ key: "fast", alias: "m", port: 1, reasoning: true }),
-    ["serve", "m", "--port", "1"]);
+    ["serve", "m", "--host", "127.0.0.1", "--port", "1"]);
 });
 
 test("roles map to tiers: operational→fast, coding/thinking→coding", () => {

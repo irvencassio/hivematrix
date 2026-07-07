@@ -76,10 +76,13 @@ function parseTier(raw: unknown, fallback: LocalTier): LocalTier {
 export function getLocalEngineConfig(config: Record<string, unknown> = readConfig()): LocalEngineConfig {
   const le = (config.localEngine ?? {}) as Record<string, unknown>;
   const rawTiers = Array.isArray(le.tiers) ? le.tiers : [];
-  const tiers: LocalTier[] = DEFAULT_TIERS.map((def) => {
-    const match = rawTiers.find((t) => (t as Record<string, unknown>)?.key === def.key);
-    return match ? parseTier(match, def) : def;
-  });
+  const defaultsByKey = new Map(DEFAULT_TIERS.map((tier) => [tier.key, tier]));
+  const tiers: LocalTier[] = rawTiers.length > 0
+    ? rawTiers.map((raw) => {
+        const key = (raw as Record<string, unknown> | null)?.key === "coding" ? "coding" : "fast";
+        return parseTier(raw, defaultsByKey.get(key) ?? DEFAULT_TIERS[0]);
+      })
+    : DEFAULT_TIERS;
   return {
     engine: coerceEngine(le.engine),
     binary: typeof le.binary === "string" && le.binary ? le.binary : null,
@@ -89,7 +92,7 @@ export function getLocalEngineConfig(config: Record<string, unknown> = readConfi
 
 /** Pure: the `rapid-mlx serve …` argv for a tier (reasoning off → --no-thinking). */
 export function buildServeArgs(tier: LocalTier): string[] {
-  const args = ["serve", tier.alias, "--port", String(tier.port)];
+  const args = ["serve", tier.alias, "--host", "127.0.0.1", "--port", String(tier.port)];
   if (!tier.reasoning) args.push("--no-thinking");
   return args;
 }
