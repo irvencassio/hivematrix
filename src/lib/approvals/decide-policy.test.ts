@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { decidePolicy } from "./decide-policy";
-import type { AutoApprovalPolicy } from "@/lib/voice/auto-approval-policy";
+import type { AutoApprovalPolicy, AutoApprovalCategory } from "@/lib/voice/auto-approval-policy";
 import type { TrustLedger } from "@/lib/approvals/trust-ledger";
 
 const OFF: AutoApprovalPolicy = { enabled: false, allowCheckpoints: false, allowLowRiskTools: false };
@@ -60,4 +60,34 @@ test("default: nothing grants it → operator required", () => {
   assert.equal(v.autoApprove, false);
   assert.equal(v.via, "operator-required");
   assert.ok(v.reason.length > 0);
+});
+
+// Floor invariant — guards against the two hard-floor lists drifting apart
+// (NEVER_AUTO_APPROVE in auto-approval-policy.ts and trustKey eligibility in
+// trust-ledger.ts). Enumerate EVERY category; a new one added to the enum forces
+// an update here, which forces a conscious decision about its floor status.
+// checkpoint (explicit + trust) and lowRiskTool (explicit only) are the only
+// approvable classes; the other five are the hard floor — never approvable.
+// (lowRiskTool is approvable in principle but the classifier never emits it, so
+// at runtime only checkpoint is actually reachable — that's a classify concern,
+// not decidePolicy's.)
+const ALL_CATEGORIES: AutoApprovalCategory[] = [
+  "checkpoint", "lowRiskTool", "content", "external", "tool", "stuck", "unknown",
+];
+const AUTO_APPROVABLE = new Set<AutoApprovalCategory>(["checkpoint", "lowRiskTool"]);
+
+test("floor invariant: only checkpoint/lowRiskTool can EVER auto-approve, across all inputs", () => {
+  const maxPermissive = { enabled: true, allowCheckpoints: true, allowLowRiskTools: true };
+  for (const category of ALL_CATEGORIES) {
+    const trusted: TrustLedger = { [category]: { approvals: 99, denials: 0 }, checkpoint: { approvals: 99, denials: 0 } };
+    // Try every lever that could grant approval: explicit policy on, autonomous, trusted.
+    const viaExplicit = decidePolicy({ category, policy: maxPermissive, autonomyLevel: "manual", ledger: {} });
+    const viaTrust = decidePolicy({ category, policy: OFF, autonomyLevel: "autonomous", ledger: trusted });
+    const grantedSomewhere = viaExplicit.autoApprove || viaTrust.autoApprove;
+    assert.equal(
+      grantedSomewhere,
+      AUTO_APPROVABLE.has(category),
+      `${category}: auto-approvable should be ${AUTO_APPROVABLE.has(category)}, got ${grantedSomewhere}`,
+    );
+  }
 });
