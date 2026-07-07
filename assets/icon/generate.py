@@ -49,18 +49,14 @@ def apply_squircle_alpha(img, content_ratio=0.805, radius_ratio=0.2237):
     canvas.paste(art, (margin, margin), art)
     return canvas
 
+# One identity: the green hive-flower on white, everywhere. The old white/black
+# alternates (icon-macos-white.svg, AppIconWhite) were retired with the chooser.
 ios_master = Image.open(render_svg("icon-ios-master.svg")).convert("RGBA")
 mac_master = apply_squircle_alpha(Image.open(render_svg("icon-macos-master.svg")).convert("RGBA"))
-white_master = apply_squircle_alpha(Image.open(render_svg("icon-macos-white.svg")).convert("RGBA"))
 
 # --- iOS: 1024, NO alpha (App Store requirement), full-bleed (iOS rounds it) ---
 ios = resize(ios_master, 1024).convert("RGB")
 ios.save(os.path.join(OUT, "AppIcon.png"))
-# iOS white alternate icon — same white master as macOS, but full-bleed (no
-# squircle inset) since iOS masks it itself. Keeps the iOS white icon in sync
-# with icon-macos-white.svg (darker green) instead of a stale hand-placed file.
-ios_white = resize(Image.open(render_svg("icon-macos-white.svg")).convert("RGBA"), 1024).convert("RGB")
-ios_white.save(os.path.join(OUT, "AppIconWhite.png"))
 
 # --- Desktop PNGs (from rounded mac master, keep alpha) ---
 png_sizes = {
@@ -83,7 +79,6 @@ for name, size in png_sizes.items():
     resize(mac_master, size).save(os.path.join(OUT, name))
 
 resize(mac_master, 512).save(os.path.join(OUT, "app-icon-dark-green.png"))
-resize(white_master, 512).save(os.path.join(OUT, "app-icon-white.png"))
 
 # --- Windows .ico (multi-size) ---
 resize(mac_master, 256).save(
@@ -110,16 +105,16 @@ for f in sorted(os.listdir(OUT)):
     if not f.endswith(".iconset"):
         print("  ", f)
 
-for name in list(png_sizes.keys()) + ["icon.ico", "icon.icns", "app-icon-dark-green.png", "app-icon-white.png"]:
+for name in list(png_sizes.keys()) + ["icon.ico", "icon.icns", "app-icon-dark-green.png"]:
     shutil.copy2(os.path.join(OUT, name), os.path.join(TAURI_ICONS, name))
 print("copied desktop icons ->", TAURI_ICONS)
 
-# Push the iOS white alternate icon into the sibling hivematrix-ios repo (if present)
-# so selecting "white" looks the same on iPhone/iPad as on the Mac.
-IOS_WHITE_DST = os.path.abspath(os.path.join(
-    REPO, "..", "hivematrix-ios", "HiveMatrix", "Assets.xcassets", "AppIconWhite.appiconset", "AppIconWhite.png"))
-if os.path.isdir(os.path.dirname(IOS_WHITE_DST)):
-    shutil.copy2(os.path.join(OUT, "AppIconWhite.png"), IOS_WHITE_DST)
-    print("copied iOS white icon ->", IOS_WHITE_DST)
+# Push the primary iOS icon into the sibling hivematrix-ios repo (if present) so
+# iPhone/iPad carry the same green-on-white identity as the Mac.
+IOS_ICON_DST = os.path.abspath(os.path.join(
+    REPO, "..", "hivematrix-ios", "HiveMatrix", "Assets.xcassets", "AppIcon.appiconset", "AppIcon.png"))
+if os.path.isdir(os.path.dirname(IOS_ICON_DST)):
+    shutil.copy2(os.path.join(OUT, "AppIcon.png"), IOS_ICON_DST)
+    print("copied iOS icon ->", IOS_ICON_DST)
 else:
-    print("iOS repo not found; skipped iOS white icon copy")
+    print("iOS repo not found; skipped iOS icon copy")
