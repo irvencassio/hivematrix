@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildVoiceBriefing } from "./briefing";
+import { buildVoiceBriefing, pipelineConcern, type BriefingPipelineRoute } from "./briefing";
 
 test("briefing speaks pending approvals, failed tasks, active directives, and usage", () => {
   const briefing = buildVoiceBriefing({
@@ -72,6 +72,59 @@ test("briefing gives an all-clear when no Browser Lane site needs attention", ()
   });
   assert.match(briefing, /Browser Lane/);
   assert.match(briefing, /ready|all clear|no sites/i);
+});
+
+test("briefing speaks a compact pipeline-health line with per-route first-pass rate", () => {
+  const briefing = buildVoiceBriefing({
+    pipelineHealth: {
+      totalRuns: 12,
+      routes: [
+        { route: "local", tasks: 6, firstPassPct: 50, avgRunsPerTask: 1.8 },
+        { route: "Claude", tasks: 4, firstPassPct: 90, avgRunsPerTask: 1.0 },
+      ],
+      concern: null,
+    },
+  });
+  assert.match(briefing, /Pipeline/);
+  assert.match(briefing, /local 50% first-pass/);
+  assert.match(briefing, /Claude 90% first-pass/);
+  assert.match(briefing, /runs\/task/);
+});
+
+test("briefing omits the pipeline line when there is no telemetry", () => {
+  assert.doesNotMatch(buildVoiceBriefing({ pipelineHealth: { totalRuns: 0, routes: [], concern: null } }), /Pipeline/);
+  assert.doesNotMatch(buildVoiceBriefing({}), /Pipeline/);
+});
+
+test("briefing surfaces the concern nudge when local coding lags the frontier", () => {
+  const routes: BriefingPipelineRoute[] = [
+    { route: "local", tasks: 8, firstPassPct: 45, avgRunsPerTask: 2.1 },
+    { route: "Claude", tasks: 5, firstPassPct: 88, avgRunsPerTask: 1.1 },
+  ];
+  const concern = pipelineConcern(routes);
+  assert.ok(concern, "a material gap should produce a nudge");
+  assert.match(concern!, /routing coding to the frontier/i);
+
+  const briefing = buildVoiceBriefing({ pipelineHealth: { totalRuns: 20, routes, concern } });
+  assert.match(briefing, /consider routing coding to the frontier/i);
+});
+
+test("pipelineConcern stays quiet on thin samples, small gaps, or healthy local", () => {
+  // Thin sample: local has < 3 tasks.
+  assert.equal(pipelineConcern([
+    { route: "local", tasks: 2, firstPassPct: 10, avgRunsPerTask: 3 },
+    { route: "Claude", tasks: 5, firstPassPct: 90, avgRunsPerTask: 1 },
+  ]), null);
+  // Small gap: local below floor but frontier not much better.
+  assert.equal(pipelineConcern([
+    { route: "local", tasks: 5, firstPassPct: 55, avgRunsPerTask: 1.5 },
+    { route: "Claude", tasks: 5, firstPassPct: 68, avgRunsPerTask: 1.2 },
+  ]), null);
+  // Healthy local: above the floor.
+  assert.equal(pipelineConcern([
+    { route: "local", tasks: 9, firstPassPct: 80, avgRunsPerTask: 1.1 },
+    { route: "Claude", tasks: 5, firstPassPct: 95, avgRunsPerTask: 1 },
+  ]), null);
 });
 
 test("briefing mentions when readiness is stale and when it was last refreshed", () => {

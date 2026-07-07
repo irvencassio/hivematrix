@@ -22,7 +22,7 @@ import {
   resolveApprovalReference,
   type ContextApproval,
 } from "./command-context";
-import { buildVoiceBriefing, usageReply, type BriefingUsage, type BriefingBrowserReadiness, type BriefingWorkflowInbox } from "./briefing";
+import { buildVoiceBriefing, usageReply, pipelineConcern, type BriefingUsage, type BriefingBrowserReadiness, type BriefingWorkflowInbox, type BriefingPipelineHealth } from "./briefing";
 import { getWeather, weatherReply, weatherNeedsLocationReply, type WeatherWhen, type WeatherResult } from "./weather";
 import { synthesizeReplyVoice } from "./turn-server";
 import { buildVoiceBrowserLaneTask } from "./browser-lane-intent";
@@ -66,6 +66,7 @@ export interface CommandTurnDeps {
   getMetrics?: () => Promise<Record<string, unknown>>;
   getBrowserReadiness?: () => Promise<BriefingBrowserReadiness | null> | BriefingBrowserReadiness | null;
   getWorkflowInbox?: () => Promise<BriefingWorkflowInbox | null> | BriefingWorkflowInbox | null;
+  getPipelineHealth?: () => Promise<BriefingPipelineHealth | null> | BriefingPipelineHealth | null;
   askOpenClaw?: (request: OpenClawVoiceRequest) => Promise<OpenClawVoiceResult>;
   /** Poll for the next OpenClaw assistant reply after sentAfter. */
   pollOpenClawReply?: (opts: { gatewayUrl: string; sessionKey: string; sentAfter: string }) => Promise<{ found: boolean; text: string | null; reason: string | null }>;
@@ -130,13 +131,14 @@ function reminderTitle(text: string): string {
  * both read the same data and phrasing.
  */
 export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<string> {
-  const [approvals, directives, failedTasks, usage, browserReadiness, workflowInbox] = await Promise.all([
+  const [approvals, directives, failedTasks, usage, browserReadiness, workflowInbox, pipelineHealth] = await Promise.all([
     approvalQueue(deps),
     listDirectives(deps),
     listFailedTasks(deps),
     getUsage(deps),
     getBrowserReadiness(deps),
     getWorkflowInboxCounts(deps),
+    getPipelineHealth(deps),
   ]);
   return buildVoiceBriefing({
     approvals: approvals.map((item) => ({ title: item.title, kind: item.kind })),
@@ -145,7 +147,34 @@ export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<strin
     usage,
     browserReadiness,
     workflowInbox,
+    pipelineHealth,
   });
+}
+
+/**
+ * Pipeline-health section for the briefing — per-route first-pass rate + rework
+ * from the observability scorecard, with a nudge when local coding lags the
+ * frontier. Read-only, counts only; degrades to null when there's no telemetry.
+ */
+async function getPipelineHealth(deps: CommandTurnDeps): Promise<BriefingPipelineHealth | null> {
+  if (deps.getPipelineHealth) return deps.getPipelineHealth();
+  try {
+    const { observabilityScorecard } = await import("@/lib/observability/store");
+    const scorecard = observabilityScorecard();
+    if (!scorecard.length) return null;
+    const label = (route: string) =>
+      route === "local-qwen" ? "local" : route === "anthropic" ? "Claude" : route === "openai-codex" ? "Codex" : route;
+    const routes = scorecard.map((s) => ({
+      route: label(s.route),
+      tasks: s.tasks,
+      firstPassPct: s.firstPassRate === null ? null : Math.round(s.firstPassRate * 100),
+      avgRunsPerTask: s.avgRunsPerTask,
+    }));
+    const totalRuns = scorecard.reduce((acc, s) => acc + s.runs, 0);
+    return { totalRuns, routes, concern: pipelineConcern(routes) };
+  } catch {
+    return null; // briefing degrades gracefully without telemetry
+  }
 }
 
 /**

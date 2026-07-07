@@ -43,6 +43,23 @@ export interface BriefingWorkflowInbox {
   attention: number;
 }
 
+/** One route's health line for the briefing (derived from the observability scorecard). */
+export interface BriefingPipelineRoute {
+  /** Display label: "local" | "Claude" | "Codex" | raw provider. */
+  route: string;
+  tasks: number;
+  /** Percent of first attempts that succeeded, or null when no first attempts. */
+  firstPassPct: number | null;
+  avgRunsPerTask: number;
+}
+
+export interface BriefingPipelineHealth {
+  totalRuns: number;
+  routes: BriefingPipelineRoute[];
+  /** A precomputed nudge when local coding quality lags the frontier, else null. */
+  concern: string | null;
+}
+
 export interface VoiceBriefingInput {
   approvals?: BriefingApproval[];
   failedTasks?: BriefingTask[];
@@ -50,6 +67,30 @@ export interface VoiceBriefingInput {
   usage?: BriefingUsage | null;
   browserReadiness?: BriefingBrowserReadiness | null;
   workflowInbox?: BriefingWorkflowInbox | null;
+  pipelineHealth?: BriefingPipelineHealth | null;
+}
+
+/** Lower bound on tasks before a route's first-pass rate is worth comparing. */
+const PIPELINE_MIN_TASKS = 3;
+/** Local first-pass this far (points) below the frontier's, and below the floor, earns a nudge. */
+const PIPELINE_GAP_POINTS = 20;
+const PIPELINE_LOCAL_FLOOR_PCT = 60;
+
+/**
+ * Pure: does local coding quality lag the frontier enough to suggest re-routing?
+ * Returns a one-line nudge or null. Only fires when BOTH routes have a meaningful
+ * sample, the local route is below the floor, and the gap is material — so it
+ * speaks up on a real trend, not noise.
+ */
+export function pipelineConcern(routes: BriefingPipelineRoute[]): string | null {
+  const local = routes.find((r) => r.route === "local" && r.tasks >= PIPELINE_MIN_TASKS && r.firstPassPct !== null);
+  if (!local || local.firstPassPct === null || local.firstPassPct >= PIPELINE_LOCAL_FLOOR_PCT) return null;
+  const frontier = routes
+    .filter((r) => r.route !== "local" && r.tasks >= PIPELINE_MIN_TASKS && r.firstPassPct !== null)
+    .sort((a, b) => (b.firstPassPct ?? 0) - (a.firstPassPct ?? 0))[0];
+  if (!frontier || frontier.firstPassPct === null) return null;
+  if (frontier.firstPassPct - local.firstPassPct < PIPELINE_GAP_POINTS) return null;
+  return `local first-pass (${local.firstPassPct}%) is well below ${frontier.route} (${frontier.firstPassPct}%) — consider routing coding to the frontier`;
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => (n === 1 ? `${n} ${one}` : `${n} ${many}`);
@@ -108,8 +149,28 @@ export function buildVoiceBriefing(input: VoiceBriefingInput): string {
   const browserLine = browserReadinessReply(input.browserReadiness);
   if (browserLine) parts.push(browserLine);
 
+  const pipelineLine = pipelineHealthReply(input.pipelineHealth);
+  if (pipelineLine) parts.push(pipelineLine);
+
   parts.push(usageReply(input.usage));
   return parts.join(" ");
+}
+
+/**
+ * Compact pipeline-health line: per-route first-pass rate and rework, plus a
+ * nudge when local coding lags the frontier. Returns "" when there's no telemetry
+ * yet (so early briefings stay short). This is how the system surfaces its own
+ * operational health unprompted, rather than burying it in a console panel.
+ */
+export function pipelineHealthReply(health: BriefingPipelineHealth | null | undefined): string {
+  if (!health || health.totalRuns === 0) return "";
+  const named = health.routes
+    .filter((r) => r.firstPassPct !== null && r.tasks >= PIPELINE_MIN_TASKS)
+    .map((r) => `${r.route} ${r.firstPassPct}% first-pass (${r.avgRunsPerTask}x runs/task)`);
+  if (named.length === 0) return "";
+  let line = `Pipeline (last ${plural(health.totalRuns, "run")}): ${listHead(named, 3)}`;
+  if (health.concern) line += ` — ${health.concern}`;
+  return `${line}.`;
 }
 
 /**
