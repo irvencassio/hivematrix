@@ -1732,10 +1732,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <select id="t_model"></select>
         <label class="flbl">Mode</label>
         <select id="t_route">
-          <option value="auto" selected>Auto — detect Flight, lanes &amp; steps</option>
+          <option value="auto" selected>Auto — route lanes, else one task</option>
           <option value="normal">Direct — one plain task</option>
+          <option value="work_package">Flight — split into a Work Package</option>
         </select>
-        <div class="muted" style="font-size:11px;margin-top:2px">Auto splits multi-step goals into a Flight and routes browsing/terminal work to the right lane. Pick Direct to force a single plain task.</div>
+        <div class="muted" style="font-size:11px;margin-top:2px">Auto routes browsing/terminal work to the right lane and otherwise dispatches a single task — the coding harness plans its own steps. Pick Flight to decompose a multi-step goal into an ordered Work Package, or Direct to force one plain task.</div>
       </details>
       <label class="flbl">Attachments</label>
       <div class="attach-row attach-drop" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onAttachDrop(event)">

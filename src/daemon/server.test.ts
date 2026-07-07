@@ -916,7 +916,7 @@ test("DELETE /work-packages/:id deletes landed package with stale active linked 
   assert.equal(body.deleted, true);
 });
 
-test("POST /tasks promotes a broad prompt into a Work Package, not a generic agent task", async (t) => {
+test("POST /tasks dispatches a broad prompt as ONE task by default (frontier self-plans), not an auto-Work-Package", async (t) => {
   withTempHome(t);
   const { _resetDbForTests, getDb } = await import("@/lib/db");
   _resetDbForTests();
@@ -928,13 +928,34 @@ test("POST /tasks promotes a broad prompt into a Work Package, not a generic age
   });
   assert.equal(res.status, 201);
   const body = await res.json() as Record<string, unknown>;
+  // Auto no longer decomposes: a broad prompt is a single task; the frontier harness
+  // plans its own subtasks. No Work Package is staged up front.
+  assert.notEqual(body.routed, "work_package");
+  assert.ok(body._id, "broad auto prompt should create a normal task");
+  const pkgCount = (getDb().prepare("SELECT COUNT(*) AS n FROM work_packages").get() as { n: number }).n;
+  assert.equal(pkgCount, 0, "broad auto prompt must not auto-stage a Work Package");
+});
+
+test("POST /tasks with route=work_package still stages a Work Package (explicit opt-in preserved)", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({
+      route: "work_package",
+      description: "Fix all the broken imports across the codebase, update every config, and refactor the router.",
+    }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
   assert.equal(body.routed, "work_package");
   assert.ok(body.packageId);
   assert.ok((body.itemCount as number) >= 2);
-
-  // No generic agent task was spawned for the broad prompt.
-  const agentCount = (getDb().prepare("SELECT COUNT(*) AS n FROM tasks WHERE executor = 'agent'").get() as { n: number }).n;
-  assert.equal(agentCount, 0, "broad prompt must not auto-create a running agent task");
+  const pkgCount = (getDb().prepare("SELECT COUNT(*) AS n FROM work_packages").get() as { n: number }).n;
+  assert.equal(pkgCount, 1, "explicit work_package route stages exactly one package");
 });
 
 test("POST /tasks still creates a normal task for a small prompt (intake passthrough)", async (t) => {
@@ -1452,7 +1473,7 @@ test("POST /work-packages/:id/items/:itemId/accept returns 409 when item is not 
   assert.ok(typeof errBody.error === "string" && errBody.error.length > 0, "error message returned");
 });
 
-test("POST /tasks uses model-advised decomposition when a keyless client is injected", async (t) => {
+test("POST /tasks route=work_package uses model-advised decomposition when a keyless client is injected", async (t) => {
   withTempHome(t);
   const { _resetDbForTests, getDb } = await import("@/lib/db");
   _resetDbForTests();
@@ -1465,9 +1486,10 @@ test("POST /tasks uses model-advised decomposition when a keyless client is inje
   t.after(() => _setIntakeDecomposeDepsForTests(null));
 
   const { base, headers } = await startServer(t);
+  // Decomposition is now explicit opt-in — the operator picks the Work Package route.
   const res = await fetch(`${base}/tasks`, {
     method: "POST", headers,
-    body: JSON.stringify({ description: "Fix all the things across the codebase and clean everything up." }),
+    body: JSON.stringify({ route: "work_package", description: "Fix all the things across the codebase and clean everything up." }),
   });
   assert.equal(res.status, 201);
   const body = await res.json() as Record<string, unknown>;
@@ -1518,7 +1540,7 @@ test("New Task createTask treats a Work Package / routed response as success, no
   assert.match(src, /work_package/);
 });
 
-test("POST /tasks: a broad prompt that NAMES a lane becomes a Work Package, not a Terminal Lane task", async (t) => {
+test("POST /tasks: a broad prompt that NAMES a lane is a single task, not hijacked into Terminal Lane", async (t) => {
   withTempHome(t);
   const { _resetDbForTests, getDb } = await import("@/lib/db");
   _resetDbForTests();
@@ -1541,9 +1563,11 @@ test("POST /tasks: a broad prompt that NAMES a lane becomes a Work Package, not 
   });
   assert.equal(res.status, 201);
   const body = await res.json() as Record<string, unknown>;
-  assert.equal(body.routed, "work_package", "broad prompt naming a lane must stage a Work Package");
-
-  // It must NOT have been hijacked into a Terminal Lane task.
+  // Broad auto → a single task (frontier self-plans), not an auto-Work-Package…
+  assert.notEqual(body.routed, "work_package");
+  assert.ok(body._id, "broad prompt naming a lane should create a normal task");
+  // …and, critically, it must NOT be hijacked into a Terminal Lane task just because
+  // the text mentions the lane name (the breadth guard still protects this).
   const tl = (getDb().prepare("SELECT COUNT(*) AS n FROM tasks WHERE source = 'terminal-lane'").get() as { n: number }).n;
   assert.equal(tl, 0, "no Terminal Lane task may be created for a broad prompt that merely names the lane");
 });

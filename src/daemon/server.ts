@@ -4144,12 +4144,14 @@ export function createDaemonServer() {
             // fall through to a normal task only on an UNEXPECTED failure
           }
         }
-        // Task Intake preflight — a deterministic, rule-first classifier that runs
-        // AFTER the explicit lane/workflow routes above and BEFORE generic agent
-        // creation. A genuinely broad/multi-step prompt becomes a durable Work
-        // Package DRAFT with proposed child items (never an auto-running swarm);
-        // everything else falls through to the unchanged normal-task path.
-        if ((route === "work_package" || route === "auto") &&
+        // Work Package staging — EXPLICIT OPT-IN ONLY (route === "work_package").
+        // A broad "auto" prompt is NOT decomposed up front: it dispatches as a
+        // single task and the frontier coding harness plans its own subtasks with
+        // full code context the preflight splitter never had. This removes the
+        // local-model decompose() latency from the default path and avoids the
+        // decomposed-tasks-run-longer failure mode. Operators who want a durable,
+        // ordered Work Package still get one by choosing the Work Package route.
+        if (route === "work_package" &&
             body.executor !== "workflow" && body.executor !== "terminal-lane") {
           try {
             const { classifyIntakeAsync, forceWorkPackage } = await import("@/lib/intake/classify");
@@ -4164,12 +4166,10 @@ export function createDaemonServer() {
               executor: typeof body.executor === "string" ? body.executor : undefined,
               activeSameProject: projectPath ? activeSameProjectTasks(projectPath) : [],
             };
+            // classifyIntakeAsync here only supplies collision detection for the
+            // held/draft decision; the operator already chose to stage a package.
             const intake = await classifyIntakeAsync(intakeInput);
-            // Stage a Work Package when intake classifies broad (auto) OR the
-            // operator explicitly forced the work_package route.
-            const candidate = route === "work_package"
-              ? await forceWorkPackage(intakeInput)
-              : (intake.kind === "work_package_candidate" ? intake.packageCandidate : null);
+            const candidate = await forceWorkPackage(intakeInput);
             if (candidate) {
               const { createWorkPackage, getWorkPackage } = await import("@/lib/work-packages/store");
               // Hold the package when intake flags a same-project collision; else draft.
