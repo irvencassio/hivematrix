@@ -56,7 +56,7 @@ public struct CommandPolicy: Codable, Equatable, Sendable {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return [] }
         var normalized = trimmed
-        for sep in ["&&", "||", "|", ";", "&"] {
+        for sep in ["&&", "||", "|", ";", "&", "\n", "\r"] {
             normalized = normalized.replacingOccurrences(of: sep, with: "\u{1}")
         }
         return normalized.split(separator: "\u{1}").compactMap { leadingCommand(of: String($0)) }

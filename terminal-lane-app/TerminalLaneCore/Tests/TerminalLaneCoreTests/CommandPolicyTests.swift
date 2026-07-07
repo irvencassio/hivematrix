@@ -57,4 +57,12 @@ final class CommandPolicyTests: XCTestCase {
         XCTAssertEqual(policy.decide(commandLine: "   ", mode: .readonly), .allow)
         XCTAssertEqual(policy.decide(commandLine: "", mode: .readonly), .allow)
     }
+
+    func testNewlineSeparatedLinesAreEachChecked() {
+        // A multi-line paste: every line is classified; one write blocks the batch.
+        if case .blocked = policy.decide(commandLine: "cat a\nrm b", mode: .readonly) {} else { XCTFail("multi-line rm must block in readonly") }
+        if case .blocked = policy.decide(commandLine: "uptime\r\nshutdown now", mode: .readwrite) {} else { XCTFail("CRLF shutdown must block") }
+        // All-allowed multi-line stays allowed in readonly.
+        XCTAssertEqual(policy.decide(commandLine: "cat a\ncat b", mode: .readonly), .allow)
+    }
 }

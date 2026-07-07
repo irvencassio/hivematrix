@@ -113,9 +113,9 @@ final class TerminalViewController: NSViewController {
         terminal.layer?.backgroundColor = NSColor.black.cgColor
         terminal.gate = { [weak self] data, term in
             guard let self else { return true }
-            if !data.contains(0x0D) { return true }
-            let pending = Self.pendingLine(of: term.getTerminal())
-            return self.gateOnEnter(pendingLine: pending, terminal: term)
+            if !(data.contains(0x0D) || data.contains(0x0A)) { return true }
+            let command = self.submittedCommand(data: data, terminal: term)
+            return self.gate(command: command, terminal: term)
         }
         return terminal
     }
@@ -218,10 +218,10 @@ final class TerminalViewController: NSViewController {
 
     fileprivate func sendSSHInput(_ data: ArraySlice<UInt8>) {
         guard let writer = stdinWriter, let terminal = sshTerminalView else { return }
-        if data.contains(0x0D) {
-            let pending = Self.pendingLine(of: terminal.getTerminal())
-            if !gateOnEnter(pendingLine: pending, terminal: terminal) {
-                let clear = ByteBuffer(bytes: [0x15]) // Ctrl-U clears the remote input line
+        if data.contains(0x0D) || data.contains(0x0A) {
+            let command = submittedCommand(data: data, terminal: terminal)
+            if !gate(command: command, terminal: terminal) {
+                let clear = ByteBuffer(bytes: [0x15]) // Ctrl-U clears the input line
                 Task { try? await writer.write(clear) }
                 return
             }
@@ -247,24 +247,40 @@ final class TerminalViewController: NSViewController {
 
     // MARK: Command policy gate
 
-    /// Returns true if the Enter should be forwarded (command allowed), false if
-    /// it was blocked (caller must clear the line and not forward).
-    private func gateOnEnter(pendingLine: String, terminal: TerminalView) -> Bool {
+    /// Returns true if the command may be forwarded (allowed); false if blocked
+    /// (caller must clear the line and withhold the submission).
+    private func gate(command: String, terminal: TerminalView) -> Bool {
         guard let profile = activeProfile else { return true }
-        let command = Self.stripPrompt(pendingLine)
-        if command.isEmpty { return true }
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
         let decision = TerminalLanePolicy.shared.policy.decide(commandLine: command, mode: profile.coreAccessMode)
         let ip = profile.host ?? "local"
         switch decision {
         case .allow:
-            logCommand(profile: profile, ip: ip, decision: "RAN", command: command)
+            logCommand(profile: profile, ip: ip, decision: "RAN", command: trimmed)
             return true
         case .blocked(let reason):
-            logCommand(profile: profile, ip: ip, decision: "BLOCKED", command: command)
+            logCommand(profile: profile, ip: ip, decision: "BLOCKED", command: trimmed)
             let notice = "\r\n\u{1b}[31m⛔ Blocked — '\(profile.displayName)' is \(profile.accessMode.label.lowercased()) (\(reason))\u{1b}[0m\r\n"
             terminal.feed(text: notice)
             return false
         }
+    }
+
+    /// The command text to classify for a submitted keystroke or paste. A lone
+    /// line terminator means "run the current input line" → read it from the
+    /// buffer; otherwise the data carries pasted/inline text → classify that
+    /// directly (Core splits it on newlines). Bracketed-paste markers stripped.
+    private func submittedCommand(data: ArraySlice<UInt8>, terminal: TerminalView) -> String {
+        let raw = String(decoding: Array(data), as: UTF8.self)
+        let unbracketed = raw
+            .replacingOccurrences(of: "\u{1b}[200~", with: "")
+            .replacingOccurrences(of: "\u{1b}[201~", with: "")
+        let contentOnly = unbracketed.filter { $0 != "\r" && $0 != "\n" }
+        if contentOnly.trimmingCharacters(in: .whitespaces).isEmpty {
+            return Self.stripPrompt(Self.pendingLine(of: terminal.getTerminal()))
+        }
+        return unbracketed
     }
 
     private func logCommand(profile: TerminalLaneProfile, ip: String, decision: String, command: String) {
@@ -305,7 +321,7 @@ final class PolicedLocalProcessTerminalView: LocalProcessTerminalView {
     var gate: ((_ data: ArraySlice<UInt8>, _ terminal: TerminalView) -> Bool)?
 
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        if data.contains(0x0D), let gate, !gate(data, self) {
+        if (data.contains(0x0D) || data.contains(0x0A)), let gate, !gate(data, self) {
             super.send(source: source, data: ArraySlice([0x15])) // Ctrl-U, no newline
             return
         }
