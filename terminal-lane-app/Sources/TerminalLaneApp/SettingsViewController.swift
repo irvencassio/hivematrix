@@ -4,6 +4,8 @@ final class SettingsViewController: NSViewController {
     private let settings = TerminalLaneSettings.shared
     private let daemonURLField = TerminalLaneUI.field(placeholder: "http://127.0.0.1:3747")
     private let statusLabel = TerminalLaneUI.statusPill()
+    private let allowlistView = NSTextView()
+    private let blocklistView = NSTextView()
 
     override func loadView() {
         view = NSView()
@@ -19,10 +21,17 @@ final class SettingsViewController: NSViewController {
             TerminalLaneUI.infoRow("Keychain items", "SSH passwords, one per user@host:port"),
         ])
 
+        let policy = TerminalLanePolicy.shared.policy
+        let allowEditor = listEditor(allowlistView, seed: policy.readOnlyAllowlist)
+        let blockEditor = listEditor(blocklistView, seed: policy.readWriteBlocklist)
+        let allowSection = section("Read-only allowlist (one command per line)", allowEditor)
+        let blockSection = section("Blocked everywhere (one command per line)", blockEditor)
+        let viewLog = TerminalLaneUI.secondaryButton("View log", target: self, action: #selector(openLog))
+
         let save = TerminalLaneUI.primaryButton("Save settings", target: self, action: #selector(saveSettings))
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let buttons = NSStackView(views: [spacer, statusLabel, save])
+        let buttons = NSStackView(views: [viewLog, spacer, statusLabel, save])
         buttons.orientation = .horizontal
         buttons.spacing = 10
 
@@ -35,6 +44,8 @@ final class SettingsViewController: NSViewController {
             title,
             section("Connection", daemonCard),
             section("Locations", locationsCard),
+            allowSection,
+            blockSection,
             buttons,
             aboutText,
         ])
@@ -50,6 +61,8 @@ final class SettingsViewController: NSViewController {
             stack.widthAnchor.constraint(lessThanOrEqualToConstant: 760),
             daemonCard.widthAnchor.constraint(equalTo: stack.widthAnchor),
             locationsCard.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            allowEditor.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            blockEditor.widthAnchor.constraint(equalTo: stack.widthAnchor),
             buttons.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
     }
@@ -63,10 +76,31 @@ final class SettingsViewController: NSViewController {
         return stack
     }
 
+    private func listEditor(_ view: NSTextView, seed: [String]) -> NSView {
+        view.string = seed.joined(separator: "\n")
+        view.isEditable = true
+        view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        view.textContainerInset = NSSize(width: 8, height: 8)
+        let scroll = NSScrollView()
+        scroll.documentView = view
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.heightAnchor.constraint(equalToConstant: 120).isActive = true
+        return scroll
+    }
+
     @objc private func saveSettings() {
         settings.daemonURL = daemonURLField.stringValue
         daemonURLField.stringValue = settings.daemonURL
+        let allow = allowlistView.string.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let block = blocklistView.string.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        TerminalLanePolicy.shared.update(readOnlyAllowlist: allow, readWriteBlocklist: block)
         statusLabel.textColor = .systemGreen
         statusLabel.stringValue = "Saved settings"
+    }
+
+    @objc private func openLog() {
+        presentAsSheet(LogViewerController())
     }
 }
