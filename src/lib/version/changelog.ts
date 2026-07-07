@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.149", date: "2026-07-07", note: "Green-on-white app icon (single identity, no light/dark toggle). Flights/Work Packages removed entirely — broad and multi-step prompts now self-plan via Superpowers (the frontier coding harness plans and executes its own subtasks). New Task Mode is Auto or Direct; Settings simplified." },
   { version: "0.1.148", date: "2026-07-07", note: "Pipeline hardening: ruff static-analysis verification gate + local repair-ladder; local-failure→frontier escalation package; route scorecard + advisory routing bandit; unified decidePolicy approval choke point; frontier-owns-code intake (broad prompts dispatch as one task, Work Packages opt-in); self-aware pipeline health in the heartbeat/brief." },
   { version: "0.1.147", date: "2026-07-06", note: "Use Qwen Rapid-MLX for local chat" },
   { version: "0.1.146", date: "2026-07-06", note: "auto-deploy HiveMatrix" },

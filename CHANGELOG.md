@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.149 — 2026-07-07
+
+Green-on-white app icon (single identity, no light/dark toggle). Flights/Work Packages removed entirely — broad and multi-step prompts now self-plan via Superpowers (the frontier coding harness plans and executes its own subtasks). New Task Mode is Auto or Direct; Settings simplified.
+
 ## v0.1.148 — 2026-07-07
 
 Pipeline hardening: ruff static-analysis verification gate + local repair-ladder; local-failure→frontier escalation package; route scorecard + advisory routing bandit; unified decidePolicy approval choke point; frontier-owns-code intake (broad prompts dispatch as one task, Work Packages opt-in); self-aware pipeline health in the heartbeat/brief.
