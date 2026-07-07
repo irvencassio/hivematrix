@@ -5,7 +5,7 @@
  * Inbound:  read chat.db since the high-water ROWID → route each message
  *           (allowlist gate) → resolve a waiting task OR dispatch to Flash Lane
  *           for a conversational reply. Flash handles both quick answers and
- *           complex work escalation via escalate_to_work_package internally.
+ *           complex work escalation via escalate_to_task internally.
  * Outbound: any Message Lane task that's waiting on its sender (needs_input) gets
  *           its question texted to that sender once.
  *
@@ -93,7 +93,7 @@ async function handleInbound(msg: { rowid: number; handle: string; text: string;
 
   // flash_turn — dispatch to Flash Lane for a conversational reply.
   // Append location so location-aware asks ("near me", local time) have it without
-  // the agent having to ask. Flash handles escalation to work packages internally.
+  // the agent having to ask. Flash handles escalation to background tasks internally.
   if (!flashDispatch) return;
   const loc = getLocation();
   const text = loc ? route.text + "\n\n[Operator location: " + loc + "]" : route.text;

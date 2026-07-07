@@ -228,56 +228,6 @@ function parseQueryString(url: string): Record<string, string> {
   return params;
 }
 
-interface TaskFlightContextRow {
-  createdTaskId: string;
-  packageId: string;
-  packageTitle: string;
-  itemId: string;
-  itemStatus: string;
-  landedCount: number;
-  totalCount: number;
-}
-
-function attachFlightContextToTasks<T extends Record<string, unknown>>(rows: T[]): Array<T & { flightContext?: Record<string, unknown> }> {
-  const taskIds = rows.map((row) => row._id).filter((id): id is string => typeof id === "string" && id.length > 0);
-  if (taskIds.length === 0) return rows;
-
-  const placeholders = taskIds.map(() => "?").join(", ");
-  const links = getDb().prepare(`
-    SELECT
-      i.createdTaskId AS createdTaskId,
-      p._id AS packageId,
-      p.title AS packageTitle,
-      i._id AS itemId,
-      i.status AS itemStatus,
-      SUM(CASE WHEN all_i.status = 'done' THEN 1 ELSE 0 END) AS landedCount,
-      COUNT(all_i._id) AS totalCount
-    FROM work_package_items i
-    JOIN work_packages p ON p._id = i.packageId
-    JOIN work_package_items all_i ON all_i.packageId = i.packageId
-    WHERE i.createdTaskId IN (${placeholders})
-    GROUP BY i.createdTaskId, p._id, p.title, i._id, i.status
-  `).all(...taskIds) as TaskFlightContextRow[];
-
-  if (links.length === 0) return rows;
-  const byTaskId = new Map(links.map((row) => [row.createdTaskId, row]));
-  return rows.map((row) => {
-    const link = typeof row._id === "string" ? byTaskId.get(row._id) : undefined;
-    if (!link) return row;
-    return {
-      ...row,
-      flightContext: {
-        packageId: link.packageId,
-        packageTitle: link.packageTitle,
-        itemId: link.itemId,
-        itemStatus: link.itemStatus,
-        landedCount: Number(link.landedCount) || 0,
-        totalCount: Number(link.totalCount) || 0,
-      },
-    };
-  });
-}
-
 export function createDaemonServer() {
   const policy = getConnectivityPolicy();
   const AUTH_TOKEN = getOrCreateToken(DAEMON_TOKEN_FILE);
@@ -526,14 +476,6 @@ export function createDaemonServer() {
         const { setAutonomyLevel, AUTONOMY_LEVELS } = await import("@/lib/config/autonomy");
         const body = await parseBody(req) as Record<string, unknown>;
         const level = setAutonomyLevel(body.level);
-        // Raising autonomy to autonomous should pick up already-staged Flights now,
-        // not only ones created afterwards.
-        try {
-          const { autostartDraftFlights } = await import("@/lib/work-packages/orchestrate");
-          for (const pid of await autostartDraftFlights()) broadcast("work-packages:updated", { packageId: pid });
-        } catch (e) {
-          console.error(`[work-packages] autostart-on-setting failed: ${e instanceof Error ? e.message : e}`);
-        }
         json(res, 200, { level, levels: AUTONOMY_LEVELS });
         return;
       }
@@ -2534,318 +2476,6 @@ export function createDaemonServer() {
         return;
       }
 
-      // ── Work Packages + Task Intake ─────────────────────────────────
-      // Every new task can be run through a lightweight, deterministic intake
-      // preflight. Small tasks stay normal tasks; broad/risky/colliding prompts
-      // become a durable Work Package draft with proposed child items. Models
-      // advise (later); HiveMatrix policy decides. All responses are secret-free.
-
-      // POST /work-packages/intake/preview  (alias: POST /tasks/intake/preview)
-      // Classify a prompt without persisting anything. Active same-project work
-      // is looked up from the DB so the collision recommendation is real.
-      if (req.method === "POST" && (urlPath === "/work-packages/intake/preview" || urlPath === "/tasks/intake/preview")) {
-        const { classifyIntakeAsync } = await import("@/lib/intake/classify");
-        const { activeSameProjectTasks } = await import("@/lib/work-packages/active");
-        const body = await parseBody(req) as Record<string, unknown>;
-        const projectPath = typeof body.projectPath === "string" ? body.projectPath : "";
-        const result = await classifyIntakeAsync({
-          title: typeof body.title === "string" ? body.title : undefined,
-          description: typeof body.description === "string" ? body.description : "",
-          project: typeof body.project === "string" ? body.project : undefined,
-          projectPath,
-          model: typeof body.model === "string" ? body.model : undefined,
-          source: typeof body.source === "string" ? body.source : undefined,
-          executor: typeof body.executor === "string" ? body.executor : undefined,
-          activeSameProject: projectPath ? activeSameProjectTasks(projectPath) : [],
-        });
-        json(res, 200, result);
-        return;
-      }
-
-      // POST /work-packages — create a package from an intake result + items.
-      if (req.method === "POST" && urlPath === "/work-packages") {
-        const { createWorkPackage } = await import("@/lib/work-packages/store");
-        const body = await parseBody(req) as Record<string, unknown>;
-        const items = Array.isArray(body.items) ? body.items : [];
-        if (items.length === 0) { json(res, 400, { error: "a work package needs at least one item" }); return; }
-        const pkg = createWorkPackage({
-          title: typeof body.title === "string" && body.title.trim() ? body.title : "Untitled work package",
-          description: typeof body.description === "string" ? body.description : "",
-          project: typeof body.project === "string" ? body.project : "hivematrix",
-          projectPath: typeof body.projectPath === "string" ? body.projectPath : "",
-          status: typeof body.status === "string" ? body.status as never : undefined,
-          sourceTaskId: typeof body.sourceTaskId === "string" ? body.sourceTaskId : null,
-          intake: (body.intake && typeof body.intake === "object") ? body.intake as never : null,
-          items: items as never,
-        });
-        broadcast("work-packages:created", { packageId: pkg.id });
-        json(res, 201, pkg);
-        return;
-      }
-
-      // GET /work-packages — list, optionally filtered by ?status=
-      if (req.method === "GET" && urlPath === "/work-packages") {
-        const { listWorkPackages } = await import("@/lib/work-packages/store");
-        const rawUrl = req.url ?? "";
-        const qIdx = rawUrl.indexOf("?");
-        const status = qIdx >= 0 ? (new URLSearchParams(rawUrl.slice(qIdx + 1)).get("status") ?? undefined) : undefined;
-        json(res, 200, { packages: listWorkPackages({ status }) });
-        return;
-      }
-
-      // POST /work-packages/:id/items/:itemId/create-task — convert ONE item to one task.
-      const wpCreateTaskMatch = urlPath.match(/^\/work-packages\/([^/]+)\/items\/([^/]+)\/create-task$/);
-      if (req.method === "POST" && wpCreateTaskMatch) {
-        const { createTaskFromItem } = await import("@/lib/work-packages/store");
-        try {
-          const r = await createTaskFromItem(decodeURIComponent(wpCreateTaskMatch[1]), decodeURIComponent(wpCreateTaskMatch[2]));
-          if (r.created) broadcast("tasks:created", { taskId: r.taskId });
-          json(res, 201, r);
-        } catch (e) {
-          json(res, 404, { error: e instanceof Error ? e.message : "create-task failed" });
-        }
-        return;
-      }
-
-      // PATCH /work-packages/:id/items/:itemId — update one item (hold/ready/cancel/...).
-      const wpItemMatch = urlPath.match(/^\/work-packages\/([^/]+)\/items\/([^/]+)$/);
-      if (req.method === "PATCH" && wpItemMatch) {
-        const { updateWorkPackageItem } = await import("@/lib/work-packages/store");
-        const body = await parseBody(req) as Record<string, unknown>;
-        const item = updateWorkPackageItem(decodeURIComponent(wpItemMatch[1]), decodeURIComponent(wpItemMatch[2]), body);
-        if (!item) { json(res, 404, { error: "Not found" }); return; }
-        broadcast("work-packages:updated", { packageId: decodeURIComponent(wpItemMatch[1]) });
-        json(res, 200, item);
-        return;
-      }
-
-      // POST /work-packages/:id/items/:itemId/accept — explicit Accept / Land operator
-      // action for a review-status item: marks it done, archives its linked task
-      // (preserving it on the board), then advances the package.
-      const wpAcceptItemMatch = urlPath.match(/^\/work-packages\/([^/]+)\/items\/([^/]+)\/accept$/);
-      if (req.method === "POST" && wpAcceptItemMatch) {
-        const { acceptWorkPackageItem } = await import("@/lib/work-packages/orchestrate");
-        try {
-          const r = await acceptWorkPackageItem(
-            decodeURIComponent(wpAcceptItemMatch[1]),
-            decodeURIComponent(wpAcceptItemMatch[2]),
-          );
-          for (const itemId of r.started) {
-            const linked = r.package.items.find((i) => i.id === itemId);
-            if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
-          }
-          broadcast("work-packages:updated", { packageId: r.package.id });
-          json(res, 200, r);
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : "accept failed";
-          json(res, msg.includes("not in review status") ? 409 : 404, { error: msg });
-        }
-        return;
-      }
-
-      // POST /work-packages/:id/start — explicit operator action: promote draft
-      // items to ready (held stays held), set the package running, advance.
-      const wpStartMatch = urlPath.match(/^\/work-packages\/([^/]+)\/start$/);
-      if (req.method === "POST" && wpStartMatch) {
-        const { startWorkPackage } = await import("@/lib/work-packages/orchestrate");
-        try {
-          const r = await startWorkPackage(decodeURIComponent(wpStartMatch[1]));
-          for (const itemId of r.started) {
-            const linked = r.package.items.find((i) => i.id === itemId);
-            if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
-          }
-          broadcast("work-packages:updated", { packageId: r.package.id });
-          json(res, 200, r);
-        } catch (e) {
-          json(res, 404, { error: e instanceof Error ? e.message : "start failed" });
-        }
-        return;
-      }
-
-      // POST /work-packages/:id/advance — reconcile + start eligible items.
-      const wpAdvanceMatch = urlPath.match(/^\/work-packages\/([^/]+)\/advance$/);
-      if (req.method === "POST" && wpAdvanceMatch) {
-        const { advanceWorkPackage } = await import("@/lib/work-packages/orchestrate");
-        try {
-          const r = await advanceWorkPackage(decodeURIComponent(wpAdvanceMatch[1]));
-          for (const itemId of r.started) {
-            const linked = r.package.items.find((i) => i.id === itemId);
-            if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
-          }
-          broadcast("work-packages:updated", { packageId: r.package.id });
-          json(res, 200, r);
-        } catch (e) {
-          json(res, 404, { error: e instanceof Error ? e.message : "advance failed" });
-        }
-        return;
-      }
-
-      // POST /work-packages/:id/reconcile — force reconcile + advance for a stuck Flight.
-      // Safe and idempotent; auto-repairs the unambiguous archived→done case.
-      // Returns AdvanceResult including updated stuckState in package detail.
-      const wpReconcileMatch = urlPath.match(/^\/work-packages\/([^/]+)\/reconcile$/);
-      if (req.method === "POST" && wpReconcileMatch) {
-        const { reconcileStuckFlight } = await import("@/lib/work-packages/orchestrate");
-        try {
-          const r = await reconcileStuckFlight(decodeURIComponent(wpReconcileMatch[1]));
-          for (const itemId of r.started) {
-            const linked = r.package.items.find((i) => i.id === itemId);
-            if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
-          }
-          broadcast("work-packages:updated", { packageId: r.package.id });
-          json(res, 200, r);
-        } catch (e) {
-          json(res, 404, { error: e instanceof Error ? e.message : "reconcile failed" });
-        }
-        return;
-      }
-
-      // ── Flight Loop API ─────────────────────────────────────────────
-      // GET  /work-packages/:id/loop          — get loop policy for a Flight
-      // PUT  /work-packages/:id/loop          — upsert loop config (create or update)
-      // POST /work-packages/:id/loop/run-pass — run one quality pass immediately
-      // POST /work-packages/:id/loop/pause    — pause an idle/active loop
-      // POST /work-packages/:id/loop/resume   — resume a paused loop
-      // GET  /work-packages/:id/loop/passes   — pass history newest-first
-
-      // GET /work-packages/:id/loop/summary — trend and recent pass summary
-      const wpLoopSummaryMatch = urlPath.match(/^\/work-packages\/([^/]+)\/loop\/summary$/);
-      if (req.method === "GET" && wpLoopSummaryMatch) {
-        const { getLoop, getLoopPasses } = await import("@/lib/work-packages/flight-loop-store");
-        const pkgId = decodeURIComponent(wpLoopSummaryMatch[1]);
-        const loop = getLoop(pkgId);
-        if (!loop) { json(res, 404, { error: "no loop for this package" }); return; }
-        const passes = getLoopPasses(loop.id, 5);
-        const completedPasses = passes.filter((p) => p.status === "completed" || p.status === "failed");
-        const recentPasses = passes.map((p) => ({
-          passNumber: p.passNumber,
-          state: (p.evidence as Record<string, unknown>).state ?? null,
-          stopReason: p.stopReason,
-          createdItemCount: p.createdItemIds.length,
-          completedAt: p.completedAt,
-        }));
-        const SEVERITY: Record<string, number> = { risky: 4, blocked: 3, needs_follow_up: 2, running: 1, clean: 0 };
-        let trend: "improving" | "stable" | "degrading" | "insufficient_data" = "insufficient_data";
-        if (completedPasses.length >= 2) {
-          const lastState = (completedPasses[0].evidence as Record<string, unknown>).state as string | undefined;
-          const prevState = (completedPasses[1].evidence as Record<string, unknown>).state as string | undefined;
-          const lastSev = SEVERITY[lastState ?? ""] ?? -1;
-          const prevSev = SEVERITY[prevState ?? ""] ?? -1;
-          if (lastSev >= 0 && prevSev >= 0) {
-            if (lastSev < prevSev) trend = "improving";
-            else if (lastSev > prevSev) trend = "degrading";
-            else trend = "stable";
-          }
-        }
-        json(res, 200, { loop, recentPasses, trend });
-        return;
-      }
-
-      const wpLoopPassesMatch = urlPath.match(/^\/work-packages\/([^/]+)\/loop\/passes$/);
-      if (req.method === "GET" && wpLoopPassesMatch) {
-        const { getLoop, getLoopPasses } = await import("@/lib/work-packages/flight-loop-store");
-        const pkgId = decodeURIComponent(wpLoopPassesMatch[1]);
-        const loop = getLoop(pkgId);
-        if (!loop) { json(res, 404, { error: "Loop not found" }); return; }
-        const passes = getLoopPasses(loop.id);
-        json(res, 200, { passes });
-        return;
-      }
-
-      const wpLoopActionMatch = urlPath.match(/^\/work-packages\/([^/]+)\/loop\/(run-pass|pause|resume)$/);
-      if (req.method === "POST" && wpLoopActionMatch) {
-        const pkgId = decodeURIComponent(wpLoopActionMatch[1]);
-        const action = wpLoopActionMatch[2];
-        if (action === "run-pass") {
-          const { runPass } = await import("@/lib/work-packages/flight-loop-pass");
-          try {
-            const r = await runPass(pkgId);
-            broadcast("work-packages:updated", { packageId: pkgId });
-            json(res, 200, r);
-          } catch (e) {
-            json(res, 409, { error: e instanceof Error ? e.message : "run-pass failed" });
-          }
-          return;
-        }
-        if (action === "pause") {
-          const { pauseLoop } = await import("@/lib/work-packages/flight-loop-store");
-          const loop = pauseLoop(pkgId);
-          if (!loop) { json(res, 409, { error: "Loop not found or cannot be paused (may be running or already paused)" }); return; }
-          broadcast("work-packages:updated", { packageId: pkgId });
-          json(res, 200, { loop });
-          return;
-        }
-        if (action === "resume") {
-          const { resumeLoop } = await import("@/lib/work-packages/flight-loop-store");
-          const loop = resumeLoop(pkgId);
-          if (!loop) { json(res, 409, { error: "Loop not found or not currently paused" }); return; }
-          broadcast("work-packages:updated", { packageId: pkgId });
-          json(res, 200, { loop });
-          return;
-        }
-      }
-
-      const wpLoopMatch = urlPath.match(/^\/work-packages\/([^/]+)\/loop$/);
-      if (wpLoopMatch) {
-        const pkgId = decodeURIComponent(wpLoopMatch[1]);
-        if (req.method === "GET") {
-          const { getLoop } = await import("@/lib/work-packages/flight-loop-store");
-          const loop = getLoop(pkgId);
-          if (!loop) { json(res, 404, { error: "Loop not found" }); return; }
-          json(res, 200, { loop });
-          return;
-        }
-        if (req.method === "PUT") {
-          const { upsertLoop } = await import("@/lib/work-packages/flight-loop-store");
-          const body = await parseBody(req) as Record<string, unknown>;
-          const loop = upsertLoop(pkgId, {
-            mode: typeof body.mode === "string" ? body.mode as never : undefined,
-            profile: typeof body.profile === "string" ? body.profile as never : undefined,
-            maxPasses: typeof body.maxPasses === "number" ? body.maxPasses : undefined,
-            cadenceSeconds: body.cadenceSeconds === null ? null : typeof body.cadenceSeconds === "number" ? body.cadenceSeconds : undefined,
-            expiresAt: body.expiresAt === null ? null : typeof body.expiresAt === "string" ? body.expiresAt : undefined,
-            autoCreateItems: typeof body.autoCreateItems === "boolean" ? body.autoCreateItems : undefined,
-            autoReadySafeItems: typeof body.autoReadySafeItems === "boolean" ? body.autoReadySafeItems : undefined,
-          });
-          broadcast("work-packages:updated", { packageId: pkgId });
-          json(res, 200, { loop });
-          return;
-        }
-      }
-
-      // GET /work-packages/:id — detail with items + status counts.
-      const wpGetMatch = urlPath.match(/^\/work-packages\/([^/]+)$/);
-      if (req.method === "GET" && wpGetMatch) {
-        const { getWorkPackage } = await import("@/lib/work-packages/store");
-        const pkg = getWorkPackage(decodeURIComponent(wpGetMatch[1]));
-        if (!pkg) { json(res, 404, { error: "Not found" }); return; }
-        json(res, 200, pkg);
-        return;
-      }
-
-      // DELETE /work-packages/:id — remove a non-running Flight. Linked board
-      // tasks remain as task history; running/active Flights are protected.
-      if (req.method === "DELETE" && wpGetMatch) {
-        const { deleteWorkPackage } = await import("@/lib/work-packages/store");
-        const result = deleteWorkPackage(decodeURIComponent(wpGetMatch[1]));
-        if (!result) { json(res, 404, { error: "Not found" }); return; }
-        if (!result.deleted) { json(res, 409, { error: result.reason || "Flight is still running", reason: result.reason || "Flight is still running" }); return; }
-        broadcast("work-packages:updated", { packageId: decodeURIComponent(wpGetMatch[1]) });
-        json(res, 200, result);
-        return;
-      }
-
-      // PATCH /work-packages/:id — update package status/fields.
-      if (req.method === "PATCH" && wpGetMatch) {
-        const { updateWorkPackage } = await import("@/lib/work-packages/store");
-        const body = await parseBody(req) as Record<string, unknown>;
-        const pkg = updateWorkPackage(decodeURIComponent(wpGetMatch[1]), body);
-        if (!pkg) { json(res, 404, { error: "Not found" }); return; }
-        broadcast("work-packages:updated", { packageId: pkg.id });
-        json(res, 200, pkg);
-        return;
-      }
-
       // POST /coo/dispatch — route-to-execution bridge. Resolves the request to a
       // lane/capability and returns a typed dispatch result: a Browser-Lane-ready
       // work item for browser routes, an explicit approval requirement for
@@ -3898,7 +3528,7 @@ export function createDaemonServer() {
         const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
         const orderBy = q.status === "review" ? "updatedAt DESC" : "position ASC";
         const rows = db.prepare(`SELECT * FROM tasks${where} ORDER BY ${orderBy} LIMIT 300`).all(...params) as Array<Record<string, unknown>>;
-        json(res, 200, attachFlightContextToTasks(rows));
+        json(res, 200, rows);
         return;
       }
 
@@ -3928,7 +3558,7 @@ export function createDaemonServer() {
             (row as Record<string, unknown>).pendingQuestion = latest.reason;
           }
         }
-        json(res, 200, attachFlightContextToTasks([row])[0]);
+        json(res, 200, row);
         return;
       }
 
@@ -4021,11 +3651,10 @@ export function createDaemonServer() {
         // of relying on content heuristics, so "developing tool X" is never
         // confused with "using tool X". auto = today's heuristics (with the
         // breadth precedence below); normal = a plain agent task with no special
-        // routing or Work Package promotion; work_package = force-stage a package;
-        // terminal-lane = force the Terminal Lane route.
+        // routing; terminal-lane = force the Terminal Lane route.
         const route = typeof body.route === "string" ? body.route : "auto";
         delete body.route;
-        const { isBroadPrompt } = await import("@/lib/intake/classify");
+        const { isBroadPrompt } = await import("@/lib/intake/breadth");
         const broad = isBroadPrompt(description);
 
         if (route === "normal") {
@@ -4142,72 +3771,17 @@ export function createDaemonServer() {
             // fall through to a normal task only on an UNEXPECTED failure
           }
         }
-        // Work Package staging — EXPLICIT OPT-IN ONLY (route === "work_package").
-        // A broad "auto" prompt is NOT decomposed up front: it dispatches as a
-        // single task and the frontier coding harness plans its own subtasks with
-        // full code context the preflight splitter never had. This removes the
-        // local-model decompose() latency from the default path and avoids the
-        // decomposed-tasks-run-longer failure mode. Operators who want a durable,
-        // ordered Work Package still get one by choosing the Work Package route.
-        if (route === "work_package" &&
-            body.executor !== "workflow" && body.executor !== "terminal-lane") {
-          try {
-            const { classifyIntakeAsync, forceWorkPackage } = await import("@/lib/intake/classify");
-            const { activeSameProjectTasks } = await import("@/lib/work-packages/active");
-            const projectPath = typeof body.projectPath === "string" ? body.projectPath : "";
-            const intakeInput = {
-              title: typeof body.title === "string" ? body.title : undefined,
-              description,
-              project: typeof body.project === "string" ? body.project : undefined,
-              projectPath,
-              source: typeof body.source === "string" ? body.source : undefined,
-              executor: typeof body.executor === "string" ? body.executor : undefined,
-              activeSameProject: projectPath ? activeSameProjectTasks(projectPath) : [],
-            };
-            // classifyIntakeAsync here only supplies collision detection for the
-            // held/draft decision; the operator already chose to stage a package.
-            const intake = await classifyIntakeAsync(intakeInput);
-            const candidate = await forceWorkPackage(intakeInput);
-            if (candidate) {
-              const { createWorkPackage, getWorkPackage } = await import("@/lib/work-packages/store");
-              // Hold the package when intake flags a same-project collision; else draft.
-              const status = intake.projectCollision?.recommendation === "hold" ? "held" : "draft";
-              const pkg = createWorkPackage({
-                title: candidate.title,
-                description,
-                project: typeof body.project === "string" ? body.project : "hivematrix",
-                projectPath,
-                status,
-                intake,
-                items: candidate.items,
-              });
-              broadcast("work-packages:created", { packageId: pkg.id });
-              // Autonomy: under the `autonomous` level, a freshly-staged Flight
-              // begins without an operator Start (a collision-held Flight waits;
-              // it auto-starts later when the hold clears). No-op at other levels.
-              let autostarted = false;
-              try {
-                const { maybeAutostartFlight } = await import("@/lib/work-packages/orchestrate");
-                autostarted = await maybeAutostartFlight(pkg.id);
-                if (autostarted) broadcast("work-packages:updated", { packageId: pkg.id });
-              } catch (e) {
-                console.error(`[work-packages] autostart-on-create failed: ${e instanceof Error ? e.message : e}`);
-              }
-              json(res, 201, {
-                routed: "work_package",
-                packageId: pkg.id,
-                status: getWorkPackage(pkg.id)?.status ?? pkg.status,
-                itemCount: pkg.items.length,
-                collision: intake.projectCollision ?? null,
-                autostarted,
-                intake,
-              });
-              return;
-            }
-          } catch (e) {
-            console.error(`[tasks] Task Intake failed; creating a normal task: ${e instanceof Error ? e.message : e}`);
-            // fall through to a normal task on any unexpected intake failure
-          }
+        // Broad "auto" prompts self-plan via Superpowers. Rather than decomposing
+        // up front (the removed Work Package / Flight subsystem), a broad prompt
+        // dispatches as a SINGLE task with workflow:"work" — the LEGACY_PREFIXES
+        // map turns that into a "/workflows:work" skill prefix, so the frontier
+        // coding harness plans and executes its own subtasks with full code context
+        // the preflight splitter never had. Non-broad tasks stay standalone. An
+        // explicit executor:"workflow"/"terminal-lane" already owns its routing.
+        if (broad && route === "auto" &&
+            body.executor !== "workflow" && body.executor !== "terminal-lane" &&
+            body.source !== "browser-lane") {
+          body.workflow = "work";
         }
         // Title is optional — derive it from the instructions when absent/blank.
         const title = typeof body.title === "string" ? body.title.trim() : "";
@@ -4227,47 +3801,6 @@ export function createDaemonServer() {
         const task = await Task.findByIdAndUpdate(taskMatch[1], body);
         if (!task) { json(res, 404, { error: "Not found" }); return; }
         broadcast("tasks:updated", { taskId: task._id, status: task.status });
-        // Work Package advance hook: when a work-package-sourced child reaches a
-        // terminal/review state, advance its package immediately (the loop is the
-        // backstop). Never let a hook failure break the task update.
-        if ((task as Record<string, unknown>).source === "work-package" &&
-            ["done", "failed", "cancelled", "review", "archived"].includes(String((task as Record<string, unknown>).status))) {
-          try {
-            const { findItemByTaskId } = await import("@/lib/work-packages/store");
-            const owner = findItemByTaskId(task._id);
-            if (owner) {
-              const { advanceWorkPackage } = await import("@/lib/work-packages/orchestrate");
-              const r = await advanceWorkPackage(owner.packageId);
-              for (const itemId of r.started) {
-                const linked = r.package.items.find((i) => i.id === itemId);
-                if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
-              }
-              broadcast("work-packages:updated", { packageId: owner.packageId });
-            }
-          } catch (e) {
-            console.error(`[work-packages] advance hook failed: ${e instanceof Error ? e.message : e}`);
-          }
-        }
-        // Collision-hold release hook: a Flight staged while this task was in
-        // flight is held purely by a same-project concurrency snapshot. When this
-        // task reaches a terminal state, release any such Flight (held → draft)
-        // so it stops sitting stuck. The 15s orchestration loop is the backstop.
-        if (["done", "failed", "cancelled", "archived"].includes(String((task as Record<string, unknown>).status))) {
-          try {
-            const projectPath = typeof (task as Record<string, unknown>).projectPath === "string"
-              ? (task as Record<string, unknown>).projectPath as string
-              : undefined;
-            const { releaseStaleCollisionHolds, maybeAutostartFlight } = await import("@/lib/work-packages/orchestrate");
-            for (const pid of releaseStaleCollisionHolds(projectPath)) {
-              // Under `autonomous` autonomy, a Flight whose collision hold just
-              // cleared starts immediately rather than waiting for the operator.
-              await maybeAutostartFlight(pid).catch(() => {});
-              broadcast("work-packages:updated", { packageId: pid });
-            }
-          } catch (e) {
-            console.error(`[work-packages] collision-hold release hook failed: ${e instanceof Error ? e.message : e}`);
-          }
-        }
         json(res, 200, task);
         return;
       }
@@ -4307,26 +3840,6 @@ export function createDaemonServer() {
             reviewState: null,
           });
           broadcast("tasks:updated", { taskId: tid, status: "backlog" });
-          // Work Package advance hook: replying to a review child requeues the
-          // task for more work, so reconcile the Flight item out of review
-          // immediately instead of waiting for a later poll.
-          if ((cur as Record<string, unknown>).source === "work-package") {
-            try {
-              const { findItemByTaskId } = await import("@/lib/work-packages/store");
-              const owner = findItemByTaskId(String((cur as Record<string, unknown>)._id));
-              if (owner) {
-                const { advanceWorkPackage } = await import("@/lib/work-packages/orchestrate");
-                const r = await advanceWorkPackage(owner.packageId);
-                for (const itemId of r.started) {
-                  const linked = r.package.items.find((i) => i.id === itemId);
-                  if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
-                }
-                broadcast("work-packages:updated", { packageId: owner.packageId });
-              }
-            } catch (e) {
-              console.error(`[work-packages] advance hook failed on reply: ${e instanceof Error ? e.message : e}`);
-            }
-          }
           json(res, 200, { ok: true, fallback: "requeued" });
           return;
         }
@@ -4386,25 +3899,6 @@ export function createDaemonServer() {
           const t = await Task.findByIdAndUpdate(tid, updates);
           if (!t) { json(res, 404, { error: "Not found" }); return; }
           broadcast("tasks:updated", { taskId: tid, status: "backlog" });
-          // Work Package advance hook: retry on a work-package child must reconcile the
-          // linked Flight item out of failed and clear its stale blocker.
-          if ((t as Record<string, unknown>).source === "work-package") {
-            try {
-              const { findItemByTaskId } = await import("@/lib/work-packages/store");
-              const owner = findItemByTaskId(t._id);
-              if (owner) {
-                const { advanceWorkPackage } = await import("@/lib/work-packages/orchestrate");
-                const r = await advanceWorkPackage(owner.packageId);
-                for (const itemId of r.started) {
-                  const linked = r.package.items.find((i) => i.id === itemId);
-                  if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
-                }
-                broadcast("work-packages:updated", { packageId: owner.packageId });
-              }
-            } catch (e) {
-              console.error(`[work-packages] advance hook failed on retry: ${e instanceof Error ? e.message : e}`);
-            }
-          }
           json(res, 200, t); return;
         }
         if (action === "cancel") {
@@ -4422,26 +3916,6 @@ export function createDaemonServer() {
         const t = await Task.findByIdAndUpdate(tid, { status: "archived" });
         if (!t) { json(res, 404, { error: "Not found" }); return; }
         broadcast("tasks:updated", { taskId: tid, status: "archived" });
-        // Work Package advance hook — archiving a work-package child (e.g. a
-        // review task the operator accepted) is a terminal transition that must
-        // reconcile the package item and unblock the next eligible item.
-        if ((t as Record<string, unknown>).source === "work-package") {
-          try {
-            const { findItemByTaskId } = await import("@/lib/work-packages/store");
-            const owner = findItemByTaskId(t._id);
-            if (owner) {
-              const { advanceWorkPackage } = await import("@/lib/work-packages/orchestrate");
-              const r = await advanceWorkPackage(owner.packageId);
-              for (const itemId of r.started) {
-                const linked = r.package.items.find((i) => i.id === itemId);
-                if (linked?.createdTaskId) broadcast("tasks:created", { taskId: linked.createdTaskId });
-              }
-              broadcast("work-packages:updated", { packageId: owner.packageId });
-            }
-          } catch (e) {
-            console.error(`[work-packages] advance hook failed: ${e instanceof Error ? e.message : e}`);
-          }
-        }
         json(res, 200, t); return;
       }
 

@@ -89,16 +89,3 @@ export function setAutonomyLevel(level: unknown): AutonomyLevel {
   return next;
 }
 
-/** True when a freshly-staged Flight should begin without an operator Start. */
-export function autonomyAutoStartsFlights(level: AutonomyLevel = getAutonomyLevel()): boolean {
-  return level === "autonomous";
-}
-
-/**
- * True when a completed low-risk item may land without an operator Accept. False
- * only for `manual`, where the operator reviews every result. This never relaxes
- * the other auto-land gates (risk, blockers, final-gated items) — see shouldAutoLand.
- */
-export function autonomyAutoLandsReviews(level: AutonomyLevel = getAutonomyLevel()): boolean {
-  return level !== "manual";
-}

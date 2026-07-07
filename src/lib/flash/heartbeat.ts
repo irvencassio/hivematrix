@@ -313,7 +313,7 @@ function defaultAppendOperatorTurn(text: string): void {
 export function heartbeatToolFilter(autonomy: AutonomyLevel): ((name: string) => boolean) | undefined {
   if (autonomy === "autonomous") return undefined;
   if (autonomy === "standard") {
-    return (name) => READ_ONLY_FLASH_TOOLS.has(name) || name === "escalate_to_work_package";
+    return (name) => READ_ONLY_FLASH_TOOLS.has(name) || name === "escalate_to_task";
   }
   return (name) => READ_ONLY_FLASH_TOOLS.has(name); // manual: observe only
 }

@@ -107,7 +107,7 @@ export async function handleFlashTurn(
     token: (delta) => writeSse(res, "token", { delta }),
     toolStart: (name, args_summary) => writeSse(res, "tool_start", { name, args_summary }),
     toolResult: (name, ok, summary) => writeSse(res, "tool_result", { name, ok, summary }),
-    escalated: (workPackageId) => writeSse(res, "escalated", { workPackageId }),
+    escalated: (taskId) => writeSse(res, "escalated", { taskId }),
     done: (sessionId, turnId, fullText, audioRef) =>
       writeSse(res, "done", { sessionId, turnId, fullText, ...(audioRef ? { audioRef } : {}) }),
   };

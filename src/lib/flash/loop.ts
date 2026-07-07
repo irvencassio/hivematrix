@@ -5,7 +5,7 @@
  * Tool calls are accumulated across streaming chunks, executed, and results
  * fed back into the next model call. Budget: 12 tool calls / 3 min wall clock.
  *
- * Flash-only tools (persona_update, escalate_to_work_package) live here;
+ * Flash-only tools (persona_update, escalate_to_task) live here;
  * the rest delegate to the existing lane-tools dispatcher.
  */
 
@@ -88,14 +88,14 @@ const FLASH_ONLY_TOOLS = [
   {
     type: "function" as const,
     function: {
-      name: "escalate_to_work_package",
+      name: "escalate_to_task",
       description:
-        "Escalate a complex multi-step request to a Work Package for structured agent execution. " +
+        "Escalate a complex multi-step request to a background task (the coding harness plans and executes it). " +
         "Use when the task cannot be completed in a single conversation turn.",
       parameters: {
         type: "object",
         properties: {
-          title: { type: "string", description: "Short title for the work package" },
+          title: { type: "string", description: "Short title for the task" },
           description: { type: "string", description: "Full description of what needs to be done" },
           projectPath: { type: "string", description: "Absolute path to the project (optional)" },
         },
@@ -301,33 +301,34 @@ async function handleDeepThink(args: Record<string, unknown>): Promise<string> {
   );
 }
 
-async function handleEscalateToWorkPackage(
+async function handleEscalateToTask(
   args: Record<string, unknown>,
   emit: FlashEmitter,
   sessionId: string,
 ): Promise<string> {
-  const { classifyIntake } = await import("@/lib/intake/classify");
-  const { createWorkPackage } = await import("@/lib/work-packages/store");
+  const { Task, generateId } = await import("@/lib/db");
 
-  const title = String(args.title ?? "Work Package");
+  const title = String(args.title ?? "Task");
   const description = String(args.description ?? "");
   const projectPath = String(args.projectPath ?? homedir());
 
-  const intake = classifyIntake({ description, projectPath });
-  const items = intake.packageCandidate?.items ?? [{ title, prompt: description, risk: "low" as const, executionMode: "run_now" as const, dependsOn: [], scopeHints: [] }];
-
-  const pkg = createWorkPackage({
+  // Broad multi-step work dispatches as a SINGLE task that self-plans via
+  // Superpowers: workflow:"work" triggers the "/workflows:work" skill prefix so
+  // the frontier coding harness plans and executes its own subtasks.
+  const task = await Task.create({
+    _id: generateId(),
     title,
     description,
     project: "hivematrix",
     projectPath,
-    sourceTaskId: `flash:${sessionId}`,
-    intake,
-    items,
+    executor: "agent",
+    model: "mixed",
+    workflow: "work",
+    source: `flash:${sessionId}`,
   });
 
-  emit.escalated(pkg.id);
-  return `Escalated to work package ${pkg.id}: "${title}"`;
+  emit.escalated(task._id);
+  return `Escalated to task ${task._id}: "${title}"`;
 }
 
 // ------------------------------------------------------------------
@@ -450,8 +451,8 @@ export async function runFlashAgentLoop(
           result = await handleDeepThink(argsObj);
         } else if (name === "generate_avatar") {
           result = await handleGenerateAvatar(argsObj, brainRoot);
-        } else if (name === "escalate_to_work_package") {
-          result = await handleEscalateToWorkPackage(argsObj, emit, sessionId);
+        } else if (name === "escalate_to_task") {
+          result = await handleEscalateToTask(argsObj, emit, sessionId);
         } else {
           result = await executeLaneTool(name, argsObj, ctx);
         }
@@ -469,7 +470,7 @@ export async function runFlashAgentLoop(
 
   // Budget exhausted — summarise and offer escalation
   const elapsedS = Math.round((Date.now() - startTime) / 1000);
-  const budgetMsg = `\n\n[Budget reached: ${toolCallDepth} tool calls in ${elapsedS}s. Use "escalate this to a work package" for longer tasks.]`;
+  const budgetMsg = `\n\n[Budget reached: ${toolCallDepth} tool calls in ${elapsedS}s. Use "escalate this to a task" for longer tasks.]`;
   emit.token(budgetMsg);
   return fullText + budgetMsg;
 }

@@ -15,10 +15,10 @@ export function getReviewStateMeta(reviewState: ReviewState | null): { label: st
   if (reviewState === "ready_for_review") {
     return { label: "Ready for Review", tone: "review" };
   }
-  // A child Flight worker's ambiguity that the coordinator/parent may answer — the
-  // operator need not act, so it reads as a Flight decision, not an input request.
+  // A child worker's ambiguity that a parent/coordinator may answer — the operator
+  // need not act, so it reads as a parent decision, not an input request.
   if (reviewState === "needs_parent_decision") {
-    return { label: "Needs Flight decision", tone: "review" };
+    return { label: "Needs parent decision", tone: "review" };
   }
   return null;
 }

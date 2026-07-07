@@ -652,91 +652,10 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE terminal_profiles ADD COLUMN authMethod TEXT NOT NULL DEFAULT 'local';
    ALTER TABLE terminal_profiles ADD COLUMN keyPath TEXT;`,
 
-  // v27: Work Packages — the Task Intake parent object + its items. A broad
-  // prompt is staged here (draft/held) instead of becoming one messy task or a
-  // swarm of colliding ones. Secret-free: description/prompt/scopeHints/blocker
-  // and the intake snapshot are key-redacted by the store on write.
-  `CREATE TABLE IF NOT EXISTS work_packages (
-      _id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      description TEXT NOT NULL DEFAULT '',
-      project TEXT NOT NULL DEFAULT 'hivematrix',
-      projectPath TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'draft',
-      sourceTaskId TEXT,
-      modelPolicy TEXT NOT NULL DEFAULT 'mixed_orchestrated',
-      orchestrationMode TEXT NOT NULL DEFAULT 'sequential',
-      intake_json TEXT NOT NULL DEFAULT '{}',
-      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
-      updatedAt TEXT NOT NULL DEFAULT (datetime('now')),
-      completedAt TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_work_packages_status ON work_packages(status, createdAt);
-    CREATE INDEX IF NOT EXISTS idx_work_packages_project ON work_packages(projectPath, status);
-
-    CREATE TABLE IF NOT EXISTS work_package_items (
-      _id TEXT PRIMARY KEY,
-      packageId TEXT NOT NULL,
-      position INTEGER NOT NULL DEFAULT 0,
-      title TEXT NOT NULL,
-      prompt TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'draft',
-      risk TEXT NOT NULL DEFAULT 'low',
-      dependsOn TEXT NOT NULL DEFAULT '[]',
-      scopeHints TEXT NOT NULL DEFAULT '[]',
-      executionMode TEXT NOT NULL DEFAULT 'sequential',
-      createdTaskId TEXT,
-      resultTaskId TEXT,
-      commitHash TEXT,
-      blocker TEXT,
-      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
-      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_work_package_items_pkg ON work_package_items(packageId, position);`,
-
-  // v28: Flight Loops + Passes — bounded quality-pass runner attached to a
-  // Flight (work package). flight_loops holds the policy (mode, profile,
-  // max passes, cadence, expiry). flight_loop_passes records each bounded
-  // inspection-and-action cycle with its evidence, created items, and stop
-  // reason. Scheduler queries nextRunAt; per-Flight index prevents overlapping
-  // passes from racing.
-  `CREATE TABLE IF NOT EXISTS flight_loops (
-      _id TEXT PRIMARY KEY,
-      packageId TEXT NOT NULL,
-      mode TEXT NOT NULL,
-      profile TEXT NOT NULL,
-      status TEXT NOT NULL,
-      maxPasses INTEGER NOT NULL,
-      passCount INTEGER NOT NULL DEFAULT 0,
-      cadenceSeconds INTEGER,
-      nextRunAt TEXT,
-      expiresAt TEXT,
-      autoCreateItems INTEGER NOT NULL DEFAULT 1,
-      autoReadySafeItems INTEGER NOT NULL DEFAULT 0,
-      stopReason TEXT,
-      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
-      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_flight_loops_package ON flight_loops(packageId);
-    CREATE INDEX IF NOT EXISTS idx_flight_loops_next_run ON flight_loops(nextRunAt, status);
-
-    CREATE TABLE IF NOT EXISTS flight_loop_passes (
-      _id TEXT PRIMARY KEY,
-      loopId TEXT NOT NULL,
-      packageId TEXT NOT NULL,
-      passNumber INTEGER NOT NULL,
-      profile TEXT NOT NULL,
-      status TEXT NOT NULL,
-      startedAt TEXT NOT NULL,
-      completedAt TEXT,
-      summary TEXT,
-      evidenceJson TEXT,
-      createdItemIdsJson TEXT,
-      stopReason TEXT,
-      error TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_flight_loop_passes_loop ON flight_loop_passes(loopId, passNumber);
-    CREATE INDEX IF NOT EXISTS idx_flight_loop_passes_pkg ON flight_loop_passes(packageId, startedAt);`,
+  // v27–v28: Work Packages + Flight Loops removed 2026-07-06. Broad prompts now
+  // dispatch as a single task with workflow:"work" and the frontier coding harness
+  // self-plans via Superpowers — no decomposition/DAG tables. Historical rows (if
+  // any) are left untouched; nothing creates or queries these tables anymore.
 
   // v29: Flash Lane — conversational agent loop sessions and turns. Per-channel-peer
   // session scoping: same iMessage sender resumes their session; console + voice

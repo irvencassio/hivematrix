@@ -54,6 +54,15 @@ const RULES = [
     pattern: "CREATE TABLE.*missions\b|FROM missions\b|INSERT INTO missions\b",
     label: 'missions table (replaced by directives/runs — do not create or query)',
   },
+  // ── Removed subsystem: Flights / Work Packages (2026-07-06) ────
+  // Broad prompts self-plan via Superpowers (workflow:"work") — the
+  // decomposition-and-DAG subsystem is gone and must not return. Targets the
+  // code symbols (dir path, tables, store/orchestrate APIs, the old flash tool)
+  // so removal-note prose ("… Work Packages removed") stays allowed.
+  {
+    pattern: "lib/work-packages/|work_packages\\b|work_package_items\\b|flight_loops\\b|flight_loop_passes\\b|WorkPackageItem|createWorkPackage|advanceWorkPackage|startWorkPackage|flight-loop-scheduler|flight-loop-store|autonomyAutoStartsFlights|escalate_to_work_package|classifyIntake|forceWorkPackage",
+    label: 'Flights / Work Packages subsystem (removed 2026-07-06 — broad prompts self-plan via Superpowers, workflow:"work")',
+  },
   {
     pattern: "missionId.*TEXT|missionPhase.*TEXT|goalAncestry.*TEXT|scheduledTaskId.*TEXT",
     label: 'Removed task columns (missionId, missionPhase, goalAncestry, scheduledTaskId)',

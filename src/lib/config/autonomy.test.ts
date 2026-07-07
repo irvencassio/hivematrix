@@ -5,8 +5,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   AUTONOMY_LEVELS,
-  autonomyAutoLandsReviews,
-  autonomyAutoStartsFlights,
   getAutonomyLevel,
   parseAutonomyLevel,
   setAutonomyLevel,
@@ -44,18 +42,6 @@ test("setAutonomyLevel persists and round-trips", () => {
 test("setAutonomyLevel coerces an invalid value to the default rather than storing junk", () => {
   assert.equal(setAutonomyLevel("nonsense"), "standard");
   assert.equal(getAutonomyLevel(), "standard");
-});
-
-test("autonomyAutoStartsFlights: only autonomous starts Flights without a click", () => {
-  assert.equal(autonomyAutoStartsFlights("manual"), false);
-  assert.equal(autonomyAutoStartsFlights("standard"), false);
-  assert.equal(autonomyAutoStartsFlights("autonomous"), true);
-});
-
-test("autonomyAutoLandsReviews: everything except manual auto-lands clean low-risk work", () => {
-  assert.equal(autonomyAutoLandsReviews("manual"), false);
-  assert.equal(autonomyAutoLandsReviews("standard"), true);
-  assert.equal(autonomyAutoLandsReviews("autonomous"), true);
 });
 
 test("AUTONOMY_LEVELS lists the three levels in gated→autonomous order", () => {

@@ -3,7 +3,7 @@
  *
  * An allowlisted sender's text either answers a task that's waiting on them
  * (needs_input) or enters a Flash Lane conversational session. Flash handles
- * both quick replies and complex work (via escalate_to_work_package internally).
+ * both quick replies and complex work (via escalate_to_task internally).
  * A non-allowlisted sender is read-only: their message never creates or resolves
  * work (the security gate).
  */

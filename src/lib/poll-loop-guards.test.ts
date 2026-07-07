@@ -16,7 +16,6 @@ const LOOP_FILES = [
   "flash/heartbeat.ts",
   "voice/voice-result-loop.ts",
   "traderbee/poller.ts",
-  "work-packages/flight-loop-scheduler.ts",
   "embeddings/indexer.ts",
   "youtube/poller.ts",
   "orchestrator/frontier-debt.ts",

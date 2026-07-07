@@ -136,17 +136,8 @@ async function main(): Promise<void> {
   const { startBrowserLaneReadinessLoop } = await import("@/lib/browser-lane/readiness-schedule");
   startBrowserLaneReadinessLoop();
 
-  // Work Package orchestration: a lightweight loop that reconciles + advances any
-  // running package, so ready items keep flowing even when a child completes
-  // outside the API (in-process scheduler). The PATCH /tasks hook is the fast path.
-  const { startWorkPackageOrchestrationLoop } = await import("@/lib/work-packages/orchestrate");
-  startWorkPackageOrchestrationLoop();
-
-  // Flight Loop scheduler: ticks every 15s to fire fixed-cadence and self-paced
-  // quality passes, expire loops past their expiresAt, and stop loops whose
-  // Flight has completed. Paired with the Work Package orchestration loop above.
-  const { startFlightLoopSchedulerLoop } = await import("@/lib/work-packages/flight-loop-scheduler");
-  startFlightLoopSchedulerLoop();
+  // Work Packages / Flight Loops removed 2026-07-06 — broad prompts self-plan via
+  // Superpowers (workflow:"work"), so there's no decomposition loop to run.
 
   // Flash Lane learning loop: every 15 minutes, distill sessions that have gone
   // cold (6h inactivity) — extract reusable skills and file feedback to backlog.

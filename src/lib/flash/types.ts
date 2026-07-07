@@ -44,7 +44,7 @@ export interface FlashEmitter {
   token(delta: string): void;
   toolStart(name: string, args_summary: string): void;
   toolResult(name: string, ok: boolean, summary: string): void;
-  escalated(workPackageId: string): void;
+  escalated(taskId: string): void;
   done(sessionId: string, turnId: string, fullText: string, audioRef?: string): void;
 }
 

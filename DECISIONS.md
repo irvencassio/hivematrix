@@ -1202,3 +1202,19 @@ tail-of-budget change.
 WP→Directive fold investigated and not recommended. The Subtraction Pass's safe wins are landed.
 
 **Provers (2026-07-06 slice):** 26/26 verification-gate tests, typecheck + scope-wall clean.
+
+## Q15 — Flights / Work Packages removed; broad prompts self-plan via Superpowers (2026-07-06)
+
+**Decision:** The Flights / Work Packages decomposition-and-DAG subsystem is deleted
+in full — `src/lib/work-packages/`, its `work_packages` / `work_package_items` /
+`flight_loops` / `flight_loop_passes` tables, the orchestration + Flight-loop scheduler
+loops, all `/work-packages/*` routes, the Task Intake classifier (`classify.ts`) and
+model-advised `decompose.ts`, and the console Flights UI. Historical data does not matter
+(no migration; the tables are simply no longer created or queried).
+**Replacement:** broad, multi-step prompts dispatch as a **single task** with
+`workflow: "work"`, which the `LEGACY_PREFIXES` map turns into a `/workflows:work`
+Superpowers skill prefix so the frontier coding harness plans and executes its own
+subtasks with full code context. Wired at `POST /tasks` (broad auto prompt → `workflow:"work"`)
+and in Flash's `escalate_to_task` tool (formerly `escalate_to_work_package`, now creates a
+`workflow:"work"` task). Breadth detection survives as `src/lib/intake/breadth.ts`
+(`isBroadPrompt`). Scope-wall now forbids the Flights / Work-Package brand from returning.
