@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.152", date: "2026-07-07", note: "Escalation ladder now tries the other local model (on-device coding specialist) before spending a frontier token — works even offline. Success scoreboard added to the brief: measurable progress against goals (directive criteria proven, weekly task outcomes, first-pass rate). Deep Think now powers local directive planning." },
   { version: "0.1.151", date: "2026-07-07", note: "Deep Think in directive planning: when planning runs on the local model, the plan is produced with test-time compute (diverse rollouts + self-consistency on Qwen) for higher quality — free tokens, latency-tolerant." },
   { version: "0.1.150", date: "2026-07-07", note: "Fixes: duplicate local model removed from the New Task picker (deduped by family); console now auto-reloads after an in-place app update so removed UI (Flights) no longer lingers as a stale page." },
   { version: "0.1.149", date: "2026-07-07", note: "Green-on-white app icon (single identity, no light/dark toggle). Flights/Work Packages removed entirely — broad and multi-step prompts now self-plan via Superpowers (the frontier coding harness plans and executes its own subtasks). New Task Mode is Auto or Direct; Settings simplified." },

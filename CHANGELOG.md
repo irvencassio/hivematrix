@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.152 — 2026-07-07
+
+Escalation ladder now tries the other local model (on-device coding specialist) before spending a frontier token — works even offline. Success scoreboard added to the brief: measurable progress against goals (directive criteria proven, weekly task outcomes, first-pass rate). Deep Think now powers local directive planning.
+
 ## v0.1.151 — 2026-07-07
 
 Deep Think in directive planning: when planning runs on the local model, the plan is produced with test-time compute (diverse rollouts + self-consistency on Qwen) for higher quality — free tokens, latency-tolerant.
