@@ -1184,8 +1184,21 @@ hard allowlist membership check, not a trust-ramp; mail drafts on miss, message 
 + self-loop guard), work-package auto-land (`shouldAutoLand`, orchestrate.ts — risk/
 executionMode-based), and desktop action tiers (`decideApproval`, desktopbee — app-
 allowlist tiers). Each keeps its own hard floor. Do NOT force these into `decidePolicy`.
-**WP→Directive fold: still pending** (the one genuinely large structural merge left).
-**Status:** budget + tripwire live; the S4 auto-approval unification is effectively complete;
-the WP→Directive fold is the remaining Subtraction merge.
+**WP→Directive fold — investigated 2026-07-06, NOT RECOMMENDED as a "fold".** The S1
+framing ("a Work Package is just a short-lived directive whose criteria are its items")
+does not hold against the code: Work Packages is a large live subsystem (~8,449 LOC,
+~15 files, its own Flight-loop scheduler + coordinator, started at `daemon/index.ts:142,148`),
+and the mapping is leaky — a WP *item* (`prompt`/`dependsOn`/`executionMode`/`createdTaskId`/
+`commitHash`/`blocker`) is a unit of executable DAG work, whereas a directive *criterion*
+(`description`/`proverId`/`proven`) is a prover-gated success condition. They are different
+primitives with different lifecycles (WP = ephemeral one-shot DAG; Directive = standing,
+episodic, prover-gated). Folding items→criteria would strip the DAG + execution-result
+fields and break the Directive's "criteria = proven truths" model — relocating complexity,
+not removing it. **Recommendation: keep both as separate primitives** (like the permission
+gates that were verified NOT to unify). Revisit only if a concrete pain point (not concept
+count) demands it; if so it is a multi-session migration on the live autonomous path, not a
+tail-of-budget change.
+**Status:** budget + tripwire live; S4 auto-approval unification effectively complete;
+WP→Directive fold investigated and not recommended. The Subtraction Pass's safe wins are landed.
 
 **Provers (2026-07-06 slice):** 26/26 verification-gate tests, typecheck + scope-wall clean.
