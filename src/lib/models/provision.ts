@@ -117,10 +117,65 @@ export function resolvedLocalModelPreset(plan: ProvisionPlan): Record<string, un
   };
 }
 
-function ensureQwenProfile(cfg: Record<string, unknown>, plan: ProvisionPlan): void {
-  if (cfg.qwen && typeof cfg.qwen === "object") return;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeEndpoint(endpoint: unknown): string {
+  return typeof endpoint === "string" ? endpoint.trim().replace(/\/+$/, "") : "";
+}
+
+function knownTierEndpoints(): Set<string> {
+  return new Set(DEFAULT_TIERS.map((tier) => normalizeEndpoint(tierBaseUrl(tier))));
+}
+
+function knownTierAliases(): Set<string> {
+  return new Set(DEFAULT_TIERS.map((tier) => tier.alias));
+}
+
+function isManagedRapidTierRef(modelId: unknown, endpoint: unknown): boolean {
+  const model = typeof modelId === "string" ? modelId : "";
+  const url = normalizeEndpoint(endpoint);
+  return knownTierAliases().has(model) || knownTierEndpoints().has(url);
+}
+
+function qwenPrimary(raw: unknown): Record<string, unknown> | null {
+  if (!isRecord(raw) || !isRecord(raw.primary)) return null;
+  return raw.primary;
+}
+
+function isManagedTierQwenProfile(raw: unknown): boolean {
+  const primary = qwenPrimary(raw);
+  return !!primary && isManagedRapidTierRef(primary.modelId, primary.endpoint);
+}
+
+function isManagedTierLocalModel(raw: unknown): boolean {
+  if (!isRecord(raw)) return false;
+  return isManagedRapidTierRef(raw.modelName, raw.endpoint);
+}
+
+function localModelForQwenLike(raw: unknown): Record<string, unknown> | null {
+  const primary = qwenPrimary(raw);
+  if (!primary) return null;
+  const modelName = typeof primary.modelId === "string" ? primary.modelId : "";
+  const endpoint = typeof primary.endpoint === "string" ? primary.endpoint : "";
+  const provider = typeof primary.provider === "string" ? primary.provider : "mlx";
+  if (!modelName || !endpoint) return null;
+  return { provider, endpoint, modelName };
+}
+
+export function syncLocalModelProfilesForProvisionPlan(cfg: Record<string, unknown>, plan: ProvisionPlan): void {
   const profile = qwenProfileForProvisionPlan(plan);
-  if (profile) cfg.qwen = profile;
+  if (!profile) return;
+
+  const shouldUseProvisionedProfile = !isRecord(cfg.qwen) || isManagedTierQwenProfile(cfg.qwen);
+  if (shouldUseProvisionedProfile) cfg.qwen = profile;
+
+  const desiredLocalModel = localModelForQwenLike(cfg.qwen);
+  if (!desiredLocalModel) return;
+  if (!isRecord(cfg.localModel) || isManagedTierLocalModel(cfg.localModel)) {
+    cfg.localModel = desiredLocalModel;
+  }
 }
 
 type Logger = (line: string) => void;
@@ -182,7 +237,7 @@ export async function provisionLocalEngine(opts: { onLog?: Logger; env?: Partial
   }
   cfg.localEngine = { engine: "rapid-mlx", binary: bin, tiers: plan.tiers };
   cfg.localModelPreset = resolvedLocalModelPreset(plan);
-  ensureQwenProfile(cfg, plan);
+  syncLocalModelProfilesForProvisionPlan(cfg, plan);
   writeJsonAtomic(configPath(), cfg);
   onLog("Wrote localEngine config. Restart the daemon to serve the configured tiers.");
   return plan;

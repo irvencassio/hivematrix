@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { planLocalEngine, getProvisionStatus, pythonVersionOk, qwenProfileForProvisionPlan, resolvedLocalModelPreset } from "./provision";
+import {
+  planLocalEngine,
+  getProvisionStatus,
+  pythonVersionOk,
+  qwenProfileForProvisionPlan,
+  resolvedLocalModelPreset,
+  syncLocalModelProfilesForProvisionPlan,
+} from "./provision";
 
 test("pythonVersionOk: 3.13+ required (rapid-mlx has no 3.9 wheel)", () => {
   assert.equal(pythonVersionOk("3.9"), false);   // the target Mac's system python
@@ -70,4 +77,68 @@ test("resolvedLocalModelPreset stores inspectable role assignments", () => {
 test("qwenProfileForProvisionPlan returns null for cloud-only plans", () => {
   const plan = planLocalEngine({ arch: "arm64", ramGB: 16 });
   assert.equal(qwenProfileForProvisionPlan(plan), null);
+});
+
+test("syncLocalModelProfilesForProvisionPlan moves stale managed coding config to fast on 48GB", () => {
+  const plan = planLocalEngine({ arch: "arm64", ramGB: 48 });
+  const cfg: Record<string, unknown> = {
+    qwen: {
+      location: "local",
+      primary: {
+        modelId: "qwen3.6-27b-4bit",
+        endpoint: "http://127.0.0.1:8001/v1",
+        provider: "mlx",
+        contextLimit: 262144,
+      },
+      thinkingEnabled: false,
+      minDecodeRate: 15,
+      probeTimeoutMs: 60000,
+    },
+    localModel: {
+      provider: "mlx",
+      endpoint: "http://127.0.0.1:8001/v1",
+      modelName: "qwen3.6-27b-4bit",
+    },
+  };
+
+  syncLocalModelProfilesForProvisionPlan(cfg, plan);
+
+  const qwen = cfg.qwen as { primary: { modelId: string; endpoint: string }; secondary: unknown };
+  assert.equal(qwen.primary.modelId, "qwen3.6-35b-4bit");
+  assert.equal(qwen.primary.endpoint, "http://127.0.0.1:8000/v1");
+  assert.equal(qwen.secondary, null);
+  assert.deepEqual(cfg.localModel, {
+    provider: "mlx",
+    endpoint: "http://127.0.0.1:8000/v1",
+    modelName: "qwen3.6-35b-4bit",
+  });
+});
+
+test("syncLocalModelProfilesForProvisionPlan preserves custom non-tier qwen profile", () => {
+  const plan = planLocalEngine({ arch: "arm64", ramGB: 48 });
+  const cfg: Record<string, unknown> = {
+    qwen: {
+      location: "local",
+      primary: {
+        modelId: "custom-mlx-model",
+        endpoint: "http://127.0.0.1:9876/v1",
+        provider: "mlx",
+        contextLimit: 4096,
+      },
+    },
+    localModel: {
+      provider: "mlx",
+      endpoint: "http://127.0.0.1:9876/v1",
+      modelName: "custom-mlx-model",
+    },
+  };
+
+  syncLocalModelProfilesForProvisionPlan(cfg, plan);
+
+  assert.equal((cfg.qwen as { primary: { modelId: string } }).primary.modelId, "custom-mlx-model");
+  assert.deepEqual(cfg.localModel, {
+    provider: "mlx",
+    endpoint: "http://127.0.0.1:9876/v1",
+    modelName: "custom-mlx-model",
+  });
 });
