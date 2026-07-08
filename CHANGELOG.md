@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.156 — 2026-07-07
+
+Terminal Lane: command policy + audit log; local engine runtime repair; keychain/readiness hardening
+
 ## v0.1.155 — 2026-07-07
 
 Fix voice/flash reply repetition loop; add iOS dark + tinted app-icon appearances
