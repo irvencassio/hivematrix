@@ -1296,6 +1296,96 @@ test("5-hour usage bars can still use the warning color", () => {
   });
 });
 
+function consoleDayTicksHtml(): (durationMs: number) => string {
+  const js = extractScript(CONSOLE_HTML);
+  const constant = js.match(/const SEVEN_DAY_MS = [^;]+;/)?.[0] ?? "";
+  const body = js.match(/function dayTicksHtml\([\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(constant.length > 10 && body.length > 20, "SEVEN_DAY_MS + dayTicksHtml body extracted");
+  return new Function(constant + "\n" + body + "\nreturn dayTicksHtml;")() as (durationMs: number) => string;
+}
+
+test("dayTicksHtml renders 6 day-boundary ticks at 1/7..6/7 for a 7-day window", () => {
+  const dayTicksHtml = consoleDayTicksHtml();
+  const html = dayTicksHtml(604800000);
+  const matches = [...html.matchAll(/usage-bar-tick" style="left:([\d.]+)%"/g)].map((m) => Number(m[1]));
+  assert.equal(matches.length, 6, "one tick per interior day boundary");
+  assert.deepEqual(
+    matches.map((n) => Math.round(n * 100) / 100),
+    [1, 2, 3, 4, 5, 6].map((d) => Math.round((d / 7) * 100 * 100) / 100)
+  );
+});
+
+test("dayTicksHtml renders nothing for the 5-hour window", () => {
+  const dayTicksHtml = consoleDayTicksHtml();
+  assert.equal(dayTicksHtml(18000000), "", "no day ticks on a sub-day window");
+});
+
+test("7-day usage bars (breakdown, codex, and summary cards) embed day ticks", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const subBar = js.match(/function renderSubBar\([\s\S]*?\n\}/)?.[0] ?? "";
+  const codexBar = js.match(/function renderCodexBar\([\s\S]*?\n\}/)?.[0] ?? "";
+  const card = js.match(/function usageProviderCard\([\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(subBar, /dayTicksHtml\(durationMs\)/, "7-day breakdown bar embeds day ticks");
+  assert.match(codexBar, /dayTicksHtml\(durationMs\)/, "Codex 7-day bar embeds day ticks");
+  assert.match(card, /dayTicksHtml\(win\.durationMs\)/, "summary card embeds day ticks when its window is 7-day");
+});
+
+function consoleTaskProvenancePills(): (t: unknown, out: unknown, logs: unknown) => string {
+  const js = extractScript(CONSOLE_HTML);
+  const esc = js.match(/function esc\(s\)\{[^\n]+\}/)?.[0] ?? "";
+  const body = js.match(/function taskProvenancePills\([\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(esc.length > 10 && body.length > 20, "esc + taskProvenancePills body extracted");
+  return new Function(esc + "\n" + body + "\nreturn taskProvenancePills;")() as (t: unknown, out: unknown, logs: unknown) => string;
+}
+
+test("taskProvenancePills renders nothing for a queued task with no run data yet", () => {
+  const pills = consoleTaskProvenancePills();
+  assert.equal(pills({}, {}, []), "", "no models, no MCP tool_use logs, no skill → empty");
+});
+
+test("taskProvenancePills renders one role pill per distinct model actually used", () => {
+  const pills = consoleTaskProvenancePills();
+  const html = pills({}, { modelsUsed: ["claude-sonnet-4.5", "qwen3.6-27b-4bit", "claude-sonnet-4.5"] }, []);
+  const matches = [...html.matchAll(/class="prov-pill role"[^>]*>([^<]+)</g)].map((m) => m[1]);
+  assert.deepEqual(matches, ["claude-sonnet-4.5", "qwen3.6-27b-4bit", "claude-sonnet-4.5"],
+    "one pill per modelsUsed entry, in order — dedup is the caller's concern if ever needed, not silently hidden here");
+});
+
+test("taskProvenancePills derives MCP server pills from mcp__<server>__<tool> tool_use log entries", () => {
+  const pills = consoleTaskProvenancePills();
+  const logs = [
+    { type: "text", content: "not a tool call" },
+    { type: "tool_use", content: "mcp__brain__search: {\"q\":\"decisions\"}" },
+    { type: "tool_use", content: "mcp__brain__links: {\"doc\":\"x\"}" },
+    { type: "tool_use", content: "Read: /some/file.ts" },
+  ];
+  const html = pills({}, {}, logs);
+  const matches = [...html.matchAll(/class="prov-pill mcp"[^>]*>([^<]+)</g)].map((m) => m[1]);
+  assert.deepEqual(matches, ["brain"], "same server deduped across multiple tool calls; non-mcp tool_use entries ignored");
+});
+
+test("taskProvenancePills shows the entry-point skill/command from out.command", () => {
+  const pills = consoleTaskProvenancePills();
+  const html = pills({}, { command: "release-hivematrix" }, []);
+  assert.match(html, /class="prov-pill skill"[^>]*>release-hivematrix</);
+});
+
+test("taskProvenancePills combines all three categories with distinct pill classes", () => {
+  const pills = consoleTaskProvenancePills();
+  const html = pills({}, { modelsUsed: ["claude-sonnet-4.5"], command: "release-hivematrix" },
+    [{ type: "tool_use", content: "mcp__brain__search: {}" }]);
+  assert.match(html, /<div class="prov-pills">/);
+  assert.match(html, /prov-pill role"[^>]*>claude-sonnet-4\.5</);
+  assert.match(html, /prov-pill mcp"[^>]*>brain</);
+  assert.match(html, /prov-pill skill"[^>]*>release-hivematrix</);
+});
+
+test("provenance pills are wired into the task detail view, right after the status line", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "selectTask");
+  assert.match(body, /taskProvenancePills\(t, out, logs\)/, "selectTask renders the pills");
+});
+
 test("settings surfaces a real Terminal Lane readiness card with no secrets", () => {
   assert.match(CONSOLE_HTML, /id="terminal_readiness"/, "Terminal readiness mount point present");
   const js = extractScript(CONSOLE_HTML);
@@ -1403,6 +1493,13 @@ test("Use another folder is an explicit advanced disclosure", () => {
   assert.match(body, /setTaskProject\([^)]*true\)/, "custom folder sets the selection with the custom flag");
 });
 
+test("board card title has a native tooltip so a truncated title stays readable on hover", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "renderBoard");
+  assert.match(body, /<span class="mdl-card-name" style="min-width:0" title="'\+esc\(t\.title\|\|t\._id\)\+'">/,
+    "card title span carries a title= tooltip with the full (untruncated) task name");
+});
+
 test("createTask builds the payload from the selection (no freeform path/search read)", () => {
   const js = extractScript(CONSOLE_HTML);
   const body = fnBody(js, "createTask");
@@ -1427,6 +1524,28 @@ test("New task keeps the model selector and attachments controls", () => {
   assert.match(slice, /<select id="t_model">/, "model selector kept");
   assert.match(slice, /id="t_attach_input"/, "attachment input kept");
   assert.match(slice, /onclick="createTask\(\)"/, "Create task button kept");
+});
+
+test("Enhanced-prompt preview includes an editable task-name field", () => {
+  const slice = taskFormSlice(CONSOLE_HTML);
+  assert.match(slice, /id="t_enhanced_title"/, "title input present in the preview box");
+  assert.match(slice, /id="t_enhanced_title"[^>]*maxlength="60"/, "title input capped to the board's title budget");
+});
+
+test("enhanceTaskPrompt populates the preview's title field from the wizard result", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "enhanceTaskPrompt");
+  assert.match(body, /getElementById\("t_enhanced_title"\)\.value = \(result && typeof result\.title === "string"\) \? result\.title : ""/,
+    "title field is set from result.title, empty string when absent");
+});
+
+test("acceptEnhancedPrompt copies the wizard title into the hidden t_title field", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "acceptEnhancedPrompt");
+  assert.match(body, /getElementById\("t_enhanced_title"\)\.value\.trim\(\)/,
+    "reads the (possibly edited) title from the preview");
+  assert.match(body, /if \(title\) document\.getElementById\("t_title"\)\.value = title/,
+    "only overwrites t_title when a non-empty title was produced — no title falls back to server-side deriveTaskTitle");
 });
 
 test("translucency row syncs to wallpaper/theme state without reopening settings", () => {

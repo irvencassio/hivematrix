@@ -673,7 +673,7 @@ test("voice logic diagnostic endpoint runs canned scenarios without audio", asyn
   assert.ok(body.scenarios.every((s) => s.audioBytes === 0));
 });
 
-test("POST /tasks/enhance returns { enhanced, rationale } and soft-falls-back with no local model configured", async (t) => {
+test("POST /tasks/enhance returns { enhanced, rationale, title } and soft-falls-back with no local model configured", async (t) => {
   const originalHome = process.env.HOME;
   const tmp = mkdtempSync(join(tmpdir(), "hm-server-enhance-"));
   process.env.HOME = tmp;
@@ -694,11 +694,12 @@ test("POST /tasks/enhance returns { enhanced, rationale } and soft-falls-back wi
     body: JSON.stringify({ description: "fix the login bug" }),
   });
   assert.equal(res.status, 200);
-  const body = await res.json() as { enhanced: string; rationale: string };
+  const body = await res.json() as { enhanced: string; rationale: string; title: string };
   // No ~/.hivematrix/config.json in this fresh temp HOME → no Qwen profile →
   // hasLocalCompletionModel() is false → enhancePrompt() passes through.
   assert.equal(body.enhanced, "fix the login bug");
   assert.equal(body.rationale, "");
+  assert.equal(body.title, "");
 });
 
 test("POST /tasks routes the exact failed YouTube prompt to content.youtube_summary, not a generic Codex agent", async (t) => {

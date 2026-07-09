@@ -62,6 +62,14 @@
     border-radius: 9px; padding: 1px 7px;
   }
 
+  /* Pinned "Always loaded" row — same interaction as a project row (clicking it
+     switches the center/right panes exactly like selecting a project), styled
+     with the blue accent instead of gold so it reads as "system", not "yours". */
+  .proj-row.pinned.active { background: rgba(88,166,255,.1); border-left: 2px solid var(--accent-2); }
+  .proj-row.pinned .name { color: var(--accent-2); }
+  .proj-row.pinned .sub { font-size: 10px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+  .pinned-section { border-bottom: 1px solid var(--border); flex-shrink: 0; }
+
   /* ── CENTER: doc tree ───────────────────────────── */
   .toolbar {
     display: flex; align-items: center; gap: 8px; padding: 8px 12px;
@@ -182,6 +190,10 @@
 
   <!-- LEFT: project picker -->
   <div class="col">
+    <div class="pinned-section">
+      <div class="col-head">Always loaded</div>
+      <div id="pinnedList"></div>
+    </div>
     <div class="col-head">Projects</div>
     <div class="col-body" id="projectList"></div>
   </div>
@@ -362,6 +374,46 @@ tooling-vs-product decision, employer-conflict review, annuity license by Aug.` 
   }
 };
 
+// "Always loaded" — files pulled into EVERY task's context regardless of
+// project (global, not per-project). Same doc shape as PROJECTS entries, so
+// the existing doc-list / render-pane code renders and edits them identically
+// — this is a pinned pseudo-project, not a separate UI.
+const PINNED_KEY = "__pinned__";
+const PINNED = {
+  label: "Always loaded",
+  docs: [
+    { file: "CLAUDE.md", status: "brief", badge: "⭐", modified: "2026-07-06", size: "3.4 KB",
+      path: "$HOME/.claude/CLAUDE.md",
+      note: "User-level instructions, loaded before every project's own brief.",
+      md: `# CLAUDE.md
+
+## Doing tasks
+- Prefer editing existing files to creating new ones.
+- Don't add features, refactor, or introduce abstractions beyond what the
+  task requires.
+- Default to writing no comments. Only add one when the WHY is non-obvious.
+
+## Executing actions with care
+Carefully consider the reversibility and blast radius of actions before
+taking them. Destructive or hard-to-reverse operations get a confirmation
+step, not a silent go-ahead.`
+    },
+    { file: "MEMORY.md", status: "brief", badge: "⭐", modified: "2026-07-09", size: "1.6 KB",
+      path: "$HOME/.claude/projects/hivematrix/memory/MEMORY.md",
+      note: "Index of persistent cross-session memory — always loaded, one line per entry.",
+      md: `# Memory index
+
+- [Handover: how to think](handover-how-to-think.md) — outgoing model's
+  handover on how to work in this seat
+- [Local model stack](local-model-stack.md) — Qwen-only since 2026-07-06
+- [Remote access setup](remote-access-setup.md) — Cloudflare + Tailscale,
+  service-token 403 fix`
+    }
+  ]
+};
+
+function projectData(key) { return key === PINNED_KEY ? PINNED : PROJECTS[key]; }
+
 const STATUS_CLASS = { brief: "tag-brief", ctx: "tag-ctx", indexed: "tag-indexed", orphan: "tag-orphan", stale: "tag-stale" };
 const STATUS_LABEL = { brief: "Main brief", ctx: "In task ctx", indexed: "Indexed only", orphan: "Orphaned", stale: "Stale" };
 
@@ -401,6 +453,16 @@ function inlineMd(s) {
 function docKey(project, file) { return project + "::" + file; }
 
 function renderProjects() {
+  const pinnedEl = document.getElementById("pinnedList");
+  pinnedEl.innerHTML = "";
+  const pinnedRow = document.createElement("div");
+  pinnedRow.className = "proj-row pinned" + (currentProject === PINNED_KEY ? " active" : "");
+  pinnedRow.innerHTML = `<span><span class="name">${PINNED.label}</span>
+      <div class="sub">pulled into every task, any project</div></span>
+      <span class="count">${PINNED.docs.length}</span>`;
+  pinnedRow.onclick = () => { currentProject = PINNED_KEY; currentDoc = null; selected.clear(); renderAll(); };
+  pinnedEl.appendChild(pinnedRow);
+
   const el = document.getElementById("projectList");
   el.innerHTML = "";
   Object.entries(PROJECTS).forEach(([key, p]) => {
@@ -413,10 +475,10 @@ function renderProjects() {
 }
 
 function renderDocs() {
-  document.getElementById("centerTitle").textContent = PROJECTS[currentProject].label + " — documents";
+  document.getElementById("centerTitle").textContent = projectData(currentProject).label + " — documents";
   const el = document.getElementById("docList");
   el.innerHTML = "";
-  const docs = PROJECTS[currentProject].docs;
+  const docs = projectData(currentProject).docs;
   const active = docs.filter(d => !archived.has(docKey(currentProject, d.file)));
   const archivedDocs = docs.filter(d => archived.has(docKey(currentProject, d.file)));
 
@@ -477,7 +539,7 @@ function updateToolbar() {
 
 function renderPane(d) {
   document.getElementById("renderTitle").textContent = d.file;
-  document.getElementById("renderPath").textContent = `projects/${currentProject}/${d.file}`;
+  document.getElementById("renderPath").textContent = d.path || `projects/${currentProject}/${d.file}`;
   paintBody(d);
 }
 
@@ -493,7 +555,7 @@ function paintBody(d) {
 }
 
 function currentDocObj() {
-  return PROJECTS[currentProject].docs.find(x => x.file === currentDoc);
+  return projectData(currentProject).docs.find(x => x.file === currentDoc);
 }
 
 document.getElementById("btnRendered").onclick = () => {
@@ -565,7 +627,7 @@ function renderAll() {
 
 renderAll();
 // Default-select the main brief for a nicer first impression.
-const defaultDoc = PROJECTS[currentProject].docs.find(d => d.status === "brief");
+const defaultDoc = projectData(currentProject).docs.find(d => d.status === "brief");
 if (defaultDoc) { currentDoc = defaultDoc.file; renderAll(); }
 </script>
 

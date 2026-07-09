@@ -51,6 +51,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     --modal-bg: #161b22;
     --text: #e6edf3; --muted: #8b949e; --accent: #d9a441; --accent-2: #58a6ff;
     --ok: #3fb950; --warn: #d29922; --err: #f85149;
+    --pill-mcp: #bc8cff; --pill-skill: #39c5cf;
     --code-bg: #0a0d12; --code-text: #e6edf3;
     --badge-bg: #21262d; --badge-text: #8b949e;
     --overlay-bg: transparent;
@@ -70,6 +71,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     --modal-bg: #ffffff;
     --text: #1f2328; --muted: #57606a; --accent: #9a6700; --accent-2: #0969da;
     --ok: #1a7f37; --warn: #9a6700; --err: #cf222e;
+    --pill-mcp: #8250df; --pill-skill: #1b7c83;
     --code-bg: #e8ecf1; --code-text: #1f2328;
     --badge-bg: #e8ecf1; --badge-text: #57606a;
     --overlay-bg: transparent;
@@ -91,6 +93,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     --modal-bg: #071206;
     --text: #b9ffce; --muted: #57b074; --accent: #39ff7e; --accent-2: #6effa3;
     --ok: #39ff7e; --warn: #d2e022; --err: #ff5d6c;
+    --pill-mcp: #a68cff; --pill-skill: #4dd0e1;
     --code-bg: #03100a; --code-text: #b9ffce;
     --badge-bg: #0c2416; --badge-text: #57b074;
     --overlay-bg: transparent;
@@ -265,6 +268,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .t-enhanced-box textarea { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
     border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px;
     font-family: inherit; resize: vertical; min-height: 90px; }
+  .t-enhanced-box input[type="text"] { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px;
+    font-family: inherit; font-weight: 600; margin-bottom: 8px; }
   .t-enhanced-box .t-enhanced-rationale { font-size: 11px; color: var(--muted); margin: 6px 0 8px; }
   .t-enhanced-box .row { display: flex; gap: 8px; }
   .form select { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
@@ -327,11 +333,15 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-breakdown .urow .um { color: var(--muted); }
   .usage-breakdown .usep { border-top: 1px solid var(--border); margin: 5px 0 3px; }
   .usage-bar-wrap { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; }
-  .usage-bar { height: 6px; border-radius: 3px; background: var(--border); flex: 1; overflow: hidden; }
+  .usage-bar { position: relative; height: 6px; border-radius: 3px; background: var(--border); flex: 1; overflow: hidden; }
   .usage-bar-fill { height: 100%; border-radius: 3px; transition: width .3s; }
   .usage-bar-fill.ok  { background: var(--ok,  #4caf50); }
   .usage-bar-fill.warn { background: #f0a500; }
   .usage-bar-fill.hi  { background: #e05b2c; }
+  /* Day markers on 7-day windows — a thin page-background notch every 1/7 of the
+     bar, so "3 days of usage in day 1" reads as a mostly-full first segment
+     instead of a vague overall percentage. */
+  .usage-bar-tick { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--bg); z-index: 1; pointer-events: none; }
   .usage-status-dot { font-size: 9px; vertical-align: middle; margin-right: 3px; }
   .usage-status-dot.ok   { color: var(--ok, #4caf50); }
   .usage-status-dot.warn { color: #f0a500; }
@@ -595,6 +605,16 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: var(--badge-bg); color: var(--badge-text); }
   .badge.model { color: var(--accent-2); }
   .badge.age { opacity: .7; background: transparent; padding-left: 0; }
+  /* Provenance pills on a completed task's detail view — what ran it. Color
+     coding: role/model = blue (matches the existing .badge.model convention),
+     MCP server = violet, skill/command = teal. Distinct hues, consistent
+     across all three themes via the --pill-* custom properties above. */
+  .prov-pills { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
+  .prov-pill { font-size: 10px; padding: 2px 8px; border-radius: 999px; font-weight: 600;
+    border: 1px solid currentColor; background: transparent; }
+  .prov-pill.role { color: var(--accent-2); }
+  .prov-pill.mcp { color: var(--pill-mcp); }
+  .prov-pill.skill { color: var(--pill-skill); }
   .session-empty { color: var(--muted); text-align: center; margin-top: 40px; }
   .session h1 { font-size: 18px; margin: 0 0 4px; }
   .session .sub { color: var(--muted); margin-bottom: 16px; }
@@ -1659,12 +1679,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   <section class="col board">
     <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
     <button class="addbtn" id="newTaskNav" onclick="showNewTaskPanel()">＋ New task</button>
-    <button class="ov-nav oc-nav" id="flashNav" onclick="showFlashPanel()">◐ Flash</button>
+    <button class="ov-nav oc-nav" id="flashNav" onclick="showFlashPanel()">💬 Chat</button>
     <div class="form" id="taskForm">
       <input id="t_title" type="hidden" value="" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
       <div id="t_enhanced_preview" class="t-enhanced-box" style="display:none">
         <div class="t-enhanced-label">✨ Enhanced prompt</div>
+        <input type="text" id="t_enhanced_title" placeholder="Task name" maxlength="60" />
         <textarea id="t_enhanced_text"></textarea>
         <div class="t-enhanced-rationale" id="t_enhanced_rationale"></div>
         <div class="row">
@@ -2152,7 +2173,7 @@ function renderBoard() {
           + items.map(t => { return '<div class="card'+(state.selected===t._id?' sel':'')+(L.key === "in_progress" ? " in-progress" : "")+'" onclick="selectTask(\''+t._id+'\')">'
               + '<button class="card-archive" title="Archive task" onclick="event.stopPropagation();cardArchive(\''+t._id+'\')">Archive</button>'
               + '<div class="mdl-card-head" style="padding-right:58px;align-items:flex-start">'
-              + '<span class="mdl-card-name" style="min-width:0">'+esc(t.title||t._id)+'</span>'
+              + '<span class="mdl-card-name" style="min-width:0" title="'+esc(t.title||t._id)+'">'+esc(t.title||t._id)+'</span>'
               + '<div style="flex:0 0 auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
               + (t.model?'<span class="badge model">'+esc(t.model)+'</span>':'')
               + (t.reviewState?'<span class="badge">'+esc(t.reviewState)+'</span>':'')
@@ -2388,6 +2409,7 @@ async function selectTask(id) {
   el.innerHTML = '<div class="session"><h1>'+esc(t.title||t._id)+(live?'<span class="streaming">● running</span>':'')
     + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></h1>'
     + '<div class="sub">'+esc(t.project||"")+' · '+esc(t.status)+(t.reviewState?' · '+esc(t.reviewState):'')+'</div>'
+    + taskProvenancePills(t, out, logs)
     + taskActionsHtml(t)
     + (t.projectPath ? '<div class="kv"><span class="k">project path</span><span>'+esc(t.projectPath)+'</span></div>' : '')
     + taskTelemetryStrip(t, out)
@@ -2658,6 +2680,33 @@ function fmtMs(ms) {
 }
 function fmtNum(n) { return n == null ? "—" : Number(n).toLocaleString(); }
 
+
+// What ran a completed task: distinct models used (out.modelsUsed, populated
+// live by the agent manager from stream init/turn events), MCP servers actually
+// invoked (derived from tool_use log entries — the CLI's own tool-call naming
+// convention is "mcp__<server>__<tool>", the same prefix approval.ts matches
+// on), and the entry-point skill/command (out.command, set when a task is
+// created via "Use a skill"). No per-task record of thinking/coding/operational
+// role assignment exists, so this deliberately shows the actual models run
+// rather than inventing a role label that can't be verified after the fact.
+function taskProvenancePills(t, out, logs) {
+  out = out || {};
+  const models = Array.isArray(out.modelsUsed) ? out.modelsUsed.filter(Boolean) : [];
+  const mcpServers = new Set();
+  for (const entry of (logs || [])) {
+    if (!entry || entry.type !== "tool_use" || typeof entry.content !== "string") continue;
+    const m = entry.content.match(/^mcp__([a-zA-Z0-9_.-]+)__/);
+    if (m) mcpServers.add(m[1]);
+  }
+  const skill = typeof out.command === "string" && out.command.trim() ? out.command.trim() : "";
+
+  if (!models.length && !mcpServers.size && !skill) return "";
+
+  const pills = models.map(m => '<span class="prov-pill role" title="Model used">' + esc(m) + '</span>')
+    .concat(Array.from(mcpServers).map(s => '<span class="prov-pill mcp" title="MCP server used">' + esc(s) + '</span>'))
+    .concat(skill ? ['<span class="prov-pill skill" title="Skill / command">' + esc(skill) + '</span>'] : []);
+  return '<div class="prov-pills">' + pills.join("") + '</div>';
+}
 
 // Per-task telemetry strip from the task's own data (no extra fetch). Honors the
 // "unavailable not zero" rule: Codex tasks with 0/0 tokens show "—".
@@ -4871,9 +4920,23 @@ function usageProviderCard(name, win, statusNote) {
   return '<div class="usage-card' + low + '">'
     + '<div class="uc-top"><span class="uc-name">' + esc(name) + '</span>'
     + '<span class="uc-pct">' + remaining.toFixed(0) + '% left</span></div>'
-    + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + used + '%"></div></div></div>'
+    + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + used + '%"></div>' + dayTicksHtml(win.durationMs) + '</div></div>'
     + '<div class="uc-reset um">' + esc(win.label) + ' · resets ' + esc(fmtResets(win.resetsAt)) + '</div>'
     + '</div>';
+}
+
+// Fixed day-boundary markers (1/7, 2/7, ... 6/7) for a 7-day window, so a
+// glance at the fill vs. the ticks answers "have I used 3 days' worth of
+// budget when only 1 day/session has actually elapsed?" — independent of how
+// much time has actually passed. Not shown on the 5-hour window.
+const SEVEN_DAY_MS = 604800000;
+function dayTicksHtml(durationMs) {
+  if (Math.abs((durationMs || 0) - SEVEN_DAY_MS) > 1000) return "";
+  let html = "";
+  for (let day = 1; day < 7; day++) {
+    html += '<div class="usage-bar-tick" style="left:' + ((day / 7) * 100) + '%"></div>';
+  }
+  return html;
 }
 
 function renderSubBar(label, win, durationMs) {
@@ -4882,7 +4945,7 @@ function renderSubBar(label, win, durationMs) {
   const cls = usageBarClass(pct, win.resetsAt, durationMs || 0);
   return '<div class="urow"><span>' + esc(label) + '</span>'
     + '<span class="um">' + win.remaining.toFixed(1) + '% left · ' + esc(fmtResets(win.resetsAt)) + '</span></div>'
-    + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div></div>';
+    + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + pct + '%"></div>' + dayTicksHtml(durationMs) + '</div></div>';
 }
 
 function renderCodexBar(label, win, durationMs) {
@@ -4892,7 +4955,7 @@ function renderCodexBar(label, win, durationMs) {
   const cls = usageBarClass(pct, win.resetsAt, durationMs || 0);
   return '<div class="urow"><span>' + esc(label) + '</span>'
     + '<span class="um">' + remaining.toFixed(1) + '% left · ' + esc(fmtResets(win.resetsAt)) + '</span></div>'
-    + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div></div>';
+    + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + pct + '%"></div>' + dayTicksHtml(durationMs) + '</div></div>';
 }
 
 function usagePlanLabel(status) {
@@ -6267,7 +6330,7 @@ let _flashState = {
 function flashPanelHtml() {
   return '<div class="oc-center-pane">'
     + '<div class="oc-panel-head">'
-    + '<div><div class="oc-panel-title"><span class="oc-avail-dot ok"></span><span>Flash</span></div>'
+    + '<div><div class="oc-panel-title"><span class="oc-avail-dot ok"></span><span>Chat</span></div>'
     + '<div class="oc-panel-sub">Native HiveMatrix agent loop</div></div>'
     + '<span class="oc-panel-head-spacer"></span>'
     + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button>'
@@ -6275,7 +6338,7 @@ function flashPanelHtml() {
     + '<div class="oc-panel-body">'
     + '<div class="oc-transcript" id="flashTranscript"></div>'
     + '<div class="oc-panel-composer-shell" onclick="flashFocusInput()">'
-    + '<textarea class="oc-input" id="flashInput" placeholder="Message Flash…" rows="3" onkeydown="flashInputKeydown(event)" oninput="flashInputResize(this)"></textarea>'
+    + '<textarea class="oc-input" id="flashInput" placeholder="Message…" rows="3" onkeydown="flashInputKeydown(event)" oninput="flashInputResize(this)"></textarea>'
     + '<div class="oc-panel-composer-actions">'
     + '<button class="create" id="flashSendBtn" onclick="event.stopPropagation();flashSend()" disabled>Send</button>'
     + '</div></div></div></div>';
@@ -6323,7 +6386,7 @@ function flashRenderMessages() {
   }
   el.innerHTML = msgs.map(function(m) {
     const ts = m.ts ? new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '';
-    const roleLabel = m.role === 'assistant' ? 'Flash' : (m.role === 'user' ? 'You' : m.role);
+    const roleLabel = m.role === 'assistant' ? 'Assistant' : (m.role === 'user' ? 'You' : m.role);
     let toolHtml = '';
     if (m.toolLines && m.toolLines.length) {
       toolHtml = '<div style="margin:4px 0 2px;font-size:11px;color:var(--muted)">'
@@ -6443,7 +6506,7 @@ async function flashSend() {
   } catch (err) {
     _flashState.messages[assistantIdx] = { role: 'system', content: 'Error: ' + (err.message || 'Send failed.'), ts: Date.now() };
     flashRenderMessages();
-    hmToast('Flash send failed.', 'err');
+    hmToast('Chat send failed.', 'err');
   } finally {
     _flashState.sending = false;
     if (sendBtn) sendBtn.disabled = !(input && input.value.trim());
@@ -7951,6 +8014,7 @@ async function enhanceTaskPrompt() {
       return;
     }
     document.getElementById("t_enhanced_text").value = enhanced;
+    document.getElementById("t_enhanced_title").value = (result && typeof result.title === "string") ? result.title : "";
     document.getElementById("t_enhanced_rationale").textContent = (result && result.rationale) ? result.rationale : "";
     document.getElementById("t_enhanced_preview").style.display = "";
   } catch (e) {
@@ -7962,7 +8026,9 @@ async function enhanceTaskPrompt() {
 }
 function acceptEnhancedPrompt() {
   const enhanced = document.getElementById("t_enhanced_text").value;
+  const title = document.getElementById("t_enhanced_title").value.trim();
   document.getElementById("t_desc").value = enhanced;
+  if (title) document.getElementById("t_title").value = title;
   _promptWizardHandled = true;
   dismissEnhancedPrompt();
 }
