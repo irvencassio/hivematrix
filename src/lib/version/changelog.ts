@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.157", date: "2026-07-09", note: "Add release-hivematrix skill wrapping canonical developer-id-release.sh" },
   { version: "0.1.156", date: "2026-07-07", note: "Terminal Lane: command policy + audit log; local engine runtime repair; keychain/readiness hardening" },
   { version: "0.1.155", date: "2026-07-07", note: "Fix voice/flash reply repetition loop; add iOS dark + tinted app-icon appearances" },
   { version: "0.1.154", date: "2026-07-07", note: "The router now learns from your re-routes (change a task's model repeatedly for a kind of task and it adopts that as the default). Pipeline self-audit: the accountability layer inspects its own metrics daily and files regressions as feedback — the system watching itself." },
