@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.161", date: "2026-07-09", note: "Developer ID release" },
   { version: "0.1.160", date: "2026-07-09", note: "Developer ID release" },
   { version: "0.1.159", date: "2026-07-09", note: "Chat rename, 7-day usage day-ticks, prompt-wizard task titles, task provenance pills" },
   { version: "0.1.158", date: "2026-07-09", note: "Fix: expand '~' projectPath (Inbox project) before task creation, preventing an ENOENT on task spawn" },
