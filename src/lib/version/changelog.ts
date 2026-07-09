@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.159", date: "2026-07-09", note: "Chat rename, 7-day usage day-ticks, prompt-wizard task titles, task provenance pills" },
   { version: "0.1.158", date: "2026-07-09", note: "Fix: expand '~' projectPath (Inbox project) before task creation, preventing an ENOENT on task spawn" },
   { version: "0.1.157", date: "2026-07-09", note: "Add release-hivematrix skill wrapping canonical developer-id-release.sh" },
   { version: "0.1.156", date: "2026-07-07", note: "Terminal Lane: command policy + audit log; local engine runtime repair; keychain/readiness hardening" },

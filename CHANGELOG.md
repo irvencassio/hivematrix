@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.159 — 2026-07-09
+
+Chat rename, 7-day usage day-ticks, prompt-wizard task titles, task provenance pills
+
 ## v0.1.158 — 2026-07-09
 
 Fix: expand '~' projectPath (Inbox project) before task creation, preventing an ENOENT on task spawn
