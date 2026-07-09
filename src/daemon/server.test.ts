@@ -1758,6 +1758,54 @@ test("disabling the current primary frontier provider corrects it to the remaini
   assert.equal(settingsBody.frontierProvider, "codex", "primary corrected off the now-disabled provider");
 });
 
+test("GET /brain/projects, /brain/docs, /brain/doc — Phase-1 checkpoint (brief/ctx/stale/orphan + raw content)", async (t) => {
+  withTempHome(t);
+  const { mkdirSync: mkdir, writeFileSync: write, utimesSync } = await import("node:fs");
+  const brainRoot = join(process.env.HOME!, "brain");
+  const proj = join(brainRoot, "projects", "hive");
+  mkdir(join(proj, "lanes"), { recursive: true });
+  mkdir(join(process.env.HOME!, ".hivematrix"), { recursive: true });
+  write(join(process.env.HOME!, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: brainRoot } }));
+
+  write(join(proj, "agent-brief.md"), "# Hive Agent Brief\n");
+  write(join(proj, "known-issues.md"), "# Known Issues\n");
+  write(join(proj, "current-state.md"), "# Current State\n");
+  write(join(proj, "lanes", "manager.md"), "# Manager Lane\n");
+  write(join(proj, "scratch.md"), "# scratch\ntodo\n");
+  const old = new Date(Date.now() - 200 * 86_400_000);
+  utimesSync(join(proj, "current-state.md"), old, old);
+
+  const { base, headers } = await startServer(t);
+
+  const projectsRes = await fetch(`${base}/brain/projects`, { headers });
+  assert.equal(projectsRes.status, 200);
+  const projectsBody = await projectsRes.json() as { projects: Array<{ slug: string; docCount: number }> };
+  const hive = projectsBody.projects.find((p) => p.slug === "hive");
+  assert.ok(hive, "hive project listed");
+  assert.equal(hive!.docCount, 5);
+
+  const docsRes = await fetch(`${base}/brain/docs?project=hive`, { headers });
+  assert.equal(docsRes.status, 200);
+  const docsBody = await docsRes.json() as { docs: Array<{ file: string; status: string }> };
+  const byFile = new Map(docsBody.docs.map((d) => [d.file, d.status]));
+  assert.equal(byFile.get("agent-brief.md"), "brief");
+  assert.equal(byFile.get("known-issues.md"), "ctx");
+  assert.equal(byFile.get("lanes/manager.md"), "ctx");
+  assert.equal(byFile.get("current-state.md"), "stale");
+  assert.equal(byFile.get("scratch.md"), "orphan", "not loaded, not indexed, not stale");
+
+  const docRes = await fetch(`${base}/brain/doc?project=hive&file=${encodeURIComponent("agent-brief.md")}`, { headers });
+  assert.equal(docRes.status, 200);
+  const docBody = await docRes.json() as { content: string };
+  assert.match(docBody.content, /Hive Agent Brief/);
+
+  const missingRes = await fetch(`${base}/brain/doc?project=hive&file=nope.md`, { headers });
+  assert.equal(missingRes.status, 404);
+
+  const traversalRes = await fetch(`${base}/brain/doc?project=hive&file=${encodeURIComponent("../../../etc/passwd")}`, { headers });
+  assert.equal(traversalRes.status, 404, "path traversal outside the project dir is rejected, not served");
+});
+
 test("every SSE stream registers a response error handler (an unhandled stream 'error' event would crash the daemon)", () => {
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
   const sites = [...src.matchAll(/text\/event-stream/g)];

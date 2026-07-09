@@ -891,6 +891,58 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     .oc-panel-composer-actions { flex-direction:row; }
     .oc-panel-composer-actions button { flex:1; }
   }
+
+  /* ── Brain / Memory Review pane ─────────────────────────────────────── */
+  .brain-pane { flex:1 1 auto; min-height:0; height:calc(100vh - 68px); max-height:calc(100vh - 68px);
+    width:100%; display:flex; flex-direction:column; padding:18px 18px 14px; gap:12px; overflow:hidden; }
+  .brain-shell { flex:1 1 auto; min-height:0; display:grid; grid-template-columns:200px 1fr 1fr;
+    border:1px solid var(--border); border-radius:10px; background:var(--panel-2); overflow:hidden; }
+  .brain-col { border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+  .brain-col:last-child { border-right:none; }
+  .brain-col-head { padding:10px 14px; border-bottom:1px solid var(--border); font-size:11px; font-weight:700;
+    letter-spacing:.06em; text-transform:uppercase; color:var(--muted); flex-shrink:0; }
+  .brain-col-body { overflow-y:auto; flex:1 1 auto; min-height:0; }
+  .brain-proj-row { padding:10px 14px; cursor:pointer; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; justify-content:space-between; }
+  .brain-proj-row:hover { background:var(--hover-bg); }
+  .brain-proj-row.active { background:rgba(217,164,65,.1); border-left:2px solid var(--accent); }
+  .brain-proj-row .name { font-weight:600; }
+  .brain-proj-row.active .name { color:var(--accent); }
+  .brain-proj-row .count { font-size:10.5px; color:var(--muted); background:var(--badge-bg); border-radius:9px; padding:1px 7px; }
+  .brain-legend { display:flex; flex-wrap:wrap; gap:10px; padding:8px 14px; border-bottom:1px solid var(--border);
+    font-size:10.5px; color:var(--muted); flex-shrink:0; background:var(--panel); }
+  .brain-legend span { display:flex; align-items:center; gap:4px; white-space:nowrap; }
+  .brain-doc-row { display:flex; align-items:center; gap:9px; padding:8px 12px; border-bottom:1px solid var(--border); cursor:pointer; }
+  .brain-doc-row:hover { background:var(--hover-bg); }
+  .brain-doc-row.selected-file { background:var(--reply-q-bg); }
+  .brain-doc-row .badge { flex-shrink:0; font-size:13px; width:20px; text-align:center; }
+  .brain-doc-row .meta-col { flex:1; min-width:0; }
+  .brain-doc-row .fname { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .brain-doc-row.tag-brief .fname { color:var(--accent); }
+  .brain-doc-row .sub { font-size:10.5px; color:var(--muted); margin-top:1px; }
+  .brain-doc-row .status-tag { flex-shrink:0; font-size:9.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+    padding:2px 6px; border-radius:4px; background:var(--badge-bg); color:var(--muted); }
+  .brain-doc-row.tag-brief .status-tag { background:rgba(217,164,65,.15); color:var(--accent); }
+  .brain-doc-row.tag-ctx .status-tag { background:rgba(63,185,80,.15); color:var(--ok); }
+  .brain-doc-row.tag-indexed .status-tag { background:rgba(88,166,255,.15); color:var(--accent-2); }
+  .brain-doc-row.tag-orphan .status-tag { background:var(--badge-bg); color:var(--muted); }
+  .brain-doc-row.tag-stale .status-tag { background:rgba(210,153,34,.15); color:var(--warn); }
+  .brain-doc-row.tag-excluded .status-tag { background:rgba(248,81,73,.12); color:var(--err); }
+  .brain-render-head { display:flex; align-items:center; justify-content:space-between; padding:10px 14px;
+    border-bottom:1px solid var(--border); flex-shrink:0; gap:10px; }
+  .brain-render-title { font-weight:700; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .brain-render-title .path { color:var(--muted); font-weight:400; font-size:11px; display:block; }
+  .brain-toggle-group { display:flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; flex-shrink:0; }
+  .brain-toggle-group button { font:inherit; font-size:11px; background:var(--panel); color:var(--muted);
+    border:none; padding:4px 12px; cursor:pointer; }
+  .brain-toggle-group button.active { background:var(--accent); color:var(--create-btn-text); font-weight:700; }
+  .brain-render-body { flex:1 1 auto; min-height:0; overflow-y:auto; padding:18px 22px; }
+  .brain-render-body.raw { font:12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre-wrap; color:var(--muted); }
+  .brain-empty-state { color:var(--muted); text-align:center; padding:60px 20px; font-size:12.5px; }
+  @media (max-width:900px) {
+    .brain-shell { grid-template-columns:1fr; overflow-y:auto; }
+    .brain-col { border-right:none; border-bottom:1px solid var(--border); }
+  }
 </style>
 </head>
 <body>
@@ -1686,6 +1738,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
     <button class="addbtn" id="newTaskNav" onclick="showNewTaskPanel()">＋ New task</button>
     <button class="ov-nav oc-nav" id="flashNav" onclick="showFlashPanel()">💬 Chat</button>
+    <button class="ov-nav oc-nav" id="brainNav" onclick="showBrain()">🧠 Brain</button>
     <div class="form" id="taskForm">
       <input id="t_title" type="hidden" value="" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
@@ -1945,7 +1998,7 @@ async function toggleThemeQuick() {
 // Center overview — at-a-glance board state when no task is selected, instead of
 // leaving the widest column empty.
 function renderOverview() {
-  if (state.selected || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen) return;
+  if (state.selected || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen || _brainState.panelOpen) return;
   setFlashSessionMode(false);
   const el = document.getElementById("session");
   if (!el) return;
@@ -1976,6 +2029,7 @@ function showOverview() {
   _skSel = '';
   _ctxTask = null;
   _flashState.panelOpen = false;
+  _brainState.panelOpen = false;
   setFlashSessionMode(false);
   renderBoard();
   renderSkillList();
@@ -1990,11 +2044,12 @@ function focusBoardLane(key) {
 }
 function updateOverviewNav() {
   const nav = document.getElementById("overviewNav");
-  const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !_flashState.panelOpen;
+  const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !_flashState.panelOpen && !_brainState.panelOpen;
   if (nav) nav.classList.toggle("active", overviewActive);
   const newTaskNav = document.getElementById("newTaskNav");
   if (newTaskNav) newTaskNav.classList.toggle("active", _taskFormInSession);
   updateFlashNav();
+  updateBrainNav();
 }
 function isEditableTarget(el) {
   if (!el) return false;
@@ -2383,6 +2438,7 @@ function taskActionsHtml(t) {
 async function selectTask(id) {
   state.selected = id;
   _flashState.panelOpen = false;
+  _brainState.panelOpen = false;
   setFlashSessionMode(false);
   // Switching tasks clears half-composed retry/reply state; staying on the same
   // task across a live refresh keeps files and draft text.
@@ -3089,6 +3145,7 @@ function showSkillPanel(key) {
   state.selected = null;
   state.selectedSkillOrCommand = key;
   _flashState.panelOpen = false;
+  _brainState.panelOpen = false;
   setFlashSessionMode(false);
   if (_taskFormInSession) _closeNewTaskPanel();
   renderBoard();
@@ -3102,6 +3159,7 @@ function _closeSkillPanel() {
   state.selectedSkillOrCommand = null;
   _skSel = '';
   _flashState.panelOpen = false;
+  _brainState.panelOpen = false;
   setFlashSessionMode(false);
   renderSkillList();
   renderSkillDetail();
@@ -5292,6 +5350,7 @@ function showNewTaskPanel() {
   if (!form || !session) return;
   state.selected = null;
   _flashState.panelOpen = false;
+  _brainState.panelOpen = false;
   setFlashSessionMode(false);
   _ctxTask = null;
   _taskFormInSession = true;
@@ -6448,6 +6507,215 @@ function showFlashPanel() {
 function updateFlashNav() {
   const nav = document.getElementById('flashNav');
   if (nav) nav.classList.toggle('active', _flashState.panelOpen);
+}
+
+// ── Brain / Memory Review panel ─────────────────────────────────────────
+// Read-only per-project doc browser (docs/superpowers/specs/2026-07-09-brain-memory-review-console-design.md,
+// Phases 1-2). Status badges are derived server-side from what actually
+// reaches a task's prompt today — see GET /brain/docs.
+let _brainState = {
+  panelOpen: false,
+  loading: false,
+  projects: [],
+  project: null,
+  docs: [],
+  embeddingsEnabled: true,
+  doc: null,       // selected file (relative to the project), e.g. "lanes/manager.md"
+  docContent: null,
+  viewMode: 'rendered'
+};
+
+const BRAIN_STATUS_CLASS = { brief: 'tag-brief', ctx: 'tag-ctx', indexed: 'tag-indexed', orphan: 'tag-orphan', stale: 'tag-stale', excluded: 'tag-excluded' };
+const BRAIN_STATUS_LABEL = { brief: 'Main brief', ctx: 'In task ctx', indexed: 'Indexed only', orphan: 'Orphaned', stale: 'Stale', excluded: 'Excluded' };
+
+function brainPanelHtml() {
+  return '<div class="oc-center-pane" style="max-width:none">'
+    + '<div class="oc-panel-head">'
+    + '<div><div class="oc-panel-title"><span>🧠</span><span>Brain / Memory Review</span></div>'
+    + '<div class="oc-panel-sub">Which brain docs actually reach a task\'s prompt, per project</div></div>'
+    + '<span class="oc-panel-head-spacer"></span>'
+    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button>'
+    + '</div>'
+    + '<div class="brain-pane" style="padding:0;height:auto;max-height:none">'
+    + '<div class="brain-shell">'
+    + '<div class="brain-col">'
+    + '<div class="brain-col-head">Projects</div>'
+    + '<div class="brain-col-body" id="brainProjectList"><div class="muted" style="padding:12px">Loading…</div></div>'
+    + '</div>'
+    + '<div class="brain-col">'
+    + '<div class="brain-col-head"><span id="brainCenterTitle">Documents</span></div>'
+    + '<div class="brain-legend">'
+    + '<span>⭐ Main brief</span><span>🟢 In task ctx</span><span>🔵 Indexed only</span>'
+    + '<span>⚪ Orphaned</span><span>🟠 Stale</span>'
+    + '</div>'
+    + '<div class="brain-col-body" id="brainDocList"><div class="muted" style="padding:12px">Select a project.</div></div>'
+    + '</div>'
+    + '<div class="brain-col">'
+    + '<div class="brain-render-head">'
+    + '<div style="min-width:0"><div class="brain-render-title" id="brainRenderTitle">Select a document</div>'
+    + '<span class="path" id="brainRenderPath"></span></div>'
+    + '<div class="brain-toggle-group">'
+    + '<button id="brainBtnRendered" class="active" onclick="setBrainViewMode(\'rendered\')">Rendered</button>'
+    + '<button id="brainBtnRaw" onclick="setBrainViewMode(\'raw\')">Raw</button>'
+    + '</div></div>'
+    + '<div class="brain-render-body" id="brainRenderBody"><div class="brain-empty-state">Click a document on the left to preview it here.</div></div>'
+    + '</div>'
+    + '</div>'
+    + '</div>'
+    + '</div>';
+}
+
+function renderBrainPanel() {
+  if (!_brainState.panelOpen) return;
+  const session = document.getElementById('session');
+  if (!session) return;
+  setFlashSessionMode(true);
+  session.innerHTML = brainPanelHtml();
+  renderBrainProjects();
+  renderBrainDocs();
+  renderBrainPane();
+}
+
+function showBrain() {
+  state.selected = null;
+  state.selectedSkillOrCommand = null;
+  _skSel = '';
+  _ctxTask = null;
+  _taskFormInSession = false;
+  _flashState.panelOpen = false;
+  _brainState.panelOpen = true;
+  renderBoard();
+  renderSkillList();
+  renderBrainPanel();
+  updateBrainNav();
+  loadBrainProjects();
+}
+
+function updateBrainNav() {
+  const nav = document.getElementById('brainNav');
+  if (nav) nav.classList.toggle('active', _brainState.panelOpen);
+}
+
+async function loadBrainProjects() {
+  const r = await api('/brain/projects');
+  _brainState.projects = (r && r.projects) || [];
+  if (!_brainState.project && _brainState.projects.length) _brainState.project = _brainState.projects[0].slug;
+  renderBrainProjects();
+  if (_brainState.project) await loadBrainDocs(_brainState.project);
+}
+
+function renderBrainProjects() {
+  const el = document.getElementById('brainProjectList');
+  if (!el) return;
+  if (!_brainState.projects.length) { el.innerHTML = '<div class="muted" style="padding:12px">No brain projects found.</div>'; return; }
+  el.innerHTML = _brainState.projects.map(p =>
+    '<div class="brain-proj-row' + (p.slug === _brainState.project ? ' active' : '') + '" onclick="selectBrainProject(\'' + attrEnc(p.slug) + '\')">'
+    + '<span class="name">' + esc(p.label) + '</span><span class="count">' + p.docCount + '</span></div>'
+  ).join('');
+}
+
+async function selectBrainProject(slug) {
+  _brainState.project = decodeURIComponent(slug);
+  _brainState.doc = null;
+  _brainState.docContent = null;
+  renderBrainProjects();
+  await loadBrainDocs(_brainState.project);
+}
+
+async function loadBrainDocs(slug) {
+  _brainState.loading = true;
+  renderBrainDocs();
+  const r = await api('/brain/docs?project=' + encodeURIComponent(slug));
+  if (_brainState.project !== slug) return; // stale response — the operator switched projects mid-fetch
+  _brainState.loading = false;
+  _brainState.docs = (r && r.docs) || [];
+  _brainState.embeddingsEnabled = !r || r.embeddingsEnabled !== false;
+  // Default-select the project's main brief on first load for a nicer first impression.
+  if (!_brainState.doc) {
+    const brief = _brainState.docs.find(d => d.status === 'brief');
+    if (brief) _brainState.doc = brief.file;
+  }
+  renderBrainDocs();
+  if (_brainState.doc) await loadBrainDocContent(_brainState.project, _brainState.doc);
+  else renderBrainPane();
+}
+
+function renderBrainDocs() {
+  const title = document.getElementById('brainCenterTitle');
+  if (title) title.textContent = (_brainState.project || '—') + ' — documents';
+  const el = document.getElementById('brainDocList');
+  if (!el) return;
+  if (_brainState.loading) { el.innerHTML = '<div class="muted" style="padding:12px">Loading…</div>'; return; }
+  if (!_brainState.docs.length) { el.innerHTML = '<div class="muted" style="padding:12px">No documents in this project.</div>'; return; }
+  const caveat = !_brainState.embeddingsEnabled
+    ? '<div class="muted" style="padding:8px 12px;font-size:10.5px;border-bottom:1px solid var(--border)">Semantic index is off — Indexed/Orphaned may be unreliable until it\'s enabled.</div>'
+    : '';
+  el.innerHTML = caveat + _brainState.docs.map(d => {
+    const cls = 'brain-doc-row ' + (BRAIN_STATUS_CLASS[d.status] || '') + (d.file === _brainState.doc ? ' selected-file' : '');
+    const sizeKb = d.sizeBytes ? (d.sizeBytes / 1024).toFixed(1) + ' KB' : '';
+    const modified = d.modified ? new Date(d.modified).toLocaleDateString() : '';
+    return '<div class="' + cls + '" onclick="selectBrainDoc(\'' + attrEnc(d.file) + '\')">'
+      + '<span class="badge">' + esc(d.badge) + '</span>'
+      + '<span class="meta-col"><div class="fname">' + esc(d.file) + '</div>'
+      + '<div class="sub">' + esc([modified, sizeKb].filter(Boolean).join(' · ')) + '</div></span>'
+      + '<span class="status-tag">' + esc(BRAIN_STATUS_LABEL[d.status] || d.status) + '</span>'
+      + '</div>';
+  }).join('');
+}
+
+async function selectBrainDoc(file) {
+  _brainState.doc = decodeURIComponent(file);
+  renderBrainDocs();
+  await loadBrainDocContent(_brainState.project, _brainState.doc);
+}
+
+let _brainDocCache = {};
+async function loadBrainDocContent(project, file) {
+  const key = project + '::' + file;
+  if (_brainDocCache[key]) { _brainState.docContent = _brainDocCache[key]; renderBrainPane(); return; }
+  _brainState.docContent = null;
+  renderBrainPane();
+  const r = await api('/brain/doc?project=' + encodeURIComponent(project) + '&file=' + encodeURIComponent(file));
+  if (_brainState.project !== project || _brainState.doc !== file) return; // stale — operator moved on
+  if (r && typeof r.content === 'string') { _brainDocCache[key] = r; _brainState.docContent = r; }
+  renderBrainPane();
+}
+
+function setBrainViewMode(mode) {
+  _brainState.viewMode = mode;
+  const rb = document.getElementById('brainBtnRendered'), rw = document.getElementById('brainBtnRaw');
+  if (rb) rb.classList.toggle('active', mode === 'rendered');
+  if (rw) rw.classList.toggle('active', mode === 'raw');
+  renderBrainPaneBody();
+}
+
+function renderBrainPane() {
+  const titleEl = document.getElementById('brainRenderTitle');
+  const pathEl = document.getElementById('brainRenderPath');
+  if (!titleEl || !pathEl) return;
+  if (!_brainState.doc) {
+    titleEl.textContent = 'Select a document';
+    pathEl.textContent = '';
+    renderBrainPaneBody();
+    return;
+  }
+  titleEl.textContent = _brainState.doc;
+  pathEl.textContent = (_brainState.docContent && _brainState.docContent.path) || (_brainState.project + '/' + _brainState.doc);
+  renderBrainPaneBody();
+}
+
+function renderBrainPaneBody() {
+  const body = document.getElementById('brainRenderBody');
+  if (!body) return;
+  if (!_brainState.doc) { body.className = 'brain-render-body'; body.innerHTML = '<div class="brain-empty-state">Click a document on the left to preview it here.</div>'; return; }
+  if (!_brainState.docContent) { body.className = 'brain-render-body'; body.innerHTML = '<div class="brain-empty-state">Loading…</div>'; return; }
+  if (_brainState.viewMode === 'raw') {
+    body.className = 'brain-render-body raw';
+    body.textContent = _brainState.docContent.content;
+  } else {
+    body.className = 'brain-render-body';
+    body.innerHTML = mdToHtml(_brainState.docContent.content);
+  }
 }
 
 function flashRenderMessages() {

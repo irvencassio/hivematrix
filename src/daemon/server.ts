@@ -1726,6 +1726,44 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /brain/projects — the Brain / Memory Review screen's left pane:
+      // <brainRoot>/projects/* with a doc count each. Distinct from GET /projects
+      // (the code-project list) — this is the brain-doc-tree list.
+      if (req.method === "GET" && urlPath === "/brain/projects") {
+        const { listProjects } = await import("@/lib/brain/doc-review");
+        json(res, 200, { projects: await listProjects() });
+        return;
+      }
+
+      // GET /brain/docs?project=<slug> — per-doc status summaries (§2 taxonomy)
+      // for the Brain / Memory Review screen's center pane.
+      if (req.method === "GET" && urlPath === "/brain/docs") {
+        const { listProjectDocs } = await import("@/lib/brain/doc-review");
+        const q = parseQueryString(req.url ?? "");
+        const project = (q.project ?? "").trim();
+        if (!project) { json(res, 400, { error: "project is required" }); return; }
+        const staleDays = Number.parseInt(q.staleDays ?? "", 10);
+        json(res, 200, await listProjectDocs(project, {
+          staleDays: Number.isFinite(staleDays) && staleDays > 0 ? staleDays : undefined,
+        }));
+        return;
+      }
+
+      // GET /brain/doc?project=<slug>&file=<relpath> — raw doc content for the
+      // render pane. Bounded + path-guarded inside doc-review.ts (rejects any
+      // traversal outside the project dir).
+      if (req.method === "GET" && urlPath === "/brain/doc") {
+        const { readProjectDoc } = await import("@/lib/brain/doc-review");
+        const q = parseQueryString(req.url ?? "");
+        const project = (q.project ?? "").trim();
+        const file = (q.file ?? "").trim();
+        if (!project || !file) { json(res, 400, { error: "project and file are required" }); return; }
+        const doc = await readProjectDoc(project, file);
+        if (!doc) { json(res, 404, { error: "doc not found" }); return; }
+        json(res, 200, doc);
+        return;
+      }
+
       // POST /brain/summarize — create an agent task that writes a "what shifted"
       // weekly digest of recently-changed brain docs. Body: { sinceDays? }.
       if (req.method === "POST" && urlPath === "/brain/summarize") {

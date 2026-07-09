@@ -12,14 +12,19 @@ import {
 const DEFAULT_SECTION_MAX_CHARS = 2_500;
 const DEFAULT_BUNDLE_MAX_CHARS = 12_000;
 
+/** No caller overrides `canonicalProject` today — "hive" is the only project whose
+ * full brain content is ever auto-loaded into a task. Exported so doc-review.ts
+ * (the Brain console screen) reports this as reality, not an assumption. */
+export const DEFAULT_CANONICAL_PROJECT = "hive";
+
 // The brain root commonly lives on a cloud mount (e.g. ~/_GD → Google Drive).
 // A synchronous read of a dehydrated cloud file blocks the daemon's main thread
 // on open() indefinitely. All brain reads MUST be async (so open() runs on the
 // libuv threadpool, not the event loop) AND time-bounded (so a stalled Drive
 // read fails gracefully instead of stalling agent spawn).
-const BRAIN_READ_TIMEOUT_MS = 3_000;
+export const BRAIN_READ_TIMEOUT_MS = 3_000;
 
-async function readWithTimeout(path: string, timeoutMs = BRAIN_READ_TIMEOUT_MS): Promise<string | null> {
+export async function readWithTimeout(path: string, timeoutMs = BRAIN_READ_TIMEOUT_MS): Promise<string | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); });
   const read = fs.readFile(path, "utf-8").then((c) => c as string).catch(() => null);
@@ -139,7 +144,7 @@ export async function buildBrainMemoryBundle(options: BrainMemoryBundleOptions =
   if (!brainRootDir) return "";
   const sectionMaxChars = options.sectionMaxChars ?? DEFAULT_SECTION_MAX_CHARS;
   const bundleMaxChars = options.bundleMaxChars ?? DEFAULT_BUNDLE_MAX_CHARS;
-  const canonicalProject = slugify(options.canonicalProject ?? "hive");
+  const canonicalProject = slugify(options.canonicalProject ?? DEFAULT_CANONICAL_PROJECT);
   const project = options.project?.trim();
   const normalizedProject = project ? slugify(project) : "";
   const sections: string[] = [];
@@ -183,7 +188,7 @@ export async function buildBrainMemoryBundle(options: BrainMemoryBundleOptions =
   return bundle.length > bundleMaxChars ? `${bundle.slice(0, bundleMaxChars)}\n...` : bundle;
 }
 
-async function listDirWithTimeout(
+export async function listDirWithTimeout(
   path: string,
   opts: { dirsOnly?: boolean; timeoutMs?: number } = {},
 ): Promise<string[]> {

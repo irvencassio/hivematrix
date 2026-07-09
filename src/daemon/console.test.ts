@@ -721,6 +721,29 @@ test("frontier usage panel exposes Claude auth login action", () => {
   assert.match(js, /Run Claude login/);
 });
 
+test("Brain / Memory Review nav opens a three-pane read-only screen wired to the Phase-1 endpoints", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(CONSOLE_HTML, /id="brainNav"[^>]*onclick="showBrain\(\)"/, "nav button present");
+  assert.match(js, /function showBrain\(/);
+  assert.match(js, /function brainPanelHtml\(/);
+  assert.match(js, /function renderBrainPanel\(/);
+  assert.match(js, /brainNav.*classList\.toggle\('active', _brainState\.panelOpen\)/s, "Brain nav active state follows its panel");
+  assert.match(js, /overviewActive = .* !_brainState\.panelOpen/, "Overview is not active while Brain is open");
+  // Wired to the Phase-1 server endpoints, not mocked data.
+  assert.match(js, /api\('\/brain\/projects'\)/);
+  assert.match(js, /api\('\/brain\/docs\?project='/);
+  assert.match(js, /api\('\/brain\/doc\?project='/);
+  // Mutual exclusivity with the other center-pane surfaces (Flash, task select, skill panel, new task).
+  const closers = ["selectTask", "_closeSkillPanel"];
+  for (const fn of closers) {
+    const body = fnBody(js, fn);
+    assert.match(body, /_brainState\.panelOpen = false/, `${fn} must close the Brain panel`);
+  }
+  // Rendered/Raw toggle + status legend + badges, matching the mockup taxonomy.
+  assert.match(js, /function setBrainViewMode\(/);
+  assert.match(js, /Main brief.*In task ctx.*Indexed only.*Orphaned.*Stale/s);
+});
+
 // Pull the shipped browser `timeAgo` out of the console script and make it callable,
 // so the actual rendered logic (not a copy) is what gets tested.
 function extractTimeAgo(html: string): (value: string | null | undefined, nowMs: number) => string {
