@@ -835,6 +835,45 @@ test("POST /tasks still creates a normal task for a small prompt (intake passthr
   assert.equal(agentCount, 1);
 });
 
+test("POST /tasks expands a '~' projectPath (Inbox project) to an absolute home path", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "Fix the typo in the footer.", project: "inbox", projectPath: "~" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  const stored = getDb().prepare("SELECT projectPath FROM tasks WHERE _id = ?").get(body._id as string) as { projectPath: string };
+  assert.equal(stored.projectPath, process.env.HOME, "stored path is the expanded absolute home dir, not the literal '~'");
+});
+
+test("POST /tasks expands a '~/sub' projectPath prefix, leaves other absolute paths untouched", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const r1 = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "task one", project: "inbox", projectPath: "~/notes" }),
+  });
+  const b1 = await r1.json() as Record<string, unknown>;
+  const s1 = getDb().prepare("SELECT projectPath FROM tasks WHERE _id = ?").get(b1._id as string) as { projectPath: string };
+  assert.equal(s1.projectPath, `${process.env.HOME}/notes`);
+
+  const r2 = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "task two", project: "hivematrix", projectPath: "/tmp/some-repo" }),
+  });
+  const b2 = await r2.json() as Record<string, unknown>;
+  const s2 = getDb().prepare("SELECT projectPath FROM tasks WHERE _id = ?").get(b2._id as string) as { projectPath: string };
+  assert.equal(s2.projectPath, "/tmp/some-repo", "a normal absolute path outside $HOME is left as-is");
+});
+
 test("POST /tasks still routes an explicit Terminal Lane request to the lane (regression)", async (t) => {
   withTempHome(t);
   const { _resetDbForTests } = await import("@/lib/db");

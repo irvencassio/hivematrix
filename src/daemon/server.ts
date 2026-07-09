@@ -3804,7 +3804,19 @@ export function createDaemonServer() {
         const title = typeof body.title === "string" ? body.title.trim() : "";
         body.title = title || deriveTaskTitle(description);
         if (typeof body.project !== "string" || !body.project.trim()) body.project = "hivematrix";
-        if (typeof body.projectPath !== "string") body.projectPath = "";
+        if (typeof body.projectPath !== "string" || !body.projectPath.trim()) {
+          body.projectPath = "";
+        } else {
+          // Expand a leading "~" (the built-in Inbox project's path) so it's a real
+          // absolute directory by the time the agent spawns — otherwise
+          // join(projectPath, ".claude") produces a literal "~/.claude" that mkdir
+          // can't create (ENOENT: no such file or directory, mkdir '~/.claude').
+          // Unlike normalizeHomeProjectPath, this does not require the result to be
+          // under $HOME — arbitrary absolute project paths are valid here.
+          const raw = body.projectPath.trim();
+          const home = homedir();
+          body.projectPath = raw === "~" ? home : raw.startsWith("~/") ? join(home, raw.slice(2)) : raw;
+        }
         // Operator preference: if this class of task has a stable learned route (you
         // keep re-routing it to the same model) and you didn't override the default,
         // adopt it — over the GLOBAL default only, never over an explicit pick.
