@@ -123,3 +123,20 @@ test("listSkillsFor returns only skills compatible with the requested harness", 
   assert.ok(!codexSkills.some((s) => s.name === "Qwen Only Skill"), "qwen-only excluded from codex");
   assert.ok(codexSkills.some((s) => s.name === "Universal Skill"), "'all' appears for codex");
 });
+
+test("listSkills drops single-provider skills when that provider is disabled in config", async () => {
+  await upsertSkill({ name: "Codex Gated Skill", description: "codex only", body: "do it", source: "test", compat: ["codex"] });
+  await upsertSkill({ name: "Qwen Gated Skill", description: "qwen only", body: "do it", source: "test", compat: ["qwen"] });
+
+  writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({
+    memory: { brainRootDir: BRAIN },
+    providers: { claude: { enabled: true }, codex: { enabled: false } },
+  }));
+  try {
+    const all = await listSkills();
+    assert.ok(!all.some((s) => s.name === "Codex Gated Skill"), "codex-only skill hidden while codex is disabled");
+    assert.ok(all.some((s) => s.name === "Qwen Gated Skill"), "qwen-only skill always survives");
+  } finally {
+    writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: BRAIN } }));
+  }
+});

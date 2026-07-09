@@ -1625,6 +1625,139 @@ test("pack download fetch is bounded by an abort timeout", () => {
   assert.match(src, /fetch\(body\.url\.trim\(\),\s*\{\s*signal:\s*AbortSignal\.timeout\(/, "pack download fetch must pass AbortSignal.timeout");
 });
 
+test("GET /providers returns installed/enabled/authPresent for claude and codex", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/providers`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { providers: Array<{ id: string; installed: boolean; enabled: boolean; authPresent: boolean }> };
+  assert.equal(body.providers.length, 2);
+  assert.deepEqual(body.providers.map((p) => p.id).sort(), ["claude", "codex"]);
+  for (const p of body.providers) {
+    assert.equal(typeof p.installed, "boolean");
+    assert.equal(typeof p.enabled, "boolean");
+    assert.equal(typeof p.authPresent, "boolean");
+  }
+});
+
+test("POST /providers/:id/enabled persists the toggle and GET /providers reflects it", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const off = await fetch(`${base}/providers/codex/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: false }),
+  });
+  assert.equal(off.status, 200);
+  const offBody = await off.json() as { ok: boolean; id: string; enabled: boolean };
+  assert.deepEqual(offBody, { ok: true, id: "codex", enabled: false });
+
+  const list = await fetch(`${base}/providers`, { headers });
+  const listBody = await list.json() as { providers: Array<{ id: string; enabled: boolean }> };
+  assert.equal(listBody.providers.find((p) => p.id === "codex")?.enabled, false);
+
+  const on = await fetch(`${base}/providers/codex/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: true }),
+  });
+  const onBody = await on.json() as { enabled: boolean };
+  assert.equal(onBody.enabled, true);
+});
+
+test("POST /claude/auth/login no longer exists — renamed to /providers/:id/setup with no back-compat alias", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/claude/auth/login`, { method: "POST", headers });
+  assert.notEqual(res.status, 200);
+});
+
+test("disabling a provider removes it from /usage's subscription reads", async (t) => {
+  withTempHome(t);
+  const { mkdirSync: mkdir, writeFileSync: write } = await import("node:fs");
+  mkdir(join(process.env.HOME!, ".hivematrix"), { recursive: true });
+  write(join(process.env.HOME!, ".hivematrix", "config.json"), JSON.stringify({
+    providers: { claude: { enabled: false }, codex: { enabled: false } },
+  }));
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/usage`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { subscription: unknown; subscriptionStatus: { state: string }; codexSubscription: unknown };
+  assert.equal(body.subscription, null);
+  assert.equal(body.subscriptionStatus.state, "disabled");
+  assert.equal(body.codexSubscription, null);
+});
+
+test("disabling a provider excludes its rows from /observability and /observability/series (history retained, view filtered)", async (t) => {
+  withTempHome(t);
+  const { mkdirSync: mkdir, writeFileSync: write } = await import("node:fs");
+  mkdir(join(process.env.HOME!, ".hivematrix"), { recursive: true });
+  write(join(process.env.HOME!, ".hivematrix", "config.json"), JSON.stringify({
+    providers: { claude: { enabled: true }, codex: { enabled: false } },
+  }));
+
+  const { recordRun } = await import("@/lib/observability/store");
+  recordRun({
+    taskId: "obs-claude", runIndex: 0, model: "claude-opus-4-8", status: "done",
+    inputTokens: 100, outputTokens: 50, costUsd: 0.01, project: "demo",
+    startedAtMs: 0, completedAtMs: 1000,
+  });
+  recordRun({
+    taskId: "obs-codex", runIndex: 0, model: "codex:gpt-5.5-codex", status: "done",
+    inputTokens: 100, outputTokens: 50, costUsd: 0.01, project: "demo",
+    startedAtMs: 0, completedAtMs: 1000,
+  });
+
+  const { base, headers } = await startServer(t);
+
+  const obsRes = await fetch(`${base}/observability`, { headers });
+  assert.equal(obsRes.status, 200);
+  const obsBody = await obsRes.json() as {
+    recent: Array<{ provider: string }>;
+    scorecard: Array<{ route: string }>;
+  };
+  assert.ok(obsBody.recent.some((r) => r.provider === "anthropic"), "claude (enabled) row present");
+  assert.ok(!obsBody.recent.some((r) => r.provider === "openai-codex"), "codex (disabled) row excluded from the view");
+  assert.ok(!obsBody.scorecard.some((r) => r.route === "openai-codex"), "codex excluded from the route scorecard");
+
+  const seriesRes = await fetch(`${base}/observability/series?window=7d`, { headers });
+  assert.equal(seriesRes.status, 200);
+  const seriesBody = await seriesRes.json() as {
+    providers: string[];
+    points: Array<{ byProvider: Record<string, unknown> }>;
+    totals: { byProvider: Array<{ key: string }> };
+  };
+  assert.ok(!seriesBody.providers.includes("openai-codex"), "codex excluded from series provider list");
+  assert.ok(!seriesBody.totals.byProvider.some((p) => p.key === "openai-codex"), "codex excluded from series totals");
+  for (const pt of seriesBody.points) assert.ok(!("openai-codex" in pt.byProvider), "codex excluded from every series point");
+
+  // History is retained on disk, not deleted — re-enable and confirm it reappears.
+  write(join(process.env.HOME!, ".hivematrix", "config.json"), JSON.stringify({
+    providers: { claude: { enabled: true }, codex: { enabled: true } },
+  }));
+  const obsRes2 = await fetch(`${base}/observability`, { headers });
+  const obsBody2 = await obsRes2.json() as { recent: Array<{ provider: string }> };
+  assert.ok(obsBody2.recent.some((r) => r.provider === "openai-codex"), "codex row reappears once re-enabled");
+});
+
+test("disabling the current primary frontier provider corrects it to the remaining enabled provider", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  // Make Claude the primary, both enabled.
+  await fetch(`${base}/settings`, { method: "POST", headers, body: JSON.stringify({ frontierProvider: "claude" }) });
+  await fetch(`${base}/providers/claude/enabled`, { method: "POST", headers, body: JSON.stringify({ enabled: true }) });
+  await fetch(`${base}/providers/codex/enabled`, { method: "POST", headers, body: JSON.stringify({ enabled: true }) });
+
+  // Disable the primary (claude) — codex is still enabled, so primary should flip to codex.
+  const res = await fetch(`${base}/providers/claude/enabled`, { method: "POST", headers, body: JSON.stringify({ enabled: false }) });
+  assert.equal(res.status, 200);
+
+  const settings = await fetch(`${base}/models`, { headers });
+  const settingsBody = await settings.json() as { frontierProvider?: string };
+  assert.equal(settingsBody.frontierProvider, "codex", "primary corrected off the now-disabled provider");
+});
+
 test("every SSE stream registers a response error handler (an unhandled stream 'error' event would crash the daemon)", () => {
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
   const sites = [...src.matchAll(/text\/event-stream/g)];

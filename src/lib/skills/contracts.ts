@@ -99,6 +99,16 @@ export function skillRunsOn(compat: SkillHarness[], harness: SkillHarness): bool
   return compat.length === 0 || compat.includes("all") || compat.includes(harness);
 }
 
+/**
+ * Provider-eligibility filter: a skill survives if its compat includes at
+ * least one currently enabled frontier provider, treating "qwen"/local and
+ * "all" as always eligible (they aren't gated by the Claude/Codex toggles).
+ */
+export function skillEnabledByProviders(compat: SkillHarness[], enabledProviders: string[]): boolean {
+  if (compat.length === 0 || compat.includes("all") || compat.includes("qwen")) return true;
+  return compat.some((c) => enabledProviders.includes(c));
+}
+
 /** Does the skill body declare a text-input slot? */
 export function skillHasInput(body: string): boolean {
   return /\{\{\s*input\s*\}\}/i.test(body);

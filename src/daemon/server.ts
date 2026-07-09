@@ -48,6 +48,17 @@ export function broadcast(event: string, data: unknown): void {
   }
 }
 
+// Observability provider names ("anthropic"/"openai-codex"/"local-qwen"/"other")
+// don't match the frontier-toggle ids ("claude"/"codex") — map the enabled
+// frontier ids into the observability naming, always keeping local/other
+// (they aren't gated by the Claude/Codex toggles).
+function obsProvidersFor(enabledFrontier: Array<"claude" | "codex">): Set<string> {
+  const out = new Set<string>(["local-qwen", "other"]);
+  if (enabledFrontier.includes("claude")) out.add("anthropic");
+  if (enabledFrontier.includes("codex")) out.add("openai-codex");
+  return out;
+}
+
 function json(res: ServerResponse, statusCode: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.writeHead(statusCode, {
@@ -733,6 +744,8 @@ export function createDaemonServer() {
 
       // GET /observability — normalized per-run telemetry + totals across all
       // three providers (Claude / Codex / local Qwen). ?taskId=… for one task.
+      // A disabled frontier provider's rows stay on disk (history is retained)
+      // but are filtered out of this rendered view — never a data delete.
       if (req.method === "GET" && urlPath === "/observability") {
         const { listTaskTelemetry, getTaskTelemetry, observabilitySummary, observabilityScorecard, routingRecommendations } = await import("@/lib/observability/store");
         const oq = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
@@ -743,7 +756,11 @@ export function createDaemonServer() {
         }
         const limit = parseInt(oq.get("limit") ?? "50", 10) || 50;
         const { getLearnedRoutes } = await import("@/lib/routing/operator-prefs");
-        json(res, 200, { totals: observabilitySummary(), scorecard: observabilityScorecard(), routing: routingRecommendations(), operatorRoutes: getLearnedRoutes(), recent: listTaskTelemetry(limit) });
+        const { getEnabledProviders } = await import("@/lib/config/frontier-providers");
+        const enabledObsProviders = obsProvidersFor(getEnabledProviders());
+        const scorecard = observabilityScorecard().filter((row) => enabledObsProviders.has(row.route));
+        const recent = listTaskTelemetry(limit).filter((row) => enabledObsProviders.has(row.provider));
+        json(res, 200, { totals: observabilitySummary(), scorecard, routing: routingRecommendations(), operatorRoutes: getLearnedRoutes(), recent });
         return;
       }
 
@@ -751,10 +768,20 @@ export function createDaemonServer() {
       // per-provider cache rollups for the dashboard (all three providers).
       if (req.method === "GET" && urlPath === "/observability/series") {
         const { observabilitySeries } = await import("@/lib/observability/series");
+        const { getEnabledProviders } = await import("@/lib/config/frontier-providers");
         const sq = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
         const w = sq.get("window");
         const window = w === "24h" || w === "30d" ? w : "7d";
-        json(res, 200, observabilitySeries(window));
+        const series = observabilitySeries(window);
+        const enabledObsProviders = obsProvidersFor(getEnabledProviders());
+        const providers = series.providers.filter((p) => enabledObsProviders.has(p));
+        const points = series.points.map((pt) => ({
+          ...pt,
+          byProvider: Object.fromEntries(Object.entries(pt.byProvider).filter(([p]) => enabledObsProviders.has(p))),
+        }));
+        const cache = series.cache.filter((row) => enabledObsProviders.has(row.provider));
+        const byProviderTotals = series.totals.byProvider.filter((row) => enabledObsProviders.has(row.key));
+        json(res, 200, { ...series, providers, points, cache, totals: { ...series.totals, byProvider: byProviderTotals } });
         return;
       }
 
@@ -771,11 +798,58 @@ export function createDaemonServer() {
         json(res, 200, await getFrontierUsage({ bypassSubscriptionCache: q.get("refresh") === "1" }));
         return;
       }
-      // POST /claude/auth/login — open Terminal for the interactive Claude CLI OAuth flow.
-      if (req.method === "POST" && urlPath === "/claude/auth/login") {
-        const { startClaudeAuthLogin } = await import("@/lib/usage/claude-auth-login");
+      // GET /providers — per-provider { id, installed, enabled, authPresent } for the Settings toggles.
+      if (req.method === "GET" && urlPath === "/providers") {
+        const { FRONTIER_PROVIDERS } = await import("@/lib/config/frontier-providers");
+        const { detectBackends } = await import("@/lib/models/backends");
+        const { readClaudeAuthMode } = await import("@/lib/usage/claude");
+        const { readCodexAuthState } = await import("@/lib/usage/codex");
+        const backends = detectBackends();
+        const providers = FRONTIER_PROVIDERS.map((id) => {
+          const backend = backends.find((b) => b.id === id);
+          const authPresent = id === "claude"
+            ? readClaudeAuthMode(".claude") === "subscription"
+            : (() => {
+              const auth = readCodexAuthState();
+              return auth.authMode === "subscription" || auth.authMode === "api-key";
+            })();
+          return {
+            id,
+            installed: backend?.installed ?? false,
+            enabled: backend?.enabled ?? false,
+            authPresent,
+          };
+        });
+        json(res, 200, { providers });
+        return;
+      }
+      // POST /providers/:id/enabled { enabled } — persist the operator's on/off toggle and broadcast.
+      if (req.method === "POST" && /^\/providers\/(claude|codex)\/enabled$/.test(urlPath)) {
+        const id = urlPath.split("/")[2] as "claude" | "codex";
+        const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
+        const enabled = body?.enabled === true;
+        const { setProviderEnabled, getEnabledProviders } = await import("@/lib/config/frontier-providers");
+        setProviderEnabled(id, enabled);
+        // If the just-disabled provider was the stored primary, correct it to
+        // the remaining enabled provider so arbitration never points at a
+        // disabled provider (open risk: stale frontierProvider).
+        if (!enabled) {
+          const { getFrontierProvider, setFrontierProvider } = await import("@/lib/models/available");
+          const stillEnabled = getEnabledProviders();
+          if (getFrontierProvider() === id && stillEnabled.length && !stillEnabled.includes(id)) {
+            setFrontierProvider(stillEnabled[0]);
+          }
+        }
+        broadcast("providers:changed", { id, enabled });
+        json(res, 200, { ok: true, id, enabled });
+        return;
+      }
+      // POST /providers/:id/setup — open Terminal for install (if needed) + interactive CLI login.
+      if (req.method === "POST" && /^\/providers\/(claude|codex)\/setup$/.test(urlPath)) {
+        const id = urlPath.split("/")[2] as "claude" | "codex";
+        const { openProviderSetup } = await import("@/lib/usage/provider-setup");
         try {
-          json(res, 200, await startClaudeAuthLogin());
+          json(res, 200, await openProviderSetup(id));
         } catch (e) {
           json(res, 500, {
             ok: false,

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { skillSlug, skillFilename, renderSkillFile, parseSkillFile, formatSkillIndex, skillRunsOn, skillHasInput, applySkillInput, type Skill } from "./contracts";
+import { skillSlug, skillFilename, renderSkillFile, parseSkillFile, formatSkillIndex, skillRunsOn, skillHasInput, applySkillInput, skillEnabledByProviders, type Skill } from "./contracts";
 
 function skill(over: Partial<Skill> = {}): Skill {
   return {
@@ -48,6 +48,23 @@ test("compat round-trips and skillRunsOn gates by harness", () => {
   assert.equal(skillRunsOn(parsed.compat, "qwen"), false);
   assert.equal(skillRunsOn(["all"], "qwen"), true);
   assert.equal(skillRunsOn([], "qwen"), true); // empty = any
+});
+
+test("skillEnabledByProviders: qwen/all/[] always eligible regardless of enablement", () => {
+  assert.equal(skillEnabledByProviders([], []), true);
+  assert.equal(skillEnabledByProviders(["all"], []), true);
+  assert.equal(skillEnabledByProviders(["qwen"], []), true);
+});
+
+test("skillEnabledByProviders: a two-provider skill survives while either is enabled", () => {
+  assert.equal(skillEnabledByProviders(["claude", "codex"], ["claude"]), true);
+  assert.equal(skillEnabledByProviders(["claude", "codex"], ["codex"]), true);
+  assert.equal(skillEnabledByProviders(["claude", "codex"], []), false);
+});
+
+test("skillEnabledByProviders: a single-provider skill disappears when that provider is off", () => {
+  assert.equal(skillEnabledByProviders(["codex"], ["claude"]), false);
+  assert.equal(skillEnabledByProviders(["codex"], ["codex"]), true);
 });
 
 test("a skill with no compat frontmatter defaults to all harnesses", () => {

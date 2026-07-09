@@ -15,6 +15,7 @@ import {
   type SubscriptionUsageStatus,
 } from "./subscription";
 import { readCodexUsageProfile, type CodexUsageProfile } from "./codex";
+import { isProviderEnabled } from "@/lib/config/frontier-providers";
 
 export interface FrontierModelUsage {
   modelId: string;
@@ -102,8 +103,10 @@ export async function getFrontierUsage(options: FrontierUsageOptions = {}): Prom
     byModel.set(primary, row);
   }
 
-  const subscriptionResult = await subscriptionReader({ bypassCache: options.bypassSubscriptionCache });
-  const codexSubscription = codexUsageReader();
+  const subscriptionResult = isProviderEnabled("claude")
+    ? await subscriptionReader({ bypassCache: options.bypassSubscriptionCache })
+    : { usage: null, status: { state: "disabled" as const, message: "Claude is disabled in Settings → Models." } };
+  const codexSubscription = isProviderEnabled("codex") ? codexUsageReader() : null;
 
   return {
     totalCost: Math.round(totalCost * 10000) / 10000,

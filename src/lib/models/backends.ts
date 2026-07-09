@@ -15,6 +15,7 @@ import { findBinary, CLAUDE_BINARY_SEARCH_PATHS, CODEX_BINARY_SEARCH_PATHS } fro
 import { getQwenProfile } from "@/lib/config/qwen-profile";
 import { getLocalModelConfig } from "@/lib/config/constants";
 import { readConfigMatchedLocalModelHealth } from "@/lib/local-model/health";
+import { isProviderEnabled } from "@/lib/config/frontier-providers";
 import { getLocalEngineConfig } from "./local-engine";
 
 export type BackendId = "local" | "claude" | "codex";
@@ -22,7 +23,12 @@ export type BackendId = "local" | "claude" | "codex";
 export interface BackendStatus {
   id: BackendId;
   name: string;
+  /** installed && enabled — the historical meaning; every existing gate reads this. */
   configured: boolean;
+  /** Binary found on disk, independent of the operator's enable/disable toggle. */
+  installed: boolean;
+  /** Operator's HiveMatrix-side enable/disable toggle (frontier providers only; always true for local). */
+  enabled: boolean;
   detail: string;
   /** Shown when not configured — how to install/connect it. */
   connect?: string;
@@ -31,7 +37,15 @@ export interface BackendStatus {
   modelId?: string;
 }
 
-export function detectBackends(): BackendStatus[] {
+/** Injectable for tests — real binary/config lookups are process-global and hard to sandbox. */
+export interface DetectBackendsEnv {
+  findBinary?: typeof findBinary;
+  isProviderEnabled?: typeof isProviderEnabled;
+}
+
+export function detectBackends(env: DetectBackendsEnv = {}): BackendStatus[] {
+  const find = env.findBinary ?? findBinary;
+  const enabled = env.isProviderEnabled ?? isProviderEnabled;
   const out: BackendStatus[] = [];
 
   // Local server — engine label reflects the configured local engine
@@ -53,6 +67,8 @@ export function detectBackends(): BackendStatus[] {
     id: "local",
     name: `Local server (${engineName})`,
     configured: localConfigured,
+    installed: localConfigured,
+    enabled: true,
     detail: localConfigured
       ? `${localModelId} @ ${localEndpoint}${health?.ready ? " (healthy)" : ""}`
       : "no local model configured",
@@ -65,23 +81,31 @@ export function detectBackends(): BackendStatus[] {
   });
 
   // Claude Code CLI
-  const claudePath = findBinary("claude", CLAUDE_BINARY_SEARCH_PATHS);
+  const claudePath = find("claude", CLAUDE_BINARY_SEARCH_PATHS);
+  const claudeInstalled = !!claudePath;
+  const claudeEnabled = enabled("claude");
   out.push({
     id: "claude",
     name: "Claude Code",
-    configured: !!claudePath,
-    detail: claudePath ? `claude CLI at ${claudePath}` : "claude CLI not found",
-    connect: claudePath ? undefined : "Install Claude Code (https://claude.com/claude-code) and run `claude` once to sign in.",
+    configured: claudeInstalled && claudeEnabled,
+    installed: claudeInstalled,
+    enabled: claudeEnabled,
+    detail: claudeInstalled ? `claude CLI at ${claudePath}` : "claude CLI not found",
+    connect: claudeInstalled ? undefined : "Install Claude Code (https://claude.com/claude-code) and run `claude` once to sign in.",
   });
 
   // Codex CLI
-  const codexPath = findBinary("codex", CODEX_BINARY_SEARCH_PATHS);
+  const codexPath = find("codex", CODEX_BINARY_SEARCH_PATHS);
+  const codexInstalled = !!codexPath;
+  const codexEnabled = enabled("codex");
   out.push({
     id: "codex",
     name: "Codex",
-    configured: !!codexPath,
-    detail: codexPath ? `codex CLI at ${codexPath}` : "codex CLI not found",
-    connect: codexPath ? undefined : "Install the Codex CLI and run `codex login` (ChatGPT subscription).",
+    configured: codexInstalled && codexEnabled,
+    installed: codexInstalled,
+    enabled: codexEnabled,
+    detail: codexInstalled ? `codex CLI at ${codexPath}` : "codex CLI not found",
+    connect: codexInstalled ? undefined : "Install the Codex CLI and run `codex login` (ChatGPT subscription).",
   });
 
   return out;

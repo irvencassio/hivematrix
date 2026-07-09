@@ -14,6 +14,7 @@
  */
 
 import { EventEmitter } from "events";
+import { getEnabledProviders } from "@/lib/config/frontier-providers";
 
 export type ConnectivityMode = "cloud-ok" | "local-only" | "offline";
 
@@ -118,14 +119,25 @@ export class ConnectivityPolicy extends EventEmitter {
   private _probeFailures = 0;
   private _changedAt = new Date().toISOString();
   private _reason = "default";
+  /** Injectable for tests; production checks the real Settings → Models toggles. */
+  private _hasEnabledFrontierProvider: () => boolean;
 
   // Probe failure threshold before declaring offline
   static OFFLINE_PROBE_THRESHOLD = 3;
+
+  constructor(opts: { hasEnabledFrontierProvider?: () => boolean } = {}) {
+    super();
+    this._hasEnabledFrontierProvider = opts.hasEnabledFrontierProvider ?? (() => getEnabledProviders().length > 0);
+  }
 
   get mode(): ConnectivityMode {
     if (this._manualOverride !== null) return this._manualOverride;
     if (this._probeFailures >= ConnectivityPolicy.OFFLINE_PROBE_THRESHOLD) return "offline";
     if (this._exhaustedProviders.size > 0) return "local-only";
+    // No frontier provider enabled ⇒ no cloud capacity, same as an exhausted
+    // usage window — degrade to local-only rather than dead-ending "frontier"
+    // tier routing into a null model. A manual override (checked above) wins.
+    if (!this._hasEnabledFrontierProvider()) return "local-only";
     return "cloud-ok";
   }
 

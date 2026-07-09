@@ -944,6 +944,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <label class="flbl" style="margin-top:14px">Backends</label>
       <div id="s_backends"></div>
 
+      <div id="s_provider_toggles" style="margin-top:14px">
+        <label class="flbl">Frontier providers</label>
+        <div class="muted" style="font-size:11px;margin-bottom:6px">Turn a provider on or off within HiveMatrix. Off disables it here only — the CLI stays installed and signed in for your own terminal use.</div>
+        <div id="s_provider_toggle_rows"><div class="muted">Loading…</div></div>
+      </div>
+
       <div id="s_frontier_provider_row" style="display:none;margin-top:14px">
         <label class="flbl">Frontier provider (Mixed / Cloud-only)</label>
         <div class="row" style="align-items:center;gap:8px">
@@ -4195,13 +4201,11 @@ async function obDetectModels() {
   const statusEl = document.getElementById('ob_models_status');
   if (statusEl) { statusEl.textContent = 'Detecting…'; statusEl.className = 'ob-any-status'; }
   try {
-    const setup = await api('/onboarding/setup');
-    const o = state.onboarding;
-    const frontier = o && o.steps && o.steps.find(s => s.id === 'frontier');
+    const [setup, providersResp] = await Promise.all([api('/onboarding/setup'), api('/providers').catch(() => null)]);
     const localMod = _obSetupItem(setup, 'models', 'localModel');
-    const fDetail = (frontier && frontier.detail) || '';
-    const hasClaude = /claude CLI/i.test(fDetail);
-    const hasCodex  = /codex CLI/i.test(fDetail);
+    const providers = (providersResp && providersResp.providers) || [];
+    const hasClaude = !!(providers.find(p => p.id === 'claude') || {}).installed;
+    const hasCodex  = !!(providers.find(p => p.id === 'codex') || {}).installed;
     const hasLocal  = _obSetupStateReady(localMod);
     _obSetModelCard('ob_model_claude', 'ob_claude_mark', 'ob_claude_status', hasClaude,
       hasClaude ? 'Detected — ready to use' : 'Not found on this Mac');
@@ -4967,11 +4971,18 @@ function usagePlanLabel(status) {
 
 async function checkUsage(forceRefresh) {
   try {
-    const u = await api(forceRefresh ? "/usage?refresh=1" : "/usage");
+    const [u, providersResp] = await Promise.all([
+      api(forceRefresh ? "/usage?refresh=1" : "/usage"),
+      api("/providers").catch(() => null),
+    ]);
     if (!u) return;
-    const sub = u.subscription;
-    const subStatus = u.subscriptionStatus;
-    const codexSubscription = u.codexSubscription;
+    const providers = (providersResp && providersResp.providers) || [];
+    const claudeEnabled = providers.length ? !!(providers.find(p => p.id === "claude") || {}).enabled : true;
+    const codexEnabled = providers.length ? !!(providers.find(p => p.id === "codex") || {}).enabled : true;
+    const sub = claudeEnabled ? u.subscription : null;
+    const subStatus = claudeEnabled ? u.subscriptionStatus : null;
+    const codexSubscription = codexEnabled ? u.codexSubscription : null;
+    const noFrontierEnabled = !claudeEnabled && !codexEnabled;
 
     // Normalize each provider's windows into {label, remaining, resetsAt} so the
     // pill, summary cards, and "worst window" all share one source of truth.
@@ -5025,11 +5036,18 @@ async function checkUsage(forceRefresh) {
       }
       summaryEl.innerHTML = cards
         ? '<div class="usage-cards">' + cards + '</div>'
-        : '<div class="muted">No frontier usage yet — local model work runs on-device.</div>';
+        : noFrontierEnabled
+          ? '<div class="muted">No frontier provider enabled — running local (Qwen) only. Enable Claude or Codex in Settings → Models.</div>'
+          : '<div class="muted">No frontier usage yet — local model work runs on-device.</div>';
     }
 
     const el = document.getElementById("usage");
     if (!el) return;
+
+    if (noFrontierEnabled) {
+      el.innerHTML = '<div class="usage-breakdown"><div class="muted">No frontier provider enabled — running local (Qwen) only. Enable Claude or Codex in Settings → Models.</div></div>';
+      return;
+    }
 
     let html = '<div class="usage-breakdown">';
 
@@ -5176,7 +5194,7 @@ async function runClaudeAuthLogin() {
   const btn = document.getElementById("claudeAuthLogin");
   if (btn) { btn.disabled = true; btn.textContent = "Opening Terminal…"; }
   try {
-    const r = await api("/claude/auth/login", { method: "POST" });
+    const r = await api("/providers/claude/setup", { method: "POST" });
     if (!r || !r.ok) {
       await hmAlert(r?.detail || r?.error || "Could not start Claude auth login.");
     } else {
@@ -6039,9 +6057,65 @@ async function openSettings() {
     try { await loadModels(); } catch (e) { /* Settings can still show setup/features. */ }
   }
   renderSettingsModelControls();
+  renderProviderToggles();
   loadTunnel();
   loadAutonomy();
   loadHeartbeat();
+}
+
+const PROVIDER_LABELS = { claude: "Claude (Claude Code)", codex: "Codex (OpenAI)" };
+
+function providerStatusChip(p) {
+  if (!p.installed && !p.enabled) return '<span class="muted" style="font-size:11px">Off · not installed</span>';
+  if (!p.installed && p.enabled) return '<span class="muted" style="font-size:11px;color:var(--accent)">Enabling — sign in in Terminal</span>';
+  if (p.installed && p.enabled && !p.authPresent) return '<span class="muted" style="font-size:11px;color:var(--accent)">On — needs sign-in</span>';
+  if (p.installed && p.enabled) return '<span class="muted" style="font-size:11px;color:var(--ok)">On</span>';
+  return '<span class="muted" style="font-size:11px">Off</span>'; // installed && !enabled
+}
+
+async function renderProviderToggles() {
+  const wrap = document.getElementById("s_provider_toggle_rows");
+  if (!wrap) return;
+  let r;
+  try { r = await api("/providers"); } catch (e) { wrap.innerHTML = '<div class="muted">Could not load provider status.</div>'; return; }
+  const providers = (r && r.providers) || [];
+  if (!providers.length) { wrap.innerHTML = '<div class="muted">No frontier providers.</div>'; return; }
+  wrap.innerHTML = providers.map(p => {
+    const needsSetup = p.enabled && (!p.installed || !p.authPresent);
+    const setupBtn = needsSetup
+      ? '<button class="sm" onclick="runProviderSetup(\'' + esc(p.id) + '\')">' + (p.installed ? 'Sign in' : 'Install + sign in') + '</button>'
+      : '';
+    return '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
+      + '<div style="flex:1"><div style="font-weight:600">' + esc(PROVIDER_LABELS[p.id] || p.id) + '</div>'
+      + '<div style="margin-top:2px">' + providerStatusChip(p) + '</div></div>'
+      + '<div class="row" style="align-items:center;gap:8px">' + setupBtn
+      + settingsSwitch(p.enabled, 'toggleProvider(\'' + esc(p.id) + '\',' + (!p.enabled) + ')', { title: (p.enabled ? 'Turn off ' : 'Turn on ') + (PROVIDER_LABELS[p.id] || p.id) })
+      + '</div></div>';
+  }).join('');
+}
+
+async function toggleProvider(id, enabled) {
+  await api("/providers/" + encodeURIComponent(id) + "/enabled", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
+  });
+  if (enabled) {
+    const r = await api("/providers").catch(() => null);
+    const p = r && r.providers && r.providers.find(x => x.id === id);
+    if (p && (!p.installed || !p.authPresent)) await runProviderSetup(id);
+  }
+  await renderProviderToggles();
+  models = await loadModels().catch(() => models);
+  renderSettingsModelControls();
+}
+
+async function runProviderSetup(id) {
+  const r = await api("/providers/" + encodeURIComponent(id) + "/setup", { method: "POST" });
+  if (!r || !r.ok) {
+    await hmAlert((r && (r.detail || r.error)) || ("Could not start " + (PROVIDER_LABELS[id] || id) + " setup."));
+  } else {
+    await hmAlert("Terminal opened for " + (PROVIDER_LABELS[id] || id) + " setup. Complete it there, then click refresh.");
+  }
+  await renderProviderToggles();
 }
 
 function renderSettingsModelControls() {

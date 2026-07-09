@@ -122,6 +122,16 @@ export function inferLocalCommandCompat(model?: string): LocalCommandCompat[] {
   return compat;
 }
 
+/**
+ * Provider-eligibility filter: a command survives if its compat includes at
+ * least one currently enabled frontier provider, treating "qwen"/local and
+ * "all" as always eligible (they aren't gated by the Claude/Codex toggles).
+ */
+export function commandEnabledByProviders(compat: LocalCommandCompat[], enabledProviders: string[]): boolean {
+  if (compat.length === 0 || compat.includes("all") || compat.includes("qwen")) return true;
+  return compat.some((c) => enabledProviders.includes(c));
+}
+
 /** Build a LocalCommand from a flat command `.md`. invokeName is precomputed by
  *  the scanner from the path. All frontmatter is optional. */
 export function parseCommandFile(content: string, invokeName: string, sourcePath: string): LocalCommand {

@@ -25,7 +25,8 @@ export type SubscriptionUsageState =
   | "missing_refresh_token"
   | "refresh_failed"
   | "usage_fetch_failed"
-  | "usage_unauthorized";
+  | "usage_unauthorized"
+  | "disabled";
 
 export interface SubscriptionUsageStatus {
   state: SubscriptionUsageState;

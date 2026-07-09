@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -88,6 +88,35 @@ test("getFrontierUsage includes Codex subscription windows when available", asyn
   assert.equal(u.codexSubscription?.sevenDay?.utilization, 34);
 
   _setCodexUsageReaderForTests(() => null);
+});
+
+test("getFrontierUsage skips subscription reads for disabled providers", async () => {
+  let subscriptionReaderCalled = false;
+  let codexReaderCalled = false;
+  _setSubscriptionReaderForTests(async () => {
+    subscriptionReaderCalled = true;
+    return { usage: null, status: { state: "ok", message: "should not be called" } };
+  });
+  _setCodexUsageReaderForTests(() => {
+    codexReaderCalled = true;
+    return null;
+  });
+
+  mkdirSync(join(TMP, ".hivematrix"), { recursive: true });
+  writeFileSync(join(TMP, ".hivematrix", "config.json"), JSON.stringify({
+    providers: { claude: { enabled: false }, codex: { enabled: false } },
+  }));
+
+  try {
+    const u = await getFrontierUsage();
+    assert.equal(subscriptionReaderCalled, false, "Claude subscription reader skipped when disabled");
+    assert.equal(codexReaderCalled, false, "Codex usage reader skipped when disabled");
+    assert.equal(u.subscriptionStatus.state, "disabled");
+    assert.equal(u.subscription, null);
+    assert.equal(u.codexSubscription, null);
+  } finally {
+    rmSync(join(TMP, ".hivematrix", "config.json"), { force: true });
+  }
 });
 
 test("getFrontierUsage can bypass the Claude subscription cache", async () => {

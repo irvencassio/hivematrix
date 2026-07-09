@@ -716,7 +716,7 @@ test("models panel has a manual refresh that bypasses cached auth state", () => 
 test("frontier usage panel exposes Claude auth login action", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /function runClaudeAuthLogin/);
-  assert.match(js, /\/claude\/auth\/login/);
+  assert.match(js, /\/providers\/claude\/setup/);
   assert.match(js, /claudeAuthLogin/);
   assert.match(js, /Run Claude login/);
 });

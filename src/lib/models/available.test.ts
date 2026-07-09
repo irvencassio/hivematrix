@@ -6,9 +6,9 @@ import type { BackendStatus } from "./backends";
 
 function backends(local: boolean, claude: boolean, codex: boolean): BackendStatus[] {
   return [
-    { id: "local", name: "Local", configured: local, detail: "", modelId: local ? "qwen/qwen3.6-27b" : undefined },
-    { id: "claude", name: "Claude Code", configured: claude, detail: "" },
-    { id: "codex", name: "Codex", configured: codex, detail: "" },
+    { id: "local", name: "Local", configured: local, installed: local, enabled: true, detail: "", modelId: local ? "qwen/qwen3.6-27b" : undefined },
+    { id: "claude", name: "Claude Code", configured: claude, installed: claude, enabled: claude, detail: "" },
+    { id: "codex", name: "Codex", configured: codex, installed: codex, enabled: codex, detail: "" },
   ];
 }
 // Selectable (non-disabled) model ids — greyed "set up X" placeholders are
@@ -27,9 +27,9 @@ test("local models are deduped by family — the same base model is never offere
   // same family and must NOT appear as a second Qwen-35B entry. The 27b coding tier
   // is a different family and stays.
   const backs = [
-    { id: "local" as const, name: "Local", configured: true, detail: "", modelId: "qwen3.6-35b-4bit" },
-    { id: "claude" as const, name: "Claude Code", configured: false, detail: "" },
-    { id: "codex" as const, name: "Codex", configured: false, detail: "" },
+    { id: "local" as const, name: "Local", configured: true, installed: true, enabled: true, detail: "", modelId: "qwen3.6-35b-4bit" },
+    { id: "claude" as const, name: "Claude Code", configured: false, installed: false, enabled: false, detail: "" },
+    { id: "codex" as const, name: "Codex", configured: false, installed: false, enabled: false, detail: "" },
   ];
   const localIds = buildAvailableModels(backs).filter((m) => m.backend === "local").map((m) => m.id);
   assert.deepEqual(localIds, ["local", "local-coding"]);

@@ -16,10 +16,18 @@ const { resolveModelId } = await import("./model-resolver");
 test.after(() => rmSync(TMP, { recursive: true, force: true }));
 
 function frontierBackends(claude: boolean, codex: boolean) {
+  return frontierBackendsQuadrant({ claudeInstalled: claude, claudeEnabled: claude, codexInstalled: codex, codexEnabled: codex });
+}
+
+// installed/enabled are independent axes since Phase 2's redefinition
+// (configured = installed && enabled) — exercise all four quadrants per provider.
+function frontierBackendsQuadrant(opts: {
+  claudeInstalled: boolean; claudeEnabled: boolean; codexInstalled: boolean; codexEnabled: boolean;
+}) {
   return [
-    { id: "local" as const, name: "Local", configured: false, detail: "" },
-    { id: "claude" as const, name: "Claude Code", configured: claude, detail: "" },
-    { id: "codex" as const, name: "Codex", configured: codex, detail: "" },
+    { id: "local" as const, name: "Local", configured: false, installed: false, enabled: true, detail: "" },
+    { id: "claude" as const, name: "Claude Code", configured: opts.claudeInstalled && opts.claudeEnabled, installed: opts.claudeInstalled, enabled: opts.claudeEnabled, detail: "" },
+    { id: "codex" as const, name: "Codex", configured: opts.codexInstalled && opts.codexEnabled, installed: opts.codexInstalled, enabled: opts.codexEnabled, detail: "" },
   ];
 }
 
@@ -53,6 +61,37 @@ test("frontier defaults return null when no frontier backend is configured", () 
   writeCfg({ frontierProvider: "codex" });
   assert.equal(resolveModelId("frontier-premium", { frontierBackends: frontierBackends(false, false) }), null);
   assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(false, false) }), null);
+});
+
+test("both enabled: primary provider wins, honoring frontierProvider among enabled providers", () => {
+  writeCfg({ frontierProvider: "claude" });
+  const both = frontierBackendsQuadrant({ claudeInstalled: true, claudeEnabled: true, codexInstalled: true, codexEnabled: true });
+  assert.equal(resolveModelId("frontier-premium", { frontierBackends: both }), "opus");
+  writeCfg({ frontierProvider: "codex" });
+  assert.equal(resolveModelId("frontier-premium", { frontierBackends: both }), "codex:gpt-5.5");
+});
+
+test("one enabled: that provider is forced regardless of frontierProvider", () => {
+  writeCfg({ frontierProvider: "codex" }); // primary points at codex, but codex is disabled
+  const claudeOnly = frontierBackendsQuadrant({ claudeInstalled: true, claudeEnabled: true, codexInstalled: true, codexEnabled: false });
+  assert.equal(resolveModelId("frontier", { frontierBackends: claudeOnly }), "sonnet", "codex installed-but-disabled must not win");
+
+  writeCfg({ frontierProvider: "claude" }); // primary points at claude, but claude is disabled
+  const codexOnly = frontierBackendsQuadrant({ claudeInstalled: true, claudeEnabled: false, codexInstalled: true, codexEnabled: true });
+  assert.equal(resolveModelId("frontier", { frontierBackends: codexOnly }), "codex:gpt-5.3-codex-spark", "claude installed-but-disabled must not win");
+});
+
+test("enabled but not yet installed does not count as available — resolves to null (routes to local)", () => {
+  const midSetup = frontierBackendsQuadrant({ claudeInstalled: false, claudeEnabled: true, codexInstalled: false, codexEnabled: false });
+  writeCfg({ frontierProvider: "claude" });
+  assert.equal(resolveModelId("frontier", { frontierBackends: midSetup }), null);
+});
+
+test("both off (both installed but disabled): resolves to null without an explicit local-only mode", () => {
+  const bothOff = frontierBackendsQuadrant({ claudeInstalled: true, claudeEnabled: false, codexInstalled: true, codexEnabled: false });
+  writeCfg({ frontierProvider: "claude" });
+  assert.equal(resolveModelId("frontier-premium", { frontierBackends: bothOff }), null);
+  assert.equal(resolveModelId("frontier", { frontierBackends: bothOff }), null);
 });
 
 test("role model overrides win even when frontier provider is Codex", () => {

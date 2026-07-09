@@ -2,14 +2,37 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ConnectivityPolicy } from "./policy";
 
-function freshPolicy() {
-  return new ConnectivityPolicy();
+function freshPolicy(hasEnabledFrontierProvider: () => boolean = () => true) {
+  return new ConnectivityPolicy({ hasEnabledFrontierProvider });
 }
 
 test("defaults to cloud-ok", () => {
   const p = freshPolicy();
   assert.equal(p.mode, "cloud-ok");
   assert.equal(p.canUseCloud(), true);
+});
+
+test("no frontier provider enabled degrades to local-only, same branch as usage exhaustion", () => {
+  const p = freshPolicy(() => false);
+  assert.equal(p.mode, "local-only");
+  assert.equal(p.canUseCloud(), false);
+  assert.equal(p.resolveModelTier("think"), "local-primary");
+  assert.equal(p.resolveModelTier("code-critical"), "local-primary");
+});
+
+test("an explicit manual cloud-ok override wins even with no frontier provider enabled (not silently overwritten)", () => {
+  const p = freshPolicy(() => false);
+  p.setManualOverride("cloud-ok", "operator forced cloud-ok");
+  assert.equal(p.mode, "cloud-ok");
+  assert.equal(p.canUseCloud(), true);
+});
+
+test("re-enabling a frontier provider recovers cloud-ok (no other state changed)", () => {
+  let enabled = false;
+  const p = freshPolicy(() => enabled);
+  assert.equal(p.mode, "local-only");
+  enabled = true;
+  assert.equal(p.mode, "cloud-ok");
 });
 
 test("coo_router (COO routing) is available in every mode — routing is local work", () => {

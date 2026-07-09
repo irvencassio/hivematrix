@@ -14,8 +14,9 @@ import type { Dirent } from "fs";
 import { join, relative, sep } from "path";
 import { homedir } from "os";
 import { getActiveProfile } from "@/lib/config/constants";
+import { getEnabledProviders } from "@/lib/config/frontier-providers";
 import {
-  parseCommandFile, parseSkillManifest, skillIsUserInvocable, skillManifestBody,
+  parseCommandFile, parseSkillManifest, skillIsUserInvocable, skillManifestBody, commandEnabledByProviders,
   type LocalCommand,
 } from "./contracts";
 
@@ -100,8 +101,11 @@ export async function scanLocalCommands(profile?: string): Promise<LocalCommand[
   const out: LocalCommand[] = [];
   await walkCommands(join(configDir, "commands"), out);
   await scanSkills(join(configDir, "skills"), out);
-  return out.sort((a, b) =>
-    a.kind === b.kind ? a.invokeName.localeCompare(b.invokeName) : a.kind === "command" ? -1 : 1);
+  const enabledProviders = getEnabledProviders();
+  return out
+    .filter((c) => commandEnabledByProviders(c.compat, enabledProviders))
+    .sort((a, b) =>
+      a.kind === b.kind ? a.invokeName.localeCompare(b.invokeName) : a.kind === "command" ? -1 : 1);
 }
 
 /** Read a SKILL.md and return its body (sans frontmatter) for bulk-import. */

@@ -32,7 +32,7 @@ writeFileSync(
 );
 
 const { scanLocalCommands, readManifestBody } = await import("./local-catalog");
-const { parseCommandFile, parseSkillManifest, splitFrontmatter } = await import("./contracts");
+const { parseCommandFile, parseSkillManifest, splitFrontmatter, commandEnabledByProviders } = await import("./contracts");
 
 test.after(() => { process.env.HOME = origHome; rmSync(TMP, { recursive: true, force: true }); });
 
@@ -127,4 +127,26 @@ test("readManifestBody strips frontmatter, keeps the body", async () => {
 test("readManifestBody → null for a missing file", async () => {
   const body = await readManifestBody(join(CFG, "skills", "nope", "SKILL.md"));
   assert.equal(body, null);
+});
+
+test("commandEnabledByProviders: qwen/all/[] always eligible; single-provider gated by enablement", () => {
+  assert.equal(commandEnabledByProviders([], []), true);
+  assert.equal(commandEnabledByProviders(["all"], []), true);
+  assert.equal(commandEnabledByProviders(["qwen"], []), true);
+  assert.equal(commandEnabledByProviders(["claude"], ["codex"]), false);
+  assert.equal(commandEnabledByProviders(["claude"], ["claude"]), true);
+});
+
+test("scanLocalCommands hides the claude-only 'import-all' command when Claude is disabled in config", async () => {
+  mkdirSync(join(HOME, ".hivematrix"), { recursive: true });
+  writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({
+    providers: { claude: { enabled: false }, codex: { enabled: false } },
+  }));
+  try {
+    const all = await scanLocalCommands();
+    assert.ok(!all.some((c) => c.invokeName === "import-all"), "claude-only command hidden while claude is disabled");
+    assert.ok(all.some((c) => c.invokeName === "ns:sub"), "no-frontmatter (all) command still shown");
+  } finally {
+    rmSync(join(HOME, ".hivematrix"), { recursive: true, force: true });
+  }
 });
