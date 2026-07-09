@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.158 — 2026-07-09
+
+Fix: expand '~' projectPath (Inbox project) before task creation, preventing an ENOENT on task spawn
+
 ## v0.1.157 — 2026-07-09
 
 Add release-hivematrix skill wrapping canonical developer-id-release.sh
