@@ -1,5 +1,10 @@
 # Skills And Commands Sharing Implementation Plan
 
+> ⚠️ **SUPERSEDED 2026-07-06 — DeepSeek/ds4 removed; the local stack is Qwen-only.**
+> Retained as a historical record. See
+> docs/superpowers/plans/2026-07-06-qwen-only-local-presets.md
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 Design: `docs/superpowers/specs/2026-07-05-skills-commands-sharing-design.md`

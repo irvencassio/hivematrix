@@ -1218,3 +1218,12 @@ subtasks with full code context. Wired at `POST /tasks` (broad auto prompt → `
 and in Flash's `escalate_to_task` tool (formerly `escalate_to_work_package`, now creates a
 `workflow:"work"` task). Breadth detection survives as `src/lib/intake/breadth.ts`
 (`isBroadPrompt`). Scope-wall now forbids the Flights / Work-Package brand from returning.
+
+## Note (2026-07-08) — DeepSeek/ds4 removal: documentation pointer
+
+DeepSeek V4 Flash ("ds4" / DwarfStar) was removed in full on 2026-07-06 (see
+`docs/superpowers/plans/2026-07-06-qwen-only-local-presets.md`). The local model
+stack is now Qwen-only (Qwen3.6-35B-A3B via Rapid-MLX). Earlier entries in this
+log that reference DeepSeek/ds4/DwarfStar as the current or primary local model
+(e.g. Q2, the BUILD entries around 2026-07-04) are historical decisions kept
+for record — they predate the removal and no longer reflect the live stack.

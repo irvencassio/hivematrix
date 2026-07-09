@@ -1,5 +1,10 @@
 # DeepSeek Python Game Reliability Implementation Plan
 
+> ⚠️ **SUPERSEDED 2026-07-06 — DeepSeek/ds4 removed; the local stack is Qwen-only.**
+> Retained as a historical record. See
+> docs/superpowers/plans/2026-07-06-qwen-only-local-presets.md
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 - [x] Add a failing test in `src/lib/orchestrator/generic-agent.test.ts` asserting the local developer system prompt includes DeepSeek/DwarfStar agent posture, Python game dependency guidance, and final-verification wording.

@@ -1,5 +1,10 @@
 # model-bench
 
+> ⚠️ **SUPERSEDED 2026-07-06 — DeepSeek/ds4 removed; the local stack is Qwen-only.**
+> Retained as a historical record. See
+> docs/superpowers/plans/2026-07-06-qwen-only-local-presets.md
+
+
 Head-to-head coding/agentic benchmark for local OpenAI-compatible models.
 Built during the 2026-07-04 bake-off that standardized HiveMatrix on
 DeepSeek V4 Flash q2-q4 (ds4) with Qwen3.6-35B-A3B (rapid-mlx) as the

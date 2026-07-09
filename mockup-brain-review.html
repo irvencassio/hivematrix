@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Brain / Memory Review — Mockup</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel-2: #1c2230; --border: #2d333b;
+    --text: #e6edf3; --muted: #8b949e; --accent: #d9a441; --accent-2: #58a6ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149;
+    --code-bg: #0a0d12; --badge-bg: #21262d;
+    --hover-bg: rgba(255,255,255,.06);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    overflow-x: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  header .logo { font-weight: 700; color: var(--accent); letter-spacing: .5px; font-size: 14px; }
+  header .crumb { color: var(--muted); font-size: 12px; }
+  header .crumb b { color: var(--text); font-weight: 600; }
+  header .spacer { flex: 1; }
+  header .hint { color: var(--muted); font-size: 11px; }
+
+  .shell {
+    display: grid;
+    grid-template-columns: 200px 1fr 1fr;
+    height: calc(100vh - 41px);
+    min-height: 0;
+  }
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: 1fr; height: auto; }
+  }
+
+  .col { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .col:last-child { border-right: none; }
+  .col-head {
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+  }
+  .col-body { overflow-y: auto; flex: 1; min-height: 0; }
+
+  /* ── LEFT: project picker ───────────────────────── */
+  .proj-row {
+    padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .proj-row:hover { background: var(--hover-bg); }
+  .proj-row.active { background: rgba(217,164,65,.1); border-left: 2px solid var(--accent); }
+  .proj-row .name { font-weight: 600; }
+  .proj-row.active .name { color: var(--accent); }
+  .proj-row .count {
+    font-size: 10.5px; color: var(--muted); background: var(--badge-bg);
+    border-radius: 9px; padding: 1px 7px;
+  }
+
+  /* ── CENTER: doc tree ───────────────────────────── */
+  .toolbar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
+  }
+  .toolbar button {
+    font: inherit; font-size: 11.5px; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; cursor: pointer;
+  }
+  .toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+  .toolbar button:disabled { opacity: .4; cursor: not-allowed; }
+  .toolbar button:disabled:hover { border-color: var(--border); color: var(--text); }
+  .toolbar .sel-count { font-size: 11px; color: var(--muted); margin-right: auto; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 10px; padding: 8px 14px;
+    border-bottom: 1px solid var(--border); font-size: 10.5px; color: var(--muted); flex-shrink: 0;
+    background: var(--panel);
+  }
+  .legend span { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+
+  .doc-row {
+    display: flex; align-items: center; gap: 9px; padding: 8px 12px;
+    border-bottom: 1px solid var(--border); cursor: pointer;
+  }
+  .doc-row:hover { background: var(--hover-bg); }
+  .doc-row.selected-file { background: rgba(88,166,255,.08); }
+  .doc-row.archived { opacity: .38; }
+  .doc-row.archived .fname { text-decoration: line-through; }
+  .doc-row input[type="checkbox"] { flex-shrink: 0; cursor: pointer; }
+  .doc-row .badge {
+    flex-shrink: 0; font-size: 13px; width: 20px; text-align: center;
+  }
+  .doc-row .meta-col { flex: 1; min-width: 0; }
+  .doc-row .fname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .doc-row.main-brief .fname { color: var(--accent); }
+  .doc-row .sub { font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+  .doc-row .status-tag {
+    flex-shrink: 0; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 4px; background: var(--badge-bg); color: var(--muted);
+  }
+  .doc-row.tag-brief .status-tag { background: rgba(217,164,65,.15); color: var(--accent); }
+  .doc-row.tag-ctx .status-tag { background: rgba(63,185,80,.15); color: var(--ok); }
+  .doc-row.tag-indexed .status-tag { background: rgba(88,166,255,.15); color: var(--accent-2); }
+  .doc-row.tag-orphan .status-tag { background: var(--badge-bg); color: var(--muted); }
+  .doc-row.tag-stale .status-tag { background: rgba(210,153,34,.15); color: var(--warn); }
+  .doc-row.tag-excluded .status-tag { background: rgba(248,81,73,.12); color: var(--err); }
+
+  .archived-divider {
+    padding: 8px 12px; font-size: 10.5px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .06em; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+
+  /* ── RIGHT: render pane ─────────────────────────── */
+  .render-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .render-title { font-weight: 700; font-size: 13px; }
+  .render-title .path { color: var(--muted); font-weight: 400; font-size: 11px; }
+  .toggle-group { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .toggle-group button {
+    font: inherit; font-size: 11px; background: var(--panel); color: var(--muted);
+    border: none; padding: 4px 12px; cursor: pointer;
+  }
+  .toggle-group button.active { background: var(--accent); color: #1a1205; font-weight: 700; }
+
+  .render-body { flex: 1; overflow-y: auto; padding: 18px 22px; }
+  .render-body.raw { font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; color: var(--muted); }
+  .render-body h1 { font-size: 20px; margin: 0 0 10px; color: var(--text); }
+  .render-body h2 { font-size: 15px; margin: 20px 0 8px; color: var(--accent); border-top: 1px solid var(--border); padding-top: 14px; }
+  .render-body h2:first-of-type { border-top: none; padding-top: 0; }
+  .render-body p { margin: 8px 0; color: var(--text); }
+  .render-body ul { margin: 6px 0; padding-left: 20px; }
+  .render-body li { margin: 4px 0; }
+  .render-body code { background: var(--code-bg); border-radius: 4px; padding: 1px 5px; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .render-body strong { color: var(--accent); }
+  .empty-state { color: var(--muted); text-align: center; padding: 60px 20px; font-size: 12.5px; }
+
+  /* ── confirm modal ──────────────────────────────── */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none;
+    align-items: center; justify-content: center; z-index: 50;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 20px; width: 340px; box-shadow: 0 8px 30px rgba(0,0,0,.4);
+  }
+  .modal h3 { margin: 0 0 8px; font-size: 14px; }
+  .modal p { margin: 0 0 16px; color: var(--muted); font-size: 12px; }
+  .modal .row { display: flex; gap: 8px; justify-content: flex-end; }
+  .modal button {
+    font: inherit; font-size: 12px; border-radius: 6px; padding: 6px 14px; cursor: pointer;
+  }
+  .modal .cancel { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  .modal .confirm { background: var(--err); color: #fff; border: none; font-weight: 700; }
+
+  .toast {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--panel-2); border: 1px solid var(--ok); color: var(--ok);
+    padding: 8px 16px; border-radius: 8px; font-size: 12px; opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s; z-index: 60;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">HiveMatrix</div>
+  <div class="crumb">Console &rsaquo; <b>Brain / Memory Review</b></div>
+  <div class="spacer"></div>
+  <div class="hint">Mockup — no backend wired</div>
+</header>
+
+<div class="shell">
+
+  <!-- LEFT: project picker -->
+  <div class="col">
+    <div class="col-head">Projects</div>
+    <div class="col-body" id="projectList"></div>
+  </div>
+
+  <!-- CENTER: doc tree -->
+  <div class="col">
+    <div class="col-head">
+      <span id="centerTitle">hive — documents</span>
+    </div>
+    <div class="legend">
+      <span>⭐ Main brief</span>
+      <span>🟢 In task ctx</span>
+      <span>🔵 Indexed only</span>
+      <span>⚪ Orphaned</span>
+      <span>🟠 Stale</span>
+    </div>
+    <div class="toolbar">
+      <span class="sel-count" id="selCount">0 selected</span>
+      <button id="btnArchive" disabled>Archive selected</button>
+      <button id="btnExclude" disabled>Exclude from context</button>
+    </div>
+    <div class="col-body" id="docList"></div>
+  </div>
+
+  <!-- RIGHT: render pane -->
+  <div class="col">
+    <div class="render-head">
+      <div>
+        <div class="render-title" id="renderTitle">Select a document</div>
+        <div class="path" id="renderPath"></div>
+      </div>
+      <div class="toggle-group">
+        <button id="btnRendered" class="active">Rendered</button>
+        <button id="btnRaw">Raw</button>
+      </div>
+    </div>
+    <div class="render-body" id="renderBody">
+      <div class="empty-state">Click a document on the left to preview it here.</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h3>Archive selected documents?</h3>
+    <p id="modalText">This moves the selected files out of active context. They stay on disk under an archived state and can be restored later.</p>
+    <div class="row">
+      <button class="cancel" id="modalCancel">Cancel</button>
+      <button class="confirm" id="modalConfirm">Archive</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const PROJECTS = {
+  "hive": {
+    label: "hive",
+    docs: [
+      { file: "agent-brief.md", status: "brief", badge: "⭐", modified: "2026-07-08", size: "2.1 KB",
+        note: "The single doc loaded into EVERY task for this project.",
+        md: `# Hive — Agent Brief
+
+## What this project is
+HiveMatrix's own core daemon + console. This is the **canonical** project — its
+agent-brief is the only one loaded with full content into every spawned task.
+
+## Current focus
+- Terminal Lane command policy + rolling audit log (shipped 0.1.156)
+- Local engine runtime repair, keychain/readiness hardening
+
+## Stack
+- Local model: **Qwen3.6-35B-A3B** via rapid-mlx (\`:8000\`) — Qwen-only since 2026-07-06
+- Frontier: Claude primary, Codex as quota overflow
+- Storage: SQLite + brain markdown tree under \`<brainRoot>/projects/\`
+
+## Watch out for
+- The brain index fan-out (\`buildBrainIndexBlock\`) does an N+1 \`readdir\` per task —
+  known perf issue, fix planned.
+- \`current-state.md\` and \`decisions.md\` are scaffolded but **not** loaded into the
+  runtime context bundle — only this file and \`known-issues.md\` are.`
+      },
+      { file: "known-issues.md", status: "ctx", badge: "🟢", modified: "2026-07-07", size: "1.4 KB",
+        note: "Loaded into every task's prompt alongside the brief.",
+        md: `# Known Issues
+
+- Brain index fan-out is N+1 readdir per task spawn (up to 13 listings, 3s
+  timeout each) — see perf note in agent-brief.
+- COO dispatch bridge is standalone; not wired into automatic task creation.
+- Memory Lane and Review Lane COO routes are explicit \`unsupported\` stubs.`
+      },
+      { file: "current-state.md", status: "stale", badge: "🟠", modified: "2026-06-30", size: "0.9 KB",
+        note: "Created by the scaffold as the 'living' doc — but nothing currently reads it.",
+        tooltip: "created but not loaded — the 'living' doc nothing currently reads",
+        md: `# Current State
+
+*(scaffolded 2026-06-30, last hand-edited same day)*
+
+This file was intended to be the continually-updated background doc, but the
+task-context loader only reads \`agent-brief.md\` + \`known-issues.md\`. Nothing
+writes here automatically and nothing reads it at task time — it is effectively
+orphaned functionality.`
+      },
+      { file: "decisions.md", status: "indexed", badge: "🔵", modified: "2026-07-02", size: "3.6 KB",
+        note: "Reachable via brain_search, not auto-loaded into task prompts.",
+        md: `# Decisions Log
+
+- 2026-07-06: Local stack goes Qwen-only, DeepSeek/ds4 removed entirely.
+- 2026-07-04: Escalation ladder ships — local agent model → local coding
+  specialist → frontier.
+- 2026-06-25: COO routing-rules + dispatch bridge introduced as a standalone
+  surface (not wired into automatic task creation).`
+      },
+      { file: "lanes/terminal.md", status: "indexed", badge: "🔵", modified: "2026-07-07", size: "2.8 KB",
+        note: "Lane playbook — search-reachable only.",
+        md: `# Terminal Lane Playbook
+
+Command policy allowlist/denylist, rolling audit log, prompt-injection markers
+stripped at first occurrence so a typed marker can't hide a real command.`
+      },
+      { file: "old-model-notes.md", status: "stale", badge: "🟠", modified: "2026-06-20", size: "1.1 KB",
+        note: "Flagged stale — mentions a removed feature.",
+        tooltip: "auto-flagged: mentions 'DeepSeek', which was removed 2026-07-06",
+        md: `# Old Model Notes
+
+*(auto-flagged stale — mentions a removed feature)*
+
+DeepSeek V4 Flash q2-q4 chosen as primary local model, ties Qwen3.6-35B on
+correctness... **⚠ This model was removed from HiveMatrix on 2026-07-06. This
+file was never updated.**`
+      },
+      { file: "scratch.md", status: "orphan", badge: "⚪", modified: "2026-05-11", size: "0.3 KB",
+        note: "On disk, read by nothing — not indexed, not loaded, not searched.",
+        md: `# scratch
+
+todo: figure out why the mobile pairing QR sometimes renders blank
+(fixed in 0.1.130, this note was never deleted)`
+      }
+    ]
+  },
+  "solo-founder-os": {
+    label: "solo-founder-os",
+    docs: [
+      { file: "agent-brief.md", status: "brief", badge: "⭐", modified: "2026-07-04", size: "1.8 KB", note: "Main brief for this project.",
+        md: `# Solo Founder OS — Agent Brief
+
+Strategy doc v1.4 + 2026-07-04 brutal review. Pending: HiveMatrix
+tooling-vs-product decision, employer-conflict review, annuity license by Aug.` },
+      { file: "strategy-v1.4.md", status: "indexed", badge: "🔵", modified: "2026-07-04", size: "5.2 KB", note: "Search-reachable only.",
+        md: `# Strategy v1.4\n\nFull strategy document — indexed, not auto-loaded.` },
+      { file: "brutal-review.md", status: "ctx", badge: "🟢", modified: "2026-07-04", size: "2.0 KB", note: "Loaded into task context.",
+        md: `# Brutal Review — 2026-07-04\n\nKey risks and open decisions.` },
+      { file: "old-pricing-draft.md", status: "orphan", badge: "⚪", modified: "2026-05-02", size: "0.7 KB", note: "Orphaned — read by nothing.",
+        md: `# Old Pricing Draft\n\nSuperseded, never deleted.` }
+    ]
+  },
+  "remote-access": {
+    label: "remote-access",
+    docs: [
+      { file: "agent-brief.md", status: "brief", badge: "⭐", modified: "2026-07-01", size: "1.2 KB", note: "Main brief for this project.",
+        md: `# Remote Access — Agent Brief\n\nMobile access via Cloudflare hivey.cassio.io + Tailscale serve.` },
+      { file: "cloudflare-setup.md", status: "indexed", badge: "🔵", modified: "2026-07-01", size: "1.9 KB", note: "Search-reachable only.",
+        md: `# Cloudflare Setup\n\nService-token 403 fix documented here.` }
+    ]
+  },
+  "voice-video": {
+    label: "voice-video-simplification",
+    docs: [
+      { file: "agent-brief.md", status: "brief", badge: "⭐", modified: "2026-07-05", size: "1.0 KB", note: "Main brief for this project.",
+        md: `# Voice/Video — Agent Brief\n\nVideo factory/HeyGen removed; TTS is Kokoro-only.` },
+      { file: "known-issues.md", status: "ctx", badge: "🟢", modified: "2026-07-05", size: "0.6 KB", note: "Loaded into task context.",
+        md: `# Known Issues\n\nNone open as of 2026-07-05.` },
+      { file: "heygen-removal-notes.md", status: "stale", badge: "🟠", modified: "2026-06-28", size: "1.3 KB", note: "Flagged stale.", tooltip: "auto-flagged: describes a removed feature",
+        md: `# HeyGen Removal Notes\n\n*(historical — feature already removed)*` }
+    ]
+  }
+};
+
+const STATUS_CLASS = { brief: "tag-brief", ctx: "tag-ctx", indexed: "tag-indexed", orphan: "tag-orphan", stale: "tag-stale" };
+const STATUS_LABEL = { brief: "Main brief", ctx: "In task ctx", indexed: "Indexed only", orphan: "Orphaned", stale: "Stale" };
+
+let currentProject = "hive";
+let currentDoc = null;
+let selected = new Set();
+let archived = new Set();
+let excluded = new Set();
+let viewMode = "rendered";
+let pendingAction = null;
+
+function tinyMarkdown(md) {
+  const lines = md.split("\n");
+  let html = "";
+  let inList = false;
+  for (let line of lines) {
+    if (/^# (.*)/.test(line)) { if (inList) { html += "</ul>"; inList = false; } html += `<h1>${line.replace(/^# /, "")}</h1>`; continue; }
+    if (/^## (.*)/.test(line)) { if (inList) { html += "</ul>"; inList = false; } html += `<h2>${line.replace(/^## /, "")}</h2>`; continue; }
+    if (/^- (.*)/.test(line)) {
+      if (!inList) { html += "<ul>"; inList = true; }
+      html += `<li>${inlineMd(line.replace(/^- /, ""))}</li>`;
+      continue;
+    }
+    if (inList) { html += "</ul>"; inList = false; }
+    if (line.trim() === "") continue;
+    html += `<p>${inlineMd(line)}</p>`;
+  }
+  if (inList) html += "</ul>";
+  return html;
+}
+function inlineMd(s) {
+  return s
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`(.*?)`/g, "<code>$1</code>");
+}
+
+function docKey(project, file) { return project + "::" + file; }
+
+function renderProjects() {
+  const el = document.getElementById("projectList");
+  el.innerHTML = "";
+  Object.entries(PROJECTS).forEach(([key, p]) => {
+    const row = document.createElement("div");
+    row.className = "proj-row" + (key === currentProject ? " active" : "");
+    row.innerHTML = `<span class="name">${p.label}</span><span class="count">${p.docs.length}</span>`;
+    row.onclick = () => { currentProject = key; currentDoc = null; selected.clear(); renderAll(); };
+    el.appendChild(row);
+  });
+}
+
+function renderDocs() {
+  document.getElementById("centerTitle").textContent = PROJECTS[currentProject].label + " — documents";
+  const el = document.getElementById("docList");
+  el.innerHTML = "";
+  const docs = PROJECTS[currentProject].docs;
+  const active = docs.filter(d => !archived.has(docKey(currentProject, d.file)));
+  const archivedDocs = docs.filter(d => archived.has(docKey(currentProject, d.file)));
+
+  active.forEach(d => el.appendChild(buildDocRow(d)));
+
+  if (archivedDocs.length) {
+    const div = document.createElement("div");
+    div.className = "archived-divider";
+    div.textContent = `Archived (${archivedDocs.length})`;
+    el.appendChild(div);
+    archivedDocs.forEach(d => el.appendChild(buildDocRow(d)));
+  }
+
+  updateToolbar();
+}
+
+function buildDocRow(d) {
+  const key = docKey(currentProject, d.file);
+  const isArchived = archived.has(key);
+  const isExcluded = excluded.has(key);
+  const row = document.createElement("div");
+  let cls = "doc-row " + STATUS_CLASS[d.status];
+  if (d.status === "brief") cls += " main-brief";
+  if (isArchived) cls += " archived";
+  if (isExcluded) cls += " tag-excluded";
+  if (currentDoc === d.file) cls += " selected-file";
+  row.className = cls;
+  row.title = d.tooltip || d.note || "";
+
+  const statusLabel = isExcluded ? "Excluded" : STATUS_LABEL[d.status];
+
+  row.innerHTML = `
+    <input type="checkbox" data-file="${d.file}" ${selected.has(key) ? "checked" : ""} ${isArchived ? "disabled" : ""}/>
+    <span class="badge">${d.badge}</span>
+    <span class="meta-col">
+      <div class="fname">${d.file}</div>
+      <div class="sub">${d.modified} · ${d.size}</div>
+    </span>
+    <span class="status-tag">${statusLabel}</span>
+  `;
+
+  row.querySelector("input").onclick = (e) => {
+    e.stopPropagation();
+    if (e.target.checked) selected.add(key); else selected.delete(key);
+    updateToolbar();
+    renderDocs();
+  };
+  row.onclick = () => { currentDoc = d.file; renderPane(d); renderDocs(); };
+  return row;
+}
+
+function updateToolbar() {
+  const n = selected.size;
+  document.getElementById("selCount").textContent = n + " selected";
+  document.getElementById("btnArchive").disabled = n === 0;
+  document.getElementById("btnExclude").disabled = n === 0;
+}
+
+function renderPane(d) {
+  document.getElementById("renderTitle").textContent = d.file;
+  document.getElementById("renderPath").textContent = `projects/${currentProject}/${d.file}`;
+  paintBody(d);
+}
+
+function paintBody(d) {
+  const body = document.getElementById("renderBody");
+  if (viewMode === "raw") {
+    body.className = "render-body raw";
+    body.textContent = d.md;
+  } else {
+    body.className = "render-body";
+    body.innerHTML = tinyMarkdown(d.md);
+  }
+}
+
+function currentDocObj() {
+  return PROJECTS[currentProject].docs.find(x => x.file === currentDoc);
+}
+
+document.getElementById("btnRendered").onclick = () => {
+  viewMode = "rendered";
+  document.getElementById("btnRendered").classList.add("active");
+  document.getElementById("btnRaw").classList.remove("active");
+  const d = currentDocObj(); if (d) paintBody(d);
+};
+document.getElementById("btnRaw").onclick = () => {
+  viewMode = "raw";
+  document.getElementById("btnRaw").classList.add("active");
+  document.getElementById("btnRendered").classList.remove("active");
+  const d = currentDocObj(); if (d) paintBody(d);
+};
+
+document.getElementById("btnArchive").onclick = () => {
+  if (selected.size === 0) return;
+  pendingAction = "archive";
+  document.getElementById("modalText").textContent =
+    `This moves ${selected.size} document${selected.size > 1 ? "s" : ""} out of active context. They stay on disk under an archived state and can be restored later.`;
+  document.querySelector(".modal h3").textContent = "Archive selected documents?";
+  document.getElementById("modalConfirm").textContent = "Archive";
+  document.getElementById("modalOverlay").classList.add("open");
+};
+
+document.getElementById("btnExclude").onclick = () => {
+  selected.forEach(key => excluded.add(key));
+  showToast(`${selected.size} document${selected.size > 1 ? "s" : ""} excluded from context`);
+  selected.clear();
+  renderDocs();
+};
+
+document.getElementById("modalCancel").onclick = () => {
+  document.getElementById("modalOverlay").classList.remove("open");
+  pendingAction = null;
+};
+document.getElementById("modalConfirm").onclick = () => {
+  if (pendingAction === "archive") {
+    selected.forEach(key => archived.add(key));
+    showToast(`${selected.size} document${selected.size > 1 ? "s" : ""} archived`);
+    selected.clear();
+  }
+  document.getElementById("modalOverlay").classList.remove("open");
+  pendingAction = null;
+  renderDocs();
+};
+
+let toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+function renderAll() {
+  renderProjects();
+  renderDocs();
+  if (currentDoc) {
+    const d = currentDocObj();
+    if (d) { renderPane(d); return; }
+  }
+  document.getElementById("renderTitle").textContent = "Select a document";
+  document.getElementById("renderPath").textContent = "";
+  document.getElementById("renderBody").className = "render-body";
+  document.getElementById("renderBody").innerHTML = '<div class="empty-state">Click a document on the left to preview it here.</div>';
+}
+
+renderAll();
+// Default-select the main brief for a nicer first impression.
+const defaultDoc = PROJECTS[currentProject].docs.find(d => d.status === "brief");
+if (defaultDoc) { currentDoc = defaultDoc.file; renderAll(); }
+</script>
+
+</body>
+</html>

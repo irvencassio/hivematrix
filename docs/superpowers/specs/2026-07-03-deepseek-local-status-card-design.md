@@ -1,5 +1,10 @@
 # DeepSeek Local Status Card Design
 
+> ⚠️ **SUPERSEDED 2026-07-06 — DeepSeek/ds4 removed; the local stack is Qwen-only.**
+> Retained as a historical record. See
+> docs/superpowers/plans/2026-07-06-qwen-only-local-presets.md
+
+
 ## Context
 
 The Settings and right-panel Models surfaces already support local backends in the model catalog:

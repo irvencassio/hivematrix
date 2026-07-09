@@ -1,5 +1,10 @@
 # DeepSeek Python Game Reliability Design
 
+> ⚠️ **SUPERSEDED 2026-07-06 — DeepSeek/ds4 removed; the local stack is Qwen-only.**
+> Retained as a historical record. See
+> docs/superpowers/plans/2026-07-06-qwen-only-local-presets.md
+
+
 ## Problem
 
 DeepSeek created a Python snake game with `pygame` on Python 3.14.6. `pygame` installed from source but its font/native module was incomplete, so the task first appeared complete and then got stuck probing `pygame.font` internals.

@@ -14,6 +14,7 @@ export const KNOWN_FEATURES = [
   { key: "ado", label: "Azure DevOps", description: "Register the Azure DevOps MCP server so agents can operate repos, PRs, pipelines, and work items." },
   { key: "voice", label: "Voice Lane", description: "Live voice conversation, phone-answering, and spoken replies in the Kokoro voice. Advanced — runs the local voice sidecar." },
   { key: "openclaw.chatDock", label: "OpenClaw Chat", description: "Show OpenClaw chat as a center-pane workspace in the HiveMatrix console. OpenClaw must be installed and its Gateway must be reachable on this Mac." },
+  { key: "promptWizardAlways", label: "Always enhance new tasks", description: "Run the New Task prompt wizard automatically before every Create — you still review and accept the rewrite. Off by default; you can still enhance manually with the ✨ button." },
 ] as const;
 
 export type FeatureKey = (typeof KNOWN_FEATURES)[number]["key"];

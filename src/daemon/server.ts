@@ -3639,6 +3639,22 @@ export function createDaemonServer() {
         return;
       }
 
+      // Prompt wizard: rewrites a rough New-Task description into a structured prompt via
+      // the local Qwen model. Always 200s — a wizard failure must never block task creation,
+      // so on any internal error this falls back to echoing the original description.
+      if (req.method === "POST" && urlPath === "/tasks/enhance") {
+        const body = await parseBody(req) as Record<string, unknown>;
+        const description = typeof body.description === "string" ? body.description : "";
+        try {
+          const { enhancePrompt } = await import("@/lib/intake/enhance-prompt");
+          const result = await enhancePrompt(description);
+          json(res, 200, result);
+        } catch {
+          json(res, 200, { enhanced: description, rationale: "" });
+        }
+        return;
+      }
+
       if (req.method === "POST" && urlPath === "/tasks") {
         const { Task, generateId } = await import("@/lib/db");
         const { deriveTaskTitle } = await import("@/lib/tasks/derive-title");

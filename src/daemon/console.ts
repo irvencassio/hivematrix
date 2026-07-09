@@ -255,6 +255,18 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     border-radius: 7px; padding: 8px 16px; cursor: pointer; font-size: 13px; }
   .form button.cancel:hover { border-color: var(--text); color: var(--text); }
   .form .err { color: var(--err); font-size: 11px; margin-top: 6px; }
+  .form button.enhance { background: transparent; color: var(--accent); border: 1px solid var(--accent);
+    border-radius: 7px; padding: 8px 14px; cursor: pointer; font-size: 13px; font-weight: 600; }
+  .form button.enhance:hover { background: var(--hover-bg); }
+  .form button.enhance:disabled { opacity: .5; cursor: default; }
+  .t-enhanced-box { border: 1px solid var(--accent); border-radius: 8px; padding: 10px; margin: 0 0 10px; background: var(--hover-bg); }
+  .t-enhanced-box .t-enhanced-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--accent); font-weight: 700; margin-bottom: 6px; }
+  .t-enhanced-box textarea { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px;
+    font-family: inherit; resize: vertical; min-height: 90px; }
+  .t-enhanced-box .t-enhanced-rationale { font-size: 11px; color: var(--muted); margin: 6px 0 8px; }
+  .t-enhanced-box .row { display: flex; gap: 8px; }
   .form select { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
     border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px;
     margin-bottom: 10px; font-family: inherit; cursor: pointer; }
@@ -1651,6 +1663,15 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="form" id="taskForm">
       <input id="t_title" type="hidden" value="" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
+      <div id="t_enhanced_preview" class="t-enhanced-box" style="display:none">
+        <div class="t-enhanced-label">✨ Enhanced prompt</div>
+        <textarea id="t_enhanced_text"></textarea>
+        <div class="t-enhanced-rationale" id="t_enhanced_rationale"></div>
+        <div class="row">
+          <button type="button" class="create" onclick="acceptEnhancedPrompt()">Use this</button>
+          <button type="button" class="cancel" onclick="dismissEnhancedPrompt()">Keep raw</button>
+        </div>
+      </div>
       <div style="margin:-4px 0 8px">
         <button type="button" class="linklike" onclick="toggleTaskSkillPicker()" title="Pick an installed skill or command to use — no need to remember names">＋ Use a skill</button>
       </div>
@@ -1696,7 +1717,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <span class="muted" id="t_attach_hint" style="font-size:11px">Drag files here or browse</span>
       </div>
       <div class="attach-chips" id="t_attach_chips"></div>
-      <div class="row" style="margin-top:12px"><button class="cancel" onclick="cancelForm('taskForm')">Cancel</button><button class="create" onclick="createTask()">Create task</button></div>
+      <div class="row" style="margin-top:12px"><button class="cancel" onclick="cancelForm('taskForm')">Cancel</button><button type="button" class="enhance" id="t_enhance_btn" onclick="enhanceTaskPrompt()">✨ Enhance</button><button class="create" onclick="createTask()">Create task</button></div>
       <div class="err" id="t_err"></div>
     </div>
     <div id="boardSec" class="board-sec">
@@ -1826,6 +1847,9 @@ function requireToken() {
 }
 let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedSkillOrCommand: null, projects: [], selectedProject: "", packCards: [], schedView: 'timeline', tlWindow: 24 };
 let _taskFormInSession = false;
+// Tracks whether the prompt wizard has already run (accepted or dismissed) for the
+// current New Task open, so "Always enhance" only auto-triggers once per open.
+let _promptWizardHandled = false;
 
 function setFlashSessionMode(open) {
   const session = document.getElementById("session");
@@ -5190,6 +5214,7 @@ function showNewTaskPanel() {
   setFlashSessionMode(false);
   _ctxTask = null;
   _taskFormInSession = true;
+  _promptWizardHandled = false;
   renderBoard();
   session.innerHTML = '<div class="new-task-panel"><h2>New task</h2></div>';
   session.querySelector(".new-task-panel").appendChild(form);
@@ -7907,6 +7932,51 @@ async function saveEmbeddingsSettings() {
   hmToast("Embeddings saved", "ok");
 }
 
+// Prompt wizard: sends the raw #t_desc text to the local-model rewrite endpoint and
+// shows the result in an editable preview. Never blocks task creation — on any
+// failure this just toasts and leaves #t_desc untouched.
+async function enhanceTaskPrompt() {
+  const descEl = document.getElementById("t_desc");
+  const raw = descEl.value.trim();
+  if (!raw) { hmToast("Describe the task first.", "err"); return; }
+  const btn = document.getElementById("t_enhance_btn");
+  btn.disabled = true;
+  const prevLabel = btn.textContent;
+  btn.textContent = "Enhancing…";
+  try {
+    const result = await api("/tasks/enhance", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ description: raw }) });
+    const enhanced = (result && typeof result.enhanced === "string" && result.enhanced.trim()) ? result.enhanced : raw;
+    if (enhanced === raw) {
+      hmToast("No changes suggested.", "ok");
+      return;
+    }
+    document.getElementById("t_enhanced_text").value = enhanced;
+    document.getElementById("t_enhanced_rationale").textContent = (result && result.rationale) ? result.rationale : "";
+    document.getElementById("t_enhanced_preview").style.display = "";
+  } catch (e) {
+    hmToast("Could not enhance prompt — using what you typed.", "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prevLabel;
+  }
+}
+function acceptEnhancedPrompt() {
+  const enhanced = document.getElementById("t_enhanced_text").value;
+  document.getElementById("t_desc").value = enhanced;
+  _promptWizardHandled = true;
+  dismissEnhancedPrompt();
+}
+function dismissEnhancedPrompt() {
+  document.getElementById("t_enhanced_preview").style.display = "none";
+  _promptWizardHandled = true;
+}
+// Settings → Features toggle, same lookup pattern as initVoiceFeature().
+async function isPromptWizardAlwaysOn() {
+  try {
+    const r = await api("/settings/features");
+    return ((r && r.features) || []).some(f => f.key === "promptWizardAlways" && f.enabled);
+  } catch (e) { return false; }
+}
 async function createTask() {
   const err = document.getElementById("t_err"); err.textContent = "";
   const title = document.getElementById("t_title").value.trim();
@@ -7918,6 +7988,11 @@ async function createTask() {
   if (!modelValue) { err.textContent = "Please choose a model before creating the task."; return; }
   if (_attachUploading > 0) { err.textContent = "Wait for attachments to finish uploading."; return; }
   if (_attachError) { err.textContent = "Try attaching failed files again before creating the task."; return; }
+  if (!_promptWizardHandled && await isPromptWizardAlwaysOn()) {
+    _promptWizardHandled = true;
+    await enhanceTaskPrompt();
+    return; // Preview shown (or a "no changes" toast) — user confirms, then Create again.
+  }
   const attachments = _attachments.slice();
   const projectPath = selectedProject.path;
   const projectName = selectedProject.name;
@@ -7931,6 +8006,7 @@ async function createTask() {
     const ok = t && (t._id || t.taskId || t.routed);
     if (!ok) { err.textContent = (t && t.error) ? String(t.error) : "Create failed."; return; }
     document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = "";
+    dismissEnhancedPrompt();
     _attachments = []; _attachError = ""; _attachUploading = 0; renderAttachChips();
     if (_taskFormInSession) _closeNewTaskPanel(); else toggleForm("taskForm");
     if (t.routed) {

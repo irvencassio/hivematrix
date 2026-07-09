@@ -1,5 +1,10 @@
 # Developer ID Release — Design
 
+> ⚠️ **SUPERSEDED 2026-07-06 — DeepSeek/ds4 removed; the local stack is Qwen-only.**
+> Retained as a historical record. See
+> docs/superpowers/plans/2026-07-06-qwen-only-local-presets.md
+
+
 > Superpowers brainstorming artifact. Decisions in this doc were approved by the operator on 2026-07-05 (see "Decisions locked").
 
 ## Problem

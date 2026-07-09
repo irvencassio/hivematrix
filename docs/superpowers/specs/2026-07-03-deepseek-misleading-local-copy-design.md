@@ -1,5 +1,10 @@
 # DeepSeek Misleading Local Copy Design
 
+> ⚠️ **SUPERSEDED 2026-07-06 — DeepSeek/ds4 removed; the local stack is Qwen-only.**
+> Retained as a historical record. See
+> docs/superpowers/plans/2026-07-06-qwen-only-local-presets.md
+
+
 ## Context
 
 HiveMatrix can now configure Dwarf Star DeepSeek as the local model, but several UI strings still assume Qwen or Rapid-MLX:

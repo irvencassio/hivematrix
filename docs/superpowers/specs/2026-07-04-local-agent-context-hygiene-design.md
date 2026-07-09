@@ -1,5 +1,10 @@
 # Local Agent Context Hygiene Design
 
+> ⚠️ **SUPERSEDED 2026-07-06 — DeepSeek/ds4 removed; the local stack is Qwen-only.**
+> Retained as a historical record. See
+> docs/superpowers/plans/2026-07-06-qwen-only-local-presets.md
+
+
 ## Problem
 
 The failed Settings Observability task did not fail because the requested code
