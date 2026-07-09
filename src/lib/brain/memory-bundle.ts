@@ -1,6 +1,6 @@
 import { existsSync } from "fs";
 import { promises as fs } from "fs";
-import { join } from "path";
+import { join, relative } from "path";
 import {
   brainDocPolicyText,
   configuredBrainRootDir,
@@ -102,6 +102,18 @@ async function boundedRead(path: string, maxChars: number, mode: ReadMode = "hea
   return mode === "tail" ? content.slice(-maxChars) : content.slice(0, maxChars);
 }
 
+/**
+ * Same as boundedRead, but honors the Brain / Memory Review "exclude from
+ * context" flag (exclusions.ts, §5 of the design spec) — an excluded doc
+ * reads as empty here, exactly as if it were missing, so it drops out of the
+ * bundle without a special case downstream.
+ */
+async function boundedReadUnlessExcluded(path: string, brainRootDir: string, maxChars: number, mode: ReadMode = "head"): Promise<string> {
+  const { isExcluded } = await import("@/lib/brain/exclusions");
+  if (isExcluded(relative(brainRootDir, path))) return "";
+  return boundedRead(path, maxChars, mode);
+}
+
 function section(title: string, body: string): string {
   const trimmed = body.trim();
   if (!trimmed) return "";
@@ -124,19 +136,19 @@ function readLegacyAccessLedger(project: string, brainRootDir: string, maxChars:
   );
 }
 
-async function readLanePlaybook(projectDir: string, id: string, maxChars: number): Promise<string> {
+async function readLanePlaybook(projectDir: string, id: string, maxChars: number, brainRootDir: string): Promise<string> {
   const legacyId = slugify(id);
   const lane = laneSlugForCompatibilityId(id);
-  const primary = await boundedRead(join(projectDir, "lanes", `${lane}.md`), maxChars, "head");
+  const primary = await boundedReadUnlessExcluded(join(projectDir, "lanes", `${lane}.md`), brainRootDir, maxChars, "head");
   if (primary) return primary;
-  return boundedRead(join(projectDir, "bees", `${legacyId}.md`), maxChars, "head");
+  return boundedReadUnlessExcluded(join(projectDir, "bees", `${legacyId}.md`), brainRootDir, maxChars, "head");
 }
 
-async function readDomainPlaybook(projectDir: string, domain: string, maxChars: number): Promise<string> {
+async function readDomainPlaybook(projectDir: string, domain: string, maxChars: number, brainRootDir: string): Promise<string> {
   const slug = slugify(domain);
-  const primary = await boundedRead(join(projectDir, "lanes", "domains", `${slug}.md`), maxChars, "head");
+  const primary = await boundedReadUnlessExcluded(join(projectDir, "lanes", "domains", `${slug}.md`), brainRootDir, maxChars, "head");
   if (primary) return primary;
-  return boundedRead(join(projectDir, "bees", "domains", `${slug}.md`), maxChars, "head");
+  return boundedReadUnlessExcluded(join(projectDir, "bees", "domains", `${slug}.md`), brainRootDir, maxChars, "head");
 }
 
 export async function buildBrainMemoryBundle(options: BrainMemoryBundleOptions = {}): Promise<string> {
@@ -154,18 +166,18 @@ export async function buildBrainMemoryBundle(options: BrainMemoryBundleOptions =
     const bee = options.bee ? slugify(options.bee) : "";
     const domain = options.domain ? slugify(options.domain) : "";
 
-    sections.push(section("Agent Brief", await boundedRead(join(projectDir, "agent-brief.md"), sectionMaxChars, "head")));
-    sections.push(section("Known Issues", await boundedRead(join(projectDir, "known-issues.md"), sectionMaxChars, "head")));
+    sections.push(section("Agent Brief", await boundedReadUnlessExcluded(join(projectDir, "agent-brief.md"), brainRootDir, sectionMaxChars, "head")));
+    sections.push(section("Known Issues", await boundedReadUnlessExcluded(join(projectDir, "known-issues.md"), brainRootDir, sectionMaxChars, "head")));
     if (bee) {
       sections.push(
-        section(`Lane Playbook (${laneSlugForCompatibilityId(bee)})`, await readLanePlaybook(projectDir, bee, sectionMaxChars))
+        section(`Lane Playbook (${laneSlugForCompatibilityId(bee)})`, await readLanePlaybook(projectDir, bee, sectionMaxChars, brainRootDir))
       );
     }
     if (domain) {
       sections.push(
         section(
           `Domain Playbook (${domain})`,
-          await readDomainPlaybook(projectDir, domain, sectionMaxChars)
+          await readDomainPlaybook(projectDir, domain, sectionMaxChars, brainRootDir)
         )
       );
     }
@@ -229,11 +241,13 @@ export async function buildBrainIndexBlock(options: {
   const projects = (await listDirWithTimeout(projectsRoot, { dirsOnly: true })).sort().slice(0, maxProjects);
   if (projects.length === 0) return "";
 
+  const { isExcluded } = await import("@/lib/brain/exclusions");
   const lines: string[] = [];
   for (const proj of projects) {
     // date-prefixed filenames sort newest-last; show the most recent N.
     const docs = (await listDirWithTimeout(join(projectsRoot, proj)))
       .filter((n) => n.endsWith(".md") || n.endsWith(".html"))
+      .filter((n) => !isExcluded(join("projects", proj, n)))
       .sort()
       .slice(-maxDocs)
       .reverse();

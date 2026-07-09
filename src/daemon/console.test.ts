@@ -744,6 +744,98 @@ test("Brain / Memory Review nav opens a three-pane read-only screen wired to the
   assert.match(js, /Main brief.*In task ctx.*Indexed only.*Orphaned.*Stale/s);
 });
 
+test("Brain Review: Exclude from context is a real toolbar action wired to POST /brain/doc/exclude", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /id="brainExcludeBtn"/);
+  assert.match(js, /function toggleBrainDocSelected\(/);
+  assert.match(js, /function runBrainExcludeAction\(/);
+  const body = fnBody(js, "runBrainExcludeAction");
+  assert.match(body, /\/brain\/doc\/exclude/);
+  assert.match(body, /method:\s*'POST'/);
+  assert.match(body, /allExcluded/);
+  // The button label/action flips to "Restore" when everything selected is already excluded.
+  const toggleBody = fnBody(js, "updateBrainToolbar");
+  assert.match(toggleBody, /excludeBtn\.disabled = n === 0/);
+  assert.match(toggleBody, /archiveBtn\.disabled = n === 0/);
+  assert.match(toggleBody, /Restore to context/);
+  // A real .html brain doc renders as HTML (sandboxed), not through the markdown escaper.
+  const bodyFn = fnBody(js, "renderBrainPaneBody");
+  assert.match(bodyFn, /\.html\?\$\/i\.test\(_brainState\.doc\)/);
+  assert.match(bodyFn, /setAttribute\('sandbox', ''\)/, "iframe must be maximally sandboxed (no script execution)");
+  assert.match(bodyFn, /\.srcdoc = /);
+});
+
+test("Brain Review: Archive/Restore is enforced by a real move, with an extra confirm for a live brief", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /id="brainArchiveBtn"/);
+  assert.match(js, /function runBrainArchiveAction\(/);
+  assert.match(js, /function runBrainRestoreOne\(/);
+  const archiveBody = fnBody(js, "runBrainArchiveAction");
+  assert.match(archiveBody, /\/brain\/doc\/archive/);
+  assert.match(archiveBody, /method:\s*'POST'/);
+  assert.match(archiveBody, /await hmConfirm\(/, "archive is destructive — must confirm, not fire-and-forget");
+  assert.match(archiveBody, /includesLiveBrief/, "extra-confirm guard when the selection includes the live main brief");
+  const restoreBody = fnBody(js, "runBrainRestoreOne");
+  assert.match(restoreBody, /\/brain\/doc\/restore/);
+  // Archived rows render struck-through under a divider, with disabled selection.
+  const rowsFn = fnBody(js, "renderBrainDocs");
+  assert.match(rowsFn, /archived-divider/);
+  assert.match(rowsFn, /disabled = isArchived \|\| isPinnedProject/);
+});
+
+test("Brain Review: permanent Delete only ever targets an already-archived doc, and requires its own confirm", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function runBrainDeleteOne\(/);
+  const rowsFn = fnBody(js, "renderBrainDocs");
+  assert.match(rowsFn, /runBrainDeleteOne/, "Delete is only rendered inside the archived-row branch");
+  const deleteBody = fnBody(js, "runBrainDeleteOne");
+  assert.match(deleteBody, /\/brain\/doc\/delete/);
+  assert.match(deleteBody, /method:\s*'POST'/);
+  assert.match(deleteBody, /await hmConfirm\(/, "permanent delete must confirm, not fire-and-forget");
+  assert.match(deleteBody, /permanently/i);
+});
+
+test("Brain Review: pinned 'Always loaded' row is styled distinctly and its docs can't be selected/mutated", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const projFn = fnBody(js, "renderBrainProjects");
+  assert.match(projFn, /'__pinned__'/);
+  assert.match(projFn, /pinned/);
+  const rowsFn = fnBody(js, "renderBrainDocs");
+  assert.match(rowsFn, /isPinnedProject = _brainState\.project === '__pinned__'/);
+  assert.match(rowsFn, /disabled = isArchived \|\| isPinnedProject/);
+});
+
+test("Brain Review: brain:changed SSE event re-fetches without a manual refresh", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /es\.addEventListener\("brain:changed", onBrainChanged\)/);
+  const body = fnBody(js, "onBrainChanged");
+  assert.match(body, /if \(!_brainState\.panelOpen\) return/, "a no-op when the Brain screen isn't open");
+  assert.match(body, /api\('\/brain\/projects'\)/);
+  assert.match(body, /loadBrainDocs\(_brainState\.project\)/);
+});
+
+test("Brain Review: network/API failures show a retry affordance instead of hanging on 'Loading…' forever", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const loadProjects = fnBody(js, "loadBrainProjects");
+  assert.match(loadProjects, /catch \(e\)/, "loadBrainProjects must not let a thrown fetch go uncaught");
+  const projRender = fnBody(js, "renderBrainProjects");
+  assert.match(projRender, /projectsError/);
+  assert.match(projRender, /Retry/);
+
+  const loadDocs = fnBody(js, "loadBrainDocs");
+  assert.match(loadDocs, /catch \(e\)/, "loadBrainDocs must not let a thrown fetch go uncaught");
+  const docsRender = fnBody(js, "renderBrainDocs");
+  assert.match(docsRender, /docsError/);
+  assert.match(docsRender, /Retry/);
+  // The pinned pseudo-project gets an honest, specific empty-state message.
+  assert.match(docsRender, /No ~\/\.claude\/CLAUDE\.md found/);
+
+  const loadContent = fnBody(js, "loadBrainDocContent");
+  assert.match(loadContent, /catch \(e\)/, "loadBrainDocContent must not let a thrown fetch go uncaught");
+  const paneBody = fnBody(js, "renderBrainPaneBody");
+  assert.match(paneBody, /docContentError/);
+});
+
 // Pull the shipped browser `timeAgo` out of the console script and make it callable,
 // so the actual rendered logic (not a copy) is what gets tested.
 function extractTimeAgo(html: string): (value: string | null | undefined, nowMs: number) => string {

@@ -103,8 +103,10 @@ export async function scanBrainHygiene(opts: {
   const rels: string[] = [];
   for (const f of await listDir(root, false)) if (isDoc(f)) rels.push(f);
   for (const dir of await listDir(root, true)) {
+    if (dir === "_archived") continue; // Brain Review archived docs — never scanned (§4)
     for (const f of await listDir(join(root, dir), false)) if (isDoc(f)) rels.push(join(dir, f));
     for (const sub of await listDir(join(root, dir), true)) {
+      if (sub === "_archived") continue;
       for (const f of await listDir(join(root, dir, sub), false)) if (isDoc(f)) rels.push(join(dir, sub, f));
     }
   }

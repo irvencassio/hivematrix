@@ -16,7 +16,7 @@ import { join, relative } from "path";
 import { configuredBrainRootDir } from "./settings";
 
 const TEXT_EXTENSIONS = new Set([".md", ".markdown", ".txt", ".html", ".htm", ".mdx"]);
-const SKIP_DIRS = new Set([".git", "node_modules", ".obsidian", ".trash"]);
+const SKIP_DIRS = new Set([".git", "node_modules", ".obsidian", ".trash", "_archived"]);
 const STOP_WORDS = new Set([
   "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "is", "are",
   "with", "how", "what", "find", "doc", "docs", "about", "my", "me", "do",

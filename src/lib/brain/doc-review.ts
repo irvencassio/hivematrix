@@ -5,8 +5,8 @@
  * Status is derived from what the code ACTUALLY does, not from filename
  * convention: "brief"/"ctx" mirror buildBrainMemoryBundle's real auto-load set
  * (memory-bundle.ts), "indexed" mirrors the semantic-index sidecar, "stale"
- * mirrors findStale() (hygiene.ts). Read-only in this phase: no archive/
- * exclude enforcement yet (excluded is always false; §5 wires it later).
+ * mirrors findStale() (hygiene.ts), "excluded" mirrors the exclusions sidecar
+ * (exclusions.ts, §5 — enforced in the loaders/walkers, not just here).
  *
  * Every filesystem touch is async + timeout-bounded (BRAIN_READ_TIMEOUT_MS) —
  * the brain root is commonly a Google Drive mount that can dehydrate.
@@ -23,6 +23,7 @@ import {
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { findStale } from "@/lib/brain/hygiene";
 import { buildLinkGraph, linksForDoc, type LinkGraph } from "@/lib/brain/links";
+import { loadExclusions } from "@/lib/brain/exclusions";
 import { loadIndex } from "@/lib/embeddings/index-store";
 import { isEmbeddingsEnabled } from "@/lib/embeddings/provider";
 
@@ -202,10 +203,12 @@ export async function listProjectDocs(slug: string, opts: ListProjectDocsOptions
   if (!projectDir) return { docs: [], embeddingsEnabled: isEmbeddingsEnabled() };
 
   const relFiles = await collectProjectFiles(projectDir);
-  if (relFiles.length === 0) return { docs: [], embeddingsEnabled: isEmbeddingsEnabled() };
+  const archivedRelFiles = await collectProjectFiles(join(projectDir, "_archived"));
+  if (relFiles.length === 0 && archivedRelFiles.length === 0) return { docs: [], embeddingsEnabled: isEmbeddingsEnabled() };
 
   const index = loadIndex();
   const embeddingsEnabled = isEmbeddingsEnabled();
+  const excluded = loadExclusions();
   let graph: LinkGraph;
   try {
     graph = await buildLinkGraph({ brainRootDir: root });
@@ -225,9 +228,10 @@ export async function listProjectDocs(slug: string, opts: ListProjectDocsOptions
     const stat = stats[i];
     const brainRelPath = relative(root, join(projectDir, file));
     const isIndexed = brainRelPath in index.entries;
+    const isDocExcluded = excluded.has(brainRelPath);
     const { backlinks } = linksForDoc(brainRelPath, graph);
     const { status, badge } = classifyDoc({
-      isExcluded: false, // §5 wires the exclusion sidecar; always false until then
+      isExcluded: isDocExcluded,
       isBriefLoaded: isProjectBriefLoaded(slug, file),
       isCtxLoaded: isCtxLoadedFile(slug, file),
       isStale: staleByPath.has(file),
@@ -244,11 +248,41 @@ export async function listProjectDocs(slug: string, opts: ListProjectDocsOptions
       indexed: isIndexed,
       backlinks: backlinks.length,
       archived: false,
+      excluded: isDocExcluded,
+    };
+  });
+
+  // Archived docs are physically moved out of context/search/index already
+  // (every walker skips _archived) — status here reflects what it would be if
+  // restored, purely informational; the console strikes these through and
+  // disables further action on them except Restore.
+  const archivedStats = await Promise.all(archivedRelFiles.map((f) => statWithTimeout(join(projectDir, "_archived", f))));
+  const archivedDocs: BrainDocSummary[] = archivedRelFiles.map((file, i) => {
+    const stat = archivedStats[i];
+    const brainRelPath = relative(root, join(projectDir, "_archived", file));
+    const { status, badge } = classifyDoc({
+      isExcluded: false,
+      isBriefLoaded: isProjectBriefLoaded(slug, file),
+      isCtxLoaded: isCtxLoadedFile(slug, file),
+      isStale: false,
+      isIndexed: false,
+    });
+    return {
+      project: slug,
+      file,
+      path: brainRelPath,
+      status,
+      badge,
+      modified: stat?.mtimeMs ?? 0,
+      sizeBytes: stat?.size ?? 0,
+      indexed: false,
+      backlinks: 0,
+      archived: true,
       excluded: false,
     };
   });
 
-  return { docs, embeddingsEnabled };
+  return { docs: [...docs, ...archivedDocs], embeddingsEnabled };
 }
 
 export interface BrainDocContent {
@@ -258,21 +292,48 @@ export interface BrainDocContent {
   sizeBytes: number;
 }
 
-/** Bounded, path-guarded raw-content read for the render pane. */
-export async function readProjectDoc(slug: string, relFile: string, brainRootDir?: string): Promise<BrainDocContent | null> {
+/**
+ * Path-guarded, brain-relative path for a (project, relFile) pair — no I/O.
+ * Used by mutation endpoints (exclude/archive) that need the exact sidecar
+ * key doc-review.ts and the loaders/walkers all key on, without reading the
+ * file. Returns null for an unsafe or out-of-bounds path (same guard as
+ * readProjectDoc).
+ */
+export function projectDocBrainRelPath(slug: string, relFile: string, brainRootDir?: string): string | null {
   const root = brainRoot(brainRootDir);
   if (!root || !isSafeSlug(slug)) return null;
   const projectDir = resolveInside(projectsRootDir(root), slug);
   if (!projectDir) return null;
   const fullPath = resolveInside(projectDir, relFile);
   if (!fullPath) return null;
+  return relative(root, fullPath);
+}
 
-  const [content, stat] = await Promise.all([readWithTimeout(fullPath), statWithTimeout(fullPath)]);
-  if (content == null) return null;
-  return {
-    content,
-    path: relative(root, fullPath),
-    modified: stat?.mtimeMs ?? 0,
-    sizeBytes: stat?.size ?? content.length,
-  };
+/**
+ * Bounded, path-guarded raw-content read for the render pane. Tries the
+ * normal project-relative location first, then that project's `_archived/`
+ * dir — an archived doc's `file` is unchanged, only its physical location
+ * moves, so the client doesn't need to know or say whether it's archived.
+ */
+export async function readProjectDoc(slug: string, relFile: string, brainRootDir?: string): Promise<BrainDocContent | null> {
+  const root = brainRoot(brainRootDir);
+  if (!root || !isSafeSlug(slug)) return null;
+  const projectDir = resolveInside(projectsRootDir(root), slug);
+  if (!projectDir) return null;
+  const primaryPath = resolveInside(projectDir, relFile);
+  if (!primaryPath) return null;
+  const archivedDir = resolveInside(projectDir, "_archived");
+  const archivedPath = archivedDir ? resolveInside(archivedDir, relFile) : null;
+
+  for (const fullPath of [primaryPath, archivedPath].filter((p): p is string => p !== null)) {
+    const [content, stat] = await Promise.all([readWithTimeout(fullPath), statWithTimeout(fullPath)]);
+    if (content == null) continue;
+    return {
+      content,
+      path: relative(root, fullPath),
+      modified: stat?.mtimeMs ?? 0,
+      sizeBytes: stat?.size ?? content.length,
+    };
+  }
+  return null;
 }

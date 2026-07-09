@@ -1731,17 +1731,26 @@ export function createDaemonServer() {
       // (the code-project list) — this is the brain-doc-tree list.
       if (req.method === "GET" && urlPath === "/brain/projects") {
         const { listProjects } = await import("@/lib/brain/doc-review");
-        json(res, 200, { projects: await listProjects() });
+        const { listPinnedDocs, PINNED_PROJECT_SLUG, PINNED_PROJECT_LABEL } = await import("@/lib/brain/pinned");
+        const [pinnedDocs, projects] = await Promise.all([listPinnedDocs(), listProjects()]);
+        // Pinned pseudo-project always listed first (§7) — global, not tied to any one brain project.
+        json(res, 200, { projects: [{ slug: PINNED_PROJECT_SLUG, label: PINNED_PROJECT_LABEL, docCount: pinnedDocs.length }, ...projects] });
         return;
       }
 
       // GET /brain/docs?project=<slug> — per-doc status summaries (§2 taxonomy)
-      // for the Brain / Memory Review screen's center pane.
+      // for the Brain / Memory Review screen's center pane. project=__pinned__
+      // returns the global "Always loaded" set (§7) instead of a brain project.
       if (req.method === "GET" && urlPath === "/brain/docs") {
         const { listProjectDocs } = await import("@/lib/brain/doc-review");
+        const { listPinnedDocs, PINNED_PROJECT_SLUG } = await import("@/lib/brain/pinned");
         const q = parseQueryString(req.url ?? "");
         const project = (q.project ?? "").trim();
         if (!project) { json(res, 400, { error: "project is required" }); return; }
+        if (project === PINNED_PROJECT_SLUG) {
+          json(res, 200, { docs: await listPinnedDocs(), embeddingsEnabled: true });
+          return;
+        }
         const staleDays = Number.parseInt(q.staleDays ?? "", 10);
         json(res, 200, await listProjectDocs(project, {
           staleDays: Number.isFinite(staleDays) && staleDays > 0 ? staleDays : undefined,
@@ -1751,16 +1760,88 @@ export function createDaemonServer() {
 
       // GET /brain/doc?project=<slug>&file=<relpath> — raw doc content for the
       // render pane. Bounded + path-guarded inside doc-review.ts (rejects any
-      // traversal outside the project dir).
+      // traversal outside the project dir). project=__pinned__ reads a pinned file.
       if (req.method === "GET" && urlPath === "/brain/doc") {
         const { readProjectDoc } = await import("@/lib/brain/doc-review");
+        const { readPinnedDoc, PINNED_PROJECT_SLUG } = await import("@/lib/brain/pinned");
         const q = parseQueryString(req.url ?? "");
         const project = (q.project ?? "").trim();
         const file = (q.file ?? "").trim();
         if (!project || !file) { json(res, 400, { error: "project and file are required" }); return; }
-        const doc = await readProjectDoc(project, file);
+        const doc = project === PINNED_PROJECT_SLUG ? await readPinnedDoc(file) : await readProjectDoc(project, file);
         if (!doc) { json(res, 404, { error: "doc not found" }); return; }
         json(res, 200, doc);
+        return;
+      }
+
+      // POST /brain/doc/exclude { project, files: [], excluded: bool } — toggle
+      // "exclude from context" for one or more docs. Enforced in the loaders/
+      // walkers (memory-bundle.ts, indexer.ts), not just this flag — see §5.
+      if (req.method === "POST" && urlPath === "/brain/doc/exclude") {
+        const { projectDocBrainRelPath } = await import("@/lib/brain/doc-review");
+        const { setExcluded } = await import("@/lib/brain/exclusions");
+        const { PINNED_PROJECT_SLUG } = await import("@/lib/brain/pinned");
+        const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
+        const project = typeof body.project === "string" ? body.project.trim() : "";
+        const files = Array.isArray(body.files) ? body.files.filter((f): f is string => typeof f === "string") : [];
+        const excluded = body.excluded === true;
+        if (!project || !files.length) { json(res, 400, { error: "project and files[] are required" }); return; }
+        if (project === PINNED_PROJECT_SLUG) { json(res, 400, { error: "pinned docs are harness-owned and read-only" }); return; }
+        const relPaths = files.map((f) => projectDocBrainRelPath(project, f)).filter((p): p is string => p !== null);
+        if (!relPaths.length) { json(res, 400, { error: "no valid files" }); return; }
+        setExcluded(relPaths, excluded);
+        broadcast("brain:changed", { project, files, excluded });
+        json(res, 200, { ok: true, project, files, excluded });
+        return;
+      }
+
+      // POST /brain/doc/archive { project, files: [] } — move doc(s) to
+      // <project>/_archived/, removing them from context/search/index (every
+      // corpus walker skips that dir). Never deletes; POST /brain/doc/restore
+      // moves them back. Per-file results so a partial failure is visible.
+      if (req.method === "POST" && urlPath === "/brain/doc/archive") {
+        const { archiveProjectDoc } = await import("@/lib/brain/archive");
+        const { PINNED_PROJECT_SLUG } = await import("@/lib/brain/pinned");
+        const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
+        const project = typeof body.project === "string" ? body.project.trim() : "";
+        const files = Array.isArray(body.files) ? body.files.filter((f): f is string => typeof f === "string") : [];
+        if (!project || !files.length) { json(res, 400, { error: "project and files[] are required" }); return; }
+        if (project === PINNED_PROJECT_SLUG) { json(res, 400, { error: "pinned docs are harness-owned and read-only" }); return; }
+        const results = await Promise.all(files.map(async (file) => ({ file, ...(await archiveProjectDoc(project, file)) })));
+        broadcast("brain:changed", { project, files, action: "archive" });
+        json(res, 200, { ok: results.every((r) => r.ok), project, results });
+        return;
+      }
+
+      // POST /brain/doc/restore { project, files: [] } — move archived doc(s) back.
+      if (req.method === "POST" && urlPath === "/brain/doc/restore") {
+        const { restoreProjectDoc } = await import("@/lib/brain/archive");
+        const { PINNED_PROJECT_SLUG } = await import("@/lib/brain/pinned");
+        const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
+        const project = typeof body.project === "string" ? body.project.trim() : "";
+        const files = Array.isArray(body.files) ? body.files.filter((f): f is string => typeof f === "string") : [];
+        if (!project || !files.length) { json(res, 400, { error: "project and files[] are required" }); return; }
+        if (project === PINNED_PROJECT_SLUG) { json(res, 400, { error: "pinned docs are harness-owned and read-only" }); return; }
+        const results = await Promise.all(files.map(async (file) => ({ file, ...(await restoreProjectDoc(project, file)) })));
+        broadcast("brain:changed", { project, files, action: "restore" });
+        json(res, 200, { ok: results.every((r) => r.ok), project, results });
+        return;
+      }
+
+      // POST /brain/doc/delete { project, files: [] } — permanently delete
+      // already-archived doc(s). Scoped to _archived/ only (deleteArchivedProjectDoc
+      // never touches a still-active doc); irreversible, unlike archive/restore.
+      if (req.method === "POST" && urlPath === "/brain/doc/delete") {
+        const { deleteArchivedProjectDoc } = await import("@/lib/brain/archive");
+        const { PINNED_PROJECT_SLUG } = await import("@/lib/brain/pinned");
+        const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
+        const project = typeof body.project === "string" ? body.project.trim() : "";
+        const files = Array.isArray(body.files) ? body.files.filter((f): f is string => typeof f === "string") : [];
+        if (!project || !files.length) { json(res, 400, { error: "project and files[] are required" }); return; }
+        if (project === PINNED_PROJECT_SLUG) { json(res, 400, { error: "pinned docs are harness-owned and read-only" }); return; }
+        const results = await Promise.all(files.map(async (file) => ({ file, ...(await deleteArchivedProjectDoc(project, file)) })));
+        broadcast("brain:changed", { project, files, action: "delete" });
+        json(res, 200, { ok: results.every((r) => r.ok), project, results });
         return;
       }
 

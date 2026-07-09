@@ -10,9 +10,12 @@ import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { embedTexts, getEmbeddingsConfig, isEmbeddingsEnabled } from "./provider";
 import { loadIndex, saveIndex, planReindex, contentHash } from "./index-store";
 import { startPollLoop } from "@/lib/lanes/poll-loop";
+import { loadExclusions } from "@/lib/brain/exclusions";
 
 const TEXT_EXTENSIONS = new Set([".md", ".markdown", ".txt", ".html", ".htm", ".mdx"]);
-const SKIP_DIRS = new Set([".git", "node_modules", ".obsidian", ".trash"]);
+// _archived is where the Brain / Memory Review screen moves archived docs
+// (§4 of the design spec) — deliberately excluded from every corpus walker.
+const SKIP_DIRS = new Set([".git", "node_modules", ".obsidian", ".trash", "_archived"]);
 const READ_TIMEOUT_MS = 3_000;
 const MAX_FILES = 5_000;
 const BATCH = 32;
@@ -30,6 +33,7 @@ async function readTimed(path: string): Promise<string | null> {
 interface FileRec { relPath: string; content: string; hash: string }
 
 async function collect(root: string): Promise<FileRec[]> {
+  const excluded = loadExclusions();
   const out: FileRec[] = [];
   const stack: string[] = [root];
   while (stack.length > 0 && out.length < MAX_FILES) {
@@ -45,9 +49,14 @@ async function collect(root: string): Promise<FileRec[]> {
       } else if (e.isFile()) {
         const dot = e.name.lastIndexOf(".");
         if (!TEXT_EXTENSIONS.has(dot >= 0 ? e.name.slice(dot).toLowerCase() : "")) continue;
+        const relPath = relative(root, full);
+        // Excluded from context (Brain / Memory Review, §5) — drop from the
+        // semantic index too; an existing entry is pruned on the next reindex
+        // since it simply falls out of collect()'s "current" file set.
+        if (excluded.has(relPath)) continue;
         const content = await readTimed(full);
         if (content == null) continue;
-        out.push({ relPath: relative(root, full), content, hash: contentHash(content) });
+        out.push({ relPath, content, hash: contentHash(content) });
       }
     }
   }

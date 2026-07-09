@@ -909,9 +909,21 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .brain-proj-row .name { font-weight:600; }
   .brain-proj-row.active .name { color:var(--accent); }
   .brain-proj-row .count { font-size:10.5px; color:var(--muted); background:var(--badge-bg); border-radius:9px; padding:1px 7px; }
+  .brain-proj-row.pinned.active { background:rgba(88,166,255,.1); border-left:2px solid var(--accent-2); }
+  .brain-proj-row.pinned .name { color:var(--accent-2); }
+  .brain-proj-row.pinned .sub { font-size:10px; color:var(--muted); font-weight:400; margin-top:2px; }
   .brain-legend { display:flex; flex-wrap:wrap; gap:10px; padding:8px 14px; border-bottom:1px solid var(--border);
     font-size:10.5px; color:var(--muted); flex-shrink:0; background:var(--panel); }
   .brain-legend span { display:flex; align-items:center; gap:4px; white-space:nowrap; }
+  .brain-toolbar { display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--border); flex-shrink:0; flex-wrap:wrap; }
+  .brain-toolbar button { font:inherit; font-size:11.5px; background:var(--panel-2); color:var(--text);
+    border:1px solid var(--border); border-radius:6px; padding:5px 10px; cursor:pointer; }
+  .brain-toolbar button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  .brain-toolbar button:disabled { opacity:.4; cursor:not-allowed; }
+  .brain-toolbar .sel-count { font-size:11px; color:var(--muted); margin-right:auto; }
+  .brain-doc-row .sm.danger { border-color:var(--err); color:var(--err); }
+  .brain-doc-row .sm.danger:hover { background:var(--err); color:#fff; }
+  .brain-doc-row input[type="checkbox"] { flex-shrink:0; cursor:pointer; }
   .brain-doc-row { display:flex; align-items:center; gap:9px; padding:8px 12px; border-bottom:1px solid var(--border); cursor:pointer; }
   .brain-doc-row:hover { background:var(--hover-bg); }
   .brain-doc-row.selected-file { background:var(--reply-q-bg); }
@@ -928,6 +940,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .brain-doc-row.tag-orphan .status-tag { background:var(--badge-bg); color:var(--muted); }
   .brain-doc-row.tag-stale .status-tag { background:rgba(210,153,34,.15); color:var(--warn); }
   .brain-doc-row.tag-excluded .status-tag { background:rgba(248,81,73,.12); color:var(--err); }
+  .brain-doc-row.archived { opacity:.5; cursor:default; }
+  .brain-doc-row.archived .fname { text-decoration:line-through; }
+  .brain-doc-row.archived:hover { background:transparent; }
+  .archived-divider { padding:8px 12px; font-size:10.5px; color:var(--muted); text-transform:uppercase;
+    letter-spacing:.06em; border-bottom:1px solid var(--border); background:var(--panel); }
   .brain-render-head { display:flex; align-items:center; justify-content:space-between; padding:10px 14px;
     border-bottom:1px solid var(--border); flex-shrink:0; gap:10px; }
   .brain-render-title { font-weight:700; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -6516,13 +6533,17 @@ function updateFlashNav() {
 let _brainState = {
   panelOpen: false,
   loading: false,
+  projectsError: false,
+  docsError: false,
+  docContentError: false,
   projects: [],
   project: null,
   docs: [],
   embeddingsEnabled: true,
   doc: null,       // selected file (relative to the project), e.g. "lanes/manager.md"
   docContent: null,
-  viewMode: 'rendered'
+  viewMode: 'rendered',
+  selected: new Set()  // files (relative to the project) checked for the toolbar action
 };
 
 const BRAIN_STATUS_CLASS = { brief: 'tag-brief', ctx: 'tag-ctx', indexed: 'tag-indexed', orphan: 'tag-orphan', stale: 'tag-stale', excluded: 'tag-excluded' };
@@ -6546,7 +6567,12 @@ function brainPanelHtml() {
     + '<div class="brain-col-head"><span id="brainCenterTitle">Documents</span></div>'
     + '<div class="brain-legend">'
     + '<span>⭐ Main brief</span><span>🟢 In task ctx</span><span>🔵 Indexed only</span>'
-    + '<span>⚪ Orphaned</span><span>🟠 Stale</span>'
+    + '<span>⚪ Orphaned</span><span>🟠 Stale</span><span>🔴 Excluded</span>'
+    + '</div>'
+    + '<div class="brain-toolbar">'
+    + '<span class="sel-count" id="brainSelCount">0 selected</span>'
+    + '<button id="brainArchiveBtn" disabled onclick="runBrainArchiveAction()">Archive selected</button>'
+    + '<button id="brainExcludeBtn" disabled onclick="runBrainExcludeAction()">Exclude from context</button>'
     + '</div>'
     + '<div class="brain-col-body" id="brainDocList"><div class="muted" style="padding:12px">Select a project.</div></div>'
     + '</div>'
@@ -6596,9 +6622,25 @@ function updateBrainNav() {
   if (nav) nav.classList.toggle('active', _brainState.panelOpen);
 }
 
-async function loadBrainProjects() {
+// Live sync (§6): archive/exclude/restore/delete from another surface (or
+// another operator session) reflects here without a manual refresh.
+async function onBrainChanged() {
+  if (!_brainState.panelOpen) return;
   const r = await api('/brain/projects');
   _brainState.projects = (r && r.projects) || [];
+  renderBrainProjects();
+  if (_brainState.project) await loadBrainDocs(_brainState.project);
+}
+
+async function loadBrainProjects() {
+  _brainState.projectsError = false;
+  try {
+    const r = await api('/brain/projects');
+    _brainState.projects = (r && r.projects) || [];
+  } catch (e) {
+    _brainState.projectsError = true;
+    _brainState.projects = [];
+  }
   if (!_brainState.project && _brainState.projects.length) _brainState.project = _brainState.projects[0].slug;
   renderBrainProjects();
   if (_brainState.project) await loadBrainDocs(_brainState.project);
@@ -6607,25 +6649,43 @@ async function loadBrainProjects() {
 function renderBrainProjects() {
   const el = document.getElementById('brainProjectList');
   if (!el) return;
+  if (_brainState.projectsError) { el.innerHTML = '<div class="muted" style="padding:12px">Could not reach the daemon. <a href="#" onclick="event.preventDefault();loadBrainProjects()">Retry</a></div>'; return; }
   if (!_brainState.projects.length) { el.innerHTML = '<div class="muted" style="padding:12px">No brain projects found.</div>'; return; }
-  el.innerHTML = _brainState.projects.map(p =>
-    '<div class="brain-proj-row' + (p.slug === _brainState.project ? ' active' : '') + '" onclick="selectBrainProject(\'' + attrEnc(p.slug) + '\')">'
-    + '<span class="name">' + esc(p.label) + '</span><span class="count">' + p.docCount + '</span></div>'
-  ).join('');
+  el.innerHTML = _brainState.projects.map(p => {
+    const isPinned = p.slug === '__pinned__';
+    const cls = 'brain-proj-row' + (isPinned ? ' pinned' : '') + (p.slug === _brainState.project ? ' active' : '');
+    const sub = isPinned ? '<div class="sub">pulled into every task, any project</div>' : '';
+    return '<div class="' + cls + '" onclick="selectBrainProject(\'' + attrEnc(p.slug) + '\')">'
+      + '<span><span class="name">' + esc(p.label) + '</span>' + sub + '</span>'
+      + '<span class="count">' + p.docCount + '</span></div>';
+  }).join('');
 }
 
 async function selectBrainProject(slug) {
   _brainState.project = decodeURIComponent(slug);
   _brainState.doc = null;
   _brainState.docContent = null;
+  _brainState.selected = new Set();
   renderBrainProjects();
   await loadBrainDocs(_brainState.project);
 }
 
 async function loadBrainDocs(slug) {
   _brainState.loading = true;
+  _brainState.docsError = false;
   renderBrainDocs();
-  const r = await api('/brain/docs?project=' + encodeURIComponent(slug));
+  let r;
+  try {
+    r = await api('/brain/docs?project=' + encodeURIComponent(slug));
+  } catch (e) {
+    if (_brainState.project !== slug) return;
+    _brainState.loading = false;
+    _brainState.docsError = true;
+    _brainState.docs = [];
+    renderBrainDocs();
+    renderBrainPane();
+    return;
+  }
   if (_brainState.project !== slug) return; // stale response — the operator switched projects mid-fetch
   _brainState.loading = false;
   _brainState.docs = (r && r.docs) || [];
@@ -6645,22 +6705,158 @@ function renderBrainDocs() {
   if (title) title.textContent = (_brainState.project || '—') + ' — documents';
   const el = document.getElementById('brainDocList');
   if (!el) return;
-  if (_brainState.loading) { el.innerHTML = '<div class="muted" style="padding:12px">Loading…</div>'; return; }
-  if (!_brainState.docs.length) { el.innerHTML = '<div class="muted" style="padding:12px">No documents in this project.</div>'; return; }
+  if (_brainState.loading) { el.innerHTML = '<div class="muted" style="padding:12px">Loading… (the brain root may be a slow cloud mount)</div>'; return; }
+  if (_brainState.docsError) { el.innerHTML = '<div class="muted" style="padding:12px">Could not load this project\'s documents. <a href="#" onclick="event.preventDefault();loadBrainDocs(_brainState.project)">Retry</a></div>'; return; }
+  if (!_brainState.docs.length) {
+    const emptyMsg = _brainState.project === '__pinned__'
+      ? 'No ~/.claude/CLAUDE.md found on this Mac — nothing pinned yet.'
+      : 'No documents in this project.';
+    el.innerHTML = '<div class="muted" style="padding:12px">' + esc(emptyMsg) + '</div>';
+    return;
+  }
   const caveat = !_brainState.embeddingsEnabled
     ? '<div class="muted" style="padding:8px 12px;font-size:10.5px;border-bottom:1px solid var(--border)">Semantic index is off — Indexed/Orphaned may be unreliable until it\'s enabled.</div>'
     : '';
-  el.innerHTML = caveat + _brainState.docs.map(d => {
-    const cls = 'brain-doc-row ' + (BRAIN_STATUS_CLASS[d.status] || '') + (d.file === _brainState.doc ? ' selected-file' : '');
+  const isPinnedProject = _brainState.project === '__pinned__';
+  const buildRow = d => {
+    const isArchived = !!d.archived;
+    const cls = 'brain-doc-row ' + (BRAIN_STATUS_CLASS[d.status] || '') + (d.file === _brainState.doc ? ' selected-file' : '') + (isArchived ? ' archived' : '');
     const sizeKb = d.sizeBytes ? (d.sizeBytes / 1024).toFixed(1) + ' KB' : '';
     const modified = d.modified ? new Date(d.modified).toLocaleDateString() : '';
+    const checked = _brainState.selected.has(d.file) ? ' checked' : '';
+    const archivedActions = isArchived
+      ? '<button class="sm" onclick="event.stopPropagation();runBrainRestoreOne(\'' + attrEnc(d.file) + '\')">Restore</button>'
+        + '<button class="sm danger" onclick="event.stopPropagation();runBrainDeleteOne(\'' + attrEnc(d.file) + '\')">Delete</button>'
+      : '';
+    // Pinned docs are harness-owned — no Archive/Exclude/Delete, no selection checkbox.
+    const disabled = isArchived || isPinnedProject;
     return '<div class="' + cls + '" onclick="selectBrainDoc(\'' + attrEnc(d.file) + '\')">'
+      + '<input type="checkbox"' + checked + (disabled ? ' disabled' : '') + ' onclick="event.stopPropagation();toggleBrainDocSelected(\'' + attrEnc(d.file) + '\',this.checked)" />'
       + '<span class="badge">' + esc(d.badge) + '</span>'
       + '<span class="meta-col"><div class="fname">' + esc(d.file) + '</div>'
       + '<div class="sub">' + esc([modified, sizeKb].filter(Boolean).join(' · ')) + '</div></span>'
-      + '<span class="status-tag">' + esc(BRAIN_STATUS_LABEL[d.status] || d.status) + '</span>'
+      + (archivedActions || '<span class="status-tag">' + esc(BRAIN_STATUS_LABEL[d.status] || d.status) + '</span>')
       + '</div>';
-  }).join('');
+  };
+  const active = _brainState.docs.filter(d => !d.archived);
+  const archived = _brainState.docs.filter(d => d.archived);
+  let html = caveat + active.map(buildRow).join('');
+  if (archived.length) {
+    html += '<div class="archived-divider">Archived (' + archived.length + ')</div>' + archived.map(buildRow).join('');
+  }
+  el.innerHTML = html;
+  updateBrainToolbar();
+}
+
+function toggleBrainDocSelected(file, checked) {
+  const f = decodeURIComponent(file);
+  if (checked) _brainState.selected.add(f); else _brainState.selected.delete(f);
+  updateBrainToolbar();
+}
+
+function updateBrainToolbar() {
+  const countEl = document.getElementById('brainSelCount');
+  const excludeBtn = document.getElementById('brainExcludeBtn');
+  const archiveBtn = document.getElementById('brainArchiveBtn');
+  if (!countEl || !excludeBtn || !archiveBtn) return;
+  const n = _brainState.selected.size;
+  countEl.textContent = n + ' selected';
+  excludeBtn.disabled = n === 0;
+  archiveBtn.disabled = n === 0;
+  if (n === 0) { excludeBtn.textContent = 'Exclude from context'; return; }
+  const byFile = new Map(_brainState.docs.map(d => [d.file, d]));
+  const allExcluded = [..._brainState.selected].every(f => (byFile.get(f) || {}).excluded);
+  excludeBtn.textContent = allExcluded ? 'Restore to context' : 'Exclude from context';
+}
+
+async function runBrainExcludeAction() {
+  const files = [..._brainState.selected];
+  if (!files.length || !_brainState.project) return;
+  const byFile = new Map(_brainState.docs.map(d => [d.file, d]));
+  const allExcluded = files.every(f => (byFile.get(f) || {}).excluded);
+  const excluded = !allExcluded; // "Restore" when everything selected is already excluded
+  const btn = document.getElementById('brainExcludeBtn');
+  if (btn) btn.disabled = true;
+  try {
+    await api('/brain/doc/exclude', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: _brainState.project, files, excluded })
+    });
+    hmToast(files.length + ' document' + (files.length === 1 ? '' : 's') + (excluded ? ' excluded from context' : ' restored to context'), 'ok');
+    _brainState.selected = new Set();
+    await loadBrainDocs(_brainState.project);
+  } catch (e) {
+    hmToast('Could not update exclusion.', 'err');
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function runBrainArchiveAction() {
+  const files = [..._brainState.selected];
+  if (!files.length || !_brainState.project) return;
+  const byFile = new Map(_brainState.docs.map(d => [d.file, d]));
+  // Archiving the project's live main brief silently degrades every future
+  // task for it — require an extra, explicit confirm beyond the normal one.
+  const includesLiveBrief = files.some(f => (byFile.get(f) || {}).status === 'brief');
+  const plural = files.length === 1 ? '' : 's';
+  let message = 'This moves ' + files.length + ' document' + plural + ' out of active context, search, and the semantic index. '
+    + 'They stay on disk under an archived state and can be restored later.';
+  if (includesLiveBrief) {
+    message = '⚠ This includes this project\'s MAIN BRIEF — the doc loaded in full into every task for it. '
+      + 'Archiving it will silently degrade every future task\'s context.\n\n' + message;
+  }
+  const ok = await hmConfirm(message, { title: 'Archive selected documents?', okLabel: 'Archive', danger: true });
+  if (!ok) return;
+  const btn = document.getElementById('brainArchiveBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/brain/doc/archive', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: _brainState.project, files })
+    });
+    hmToast((r && r.ok ? files.length : 0) + ' of ' + files.length + ' document' + plural + ' archived', (r && r.ok) ? 'ok' : 'err');
+    _brainState.selected = new Set();
+    await loadBrainDocs(_brainState.project);
+  } catch (e) {
+    hmToast('Could not archive — the file(s) were left in place.', 'err');
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function runBrainRestoreOne(file) {
+  const f = decodeURIComponent(file);
+  if (!_brainState.project) return;
+  try {
+    await api('/brain/doc/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: _brainState.project, files: [f] })
+    });
+    hmToast('Restored.', 'ok');
+    await loadBrainDocs(_brainState.project);
+  } catch (e) {
+    hmToast('Could not restore — the file was left in _archived/.', 'err');
+  }
+}
+
+async function runBrainDeleteOne(file) {
+  const f = decodeURIComponent(file);
+  if (!_brainState.project) return;
+  const ok = await hmConfirm(
+    '⚠ This permanently deletes "' + f + '". Unlike Archive, this cannot be undone — the file will not stay on disk.',
+    { title: 'Delete permanently?', okLabel: 'Delete forever', danger: true }
+  );
+  if (!ok) return;
+  try {
+    const r = await api('/brain/doc/delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: _brainState.project, files: [f] })
+    });
+    if (r && r.ok) hmToast('Deleted permanently.', 'ok');
+    else hmToast('Could not delete.', 'err');
+    await loadBrainDocs(_brainState.project);
+  } catch (e) {
+    hmToast('Could not delete.', 'err');
+  }
 }
 
 async function selectBrainDoc(file) {
@@ -6672,12 +6868,20 @@ async function selectBrainDoc(file) {
 let _brainDocCache = {};
 async function loadBrainDocContent(project, file) {
   const key = project + '::' + file;
-  if (_brainDocCache[key]) { _brainState.docContent = _brainDocCache[key]; renderBrainPane(); return; }
+  if (_brainDocCache[key]) { _brainState.docContentError = false; _brainState.docContent = _brainDocCache[key]; renderBrainPane(); return; }
   _brainState.docContent = null;
+  _brainState.docContentError = false;
   renderBrainPane();
-  const r = await api('/brain/doc?project=' + encodeURIComponent(project) + '&file=' + encodeURIComponent(file));
+  let r;
+  try {
+    r = await api('/brain/doc?project=' + encodeURIComponent(project) + '&file=' + encodeURIComponent(file));
+  } catch (e) {
+    if (_brainState.project === project && _brainState.doc === file) { _brainState.docContentError = true; renderBrainPane(); }
+    return;
+  }
   if (_brainState.project !== project || _brainState.doc !== file) return; // stale — operator moved on
   if (r && typeof r.content === 'string') { _brainDocCache[key] = r; _brainState.docContent = r; }
+  else _brainState.docContentError = true;
   renderBrainPane();
 }
 
@@ -6708,14 +6912,32 @@ function renderBrainPaneBody() {
   const body = document.getElementById('brainRenderBody');
   if (!body) return;
   if (!_brainState.doc) { body.className = 'brain-render-body'; body.innerHTML = '<div class="brain-empty-state">Click a document on the left to preview it here.</div>'; return; }
+  if (_brainState.docContentError) { body.className = 'brain-render-body'; body.innerHTML = '<div class="brain-empty-state">Could not load this document.</div>'; return; }
   if (!_brainState.docContent) { body.className = 'brain-render-body'; body.innerHTML = '<div class="brain-empty-state">Loading…</div>'; return; }
   if (_brainState.viewMode === 'raw') {
     body.className = 'brain-render-body raw';
     body.textContent = _brainState.docContent.content;
-  } else {
-    body.className = 'brain-render-body';
-    body.innerHTML = mdToHtml(_brainState.docContent.content);
+    return;
   }
+  // A real .html/.htm brain doc must not go through the markdown pipeline —
+  // mdToHtml escapes-then-reparses, so actual HTML tags would show as garbled
+  // literal text. Render it as HTML in a maximally-sandboxed iframe instead:
+  // no scripts, no same-origin, no forms/popups — brain docs are local files,
+  // but a synced/shared doc could still carry hostile markup, and this is the
+  // daemon's own console origin (has the API token) so script execution here
+  // must stay blocked regardless of trust in the content's source.
+  if (/\.html?$/i.test(_brainState.doc)) {
+    body.className = 'brain-render-body';
+    body.innerHTML = '';
+    const frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', '');
+    frame.style.cssText = 'width:100%;height:100%;min-height:60vh;border:1px solid var(--border);border-radius:6px;background:#fff';
+    body.appendChild(frame);
+    frame.srcdoc = _brainState.docContent.content;
+    return;
+  }
+  body.className = 'brain-render-body';
+  body.innerHTML = mdToHtml(_brainState.docContent.content);
 }
 
 function flashRenderMessages() {
@@ -8499,6 +8721,7 @@ function connectSSE() {
     es.addEventListener("directives:updated", refresh);
     es.addEventListener("directives:deleted", refresh);
     es.addEventListener("connectivity:change", refresh);
+    es.addEventListener("brain:changed", onBrainChanged);
     es.onerror = () => { live.className = "live stale"; live.textContent = "● reconnecting"; };
   } catch (e) { /* polling covers it */ }
 }

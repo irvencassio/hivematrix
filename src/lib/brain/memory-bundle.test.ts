@@ -1,9 +1,21 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { buildBrainMemoryBundle, buildBrainIndexBlock, ensureHiveBrainScaffold, hiveProjectBrainDir } from "./memory-bundle";
+
+async function withTempHome<T>(run: () => Promise<T>): Promise<T> {
+  const originalHome = process.env.HOME;
+  const tempHome = mkdtempSync(join(tmpdir(), "hive-brain-exclusion-home-"));
+  process.env.HOME = tempHome;
+  try {
+    return await run();
+  } finally {
+    process.env.HOME = originalHome;
+    rmSync(tempHome, { recursive: true, force: true });
+  }
+}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -111,4 +123,28 @@ Worker contract landed cleanly.
   assert.doesNotMatch(bundle, /Bee Playbook|ManagerBee/);
   assert.match(bundle, /Known Issues/);
   // Directive reflections replace mission recaps in HiveMatrix — recap content not included
+});
+
+test("excluding known-issues.md drops it from the memory bundle and the index block, reversibly", async () => {
+  await withTempHome(async () => {
+    const { setExcluded } = await import("./exclusions");
+    const brainRoot = mkdtempSync(join(tmpdir(), "hive-brain-"));
+    await ensureHiveBrainScaffold(brainRoot);
+    const projectDir = hiveProjectBrainDir(brainRoot);
+    writeFileSync(join(projectDir, "known-issues.md"), "# Hive Known Issues\n\n- Canonical issue");
+
+    setExcluded(["projects/hive/known-issues.md"], true);
+
+    const bundle = await buildBrainMemoryBundle({ brainRootDir: brainRoot, project: "hive" });
+    assert.match(bundle, /Agent Brief/, "non-excluded docs still load");
+    assert.doesNotMatch(bundle, /Canonical issue/, "excluded doc's content must not reach the prompt");
+
+    const indexBlock = await buildBrainIndexBlock({ brainRootDir: brainRoot });
+    assert.doesNotMatch(indexBlock, /known-issues\.md/, "excluded doc must not appear in the awareness listing");
+    assert.match(indexBlock, /agent-brief\.md/, "non-excluded doc still listed");
+
+    setExcluded(["projects/hive/known-issues.md"], false);
+    const restored = await buildBrainMemoryBundle({ brainRootDir: brainRoot, project: "hive" });
+    assert.match(restored, /Canonical issue/, "un-excluding restores it");
+  });
 });

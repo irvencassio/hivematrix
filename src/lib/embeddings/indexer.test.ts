@@ -56,6 +56,25 @@ test("changing a doc re-embeds only it; deleting prunes it", async () => {
   assert.ok(!Object.keys(loadIndex().entries).some((p) => p.includes("knox")));
 });
 
+test("a doc excluded via the Brain / Memory Review sidecar is dropped from the index (and pruned if already indexed)", async () => {
+  writeFileSync(join(BRAIN, "cloudflare-tunnel.md"), "cloudflare tunnel notes, still present on disk.");
+  await reindexBrain({ embedder: embedBatch });
+  assert.ok("cloudflare-tunnel.md" in loadIndex().entries, "present before exclusion");
+
+  const { setExcluded, loadExclusions } = await import("@/lib/brain/exclusions");
+  setExcluded(["cloudflare-tunnel.md"], true);
+
+  const afterExclude = await reindexBrain({ embedder: embedBatch });
+  assert.equal(afterExclude.pruned, 1, "excluded doc pruned from the index on the next reindex");
+  assert.ok(!("cloudflare-tunnel.md" in loadIndex().entries));
+
+  setExcluded(["cloudflare-tunnel.md"], false);
+  assert.equal(loadExclusions().size, 0);
+  const afterRestore = await reindexBrain({ embedder: embedBatch });
+  assert.equal(afterRestore.indexed, 1, "un-excluding re-embeds it on the next reindex");
+  assert.ok("cloudflare-tunnel.md" in loadIndex().entries);
+});
+
 test("semanticSearch ranks the semantically closest doc first", async () => {
   // re-seed both docs
   writeFileSync(join(BRAIN, "cloudflare-tunnel.md"), "named cloudflare tunnel remote access durable tunnel");

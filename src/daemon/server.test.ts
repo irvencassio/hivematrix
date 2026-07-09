@@ -1806,6 +1806,165 @@ test("GET /brain/projects, /brain/docs, /brain/doc — Phase-1 checkpoint (brief
   assert.equal(traversalRes.status, 404, "path traversal outside the project dir is rejected, not served");
 });
 
+test("POST /brain/doc/exclude toggles the exclusion flag and GET /brain/docs reflects it (reversible)", async (t) => {
+  withTempHome(t);
+  const { mkdirSync: mkdir, writeFileSync: write } = await import("node:fs");
+  const brainRoot = join(process.env.HOME!, "brain");
+  const proj = join(brainRoot, "projects", "hive");
+  mkdir(proj, { recursive: true });
+  mkdir(join(process.env.HOME!, ".hivematrix"), { recursive: true });
+  write(join(process.env.HOME!, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: brainRoot } }));
+  write(join(proj, "known-issues.md"), "# Known Issues\n");
+
+  const { base, headers } = await startServer(t);
+
+  const before = await fetch(`${base}/brain/docs?project=hive`, { headers });
+  const beforeBody = await before.json() as { docs: Array<{ file: string; status: string; excluded: boolean }> };
+  assert.equal(beforeBody.docs.find((d) => d.file === "known-issues.md")?.status, "ctx");
+
+  const excludeRes = await fetch(`${base}/brain/doc/exclude`, {
+    method: "POST", headers, body: JSON.stringify({ project: "hive", files: ["known-issues.md"], excluded: true }),
+  });
+  assert.equal(excludeRes.status, 200);
+  const excludeBody = await excludeRes.json() as { ok: boolean; excluded: boolean };
+  assert.deepEqual(excludeBody, { ok: true, project: "hive", files: ["known-issues.md"], excluded: true });
+
+  const after = await fetch(`${base}/brain/docs?project=hive`, { headers });
+  const afterBody = await after.json() as { docs: Array<{ file: string; status: string; excluded: boolean }> };
+  const excludedDoc = afterBody.docs.find((d) => d.file === "known-issues.md");
+  assert.equal(excludedDoc?.status, "excluded", "excluded overrides ctx in the precedence order");
+  assert.equal(excludedDoc?.excluded, true);
+
+  const restoreRes = await fetch(`${base}/brain/doc/exclude`, {
+    method: "POST", headers, body: JSON.stringify({ project: "hive", files: ["known-issues.md"], excluded: false }),
+  });
+  assert.equal(restoreRes.status, 200);
+  const restored = await fetch(`${base}/brain/docs?project=hive`, { headers });
+  const restoredBody = await restored.json() as { docs: Array<{ file: string; status: string }> };
+  assert.equal(restoredBody.docs.find((d) => d.file === "known-issues.md")?.status, "ctx", "un-excluding restores the underlying status");
+});
+
+test("POST /brain/doc/archive moves a doc out of the active set (and search); POST /brain/doc/restore reverses it", async (t) => {
+  withTempHome(t);
+  const { mkdirSync: mkdir, writeFileSync: write, existsSync } = await import("node:fs");
+  const brainRoot = join(process.env.HOME!, "brain");
+  const proj = join(brainRoot, "projects", "hive");
+  mkdir(proj, { recursive: true });
+  mkdir(join(process.env.HOME!, ".hivematrix"), { recursive: true });
+  write(join(process.env.HOME!, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: brainRoot } }));
+  write(join(proj, "agent-brief.md"), "# Hive Agent Brief — unique-archive-marker\n");
+
+  const { base, headers } = await startServer(t);
+
+  // Findable via search before archiving.
+  const searchBefore = await fetch(`${base}/brain/search?q=unique-archive-marker`, { headers });
+  const searchBeforeBody = await searchBefore.json() as { results?: unknown[]; hits?: unknown[] };
+  const beforeHits = (searchBeforeBody.results ?? searchBeforeBody.hits ?? []) as unknown[];
+  assert.ok(beforeHits.length > 0, "doc is keyword-searchable before archiving");
+
+  const archiveRes = await fetch(`${base}/brain/doc/archive`, {
+    method: "POST", headers, body: JSON.stringify({ project: "hive", files: ["agent-brief.md"] }),
+  });
+  assert.equal(archiveRes.status, 200);
+  const archiveBody = await archiveRes.json() as { ok: boolean; results: Array<{ file: string; ok: boolean }> };
+  assert.deepEqual(archiveBody, { ok: true, project: "hive", results: [{ file: "agent-brief.md", ok: true }] });
+  assert.ok(!existsSync(join(proj, "agent-brief.md")));
+  assert.ok(existsSync(join(proj, "_archived", "agent-brief.md")), "moved, not deleted");
+
+  const docsAfterArchive = await fetch(`${base}/brain/docs?project=hive`, { headers });
+  const docsAfterArchiveBody = await docsAfterArchive.json() as { docs: Array<{ file: string; archived: boolean }> };
+  const briefRow = docsAfterArchiveBody.docs.find((d) => d.file === "agent-brief.md");
+  assert.equal(briefRow?.archived, true);
+
+  // No longer keyword-searchable once archived (unlike a mere exclude).
+  const searchAfter = await fetch(`${base}/brain/search?q=unique-archive-marker`, { headers });
+  const searchAfterBody = await searchAfter.json() as { results?: unknown[]; hits?: unknown[] };
+  const afterHits = (searchAfterBody.results ?? searchAfterBody.hits ?? []) as unknown[];
+  assert.equal(afterHits.length, 0, "archived doc drops out of search too");
+
+  const restoreRes = await fetch(`${base}/brain/doc/restore`, {
+    method: "POST", headers, body: JSON.stringify({ project: "hive", files: ["agent-brief.md"] }),
+  });
+  assert.equal(restoreRes.status, 200);
+  assert.ok(existsSync(join(proj, "agent-brief.md")));
+  assert.ok(!existsSync(join(proj, "_archived", "agent-brief.md")));
+
+  const docsAfterRestore = await fetch(`${base}/brain/docs?project=hive`, { headers });
+  const docsAfterRestoreBody = await docsAfterRestore.json() as { docs: Array<{ file: string; archived: boolean; status: string }> };
+  const restoredRow = docsAfterRestoreBody.docs.find((d) => d.file === "agent-brief.md");
+  assert.equal(restoredRow?.archived, false);
+  assert.equal(restoredRow?.status, "brief");
+});
+
+test("POST /brain/doc/delete permanently removes an archived doc, but refuses to touch an active one", async (t) => {
+  withTempHome(t);
+  const { mkdirSync: mkdir, writeFileSync: write, existsSync } = await import("node:fs");
+  const brainRoot = join(process.env.HOME!, "brain");
+  const proj = join(brainRoot, "projects", "hive");
+  mkdir(proj, { recursive: true });
+  mkdir(join(process.env.HOME!, ".hivematrix"), { recursive: true });
+  write(join(process.env.HOME!, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: brainRoot } }));
+  write(join(proj, "known-issues.md"), "# Known Issues\n");
+
+  const { base, headers } = await startServer(t);
+
+  // Deleting a still-active (never-archived) doc must fail and leave it in place.
+  const deleteActiveRes = await fetch(`${base}/brain/doc/delete`, {
+    method: "POST", headers, body: JSON.stringify({ project: "hive", files: ["known-issues.md"] }),
+  });
+  const deleteActiveBody = await deleteActiveRes.json() as { ok: boolean };
+  assert.equal(deleteActiveBody.ok, false);
+  assert.ok(existsSync(join(proj, "known-issues.md")), "active doc survives an errant delete call");
+
+  await fetch(`${base}/brain/doc/archive`, {
+    method: "POST", headers, body: JSON.stringify({ project: "hive", files: ["known-issues.md"] }),
+  });
+  assert.ok(existsSync(join(proj, "_archived", "known-issues.md")));
+
+  const deleteRes = await fetch(`${base}/brain/doc/delete`, {
+    method: "POST", headers, body: JSON.stringify({ project: "hive", files: ["known-issues.md"] }),
+  });
+  assert.equal(deleteRes.status, 200);
+  const deleteBody = await deleteRes.json() as { ok: boolean; results: Array<{ file: string; ok: boolean }> };
+  assert.deepEqual(deleteBody, { ok: true, project: "hive", results: [{ file: "known-issues.md", ok: true }] });
+  assert.ok(!existsSync(join(proj, "_archived", "known-issues.md")), "permanently gone");
+
+  const docsAfter = await fetch(`${base}/brain/docs?project=hive`, { headers });
+  const docsAfterBody = await docsAfter.json() as { docs: Array<{ file: string }> };
+  assert.ok(!docsAfterBody.docs.some((d) => d.file === "known-issues.md"), "no longer listed at all");
+});
+
+test("Pinned 'Always loaded' pseudo-project: listed first, surfaces real CLAUDE.md content, and refuses mutation", async (t) => {
+  withTempHome(t);
+  const { mkdirSync: mkdir, writeFileSync: write } = await import("node:fs");
+  mkdir(join(process.env.HOME!, ".claude"), { recursive: true });
+  write(join(process.env.HOME!, ".claude", "CLAUDE.md"), "# Instructions\nBe concise.");
+
+  const { base, headers } = await startServer(t);
+
+  const projectsRes = await fetch(`${base}/brain/projects`, { headers });
+  const projectsBody = await projectsRes.json() as { projects: Array<{ slug: string; label: string; docCount: number }> };
+  assert.equal(projectsBody.projects[0].slug, "__pinned__", "pinned is always listed first");
+  assert.equal(projectsBody.projects[0].docCount, 1);
+
+  const docsRes = await fetch(`${base}/brain/docs?project=__pinned__`, { headers });
+  const docsBody = await docsRes.json() as { docs: Array<{ file: string; status: string; badge: string }> };
+  assert.equal(docsBody.docs.length, 1);
+  assert.equal(docsBody.docs[0].file, "CLAUDE.md");
+  assert.equal(docsBody.docs[0].status, "brief");
+
+  const docRes = await fetch(`${base}/brain/doc?project=__pinned__&file=CLAUDE.md`, { headers });
+  const docBody = await docRes.json() as { content: string };
+  assert.match(docBody.content, /Be concise/);
+
+  for (const path of ["/brain/doc/exclude", "/brain/doc/archive", "/brain/doc/restore", "/brain/doc/delete"]) {
+    const r = await fetch(`${base}${path}`, {
+      method: "POST", headers, body: JSON.stringify({ project: "__pinned__", files: ["CLAUDE.md"] }),
+    });
+    assert.equal(r.status, 400, `${path} must refuse the pinned pseudo-project`);
+  }
+});
+
 test("every SSE stream registers a response error handler (an unhandled stream 'error' event would crash the daemon)", () => {
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
   const sites = [...src.matchAll(/text\/event-stream/g)];
