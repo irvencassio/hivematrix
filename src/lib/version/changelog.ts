@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.169", date: "2026-07-10", note: "Fix daemon launching with cwd=/ (WorkingDirectory missing from launchd plist), causing skill/feedback/directive tasks to get permanently stuck; also fix task-role vs auth-profile field confusion in skill/feedback task creation" },
   { version: "0.1.168", date: "2026-07-10", note: "Fix Tailscale toggle always showing Off in Settings" },
   { version: "0.1.167", date: "2026-07-10", note: "Developer ID release" },
   { version: "0.1.166", date: "2026-07-10", note: "Developer ID release" },
