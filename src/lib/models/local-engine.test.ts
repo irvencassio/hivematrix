@@ -7,6 +7,7 @@ import {
   getLocalEngineConfig, buildServeArgs, localTargetForRole, tierBaseUrl, tierForAlias, DEFAULT_TIERS,
   localEngineCapability, memoryTierForGB, selectLocalMemoryPreset, resolveRapidBinary,
   isLocalEngineEnabled, setLocalEngineEnabled, getLocalEngineSelection, setLocalEngineSelection,
+  getLocalEngineTuning, setLocalEngineTuning, validateTuning,
 } from "./local-engine";
 
 function withTempHome<T>(config: Record<string, unknown>, run: (homeDir: string) => T): T {
@@ -47,11 +48,49 @@ test("configured localEngine tiers are authoritative when present", () => {
   assert.equal(c.tiers[0].reasoning, true);
 });
 
-test("buildServeArgs adds --no-thinking only when reasoning off", () => {
+test("getLocalEngineConfig persists a configured kvCacheDtype and cacheMemoryPercent", () => {
+  const c = getLocalEngineConfig({
+    localEngine: {
+      tiers: [{ key: "coding", alias: "qwen3.6-27b-8bit", port: 8001, reasoning: false, kvCacheDtype: "int8", cacheMemoryPercent: 0.3 }],
+    },
+  });
+  assert.equal(c.tiers[0].kvCacheDtype, "int8");
+  assert.equal(c.tiers[0].cacheMemoryPercent, 0.3);
+});
+
+test("getLocalEngineConfig falls back to the default kvCacheDtype (int4) when unset", () => {
+  const c = getLocalEngineConfig({
+    localEngine: { tiers: [{ key: "fast", alias: "my-fast", port: 9000, reasoning: false }] },
+  });
+  assert.equal(c.tiers[0].kvCacheDtype, "int4");
+});
+
+test("buildServeArgs adds --no-thinking + --kv-cache-dtype when reasoning off", () => {
   assert.deepEqual(buildServeArgs(DEFAULT_TIERS[0]),
-    ["serve", "qwen3.6-35b-4bit", "--host", "127.0.0.1", "--port", "8000", "--no-thinking"]);
-  assert.deepEqual(buildServeArgs({ key: "fast", alias: "m", port: 1, reasoning: true }),
-    ["serve", "m", "--host", "127.0.0.1", "--port", "1"]);
+    ["serve", "qwen3.6-35b-4bit", "--host", "127.0.0.1", "--port", "8000", "--no-thinking", "--kv-cache-dtype", "int4"]);
+});
+
+test("buildServeArgs omits --no-thinking and --kv-cache-dtype, adds --reasoning, when reasoning on", () => {
+  // --reasoning pins int8 server-side regardless of kvCacheDtype, so a
+  // configured dtype is advisory only and must not be printed as if it took effect.
+  assert.deepEqual(
+    buildServeArgs({ key: "fast", alias: "m", port: 1, reasoning: true, kvCacheDtype: "int4" }),
+    ["serve", "m", "--host", "127.0.0.1", "--port", "1", "--reasoning"],
+  );
+});
+
+test("buildServeArgs omits --kv-cache-dtype when unset (defers to Rapid-MLX's own default)", () => {
+  assert.deepEqual(
+    buildServeArgs({ key: "fast", alias: "m", port: 1, reasoning: false }),
+    ["serve", "m", "--host", "127.0.0.1", "--port", "1", "--no-thinking"],
+  );
+});
+
+test("buildServeArgs passes --cache-memory-percent when configured", () => {
+  assert.deepEqual(
+    buildServeArgs({ key: "coding", alias: "m", port: 1, reasoning: false, kvCacheDtype: "int8", cacheMemoryPercent: 0.3 }),
+    ["serve", "m", "--host", "127.0.0.1", "--port", "1", "--no-thinking", "--kv-cache-dtype", "int8", "--cache-memory-percent", "0.3"],
+  );
 });
 
 test("roles map to tiers: operational→fast, coding/thinking→coding", () => {
@@ -136,6 +175,73 @@ test("setLocalEngineSelection: preserves enabled/binary/tiers — only touches `
   });
 });
 
+test("getLocalEngineTuning: absent key -> {}", () => {
+  withTempHome({}, () => {
+    assert.deepEqual(getLocalEngineTuning(), {});
+  });
+});
+
+test("setLocalEngineTuning: a tier omitted from the patch leaves the other tier's override untouched", () => {
+  withTempHome({ localEngine: { tuning: { fast: { kvCacheDtype: "int8" } } } }, () => {
+    setLocalEngineTuning({ coding: { contextLimit: 16384 } });
+    const merged = getLocalEngineTuning();
+    assert.equal(merged.fast?.kvCacheDtype, "int8");
+    assert.equal(merged.coding?.contextLimit, 16384);
+  });
+});
+
+test("setLocalEngineTuning: a tier explicitly set to null clears its override (removed, not stored as null)", () => {
+  withTempHome({ localEngine: { tuning: { fast: { kvCacheDtype: "int8" }, coding: { contextLimit: 16384 } } } }, () => {
+    setLocalEngineTuning({ fast: null });
+    const merged = getLocalEngineTuning();
+    assert.equal(merged.fast, undefined);
+    assert.equal(merged.coding?.contextLimit, 16384);
+  });
+});
+
+test("setLocalEngineTuning: setting only kvCacheDtype doesn't clobber a stored contextLimit for the same tier", () => {
+  withTempHome({ localEngine: { tuning: { fast: { contextLimit: 32768 } } } }, () => {
+    setLocalEngineTuning({ fast: { kvCacheDtype: "bf16" } });
+    const merged = getLocalEngineTuning();
+    assert.equal(merged.fast?.contextLimit, 32768);
+    assert.equal(merged.fast?.kvCacheDtype, "bf16");
+  });
+});
+
+test("validateTuning: accepts a contextLimit within the tier's maxRecommendedContext and an in-range kvCacheDtype", () => {
+  const preset = selectLocalMemoryPreset({ ramGB: 128 });
+  const result = validateTuning({ fast: { contextLimit: 65536, kvCacheDtype: "int8" } }, preset);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.tuning.fast, { contextLimit: 65536, kvCacheDtype: "int8" });
+});
+
+test("validateTuning: rejects a contextLimit above the tier's maxRecommendedContext", () => {
+  const preset = selectLocalMemoryPreset({ ramGB: 32 }); // fast maxRecommendedContext = 32768
+  const result = validateTuning({ fast: { contextLimit: 999_999 } }, preset);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /contextLimit for fast/);
+});
+
+test("validateTuning: rejects a contextLimit below 1024", () => {
+  const preset = selectLocalMemoryPreset({ ramGB: 128 });
+  const result = validateTuning({ fast: { contextLimit: 512 } }, preset);
+  assert.equal(result.ok, false);
+});
+
+test("validateTuning: rejects an unknown kvCacheDtype", () => {
+  const preset = selectLocalMemoryPreset({ ramGB: 128 });
+  const result = validateTuning({ coding: { kvCacheDtype: "fp32" } }, preset);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /invalid kvCacheDtype/);
+});
+
+test("validateTuning: null explicitly clears a tier's override", () => {
+  const preset = selectLocalMemoryPreset({ ramGB: 128 });
+  const result = validateTuning({ fast: null }, preset);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.tuning.fast, null);
+});
+
 test("setLocalEngineEnabled persists and merges without disturbing other localEngine keys", () => {
   withTempHome(
     { existingKey: "keepme", localEngine: { engine: "rapid-mlx", binary: "/x/rapid-mlx" } },
@@ -156,7 +262,10 @@ test("memory tiers select explicit Qwen presets", () => {
   assert.equal(memoryTierForGB(64), "64gb");
   assert.equal(memoryTierForGB(128), "128gb");
   assert.equal(selectLocalMemoryPreset({ ramGB: 32 }).localAgentFast.model, "qwen3.6-35b-a3b");
-  assert.equal(selectLocalMemoryPreset({ ramGB: 128 }).localCoderQuality.quant, "Q8_0 or UD-Q8_K_XL");
+  assert.equal(selectLocalMemoryPreset({ ramGB: 128 }).localCoderQuality.quant, "8bit");
+  assert.equal(selectLocalMemoryPreset({ ramGB: 128 }).localCoderQuality.kvCacheDtype, "int8");
+  assert.equal(selectLocalMemoryPreset({ ramGB: 128 }).localAgentFast.quant, "8bit");
+  assert.equal(selectLocalMemoryPreset({ ramGB: 128 }).localAgentFast.kvCacheDtype, "int4");
 });
 
 test("capability: non-Apple-Silicon → cloud-only, no tiers", () => {

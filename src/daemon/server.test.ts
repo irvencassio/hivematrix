@@ -1751,6 +1751,84 @@ test("POST /local-engine/selection persists a merged selection, and GET /local-e
   assert.equal(getBody.selection.fast, "8bit");
 });
 
+test("GET /local-engine reports per-tier context/kv-cache tuning defaults and a live KV-GiB footprint estimate", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/local-engine`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { tuning: Record<string, { defaultContext: number; effectiveContext: number; effectiveKvDtype: string; kvGiBByDtype: Record<string, number> }> };
+  assert.ok(body.tuning.fast);
+  assert.equal(body.tuning.fast.effectiveContext, body.tuning.fast.defaultContext);
+  assert.ok(body.tuning.fast.kvGiBByDtype.int4 > 0);
+  assert.ok(body.tuning.fast.kvGiBByDtype.bf16 > body.tuning.fast.kvGiBByDtype.int4);
+});
+
+test("POST /local-engine/tuning rejects a contextLimit outside the RAM band's recommended range", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/local-engine/tuning`, {
+    method: "POST", headers, body: JSON.stringify({ fast: { contextLimit: 999_999_999 } }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json() as { ok: boolean; error: string };
+  assert.equal(body.ok, false);
+  assert.match(body.error, /contextLimit for fast/);
+});
+
+test("POST /local-engine/tuning rejects an unknown kvCacheDtype", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/local-engine/tuning`, {
+    method: "POST", headers, body: JSON.stringify({ fast: { kvCacheDtype: "fp32" } }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json() as { ok: boolean; error: string };
+  assert.equal(body.ok, false);
+  assert.match(body.error, /invalid kvCacheDtype/);
+});
+
+test("POST /local-engine/tuning persists a merged override, GET /local-engine reflects it, and null reverts to the preset default", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const set = await fetch(`${base}/local-engine/tuning`, {
+    method: "POST", headers, body: JSON.stringify({ fast: { kvCacheDtype: "int8" } }),
+  });
+  assert.equal(set.status, 200);
+  const setBody = await set.json() as { ok: boolean; tuning: Record<string, { kvCacheDtype?: string }> };
+  assert.equal(setBody.ok, true);
+  assert.equal(setBody.tuning.fast?.kvCacheDtype, "int8");
+
+  const get = await fetch(`${base}/local-engine`, { headers });
+  const getBody = await get.json() as { tuning: Record<string, { effectiveKvDtype: string }> };
+  assert.equal(getBody.tuning.fast.effectiveKvDtype, "int8");
+
+  const clear = await fetch(`${base}/local-engine/tuning`, {
+    method: "POST", headers, body: JSON.stringify({ fast: null }),
+  });
+  assert.equal(clear.status, 200);
+  const clearBody = await clear.json() as { tuning: Record<string, unknown> };
+  assert.equal(clearBody.tuning.fast, undefined);
+});
+
+test("GET /local-engine/provision's plan honors a persisted tuning override's contextLimit", async (t) => {
+  withTempHome(t);
+  const { mkdirSync: mkdir, writeFileSync: write } = await import("node:fs");
+  mkdir(join(process.env.HOME!, ".hivematrix"), { recursive: true });
+  write(join(process.env.HOME!, ".hivematrix", "config.json"), JSON.stringify({
+    localEngine: { tuning: { fast: { contextLimit: 12345 } } },
+  }));
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/local-engine/provision`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { plan: { tiers: Array<{ key: string }>; tuning: Record<string, { contextLimit?: number }> } };
+  assert.equal(body.plan.tuning.fast?.contextLimit, 12345);
+});
+
 test("GET /local-engine/provision's plan honors a persisted selection instead of the auto pick", async (t) => {
   withTempHome(t);
   const { mkdirSync: mkdir, writeFileSync: write } = await import("node:fs");

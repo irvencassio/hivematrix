@@ -22,6 +22,7 @@ import { getAgentProfile } from "@/lib/config/agent-profiles";
 import { buildBrainMemoryBundle, buildBrainIndexBlock } from "@/lib/brain/memory-bundle";
 import { brainDocPolicyText } from "@/lib/brain/settings";
 import { resolveThinkingMode } from "@/lib/config/budget-policy";
+import { governContext, ContextBudgetExceededError } from "@/lib/local-model/context-governor";
 
 const MAX_TURNS = 50;
 const MODEL_TOOL_RESULT_MAX_CHARS = 12_000;
@@ -527,7 +528,7 @@ export function buildGenericRequestBody(
     model: modelId,
     messages,
     stream: true,
-    max_tokens: provider.maxTokens,
+    max_tokens: provider.maxOutputTokens,
   };
 
   if (provider.supportsTools && profileTools && profileTools.length > 0) {
@@ -655,6 +656,28 @@ async function runAgentLoop(
 
     turns++;
 
+    // Rapid-MLX has no server-side context flag (MLX grows the KV cache
+    // lazily), so nothing else bounds a local conversation. Compact or fail
+    // loudly here rather than letting an oversized prompt hit the server as
+    // silent memory pressure (2026-07-09 local-model-tuning spec, §3.3).
+    if (LOCAL_SERVED_PROVIDERS.has(provider.name) && provider.contextLimit) {
+      try {
+        const governed = governContext(messages, { contextLimit: provider.contextLimit, maxOutputTokens: provider.maxOutputTokens });
+        if (governed.compacted) {
+          onEvent(taskId, {
+            type: "log",
+            content: `[context] compacted ${governed.droppedCount} older turn(s) — ~${governed.estimatedTokensBefore} -> ~${governed.estimatedTokensAfter} tokens (budget ${provider.contextLimit - provider.maxOutputTokens})`,
+          });
+        }
+      } catch (err) {
+        if (err instanceof ContextBudgetExceededError) {
+          onEvent(taskId, { type: "error", content: err.message });
+          return { code: 1, result: err.message, turns, totalTokens, inputTokens, outputTokens };
+        }
+        throw err;
+      }
+    }
+
     // Call API with single retry on transient errors (429, 500, 502, 503)
     let response: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -769,7 +792,7 @@ async function runAgentLoop(
       if (truncatedToolCall) {
         onEvent(taskId, {
           type: "error",
-          content: `Model output was truncated at max_tokens=${provider.maxTokens} mid tool-call — arguments are incomplete and will not be executed.`,
+          content: `Model output was truncated at max_tokens=${provider.maxOutputTokens} mid tool-call — arguments are incomplete and will not be executed.`,
         });
       }
 
@@ -782,7 +805,7 @@ async function runAgentLoop(
           // Do not parse or execute a truncated call. Tell the model exactly
           // what happened and how to recover, then move on — this must not
           // count toward the loop guard, since a retry is not a repeat.
-          const result = buildTruncatedToolCallResult(provider.maxTokens);
+          const result = buildTruncatedToolCallResult(provider.maxOutputTokens);
           const modelResult = modelToolResultContent(result);
           onEvent(taskId, { type: "tool_result", content: result.slice(0, 500) });
           if ("id" in tc) {

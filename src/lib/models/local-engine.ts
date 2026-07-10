@@ -18,6 +18,7 @@ import { homedir, arch as osArch, totalmem } from "os";
 import { findBinary } from "@/lib/config/binary-detection";
 import { writeJsonAtomic } from "@/lib/config/atomic-write";
 import { quantForAlias, LOCAL_MODEL_CATALOG, type LocalQuant, type LocalModelOption, type LocalSelection } from "./local-quant";
+import { DEFAULT_KV_CACHE_DTYPE, KV_CACHE_DTYPES, type KvCacheDtype } from "./local-tuning";
 
 export type LocalEngineKind = "rapid-mlx" | "lmstudio" | "ollama";
 export type TierKey = "fast" | "coding";
@@ -30,6 +31,13 @@ export interface LocalTier {
   reasoning: boolean; // false → serve with --no-thinking
   /** Display hint only — the alias is the serving source of truth. */
   quant?: LocalQuant | null;
+  /** --kv-cache-dtype. Rapid-MLX's own default is int4 (R15 #300); we pass it
+   * explicitly so a tier's choice survives a Rapid-MLX version that changes its
+   * default. NOTE: `--reasoning` (set when `reasoning: true`) pins int8
+   * server-side regardless of this value — see buildServeArgs. */
+  kvCacheDtype?: KvCacheDtype;
+  /** --cache-memory-percent. Omitted → Rapid-MLX's own default (0.20). */
+  cacheMemoryPercent?: number;
 }
 
 export interface LocalEngineConfig {
@@ -39,8 +47,8 @@ export interface LocalEngineConfig {
 }
 
 export const DEFAULT_TIERS: LocalTier[] = [
-  { key: "fast", alias: "qwen3.6-35b-4bit", port: 8000, reasoning: false, quant: "4bit" },
-  { key: "coding", alias: "qwen3.6-27b-4bit", port: 8001, reasoning: false, quant: "4bit" },
+  { key: "fast", alias: "qwen3.6-35b-4bit", port: 8000, reasoning: false, quant: "4bit", kvCacheDtype: DEFAULT_KV_CACHE_DTYPE },
+  { key: "coding", alias: "qwen3.6-27b-4bit", port: 8001, reasoning: false, quant: "4bit", kvCacheDtype: DEFAULT_KV_CACHE_DTYPE },
 ];
 
 export const SUPPORTED_LOCAL_TIER_PRESETS: LocalTier[] = DEFAULT_TIERS;
@@ -71,12 +79,20 @@ function parseTier(raw: unknown, fallback: LocalTier): LocalTier {
   const key: TierKey = r.key === "coding" ? "coding" : "fast";
   const alias = typeof r.alias === "string" && r.alias ? r.alias : fallback.alias;
   const quant = typeof r.quant === "string" ? (r.quant as LocalQuant) : quantForAlias(alias);
+  const kvCacheDtype = typeof r.kvCacheDtype === "string" && (KV_CACHE_DTYPES as string[]).includes(r.kvCacheDtype)
+    ? (r.kvCacheDtype as KvCacheDtype)
+    : fallback.kvCacheDtype ?? DEFAULT_KV_CACHE_DTYPE;
+  const cacheMemoryPercent = typeof r.cacheMemoryPercent === "number" && r.cacheMemoryPercent > 0 && r.cacheMemoryPercent <= 1
+    ? r.cacheMemoryPercent
+    : fallback.cacheMemoryPercent;
   return {
     key,
     alias,
     port: typeof r.port === "number" && r.port > 0 ? r.port : fallback.port,
     reasoning: r.reasoning === true, // default false (reasoning off)
     quant,
+    kvCacheDtype,
+    cacheMemoryPercent,
   };
 }
 
@@ -180,10 +196,122 @@ export function setLocalEngineSelection(patch: LocalSelection): void {
   writeJsonAtomic(configFilePath(), config);
 }
 
-/** Pure: the `rapid-mlx serve …` argv for a tier (reasoning off → --no-thinking). */
+// --- Operator context/KV-cache overrides (Settings §3.5, 2026-07-09 tuning spec) ---
+// Distinct from `selection` (which weight quant to install): a tier's context
+// budget and KV dtype are RAM-band decisions the operator can override per tier,
+// independent of the weight quant. Absent ⇒ the preset role's default applies.
+
+export interface TierTuning {
+  /** Client-enforced prompt+history budget — see context-governor.ts. */
+  contextLimit?: number;
+  kvCacheDtype?: KvCacheDtype;
+}
+export type LocalTuning = Partial<Record<TierKey, TierTuning>>;
+
+interface LocalEngineTuningBlock { tuning?: unknown }
+
+function parseTierTuning(raw: unknown): TierTuning | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const out: TierTuning = {};
+  if (typeof r.contextLimit === "number" && r.contextLimit > 0) out.contextLimit = r.contextLimit;
+  if (typeof r.kvCacheDtype === "string" && (KV_CACHE_DTYPES as string[]).includes(r.kvCacheDtype)) {
+    out.kvCacheDtype = r.kvCacheDtype as KvCacheDtype;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function parseTuning(raw: unknown): LocalTuning {
+  if (!raw || typeof raw !== "object") return {};
+  const r = raw as Record<string, unknown>;
+  const out: LocalTuning = {};
+  for (const key of ["fast", "coding"] as TierKey[]) {
+    const t = parseTierTuning(r[key]);
+    if (t) out[key] = t;
+  }
+  return out;
+}
+
+/** The operator's persisted context/KV-cache overrides (config.json
+ * `localEngine.tuning`). Absent key ⇒ {} (preset defaults apply). */
+export function getLocalEngineTuning(config: Record<string, unknown> = readConfig()): LocalTuning {
+  const entry = readLocalEngineBlock(config) as LocalEngineTuningBlock;
+  return parseTuning(entry.tuning);
+}
+
+/** Merges a per-tier patch over the persisted tuning — a tier key omitted from
+ * `patch` leaves it untouched; a tier key set to `null` clears the override
+ * (reverts to the preset default); a tier key set to an object merges its
+ * fields (so setting only `kvCacheDtype` doesn't clobber a stored `contextLimit`). */
+export function setLocalEngineTuning(patch: Partial<Record<TierKey, TierTuning | null>>): void {
+  const config = readConfig();
+  const existing = readLocalEngineBlock(config) as LocalEngineTuningBlock;
+  const merged: LocalTuning = parseTuning(existing.tuning);
+  for (const key of Object.keys(patch) as TierKey[]) {
+    const v = patch[key];
+    if (v === undefined) continue;
+    if (v === null) delete merged[key];
+    else merged[key] = { ...merged[key], ...v };
+  }
+  config.localEngine = { ...existing, tuning: merged };
+  writeJsonAtomic(configFilePath(), config);
+}
+
+export type TuningInput = Partial<Record<TierKey, unknown>>;
+export type TuningValidation = { ok: true; tuning: Partial<Record<TierKey, TierTuning | null>> } | { ok: false; error: string };
+
+/** Validates a raw (untrusted) tuning payload against the RAM band's preset —
+ * contextLimit must fall within [1024, role.maxRecommendedContext] and
+ * kvCacheDtype must be a known dtype. Pure, mirrors local-quant.ts's
+ * validateSelection so the HTTP layer stays a thin parse-then-branch. */
+export function validateTuning(raw: TuningInput, preset: LocalMemoryPreset): TuningValidation {
+  const tuning: Partial<Record<TierKey, TierTuning | null>> = {};
+  for (const key of Object.keys(raw) as TierKey[]) {
+    if (key !== "fast" && key !== "coding") continue;
+    const v = raw[key];
+    if (v === undefined) continue;
+    if (v === null) { tuning[key] = null; continue; }
+    if (typeof v !== "object") return { ok: false, error: `invalid tuning payload for ${key}` };
+    const role = key === "coding" ? preset.localCoderQuality : preset.localAgentFast;
+    const r = v as Record<string, unknown>;
+    const out: TierTuning = {};
+    if (r.contextLimit !== undefined) {
+      if (typeof r.contextLimit !== "number" || r.contextLimit < 1024 || r.contextLimit > role.maxRecommendedContext) {
+        return { ok: false, error: `contextLimit for ${key} must be between 1024 and ${role.maxRecommendedContext}` };
+      }
+      out.contextLimit = r.contextLimit;
+    }
+    if (r.kvCacheDtype !== undefined) {
+      if (typeof r.kvCacheDtype !== "string" || !(KV_CACHE_DTYPES as string[]).includes(r.kvCacheDtype)) {
+        return { ok: false, error: `invalid kvCacheDtype for ${key}: ${JSON.stringify(r.kvCacheDtype)}` };
+      }
+      out.kvCacheDtype = r.kvCacheDtype as KvCacheDtype;
+    }
+    tuning[key] = out;
+  }
+  return { ok: true, tuning };
+}
+
+/**
+ * Pure: the `rapid-mlx serve …` argv for a tier.
+ *
+ * `--reasoning` (Rapid-MLX's own flag) pins `--kv-cache-dtype` to int8
+ * SERVER-SIDE regardless of what we pass — its own help text: "pins
+ * --kv-cache-dtype to int8 regardless of the dtype flag (sub-4-bit drops -20pt
+ * on AIME-class math for Qwen3 thinking variants)". So a reasoning tier's
+ * `kvCacheDtype` is advisory only; we omit the flag rather than pass a value
+ * the server will silently override, since a printed-but-ignored arg is
+ * confusing to read from a process list.
+ */
 export function buildServeArgs(tier: LocalTier): string[] {
   const args = ["serve", tier.alias, "--host", "127.0.0.1", "--port", String(tier.port)];
-  if (!tier.reasoning) args.push("--no-thinking");
+  if (tier.reasoning) {
+    args.push("--reasoning");
+  } else {
+    args.push("--no-thinking");
+    if (tier.kvCacheDtype) args.push("--kv-cache-dtype", tier.kvCacheDtype);
+  }
+  if (tier.cacheMemoryPercent != null) args.push("--cache-memory-percent", String(tier.cacheMemoryPercent));
   return args;
 }
 
@@ -212,7 +340,10 @@ export function tierForAlias(alias: string, cfg: LocalEngineConfig = getLocalEng
   const opt = catalogOptionForAlias(alias);
   if (!opt) return null;
   const sameTier = cfg.tiers.find((t) => t.key === opt.tier) ?? DEFAULT_TIERS.find((t) => t.key === opt.tier)!;
-  return { key: opt.tier, alias: opt.alias, port: sameTier.port, reasoning: sameTier.reasoning, quant: opt.quant };
+  return {
+    key: opt.tier, alias: opt.alias, port: sameTier.port, reasoning: sameTier.reasoning, quant: opt.quant,
+    kvCacheDtype: sameTier.kvCacheDtype, cacheMemoryPercent: sameTier.cacheMemoryPercent,
+  };
 }
 
 /** Resolve a role to its tier's endpoint + model, or null if unmapped. */
@@ -392,9 +523,17 @@ export type LocalPresetMode =
 export interface LocalRolePreset {
   enabled: boolean;
   model: string;
-  quant: string;
+  /** MLX quant (matches LOCAL_MODEL_CATALOG's alias suffix) — null when disabled.
+   * NOT a GGUF/llama.cpp quant name; Rapid-MLX only serves MLX weights. */
+  quant: LocalQuant | null;
+  /** Client-enforced prompt+history budget (context-governor.ts) — Rapid-MLX
+   * has no server-side context flag, so this is the only place it takes effect. */
   defaultContext: number;
+  /** Upper bound offered in the Settings context slider — not itself enforced. */
   maxRecommendedContext: number;
+  /** --kv-cache-dtype for this tier at this RAM band. See local-tuning.ts for
+   * the footprint arithmetic these picks are derived from (2026-07-09 spec §1). */
+  kvCacheDtype: KvCacheDtype | null;
   role: string;
 }
 
@@ -420,12 +559,21 @@ export interface LocalMemoryPreset {
 const DISABLED_ROLE: LocalRolePreset = {
   enabled: false,
   model: "",
-  quant: "",
+  quant: null,
   defaultContext: 0,
   maxRecommendedContext: 0,
+  kvCacheDtype: null,
   role: "disabled",
 };
 
+/**
+ * Per-RAM-band quant/context/KV-dtype picks. Derived (2026-07-09 tuning spec §1)
+ * from each model's real KV shape, not guessed: the coding tier (64 layers x 4
+ * kv_heads) costs ~3.2x more KV per token than the fast tier (40 layers x 2
+ * kv_heads), so identical context budgets across tiers — the pre-2026-07-09
+ * shape of this table — were backwards. `local-tuning.ts` computes the exact
+ * footprint; use `estimateKvCacheGiB` before hand-editing these numbers.
+ */
 export const LOCAL_MEMORY_PRESETS: LocalMemoryPreset[] = [
   {
     id: "less_than_32gb",
@@ -445,11 +593,11 @@ export const LOCAL_MEMORY_PRESETS: LocalMemoryPreset[] = [
     mode: "local_agent_light",
     localEnabled: true,
     recommendedTiers: ["fast"],
-    localAgentFast: { enabled: true, model: "qwen3.6-35b-a3b", quant: "UD-Q4_K_M or IQ4_XS", defaultContext: 8192, maxRecommendedContext: 16384, role: "fast local agent/planner" },
+    localAgentFast: { enabled: true, model: "qwen3.6-35b-a3b", quant: "4bit", defaultContext: 16384, maxRecommendedContext: 32768, kvCacheDtype: "int4", role: "fast local agent/planner" },
     localCoderQuality: DISABLED_ROLE,
     localEmbeddings: { enabled: true, model: "bge-small or nomic-embed-text", role: "small local retrieval embedding model" },
     frontierPrimary: { enabled: true, role: "fallback when local is unavailable or insufficient" },
-    rationale: "32GB can run Qwen3.6-35B-A3B at Q4 with a small embedding model, but should not keep Qwen3.6-27B hot",
+    rationale: "32GB can run Qwen3.6-35B-A3B at 4-bit with a small embedding model, but should not keep Qwen3.6-27B hot",
   },
   {
     id: "48gb",
@@ -457,7 +605,7 @@ export const LOCAL_MEMORY_PRESETS: LocalMemoryPreset[] = [
     mode: "local_agent_standard",
     localEnabled: true,
     recommendedTiers: ["fast"],
-    localAgentFast: { enabled: true, model: "qwen3.6-35b-a3b", quant: "Q5_K_M or Q6_K if available, otherwise UD-Q4_K_M", defaultContext: 16384, maxRecommendedContext: 32768, role: "primary local agent/planner" },
+    localAgentFast: { enabled: true, model: "qwen3.6-35b-a3b", quant: "4bit", defaultContext: 32768, maxRecommendedContext: 65536, kvCacheDtype: "int4", role: "primary local agent/planner" },
     localCoderQuality: DISABLED_ROLE,
     localEmbeddings: { enabled: true, model: "bge-small or nomic-embed-text", role: "small local retrieval embedding model" },
     frontierPrimary: { enabled: true, role: "fallback when local is unavailable or insufficient" },
@@ -469,11 +617,11 @@ export const LOCAL_MEMORY_PRESETS: LocalMemoryPreset[] = [
     mode: "dual_local_compact",
     localEnabled: true,
     recommendedTiers: ["fast", "coding"],
-    localAgentFast: { enabled: true, model: "qwen3.6-35b-a3b", quant: "UD-Q4_K_M or Q5_K_M", defaultContext: 16384, maxRecommendedContext: 32768, role: "fast planner, triage, subagent, summarizer" },
-    localCoderQuality: { enabled: true, model: "qwen3.6-27b", quant: "Q5_K_M or Q6_K", defaultContext: 16384, maxRecommendedContext: 32768, role: "coding quality model" },
+    localAgentFast: { enabled: true, model: "qwen3.6-35b-a3b", quant: "4bit", defaultContext: 32768, maxRecommendedContext: 65536, kvCacheDtype: "int4", role: "fast planner, triage, subagent, summarizer" },
+    localCoderQuality: { enabled: true, model: "qwen3.6-27b", quant: "4bit", defaultContext: 16384, maxRecommendedContext: 32768, kvCacheDtype: "int4", role: "coding quality model" },
     localEmbeddings: { enabled: true, model: "bge-small or nomic-embed-text", role: "small local retrieval embedding model" },
     frontierPrimary: { enabled: true, role: "fallback when local is unavailable or insufficient" },
-    rationale: "64GB can run both Qwen models if context is capped and the system accepts some memory pressure",
+    rationale: "64GB can run both Qwen models resident at 4-bit; the coding tier gets a smaller context budget than fast — it costs ~3.2x more KV per token (64 layers x 4 kv_heads vs 40 x 2)",
   },
   {
     id: "128gb",
@@ -481,11 +629,15 @@ export const LOCAL_MEMORY_PRESETS: LocalMemoryPreset[] = [
     mode: "dual_local_quality",
     localEnabled: true,
     recommendedTiers: ["fast", "coding"],
-    localAgentFast: { enabled: true, model: "qwen3.6-35b-a3b", quant: "Q6_K or Q8_0, prefer Q6_K when both models are hot", defaultContext: 32768, maxRecommendedContext: 65536, role: "fast local agent/planner" },
-    localCoderQuality: { enabled: true, model: "qwen3.6-27b", quant: "Q8_0 or UD-Q8_K_XL", defaultContext: 32768, maxRecommendedContext: 65536, role: "primary local coding model" },
+    // 8-bit weights (34.0+62.7=... see local-tuning.ts) fit comfortably under the
+    // ~115G Metal ceiling at these contexts: ~68.6G resident. int8 KV on coding
+    // only — Rapid-MLX's own --reasoning profile pins int8 for exactly this
+    // model/role combination (AIME-class math loses ~20pt under sub-4-bit KV).
+    localAgentFast: { enabled: true, model: "qwen3.6-35b-a3b", quant: "8bit", defaultContext: 65536, maxRecommendedContext: 131072, kvCacheDtype: "int4", role: "fast local agent/planner" },
+    localCoderQuality: { enabled: true, model: "qwen3.6-27b", quant: "8bit", defaultContext: 32768, maxRecommendedContext: 65536, kvCacheDtype: "int8", role: "primary local coding model" },
     localEmbeddings: { enabled: true, model: "bge-small, nomic-embed-text, or mxbai-embed-large", role: "small local retrieval embedding model" },
     frontierPrimary: { enabled: true, role: "fallback when local is unavailable or insufficient" },
-    rationale: "128GB is the first tier where both models can be kept usable at the same time while preserving high coding quality",
+    rationale: "128GB is the first tier where both models can run at 8-bit weights while staying resident together (~68.6G at 65536/32768 context, int4/int8 KV — see local-tuning.ts)",
   },
 ];
 

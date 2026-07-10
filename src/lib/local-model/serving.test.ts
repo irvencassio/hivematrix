@@ -73,7 +73,7 @@ test("resolveServeCommand launches Rapid-MLX tier aliases with rapid-mlx", () =>
       endpoint: "http://127.0.0.1:8000/v1",
     }), null), {
       cmd: fakeRapid,
-      args: ["serve", "qwen3.6-35b-4bit", "--host", "127.0.0.1", "--port", "8000", "--no-thinking"],
+      args: ["serve", "qwen3.6-35b-4bit", "--host", "127.0.0.1", "--port", "8000", "--no-thinking", "--kv-cache-dtype", "int4"],
     });
   } finally {
     process.env.HOME = origHome;

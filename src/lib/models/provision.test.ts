@@ -53,6 +53,29 @@ test("planLocalEngine: 64 GB → both tiers resident", () => {
   assert.equal(plan.tiers.length, 2);
 });
 
+test("planLocalEngine: 128 GB auto-picks 8-bit weights per the preset, not the hardcoded 4-bit DEFAULT_TIERS", () => {
+  const plan = planLocalEngine({ arch: "arm64", ramGB: 128 });
+  assert.deepEqual(plan.recommendedTiers, ["fast", "coding"]);
+  const fast = plan.tiers.find((t) => t.key === "fast");
+  const coding = plan.tiers.find((t) => t.key === "coding");
+  assert.equal(fast?.alias, "qwen3.6-35b-8bit");
+  assert.equal(fast?.quant, "8bit");
+  assert.equal(fast?.kvCacheDtype, "int4");
+  assert.equal(coding?.alias, "qwen3.6-27b-8bit");
+  assert.equal(coding?.quant, "8bit");
+  assert.equal(coding?.kvCacheDtype, "int8");
+});
+
+test("planLocalEngine: an explicit selection still gets the RAM band's kvCacheDtype for that tier", () => {
+  // Operator explicitly picks 4-bit at 128GB — the KV dtype pick is a RAM-band
+  // decision (§3.2), orthogonal to the operator's own weight-quant choice, so
+  // the coding tier still gets int8 here even though the weight quant is 4-bit.
+  const plan = planLocalEngine({ arch: "arm64", ramGB: 128 }, { fast: "4bit", coding: "4bit" });
+  const coding = plan.tiers.find((t) => t.key === "coding");
+  assert.equal(coding?.quant, "4bit");
+  assert.equal(coding?.kvCacheDtype, "int8");
+});
+
 test("planLocalEngine: 16 GB → cloud-only, no tiers, with a reason", () => {
   const plan = planLocalEngine({ arch: "arm64", ramGB: 16 });
   assert.equal(plan.localCapable, false);
@@ -76,7 +99,7 @@ test("qwenProfileForProvisionPlan makes Flash/chat use the fast Qwen tier", () =
   assert.equal(profile.primary.modelId, "qwen3.6-35b-4bit");
   assert.equal(profile.primary.endpoint, "http://127.0.0.1:8000/v1");
   assert.equal(profile.primary.provider, "mlx");
-  assert.equal(profile.primary.contextLimit, 16384);
+  assert.equal(profile.primary.contextLimit, 32768);
   assert.equal(profile.thinkingEnabled, false);
   assert.equal(profile.secondary?.modelId, "qwen3.6-27b-4bit");
   assert.equal(profile.secondary?.endpoint, "http://127.0.0.1:8001/v1");

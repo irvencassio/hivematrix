@@ -30,7 +30,7 @@ export function buildQwenProvider(profile: QwenProfile, preferSecondary = false)
 
   // Try resolveProvider first (picks up cached toolCalls from health probe)
   const resolved = resolveProvider(modelCfg.modelId);
-  if (resolved) return { ...resolved, maxTokens: modelCfg.maxOutputTokens };
+  if (resolved) return { ...resolved, maxOutputTokens: modelCfg.maxOutputTokens, contextLimit: modelCfg.contextLimit };
 
   // Fall back to constructing directly from profile
   return {
@@ -38,7 +38,8 @@ export function buildQwenProvider(profile: QwenProfile, preferSecondary = false)
     endpoint: modelCfg.endpoint,
     apiKey: "",
     supportsTools: true,
-    maxTokens: modelCfg.maxOutputTokens,
+    maxOutputTokens: modelCfg.maxOutputTokens,
+    contextLimit: modelCfg.contextLimit,
   };
 }
 

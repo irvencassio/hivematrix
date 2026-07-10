@@ -71,7 +71,7 @@ test("generic/local request body uses provider max tokens and leaves cost uncapp
     endpoint: "http://localhost:11434/v1",
     apiKey: "",
     supportsTools: true,
-    maxTokens: 16384,
+    maxOutputTokens: 16384,
   };
 
   const body = buildGenericRequestBody(provider, "qwen-local", [
@@ -98,7 +98,7 @@ test("generic/local chat completions tries /v1 fallback for stale Ollama base en
     endpoint: "http://localhost:11434",
     apiKey: "",
     supportsTools: true,
-    maxTokens: 4096,
+    maxOutputTokens: 4096,
   };
 
   assert.deepEqual(buildChatCompletionsUrls(provider), [

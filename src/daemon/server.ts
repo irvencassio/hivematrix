@@ -1421,9 +1421,11 @@ export function createDaemonServer() {
       // GET /local-engine — Rapid-MLX toggle + HuggingFace-style model/quant picker state.
       if (req.method === "GET" && urlPath === "/local-engine") {
         const {
-          localEngineCapability, isLocalEngineEnabled, getLocalEngineSelection, resolveRapidBinary, getLocalEngineConfig,
+          localEngineCapability, isLocalEngineEnabled, getLocalEngineSelection, getLocalEngineTuning,
+          resolveRapidBinary, getLocalEngineConfig, selectLocalMemoryPreset,
         } = await import("@/lib/models/local-engine");
         const { optionsForRam } = await import("@/lib/models/local-quant");
+        const { estimateKvCacheGiB, KV_CACHE_DTYPES } = await import("@/lib/models/local-tuning");
         const { listCachedModelRepos } = await import("@/lib/models/provision");
         const { getServingStatus } = await import("@/lib/local-model/serving");
 
@@ -1433,6 +1435,30 @@ export function createDaemonServer() {
         const installed = bin !== null;
         const cachedRepos = installed ? await listCachedModelRepos(bin) : new Set<string>();
         const options = optionsForRam(cap.ramGB).map((opt) => ({ ...opt, cached: cachedRepos.has(opt.repo) }));
+        const preset = selectLocalMemoryPreset({ ramGB: cap.ramGB });
+        const tuning = getLocalEngineTuning();
+
+        // Tuning defaults + slider bounds per tier, so the UI never has to
+        // duplicate LOCAL_MEMORY_PRESETS' numbers — and a live KV-GiB estimate
+        // per dtype at the tier's CURRENT effective context, for the footprint readout.
+        const tuningByTier: Record<string, unknown> = {};
+        for (const key of ["fast", "coding"] as const) {
+          const role = key === "coding" ? preset.localCoderQuality : preset.localAgentFast;
+          if (!role.enabled) continue;
+          const effectiveContext = tuning[key]?.contextLimit ?? role.defaultContext;
+          const effectiveKvDtype = tuning[key]?.kvCacheDtype ?? role.kvCacheDtype ?? "int4";
+          tuningByTier[key] = {
+            defaultContext: role.defaultContext,
+            maxRecommendedContext: role.maxRecommendedContext,
+            defaultKvCacheDtype: role.kvCacheDtype,
+            override: tuning[key] ?? null,
+            effectiveContext,
+            effectiveKvDtype,
+            kvGiBByDtype: Object.fromEntries(
+              KV_CACHE_DTYPES.map((dtype) => [dtype, estimateKvCacheGiB(key, effectiveContext, dtype)]),
+            ),
+          };
+        }
 
         json(res, 200, {
           enabled,
@@ -1443,6 +1469,7 @@ export function createDaemonServer() {
           ready: getServingStatus().healthy,
           selection: getLocalEngineSelection(),
           options,
+          tuning: tuningByTier,
         });
         return;
       }
@@ -1491,25 +1518,49 @@ export function createDaemonServer() {
         json(res, 200, { ok: true, selection: merged, pullRequired });
         return;
       }
+      // POST /local-engine/tuning { fast?: {contextLimit?, kvCacheDtype?}|null, coding?: {...}|null }
+      // — persist the operator's context/KV-cache overrides (merged over the existing tuning;
+      // an omitted tier is untouched, a tier set to null reverts to the preset default).
+      // contextLimit is bounds-checked against the RAM band's maxRecommendedContext for that
+      // tier. Does NOT trigger a restart — the client calls POST /local-engine/provision
+      // afterward, same as /local-engine/selection, to re-serve with the new argv.
+      if (req.method === "POST" && urlPath === "/local-engine/tuning") {
+        const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
+        const { localEngineCapability, selectLocalMemoryPreset, setLocalEngineTuning, getLocalEngineTuning, validateTuning } =
+          await import("@/lib/models/local-engine");
+
+        const cap = localEngineCapability();
+        const preset = selectLocalMemoryPreset({ ramGB: cap.ramGB });
+        const result = validateTuning(body, preset);
+        if (!result.ok) {
+          json(res, 400, { ok: false, error: result.error });
+          return;
+        }
+        setLocalEngineTuning(result.tuning);
+        broadcast("local-engine:changed", { tuning: result.tuning });
+        json(res, 200, { ok: true, tuning: getLocalEngineTuning() });
+        return;
+      }
 
       // GET /local-engine/provision — provisioning plan (what fits this Mac) + job status.
       if (req.method === "GET" && urlPath === "/local-engine/provision") {
         const { planLocalEngine, getProvisionStatus } = await import("@/lib/models/provision");
-        const { getLocalEngineSelection } = await import("@/lib/models/local-engine");
+        const { getLocalEngineSelection, getLocalEngineTuning } = await import("@/lib/models/local-engine");
         const persisted = getLocalEngineSelection();
         const selection = Object.keys(persisted).length ? persisted : null;
-        json(res, 200, { plan: planLocalEngine(undefined, selection), status: getProvisionStatus() });
+        json(res, 200, { plan: planLocalEngine(undefined, selection, getLocalEngineTuning()), status: getProvisionStatus() });
         return;
       }
       // POST /local-engine/provision — start a background provision (install + pull + write config).
-      // Honors the persisted operator selection (POST /local-engine/selection); falls back to the
-      // auto pick when nothing has been explicitly selected yet (fresh install).
+      // Honors the persisted operator selection (POST /local-engine/selection) and tuning
+      // (POST /local-engine/tuning); falls back to the auto pick / preset defaults when nothing
+      // has been explicitly set yet (fresh install).
       if (req.method === "POST" && urlPath === "/local-engine/provision") {
         const { startProvision } = await import("@/lib/models/provision");
-        const { getLocalEngineSelection } = await import("@/lib/models/local-engine");
+        const { getLocalEngineSelection, getLocalEngineTuning } = await import("@/lib/models/local-engine");
         const persisted = getLocalEngineSelection();
         const selection = Object.keys(persisted).length ? persisted : null;
-        json(res, 202, startProvision(selection));
+        json(res, 202, startProvision(selection, undefined, getLocalEngineTuning()));
         return;
       }
 

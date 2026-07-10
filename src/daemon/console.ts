@@ -6434,6 +6434,36 @@ async function renderProviderToggles() {
 
 // --- Rapid-MLX (local engine) toggle row + HuggingFace-style model/quant picker ---
 
+// KV-cache footprint arithmetic — mirrors src/lib/models/local-tuning.ts exactly
+// (this file has no import path into the Node backend, so the formula is
+// duplicated; keep both in sync). Lets the context slider show a live GiB
+// estimate without a server round-trip per drag.
+const KV_SHAPE_BY_TIER = {
+  fast: { layers: 40, kvHeads: 2, headDim: 256 },   // Qwen3.6-35B-A3B (MoE)
+  coding: { layers: 64, kvHeads: 4, headDim: 256 }, // Qwen3.6-27B (dense)
+};
+const KV_BYTES_PER_ELEM = { int4: 0.5 + 4 / 64, int8: 1.0 + 4 / 64, bf16: 2.0 };
+function estimateKvCacheGiB(tier, contextTokens, dtype) {
+  const shape = KV_SHAPE_BY_TIER[tier];
+  if (!shape) return 0;
+  const bytesPerToken = 2 * shape.layers * shape.kvHeads * shape.headDim * (KV_BYTES_PER_ELEM[dtype] || KV_BYTES_PER_ELEM.int4);
+  return (bytesPerToken * contextTokens) / 1024 ** 3;
+}
+// Slider stops — powers of two from 8192 up to whatever the RAM band recommends.
+const CONTEXT_STEPS = [8192, 16384, 32768, 65536, 131072, 262144];
+function contextStepsForTier(maxRecommendedContext) {
+  const steps = CONTEXT_STEPS.filter((n) => n <= (maxRecommendedContext || 262144));
+  return steps.length ? steps : [maxRecommendedContext || 8192];
+}
+function nearestStepIndex(steps, value) {
+  let best = 0, bestDiff = Infinity;
+  steps.forEach((s, i) => { const d = Math.abs(s - value); if (d < bestDiff) { bestDiff = d; best = i; } });
+  return best;
+}
+function fmtTokens(n) {
+  return n >= 1024 ? (n / 1024).toFixed(n % 1024 === 0 ? 0 : 1) + "k" : String(n);
+}
+
 function localEngineStatusChip(le) {
   if (!le || !le.capable) return '<span class="muted" style="font-size:11px">Unavailable' + (le && le.reason ? ' · ' + esc(le.reason) : '') + '</span>';
   if (!le.enabled) return '<span class="muted" style="font-size:11px">Off</span>';
@@ -6486,6 +6516,14 @@ async function toggleLocalEngine(enabled) {
 // Client-side pending edits, kept across re-renders until Apply/Reset — so
 // clicking a radio doesn't have to round-trip to the server before the UI updates.
 let _localPending = null;
+// Context/KV-cache tuning pending edits — separate state from _localPending
+// (which quant to install) since they're independent axes (§3.2, 2026-07-09
+// tuning spec): the operator can change KV dtype without re-downloading a model.
+let _tuningPending = null;
+// Last-rendered /local-engine response, so the slider/dtype onchange handlers
+// (invoked from plain onclick/oninput strings, not closures) can read
+// maxRecommendedContext without a server round-trip per drag.
+let _leCache = null;
 
 function localDefaultSelection(le) {
   const sel = {};
@@ -6495,11 +6533,54 @@ function localDefaultSelection(le) {
   return sel;
 }
 
+function localDefaultTuning(le) {
+  const t = {};
+  for (const key of ["fast", "coding"]) {
+    const info = le.tuning && le.tuning[key];
+    if (!info) continue;
+    t[key] = { contextLimit: info.effectiveContext, kvCacheDtype: info.effectiveKvDtype };
+  }
+  return t;
+}
+
 function renderLocalModelPicker(le) {
+  _leCache = le;
   if (!_localPending) _localPending = localDefaultSelection(le);
+  if (!_tuningPending) _tuningPending = localDefaultTuning(le);
   const pending = _localPending;
+  const pendingTuning = _tuningPending;
   const optionsByTier = { fast: [], coding: [] };
   for (const o of (le.options || [])) (optionsByTier[o.tier] || (optionsByTier[o.tier] = [])).push(o);
+
+  const tuningBlock = (tier) => {
+    const info = (le.tuning || {})[tier];
+    const tune = pendingTuning[tier];
+    if (!info || !tune) return '';
+    const steps = contextStepsForTier(info.maxRecommendedContext);
+    const idx = nearestStepIndex(steps, tune.contextLimit);
+    const dtype = tune.kvCacheDtype;
+    const kvGiB = estimateKvCacheGiB(tier, steps[idx], dtype);
+    const dtypeButtons = ["int4", "int8", "bf16"].map((d) => {
+      const active = d === dtype;
+      return '<button type="button" class="linklike" style="font-size:11px;padding:2px 7px;border:1px solid var(--border);border-radius:4px'
+        + (active ? ';background:var(--accent);color:#fff;border-color:var(--accent)' : '')
+        + '" onclick="setTuningKvDtype(\'' + tier + '\',\'' + d + '\')">' + d + '</button>';
+    }).join(' ');
+    const overrideNote = info.override
+      ? ' <button class="linklike" style="font-size:10px" onclick="resetTierTuning(\'' + tier + '\')">reset to default</button>'
+      : '';
+    return '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'
+      + '<div class="row" style="justify-content:space-between;align-items:baseline;font-size:11px">'
+      + '<span>Context: <b>' + fmtTokens(steps[idx]) + '</b> tokens' + overrideNote + '</span>'
+      + '<span class="muted">KV cache ~' + kvGiB.toFixed(2) + ' GiB</span>'
+      + '</div>'
+      + '<input type="range" min="0" max="' + (steps.length - 1) + '" step="1" value="' + idx + '"'
+      + ' style="width:100%;margin:4px 0" onchange="setTuningContext(\'' + tier + '\', this.value)">'
+      + '<div class="row" style="justify-content:space-between;align-items:center;margin-top:2px">'
+      + '<span class="muted" style="font-size:10px">KV cache dtype</span>'
+      + '<span>' + dtypeButtons + '</span>'
+      + '</div></div>';
+  };
 
   const tierBlock = (tier, title, showRemove) => {
     const opts = optionsByTier[tier] || [];
@@ -6523,7 +6604,7 @@ function renderLocalModelPicker(le) {
       + '<div class="row" style="justify-content:space-between;align-items:center">'
       + '<b style="font-size:12px">' + esc(title) + '</b>'
       + '<span>' + '<span class="muted" style="font-size:11px">' + esc(tier) + '</span>' + removeBtn + '</span>'
-      + '</div>' + rows + '</div>';
+      + '</div>' + rows + tuningBlock(tier) + '</div>';
   };
 
   let html = '<div style="margin:4px 0 10px 2px">';
@@ -6536,8 +6617,35 @@ function renderLocalModelPicker(le) {
     }
   }
 
+  // Estimated resident footprint: pending weight quants + pending KV cache,
+  // against this Mac's RAM at Rapid-MLX's default 90% Metal ceiling (§3.2).
+  let footprintGiB = 0;
+  for (const tier of Object.keys(pending)) {
+    const opt = (optionsByTier[tier] || []).find(o => o.quant === pending[tier]);
+    if (opt) footprintGiB += opt.downloadGiB;
+    const tune = pendingTuning[tier];
+    const info = (le.tuning || {})[tier];
+    if (tune && info) {
+      const steps = contextStepsForTier(info.maxRecommendedContext);
+      footprintGiB += estimateKvCacheGiB(tier, steps[nearestStepIndex(steps, tune.contextLimit)], tune.kvCacheDtype);
+    }
+  }
+  if (footprintGiB > 0 && le.ramGB) {
+    const ceilingGiB = le.ramGB * 0.90;
+    const pct = footprintGiB / ceilingGiB;
+    const color = pct > 0.95 ? 'var(--danger, #c33)' : pct > 0.85 ? 'var(--accent)' : 'var(--ok)';
+    html += '<div class="muted" style="margin-top:8px;font-size:11px">Estimated resident footprint: '
+      + '<b style="color:' + color + '">' + footprintGiB.toFixed(1) + ' GiB</b>'
+      + ' of ~' + ceilingGiB.toFixed(0) + ' GiB (90% of ' + Math.round(le.ramGB) + ' GB RAM)</div>';
+  }
+
   const currentSelection = le.selection || {};
-  const dirty = JSON.stringify(pending) !== JSON.stringify(currentSelection);
+  const currentTuning = {};
+  for (const key of Object.keys(le.tuning || {})) {
+    currentTuning[key] = { contextLimit: le.tuning[key].effectiveContext, kvCacheDtype: le.tuning[key].effectiveKvDtype };
+  }
+  const dirty = JSON.stringify(pending) !== JSON.stringify(currentSelection)
+    || JSON.stringify(pendingTuning) !== JSON.stringify(currentTuning);
   if (dirty) {
     let downloadGiB = 0;
     for (const tier of Object.keys(pending)) {
@@ -6574,9 +6682,58 @@ function removeLocalTier(tier) {
   renderProviderToggles();
 }
 
+function setTuningContext(tier, stepIndexStr) {
+  if (!_tuningPending || !_leCache) return;
+  const info = (_leCache.tuning || {})[tier];
+  if (!info) return;
+  const steps = contextStepsForTier(info.maxRecommendedContext);
+  const idx = Math.max(0, Math.min(steps.length - 1, Number(stepIndexStr) || 0));
+  const cur = _tuningPending[tier] || { kvCacheDtype: info.defaultKvCacheDtype || "int4" };
+  _tuningPending[tier] = { ...cur, contextLimit: steps[idx] };
+  renderProviderToggles();
+}
+
+function setTuningKvDtype(tier, dtype) {
+  if (!_tuningPending || !_leCache) return;
+  const info = (_leCache.tuning || {})[tier];
+  if (!info) return;
+  const cur = _tuningPending[tier] || { contextLimit: info.defaultContext };
+  _tuningPending[tier] = { ...cur, kvCacheDtype: dtype };
+  renderProviderToggles();
+}
+
+function resetTierTuning(tier) {
+  if (!_tuningPending || !_leCache) return;
+  const info = (_leCache.tuning || {})[tier];
+  if (!info) return;
+  _tuningPending[tier] = { contextLimit: info.defaultContext, kvCacheDtype: info.defaultKvCacheDtype || "int4" };
+  renderProviderToggles();
+}
+
 function resetLocalSelection() {
   _localPending = null; // re-seeded from server state on next render
+  _tuningPending = null;
   renderProviderToggles();
+}
+
+// Only sends a tier's tuning if it actually differs from that tier's preset
+// default — otherwise every Apply would persist a redundant override equal to
+// the default. A tier reset back to its default (via resetTierTuning) sends
+// null so an existing stored override is cleared, not left stale.
+function pendingTuningBody() {
+  const body = {};
+  const le = _leCache || {};
+  for (const key of ["fast", "coding"]) {
+    const info = (le.tuning || {})[key];
+    if (!info) continue;
+    if (_localPending && _localPending[key] === undefined) { body[key] = null; continue; }
+    const tune = _tuningPending && _tuningPending[key];
+    if (!tune) continue;
+    const isDefault = tune.contextLimit === info.defaultContext && tune.kvCacheDtype === (info.defaultKvCacheDtype || "int4");
+    if (isDefault) { if (info.override) body[key] = null; }
+    else body[key] = { contextLimit: tune.contextLimit, kvCacheDtype: tune.kvCacheDtype };
+  }
+  return body;
 }
 
 async function applyLocalSelection() {
@@ -6587,6 +6744,12 @@ async function applyLocalSelection() {
     await api("/local-engine/selection", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
+    const tuningBody = pendingTuningBody();
+    if (Object.keys(tuningBody).length) {
+      await api("/local-engine/tuning", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(tuningBody),
+      });
+    }
     await api("/local-engine/provision", { method: "POST" });
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = "Apply"; }
@@ -6609,6 +6772,7 @@ async function pollLocalProvision() {
   }
   if (s.phase === "running") { setTimeout(pollLocalProvision, 1500); return; }
   _localPending = null; // done — re-seed the picker from the now-current server selection
+  _tuningPending = null;
   await renderProviderToggles();
   models = await loadModels().catch(() => models);
   renderSettingsModelControls();

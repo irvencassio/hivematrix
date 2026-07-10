@@ -13,7 +13,16 @@ export interface ModelProvider {
   endpoint: string;
   apiKey: string;
   supportsTools: boolean;
-  maxTokens: number;
+  /** Cap on tokens GENERATED per turn (OpenAI `max_tokens`) — never the context
+   * window. See QwenModelConfig.maxOutputTokens for the local-model source of
+   * this value; the two must never be conflated (2026-07-09 tuning spec). */
+  maxOutputTokens: number;
+  /** Prompt+history budget in tokens, enforced client-side by the context
+   * governor (local-model/context-governor.ts) before dispatch — Rapid-MLX has
+   * no server-side context flag, so nothing else bounds this. Undefined ⇒ the
+   * governor no-ops (only the Qwen local-engine flow currently populates this;
+   * see QwenModelConfig.contextLimit / buildQwenProvider). */
+  contextLimit?: number;
 }
 
 export interface ProviderConfig {
@@ -23,38 +32,38 @@ export interface ProviderConfig {
 }
 
 // Built-in provider defaults — endpoint and capabilities
-const PROVIDER_DEFAULTS: Record<string, { endpoint: string; supportsTools: boolean; maxTokens: number }> = {
+const PROVIDER_DEFAULTS: Record<string, { endpoint: string; supportsTools: boolean; maxOutputTokens: number }> = {
   ollama: {
     endpoint: "http://localhost:11434/v1",
     supportsTools: true,
-    maxTokens: 4096,
+    maxOutputTokens: 4096,
   },
   lmstudio: {
     endpoint: "http://localhost:1234/v1",
     supportsTools: true,
-    maxTokens: 4096,
+    maxOutputTokens: 4096,
   },
   mlx: {
     endpoint: "http://localhost:8080/v1",
     // rapid-mlx parses tool calls across model formats; verified 2/2 on the
     // two-step tool-chain bench with Qwen3.6-35B (tools/model-bench, 2026-07-04).
     supportsTools: true,
-    maxTokens: 4096,
+    maxOutputTokens: 4096,
   },
   vllm: {
     endpoint: "http://localhost:8000/v1",
     supportsTools: true,
-    maxTokens: 4096,
+    maxOutputTokens: 4096,
   },
   nanai: {
     endpoint: "",
     supportsTools: true,
-    maxTokens: 4096,
+    maxOutputTokens: 4096,
   },
   openai: {
     endpoint: "https://api.openai.com/v1",
     supportsTools: true,
-    maxTokens: 4096,
+    maxOutputTokens: 4096,
   },
 };
 
@@ -162,6 +171,6 @@ export function resolveProvider(modelId: string): ModelProvider | null {
     endpoint,
     apiKey,
     supportsTools,
-    maxTokens: defaults?.maxTokens ?? 4096,
+    maxOutputTokens: defaults?.maxOutputTokens ?? 4096,
   };
 }

@@ -101,6 +101,7 @@ test("local model provisioning is optional until the user starts Rapid-MLX setup
         recommendedTiers: ["fast"],
         tiers: [],
         preset: PRESET_32GB,
+        tuning: {},
       },
       status: {
         phase: "idle",

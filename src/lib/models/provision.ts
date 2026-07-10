@@ -21,8 +21,10 @@ import { homedir } from "os";
 import { writeJsonAtomic } from "@/lib/config/atomic-write";
 import {
   localEngineCapability, DEFAULT_TIERS, resolveRapidBinary, tierBaseUrl, selectLocalMemoryPreset,
-  type LocalTier, type TierKey, type HardwareProbe, type LocalMemoryPresetId, type LocalPresetMode, type LocalMemoryPreset,
+  type LocalTier, type TierKey, type HardwareProbe, type LocalMemoryPresetId, type LocalPresetMode, type LocalMemoryPreset, type LocalRolePreset,
+  type LocalTuning,
 } from "./local-engine";
+import { DEFAULT_KV_CACHE_DTYPE } from "./local-tuning";
 import { optionFor, LOCAL_MODEL_CATALOG, type LocalSelection } from "./local-quant";
 import type { QwenProfile } from "@/lib/config/qwen-profile";
 import { provisioningPython } from "@/lib/voice/provision";
@@ -54,6 +56,10 @@ export interface ProvisionPlan {
   /** Resolved tier definitions to serve resident (alias/port/reasoning). */
   tiers: LocalTier[];
   preset: LocalMemoryPreset;
+  /** Operator context/KV-cache overrides (Settings §3.5) — already folded into
+   * `tiers[].kvCacheDtype`; kept here too because `qwenProfileForProvisionPlan`
+   * needs the contextLimit override, which isn't part of LocalTier. */
+  tuning: LocalTuning;
   reason?: string;
 }
 
@@ -70,17 +76,44 @@ function tierPort(key: TierKey): number {
   return (DEFAULT_TIERS.find((t) => t.key === key) ?? DEFAULT_TIERS[0]).port;
 }
 
+function presetRoleForTier(key: TierKey, preset: LocalMemoryPreset): LocalRolePreset {
+  return key === "coding" ? preset.localCoderQuality : preset.localAgentFast;
+}
+
+function kvCacheDtypeForTier(key: TierKey, preset: LocalMemoryPreset, tuning: LocalTuning) {
+  return tuning[key]?.kvCacheDtype ?? presetRoleForTier(key, preset).kvCacheDtype ?? DEFAULT_KV_CACHE_DTYPE;
+}
+
 /** Resolve an operator selection into concrete LocalTier objects — one per
- * selected tier, at its chosen quant. Skips a tier whose (tier, quant) isn't in
- * the catalog rather than guessing an alias. */
-function tiersForSelection(selection: LocalSelection): LocalTier[] {
+ * selected tier, at its chosen quant. `kvCacheDtype` comes from the operator's
+ * tuning override if set, else the RAM-band preset's role for that tier (a
+ * KV-dtype pick, orthogonal to the weight-quant pick made here). Skips a tier
+ * whose (tier, quant) isn't in the catalog rather than guessing an alias. */
+function tiersForSelection(selection: LocalSelection, preset: LocalMemoryPreset, tuning: LocalTuning): LocalTier[] {
   return (Object.keys(selection) as TierKey[])
     .map((key): LocalTier | null => {
       const quant = selection[key];
       if (!quant) return null;
       const opt = optionFor(key, quant);
       if (!opt) return null;
-      return { key, alias: opt.alias, port: tierPort(key), reasoning: false, quant: opt.quant };
+      return { key, alias: opt.alias, port: tierPort(key), reasoning: false, quant: opt.quant, kvCacheDtype: kvCacheDtypeForTier(key, preset, tuning) };
+    })
+    .filter((t): t is LocalTier => t !== null);
+}
+
+/** Auto pick: the RAM-band preset's quant/kvCacheDtype for each recommended
+ * tier (2026-07-09 tuning spec §3.2), operator tuning overrides applied — NOT
+ * the hardcoded 4-bit DEFAULT_TIERS, which would silently ignore what the
+ * preset recommends (e.g. 8-bit at 128GB). A role that's disabled or has no
+ * quant (DISABLED_ROLE) is skipped. */
+function tiersForPreset(recommendedTiers: TierKey[], preset: LocalMemoryPreset, tuning: LocalTuning): LocalTier[] {
+  return recommendedTiers
+    .map((key): LocalTier | null => {
+      const role = presetRoleForTier(key, preset);
+      if (!role.enabled || !role.quant) return null;
+      const opt = optionFor(key, role.quant);
+      if (!opt) return null;
+      return { key, alias: opt.alias, port: tierPort(key), reasoning: false, quant: opt.quant, kvCacheDtype: kvCacheDtypeForTier(key, preset, tuning) };
     })
     .filter((t): t is LocalTier => t !== null);
 }
@@ -88,26 +121,30 @@ function tiersForSelection(selection: LocalSelection): LocalTier[] {
 /**
  * Pure: what this Mac should run, as resolved LocalTier objects.
  *
- * `selection === null` (the default) reproduces today's auto behavior: `fast`
- * at 4-bit, plus `coding` at 4-bit once RAM crosses the 64GB band
- * (`cap.recommendedTiers`). An explicit `selection` is the operator's
+ * `selection === null` (the default) auto-picks the RAM-band preset's
+ * quant/context/KV-dtype for each recommended tier (`cap.recommendedTiers`) —
+ * see `LOCAL_MEMORY_PRESETS`. An explicit `selection` is the operator's
  * HuggingFace-style model/quant picks (§ local-engine-toggle-model-picker spec)
- * and overrides the auto pick entirely — including dropping a tier the
- * operator didn't select, even if it would otherwise be recommended.
+ * and overrides the auto pick's quant entirely — including dropping a tier the
+ * operator didn't select, even if it would otherwise be recommended. `tuning`
+ * is the operator's context/KV-cache overrides (Settings §3.5); applies on top
+ * of either pick and is independent of it.
  */
-export function planLocalEngine(env: Partial<HardwareProbe> = {}, selection: LocalSelection | null = null): ProvisionPlan {
+export function planLocalEngine(
+  env: Partial<HardwareProbe> = {},
+  selection: LocalSelection | null = null,
+  tuning: LocalTuning = {},
+): ProvisionPlan {
   const cap = localEngineCapability(env);
   const preset = selectLocalMemoryPreset({ ramGB: cap.ramGB });
   const tiers = selection
-    ? tiersForSelection(selection)
-    : cap.recommendedTiers
-        .map((k) => DEFAULT_TIERS.find((d) => d.key === k))
-        .filter((t): t is LocalTier => !!t);
+    ? tiersForSelection(selection, preset, tuning)
+    : tiersForPreset(cap.recommendedTiers, preset, tuning);
   return {
     arch: cap.arch, ramGB: cap.ramGB, presetId: cap.presetId, mode: cap.mode,
     localCapable: cap.localCapable,
     recommendedTiers: cap.recommendedTiers,
-    tiers, preset, reason: cap.reason,
+    tiers, preset, tuning, reason: cap.reason,
   };
 }
 
@@ -116,9 +153,10 @@ export function qwenProfileForProvisionPlan(plan: ProvisionPlan): QwenProfile | 
   const primaryTier = plan.tiers.find((t) => t.key === "fast") ?? plan.tiers[0];
   const secondaryTier = plan.tiers.find((t) => t.key === "coding") ?? null;
   const modelForTier = (tier: LocalTier) => {
-    const contextLimit = tier.key === "coding"
+    const presetDefault = tier.key === "coding"
       ? plan.preset.localCoderQuality.defaultContext
       : plan.preset.localAgentFast.defaultContext;
+    const contextLimit = plan.tuning[tier.key]?.contextLimit ?? presetDefault;
     return {
       modelId: tier.alias,
       endpoint: tierBaseUrl(tier),
@@ -280,10 +318,10 @@ export async function listCachedModelRepos(bin: string): Promise<Set<string>> {
 
 /** Perform provisioning: install engine, pull fitting models, write config. */
 export async function provisionLocalEngine(
-  opts: { onLog?: Logger; env?: Partial<HardwareProbe>; selection?: LocalSelection | null } = {},
+  opts: { onLog?: Logger; env?: Partial<HardwareProbe>; selection?: LocalSelection | null; tuning?: LocalTuning } = {},
 ): Promise<ProvisionPlan> {
   const onLog = opts.onLog ?? (() => {});
-  const plan = planLocalEngine(opts.env, opts.selection ?? null);
+  const plan = planLocalEngine(opts.env, opts.selection ?? null, opts.tuning ?? {});
   const cfg = readConfig();
   // Preserve `enabled`/`selection` — this function only owns `engine`/`binary`/
   // `tiers`; overwriting the whole block would silently wipe the operator's
@@ -343,10 +381,13 @@ export function getProvisionStatus(): ProvisionStatus {
  * selection is the operator's model/quant picks and is also what
  * `POST /local-engine/provision` should pass once it's read the persisted
  * selection (server layer's job — this function stays pure/injectable).
+ * `tuning` is the operator's persisted context/KV-cache overrides, likewise
+ * the server layer's job to read and pass.
  */
 export function startProvision(
   selection: LocalSelection | null = null,
   now: () => string = () => new Date().toISOString(),
+  tuning: LocalTuning = {},
 ): ProvisionStatus {
   if (_state.phase === "running") return getProvisionStatus();
   _state.phase = "running";
@@ -354,12 +395,12 @@ export function startProvision(
   _state.error = null;
   _state.finishedAt = null;
   _state.startedAt = now();
-  _state.plan = planLocalEngine(undefined, selection);
+  _state.plan = planLocalEngine(undefined, selection, tuning);
   const onLog = (line: string) => {
     _state.log.push(line);
     if (_state.log.length > MAX_LOG) _state.log.splice(0, _state.log.length - MAX_LOG);
   };
-  provisionLocalEngine({ onLog, selection })
+  provisionLocalEngine({ onLog, selection, tuning })
     .then((plan) => { _state.plan = plan; _state.phase = "done"; })
     .catch((e) => { _state.error = e?.message ?? String(e); _state.phase = "error"; })
     .finally(() => { _state.finishedAt = now(); });
