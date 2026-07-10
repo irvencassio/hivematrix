@@ -107,10 +107,20 @@ export function getLocalEngineConfig(config: Record<string, unknown> = readConfi
         return parseTier(raw, defaultsByKey.get(key) ?? DEFAULT_TIERS[0]);
       })
     : DEFAULT_TIERS;
+  // Overlay the operator's per-tier reasoning override (localEngine.tuning) onto
+  // the tier's compiled default, so every serve/route/status reader (ensureTier,
+  // tierForAlias, localEngineStatus) honors the thinking-mode toggle with no
+  // change of their own. Map to fresh objects only when overriding, so
+  // DEFAULT_TIERS is never mutated.
+  const tuning = parseTuning((le as LocalEngineTuningBlock).tuning);
+  const tiersWithReasoning = tiers.map((t) => {
+    const override = tuning[t.key]?.reasoning;
+    return typeof override === "boolean" && override !== t.reasoning ? { ...t, reasoning: override } : t;
+  });
   return {
     engine: coerceEngine(le.engine),
     binary: typeof le.binary === "string" && le.binary ? le.binary : null,
-    tiers,
+    tiers: tiersWithReasoning,
   };
 }
 
@@ -205,6 +215,12 @@ export interface TierTuning {
   /** Client-enforced prompt+history budget — see context-governor.ts. */
   contextLimit?: number;
   kvCacheDtype?: KvCacheDtype;
+  /** Operator override for the tier's reasoning/thinking mode. Absent ⇒ the
+   * tier's compiled default (DEFAULT_TIERS, currently false → `--no-thinking`).
+   * When set it is overlaid onto the tier in getLocalEngineConfig, so the
+   * launcher, router, and status all serve with `--reasoning` vs `--no-thinking`
+   * to match. Latency lever: true re-enables `<think>` (slower turns). */
+  reasoning?: boolean;
 }
 export type LocalTuning = Partial<Record<TierKey, TierTuning>>;
 
@@ -218,6 +234,7 @@ function parseTierTuning(raw: unknown): TierTuning | undefined {
   if (typeof r.kvCacheDtype === "string" && (KV_CACHE_DTYPES as string[]).includes(r.kvCacheDtype)) {
     out.kvCacheDtype = r.kvCacheDtype as KvCacheDtype;
   }
+  if (typeof r.reasoning === "boolean") out.reasoning = r.reasoning;
   return Object.keys(out).length ? out : undefined;
 }
 
@@ -286,6 +303,12 @@ export function validateTuning(raw: TuningInput, preset: LocalMemoryPreset): Tun
         return { ok: false, error: `invalid kvCacheDtype for ${key}: ${JSON.stringify(r.kvCacheDtype)}` };
       }
       out.kvCacheDtype = r.kvCacheDtype as KvCacheDtype;
+    }
+    if (r.reasoning !== undefined) {
+      if (typeof r.reasoning !== "boolean") {
+        return { ok: false, error: `reasoning for ${key} must be a boolean` };
+      }
+      out.reasoning = r.reasoning;
     }
     tuning[key] = out;
   }

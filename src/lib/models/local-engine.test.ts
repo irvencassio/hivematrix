@@ -242,6 +242,49 @@ test("validateTuning: null explicitly clears a tier's override", () => {
   if (result.ok) assert.equal(result.tuning.fast, null);
 });
 
+test("validateTuning: accepts a boolean reasoning override", () => {
+  const preset = selectLocalMemoryPreset({ ramGB: 128 });
+  const result = validateTuning({ fast: { reasoning: true } }, preset);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.tuning.fast, { reasoning: true });
+});
+
+test("validateTuning: rejects a non-boolean reasoning override", () => {
+  const preset = selectLocalMemoryPreset({ ramGB: 128 });
+  const result = validateTuning({ fast: { reasoning: "yes" } }, preset);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /reasoning for fast must be a boolean/);
+});
+
+test("getLocalEngineConfig overlays a tuning.reasoning override onto the tier's default", () => {
+  // Default is reasoning off; a tuning override flips the effective tier flag so
+  // the launcher/router/status all serve --reasoning without any other change.
+  const c = getLocalEngineConfig({ localEngine: { tuning: { fast: { reasoning: true } } } });
+  const fast = c.tiers.find((t) => t.key === "fast")!;
+  const coding = c.tiers.find((t) => t.key === "coding")!;
+  assert.equal(fast.reasoning, true);
+  assert.equal(coding.reasoning, false); // untouched tier keeps its default
+  // ...and the overlaid flag flows through to the serve argv.
+  assert.ok(buildServeArgs(fast).includes("--reasoning"));
+  assert.ok(!buildServeArgs(fast).includes("--no-thinking"));
+});
+
+test("getLocalEngineConfig: tuning.reasoning false leaves the default-off tier off (no spurious override)", () => {
+  const c = getLocalEngineConfig({ localEngine: { tuning: { coding: { reasoning: false } } } });
+  assert.ok(c.tiers.every((t) => t.reasoning === false));
+});
+
+test("setLocalEngineTuning + getLocalEngineTuning round-trip a reasoning override alongside context", () => {
+  withTempHome({}, () => {
+    setLocalEngineTuning({ fast: { contextLimit: 16384, reasoning: true } });
+    const merged = getLocalEngineTuning();
+    assert.deepEqual(merged.fast, { contextLimit: 16384, reasoning: true });
+    // Setting only contextLimit later must not clobber the stored reasoning flag.
+    setLocalEngineTuning({ fast: { contextLimit: 32768 } });
+    assert.deepEqual(getLocalEngineTuning().fast, { contextLimit: 32768, reasoning: true });
+  });
+});
+
 test("setLocalEngineEnabled persists and merges without disturbing other localEngine keys", () => {
   withTempHome(
     { existingKey: "keepme", localEngine: { engine: "rapid-mlx", binary: "/x/rapid-mlx" } },

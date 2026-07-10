@@ -6539,7 +6539,7 @@ function localDefaultTuning(le) {
   for (const key of ["fast", "coding"]) {
     const info = le.tuning && le.tuning[key];
     if (!info) continue;
-    t[key] = { contextLimit: info.effectiveContext, kvCacheDtype: info.effectiveKvDtype };
+    t[key] = { contextLimit: info.effectiveContext, kvCacheDtype: info.effectiveKvDtype, reasoning: !!info.effectiveReasoning };
   }
   return t;
 }
@@ -6560,6 +6560,7 @@ function renderLocalModelPicker(le) {
     const steps = contextStepsForTier(info.maxRecommendedContext);
     const idx = nearestStepIndex(steps, tune.contextLimit);
     const dtype = tune.kvCacheDtype;
+    const reasoningOn = tune.reasoning != null ? !!tune.reasoning : !!info.effectiveReasoning;
     const kvGiB = estimateKvCacheGiB(tier, steps[idx], dtype);
     const dtypeButtons = ["int4", "int8", "bf16"].map((d) => {
       const active = d === dtype;
@@ -6580,6 +6581,16 @@ function renderLocalModelPicker(le) {
       + '<div class="row" style="justify-content:space-between;align-items:center;margin-top:2px">'
       + '<span class="muted" style="font-size:10px">KV cache dtype</span>'
       + '<span>' + dtypeButtons + '</span>'
+      + '</div>'
+      // Thinking mode: a physical ON/OFF representation of this tier's reasoning
+      // flag (serves --reasoning vs --no-thinking), toggleable per tier. OFF is
+      // the latency default; ON re-enables <think> (slower turns, more tokens).
+      + '<div class="row" style="justify-content:space-between;align-items:center;margin-top:6px">'
+      + '<span class="muted" style="font-size:10px">Thinking mode <span style="opacity:.7">' + (reasoningOn ? '· slower, reasons before replying' : '· fastest (--no-thinking)') + '</span></span>'
+      + '<span class="row" style="align-items:center;gap:6px">'
+      + '<span style="font-size:11px;font-weight:600;color:' + (reasoningOn ? 'var(--accent)' : 'var(--muted)') + '">' + (reasoningOn ? 'ON' : 'OFF') + '</span>'
+      + settingsSwitch(reasoningOn, 'setTuningReasoning(\'' + tier + '\',' + (!reasoningOn) + ')', { title: (reasoningOn ? 'Turn thinking off' : 'Turn thinking on') + ' for the ' + tier + ' tier' })
+      + '</span>'
       + '</div></div>';
   };
 
@@ -6703,11 +6714,20 @@ function setTuningKvDtype(tier, dtype) {
   renderProviderToggles();
 }
 
+function setTuningReasoning(tier, on) {
+  if (!_tuningPending || !_leCache) return;
+  const info = (_leCache.tuning || {})[tier];
+  if (!info) return;
+  const cur = _tuningPending[tier] || { contextLimit: info.effectiveContext, kvCacheDtype: info.effectiveKvDtype || "int4" };
+  _tuningPending[tier] = { ...cur, reasoning: !!on };
+  renderProviderToggles();
+}
+
 function resetTierTuning(tier) {
   if (!_tuningPending || !_leCache) return;
   const info = (_leCache.tuning || {})[tier];
   if (!info) return;
-  _tuningPending[tier] = { contextLimit: info.defaultContext, kvCacheDtype: info.defaultKvCacheDtype || "int4" };
+  _tuningPending[tier] = { contextLimit: info.defaultContext, kvCacheDtype: info.defaultKvCacheDtype || "int4", reasoning: !!info.defaultReasoning };
   renderProviderToggles();
 }
 
@@ -6730,9 +6750,12 @@ function pendingTuningBody() {
     if (_localPending && _localPending[key] === undefined) { body[key] = null; continue; }
     const tune = _tuningPending && _tuningPending[key];
     if (!tune) continue;
-    const isDefault = tune.contextLimit === info.defaultContext && tune.kvCacheDtype === (info.defaultKvCacheDtype || "int4");
+    const tuneReasoning = tune.reasoning != null ? !!tune.reasoning : !!info.effectiveReasoning;
+    const isDefault = tune.contextLimit === info.defaultContext
+      && tune.kvCacheDtype === (info.defaultKvCacheDtype || "int4")
+      && tuneReasoning === !!info.defaultReasoning;
     if (isDefault) { if (info.override) body[key] = null; }
-    else body[key] = { contextLimit: tune.contextLimit, kvCacheDtype: tune.kvCacheDtype };
+    else body[key] = { contextLimit: tune.contextLimit, kvCacheDtype: tune.kvCacheDtype, reasoning: tuneReasoning };
   }
   return body;
 }

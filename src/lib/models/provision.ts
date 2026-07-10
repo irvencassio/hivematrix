@@ -84,6 +84,13 @@ function kvCacheDtypeForTier(key: TierKey, preset: LocalMemoryPreset, tuning: Lo
   return tuning[key]?.kvCacheDtype ?? presetRoleForTier(key, preset).kvCacheDtype ?? DEFAULT_KV_CACHE_DTYPE;
 }
 
+/** Reasoning/thinking mode for a tier: operator override if set, else off
+ * (the compiled DEFAULT_TIERS default — the biggest latency lever). Mirrors
+ * kvCacheDtypeForTier so the provision plan matches getLocalEngineConfig's overlay. */
+function reasoningForTier(key: TierKey, tuning: LocalTuning): boolean {
+  return tuning[key]?.reasoning ?? false;
+}
+
 /** Resolve an operator selection into concrete LocalTier objects — one per
  * selected tier, at its chosen quant. `kvCacheDtype` comes from the operator's
  * tuning override if set, else the RAM-band preset's role for that tier (a
@@ -96,7 +103,7 @@ function tiersForSelection(selection: LocalSelection, preset: LocalMemoryPreset,
       if (!quant) return null;
       const opt = optionFor(key, quant);
       if (!opt) return null;
-      return { key, alias: opt.alias, port: tierPort(key), reasoning: false, quant: opt.quant, kvCacheDtype: kvCacheDtypeForTier(key, preset, tuning) };
+      return { key, alias: opt.alias, port: tierPort(key), reasoning: reasoningForTier(key, tuning), quant: opt.quant, kvCacheDtype: kvCacheDtypeForTier(key, preset, tuning) };
     })
     .filter((t): t is LocalTier => t !== null);
 }
@@ -113,7 +120,7 @@ function tiersForPreset(recommendedTiers: TierKey[], preset: LocalMemoryPreset, 
       if (!role.enabled || !role.quant) return null;
       const opt = optionFor(key, role.quant);
       if (!opt) return null;
-      return { key, alias: opt.alias, port: tierPort(key), reasoning: false, quant: opt.quant, kvCacheDtype: kvCacheDtypeForTier(key, preset, tuning) };
+      return { key, alias: opt.alias, port: tierPort(key), reasoning: reasoningForTier(key, tuning), quant: opt.quant, kvCacheDtype: kvCacheDtypeForTier(key, preset, tuning) };
     })
     .filter((t): t is LocalTier => t !== null);
 }

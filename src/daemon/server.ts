@@ -1449,13 +1449,19 @@ export function createDaemonServer() {
           if (!role.enabled) continue;
           const effectiveContext = tuning[key]?.contextLimit ?? role.defaultContext;
           const effectiveKvDtype = tuning[key]?.kvCacheDtype ?? role.kvCacheDtype ?? "int4";
+          // Reasoning/thinking default is the compiled tier default (off — the
+          // latency lever), overridable per tier via the tuning block.
+          const defaultReasoning = false;
+          const effectiveReasoning = tuning[key]?.reasoning ?? defaultReasoning;
           tuningByTier[key] = {
             defaultContext: role.defaultContext,
             maxRecommendedContext: role.maxRecommendedContext,
             defaultKvCacheDtype: role.kvCacheDtype,
+            defaultReasoning,
             override: tuning[key] ?? null,
             effectiveContext,
             effectiveKvDtype,
+            effectiveReasoning,
             kvGiBByDtype: Object.fromEntries(
               KV_CACHE_DTYPES.map((dtype) => [dtype, estimateKvCacheGiB(key, effectiveContext, dtype)]),
             ),
