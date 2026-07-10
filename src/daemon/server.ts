@@ -3964,7 +3964,7 @@ export function createDaemonServer() {
           const result = await enhancePrompt(description);
           json(res, 200, result);
         } catch {
-          json(res, 200, { enhanced: description, rationale: "", title: "" });
+          json(res, 200, { enhanced: description, rationale: "", title: "", agentType: "auto" });
         }
         return;
       }

@@ -694,12 +694,13 @@ test("POST /tasks/enhance returns { enhanced, rationale, title } and soft-falls-
     body: JSON.stringify({ description: "fix the login bug" }),
   });
   assert.equal(res.status, 200);
-  const body = await res.json() as { enhanced: string; rationale: string; title: string };
+  const body = await res.json() as { enhanced: string; rationale: string; title: string; agentType: string };
   // No ~/.hivematrix/config.json in this fresh temp HOME → no Qwen profile →
   // hasLocalCompletionModel() is false → enhancePrompt() passes through.
   assert.equal(body.enhanced, "fix the login bug");
   assert.equal(body.rationale, "");
   assert.equal(body.title, "");
+  assert.equal(body.agentType, "auto", "passthrough always suggests auto — the wizard never invents a role it couldn't classify");
 });
 
 test("POST /tasks routes the exact failed YouTube prompt to content.youtube_summary, not a generic Codex agent", async (t) => {

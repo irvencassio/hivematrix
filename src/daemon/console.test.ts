@@ -1584,14 +1584,21 @@ test("renderRolePills: distinct roles among childTasks each get their own pill, 
   assert.deepEqual(order, ["🧭 COO", "🎨 Designer", "🔍 QA"], "primary role first, then each distinct child role once, auto children ignored");
 });
 
-test("loadAgentProfiles groups the New Task role select by tier (Auto/core flat, Coordinator + Domain as separate optgroups, explicit-pick only)", () => {
+test("roleSelectOptionsHtml groups every role select by tier (Auto/core flat, Coordinator + Domain as separate optgroups, explicit-pick only)", () => {
   const js = extractScript(CONSOLE_HTML);
-  const body = fnBody(js, "loadAgentProfiles");
+  const body = fnBody(js, "roleSelectOptionsHtml");
   assert.match(body, /filter\(p => \(p\.tier \|\| "core"\) === "core"\)/, "core roles are the flat, Auto-eligible list");
   assert.match(body, /filter\(p => p\.tier === "coordinator"\)/);
   assert.match(body, /filter\(p => p\.tier === "domain"\)/);
   assert.match(body, /optgroup label="Coordinator \(explicit only\)"/);
   assert.match(body, /optgroup label="Domain \(explicit only\)"/);
+});
+
+test("loadAgentProfiles populates BOTH the main role select and the wizard preview's suggestion select from the same shared options, so they can never drift", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "loadAgentProfiles");
+  assert.match(body, /populateRoleSelect\("t_role"\)/);
+  assert.match(body, /populateRoleSelect\("t_enhanced_role"\)/);
 });
 
 test("provenance pills are wired into the task detail view, right after the status line", () => {
@@ -1760,6 +1767,27 @@ test("acceptEnhancedPrompt copies the wizard title into the hidden t_title field
     "reads the (possibly edited) title from the preview");
   assert.match(body, /if \(title\) document\.getElementById\("t_title"\)\.value = title/,
     "only overwrites t_title when a non-empty title was produced — no title falls back to server-side deriveTaskTitle");
+});
+
+test("Enhanced-prompt preview includes an editable, freely-overridable role suggestion select", () => {
+  const slice = taskFormSlice(CONSOLE_HTML);
+  assert.match(slice, /id="t_enhanced_role"/, "role select present in the preview box");
+});
+
+test("enhanceTaskPrompt pre-fills the preview's role select from result.agentType, falling back to auto for anything not in the loaded roster", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "enhanceTaskPrompt");
+  assert.match(body, /getElementById\("t_enhanced_role"\)/);
+  assert.match(body, /agentProfileById\[result && result\.agentType\] \? result\.agentType : "auto"/,
+    "never trusts an unrecognized agentType verbatim — client-side defense in depth alongside the server's own validation");
+});
+
+test("acceptEnhancedPrompt copies the (possibly operator-corrected) suggested role into the real t_role select that Create actually reads", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "acceptEnhancedPrompt");
+  assert.match(body, /getElementById\("t_enhanced_role"\)/);
+  assert.match(body, /if \(roleSel && suggestedRole\) roleSel\.value = suggestedRole/,
+    "writes into t_role — the same field createTask() reads — so the wizard's suggestion (or the operator's override of it) actually takes effect");
 });
 
 test("translucency row syncs to wallpaper/theme state without reopening settings", () => {

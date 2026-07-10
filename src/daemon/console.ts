@@ -1776,6 +1776,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="t_enhanced_preview" class="t-enhanced-box" style="display:none">
         <div class="t-enhanced-label">✨ Enhanced prompt</div>
         <input type="text" id="t_enhanced_title" placeholder="Task name" maxlength="60" />
+        <label class="flbl" style="margin-top:6px">Suggested role — review and correct if needed</label>
+        <select id="t_enhanced_role"><option value="auto">Auto</option></select>
         <textarea id="t_enhanced_text"></textarea>
         <div class="t-enhanced-rationale" id="t_enhanced_rationale"></div>
         <div class="row">
@@ -5466,29 +5468,39 @@ function agentRoleOption(p) {
   return '<option value="'+esc(p.id)+'">'+esc(p.icon || "")+' '+esc(p.name)+'</option>';
 }
 
+// "Auto" only ever routes to a tier:"core" role (see resolveAutoAgentType /
+// getCoreAgentProfiles) — coordinator (coo) and domain (e.g. trader)
+// profiles are listed in their own groups, explicit-pick only, so this
+// grouping isn't just cosmetic: it's the operator-facing half of the same
+// tier boundary the classifier enforces server-side. Shared by every role
+// select in the New Task flow (the main picker and the wizard preview's
+// suggestion override) so they never drift out of sync with each other.
+function roleSelectOptionsHtml() {
+  const core = agentProfiles.filter(p => (p.tier || "core") === "core");
+  const coordinator = agentProfiles.filter(p => p.tier === "coordinator");
+  const domain = agentProfiles.filter(p => p.tier === "domain");
+  return '<option value="auto">Auto</option>'
+    + core.map(agentRoleOption).join("")
+    + (coordinator.length ? '<optgroup label="Coordinator (explicit only)">' + coordinator.map(agentRoleOption).join("") + '</optgroup>' : "")
+    + (domain.length ? '<optgroup label="Domain (explicit only)">' + domain.map(agentRoleOption).join("") + '</optgroup>' : "");
+}
+
+function populateRoleSelect(id) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  const current = sel.value || "auto";
+  sel.innerHTML = roleSelectOptionsHtml();
+  sel.value = agentProfileById[current] ? current : "auto";
+}
+
 async function loadAgentProfiles() {
   const data = await api("/agents/profiles");
   if (!data || !Array.isArray(data.profiles)) return;
   agentProfiles = data.profiles;
   for (const k of Object.keys(agentProfileById)) delete agentProfileById[k];
   for (const p of agentProfiles) agentProfileById[p.id] = p;
-  const sel = document.getElementById("t_role");
-  if (sel) {
-    const current = sel.value || "auto";
-    // "Auto" only ever routes to a tier:"core" role (see resolveAutoAgentType /
-    // getCoreAgentProfiles) — coordinator (coo) and domain (e.g. trader)
-    // profiles are listed in their own groups, explicit-pick only, so the
-    // grouping here isn't just cosmetic: it's the operator-facing half of
-    // the same tier boundary the classifier enforces server-side.
-    const core = agentProfiles.filter(p => (p.tier || "core") === "core");
-    const coordinator = agentProfiles.filter(p => p.tier === "coordinator");
-    const domain = agentProfiles.filter(p => p.tier === "domain");
-    sel.innerHTML = '<option value="auto">Auto</option>'
-      + core.map(agentRoleOption).join("")
-      + (coordinator.length ? '<optgroup label="Coordinator (explicit only)">' + coordinator.map(agentRoleOption).join("") + '</optgroup>' : "")
-      + (domain.length ? '<optgroup label="Domain (explicit only)">' + domain.map(agentRoleOption).join("") + '</optgroup>' : "");
-    sel.value = agentProfileById[current] ? current : "auto";
-  }
+  populateRoleSelect("t_role");
+  populateRoleSelect("t_enhanced_role");
   return agentProfiles;
 }
 
@@ -8989,6 +9001,13 @@ async function enhanceTaskPrompt() {
     document.getElementById("t_enhanced_text").value = enhanced;
     document.getElementById("t_enhanced_title").value = (result && typeof result.title === "string") ? result.title : "";
     document.getElementById("t_enhanced_rationale").textContent = (result && result.rationale) ? result.rationale : "";
+    // Suggestion only — the wizard never decides. Pre-fill the preview's own
+    // role select with it (already populated/kept in sync by
+    // loadAgentProfiles → populateRoleSelect), so the operator sees and can
+    // freely override it before accepting, right where they're already
+    // reviewing the rewrite.
+    const roleSel = document.getElementById("t_enhanced_role");
+    if (roleSel) roleSel.value = agentProfileById[result && result.agentType] ? result.agentType : "auto";
     document.getElementById("t_enhanced_preview").style.display = "";
   } catch (e) {
     hmToast("Could not enhance prompt — using what you typed.", "err");
@@ -9000,8 +9019,11 @@ async function enhanceTaskPrompt() {
 function acceptEnhancedPrompt() {
   const enhanced = document.getElementById("t_enhanced_text").value;
   const title = document.getElementById("t_enhanced_title").value.trim();
+  const suggestedRole = (document.getElementById("t_enhanced_role") || {}).value;
   document.getElementById("t_desc").value = enhanced;
   if (title) document.getElementById("t_title").value = title;
+  const roleSel = document.getElementById("t_role");
+  if (roleSel && suggestedRole) roleSel.value = suggestedRole;
   _promptWizardHandled = true;
   dismissEnhancedPrompt();
 }
