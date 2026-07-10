@@ -10,8 +10,18 @@ import { join } from "path";
 import { homedir } from "os";
 import { classifyByKeywords } from "./keyword-classifier";
 import { getCoreAgentProfiles } from "@/lib/config/agent-profiles";
+import { isProviderEnabled } from "@/lib/config/frontier-providers";
 
 const CLASSIFIER_TIMEOUT_MS = 8000; // CLI startup is slower than raw API
+
+// Node's built-in child_process module exports are non-configurable, so
+// test-runner mock.method() can't patch execSync directly — this thin
+// swappable reference is the DI seam tests use instead (mirrors this
+// codebase's _setXDepsForTests convention, e.g. mailbee/status.ts).
+let _execSyncImpl: typeof execSync = execSync;
+export function _setExecSyncForTests(fn: typeof execSync | null): void {
+  _execSyncImpl = fn ?? execSync;
+}
 
 // getCoreAgentProfiles() is deliberately re-read on every call (never
 // cached to a module-level const) — a custom-profile edit or the roster
@@ -70,10 +80,20 @@ function resolveClaudeBinary(): string {
 /**
  * Classify a task description to determine the best agent type.
  * Tries Claude CLI (Haiku) first, falls back to keywords, then "developer".
+ *
+ * The CLI step is SKIPPED ENTIRELY — never even attempted — when Claude is
+ * disabled as a frontier provider (Settings → Models toggle) or its binary
+ * isn't installed. Without this, every task classification would shell out
+ * and eat up to two 8s execSync timeouts (Haiku, then a Sonnet retry) before
+ * ever reaching the free, instant keyword fallback — the scheduler's claim
+ * loop would stall for up to 16s per task for a call that was always going
+ * to fail. isProviderEnabled mirrors the exact enablement check the
+ * Settings UI and Usage screen already use, so "Claude disabled" behaves
+ * identically everywhere in the app.
  */
 export async function classifyTask(description: string): Promise<string> {
-  // Try LLM classification via Claude CLI
-  const cliResult = classifyWithCLI(description);
+  // Try LLM classification via Claude CLI — only if Claude is actually usable.
+  const cliResult = isProviderEnabled("claude") ? classifyWithCLI(description) : null;
   if (cliResult) return cliResult;
 
   // Fall back to keyword classification
@@ -95,7 +115,7 @@ function classifyWithCLI(description: string): string | null {
 
   try {
     // Use Haiku for fast, cheap classification
-    const result = execSync(
+    const result = _execSyncImpl(
       `${JSON.stringify(binary)} -p ${JSON.stringify(prompt)} --model haiku --max-turns 1 --output-format text`,
       {
         encoding: "utf-8",
@@ -109,7 +129,7 @@ function classifyWithCLI(description: string): string | null {
     if (agentType) return agentType;
 
     // Retry with Sonnet if Haiku didn't return a valid type
-    const sonnetResult = execSync(
+    const sonnetResult = _execSyncImpl(
       `${JSON.stringify(binary)} -p ${JSON.stringify(prompt)} --model sonnet --max-turns 1 --output-format text`,
       {
         encoding: "utf-8",
