@@ -1744,6 +1744,7 @@ export function createDaemonServer() {
       if (req.method === "GET" && urlPath === "/brain/docs") {
         const { listProjectDocs } = await import("@/lib/brain/doc-review");
         const { listPinnedDocs, PINNED_PROJECT_SLUG } = await import("@/lib/brain/pinned");
+        const { listProjectConfigDocs } = await import("@/lib/brain/claude-code-project-config");
         const q = parseQueryString(req.url ?? "");
         const project = (q.project ?? "").trim();
         if (!project) { json(res, 400, { error: "project is required" }); return; }
@@ -1752,23 +1753,31 @@ export function createDaemonServer() {
           return;
         }
         const staleDays = Number.parseInt(q.staleDays ?? "", 10);
-        json(res, 200, await listProjectDocs(project, {
-          staleDays: Number.isFinite(staleDays) && staleDays > 0 ? staleDays : undefined,
-        }));
+        const [result, configDocs] = await Promise.all([
+          listProjectDocs(project, { staleDays: Number.isFinite(staleDays) && staleDays > 0 ? staleDays : undefined }),
+          listProjectConfigDocs(project),
+        ]);
+        // Config docs (the Claude Code CLI's own CLAUDE.md/settings.json/.mcp.json for
+        // the matching code project) surface first, ahead of this project's brain docs.
+        json(res, 200, { ...result, docs: [...configDocs, ...result.docs] });
         return;
       }
 
       // GET /brain/doc?project=<slug>&file=<relpath> — raw doc content for the
       // render pane. Bounded + path-guarded inside doc-review.ts (rejects any
-      // traversal outside the project dir). project=__pinned__ reads a pinned file.
+      // traversal outside the project dir). project=__pinned__ reads a pinned file;
+      // file starting with "claude-code/" reads a project-scoped harness config file.
       if (req.method === "GET" && urlPath === "/brain/doc") {
         const { readProjectDoc } = await import("@/lib/brain/doc-review");
         const { readPinnedDoc, PINNED_PROJECT_SLUG } = await import("@/lib/brain/pinned");
+        const { readProjectConfigDoc, CONFIG_FILE_PREFIX } = await import("@/lib/brain/claude-code-project-config");
         const q = parseQueryString(req.url ?? "");
         const project = (q.project ?? "").trim();
         const file = (q.file ?? "").trim();
         if (!project || !file) { json(res, 400, { error: "project and file are required" }); return; }
-        const doc = project === PINNED_PROJECT_SLUG ? await readPinnedDoc(file) : await readProjectDoc(project, file);
+        const doc = project === PINNED_PROJECT_SLUG ? await readPinnedDoc(file)
+          : file.startsWith(CONFIG_FILE_PREFIX) ? await readProjectConfigDoc(project, file)
+          : await readProjectDoc(project, file);
         if (!doc) { json(res, 404, { error: "doc not found" }); return; }
         json(res, 200, doc);
         return;
@@ -1781,12 +1790,14 @@ export function createDaemonServer() {
         const { projectDocBrainRelPath } = await import("@/lib/brain/doc-review");
         const { setExcluded } = await import("@/lib/brain/exclusions");
         const { PINNED_PROJECT_SLUG } = await import("@/lib/brain/pinned");
+        const { CONFIG_FILE_PREFIX } = await import("@/lib/brain/claude-code-project-config");
         const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
         const project = typeof body.project === "string" ? body.project.trim() : "";
         const files = Array.isArray(body.files) ? body.files.filter((f): f is string => typeof f === "string") : [];
         const excluded = body.excluded === true;
         if (!project || !files.length) { json(res, 400, { error: "project and files[] are required" }); return; }
         if (project === PINNED_PROJECT_SLUG) { json(res, 400, { error: "pinned docs are harness-owned and read-only" }); return; }
+        if (files.some((f) => f.startsWith(CONFIG_FILE_PREFIX))) { json(res, 400, { error: "Claude Code config files are harness-owned and read-only" }); return; }
         const relPaths = files.map((f) => projectDocBrainRelPath(project, f)).filter((p): p is string => p !== null);
         if (!relPaths.length) { json(res, 400, { error: "no valid files" }); return; }
         setExcluded(relPaths, excluded);
@@ -1802,11 +1813,13 @@ export function createDaemonServer() {
       if (req.method === "POST" && urlPath === "/brain/doc/archive") {
         const { archiveProjectDoc } = await import("@/lib/brain/archive");
         const { PINNED_PROJECT_SLUG } = await import("@/lib/brain/pinned");
+        const { CONFIG_FILE_PREFIX } = await import("@/lib/brain/claude-code-project-config");
         const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
         const project = typeof body.project === "string" ? body.project.trim() : "";
         const files = Array.isArray(body.files) ? body.files.filter((f): f is string => typeof f === "string") : [];
         if (!project || !files.length) { json(res, 400, { error: "project and files[] are required" }); return; }
         if (project === PINNED_PROJECT_SLUG) { json(res, 400, { error: "pinned docs are harness-owned and read-only" }); return; }
+        if (files.some((f) => f.startsWith(CONFIG_FILE_PREFIX))) { json(res, 400, { error: "Claude Code config files are harness-owned and read-only" }); return; }
         const results = await Promise.all(files.map(async (file) => ({ file, ...(await archiveProjectDoc(project, file)) })));
         broadcast("brain:changed", { project, files, action: "archive" });
         json(res, 200, { ok: results.every((r) => r.ok), project, results });
@@ -1817,11 +1830,13 @@ export function createDaemonServer() {
       if (req.method === "POST" && urlPath === "/brain/doc/restore") {
         const { restoreProjectDoc } = await import("@/lib/brain/archive");
         const { PINNED_PROJECT_SLUG } = await import("@/lib/brain/pinned");
+        const { CONFIG_FILE_PREFIX } = await import("@/lib/brain/claude-code-project-config");
         const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
         const project = typeof body.project === "string" ? body.project.trim() : "";
         const files = Array.isArray(body.files) ? body.files.filter((f): f is string => typeof f === "string") : [];
         if (!project || !files.length) { json(res, 400, { error: "project and files[] are required" }); return; }
         if (project === PINNED_PROJECT_SLUG) { json(res, 400, { error: "pinned docs are harness-owned and read-only" }); return; }
+        if (files.some((f) => f.startsWith(CONFIG_FILE_PREFIX))) { json(res, 400, { error: "Claude Code config files are harness-owned and read-only" }); return; }
         const results = await Promise.all(files.map(async (file) => ({ file, ...(await restoreProjectDoc(project, file)) })));
         broadcast("brain:changed", { project, files, action: "restore" });
         json(res, 200, { ok: results.every((r) => r.ok), project, results });
@@ -1834,11 +1849,13 @@ export function createDaemonServer() {
       if (req.method === "POST" && urlPath === "/brain/doc/delete") {
         const { deleteArchivedProjectDoc } = await import("@/lib/brain/archive");
         const { PINNED_PROJECT_SLUG } = await import("@/lib/brain/pinned");
+        const { CONFIG_FILE_PREFIX } = await import("@/lib/brain/claude-code-project-config");
         const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
         const project = typeof body.project === "string" ? body.project.trim() : "";
         const files = Array.isArray(body.files) ? body.files.filter((f): f is string => typeof f === "string") : [];
         if (!project || !files.length) { json(res, 400, { error: "project and files[] are required" }); return; }
         if (project === PINNED_PROJECT_SLUG) { json(res, 400, { error: "pinned docs are harness-owned and read-only" }); return; }
+        if (files.some((f) => f.startsWith(CONFIG_FILE_PREFIX))) { json(res, 400, { error: "Claude Code config files are harness-owned and read-only" }); return; }
         const results = await Promise.all(files.map(async (file) => ({ file, ...(await deleteArchivedProjectDoc(project, file)) })));
         broadcast("brain:changed", { project, files, action: "delete" });
         json(res, 200, { ok: results.every((r) => r.ok), project, results });

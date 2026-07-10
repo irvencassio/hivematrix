@@ -1,16 +1,22 @@
 /**
  * "Always loaded" pinned pseudo-project (§7 of the design spec) — read-only
- * surfacing of the harness-owned CLAUDE.md, so the operator can see whether it
- * exists (and what it says) without hunting for it manually. Not archivable
- * or excludable: this file's loading is owned by the Claude CLI harness, not
- * HiveMatrix — the daemon only reads it, never controls its injection.
+ * surfacing of harness-owned files, so the operator can see whether they
+ * exist (and what they say) without hunting for them manually. Not
+ * archivable or excludable: these files' loading is owned by the Claude CLI
+ * harness, not HiveMatrix — the daemon only reads them, never controls their
+ * injection.
  *
- * Scoping note: the design mockup also pictures a per-project MEMORY.md
- * (~/.claude/projects/<encoded-projectPath>/memory/MEMORY.md, subprocess.ts:637).
- * That path is keyed by one specific code project's filesystem path, not
- * global — it doesn't fit "pulled into every task, any project" the way
- * CLAUDE.md does, so it's left out of this global pinned view rather than
- * arbitrarily picking one project to overfit the pinned concept to.
+ * Covers the two truly GLOBAL core files (per the operator's own reference
+ * breakdown of Claude Code's file model):
+ *   - CLAUDE.md     — ~/.claude/CLAUDE.md (instructions)
+ *   - settings.json — ~/.claude/settings.json (permissions/hooks/env/model)
+ * `.mcp.json` has no user-level equivalent (user-scoped MCP servers live in
+ * ~/.claude.json instead, which also holds OAuth/app state — deliberately
+ * NOT surfaced here, unlike the other two which are plain local config).
+ *
+ * Project-scoped versions of these same three files (plus .mcp.json, which
+ * IS project-rooted) are handled separately in claude-code-project-config.ts,
+ * since they require matching a Brain project to a code project's path.
  */
 
 import { promises as fs } from "fs";
@@ -26,6 +32,15 @@ export function userClaudeMdPath(): string {
   return join(homedir(), ".claude", "CLAUDE.md");
 }
 
+export function userSettingsJsonPath(): string {
+  return join(homedir(), ".claude", "settings.json");
+}
+
+const PINNED_FILES: Array<{ file: string; resolve: () => string; displayPath: string }> = [
+  { file: "CLAUDE.md", resolve: userClaudeMdPath, displayPath: "~/.claude/CLAUDE.md" },
+  { file: "settings.json", resolve: userSettingsJsonPath, displayPath: "~/.claude/settings.json" },
+];
+
 async function statWithTimeout(path: string, timeoutMs = BRAIN_READ_TIMEOUT_MS): Promise<{ mtimeMs: number; size: number } | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<null>((res) => { timer = setTimeout(() => res(null), timeoutMs); });
@@ -37,42 +52,48 @@ async function statWithTimeout(path: string, timeoutMs = BRAIN_READ_TIMEOUT_MS):
   }
 }
 
-/** The pinned doc list — empty when CLAUDE.md doesn't exist (an honest, not-loaded reality). */
+/** The pinned doc list — only files that actually exist show up (an honest, not-loaded reality). */
 export async function listPinnedDocs(): Promise<BrainDocSummary[]> {
-  const path = userClaudeMdPath();
-  const stat = await statWithTimeout(path);
-  if (!stat) return [];
-  const { status, badge } = classifyDoc({
-    isExcluded: false,
-    isBriefLoaded: true, // forced ⭐ — harness-loaded, not derived from the usual auto-load set
-    isCtxLoaded: false,
-    isStale: false,
-    isIndexed: false,
-  });
-  return [{
-    project: PINNED_PROJECT_SLUG,
-    file: "CLAUDE.md",
-    path: "~/.claude/CLAUDE.md",
-    status,
-    badge,
-    modified: stat.mtimeMs,
-    sizeBytes: stat.size,
-    indexed: false,
-    backlinks: 0,
-    archived: false,
-    excluded: false,
-  }];
+  const out: BrainDocSummary[] = [];
+  for (const entry of PINNED_FILES) {
+    const path = entry.resolve();
+    const stat = await statWithTimeout(path);
+    if (!stat) continue;
+    const { status, badge } = classifyDoc({
+      isExcluded: false,
+      isBriefLoaded: true, // forced ⭐ — harness-loaded, not derived from the usual auto-load set
+      isCtxLoaded: false,
+      isStale: false,
+      isIndexed: false,
+    });
+    out.push({
+      project: PINNED_PROJECT_SLUG,
+      file: entry.file,
+      path: entry.displayPath,
+      status,
+      badge,
+      modified: stat.mtimeMs,
+      sizeBytes: stat.size,
+      indexed: false,
+      backlinks: 0,
+      archived: false,
+      excluded: false,
+      configFile: true,
+    });
+  }
+  return out;
 }
 
-/** Raw content for the render pane. Only "CLAUDE.md" is a valid pinned file. */
+/** Raw content for the render pane. Only a known pinned filename is valid. */
 export async function readPinnedDoc(file: string): Promise<BrainDocContent | null> {
-  if (file !== "CLAUDE.md") return null;
-  const path = userClaudeMdPath();
+  const entry = PINNED_FILES.find((f) => f.file === file);
+  if (!entry) return null;
+  const path = entry.resolve();
   const [content, stat] = await Promise.all([readWithTimeout(path), statWithTimeout(path)]);
   if (content == null) return null;
   return {
     content,
-    path: "~/.claude/CLAUDE.md",
+    path: entry.displayPath,
     modified: stat?.mtimeMs ?? 0,
     sizeBytes: stat?.size ?? content.length,
   };

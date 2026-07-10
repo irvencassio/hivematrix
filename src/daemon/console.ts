@@ -940,6 +940,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .brain-doc-row.tag-orphan .status-tag { background:var(--badge-bg); color:var(--muted); }
   .brain-doc-row.tag-stale .status-tag { background:rgba(210,153,34,.15); color:var(--warn); }
   .brain-doc-row.tag-excluded .status-tag { background:rgba(248,81,73,.12); color:var(--err); }
+  .brain-doc-row.config-file { background:rgba(88,166,255,.05); cursor:pointer; }
+  .brain-doc-row.config-file .status-tag { background:rgba(88,166,255,.15); color:var(--accent-2); }
+  .brain-doc-row.config-file .fname { color:var(--accent-2); }
   .brain-doc-row.archived { opacity:.5; cursor:default; }
   .brain-doc-row.archived .fname { text-decoration:line-through; }
   .brain-doc-row.archived:hover { background:transparent; }
@@ -956,6 +959,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .brain-render-body { flex:1 1 auto; min-height:0; overflow-y:auto; padding:18px 22px; }
   .brain-render-body.raw { font:12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre-wrap; color:var(--muted); }
   .brain-empty-state { color:var(--muted); text-align:center; padding:60px 20px; font-size:12.5px; }
+  .json-friendly { font-size:13px; line-height:1.5; }
+  .json-row { margin-bottom:16px; }
+  .json-key { display:block; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--muted); margin-bottom:4px; }
+  .json-val code, .json-list code { background:var(--code-bg); border-radius:4px; padding:1px 5px;
+    font:12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .json-list { margin:2px 0; padding-left:20px; }
+  .json-list li { margin:4px 0; }
   @media (max-width:900px) {
     .brain-shell { grid-template-columns:1fr; overflow-y:auto; }
     .brain-col { border-right:none; border-bottom:1px solid var(--border); }
@@ -6720,7 +6731,8 @@ function renderBrainDocs() {
   const isPinnedProject = _brainState.project === '__pinned__';
   const buildRow = d => {
     const isArchived = !!d.archived;
-    const cls = 'brain-doc-row ' + (BRAIN_STATUS_CLASS[d.status] || '') + (d.file === _brainState.doc ? ' selected-file' : '') + (isArchived ? ' archived' : '');
+    const isConfig = !!d.configFile;
+    const cls = 'brain-doc-row ' + (BRAIN_STATUS_CLASS[d.status] || '') + (d.file === _brainState.doc ? ' selected-file' : '') + (isArchived ? ' archived' : '') + (isConfig ? ' config-file' : '');
     const sizeKb = d.sizeBytes ? (d.sizeBytes / 1024).toFixed(1) + ' KB' : '';
     const modified = d.modified ? new Date(d.modified).toLocaleDateString() : '';
     const checked = _brainState.selected.has(d.file) ? ' checked' : '';
@@ -6728,14 +6740,18 @@ function renderBrainDocs() {
       ? '<button class="sm" onclick="event.stopPropagation();runBrainRestoreOne(\'' + attrEnc(d.file) + '\')">Restore</button>'
         + '<button class="sm danger" onclick="event.stopPropagation();runBrainDeleteOne(\'' + attrEnc(d.file) + '\')">Delete</button>'
       : '';
-    // Pinned docs are harness-owned — no Archive/Exclude/Delete, no selection checkbox.
-    const disabled = isArchived || isPinnedProject;
+    // Pinned docs and Claude Code config files are harness-owned — no
+    // Archive/Exclude/Delete, no selection checkbox.
+    const disabled = isArchived || isPinnedProject || isConfig;
+    const displayName = isConfig ? d.file.replace(/^claude-code\//, '') : d.file;
+    const badge = isConfig ? '🔧' : esc(d.badge);
+    const statusLabel = isConfig ? 'Claude Code config' : esc(BRAIN_STATUS_LABEL[d.status] || d.status);
     return '<div class="' + cls + '" onclick="selectBrainDoc(\'' + attrEnc(d.file) + '\')">'
       + '<input type="checkbox"' + checked + (disabled ? ' disabled' : '') + ' onclick="event.stopPropagation();toggleBrainDocSelected(\'' + attrEnc(d.file) + '\',this.checked)" />'
-      + '<span class="badge">' + esc(d.badge) + '</span>'
-      + '<span class="meta-col"><div class="fname">' + esc(d.file) + '</div>'
+      + '<span class="badge">' + badge + '</span>'
+      + '<span class="meta-col"><div class="fname">' + esc(displayName) + '</div>'
       + '<div class="sub">' + esc([modified, sizeKb].filter(Boolean).join(' · ')) + '</div></span>'
-      + (archivedActions || '<span class="status-tag">' + esc(BRAIN_STATUS_LABEL[d.status] || d.status) + '</span>')
+      + (archivedActions || '<span class="status-tag">' + statusLabel + '</span>')
       + '</div>';
   };
   const active = _brainState.docs.filter(d => !d.archived);
@@ -6936,8 +6952,108 @@ function renderBrainPaneBody() {
     frame.srcdoc = _brainState.docContent.content;
     return;
   }
+  // JSON config files (settings.json, .mcp.json, ...) render as a plain-English
+  // summary, not a raw JSON blob — a novice operator shouldn't have to parse
+  // braces and quotes to see "what am I allowing Claude Code to do here?".
+  if (/\.json$/i.test(brainDocBaseName(_brainState.doc))) {
+    body.className = 'brain-render-body';
+    const friendly = renderBrainJsonFriendly(brainDocBaseName(_brainState.doc), _brainState.docContent.content);
+    body.innerHTML = friendly || '<div class="brain-empty-state">Could not parse this file as JSON — see Raw.</div>';
+    return;
+  }
   body.className = 'brain-render-body';
   body.innerHTML = mdToHtml(_brainState.docContent.content);
+}
+
+function brainDocBaseName(file) {
+  return file.replace(/^claude-code\//, '');
+}
+
+// ── Novice-friendly JSON rendering for Claude Code config files ──────────
+function jsonFriendlyRow(label, valueHtml) {
+  return '<div class="json-row"><span class="json-key">' + esc(label) + '</span><div class="json-val">' + valueHtml + '</div></div>';
+}
+
+function jsonFriendlyList(items) {
+  if (!items || !items.length) return '<span class="muted">(none)</span>';
+  return '<ul class="json-list">' + items.map(i => '<li><code>' + esc(String(i)) + '</code></li>').join('') + '</ul>';
+}
+
+// Bounded, defensive recursive renderer for whatever keys a settings/mcp file
+// doesn't have a named summary for above — still readable, never raw braces.
+function renderGenericJsonTree(value, depth) {
+  depth = depth || 0;
+  if (depth > 6) return '<span class="muted">…</span>';
+  if (value === null || value === undefined) return '<span class="muted">—</span>';
+  if (Array.isArray(value)) {
+    if (!value.length) return '<span class="muted">(none)</span>';
+    return '<ul class="json-list">' + value.map(v => '<li>' + renderGenericJsonTree(v, depth + 1) + '</li>').join('') + '</ul>';
+  }
+  if (typeof value === 'object') {
+    const keys = Object.keys(value);
+    if (!keys.length) return '<span class="muted">(none)</span>';
+    return '<ul class="json-list">' + keys.map(k => '<li><b>' + esc(k) + '</b>: ' + renderGenericJsonTree(value[k], depth + 1) + '</li>').join('') + '</ul>';
+  }
+  if (typeof value === 'boolean') return '<code>' + (value ? 'yes' : 'no') + '</code>';
+  return '<code>' + esc(String(value)) + '</code>';
+}
+
+function renderSettingsJsonFriendly(data) {
+  let html = '<div class="json-friendly">';
+  if (data.model) html += jsonFriendlyRow('Model', '<code>' + esc(data.model) + '</code>');
+  if (data.permissions) {
+    if (data.permissions.allow) html += jsonFriendlyRow('Allowed without asking', jsonFriendlyList(data.permissions.allow));
+    if (data.permissions.ask) html += jsonFriendlyRow('Asks for confirmation', jsonFriendlyList(data.permissions.ask));
+    if (data.permissions.deny) html += jsonFriendlyRow('Never allowed', jsonFriendlyList(data.permissions.deny));
+  }
+  if (data.env && Object.keys(data.env).length) {
+    html += jsonFriendlyRow('Environment variables', '<ul class="json-list">' + Object.entries(data.env).map(([k, v]) =>
+      '<li><code>' + esc(k) + '</code> = <code>' + esc(String(v)) + '</code></li>').join('') + '</ul>');
+  }
+  if (data.hooks && Object.keys(data.hooks).length) {
+    html += jsonFriendlyRow('Hooks (run automatically on these events)', '<ul class="json-list">' + Object.entries(data.hooks).map(([event, defs]) => {
+      const list = Array.isArray(defs) ? defs : [defs];
+      const cmds = list.flatMap(d => (d && Array.isArray(d.hooks)) ? d.hooks.map(h => h && h.command).filter(Boolean) : (d && d.command ? [d.command] : []));
+      return '<li><b>' + esc(event) + '</b>: ' + (cmds.length ? cmds.map(c => '<code>' + esc(c) + '</code>').join(', ') : '<span class="muted">configured</span>') + '</li>';
+    }).join('') + '</ul>');
+  }
+  const statusLine = data.statusLine || data.statusline;
+  if (statusLine) html += jsonFriendlyRow('Status line', '<code>' + esc(typeof statusLine === 'string' ? statusLine : JSON.stringify(statusLine)) + '</code>');
+  const known = ['model', 'permissions', 'env', 'hooks', 'statusLine', 'statusline'];
+  const rest = Object.keys(data).filter(k => !known.includes(k));
+  if (rest.length) html += jsonFriendlyRow('Other settings', renderGenericJsonTree(Object.fromEntries(rest.map(k => [k, data[k]]))));
+  if (!data.model && !data.permissions && !data.env && !data.hooks && !statusLine && !rest.length) {
+    html += '<div class="muted">This settings file is empty.</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderMcpJsonFriendly(data) {
+  const servers = data.mcpServers || data.servers || {};
+  const names = Object.keys(servers);
+  let html = '<div class="json-friendly">';
+  if (!names.length) {
+    html += '<div class="muted">No MCP servers configured in this file.</div>';
+  } else {
+    html += jsonFriendlyRow('MCP servers (' + names.length + ')', '<ul class="json-list">' + names.map(name => {
+      const s = servers[name] || {};
+      const type = s.type || (s.url ? 'remote (http/sse)' : 'local (stdio)');
+      const detail = s.url ? esc(s.url) : [s.command, ...(Array.isArray(s.args) ? s.args : [])].filter(Boolean).map(esc).join(' ');
+      return '<li><b>' + esc(name) + '</b> <span class="muted">— ' + esc(type) + '</span>'
+        + (detail ? '<div><code>' + detail + '</code></div>' : '') + '</li>';
+    }).join('') + '</ul>');
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderBrainJsonFriendly(baseName, content) {
+  let data;
+  try { data = JSON.parse(content); } catch (e) { return null; }
+  if (/^settings(\.local)?\.json$/i.test(baseName)) return renderSettingsJsonFriendly(data);
+  if (/^\.?mcp\.json$/i.test(baseName)) return renderMcpJsonFriendly(data);
+  return '<div class="json-friendly">' + renderGenericJsonTree(data) + '</div>';
 }
 
 function flashRenderMessages() {

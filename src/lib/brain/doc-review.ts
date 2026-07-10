@@ -61,6 +61,9 @@ export interface BrainDocSummary {
   archived: boolean;
   /** Always false until §3 (exclude) ships. */
   excluded: boolean;
+  /** A Claude Code harness config file (CLAUDE.md/settings.json/.mcp.json) surfaced
+   * read-only alongside this project's brain docs — never archivable/excludable. */
+  configFile?: boolean;
 }
 
 export interface BrainProjectSummary {

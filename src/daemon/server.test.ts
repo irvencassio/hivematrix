@@ -1965,6 +1965,57 @@ test("Pinned 'Always loaded' pseudo-project: listed first, surfaces real CLAUDE.
   }
 });
 
+test("A Brain project's docs include its matching code project's Claude Code config files (CLAUDE.md/settings.json/.mcp.json), read-only", async (t) => {
+  withTempHome(t);
+  const { mkdirSync: mkdir, writeFileSync: write } = await import("node:fs");
+  const home = process.env.HOME!;
+  const brainRoot = join(home, "brain");
+  const proj = join(brainRoot, "projects", "hive");
+  mkdir(proj, { recursive: true });
+  mkdir(join(home, ".hivematrix"), { recursive: true });
+  write(join(home, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: brainRoot } }));
+  write(join(proj, "agent-brief.md"), "# Hive Agent Brief\n");
+
+  // A matching code project named "hive" (git repo) with the three core files.
+  const codeProj = join(home, "hive");
+  mkdir(join(codeProj, ".git"), { recursive: true });
+  write(join(codeProj, ".git", "HEAD"), "ref: refs/heads/main");
+  write(join(codeProj, "package.json"), JSON.stringify({ name: "hive" }));
+  write(join(codeProj, "CLAUDE.md"), "# Hive project instructions\nUnique marker text.");
+  mkdir(join(codeProj, ".claude"), { recursive: true });
+  write(join(codeProj, ".claude", "settings.json"), JSON.stringify({ model: "opus" }));
+  write(join(codeProj, ".mcp.json"), JSON.stringify({ mcpServers: { canopy: { command: "canopy-mcp" } } }));
+
+  const { discoverProjectsFresh } = await import("@/lib/routing/project-discovery");
+  discoverProjectsFresh();
+
+  const { base, headers } = await startServer(t);
+
+  const docsRes = await fetch(`${base}/brain/docs?project=hive`, { headers });
+  assert.equal(docsRes.status, 200);
+  const docsBody = await docsRes.json() as { docs: Array<{ file: string; configFile?: boolean; status: string }> };
+  const configDocs = docsBody.docs.filter((d) => d.configFile);
+  assert.deepEqual(configDocs.map((d) => d.file).sort(), ["claude-code/.mcp.json", "claude-code/CLAUDE.md", "claude-code/settings.json"]);
+  assert.ok(docsBody.docs.some((d) => d.file === "agent-brief.md"), "the project's own brain docs are still present");
+  for (const d of configDocs) assert.equal(d.status, "brief");
+
+  const claudeDocRes = await fetch(`${base}/brain/doc?project=hive&file=${encodeURIComponent("claude-code/CLAUDE.md")}`, { headers });
+  assert.equal(claudeDocRes.status, 200);
+  const claudeDocBody = await claudeDocRes.json() as { content: string };
+  assert.match(claudeDocBody.content, /Unique marker text/);
+
+  const mcpDocRes = await fetch(`${base}/brain/doc?project=hive&file=${encodeURIComponent("claude-code/.mcp.json")}`, { headers });
+  const mcpDocBody = await mcpDocRes.json() as { content: string };
+  assert.match(mcpDocBody.content, /canopy/);
+
+  for (const path of ["/brain/doc/exclude", "/brain/doc/archive", "/brain/doc/restore", "/brain/doc/delete"]) {
+    const r = await fetch(`${base}${path}`, {
+      method: "POST", headers, body: JSON.stringify({ project: "hive", files: ["claude-code/CLAUDE.md"] }),
+    });
+    assert.equal(r.status, 400, `${path} must refuse a Claude Code config file`);
+  }
+});
+
 test("every SSE stream registers a response error handler (an unhandled stream 'error' event would crash the daemon)", () => {
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
   const sites = [...src.matchAll(/text\/event-stream/g)];

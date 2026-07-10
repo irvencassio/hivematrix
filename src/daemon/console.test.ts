@@ -802,7 +802,30 @@ test("Brain Review: pinned 'Always loaded' row is styled distinctly and its docs
   assert.match(projFn, /pinned/);
   const rowsFn = fnBody(js, "renderBrainDocs");
   assert.match(rowsFn, /isPinnedProject = _brainState\.project === '__pinned__'/);
-  assert.match(rowsFn, /disabled = isArchived \|\| isPinnedProject/);
+  assert.match(rowsFn, /disabled = isArchived \|\| isPinnedProject \|\| isConfig/);
+});
+
+test("Brain Review: Claude Code config files (CLAUDE.md/settings.json/.mcp.json) render read-only and settings/mcp JSON gets a novice-friendly summary, not raw JSON", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const rowsFn = fnBody(js, "renderBrainDocs");
+  assert.match(rowsFn, /isConfig = !!d\.configFile/);
+  assert.match(rowsFn, /disabled = isArchived \|\| isPinnedProject \|\| isConfig/, "config files can't be selected for Archive/Exclude");
+  assert.ok(rowsFn.includes("claude-code"), "the claude-code/ prefix is stripped for display");
+
+  const paneBody = fnBody(js, "renderBrainPaneBody");
+  assert.match(paneBody, /renderBrainJsonFriendly/);
+
+  const friendlyBody = fnBody(js, "renderBrainJsonFriendly");
+  assert.match(friendlyBody, /renderSettingsJsonFriendly/);
+  assert.match(friendlyBody, /renderMcpJsonFriendly/);
+
+  const settingsBody = fnBody(js, "renderSettingsJsonFriendly");
+  assert.match(settingsBody, /Allowed without asking/);
+  assert.match(settingsBody, /permissions\.allow/);
+  assert.doesNotMatch(settingsBody, /JSON\.stringify\(data\)/, "must not just dump raw JSON back out");
+
+  const mcpBody = fnBody(js, "renderMcpJsonFriendly");
+  assert.match(mcpBody, /mcpServers/);
 });
 
 test("Brain Review: brain:changed SSE event re-fetches without a manual refresh", () => {

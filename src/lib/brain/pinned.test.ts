@@ -18,7 +18,7 @@ function withTempHome<T>(run: () => Promise<T>): Promise<T> {
   })();
 }
 
-test("listPinnedDocs is empty when ~/.claude/CLAUDE.md does not exist", async () => {
+test("listPinnedDocs is empty when neither CLAUDE.md nor settings.json exist", async () => {
   await withTempHome(async () => {
     const { listPinnedDocs } = await import("./pinned");
     assert.deepEqual(await listPinnedDocs(), []);
@@ -38,19 +38,50 @@ test("listPinnedDocs surfaces CLAUDE.md forced to 'brief' status when it exists"
     assert.equal(docs[0].badge, "⭐");
     assert.equal(docs[0].archived, false);
     assert.equal(docs[0].excluded, false);
+    assert.equal(docs[0].configFile, true);
     assert.ok(docs[0].sizeBytes > 0);
   });
 });
 
-test("readPinnedDoc returns CLAUDE.md's real content, and null for anything else", async () => {
+test("listPinnedDocs also surfaces settings.json independently when present", async () => {
   await withTempHome(async () => {
-    const { readPinnedDoc, userClaudeMdPath } = await import("./pinned");
+    const { listPinnedDocs, userSettingsJsonPath } = await import("./pinned");
+    mkdirSync(join(process.env.HOME!, ".claude"), { recursive: true });
+    writeFileSync(userSettingsJsonPath(), JSON.stringify({ model: "opus" }));
+    const docs = await listPinnedDocs();
+    assert.equal(docs.length, 1);
+    assert.equal(docs[0].file, "settings.json");
+    assert.equal(docs[0].configFile, true);
+  });
+});
+
+test("listPinnedDocs shows both files when both exist", async () => {
+  await withTempHome(async () => {
+    const { listPinnedDocs, userClaudeMdPath, userSettingsJsonPath } = await import("./pinned");
+    mkdirSync(join(process.env.HOME!, ".claude"), { recursive: true });
+    writeFileSync(userClaudeMdPath(), "# Instructions");
+    writeFileSync(userSettingsJsonPath(), JSON.stringify({ model: "opus" }));
+    const docs = await listPinnedDocs();
+    assert.deepEqual(docs.map((d) => d.file).sort(), ["CLAUDE.md", "settings.json"]);
+  });
+});
+
+test("readPinnedDoc returns real content for either known file, and null for anything else", async () => {
+  await withTempHome(async () => {
+    const { readPinnedDoc, userClaudeMdPath, userSettingsJsonPath } = await import("./pinned");
     mkdirSync(join(process.env.HOME!, ".claude"), { recursive: true });
     writeFileSync(userClaudeMdPath(), "# Instructions\nBe concise.");
-    const doc = await readPinnedDoc("CLAUDE.md");
-    assert.ok(doc);
-    assert.match(doc!.content, /Be concise/);
-    assert.equal(await readPinnedDoc("MEMORY.md"), null, "only CLAUDE.md is a valid pinned file");
+    writeFileSync(userSettingsJsonPath(), JSON.stringify({ model: "opus" }));
+
+    const claudeDoc = await readPinnedDoc("CLAUDE.md");
+    assert.ok(claudeDoc);
+    assert.match(claudeDoc!.content, /Be concise/);
+
+    const settingsDoc = await readPinnedDoc("settings.json");
+    assert.ok(settingsDoc);
+    assert.match(settingsDoc!.content, /"model"/);
+
+    assert.equal(await readPinnedDoc("MEMORY.md"), null, "only known pinned files are valid");
     assert.equal(await readPinnedDoc("../../etc/passwd"), null);
   });
 });
@@ -59,5 +90,6 @@ test("readPinnedDoc returns null when the file does not exist", async () => {
   await withTempHome(async () => {
     const { readPinnedDoc } = await import("./pinned");
     assert.equal(await readPinnedDoc("CLAUDE.md"), null);
+    assert.equal(await readPinnedDoc("settings.json"), null);
   });
 });
