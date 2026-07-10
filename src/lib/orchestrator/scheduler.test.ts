@@ -206,3 +206,30 @@ test("resolveAutoAgentType: agentSpecialization explicitly false ⇒ developer",
     assert.equal(await resolveAutoAgentType("verify the checkout flow end to end"), "developer");
   });
 });
+
+test("modelRole: thinking-tier profiles now resolve via thinkModel (previously undefined)", async () => {
+  await withTempHome({ thinkModel: "claude-opus-4-8" }, () => {
+    assert.equal(resolveModelForAgentRole(null, "founder"), "claude-opus-4-8");
+    assert.equal(resolveModelForAgentRole(null, "coo"), "claude-opus-4-8");
+    assert.equal(resolveModelForAgentRole(undefined, "analyst"), "claude-opus-4-8");
+  });
+});
+
+test("modelRole: designer resolves via the coding role model (previously undefined)", async () => {
+  await withTempHome({ frontierModel: "qwen3.6-35b-4bit" }, () => {
+    assert.equal(resolveModelForAgentRole(null, "designer"), "qwen3.6-35b-4bit");
+  });
+});
+
+test("modelRole: profiles with no modelRole and no coarse-map entry stay undefined", async () => {
+  await withTempHome({ thinkModel: "claude-opus-4-8", frontierModel: "qwen3.6-35b-4bit" }, () => {
+    assert.equal(resolveModelForAgentRole(null, "researcher"), undefined);
+    assert.equal(resolveModelForAgentRole(undefined, "general"), undefined);
+  });
+});
+
+test("modelRole: an empty role-model slot falls through cleanly (no crash, no false positive)", async () => {
+  await withTempHome({}, () => {
+    assert.equal(resolveModelForAgentRole(null, "founder"), undefined);
+  });
+});

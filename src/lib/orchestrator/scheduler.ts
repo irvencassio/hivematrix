@@ -14,6 +14,7 @@ import type { TaskDelayReason } from "@/lib/types";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { getRoleModels } from "@/lib/models/available";
 import { isFeatureEnabled } from "@/lib/config/features";
+import { getAgentProfile } from "@/lib/config/agent-profiles";
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let consecutiveErrors = 0;
@@ -147,11 +148,26 @@ export async function resolveAutoAgentType(description: string): Promise<string>
   return classifyTask(description);
 }
 
+/**
+ * Precedence: an explicit pinned model always wins; then the agent profile's
+ * own `modelRole` preference (Settings → Models slot); then a coarse
+ * built-in-id fallback (kept as a safety net for a custom profile override
+ * that doesn't set modelRole); else undefined (daemon default).
+ */
 export function resolveModelForAgentRole(currentModel: string | null | undefined, agentType: string | null | undefined): string | undefined {
   const pinned = currentModel?.trim();
   if (pinned) return pinned;
   const roleModels = getRoleModels();
   const normalizedAgent = String(agentType ?? "").trim();
+
+  if (normalizedAgent) {
+    const profile = getAgentProfile(normalizedAgent);
+    if (profile.modelRole) {
+      const fromProfile = roleModels[profile.modelRole]?.trim();
+      if (fromProfile) return fromProfile;
+    }
+  }
+
   if (normalizedAgent === "developer" || normalizedAgent === "cto" || normalizedAgent === "qa") {
     return roleModels.coding.trim() || undefined;
   }

@@ -3,6 +3,22 @@ import { join } from "path";
 import { homedir } from "os";
 import { CODING_OPENAI_TOOLS } from "@/lib/config/constants";
 
+/**
+ * Keys of `RoleModels` (src/lib/models/available.ts) — deliberately NOT
+ * imported as a type here to keep this module dependency-light; kept in sync
+ * by convention (thinking/coding/operational/writer). This is a different
+ * axis from `ModelRole` (src/lib/connectivity/policy.ts:
+ * think/execute/code-critical/image/cheap-web/converse) — that taxonomy picks
+ * a workload TIER; this one picks which of the operator's Settings → Models
+ * role slots an agent PROFILE prefers. Do not conflate or rename either.
+ */
+export type ProfileModelRole = "thinking" | "coding" | "operational" | "writer";
+
+const PROFILE_MODEL_ROLES = new Set<string>(["thinking", "coding", "operational", "writer"]);
+function isProfileModelRole(v: unknown): v is ProfileModelRole {
+  return typeof v === "string" && PROFILE_MODEL_ROLES.has(v);
+}
+
 export interface AgentProfile {
   id: string;
   name: string;
@@ -11,9 +27,17 @@ export interface AgentProfile {
   tools: string[];
   loadClaudeMd: boolean;
   icon: string;
+  /** Which Settings → Models role slot this profile prefers, if any. Resolved
+   * via getRoleModels()[modelRole]; falls back to resolveModelForAgentRole's
+   * coarse map, then the daemon default, when unset or the slot is empty. */
+  modelRole?: ProfileModelRole;
 }
 
-const CUSTOM_PROFILES_DIR = join(homedir(), ".hivematrix", "agents");
+// A function, not a module-level const — homedir() must be re-read per call
+// so tests can inject a temp HOME (matches the config/features.ts pattern).
+function customProfilesDir(): string {
+  return join(homedir(), ".hivematrix", "agents");
+}
 
 // ── Built-in profiles ──────────────────────────────────────────────
 
@@ -53,6 +77,7 @@ Rules:
     tools: [...CODING_OPENAI_TOOLS],
     loadClaudeMd: true,
     icon: "💻",
+    modelRole: "coding",
   },
   {
     id: "researcher",
@@ -87,6 +112,7 @@ Rules:
     tools: ["bash", "read_file", "write_file"],
     loadClaudeMd: false,
     icon: "📣",
+    modelRole: "writer",
   },
   {
     id: "founder",
@@ -104,6 +130,7 @@ Rules:
     tools: ["bash", "read_file", "search"],
     loadClaudeMd: false,
     icon: "🚀",
+    modelRole: "thinking",
   },
   {
     id: "ceo",
@@ -123,6 +150,7 @@ Rules:
     tools: ["bash", "read_file", "search", "create_task"],
     loadClaudeMd: false,
     icon: "👔",
+    modelRole: "thinking",
   },
   {
     id: "cto",
@@ -142,6 +170,7 @@ Rules:
     tools: ["bash", "read_file", "write_file", "edit_file", "search", "list_files", "create_task"],
     loadClaudeMd: true,
     icon: "🏗️",
+    modelRole: "coding",
   },
   {
     id: "qa",
@@ -195,6 +224,7 @@ You are the last line of defense before users see the product. Be rigorous, be s
     tools: ["bash", "read_file", "search", "list_files"],
     loadClaudeMd: true,
     icon: "🧪",
+    modelRole: "coding",
   },
   {
     id: "designer",
@@ -261,6 +291,7 @@ Rules:
     tools: ["bash", "read_file", "write_file", "edit_file", "search", "list_files"],
     loadClaudeMd: true,
     icon: "🎨",
+    modelRole: "coding",
   },
   {
     id: "inventor",
@@ -279,6 +310,7 @@ Rules:
     tools: ["bash", "read_file", "search", "list_files"],
     loadClaudeMd: true,
     icon: "🐝",
+    modelRole: "thinking",
   },
   {
     id: "cfo",
@@ -315,6 +347,7 @@ Rules:
     tools: ["bash", "read_file", "create_task"],
     loadClaudeMd: false,
     icon: "📋",
+    modelRole: "thinking",
   },
   {
     id: "analyst",
@@ -332,6 +365,7 @@ Rules:
     tools: ["bash", "read_file", "search"],
     loadClaudeMd: false,
     icon: "📊",
+    modelRole: "thinking",
   },
   {
     id: "trader",
@@ -400,12 +434,13 @@ for (const p of BUILT_IN_PROFILES) {
 }
 
 function loadCustomProfiles(): Map<string, AgentProfile> {
+  const dir = customProfilesDir();
   const customs = new Map<string, AgentProfile>();
   try {
-    const files = readdirSync(CUSTOM_PROFILES_DIR).filter((f) => f.endsWith(".json"));
+    const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
     for (const file of files) {
       try {
-        const data = JSON.parse(readFileSync(join(CUSTOM_PROFILES_DIR, file), "utf-8"));
+        const data = JSON.parse(readFileSync(join(dir, file), "utf-8"));
         if (data.id && data.systemPrompt) {
           customs.set(data.id, {
             id: data.id,
@@ -415,6 +450,7 @@ function loadCustomProfiles(): Map<string, AgentProfile> {
             tools: data.tools ?? [],
             loadClaudeMd: data.loadClaudeMd ?? false,
             icon: data.icon ?? "🤖",
+            ...(isProfileModelRole(data.modelRole) ? { modelRole: data.modelRole } : {}),
           });
         }
       } catch {
