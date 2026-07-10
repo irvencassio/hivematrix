@@ -23,6 +23,7 @@ import {
   localEngineCapability, DEFAULT_TIERS, resolveRapidBinary, tierBaseUrl, selectLocalMemoryPreset,
   type LocalTier, type TierKey, type HardwareProbe, type LocalMemoryPresetId, type LocalPresetMode, type LocalMemoryPreset,
 } from "./local-engine";
+import { optionFor, LOCAL_MODEL_CATALOG, type LocalSelection } from "./local-quant";
 import type { QwenProfile } from "@/lib/config/qwen-profile";
 import { provisioningPython } from "@/lib/voice/provision";
 
@@ -65,13 +66,43 @@ function readConfig(): Record<string, unknown> {
   try { return JSON.parse(readFileSync(configPath(), "utf-8")); } catch { return {}; }
 }
 
-/** Pure: what this Mac should run, as resolved LocalTier objects. */
-export function planLocalEngine(env: Partial<HardwareProbe> = {}): ProvisionPlan {
+function tierPort(key: TierKey): number {
+  return (DEFAULT_TIERS.find((t) => t.key === key) ?? DEFAULT_TIERS[0]).port;
+}
+
+/** Resolve an operator selection into concrete LocalTier objects — one per
+ * selected tier, at its chosen quant. Skips a tier whose (tier, quant) isn't in
+ * the catalog rather than guessing an alias. */
+function tiersForSelection(selection: LocalSelection): LocalTier[] {
+  return (Object.keys(selection) as TierKey[])
+    .map((key): LocalTier | null => {
+      const quant = selection[key];
+      if (!quant) return null;
+      const opt = optionFor(key, quant);
+      if (!opt) return null;
+      return { key, alias: opt.alias, port: tierPort(key), reasoning: false, quant: opt.quant };
+    })
+    .filter((t): t is LocalTier => t !== null);
+}
+
+/**
+ * Pure: what this Mac should run, as resolved LocalTier objects.
+ *
+ * `selection === null` (the default) reproduces today's auto behavior: `fast`
+ * at 4-bit, plus `coding` at 4-bit once RAM crosses the 64GB band
+ * (`cap.recommendedTiers`). An explicit `selection` is the operator's
+ * HuggingFace-style model/quant picks (§ local-engine-toggle-model-picker spec)
+ * and overrides the auto pick entirely — including dropping a tier the
+ * operator didn't select, even if it would otherwise be recommended.
+ */
+export function planLocalEngine(env: Partial<HardwareProbe> = {}, selection: LocalSelection | null = null): ProvisionPlan {
   const cap = localEngineCapability(env);
   const preset = selectLocalMemoryPreset({ ramGB: cap.ramGB });
-  const tiers = cap.recommendedTiers
-    .map((k) => DEFAULT_TIERS.find((d) => d.key === k))
-    .filter((t): t is LocalTier => !!t);
+  const tiers = selection
+    ? tiersForSelection(selection)
+    : cap.recommendedTiers
+        .map((k) => DEFAULT_TIERS.find((d) => d.key === k))
+        .filter((t): t is LocalTier => !!t);
   return {
     arch: cap.arch, ramGB: cap.ramGB, presetId: cap.presetId, mode: cap.mode,
     localCapable: cap.localCapable,
@@ -129,8 +160,15 @@ function knownTierEndpoints(): Set<string> {
   return new Set(DEFAULT_TIERS.map((tier) => normalizeEndpoint(tierBaseUrl(tier))));
 }
 
+/** Every alias this provisioner could ever write into `qwen.primary` — the full
+ * catalog (all tiers × all quants), not just the 4-bit defaults. Used to decide
+ * whether a stored `qwen` profile is HiveMatrix-managed (safe to overwrite on
+ * the next provision/quant-switch) or operator-authored (leave it alone).
+ * Getting this wrong in the 4-bit-only direction means a quant switch to 6/8-bit
+ * silently stops updating `qwen.primary`: the UI would claim the new quant while
+ * the supervisor keeps serving the old one. */
 function knownTierAliases(): Set<string> {
-  return new Set(DEFAULT_TIERS.map((tier) => tier.alias));
+  return new Set(LOCAL_MODEL_CATALOG.map((opt) => opt.alias));
 }
 
 function isManagedRapidTierRef(modelId: unknown, endpoint: unknown): boolean {
@@ -214,28 +252,60 @@ async function ensureRapidBinary(onLog: Logger): Promise<string> {
   return bin;
 }
 
+/**
+ * Repos already on disk, per `rapid-mlx ls`. Substring-matched against the
+ * catalog's known repo ids rather than parsed as a formatted table — robust to
+ * column-alignment changes, and `rapid-mlx info` reports no size/cached-state at
+ * all, so `ls` is the only source. Best-effort: returns empty on any failure
+ * (missing binary, engine crash, unexpected output) rather than throwing —
+ * this only affects a "downloaded" badge in the UI, never correctness of pull.
+ */
+export async function listCachedModelRepos(bin: string): Promise<Set<string>> {
+  try {
+    const { stdout } = await execFileP(bin, ["ls"], { timeout: 15_000 });
+    const cached = new Set<string>();
+    for (const opt of LOCAL_MODEL_CATALOG) {
+      if (stdout.includes(opt.repo)) cached.add(opt.repo);
+    }
+    return cached;
+  } catch {
+    return new Set();
+  }
+}
+
 /** Perform provisioning: install engine, pull fitting models, write config. */
-export async function provisionLocalEngine(opts: { onLog?: Logger; env?: Partial<HardwareProbe> } = {}): Promise<ProvisionPlan> {
+export async function provisionLocalEngine(
+  opts: { onLog?: Logger; env?: Partial<HardwareProbe>; selection?: LocalSelection | null } = {},
+): Promise<ProvisionPlan> {
   const onLog = opts.onLog ?? (() => {});
-  const plan = planLocalEngine(opts.env);
+  const plan = planLocalEngine(opts.env, opts.selection ?? null);
   const cfg = readConfig();
+  // Preserve `enabled`/`selection` — this function only owns `engine`/`binary`/
+  // `tiers`; overwriting the whole block would silently wipe the operator's
+  // toggle state and picks on the very next provision run.
+  const existingLocalEngine = (cfg.localEngine && typeof cfg.localEngine === "object")
+    ? cfg.localEngine as Record<string, unknown>
+    : {};
 
   if (!plan.localCapable) {
     onLog(plan.reason ?? "This Mac can't run a local model — cloud-only.");
-    cfg.localEngine = { engine: "rapid-mlx", binary: null, tiers: [] };
+    cfg.localEngine = { ...existingLocalEngine, engine: "rapid-mlx", binary: null, tiers: [] };
     cfg.localModelPreset = resolvedLocalModelPreset(plan);
     writeJsonAtomic(configPath(), cfg);
     onLog("Wrote cloud-only localEngine block.");
     return plan;
   }
 
-  onLog(`Provisioning for ${Math.round(plan.ramGB)} GB ${plan.arch}: ${plan.recommendedTiers.join(" + ")} resident.`);
+  const tierSummary = plan.tiers.length
+    ? plan.tiers.map((t) => t.quant ? `${t.key}@${t.quant}` : t.key).join(" + ")
+    : "nothing";
+  onLog(`Provisioning for ${Math.round(plan.ramGB)} GB ${plan.arch}: ${tierSummary} resident.`);
   const bin = await ensureRapidBinary(onLog);
   for (const t of plan.tiers) {
     onLog(`pulling ${t.alias}…`);
     await run(bin, ["pull", t.alias], onLog);
   }
-  cfg.localEngine = { engine: "rapid-mlx", binary: bin, tiers: plan.tiers };
+  cfg.localEngine = { ...existingLocalEngine, engine: "rapid-mlx", binary: bin, tiers: plan.tiers };
   cfg.localModelPreset = resolvedLocalModelPreset(plan);
   syncLocalModelProfilesForProvisionPlan(cfg, plan);
   writeJsonAtomic(configPath(), cfg);
@@ -262,20 +332,29 @@ export function getProvisionStatus(): ProvisionStatus {
   return { ..._state, log: [..._state.log] };
 }
 
-/** Start a background provision (idempotent: no-op if already running). */
-export function startProvision(now: () => string = () => new Date().toISOString()): ProvisionStatus {
+/**
+ * Start a background provision (idempotent: no-op if already running).
+ * `selection` omitted/null ⇒ auto pick (today's behavior); an explicit
+ * selection is the operator's model/quant picks and is also what
+ * `POST /local-engine/provision` should pass once it's read the persisted
+ * selection (server layer's job — this function stays pure/injectable).
+ */
+export function startProvision(
+  selection: LocalSelection | null = null,
+  now: () => string = () => new Date().toISOString(),
+): ProvisionStatus {
   if (_state.phase === "running") return getProvisionStatus();
   _state.phase = "running";
   _state.log = [];
   _state.error = null;
   _state.finishedAt = null;
   _state.startedAt = now();
-  _state.plan = planLocalEngine();
+  _state.plan = planLocalEngine(undefined, selection);
   const onLog = (line: string) => {
     _state.log.push(line);
     if (_state.log.length > MAX_LOG) _state.log.splice(0, _state.log.length - MAX_LOG);
   };
-  provisionLocalEngine({ onLog })
+  provisionLocalEngine({ onLog, selection })
     .then((plan) => { _state.plan = plan; _state.phase = "done"; })
     .catch((e) => { _state.error = e?.message ?? String(e); _state.phase = "error"; })
     .finally(() => { _state.finishedAt = now(); });

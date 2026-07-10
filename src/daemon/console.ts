@@ -1025,8 +1025,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="s_backends"></div>
 
       <div id="s_provider_toggles" style="margin-top:14px">
-        <label class="flbl">Frontier providers</label>
-        <div class="muted" style="font-size:11px;margin-bottom:6px">Turn a provider on or off within HiveMatrix. Off disables it here only — the CLI stays installed and signed in for your own terminal use.</div>
+        <label class="flbl">Providers</label>
+        <div class="muted" style="font-size:11px;margin-bottom:6px">Turn a provider on or off within HiveMatrix. Off disables it here only — Claude/Codex CLIs stay installed and signed in for your own terminal use; Rapid-MLX weights and the engine stay on disk.</div>
         <div id="s_provider_toggle_rows"><div class="muted">Loading…</div></div>
       </div>
 
@@ -5498,12 +5498,23 @@ function localHealthProviderName(provider) {
 
 // One-click provisioner: sizes Rapid-MLX to this Mac, installs it, pulls the
 // models that fit, writes config. Shown only when the Mac can run local.
-function renderProvisionUI(cap) {
+// selection (from GET /local-engine) is the operator's explicit picks, if any —
+// once set, the caption must describe what will ACTUALLY be pulled, not the
+// generic auto-recommendation (that's what the Providers toggle's own picker
+// caption already gets right; this legacy one-click button needs to match).
+function provisionCaptionText(cap, selection) {
+  const hasSelection = selection && Object.keys(selection).length;
+  const profile = hasSelection
+    ? Object.keys(selection).map(k => k + "@" + selection[k]).join(" + ")
+    : ((cap && cap.recommendedTiers) || []).join(" + ");
+  return "Installs Rapid-MLX + pulls " + profile + " for this Mac.";
+}
+
+function renderProvisionUI(cap, selection) {
   if (!cap || !cap.localCapable) return "";
-  const profile = (cap.recommendedTiers || []).join(" + ");
   return '<div style="margin:6px 0 4px 2px">'
     + '<button id="provisionBtn" class="create" onclick="provisionLocalEngine()" style="font-size:12px">Provision local engine</button>'
-    + '<span class="muted" style="font-size:11px;margin-left:8px">Installs Rapid-MLX + pulls ' + esc(profile) + ' for this Mac.</span>'
+    + '<span id="provisionCaption" class="muted" style="font-size:11px;margin-left:8px">' + esc(provisionCaptionText(cap, selection)) + '</span>'
     + '<div id="provisionLog" style="margin-top:4px"></div></div>';
 }
 
@@ -5634,6 +5645,7 @@ async function loadModels() {
   if (about && about.style.display !== "none") renderAbout();
   const settingsOverlay = document.getElementById("settingsOverlay");
   if (settingsOverlay && settingsOverlay.classList.contains("open")) renderSettingsModelControls();
+  return models;
 }
 
 // --- Projects ---
@@ -6163,11 +6175,12 @@ function providerStatusChip(p) {
 async function renderProviderToggles() {
   const wrap = document.getElementById("s_provider_toggle_rows");
   if (!wrap) return;
-  let r;
-  try { r = await api("/providers"); } catch (e) { wrap.innerHTML = '<div class="muted">Could not load provider status.</div>'; return; }
+  let r, le;
+  try {
+    [r, le] = await Promise.all([api("/providers"), api("/local-engine").catch(() => null)]);
+  } catch (e) { wrap.innerHTML = '<div class="muted">Could not load provider status.</div>'; return; }
   const providers = (r && r.providers) || [];
-  if (!providers.length) { wrap.innerHTML = '<div class="muted">No frontier providers.</div>'; return; }
-  wrap.innerHTML = providers.map(p => {
+  let html = providers.map(p => {
     const needsSetup = p.enabled && (!p.installed || !p.authPresent);
     const setupBtn = needsSetup
       ? '<button class="sm" onclick="runProviderSetup(\'' + esc(p.id) + '\')">' + (p.installed ? 'Sign in' : 'Install + sign in') + '</button>'
@@ -6179,6 +6192,199 @@ async function renderProviderToggles() {
       + settingsSwitch(p.enabled, 'toggleProvider(\'' + esc(p.id) + '\',' + (!p.enabled) + ')', { title: (p.enabled ? 'Turn off ' : 'Turn on ') + (PROVIDER_LABELS[p.id] || p.id) })
       + '</div></div>';
   }).join('');
+  html += renderLocalEngineToggleRow(le);
+  wrap.innerHTML = html || '<div class="muted">No providers.</div>';
+
+  // Keep the legacy "Provision local engine" button's caption (in #s_backends,
+  // Settings > Models) honest once the operator has an explicit selection.
+  // Patch the span directly rather than re-rendering the whole Settings form,
+  // which would clobber any in-progress edit elsewhere on the page (endpoint
+  // URL, theme, etc.).
+  if (models) models.localEngineSelection = le ? le.selection : undefined;
+  const caption = document.getElementById("provisionCaption");
+  if (caption && models) caption.textContent = provisionCaptionText(models.localEngineCapability, le ? le.selection : undefined);
+}
+
+// --- Rapid-MLX (local engine) toggle row + HuggingFace-style model/quant picker ---
+
+function localEngineStatusChip(le) {
+  if (!le || !le.capable) return '<span class="muted" style="font-size:11px">Unavailable' + (le && le.reason ? ' · ' + esc(le.reason) : '') + '</span>';
+  if (!le.enabled) return '<span class="muted" style="font-size:11px">Off</span>';
+  if (!le.installed) return '<span class="muted" style="font-size:11px;color:var(--accent)">Enabling — installing engine + model</span>';
+  if (!le.ready) return '<span class="muted" style="font-size:11px;color:var(--accent)">On — starting</span>';
+  return '<span class="muted" style="font-size:11px;color:var(--ok)">On</span>';
+}
+
+function renderLocalEngineToggleRow(le) {
+  if (!le) return '';
+  const disabled = !le.capable;
+  const row = '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
+    + '<div style="flex:1"><div style="font-weight:600">Rapid-MLX (local)</div>'
+    + '<div style="margin-top:2px">' + localEngineStatusChip(le) + '</div></div>'
+    + '<div class="row" style="align-items:center;gap:8px">'
+    + settingsSwitch(le.enabled, 'toggleLocalEngine(' + (!le.enabled) + ')', {
+        title: (le.enabled ? 'Turn off ' : 'Turn on ') + 'Rapid-MLX',
+        disabled,
+      })
+    + '</div></div>';
+  const picker = (le.enabled && le.capable) ? renderLocalModelPicker(le) : '';
+  return row + picker;
+}
+
+async function toggleLocalEngine(enabled) {
+  await api("/local-engine/enabled", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
+  });
+  if (enabled) {
+    // First-ever enable: seed a default selection (mirrors today's auto-pick —
+    // fast@4bit, plus coding@4bit once this Mac offers it) so "on" always means
+    // something is actually being installed, not an empty picker.
+    const le = await api("/local-engine").catch(() => null);
+    if (le && !Object.keys(le.selection || {}).length) {
+      const body = { fast: "4bit" };
+      if ((le.options || []).some(o => o.tier === "coding")) body.coding = "4bit";
+      await api("/local-engine/selection", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      }).catch(() => {});
+    }
+    await api("/local-engine/provision", { method: "POST" }).catch(() => {});
+  }
+  _localPending = null;
+  await renderProviderToggles();
+  models = await loadModels().catch(() => models);
+  renderSettingsModelControls();
+  if (enabled) pollLocalProvision();
+}
+
+// Client-side pending edits, kept across re-renders until Apply/Reset — so
+// clicking a radio doesn't have to round-trip to the server before the UI updates.
+let _localPending = null;
+
+function localDefaultSelection(le) {
+  const sel = {};
+  sel.fast = (le.selection && le.selection.fast) || "4bit";
+  const hasCoding = (le.options || []).some(o => o.tier === "coding");
+  if (hasCoding && le.selection && le.selection.coding) sel.coding = le.selection.coding;
+  return sel;
+}
+
+function renderLocalModelPicker(le) {
+  if (!_localPending) _localPending = localDefaultSelection(le);
+  const pending = _localPending;
+  const optionsByTier = { fast: [], coding: [] };
+  for (const o of (le.options || [])) (optionsByTier[o.tier] || (optionsByTier[o.tier] = [])).push(o);
+
+  const tierBlock = (tier, title, showRemove) => {
+    const opts = optionsByTier[tier] || [];
+    if (!opts.length) return '';
+    const rows = opts.map(o => {
+      const checked = pending[tier] === o.quant;
+      const badge = o.cached
+        ? '<span style="color:var(--ok)">✓ downloaded</span>'
+        : (o.downloadGiB.toFixed(1) + ' GiB download');
+      return '<label class="row" style="align-items:center;gap:8px;padding:2px 0;cursor:pointer">'
+        + '<input type="radio" name="localquant_' + tier + '"' + (checked ? ' checked' : '')
+        + ' onchange="pickLocalQuant(\'' + tier + '\',\'' + o.quant + '\')">'
+        + '<span style="min-width:40px">' + esc(o.quant) + '</span>'
+        + '<span class="muted" style="font-size:11px">' + badge + '</span>'
+        + '</label>';
+    }).join('');
+    const removeBtn = showRemove
+      ? ' <button class="linklike" style="font-size:11px" onclick="removeLocalTier(\'' + tier + '\')">Remove</button>'
+      : '';
+    return '<div style="margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:6px">'
+      + '<div class="row" style="justify-content:space-between;align-items:center">'
+      + '<b style="font-size:12px">' + esc(title) + '</b>'
+      + '<span>' + '<span class="muted" style="font-size:11px">' + esc(tier) + '</span>' + removeBtn + '</span>'
+      + '</div>' + rows + '</div>';
+  };
+
+  let html = '<div style="margin:4px 0 10px 2px">';
+  html += tierBlock('fast', 'Qwen3.6-35B-A3B', false);
+  if ((optionsByTier.coding || []).length) {
+    if (pending.coding) {
+      html += tierBlock('coding', 'Qwen3.6-27B', true);
+    } else {
+      html += '<div style="margin-top:8px"><button class="linklike" style="font-size:12px" onclick="addLocalCodingTier()">+ Add Qwen3.6-27B</button></div>';
+    }
+  }
+
+  const currentSelection = le.selection || {};
+  const dirty = JSON.stringify(pending) !== JSON.stringify(currentSelection);
+  if (dirty) {
+    let downloadGiB = 0;
+    for (const tier of Object.keys(pending)) {
+      const opt = (optionsByTier[tier] || []).find(o => o.quant === pending[tier]);
+      if (opt && !opt.cached) downloadGiB += opt.downloadGiB;
+    }
+    html += '<div class="row" style="margin-top:8px;gap:8px;align-items:center">'
+      + '<button id="localApplyBtn" class="create" style="font-size:12px" onclick="applyLocalSelection()">'
+      + (downloadGiB > 0 ? 'Apply — downloads ' + downloadGiB.toFixed(1) + ' GiB' : 'Apply — restart only, already downloaded')
+      + '</button>'
+      + '<button class="linklike" style="font-size:12px" onclick="resetLocalSelection()">Reset</button>'
+      + '</div>';
+  }
+  html += '<div id="localProvisionLog" style="margin-top:6px"></div>';
+  html += '</div>';
+  return html;
+}
+
+function pickLocalQuant(tier, quant) {
+  if (!_localPending) return;
+  _localPending[tier] = quant;
+  renderProviderToggles();
+}
+
+function addLocalCodingTier() {
+  if (!_localPending) return;
+  _localPending.coding = "4bit";
+  renderProviderToggles();
+}
+
+function removeLocalTier(tier) {
+  if (!_localPending) return;
+  delete _localPending[tier];
+  renderProviderToggles();
+}
+
+function resetLocalSelection() {
+  _localPending = null; // re-seeded from server state on next render
+  renderProviderToggles();
+}
+
+async function applyLocalSelection() {
+  const btn = document.getElementById("localApplyBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "Applying…"; }
+  const body = { fast: (_localPending && _localPending.fast) || null, coding: (_localPending && _localPending.coding) || null };
+  try {
+    await api("/local-engine/selection", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    await api("/local-engine/provision", { method: "POST" });
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = "Apply"; }
+    const el = document.getElementById("localProvisionLog");
+    if (el) el.innerHTML = '<div class="muted" style="font-size:11px">✗ request failed — is the daemon reachable?</div>';
+    return;
+  }
+  pollLocalProvision();
+}
+
+async function pollLocalProvision() {
+  let r;
+  try { r = await api("/local-engine/provision"); } catch (e) { return; }
+  const s = (r && r.status) || {};
+  const el = document.getElementById("localProvisionLog");
+  if (el) {
+    const log = (s.log || []).join("\n");
+    const tail = s.phase === "error" ? "\n✗ " + (s.error || "failed") : s.phase === "done" ? "\n✓ done" : "";
+    el.innerHTML = '<pre class="muted" style="font-size:11px;white-space:pre-wrap;max-height:160px;overflow:auto;margin:2px 0">' + esc(log + tail) + "</pre>";
+  }
+  if (s.phase === "running") { setTimeout(pollLocalProvision, 1500); return; }
+  _localPending = null; // done — re-seed the picker from the now-current server selection
+  await renderProviderToggles();
+  models = await loadModels().catch(() => models);
+  renderSettingsModelControls();
 }
 
 async function toggleProvider(id, enabled) {
@@ -6224,7 +6430,7 @@ function renderSettingsModelControls() {
     + '<span class="st '+(b.configured?'ok':'no')+'">'+(b.configured?'✓ '+esc(b.detail):'not set up')+'</span></div>'
     + (b.configured?'':'<div class="mdl-card-foot">'+esc(b.connect||'')+'</div>')+'</div>').join("") : '<div class="mdl-card"><div class="mdl-card-foot" style="border:none;margin:0;padding:0">Model status unavailable.</div></div>';
   document.getElementById("s_backends").innerHTML += renderLocalEngine(m.localEngine, m.localEngineCapability);
-  document.getElementById("s_backends").innerHTML += renderProvisionUI(m.localEngineCapability);
+  document.getElementById("s_backends").innerHTML += renderProvisionUI(m.localEngineCapability, m.localEngineSelection);
   document.getElementById("s_endpoint").value = (local && local.endpoint) || "http://localhost:1234/v1";
   renderEmbeddingSettings();
   const v = m.version || {};

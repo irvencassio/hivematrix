@@ -12,9 +12,12 @@
  */
 
 import { spawn, type ChildProcess } from "child_process";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, readdirSync } from "fs";
 import { join } from "path";
 import { homedir, arch as osArch, totalmem } from "os";
+import { findBinary } from "@/lib/config/binary-detection";
+import { writeJsonAtomic } from "@/lib/config/atomic-write";
+import { quantForAlias, LOCAL_MODEL_CATALOG, type LocalQuant, type LocalModelOption, type LocalSelection } from "./local-quant";
 
 export type LocalEngineKind = "rapid-mlx" | "lmstudio" | "ollama";
 export type TierKey = "fast" | "coding";
@@ -25,6 +28,8 @@ export interface LocalTier {
   alias: string; // rapid-mlx model alias (or HF path)
   port: number;
   reasoning: boolean; // false → serve with --no-thinking
+  /** Display hint only — the alias is the serving source of truth. */
+  quant?: LocalQuant | null;
 }
 
 export interface LocalEngineConfig {
@@ -34,8 +39,8 @@ export interface LocalEngineConfig {
 }
 
 export const DEFAULT_TIERS: LocalTier[] = [
-  { key: "fast", alias: "qwen3.6-35b-4bit", port: 8000, reasoning: false },
-  { key: "coding", alias: "qwen3.6-27b-4bit", port: 8001, reasoning: false },
+  { key: "fast", alias: "qwen3.6-35b-4bit", port: 8000, reasoning: false, quant: "4bit" },
+  { key: "coding", alias: "qwen3.6-27b-4bit", port: 8001, reasoning: false, quant: "4bit" },
 ];
 
 export const SUPPORTED_LOCAL_TIER_PRESETS: LocalTier[] = DEFAULT_TIERS;
@@ -64,11 +69,14 @@ function parseTier(raw: unknown, fallback: LocalTier): LocalTier {
   if (!raw || typeof raw !== "object") return fallback;
   const r = raw as Record<string, unknown>;
   const key: TierKey = r.key === "coding" ? "coding" : "fast";
+  const alias = typeof r.alias === "string" && r.alias ? r.alias : fallback.alias;
+  const quant = typeof r.quant === "string" ? (r.quant as LocalQuant) : quantForAlias(alias);
   return {
     key,
-    alias: typeof r.alias === "string" && r.alias ? r.alias : fallback.alias,
+    alias,
     port: typeof r.port === "number" && r.port > 0 ? r.port : fallback.port,
     reasoning: r.reasoning === true, // default false (reasoning off)
+    quant,
   };
 }
 
@@ -90,6 +98,88 @@ export function getLocalEngineConfig(config: Record<string, unknown> = readConfi
   };
 }
 
+interface LocalEngineEnablement { enabled?: boolean }
+
+function readLocalEngineBlock(config: Record<string, unknown>): LocalEngineEnablement {
+  const raw = config.localEngine;
+  return raw && typeof raw === "object" ? (raw as LocalEngineEnablement) : {};
+}
+
+function configFilePath(): string {
+  return join(homedir(), ".hivematrix", "config.json");
+}
+
+/**
+ * Default when the key is absent: enabled iff the engine binary resolves AND
+ * this Mac is capable — mirrors frontier providers' "detected ⇒ enabled"
+ * first-run rule (config/frontier-providers.ts `isProviderEnabled`), so an
+ * already-working local engine doesn't go dark on upgrade. Once the operator
+ * has explicitly toggled, the stored value wins regardless of detection.
+ *
+ * `detect` is injectable for tests; defaults to the real binary + capability probe.
+ */
+export function isLocalEngineEnabled(
+  config: Record<string, unknown> = readConfig(),
+  detect: () => boolean = () =>
+    resolveRapidBinary(getLocalEngineConfig(config)) !== null && localEngineCapability().localCapable,
+): boolean {
+  const entry = readLocalEngineBlock(config);
+  if (typeof entry.enabled === "boolean") return entry.enabled;
+  return detect();
+}
+
+/** Atomic merge write — copies the frontier-providers.ts setProviderEnabled pattern. */
+export function setLocalEngineEnabled(enabled: boolean): void {
+  const config = readConfig();
+  const existing = readLocalEngineBlock(config);
+  config.localEngine = { ...existing, enabled };
+  writeJsonAtomic(configFilePath(), config);
+}
+
+interface LocalEngineSelectionBlock { selection?: unknown }
+
+function parseSelection(raw: unknown): LocalSelection {
+  if (!raw || typeof raw !== "object") return {};
+  const r = raw as Record<string, unknown>;
+  const out: LocalSelection = {};
+  for (const key of ["fast", "coding"] as TierKey[]) {
+    const v = r[key];
+    if (typeof v === "string" && LOCAL_MODEL_CATALOG.some((opt) => opt.tier === key && opt.quant === v)) {
+      out[key] = v as LocalQuant;
+    }
+  }
+  return out;
+}
+
+/** The operator's persisted model/quant picks (config.json `localEngine.selection`) —
+ * distinct from `tiers`, which is what's actually installed/serving as of the
+ * last provision. Absent key ⇒ {} (no explicit selection yet). */
+export function getLocalEngineSelection(config: Record<string, unknown> = readConfig()): LocalSelection {
+  const entry = readLocalEngineBlock(config) as LocalEngineSelectionBlock;
+  return parseSelection(entry.selection);
+}
+
+/**
+ * Merges a per-tier patch over the persisted selection — a tier key omitted
+ * from `patch` leaves that tier's current pick untouched; a tier key set to
+ * `null` deselects it (removed from the stored object, not stored as null); a
+ * tier key set to a quant updates/adds it. Full-replace would let editing one
+ * tier's radio silently drop the other tier's pick.
+ */
+export function setLocalEngineSelection(patch: LocalSelection): void {
+  const config = readConfig();
+  const existing = readLocalEngineBlock(config) as LocalEngineSelectionBlock;
+  const merged: LocalSelection = parseSelection(existing.selection);
+  for (const key of Object.keys(patch) as TierKey[]) {
+    const v = patch[key];
+    if (v === undefined) continue;
+    if (v === null) delete merged[key];
+    else merged[key] = v;
+  }
+  config.localEngine = { ...existing, selection: merged };
+  writeJsonAtomic(configFilePath(), config);
+}
+
 /** Pure: the `rapid-mlx serve …` argv for a tier (reasoning off → --no-thinking). */
 export function buildServeArgs(tier: LocalTier): string[] {
   const args = ["serve", tier.alias, "--host", "127.0.0.1", "--port", String(tier.port)];
@@ -104,10 +194,25 @@ export function tierBaseUrl(tier: LocalTier): string {
 
 /** The tier whose alias equals this model id, or null (used to route a chosen
  * local model to the right Rapid-MLX port). */
+function catalogOptionForAlias(alias: string): LocalModelOption | null {
+  return LOCAL_MODEL_CATALOG.find((opt) => opt.alias === alias || opt.repo === alias) ?? null;
+}
+
+/** Resolves both the short alias (qwen3.6-35b-8bit) and the full HF repo id
+ * (mlx-community/Qwen3.6-35B-A3B-8bit) for every published quant, not just the
+ * two currently-configured tiers — used to recognize "this model id belongs to
+ * the local mlx engine" for routing regardless of which quant is installed. */
 export function tierForAlias(alias: string, cfg: LocalEngineConfig = getLocalEngineConfig()): LocalTier | null {
-  return cfg.tiers.find((t) => t.alias === alias)
-    ?? SUPPORTED_LOCAL_TIER_PRESETS.find((t) => t.alias === alias)
-    ?? null;
+  const direct = cfg.tiers.find((t) => t.alias === alias);
+  if (direct) return direct;
+
+  const legacy = SUPPORTED_LOCAL_TIER_PRESETS.find((t) => t.alias === alias);
+  if (legacy) return legacy;
+
+  const opt = catalogOptionForAlias(alias);
+  if (!opt) return null;
+  const sameTier = cfg.tiers.find((t) => t.key === opt.tier) ?? DEFAULT_TIERS.find((t) => t.key === opt.tier)!;
+  return { key: opt.tier, alias: opt.alias, port: sameTier.port, reasoning: sameTier.reasoning, quant: opt.quant };
 }
 
 /** Resolve a role to its tier's endpoint + model, or null if unmapped. */
@@ -121,17 +226,57 @@ export function localTargetForRole(
   return { endpoint: tierBaseUrl(tier), model: tier.alias, tier: tier.key };
 }
 
-/** Locate the rapid-mlx executable: config → env → PATH-ish known locations. */
-export function resolveRapidBinary(cfg: LocalEngineConfig = getLocalEngineConfig()): string | null {
-  const candidates = [
-    cfg.binary,
-    process.env.HIVE_RAPID_MLX,
-    join(homedir(), "hivematrix", ".rapidmlx-eval", ".venv", "bin", "rapid-mlx"),
-    join(homedir(), ".local", "bin", "rapid-mlx"),
+/** `pip install --user rapid-mlx` on macOS lands under ~/Library/Python/<major.minor>/bin —
+ * a directory GUI-launched apps rarely have on PATH. Enumerate whichever Python
+ * versions are present rather than guessing one. */
+function pythonUserBinCandidates(home: string, listVersions: (base: string) => string[]): string[] {
+  const base = join(home, "Library", "Python");
+  return listVersions(base).map((version) => join(base, version, "bin", "rapid-mlx"));
+}
+
+function defaultListVersions(base: string): string[] {
+  try {
+    return readdirSync(base);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Locate the rapid-mlx executable: explicit config/env win outright; otherwise
+ * PATH (covers venv/homebrew/pipx installs) via the same `which`-based lookup
+ * claude/codex use, then a handful of known install locations as a fallback for
+ * GUI-launched apps whose PATH never saw the user's shell profile.
+ *
+ * `probe` is a test seam — real callers omit it.
+ */
+export function resolveRapidBinary(
+  cfg: LocalEngineConfig = getLocalEngineConfig(),
+  probe: {
+    exists?: (path: string) => boolean;
+    home?: string;
+    hiveEnv?: string;
+    listPythonVersions?: (base: string) => string[];
+    findOnPath?: (name: string, searchPaths: string[]) => string | null;
+  } = {},
+): string | null {
+  const exists = probe.exists ?? existsSync;
+  const home = probe.home ?? homedir();
+  const hiveEnv = probe.hiveEnv ?? process.env.HIVE_RAPID_MLX;
+  const listPythonVersions = probe.listPythonVersions ?? defaultListVersions;
+  const findOnPath = probe.findOnPath ?? findBinary;
+
+  const configured = [cfg.binary, hiveEnv].filter((p): p is string => !!p);
+  for (const p of configured) if (exists(p)) return p;
+
+  const searchPaths = [
+    ...pythonUserBinCandidates(home, listPythonVersions),
+    join(home, ".local", "bin", "rapid-mlx"),
+    join(home, "hivematrix", ".rapidmlx-eval", ".venv", "bin", "rapid-mlx"),
     "/opt/homebrew/bin/rapid-mlx",
-  ].filter((p): p is string => !!p);
-  for (const p of candidates) if (existsSync(p)) return p;
-  return null;
+  ].filter((p) => exists(p));
+
+  return findOnPath("rapid-mlx", searchPaths);
 }
 
 // --- Process management: keep each tier's `rapid-mlx serve` alive on its port.
@@ -209,13 +354,6 @@ export interface HardwareProbe { arch: string; ramGB: number }
 export function probeHardware(): HardwareProbe {
   return { arch: osArch(), ramGB: totalmem() / 1e9 };
 }
-
-/** Resident 4-bit footprint per tier (weights + KV/overhead), GB. From the
- * locked local-model architecture doc (M5 Max measurements): 35B-A3B ~20, 27B
- * dense ~15. */
-export const TIER_FOOTPRINT_GB: Record<TierKey, number> = { fast: 20, coding: 15 };
-/** RAM that must stay free for macOS + the daemon + the voice sidecar. */
-const HEADROOM_GB = 14;
 
 export interface TierCapability {
   key: TierKey;

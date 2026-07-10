@@ -16,7 +16,7 @@ import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { getQwenProfile, type QwenProfile, type QwenProvider } from "@/lib/config/qwen-profile";
-import { buildServeArgs, resolveRapidBinary, tierForAlias } from "@/lib/models/local-engine";
+import { buildServeArgs, resolveRapidBinary, tierForAlias, isLocalEngineEnabled } from "@/lib/models/local-engine";
 
 const CHECK_INTERVAL_MS = 8_000;
 const RELAUNCH_THROTTLE_MS = 12_000; // don't hammer a crash-looping server
@@ -75,13 +75,15 @@ export function resolveServeCommand(profile: QwenProfile, override = readServeCo
 }
 
 export type ServeTickDecision =
+  | { action: "disabled" }       // operator turned the local engine off — reap and don't respawn
   | { action: "unmanaged" }      // remote, or no launch command — just report
   | { action: "healthy" }        // up; nothing to do
   | { action: "starting" }       // child alive but not yet healthy — wait
   | { action: "throttled" }      // down, but too soon since last launch
   | { action: "spawn" };         // down + eligible — (re)launch
 
-/** Pure per-tick decision. */
+/** Pure per-tick decision. `enabled` is checked first — a disabled engine never
+ * spawns or reports healthy/starting, even if a stray process is still up. */
 export function decideServeTick(input: {
   location: QwenProfile["location"];
   hasCommand: boolean;
@@ -89,7 +91,9 @@ export function decideServeTick(input: {
   childAlive: boolean;
   msSinceLastStart: number;
   throttleMs?: number;
+  enabled?: boolean;
 }): ServeTickDecision {
+  if (input.enabled === false) return { action: "disabled" };
   if (input.location !== "local" || !input.hasCommand) return { action: "unmanaged" };
   if (input.healthy) return { action: "healthy" };
   if (input.childAlive) return { action: "starting" };
@@ -137,6 +141,7 @@ export async function waitForServerReady(
 
 export interface ServingStatus {
   managed: boolean;
+  enabled: boolean;
   location: QwenProfile["location"] | "none";
   provider: QwenProvider | null;
   endpoint: string | null;
@@ -150,7 +155,7 @@ export interface ServingStatus {
 }
 
 const state: ServingStatus = {
-  managed: false, location: "none", provider: null, endpoint: null, modelId: null,
+  managed: false, enabled: true, location: "none", provider: null, endpoint: null, modelId: null,
   healthy: false, pid: null, restarts: 0, lastStartAt: null, lastExitAt: null, lastError: null,
 };
 let child: ChildProcess | null = null;
@@ -190,9 +195,10 @@ function spawnServer(command: ServeCommand): void {
 }
 
 async function tick(): Promise<void> {
+  const enabled = isLocalEngineEnabled();
   const profile = getQwenProfile();
   if (!profile) {
-    state.managed = false; state.location = "none"; state.healthy = false;
+    state.managed = false; state.enabled = enabled; state.location = "none"; state.healthy = false;
     return;
   }
   const command = resolveServeCommand(profile);
@@ -200,9 +206,12 @@ async function tick(): Promise<void> {
   state.provider = profile.primary.provider;
   state.endpoint = profile.primary.endpoint;
   state.modelId = profile.primary.modelId;
-  state.managed = profile.location === "local" && command !== null;
+  state.enabled = enabled;
+  state.managed = enabled && profile.location === "local" && command !== null;
 
-  state.healthy = await isServerUp(profile.primary.endpoint);
+  // Skip the network probe while disabled — we intend the server down, and a
+  // stray external process shouldn't make an "off" toggle read as "healthy".
+  state.healthy = enabled ? await isServerUp(profile.primary.endpoint) : false;
 
   const decision = decideServeTick({
     location: profile.location,
@@ -211,9 +220,13 @@ async function tick(): Promise<void> {
     childAlive: child !== null && state.pid !== null,
     msSinceLastStart: Date.now() - lastStartMs,
     throttleMs: relaunchThrottleMs,
+    enabled,
   });
 
-  if (decision.action === "spawn" && command) {
+  if (decision.action === "disabled" && child) {
+    console.log("[serving] local engine disabled — stopping the managed server");
+    try { child.kill(); } catch { /* already gone */ }
+  } else if (decision.action === "spawn" && command) {
     console.log(`[serving] local model down — launching ${command.cmd}`);
     spawnServer(command);
   }

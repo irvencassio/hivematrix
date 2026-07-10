@@ -1663,6 +1663,110 @@ test("POST /providers/:id/enabled persists the toggle and GET /providers reflect
   assert.equal(onBody.enabled, true);
 });
 
+test("GET /local-engine returns the picker's full state shape", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/local-engine`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as {
+    enabled: boolean; installed: boolean; capable: boolean; reason: string | null;
+    ramGB: number; ready: boolean; selection: Record<string, unknown>;
+    options: Array<{ tier: string; quant: string; alias: string; repo: string; downloadGiB: number; cached: boolean }>;
+  };
+  // installed/capable/ramGB are real-machine facts (no hardware-injection at the
+  // HTTP layer) — assert shape/type, not a specific value, same as the existing
+  // GET /providers test does for installed/authPresent.
+  assert.equal(typeof body.enabled, "boolean");
+  assert.equal(typeof body.installed, "boolean");
+  assert.equal(typeof body.capable, "boolean");
+  assert.equal(typeof body.ramGB, "number");
+  assert.equal(typeof body.ready, "boolean");
+  assert.deepEqual(body.selection, {}); // fresh temp home — nothing selected yet
+  assert.ok(Array.isArray(body.options));
+  for (const opt of body.options) {
+    assert.equal(typeof opt.alias, "string");
+    assert.equal(typeof opt.downloadGiB, "number");
+    assert.equal(typeof opt.cached, "boolean");
+  }
+});
+
+test("POST /local-engine/enabled persists the toggle and GET /local-engine reflects it", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const off = await fetch(`${base}/local-engine/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: false }),
+  });
+  assert.equal(off.status, 200);
+  assert.deepEqual(await off.json(), { ok: true, enabled: false });
+
+  const get = await fetch(`${base}/local-engine`, { headers });
+  const body = await get.json() as { enabled: boolean };
+  assert.equal(body.enabled, false);
+});
+
+test("disabling the local engine removes it from /models' selectable backends", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  await fetch(`${base}/local-engine/enabled`, { method: "POST", headers, body: JSON.stringify({ enabled: false }) });
+
+  const res = await fetch(`${base}/models`, { headers });
+  const body = await res.json() as { backends: Array<{ id: string; enabled: boolean; configured: boolean }> };
+  const local = body.backends.find((b) => b.id === "local");
+  assert.equal(local?.enabled, false);
+  assert.equal(local?.configured, false); // configured = installed && enabled — false regardless of installed
+});
+
+test("POST /local-engine/selection rejects a malformed quant regardless of the machine's real RAM", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/local-engine/selection`, {
+    method: "POST", headers, body: JSON.stringify({ fast: "12bit" }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json() as { ok: boolean; error: string };
+  assert.equal(body.ok, false);
+  assert.match(body.error, /invalid quant for fast/);
+});
+
+test("POST /local-engine/selection persists a merged selection, and GET /local-engine reflects it (requires the test machine to have >=32GB RAM, same assumption GET /local-engine's real-hardware fields already make)", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const set = await fetch(`${base}/local-engine/selection`, {
+    method: "POST", headers, body: JSON.stringify({ fast: "8bit" }),
+  });
+  assert.equal(set.status, 200);
+  const setBody = await set.json() as { ok: boolean; selection: Record<string, string>; pullRequired: string[] };
+  assert.equal(setBody.ok, true);
+  assert.equal(setBody.selection.fast, "8bit");
+  assert.ok(Array.isArray(setBody.pullRequired));
+
+  const get = await fetch(`${base}/local-engine`, { headers });
+  const getBody = await get.json() as { selection: Record<string, string> };
+  assert.equal(getBody.selection.fast, "8bit");
+});
+
+test("GET /local-engine/provision's plan honors a persisted selection instead of the auto pick", async (t) => {
+  withTempHome(t);
+  const { mkdirSync: mkdir, writeFileSync: write } = await import("node:fs");
+  mkdir(join(process.env.HOME!, ".hivematrix"), { recursive: true });
+  write(join(process.env.HOME!, ".hivematrix", "config.json"), JSON.stringify({
+    localEngine: { selection: { fast: "6bit" } },
+  }));
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/local-engine/provision`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { plan: { tiers: Array<{ key: string; alias: string; quant: string }> } };
+  assert.equal(body.plan.tiers.length, 1);
+  assert.equal(body.plan.tiers[0].key, "fast");
+  assert.equal(body.plan.tiers[0].alias, "qwen3.6-35b-6bit");
+});
+
 test("POST /claude/auth/login no longer exists — renamed to /providers/:id/setup with no back-compat alias", async (t) => {
   withTempHome(t);
   const { base, headers } = await startServer(t);

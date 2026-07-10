@@ -1331,7 +1331,7 @@ test("Settings Models renders local engine and provisioning controls without cac
 
   assert.match(renderSettings, /renderLocalEngine\(m\.localEngine, m\.localEngineCapability\)/);
   assert.doesNotMatch(renderSettings, /renderLocalModelHealth\(m\.localModelHealth\)/);
-  assert.match(renderSettings, /renderProvisionUI\(m\.localEngineCapability\)/);
+  assert.match(renderSettings, /renderProvisionUI\(m\.localEngineCapability,\s*m\.localEngineSelection\)/);
   assert.doesNotMatch(renderSettings, /renderLocalBackendChoice/);
 });
 

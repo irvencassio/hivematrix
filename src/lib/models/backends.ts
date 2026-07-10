@@ -16,7 +16,7 @@ import { getQwenProfile } from "@/lib/config/qwen-profile";
 import { getLocalModelConfig } from "@/lib/config/constants";
 import { readConfigMatchedLocalModelHealth } from "@/lib/local-model/health";
 import { isProviderEnabled } from "@/lib/config/frontier-providers";
-import { getLocalEngineConfig } from "./local-engine";
+import { getLocalEngineConfig, isLocalEngineEnabled } from "./local-engine";
 
 export type BackendId = "local" | "claude" | "codex";
 
@@ -27,7 +27,7 @@ export interface BackendStatus {
   configured: boolean;
   /** Binary found on disk, independent of the operator's enable/disable toggle. */
   installed: boolean;
-  /** Operator's HiveMatrix-side enable/disable toggle (frontier providers only; always true for local). */
+  /** Operator's HiveMatrix-side enable/disable toggle. */
   enabled: boolean;
   detail: string;
   /** Shown when not configured — how to install/connect it. */
@@ -41,11 +41,13 @@ export interface BackendStatus {
 export interface DetectBackendsEnv {
   findBinary?: typeof findBinary;
   isProviderEnabled?: typeof isProviderEnabled;
+  isLocalEngineEnabled?: typeof isLocalEngineEnabled;
 }
 
 export function detectBackends(env: DetectBackendsEnv = {}): BackendStatus[] {
   const find = env.findBinary ?? findBinary;
   const enabled = env.isProviderEnabled ?? isProviderEnabled;
+  const localEnabled = env.isLocalEngineEnabled ?? isLocalEngineEnabled;
   const out: BackendStatus[] = [];
 
   // Local server — engine label reflects the configured local engine
@@ -63,12 +65,13 @@ export function detectBackends(env: DetectBackendsEnv = {}): BackendStatus[] {
     ?? (engine === "rapid-mlx" ? "http://127.0.0.1:8000/v1" : "http://localhost:1234/v1");
   const health = readConfigMatchedLocalModelHealth();
   const localConfigured = !!localModelId;
+  const localEngineEnabled = localEnabled();
   out.push({
     id: "local",
     name: `Local server (${engineName})`,
-    configured: localConfigured,
+    configured: localConfigured && localEngineEnabled,
     installed: localConfigured,
-    enabled: true,
+    enabled: localEngineEnabled,
     detail: localConfigured
       ? `${localModelId} @ ${localEndpoint}${health?.ready ? " (healthy)" : ""}`
       : "no local model configured",

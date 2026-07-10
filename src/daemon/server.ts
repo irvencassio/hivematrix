@@ -1217,16 +1217,98 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /local-engine — Rapid-MLX toggle + HuggingFace-style model/quant picker state.
+      if (req.method === "GET" && urlPath === "/local-engine") {
+        const {
+          localEngineCapability, isLocalEngineEnabled, getLocalEngineSelection, resolveRapidBinary, getLocalEngineConfig,
+        } = await import("@/lib/models/local-engine");
+        const { optionsForRam } = await import("@/lib/models/local-quant");
+        const { listCachedModelRepos } = await import("@/lib/models/provision");
+        const { getServingStatus } = await import("@/lib/local-model/serving");
+
+        const cap = localEngineCapability();
+        const enabled = isLocalEngineEnabled();
+        const bin = resolveRapidBinary(getLocalEngineConfig());
+        const installed = bin !== null;
+        const cachedRepos = installed ? await listCachedModelRepos(bin) : new Set<string>();
+        const options = optionsForRam(cap.ramGB).map((opt) => ({ ...opt, cached: cachedRepos.has(opt.repo) }));
+
+        json(res, 200, {
+          enabled,
+          installed,
+          capable: cap.localCapable,
+          reason: cap.reason ?? null,
+          ramGB: cap.ramGB,
+          ready: getServingStatus().healthy,
+          selection: getLocalEngineSelection(),
+          options,
+        });
+        return;
+      }
+      // POST /local-engine/enabled { enabled } — persist the operator's toggle and broadcast.
+      // Off is a HiveMatrix-side gate only — no uninstall, no weight deletion; the
+      // next serve tick reaps the managed process (src/lib/local-model/serving.ts).
+      if (req.method === "POST" && urlPath === "/local-engine/enabled") {
+        const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
+        const enabled = body?.enabled === true;
+        const { setLocalEngineEnabled } = await import("@/lib/models/local-engine");
+        setLocalEngineEnabled(enabled);
+        broadcast("local-engine:changed", { enabled });
+        json(res, 200, { ok: true, enabled });
+        return;
+      }
+      // POST /local-engine/selection { fast?: quant|null, coding?: quant|null } — persist the
+      // operator's model/quant picks (merged over the existing selection; an omitted tier is
+      // untouched, a tier set to null is deselected). Rejects anything the detected RAM band
+      // doesn't offer. Does NOT trigger a pull — the client calls POST /local-engine/provision
+      // (existing endpoint) afterward, which now honors the persisted selection.
+      if (req.method === "POST" && urlPath === "/local-engine/selection") {
+        const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
+        const { localEngineCapability, setLocalEngineSelection, getLocalEngineSelection, resolveRapidBinary, getLocalEngineConfig } =
+          await import("@/lib/models/local-engine");
+        const { validateSelection, optionFor } = await import("@/lib/models/local-quant");
+        const { listCachedModelRepos } = await import("@/lib/models/provision");
+
+        const cap = localEngineCapability();
+        const result = validateSelection(body, cap.ramGB);
+        if (!result.ok) {
+          json(res, 400, { ok: false, error: result.error });
+          return;
+        }
+        setLocalEngineSelection(result.selection);
+        broadcast("local-engine:changed", { selection: result.selection });
+
+        const merged = getLocalEngineSelection();
+        const bin = resolveRapidBinary(getLocalEngineConfig());
+        const cachedRepos = bin ? await listCachedModelRepos(bin) : new Set<string>();
+        const pullRequired = (Object.keys(merged) as Array<"fast" | "coding">)
+          .map((key) => optionFor(key, merged[key]!))
+          .filter((opt): opt is NonNullable<typeof opt> => !!opt)
+          .filter((opt) => !cachedRepos.has(opt.repo))
+          .map((opt) => opt.alias);
+
+        json(res, 200, { ok: true, selection: merged, pullRequired });
+        return;
+      }
+
       // GET /local-engine/provision — provisioning plan (what fits this Mac) + job status.
       if (req.method === "GET" && urlPath === "/local-engine/provision") {
         const { planLocalEngine, getProvisionStatus } = await import("@/lib/models/provision");
-        json(res, 200, { plan: planLocalEngine(), status: getProvisionStatus() });
+        const { getLocalEngineSelection } = await import("@/lib/models/local-engine");
+        const persisted = getLocalEngineSelection();
+        const selection = Object.keys(persisted).length ? persisted : null;
+        json(res, 200, { plan: planLocalEngine(undefined, selection), status: getProvisionStatus() });
         return;
       }
       // POST /local-engine/provision — start a background provision (install + pull + write config).
+      // Honors the persisted operator selection (POST /local-engine/selection); falls back to the
+      // auto pick when nothing has been explicitly selected yet (fresh install).
       if (req.method === "POST" && urlPath === "/local-engine/provision") {
         const { startProvision } = await import("@/lib/models/provision");
-        json(res, 202, startProvision());
+        const { getLocalEngineSelection } = await import("@/lib/models/local-engine");
+        const persisted = getLocalEngineSelection();
+        const selection = Object.keys(persisted).length ? persisted : null;
+        json(res, 202, startProvision(selection));
         return;
       }
 
