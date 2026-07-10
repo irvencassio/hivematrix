@@ -48,6 +48,21 @@ test("flags stalled directive criteria and a clogged feedback loop", () => {
   assert.ok(concerns.find((c) => /backlog resolution is low/i.test(c.title)));
 });
 
+test("a retired local provider (e.g. local-dwarfstar) doesn't leak into the frontier comparison", () => {
+  const concerns = pipelineConcerns({
+    scoreboard: scoreboard(),
+    routeScorecard: [
+      route({ route: "local-qwen", firstPassRate: 0.5 }),
+      route({ route: "local-dwarfstar", firstPassRate: 0.95 }),
+      route({ route: "anthropic", firstPassRate: 0.65 }),
+    ],
+    loopResolutionRate: 0.8, loopItems: 10,
+  });
+  // If the retired-local row leaked into "frontier", its 0.95 first-pass rate would win
+  // the sort and widen the gap past FRONTIER_GAP, wrongly flagging a re-route concern.
+  assert.equal(concerns.find((c) => /route coding to the frontier/i.test(c.title)), undefined);
+});
+
 test("thin data → no concerns (needs a real sample)", () => {
   const concerns = pipelineConcerns({
     scoreboard: scoreboard({ criteriaProven: 0, criteriaTotal: 1, tasksDone: 1, tasksFailed: 1 }),

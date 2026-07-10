@@ -13,7 +13,14 @@
 
 import { recordFeedbackDedup } from "./feedback";
 import type { Scoreboard } from "./scoreboard";
-import type { RouteScorecardRow } from "@/lib/observability/contracts";
+import { isLocalProvider, type RouteScorecardRow } from "@/lib/observability/contracts";
+
+// Frontier routes, by allowlist rather than "not local" — `isLocalProvider` is a
+// prefix check over `local-${string}`, but that still leaves "other" (unrecognized
+// or pre-Provider-widening rows) unaccounted for. An explicit allowlist keeps "other"
+// out of both buckets instead of a `!== "local-qwen"`-style filter silently
+// miscounting it as frontier.
+const FRONTIER_ROUTES: RouteScorecardRow["route"][] = ["anthropic", "openai-codex"];
 
 export interface AuditConcern {
   kind: "bug" | "enhancement";
@@ -45,9 +52,9 @@ export function pipelineConcerns(input: {
   const { scoreboard: s, routeScorecard } = input;
 
   // 1) Local coding quality lags the frontier → suggest re-routing coding.
-  const local = routeScorecard.find((r) => r.route === "local-qwen" && r.tasks >= MIN_ROUTE_TASKS && r.firstPassRate !== null);
+  const local = routeScorecard.find((r) => isLocalProvider(r.route) && r.tasks >= MIN_ROUTE_TASKS && r.firstPassRate !== null);
   const frontier = routeScorecard
-    .filter((r) => r.route !== "local-qwen" && r.tasks >= MIN_ROUTE_TASKS && r.firstPassRate !== null)
+    .filter((r) => FRONTIER_ROUTES.includes(r.route) && r.tasks >= MIN_ROUTE_TASKS && r.firstPassRate !== null)
     .sort((a, b) => (b.firstPassRate ?? 0) - (a.firstPassRate ?? 0))[0];
   if (local?.firstPassRate != null && frontier?.firstPassRate != null &&
       local.firstPassRate < LOCAL_FLOOR && frontier.firstPassRate - local.firstPassRate >= FRONTIER_GAP) {
