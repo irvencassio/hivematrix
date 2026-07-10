@@ -1,7 +1,8 @@
-import { readFileSync, readdirSync } from "fs";
+import { readFileSync, readdirSync, mkdirSync, unlinkSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { CODING_OPENAI_TOOLS } from "@/lib/config/constants";
+import { writeJsonAtomic } from "@/lib/config/atomic-write";
 
 /**
  * Keys of `RoleModels` (src/lib/models/available.ts) — deliberately NOT
@@ -518,6 +519,62 @@ export function getAllAgentProfiles(): AgentProfile[] {
  * by the console to show a "custom" chip without exposing systemPrompt in the list route. */
 export function customProfileIds(): string[] {
   return Array.from(loadCustomProfiles().keys());
+}
+
+export interface CustomProfileInput {
+  id: string;
+  name?: string;
+  description?: string;
+  systemPrompt: string;
+  tools?: string[];
+  loadClaudeMd?: boolean;
+  icon?: string;
+  modelRole?: string;
+  tier?: string;
+}
+
+/**
+ * Write (create or overwrite) a custom profile override to
+ * <CUSTOM_PROFILES_DIR>/<id>.json. The caller (server.ts PUT
+ * /agents/profiles/:id) is responsible for validating `id` against
+ * ^[a-z][a-z0-9_-]*$ BEFORE calling this — id becomes a filename here, so an
+ * unvalidated id is a path-traversal vector. Re-validates defensively anyway
+ * (never trust a single call site to be the only caller forever).
+ */
+export function writeCustomProfile(input: CustomProfileInput): void {
+  if (!/^[a-z][a-z0-9_-]*$/.test(input.id)) {
+    throw new Error(`Invalid profile id: ${input.id}`);
+  }
+  if (!input.systemPrompt || !input.systemPrompt.trim()) {
+    throw new Error("systemPrompt must not be empty");
+  }
+  const dir = customProfilesDir();
+  mkdirSync(dir, { recursive: true });
+  const data: Record<string, unknown> = {
+    id: input.id,
+    name: input.name ?? input.id,
+    description: input.description ?? "",
+    systemPrompt: input.systemPrompt,
+    tools: Array.isArray(input.tools) ? input.tools : [],
+    loadClaudeMd: input.loadClaudeMd ?? false,
+    icon: input.icon ?? "🤖",
+  };
+  if (isProfileModelRole(input.modelRole)) data.modelRole = input.modelRole;
+  if (isProfileTier(input.tier)) data.tier = input.tier;
+  writeJsonAtomic(join(dir, `${input.id}.json`), data);
+}
+
+/** Delete a custom override, reverting to the built-in (or to "unknown id" if
+ * this was a wholly custom, non-built-in profile). Returns false — not an
+ * error — when there was nothing to delete, so the route can 404 cleanly. */
+export function deleteCustomProfile(id: string): boolean {
+  if (!/^[a-z][a-z0-9_-]*$/.test(id)) {
+    throw new Error(`Invalid profile id: ${id}`);
+  }
+  const path = join(customProfilesDir(), `${id}.json`);
+  if (!existsSync(path)) return false;
+  unlinkSync(path);
+  return true;
 }
 
 /**

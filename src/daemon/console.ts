@@ -7395,6 +7395,9 @@ let _rolesState = {
   detailError: false,
   stats: null,         // GET /agents/profiles/:id/stats response
   viewMode: 'rendered',
+  editing: false,      // true while the prompt textarea is open
+  draft: null,          // in-progress edited text, kept separate from detail.systemPrompt
+  saving: false,
 };
 
 const ROLES_TIER_LABEL = { core: 'Core', coordinator: 'Coordinator', domain: 'Domain' };
@@ -7421,9 +7424,13 @@ function rolesPanelHtml() {
     + '<div class="brain-render-head">'
     + '<div style="min-width:0"><div class="brain-render-title" id="rolesPromptTitle">Select a role</div>'
     + '<span class="path" id="rolesPromptSub"></span></div>'
-    + '<div class="brain-toggle-group">'
+    + '<div style="display:flex;align-items:center;gap:6px">'
+    + '<div class="brain-toggle-group" id="rolesViewToggle">'
     + '<button id="rolesBtnRendered" class="active" onclick="setRolesViewMode(\'rendered\')">Rendered</button>'
     + '<button id="rolesBtnRaw" onclick="setRolesViewMode(\'raw\')">Raw</button>'
+    + '</div>'
+    + '<button class="sm" id="rolesEditBtn" onclick="startRoleEdit()" style="display:none">Edit</button>'
+    + '<button class="sm danger" id="rolesResetBtn" onclick="resetRoleToDefault()" style="display:none" title="Delete the custom override, reverting to the built-in prompt">Reset to default</button>'
     + '</div></div>'
     + '<div class="brain-render-body" id="rolesPromptBody"><div class="brain-empty-state">Click a role on the left to read its system prompt here.</div></div>'
     + '</div>'
@@ -7504,6 +7511,8 @@ function renderRolesRoster() {
 
 async function selectRole(id) {
   _rolesState.role = decodeURIComponent(id);
+  _rolesState.editing = false;
+  _rolesState.draft = null;
   renderRolesRoster();
   await loadRoleDetail(_rolesState.role);
 }
@@ -7619,11 +7628,20 @@ function setRolesViewMode(mode) {
 function renderRolesPromptPane() {
   const titleEl = document.getElementById('rolesPromptTitle');
   const subEl = document.getElementById('rolesPromptSub');
+  const editBtn = document.getElementById('rolesEditBtn');
+  const resetBtn = document.getElementById('rolesResetBtn');
+  const toggle = document.getElementById('rolesViewToggle');
   if (!titleEl || !subEl) return;
-  if (!_rolesState.role) { titleEl.textContent = 'Select a role'; subEl.textContent = ''; renderRolesPromptBody(); return; }
   const d = _rolesState.detail;
-  titleEl.textContent = d ? (d.icon + ' ' + d.name) : _rolesState.role;
-  subEl.textContent = d ? d.promptLines + ' lines' : '';
+  if (!_rolesState.role) { titleEl.textContent = 'Select a role'; subEl.textContent = ''; }
+  else { titleEl.textContent = d ? (d.icon + ' ' + d.name) : _rolesState.role; subEl.textContent = d ? d.promptLines + ' lines' : ''; }
+  // Editing hides the view-mode toggle and Edit/Reset (replaced by Save/Cancel
+  // inside the body) — showing both would let the operator flip Rendered/Raw
+  // mid-edit and lose the distinction between "viewing" and "editing".
+  const showControls = !!d && !_rolesState.editing;
+  if (editBtn) editBtn.style.display = showControls ? '' : 'none';
+  if (resetBtn) resetBtn.style.display = (showControls && d.isCustom) ? '' : 'none';
+  if (toggle) toggle.style.display = showControls ? '' : 'none';
   renderRolesPromptBody();
 }
 
@@ -7634,6 +7652,17 @@ function renderRolesPromptBody() {
   if (_rolesState.detailError) { body.className = 'brain-render-body'; body.innerHTML = '<div class="brain-empty-state">Could not load this role.</div>'; return; }
   const d = _rolesState.detail;
   if (!d) { body.className = 'brain-render-body'; body.innerHTML = '<div class="brain-empty-state">Loading…</div>'; return; }
+  if (_rolesState.editing) {
+    body.className = 'brain-render-body';
+    body.innerHTML = '<textarea id="rolesEditTextarea" style="width:100%;min-height:320px;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:10px" oninput="_rolesState.draft=this.value"></textarea>'
+      + '<div class="row" style="margin-top:10px">'
+      + '<button class="cancel" onclick="cancelRoleEdit()">Cancel</button>'
+      + '<button class="create" id="rolesSaveBtn" onclick="saveRoleEdit()">Save</button>'
+      + '</div>';
+    const ta = document.getElementById('rolesEditTextarea');
+    if (ta) ta.value = _rolesState.draft != null ? _rolesState.draft : d.systemPrompt;
+    return;
+  }
   if (_rolesState.viewMode === 'raw') {
     body.className = 'brain-render-body raw';
     body.textContent = d.systemPrompt;
@@ -7641,6 +7670,61 @@ function renderRolesPromptBody() {
   }
   body.className = 'brain-render-body';
   body.innerHTML = mdToHtml(d.systemPrompt);
+}
+
+function startRoleEdit() {
+  if (!_rolesState.detail) return;
+  _rolesState.editing = true;
+  _rolesState.draft = _rolesState.detail.systemPrompt;
+  renderRolesPromptPane();
+}
+
+function cancelRoleEdit() {
+  _rolesState.editing = false;
+  _rolesState.draft = null;
+  renderRolesPromptPane();
+}
+
+async function saveRoleEdit() {
+  const id = _rolesState.role;
+  const ta = document.getElementById('rolesEditTextarea');
+  const systemPrompt = ta ? ta.value : _rolesState.draft;
+  if (!systemPrompt || !systemPrompt.trim()) { hmToast('Prompt cannot be empty.', 'err'); return; }
+  const btn = document.getElementById('rolesSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const d = _rolesState.detail || {};
+    await api('/agents/profiles/' + encodeURIComponent(id), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemPrompt, name: d.name, description: d.description, tools: d.tools,
+        loadClaudeMd: d.loadClaudeMd, icon: d.icon, modelRole: d.modelRole, tier: d.tier,
+      }),
+    });
+    hmToast('Saved — takes effect on the next task using this role, no restart needed.', 'ok');
+    _rolesState.editing = false;
+    _rolesState.draft = null;
+    await loadAgentProfiles(); // refresh isCustom/promptLines everywhere (New Task picker, roster list)
+    await loadRoleDetail(id);
+  } catch (e) {
+    hmToast('Could not save: ' + (e instanceof Error ? e.message : String(e)), 'err');
+    if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+  }
+}
+
+async function resetRoleToDefault() {
+  const id = _rolesState.role;
+  if (!id) return;
+  const ok = await hmConfirm('Reset ' + id + ' to its default prompt? This deletes the custom override — it cannot be undone.');
+  if (!ok) return;
+  try {
+    await api('/agents/profiles/' + encodeURIComponent(id), { method: 'DELETE' });
+    hmToast('Reset to default.', 'ok');
+    await loadAgentProfiles();
+    await loadRoleDetail(id);
+  } catch (e) {
+    hmToast('Could not reset: ' + (e instanceof Error ? e.message : String(e)), 'err');
+  }
 }
 
 function flashRenderMessages() {

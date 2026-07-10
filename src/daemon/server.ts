@@ -485,6 +485,57 @@ export function createDaemonServer() {
         return;
       }
 
+      // PUT /agents/profiles/:id — create or overwrite a custom profile
+      // override (~/.hivematrix/agents/<id>.json). Roles screen's Save.
+      if (req.method === "PUT" && agentProfileIdMatch && !agentProfileIdMatch[3]) {
+        const id = agentProfileIdMatch[1];
+        if (!isValidProfileId(id)) { json(res, 400, { error: "Invalid profile id" }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt : "";
+        if (!systemPrompt.trim()) { json(res, 400, { error: "systemPrompt is required" }); return; }
+        const tools = Array.isArray(body.tools) ? body.tools.filter((t): t is string => typeof t === "string") : [];
+        const { TOOL_DEFINITIONS } = await import("@/lib/orchestrator/tool-bridge");
+        const validToolNames = new Set(TOOL_DEFINITIONS.map((t) => t.function.name));
+        const unknownTools = tools.filter((t) => !validToolNames.has(t));
+        if (unknownTools.length) {
+          json(res, 400, { error: `Unknown tool name(s): ${unknownTools.join(", ")}. A typo here silently disarms the agent at runtime rather than failing loudly, so it's rejected at save time instead.` });
+          return;
+        }
+        const { writeCustomProfile } = await import("@/lib/config/agent-profiles");
+        try {
+          writeCustomProfile({
+            id,
+            name: typeof body.name === "string" ? body.name : undefined,
+            description: typeof body.description === "string" ? body.description : undefined,
+            systemPrompt,
+            tools,
+            loadClaudeMd: body.loadClaudeMd === true,
+            icon: typeof body.icon === "string" ? body.icon : undefined,
+            modelRole: typeof body.modelRole === "string" ? body.modelRole : undefined,
+            tier: typeof body.tier === "string" ? body.tier : undefined,
+          });
+        } catch (e) {
+          json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+          return;
+        }
+        broadcast("agents:changed", { id });
+        json(res, 200, { ok: true, id });
+        return;
+      }
+
+      // DELETE /agents/profiles/:id — remove a custom override, reverting to
+      // the built-in. 404 if this id has no custom override to delete.
+      if (req.method === "DELETE" && agentProfileIdMatch && !agentProfileIdMatch[3]) {
+        const id = agentProfileIdMatch[1];
+        if (!isValidProfileId(id)) { json(res, 400, { error: "Invalid profile id" }); return; }
+        const { deleteCustomProfile } = await import("@/lib/config/agent-profiles");
+        const deleted = deleteCustomProfile(id);
+        if (!deleted) { json(res, 404, { error: "No custom override for this profile" }); return; }
+        broadcast("agents:changed", { id });
+        json(res, 200, { ok: true, id });
+        return;
+      }
+
       // GET /settings/keys — which API keys (env vars) are SET. Never returns
       // values — only env name, label, purpose, and a boolean. Keys are provided
       // via environment variables, not config.json.

@@ -859,6 +859,42 @@ test("Roles screen: prompt viewer Rendered/Raw toggle mirrors the Brain screen's
   assert.match(body, /mdToHtml\(d\.systemPrompt\)/, "rendered mode goes through the same markdown pipeline as everything else");
 });
 
+test("Roles screen: Edit mode replaces the render pane with a seeded textarea, never shown at the same time as the Rendered/Raw toggle", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const bodyFn = fnBody(js, "renderRolesPromptBody");
+  assert.match(bodyFn, /_rolesState\.editing/);
+  assert.match(bodyFn, /id="rolesEditTextarea"/);
+  assert.match(bodyFn, /ta\.value = _rolesState\.draft != null \? _rolesState\.draft : d\.systemPrompt/, "seeded from the draft if one exists, else the real current prompt");
+  const paneFn = fnBody(js, "renderRolesPromptPane");
+  assert.match(paneFn, /showControls = !!d && !_rolesState\.editing/, "view controls (toggle/Edit/Reset) are mutually exclusive with the edit textarea");
+});
+
+test("Roles screen: Reset to default is only offered for a custom override, and requires confirmation", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const paneFn = fnBody(js, "renderRolesPromptPane");
+  assert.match(paneFn, /showControls && d\.isCustom/, "Reset only shown for a custom (isCustom) profile");
+  const resetFn = fnBody(js, "resetRoleToDefault");
+  assert.match(resetFn, /await hmConfirm\(/, "destructive — must confirm, not fire-and-forget");
+  assert.match(resetFn, /method: 'DELETE'/);
+  assert.match(resetFn, /cannot be undone/i);
+});
+
+test("Roles screen: Save PUTs the edited prompt and refreshes the roster so the New Task role picker's isCustom chip updates without a restart", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const saveFn = fnBody(js, "saveRoleEdit");
+  assert.match(saveFn, /method: 'PUT'/);
+  assert.match(saveFn, /systemPrompt\.trim\(\)/, "rejects an empty/whitespace-only prompt client-side too");
+  assert.match(saveFn, /await loadAgentProfiles\(\)/, "refreshes the shared roster state (New Task picker + roles roster list)");
+  assert.match(saveFn, /await loadRoleDetail\(id\)/, "reloads this role's own detail so the dossier/prompt reflect the save immediately");
+});
+
+test("Roles screen: switching to a different role cancels any in-progress, unsaved edit", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const selectFn = fnBody(js, "selectRole");
+  assert.match(selectFn, /_rolesState\.editing = false/);
+  assert.match(selectFn, /_rolesState\.draft = null/);
+});
+
 test("Brain Review: Claude Code config files (CLAUDE.md/settings.json/.mcp.json) render read-only and settings/mcp JSON gets a novice-friendly summary, not raw JSON", () => {
   const js = extractScript(CONSOLE_HTML);
   const rowsFn = fnBody(js, "renderBrainDocs");

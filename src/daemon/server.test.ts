@@ -2217,6 +2217,79 @@ test("GET /agents/profiles/:id/stats reflects real task history for that role", 
   assert.equal(body.totalRuns, 2, "only qa-agentType tasks are counted, not developer's");
 });
 
+test("PUT /agents/profiles/:id creates a custom override that GET immediately reflects — no daemon restart", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const put = await fetch(`${base}/agents/profiles/founder`, {
+    method: "PUT", headers,
+    body: JSON.stringify({ systemPrompt: "A custom founder prompt.", tools: ["bash", "read_file"] }),
+  });
+  assert.equal(put.status, 200);
+
+  const get = await fetch(`${base}/agents/profiles/founder`, { headers });
+  const body = await get.json() as Record<string, unknown>;
+  assert.equal(body.systemPrompt, "A custom founder prompt.");
+  assert.equal(body.isCustom, true);
+
+  const list = await fetch(`${base}/agents/profiles`, { headers });
+  const listBody = await list.json() as { profiles: Array<{ id: string; isCustom: boolean }> };
+  assert.equal(listBody.profiles.find((p) => p.id === "founder")?.isCustom, true);
+});
+
+test("PUT /agents/profiles/:id rejects an unknown tool name — a typo must fail loudly at save, not silently disarm the agent", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/agents/profiles/founder`, {
+    method: "PUT", headers,
+    body: JSON.stringify({ systemPrompt: "x", tools: ["bash", "read_fiel"] }), // typo
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json() as Record<string, unknown>;
+  assert.match(body.error as string, /read_fiel/);
+});
+
+test("PUT /agents/profiles/:id rejects an empty systemPrompt and a malformed id", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const emptyPrompt = await fetch(`${base}/agents/profiles/founder`, {
+    method: "PUT", headers, body: JSON.stringify({ systemPrompt: "   " }),
+  });
+  assert.equal(emptyPrompt.status, 400);
+
+  const badId = await fetch(`${base}/agents/profiles/${encodeURIComponent("../escape")}`, {
+    method: "PUT", headers, body: JSON.stringify({ systemPrompt: "x" }),
+  });
+  assert.equal(badId.status, 400);
+});
+
+test("DELETE /agents/profiles/:id removes a custom override and reverts GET to the real built-in", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  await fetch(`${base}/agents/profiles/qa`, { method: "PUT", headers, body: JSON.stringify({ systemPrompt: "Custom QA." }) });
+  let get = await fetch(`${base}/agents/profiles/qa`, { headers });
+  assert.equal((await get.json() as Record<string, unknown>).systemPrompt, "Custom QA.");
+
+  const del = await fetch(`${base}/agents/profiles/qa`, { method: "DELETE", headers });
+  assert.equal(del.status, 200);
+
+  get = await fetch(`${base}/agents/profiles/qa`, { headers });
+  const body = await get.json() as Record<string, unknown>;
+  assert.notEqual(body.systemPrompt, "Custom QA.");
+  assert.equal(body.isCustom, false);
+});
+
+test("DELETE /agents/profiles/:id returns 404 when there is no custom override to remove", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/agents/profiles/developer`, { method: "DELETE", headers });
+  assert.equal(res.status, 404);
+});
+
 test("POST /tasks persists an explicit agentType (the New Task role picker's contract)", async (t) => {
   withTempHome(t);
   const { _resetDbForTests } = await import("@/lib/db");

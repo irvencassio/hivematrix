@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import {
   getAgentProfile, getAllAgentProfiles, getCoreAgentProfiles, resolveLegacyAgentType,
   profileTier, AGENT_PROFILE_IDS, LEGACY_PROFILE_ALIASES,
+  writeCustomProfile, deleteCustomProfile, customProfileIds,
 } from "./agent-profiles";
 
 async function withTempHome<T>(files: Record<string, unknown> | null, run: () => T | Promise<T>): Promise<T> {
@@ -184,5 +185,68 @@ test("coo's prompt describes its real fire-and-forget limitation honestly, and d
     // role was cut). The real roster comes from generic-agent.ts/subprocess.ts
     // injecting it live (see generic-agent.test.ts / subprocess.test.ts).
     assert.doesNotMatch(prompt, /developer, researcher, marketing, founder/);
+  });
+});
+
+// ─── Phase 2 (2026-07-09): custom profile write/delete ─────────────────────
+
+test("writeCustomProfile creates ~/.hivematrix/agents/<id>.json and getAgentProfile picks it up immediately, no restart", async () => {
+  await withTempHome(null, () => {
+    writeCustomProfile({ id: "founder", systemPrompt: "Edited founder prompt.", tools: ["bash", "read_file"] });
+    const p = getAgentProfile("founder");
+    assert.equal(p.systemPrompt, "Edited founder prompt.");
+    assert.deepEqual(p.tools, ["bash", "read_file"]);
+    assert.ok(customProfileIds().includes("founder"));
+  });
+});
+
+test("writeCustomProfile rejects an empty systemPrompt", async () => {
+  await withTempHome(null, () => {
+    assert.throws(() => writeCustomProfile({ id: "founder", systemPrompt: "   " }), /systemPrompt/);
+  });
+});
+
+test("writeCustomProfile rejects a malformed id even when called directly (defense in depth behind the route's own validation)", async () => {
+  await withTempHome(null, () => {
+    assert.throws(() => writeCustomProfile({ id: "../../etc/passwd", systemPrompt: "x" }), /Invalid profile id/);
+    assert.throws(() => writeCustomProfile({ id: "UPPERCASE", systemPrompt: "x" }), /Invalid profile id/);
+  });
+});
+
+test("writeCustomProfile validates and persists modelRole/tier when given valid values, drops invalid ones", async () => {
+  await withTempHome(null, () => {
+    writeCustomProfile({ id: "researcher", systemPrompt: "x", modelRole: "thinking", tier: "domain" });
+    const p = getAgentProfile("researcher");
+    assert.equal(p.modelRole, "thinking");
+    assert.equal(p.tier, "domain");
+
+    writeCustomProfile({ id: "marketing", systemPrompt: "x", modelRole: "not-a-role", tier: "not-a-tier" });
+    const p2 = getAgentProfile("marketing");
+    assert.equal(p2.modelRole, undefined);
+    assert.equal(profileTier(p2), "core", "invalid tier is dropped, defaults to core");
+  });
+});
+
+test("deleteCustomProfile removes the override and getAgentProfile reverts to the built-in", async () => {
+  await withTempHome(null, () => {
+    writeCustomProfile({ id: "qa", systemPrompt: "Custom QA prompt." });
+    assert.equal(getAgentProfile("qa").systemPrompt, "Custom QA prompt.");
+
+    const deleted = deleteCustomProfile("qa");
+    assert.equal(deleted, true);
+    assert.notEqual(getAgentProfile("qa").systemPrompt, "Custom QA prompt.");
+    assert.match(getAgentProfile("qa").systemPrompt, /senior QA engineer/i, "reverted to the real built-in qa prompt");
+  });
+});
+
+test("deleteCustomProfile returns false (not an error) when there is nothing to delete", async () => {
+  await withTempHome(null, () => {
+    assert.equal(deleteCustomProfile("developer"), false, "developer has no custom override in this fixture");
+  });
+});
+
+test("deleteCustomProfile rejects a malformed id", async () => {
+  await withTempHome(null, () => {
+    assert.throws(() => deleteCustomProfile("../escape"), /Invalid profile id/);
   });
 });
