@@ -4,8 +4,38 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { getUsageAvailabilityForTask, resolveAutoAgentType, resolveModelForAgentRole, shouldClearStaleUsageDelay } from "./scheduler";
+import { getUsageAvailabilityForTask, resolveAutoAgentType, resolveModelForAgentRole, shouldClearStaleUsageDelay, pickNextEligibleTask } from "./scheduler";
 import type { UsageData } from "@/lib/usage/fetcher";
+
+async function withTempDb<T>(run: () => T | Promise<T>): Promise<T> {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-scheduler-db-test-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "test.db");
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  try {
+    return await run();
+  } finally {
+    _resetDbForTests();
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    if (originalHome) process.env.HOME = originalHome;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function mkTask(overrides: Record<string, unknown> = {}) {
+  const { Task, generateId } = await import("@/lib/db");
+  return Task.create({
+    _id: generateId(),
+    title: "t", description: "d", project: "p", projectPath: "/tmp/p",
+    status: "backlog", executor: "agent",
+    ...overrides,
+  });
+}
+
+const BASE_QUERY = { status: "backlog", executor: "agent" };
 
 async function withTempHome<T>(config: Record<string, unknown>, run: () => T | Promise<T>): Promise<T> {
   const originalHome = process.env.HOME;
@@ -234,5 +264,61 @@ test("modelRole: profiles with no modelRole and no coarse-map entry stay undefin
 test("modelRole: an empty role-model slot falls through cleanly (no crash, no false positive)", async () => {
   await withTempHome({}, () => {
     assert.equal(resolveModelForAgentRole(null, "founder"), undefined);
+  });
+});
+
+test("pickNextEligibleTask: with no dependsOn anywhere, behavior is unchanged — oldest position wins", async () => {
+  await withTempDb(async () => {
+    const a = await mkTask({ position: 2, title: "second" });
+    const b = await mkTask({ position: 1, title: "first" });
+    const picked = await pickNextEligibleTask(BASE_QUERY);
+    assert.equal(picked?._id.toString(), b._id.toString());
+    void a;
+  });
+});
+
+test("pickNextEligibleTask: B depends on A ⇒ B is never picked while A is still active", async () => {
+  await withTempDb(async () => {
+    const a = await mkTask({ position: 1, title: "A", status: "in_progress" });
+    await mkTask({ position: 2, title: "B", dependsOn: [a._id.toString()] });
+    // A itself isn't a backlog task right now (it's in_progress), so the only
+    // backlog candidate is B — and its dependency isn't terminal yet.
+    const picked = await pickNextEligibleTask(BASE_QUERY);
+    assert.equal(picked, null, "B must not run before A terminates");
+  });
+});
+
+test("pickNextEligibleTask: B becomes eligible once A reaches a terminal status (review)", async () => {
+  await withTempDb(async () => {
+    const a = await mkTask({ position: 1, title: "A", status: "review" });
+    const b = await mkTask({ position: 2, title: "B", dependsOn: [a._id.toString()] });
+    const picked = await pickNextEligibleTask(BASE_QUERY);
+    assert.equal(picked?._id.toString(), b._id.toString());
+  });
+});
+
+test("pickNextEligibleTask: a blocked task never starves an eligible one behind it in position order", async () => {
+  await withTempDb(async () => {
+    const a = await mkTask({ position: 1, title: "A", status: "in_progress" });
+    await mkTask({ position: 2, title: "B (blocked)", dependsOn: [a._id.toString()] });
+    const c = await mkTask({ position: 3, title: "C (free)" });
+    const picked = await pickNextEligibleTask(BASE_QUERY);
+    assert.equal(picked?._id.toString(), c._id.toString(), "C has no deps and should be picked even though it's behind blocked B");
+  });
+});
+
+test("pickNextEligibleTask: multiple dependsOn must ALL be terminal, not just one", async () => {
+  await withTempDb(async () => {
+    const a = await mkTask({ position: 1, title: "A", status: "review" });
+    const b = await mkTask({ position: 2, title: "B", status: "in_progress" });
+    await mkTask({ position: 3, title: "C", dependsOn: [a._id.toString(), b._id.toString()] });
+    assert.equal(await pickNextEligibleTask(BASE_QUERY), null, "C waits on B too, even though A is done");
+  });
+});
+
+test("pickNextEligibleTask: a dependsOn id that no longer resolves to any task keeps the task blocked (fail closed, not silently dropped)", async () => {
+  await withTempDb(async () => {
+    await mkTask({ position: 1, title: "orphaned dep", dependsOn: ["does-not-exist"] });
+    assert.equal(await pickNextEligibleTask(BASE_QUERY), null);
   });
 });

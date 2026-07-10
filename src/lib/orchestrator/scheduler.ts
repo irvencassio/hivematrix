@@ -259,6 +259,42 @@ async function clearStaleUsageDelays(
   return cleared;
 }
 
+// A dependency is "met" once its task has left the active backlog/in_progress
+// path — it doesn't have to be archived (that's a manual declutter action).
+const DEPENDENCY_TERMINAL_STATUSES = new Set(["review", "done", "archived", "failed", "cancelled"]);
+// How many oldest-first candidates to scan per tick for one with all
+// dependsOn met. Bounded and cheap (local SQLite) — not a full table scan.
+const DEPENDENCY_SCAN_BATCH = 200;
+
+/**
+ * Pick the oldest-position task matching `query` whose dependsOn (if any)
+ * are all met. dependsOn is a JSON column, not queryable via the generic
+ * $-operator WHERE builder, so this scans a bounded batch already sorted
+ * and filtered by `query` and returns the first eligible one in JS —
+ * skipping (not claiming) any candidate still waiting on a dependency, so a
+ * blocked task never starves an eligible one behind it in position order.
+ */
+export async function pickNextEligibleTask(query: Record<string, unknown>) {
+  const candidates = await Task.find(query).sort({ position: 1 }).limit(DEPENDENCY_SCAN_BATCH);
+  const withDeps = candidates.filter((c) => Array.isArray(c.dependsOn) && c.dependsOn.length > 0);
+  if (withDeps.length === 0) return candidates[0] ?? null;
+
+  const depIds = new Set<string>();
+  for (const c of withDeps) for (const d of c.dependsOn) depIds.add(d);
+  const depTasks = await Task.find({ _id: { $in: Array.from(depIds) } });
+  const depStatus = new Map(depTasks.map((t) => [t._id.toString(), t.status]));
+
+  for (const c of candidates) {
+    const deps = Array.isArray(c.dependsOn) ? c.dependsOn : [];
+    const allMet = deps.every((id) => {
+      const status = depStatus.get(id);
+      return status !== undefined && DEPENDENCY_TERMINAL_STATUSES.has(status);
+    });
+    if (allMet) return c;
+  }
+  return null;
+}
+
 async function tick() {
   try {
     // Fire due scheduled_tasks first so their tasks can be claimed this tick
@@ -356,9 +392,9 @@ async function tick() {
 
     while (currentSlots.available > 0 && agentManager.isSpawnGateReady()) {
       const assignedAt = new Date().toISOString();
-      const task = await Task.findOne(query).sort({ position: 1 });
+      const task = await pickNextEligibleTask(query);
 
-      if (!task) break; // No more eligible tasks
+      if (!task) break; // No more eligible tasks (or every candidate is waiting on a dependency)
 
       // An explicit agentType on the task (set by the operator or the prompt
       // wizard) always wins and is used as-is — resolveAutoAgentType is only
