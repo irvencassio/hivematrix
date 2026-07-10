@@ -9,12 +9,11 @@ import { missionTick } from "./mission-engine";
 import { syncMissionProgressDoc } from "./mission-progress-doc";
 import { scheduledRunnerTick } from "./scheduled-runner";
 import { isCodexModel } from "@/lib/models/catalog";
-import { dispatchInventorBeeTask } from "@/lib/inventorbee/task-dispatch";
 import type { TaskDelayReason } from "@/lib/types";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { getRoleModels } from "@/lib/models/available";
 import { isFeatureEnabled } from "@/lib/config/features";
-import { getAgentProfile } from "@/lib/config/agent-profiles";
+import { getAgentProfile, resolveLegacyAgentType } from "@/lib/config/agent-profiles";
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let consecutiveErrors = 0;
@@ -363,10 +362,13 @@ async function tick() {
 
       // An explicit agentType on the task (set by the operator or the prompt
       // wizard) always wins and is used as-is — resolveAutoAgentType is only
-      // consulted for "auto". The resolved agent role also determines which
-      // role-model default applies when the task itself was intentionally
-      // created backend-agnostic.
-      let agentType = ((task as Record<string, unknown>).agentType as string) ?? "auto";
+      // consulted for "auto". resolveLegacyAgentType normalizes a
+      // removed-profile id (e.g. a legacy/imported "inventor" task) to its
+      // replacement — "auto" is not an alias key, so it passes through
+      // untouched. The resolved agent role also determines which role-model
+      // default applies when the task itself was intentionally created
+      // backend-agnostic.
+      let agentType = resolveLegacyAgentType(((task as Record<string, unknown>).agentType as string) ?? "auto");
       let autoRoleProvenance: { agentType: string; source: "classifier" | "default" } | null = null;
       if (agentType === "auto") {
         autoRoleProvenance = await resolveAutoAgentType(task.description);
@@ -467,26 +469,22 @@ async function tick() {
       });
 
       try {
-        if (agentType === "inventor") {
-          await dispatchInventorBeeTask(task);
-        } else {
-          await agentManager.spawnAgent(
-            task._id.toString(),
-            task.description,
-            task.projectPath,
-            task.maxBudgetUsd,
-            task.project,
-            task.workflow,
-            task.resumeSessionId ?? undefined,
-            effectiveModel,
-            task.profile ?? undefined,
-            (task as Record<string, unknown>).workflowStepIndex as number | undefined,
-            (task as Record<string, unknown>).worktreeName as string | null | undefined,
-            agentType,
-            (task as Record<string, unknown>).thinkingMode as string | undefined,
-            (task as Record<string, unknown>).fastMode === true,
-          );
-        }
+        await agentManager.spawnAgent(
+          task._id.toString(),
+          task.description,
+          task.projectPath,
+          task.maxBudgetUsd,
+          task.project,
+          task.workflow,
+          task.resumeSessionId ?? undefined,
+          effectiveModel,
+          task.profile ?? undefined,
+          (task as Record<string, unknown>).workflowStepIndex as number | undefined,
+          (task as Record<string, unknown>).worktreeName as string | null | undefined,
+          agentType,
+          (task as Record<string, unknown>).thinkingMode as string | undefined,
+          (task as Record<string, unknown>).fastMode === true,
+        );
       } catch (spawnErr) {
         const msg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
         const isAuth = msg.includes("Auth failed");

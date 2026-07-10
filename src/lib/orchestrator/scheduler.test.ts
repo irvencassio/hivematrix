@@ -211,7 +211,10 @@ test("modelRole: thinking-tier profiles now resolve via thinkModel (previously u
   await withTempHome({ thinkModel: "claude-opus-4-8" }, () => {
     assert.equal(resolveModelForAgentRole(null, "founder"), "claude-opus-4-8");
     assert.equal(resolveModelForAgentRole(null, "coo"), "claude-opus-4-8");
-    assert.equal(resolveModelForAgentRole(undefined, "analyst"), "claude-opus-4-8");
+    // "analyst" was cut (Phase 4) and aliases to "researcher" via getAgentProfile
+    // — researcher's modelRole is deliberately unset, so this now resolves like
+    // researcher, not like the old standalone analyst profile did.
+    assert.equal(resolveModelForAgentRole(undefined, "analyst"), undefined);
   });
 });
 

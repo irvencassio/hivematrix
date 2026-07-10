@@ -1584,6 +1584,16 @@ test("renderRolePills: distinct roles among childTasks each get their own pill, 
   assert.deepEqual(order, ["🧭 COO", "🎨 Designer", "🔍 QA"], "primary role first, then each distinct child role once, auto children ignored");
 });
 
+test("loadAgentProfiles groups the New Task role select by tier (Auto/core flat, Coordinator + Domain as separate optgroups, explicit-pick only)", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "loadAgentProfiles");
+  assert.match(body, /filter\(p => \(p\.tier \|\| "core"\) === "core"\)/, "core roles are the flat, Auto-eligible list");
+  assert.match(body, /filter\(p => p\.tier === "coordinator"\)/);
+  assert.match(body, /filter\(p => p\.tier === "domain"\)/);
+  assert.match(body, /optgroup label="Coordinator \(explicit only\)"/);
+  assert.match(body, /optgroup label="Domain \(explicit only\)"/);
+});
+
 test("provenance pills are wired into the task detail view, right after the status line", () => {
   const js = extractScript(CONSOLE_HTML);
   const body = fnBody(js, "selectTask");

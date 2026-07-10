@@ -19,6 +19,26 @@ function isProfileModelRole(v: unknown): v is ProfileModelRole {
   return typeof v === "string" && PROFILE_MODEL_ROLES.has(v);
 }
 
+/**
+ * core = offered to classifyTask/keyword-classifier and the "Auto" routing
+ * path — every core role added costs classification accuracy for every
+ * other core role, so keep this roster small and admit a new one only when
+ * it differs from every existing role on tool asymmetry, deliverable, or
+ * model (see the spec's admission test).
+ * coordinator = coo, gated out of auto-routing until it can read back its
+ * delegated subtasks' results (Spec 3) — a coordinator that can't observe
+ * outcomes can't coordinate.
+ * domain = a subject-area specialist (e.g. trader) that is NEVER offered to
+ * the classifier — selectable only by an explicit pick, at zero routing
+ * cost. This is the sanctioned way to add new subject areas.
+ */
+export type ProfileTier = "core" | "coordinator" | "domain";
+
+const PROFILE_TIERS = new Set<string>(["core", "coordinator", "domain"]);
+function isProfileTier(v: unknown): v is ProfileTier {
+  return typeof v === "string" && PROFILE_TIERS.has(v);
+}
+
 export interface AgentProfile {
   id: string;
   name: string;
@@ -31,7 +51,31 @@ export interface AgentProfile {
    * via getRoleModels()[modelRole]; falls back to resolveModelForAgentRole's
    * coarse map, then the daemon default, when unset or the slot is empty. */
   modelRole?: ProfileModelRole;
+  /** Undefined defaults to "core" — always read via profileTier(p), never
+   * p.tier directly, so that default lives in exactly one place. */
+  tier?: ProfileTier;
 }
+
+/** The single place "undefined tier defaults to core" is decided. */
+export function profileTier(p: Pick<AgentProfile, "tier">): ProfileTier {
+  return p.tier ?? "core";
+}
+
+/**
+ * ids removed from the roster because they were identical to a survivor on
+ * every axis (tool asymmetry, deliverable, model) — see the spec's
+ * admission-test table. A task or custom-profile override that still names
+ * one of these (imported/legacy data) resolves to its replacement instead
+ * of silently falling through to the generic "unknown id → developer"
+ * fallback, which would have been a worse, unexplained substitution.
+ */
+export const LEGACY_PROFILE_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+  cto: "developer",
+  ceo: "founder",
+  cfo: "founder",
+  analyst: "researcher",
+  inventor: "founder",
+});
 
 // A function, not a module-level const — homedir() must be re-read per call
 // so tests can inject a temp HOME (matches the config/features.ts pattern).
@@ -131,46 +175,6 @@ Rules:
     loadClaudeMd: false,
     icon: "🚀",
     modelRole: "thinking",
-  },
-  {
-    id: "ceo",
-    name: "CEO / Visionary",
-    description: "Vision, strategic direction, prioritization, leadership decisions, big-picture thinking, idea brainstorming",
-    systemPrompt: `You are a CEO and visionary leader. Set strategic direction, prioritize initiatives, make high-level decisions, and think about the big picture.
-
-You can delegate work by creating tasks for specialist agents using the create_task tool.
-
-Rules:
-- Think in terms of leverage — what creates the most value with the least effort
-- Prioritize ruthlessly: say no to good ideas to focus on great ones
-- Balance short-term execution with long-term vision
-- Consider people, process, and technology in decisions
-- Make decisions with imperfect information — don't stall for certainty
-- Communicate decisions clearly with rationale`,
-    tools: ["bash", "read_file", "search", "create_task"],
-    loadClaudeMd: false,
-    icon: "👔",
-    modelRole: "thinking",
-  },
-  {
-    id: "cto",
-    name: "CTO / Technical Architect",
-    description: "Technical architecture, security review, infrastructure decisions, system design, tech evaluation, code quality",
-    systemPrompt: `You are a CTO and technical architect. Make infrastructure decisions, evaluate technical approaches, review system design, and ensure security and code quality.
-
-You can delegate capability-invention work by creating tasks for specialist agents using the create_task tool. When the real problem is "we need a new skill, MCP, lane, or shared capability contract," create an inventor task instead of forcing implementation through an ill-fitting developer task.
-
-Rules:
-- Evaluate trade-offs explicitly (cost, complexity, performance, maintainability)
-- Default to simple, proven technologies over cutting-edge unless there's a compelling reason
-- Consider security implications of every architectural decision
-- Think about scale trajectory — design for 10x, not 100x
-- Document decisions as ADRs (Architecture Decision Records) when impactful
-- Review code with a focus on correctness, security, and maintainability`,
-    tools: ["bash", "read_file", "write_file", "edit_file", "search", "list_files", "create_task"],
-    loadClaudeMd: true,
-    icon: "🏗️",
-    modelRole: "coding",
   },
   {
     id: "qa",
@@ -294,48 +298,14 @@ Rules:
     modelRole: "coding",
   },
   {
-    id: "inventor",
-    name: "Inventor / Capability Architect",
-    description: "Capability-gap analysis, new skill, MCP, lane, or provider-boundary design; scaffold and proposal planning",
-    systemPrompt: `You are Inventor, Hive's capability architect. Your job is to decide whether a missing capability should become a skill, an MCP, a lane/provider, or a shared Hive capability contract.
-
-Rules:
-- Default to proposal-first. Do not assume live mutation is acceptable.
-- Prefer skills for procedural workflows and repeatable operator guidance.
-- Prefer MCPs for reusable tool surfaces or external system integrations.
-- Prefer lanes/providers for durable runtimes, transports, or worker boundaries.
-- Prefer shared capability contracts when multiple lanes or providers should share one interface.
-- Treat voice, auth, browser, desktop, and central-routing changes as high-risk and approval-heavy.
-- Produce repo impacts, evaluation ideas, and upgrade paths rather than vague brainstorming.`,
-    tools: ["bash", "read_file", "search", "list_files"],
-    loadClaudeMd: true,
-    icon: "🐝",
-    modelRole: "thinking",
-  },
-  {
-    id: "cfo",
-    name: "CFO / Financial Analyst",
-    description: "Financial analysis, ROI calculations, budget planning, cost optimization, forecasting, reporting",
-    systemPrompt: `You are a CFO and financial analyst. Analyze costs, calculate ROI, plan budgets, optimize spending, and create financial reports.
-
-Rules:
-- Always show your math — make calculations transparent and auditable
-- Use conservative estimates for projections, optimistic for risk assessment
-- Present financial data in tables with clear units and time periods
-- Compare against benchmarks and industry standards when available
-- Flag assumptions explicitly so they can be challenged
-- Recommend specific actions, not just observations`,
-    tools: ["bash", "read_file"],
-    loadClaudeMd: false,
-    icon: "💰",
-  },
-  {
     id: "coo",
     name: "COO / Operations Manager",
     description: "Task delegation, process optimization, workflow coordination, operational efficiency, project management",
     systemPrompt: `You are a COO and operations manager. Break complex tasks into subtasks, delegate to specialist agents, coordinate workflows, and optimize processes.
 
-You can delegate work by creating tasks for specialist agents using the create_task tool. Available agent types: developer, researcher, marketing, founder, ceo, cto, qa, designer, inventor, cfo, analyst, trader, general.
+You can delegate work by creating tasks for specialist agents using the create_task tool. Your available agent types are generated at prompt-assembly time from the current core roster (see generic-agent.ts buildSystemPrompt) — do not hardcode a roster list here, it will rot the moment a role is added, cut, or renamed.
+
+You cannot yet see the results of tasks you delegate — create_task is fire-and-forget. Say so plainly in your final message rather than implying you reviewed outcomes you never saw.
 
 Rules:
 - Decompose complex goals into clear, actionable subtasks
@@ -348,24 +318,7 @@ Rules:
     loadClaudeMd: false,
     icon: "📋",
     modelRole: "thinking",
-  },
-  {
-    id: "analyst",
-    name: "Data Analyst",
-    description: "Data processing, metrics analysis, insights generation, dashboards, SQL, statistical analysis",
-    systemPrompt: `You are a data analyst. Process data, calculate metrics, find insights, and present findings clearly.
-
-Rules:
-- Start with the question being asked, then show how data answers it
-- Use tables, summaries, and visualizations to present data clearly
-- Distinguish correlation from causation
-- Note sample sizes, confidence intervals, and data quality issues
-- Provide both the number and the narrative — data without context is noise
-- Recommend follow-up questions that the data suggests`,
-    tools: ["bash", "read_file", "search"],
-    loadClaudeMd: false,
-    icon: "📊",
-    modelRole: "thinking",
+    tier: "coordinator",
   },
   {
     id: "trader",
@@ -423,6 +376,7 @@ Rules:
     tools: ["bash", "read_file", "search"],
     loadClaudeMd: false,
     icon: "📈",
+    tier: "domain",
   },
 ];
 
@@ -451,6 +405,7 @@ function loadCustomProfiles(): Map<string, AgentProfile> {
             loadClaudeMd: data.loadClaudeMd ?? false,
             icon: data.icon ?? "🤖",
             ...(isProfileModelRole(data.modelRole) ? { modelRole: data.modelRole } : {}),
+            ...(isProfileTier(data.tier) ? { tier: data.tier } : {}),
           });
         }
       } catch {
@@ -471,6 +426,16 @@ export function getAgentProfile(id: string): AgentProfile {
   // Then built-ins
   if (profileMap.has(id)) return profileMap.get(id)!;
 
+  // A removed id (legacy/imported task, or a custom-profile JSON that still
+  // names one) resolves to its documented replacement, not the generic
+  // "unknown → developer" fallback — that would have silently substituted a
+  // different role's tools/model with no explanation. Only falls through to
+  // the alias's OWN lookup, which still ends at "developer" if that alias
+  // target is itself somehow missing (defensive; should not happen for a
+  // built-in alias target).
+  const aliasTarget = LEGACY_PROFILE_ALIASES[id];
+  if (aliasTarget) return getAgentProfile(aliasTarget);
+
   // Fallback to developer
   return profileMap.get("developer")!;
 }
@@ -490,5 +455,26 @@ export function customProfileIds(): string[] {
   return Array.from(loadCustomProfiles().keys());
 }
 
+/**
+ * Profiles the classifier (and the "Auto" routing path generally) is allowed
+ * to choose. Both classifyTask (intent-classifier.ts) and
+ * classifyByKeywords (keyword-classifier.ts) must build their choice set
+ * from this, never from getAllAgentProfiles() directly — a coordinator or
+ * domain profile reachable via "Auto" would defeat the entire point of the
+ * tier split (§5 of the activation spec).
+ */
+export function getCoreAgentProfiles(): AgentProfile[] {
+  return getAllAgentProfiles().filter((p) => profileTier(p) === "core");
+}
+
+/** Normalize a raw stored agentType through LEGACY_PROFILE_ALIASES — for
+ * code that branches on the raw id string BEFORE calling getAgentProfile
+ * (e.g. the scheduler's dispatch special-cases), so a legacy/imported value
+ * naming a removed id takes its replacement's real code path instead of
+ * whatever dead branch the old literal id used to trigger. */
+export function resolveLegacyAgentType(id: string): string {
+  return LEGACY_PROFILE_ALIASES[id] ?? id;
+}
+
 export const AGENT_PROFILE_IDS = BUILT_IN_PROFILES.map((p) => p.id);
-export const VALID_AGENT_TYPES = new Set(["auto", ...AGENT_PROFILE_IDS]);
+export const VALID_AGENT_TYPES = new Set(["auto", ...AGENT_PROFILE_IDS, ...Object.keys(LEGACY_PROFILE_ALIASES)]);

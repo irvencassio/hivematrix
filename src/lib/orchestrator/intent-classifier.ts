@@ -9,19 +9,25 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { classifyByKeywords } from "./keyword-classifier";
-import { getAllAgentProfiles } from "@/lib/config/agent-profiles";
+import { getCoreAgentProfiles } from "@/lib/config/agent-profiles";
 
 const CLASSIFIER_TIMEOUT_MS = 8000; // CLI startup is slower than raw API
 
+// getCoreAgentProfiles() is deliberately re-read on every call (never
+// cached to a module-level const) — a custom-profile edit or the roster
+// itself changing must take effect on the next classification, not require
+// a daemon restart. It also restricts the classifier's choice set to
+// tier==="core" — coo (coordinator) and any domain profile (e.g. trader)
+// must never be auto-selected; only an explicit pick reaches them.
 function buildAgentDescriptions(): string {
-  return getAllAgentProfiles()
+  return getCoreAgentProfiles()
     .map((p) => `- ${p.id}: ${p.description}`)
     .join("\n");
 }
 
-const VALID_TYPES = new Set(
-  getAllAgentProfiles().map((p) => p.id)
-);
+function validAgentTypes(): Set<string> {
+  return new Set(getCoreAgentProfiles().map((p) => p.id));
+}
 
 /**
  * Resolve the claude binary path — mirrors subprocess.ts logic.
@@ -121,6 +127,6 @@ function classifyWithCLI(description: string): string | null {
 
 function extractAgentType(content: string): string | null {
   const match = content.match(/"agent"\s*:\s*"(\w+)"/);
-  if (match && VALID_TYPES.has(match[1])) return match[1];
+  if (match && validAgentTypes().has(match[1])) return match[1];
   return null;
 }

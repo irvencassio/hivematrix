@@ -425,7 +425,7 @@ export function createDaemonServer() {
       // Settings → Agents). Deliberately omits systemPrompt (large; a per-id
       // detail route is the place for that) so this stays a light list call.
       if (req.method === "GET" && urlPath === "/agents/profiles") {
-        const { getAllAgentProfiles, customProfileIds } = await import("@/lib/config/agent-profiles");
+        const { getAllAgentProfiles, customProfileIds, profileTier } = await import("@/lib/config/agent-profiles");
         const customIds = new Set(customProfileIds());
         const profiles = getAllAgentProfiles().map((p) => ({
           id: p.id,
@@ -435,6 +435,7 @@ export function createDaemonServer() {
           tools: p.tools,
           loadClaudeMd: p.loadClaudeMd,
           modelRole: p.modelRole ?? null,
+          tier: profileTier(p),
           isCustom: customIds.has(p.id),
           promptLines: p.systemPrompt.trim().split("\n").length,
         }));

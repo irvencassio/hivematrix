@@ -2134,10 +2134,22 @@ test("GET /agents/profiles lists the roster without leaking systemPrompt", async
     assert.equal(typeof p.name, "string");
     assert.equal(typeof p.promptLines, "number");
     assert.equal(typeof p.isCustom, "boolean");
+    assert.ok(["core", "coordinator", "domain"].includes(p.tier as string), `${p.id} has an unexpected tier: ${p.tier}`);
   }
   const developer = body.profiles.find((p) => p.id === "developer");
   assert.equal(developer?.modelRole, "coding");
   assert.equal(developer?.isCustom, false);
+  assert.equal(developer?.tier, "core");
+
+  // Phase 4 (roster reduction): the wire shape the New Task role picker's
+  // Domain/Coordinator optgroups depend on.
+  assert.equal(body.profiles.length, 9, "14 → 9 after cutting ceo/cto/cfo/analyst/inventor");
+  assert.equal(body.profiles.filter((p) => p.tier === "core").length, 7);
+  assert.equal(body.profiles.filter((p) => p.tier === "coordinator").length, 1);
+  assert.equal(body.profiles.filter((p) => p.tier === "domain").length, 1);
+  assert.equal(body.profiles.find((p) => p.id === "coo")?.tier, "coordinator");
+  assert.equal(body.profiles.find((p) => p.id === "trader")?.tier, "domain");
+  assert.equal(body.profiles.find((p) => p.id === "cto"), undefined, "cut ids must not appear in the live roster");
 });
 
 test("POST /tasks persists an explicit agentType (the New Task role picker's contract)", async (t) => {

@@ -5459,8 +5459,12 @@ let models = null;            // { backends, available, defaultModel, version }
 const modelById = {};         // UiModel.id → {modelId, fast}
 
 // --- Agent roles (roster) ---
-let agentProfiles = [];       // [{id, name, description, icon, tools, loadClaudeMd, modelRole, isCustom, promptLines}]
+let agentProfiles = [];       // [{id, name, description, icon, tools, loadClaudeMd, modelRole, tier, isCustom, promptLines}]
 const agentProfileById = {};  // id → profile, for the role pill lookup
+
+function agentRoleOption(p) {
+  return '<option value="'+esc(p.id)+'">'+esc(p.icon || "")+' '+esc(p.name)+'</option>';
+}
 
 async function loadAgentProfiles() {
   const data = await api("/agents/profiles");
@@ -5471,8 +5475,18 @@ async function loadAgentProfiles() {
   const sel = document.getElementById("t_role");
   if (sel) {
     const current = sel.value || "auto";
+    // "Auto" only ever routes to a tier:"core" role (see resolveAutoAgentType /
+    // getCoreAgentProfiles) — coordinator (coo) and domain (e.g. trader)
+    // profiles are listed in their own groups, explicit-pick only, so the
+    // grouping here isn't just cosmetic: it's the operator-facing half of
+    // the same tier boundary the classifier enforces server-side.
+    const core = agentProfiles.filter(p => (p.tier || "core") === "core");
+    const coordinator = agentProfiles.filter(p => p.tier === "coordinator");
+    const domain = agentProfiles.filter(p => p.tier === "domain");
     sel.innerHTML = '<option value="auto">Auto</option>'
-      + agentProfiles.map(p => '<option value="'+esc(p.id)+'">'+esc(p.icon || "")+' '+esc(p.name)+'</option>').join("");
+      + core.map(agentRoleOption).join("")
+      + (coordinator.length ? '<optgroup label="Coordinator (explicit only)">' + coordinator.map(agentRoleOption).join("") + '</optgroup>' : "")
+      + (domain.length ? '<optgroup label="Domain (explicit only)">' + domain.map(agentRoleOption).join("") + '</optgroup>' : "");
     sel.value = agentProfileById[current] ? current : "auto";
   }
   return agentProfiles;
