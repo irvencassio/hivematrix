@@ -16,7 +16,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { loadHiveConfig } from "@/lib/central/config";
-import { getMachineFingerprint } from "./machine";
+import { getMachineFingerprints } from "./machine";
 
 /** Embedded issuer public key (SPKI PEM). Empty until the Stripe-issuance key ships. */
 export const LICENSE_ISSUER_PUBLIC_KEY_PEM = "";
@@ -74,11 +74,18 @@ export function canonicalize(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** Pure verifier: signature → machine binding → expiry/grace. */
+/**
+ * Pure verifier: signature → machine binding → expiry/grace.
+ *
+ * `opts.machineId` accepts a single fingerprint or a set of acceptable ones (the
+ * current fingerprint scheme plus retired ones); a machine-bound license passes
+ * if it matches ANY of them, so a fingerprint-scheme migration never invalidates
+ * a same-machine license.
+ */
 export function verifyLicense(
   signed: SignedLicense | null,
   publicKeyPem: string,
-  opts: { machineId: string; now: Date },
+  opts: { machineId: string | string[]; now: Date },
 ): LicenseStatus {
   if (!signed) return { state: "missing", permitted: true, reason: "no license installed" };
   if (!publicKeyPem.trim()) return { state: "unlicensed", permitted: true, reason: "no issuer public key configured" };
@@ -92,7 +99,8 @@ export function verifyLicense(
   if (!sigOk) return { state: "invalid", permitted: false, reason: "signature verification failed" };
 
   const p = signed.payload;
-  if (p.machineId && p.machineId !== opts.machineId) {
+  const acceptableIds = Array.isArray(opts.machineId) ? opts.machineId : [opts.machineId];
+  if (p.machineId && !acceptableIds.includes(p.machineId)) {
     return { state: "machine_mismatch", permitted: false, reason: "license bound to a different machine", edition: p.edition };
   }
 
@@ -150,7 +158,7 @@ export function loadLicense(): SignedLicense | null {
 
 /** The daemon's view: load the local license and verify it against this machine + now. */
 export function getLicenseStatus(now: Date = new Date()): LicenseStatus {
-  return verifyLicense(loadLicense(), resolveIssuerPublicKey(), { machineId: getMachineFingerprint(), now });
+  return verifyLicense(loadLicense(), resolveIssuerPublicKey(), { machineId: getMachineFingerprints(), now });
 }
 
 /** Install a license file (e.g. POSTed from setup or a Stripe webhook), then re-evaluate. */

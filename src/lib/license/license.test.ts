@@ -75,6 +75,22 @@ test("a license bound to another machine is rejected", () => {
   assert.equal(status.permitted, false);
 });
 
+test("a license bound to a retired fingerprint scheme still verifies on the same machine", () => {
+  // Migration case (hostname→UUID): the current scheme yields CURRENT, but a
+  // license issued under the old scheme carries LEGACY. Passing the acceptable
+  // set (as getLicenseStatus does) must NOT lock the box out of its own license.
+  const CURRENT = "uuid-scheme-fingerprint";
+  const LEGACY = "hostname-scheme-fingerprint";
+  const legacyBound = verifyLicense(sign(basePayload({ machineId: LEGACY })), PUB_PEM, { machineId: [CURRENT, LEGACY], now: NOW });
+  assert.equal(legacyBound.state, "valid");
+  assert.equal(legacyBound.permitted, true);
+
+  // A fingerprint in neither scheme is still a genuine different-machine reject.
+  const foreign = verifyLicense(sign(basePayload({ machineId: "some-other-box" })), PUB_PEM, { machineId: [CURRENT, LEGACY], now: NOW });
+  assert.equal(foreign.state, "machine_mismatch");
+  assert.equal(foreign.permitted, false);
+});
+
 test("a tampered payload fails signature verification", () => {
   const signed = sign(basePayload());
   const tampered = { ...signed, payload: { ...basePayload(), edition: "enterprise" } as never };
