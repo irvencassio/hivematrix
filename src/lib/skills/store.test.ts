@@ -13,7 +13,7 @@ writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory:
 const origHome = process.env.HOME;
 process.env.HOME = HOME;
 
-const { upsertSkill, listSkills, listSkillsFor, readSkill, skillsDir, markSkillUsed, setSkillTrusted, deleteSkill } = await import("./store");
+const { upsertSkill, listSkills, listSkillsFor, skillsForRole, readSkill, skillsDir, markSkillUsed, setSkillTrusted, deleteSkill } = await import("./store");
 
 test.after(() => {
   process.env.HOME = origHome;
@@ -139,4 +139,19 @@ test("listSkills drops single-provider skills when that provider is disabled in 
   } finally {
     writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: BRAIN } }));
   }
+});
+
+test("skillsForRole: every pre-existing skill (no roles frontmatter) resolves to every role", async () => {
+  const forQa = await skillsForRole("qa");
+  const forFounder = await skillsForRole("founder");
+  assert.ok(forQa.some((s) => s.name === "Cut Release"), "an untagged skill is visible to qa");
+  assert.ok(forFounder.some((s) => s.name === "Cut Release"), "the same untagged skill is visible to founder");
+});
+
+test("skillsForRole: a hand-tagged roles:['qa'] skill appears only under qa", async () => {
+  await upsertSkill({ name: "QA Regression Checklist", description: "run before ship", body: "1. run suite\n2. smoke test", source: "manual", roles: ["qa"] });
+  const forQa = await skillsForRole("qa");
+  const forFounder = await skillsForRole("founder");
+  assert.ok(forQa.some((s) => s.name === "QA Regression Checklist"));
+  assert.ok(!forFounder.some((s) => s.name === "QA Regression Checklist"));
 });

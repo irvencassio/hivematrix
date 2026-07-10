@@ -4,7 +4,7 @@ import { detectSkillIntent, buildSkillVoiceReply } from "./skill-intent";
 import type { SkillIndexEntry } from "@/lib/skills/contracts";
 
 function e(p: Partial<SkillIndexEntry>): SkillIndexEntry {
-  return { name: "n", description: "", tags: [], useCount: 0, compat: ["all"], hasInput: false, trusted: true, kind: "instruction", ...p };
+  return { name: "n", description: "", tags: [], useCount: 0, compat: ["all"], hasInput: false, trusted: true, kind: "instruction", roles: [], ...p };
 }
 
 test("detectSkillIntent: list phrasings", () => {

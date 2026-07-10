@@ -2217,6 +2217,39 @@ test("GET /agents/profiles/:id/stats reflects real task history for that role", 
   assert.equal(body.totalRuns, 2, "only qa-agentType tasks are counted, not developer's");
 });
 
+test("GET /agents/profiles/:id/skills is honest when no skills exist yet", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/agents/profiles/qa/skills`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { skills: unknown[] };
+  assert.deepEqual(body.skills, []);
+});
+
+test("GET /agents/profiles/:id/skills: an untagged skill is visible to every role, a roles:['qa'] skill only to qa", async (t) => {
+  withTempHome(t);
+  const { mkdirSync: mkdir, writeFileSync: write } = await import("node:fs");
+  const brainRoot = join(process.env.HOME!, "brain");
+  mkdir(join(brainRoot, "skills"), { recursive: true });
+  mkdir(join(process.env.HOME!, ".hivematrix"), { recursive: true });
+  write(join(process.env.HOME!, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: brainRoot } }));
+  write(join(brainRoot, "skills", "universal-recipe.md"), "---\nname: universal-recipe\ndescription: applies everywhere\n---\n\nDo the thing.\n");
+  write(join(brainRoot, "skills", "qa-regression.md"), "---\nname: qa-regression\ndescription: run before ship\nroles: qa\n---\n\nRun the suite.\n");
+
+  const { base, headers } = await startServer(t);
+
+  const qaRes = await fetch(`${base}/agents/profiles/qa/skills`, { headers });
+  const qaBody = await qaRes.json() as { skills: Array<{ name: string }> };
+  assert.ok(qaBody.skills.some((s) => s.name === "universal-recipe"));
+  assert.ok(qaBody.skills.some((s) => s.name === "qa-regression"));
+
+  const founderRes = await fetch(`${base}/agents/profiles/founder/skills`, { headers });
+  const founderBody = await founderRes.json() as { skills: Array<{ name: string }> };
+  assert.ok(founderBody.skills.some((s) => s.name === "universal-recipe"), "untagged skill visible to founder too");
+  assert.ok(!founderBody.skills.some((s) => s.name === "qa-regression"), "qa-only skill hidden from founder");
+});
+
 test("PUT /agents/profiles/:id creates a custom override that GET immediately reflects — no daemon restart", async (t) => {
   withTempHome(t);
   const { base, headers } = await startServer(t);

@@ -6,7 +6,7 @@ import type { SkillIndexEntry } from "./contracts";
 function e(p: Partial<SkillIndexEntry>): SkillIndexEntry {
   return {
     name: "n", description: "", tags: [], useCount: 0, compat: ["all"],
-    hasInput: false, trusted: true, kind: "instruction", ...p,
+    hasInput: false, trusted: true, kind: "instruction", roles: [], ...p,
   };
 }
 

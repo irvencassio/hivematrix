@@ -20,7 +20,7 @@ function scriptSkill(over: Partial<Skill> = {}): Skill {
   return {
     name: "demo", description: "", tags: [], body: 'echo "hello $SKILL_INPUT"',
     source: "operator", createdAt: "", updatedAt: "", revisions: 1, useCount: 0, lastUsedAt: "",
-    compat: ["all"], trusted: true, kind: "script", interpreter: "bash", ...over,
+    compat: ["all"], trusted: true, kind: "script", interpreter: "bash", roles: [], ...over,
   };
 }
 

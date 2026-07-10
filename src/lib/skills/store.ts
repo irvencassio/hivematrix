@@ -10,7 +10,7 @@ import { join } from "path";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { getEnabledProviders } from "@/lib/config/frontier-providers";
 import {
-  renderSkillFile, parseSkillFile, skillFilename, skillSlug, skillHasInput, extractSkillParams, skillRunsOn, skillEnabledByProviders,
+  renderSkillFile, parseSkillFile, skillFilename, skillSlug, skillHasInput, extractSkillParams, skillRunsOn, skillEnabledByProviders, skillAppliesToRole,
   type Skill, type SkillIndexEntry, type SkillHarness, type SkillKind, type SkillInterpreter, type SkillScope, type ScanVerdict,
 } from "./contracts";
 
@@ -56,7 +56,7 @@ export async function listSkills(): Promise<SkillIndexEntry[]> {
       useCount: skill.useCount, compat: skill.compat, hasInput: skillHasInput(skill.body),
       params: extractSkillParams(skill.body),
       trusted: skill.trusted, kind: skill.kind, scope: skill.scope, signed: !!skill.signature,
-      scan: skill.scanVerdict,
+      scan: skill.scanVerdict, roles: skill.roles,
     });
   }
   // Most-used first (proven skills surface), then alphabetical.
@@ -67,6 +67,12 @@ export async function listSkills(): Promise<SkillIndexEntry[]> {
 export async function listSkillsFor(harness: SkillHarness): Promise<SkillIndexEntry[]> {
   const all = await listSkills();
   return all.filter((e) => skillRunsOn(e.compat, harness));
+}
+
+/** List all skills attributed to the given agent role (empty roles = every role), most-used first. */
+export async function skillsForRole(agentType: string): Promise<SkillIndexEntry[]> {
+  const all = await listSkills();
+  return all.filter((e) => skillAppliesToRole(e.roles, agentType));
 }
 
 /** Full skills (not just the index) — bounded, timed. For fan-out + prune, which
@@ -105,6 +111,8 @@ export interface UpsertSkillInput {
   signedBy?: string;
   signature?: string;
   scanVerdict?: ScanVerdict;
+  /** Agent profile ids to attribute this skill to (empty/omitted = every role). */
+  roles?: string[];
   now?: string;
 }
 
@@ -142,6 +150,7 @@ export async function upsertSkill(input: UpsertSkillInput): Promise<UpsertSkillR
       signedBy: input.signedBy ?? existing.signedBy,
       signature: input.signature ?? existing.signature,
       scanVerdict: input.scanVerdict ?? existing.scanVerdict,
+      roles: input.roles ?? existing.roles,
     };
     result = { created: false, refined: bodyChanged, path };
   } else {
@@ -164,6 +173,7 @@ export async function upsertSkill(input: UpsertSkillInput): Promise<UpsertSkillR
       signedBy: input.signedBy,
       signature: input.signature,
       scanVerdict: input.scanVerdict,
+      roles: input.roles ?? [],
     };
     result = { created: true, refined: false, path };
   }

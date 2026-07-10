@@ -845,10 +845,19 @@ test("Roles screen: the Insight panel is honest about a never-run role — never
   assert.match(body, /successRate == null \? 'not enough data'/, "successRate:null renders as an honest label, not 0%");
 });
 
-test("Roles screen: the Learned panel tells the truth — no skill-authoring loop exists yet (Phase 2/4 territory)", () => {
+test("Roles screen: the Learned panel shows real attributed skills, with an honest empty state when there are none", () => {
   const js = extractScript(CONSOLE_HTML);
   const body = fnBody(js, "renderRoleDossier");
-  assert.match(body, /No skills learned yet/);
+  assert.match(body, /_rolesState\.skills/, "reads real skills from state, not a hardcoded placeholder");
+  assert.match(body, /No skills learned yet/, "empty state still shown honestly when sk.length === 0");
+  assert.match(body, /sk\.map\(s => /, "non-empty skills render each attributed skill");
+});
+
+test("Roles screen: loadRoleDetail fetches /agents/profiles/:id/skills alongside profile+stats", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "loadRoleDetail");
+  assert.match(body, /\/agents\/profiles\/'\s*\+\s*encodeURIComponent\(id\)\s*\+\s*'\/skills'/);
+  assert.match(body, /_rolesState\.skills = /);
 });
 
 test("Roles screen: prompt viewer Rendered/Raw toggle mirrors the Brain screen's pattern exactly", () => {

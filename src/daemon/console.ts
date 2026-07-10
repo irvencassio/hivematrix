@@ -7394,6 +7394,7 @@ let _rolesState = {
   detail: null,        // GET /agents/profiles/:id response (has systemPrompt)
   detailError: false,
   stats: null,         // GET /agents/profiles/:id/stats response
+  skills: null,        // GET /agents/profiles/:id/skills response (skills array)
   viewMode: 'rendered',
   editing: false,      // true while the prompt textarea is open
   draft: null,          // in-progress edited text, kept separate from detail.systemPrompt
@@ -7521,13 +7522,15 @@ async function loadRoleDetail(id) {
   _rolesState.detail = null;
   _rolesState.detailError = false;
   _rolesState.stats = null;
+  _rolesState.skills = null;
   renderRoleDossier();
   renderRolesPromptPane();
-  let detail, stats;
+  let detail, stats, skillsRes;
   try {
-    [detail, stats] = await Promise.all([
+    [detail, stats, skillsRes] = await Promise.all([
       api('/agents/profiles/' + encodeURIComponent(id)),
       api('/agents/profiles/' + encodeURIComponent(id) + '/stats'),
+      api('/agents/profiles/' + encodeURIComponent(id) + '/skills'),
     ]);
   } catch (e) {
     if (_rolesState.role !== id) return; // stale — operator moved on
@@ -7539,6 +7542,7 @@ async function loadRoleDetail(id) {
   if (_rolesState.role !== id) return; // stale response
   _rolesState.detail = detail || null;
   _rolesState.stats = stats || null;
+  _rolesState.skills = (skillsRes && skillsRes.skills) || [];
   if (!detail) _rolesState.detailError = true;
   renderRoleDossier();
   renderRolesPromptPane();
@@ -7610,9 +7614,18 @@ function renderRoleDossier() {
     + '<div class="roles-block-head">Insight</div>'
     + '<div class="roles-block-body">' + insightBody + '</div></div>';
 
+  const sk = _rolesState.skills;
+  let learnedBody;
+  if (sk === null) {
+    learnedBody = '<div class="muted">Loading…</div>';
+  } else if (sk.length === 0) {
+    learnedBody = '<div class="muted">No skills learned yet. Roles begin authoring skills once retrospection is wired.</div>';
+  } else {
+    learnedBody = sk.map(s => '<div class="kv"><span class="k">' + esc(s.name) + (s.trusted ? '' : ' <span class="badge">untrusted</span>') + '</span><span>' + (s.useCount > 0 ? 'used ' + s.useCount + '×' : 'unused') + '</span></div>').join('');
+  }
   const learned = '<div class="roles-block">'
     + '<div class="roles-block-head">Learned</div>'
-    + '<div class="roles-block-body"><div class="muted">No skills learned yet. Roles begin authoring skills once retrospection is wired.</div></div></div>';
+    + '<div class="roles-block-body">' + learnedBody + '</div></div>';
 
   body.innerHTML = identity + configuration + insight + learned;
 }

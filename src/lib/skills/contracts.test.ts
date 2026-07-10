@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { skillSlug, skillFilename, renderSkillFile, parseSkillFile, formatSkillIndex, skillRunsOn, skillHasInput, applySkillInput, skillEnabledByProviders, type Skill } from "./contracts";
+import { skillSlug, skillFilename, renderSkillFile, parseSkillFile, formatSkillIndex, skillRunsOn, skillHasInput, applySkillInput, skillEnabledByProviders, skillAppliesToRole, type Skill } from "./contracts";
 
 function skill(over: Partial<Skill> = {}): Skill {
   return {
@@ -18,6 +18,7 @@ function skill(over: Partial<Skill> = {}): Skill {
     trusted: over.trusted ?? true,
     kind: over.kind ?? "instruction",
     interpreter: over.interpreter ?? "bash",
+    roles: over.roles ?? [],
   };
 }
 
@@ -56,6 +57,24 @@ test("skillEnabledByProviders: qwen/all/[] always eligible regardless of enablem
   assert.equal(skillEnabledByProviders(["qwen"], []), true);
 });
 
+test("roles is absent from rendered frontmatter when empty, and parses back to [] — proving backward compat", () => {
+  const s = skill(); // no roles set
+  const rendered = renderSkillFile(s);
+  assert.doesNotMatch(rendered, /^roles:/m);
+  const parsed = parseSkillFile(rendered)!;
+  assert.deepEqual(parsed.roles, []);
+  assert.equal(skillAppliesToRole(parsed.roles, "qa"), true);
+  assert.equal(skillAppliesToRole(parsed.roles, "founder"), true);
+});
+
+test("a hand-tagged roles round-trips and gates skillAppliesToRole to just that role", () => {
+  const s = skill({ roles: ["qa"] });
+  const parsed = parseSkillFile(renderSkillFile(s))!;
+  assert.deepEqual(parsed.roles, ["qa"]);
+  assert.equal(skillAppliesToRole(parsed.roles, "qa"), true);
+  assert.equal(skillAppliesToRole(parsed.roles, "founder"), false);
+});
+
 test("skillEnabledByProviders: a two-provider skill survives while either is enabled", () => {
   assert.equal(skillEnabledByProviders(["claude", "codex"], ["claude"]), true);
   assert.equal(skillEnabledByProviders(["claude", "codex"], ["codex"]), true);
@@ -80,7 +99,7 @@ test("skillHasInput + applySkillInput handle the {{input}} slot", () => {
 });
 
 test("formatSkillIndex shows use counts for proven skills", () => {
-  const idx = formatSkillIndex([{ name: "a", description: "do a", tags: [], useCount: 3, compat: ["all"], hasInput: false, trusted: true, kind: "instruction" }, { name: "b", description: "do b", tags: [], useCount: 0, compat: ["all"], hasInput: false, trusted: true, kind: "instruction" }]);
+  const idx = formatSkillIndex([{ name: "a", description: "do a", tags: [], useCount: 3, compat: ["all"], hasInput: false, trusted: true, kind: "instruction", roles: [] }, { name: "b", description: "do b", tags: [], useCount: 0, compat: ["all"], hasInput: false, trusted: true, kind: "instruction", roles: [] }]);
   assert.match(idx, /- a \(used 3×\): do a/);
   assert.match(idx, /- b: do b/);
 });
@@ -92,7 +111,7 @@ test("parseSkillFile rejects malformed content", () => {
 
 test("formatSkillIndex lists name: description, empty when no skills", () => {
   assert.equal(formatSkillIndex([]), "");
-  const idx = formatSkillIndex([{ name: "a", description: "do a", tags: [], useCount: 0, compat: ["all"], hasInput: false, trusted: true, kind: "instruction" }, { name: "b", description: "do b", tags: [], useCount: 0, compat: ["all"], hasInput: false, trusted: true, kind: "instruction" }]);
+  const idx = formatSkillIndex([{ name: "a", description: "do a", tags: [], useCount: 0, compat: ["all"], hasInput: false, trusted: true, kind: "instruction", roles: [] }, { name: "b", description: "do b", tags: [], useCount: 0, compat: ["all"], hasInput: false, trusted: true, kind: "instruction", roles: [] }]);
   assert.match(idx, /Skill Library/);
   assert.match(idx, /- a: do a/);
   assert.match(idx, /- b: do b/);

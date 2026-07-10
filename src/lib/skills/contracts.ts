@@ -73,6 +73,12 @@ export interface Skill {
   signature?: string;
   /** Last scan-on-install verdict (pass/warn/block). */
   scanVerdict?: ScanVerdict;
+  /**
+   * Agent profile ids this skill is attributed to (e.g. ["qa"]). Empty = every
+   * role sees it — this is metadata for the Roles screen's Learned panel, not a
+   * usage gate; it never restricts what an agent may run.
+   */
+  roles: string[];
 }
 
 /** One line per skill for an index/listing (cheap — frontmatter only). */
@@ -92,11 +98,18 @@ export interface SkillIndexEntry {
   scope?: SkillScope;
   signed?: boolean;
   scan?: ScanVerdict;
+  /** Agent profile ids this skill is attributed to (empty = every role). */
+  roles: string[];
 }
 
 /** A skill is harness-agnostic if compat is empty or contains "all". */
 export function skillRunsOn(compat: SkillHarness[], harness: SkillHarness): boolean {
   return compat.length === 0 || compat.includes("all") || compat.includes(harness);
+}
+
+/** A skill is attributed to an agent role if roles is empty (all roles) or contains it. */
+export function skillAppliesToRole(roles: string[], agentType: string): boolean {
+  return roles.length === 0 || roles.includes(agentType);
 }
 
 /**
@@ -146,6 +159,11 @@ function parseCompat(raw: string | undefined): SkillHarness[] {
   return valid.length ? valid : ["all"];
 }
 
+function parseRoles(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
 export function skillSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "skill";
 }
@@ -179,6 +197,7 @@ export function renderSkillFile(skill: Skill): string {
     ...(skill.signedBy ? [`signedBy: ${skill.signedBy}`] : []),
     ...(skill.signature ? [`signature: ${skill.signature}`] : []),
     ...(skill.scanVerdict ? [`scanVerdict: ${skill.scanVerdict}`] : []),
+    ...(skill.roles.length ? [`roles: ${fmList(skill.roles)}`] : []),
     "---",
   ].join("\n");
   return `${fm}\n\n${skill.body.trim()}\n`;
@@ -216,6 +235,7 @@ export function parseSkillFile(content: string): Skill | null {
     signedBy: fm.signedBy || undefined,
     signature: fm.signature || undefined,
     scanVerdict: coerceVerdict(fm.scanVerdict),
+    roles: parseRoles(fm.roles),
   };
 }
 

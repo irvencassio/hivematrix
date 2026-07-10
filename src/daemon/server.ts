@@ -485,6 +485,17 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /agents/profiles/:id/skills — skills attributed to this role
+      // (roles frontmatter empty ⇒ visible to every role). Roles screen's
+      // Learned panel.
+      if (req.method === "GET" && agentProfileIdMatch && agentProfileIdMatch[3] === "skills") {
+        const id = agentProfileIdMatch[1];
+        if (!isValidProfileId(id)) { json(res, 400, { error: "Invalid profile id" }); return; }
+        const { skillsForRole } = await import("@/lib/skills/store");
+        json(res, 200, { skills: await skillsForRole(id) });
+        return;
+      }
+
       // PUT /agents/profiles/:id — create or overwrite a custom profile
       // override (~/.hivematrix/agents/<id>.json). Roles screen's Save.
       if (req.method === "PUT" && agentProfileIdMatch && !agentProfileIdMatch[3]) {

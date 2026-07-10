@@ -4,7 +4,7 @@ import { skillTurnOverride } from "./skill-turn";
 import type { Skill, SkillIndexEntry } from "@/lib/skills/contracts";
 
 function index(p: Partial<SkillIndexEntry>): SkillIndexEntry {
-  return { name: "deploy-release", description: "ship a release", tags: [], useCount: 0, compat: ["all"], hasInput: false, trusted: true, kind: "instruction", ...p };
+  return { name: "deploy-release", description: "ship a release", tags: [], useCount: 0, compat: ["all"], hasInput: false, trusted: true, kind: "instruction", roles: [], ...p };
 }
 
 function skill(p: Partial<Skill>): Skill {
@@ -25,6 +25,7 @@ function skill(p: Partial<Skill>): Skill {
     compat: ["all"],
     scope: "personal",
     scanVerdict: "pass",
+    roles: [],
     ...p,
   };
 }

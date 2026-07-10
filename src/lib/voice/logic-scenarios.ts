@@ -61,6 +61,7 @@ const skillIndex: SkillIndexEntry = {
   hasInput: false,
   trusted: true,
   kind: "instruction",
+  roles: [],
 };
 
 const skillBody: Skill = {
@@ -80,6 +81,7 @@ const skillBody: Skill = {
   compat: ["all"],
   scope: "personal",
   scanVerdict: "pass",
+  roles: [],
 };
 
 const scenarios: Scenario[] = [
