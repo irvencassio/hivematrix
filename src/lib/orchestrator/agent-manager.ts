@@ -59,6 +59,34 @@ export function shouldRaiseSilenceWatchdog(task: WatchdogTaskInfo): boolean {
   return task.source === "dashboard";
 }
 
+/** A parent may resume from waiting_children at most once — the anti-runaway
+ * guard for COO delegation. Without it a coordinator could re-delegate and
+ * re-wait forever. */
+export const MAX_DELEGATION_CONTINUATIONS = 1;
+
+/**
+ * A subtask (parentTaskId set) is consumed by its coordinator, not a human —
+ * it should settle straight to a real terminal status instead of sitting in
+ * "review" waiting for someone to click Archive, so the waiting_children
+ * reaper (which only recognizes archived/failed/cancelled as settled) can
+ * converge. A subtask that itself needs input still surfaces normally —
+ * there is no parent-resolves-child mechanism.
+ */
+export function shouldAutoArchiveSubtask(hasParent: boolean, reviewState: string | null): boolean {
+  return hasParent && reviewState !== "needs_input";
+}
+
+/**
+ * A coordinator task that just spawned real children — and hasn't already
+ * used its one allowed continuation — should park in waiting_children
+ * instead of review. Depth cap 2 means a subtask (isSubtask=true) can never
+ * itself have children, so isSubtask and childrenCount>0 never co-occur in
+ * practice; the check is defensive.
+ */
+export function shouldEnterWaitingChildren(opts: { isSubtask: boolean; priorContinuations: number; childrenCount: number }): boolean {
+  return !opts.isSubtask && opts.priorContinuations < MAX_DELEGATION_CONTINUATIONS && opts.childrenCount > 0;
+}
+
 class AgentManager {
   private agents = new Map<number, AgentProcess>();
   private broadcaster: EventBroadcaster = () => {};
@@ -758,7 +786,7 @@ class AgentManager {
           transientRetries: 0, // reset on success
         };
         let nextStatus = agentReportedFailure ? "failed" : "review";
-        let reviewState = agentReportedFailure
+        let reviewState: string | null = agentReportedFailure
           ? null
           : summary.startsWith("❓ Awaiting your reply:")
             ? "needs_input"
@@ -778,6 +806,38 @@ class AgentManager {
             reviewState = null;
           }
         }
+
+        // Subtasks (parentTaskId set) are consumed by their coordinator, not a
+        // human — skip the review holding pattern so the waiting_children
+        // reaper (which only recognizes archived/failed/cancelled as settled)
+        // can converge without a human clicking Archive. A subtask that itself
+        // needs input still surfaces normally — there is no parent-resolves-
+        // child mechanism.
+        if (shouldAutoArchiveSubtask(!!task?.parentTaskId, reviewState)) {
+          nextStatus = "archived";
+          reviewState = null;
+        }
+
+        // Coordinator delegation: this run spawned subtasks (create_task) and
+        // hasn't already used its one allowed continuation — park it in
+        // waiting_children instead of review. The scheduler's reaper resumes
+        // it (at most once) once every child is settled. Depth cap 2 means a
+        // task that itself has a parentTaskId can never reach this branch (it
+        // can't create subtasks), so this never conflicts with the
+        // auto-archive above.
+        if (!agentReportedFailure) {
+          const priorContinuations = typeof (task?.output as Record<string, unknown> | undefined)?.continuations === "number"
+            ? ((task!.output as Record<string, unknown>).continuations as number)
+            : 0;
+          const childrenCount = await Task.countDocuments({ parentTaskId: taskId });
+          if (shouldEnterWaitingChildren({ isSubtask: !!task?.parentTaskId, priorContinuations, childrenCount })) {
+            nextStatus = "review";
+            reviewState = "waiting_children";
+            output.delegated = true;
+            output.childrenWaitingSince = completedAt;
+          }
+        }
+
         // Self-improvement Hook A: if this task addressed a feedback item, advance
         // that item as the task completes (success → triaged; done → done). The
         // resolver is forward-only and never re-opens. Non-critical.

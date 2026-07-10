@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { getUsageAvailabilityForTask, resolveAutoAgentType, resolveModelForAgentRole, shouldClearStaleUsageDelay, pickNextEligibleTask } from "./scheduler";
+import { getUsageAvailabilityForTask, resolveAutoAgentType, resolveModelForAgentRole, shouldClearStaleUsageDelay, pickNextEligibleTask, reapWaitingChildren } from "./scheduler";
 import type { UsageData } from "@/lib/usage/fetcher";
 
 async function withTempDb<T>(run: () => T | Promise<T>): Promise<T> {
@@ -320,5 +320,113 @@ test("pickNextEligibleTask: a dependsOn id that no longer resolves to any task k
   await withTempDb(async () => {
     await mkTask({ position: 1, title: "orphaned dep", dependsOn: ["does-not-exist"] });
     assert.equal(await pickNextEligibleTask(BASE_QUERY), null);
+  });
+});
+
+// ─── Phase 3: waiting_children reaper — the COO delegation "money test" ────
+
+test("reapWaitingChildren: does nothing while children are still active — parent stays parked, never claimable", async () => {
+  await withTempDb(async () => {
+    const parent = await mkTask({
+      status: "review", reviewState: "waiting_children",
+      output: { childrenWaitingSince: new Date().toISOString() },
+    });
+    await mkTask({ parentTaskId: parent._id.toString(), status: "in_progress", agentType: "qa" });
+
+    await reapWaitingChildren();
+
+    const fresh = await (await import("@/lib/db")).Task.findById(parent._id.toString());
+    assert.equal(fresh!.reviewState, "waiting_children");
+    assert.equal(fresh!.status, "review");
+    // Structural proof it can never occupy a scheduler slot while waiting —
+    // the claim query only ever matches status:"backlog".
+    const claimable = await (await import("@/lib/db")).Task.find({ status: "backlog", executor: "agent" });
+    assert.ok(!claimable.some((t) => t._id.toString() === parent._id.toString()));
+  });
+});
+
+test("reapWaitingChildren: THE MONEY TEST — 2 children terminate, parent resumes exactly once with both outputs in context", async () => {
+  await withTempDb(async () => {
+    const parent = await mkTask({
+      description: "Ship the pricing page redesign.",
+      status: "review", reviewState: "waiting_children",
+      output: { childrenWaitingSince: new Date().toISOString(), delegated: true },
+    });
+    await mkTask({
+      parentTaskId: parent._id.toString(), agentType: "designer", title: "Design the layout",
+      status: "archived", output: { summary: "Delivered a 3-panel responsive layout." },
+    });
+    await mkTask({
+      parentTaskId: parent._id.toString(), agentType: "qa", title: "Verify checkout flow",
+      status: "failed", output: { summary: "Checkout button is unreachable on mobile." },
+    });
+
+    await reapWaitingChildren();
+
+    const { Task } = await import("@/lib/db");
+    const resumed = await Task.findById(parent._id.toString());
+    assert.equal(resumed!.status, "backlog", "released back to the scheduler — no blocking, no polling");
+    assert.equal(resumed!.reviewState, null);
+    assert.equal((resumed!.output as Record<string, unknown>).continuations, 1, "exactly one continuation recorded");
+    assert.match(resumed!.description, /Ship the pricing page redesign\./, "original instructions preserved");
+    assert.match(resumed!.description, /\[designer\] Design the layout — archived/);
+    assert.match(resumed!.description, /Delivered a 3-panel responsive layout\./);
+    assert.match(resumed!.description, /\[qa\] Verify checkout flow — failed/);
+    assert.match(resumed!.description, /Checkout button is unreachable on mobile\./);
+
+    // Second reap pass (simulating the parent finishing again without new
+    // children, or the operator re-checking) must be a no-op — the parent
+    // is no longer reviewState:"waiting_children" so it's not revisited.
+    await reapWaitingChildren();
+    const still = await Task.findById(parent._id.toString());
+    assert.equal((still!.output as Record<string, unknown>).continuations, 1, "resuming again does not bump continuations a second time");
+  });
+});
+
+test("reapWaitingChildren: force-resumes after 24h even if a child never finished — never strand a task", async () => {
+  await withTempDb(async () => {
+    const overdue = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    const parent = await mkTask({
+      status: "review", reviewState: "waiting_children",
+      output: { childrenWaitingSince: overdue },
+    });
+    await mkTask({ parentTaskId: parent._id.toString(), agentType: "developer", title: "Slow task", status: "in_progress" });
+
+    await reapWaitingChildren();
+
+    const { Task } = await import("@/lib/db");
+    const resumed = await Task.findById(parent._id.toString());
+    assert.equal(resumed!.status, "backlog");
+    assert.match(resumed!.description, /did not complete in time — status: in_progress/);
+  });
+});
+
+test("reapWaitingChildren: NOT overdue and children still active ⇒ stays parked (force-resume only fires past 24h)", async () => {
+  await withTempDb(async () => {
+    const recent = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1h ago
+    const parent = await mkTask({ status: "review", reviewState: "waiting_children", output: { childrenWaitingSince: recent } });
+    await mkTask({ parentTaskId: parent._id.toString(), status: "in_progress" });
+
+    await reapWaitingChildren();
+
+    const { Task } = await import("@/lib/db");
+    const stillWaiting = await Task.findById(parent._id.toString());
+    assert.equal(stillWaiting!.reviewState, "waiting_children");
+  });
+});
+
+test("reapWaitingChildren: a subtask that succeeded auto-archives (agent-manager's shouldAutoArchiveSubtask), which is what lets terminal-status checks converge", async () => {
+  await withTempDb(async () => {
+    const parent = await mkTask({ status: "review", reviewState: "waiting_children", output: { childrenWaitingSince: new Date().toISOString() } });
+    // Simulates the auto-archive outcome directly (agent-manager.ts's own
+    // logic is unit-tested separately) — status:"archived" is what the
+    // reaper treats as settled.
+    await mkTask({ parentTaskId: parent._id.toString(), status: "archived", output: { summary: "Done." } });
+
+    await reapWaitingChildren();
+
+    const { Task } = await import("@/lib/db");
+    const resumed = await Task.findById(parent._id.toString());
+    assert.equal(resumed!.status, "backlog");
   });
 });

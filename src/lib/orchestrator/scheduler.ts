@@ -295,6 +295,72 @@ export async function pickNextEligibleTask(query: Record<string, unknown>) {
   return null;
 }
 
+// A waiting_children parent's dependency is "settled" only once it's fully
+// terminal — archived/failed/cancelled — not merely "review" (a subtask
+// auto-archives on success; see agent-manager.ts's shouldAutoArchiveSubtask).
+const WAITING_CHILDREN_TERMINAL_STATUSES = new Set(["archived", "failed", "cancelled"]);
+// Never strand a coordinator: force-resume after this long even if some
+// children haven't settled, with whatever finished (the rest marked as not
+// having completed).
+const WAITING_CHILDREN_FORCE_RESUME_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Reaper pass (not a new loop — part of the existing tick): finds
+ * coordinator tasks parked in reviewState:"waiting_children" whose children
+ * have all settled (or that have waited past the force-resume timeout), and
+ * resumes each via the same continuation mechanism a human reply already
+ * uses — appending a bounded results block and returning the parent to
+ * backlog. The parent's own agent-manager completion logic enforces the
+ * one-continuation guard; this just acts once the wait is over.
+ */
+export async function reapWaitingChildren(): Promise<void> {
+  const waiting = await Task.find({ reviewState: "waiting_children" });
+  if (waiting.length === 0) return;
+
+  const { buildChildrenResultsBlock, extractChildResultText } = await import("./children-results");
+  const { appendChildrenResultsContinuation } = await import("@/lib/tasks/reply-continuation");
+
+  for (const parent of waiting) {
+    const children = await Task.find({ parentTaskId: parent._id.toString() });
+    const allSettled = children.length > 0 && children.every((c) => WAITING_CHILDREN_TERMINAL_STATUSES.has(String(c.status)));
+
+    const waitingSince = typeof (parent.output as Record<string, unknown> | undefined)?.childrenWaitingSince === "string"
+      ? Date.parse((parent.output as Record<string, unknown>).childrenWaitingSince as string)
+      : NaN;
+    const overdue = Number.isFinite(waitingSince) && Date.now() - waitingSince > WAITING_CHILDREN_FORCE_RESUME_MS;
+
+    if (!allSettled && !overdue) continue;
+
+    const results = children.map((c) => {
+      const terminal = WAITING_CHILDREN_TERMINAL_STATUSES.has(String(c.status));
+      return {
+        taskId: c._id.toString(),
+        agentType: String((c as unknown as { agentType?: unknown }).agentType ?? "unknown"),
+        title: String(c.title ?? ""),
+        status: String(c.status),
+        resultText: terminal ? extractChildResultText(c) : `(did not complete in time — status: ${c.status})`,
+      };
+    });
+    const block = buildChildrenResultsBlock(results);
+
+    const priorContinuations = typeof (parent.output as Record<string, unknown> | undefined)?.continuations === "number"
+      ? ((parent.output as Record<string, unknown>).continuations as number)
+      : 0;
+
+    const fields = {
+      description: appendChildrenResultsContinuation(String(parent.description ?? ""), block),
+      status: "backlog",
+      reviewState: null,
+      agentPid: null,
+      startedAt: null,
+      completedAt: null,
+      output: { ...(parent.output ?? {}), continuations: priorContinuations + 1 },
+    };
+    await Task.findByIdAndUpdate(parent._id.toString(), fields);
+    broadcast({ type: "task:updated", taskId: parent._id.toString(), fields });
+  }
+}
+
 async function tick() {
   try {
     // Fire due scheduled_tasks first so their tasks can be claimed this tick
@@ -302,6 +368,15 @@ async function tick() {
       await scheduledRunnerTick();
     } catch (err) {
       console.error("[scheduler] scheduledRunnerTick error:", err instanceof Error ? err.message : err);
+    }
+
+    // Resume coordinator tasks whose delegated children have all settled (or
+    // that have waited past the 24h force-resume timeout) before this tick
+    // looks for new work to claim.
+    try {
+      await reapWaitingChildren();
+    } catch (err) {
+      console.error("[scheduler] reapWaitingChildren error:", err instanceof Error ? err.message : err);
     }
 
     // Run mission DAG engine before scheduling — promotes eligible tasks
