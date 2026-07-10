@@ -2488,6 +2488,7 @@ async function selectTask(id) {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   setFlashSessionMode(false);
+  if (_taskFormInSession) _closeNewTaskPanel();
   // Switching tasks clears half-composed retry/reply state; staying on the same
   // task across a live refresh keeps files and draft text.
   if (_ctxTask !== id) {
@@ -7122,7 +7123,7 @@ function showFlashPanel() {
   state.selectedSkillOrCommand = null;
   _skSel = '';
   _ctxTask = null;
-  _taskFormInSession = false;
+  if (_taskFormInSession) _closeNewTaskPanel();
   _flashState.panelOpen = true;
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
@@ -7220,7 +7221,7 @@ function showBrain() {
   state.selectedSkillOrCommand = null;
   _skSel = '';
   _ctxTask = null;
-  _taskFormInSession = false;
+  if (_taskFormInSession) _closeNewTaskPanel();
   _flashState.panelOpen = false;
   _brainState.panelOpen = true;
   _rolesState.panelOpen = false;
@@ -7738,7 +7739,7 @@ function showRoles() {
   state.selectedSkillOrCommand = null;
   _skSel = '';
   _ctxTask = null;
-  _taskFormInSession = false;
+  if (_taskFormInSession) _closeNewTaskPanel();
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
   _rolesState.panelOpen = true;
