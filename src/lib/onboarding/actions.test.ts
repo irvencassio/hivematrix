@@ -30,6 +30,8 @@ test("buildDaemonPlist points at the bundled node + cjs, no tsx", () => {
   assert.match(plist, /<key>PATH<\/key><string>[^<]*\/opt\/homebrew\/bin/);
   assert.doesNotMatch(plist, /tsx/);
   assert.match(plist, /<key>KeepAlive<\/key>\s*<true\/>/);
+  assert.match(plist, /<key>WorkingDirectory<\/key><string>[^<]+<\/string>/);
+  assert.doesNotMatch(plist, /<key>WorkingDirectory<\/key><string>\/?<\/string>/);
 });
 
 test("buildHelperPlist points at the nested helper executable", () => {

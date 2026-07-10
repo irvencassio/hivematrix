@@ -60,6 +60,7 @@ export function buildDaemonPlist(opts: { nodeBin: string; daemonCjs: string; log
     <string>${plistString(opts.nodeBin)}</string>
     <string>${plistString(opts.daemonCjs)}</string>
   </array>
+  <key>WorkingDirectory</key><string>${plistString(homedir())}</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>NODE_ENV</key><string>production</string>

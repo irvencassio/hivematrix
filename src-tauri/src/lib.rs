@@ -128,13 +128,15 @@ fn spawn_bundled_daemon(app: &tauri::App) -> Option<Child> {
         log::warn!("bundled daemon not found under {res:?} — not spawning");
         return None;
     }
-    match Command::new(&node)
-        .arg(&cjs)
+    let mut cmd = Command::new(&node);
+    cmd.arg(&cjs)
         .env("HIVEMATRIX_NODE_BIN", &node)
         .env("HIVEMATRIX_PORT", DAEMON_PORT.to_string())
-        .env("NODE_ENV", "production")
-        .spawn()
-    {
+        .env("NODE_ENV", "production");
+    if let Ok(home) = std::env::var("HOME") {
+        cmd.current_dir(home);
+    }
+    match cmd.spawn() {
         Ok(child) => {
             log::info!("spawned bundled daemon pid={}", child.id());
             Some(child)
