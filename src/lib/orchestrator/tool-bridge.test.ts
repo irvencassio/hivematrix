@@ -3,11 +3,59 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AddressInfo } from "node:net";
 
 import { executeTool } from "./tool-bridge";
 
 function tempProject(): string {
   return mkdtempSync(join(tmpdir(), "hm-tool-bridge-"));
+}
+
+// create_task shells out (curl) to the real daemon HTTP API on
+// HIVEMATRIX_PORT — there's no DI seam for that, so these tests spin up a
+// real daemon server (same pattern as server.test.ts's startServer) against
+// an isolated HOME + temp DB, and point HIVEMATRIX_PORT at it.
+async function withRealDaemon<T>(run: (ctx: { base: string; headers: Record<string, string> }) => Promise<T>): Promise<T> {
+  const originalHome = process.env.HOME;
+  const originalPort = process.env.HIVEMATRIX_PORT;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-tool-bridge-daemon-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "test.db");
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { createDaemonServer } = await import("@/daemon/server");
+  const { getOrCreateToken, DAEMON_TOKEN_FILE } = await import("@/lib/auth/token");
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  process.env.HIVEMATRIX_PORT = String(port);
+  try {
+    return await run({ base: `http://127.0.0.1:${port}`, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    _resetDbForTests();
+    delete process.env.HIVEMATRIX_DB_PATH;
+    if (originalPort) process.env.HIVEMATRIX_PORT = originalPort; else delete process.env.HIVEMATRIX_PORT;
+    if (originalHome) process.env.HOME = originalHome;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function createTopLevelTask(base: string, headers: Record<string, string>, description = "Parent coordinator task"): Promise<string> {
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description, agentType: "coo", project: "ops", projectPath: "/tmp", route: "normal" }),
+  });
+  const body = await res.json() as { _id: string };
+  assert.equal(res.status, 201, `createTopLevelTask setup failed: ${JSON.stringify(body)}`);
+  return body._id;
+}
+
+function extractCreatedTaskId(result: string): string {
+  const m = result.match(/^Created task ([^:]+):/);
+  assert.ok(m, `expected a "Created task <id>: ..." result, got: ${result}`);
+  return m![1];
 }
 
 test("read_file refuses binary image attachments instead of injecting bytes", async () => {
@@ -84,4 +132,101 @@ test("list_files excludes generated dependency and worktree folders by default",
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("create_task fails CLOSED when the depth-check HTTP call cannot be verified — refused, not 'proceed cautiously'", async () => {
+  await withRealDaemon(async ({ base, headers }) => {
+    const parentId = await createTopLevelTask(base, headers);
+    const goodPort = process.env.HIVEMATRIX_PORT;
+    process.env.HIVEMATRIX_PORT = "1"; // reserved port — nothing listens here, the curl call errors
+    try {
+      const result = await executeTool(
+        "create_task",
+        JSON.stringify({ description: "Do the subtask", agentType: "developer" }),
+        "/tmp",
+        { parentTaskId: parentId, parentProject: "ops", currentAgentType: "coo" },
+      );
+      assert.match(result, /^Error:/);
+      assert.match(result, /refusing to create a subtask/i);
+    } finally {
+      process.env.HIVEMATRIX_PORT = goodPort;
+    }
+  });
+});
+
+test("create_task's sibling cap counts only THIS parent's real children, not every active task in the system", async () => {
+  await withRealDaemon(async ({ base, headers }) => {
+    const parentA = await createTopLevelTask(base, headers, "Parent A");
+    const parentB = await createTopLevelTask(base, headers, "Parent B");
+
+    // Unrelated tasks — none of this should count against parent A's cap.
+    // (Before the parentTaskId query-filter fix, the sibling check counted
+    // every active task in the system, not just this parent's children.)
+    for (let i = 0; i < 9; i++) await createTopLevelTask(base, headers, `Noise task ${i}`);
+    for (let i = 0; i < 3; i++) {
+      const r = await executeTool("create_task", JSON.stringify({ description: `B child ${i}`, agentType: "developer" }), "/tmp", { parentTaskId: parentB, parentProject: "ops" });
+      assert.match(r, /^Created task/);
+    }
+
+    for (let i = 0; i < 10; i++) {
+      const r = await executeTool("create_task", JSON.stringify({ description: `A child ${i}`, agentType: "developer" }), "/tmp", { parentTaskId: parentA, parentProject: "ops" });
+      assert.match(r, /^Created task/, `A child ${i} should succeed — the cap must count only parent A's own children`);
+    }
+    const eleventh = await executeTool("create_task", JSON.stringify({ description: "A child 11", agentType: "developer" }), "/tmp", { parentTaskId: parentA, parentProject: "ops" });
+    assert.match(eleventh, /Maximum subtasks per parent/);
+  });
+});
+
+test("create_task: a subtask cannot create a subtask (depth cap 2)", async () => {
+  await withRealDaemon(async ({ base, headers }) => {
+    const parentId = await createTopLevelTask(base, headers);
+    const childId = extractCreatedTaskId(await executeTool(
+      "create_task", JSON.stringify({ description: "child", agentType: "developer" }), "/tmp",
+      { parentTaskId: parentId, parentProject: "ops" },
+    ));
+    const grandchild = await executeTool(
+      "create_task", JSON.stringify({ description: "grandchild", agentType: "developer" }), "/tmp",
+      { parentTaskId: childId, parentProject: "ops" },
+    );
+    assert.match(grandchild, /Maximum subtask depth/);
+  });
+});
+
+test("create_task: dependsOn accepts a real sibling id and it's persisted on the new task", async () => {
+  await withRealDaemon(async ({ base, headers }) => {
+    const parentId = await createTopLevelTask(base, headers);
+    const first = extractCreatedTaskId(await executeTool(
+      "create_task", JSON.stringify({ description: "First subtask", agentType: "developer" }), "/tmp",
+      { parentTaskId: parentId, parentProject: "ops" },
+    ));
+    const second = extractCreatedTaskId(await executeTool(
+      "create_task", JSON.stringify({ description: "Second subtask", agentType: "qa", dependsOn: [first] }), "/tmp",
+      { parentTaskId: parentId, parentProject: "ops" },
+    ));
+
+    const row = await (await fetch(`${base}/tasks/${second}`, { headers })).json() as Record<string, unknown>;
+    const dependsOn = JSON.parse(String(row.dependsOn ?? "[]"));
+    assert.deepEqual(dependsOn, [first]);
+  });
+});
+
+test("create_task: dependsOn referencing a non-sibling id is rejected", async () => {
+  await withRealDaemon(async ({ base, headers }) => {
+    const parentId = await createTopLevelTask(base, headers);
+    const otherTopLevel = await createTopLevelTask(base, headers, "Unrelated task");
+    const result = await executeTool(
+      "create_task", JSON.stringify({ description: "Bad subtask", agentType: "developer", dependsOn: [otherTopLevel] }), "/tmp",
+      { parentTaskId: parentId, parentProject: "ops" },
+    );
+    assert.match(result, /not siblings/);
+  });
+});
+
+test("create_task: dependsOn is rejected when creating a top-level task (no parentTaskId — nothing to be a sibling of)", async () => {
+  await withRealDaemon(async () => {
+    const result = await executeTool(
+      "create_task", JSON.stringify({ description: "Top-level", agentType: "developer", dependsOn: ["some-id"] }), "/tmp", {},
+    );
+    assert.match(result, /only valid when creating a subtask/);
+  });
 });

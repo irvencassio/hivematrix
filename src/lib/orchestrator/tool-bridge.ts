@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from "fs
 import { dirname, resolve, relative, extname } from "path";
 import { AGENT_PROFILE_IDS } from "@/lib/config/agent-profiles";
 import { readToken } from "@/lib/auth/token";
+import { validateDag } from "@/lib/orchestrator/dag-engine";
 
 const execAsync = promisify(exec);
 
@@ -177,6 +178,11 @@ export const TOOL_DEFINITIONS: ChatTool[] = [
           project: {
             type: "string",
             description: "Project name to run the task in (e.g., 'hive', 'ops'). Defaults to parent task's project.",
+          },
+          dependsOn: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional: ids of this task's OWN sibling subtasks (created earlier in this same delegation) that must finish before this one is claimed. Only valid when creating a subtask; every id must be a real sibling.",
           },
         },
         required: ["description", "agentType"],
@@ -444,6 +450,9 @@ async function executeCreateTask(args: Record<string, unknown>, context?: ToolCo
   const project = (args.project as string) || context?.parentProject || "ops";
   const parentTaskId = context?.parentTaskId ?? null;
   const source = context?.currentAgentType ? `agent:${context.currentAgentType}` : "agent";
+  const dependsOn = Array.isArray(args.dependsOn)
+    ? args.dependsOn.filter((d): d is string => typeof d === "string" && d.trim().length > 0)
+    : [];
 
   if (!description || !agentType) {
     return "Error: description and agentType are required";
@@ -455,35 +464,72 @@ async function executeCreateTask(args: Record<string, unknown>, context?: ToolCo
   const token = readToken("auth-token") ?? "";
   const authArg = `-H "Authorization: Bearer ${token}"`;
 
-  // Safety: check subtask depth (max 2 levels)
+  let siblings: Array<{ _id: string; dependsOn: string[] }> = [];
+
   if (parentTaskId) {
+    // Safety: check subtask depth (max 2 levels). Fails CLOSED — if the
+    // check itself can't be verified (network blip, malformed response),
+    // the create is refused rather than allowed through, or a transient
+    // failure would let a coordinator exceed its depth cap undetected.
     try {
       const { stdout } = await execAsync(
         `curl -s ${authArg} ${base}/tasks/${parentTaskId}`,
         { encoding: "utf-8", timeout: 5_000, killSignal: "SIGKILL" }
       );
       const parentTask = JSON.parse(stdout);
+      if (!parentTask || typeof parentTask !== "object" || typeof parentTask._id !== "string") {
+        return "Error: Could not verify subtask depth — refusing to create a subtask.";
+      }
       if (parentTask.parentTaskId) {
         // Parent already has a parent → this would be depth 3 — reject
         return "Error: Maximum subtask depth (2 levels) reached. A subtask cannot create subtasks.";
       }
     } catch {
-      // If we can't verify depth, proceed cautiously
+      return "Error: Could not verify subtask depth — refusing to create a subtask.";
     }
 
-    // Safety: check subtask count (max 10 per parent)
+    // Safety: check subtask count (max 10 per parent), and fetch real
+    // siblings (for dependsOn validation below). Fails CLOSED for the same
+    // reason as the depth check.
     try {
       const { stdout } = await execAsync(
         `curl -s ${authArg} "${base}/tasks?parentTaskId=${parentTaskId}"`,
         { encoding: "utf-8", timeout: 5_000, killSignal: "SIGKILL" }
       );
-      const siblings = JSON.parse(stdout);
-      const siblingCount = Array.isArray(siblings) ? siblings.length : (siblings.tasks?.length ?? 0);
-      if (siblingCount >= MAX_SUBTASKS_PER_PARENT) {
+      const raw = JSON.parse(stdout);
+      const rows: Array<Record<string, unknown>> | null = Array.isArray(raw)
+        ? raw
+        : (raw && Array.isArray(raw.tasks) ? raw.tasks : null);
+      if (!rows) {
+        return "Error: Could not verify sibling count — refusing to create a subtask.";
+      }
+      siblings = rows.map((r) => ({
+        _id: String(r._id),
+        dependsOn: parseDependsOnColumn(r.dependsOn),
+      }));
+      if (siblings.length >= MAX_SUBTASKS_PER_PARENT) {
         return `Error: Maximum subtasks per parent (${MAX_SUBTASKS_PER_PARENT}) reached.`;
       }
     } catch {
-      // If we can't verify count, proceed cautiously
+      return "Error: Could not verify sibling count — refusing to create a subtask.";
+    }
+  }
+
+  if (dependsOn.length > 0) {
+    if (!parentTaskId) {
+      return "Error: dependsOn is only valid when creating a subtask (a top-level task has no siblings to depend on).";
+    }
+    const siblingIds = new Set(siblings.map((s) => s._id));
+    const unknownIds = dependsOn.filter((id) => !siblingIds.has(id));
+    if (unknownIds.length > 0) {
+      return `Error: dependsOn references task(s) that are not siblings of this subtask: ${unknownIds.join(", ")}`;
+    }
+    const dagCheck = validateDag([
+      ...siblings.map((s) => ({ _id: s._id, status: "backlog", dependsOn: s.dependsOn })),
+      { _id: "__pending_new_task__", status: "backlog", dependsOn },
+    ]);
+    if (!dagCheck.valid) {
+      return "Error: dependsOn would create a dependency cycle.";
     }
   }
 
@@ -494,6 +540,7 @@ async function executeCreateTask(args: Record<string, unknown>, context?: ToolCo
       project,
       source,
       parentTaskId,
+      ...(dependsOn.length > 0 ? { dependsOn } : {}),
     });
     const { stdout } = await execAsync(
       `curl -s -X POST ${authArg} ${base}/tasks -H "Content-Type: application/json" -d '${body.replace(/'/g, "'\\''")}'`,
@@ -504,6 +551,17 @@ async function executeCreateTask(args: Record<string, unknown>, context?: ToolCo
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return `Error creating task: ${msg}`;
+  }
+}
+
+function parseDependsOnColumn(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string");
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    return [];
   }
 }
 

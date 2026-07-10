@@ -3944,6 +3944,7 @@ export function createDaemonServer() {
         else { conditions.push("status != 'archived'"); }
         if (q.profile) { conditions.push("profile = ?"); params.push(q.profile); }
         if (q.project) { conditions.push("project = ?"); params.push(q.project); }
+        if (q.parentTaskId) { conditions.push("parentTaskId = ?"); params.push(q.parentTaskId); }
         const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
         const orderBy = q.status === "review" ? "updatedAt DESC" : "position ASC";
         const rows = db.prepare(`SELECT * FROM tasks${where} ORDER BY ${orderBy} LIMIT 300`).all(...params) as Array<Record<string, unknown>>;
