@@ -140,12 +140,14 @@ export function getUsageAvailabilityForTask(
  * `agentSpecialization` feature is on, else the fixed "developer" fallback
  * (today's behavior — unchanged when the flag is absent/off). Only ever
  * called for tasks whose agentType is "auto"; an explicit agentType on the
- * task always bypasses this entirely.
+ * task always bypasses this entirely. Returns the provenance source
+ * alongside the id so the caller can record an honest roleProvenance
+ * without re-reading the flag (and risking drift between the two reads).
  */
-export async function resolveAutoAgentType(description: string): Promise<string> {
-  if (!isFeatureEnabled("agentSpecialization")) return "developer";
+export async function resolveAutoAgentType(description: string): Promise<{ agentType: string; source: "classifier" | "default" }> {
+  if (!isFeatureEnabled("agentSpecialization")) return { agentType: "developer", source: "default" };
   const { classifyTask } = await import("./intent-classifier");
-  return classifyTask(description);
+  return { agentType: await classifyTask(description), source: "classifier" };
 }
 
 /**
@@ -365,8 +367,10 @@ async function tick() {
       // role-model default applies when the task itself was intentionally
       // created backend-agnostic.
       let agentType = ((task as Record<string, unknown>).agentType as string) ?? "auto";
+      let autoRoleProvenance: { agentType: string; source: "classifier" | "default" } | null = null;
       if (agentType === "auto") {
-        agentType = await resolveAutoAgentType(task.description);
+        autoRoleProvenance = await resolveAutoAgentType(task.description);
+        agentType = autoRoleProvenance.agentType;
       }
       const effectiveModel = resolveModelForAgentRole(task.model ?? undefined, agentType);
 
@@ -426,6 +430,15 @@ async function tick() {
         continue;
       }
 
+      // Record the routing decision as auditable provenance (console role
+      // pill tooltip) ONLY when this task's agentType was actually auto-
+      // resolved just now — an explicit agentType already carries its own
+      // {source:"explicit"} roleProvenance set at task-creation time
+      // (server.ts POST /tasks), which must not be overwritten here.
+      const roleProvenanceUpdate = autoRoleProvenance
+        ? { output: { ...(task.output ?? {}), roleProvenance: autoRoleProvenance } }
+        : {};
+
       await Task.findByIdAndUpdate(task._id.toString(), {
         status: "assigned",
         assignedAt,
@@ -433,6 +446,7 @@ async function tick() {
         delayReason: null,
         ...(effectiveModel && effectiveModel !== task.model ? { model: effectiveModel } : {}),
         ...(agentType !== ((task as Record<string, unknown>).agentType as string) ? { agentType } : {}),
+        ...roleProvenanceUpdate,
       });
       if (task.missionId) {
         await syncMissionProgressDoc(task.missionId.toString());
@@ -448,6 +462,7 @@ async function tick() {
           delayReason: null,
           ...(effectiveModel && effectiveModel !== task.model ? { model: effectiveModel } : {}),
           ...(agentType !== ((task as Record<string, unknown>).agentType as string) ? { agentType } : {}),
+          ...roleProvenanceUpdate,
         },
       });
 

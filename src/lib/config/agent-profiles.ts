@@ -484,5 +484,11 @@ export function getAllAgentProfiles(): AgentProfile[] {
   return Array.from(merged.values());
 }
 
+/** ids that have a custom override (whether or not the id also names a built-in) — used
+ * by the console to show a "custom" chip without exposing systemPrompt in the list route. */
+export function customProfileIds(): string[] {
+  return Array.from(loadCustomProfiles().keys());
+}
+
 export const AGENT_PROFILE_IDS = BUILT_IN_PROFILES.map((p) => p.id);
 export const VALID_AGENT_TYPES = new Set(["auto", ...AGENT_PROFILE_IDS]);

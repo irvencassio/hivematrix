@@ -195,15 +195,15 @@ test("explicit task model remains pinned over role defaults", async () => {
   });
 });
 
-test("resolveAutoAgentType: agentSpecialization absent ⇒ developer, no classifier call", async () => {
+test("resolveAutoAgentType: agentSpecialization absent ⇒ developer/default, no classifier call", async () => {
   await withTempHome({}, async () => {
-    assert.equal(await resolveAutoAgentType("write the launch blog post"), "developer");
+    assert.deepEqual(await resolveAutoAgentType("write the launch blog post"), { agentType: "developer", source: "default" });
   });
 });
 
-test("resolveAutoAgentType: agentSpecialization explicitly false ⇒ developer", async () => {
+test("resolveAutoAgentType: agentSpecialization explicitly false ⇒ developer/default", async () => {
   await withTempHome({ features: { agentSpecialization: false } }, async () => {
-    assert.equal(await resolveAutoAgentType("verify the checkout flow end to end"), "developer");
+    assert.deepEqual(await resolveAutoAgentType("verify the checkout flow end to end"), { agentType: "developer", source: "default" });
   });
 });
 

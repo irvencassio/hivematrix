@@ -2120,6 +2120,41 @@ test("A Brain project's docs include its matching code project's Claude Code con
   }
 });
 
+test("GET /agents/profiles lists the roster without leaking systemPrompt", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/agents/profiles`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { profiles: Array<Record<string, unknown>> };
+  assert.ok(Array.isArray(body.profiles) && body.profiles.length > 0);
+  for (const p of body.profiles) {
+    assert.equal(p.systemPrompt, undefined, `${p.id} must not leak systemPrompt over the list route`);
+    assert.equal(typeof p.id, "string");
+    assert.equal(typeof p.name, "string");
+    assert.equal(typeof p.promptLines, "number");
+    assert.equal(typeof p.isCustom, "boolean");
+  }
+  const developer = body.profiles.find((p) => p.id === "developer");
+  assert.equal(developer?.modelRole, "coding");
+  assert.equal(developer?.isCustom, false);
+});
+
+test("POST /tasks persists an explicit agentType (the New Task role picker's contract)", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "Design the new pricing page layout.", agentType: "designer", route: "normal", project: "hivematrix", projectPath: "/tmp/hivematrix" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.agentType, "designer");
+});
+
 test("every SSE stream registers a response error handler (an unhandled stream 'error' event would crash the daemon)", () => {
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
   const sites = [...src.matchAll(/text\/event-stream/g)];

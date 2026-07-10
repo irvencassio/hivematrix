@@ -606,15 +606,18 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .badge.model { color: var(--accent-2); }
   .badge.age { opacity: .7; background: transparent; padding-left: 0; }
   /* Provenance pills on a completed task's detail view — what ran it. Color
-     coding: role/model = blue (matches the existing .badge.model convention),
-     MCP server = violet, skill/command = teal. Distinct hues, consistent
-     across all three themes via the --pill-* custom properties above. */
+     coding: model = blue (matches the existing .badge.model convention),
+     MCP server = violet, skill/command = teal, agent role = gold (a 4th,
+     distinct hue — NOT the same class as .role, which names the model pill
+     for historical reasons; do not conflate the two). Consistent across all
+     three themes via the --pill-*/--accent custom properties above. */
   .prov-pills { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
   .prov-pill { font-size: 10px; padding: 2px 8px; border-radius: 999px; font-weight: 600;
     border: 1px solid currentColor; background: transparent; }
   .prov-pill.role { color: var(--accent-2); }
   .prov-pill.mcp { color: var(--pill-mcp); }
   .prov-pill.skill { color: var(--pill-skill); }
+  .prov-pill.agent { color: var(--accent); }
   .session-empty { color: var(--muted); text-align: center; margin-top: 40px; }
   .session h1 { font-size: 18px; margin: 0 0 4px; }
   .session .sub { color: var(--muted); margin-bottom: 16px; }
@@ -1809,6 +1812,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <input id="t_path" type="hidden" value="" />
       <details id="t_advanced">
         <summary style="display:block;cursor:pointer;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;margin:10px 0 3px">Advanced</summary>
+        <label class="flbl">Role</label>
+        <select id="t_role"><option value="auto" selected>Auto</option></select>
+        <div class="muted" style="font-size:11px;margin-top:2px" id="t_role_hint">Auto picks a specialist when "Specialist agents" is enabled in Settings → Features; otherwise every task runs as developer.</div>
         <label class="flbl">Model</label>
         <select id="t_model"></select>
         <label class="flbl">Mode</label>
@@ -2264,6 +2270,7 @@ function renderBoard() {
               + '<div class="mdl-card-head" style="padding-right:58px;align-items:flex-start">'
               + '<span class="mdl-card-name" style="min-width:0" title="'+esc(t.title||t._id)+'">'+esc(t.title||t._id)+'</span>'
               + '<div style="flex:0 0 auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
+              + cardRoleBadge(t)
               + (t.model?'<span class="badge model">'+esc(t.model)+'</span>':'')
               + (t.reviewState?'<span class="badge">'+esc(t.reviewState)+'</span>':'')
               + ageBadge(t)+'</div>'
@@ -2771,16 +2778,62 @@ function fmtMs(ms) {
 function fmtNum(n) { return n == null ? "—" : Number(n).toLocaleString(); }
 
 
-// What ran a completed task: distinct models used (out.modelsUsed, populated
-// live by the agent manager from stream init/turn events), MCP servers actually
-// invoked (derived from tool_use log entries — the CLI's own tool-call naming
-// convention is "mcp__<server>__<tool>", the same prefix approval.ts matches
-// on), and the entry-point skill/command (out.command, set when a task is
-// created via "Use a skill"). No per-task record of thinking/coding/operational
-// role assignment exists, so this deliberately shows the actual models run
-// rather than inventing a role label that can't be verified after the fact.
+// Which agent role(s) handled a task, as pills: the task's own agentType
+// (skipped when "auto"/unset — a task with no real role resolved yet has
+// nothing honest to show), plus one pill per distinct role among childTasks
+// (empty today; Spec 3's delegation read-back fills this in without needing
+// to touch this function again — that's the point of taking the array param
+// now instead of a single task). Tooltip states HOW the role was chosen
+// (out.roleProvenance, set by POST /tasks for an explicit pick or by the
+// scheduler for an auto-resolved one) — never invents a reason it can't back.
+const ROLE_PROVENANCE_LABEL = { explicit: "you picked it", classifier: "auto-classified", keyword: "keyword-matched", default: "default (Specialist agents is off)" };
+function renderRolePills(task, childTasks) {
+  task = task || {};
+  childTasks = Array.isArray(childTasks) ? childTasks : [];
+  const primaryId = (task.agentType && task.agentType !== "auto") ? task.agentType : null;
+  const ids = [];
+  if (primaryId) ids.push(primaryId);
+  for (const c of childTasks) {
+    if (c && c.agentType && c.agentType !== "auto" && ids.indexOf(c.agentType) === -1) ids.push(c.agentType);
+  }
+  if (!ids.length) return "";
+  // task.output may be the raw (possibly JSON-string) field or an
+  // already-parsed object depending on the caller — handle both, matching
+  // the parse callers like renderSession already do for t.output.
+  const rawOut = task.output;
+  const out = (rawOut && typeof rawOut === "object") ? rawOut
+    : (typeof rawOut === "string" ? (() => { try { return JSON.parse(rawOut); } catch { return {}; } })() : {});
+  const prov = out.roleProvenance;
+  return ids.map(id => {
+    const p = agentProfileById[id];
+    const label = (p ? ((p.icon || "") + " " + p.name) : id).trim();
+    const tip = (id === primaryId && prov && prov.agentType === id && ROLE_PROVENANCE_LABEL[prov.source])
+      ? ROLE_PROVENANCE_LABEL[prov.source] : "Agent role";
+    return '<span class="prov-pill agent" title="' + esc(tip) + '">' + esc(label) + '</span>';
+  }).join("");
+}
+
+// Compact board-card equivalent of renderRolePills — same "which role(s)
+// handled this" data, styled as a .badge to match the model/reviewState/age
+// badges already on the card instead of the detail view's pill shape.
+function cardRoleBadge(t) {
+  const id = t && t.agentType && t.agentType !== "auto" ? t.agentType : null;
+  if (!id) return "";
+  const p = agentProfileById[id];
+  const label = (p ? ((p.icon || "") + " " + p.name) : id).trim();
+  return '<span class="badge" style="color:var(--accent)" title="Agent role">' + esc(label) + '</span>';
+}
+
+// What ran a completed task: the agent role(s) (renderRolePills, above),
+// distinct models used (out.modelsUsed, populated live by the agent manager
+// from stream init/turn events), MCP servers actually invoked (derived from
+// tool_use log entries — the CLI's own tool-call naming convention is
+// "mcp__<server>__<tool>", the same prefix approval.ts matches on), and the
+// entry-point skill/command (out.command, set when a task is created via
+// "Use a skill").
 function taskProvenancePills(t, out, logs) {
   out = out || {};
+  const rolePills = renderRolePills(t, []);
   const models = Array.isArray(out.modelsUsed) ? out.modelsUsed.filter(Boolean) : [];
   const mcpServers = new Set();
   for (const entry of (logs || [])) {
@@ -2790,12 +2843,12 @@ function taskProvenancePills(t, out, logs) {
   }
   const skill = typeof out.command === "string" && out.command.trim() ? out.command.trim() : "";
 
-  if (!models.length && !mcpServers.size && !skill) return "";
+  if (!rolePills && !models.length && !mcpServers.size && !skill) return "";
 
-  const pills = models.map(m => '<span class="prov-pill role" title="Model used">' + esc(m) + '</span>')
-    .concat(Array.from(mcpServers).map(s => '<span class="prov-pill mcp" title="MCP server used">' + esc(s) + '</span>'))
-    .concat(skill ? ['<span class="prov-pill skill" title="Skill / command">' + esc(skill) + '</span>'] : []);
-  return '<div class="prov-pills">' + pills.join("") + '</div>';
+  const pills = rolePills + models.map(m => '<span class="prov-pill role" title="Model used">' + esc(m) + '</span>').join("")
+    + Array.from(mcpServers).map(s => '<span class="prov-pill mcp" title="MCP server used">' + esc(s) + '</span>').join("")
+    + (skill ? '<span class="prov-pill skill" title="Skill / command">' + esc(skill) + '</span>' : "");
+  return '<div class="prov-pills">' + pills + '</div>';
 }
 
 // Per-task telemetry strip from the task's own data (no extra fetch). Honors the
@@ -5404,6 +5457,26 @@ function _closeNewTaskPanel() {
 // --- Models / Settings ---
 let models = null;            // { backends, available, defaultModel, version }
 const modelById = {};         // UiModel.id → {modelId, fast}
+
+// --- Agent roles (roster) ---
+let agentProfiles = [];       // [{id, name, description, icon, tools, loadClaudeMd, modelRole, isCustom, promptLines}]
+const agentProfileById = {};  // id → profile, for the role pill lookup
+
+async function loadAgentProfiles() {
+  const data = await api("/agents/profiles");
+  if (!data || !Array.isArray(data.profiles)) return;
+  agentProfiles = data.profiles;
+  for (const k of Object.keys(agentProfileById)) delete agentProfileById[k];
+  for (const p of agentProfiles) agentProfileById[p.id] = p;
+  const sel = document.getElementById("t_role");
+  if (sel) {
+    const current = sel.value || "auto";
+    sel.innerHTML = '<option value="auto">Auto</option>'
+      + agentProfiles.map(p => '<option value="'+esc(p.id)+'">'+esc(p.icon || "")+' '+esc(p.name)+'</option>').join("");
+    sel.value = agentProfileById[current] ? current : "auto";
+  }
+  return agentProfiles;
+}
 
 function localBackendText(backend, health) {
   return [
@@ -8951,13 +9024,15 @@ async function createTask() {
   try {
     // Title optional — omit when blank so the daemon derives it from the instructions.
     const route = (document.getElementById("t_route") || {}).value || "auto";
+    const agentType = (document.getElementById("t_role") || {}).value || "auto";
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: projectName, model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent", route }) });
+      body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: projectName, model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent", route, agentType }) });
     // POST /tasks may return a normal task ({_id}) or a special route
     // ({routed,taskId} for workflow / terminal-lane / browser-lane). All of these are success.
     const ok = t && (t._id || t.taskId || t.routed);
     if (!ok) { err.textContent = (t && t.error) ? String(t.error) : "Create failed."; return; }
     document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = "";
+    const roleSel = document.getElementById("t_role"); if (roleSel) roleSel.value = "auto";
     dismissEnhancedPrompt();
     _attachments = []; _attachError = ""; _attachUploading = 0; renderAttachChips();
     if (_taskFormInSession) _closeNewTaskPanel(); else toggleForm("taskForm");
@@ -9070,6 +9145,7 @@ async function checkDaemonVersionReload() {
 
 if (requireToken()) {
   loadModels();
+  loadAgentProfiles();
   wireCtxSections();
   initColResizers();
   mpRegister('d',   'd_path');

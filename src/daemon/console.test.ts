@@ -1471,9 +1471,26 @@ test("7-day usage bars (breakdown, codex, and summary cards) embed day ticks", (
 function consoleTaskProvenancePills(): (t: unknown, out: unknown, logs: unknown) => string {
   const js = extractScript(CONSOLE_HTML);
   const esc = js.match(/function esc\(s\)\{[^\n]+\}/)?.[0] ?? "";
+  const agentProfileById = js.match(/const agentProfileById = \{\};[^\n]*/)?.[0] ?? "";
+  const roleLabel = js.match(/const ROLE_PROVENANCE_LABEL = \{[^\n]+\};/)?.[0] ?? "";
+  const renderRolePills = js.match(/function renderRolePills\([\s\S]*?\n\}/)?.[0] ?? "";
   const body = js.match(/function taskProvenancePills\([\s\S]*?\n\}/)?.[0] ?? "";
-  assert.ok(esc.length > 10 && body.length > 20, "esc + taskProvenancePills body extracted");
-  return new Function(esc + "\n" + body + "\nreturn taskProvenancePills;")() as (t: unknown, out: unknown, logs: unknown) => string;
+  assert.ok(esc.length > 10 && agentProfileById.length > 5 && roleLabel.length > 10 && renderRolePills.length > 20 && body.length > 20,
+    "esc + agentProfileById + ROLE_PROVENANCE_LABEL + renderRolePills + taskProvenancePills bodies extracted");
+  return new Function(esc + "\n" + agentProfileById + "\n" + roleLabel + "\n" + renderRolePills + "\n" + body + "\nreturn taskProvenancePills;")() as (t: unknown, out: unknown, logs: unknown) => string;
+}
+
+// Same extraction as consoleTaskProvenancePills, but exposes renderRolePills
+// directly and lets a test seed agentProfileById (normally populated by
+// loadAgentProfiles() from GET /agents/profiles at boot) with fixture data.
+function consoleRenderRolePills(profileFixtures: Record<string, { icon?: string; name: string }>): (task: unknown, childTasks: unknown) => string {
+  const js = extractScript(CONSOLE_HTML);
+  const esc = js.match(/function esc\(s\)\{[^\n]+\}/)?.[0] ?? "";
+  const roleLabel = js.match(/const ROLE_PROVENANCE_LABEL = \{[^\n]+\};/)?.[0] ?? "";
+  const renderRolePills = js.match(/function renderRolePills\([\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(esc.length > 10 && roleLabel.length > 10 && renderRolePills.length > 20, "esc + ROLE_PROVENANCE_LABEL + renderRolePills bodies extracted");
+  const seededProfiles = "const agentProfileById = " + JSON.stringify(profileFixtures) + ";";
+  return new Function(esc + "\n" + seededProfiles + "\n" + roleLabel + "\n" + renderRolePills + "\nreturn renderRolePills;")() as (task: unknown, childTasks: unknown) => string;
 }
 
 test("taskProvenancePills renders nothing for a queued task with no run data yet", () => {
@@ -1516,6 +1533,55 @@ test("taskProvenancePills combines all three categories with distinct pill class
   assert.match(html, /prov-pill role"[^>]*>claude-sonnet-4\.5</);
   assert.match(html, /prov-pill mcp"[^>]*>brain</);
   assert.match(html, /prov-pill skill"[^>]*>release-hivematrix</);
+});
+
+test("renderRolePills: no agentType (or 'auto') and no children ⇒ empty, never invents a role", () => {
+  const render = consoleRenderRolePills({});
+  assert.equal(render({}, []), "");
+  assert.equal(render({ agentType: "auto" }, []), "");
+});
+
+test("renderRolePills: known profile shows icon + name, distinct 'agent' pill class from the model pill", () => {
+  const render = consoleRenderRolePills({ designer: { icon: "🎨", name: "UX / UI Designer" } });
+  const html = render({ agentType: "designer" }, []);
+  assert.match(html, /class="prov-pill agent"/);
+  assert.match(html, />🎨 UX \/ UI Designer</);
+});
+
+test("renderRolePills: unknown id (not yet loaded/custom-deleted) falls back to the raw id, not a blank pill", () => {
+  const render = consoleRenderRolePills({});
+  const html = render({ agentType: "some-custom-role" }, []);
+  assert.match(html, /class="prov-pill agent"/);
+  assert.match(html, />some-custom-role</);
+});
+
+test("renderRolePills: tooltip states how the role was chosen from output.roleProvenance", () => {
+  const render = consoleRenderRolePills({ qa: { icon: "🔍", name: "QA" } });
+  const explicit = render({ agentType: "qa", output: { roleProvenance: { agentType: "qa", source: "explicit" } } }, []);
+  assert.match(explicit, /title="you picked it"/);
+  const classifier = render({ agentType: "qa", output: { roleProvenance: { agentType: "qa", source: "classifier" } } }, []);
+  assert.match(classifier, /title="auto-classified"/);
+  const asString = render({ agentType: "qa", output: JSON.stringify({ roleProvenance: { agentType: "qa", source: "default" } }) }, []);
+  assert.match(asString, /title="default \(Specialist agents is off\)"/, "task.output as a raw JSON string is parsed, not just a live object");
+});
+
+test("renderRolePills: a stale roleProvenance for a DIFFERENT agentType is never shown as this task's reason", () => {
+  const render = consoleRenderRolePills({ developer: { icon: "💻", name: "Developer" } });
+  // e.g. a task whose role was later overridden — the recorded provenance no longer describes agentType.
+  const html = render({ agentType: "developer", output: { roleProvenance: { agentType: "qa", source: "explicit" } } }, []);
+  assert.match(html, /title="Agent role"/, "falls back to the generic tooltip rather than claiming a mismatched reason");
+});
+
+test("renderRolePills: distinct roles among childTasks each get their own pill, deduped, primary first", () => {
+  const render = consoleRenderRolePills({
+    coo: { icon: "🧭", name: "COO" }, designer: { icon: "🎨", name: "Designer" }, qa: { icon: "🔍", name: "QA" },
+  });
+  const html = render(
+    { agentType: "coo" },
+    [{ agentType: "designer" }, { agentType: "qa" }, { agentType: "designer" }, { agentType: "auto" }],
+  );
+  const order = [...html.matchAll(/>([^<]+)</g)].map((m) => m[1]);
+  assert.deepEqual(order, ["🧭 COO", "🎨 Designer", "🔍 QA"], "primary role first, then each distinct child role once, auto children ignored");
 });
 
 test("provenance pills are wired into the task detail view, right after the status line", () => {

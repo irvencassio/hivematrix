@@ -421,6 +421,27 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /agents/profiles — the agent role roster (New Task role picker,
+      // Settings → Agents). Deliberately omits systemPrompt (large; a per-id
+      // detail route is the place for that) so this stays a light list call.
+      if (req.method === "GET" && urlPath === "/agents/profiles") {
+        const { getAllAgentProfiles, customProfileIds } = await import("@/lib/config/agent-profiles");
+        const customIds = new Set(customProfileIds());
+        const profiles = getAllAgentProfiles().map((p) => ({
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          icon: p.icon,
+          tools: p.tools,
+          loadClaudeMd: p.loadClaudeMd,
+          modelRole: p.modelRole ?? null,
+          isCustom: customIds.has(p.id),
+          promptLines: p.systemPrompt.trim().split("\n").length,
+        }));
+        json(res, 200, { profiles });
+        return;
+      }
+
       // GET /settings/keys — which API keys (env vars) are SET. Never returns
       // values — only env name, label, purpose, and a boolean. Keys are provided
       // via environment variables, not config.json.
@@ -3956,6 +3977,16 @@ export function createDaemonServer() {
         const description = typeof body.description === "string" ? body.description : "";
         body.description = appendAttachmentBlock(description, attachments);
         delete body.attachments;
+        // An explicit (non-"auto") agentType on creation means the operator (or the
+        // prompt wizard) picked the role — record that provenance now, before any
+        // routing branch below spreads `body` into Task.create, so the console's role
+        // pill can show "you picked it" instead of guessing after the fact. The
+        // scheduler tags the complementary "classifier"/"default" provenance when it
+        // resolves an "auto" agentType (scheduler.ts).
+        if (typeof body.agentType === "string" && body.agentType.trim() && body.agentType.trim() !== "auto") {
+          body.output = { ...(body.output && typeof body.output === "object" ? body.output as Record<string, unknown> : {}),
+            roleProvenance: { agentType: body.agentType.trim(), source: "explicit" } };
+        }
         // Explicit Route selector (New Task) — operator can force the path instead
         // of relying on content heuristics, so "developing tool X" is never
         // confused with "using tool X". auto = today's heuristics (with the
