@@ -589,7 +589,7 @@ export async function spawnAgent(
     // task can run through either harness, so both need this.
     if (agentType === "coo") {
       const { getCoreAgentProfiles } = await import("@/lib/config/agent-profiles");
-      const roster = getCoreAgentProfiles().map((p) => `- ${p.id}: ${p.description}`).join("\n");
+      const roster = getCoreAgentProfiles().filter((p) => p.id !== "coo").map((p) => `- ${p.id}: ${p.description}`).join("\n");
       profileText += `\n\n--- Available agent types (create_task) ---\n${roster}`;
     }
     const profilePrompt = `\n\n--- Agent Role ---\n${profileText}`;

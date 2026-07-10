@@ -129,7 +129,9 @@ export async function buildSystemPrompt(projectPath: string, agentType: string, 
   // getCoreAgentProfiles() is deliberately re-read on every call.
   if (agentType === "coo") {
     const { getCoreAgentProfiles } = await import("@/lib/config/agent-profiles");
-    const roster = getCoreAgentProfiles().map((p) => `- ${p.id}: ${p.description}`).join("\n");
+    // Excludes coo itself — self-delegation is never useful, and coo is now
+    // core-tier (classifier-routable) so it would otherwise list itself.
+    const roster = getCoreAgentProfiles().filter((p) => p.id !== "coo").map((p) => `- ${p.id}: ${p.description}`).join("\n");
     prompt += `\n\n--- Available agent types (create_task) ---\n${roster}`;
   }
   prompt += `\n\n--- Brain Doc Policy ---\n${brainDocPolicyText()}`;

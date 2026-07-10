@@ -48,7 +48,8 @@ test("buildSystemPrompt injects a live core-roster list for the coo profile (not
     for (const id of ["developer", "researcher", "marketing", "founder", "qa", "designer"]) {
       assert.match(prompt, new RegExp(`- ${id}:`), `roster block must list "${id}"`);
     }
-    // coo/trader are coordinator/domain-tier — must never appear in the
+    // coo excludes itself from its own roster (self-delegation is never
+    // useful); trader is domain-tier and never appears in the auto-routable
     // roster coo is told it can delegate to (see agent-roles-activation spec).
     assert.doesNotMatch(prompt, /- coo:/);
     assert.doesNotMatch(prompt, /- trader:/);

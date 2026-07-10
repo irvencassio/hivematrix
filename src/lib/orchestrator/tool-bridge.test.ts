@@ -230,3 +230,47 @@ test("create_task: dependsOn is rejected when creating a top-level task (no pare
     assert.match(result, /only valid when creating a subtask/);
   });
 });
+
+// ─── dispatch_capability — the typed COO dispatcher, not create_task ───────
+
+test("dispatch_capability requires a non-empty request", async () => {
+  await withRealDaemon(async () => {
+    const result = await executeTool("dispatch_capability", JSON.stringify({}), "/tmp", {});
+    assert.match(result, /^Error: request is required/);
+  });
+});
+
+test("dispatch_capability: no routing rules configured ⇒ honest no_match, never fabricates a route", async () => {
+  await withRealDaemon(async () => {
+    const result = await executeTool("dispatch_capability", JSON.stringify({ request: "do something nobody routes" }), "/tmp", {});
+    assert.match(result, /No capability route matched/);
+  });
+});
+
+test("dispatch_capability: mail/message/desktop ALWAYS come back approval_required — never auto-approved", async () => {
+  await withRealDaemon(async () => {
+    const { seedDefaultCooRoutingRules } = await import("@/lib/coo/store");
+    seedDefaultCooRoutingRules();
+    const result = await executeTool("dispatch_capability", JSON.stringify({ request: "send mail to the investor list" }), "/tmp", {});
+    assert.match(result, /^APPROVAL REQUIRED — not executed\./);
+    assert.doesNotMatch(result, /\bwas sent\b|\bhas been sent\b|\bis done\b/i, "must never claim the mail was sent");
+  });
+});
+
+test("dispatch_capability: memory/review report unsupported — the COO must say so, not improvise with bash", async () => {
+  await withRealDaemon(async () => {
+    const { seedDefaultCooRoutingRules } = await import("@/lib/coo/store");
+    seedDefaultCooRoutingRules();
+    const result = await executeTool("dispatch_capability", JSON.stringify({ request: "remember this for later" }), "/tmp", {});
+    assert.match(result, /^Unsupported — no execution bridge for this yet\./);
+  });
+});
+
+test("dispatch_capability: terminal (executable lane) comes back prepared, with the matched capability named", async () => {
+  await withRealDaemon(async () => {
+    const { seedDefaultCooRoutingRules } = await import("@/lib/coo/store");
+    seedDefaultCooRoutingRules();
+    const result = await executeTool("dispatch_capability", JSON.stringify({ request: "run command to list files" }), "/tmp", {});
+    assert.match(result, /^Prepared \(lane: terminal/);
+  });
+});

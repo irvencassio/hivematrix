@@ -51,27 +51,29 @@ test("built-in modelRole assignments match the spec's admission-test table (post
   });
 });
 
-test("the roster is exactly 7 core + 1 coordinator + 1 domain (14 → 9)", async () => {
+test("the roster is exactly 8 core + 0 coordinator + 1 domain (14 → 9)", async () => {
   await withTempHome(null, () => {
     const all = getAllAgentProfiles();
     assert.equal(all.length, 9, "cut ceo/cto/cfo/analyst/inventor — 5 removed from the original 14");
     const byTier = { core: 0, coordinator: 0, domain: 0 };
     for (const p of all) byTier[profileTier(p)]++;
-    assert.deepEqual(byTier, { core: 7, coordinator: 1, domain: 1 });
+    // Spec 3 Phase 4 promotes coo to core-tier now that it can read back its
+    // own delegated children's results — see agent-roles-activation §5c.
+    assert.deepEqual(byTier, { core: 8, coordinator: 0, domain: 1 });
     assert.deepEqual(
       new Set(all.filter((p) => profileTier(p) === "core").map((p) => p.id)),
-      new Set(["general", "developer", "researcher", "marketing", "founder", "qa", "designer"]),
+      new Set(["general", "developer", "researcher", "marketing", "founder", "qa", "designer", "coo"]),
     );
-    assert.equal(all.find((p) => p.id === "coo")?.tier, "coordinator");
+    assert.equal(all.find((p) => p.id === "coo")?.tier, "core");
     assert.equal(all.find((p) => p.id === "trader")?.tier, "domain");
   });
 });
 
-test("getCoreAgentProfiles never includes the coordinator or domain profile", async () => {
+test("getCoreAgentProfiles includes coo (promoted Spec 3 Phase 4) but never the domain profile", async () => {
   await withTempHome(null, () => {
     const coreIds = getCoreAgentProfiles().map((p) => p.id);
-    assert.equal(coreIds.length, 7);
-    assert.ok(!coreIds.includes("coo"), "coo is coordinator-tier — must never be classifier-reachable yet");
+    assert.equal(coreIds.length, 8);
+    assert.ok(coreIds.includes("coo"), "coo is now core-tier — classifier-reachable once it can observe outcomes");
     assert.ok(!coreIds.includes("trader"), "trader is domain-tier — must never be classifier-reachable");
   });
 });
@@ -175,11 +177,17 @@ test("the four rewritten profiles clear the ≥25-line depth bar; designer/qa/tr
   });
 });
 
-test("coo's prompt describes its real fire-and-forget limitation honestly, and defers roster listing to the live injection (no hardcoded roster string)", async () => {
+test("coo's prompt honestly describes its bounded read-back — one resume, no grandchildren — and documents both delegation verbs", async () => {
   await withTempHome(null, () => {
     const prompt = getAgentProfile("coo").systemPrompt;
-    assert.match(prompt, /fire-and-forget/i);
-    assert.match(prompt, /cannot read|cannot synthesize|cannot see/i);
+    // Spec 3 Phase 3/4: coo is no longer purely fire-and-forget — it can read
+    // back delegated children's results exactly once, via a continuation.
+    assert.match(prompt, /exactly once/i);
+    assert.match(prompt, /cite each child|reference each child/i);
+    assert.match(prompt, /grandchildren are not possible|depth cap 2/i);
+    assert.match(prompt, /create_task/);
+    assert.match(prompt, /dispatch_capability/);
+    assert.match(prompt, /approval_required/);
     // Must NOT contain a comma-separated hardcoded id list (the pre-2026-07-09
     // bug this profile had — a literal roster string that rotted the moment a
     // role was cut). The real roster comes from generic-agent.ts/subprocess.ts

@@ -39,12 +39,18 @@ const KEYWORD_RULES: Array<{ patterns: RegExp[]; agentType: string }> = [
   // Designer — UX/UI, design systems, prototypes
   { patterns: [/\b(ux|ui|user experience|user interface|wireframe|mockup|mock.?up|prototype|design system|design token|figma|sketch|adobe xd|interaction design|visual design|information architecture|ia|user journey|user flow|usability|accessibility|a11y|wcag|affordance|heuristic|design critique|design review|style guide|brand guidelines|color palette|typography|iconography|empty state|loading state|micro.?interaction|hover state|focus state|component library|atomic design|design handoff|responsive design|mobile.?first)\b/i], agentType: "designer" },
 
-  // NOTE: no rule maps to "coo" or "trader" — both are gated out of
-  // auto-routing by tier (coordinator / domain, see agent-profiles.ts §5b/§5c
-  // of the activation spec). A prompt that mentions delegation/coordination
-  // or stocks/trading language falls through to the "developer" default
-  // rather than being auto-picked into a tier the classifier must not reach;
-  // the operator can still pick either explicitly on the New Task role select.
+  // NOTE: no rule maps to "trader" — it's domain-tier, gated out of
+  // auto-routing entirely (see agent-profiles.ts §5c of the activation spec).
+  // A prompt with stocks/trading language falls through to "developer"
+  // rather than being auto-picked; the operator can still pick it explicitly
+  // on the New Task role select.
+  //
+  // "coo" is core-tier (promoted in Spec 3 Phase 4) and IS reachable via the
+  // LLM classifier — it simply has no fast keyword rule here, since
+  // delegation/coordination language ("coordinate the launch") is too easily
+  // confused with ordinary project-management prose for a cheap regex to
+  // gate reliably. It falls through to the keyword layer's "developer"
+  // default only when the LLM classifier is unavailable.
 ];
 
 export function classifyByKeywords(description: string): string | null {

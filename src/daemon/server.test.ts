@@ -2142,13 +2142,14 @@ test("GET /agents/profiles lists the roster without leaking systemPrompt", async
   assert.equal(developer?.isCustom, false);
   assert.equal(developer?.tier, "core");
 
-  // Phase 4 (roster reduction): the wire shape the New Task role picker's
-  // Domain/Coordinator optgroups depend on.
+  // Phase 4 (roster reduction) + Spec 3 Phase 4 (coo promoted to core once
+  // it can read back its own delegated children's results): the wire shape
+  // the New Task role picker's Domain optgroup depends on.
   assert.equal(body.profiles.length, 9, "14 → 9 after cutting ceo/cto/cfo/analyst/inventor");
-  assert.equal(body.profiles.filter((p) => p.tier === "core").length, 7);
-  assert.equal(body.profiles.filter((p) => p.tier === "coordinator").length, 1);
+  assert.equal(body.profiles.filter((p) => p.tier === "core").length, 8);
+  assert.equal(body.profiles.filter((p) => p.tier === "coordinator").length, 0);
   assert.equal(body.profiles.filter((p) => p.tier === "domain").length, 1);
-  assert.equal(body.profiles.find((p) => p.id === "coo")?.tier, "coordinator");
+  assert.equal(body.profiles.find((p) => p.id === "coo")?.tier, "core");
   assert.equal(body.profiles.find((p) => p.id === "trader")?.tier, "domain");
   assert.equal(body.profiles.find((p) => p.id === "cto"), undefined, "cut ids must not appear in the live roster");
 });

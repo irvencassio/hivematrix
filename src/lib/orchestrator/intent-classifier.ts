@@ -27,8 +27,10 @@ export function _setExecSyncForTests(fn: typeof execSync | null): void {
 // cached to a module-level const) — a custom-profile edit or the roster
 // itself changing must take effect on the next classification, not require
 // a daemon restart. It also restricts the classifier's choice set to
-// tier==="core" — coo (coordinator) and any domain profile (e.g. trader)
-// must never be auto-selected; only an explicit pick reaches them.
+// tier==="core" — any domain profile (e.g. trader) must never be
+// auto-selected; only an explicit pick reaches it. coo was gated out of
+// this set (coordinator-tier) until it could read back its own delegated
+// children's results — Spec 3 Phase 4 promoted it to core now that it can.
 function buildAgentDescriptions(): string {
   return getCoreAgentProfiles()
     .map((p) => `- ${p.id}: ${p.description}`)

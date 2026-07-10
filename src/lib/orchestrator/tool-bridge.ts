@@ -189,6 +189,32 @@ export const TOOL_DEFINITIONS: ChatTool[] = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "dispatch_capability",
+      description: "Route a request to a HiveMatrix capability lane (browser, terminal, mail, message, desktop) via the typed COO dispatcher — for \"go do X in the world\" actions (browse a site, run a shell command, send an email), not for delegating to a specialist role (use create_task for that). Honors real risk tiers and approval policy: mail/message/desktop actions always come back as approval_required and are never auto-approved; memory/review report as unsupported.",
+      parameters: {
+        type: "object",
+        properties: {
+          request: {
+            type: "string",
+            description: "What you want done, in plain language.",
+          },
+          domains: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional: target domain(s) for a browser request.",
+          },
+          project: {
+            type: "string",
+            description: "Optional project label.",
+          },
+        },
+        required: ["request"],
+      },
+    },
+  },
 ];
 
 /** Context passed to tool execution for delegation safety. */
@@ -235,6 +261,8 @@ export async function executeTool(
         return await executeListFiles(args, projectPath);
       case "create_task":
         return await executeCreateTask(args, context);
+      case "dispatch_capability":
+        return await executeDispatchCapability(args);
       default: {
         // Embedded capability lanes (Browser Lane / Desktop Lane) are
         // resolved by the lane-tools module, which enforces the connectivity
@@ -562,6 +590,62 @@ function parseDependsOnColumn(value: unknown): string[] {
     return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * Routes through the daemon's existing typed COO dispatcher (POST
+ * /coo/dispatch, prepare-only — no `create`) rather than reimplementing
+ * routing/risk-tier/approval logic here. Gives delegation the same risk
+ * tiers and approval gates create_task bypasses: browser/terminal come back
+ * "prepared" (a real work item), mail/message/desktop always come back
+ * "approval_required" (never auto-approved), memory/review come back
+ * "unsupported", and the caller must report that honestly rather than
+ * improvising with bash.
+ */
+async function executeDispatchCapability(args: Record<string, unknown>): Promise<string> {
+  const request = typeof args.request === "string" ? args.request.trim() : "";
+  if (!request) return "Error: request is required";
+  const domains = Array.isArray(args.domains)
+    ? args.domains.filter((d): d is string => typeof d === "string" && d.trim().length > 0)
+    : undefined;
+  const project = typeof args.project === "string" && args.project.trim() ? args.project.trim() : undefined;
+
+  const base = `http://127.0.0.1:${process.env.HIVEMATRIX_PORT ?? "3747"}`;
+  const token = readToken("auth-token") ?? "";
+  const authArg = `-H "Authorization: Bearer ${token}"`;
+
+  try {
+    const body = JSON.stringify({ text: request, domains, project });
+    const { stdout } = await execAsync(
+      `curl -s -X POST ${authArg} ${base}/coo/dispatch -H "Content-Type: application/json" -d '${body.replace(/'/g, "'\\''")}'`,
+      { encoding: "utf-8", timeout: 15_000, killSignal: "SIGKILL" }
+    );
+    const parsed = JSON.parse(stdout) as { ok?: boolean; error?: string; result?: {
+      status: string; lane: string | null; capability: string | null; reason: string;
+      approval: { required: boolean; trust: string } | null;
+    } };
+    if (!parsed.ok || !parsed.result) {
+      return `Error dispatching capability: ${parsed.error ?? "unknown error"}`;
+    }
+    const r = parsed.result;
+    switch (r.status) {
+      case "no_match":
+        return `No capability route matched this request. ${r.reason}`;
+      case "unsupported":
+        return `Unsupported — no execution bridge for this yet. ${r.reason}`;
+      case "approval_required":
+        return `APPROVAL REQUIRED — not executed. This must be surfaced to the operator, never treated as done. ${r.reason} Trust boundary: ${r.approval?.trust ?? "n/a"}`;
+      case "needs_input":
+        return `Needs more input before this can route: ${r.reason}`;
+      case "prepared":
+        return `Prepared (lane: ${r.lane}, capability: ${r.capability}). ${r.reason}`;
+      default:
+        return r.reason;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Error dispatching capability: ${msg}`;
   }
 }
 

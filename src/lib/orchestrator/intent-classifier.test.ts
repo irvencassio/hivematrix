@@ -81,11 +81,12 @@ test("classifyTask returns the CLI's classification when it succeeds and names a
   });
 });
 
-test("classifyTask rejects a CLI response naming a coordinator/domain id, falling through instead of trusting it", async () => {
-  _setExecSyncForTests(((): string => JSON.stringify({ agent: "coo" })) as unknown as typeof import("node:child_process").execSync);
+test("classifyTask rejects a CLI response naming a domain id, falling through instead of trusting it", async () => {
+  // trader is domain-tier — never auto-routable, explicit-pick only.
+  _setExecSyncForTests(((): string => JSON.stringify({ agent: "trader" })) as unknown as typeof import("node:child_process").execSync);
 
   await withTempHome({ providers: { claude: { enabled: true } } }, async () => {
     const result = await classifyTask("fix the login bug");
-    assert.equal(result, "developer", "\"coo\" is not a valid CLI response (coordinator-tier) — falls through to the keyword rule");
+    assert.equal(result, "developer", "\"trader\" is not a valid CLI response (domain-tier) — falls through to the keyword rule");
   });
 });

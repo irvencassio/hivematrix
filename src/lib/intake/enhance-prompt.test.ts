@@ -92,16 +92,18 @@ test("a hallucinated agentType (not a real core-roster id) is rejected, never tr
   assert.equal(result.agentType, "auto");
 });
 
-test("a coordinator or domain id from the model is rejected — the wizard must never suggest an explicit-only role", async () => {
-  const coo = await enhancePrompt("coordinate the launch across teams", {
-    chatComplete: async () => JSON.stringify({ agentType: "coo", enhanced: "Coordinate the launch.", rationale: "" }),
-  });
-  assert.equal(coo.agentType, "auto", "coo is coordinator-tier — not suggestible until Spec 3");
-
+test("a domain id from the model is rejected — the wizard must never suggest an explicit-only role", async () => {
   const trader = await enhancePrompt("analyze this stock", {
     chatComplete: async () => JSON.stringify({ agentType: "trader", enhanced: "Analyze the stock.", rationale: "" }),
   });
   assert.equal(trader.agentType, "auto", "trader is domain-tier — explicit pick only");
+});
+
+test("coo is a valid wizard suggestion (Spec 3 Phase 4 promoted it to core-tier)", async () => {
+  const coo = await enhancePrompt("coordinate the launch across teams", {
+    chatComplete: async () => JSON.stringify({ agentType: "coo", enhanced: "Coordinate the launch.", rationale: "" }),
+  });
+  assert.equal(coo.agentType, "coo");
 });
 
 test("the system prompt is role-neutral: no hard-coded 'coding-agent' framing or blanket file-path instruction", async () => {
