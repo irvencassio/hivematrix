@@ -1227,3 +1227,56 @@ stack is now Qwen-only (Qwen3.6-35B-A3B via Rapid-MLX). Earlier entries in this
 log that reference DeepSeek/ds4/DwarfStar as the current or primary local model
 (e.g. Q2, the BUILD entries around 2026-07-04) are historical decisions kept
 for record — they predate the removal and no longer reflect the live stack.
+
+## Q16 — Delegation result read-back reinstated (narrow); Q15 decomposition stays dead (2026-07-09)
+
+**Context.** The 14-profile agent roster (`src/lib/config/agent-profiles.ts`) has never
+routed a task to anything but `developer` — verified against the live DB, 64/64 tasks.
+The COO profile can call `create_task` but is architecturally blind: `executeCreateTask`
+(`tool-bridge.ts:441-508`) POSTs a subtask and returns immediately; the parent agent's
+process exits without ever reading what its child produced. A coordinator that cannot
+observe outcomes cannot coordinate. Fixing that requires a parent to read its children's
+results — which sits close enough to the decomposition-and-DAG shape of Q15 that it needs
+its own explicit decision, not a quiet reopening.
+
+**Decision — reinstated:** a parent task may read the outputs of its own already-completed
+children, via a **continuation** (reusing the existing human-reply mechanism,
+`appendReplyContinuation`, `server.ts:4073-4113`) — never by blocking a scheduler slot. The
+scheduler additionally honors the pre-existing `dependsOn` column
+(`src/lib/db/index.ts:50,793,818,831,1083`) for ordering, via the pre-existing, previously
+unwired `dag-engine.ts` (Kahn cycle check). **No new persistent store is created** —
+`parentTaskId`, `dependsOn`, and `reviewState` (as the state carrier, mirroring the existing
+`needs_input` value) already exist.
+
+**Decision — NOT reinstated, and still forbidden by the scope wall:** preflight
+decomposition. There is no task-intake classifier, no `decompose.ts`, no
+`work_packages`/`work_package_items`/`flight_loops` tables, no Flights UI, no Flight-loop
+scheduler, and no Work Package brand. Broad prompts still self-plan as a single
+`workflow:"work"` task via Superpowers, exactly as Q15 specifies. `missionId`,
+`missionPhase`, `goalAncestry`, and `scheduledTaskId` remain removed.
+
+**Why this is not Q15 returning.** Q15 removed decomposition performed *before the work
+began, by a classifier that had never read the code* — a preflight splitter operating on
+guesses. What this reinstates is synthesis performed *after the work is done, by an agent
+that already had tools in hand and looked around* — the COO decomposes at runtime with full
+context, and the only new capability is reading back what its own children, which it itself
+spawned with that context, produced. The failure mode Q15 cited (planning without context)
+is not reintroduced; nothing here plans on the system's behalf before an agent has started.
+
+**Scope, explicitly bounded (see `docs/superpowers/specs/2026-07-09-coo-delegation-result-readback-design.md`):**
+- Depth capped at 2 (no grandchildren), sibling cap 10 — both **fail closed** on any internal
+  check error (previously fail-open, a latent bug fixed as part of this work).
+- A parent may resume **at most once** per delegation round — the anti-runaway guard.
+- No agent-to-agent messaging, group chat, blackboard, or free-form dialogue. Delegation is
+  one-hop and structured: a subtask with a result, never a conversation.
+- No DAG visualization UI, no automatic `dependsOn` inference — the COO sets it explicitly
+  or not at all.
+- The COO's lane-delegation verb must route through the existing typed dispatcher
+  (`src/lib/coo/routing-rules.ts` / `dispatch.ts`) and its approval gates — it must never
+  auto-approve `mail`/`message`/`desktop`, and must report `memory`/`review` as
+  `unsupported` rather than improvising with `bash`.
+
+**Provers (when implemented):** a coordinator task with children never holds a scheduler
+slot while they run (verified at `slots = 1`, no deadlock); a coordinator resumes at most
+once; depth/sibling caps hold under an induced internal-check failure; `npm run scope-wall`
+stays clean (no Work-Package brand, no removed columns reappear).
