@@ -122,3 +122,67 @@ test("a custom profile with no modelRole simply has none (not a crash)", async (
     assert.equal(plain?.modelRole, undefined);
   });
 });
+
+// ─── Phase 7 (2026-07-09): rewritten thin profiles ─────────────────────────
+
+function promptLines(id: string): number {
+  return getAgentProfile(id).systemPrompt.trim().split("\n").length;
+}
+
+test("developer's rewrite preserves every original rule verbatim — extends, never replaces", async () => {
+  await withTempHome(null, () => {
+    const prompt = getAgentProfile("developer").systemPrompt;
+    const originalRules = [
+      "Read files before modifying them to understand existing code",
+      "Use bash for git, npm, build tools, and other shell commands",
+      "Make targeted edits rather than rewriting entire files",
+      "Run tests after changes when a test suite exists",
+      "Be direct — execute the task, don't ask for confirmation",
+      "Commit changes when work is complete",
+    ];
+    for (const rule of originalRules) {
+      assert.ok(prompt.includes(rule), `original rule dropped or reworded: "${rule}"`);
+    }
+    // The Phase-7 addition: an explicit verification/handoff step, layered
+    // in ADDITION to (not instead of) the rules above.
+    assert.match(prompt, /verify|verification/i);
+  });
+});
+
+test("researcher and founder enforce opposite sides of the same boundary: researcher must not recommend, founder must", async () => {
+  await withTempHome(null, () => {
+    const researcher = getAgentProfile("researcher").systemPrompt;
+    const founder = getAgentProfile("founder").systemPrompt;
+    assert.match(researcher, /not to advise|not just to gather and present/i);
+    assert.match(researcher, /recommend/i, "must at least mention recommending, to explicitly forbid it");
+    assert.match(founder, /take a position|land on a recommendation|recommend/i);
+    assert.match(founder, /name the risks|honest about risks/i);
+  });
+});
+
+test("the four rewritten profiles clear the ≥25-line depth bar; designer/qa/trader are untouched by Phase 7", async () => {
+  await withTempHome(null, () => {
+    for (const id of ["founder", "researcher", "marketing", "coo"]) {
+      assert.ok(promptLines(id) >= 25, `${id} is only ${promptLines(id)} lines — expected ≥25`);
+    }
+    // general is deliberately kept short — the no-tools conversational fallback.
+    assert.ok(promptLines("general") < 15);
+    // Reference quality bar — must remain exactly what they were before Phase 7.
+    assert.equal(promptLines("qa"), 45);
+    assert.equal(promptLines("designer"), 58);
+    assert.equal(promptLines("trader"), 49);
+  });
+});
+
+test("coo's prompt describes its real fire-and-forget limitation honestly, and defers roster listing to the live injection (no hardcoded roster string)", async () => {
+  await withTempHome(null, () => {
+    const prompt = getAgentProfile("coo").systemPrompt;
+    assert.match(prompt, /fire-and-forget/i);
+    assert.match(prompt, /cannot read|cannot synthesize|cannot see/i);
+    // Must NOT contain a comma-separated hardcoded id list (the pre-2026-07-09
+    // bug this profile had — a literal roster string that rotted the moment a
+    // role was cut). The real roster comes from generic-agent.ts/subprocess.ts
+    // injecting it live (see generic-agent.test.ts / subprocess.test.ts).
+    assert.doesNotMatch(prompt, /developer, researcher, marketing, founder/);
+  });
+});

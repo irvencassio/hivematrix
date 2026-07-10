@@ -582,7 +582,17 @@ export async function spawnAgent(
   // Inject agent profile system prompt for non-developer types
   if (agentType && agentType !== "developer" && agentType !== "auto") {
     const agentProfile = getAgentProfile(agentType);
-    const profilePrompt = `\n\n--- Agent Role ---\n${agentProfile.systemPrompt}`;
+    let profileText = agentProfile.systemPrompt;
+    // Same live-roster injection as generic-agent.ts:buildSystemPrompt — the
+    // coo profile deliberately doesn't hardcode a roster string, since a
+    // hardcoded one goes stale the moment a role is added/cut/renamed. A coo
+    // task can run through either harness, so both need this.
+    if (agentType === "coo") {
+      const { getCoreAgentProfiles } = await import("@/lib/config/agent-profiles");
+      const roster = getCoreAgentProfiles().map((p) => `- ${p.id}: ${p.description}`).join("\n");
+      profileText += `\n\n--- Available agent types (create_task) ---\n${roster}`;
+    }
+    const profilePrompt = `\n\n--- Agent Role ---\n${profileText}`;
     args.push("--append-system-prompt", profilePrompt);
     overheadBytes.agentProfile = Buffer.byteLength(profilePrompt);
   }

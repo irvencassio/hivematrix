@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import type { ModelProvider } from "@/lib/config/providers";
 import { renderAttachmentBlock } from "@/lib/tasks/attachments";
@@ -8,11 +11,56 @@ import {
   buildGenericRequestBody,
   buildMessages,
   buildSmokeGateFinalResult,
+  buildSystemPrompt,
   extractTextToolCalls,
   genericThinkingInstruction,
   modelToolResultContent,
   shouldRunCompletionSmokeGate,
 } from "./generic-agent";
+
+async function withTempHomeAndProject<T>(run: (projectPath: string) => T | Promise<T>): Promise<T> {
+  const originalHome = process.env.HOME;
+  const tempHome = mkdtempSync(join(tmpdir(), "hm-generic-agent-test-"));
+  // memory.enabled: false short-circuits every brain read (settings.ts
+  // configuredBrainRootDir returns null), so buildSystemPrompt resolves fast
+  // and deterministically — this test is about the coo roster injection,
+  // not brain-bundle assembly.
+  mkdirSync(join(tempHome, ".hivematrix"), { recursive: true });
+  writeFileSync(join(tempHome, ".hivematrix", "config.json"), JSON.stringify({ memory: { enabled: false } }));
+  const projectPath = join(tempHome, "project");
+  mkdirSync(projectPath, { recursive: true });
+  process.env.HOME = tempHome;
+  try {
+    return await run(projectPath);
+  } finally {
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    rmSync(tempHome, { recursive: true, force: true });
+  }
+}
+
+test("buildSystemPrompt injects a live core-roster list for the coo profile (not hardcoded, not stale)", async () => {
+  await withTempHomeAndProject(async (projectPath) => {
+    const prompt = await buildSystemPrompt(projectPath, "coo");
+    assert.match(prompt, /--- Available agent types \(create_task\) ---/);
+    // Every current core role's id should appear in the injected roster —
+    // this is the regression that would have caught the pre-2026-07-09 bug
+    // where coo's prompt claimed dynamic generation but nothing generated it.
+    for (const id of ["developer", "researcher", "marketing", "founder", "qa", "designer"]) {
+      assert.match(prompt, new RegExp(`- ${id}:`), `roster block must list "${id}"`);
+    }
+    // coo/trader are coordinator/domain-tier — must never appear in the
+    // roster coo is told it can delegate to (see agent-roles-activation spec).
+    assert.doesNotMatch(prompt, /- coo:/);
+    assert.doesNotMatch(prompt, /- trader:/);
+  });
+});
+
+test("buildSystemPrompt does NOT inject the roster block for a non-coo profile", async () => {
+  await withTempHomeAndProject(async (projectPath) => {
+    const prompt = await buildSystemPrompt(projectPath, "developer");
+    assert.doesNotMatch(prompt, /--- Available agent types \(create_task\) ---/);
+  });
+});
 
 test("generic/local request body uses provider max tokens and leaves cost uncapped", () => {
   const provider: ModelProvider = {

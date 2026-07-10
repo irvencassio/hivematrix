@@ -118,9 +118,21 @@ export function genericDeliverableReliabilityInstruction(): string {
 - Do not claim completion until the final verification command passes. If the last command fails, fix it or report the blocker plainly instead of summarizing success.`;
 }
 
-async function buildSystemPrompt(projectPath: string, agentType: string, thinkingMode?: string | null): Promise<string> {
+export async function buildSystemPrompt(projectPath: string, agentType: string, thinkingMode?: string | null): Promise<string> {
   const profile = getAgentProfile(agentType);
-  let prompt = `${profile.systemPrompt}\n\n--- Brain Doc Policy ---\n${brainDocPolicyText()}`;
+  let prompt = profile.systemPrompt;
+  // The coo profile's prompt deliberately does NOT hardcode a roster string
+  // (agent-profiles.ts) — a hardcoded list rots the moment a role is added,
+  // cut, or renamed (exactly what happened to the pre-2026-07-09 coo prompt,
+  // which still named "ceo"/"cto"/"cfo"/"analyst"/"inventor" after they were
+  // cut). Generate it fresh here instead, from the live core roster —
+  // getCoreAgentProfiles() is deliberately re-read on every call.
+  if (agentType === "coo") {
+    const { getCoreAgentProfiles } = await import("@/lib/config/agent-profiles");
+    const roster = getCoreAgentProfiles().map((p) => `- ${p.id}: ${p.description}`).join("\n");
+    prompt += `\n\n--- Available agent types (create_task) ---\n${roster}`;
+  }
+  prompt += `\n\n--- Brain Doc Policy ---\n${brainDocPolicyText()}`;
   // Chief-of-staff routing table: tell the agent which capability lane owns each
   // intent (email → Mail Lane, browser → Browser Lane, …) so it dispatches to the
   // right tool instead of improvising. Reflects only currently-available lanes.

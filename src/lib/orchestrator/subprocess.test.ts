@@ -1,8 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { renderAttachmentBlock } from "@/lib/tasks/attachments";
 import { buildClaudeSpawnArgs, isLocalEndpointModel } from "./subprocess";
+
+test("the coo agent profile's live-roster injection is wired into the Claude CLI path too, not just generic-agent.ts", () => {
+  // spawnAgent shells out to a real Claude CLI process, so this is a
+  // source-level regression guard rather than a full spawn-mock test (see
+  // generic-agent.test.ts for the equivalent behavioral test against the
+  // local/Qwen path, which exercises the identical getCoreAgentProfiles()
+  // logic this mirrors). The bug this catches: coo's system prompt claims
+  // "your available agent types are generated at prompt-assembly time" —
+  // that claim must be backed by real code on EVERY path that can run a coo
+  // task, or the CLI-routed COO would see a promise with nothing behind it.
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "subprocess.ts"), "utf8");
+  const region = src.slice(src.indexOf('agentType !== "auto"'), src.indexOf('agentType !== "auto"') + 1200);
+  assert.match(region, /agentType === "coo"/, "the CLI path must special-case coo the same way generic-agent.ts does");
+  assert.match(region, /getCoreAgentProfiles/, "must build the roster from the live core roster, not a hardcoded string");
+  assert.match(region, /--- Available agent types \(create_task\) ---/, "same injected header the local-agent path uses");
+});
 
 test("Claude spawn args omit max-budget flag when budget is uncapped", () => {
   const args = buildClaudeSpawnArgs({
