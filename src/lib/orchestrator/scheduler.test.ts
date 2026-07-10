@@ -4,17 +4,17 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { getUsageAvailabilityForTask, resolveModelForAgentRole, shouldClearStaleUsageDelay } from "./scheduler";
+import { getUsageAvailabilityForTask, resolveAutoAgentType, resolveModelForAgentRole, shouldClearStaleUsageDelay } from "./scheduler";
 import type { UsageData } from "@/lib/usage/fetcher";
 
-function withTempHome<T>(config: Record<string, unknown>, run: () => T): T {
+async function withTempHome<T>(config: Record<string, unknown>, run: () => T | Promise<T>): Promise<T> {
   const originalHome = process.env.HOME;
   const tempHome = mkdtempSync(join(tmpdir(), "hm-scheduler-test-"));
   mkdirSync(join(tempHome, ".hivematrix"), { recursive: true });
   writeFileSync(join(tempHome, ".hivematrix", "config.json"), JSON.stringify(config));
   process.env.HOME = tempHome;
   try {
-    return run();
+    return await run();
   } finally {
     process.env.HOME = originalHome;
     rmSync(tempHome, { recursive: true, force: true });
@@ -181,16 +181,28 @@ test("non usage-reset delays are not cleared", () => {
   );
 });
 
-test("blank coding agent tasks resolve to the configured coding role model", () => {
-  withTempHome({ frontierModel: "qwen3.6-35b-4bit" }, () => {
+test("blank coding agent tasks resolve to the configured coding role model", async () => {
+  await withTempHome({ frontierModel: "qwen3.6-35b-4bit" }, () => {
     assert.equal(resolveModelForAgentRole(null, "developer"), "qwen3.6-35b-4bit");
     assert.equal(resolveModelForAgentRole(undefined, "cto"), "qwen3.6-35b-4bit");
     assert.equal(resolveModelForAgentRole("", "qa"), "qwen3.6-35b-4bit");
   });
 });
 
-test("explicit task model remains pinned over role defaults", () => {
-  withTempHome({ frontierModel: "qwen3.6-35b-4bit" }, () => {
+test("explicit task model remains pinned over role defaults", async () => {
+  await withTempHome({ frontierModel: "qwen3.6-35b-4bit" }, () => {
     assert.equal(resolveModelForAgentRole("claude-sonnet-4-6", "developer"), "claude-sonnet-4-6");
+  });
+});
+
+test("resolveAutoAgentType: agentSpecialization absent ⇒ developer, no classifier call", async () => {
+  await withTempHome({}, async () => {
+    assert.equal(await resolveAutoAgentType("write the launch blog post"), "developer");
+  });
+});
+
+test("resolveAutoAgentType: agentSpecialization explicitly false ⇒ developer", async () => {
+  await withTempHome({ features: { agentSpecialization: false } }, async () => {
+    assert.equal(await resolveAutoAgentType("verify the checkout flow end to end"), "developer");
   });
 });

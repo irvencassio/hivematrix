@@ -13,6 +13,7 @@ import { dispatchInventorBeeTask } from "@/lib/inventorbee/task-dispatch";
 import type { TaskDelayReason } from "@/lib/types";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { getRoleModels } from "@/lib/models/available";
+import { isFeatureEnabled } from "@/lib/config/features";
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let consecutiveErrors = 0;
@@ -131,6 +132,19 @@ export function getUsageAvailabilityForTask(
   }
 
   return { ok: true, ...subject };
+}
+
+/**
+ * Resolve "auto" to a concrete agentType: classify when the
+ * `agentSpecialization` feature is on, else the fixed "developer" fallback
+ * (today's behavior — unchanged when the flag is absent/off). Only ever
+ * called for tasks whose agentType is "auto"; an explicit agentType on the
+ * task always bypasses this entirely.
+ */
+export async function resolveAutoAgentType(description: string): Promise<string> {
+  if (!isFeatureEnabled("agentSpecialization")) return "developer";
+  const { classifyTask } = await import("./intent-classifier");
+  return classifyTask(description);
 }
 
 export function resolveModelForAgentRole(currentModel: string | null | undefined, agentType: string | null | undefined): string | undefined {
@@ -329,26 +343,14 @@ async function tick() {
 
       if (!task) break; // No more eligible tasks
 
-      // Auto-classify agent type if set to "auto" and feature is enabled.
-      // The resolved agent role also determines which role-model default applies
-      // when the task itself was intentionally created backend-agnostic.
+      // An explicit agentType on the task (set by the operator or the prompt
+      // wizard) always wins and is used as-is — resolveAutoAgentType is only
+      // consulted for "auto". The resolved agent role also determines which
+      // role-model default applies when the task itself was intentionally
+      // created backend-agnostic.
       let agentType = ((task as Record<string, unknown>).agentType as string) ?? "auto";
       if (agentType === "auto") {
-        let specializationEnabled = false;
-        try {
-          const { readFileSync } = await import("fs");
-          const { join } = await import("path");
-          const { homedir } = await import("os");
-          const cfg = JSON.parse(readFileSync(join(homedir(), ".hivematrix", "config.json"), "utf-8"));
-          specializationEnabled = cfg.features?.agentSpecialization === true;
-        } catch { /* default off */ }
-
-        if (specializationEnabled) {
-          const { classifyTask } = await import("./intent-classifier");
-          agentType = await classifyTask(task.description);
-        } else {
-          agentType = "developer";
-        }
+        agentType = await resolveAutoAgentType(task.description);
       }
       const effectiveModel = resolveModelForAgentRole(task.model ?? undefined, agentType);
 

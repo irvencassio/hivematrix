@@ -15,6 +15,7 @@ export const KNOWN_FEATURES = [
   { key: "voice", label: "Voice Lane", description: "Live voice conversation, phone-answering, and spoken replies in the Kokoro voice. Advanced — runs the local voice sidecar." },
   { key: "openclaw.chatDock", label: "OpenClaw Chat", description: "Show OpenClaw chat as a center-pane workspace in the HiveMatrix console. OpenClaw must be installed and its Gateway must be reachable on this Mac." },
   { key: "promptWizardAlways", label: "Always enhance new tasks", description: "Run the New Task prompt wizard automatically before every Create — you still review and accept the rewrite. Off by default; you can still enhance manually with the ✨ button." },
+  { key: "agentSpecialization", label: "Specialist agents", description: "Route each task to a specialist role (developer, QA, designer, COO…) instead of always using the developer role. Off = every task runs as developer." },
 ] as const;
 
 export type FeatureKey = (typeof KNOWN_FEATURES)[number]["key"];
