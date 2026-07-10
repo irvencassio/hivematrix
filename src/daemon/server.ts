@@ -1246,8 +1246,10 @@ export function createDaemonServer() {
       if (req.method === "GET" && urlPath === "/tunnel") {
         const { tunnelStatus } = await import("@/lib/tunnel/cloudflared");
         const { tailscaleStatus } = await import("@/lib/tunnel/tailscale");
+        const { readRemoteAccessSettings } = await import("@/lib/tunnel/remote-access-settings");
         const port = parseInt(process.env.HIVEMATRIX_PORT ?? "3747", 10);
-        json(res, 200, { ...tunnelStatus(), tailscale: tailscaleStatus(port) });
+        const tsEnabled = readRemoteAccessSettings().tailscaleEnabled === true;
+        json(res, 200, { ...tunnelStatus(), tailscale: { ...tailscaleStatus(port), enabled: tsEnabled } });
         return;
       }
       // POST /tunnel/stop
@@ -1300,7 +1302,7 @@ export function createDaemonServer() {
           stopTailscaleServe();
           mergeRemoteAccessSettings({ tailscaleEnabled: false });
         }
-        json(res, 200, { ...tunnelStatus(), tailscale: tailscaleStatus(port) });
+        json(res, 200, { ...tunnelStatus(), tailscale: { ...tailscaleStatus(port), enabled } });
         return;
       }
       // POST /remote/cloudflare/enabled — turn the named tunnel on or off.
