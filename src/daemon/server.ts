@@ -1250,17 +1250,6 @@ export function createDaemonServer() {
         json(res, 200, { ...tunnelStatus(), tailscale: tailscaleStatus(port) });
         return;
       }
-      // POST /tunnel/start — start a quick tunnel to this daemon
-      if (req.method === "POST" && urlPath === "/tunnel/start") {
-        const { startQuickTunnel, tunnelStatus } = await import("@/lib/tunnel/cloudflared");
-        try {
-          const url = await startQuickTunnel(parseInt(process.env.HIVEMATRIX_PORT ?? "3747", 10));
-          json(res, 200, { ...tunnelStatus(), url });
-        } catch (e) {
-          json(res, 500, { error: e instanceof Error ? e.message : String(e) });
-        }
-        return;
-      }
       // POST /tunnel/stop
       if (req.method === "POST" && urlPath === "/tunnel/stop") {
         const { stopTunnel, tunnelStatus } = await import("@/lib/tunnel/cloudflared");
@@ -1268,15 +1257,88 @@ export function createDaemonServer() {
         json(res, 200, tunnelStatus());
         return;
       }
-      // POST /tunnel/start-named — run a named tunnel via connector token
+      // POST /tunnel/start-named — DEPRECATED shim retained for iOS builds
+      // predating 2026-07-09. Delegates to the same enable path as
+      // POST /remote/cloudflare/enabled: persists the token + hostname, starts
+      // the connector, and marks Cloudflare enabled on success.
       if (req.method === "POST" && urlPath === "/tunnel/start-named") {
-        const { startNamedTunnel, tunnelStatus } = await import("@/lib/tunnel/cloudflared");
+        const { startNamedTunnel, configureNamedTunnel, tunnelStatus } = await import("@/lib/tunnel/cloudflared");
+        const { mergeRemoteAccessSettings } = await import("@/lib/tunnel/remote-access-settings");
         const body = await parseBody(req) as Record<string, unknown>;
         const token = String(body.connectorToken ?? "").trim();
         const hostname = String(body.hostname ?? "").trim();
         if (!token || !hostname) { json(res, 400, { error: "connectorToken and hostname required" }); return; }
-        try { await startNamedTunnel(token, hostname.startsWith("http") ? hostname : `https://${hostname}`); json(res, 200, tunnelStatus()); }
-        catch (e) { json(res, 500, { error: e instanceof Error ? e.message : String(e) }); }
+        const publicUrl = hostname.startsWith("http") ? hostname : `https://${hostname}`;
+        // Persist the hostname ourselves rather than relying on startNamedTunnel's
+        // internal side effect — keeps this route's behavior independent of
+        // whichever implementation is wired in underneath it.
+        configureNamedTunnel(publicUrl);
+        try {
+          await startNamedTunnel(token, publicUrl);
+          mergeRemoteAccessSettings({ cloudflareConnectorToken: token, cloudflareEnabled: true });
+          json(res, 200, tunnelStatus());
+        } catch (e) {
+          json(res, 500, { error: e instanceof Error ? e.message : String(e) });
+        }
+        return;
+      }
+      // POST /remote/tailscale/enabled — turn `tailscale serve` for this
+      // daemon on or off. A failed enable does NOT persist tailscaleEnabled:
+      // true — a switch that reports ON while serve failed would be a lie.
+      if (req.method === "POST" && urlPath === "/remote/tailscale/enabled") {
+        const { startTailscaleServe, stopTailscaleServe, tailscaleStatus } = await import("@/lib/tunnel/tailscale");
+        const { tunnelStatus } = await import("@/lib/tunnel/cloudflared");
+        const { mergeRemoteAccessSettings } = await import("@/lib/tunnel/remote-access-settings");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const enabled = body.enabled === true;
+        const port = parseInt(process.env.HIVEMATRIX_PORT ?? "3747", 10);
+        if (enabled) {
+          const result = startTailscaleServe(port);
+          if (!result.ok) { json(res, 500, { error: result.error || "failed to start tailscale serve" }); return; }
+          mergeRemoteAccessSettings({ tailscaleEnabled: true });
+        } else {
+          stopTailscaleServe();
+          mergeRemoteAccessSettings({ tailscaleEnabled: false });
+        }
+        json(res, 200, { ...tunnelStatus(), tailscale: tailscaleStatus(port) });
+        return;
+      }
+      // POST /remote/cloudflare/enabled — turn the named tunnel on or off.
+      // ON: requires a saved hostname; starts the connector when a token is
+      // stored, else adopts an externally-run connector. A failed start does
+      // NOT persist cloudflareEnabled: true.
+      // OFF: only stops a connector HiveMatrix itself started (canStop) —
+      // never kills one running outside HiveMatrix. Hostname, Access
+      // credentials, and connector token are left on disk either way.
+      if (req.method === "POST" && urlPath === "/remote/cloudflare/enabled") {
+        const { tunnelStatus, startNamedTunnel, configureNamedTunnel, stopTunnel } = await import("@/lib/tunnel/cloudflared");
+        const { tailscaleStatus } = await import("@/lib/tunnel/tailscale");
+        const { mergeRemoteAccessSettings, readRemoteAccessSettings } = await import("@/lib/tunnel/remote-access-settings");
+        const port = parseInt(process.env.HIVEMATRIX_PORT ?? "3747", 10);
+        const body = await parseBody(req) as Record<string, unknown>;
+        const enabled = body.enabled === true;
+        if (typeof body.connectorToken === "string") {
+          mergeRemoteAccessSettings({ cloudflareConnectorToken: body.connectorToken });
+        }
+        if (enabled) {
+          const settings = readRemoteAccessSettings();
+          if (!settings.namedHostname) { json(res, 400, { error: "Set a public hostname first" }); return; }
+          try {
+            if (settings.cloudflareConnectorToken) {
+              await startNamedTunnel(settings.cloudflareConnectorToken, settings.namedHostname);
+            } else {
+              configureNamedTunnel(settings.namedHostname);
+            }
+          } catch (e) {
+            json(res, 500, { error: e instanceof Error ? e.message : String(e) });
+            return;
+          }
+          mergeRemoteAccessSettings({ cloudflareEnabled: true });
+        } else {
+          if (tunnelStatus().canStop) stopTunnel();
+          mergeRemoteAccessSettings({ cloudflareEnabled: false });
+        }
+        json(res, 200, { ...tunnelStatus(), tailscale: tailscaleStatus(port) });
         return;
       }
       // POST /tunnel/configure-named — persist/adopt a named tunnel hostname for pairing.
@@ -1308,21 +1370,27 @@ export function createDaemonServer() {
         return;
       }
       // GET /tunnel/qr — QR (SVG) of the pairing payload {url, token} for iOS.
+      // Encodes the TAILSCALE pairing URL (the phone's transport), not the
+      // Cloudflare one — the Watch has no QR and is paired manually on iPhone.
+      // No cloudflareAccess options are passed: the mesh needs none, so the
+      // Access secret is never printed into a QR the phone doesn't need.
       // Generated locally via qrencode; the token never leaves the machine.
       if (req.method === "GET" && urlPath === "/tunnel/qr") {
         const { checkGate } = await import("@/lib/license/gates");
         const pairingGate = checkGate("companion_pairing");
         if (!pairingGate.permitted) { json(res, 403, { error: pairingGate.reason, upgradeRequired: pairingGate.upgradeRequired }); return; }
-        const { tunnelStatus, pairingPayload, generateQrSvg } = await import("@/lib/tunnel/cloudflared");
+        const { pairingPayload, generateQrSvg, qrencodeInstalled } = await import("@/lib/tunnel/cloudflared");
         const { readRemoteAccessSettings } = await import("@/lib/tunnel/remote-access-settings");
-        const st = tunnelStatus();
-        if (!st.url) { json(res, 400, { error: "no tunnel running" }); return; }
-        if (!st.qrInstalled) { json(res, 503, { error: "qrencode not installed (brew install qrencode)" }); return; }
+        const { tailscaleStatus } = await import("@/lib/tunnel/tailscale");
+        const port = parseInt(process.env.HIVEMATRIX_PORT ?? "3747", 10);
         const settings = readRemoteAccessSettings();
-        const svg = await generateQrSvg(pairingPayload(st.url, AUTH_TOKEN, {
-          cloudflareAccessClientId: settings.cloudflareAccessClientId,
-          cloudflareAccessClientSecret: settings.cloudflareAccessClientSecret,
-        }));
+        const ts = tailscaleStatus(port);
+        if (!settings.tailscaleEnabled || !ts.serving || !ts.pairingUrl) {
+          json(res, 400, { error: "Turn on Tailscale to show the pairing QR." });
+          return;
+        }
+        if (!qrencodeInstalled()) { json(res, 503, { error: "qrencode not installed (brew install qrencode)" }); return; }
+        const svg = await generateQrSvg(pairingPayload(ts.pairingUrl, AUTH_TOKEN));
         if (!svg) { json(res, 500, { error: "qr generation failed" }); return; }
         res.writeHead(200, { "Content-Type": "image/svg+xml" });
         res.end(svg);

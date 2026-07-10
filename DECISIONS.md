@@ -1280,3 +1280,45 @@ is not reintroduced; nothing here plans on the system's behalf before an agent h
 slot while they run (verified at `slots = 1`, no deadlock); a coordinator resumes at most
 once; depth/sibling caps hold under an induced internal-check failure; `npm run scope-wall`
 stays clean (no Work-Package brand, no removed columns reappear).
+
+## Q17 — Quick tunnel removed; remote access is two transport toggles (2026-07-09)
+
+**Decision:** Settings → Remote access becomes two independent toggles instead of two
+always-visible cards. **Tailscale** (for the iPhone) and **Cloudflare** (for the Apple
+Watch) each drive their real transport when switched on — `tailscale serve --bg 3747` /
+`tailscale serve reset`, and starting or adopting a named `cloudflared` connector — rather
+than merely disclosing a settings panel. A failed enable does not persist as enabled; the
+switch reflects what actually happened, not what was requested.
+
+**Deleted, not deprecated:** the temporary/quick Cloudflare tunnel
+(`*.trycloudflare.com`, `startQuickTunnel`, `TunnelMode: "quick"`, `POST /tunnel/start`).
+It had carried a real security caveat (a random-but-not-secret-grade public URL) and had
+no UI button wired to it for some time before this change. Cloudflare access is now
+**permanent named tunnel only**.
+
+**New persisted state** (`~/.hivematrix/remote-access.json`, no new store — extends the
+existing file): `tailscaleEnabled`, `cloudflareEnabled`, `cloudflareConnectorToken`. No
+new database table, no new concept class.
+
+**The pairing QR (`GET /tunnel/qr`) now encodes the Tailscale URL, not Cloudflare's.** The
+phone is the QR-scanning device and belongs on the mesh; the Apple Watch has no QR and is
+paired manually from HiveMatrix on iPhone, unchanged. This closes a secret-exposure gap:
+the QR no longer embeds the Cloudflare Access client secret, since the mesh never needed it.
+
+**Code:** `src/lib/tunnel/remote-access-settings.ts` (persistence), `src/lib/tunnel/tailscale.ts`
+(`startTailscaleServe`/`stopTailscaleServe`/`parseServeStatusJSON`, plus a test-only DI seam
+`_setTailscaleServeDepsForTests` mirroring `_setMailbeeStatusDepsForTests`), `src/lib/tunnel/cloudflared.ts`
+(quick-tunnel code deleted; `_setCloudflaredDepsForTests` added for the same reason),
+`src/daemon/server.ts` (`POST /remote/tailscale/enabled`, `POST /remote/cloudflare/enabled`;
+`POST /tunnel/start-named` kept as a deprecated shim for pre-2026-07-09 iOS builds),
+`src/daemon/console.ts` (two `settingsSwitch`-driven cards replacing the always-open ones).
+Spec: `docs/superpowers/specs/2026-07-09-remote-access-toggles-spec.md` (+ companion specs
+in `hivematrix-ios` and `hivematrix-watch`).
+
+**Provers:** `remote-access-settings.test.ts` proves boolean `false` survives persistence
+(the truthiness-guard trap the spec called out explicitly); `tailscale.test.ts` proves
+`parseServeStatusJSON` against real `tailscale serve status --json` shapes with no
+subprocess; `server.test.ts` proves a failed Tailscale/Cloudflare enable does not persist
+as enabled, and that disabling an externally-adopted (not-HiveMatrix-owned) Cloudflare
+connector never calls `stopTunnel` on it. `grep -ri "trycloudflare\|startQuickTunnel" src/`
+returns nothing.

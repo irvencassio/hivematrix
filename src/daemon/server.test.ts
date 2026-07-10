@@ -2453,3 +2453,239 @@ test("every SSE stream registers a response error handler (an unhandled stream '
     );
   }
 });
+
+// --- POST /remote/tailscale/enabled, POST /remote/cloudflare/enabled ---
+//
+// The route handlers shell out to real `tailscale`/`cloudflared` binaries.
+// Status reads (`tailscale status --json`, `tailscale serve status --json`)
+// are read-only and safe to let run for real even in CI. But START/STOP calls
+// mutate real system state (or, for cloudflared, open a real network
+// connection to Cloudflare) — those are swapped for stubs via the modules'
+// test-only DI seams (_setTailscaleServeDepsForTests / _setCloudflaredDepsForTests),
+// the same pattern as _setMailbeeStatusDepsForTests.
+
+test("POST /remote/tailscale/enabled: a failed serve start returns 500 and does NOT persist tailscaleEnabled", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const { _setTailscaleServeDepsForTests } = await import("@/lib/tunnel/tailscale");
+  const { readRemoteAccessSettings } = await import("@/lib/tunnel/remote-access-settings");
+  _setTailscaleServeDepsForTests({ start: () => ({ ok: false, error: "tailnet HTTPS certs not enabled" }) });
+  t.after(() => _setTailscaleServeDepsForTests(null));
+
+  const res = await fetch(`${base}/remote/tailscale/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: true }),
+  });
+  assert.equal(res.status, 500);
+  const body = await res.json() as Record<string, unknown>;
+  assert.match(String(body.error), /tailnet HTTPS certs not enabled/);
+
+  // A switch that reports ON while serve failed would be a lie — the failure
+  // must not persist.
+  assert.notEqual(readRemoteAccessSettings().tailscaleEnabled, true);
+});
+
+test("POST /remote/tailscale/enabled: a successful serve start persists tailscaleEnabled and returns tailscale status", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const { _setTailscaleServeDepsForTests } = await import("@/lib/tunnel/tailscale");
+  const { readRemoteAccessSettings } = await import("@/lib/tunnel/remote-access-settings");
+  let startCalledWithPort: number | null = null;
+  _setTailscaleServeDepsForTests({ start: (port: number) => { startCalledWithPort = port; return { ok: true }; } });
+  t.after(() => _setTailscaleServeDepsForTests(null));
+
+  const res = await fetch(`${base}/remote/tailscale/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: true }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.ok(body.tailscale, "response includes a tailscale status object");
+  assert.equal(startCalledWithPort, 3747);
+  assert.equal(readRemoteAccessSettings().tailscaleEnabled, true);
+});
+
+test("POST /remote/tailscale/enabled: disabling calls stop and persists tailscaleEnabled: false", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const { _setTailscaleServeDepsForTests } = await import("@/lib/tunnel/tailscale");
+  const { mergeRemoteAccessSettings, readRemoteAccessSettings } = await import("@/lib/tunnel/remote-access-settings");
+  mergeRemoteAccessSettings({ tailscaleEnabled: true });
+  let stopCalled = false;
+  _setTailscaleServeDepsForTests({ stop: () => { stopCalled = true; return { ok: true }; } });
+  t.after(() => _setTailscaleServeDepsForTests(null));
+
+  const res = await fetch(`${base}/remote/tailscale/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: false }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(stopCalled, true);
+  // `false` must survive the persistence layer's truthiness trap.
+  assert.equal(readRemoteAccessSettings().tailscaleEnabled, false);
+});
+
+test("POST /remote/cloudflare/enabled: enabling without a saved hostname is rejected", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/remote/cloudflare/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: true }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json() as Record<string, unknown>;
+  assert.match(String(body.error), /hostname/i);
+});
+
+test("POST /remote/cloudflare/enabled: with a hostname and no connector token, adopts an external connector", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  await fetch(`${base}/tunnel/configure-named`, {
+    method: "POST", headers, body: JSON.stringify({ hostname: "hivey.cassio.io" }),
+  });
+
+  const res = await fetch(`${base}/remote/cloudflare/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: true }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.mode, "named");
+  assert.equal(body.owner, "configured");
+  assert.equal(body.running, true);
+  assert.equal(body.cloudflareEnabled, true);
+});
+
+test("POST /remote/cloudflare/enabled: with a connector token, starts the named tunnel and saves the token", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const { _setCloudflaredDepsForTests } = await import("@/lib/tunnel/cloudflared");
+  let calledWith: { token: string; hostname: string } | null = null;
+  _setCloudflaredDepsForTests({
+    startNamedTunnel: async (connectorToken: string, hostname: string) => {
+      calledWith = { token: connectorToken, hostname };
+      return hostname;
+    },
+  });
+  t.after(() => _setCloudflaredDepsForTests(null));
+
+  await fetch(`${base}/tunnel/configure-named`, {
+    method: "POST", headers, body: JSON.stringify({ hostname: "hivey.cassio.io" }),
+  });
+  const res = await fetch(`${base}/remote/cloudflare/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: true, connectorToken: "connector-token-abc" }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.cloudflareEnabled, true);
+  assert.equal(body.connectorTokenSaved, true);
+  const called = calledWith as { token: string; hostname: string } | null;
+  assert.ok(called, "startNamedTunnel must be called");
+  assert.equal(called!.token, "connector-token-abc");
+  assert.equal(called!.hostname, "https://hivey.cassio.io");
+});
+
+test("POST /remote/cloudflare/enabled: a failed connector start returns 500 and does NOT persist cloudflareEnabled", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const { _setCloudflaredDepsForTests } = await import("@/lib/tunnel/cloudflared");
+  const { readRemoteAccessSettings } = await import("@/lib/tunnel/remote-access-settings");
+  _setCloudflaredDepsForTests({
+    startNamedTunnel: async () => { throw new Error("connector auth rejected"); },
+  });
+  t.after(() => _setCloudflaredDepsForTests(null));
+
+  await fetch(`${base}/tunnel/configure-named`, {
+    method: "POST", headers, body: JSON.stringify({ hostname: "hivey.cassio.io" }),
+  });
+  const res = await fetch(`${base}/remote/cloudflare/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: true, connectorToken: "bad-token" }),
+  });
+  assert.equal(res.status, 500);
+  const body = await res.json() as Record<string, unknown>;
+  assert.match(String(body.error), /connector auth rejected/);
+  assert.notEqual(readRemoteAccessSettings().cloudflareEnabled, true);
+});
+
+test("POST /remote/cloudflare/enabled: disabling an externally-adopted (not-owned) tunnel leaves it configured, not torn down", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  await fetch(`${base}/tunnel/configure-named`, {
+    method: "POST", headers, body: JSON.stringify({ hostname: "hivey.cassio.io" }),
+  });
+  await fetch(`${base}/remote/cloudflare/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: true }),
+  });
+  const before = await (await fetch(`${base}/tunnel`, { headers })).json() as Record<string, unknown>;
+  assert.equal(before.canStop, false, "an adopted, not-HiveMatrix-owned connector must not be stoppable");
+
+  const res = await fetch(`${base}/remote/cloudflare/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: false }),
+  });
+  assert.equal(res.status, 200);
+  const after = await res.json() as Record<string, unknown>;
+  assert.equal(after.cloudflareEnabled, false);
+  assert.equal(after.running, false);
+  // The external connector's own config survives — HiveMatrix never touched
+  // it (canStop was false), only its own "am I using this" flag flipped.
+  assert.equal(after.mode, "named");
+  assert.equal(after.owner, "configured");
+  assert.equal(after.url, "https://hivey.cassio.io");
+});
+
+test("POST /remote/cloudflare/enabled: an empty connectorToken clears a previously-saved one", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const { _setCloudflaredDepsForTests } = await import("@/lib/tunnel/cloudflared");
+  _setCloudflaredDepsForTests({ startNamedTunnel: async (_token: string, hostname: string) => hostname });
+  t.after(() => _setCloudflaredDepsForTests(null));
+
+  await fetch(`${base}/tunnel/configure-named`, {
+    method: "POST", headers, body: JSON.stringify({ hostname: "hivey.cassio.io" }),
+  });
+  await fetch(`${base}/remote/cloudflare/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: true, connectorToken: "some-token" }),
+  });
+  const midway = await (await fetch(`${base}/tunnel`, { headers })).json() as Record<string, unknown>;
+  assert.equal(midway.connectorTokenSaved, true);
+
+  await fetch(`${base}/remote/cloudflare/enabled`, {
+    method: "POST", headers, body: JSON.stringify({ enabled: false, connectorToken: "" }),
+  });
+  const after = await (await fetch(`${base}/tunnel`, { headers })).json() as Record<string, unknown>;
+  assert.equal(after.connectorTokenSaved, false);
+});
+
+test("POST /tunnel/start-named (deprecated shim) still works for pre-2026-07-09 iOS builds", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const { _setCloudflaredDepsForTests } = await import("@/lib/tunnel/cloudflared");
+  _setCloudflaredDepsForTests({ startNamedTunnel: async (_token: string, hostname: string) => hostname });
+  t.after(() => _setCloudflaredDepsForTests(null));
+
+  const res = await fetch(`${base}/tunnel/start-named`, {
+    method: "POST", headers, body: JSON.stringify({ connectorToken: "tok", hostname: "hivey.cassio.io" }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.mode, "named");
+  assert.equal(body.cloudflareEnabled, true);
+});
+
+test("GET /tunnel/start is gone — the quick tunnel route no longer exists", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const res = await fetch(`${base}/tunnel/start`, { method: "POST", headers });
+  assert.equal(res.status, 404);
+});
+
+test("GET /tunnel/qr: the companion_pairing license gate still runs first (unchanged by the Tailscale switch)", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  // A fresh temp HOME has no license.json → Free tier → the Pro gate blocks
+  // before the route ever reads Tailscale state. This proves the gate check
+  // still comes first; the Tailscale-enabled/serving guard behind it is
+  // covered at the unit level (parseServeStatusJSON / parseTailscaleStatusJSON
+  // in tailscale.test.ts) since exercising it here would require a signed Pro
+  // license fixture.
+  const res = await fetch(`${base}/tunnel/qr`, { headers });
+  assert.equal(res.status, 403);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.upgradeRequired, true);
+});

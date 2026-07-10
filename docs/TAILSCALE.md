@@ -17,27 +17,36 @@ off-mesh fallback.
 ## One-time setup (operator)
 
 Tailscale requires an account sign-in (browser auth) — that part is yours.
+**Tailnet HTTPS certs must be enabled** (admin console → DNS → Enable HTTPS) —
+this is the single most common reason the console's Tailscale toggle fails to
+turn on.
 
 ```bash
 # Install (Homebrew CLI + daemon, or the macOS app from tailscale.com/download)
 brew install tailscale && sudo brew services start tailscale
-
-# Drive the rest — sign-in, `tailscale serve`, and print the pairing URL + token:
-cd ~/hivematrix && ./scripts/tailscale-setup.sh
+tailscale up
 ```
+
+Once signed in, the console's **Tailscale toggle** (Settings → Remote access)
+runs `tailscale serve --bg 3747` for you and shows a pairing QR — no manual
+step needed. (`scripts/tailscale-setup.sh` does the same thing standalone, for
+scripted/headless bring-up.)
 
 The daemon binds loopback (`127.0.0.1:3747`) by design; `tailscale serve` proxies
 the tailnet to it, so **no daemon bind change and no new public exposure**.
 
-Install Tailscale on the iPhone too (same account), then in the HiveMatrix iOS
-app paste the tailnet URL (`https://<magicdns>` or `http://100.x.y.z:3747`) + the
-token — or scan a QR built from them.
+Install Tailscale on the iPhone too (same account), then in HiveMatrix on
+iPhone scan the pairing QR — or paste the tailnet URL (`https://<magicdns>`)
+and token manually.
 
 ## What the daemon does (tailnet-aware)
 
 - **`GET /tunnel`** returns a `tailscale` object:
-  `{ installed, running, ipv4, magicDNSName, pairingUrl }` so the app/console can
-  show mesh state and offer the tailnet pairing URL.
+  `{ installed, running, serving, enabled, ipv4, magicDNSName, pairingUrl }` so
+  the app/console can show mesh state, whether `tailscale serve` is actively
+  proxying our port, and offer the tailnet pairing URL. `enabled` is the
+  toggle's persisted state; `serving` is live-checked via
+  `tailscale serve status --json`.
 - **`GET /voice/rtc/config`** serves **STUN-only** ICE (skips TURN) when the
   client is on-mesh — detected with zero subprocess cost from an explicit
   `?transport=direct` opt-in or a tailnet `Host` header (`100.x` / `*.ts.net`).

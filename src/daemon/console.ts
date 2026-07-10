@@ -1089,52 +1089,50 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="settingsRemote" style="display:none">
       <div class="remote-status"><span class="dot" id="s_remote_dot"></span><span id="s_remote_label">…</span></div>
       <div id="s_tunnel_detail" class="muted" style="font-size:11px;margin-top:4px"></div>
-      <div class="muted" style="font-size:11px;margin-top:6px">Reach this daemon from your phone. Tailscale is a private mesh (recommended); a named Cloudflare tunnel is for the Apple Watch and other off-mesh devices.</div>
 
       <div class="remote-card">
-        <div class="remote-card-h"><span>Tailscale</span><span class="badge">private mesh · recommended</span></div>
-        <div class="muted" id="s_ts_status" style="font-size:11px;margin:4px 0 8px">Checking Tailscale…</div>
-        <label class="flbl" style="margin-top:0">Reachable URL (this Mac)</label>
-        <div class="row"><input id="s_ts_url" readonly placeholder="run: tailscale serve --bg 3747" style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
-          <button class="copybtn" onclick="copyField('s_ts_url')">Copy</button></div>
-        <div class="muted" style="font-size:11px;margin-top:4px">On the Mac run <code>tailscale serve --bg 3747</code> (needs tailnet HTTPS certs enabled). Then on your phone with Tailscale connected, open HiveMatrix → Settings → Remote and use this URL. Nothing is exposed to the internet.</div>
+        <div class="remote-card-h" style="justify-content:space-between"><span>Tailscale <span class="badge">iPhone · private mesh</span></span><span id="s_ts_switch"></span></div>
+        <div id="s_ts_body" style="display:none">
+          <div class="muted" id="s_ts_status" style="font-size:11px;margin:4px 0 8px"></div>
+          <label class="flbl" style="margin-top:0">Reachable URL (this Mac)</label>
+          <div class="row"><input id="s_ts_url" readonly style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
+            <button class="copybtn" onclick="copyField('s_ts_url')">Copy</button></div>
+          <label class="flbl" style="margin-top:10px">Scan to pair (iPhone)</label>
+          <div id="s_qr" style="background:#fff;border-radius:8px;padding:8px;width:188px;height:188px"></div>
+          <div class="muted" style="font-size:11px;margin-top:4px">Open HiveMatrix on iPhone → Scan QR. Encodes the tailnet URL + token (generated locally). Nothing is exposed to the internet.</div>
+        </div>
       </div>
 
       <div class="remote-card">
-        <div class="remote-card-h"><span>Named tunnel</span><span class="badge">durable · multi-user</span></div>
-        <div class="muted" style="font-size:11px;margin:4px 0 8px">A stable hostname you control — survives restarts and is right for ongoing / shared access.</div>
-        <label class="flbl" style="margin-top:0">Public hostname</label>
-        <div class="row"><input id="s_named_host" placeholder="hivey.cassio.io" style="flex:1" />
-          <button class="copybtn" onclick="configureNamedTunnel()">Save / show QR</button></div>
-        <div class="muted" style="font-size:11px;margin-top:4px">A stable Cloudflare hostname for one-time mobile pairing.</div>
+        <div class="remote-card-h" style="justify-content:space-between"><span>Cloudflare <span class="badge">Apple Watch · permanent tunnel</span></span><span id="s_cf_switch"></span></div>
+        <div id="s_cf_body" style="display:none">
+          <div class="muted" style="font-size:11px;margin:4px 0 8px">The Apple Watch can't join a mesh, so it reaches the daemon over a permanent named tunnel. There is no QR for the Watch — enter these values in HiveMatrix on iPhone, then tap Sync Apple Watch.</div>
+          <label class="flbl" style="margin-top:0">Public hostname</label>
+          <div class="row"><input id="s_named_host" placeholder="hivey.cassio.io" style="flex:1" />
+            <button class="copybtn" onclick="configureNamedTunnel()">Save hostname</button></div>
 
-        <label class="flbl" style="margin-top:8px">Cloudflare Access Client ID</label>
-        <input id="s_cf_access_id" placeholder="optional service-token client id for mobile" style="width:100%;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
-        <label class="flbl" style="margin-top:6px">Cloudflare Access Client Secret</label>
-        <div class="row"><input id="s_cf_access_secret" type="password" placeholder="optional service-token client secret" style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
-          <button class="copybtn" onclick="saveCloudflareAccessCredentials()">Save Access</button></div>
-        <div class="muted" id="s_cf_access_detail" style="font-size:11px;margin-top:4px">Only needed when Cloudflare Access protects the hostname for iOS/API calls.</div>
+          <label class="flbl" style="margin-top:8px">Cloudflare Access Client ID</label>
+          <input id="s_cf_access_id" placeholder="service-token client id" style="width:100%;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
+          <label class="flbl" style="margin-top:6px">Cloudflare Access Client Secret</label>
+          <div class="row"><input id="s_cf_access_secret" type="password" placeholder="service-token client secret" style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
+            <button class="copybtn" onclick="saveCloudflareAccessCredentials()">Save Access</button></div>
+          <div class="muted" id="s_cf_access_detail" style="font-size:11px;margin-top:4px"></div>
 
-        <label class="flbl" style="margin-top:8px">Connector token</label>
-        <input id="s_named_token" type="password" placeholder="optional — only if HiveMatrix should start cloudflared" style="width:100%" />
-        <div class="row" style="margin-top:6px"><button class="copybtn" onclick="startNamedTunnel()">Run with token</button></div>
-        <div class="muted" style="font-size:11px;margin-top:4px">Leave blank when an existing Cloudflare connector is already running.</div>
-      </div>
+          <label class="flbl" style="margin-top:8px">Connector token</label>
+          <input id="s_named_token" type="password" placeholder="optional — only if HiveMatrix should run cloudflared" style="width:100%" />
+          <div class="muted" style="font-size:11px;margin-top:4px">Leave blank when a Cloudflare connector already runs outside HiveMatrix. Saved when you turn the toggle on.</div>
 
-      <div id="s_tunnel_live" style="display:none;margin-top:10px">
-        <label class="flbl">Public URL</label>
-        <div class="row"><input id="s_tunnel_url" readonly style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
-          <button class="copybtn" onclick="copyField('s_tunnel_url')">Copy</button></div>
-        <label class="flbl" style="margin-top:10px">Scan to pair (iPhone)</label>
-        <div id="s_qr" style="background:#fff;border-radius:8px;padding:8px;width:188px;height:188px"></div>
-        <div class="muted" style="font-size:11px;margin-top:4px">Open HiveMatrix on iPhone → Scan QR. Encodes the URL + token (generated locally).</div>
+          <label class="flbl" style="margin-top:10px">Public URL</label>
+          <div class="row"><input id="s_tunnel_url" readonly style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
+            <button class="copybtn" onclick="copyField('s_tunnel_url')">Copy</button></div>
+        </div>
       </div>
 
       <label class="flbl" style="margin-top:14px">Access token (manual pairing)</label>
       <div class="row"><input id="s_token" readonly style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
         <button class="copybtn" onclick="copyField('s_token')">Copy</button></div>
 
-      <div class="muted" style="font-size:11px;margin-top:10px">⚠ A tunnel exposes the daemon to the internet; the access token is the only barrier — treat it like a password. The console never hands the token to tunneled visitors.</div>
+      <div class="muted" style="font-size:11px;margin-top:10px">⚠ A Cloudflare tunnel exposes the daemon to the internet; the access token is the only barrier — treat it like a password. The console never hands the token to tunneled visitors. Tailscale exposes nothing publicly.</div>
     </div>
     <div id="settingsGeneral" style="display:none">
       <label class="flbl">Appearance</label>
@@ -6804,6 +6802,7 @@ function switchSettingsTab(tab) {
   if (tab === "lanes") { renderSystemReadiness(); renderLaneSetup(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); renderVaultRefs(); }
   if (tab === "setup") renderSettingsSetup();
   if (tab === "features") renderFeatures();
+  if (tab === "remote") loadTunnel();
   if (tab === "about") { renderAbout(); checkUpdate(); }
   if (tab === "license") renderLicense();
 }
@@ -9140,49 +9139,58 @@ let tunnel = null;
 function copyField(id){ var i=document.getElementById(id); i.select(); document.execCommand("copy"); }
 async function loadTunnel() {
   tunnel = await api("/tunnel");
-  const dot = document.getElementById("s_remote_dot"), label = document.getElementById("s_remote_label");
-  const detail = document.getElementById("s_tunnel_detail"), live = document.getElementById("s_tunnel_live");
   if (!tunnel) return;
-  // Tailscale (private mesh) — surfaced independently of the Cloudflare tunnel.
   const ts = tunnel.tailscale || {};
+  const tsOn = ts.enabled === true, cfOn = tunnel.cloudflareEnabled === true;
+
+  // Header switches — the same toggle component the ChatGPT/Claude provider
+  // rows use (settingsSwitch), so turning one on drives the real transport.
+  const tsSwitchEl = document.getElementById("s_ts_switch");
+  if (tsSwitchEl) tsSwitchEl.innerHTML = settingsSwitch(tsOn, "toggleTailscale(" + (!tsOn) + ")",
+    { disabled: !ts.installed, title: !ts.installed ? "Tailscale not installed" : (tsOn ? "Turn off Tailscale" : "Turn on Tailscale") });
+  const cfSwitchEl = document.getElementById("s_cf_switch");
+  if (cfSwitchEl) cfSwitchEl.innerHTML = settingsSwitch(cfOn, "toggleCloudflare(" + (!cfOn) + ")",
+    { disabled: !tunnel.installed, title: !tunnel.installed ? "cloudflared not installed (brew install cloudflared)" : (cfOn ? "Turn off Cloudflare" : "Turn on Cloudflare") });
+
+  const tsBody = document.getElementById("s_ts_body"), cfBody = document.getElementById("s_cf_body");
+  if (tsBody) tsBody.style.display = tsOn ? "block" : "none";
+  if (cfBody) cfBody.style.display = cfOn ? "block" : "none";
+
+  // Tailscale body
   const tsStatus = document.getElementById("s_ts_status"), tsUrl = document.getElementById("s_ts_url");
   if (tsStatus) tsStatus.textContent = !ts.installed ? "Tailscale not installed on this Mac — install from tailscale.com."
     : !ts.running ? "Tailscale installed but not connected — open the Tailscale app and sign in."
-    : ts.magicDNSName ? ("Connected as " + ts.magicDNSName) : "Connected (enable MagicDNS for a hostname).";
+    : !ts.serving ? "Connected, but not serving the daemon yet."
+    : ts.magicDNSName ? ("Serving as " + ts.magicDNSName) : "Serving (enable MagicDNS for a hostname).";
   if (tsUrl && document.activeElement !== tsUrl) tsUrl.value = ts.pairingUrl || "";
-  if (!tunnel.installed) {
-    dot.className = "dot err"; label.textContent = "cloudflared not installed";
-    detail.textContent = "Install with: brew install cloudflared";
-    live.style.display = "none"; return;
-  }
-  // Reflect saved Cloudflare Access credentials so it's clear they persisted
-  // (the secret is never sent back — we only signal that one is stored).
+  if (tsOn && ts.serving) loadTunnelQr();
+
+  // Cloudflare body — reflect saved creds without ever echoing a secret.
   const idField = document.getElementById("s_cf_access_id");
   if (idField && document.activeElement !== idField) idField.value = tunnel.cloudflareAccessClientId || "";
   const secretField = document.getElementById("s_cf_access_secret");
   if (secretField && document.activeElement !== secretField)
-    secretField.placeholder = tunnel.cloudflareAccessSecretSaved ? "•••••••• saved — type to replace" : "optional service-token client secret";
-  if (tunnel.running && tunnel.url) {
-    dot.className = "dot on"; label.textContent = "Remote access ON";
-    const modeLabel = tunnel.mode === "named"
-      ? (tunnel.owner === "hivematrix" ? "Named tunnel running from HiveMatrix" : "Named tunnel configured for pairing")
-      : "Temporary ad-hoc tunnel running";
-    detail.textContent = modeLabel + (tunnel.cloudflareAccessConfigured ? " · Cloudflare Access credentials included in QR" : "") + (tunnel.qrInstalled ? "" : " (install qrencode for the QR: brew install qrencode)");
-    live.style.display = "block";
-    document.getElementById("s_tunnel_url").value = tunnel.url;
-    if (tunnel.mode === "named") document.getElementById("s_named_host").value = tunnel.url;
-    const cfDetail = document.getElementById("s_cf_access_detail");
-    if (cfDetail) cfDetail.textContent = tunnel.cloudflareAccessConfigured
-      ? "Cloudflare Access service-token credentials are saved and will be included in the QR."
-      : "Only needed when Cloudflare Access protects the hostname for iOS/API calls.";
-    // Load the QR via fetch so any failure (Pro-license gate, no tunnel, missing
-    // qrencode) surfaces its reason instead of a silently-broken <img>.
-    loadTunnelQr();
-  } else {
-    dot.className = "dot off"; label.textContent = "Remote access OFF";
-    detail.textContent = "Use Tailscale above, or configure a named Cloudflare tunnel below, to reach this daemon from your phone.";
-    live.style.display = "none";
-  }
+    secretField.placeholder = tunnel.cloudflareAccessSecretSaved ? "•••••••• saved — type to replace" : "service-token client secret";
+  const tokField = document.getElementById("s_named_token");
+  if (tokField && document.activeElement !== tokField)
+    tokField.placeholder = tunnel.connectorTokenSaved ? "•••••••• saved — type to replace" : "optional — only if HiveMatrix should run cloudflared";
+  const hostField = document.getElementById("s_named_host");
+  if (tunnel.url && hostField && document.activeElement !== hostField) hostField.value = tunnel.url;
+  const tunnelUrlField = document.getElementById("s_tunnel_url");
+  if (tunnelUrlField) tunnelUrlField.value = tunnel.url || "";
+  const cfDetail = document.getElementById("s_cf_access_detail");
+  if (cfDetail) cfDetail.textContent = tunnel.cloudflareAccessConfigured
+    ? "Access service-token credentials are saved. Enter the same values on iPhone, then Sync Apple Watch."
+    : "Required when Cloudflare Access protects the hostname (it does for the Watch).";
+
+  // Status header
+  const dot = document.getElementById("s_remote_dot"), label = document.getElementById("s_remote_label");
+  const detail = document.getElementById("s_tunnel_detail");
+  const legs = [];
+  if (tsOn && ts.serving) legs.push("Tailscale (iPhone)");
+  if (cfOn && tunnel.running) legs.push("Cloudflare (Apple Watch)");
+  if (legs.length) { dot.className = "dot on"; label.textContent = "Remote access ON"; detail.textContent = legs.join(" · "); }
+  else { dot.className = "dot off"; label.textContent = "Remote access OFF"; detail.textContent = "Turn on Tailscale for your iPhone, or Cloudflare for your Apple Watch."; }
 }
 async function loadTunnelQr() {
   const box = document.getElementById("s_qr");
@@ -9191,13 +9199,50 @@ async function loadTunnelQr() {
   try {
     const r = await fetch("/tunnel/qr", { headers: { "Authorization": "Bearer " + HM_TOKEN } });
     if (r.ok) { box.innerHTML = await r.text(); return; }
-    // Endpoint returns a JSON reason (Pro-license gate, no tunnel, qrencode missing).
+    // Endpoint returns a JSON reason (Pro-license gate, Tailscale off, missing
+    // qrencode) — surface it instead of leaving a silently-broken box.
     let reason = "QR unavailable";
     try { const j = await r.json(); if (j && j.error) reason = j.error; } catch (e) { /* non-JSON */ }
     box.innerHTML = '<div class="muted" style="font-size:11px;padding:8px;text-align:center">' + esc(reason) + '</div>';
   } catch (e) {
     box.innerHTML = '<div class="muted" style="font-size:11px;padding:8px;text-align:center">QR request failed</div>';
   }
+}
+async function toggleTailscale(enabled) {
+  const status = document.getElementById("s_ts_status");
+  let resp = null;
+  try {
+    resp = await api("/remote/tailscale/enabled", { method: "POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ enabled }) });
+  } catch (e) { /* network failure → generic error below */ }
+  if (!resp || resp.error) {
+    // A failed enable must snap the switch back to Off, not lie about state —
+    // re-render from the server rather than trusting the optimistic click.
+    if (status) { status.style.color = "var(--err)"; status.textContent = (resp && resp.error) || "Failed to reach the daemon."; }
+    await loadTunnel();
+    return;
+  }
+  tunnel = resp;
+  await loadTunnel();
+}
+async function toggleCloudflare(enabled) {
+  const cfDetail = document.getElementById("s_cf_access_detail");
+  const connectorToken = document.getElementById("s_named_token").value.trim();
+  const body = { enabled };
+  if (connectorToken) body.connectorToken = connectorToken;
+  let resp = null;
+  try {
+    resp = await api("/remote/cloudflare/enabled", { method: "POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body) });
+  } catch (e) { /* network failure → generic error below */ }
+  if (!resp || resp.error) {
+    if (cfDetail) { cfDetail.style.color = "var(--err)"; cfDetail.textContent = (resp && resp.error) || "Failed to reach the daemon."; }
+    await loadTunnel();
+    return;
+  }
+  tunnel = resp;
+  document.getElementById("s_named_token").value = "";
+  await loadTunnel();
 }
 async function configureNamedTunnel() {
   const hostname = document.getElementById("s_named_host").value.trim();
@@ -9232,14 +9277,6 @@ async function saveCloudflareAccessCredentials() {
     cfDetail.style.color = verification.ok === true ? "var(--ok)" : verification.ok === false ? "var(--err)" : "";
     cfDetail.textContent = verification.message;
   }
-}
-async function startNamedTunnel() {
-  const connectorToken = document.getElementById("s_named_token").value.trim();
-  const hostname = document.getElementById("s_named_host").value.trim();
-  if (!connectorToken || !hostname) return;
-  tunnel = await api("/tunnel/start-named", { method: "POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ connectorToken, hostname }) });
-  loadTunnel();
 }
 
 async function saveTheme() {

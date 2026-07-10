@@ -567,14 +567,22 @@ test("Full dashboard opens dedicated Observability popup, not Settings", () => {
   assert.match(js, /function closeObsDashboard\(/, "closeObsDashboard present");
 });
 
-test("remote access UI offers a Tailscale mesh and a named (durable) Cloudflare tunnel, not the throwaway temporary tunnel", () => {
-  // Tailscale is the recommended private-mesh path; the named Cloudflare tunnel
-  // remains for the Apple Watch / off-mesh devices. The throwaway trycloudflare
-  // "temporary tunnel" was removed.
-  assert.match(CONSOLE_HTML, /<span>Tailscale<\/span>/);
+test("remote access UI is two toggles — Tailscale for iPhone, Cloudflare for Apple Watch — not the throwaway temporary tunnel", () => {
+  // Each transport is a switch that drives the daemon (starts/stops the real
+  // process) and reveals its settings only when on. The throwaway trycloudflare
+  // "temporary tunnel" was removed in full.
+  assert.match(CONSOLE_HTML, /Tailscale <span class="badge">iPhone/);
+  assert.match(CONSOLE_HTML, /Cloudflare <span class="badge">Apple Watch/);
+  assert.match(CONSOLE_HTML, /id="s_ts_switch"/);
+  assert.match(CONSOLE_HTML, /id="s_cf_switch"/);
+  assert.match(CONSOLE_HTML, /id="s_ts_body"/);
+  assert.match(CONSOLE_HTML, /id="s_cf_body"/);
   assert.match(CONSOLE_HTML, /id="s_ts_url"/);
-  assert.match(CONSOLE_HTML, /tailscale serve --bg 3747/);
-  assert.match(CONSOLE_HTML, /Named tunnel/);
+  assert.match(CONSOLE_HTML, /id="s_qr"/);
+  // The toggle now runs `tailscale serve --bg 3747` itself instead of telling
+  // the operator to type it — that instruction string is gone from the copy.
+  assert.doesNotMatch(CONSOLE_HTML, /tailscale serve --bg 3747/, "the manual instruction is gone now that the toggle runs it");
+  assert.doesNotMatch(CONSOLE_HTML, /id="s_tunnel_live"/, "s_tunnel_live's children now live inside their own cards");
   assert.doesNotMatch(CONSOLE_HTML, /Temporary tunnel/, "the throwaway temporary tunnel UI must be gone");
   assert.doesNotMatch(CONSOLE_HTML, /trycloudflare/, "no trycloudflare quick-test tunnel");
   assert.doesNotMatch(CONSOLE_HTML, /Advanced: Named Cloudflare tunnel/, "named tunnel should not be hidden under an Advanced disclosure");
@@ -582,6 +590,8 @@ test("remote access UI offers a Tailscale mesh and a named (durable) Cloudflare 
   assert.match(CONSOLE_HTML, /Cloudflare Access Client Secret/);
   assert.match(CONSOLE_HTML, /\/tunnel\/configure-named/);
   assert.match(CONSOLE_HTML, /\/tunnel\/access-credentials/);
+  assert.match(CONSOLE_HTML, /\/remote\/tailscale\/enabled/);
+  assert.match(CONSOLE_HTML, /\/remote\/cloudflare\/enabled/);
   // Remote setup lives on its own settings tab.
   assert.match(CONSOLE_HTML, /id="settingsRemote"/);
   assert.match(CONSOLE_HTML, /switchSettingsTab\('remote'\)/);

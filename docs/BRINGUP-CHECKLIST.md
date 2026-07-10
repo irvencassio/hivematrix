@@ -31,12 +31,13 @@ each section gates the next. Items marked **(live)** require the physical Mac.
 - [ ] **notify plane**: configure targets (`/notify/config`) so stuck tasks / approvals escalate to the phone.
 
 ## 5. Mobile pairing
-- [ ] Open the desktop console pairing QR (`/tunnel/qr`); scan it in the iOS app (`~/hivematrix-ios`) to load URL + token. **(needs an Xcode build of the iOS app)**
+- [ ] Turn on Tailscale in Settings → Remote access, then open the desktop console pairing QR (`/tunnel/qr`, now Tailscale's URL); scan it in the iOS app (`~/hivematrix-ios`) to load URL + token. **(needs an Xcode build of the iOS app)**
 - [ ] Confirm the **Approvals** tab lists pending gates and resolves them (approve/deny, stuck retry/skip/abort).
 - [ ] (Android `~/hivematrix-android` is a scaffold — build in Android Studio later.)
 
 ## 6. Connectivity / remote access
-- [ ] Bring up the **named Cloudflare tunnel** (durable/multi-user), not a quick trycloudflare (test-only).
+- [ ] Turn on the **Tailscale** toggle for the iPhone (Settings → Remote access) — private mesh, pairing QR.
+- [ ] Turn on the **Cloudflare** toggle for the Apple Watch — permanent named tunnel only; there is no temporary tunnel.
 - [ ] `GET /posture` shows each capability as works/degraded/queued for the chosen posture — no silent failures.
 
 ## 7. Capability config (optional per posture)

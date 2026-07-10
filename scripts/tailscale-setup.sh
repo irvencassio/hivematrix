@@ -8,6 +8,10 @@
 # authenticate your account). This script drives everything else and prints the
 # tailnet pairing URL + token at the end. Safe to re-run (idempotent).
 #
+# NOTE: the console's Tailscale toggle (Settings → Remote access) now does the
+# `tailscale serve --bg $PORT` step itself. This script remains for
+# scripted/headless bring-up where the console isn't in the loop.
+#
 # See docs/TAILSCALE.md.
 set -uo pipefail
 

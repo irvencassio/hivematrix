@@ -45,7 +45,7 @@ test("pairingPayload includes optional Cloudflare Access credentials for one-tim
   );
 });
 
-test("configured named tunnel persists hostname and exposes a QR-capable status without a child process", async () => {
+test("configured named tunnel persists the hostname but stays not-running until the Cloudflare toggle is on", async () => {
   const root = mkdtempSync(join(tmpdir(), "hm-cloudflared-"));
   const previousHome = process.env.HOME;
   process.env.HOME = root;
@@ -56,10 +56,35 @@ test("configured named tunnel persists hostname and exposes a QR-capable status 
 
     assert.equal(status.mode, "named");
     assert.equal(status.owner, "configured");
-    assert.equal(status.running, true);
+    // Saving a hostname alone doesn't flip the toggle — the daemon reports
+    // itself unreachable until cloudflareEnabled is explicitly set.
+    assert.equal(status.running, false);
     assert.equal(status.canStop, false);
     assert.equal(status.url, "https://hivey.cassio.io");
     assert.equal(mod.tunnelStatus().url, "https://hivey.cassio.io");
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("enabling Cloudflare after a hostname is configured (no connector token) adopts it as running", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hm-cloudflared-"));
+  const previousHome = process.env.HOME;
+  process.env.HOME = root;
+
+  try {
+    const mod = await import(`./cloudflared.ts?case=${Date.now()}`);
+    mod.configureNamedTunnel("hivey.cassio.io");
+    const settingsMod = await import(`./remote-access-settings.ts?case=${Date.now()}`);
+    settingsMod.mergeRemoteAccessSettings({ cloudflareEnabled: true });
+
+    const status = mod.tunnelStatus();
+    assert.equal(status.running, true);
+    assert.equal(status.mode, "named");
+    assert.equal(status.owner, "configured");
+    assert.equal(status.canStop, false);
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
@@ -258,6 +283,8 @@ test("stopping a configured named tunnel does not erase persisted hostname", asy
   try {
     const mod = await import(`./cloudflared.ts?case=${Date.now()}`);
     mod.configureNamedTunnel("https://hivey.cassio.io/");
+    const settingsMod = await import(`./remote-access-settings.ts?case=${Date.now()}`);
+    settingsMod.mergeRemoteAccessSettings({ cloudflareEnabled: true });
     mod.stopTunnel();
 
     const status = mod.tunnelStatus();

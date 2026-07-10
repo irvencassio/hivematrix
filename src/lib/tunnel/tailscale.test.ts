@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { isTailnetAddress, hostOnMesh, parseTailscaleStatusJSON, filterStunOnly } =
+const { isTailnetAddress, hostOnMesh, parseTailscaleStatusJSON, filterStunOnly, parseServeStatusJSON } =
   await import(`./tailscale.ts?case=${Date.now()}`);
 
 test("isTailnetAddress accepts the 100.64.0.0/10 CGNAT range only", () => {
@@ -73,4 +73,35 @@ test("filterStunOnly drops any entry containing a turn/turns url", () => {
     { urls: "stun:stun.l.google.com:19302" },
     { urls: ["stun:c.example:3478", "stun:d.example:3478"] },
   ]);
+});
+
+test("parseServeStatusJSON: true when a handler proxies to our port", () => {
+  const raw = JSON.stringify({
+    TCP: { "443": { HTTPS: true } },
+    Web: {
+      "irvs-macbook-pro.tail2b861e.ts.net:443": {
+        Handlers: { "/": { Proxy: "http://127.0.0.1:3747" } },
+      },
+    },
+  });
+  assert.equal(parseServeStatusJSON(raw, 3747), true);
+});
+
+test("parseServeStatusJSON: false when nothing is served", () => {
+  assert.equal(parseServeStatusJSON("{}", 3747), false);
+});
+
+test("parseServeStatusJSON: false on malformed JSON", () => {
+  assert.equal(parseServeStatusJSON("not json", 3747), false);
+});
+
+test("parseServeStatusJSON: false when the handler proxies to a different port", () => {
+  const raw = JSON.stringify({
+    Web: {
+      "irvs-macbook-pro.tail2b861e.ts.net:443": {
+        Handlers: { "/": { Proxy: "http://127.0.0.1:8080" } },
+      },
+    },
+  });
+  assert.equal(parseServeStatusJSON(raw, 3747), false);
 });

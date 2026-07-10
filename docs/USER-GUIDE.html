@@ -375,16 +375,19 @@ cd "${HIVEMATRIX_REPO:-$HOME/hivematrix}"
 <h2 id="remote"><span class="n">8</span>Remote access (iPhone)</h2>
 <p>The daemon is loopback-only; <code>cloudflared</code> bridges it to the internet when you choose.</p>
 <ol>
-  <li>Settings → <strong>Remote Access</strong> → <span class="ui">Start tunnel</span> for a quick test URL, or use a
-    <strong>named tunnel</strong> (Advanced) for durable, multi-user access.</li>
-  <li>A <strong>pairing QR</strong> appears — open HiveMatrix on iPhone and scan it. It encodes the URL + access token,
-    generated locally; the token never travels through Cloudflare.</li>
+  <li>Settings → <strong>Remote Access</strong> has two toggles: <span class="ui">Tailscale</span> for your iPhone
+    (private mesh) and <span class="ui">Cloudflare</span> for your Apple Watch (permanent named tunnel). Turning one on
+    starts the real transport — <code>tailscale serve</code> or the named <code>cloudflared</code> connector.</li>
+  <li>With Tailscale on, a <strong>pairing QR</strong> appears — open HiveMatrix on iPhone and scan it. It encodes the
+    tailnet URL + access token, generated locally; nothing is exposed to the internet.</li>
   <li>Or paste the <strong>access token</strong> manually (remote visitors never get it auto-injected).</li>
+  <li>The Apple Watch has no QR — enter the Cloudflare hostname and Access service token in HiveMatrix on iPhone, then
+    tap <span class="ui">Sync Apple Watch</span>.</li>
 </ol>
 <div class="callout warn">
-  <strong>For anything lasting, use a named tunnel.</strong> Quick <code>trycloudflare.com</code> URLs are random and change
-  on restart. See the companion brain doc <em>"HiveMatrix — Cloudflare Tunnels &amp; Remote Access"</em> for the full
-  quick-vs-named breakdown and the multi-user setup.
+  <strong>Cloudflare is permanent-tunnel only.</strong> The old throwaway <code>trycloudflare.com</code> quick tunnel has
+  been removed — there is nothing random or restart-sensitive left to worry about. See the companion brain doc
+  <em>"HiveMatrix — Cloudflare Tunnels &amp; Remote Access"</em> for the multi-user Cloudflare Access setup.
 </div>
 
 <h2 id="setup"><span class="n">9</span>First-time setup</h2>
@@ -433,7 +436,7 @@ private (local-only) or to test offline behavior.</p>
   <div><span class="k">Desktop Lane helper</span><span><code>127.0.0.1:3748</code></span></div>
   <div><span class="k">Capability lane status</span><span><code>GET /lanes</code> · toggle <code>POST /lanes/:kind/autostart</code> <span style="color:var(--muted)">(compatibility aliases: <code>GET /bees</code>, <code>POST /bees/:kind/autostart</code>)</span></span></div>
   <div><span class="k">Models</span><span><code>GET /models</code> (backends + available + default)</span></div>
-  <div><span class="k">Tunnel</span><span><code>GET /tunnel</code> · <code>POST /tunnel/start</code> · <code>/tunnel/start-named</code> · <code>/tunnel/qr</code></span></div>
+  <div><span class="k">Tunnel</span><span><code>GET /tunnel</code> · <code>POST /remote/tailscale/enabled</code> · <code>POST /remote/cloudflare/enabled</code> · <code>GET /tunnel/qr</code> (Tailscale pairing)</span></div>
   <div><span class="k">Brain memory</span><span><code>~/_GD/brain</code> (canonical)</span></div>
   <div><span class="k">Companion docs</span><span>Cloudflare tunnels brain doc · <code>docs/REMOTE-ACCESS.md</code> · <code>COMPONENT-MAP.md</code> · <code>DECISIONS.md</code></span></div>
 </div>
