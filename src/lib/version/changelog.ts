@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.163", date: "2026-07-10", note: "Developer ID release" },
   { version: "0.1.162", date: "2026-07-09", note: "Developer ID release" },
   { version: "0.1.161", date: "2026-07-09", note: "Developer ID release" },
   { version: "0.1.160", date: "2026-07-09", note: "Developer ID release" },
