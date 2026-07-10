@@ -1568,7 +1568,7 @@ test("7-day usage bars (breakdown, codex, and summary cards) embed day ticks", (
   assert.match(card, /dayTicksHtml\(win\.durationMs\)/, "summary card embeds day ticks when its window is 7-day");
 });
 
-function consoleTaskProvenancePills(): (t: unknown, out: unknown, logs: unknown) => string {
+function consoleTaskProvenancePills(): (t: unknown, out: unknown, logs: unknown, childTasks?: unknown) => string {
   const js = extractScript(CONSOLE_HTML);
   const esc = js.match(/function esc\(s\)\{[^\n]+\}/)?.[0] ?? "";
   const agentProfileById = js.match(/const agentProfileById = \{\};[^\n]*/)?.[0] ?? "";
@@ -1577,7 +1577,18 @@ function consoleTaskProvenancePills(): (t: unknown, out: unknown, logs: unknown)
   const body = js.match(/function taskProvenancePills\([\s\S]*?\n\}/)?.[0] ?? "";
   assert.ok(esc.length > 10 && agentProfileById.length > 5 && roleLabel.length > 10 && renderRolePills.length > 20 && body.length > 20,
     "esc + agentProfileById + ROLE_PROVENANCE_LABEL + renderRolePills + taskProvenancePills bodies extracted");
-  return new Function(esc + "\n" + agentProfileById + "\n" + roleLabel + "\n" + renderRolePills + "\n" + body + "\nreturn taskProvenancePills;")() as (t: unknown, out: unknown, logs: unknown) => string;
+  return new Function(esc + "\n" + agentProfileById + "\n" + roleLabel + "\n" + renderRolePills + "\n" + body + "\nreturn taskProvenancePills;")() as (t: unknown, out: unknown, logs: unknown, childTasks?: unknown) => string;
+}
+
+// Same extraction as consoleTaskProvenancePills, but for cardRoleBadge (the
+// board-card equivalent) and lets a test seed agentProfileById.
+function consoleCardRoleBadge(profileFixtures: Record<string, { icon?: string; name: string }>): (t: unknown) => string {
+  const js = extractScript(CONSOLE_HTML);
+  const esc = js.match(/function esc\(s\)\{[^\n]+\}/)?.[0] ?? "";
+  const body = js.match(/function cardRoleBadge\([\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(esc.length > 10 && body.length > 20, "esc + cardRoleBadge bodies extracted");
+  const seededProfiles = "const agentProfileById = " + JSON.stringify(profileFixtures) + ";";
+  return new Function(esc + "\n" + seededProfiles + "\n" + body + "\nreturn cardRoleBadge;")() as (t: unknown) => string;
 }
 
 // Same extraction as consoleTaskProvenancePills, but exposes renderRolePills
@@ -1684,6 +1695,41 @@ test("renderRolePills: distinct roles among childTasks each get their own pill, 
   assert.deepEqual(order, ["🧭 COO", "🎨 Designer", "🔍 QA"], "primary role first, then each distinct child role once, auto children ignored");
 });
 
+test("taskProvenancePills threads childTasks through to renderRolePills — a coordinator's detail view shows every role that helped", () => {
+  const pills = consoleTaskProvenancePills();
+  const html = pills({ agentType: "coo" }, {}, [], [{ agentType: "designer" }, { agentType: "qa" }]);
+  const roles = [...html.matchAll(/class="prov-pill agent"[^>]*>([^<]+)</g)].map((m) => m[1]);
+  assert.deepEqual(roles, ["coo", "designer", "qa"]);
+});
+
+test("cardRoleBadge: a plain task with no children shows just its own role badge (unchanged single-pill behavior)", () => {
+  const badge = consoleCardRoleBadge({ developer: { icon: "💻", name: "Developer" } });
+  assert.match(badge({ agentType: "developer" }), /class="badge"[^>]*>💻 Developer</);
+  assert.equal(badge({ agentType: "developer", childAgentTypes: [] }), badge({ agentType: "developer" }));
+});
+
+test("cardRoleBadge: a coordinator's board card shows its own badge plus one per distinct child role (server-enriched childAgentTypes)", () => {
+  const badge = consoleCardRoleBadge({
+    coo: { icon: "🧭", name: "COO" }, designer: { icon: "🎨", name: "Designer" }, qa: { icon: "🔍", name: "QA" },
+  });
+  const html = badge({ agentType: "coo", childAgentTypes: ["designer", "qa", "designer"] });
+  const roles = [...html.matchAll(/class="badge"[^>]*>([^<]+)</g)].map((m) => m[1]);
+  assert.deepEqual(roles, ["🧭 COO", "🎨 Designer", "🔍 QA"], "primary first, each distinct child once — deduped even though designer repeats");
+});
+
+test("cardRoleBadge: no agentType and no children ⇒ empty, never invents a badge", () => {
+  const badge = consoleCardRoleBadge({});
+  assert.equal(badge({}), "");
+  assert.equal(badge({ agentType: "auto", childAgentTypes: [] }), "");
+});
+
+test("selectTask fetches this task's children (for plural role pills) and passes them into taskProvenancePills", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "selectTask");
+  assert.match(body, /\/tasks\?parentTaskId="\s*\+\s*id/);
+  assert.match(body, /taskProvenancePills\(t, out, logs, children\)/);
+});
+
 test("roleSelectOptionsHtml groups every role select by tier (Auto/core flat, Coordinator + Domain as separate optgroups, explicit-pick only)", () => {
   const js = extractScript(CONSOLE_HTML);
   const body = fnBody(js, "roleSelectOptionsHtml");
@@ -1704,7 +1750,7 @@ test("loadAgentProfiles populates BOTH the main role select and the wizard previ
 test("provenance pills are wired into the task detail view, right after the status line", () => {
   const js = extractScript(CONSOLE_HTML);
   const body = fnBody(js, "selectTask");
-  assert.match(body, /taskProvenancePills\(t, out, logs\)/, "selectTask renders the pills");
+  assert.match(body, /taskProvenancePills\(t, out, logs, children\)/, "selectTask renders the pills (with fetched children for plural role pills)");
 });
 
 test("settings surfaces a real Terminal Lane readiness card with no secrets", () => {

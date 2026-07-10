@@ -2503,6 +2503,12 @@ async function selectTask(id) {
   renderBoard();
   const t = await api("/tasks/"+id);
   if (!t || !t._id) { state.selected = null; return; }
+  // Coordinator children (for plural role pills) — cheap, indexed lookup;
+  // includes archived children (see GET /tasks' parentTaskId special-case),
+  // since a subtask auto-archives on success and that's the interesting case.
+  let children = [];
+  try { children = await api("/tasks?parentTaskId="+id); } catch (e) { children = []; }
+  if (state.selected !== id) return; // stale — operator moved on while this was in flight
   const out = t.output ? (typeof t.output==="string"?JSON.parse(t.output):t.output) : {};
   // The clean text the operator would edit: a review draft's script, else the result.
   _replyEditSource = (typeof out.reviewScript === "string" && out.reviewScript) || (typeof out.summary === "string" && out.summary) || "";
@@ -2516,7 +2522,7 @@ async function selectTask(id) {
   el.innerHTML = '<div class="session"><h1>'+esc(t.title||t._id)+(live?'<span class="streaming">● running</span>':'')
     + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></h1>'
     + '<div class="sub">'+esc(t.project||"")+' · '+esc(t.status)+(t.reviewState?' · '+esc(t.reviewState):'')+'</div>'
-    + taskProvenancePills(t, out, logs)
+    + taskProvenancePills(t, out, logs, children)
     + taskActionsHtml(t)
     + (t.projectPath ? '<div class="kv"><span class="k">project path</span><span>'+esc(t.projectPath)+'</span></div>' : '')
     + taskTelemetryStrip(t, out)
@@ -2825,13 +2831,24 @@ function renderRolePills(task, childTasks) {
 
 // Compact board-card equivalent of renderRolePills — same "which role(s)
 // handled this" data, styled as a .badge to match the model/reviewState/age
-// badges already on the card instead of the detail view's pill shape.
+// badges already on the card instead of the detail view's pill shape. A
+// coordinator's card shows its own role plus one badge per distinct child
+// agentType (childAgentTypes is enriched server-side in GET /tasks — a
+// single grouped query, not a per-card fetch).
 function cardRoleBadge(t) {
-  const id = t && t.agentType && t.agentType !== "auto" ? t.agentType : null;
-  if (!id) return "";
-  const p = agentProfileById[id];
-  const label = (p ? ((p.icon || "") + " " + p.name) : id).trim();
-  return '<span class="badge" style="color:var(--accent)" title="Agent role">' + esc(label) + '</span>';
+  const primaryId = t && t.agentType && t.agentType !== "auto" ? t.agentType : null;
+  const ids = [];
+  if (primaryId) ids.push(primaryId);
+  const childIds = Array.isArray(t && t.childAgentTypes) ? t.childAgentTypes : [];
+  for (const id of childIds) {
+    if (id && id !== "auto" && ids.indexOf(id) === -1) ids.push(id);
+  }
+  if (!ids.length) return "";
+  return ids.map(id => {
+    const p = agentProfileById[id];
+    const label = (p ? ((p.icon || "") + " " + p.name) : id).trim();
+    return '<span class="badge" style="color:var(--accent)" title="Agent role">' + esc(label) + '</span>';
+  }).join("");
 }
 
 // What ran a completed task: the agent role(s) (renderRolePills, above),
@@ -2841,9 +2858,9 @@ function cardRoleBadge(t) {
 // "mcp__<server>__<tool>", the same prefix approval.ts matches on), and the
 // entry-point skill/command (out.command, set when a task is created via
 // "Use a skill").
-function taskProvenancePills(t, out, logs) {
+function taskProvenancePills(t, out, logs, childTasks) {
   out = out || {};
-  const rolePills = renderRolePills(t, []);
+  const rolePills = renderRolePills(t, childTasks || []);
   const models = Array.isArray(out.modelsUsed) ? out.modelsUsed.filter(Boolean) : [];
   const mcpServers = new Set();
   for (const entry of (logs || [])) {

@@ -2339,6 +2339,43 @@ test("POST /tasks persists an explicit agentType (the New Task role picker's con
   assert.equal(body.agentType, "designer");
 });
 
+test("GET /tasks enriches coordinator rows with distinct childAgentTypes — one grouped query, plural role pills on the board", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, Task } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const parent = await Task.create({ title: "Coordinate the launch", description: "d", project: "p", projectPath: "/tmp/p", status: "backlog", agentType: "coo" });
+  await Task.create({ title: "child 1", description: "d", project: "p", projectPath: "/tmp/p", status: "review", agentType: "designer", parentTaskId: parent._id });
+  await Task.create({ title: "child 2 (archived)", description: "d", project: "p", projectPath: "/tmp/p", status: "archived", agentType: "qa", parentTaskId: parent._id });
+  await Task.create({ title: "child 3 (auto, ignored)", description: "d", project: "p", projectPath: "/tmp/p", status: "backlog", agentType: "auto", parentTaskId: parent._id });
+  await Task.create({ title: "unrelated top-level", description: "d", project: "p", projectPath: "/tmp/p", status: "backlog", agentType: "developer" });
+
+  const res = await fetch(`${base}/tasks`, { headers });
+  const rows = await res.json() as Array<Record<string, unknown>>;
+  const parentRow = rows.find((r) => r._id === parent._id);
+  assert.ok(parentRow);
+  assert.deepEqual(new Set(parentRow!.childAgentTypes as string[]), new Set(["designer", "qa"]), "includes the archived child; excludes the auto one");
+
+  const unrelated = rows.find((r) => r.title === "unrelated top-level");
+  assert.equal(unrelated!.childAgentTypes, undefined, "a task with no children carries no childAgentTypes field");
+});
+
+test("GET /tasks?parentTaskId=X includes archived children (a subtask auto-archives on success) unlike the board's default archived exclusion", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, Task } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const parent = await Task.create({ title: "parent", description: "d", project: "p", projectPath: "/tmp/p", status: "backlog" });
+  await Task.create({ title: "archived child", description: "d", project: "p", projectPath: "/tmp/p", status: "archived", parentTaskId: parent._id });
+
+  const res = await fetch(`${base}/tasks?parentTaskId=${parent._id}`, { headers });
+  const rows = await res.json() as Array<Record<string, unknown>>;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, "archived");
+});
+
 test("every SSE stream registers a response error handler (an unhandled stream 'error' event would crash the daemon)", () => {
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
   const sites = [...src.matchAll(/text\/event-stream/g)];

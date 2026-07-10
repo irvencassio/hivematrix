@@ -3941,13 +3941,42 @@ export function createDaemonServer() {
         const conditions: string[] = [];
         const params: string[] = [];
         if (q.status) { conditions.push("status = ?"); params.push(q.status); }
-        else { conditions.push("status != 'archived'"); }
+        // The board's default excludes archived tasks (declutter). A
+        // parentTaskId query is a scoped lookup of a specific coordinator's
+        // children — those auto-archive on success (see agent-manager.ts's
+        // shouldAutoArchiveSubtask), so excluding archived here would hide
+        // exactly the completed-successfully case the caller wants to see.
+        else if (!q.parentTaskId) { conditions.push("status != 'archived'"); }
         if (q.profile) { conditions.push("profile = ?"); params.push(q.profile); }
         if (q.project) { conditions.push("project = ?"); params.push(q.project); }
         if (q.parentTaskId) { conditions.push("parentTaskId = ?"); params.push(q.parentTaskId); }
         const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
         const orderBy = q.status === "review" ? "updatedAt DESC" : "position ASC";
         const rows = db.prepare(`SELECT * FROM tasks${where} ORDER BY ${orderBy} LIMIT 300`).all(...params) as Array<Record<string, unknown>>;
+
+        // Enrich with each task's distinct child agentTypes (one grouped
+        // query, not N+1) — the board's plural role pills need "which roles
+        // helped on this" without a per-card fetch. Only rows that are
+        // actually parents pay for it.
+        const parentIds = rows.map((r) => String(r._id)).filter(Boolean);
+        if (parentIds.length > 0) {
+          const placeholders = parentIds.map(() => "?").join(",");
+          const childRows = db.prepare(
+            `SELECT parentTaskId, agentType FROM tasks WHERE parentTaskId IN (${placeholders})`
+          ).all(...parentIds) as Array<{ parentTaskId: string; agentType: string | null }>;
+          const childTypesByParent = new Map<string, string[]>();
+          for (const c of childRows) {
+            if (!c.agentType || c.agentType === "auto") continue;
+            const list = childTypesByParent.get(c.parentTaskId) ?? [];
+            if (!list.includes(c.agentType)) list.push(c.agentType);
+            childTypesByParent.set(c.parentTaskId, list);
+          }
+          for (const r of rows) {
+            const types = childTypesByParent.get(String(r._id));
+            if (types) r.childAgentTypes = types;
+          }
+        }
+
         json(res, 200, rows);
         return;
       }
