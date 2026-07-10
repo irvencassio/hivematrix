@@ -443,6 +443,48 @@ export function createDaemonServer() {
         return;
       }
 
+      // Profile ids double as filenames (custom-profile JSON is written as
+      // <id>.json — see Spec2 Phase 2) and are consulted before any DB
+      // lookup, so every /agents/profiles/:id* route validates the shape
+      // here rather than trusting the URL segment.
+      const agentProfileIdMatch = urlPath.match(/^\/agents\/profiles\/([^/]+)(\/(stats|skills))?$/);
+      const isValidProfileId = (id: string) => /^[a-z][a-z0-9_-]*$/.test(id);
+
+      // GET /agents/profiles/:id — full profile INCLUDING systemPrompt (the
+      // list route above deliberately omits it). Roles console dossier +
+      // prompt viewer.
+      if (req.method === "GET" && agentProfileIdMatch && !agentProfileIdMatch[3]) {
+        const id = agentProfileIdMatch[1];
+        if (!isValidProfileId(id)) { json(res, 400, { error: "Invalid profile id" }); return; }
+        const { getAgentProfile, customProfileIds, profileTier } = await import("@/lib/config/agent-profiles");
+        const customIds = new Set(customProfileIds());
+        const p = getAgentProfile(id);
+        json(res, 200, {
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          icon: p.icon,
+          tools: p.tools,
+          loadClaudeMd: p.loadClaudeMd,
+          modelRole: p.modelRole ?? null,
+          tier: profileTier(p),
+          isCustom: customIds.has(p.id),
+          systemPrompt: p.systemPrompt,
+          promptLines: p.systemPrompt.trim().split("\n").length,
+        });
+        return;
+      }
+
+      // GET /agents/profiles/:id/stats — real usage, never fabricated. A
+      // role that has never run reports totalRuns: 0, not a fake rate.
+      if (req.method === "GET" && agentProfileIdMatch && agentProfileIdMatch[3] === "stats") {
+        const id = agentProfileIdMatch[1];
+        if (!isValidProfileId(id)) { json(res, 400, { error: "Invalid profile id" }); return; }
+        const { computeRoleStats } = await import("@/lib/orchestrator/role-stats");
+        json(res, 200, await computeRoleStats(id));
+        return;
+      }
+
       // GET /settings/keys — which API keys (env vars) are SET. Never returns
       // values — only env name, label, purpose, and a boolean. Keys are provided
       // via environment variables, not config.json.

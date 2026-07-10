@@ -805,6 +805,60 @@ test("Brain Review: pinned 'Always loaded' row is styled distinctly and its docs
   assert.match(rowsFn, /disabled = isArchived \|\| isPinnedProject \|\| isConfig/);
 });
 
+test("Roles screen nav opens a three-pane read-only screen wired to the real /agents/profiles endpoints", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(CONSOLE_HTML, /id="rolesNav"[^>]*onclick="showRoles\(\)"/, "nav button present");
+  assert.match(js, /function showRoles\(/);
+  assert.match(js, /function rolesPanelHtml\(/);
+  assert.match(js, /function renderRolesPanel\(/);
+  assert.match(js, /rolesNav.*classList\.toggle\('active', _rolesState\.panelOpen\)/s, "Roles nav active state follows its panel");
+  assert.match(js, /overviewActive = .* !_rolesState\.panelOpen/, "Overview is not active while Roles is open");
+  // Wired to the real Spec2-Phase1 server endpoints, not mocked data.
+  assert.match(js, /api\('\/agents\/profiles'\)/);
+  assert.match(js, /api\('\/agents\/profiles\/' \+ encodeURIComponent\(id\)\)/);
+  assert.match(js, /api\('\/agents\/profiles\/' \+ encodeURIComponent\(id\) \+ '\/stats'\)/);
+  // Mutual exclusivity with every other center-pane surface.
+  for (const fn of ["selectTask", "_closeSkillPanel", "showSkillPanel", "showNewTaskPanel", "showOverview", "showFlashPanel", "showBrain"]) {
+    const body = fnBody(js, fn);
+    assert.match(body, /_rolesState\.panelOpen = false/, `${fn} must close the Roles panel`);
+  }
+  // And Roles itself closes Flash + Brain when opened.
+  const showRolesBody = fnBody(js, "showRoles");
+  assert.match(showRolesBody, /_flashState\.panelOpen = false/);
+  assert.match(showRolesBody, /_brainState\.panelOpen = false/);
+  assert.match(js, /function setRolesViewMode\(/);
+});
+
+test("Roles screen: roster is grouped by tier (Core/Coordinator/Domain), mirroring the New Task role picker's boundary", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "renderRolesRoster");
+  assert.match(body, /byTier\[tier\]\.map\(row\)/);
+  assert.match(body, /\['core', 'coordinator', 'domain'\]/);
+});
+
+test("Roles screen: the Insight panel is honest about a never-run role — never fabricates a rate", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "renderRoleDossier");
+  assert.match(body, /totalRuns === 0/);
+  assert.match(body, /has never run/);
+  assert.match(body, /Enable.*Specialist agents/);
+  assert.match(body, /successRate == null \? 'not enough data'/, "successRate:null renders as an honest label, not 0%");
+});
+
+test("Roles screen: the Learned panel tells the truth — no skill-authoring loop exists yet (Phase 2/4 territory)", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "renderRoleDossier");
+  assert.match(body, /No skills learned yet/);
+});
+
+test("Roles screen: prompt viewer Rendered/Raw toggle mirrors the Brain screen's pattern exactly", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "renderRolesPromptBody");
+  assert.match(body, /_rolesState\.viewMode === 'raw'/);
+  assert.match(body, /body\.textContent = d\.systemPrompt/, "raw mode shows the literal prompt text");
+  assert.match(body, /mdToHtml\(d\.systemPrompt\)/, "rendered mode goes through the same markdown pipeline as everything else");
+});
+
 test("Brain Review: Claude Code config files (CLAUDE.md/settings.json/.mcp.json) render read-only and settings/mcp JSON gets a novice-friendly summary, not raw JSON", () => {
   const js = extractScript(CONSOLE_HTML);
   const rowsFn = fnBody(js, "renderBrainDocs");

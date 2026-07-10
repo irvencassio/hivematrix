@@ -962,6 +962,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .brain-render-body { flex:1 1 auto; min-height:0; overflow-y:auto; padding:18px 22px; }
   .brain-render-body.raw { font:12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre-wrap; color:var(--muted); }
   .brain-empty-state { color:var(--muted); text-align:center; padding:60px 20px; font-size:12.5px; }
+  /* Roles screen center-pane dossier blocks (Identity/Configuration/Insight/Learned) */
+  .roles-block { border-bottom:1px solid var(--border); padding:12px 14px; }
+  .roles-block:last-child { border-bottom:none; }
+  .roles-block-head { font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-bottom:8px; }
+  .roles-block-body { font-size:13px; line-height:1.5; }
   .json-friendly { font-size:13px; line-height:1.5; }
   .json-row { margin-bottom:16px; }
   .json-key { display:block; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.04em;
@@ -1770,6 +1775,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <button class="addbtn" id="newTaskNav" onclick="showNewTaskPanel()">＋ New task</button>
     <button class="ov-nav oc-nav" id="flashNav" onclick="showFlashPanel()">💬 Chat</button>
     <button class="ov-nav oc-nav" id="brainNav" onclick="showBrain()">🧠 Brain</button>
+    <button class="ov-nav oc-nav" id="rolesNav" onclick="showRoles()">👥 Roles</button>
     <div class="form" id="taskForm">
       <input id="t_title" type="hidden" value="" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
@@ -2034,7 +2040,7 @@ async function toggleThemeQuick() {
 // Center overview — at-a-glance board state when no task is selected, instead of
 // leaving the widest column empty.
 function renderOverview() {
-  if (state.selected || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen || _brainState.panelOpen) return;
+  if (state.selected || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen || _brainState.panelOpen || _rolesState.panelOpen) return;
   setFlashSessionMode(false);
   const el = document.getElementById("session");
   if (!el) return;
@@ -2066,6 +2072,7 @@ function showOverview() {
   _ctxTask = null;
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
+  _rolesState.panelOpen = false;
   setFlashSessionMode(false);
   renderBoard();
   renderSkillList();
@@ -2080,7 +2087,7 @@ function focusBoardLane(key) {
 }
 function updateOverviewNav() {
   const nav = document.getElementById("overviewNav");
-  const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !_flashState.panelOpen && !_brainState.panelOpen;
+  const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !_flashState.panelOpen && !_brainState.panelOpen && !_rolesState.panelOpen;
   if (nav) nav.classList.toggle("active", overviewActive);
   const newTaskNav = document.getElementById("newTaskNav");
   if (newTaskNav) newTaskNav.classList.toggle("active", _taskFormInSession);
@@ -2476,6 +2483,7 @@ async function selectTask(id) {
   state.selected = id;
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
+  _rolesState.panelOpen = false;
   setFlashSessionMode(false);
   // Switching tasks clears half-composed retry/reply state; staying on the same
   // task across a live refresh keeps files and draft text.
@@ -3229,6 +3237,7 @@ function showSkillPanel(key) {
   state.selectedSkillOrCommand = key;
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
+  _rolesState.panelOpen = false;
   setFlashSessionMode(false);
   if (_taskFormInSession) _closeNewTaskPanel();
   renderBoard();
@@ -3243,6 +3252,7 @@ function _closeSkillPanel() {
   _skSel = '';
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
+  _rolesState.panelOpen = false;
   setFlashSessionMode(false);
   renderSkillList();
   renderSkillDetail();
@@ -5434,6 +5444,7 @@ function showNewTaskPanel() {
   state.selected = null;
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
+  _rolesState.panelOpen = false;
   setFlashSessionMode(false);
   _ctxTask = null;
   _taskFormInSession = true;
@@ -6831,10 +6842,14 @@ function showFlashPanel() {
   _ctxTask = null;
   _taskFormInSession = false;
   _flashState.panelOpen = true;
+  _brainState.panelOpen = false;
+  _rolesState.panelOpen = false;
   renderBoard();
   renderSkillList();
   renderFlashPanel();
   updateFlashNav();
+  updateBrainNav();
+  updateRolesNav();
 }
 
 function updateFlashNav() {
@@ -6926,10 +6941,13 @@ function showBrain() {
   _taskFormInSession = false;
   _flashState.panelOpen = false;
   _brainState.panelOpen = true;
+  _rolesState.panelOpen = false;
   renderBoard();
   renderSkillList();
   renderBrainPanel();
+  updateFlashNav();
   updateBrainNav();
+  updateRolesNav();
   loadBrainProjects();
 }
 
@@ -7359,6 +7377,270 @@ function renderBrainJsonFriendly(baseName, content) {
   if (/^settings(\.local)?\.json$/i.test(baseName)) return renderSettingsJsonFriendly(data);
   if (/^\.?mcp\.json$/i.test(baseName)) return renderMcpJsonFriendly(data);
   return '<div class="json-friendly">' + renderGenericJsonTree(data) + '</div>';
+}
+
+// ── Roles screen (Spec2 Phase1) — browse each agent profile: identity,
+// resolved model, tool allowlist, real usage stats, and the prompt itself.
+// Structurally mirrors the Brain screen (brainPanelHtml/showBrain/…, above):
+// left = roster list, center = the selected role's dossier, right = prompt
+// viewer with a Rendered/Raw toggle. Reuses the .brain-shell/.brain-col/
+// .brain-render-* CSS — same generic three-pane layout, different content. ──
+
+let _rolesState = {
+  panelOpen: false,
+  profiles: [],       // [{id,name,description,icon,tools,loadClaudeMd,modelRole,tier,isCustom,promptLines}]
+  profilesError: false,
+  role: null,         // selected profile id
+  detail: null,        // GET /agents/profiles/:id response (has systemPrompt)
+  detailError: false,
+  stats: null,         // GET /agents/profiles/:id/stats response
+  viewMode: 'rendered',
+};
+
+const ROLES_TIER_LABEL = { core: 'Core', coordinator: 'Coordinator', domain: 'Domain' };
+
+function rolesPanelHtml() {
+  return '<div class="oc-center-pane" style="max-width:none">'
+    + '<div class="oc-panel-head">'
+    + '<div><div class="oc-panel-title"><span>👥</span><span>Roles</span></div>'
+    + '<div class="oc-panel-sub">What each agent role actually is — prompt, tools, model, and real usage</div></div>'
+    + '<span class="oc-panel-head-spacer"></span>'
+    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button>'
+    + '</div>'
+    + '<div class="brain-pane" style="padding:0;height:auto;max-height:none">'
+    + '<div class="brain-shell">'
+    + '<div class="brain-col">'
+    + '<div class="brain-col-head">Roster</div>'
+    + '<div class="brain-col-body" id="rolesRosterList"><div class="muted" style="padding:12px">Loading…</div></div>'
+    + '</div>'
+    + '<div class="brain-col">'
+    + '<div class="brain-col-head"><span id="rolesDossierTitle">Dossier</span></div>'
+    + '<div class="brain-col-body" id="rolesDossierBody"><div class="muted" style="padding:12px">Select a role.</div></div>'
+    + '</div>'
+    + '<div class="brain-col">'
+    + '<div class="brain-render-head">'
+    + '<div style="min-width:0"><div class="brain-render-title" id="rolesPromptTitle">Select a role</div>'
+    + '<span class="path" id="rolesPromptSub"></span></div>'
+    + '<div class="brain-toggle-group">'
+    + '<button id="rolesBtnRendered" class="active" onclick="setRolesViewMode(\'rendered\')">Rendered</button>'
+    + '<button id="rolesBtnRaw" onclick="setRolesViewMode(\'raw\')">Raw</button>'
+    + '</div></div>'
+    + '<div class="brain-render-body" id="rolesPromptBody"><div class="brain-empty-state">Click a role on the left to read its system prompt here.</div></div>'
+    + '</div>'
+    + '</div>'
+    + '</div>'
+    + '</div>';
+}
+
+function renderRolesPanel() {
+  if (!_rolesState.panelOpen) return;
+  const session = document.getElementById('session');
+  if (!session) return;
+  setFlashSessionMode(true);
+  session.innerHTML = rolesPanelHtml();
+  renderRolesRoster();
+  renderRoleDossier();
+  renderRolesPromptPane();
+}
+
+function showRoles() {
+  state.selected = null;
+  state.selectedSkillOrCommand = null;
+  _skSel = '';
+  _ctxTask = null;
+  _taskFormInSession = false;
+  _flashState.panelOpen = false;
+  _brainState.panelOpen = false;
+  _rolesState.panelOpen = true;
+  renderBoard();
+  renderSkillList();
+  renderRolesPanel();
+  updateFlashNav();
+  updateBrainNav();
+  updateRolesNav();
+  loadRolesRoster();
+}
+
+function updateRolesNav() {
+  const nav = document.getElementById('rolesNav');
+  if (nav) nav.classList.toggle('active', _rolesState.panelOpen);
+}
+
+async function loadRolesRoster() {
+  _rolesState.profilesError = false;
+  try {
+    const r = await api('/agents/profiles');
+    _rolesState.profiles = (r && r.profiles) || [];
+  } catch (e) {
+    _rolesState.profilesError = true;
+    _rolesState.profiles = [];
+  }
+  if (!_rolesState.role && _rolesState.profiles.length) _rolesState.role = _rolesState.profiles[0].id;
+  renderRolesRoster();
+  if (_rolesState.role) await loadRoleDetail(_rolesState.role);
+}
+
+function renderRolesRoster() {
+  const el = document.getElementById('rolesRosterList');
+  if (!el) return;
+  if (_rolesState.profilesError) { el.innerHTML = '<div class="muted" style="padding:12px">Could not reach the daemon. <a href="#" onclick="event.preventDefault();loadRolesRoster()">Retry</a></div>'; return; }
+  if (!_rolesState.profiles.length) { el.innerHTML = '<div class="muted" style="padding:12px">No agent profiles found.</div>'; return; }
+  const byTier = { core: [], coordinator: [], domain: [] };
+  for (const p of _rolesState.profiles) (byTier[p.tier] || byTier.core).push(p);
+  const row = p => {
+    const cls = 'brain-proj-row' + (p.id === _rolesState.role ? ' active' : '');
+    const customChip = p.isCustom ? '<span class="count" style="margin-left:4px" title="Custom override">✎</span>' : '';
+    return '<div class="' + cls + '" onclick="selectRole(\'' + attrEnc(p.id) + '\')">'
+      + '<span><span class="name">' + esc(p.icon || '') + ' ' + esc(p.name) + '</span></span>'
+      + '<span>' + customChip + '</span></div>';
+  };
+  let html = '';
+  for (const tier of ['core', 'coordinator', 'domain']) {
+    if (!byTier[tier].length) continue;
+    html += '<div class="brain-col-head" style="font-size:10px;padding:6px 14px">' + ROLES_TIER_LABEL[tier] + '</div>' + byTier[tier].map(row).join('');
+  }
+  el.innerHTML = html;
+}
+
+async function selectRole(id) {
+  _rolesState.role = decodeURIComponent(id);
+  renderRolesRoster();
+  await loadRoleDetail(_rolesState.role);
+}
+
+async function loadRoleDetail(id) {
+  _rolesState.detail = null;
+  _rolesState.detailError = false;
+  _rolesState.stats = null;
+  renderRoleDossier();
+  renderRolesPromptPane();
+  let detail, stats;
+  try {
+    [detail, stats] = await Promise.all([
+      api('/agents/profiles/' + encodeURIComponent(id)),
+      api('/agents/profiles/' + encodeURIComponent(id) + '/stats'),
+    ]);
+  } catch (e) {
+    if (_rolesState.role !== id) return; // stale — operator moved on
+    _rolesState.detailError = true;
+    renderRoleDossier();
+    renderRolesPromptPane();
+    return;
+  }
+  if (_rolesState.role !== id) return; // stale response
+  _rolesState.detail = detail || null;
+  _rolesState.stats = stats || null;
+  if (!detail) _rolesState.detailError = true;
+  renderRoleDossier();
+  renderRolesPromptPane();
+}
+
+function fmtRoleDuration(ms) {
+  if (ms == null) return '—';
+  if (ms < 1000) return ms + 'ms';
+  const s = ms / 1000;
+  if (s < 60) return s.toFixed(1) + 's';
+  return (s / 60).toFixed(1) + 'm';
+}
+
+function fmtRoleRelativeTime(iso) {
+  if (!iso) return 'never';
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms)) return iso;
+  const mins = Math.round(ms / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + 'm ago';
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return hours + 'h ago';
+  return Math.round(hours / 24) + 'd ago';
+}
+
+function renderRoleDossier() {
+  const titleEl = document.getElementById('rolesDossierTitle');
+  const body = document.getElementById('rolesDossierBody');
+  if (!body) return;
+  if (!_rolesState.role) { if (titleEl) titleEl.textContent = 'Dossier'; body.innerHTML = '<div class="muted" style="padding:12px">Select a role.</div>'; return; }
+  if (_rolesState.detailError) { body.innerHTML = '<div class="muted" style="padding:12px">Could not load this role. <a href="#" onclick="event.preventDefault();loadRoleDetail(_rolesState.role)">Retry</a></div>'; return; }
+  const d = _rolesState.detail;
+  if (titleEl) titleEl.textContent = d ? (d.icon + ' ' + d.name) : _rolesState.role;
+  if (!d) { body.innerHTML = '<div class="muted" style="padding:12px">Loading…</div>'; return; }
+
+  const identity = '<div class="roles-block">'
+    + '<div class="roles-block-head">Identity</div>'
+    + '<div class="roles-block-body">'
+    + '<p style="margin:0 0 8px">' + esc(d.description) + '</p>'
+    + '<span class="badge">' + (d.isCustom ? 'Custom' : 'Built-in') + '</span> '
+    + '<span class="badge">' + esc(ROLES_TIER_LABEL[d.tier] || d.tier) + '</span>'
+    + '</div></div>';
+
+  const toolsHtml = d.tools.length
+    ? d.tools.map(t => '<span class="badge" style="margin:0 4px 4px 0">' + esc(t) + '</span>').join('')
+    : '<span class="muted">No tools — conversational only</span>';
+  const configuration = '<div class="roles-block">'
+    + '<div class="roles-block-head">Configuration</div>'
+    + '<div class="roles-block-body">'
+    + '<div class="kv"><span class="k">model</span><span>' + (d.modelRole ? esc(d.modelRole) + ' role' : 'default') + '</span></div>'
+    + '<div class="kv"><span class="k">CLAUDE.md</span><span>' + (d.loadClaudeMd ? 'loaded' : 'not loaded') + '</span></div>'
+    + '<div style="margin-top:6px">' + toolsHtml + '</div>'
+    + '</div></div>';
+
+  const s = _rolesState.stats;
+  let insightBody;
+  if (!s || s.totalRuns === 0) {
+    insightBody = '<div class="muted">This role has never run. Enable <b>Specialist agents</b> in Settings → Features, or pick it explicitly on a new task.</div>';
+  } else {
+    const rate = s.successRate == null ? 'not enough data' : Math.round(s.successRate * 100) + '%';
+    const statusRows = Object.entries(s.byStatus).map(([k, v]) => '<div class="kv"><span class="k">' + esc(k) + '</span><span>' + v + '</span></div>').join('');
+    insightBody = '<div class="kv"><span class="k">total runs</span><span>' + s.totalRuns + '</span></div>'
+      + statusRows
+      + '<div class="kv"><span class="k">success rate</span><span>' + rate + '</span></div>'
+      + '<div class="kv"><span class="k">last run</span><span>' + esc(fmtRoleRelativeTime(s.lastRunAt)) + '</span></div>'
+      + '<div class="kv"><span class="k">median duration</span><span>' + esc(fmtRoleDuration(s.medianDurationMs)) + '</span></div>';
+  }
+  const insight = '<div class="roles-block">'
+    + '<div class="roles-block-head">Insight</div>'
+    + '<div class="roles-block-body">' + insightBody + '</div></div>';
+
+  const learned = '<div class="roles-block">'
+    + '<div class="roles-block-head">Learned</div>'
+    + '<div class="roles-block-body"><div class="muted">No skills learned yet. Roles begin authoring skills once retrospection is wired.</div></div></div>';
+
+  body.innerHTML = identity + configuration + insight + learned;
+}
+
+function setRolesViewMode(mode) {
+  _rolesState.viewMode = mode;
+  const rb = document.getElementById('rolesBtnRendered'), rw = document.getElementById('rolesBtnRaw');
+  if (rb) rb.classList.toggle('active', mode === 'rendered');
+  if (rw) rw.classList.toggle('active', mode === 'raw');
+  renderRolesPromptBody();
+}
+
+function renderRolesPromptPane() {
+  const titleEl = document.getElementById('rolesPromptTitle');
+  const subEl = document.getElementById('rolesPromptSub');
+  if (!titleEl || !subEl) return;
+  if (!_rolesState.role) { titleEl.textContent = 'Select a role'; subEl.textContent = ''; renderRolesPromptBody(); return; }
+  const d = _rolesState.detail;
+  titleEl.textContent = d ? (d.icon + ' ' + d.name) : _rolesState.role;
+  subEl.textContent = d ? d.promptLines + ' lines' : '';
+  renderRolesPromptBody();
+}
+
+function renderRolesPromptBody() {
+  const body = document.getElementById('rolesPromptBody');
+  if (!body) return;
+  if (!_rolesState.role) { body.className = 'brain-render-body'; body.innerHTML = '<div class="brain-empty-state">Click a role on the left to read its system prompt here.</div>'; return; }
+  if (_rolesState.detailError) { body.className = 'brain-render-body'; body.innerHTML = '<div class="brain-empty-state">Could not load this role.</div>'; return; }
+  const d = _rolesState.detail;
+  if (!d) { body.className = 'brain-render-body'; body.innerHTML = '<div class="brain-empty-state">Loading…</div>'; return; }
+  if (_rolesState.viewMode === 'raw') {
+    body.className = 'brain-render-body raw';
+    body.textContent = d.systemPrompt;
+    return;
+  }
+  body.className = 'brain-render-body';
+  body.innerHTML = mdToHtml(d.systemPrompt);
 }
 
 function flashRenderMessages() {

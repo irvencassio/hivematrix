@@ -2153,6 +2153,70 @@ test("GET /agents/profiles lists the roster without leaking systemPrompt", async
   assert.equal(body.profiles.find((p) => p.id === "cto"), undefined, "cut ids must not appear in the live roster");
 });
 
+test("GET /agents/profiles/:id returns the full profile INCLUDING systemPrompt (the roles screen's prompt viewer)", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/agents/profiles/designer`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.id, "designer");
+  assert.equal(typeof body.systemPrompt, "string");
+  assert.ok((body.systemPrompt as string).length > 500, "designer's real 58-line prompt, not a stub");
+  assert.equal(body.tier, "core");
+  assert.equal(body.isCustom, false);
+});
+
+test("GET /agents/profiles/:id resolves a legacy/cut id through its alias (e.g. cto → developer), same as the scheduler", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/agents/profiles/cto`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.id, "developer", "cto is cut and aliases to developer — getAgentProfile resolves it, not a 404");
+});
+
+test("GET /agents/profiles/:id rejects a malformed id (path-injection defense-in-depth ahead of Phase 2's file-writing routes)", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  for (const bad of ["../../etc/passwd", "..%2f..%2fetc", "UPPERCASE", "has spaces", "semi;colon"]) {
+    const res = await fetch(`${base}/agents/profiles/${encodeURIComponent(bad)}`, { headers });
+    assert.equal(res.status, 400, `"${bad}" should be rejected`);
+  }
+});
+
+test("GET /agents/profiles/:id/stats returns real, honest zeros for a role that has never run", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/agents/profiles/designer/stats`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.totalRuns, 0);
+  assert.equal(body.successRate, null);
+  assert.equal(body.lastRunAt, null);
+});
+
+test("GET /agents/profiles/:id/stats reflects real task history for that role", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, Task } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  await Task.create({ title: "t1", description: "d", project: "p", projectPath: "/tmp/p", status: "archived", agentType: "qa" });
+  await Task.create({ title: "t2", description: "d", project: "p", projectPath: "/tmp/p", status: "review", agentType: "qa" });
+  await Task.create({ title: "t3", description: "d", project: "p", projectPath: "/tmp/p", status: "archived", agentType: "developer" });
+
+  const res = await fetch(`${base}/agents/profiles/qa/stats`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.totalRuns, 2, "only qa-agentType tasks are counted, not developer's");
+});
+
 test("POST /tasks persists an explicit agentType (the New Task role picker's contract)", async (t) => {
   withTempHome(t);
   const { _resetDbForTests } = await import("@/lib/db");
