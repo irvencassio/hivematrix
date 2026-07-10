@@ -27,37 +27,39 @@ const sampleProfile: QwenProfile = {
     endpoint: "http://localhost:8080",
     provider: "mlx",
     contextLimit: 65536,
+    maxOutputTokens: 16384,
   },
   secondary: {
     modelId: "qwen3-35b",
     endpoint: "http://localhost:8080",
     provider: "mlx",
     contextLimit: 32768,
+    maxOutputTokens: 8192,
   },
   thinkingEnabled: true,
   minDecodeRate: 15,
   probeTimeoutMs: 60000,
 };
 
-test("buildQwenProvider returns provider with primary model by default", () => {
+test("buildQwenProvider returns provider with primary model's output cap, not its context window", () => {
   const provider = buildQwenProvider(sampleProfile, false);
   assert.ok(provider !== null);
-  assert.equal(provider!.maxTokens, 65536);
+  assert.equal(provider!.maxTokens, 16384);
   assert.equal(provider!.name, "mlx");
   assert.equal(provider!.endpoint, "http://localhost:8080");
 });
 
-test("buildQwenProvider uses secondary model when preferSecondary=true", () => {
+test("buildQwenProvider uses secondary model's output cap when preferSecondary=true", () => {
   const provider = buildQwenProvider(sampleProfile, true);
   assert.ok(provider !== null);
-  assert.equal(provider!.maxTokens, 32768);
+  assert.equal(provider!.maxTokens, 8192);
 });
 
 test("buildQwenProvider falls back to primary when secondary is null", () => {
   const noSecondary: QwenProfile = { ...sampleProfile, secondary: null };
   const provider = buildQwenProvider(noSecondary, true);
   assert.ok(provider !== null);
-  assert.equal(provider!.maxTokens, 65536);
+  assert.equal(provider!.maxTokens, 16384);
 });
 
 test("isQwenCodeAvailable returns false when no qwen config", () => {

@@ -7,6 +7,7 @@ import type { StreamEvent } from "./stream-parser";
 interface StreamState {
   toolCalls: Map<number, { id: string; name: string; arguments: string }>;
   usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+  finishReason: string | null;
 }
 
 /**
@@ -42,6 +43,7 @@ export function parseOpenAIChunk(
   const choice = choices[0];
   const delta = choice.delta as Record<string, unknown> | undefined;
   const finishReason = choice.finish_reason as string | null;
+  if (finishReason) state.finishReason = finishReason;
 
   if (delta) {
     // Reasoning delta — Qwen 3.6 / LM Studio emit thinking via a separate
@@ -81,8 +83,14 @@ export function parseOpenAIChunk(
     }
   }
 
-  // When tool_calls finish, emit tool_use events for each accumulated call
-  if (finishReason === "tool_calls" || finishReason === "function_call") {
+  // When tool_calls finish, emit tool_use events for each accumulated call.
+  // A "length" stop with accumulated tool calls means the model ran out of
+  // output tokens mid-argument — still emit so the caller can see the (truncated)
+  // call and respond with an error instead of silently dropping it. A "length"
+  // stop with no accumulated tool calls is just a long text response.
+  const isToolFinish = finishReason === "tool_calls" || finishReason === "function_call";
+  const isTruncatedMidTool = finishReason === "length" && state.toolCalls.size > 0;
+  if (isToolFinish || isTruncatedMidTool) {
     for (const [, tc] of state.toolCalls) {
       events.push({
         type: "tool_use",
@@ -100,7 +108,7 @@ export function parseOpenAIChunk(
  * Create a fresh stream state for a new response.
  */
 export function createStreamState(): StreamState {
-  return { toolCalls: new Map(), usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
+  return { toolCalls: new Map(), usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, finishReason: null };
 }
 
 /**
@@ -108,6 +116,15 @@ export function createStreamState(): StreamState {
  */
 export function getUsage(state: StreamState): { promptTokens: number; completionTokens: number; totalTokens: number } {
   return { ...state.usage };
+}
+
+/**
+ * Get the finish reason of the most recently completed turn, if any.
+ * `"length"` means the model was cut off by max_tokens — any accumulated
+ * tool call arguments may be incomplete.
+ */
+export function getFinishReason(state: StreamState): string | null {
+  return state.finishReason;
 }
 
 /**

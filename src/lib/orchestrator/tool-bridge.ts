@@ -1,6 +1,6 @@
 import { exec } from "child_process";
 import { promisify } from "util";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from "fs";
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, statSync } from "fs";
 import { dirname, resolve, relative, extname } from "path";
 import { AGENT_PROFILE_IDS } from "@/lib/config/agent-profiles";
 import { readToken } from "@/lib/auth/token";
@@ -100,12 +100,13 @@ export const TOOL_DEFINITIONS: ChatTool[] = [
     type: "function" as const,
     function: {
       name: "write_file",
-      description: "Write content to a file. Creates parent directories if needed. Overwrites existing files.",
+      description: "Write content to a file. Creates parent directories if needed. If your file is large, do not try to write it in one call — write the first chunk with mode=\"overwrite\" (the default), then write each following chunk with mode=\"append\". Keep each chunk well under your output budget.",
       parameters: {
         type: "object",
         properties: {
           path: { type: "string", description: "Path to the file" },
           content: { type: "string", description: "Content to write" },
+          mode: { type: "string", enum: ["overwrite", "append"], description: "overwrite (default) replaces the file; append adds to the end, creating the file if it doesn't exist yet." },
         },
         required: ["path", "content"],
       },
@@ -242,7 +243,14 @@ export async function executeTool(
   try {
     args = JSON.parse(argsJson);
   } catch {
-    return `Error: Invalid JSON arguments: ${argsJson.slice(0, 200)}`;
+    // An unterminated string or unbalanced braces at end-of-input is the
+    // signature of a call cut off by max_tokens, not a malformed-but-complete
+    // payload — the two need different guidance for the model to recover.
+    const looksTruncated = argsJson.length > 0 && !argsJson.trimEnd().endsWith("}");
+    if (looksTruncated) {
+      return `Error: tool arguments were cut off mid-JSON and were NOT executed (received ${argsJson.length} chars). Nothing changed on disk. If you are writing a large file, split it: write_file with mode="overwrite" for the first chunk, then mode="append" for each subsequent chunk.`;
+    }
+    return `Error: Invalid JSON arguments (${argsJson.length} chars): ${argsJson.slice(0, 200)}`;
   }
 
   try {
@@ -416,6 +424,13 @@ function executeWriteFile(args: Record<string, unknown>, projectPath: string, co
 
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+  const append = args.mode === "append";
+  if (append) {
+    appendFileSync(filePath, content);
+    context?.touchedFiles?.add(filePath);
+    return `File appended: ${relative(projectPath, filePath)} (+${content.length} bytes)`;
+  }
 
   writeFileSync(filePath, content);
   context?.touchedFiles?.add(filePath);

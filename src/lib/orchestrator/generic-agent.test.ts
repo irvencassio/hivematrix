@@ -12,9 +12,11 @@ import {
   buildMessages,
   buildSmokeGateFinalResult,
   buildSystemPrompt,
+  buildTruncatedToolCallResult,
   extractTextToolCalls,
   genericThinkingInstruction,
   modelToolResultContent,
+  resolveEffectiveToolCalls,
   shouldRunCompletionSmokeGate,
 } from "./generic-agent";
 
@@ -150,6 +152,62 @@ test("generic/local caps tool results before appending them to model messages", 
   assert.ok(result.length < 1_300);
   assert.match(result, /truncated/i);
   assert.match(result, /ask for a narrower read/i);
+});
+
+test("resolveEffectiveToolCalls prefers native calls when present and complete", () => {
+  const native = [{ id: "call_1", name: "bash", arguments: '{"command":"ls"}' }];
+  const resolved = resolveEffectiveToolCalls(true, native, [], "tool_calls");
+
+  assert.equal(resolved.useNativeToolCalls, true);
+  assert.deepEqual(resolved.effectiveToolCalls, native);
+  assert.equal(resolved.truncatedToolCall, false);
+});
+
+test("resolveEffectiveToolCalls falls back to text-form calls when no native call finished", () => {
+  const textCalls = [{ name: "bash", arguments: '{"command":"ls"}' }];
+  const resolved = resolveEffectiveToolCalls(false, [], textCalls, "stop");
+
+  assert.equal(resolved.useNativeToolCalls, false);
+  assert.deepEqual(resolved.effectiveToolCalls, textCalls);
+  assert.equal(resolved.truncatedToolCall, false);
+});
+
+test("resolveEffectiveToolCalls flags a native call truncated by max_tokens", () => {
+  const native = [{ id: "call_1", name: "write_file", arguments: '{"path":"x","content":"abc' }];
+  const resolved = resolveEffectiveToolCalls(true, native, [], "length");
+
+  assert.equal(resolved.useNativeToolCalls, true);
+  assert.deepEqual(resolved.effectiveToolCalls, native);
+  assert.equal(resolved.truncatedToolCall, true);
+});
+
+test("resolveEffectiveToolCalls does not flag truncation for a merely long text response", () => {
+  // finish_reason "length" with no accumulated tool calls at all — a plain
+  // response that ran long, not a cut-off tool call.
+  const resolved = resolveEffectiveToolCalls(false, [], [], "length");
+
+  assert.equal(resolved.useNativeToolCalls, false);
+  assert.equal(resolved.effectiveToolCalls.length, 0);
+  assert.equal(resolved.truncatedToolCall, false);
+});
+
+test("resolveEffectiveToolCalls never selects native calls that only accumulated without hasToolCalls", () => {
+  // A tool_use event was never emitted for this call (e.g. stream ended without
+  // a tool_calls/length finish_reason at all) — must not execute a half-built call.
+  const native = [{ id: "call_1", name: "write_file", arguments: '{"path":"x"' }];
+  const resolved = resolveEffectiveToolCalls(false, native, [], null);
+
+  assert.equal(resolved.useNativeToolCalls, false);
+  assert.deepEqual(resolved.effectiveToolCalls, []);
+});
+
+test("buildTruncatedToolCallResult names the exact max_tokens cap and the append-mode recovery path", () => {
+  const result = buildTruncatedToolCallResult(16384);
+
+  assert.match(result, /NOT executed/);
+  assert.match(result, /max_tokens=16384/);
+  assert.match(result, /mode="append"/);
+  assert.match(result, /Do NOT use bash heredocs/);
 });
 
 test("generic/local extracts Qwen textual tool calls", () => {

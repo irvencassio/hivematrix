@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -58,6 +58,38 @@ function extractCreatedTaskId(result: string): string {
   return m![1];
 }
 
+test("executeTool reports a truncated (cut-off-mid-JSON) write_file call as such and does not create a file", async () => {
+  const dir = tempProject();
+  try {
+    const truncated = '{"path":"out.txt","content":"<!DOCTYPE html>\\n<html lang=\\"en\\">\\n<head';
+
+    const out = await executeTool("write_file", truncated, dir);
+
+    assert.match(out, /cut off mid-JSON/i);
+    assert.match(out, /NOT executed/);
+    assert.match(out, new RegExp(`${truncated.length} chars`));
+    assert.match(out, /mode="append"/);
+    assert.equal(existsSync(join(dir, "out.txt")), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("executeTool reports genuinely malformed (but complete) JSON as invalid, not truncated", async () => {
+  const dir = tempProject();
+  try {
+    const malformed = '{"path": }';
+
+    const out = await executeTool("write_file", malformed, dir);
+
+    assert.match(out, /Invalid JSON arguments/);
+    assert.doesNotMatch(out, /cut off mid-JSON/i);
+    assert.match(out, new RegExp(`${malformed.length} chars`));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("read_file refuses binary image attachments instead of injecting bytes", async () => {
   const dir = tempProject();
   try {
@@ -86,6 +118,64 @@ test("read_file defaults to a bounded window and tells the model how to continue
     assert.doesNotMatch(out, /500\tline 500/);
     assert.match(out, /truncated/i);
     assert.match(out, /offset/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("write_file defaults to overwrite, replacing existing content", async () => {
+  const dir = tempProject();
+  try {
+    const file = join(dir, "out.txt");
+    writeFileSync(file, "stale content");
+
+    const out = await executeTool("write_file", JSON.stringify({ path: "out.txt", content: "fresh content" }), dir);
+
+    assert.match(out, /^File written:/);
+    assert.equal(readFileSync(file, "utf-8"), "fresh content");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("write_file mode=append adds to the end of an existing file without truncating it", async () => {
+  const dir = tempProject();
+  try {
+    const file = join(dir, "out.txt");
+    await executeTool("write_file", JSON.stringify({ path: "out.txt", content: "part one\n" }), dir);
+    const out = await executeTool("write_file", JSON.stringify({ path: "out.txt", content: "part two\n", mode: "append" }), dir);
+
+    assert.match(out, /^File appended:/);
+    assert.equal(readFileSync(file, "utf-8"), "part one\npart two\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("write_file mode=append creates the file when it does not exist yet, like shell >>", async () => {
+  const dir = tempProject();
+  try {
+    const file = join(dir, "new.txt");
+
+    const out = await executeTool("write_file", JSON.stringify({ path: "new.txt", content: "first chunk", mode: "append" }), dir);
+
+    assert.match(out, /^File appended:/);
+    assert.equal(readFileSync(file, "utf-8"), "first chunk");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("write_file falls back to overwrite for an unrecognised mode value", async () => {
+  const dir = tempProject();
+  try {
+    const file = join(dir, "out.txt");
+    writeFileSync(file, "stale content");
+
+    const out = await executeTool("write_file", JSON.stringify({ path: "out.txt", content: "fresh content", mode: "bogus" }), dir);
+
+    assert.match(out, /^File written:/);
+    assert.equal(readFileSync(file, "utf-8"), "fresh content");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

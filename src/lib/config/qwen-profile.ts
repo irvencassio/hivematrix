@@ -10,6 +10,9 @@ export interface QwenModelConfig {
   endpoint: string;
   provider: QwenProvider;
   contextLimit: number;
+  /** Cap on tokens generated per turn — NOT the context window. Reasoning
+   * tokens (Qwen's reasoning_content) draw from this same budget. */
+  maxOutputTokens: number;
 }
 
 export interface QwenProfile {
@@ -22,6 +25,7 @@ export interface QwenProfile {
 }
 
 const DEFAULT_CONTEXT_LIMIT = 32768;
+const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 const DEFAULT_MIN_DECODE_RATE = 15;
 const DEFAULT_PROBE_TIMEOUT_MS = 60_000;
 const DEFAULT_THINKING_ENABLED = false;
@@ -31,6 +35,7 @@ const DEFAULT_PRIMARY: QwenModelConfig = {
   endpoint: "http://localhost:8080",
   provider: "mlx",
   contextLimit: 262144,
+  maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
 };
 
 function coerceProvider(p: unknown): QwenProvider {
@@ -41,13 +46,19 @@ function coerceProvider(p: unknown): QwenProvider {
 function parseModelConfig(raw: unknown, fallback: QwenModelConfig): QwenModelConfig {
   if (!raw || typeof raw !== "object") return fallback;
   const r = raw as Record<string, unknown>;
+  const contextLimit = typeof r.contextLimit === "number" && r.contextLimit > 0
+    ? r.contextLimit
+    : DEFAULT_CONTEXT_LIMIT;
+  const requestedOutput = typeof r.maxOutputTokens === "number" && r.maxOutputTokens > 0
+    ? r.maxOutputTokens
+    : DEFAULT_MAX_OUTPUT_TOKENS;
   return {
     modelId: typeof r.modelId === "string" && r.modelId ? r.modelId : fallback.modelId,
     endpoint: typeof r.endpoint === "string" && r.endpoint ? r.endpoint : fallback.endpoint,
     provider: coerceProvider(r.provider),
-    contextLimit: typeof r.contextLimit === "number" && r.contextLimit > 0
-      ? r.contextLimit
-      : DEFAULT_CONTEXT_LIMIT,
+    contextLimit,
+    // Never let the output cap exceed the context window itself.
+    maxOutputTokens: Math.min(requestedOutput, contextLimit),
   };
 }
 

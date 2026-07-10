@@ -115,14 +115,19 @@ export function qwenProfileForProvisionPlan(plan: ProvisionPlan): QwenProfile | 
   if (!plan.localCapable || plan.tiers.length === 0) return null;
   const primaryTier = plan.tiers.find((t) => t.key === "fast") ?? plan.tiers[0];
   const secondaryTier = plan.tiers.find((t) => t.key === "coding") ?? null;
-  const modelForTier = (tier: LocalTier) => ({
-    modelId: tier.alias,
-    endpoint: tierBaseUrl(tier),
-    provider: "mlx" as const,
-    contextLimit: tier.key === "coding"
+  const modelForTier = (tier: LocalTier) => {
+    const contextLimit = tier.key === "coding"
       ? plan.preset.localCoderQuality.defaultContext
-      : plan.preset.localAgentFast.defaultContext,
-  });
+      : plan.preset.localAgentFast.defaultContext;
+    return {
+      modelId: tier.alias,
+      endpoint: tierBaseUrl(tier),
+      provider: "mlx" as const,
+      contextLimit,
+      // Output cap, not the window — leave headroom for prompt + reasoning tokens.
+      maxOutputTokens: Math.min(16384, contextLimit),
+    };
+  };
   return {
     location: "local",
     primary: modelForTier(primaryTier),

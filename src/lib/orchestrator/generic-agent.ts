@@ -8,6 +8,7 @@ import {
   parseOpenAIChunk,
   createStreamState,
   getCompletedToolCalls,
+  getFinishReason,
   getUsage,
   parseSSEStream,
 } from "./openai-stream-adapter";
@@ -65,6 +66,47 @@ export function buildSmokeGateFinalResult(
 export function modelToolResultContent(result: string, maxChars = MODEL_TOOL_RESULT_MAX_CHARS): string {
   if (result.length <= maxChars) return result;
   return `${result.slice(0, maxChars)}\n\n[truncated: tool result was ${result.length} chars; ask for a narrower read/search/listing with offset, limit, path, or glob if more detail is needed.]`;
+}
+
+export interface NativeToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+/**
+ * Decide which tool calls this turn actually has, and whether the model was
+ * cut off by max_tokens while a native call was still accumulating. The
+ * `useNativeToolCalls` flag is the single source of truth for whether the
+ * assistant message pushed to `messages` carries a `tool_calls` field — the
+ * tool-result messages pushed afterward must agree with it, or the
+ * conversation desyncs (a role:"tool" message whose tool_call_id points at
+ * an assistant message that never had tool_calls).
+ */
+export function resolveEffectiveToolCalls(
+  hasToolCalls: boolean,
+  toolCalls: NativeToolCall[],
+  textToolCalls: TextToolCall[],
+  finishReason: string | null
+): {
+  useNativeToolCalls: boolean;
+  effectiveToolCalls: Array<NativeToolCall | TextToolCall>;
+  truncatedToolCall: boolean;
+} {
+  const useNativeToolCalls = hasToolCalls && toolCalls.length > 0;
+  return {
+    useNativeToolCalls,
+    effectiveToolCalls: useNativeToolCalls ? toolCalls : textToolCalls,
+    // "length" means the model was cut off by max_tokens mid-turn. If it happened
+    // while a native tool call was still accumulating, the arguments are a
+    // truncated JSON fragment — never parse or execute them.
+    truncatedToolCall: finishReason === "length" && useNativeToolCalls,
+  };
+}
+
+/** Tool-result content for a call whose arguments were cut off by max_tokens. */
+export function buildTruncatedToolCallResult(maxTokens: number): string {
+  return `Error: your tool call was cut off before it finished — the arguments are incomplete and were NOT executed. No file was written and nothing changed on disk.\n\nYou ran out of output tokens for this turn (max_tokens=${maxTokens}). Reasoning tokens count against the same budget.\n\nRecovery: split the work across turns. Call write_file with mode="overwrite" for the first chunk, then call write_file with mode="append" for each following chunk. Keep each chunk under ~2000 tokens. Do NOT use bash heredocs to write files.`;
 }
 
 // Incrementing fake PID for generic agents (negative to avoid collision with real PIDs)
@@ -695,13 +737,19 @@ async function runAgentLoop(
     inputTokens += usage.promptTokens;
     outputTokens += usage.completionTokens;
 
-    // Get completed tool calls from this turn
+    // Get completed tool calls from this turn.
     const toolCalls = getCompletedToolCalls(state);
-    const effectiveToolCalls = toolCalls.length > 0 ? toolCalls : textTools.toolCalls;
+    const finishReason = getFinishReason(state);
+    const { useNativeToolCalls, effectiveToolCalls, truncatedToolCall } = resolveEffectiveToolCalls(
+      hasToolCalls,
+      toolCalls,
+      textTools.toolCalls,
+      finishReason
+    );
 
-    if ((toolCalls.length > 0 && hasToolCalls) || textTools.toolCalls.length > 0) {
+    if (effectiveToolCalls.length > 0) {
       // Add assistant message with tool calls to conversation
-      if (toolCalls.length > 0 && hasToolCalls) {
+      if (useNativeToolCalls) {
         messages.push({
           role: "assistant",
           content: cleanTurnText || null,
@@ -718,11 +766,33 @@ async function runAgentLoop(
         });
       }
 
+      if (truncatedToolCall) {
+        onEvent(taskId, {
+          type: "error",
+          content: `Model output was truncated at max_tokens=${provider.maxTokens} mid tool-call — arguments are incomplete and will not be executed.`,
+        });
+      }
+
       let loopBreakTriggered = false;
       const textToolResults: string[] = [];
 
       // Execute each tool call and add results
       for (const tc of effectiveToolCalls) {
+        if (truncatedToolCall) {
+          // Do not parse or execute a truncated call. Tell the model exactly
+          // what happened and how to recover, then move on — this must not
+          // count toward the loop guard, since a retry is not a repeat.
+          const result = buildTruncatedToolCallResult(provider.maxTokens);
+          const modelResult = modelToolResultContent(result);
+          onEvent(taskId, { type: "tool_result", content: result.slice(0, 500) });
+          if ("id" in tc) {
+            messages.push({ role: "tool", tool_call_id: tc.id, content: modelResult });
+          } else {
+            textToolResults.push(`Tool result for ${tc.name}:\n${modelResult}`);
+          }
+          continue;
+        }
+
         // Normalise args to a stable key for loop detection
         let normArgs = tc.arguments;
         try {

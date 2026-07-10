@@ -28,8 +28,8 @@ test("getQwenProfile parses full profile", () => {
   const cfg = {
     qwen: {
       location: "local",
-      primary: { modelId: "Qwen3-Coder-Next-80B-A3B", endpoint: "http://localhost:8080", provider: "mlx", contextLimit: 262144 },
-      secondary: { modelId: "Qwen3.6-35B-A3B", endpoint: "http://localhost:8080", provider: "mlx", contextLimit: 65536 },
+      primary: { modelId: "Qwen3-Coder-Next-80B-A3B", endpoint: "http://localhost:8080", provider: "mlx", contextLimit: 262144, maxOutputTokens: 16384 },
+      secondary: { modelId: "Qwen3.6-35B-A3B", endpoint: "http://localhost:8080", provider: "mlx", contextLimit: 65536, maxOutputTokens: 8192 },
       thinkingEnabled: true,
       minDecodeRate: 15,
       probeTimeoutMs: 60000,
@@ -41,10 +41,33 @@ test("getQwenProfile parses full profile", () => {
   assert.equal(profile!.primary.modelId, "Qwen3-Coder-Next-80B-A3B");
   assert.equal(profile!.primary.provider, "mlx");
   assert.equal(profile!.primary.contextLimit, 262144);
+  assert.equal(profile!.primary.maxOutputTokens, 16384);
   assert.ok(profile!.secondary !== null);
   assert.equal(profile!.secondary!.modelId, "Qwen3.6-35B-A3B");
+  assert.equal(profile!.secondary!.maxOutputTokens, 8192);
   assert.equal(profile!.thinkingEnabled, true);
   assert.equal(profile!.minDecodeRate, 15);
+});
+
+test("getQwenProfile defaults maxOutputTokens when omitted", () => {
+  const cfg = {
+    qwen: {
+      primary: { modelId: "my-model", endpoint: "http://localhost:8080", provider: "ollama" },
+    },
+  };
+  const profile = withTempHome(cfg, () => getQwenProfile());
+  assert.equal(profile!.primary.maxOutputTokens, 16384);
+});
+
+test("getQwenProfile clamps maxOutputTokens to contextLimit when config asks for more", () => {
+  const cfg = {
+    qwen: {
+      primary: { modelId: "my-model", endpoint: "http://localhost:8080", provider: "mlx", contextLimit: 8192, maxOutputTokens: 65536 },
+    },
+  };
+  const profile = withTempHome(cfg, () => getQwenProfile());
+  assert.equal(profile!.primary.contextLimit, 8192);
+  assert.equal(profile!.primary.maxOutputTokens, 8192);
 });
 
 test("getQwenProfile applies defaults for missing fields", () => {

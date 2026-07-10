@@ -31,6 +31,7 @@ const profile = (over: Partial<QwenProfile["primary"]> & { location?: QwenProfil
   primary: {
     modelId: over.modelId ?? "Qwen3.6-27B", endpoint: over.endpoint ?? "http://127.0.0.1:8080",
     provider: over.provider ?? "mlx", contextLimit: over.contextLimit ?? 131072,
+    maxOutputTokens: over.maxOutputTokens ?? 16384,
   },
   secondary: null, thinkingEnabled: true, minDecodeRate: 15, probeTimeoutMs: 60000,
 });
