@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.168", date: "2026-07-10", note: "Fix Tailscale toggle always showing Off in Settings" },
   { version: "0.1.167", date: "2026-07-10", note: "Developer ID release" },
   { version: "0.1.166", date: "2026-07-10", note: "Developer ID release" },
   { version: "0.1.165", date: "2026-07-10", note: "Developer ID release" },

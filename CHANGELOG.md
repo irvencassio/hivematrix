@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.168 — 2026-07-10
+
+Fix Tailscale toggle always showing Off in Settings
+
 ## v0.1.167 — 2026-07-10
 
 Developer ID release
