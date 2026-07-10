@@ -18,12 +18,22 @@ function resolveDbPath(): string {
 const g = globalThis as unknown as { __hivematrixSqlite?: Database.Database };
 
 // ------------------------------------------------------------------
-// Schema migrations — each entry runs once, tracked via PRAGMA user_version.
-// Append-only: never edit or reorder existing entries.
+// Schema migrations — each entry runs once, tracked by stable id in the
+// _migrations_applied ledger (see runMigrations). Append-only: never edit
+// an already-shipped entry's id or sql, never reorder or delete one.
 // ------------------------------------------------------------------
-const MIGRATIONS: string[] = [
+interface Migration {
+  id: string;
+  sql: string;
+}
+
+function m(id: string, sql: string): Migration {
+  return { id, sql };
+}
+
+const MIGRATIONS: Migration[] = [
   // v1: core tasks table (goals/missions/scheduledTasks dropped; directive replaces them)
-  `CREATE TABLE IF NOT EXISTS tasks (
+  m("v1", `CREATE TABLE IF NOT EXISTS tasks (
       _id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       description TEXT NOT NULL,
@@ -67,10 +77,10 @@ const MIGRATIONS: string[] = [
       updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_status_position ON tasks(status, position);
-    CREATE INDEX IF NOT EXISTS idx_tasks_project_path_status ON tasks(projectPath, status);`,
+    CREATE INDEX IF NOT EXISTS idx_tasks_project_path_status ON tasks(projectPath, status);`),
 
   // v2: task_history archive table + usage_totals aggregation table
-  `CREATE TABLE IF NOT EXISTS task_history (
+  m("v2", `CREATE TABLE IF NOT EXISTS task_history (
       _id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       description TEXT NOT NULL,
@@ -103,10 +113,10 @@ const MIGRATIONS: string[] = [
     CREATE INDEX IF NOT EXISTS idx_history_project ON task_history(project);
     CREATE INDEX IF NOT EXISTS idx_history_profile ON task_history(profile);
     CREATE INDEX IF NOT EXISTS idx_history_archived ON task_history(archivedAt);
-    CREATE INDEX IF NOT EXISTS idx_history_completed ON task_history(completedAt);`,
+    CREATE INDEX IF NOT EXISTS idx_history_completed ON task_history(completedAt);`),
 
   // v3: usage_totals aggregation table
-  `CREATE TABLE IF NOT EXISTS usage_totals (
+  m("v3", `CREATE TABLE IF NOT EXISTS usage_totals (
       _id INTEGER PRIMARY KEY AUTOINCREMENT,
       profile TEXT NOT NULL,
       project TEXT NOT NULL,
@@ -121,10 +131,10 @@ const MIGRATIONS: string[] = [
       turns INTEGER DEFAULT 0,
       updatedAt TEXT DEFAULT (datetime('now'))
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_totals_key ON usage_totals(profile, project, period, periodStart);`,
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_totals_key ON usage_totals(profile, project, period, periodStart);`),
 
   // v4: artifacts table for agent-produced visual output
-  `CREATE TABLE IF NOT EXISTS artifacts (
+  m("v4", `CREATE TABLE IF NOT EXISTS artifacts (
       _id TEXT PRIMARY KEY,
       scope TEXT NOT NULL,
       scopeId TEXT,
@@ -142,10 +152,10 @@ const MIGRATIONS: string[] = [
     );
     CREATE INDEX IF NOT EXISTS idx_artifacts_scope ON artifacts(scope, scopeId);
     CREATE INDEX IF NOT EXISTS idx_artifacts_stem ON artifacts(scope, scopeId, stem);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_file ON artifacts(scope, scopeId, filename);`,
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_file ON artifacts(scope, scopeId, filename);`),
 
   // v5: messaging control-plane — channels, identities, deliveries, inbound, sessions
-  `CREATE TABLE IF NOT EXISTS message_channels (
+  m("v5", `CREATE TABLE IF NOT EXISTS message_channels (
       _id TEXT PRIMARY KEY,
       channel TEXT NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 0,
@@ -175,10 +185,10 @@ const MIGRATIONS: string[] = [
       updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_message_identities_channel_address ON message_identities(channel, address);
-    CREATE INDEX IF NOT EXISTS idx_message_identities_status ON message_identities(channel, status);`,
+    CREATE INDEX IF NOT EXISTS idx_message_identities_status ON message_identities(channel, status);`),
 
   // v6: directives table — replaces goals/missions/scheduled_tasks as the unified planning primitive
-  `CREATE TABLE IF NOT EXISTS directives (
+  m("v6", `CREATE TABLE IF NOT EXISTS directives (
       _id TEXT PRIMARY KEY,
       goal TEXT NOT NULL,
       triggerPolicy TEXT NOT NULL DEFAULT 'manual',
@@ -198,10 +208,10 @@ const MIGRATIONS: string[] = [
     );
     CREATE INDEX IF NOT EXISTS idx_directives_profile_status ON directives(profile, status);
     CREATE INDEX IF NOT EXISTS idx_directives_project ON directives(project);
-    CREATE INDEX IF NOT EXISTS idx_directives_next_run ON directives(nextRunAt);`,
+    CREATE INDEX IF NOT EXISTS idx_directives_next_run ON directives(nextRunAt);`),
 
   // v7: runs table — execution records for each directive invocation
-  `CREATE TABLE IF NOT EXISTS runs (
+  m("v7", `CREATE TABLE IF NOT EXISTS runs (
       _id TEXT PRIMARY KEY,
       directiveId TEXT NOT NULL,
       phase TEXT NOT NULL DEFAULT 'plan',
@@ -214,10 +224,10 @@ const MIGRATIONS: string[] = [
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_runs_directive ON runs(directiveId);
-    CREATE INDEX IF NOT EXISTS idx_runs_phase ON runs(directiveId, phase);`,
+    CREATE INDEX IF NOT EXISTS idx_runs_phase ON runs(directiveId, phase);`),
 
   // v8: run_journal table — step-by-step recovery log for resumable runs
-  `CREATE TABLE IF NOT EXISTS run_journal (
+  m("v8", `CREATE TABLE IF NOT EXISTS run_journal (
       _id INTEGER PRIMARY KEY AUTOINCREMENT,
       runId TEXT NOT NULL,
       directiveId TEXT NOT NULL,
@@ -226,10 +236,10 @@ const MIGRATIONS: string[] = [
       recordedAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_run_journal_run ON run_journal(runId);
-    CREATE INDEX IF NOT EXISTS idx_run_journal_directive ON run_journal(directiveId);`,
+    CREATE INDEX IF NOT EXISTS idx_run_journal_directive ON run_journal(directiveId);`),
 
   // v9: directive_criteria table — verified-completion criteria for directives
-  `CREATE TABLE IF NOT EXISTS directive_criteria (
+  m("v9", `CREATE TABLE IF NOT EXISTS directive_criteria (
       _id TEXT PRIMARY KEY,
       directiveId TEXT NOT NULL,
       description TEXT NOT NULL,
@@ -241,28 +251,28 @@ const MIGRATIONS: string[] = [
       updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_directive_criteria_directive ON directive_criteria(directiveId);
-    CREATE INDEX IF NOT EXISTS idx_directive_criteria_proven ON directive_criteria(directiveId, proven);`,
+    CREATE INDEX IF NOT EXISTS idx_directive_criteria_proven ON directive_criteria(directiveId, proven);`),
 
   // v10: add directiveId FK on tasks — links a task back to its originating directive
-  `ALTER TABLE tasks ADD COLUMN directiveId TEXT DEFAULT NULL;
-    CREATE INDEX IF NOT EXISTS idx_tasks_directive ON tasks(directiveId);`,
+  m("v10", `ALTER TABLE tasks ADD COLUMN directiveId TEXT DEFAULT NULL;
+    CREATE INDEX IF NOT EXISTS idx_tasks_directive ON tasks(directiveId);`),
 
   // v11: add delayReason on tasks — the scheduler tags usage-limit delays so
   // clearStaleUsageDelays can distinguish them from other delay causes.
-  `ALTER TABLE tasks ADD COLUMN delayReason TEXT DEFAULT NULL;`,
+  m("v11", `ALTER TABLE tasks ADD COLUMN delayReason TEXT DEFAULT NULL;`),
 
   // v12: add brainSelection on tasks — pinned brain doc paths persisted per
   // task (the Task store reads/writes it; was missing from the base schema).
-  `ALTER TABLE tasks ADD COLUMN brainSelection TEXT NOT NULL DEFAULT '[]';`,
+  m("v12", `ALTER TABLE tasks ADD COLUMN brainSelection TEXT NOT NULL DEFAULT '[]';`),
 
   // v13: add reviewState on tasks — distinguishes needs_input from
   // ready_for_review under the review status (set by agent-manager on exit).
-  `ALTER TABLE tasks ADD COLUMN reviewState TEXT DEFAULT NULL;`,
+  m("v13", `ALTER TABLE tasks ADD COLUMN reviewState TEXT DEFAULT NULL;`),
 
   // v14: frontier-review-debt queue — code-critical work that ran locally
   // (mixed mode, cloud unavailable) is recorded here and replayed as a frontier
   // review task when cloud-ok returns.
-  `CREATE TABLE IF NOT EXISTS frontier_review_debt (
+  m("v14", `CREATE TABLE IF NOT EXISTS frontier_review_debt (
       _id TEXT PRIMARY KEY,
       taskId TEXT NOT NULL,
       project TEXT,
@@ -273,12 +283,12 @@ const MIGRATIONS: string[] = [
       drainedAt TEXT
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_frontier_debt_task ON frontier_review_debt(taskId);
-    CREATE INDEX IF NOT EXISTS idx_frontier_debt_status ON frontier_review_debt(status);`,
+    CREATE INDEX IF NOT EXISTS idx_frontier_debt_status ON frontier_review_debt(status);`),
 
   // v15: telemetry_events — opt-in, local-first event log (privacy is a selling
   // point, so nothing is recorded unless config.telemetry.enabled is true and
   // nothing leaves the machine without an explicit "send diagnostics").
-  `CREATE TABLE IF NOT EXISTS telemetry_events (
+  m("v15", `CREATE TABLE IF NOT EXISTS telemetry_events (
       _id INTEGER PRIMARY KEY AUTOINCREMENT,
       category TEXT NOT NULL,
       event TEXT NOT NULL,
@@ -288,11 +298,11 @@ const MIGRATIONS: string[] = [
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_telemetry_category ON telemetry_events(category);
-    CREATE INDEX IF NOT EXISTS idx_telemetry_created ON telemetry_events(createdAt);`,
+    CREATE INDEX IF NOT EXISTS idx_telemetry_created ON telemetry_events(createdAt);`),
 
   // v16: feedback — bugs and enhancement requests filed by the founder (by text,
   // console, or mobile) and triaged locally. Lightweight backlog, not a tracker.
-  `CREATE TABLE IF NOT EXISTS feedback (
+  m("v16", `CREATE TABLE IF NOT EXISTS feedback (
       _id TEXT PRIMARY KEY,
       kind TEXT NOT NULL,
       title TEXT NOT NULL,
@@ -303,12 +313,12 @@ const MIGRATIONS: string[] = [
       updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_feedback_kind ON feedback(kind);
-    CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);`,
+    CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);`),
 
   // v17: task_telemetry — one normalized row per task-run (observability).
   // NULL columns mean "unavailable" (e.g. Codex tokens before recovery) — never
   // a fake 0. gen_ai.* shaped for portability.
-  `CREATE TABLE IF NOT EXISTS task_telemetry (
+  m("v17", `CREATE TABLE IF NOT EXISTS task_telemetry (
       _id INTEGER PRIMARY KEY AUTOINCREMENT,
       taskId TEXT NOT NULL,
       runIndex INTEGER NOT NULL DEFAULT 0,
@@ -337,11 +347,11 @@ const MIGRATIONS: string[] = [
     );
     CREATE INDEX IF NOT EXISTS idx_task_telemetry_task ON task_telemetry(taskId);
     CREATE INDEX IF NOT EXISTS idx_task_telemetry_created ON task_telemetry(createdAt);
-    CREATE INDEX IF NOT EXISTS idx_task_telemetry_provider ON task_telemetry(provider);`,
+    CREATE INDEX IF NOT EXISTS idx_task_telemetry_provider ON task_telemetry(provider);`),
 
   // v18: Lane and Browser Lane control-plane schema. Secrets never live here:
   // browser_credentials stores only Keychain credentialRef metadata.
-  `CREATE TABLE IF NOT EXISTS lane_providers (
+  m("v18", `CREATE TABLE IF NOT EXISTS lane_providers (
       _id TEXT PRIMARY KEY,
       lane TEXT NOT NULL,
       provider TEXT NOT NULL,
@@ -484,12 +494,12 @@ const MIGRATIONS: string[] = [
       screenshotPath TEXT,
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
-    CREATE INDEX IF NOT EXISTS idx_browser_trace_events_run ON browser_trace_events(traceRunId, createdAt);`,
+    CREATE INDEX IF NOT EXISTS idx_browser_trace_events_run ON browser_trace_events(traceRunId, createdAt);`),
 
   // v19: COO route-to-execution audit trail. Append-only record of every
   // dispatch decision. No secrets: requestText is the operator's intent and the
   // bridge never resolves credential/cookie/Keychain material into a row.
-  `CREATE TABLE IF NOT EXISTS coo_dispatch_audit (
+  m("v19", `CREATE TABLE IF NOT EXISTS coo_dispatch_audit (
       _id TEXT PRIMARY KEY,
       requestText TEXT NOT NULL,
       requestContext TEXT NOT NULL DEFAULT '{}',
@@ -502,16 +512,16 @@ const MIGRATIONS: string[] = [
       reason TEXT NOT NULL DEFAULT '',
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
-    CREATE INDEX IF NOT EXISTS idx_coo_dispatch_audit_created ON coo_dispatch_audit(createdAt);`,
+    CREATE INDEX IF NOT EXISTS idx_coo_dispatch_audit_created ON coo_dispatch_audit(createdAt);`),
 
   // v20: link a dispatch audit row to the task it created (Browser Lane). Kept
   // separate from workItemId (the envelope id) so neither is overloaded.
-  `ALTER TABLE coo_dispatch_audit ADD COLUMN taskId TEXT;`,
+  m("v20", `ALTER TABLE coo_dispatch_audit ADD COLUMN taskId TEXT;`),
 
   // v21: generic Workflow Run Ledger — durable run state, events, artifacts, and
   // blockers for registered workflows. No secrets: artifact_json / metadata_json
   // are key-redacted before write by the store.
-  `CREATE TABLE IF NOT EXISTS workflow_runs (
+  m("v21", `CREATE TABLE IF NOT EXISTS workflow_runs (
       _id TEXT PRIMARY KEY,
       workflowId TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'created',
@@ -540,12 +550,12 @@ const MIGRATIONS: string[] = [
       metadata_json TEXT NOT NULL DEFAULT '{}',
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
-    CREATE INDEX IF NOT EXISTS idx_workflow_run_events_run ON workflow_run_events(runId, createdAt);`,
+    CREATE INDEX IF NOT EXISTS idx_workflow_run_events_run ON workflow_run_events(runId, createdAt);`),
 
   // v22: workflow action handoffs — a run can durably PROPOSE a next workflow, which
   // an operator/model later executes explicitly. No secrets: suggested_inputs_json is
   // key-redacted by the store.
-  `CREATE TABLE IF NOT EXISTS workflow_actions (
+  m("v22", `CREATE TABLE IF NOT EXISTS workflow_actions (
       _id TEXT PRIMARY KEY,
       sourceRunId TEXT NOT NULL,
       targetWorkflowId TEXT NOT NULL,
@@ -558,25 +568,25 @@ const MIGRATIONS: string[] = [
       createdAt TEXT NOT NULL DEFAULT (datetime('now')),
       updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
-    CREATE INDEX IF NOT EXISTS idx_workflow_actions_source ON workflow_actions(sourceRunId, createdAt);`,
+    CREATE INDEX IF NOT EXISTS idx_workflow_actions_source ON workflow_actions(sourceRunId, createdAt);`),
 
   // v23: workflow review gate — durable review decisions on runs, and an artifact map
   // on actions so execution pulls the CURRENT (revised) source artifacts. Additive;
   // notes/values are secret-scrubbed by the store.
-  `ALTER TABLE workflow_runs ADD COLUMN reviewDecision TEXT;
+  m("v23", `ALTER TABLE workflow_runs ADD COLUMN reviewDecision TEXT;
    ALTER TABLE workflow_runs ADD COLUMN reviewNote TEXT;
    ALTER TABLE workflow_runs ADD COLUMN reviewedAt TEXT;
    ALTER TABLE workflow_runs ADD COLUMN reviewedArtifacts_json TEXT;
-   ALTER TABLE workflow_actions ADD COLUMN source_artifact_map_json TEXT;`,
+   ALTER TABLE workflow_actions ADD COLUMN source_artifact_map_json TEXT;`),
 
   // v24: Browser Lane sites record the non-secret provider account/email the site
   // signs in as (Google/Microsoft SSO, or a Keychain account label). Metadata
   // only — never a password/cookie/token; secrets stay in macOS Keychain.
-  `ALTER TABLE browser_sites ADD COLUMN providerAccount TEXT;`,
+  m("v24", `ALTER TABLE browser_sites ADD COLUMN providerAccount TEXT;`),
 
   // v25: Terminal Lane control-plane schema. Secrets never live here:
   // terminal_credentials stores only Keychain credentialRef metadata.
-  `CREATE TABLE IF NOT EXISTS terminal_profiles (
+  m("v25", `CREATE TABLE IF NOT EXISTS terminal_profiles (
       _id TEXT PRIMARY KEY,
       displayName TEXT NOT NULL,
       kind TEXT NOT NULL,
@@ -644,13 +654,13 @@ const MIGRATIONS: string[] = [
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_terminal_session_audit_created ON terminal_session_audit(createdAt);
-    CREATE INDEX IF NOT EXISTS idx_terminal_session_audit_profile ON terminal_session_audit(profileId, createdAt);`,
+    CREATE INDEX IF NOT EXISTS idx_terminal_session_audit_profile ON terminal_session_audit(profileId, createdAt);`),
 
   // v26: Terminal Lane honest auth model. authMethod replaces the implicit
   // "kind+credentialRef" guesswork; keyPath stores an SSH identity-file PATH
   // (metadata only — never a secret). Existing rows default to 'local'.
-  `ALTER TABLE terminal_profiles ADD COLUMN authMethod TEXT NOT NULL DEFAULT 'local';
-   ALTER TABLE terminal_profiles ADD COLUMN keyPath TEXT;`,
+  m("v26", `ALTER TABLE terminal_profiles ADD COLUMN authMethod TEXT NOT NULL DEFAULT 'local';
+   ALTER TABLE terminal_profiles ADD COLUMN keyPath TEXT;`),
 
   // v27–v28: Work Packages + Flight Loops removed 2026-07-06. Broad prompts now
   // dispatch as a single task with workflow:"work" and the frontier coding harness
@@ -660,7 +670,7 @@ const MIGRATIONS: string[] = [
   // v29: Flash Lane — conversational agent loop sessions and turns. Per-channel-peer
   // session scoping: same iMessage sender resumes their session; console + voice
   // share one operator session per profile. Feedback stored in artifactsJson column.
-  `CREATE TABLE IF NOT EXISTS flash_sessions (
+  m("v29", `CREATE TABLE IF NOT EXISTS flash_sessions (
       id TEXT PRIMARY KEY,
       channel TEXT NOT NULL,
       peer TEXT NOT NULL,
@@ -680,15 +690,15 @@ const MIGRATIONS: string[] = [
       artifactsJson TEXT,
       ts TEXT NOT NULL DEFAULT (datetime('now'))
     );
-    CREATE INDEX IF NOT EXISTS idx_flash_turns_session ON flash_turns(sessionId, ts);`,
+    CREATE INDEX IF NOT EXISTS idx_flash_turns_session ON flash_turns(sessionId, ts);`),
 
   // v30: Flash Lane learning loop — track which sessions have been distilled so the
   // scheduler doesn't re-distill already-processed sessions across daemon restarts.
-  `ALTER TABLE flash_sessions ADD COLUMN distilledAt TEXT;`,
+  m("v30", `ALTER TABLE flash_sessions ADD COLUMN distilledAt TEXT;`),
 
   // v31: Credential vault ref index — metadata only; actual secrets live in the macOS
   // Keychain under service "hivematrix-vault", account "<scope>/<name>".
-  `CREATE TABLE IF NOT EXISTS vault_refs (
+  m("v31", `CREATE TABLE IF NOT EXISTS vault_refs (
     scope     TEXT NOT NULL,
     name      TEXT NOT NULL,
     label     TEXT NOT NULL DEFAULT '',
@@ -696,20 +706,20 @@ const MIGRATIONS: string[] = [
     updatedAt TEXT NOT NULL,
     PRIMARY KEY (scope, name)
   );
-  CREATE INDEX IF NOT EXISTS idx_vault_refs_scope ON vault_refs(scope);`,
+  CREATE INDEX IF NOT EXISTS idx_vault_refs_scope ON vault_refs(scope);`),
 
   // v32: Terminal Lane per-server access mode (readwrite default | readonly).
   // App-side enforcement classifies commands against editable allow/block lists;
   // the daemon only stores/syncs the mode.
-  `ALTER TABLE terminal_profiles ADD COLUMN accessMode TEXT NOT NULL DEFAULT 'readwrite';`,
+  m("v32", `ALTER TABLE terminal_profiles ADD COLUMN accessMode TEXT NOT NULL DEFAULT 'readwrite';`),
 
   // v33: split Anthropic's cache-write total into its 5-minute vs 1-hour TTL
   // tiers — they price differently (1.25x vs 2.0x base input), so the flat
   // cacheCreationTokens sum can't answer "did caching actually save money".
   // NULL on existing rows means "unknown" (recorded before this split
   // existed), never a fake 0 — see task_telemetry's NULL convention above.
-  `ALTER TABLE task_telemetry ADD COLUMN cacheCreate5mTokens INTEGER;
-   ALTER TABLE task_telemetry ADD COLUMN cacheCreate1hTokens INTEGER;`,
+  m("v33", `ALTER TABLE task_telemetry ADD COLUMN cacheCreate5mTokens INTEGER;
+   ALTER TABLE task_telemetry ADD COLUMN cacheCreate1hTokens INTEGER;`),
 ];
 
 // ------------------------------------------------------------------
@@ -728,17 +738,63 @@ function openDb(): Database.Database {
 }
 
 /**
- * Apply pending migrations, each atomically with its user_version bump — a
- * crash mid-migration must not leave half a schema behind or re-run an
- * already-applied migration on the next start. Exported for tests.
+ * Apply pending migrations, each atomically with its ledger row — a crash
+ * mid-migration must not leave half a schema behind or re-run an
+ * already-applied migration on the next start.
+ *
+ * Tracking is by stable id in _migrations_applied, not by array position or
+ * PRAGMA user_version. Position/user_version drift is possible in practice —
+ * e.g. an uncommitted migration ran once against a real local db (bumping
+ * user_version) and was later discarded before being committed, leaving the
+ * db's stamped version ahead of what the committed array would ever produce.
+ * A scheme that trusts user_version to backfill "everything up to here is
+ * already applied" reproduces that exact bug: it can't tell a migration that
+ * really ran from one that merely shares a version number with whatever did.
+ *
+ * So there is no trust-the-counter backfill. Every migration not yet in the
+ * ledger is actually attempted. Every CREATE TABLE/INDEX in this file is
+ * IF NOT EXISTS (safe to re-run). The one non-idempotent shape is a bare
+ * ALTER TABLE ADD COLUMN, whose only failure mode on a second run is SQLite's
+ * "duplicate column name" — an unambiguous, narrowly-matched signal that this
+ * exact migration already succeeded previously (its statements are atomic:
+ * see the transaction below), so that specific error is caught and treated
+ * as confirmation rather than failure. Any other error is a real failure and
+ * propagates, rolling back whatever that migration attempted.
+ *
+ * user_version is still bumped for external introspection/back-compat, but
+ * it is no longer the gate — the ledger is. Plain strings (as used by tests)
+ * are accepted and assigned a positional id, matching the old behavior for
+ * throwaway migration lists that don't need cross-run identity.
  */
-export function runMigrations(db: Database.Database, migrations: readonly string[] = MIGRATIONS): void {
-  const currentVersion = (db.pragma("user_version", { simple: true }) as number) ?? 0;
+export function runMigrations(db: Database.Database, migrations: readonly (Migration | string)[] = MIGRATIONS): void {
+  const normalized: Migration[] = migrations.map((entry, i) => (typeof entry === "string" ? { id: `#${i}`, sql: entry } : entry));
 
-  for (let i = currentVersion; i < migrations.length; i++) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS _migrations_applied (
+      id TEXT PRIMARY KEY,
+      appliedAt TEXT NOT NULL
+    );
+  `);
+
+  const isApplied = db.prepare("SELECT 1 FROM _migrations_applied WHERE id = ?");
+  const insertApplied = db.prepare("INSERT INTO _migrations_applied (id, appliedAt) VALUES (?, ?)");
+
+  for (const migration of normalized) {
+    if (isApplied.get(migration.id)) continue;
+
     db.transaction(() => {
-      db.exec(migrations[i]);
-      db.pragma(`user_version = ${i + 1}`);
+      try {
+        db.exec(migration.sql);
+        insertApplied.run(migration.id, new Date().toISOString());
+      } catch (err) {
+        if (err instanceof Error && /duplicate column name/i.test(err.message)) {
+          insertApplied.run(migration.id, "recovered: already applied outside the ledger");
+        } else {
+          throw err;
+        }
+      }
+      const appliedCount = (db.prepare("SELECT COUNT(*) AS n FROM _migrations_applied").get() as { n: number }).n;
+      db.pragma(`user_version = ${appliedCount}`);
     })();
   }
 }
