@@ -1845,6 +1845,70 @@ test("disabling a provider excludes its rows from /observability and /observabil
   assert.ok(obsBody2.recent.some((r) => r.provider === "openai-codex"), "codex row reappears once re-enabled");
 });
 
+test("/observability/series end-to-end: 1h window, per-model breakdown, cache 5m/1h split, and live local-engine cache field all round-trip over real HTTP", async (t) => {
+  withTempHome(t);
+  const { recordRun } = await import("@/lib/observability/store");
+
+  recordRun({
+    taskId: "e2e-claude", runIndex: 0, model: "claude-opus-4-8", status: "done",
+    inputTokens: 500, outputTokens: 100, cacheReadTokens: 1000,
+    cacheCreationTokens: 300, cacheCreate5mTokens: 200, cacheCreate1hTokens: 100,
+    costUsd: 0.05, project: "demo", startedAtMs: 0, completedAtMs: 1000,
+  });
+  recordRun({
+    taskId: "e2e-local-fast", runIndex: 0, model: "qwen3.6-35b-4bit", status: "done",
+    inputTokens: 200, outputTokens: 80, project: "demo", startedAtMs: 0, completedAtMs: 500,
+  });
+  recordRun({
+    taskId: "e2e-local-coding", runIndex: 0, model: "qwen3.6-27b-4bit", status: "done",
+    inputTokens: 150, outputTokens: 60, project: "demo", startedAtMs: 0, completedAtMs: 500,
+  });
+
+  const { base, headers } = await startServer(t);
+
+  // 1h window: previously whitelisted only 24h/30d, defaulting anything else
+  // (including a bare "1h") to 7d — a regression here would silently widen
+  // the window instead of erroring.
+  const res = await fetch(`${base}/observability/series?window=1h`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as {
+    window: string; unit: string; points: Array<{ t: string }>;
+    models: Array<{ model: string; provider: string; runs: number }>;
+    cache: Array<{ provider: string; cacheCreate5mTokens: number | null; cacheCreate1hTokens: number | null; netBenefitTokens: number | null }>;
+    localEngineCache: Array<{ tierKey: string; alias: string; port: number; metrics: unknown }>;
+  };
+  assert.equal(body.window, "1h");
+  assert.equal(body.unit, "minute");
+  assert.equal(body.points.length, 12, "1h window buckets into 12 five-minute points");
+
+  // Per-model breakdown: two distinct local models under the same provider,
+  // not collapsed into one "local model" row.
+  const byModel = Object.fromEntries(body.models.map((m) => [m.model, m]));
+  assert.ok(byModel["qwen3.6-35b-4bit"], "fast tier is its own model row");
+  assert.ok(byModel["qwen3.6-27b-4bit"], "coding tier is its own model row");
+  assert.equal(byModel["qwen3.6-35b-4bit"].provider, "local-qwen");
+  assert.equal(byModel["claude-opus-4-8"].provider, "anthropic");
+
+  // Cache 5m/1h split + net benefit round-trip through the real HTTP response.
+  const anthropicCache = body.cache.find((c) => c.provider === "anthropic")!;
+  assert.equal(anthropicCache.cacheCreate5mTokens, 200);
+  assert.equal(anthropicCache.cacheCreate1hTokens, 100);
+  assert.ok(anthropicCache.netBenefitTokens != null, "known split → a real (non-null) net benefit number");
+
+  // localEngineCache is present with the configured tiers. `metrics` is
+  // whatever a REAL scrape of 127.0.0.1:<port> returns on the machine running
+  // this test — null if nothing is listening there, a real struct if a
+  // rapid-mlx instance happens to be up (this dev box often has one running).
+  // Deliberately not asserting which — a test that only passes when the
+  // engine is down (or only when it's up) would be network-state-flaky.
+  assert.ok(Array.isArray(body.localEngineCache));
+  assert.ok(body.localEngineCache.length >= 1, "at least the configured local tiers are reported");
+  for (const tier of body.localEngineCache) {
+    assert.equal(typeof tier.port, "number");
+    assert.ok(tier.metrics === null || typeof tier.metrics === "object", "metrics is null (offline) or a real struct — never a fabricated non-null placeholder");
+  }
+});
+
 test("disabling the current primary frontier provider corrects it to the remaining enabled provider", async (t) => {
   withTempHome(t);
   const { base, headers } = await startServer(t);

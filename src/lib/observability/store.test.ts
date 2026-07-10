@@ -79,3 +79,33 @@ test("observabilitySummary aggregates across providers", () => {
   assert.equal(codex.inputTokens, null, "unavailable Codex tokens → null in summary, not 0");
   assert.equal(codex.outputTokens, null);
 });
+
+test("observabilitySummary: no isAllowed filter → hiddenProviders is empty and all rows count", () => {
+  const s = observabilitySummary();
+  assert.deepEqual(s.hiddenProviders, []);
+});
+
+test("observabilitySummary: isAllowed filters BOTH byProvider/split/tokens AND reports what it hid", () => {
+  recordRun({ taskId: "hide-1", runIndex: 0, model: "codex:gpt-5.5-codex", status: "done", inputTokens: 4000, outputTokens: 1000 });
+  const allowAll = observabilitySummary(1000);
+  const hideCodex = observabilitySummary(1000, (p) => p !== "openai-codex");
+
+  // Derive expected deltas from the actual codex row rather than assuming
+  // exactly one codex row exists — earlier tests in this shared-DB file may
+  // have already recorded one.
+  const codexRow = allowAll.byProvider.find((p) => p.key === "openai-codex")!;
+  assert.ok(codexRow, "sanity: codex row exists before filtering");
+  assert.ok(!hideCodex.byProvider.some((p) => p.key === "openai-codex"), "hidden provider excluded from byProvider");
+
+  // The headline totals must be filtered BEFORE aggregation, not after — this
+  // is the bug this feature exists to prevent (a disabled provider still
+  // inflating tokens.total/split because only scorecard/recent were filtered).
+  assert.equal(hideCodex.runs, allowAll.runs - codexRow.runs);
+  assert.equal(hideCodex.tokens.input, allowAll.tokens.input - (codexRow.inputTokens ?? 0));
+  assert.equal(hideCodex.tokens.output, allowAll.tokens.output - (codexRow.outputTokens ?? 0));
+
+  // ...but it must be reported, not silently dropped.
+  const hidden = hideCodex.hiddenProviders.find((h) => h.key === "openai-codex");
+  assert.ok(hidden, "hidden provider must be reported in hiddenProviders");
+  assert.equal(hidden!.runs, codexRow.runs);
+});

@@ -230,7 +230,7 @@ export interface AgentProcess {
   modelsUsed: string[];
   launchCommand?: string;
   sessionId?: string;
-  lastResult?: { cost: number; result: string; sessionId: string; turns: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; contextWindow: number; reasoningTokens?: number };
+  lastResult?: { cost: number; result: string; sessionId: string; turns: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; cacheCreate5mTokens?: number; cacheCreate1hTokens?: number; contextWindow: number; reasoningTokens?: number };
 }
 
 export type AgentEventHandler = (taskId: string, event: StreamEvent) => void;
@@ -743,6 +743,8 @@ export async function spawnAgent(
             outputTokens: event.outputTokens,
             cacheReadTokens: event.cacheReadTokens,
             cacheCreationTokens: event.cacheCreationTokens,
+            cacheCreate5mTokens: event.cacheCreate5mTokens,
+            cacheCreate1hTokens: event.cacheCreate1hTokens,
             contextWindow: event.contextWindow,
             reasoningTokens: event.reasoningTokens,
           };
@@ -781,6 +783,8 @@ export async function spawnAgent(
             outputTokens: event.outputTokens,
             cacheReadTokens: event.cacheReadTokens,
             cacheCreationTokens: event.cacheCreationTokens,
+            cacheCreate5mTokens: event.cacheCreate5mTokens,
+            cacheCreate1hTokens: event.cacheCreate1hTokens,
             contextWindow: event.contextWindow,
             reasoningTokens: event.reasoningTokens,
           };

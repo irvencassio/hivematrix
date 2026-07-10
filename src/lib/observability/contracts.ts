@@ -12,7 +12,13 @@
  * and rollups exclude it. A fake 0 would silently corrupt every total.
  */
 
-export type Provider = "anthropic" | "openai-codex" | "local-qwen" | "other";
+// `local-${string}` admits every on-device provider id, past and present —
+// including retired ones (e.g. "local-dwarfstar", the removed DeepSeek stack)
+// that still own historical rows in task_telemetry. Never narrow this back to
+// a fixed set of local ids; isLocalProvider() below is a prefix check, not a
+// membership check, precisely so old data keeps classifying correctly after
+// the engine that produced it is gone.
+export type Provider = "anthropic" | "openai-codex" | "other" | `local-${string}`;
 
 /** Map a model id to its provider. Codex models are prefixed `codex:`. */
 export function providerForModel(model: string | null | undefined): Provider {
@@ -25,7 +31,7 @@ export function providerForModel(model: string | null | undefined): Provider {
 }
 
 export function isLocalProvider(p: Provider): boolean {
-  return p === "local-qwen";
+  return p.startsWith("local-");
 }
 
 /** Raw, per-run inputs handed to the normalizer (any field may be missing). */
@@ -40,6 +46,11 @@ export interface RunTelemetryInput {
   outputTokens?: number | null;
   cacheReadTokens?: number | null;
   cacheCreationTokens?: number | null;
+  /** Split of cacheCreationTokens by TTL tier — 1.25x vs 2.0x base input
+   * price. Null when unknown (older CLI, non-Anthropic, or pre-migration
+   * rows) — never a fake 0, matching cacheCreationTokens' own convention. */
+  cacheCreate5mTokens?: number | null;
+  cacheCreate1hTokens?: number | null;
   reasoningTokens?: number | null;
   /** Provider-reported cost only. Local + Codex stay null (not 0). */
   costUsd?: number | null;
@@ -68,6 +79,8 @@ export interface TaskTelemetry {
   outputTokens: number | null;
   cacheReadTokens: number | null;
   cacheCreationTokens: number | null;
+  cacheCreate5mTokens: number | null;
+  cacheCreate1hTokens: number | null;
   reasoningTokens: number | null;
   totalTokens: number | null;
   tokensPerSec: number | null;
@@ -96,12 +109,14 @@ export function normalizeRun(input: RunTelemetryInput): TaskTelemetry {
   let outTok = numOrNull(input.outputTokens);
   let cacheRead = numOrNull(input.cacheReadTokens);
   let cacheCreate = numOrNull(input.cacheCreationTokens);
+  let cacheCreate5m = numOrNull(input.cacheCreate5mTokens);
+  let cacheCreate1h = numOrNull(input.cacheCreate1hTokens);
   let reasoning = numOrNull(input.reasoningTokens);
 
   // Codex reports 0/0 when usage is unavailable (raw stdout, no usage object).
   // Treat that as "unavailable" → null, so it never pollutes token totals.
   if (provider === "openai-codex" && (inTok ?? 0) === 0 && (outTok ?? 0) === 0) {
-    inTok = null; outTok = null; cacheRead = null; cacheCreate = null; reasoning = null;
+    inTok = null; outTok = null; cacheRead = null; cacheCreate = null; cacheCreate5m = null; cacheCreate1h = null; reasoning = null;
   }
 
   const anyTokens = inTok != null || outTok != null;
@@ -140,6 +155,8 @@ export function normalizeRun(input: RunTelemetryInput): TaskTelemetry {
     outputTokens: outTok,
     cacheReadTokens: cacheRead,
     cacheCreationTokens: cacheCreate,
+    cacheCreate5mTokens: cacheCreate5m,
+    cacheCreate1hTokens: cacheCreate1h,
     reasoningTokens: reasoning,
     totalTokens,
     tokensPerSec,
@@ -160,6 +177,10 @@ export function normalizeRun(input: RunTelemetryInput): TaskTelemetry {
 
 export interface ProviderTotals {
   key: string;            // provider or model id
+  /** Which provider this row belongs to. Equal to `key` for byProvider rows;
+   * for byModel rows it's the model's provider, so a consumer can nest a
+   * model row under its provider without re-deriving it from the model id. */
+  provider: Provider;
   runs: number;
   succeeded: number;
   failed: number;
@@ -236,6 +257,40 @@ export function routeScorecard(rows: TaskTelemetry[]): RouteScorecardRow[] {
   return out.sort((a, b) => b.runs - a.runs);
 }
 
+// --- Cache token economics -----------------------------------------------------
+//
+// Anthropic's cache multipliers (platform.claude.com/docs/build-with-claude/
+// prompt-caching) are FIXED PERCENTAGES of the base input-token price, not
+// per-model dollar amounts — so "did caching pay for itself" is computable in
+// equivalent base-input-tokens without a per-model price table that could go
+// stale or drift from real billing. This never touches dollars; costUsd is
+// already the provider-reported real cost and should be trusted for spend.
+
+/** Cache read costs 0.1x base input — a 0.9x credit per token read from cache. */
+export const CACHE_READ_DISCOUNT = 0.1;
+/** 5-minute cache write costs 1.25x base input — a 0.25x premium over a plain read. */
+export const CACHE_WRITE_5M_PREMIUM = 0.25;
+/** 1-hour cache write costs 2.0x base input — a 1.0x premium over a plain read. */
+export const CACHE_WRITE_1H_PREMIUM = 1.0;
+
+/**
+ * Net cache benefit in equivalent base-input-tokens: the read discount earned
+ * minus the write premium paid. Null when the 5m/1h split isn't known (older
+ * rows, non-Anthropic providers) — the two tiers price too differently to
+ * guess. Positive means caching paid for itself in this window; negative
+ * means the write premium exceeded what the reads saved.
+ */
+export function netCacheBenefitTokens(args: {
+  cacheReadTokens: number | null;
+  cacheCreate5mTokens: number | null;
+  cacheCreate1hTokens: number | null;
+}): number | null {
+  if (args.cacheCreate5mTokens == null || args.cacheCreate1hTokens == null) return null;
+  const readSavings = (args.cacheReadTokens ?? 0) * (1 - CACHE_READ_DISCOUNT);
+  const writePremium = args.cacheCreate5mTokens * CACHE_WRITE_5M_PREMIUM + args.cacheCreate1hTokens * CACHE_WRITE_1H_PREMIUM;
+  return Math.round((readSavings - writePremium) * 10) / 10;
+}
+
 /** Nearest-rank percentile over a numeric array (returns null when empty). */
 export function percentile(values: number[], p: number): number | null {
   const xs = values.filter((v) => typeof v === "number" && Number.isFinite(v)).sort((a, b) => a - b);
@@ -256,6 +311,10 @@ function totalsFor(key: string, rows: TaskTelemetry[]): ProviderTotals {
   };
   return {
     key,
+    // rows is always non-empty (built from a Map entry with >=1 pushed row);
+    // for a byModel group every row shares the same provider (a model id
+    // determines its provider at write time), so rows[0] is representative.
+    provider: rows[0].provider,
     runs: rows.length,
     succeeded: rows.filter((r) => r.status === "done" || r.status === "review").length,
     failed: rows.filter((r) => r.status === "failed").length,

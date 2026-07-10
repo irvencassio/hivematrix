@@ -48,15 +48,17 @@ export function broadcast(event: string, data: unknown): void {
   }
 }
 
-// Observability provider names ("anthropic"/"openai-codex"/"local-qwen"/"other")
+// Observability provider names ("anthropic"/"openai-codex"/"local-*"/"other")
 // don't match the frontier-toggle ids ("claude"/"codex") — map the enabled
-// frontier ids into the observability naming, always keeping local/other
-// (they aren't gated by the Claude/Codex toggles).
-function obsProvidersFor(enabledFrontier: Array<"claude" | "codex">): Set<string> {
-  const out = new Set<string>(["local-qwen", "other"]);
-  if (enabledFrontier.includes("claude")) out.add("anthropic");
-  if (enabledFrontier.includes("codex")) out.add("openai-codex");
-  return out;
+// frontier ids into the observability naming. Every "local-*" provider
+// (including retired ones like "local-dwarfstar" that still own historical
+// rows) and "other" are never gated by the Claude/Codex toggles — only
+// "anthropic" and "openai-codex" are. A Set can't express the "local-*"
+// wildcard, so this is a predicate rather than an allowlist Set.
+function obsProviderAllowed(provider: string, enabledFrontier: Array<"claude" | "codex">): boolean {
+  if (provider === "anthropic") return enabledFrontier.includes("claude");
+  if (provider === "openai-codex") return enabledFrontier.includes("codex");
+  return true;
 }
 
 function json(res: ServerResponse, statusCode: number, body: unknown): void {
@@ -883,31 +885,36 @@ export function createDaemonServer() {
         const limit = parseInt(oq.get("limit") ?? "50", 10) || 50;
         const { getLearnedRoutes } = await import("@/lib/routing/operator-prefs");
         const { getEnabledProviders } = await import("@/lib/config/frontier-providers");
-        const enabledObsProviders = obsProvidersFor(getEnabledProviders());
-        const scorecard = observabilityScorecard().filter((row) => enabledObsProviders.has(row.route));
-        const recent = listTaskTelemetry(limit).filter((row) => enabledObsProviders.has(row.provider));
-        json(res, 200, { totals: observabilitySummary(), scorecard, routing: routingRecommendations(), operatorRoutes: getLearnedRoutes(), recent });
+        const enabledFrontier = getEnabledProviders();
+        const isAllowed = (p: string) => obsProviderAllowed(p, enabledFrontier);
+        const scorecard = observabilityScorecard().filter((row) => isAllowed(row.route));
+        const recent = listTaskTelemetry(limit).filter((row) => isAllowed(row.provider));
+        // totals is filtered at the same gate as scorecard/recent — see the comment
+        // on observabilitySummary(). Filtering it separately/after the fact is the
+        // bug that let a disabled Codex keep inflating the headline token count.
+        json(res, 200, { totals: observabilitySummary(1000, isAllowed), scorecard, routing: routingRecommendations(), operatorRoutes: getLearnedRoutes(), recent });
         return;
       }
 
-      // GET /observability/series?window=24h|7d|30d — time-bucketed telemetry +
+      // GET /observability/series?window=1h|24h|7d|30d — time-bucketed telemetry +
       // per-provider cache rollups for the dashboard (all three providers).
       if (req.method === "GET" && urlPath === "/observability/series") {
         const { observabilitySeries } = await import("@/lib/observability/series");
         const { getEnabledProviders } = await import("@/lib/config/frontier-providers");
         const sq = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
         const w = sq.get("window");
-        const window = w === "24h" || w === "30d" ? w : "7d";
-        const series = observabilitySeries(window);
-        const enabledObsProviders = obsProvidersFor(getEnabledProviders());
-        const providers = series.providers.filter((p) => enabledObsProviders.has(p));
+        const window = w === "1h" || w === "24h" || w === "30d" ? w : "7d";
+        const series = await observabilitySeries(window);
+        const enabledFrontier = getEnabledProviders();
+        const providers = series.providers.filter((p) => obsProviderAllowed(p, enabledFrontier));
         const points = series.points.map((pt) => ({
           ...pt,
-          byProvider: Object.fromEntries(Object.entries(pt.byProvider).filter(([p]) => enabledObsProviders.has(p))),
+          byProvider: Object.fromEntries(Object.entries(pt.byProvider).filter(([p]) => obsProviderAllowed(p, enabledFrontier))),
         }));
-        const cache = series.cache.filter((row) => enabledObsProviders.has(row.provider));
-        const byProviderTotals = series.totals.byProvider.filter((row) => enabledObsProviders.has(row.key));
-        json(res, 200, { ...series, providers, points, cache, totals: { ...series.totals, byProvider: byProviderTotals } });
+        const cache = series.cache.filter((row) => obsProviderAllowed(row.provider, enabledFrontier));
+        const models = series.models.filter((row) => obsProviderAllowed(row.provider, enabledFrontier));
+        const byProviderTotals = series.totals.byProvider.filter((row) => obsProviderAllowed(row.key, enabledFrontier));
+        json(res, 200, { ...series, providers, points, cache, models, totals: { ...series.totals, byProvider: byProviderTotals } });
         return;
       }
 

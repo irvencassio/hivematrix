@@ -34,6 +34,8 @@ function rowToTelemetry(r: Row): TaskTelemetry {
     outputTokens: n("outputTokens"),
     cacheReadTokens: n("cacheReadTokens"),
     cacheCreationTokens: n("cacheCreationTokens"),
+    cacheCreate5mTokens: n("cacheCreate5mTokens"),
+    cacheCreate1hTokens: n("cacheCreate1hTokens"),
     reasoningTokens: n("reasoningTokens"),
     totalTokens: n("totalTokens"),
     tokensPerSec: n("tokensPerSec"),
@@ -56,11 +58,13 @@ export function recordTaskTelemetry(t: TaskTelemetry): void {
   db.prepare(
     `INSERT INTO task_telemetry
       (taskId, runIndex, provider, model, role, connectivity, status,
-       inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, reasoningTokens,
+       inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens,
+       cacheCreate5mTokens, cacheCreate1hTokens, reasoningTokens,
        totalTokens, tokensPerSec, latencyMs, ttftMs, turns, toolCalls, costUsd,
        directiveId, runId, proverType, project, createdAt)
      VALUES (@taskId, @runIndex, @provider, @model, @role, @connectivity, @status,
-       @inputTokens, @outputTokens, @cacheReadTokens, @cacheCreationTokens, @reasoningTokens,
+       @inputTokens, @outputTokens, @cacheReadTokens, @cacheCreationTokens,
+       @cacheCreate5mTokens, @cacheCreate1hTokens, @reasoningTokens,
        @totalTokens, @tokensPerSec, @latencyMs, @ttftMs, @turns, @toolCalls, @costUsd,
        @directiveId, @runId, @proverType, @project, @createdAt)`,
   ).run({
@@ -118,9 +122,43 @@ export function getTaskTelemetry(taskId: string): TaskTelemetry[] {
   return rows.map(rowToTelemetry);
 }
 
-/** Totals over the most recent `window` rows (default 1000). */
-export function observabilitySummary(window = 1000): ObservabilityTotals {
-  return summarizeTelemetry(listTaskTelemetry(window));
+export interface HiddenProviderRow {
+  key: string;
+  runs: number;
+}
+
+export interface ObservabilitySummary extends ObservabilityTotals {
+  /**
+   * Providers with rows in this window that `isAllowed` excluded (e.g. a
+   * disabled frontier provider) — never silently dropped from the response,
+   * so a caller can render "Codex — 4 runs hidden (disabled)" instead of the
+   * provider just vanishing. Empty when no `isAllowed` filter is given.
+   */
+  hiddenProviders: HiddenProviderRow[];
+}
+
+/**
+ * Totals over the most recent `window` rows (default 1000), optionally
+ * restricted to providers `isAllowed` admits (e.g. the enabled-frontier
+ * gate). Filtering happens BEFORE summarizeTelemetry — filtering totals
+ * after aggregation would leave tokens/split counting the hidden provider's
+ * rows, which is exactly the bug this exists to prevent (a disabled Codex
+ * still inflating the headline token count).
+ */
+export function observabilitySummary(window = 1000, isAllowed?: (provider: string) => boolean): ObservabilitySummary {
+  const rows = listTaskTelemetry(window);
+  if (!isAllowed) return { ...summarizeTelemetry(rows), hiddenProviders: [] };
+
+  const visible = rows.filter((r) => isAllowed(r.provider));
+  const hiddenCounts = new Map<string, number>();
+  for (const r of rows) {
+    if (!isAllowed(r.provider)) hiddenCounts.set(r.provider, (hiddenCounts.get(r.provider) ?? 0) + 1);
+  }
+  const hiddenProviders = [...hiddenCounts.entries()]
+    .map(([key, runs]) => ({ key, runs }))
+    .sort((a, b) => b.runs - a.runs);
+
+  return { ...summarizeTelemetry(visible), hiddenProviders };
 }
 
 /** Per-route scorecard (first-pass rate, rework, cost/task) over the most recent `window` rows. */

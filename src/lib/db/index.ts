@@ -702,6 +702,14 @@ const MIGRATIONS: string[] = [
   // App-side enforcement classifies commands against editable allow/block lists;
   // the daemon only stores/syncs the mode.
   `ALTER TABLE terminal_profiles ADD COLUMN accessMode TEXT NOT NULL DEFAULT 'readwrite';`,
+
+  // v33: split Anthropic's cache-write total into its 5-minute vs 1-hour TTL
+  // tiers — they price differently (1.25x vs 2.0x base input), so the flat
+  // cacheCreationTokens sum can't answer "did caching actually save money".
+  // NULL on existing rows means "unknown" (recorded before this split
+  // existed), never a fake 0 — see task_telemetry's NULL convention above.
+  `ALTER TABLE task_telemetry ADD COLUMN cacheCreate5mTokens INTEGER;
+   ALTER TABLE task_telemetry ADD COLUMN cacheCreate1hTokens INTEGER;`,
 ];
 
 // ------------------------------------------------------------------

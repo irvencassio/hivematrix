@@ -7,7 +7,7 @@ export type StreamEvent =
   | { type: "tool_use"; tool: string; input: string }
   | { type: "tool_result"; content: string }
   | { type: "init"; model: string }
-  | { type: "result"; sessionId: string; cost: number; result: string; turns: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; contextWindow: number; reasoningTokens?: number }
+  | { type: "result"; sessionId: string; cost: number; result: string; turns: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; cacheCreate5mTokens?: number; cacheCreate1hTokens?: number; contextWindow: number; reasoningTokens?: number }
   | { type: "error"; content: string }
   | { type: "unknown"; raw: string };
 
@@ -54,6 +54,20 @@ export class StreamParser {
         const usage = data.usage as Record<string, number> | undefined;
         const cacheRead = usage?.cache_read_input_tokens ?? 0;
         const cacheCreate = usage?.cache_creation_input_tokens ?? 0;
+        // The 5m/1h split prices differently (1.25x vs 2.0x base input) — the
+        // flat cacheCreate total above can't tell you which tier wrote it.
+        // Absent (older CLI, or a provider that doesn't report it) → undefined,
+        // never a fake 0.
+        const cacheCreationDetail = (data.usage as Record<string, unknown> | undefined)?.cache_creation as Record<string, number> | undefined;
+        const cacheCreate5m = cacheCreationDetail?.ephemeral_5m_input_tokens;
+        const cacheCreate1h = cacheCreationDetail?.ephemeral_1h_input_tokens;
+        if (cacheCreate5m != null && cacheCreate1h != null && cacheCreate5m + cacheCreate1h !== cacheCreate) {
+          // Anthropic's documented invariant broke — surface it, but don't let
+          // a reporting mismatch break task completion over a telemetry detail.
+          console.warn(
+            `[observability] cache_creation split mismatch: ${cacheCreate5m}+${cacheCreate1h} !== ${cacheCreate} (session ${data.session_id ?? "?"})`,
+          );
+        }
         const baseInput = usage?.input_tokens ?? 0;
         const inputTok = baseInput + cacheCreate + cacheRead;
         const outputTok = usage?.output_tokens ?? 0;
@@ -82,6 +96,8 @@ export class StreamParser {
           outputTokens: outputTok || data.total_output_tokens || 0,
           cacheReadTokens: cacheRead,
           cacheCreationTokens: cacheCreate,
+          cacheCreate5mTokens: cacheCreate5m,
+          cacheCreate1hTokens: cacheCreate1h,
           contextWindow,
           reasoningTokens: reasoningTokens || undefined,
         }];

@@ -494,6 +494,68 @@ test("observability by-provider table uses fmtNum for tok in/out (null Codex tok
   assert.ok(matches.length >= 2, "both sidebar and dashboard table renders must use fmtNum for tok in/out");
 });
 
+test("observability model label strips the internal codex: prefix and expands the [1m] context marker", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const fn = js.match(/function obsModelLabel\(model\) \{[\s\S]*?\n\}/);
+  assert.ok(fn, "console script must define obsModelLabel");
+  const factory = new Function(`${fn![0]}\nreturn obsModelLabel;`) as () => (model: string) => string;
+  const obsModelLabel = factory();
+  assert.equal(obsModelLabel("codex:gpt-5.5"), "gpt-5.5", "codex: is execution-only, stripped for display");
+  assert.equal(obsModelLabel("claude-opus-4-8[1m]"), "claude-opus-4-8 (1M ctx)", "[1m] expands to a readable suffix, not merged into the base model");
+  assert.equal(obsModelLabel("claude-opus-4-8"), "claude-opus-4-8", "a plain model id passes through unchanged");
+  assert.equal(obsModelLabel("qwen3.6-35b-4bit"), "qwen3.6-35b-4bit");
+});
+
+test("inline observability panel nests per-model rows under each provider row", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const renderObservability = extractBetween(js, "async function renderObservability()", "// --- Observability dashboard");
+  assert.match(renderObservability, /const byModel = Array\.isArray\(t\.byModel\)/, "reads totals.byModel");
+  assert.match(renderObservability, /byModel\.filter\(m => m\.provider === p\.key\)/, "nests each provider's models by matching provider, not by re-deriving it from the model id");
+  assert.match(renderObservability, /obsModelLabel\(m\.key\)/, "model rows use the display-cleanup helper");
+});
+
+test("dashboard modal offers a provider/model group-by toggle for the breakdown table", () => {
+  assert.match(CONSOLE_HTML, /id="obs_group_modal"/, "group toggle present");
+  assert.match(CONSOLE_HTML, /onclick="setObsGroupModal\('provider'\)"/);
+  assert.match(CONSOLE_HTML, /onclick="setObsGroupModal\('model'\)"/);
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function setObsGroupModal\(g\) \{ _obsGroup = g;/);
+  const renderObsDashboard = extractBetween(js, "async function renderObsDashboard(target)", "function renderConn()");
+  assert.match(renderObsDashboard, /const groupByModel = _obsGroup === "model"/);
+  assert.match(renderObsDashboard, /detail\.totals\.byModel/, "model mode reads the same totals payload — no second query");
+});
+
+test("dashboard modal offers a 1h window with 5-minute bucket ticks", () => {
+  assert.match(CONSOLE_HTML, /onclick="setObsWindowModal\('1h'\)"/, "1h window button present");
+  const js = extractScript(CONSOLE_HTML);
+  const obsBucketLabel = extractFunctionBlock(js, "obsBucketLabel");
+  assert.match(obsBucketLabel, /if \(unit === "minute"\) return \(t \|\| ""\)\.slice\(11, 16\)/, "minute-unit ticks render HH:MM, not the date");
+});
+
+test("prompt cache section shows the Claude 5m/1h write split and a token-based net benefit, never a dollar figure", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const renderObsDashboard = extractBetween(js, "async function renderObsDashboard(target)", "function renderConn()");
+  assert.match(renderObsDashboard, /c\.cacheCreate5mTokens != null && c\.cacheCreate1hTokens != null/, "the split is only rendered when known, never guessed");
+  assert.match(renderObsDashboard, /c\.netBenefitTokens/);
+  assert.doesNotMatch(renderObsDashboard, /\$/, "cache economics are token-based — no dollar-sign pricing table");
+  // Local providers are excluded from the DB-cache loop — they get their own
+  // live section below, not the "no prompt-cache signal" fallback line.
+  assert.match(renderObsDashboard, /dbCacheRows = crows\.filter\(function \(c\) \{ return c\.provider\.indexOf\("local-"\) !== 0; \}\)/);
+});
+
+test("dashboard modal has a live local-engine cache section, separate from the window-scoped DB cache rollup", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const renderObsDashboard = extractBetween(js, "async function renderObsDashboard(target)", "function renderConn()");
+  assert.match(renderObsDashboard, /Local engine cache/);
+  assert.match(renderObsDashboard, /not scoped to the selected window/, "explicitly not window-scoped, unlike the Claude/Codex section above");
+  assert.match(renderObsDashboard, /s\.localEngineCache/);
+  // A tier with no reachable engine renders "engine offline", never a fake 0%.
+  assert.match(renderObsDashboard, /if \(!m\) \{/);
+  assert.match(renderObsDashboard, /engine offline/);
+  // Cache-pressure evictions (KV thrashing) get a visually distinct callout.
+  assert.match(renderObsDashboard, /pressure evictions/);
+});
+
 test("Full dashboard opens dedicated Observability popup, not Settings", () => {
   const js = extractScript(CONSOLE_HTML);
   // openObsDashboard must open the dedicated overlay — not Settings.

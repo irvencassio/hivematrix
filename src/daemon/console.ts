@@ -1452,9 +1452,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <h1>Observability <span class="x" onclick="closeObsDashboard()">✕</span></h1>
     <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">
       <span class="obs-win" id="obs_win_modal">
+        <button data-w="1h" onclick="setObsWindowModal('1h')">1h</button>
         <button data-w="24h" onclick="setObsWindowModal('24h')">24h</button>
         <button data-w="7d" class="on" onclick="setObsWindowModal('7d')">7d</button>
         <button data-w="30d" onclick="setObsWindowModal('30d')">30d</button>
+      </span>
+      <span class="obs-win" id="obs_group_modal">
+        <button data-g="provider" class="on" onclick="setObsGroupModal('provider')">by provider</button>
+        <button data-g="model" onclick="setObsGroupModal('model')">by model</button>
       </span>
       <button class="copybtn" onclick="renderObsDashboard('obsDashModal')">↻ Refresh</button>
     </div>
@@ -2773,15 +2778,38 @@ function toggleReply(id) {
 
 // --- Observability (per-task telemetry + totals) ---
 let _obsWindow = "7d";
-const OBS_LABELS = { "anthropic": "Claude", "openai-codex": "Codex", "local-qwen": "Local model", "other": "other" };
-const OBS_COLORS = { "anthropic": "#c8794f", "openai-codex": "#10a37f", "local-qwen": "#7a5cff", "other": "#8a93a6" };
-const OBS_ORDER = { "anthropic": 0, "openai-codex": 1, "local-qwen": 2, "other": 3 };
+// Only the dashboard modal's bottom breakdown table honors this — the time-
+// bucketed "Tokens/Tasks over time" charts stay provider-grouped, since a
+// per-bucket-per-model breakdown would double the query cost and cardinality
+// for a granularity the operator didn't ask for (they asked which MODEL ran,
+// not a per-hour model timeline).
+let _obsGroup = "provider";
+// Any provider key not listed here (e.g. a future "local-<engine>" id) falls
+// back to its raw string as a label and to OBS_COLORS.other as a color — see
+// the "|| " fallbacks at every OBS_LABELS/OBS_COLORS read site below. Known
+// retired providers get an explicit entry so their historical rows read as
+// "known but gone", not as an unlabeled grey "other" bucket.
+const OBS_LABELS = { "anthropic": "Claude", "openai-codex": "Codex", "local-qwen": "Local model", "local-dwarfstar": "Local (retired)", "other": "other" };
+const OBS_COLORS = { "anthropic": "#c8794f", "openai-codex": "#10a37f", "local-qwen": "#7a5cff", "local-dwarfstar": "#5c6470", "other": "#8a93a6" };
+const OBS_ORDER = { "anthropic": 0, "openai-codex": 1, "local-qwen": 2, "local-dwarfstar": 3, "other": 4 };
 function obsProvider(model) {
   const m = (model || "").toLowerCase().trim();
   if (/^(codex|chatgpt)/.test(m) || /^(gpt|o[0-9])/.test(m)) return "Codex";
   if (/^(claude|opus|sonnet|haiku)/.test(m)) return "Claude";
   if (/(qwen|mistral|llama|mlx|local|gemma|phi|nan)/.test(m)) return "Local model";
   return "—";
+}
+// Display-only cleanup of a raw model id: strip the internal "codex:" prefix
+// (execution-only, not user-facing — see codex-agent.ts) and expand a
+// trailing "[1m]" 1M-context-window marker into a readable suffix. Never
+// merges distinct model ids — a [1m] variant prices differently and must
+// stay its own row.
+function obsModelLabel(model) {
+  model = String(model || "");
+  if (model.indexOf("codex:") === 0) model = model.slice(6);
+  const m1m = model.match(/^(.*)\[1m\]$/);
+  if (m1m) return m1m[1] + " (1M ctx)";
+  return model;
 }
 
 
@@ -2919,14 +2947,32 @@ async function renderObservability() {
     + '<span class="opill">' + fmtNum(t.tokens.total) + ' tok</span>'
     + '</div>';
   html += '<table class="obs-tbl"><tr><th>provider</th><th>runs</th><th>tok in/out</th><th>p50</th><th>p95</th></tr>';
+  const byModel = Array.isArray(t.byModel) ? t.byModel : [];
   for (const p of t.byProvider) {
     const label = OBS_LABELS[p.key] || p.key;
     html += '<tr><td>' + esc(label) + '</td><td>' + p.runs + '</td>'
       + '<td>' + fmtNum(p.inputTokens) + ' / ' + fmtNum(p.outputTokens) + '</td>'
       + '<td>' + fmtMs(p.latencyP50Ms) + '</td><td>' + fmtMs(p.latencyP95Ms) + '</td>'
       + '</tr>';
+    // Nested per-model breakdown — the operator's ask: which specific Claude
+    // model, which specific local tier, actually ran these tasks.
+    const models = byModel.filter(m => m.provider === p.key).sort((a, b) => b.runs - a.runs);
+    for (const m of models) {
+      html += '<tr class="obs-modelrow muted" style="font-size:11px"><td style="padding-left:16px">' + esc(obsModelLabel(m.key)) + '</td><td>' + m.runs + '</td>'
+        + '<td>' + fmtNum(m.inputTokens) + ' / ' + fmtNum(m.outputTokens) + '</td>'
+        + '<td>' + fmtMs(m.latencyP50Ms) + '</td><td>' + fmtMs(m.latencyP95Ms) + '</td>'
+        + '</tr>';
+    }
   }
   html += '</table>';
+  // Disabled providers with rows in scope are never silently dropped — a
+  // muted footnote says what's hidden and why, so "0 Codex runs" reads as
+  // "disabled" instead of "never used".
+  if (Array.isArray(t.hiddenProviders) && t.hiddenProviders.length) {
+    html += '<div class="muted" style="font-size:11px;margin-top:4px">'
+      + t.hiddenProviders.map(h => esc(OBS_LABELS[h.key] || h.key) + ' — ' + h.runs + ' run' + (h.runs === 1 ? '' : 's') + ' hidden (disabled)').join(' · ')
+      + '</div>';
+  }
   // Route scorecard — the empirical "local vs frontier per route" view: first-pass
   // rate (one-and-done), rework (runs/task), and cost per task.
   if (Array.isArray(data.scorecard) && data.scorecard.length) {
@@ -2966,6 +3012,7 @@ async function renderObservability() {
 function openObsDashboard() { document.getElementById("obsOverlay").classList.add("open"); renderObsDashboard("obsDashModal"); }
 function closeObsDashboard() { document.getElementById("obsOverlay").classList.remove("open"); }
 function setObsWindowModal(w) { _obsWindow = w; renderObsDashboard("obsDashModal"); }
+function setObsGroupModal(g) { _obsGroup = g; renderObsDashboard("obsDashModal"); }
 function obsKpi(v, l) { return '<div class="obs-kpi"><div class="v">' + esc(String(v)) + '</div><div class="l">' + esc(l) + '</div></div>'; }
 
 // Compact number for axes/tooltips (12.3k, 4.1M).
@@ -2985,6 +3032,7 @@ function obsNiceMax(v) {
   return step * pow;
 }
 function obsBucketLabel(t, unit) {
+  if (unit === "minute") return (t || "").slice(11, 16); // "HH:MM" — label already carries the 5-min-floored minute
   if (unit === "hour") return (t || "").slice(11, 13) + ":00";
   return (t || "").slice(5); // MM-DD
 }
@@ -3037,6 +3085,9 @@ async function renderObsDashboard(target) {
   if (!el) return;
   const winSel = target === "obsDashModal" ? "#obs_win_modal button" : "#obs_win button";
   document.querySelectorAll(winSel).forEach(function (b) { b.classList.toggle("on", b.dataset.w === _obsWindow); });
+  if (target === "obsDashModal") {
+    document.querySelectorAll("#obs_group_modal button").forEach(function (b) { b.classList.toggle("on", b.dataset.g === _obsGroup); });
+  }
   el.innerHTML = '<div class="muted">Loading…</div>';
   let s, detail;
   try {
@@ -3059,36 +3110,87 @@ async function renderObsDashboard(target) {
     + obsStackedBars(s.points, providers, function (p, pr) { const c = p.byProvider[pr]; return c ? c.inputTokens + c.outputTokens : 0; }, s.unit)
     + obsLegend(providers) + '</div>';
 
-  html += '<div class="obs-chart"><h4>Tasks over time</h4><div class="sub">runs per ' + (s.unit === "hour" ? "hour" : "day") + ', stacked by provider</div>'
+  html += '<div class="obs-chart"><h4>Tasks over time</h4><div class="sub">runs per ' + (s.unit === "minute" ? "5 min" : s.unit === "hour" ? "hour" : "day") + ', stacked by provider</div>'
     + obsStackedBars(s.points, providers, function (p, pr) { const c = p.byProvider[pr]; return c ? c.runs : 0; }, s.unit)
     + obsLegend(providers) + '</div>';
 
-  html += '<div class="obs-chart"><h4>Prompt cache</h4><div class="sub">cached input reuse — Claude &amp; Codex cache prompts; local model work runs on-device</div>';
+  html += '<div class="obs-chart"><h4>Prompt cache</h4><div class="sub">cached input reuse — Claude &amp; Codex cache prompts; the local engine has its own live cache section below</div>';
   const crows = (s.cache || []).slice().sort(function (a, b) { return (OBS_ORDER[a.provider] ?? 9) - (OBS_ORDER[b.provider] ?? 9); });
-  if (!crows.length) html += '<div class="muted">No cache data.</div>';
-  for (const c of crows) {
+  const dbCacheRows = crows.filter(function (c) { return c.provider.indexOf("local-") !== 0; });
+  if (!dbCacheRows.length) html += '<div class="muted">No cache data.</div>';
+  for (const c of dbCacheRows) {
     const label = OBS_LABELS[c.provider] || c.provider;
     if (!c.supported) {
       html += '<div class="obs-cacherow"><span class="cprov">' + esc(label) + '</span>'
-        + '<span class="muted" style="font-size:11px">on-device — no prompt cache</span><span class="cnum"></span></div>';
+        + '<span class="muted" style="font-size:11px">no prompt-cache signal</span><span class="cnum"></span></div>';
       continue;
     }
     const pct = c.hitRatePct != null ? c.hitRatePct : 0;
     const col = pct >= 50 ? "var(--ok,#4caf50)" : pct >= 20 ? "#f0a500" : "#e05b2c";
-    const written = c.cacheCreationTokens > 0 ? " · " + obsShort(c.cacheCreationTokens) + " written" : "";
+    let written = c.cacheCreationTokens > 0 ? " · " + obsShort(c.cacheCreationTokens) + " written" : "";
+    if (c.cacheCreate5mTokens != null && c.cacheCreate1hTokens != null) {
+      written += " (" + obsShort(c.cacheCreate5mTokens) + " 5m, " + obsShort(c.cacheCreate1hTokens) + " 1h)";
+    }
+    const net = c.netBenefitTokens != null
+      ? ' · <span title="Equivalent base-input-tokens saved by caching, net of the write premium — a token-based signal, not a dollar figure.">net ' + (c.netBenefitTokens >= 0 ? "+" : "-") + obsShort(Math.abs(c.netBenefitTokens)) + (c.netBenefitTokens < 0 ? " (loss)" : " saved") + '</span>'
+      : '';
     html += '<div class="obs-cacherow">'
       + '<span class="cprov">' + esc(label) + '</span>'
       + '<span class="cbar"><i style="width:' + Math.min(100, pct).toFixed(0) + '%;background:' + col + '"></i></span>'
-      + '<span class="cnum">' + (c.hitRatePct != null ? c.hitRatePct.toFixed(0) + "% hit" : "—") + " · " + obsShort(c.cacheReadTokens) + " read" + written + '</span>'
+      + '<span class="cnum">' + (c.hitRatePct != null ? c.hitRatePct.toFixed(0) + "% hit" : "—") + " · " + obsShort(c.cacheReadTokens) + " read" + written + net + '</span>'
       + '</div>';
   }
   html += '</div>';
 
-  if (detail && detail.totals && detail.totals.byProvider && detail.totals.byProvider.length) {
-    html += '<div class="obs-chart"><h4>By provider</h4><div class="sub">recent runs · latency percentiles · throughput</div>'
-      + '<table class="obs-tbl"><tr><th>provider</th><th>runs</th><th>tok in/out</th><th>p50</th><th>p95</th><th>tok/s</th></tr>';
-    for (const p of detail.totals.byProvider) {
-      html += '<tr><td>' + esc(OBS_LABELS[p.key] || p.key) + '</td><td>' + p.runs + '</td>'
+  // Live rapid-mlx per-tier prefix/KV-cache snapshot — NOT window-scoped
+  // (task_telemetry has no per-run local cache signal, so unlike the section
+  // above this is always "right now", regardless of the 1h/24h/7d/30d picker).
+  html += '<div class="obs-chart"><h4>Local engine cache</h4><div class="sub">rapid-mlx prefix cache — live process state, not scoped to the selected window</div>';
+  const localRows = s.localEngineCache || [];
+  if (!localRows.length) {
+    html += '<div class="muted">Configured local engine does not expose cache metrics.</div>';
+  } else {
+    for (const lr of localRows) {
+      const tierLabel = esc(lr.alias) + ' <span class="muted">(' + esc(lr.tierKey) + ')</span>';
+      const m = lr.metrics;
+      if (!m) {
+        html += '<div class="obs-cacherow"><span class="cprov">' + tierLabel + '</span>'
+          + '<span class="muted" style="font-size:11px">engine offline</span><span class="cnum"></span></div>';
+        continue;
+      }
+      const hits = m.prefixCacheHitsTotal || 0, misses = m.prefixCacheMissesTotal || 0;
+      const total = hits + misses;
+      const pct = total > 0 ? Math.round((hits / total) * 100) : 0;
+      const col = pct >= 50 ? "var(--ok,#4caf50)" : pct >= 20 ? "#f0a500" : "#e05b2c";
+      const kvPct = (m.prefixCacheCurrentBytes != null && m.prefixCacheCapBytes) ? Math.round((m.prefixCacheCurrentBytes / m.prefixCacheCapBytes) * 100) : null;
+      const pressure = m.prefixCachePressureEvictionsTotal;
+      html += '<div class="obs-cacherow">'
+        + '<span class="cprov">' + tierLabel + '</span>'
+        + '<span class="cbar"><i style="width:' + pct + '%;background:' + col + '"></i></span>'
+        + '<span class="cnum">' + (total > 0 ? pct + "% hit" : "—") + " · " + obsShort(m.prefixCacheTokensSavedTotal || 0) + " tok saved"
+        + (kvPct != null ? " · KV " + kvPct + "%" : "")
+        + (pressure ? ' · <span style="color:#e05b2c" title="Cache evictions forced by memory pressure — the KV cache is thrashing">' + fmtNum(pressure) + " pressure evictions</span>" : "")
+        + '</span></div>';
+    }
+  }
+  html += '</div>';
+
+  const groupByModel = _obsGroup === "model";
+  const groupRows = groupByModel ? (detail && detail.totals && detail.totals.byModel) : (detail && detail.totals && detail.totals.byProvider);
+  if (groupRows && groupRows.length) {
+    const heading = groupByModel ? "By model" : "By provider";
+    const colHead = groupByModel ? "model" : "provider";
+    html += '<div class="obs-chart"><h4>' + heading + '</h4><div class="sub">recent runs · latency percentiles · throughput</div>'
+      + '<table class="obs-tbl"><tr><th>' + colHead + '</th><th>runs</th><th>tok in/out</th><th>p50</th><th>p95</th><th>tok/s</th></tr>';
+    for (const p of groupRows) {
+      // In "by model" mode, a small dot in the parent provider's color keeps
+      // e.g. both Claude models visually grouped without a second heavy
+      // per-bucket-per-model query — see the _obsGroup comment above.
+      const dot = groupByModel
+        ? '<i style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;background:' + (OBS_COLORS[p.provider] || OBS_COLORS.other) + '"></i>'
+        : '';
+      const label = groupByModel ? obsModelLabel(p.key) : (OBS_LABELS[p.key] || p.key);
+      html += '<tr><td>' + dot + esc(label) + '</td><td>' + p.runs + '</td>'
         + '<td>' + fmtNum(p.inputTokens) + ' / ' + fmtNum(p.outputTokens) + '</td>'
         + '<td>' + fmtMs(p.latencyP50Ms) + '</td><td>' + fmtMs(p.latencyP95Ms) + '</td>'
         + '<td>' + (p.avgTokensPerSec != null ? p.avgTokensPerSec : "—") + '</td></tr>';

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   providerForModel,
+  isLocalProvider,
   normalizeRun,
   summarizeTelemetry,
   routeScorecard,
@@ -18,6 +19,18 @@ test("providerForModel maps each runner correctly", () => {
   assert.equal(providerForModel("mistral-small"), "local-qwen");
   assert.equal(providerForModel(""), "other");
   assert.equal(providerForModel(null), "other");
+});
+
+test("isLocalProvider is a prefix check, so retired local providers still classify as local", () => {
+  assert.equal(isLocalProvider("local-qwen"), true);
+  // "local-dwarfstar" is the removed DeepSeek stack — it was never re-derived
+  // by providerForModel (its model regex never matches "deepseek"), but rows
+  // written while it existed still carry this literal provider string and
+  // must keep counting as local, not frontier.
+  assert.equal(isLocalProvider("local-dwarfstar"), true);
+  assert.equal(isLocalProvider("anthropic"), false);
+  assert.equal(isLocalProvider("openai-codex"), false);
+  assert.equal(isLocalProvider("other"), false);
 });
 
 const base: RunTelemetryInput = {
@@ -74,6 +87,21 @@ test("percentile: nearest-rank, empty → null", () => {
   assert.equal(percentile([10], 95), 10);
   assert.equal(percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 50), 5);
   assert.equal(percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 95), 10);
+});
+
+test("summarizeTelemetry: a retired local-* provider (e.g. local-dwarfstar) still counts as local", () => {
+  // Historical rows carry a literal provider string from a since-removed
+  // engine — construct the TaskTelemetry directly (as store.ts's rowToTelemetry
+  // does when reading from SQLite) rather than via normalizeRun, since
+  // providerForModel can no longer produce this value.
+  const retired = normalizeRun({ taskId: "z", runIndex: 0, model: "deepseek-v4-flash", status: "done", inputTokens: 50, outputTokens: 50, startedAtMs: 0, completedAtMs: 1000 });
+  const rows = [{ ...retired, provider: "local-dwarfstar" as const }];
+  const s = summarizeTelemetry(rows);
+  assert.equal(s.split.local, 1, "a local-* provider must count as local even when unrecognized by providerForModel");
+  assert.equal(s.split.frontier, 0);
+  const row = s.byProvider.find((p) => p.key === "local-dwarfstar")!;
+  assert.ok(row, "retired provider must still appear in byProvider, not be dropped");
+  assert.equal(row.runs, 1);
 });
 
 test("summarizeTelemetry: provider split, latency p50/p95, totals exclude nulls", () => {

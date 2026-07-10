@@ -39,6 +39,8 @@ export function captureRunTelemetry(args: {
       outputTokens: args.result?.outputTokens ?? null,
       cacheReadTokens: args.result?.cacheReadTokens ?? null,
       cacheCreationTokens: args.result?.cacheCreationTokens ?? null,
+      cacheCreate5mTokens: args.result?.cacheCreate5mTokens ?? null,
+      cacheCreate1hTokens: args.result?.cacheCreate1hTokens ?? null,
       reasoningTokens: args.result?.reasoningTokens ?? null,
       costUsd: args.result?.cost ?? null,
       turns: args.result?.turns ?? null,
