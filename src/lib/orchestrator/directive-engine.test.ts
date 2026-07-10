@@ -641,6 +641,50 @@ test("reflect phase records retrospective learning paths", async () => {
   _setDirectiveRetrospectiveForTests(null);
 });
 
+test("reflect phase: skills distilled from a retrospective are untrusted and attributed to coo (the authoring role)", async () => {
+  _setDirectivePlannerForTests(async () => null);
+  _setDirectiveReviewerForTests(async () => null);
+  const brainRoot = mkdtempSync(join(TMP, "brain-skills-"));
+  const homeTmp = mkdtempSync(join(TMP, "home-skills-"));
+  const { mkdirSync: mkdir, writeFileSync: write } = await import("node:fs");
+  mkdir(join(homeTmp, ".hivematrix"), { recursive: true });
+  write(join(homeTmp, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: brainRoot } }));
+  const originalHome = process.env.HOME;
+  process.env.HOME = homeTmp;
+
+  try {
+    const d = mkDirective();
+    addCriterion(d._id, "Skill distillation criterion");
+    _setDirectiveRetrospectiveForTests(async () => `\`\`\`json
+{
+  "overallAssessment": "Done.",
+  "skills": [
+    { "name": "cut-a-clean-release", "description": "how to ship without breaking main", "tags": ["ops"], "body": "1. bump\\n2. tag\\n3. push" }
+  ]
+}
+\`\`\``);
+
+    await directiveTick(new Date("2026-06-12T10:00:00Z"));
+    const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+    await directiveTick(new Date("2026-06-12T10:00:01Z"));
+    await completeRunTasks(d._id, run._id, "review");
+    await directiveTick(new Date("2026-06-12T10:00:02Z"));
+    await directiveTick(new Date("2026-06-12T10:00:03Z"));
+    assert.equal(getRun(run._id)!.phase, "reflect");
+    await directiveTick(new Date("2026-06-12T10:00:04Z"), { brainRootDir: brainRoot });
+
+    assert.ok(getJournal(run._id).some((j) => j.step === "skills_distilled"));
+    const { readSkill } = await import("@/lib/skills/store");
+    const skill = await readSkill("cut-a-clean-release");
+    assert.ok(skill, "the distilled skill was written to the library");
+    assert.equal(skill!.trusted, false, "an LLM's self-reported 'what worked' is never auto-trusted");
+    assert.deepEqual(skill!.roles, ["coo"], "attributed to the retrospective's authoring role");
+  } finally {
+    process.env.HOME = originalHome;
+    _setDirectiveRetrospectiveForTests(null);
+  }
+});
+
 test("production retrospective phase task records learning before yielding", async () => {
   _setDirectivePlannerForTests(async () => null);
   _setDirectiveReviewerForTests(async () => null);

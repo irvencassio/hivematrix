@@ -1094,6 +1094,12 @@ async function resolveProvenFeedback(directive: DirectiveRow, run: RunRow): Prom
  * Skill distillation: persist the retrospective's reusable recipes into the
  * skill library (<brain>/skills/), refining any that already exist. The
  * constructive half of self-improvement — experience becomes applicable skill.
+ *
+ * Retrospective-distilled skills are never auto-trusted (an LLM's self-report
+ * of "what worked" is exactly the kind of untrusted-until-reviewed claim the
+ * skill library's trust model exists for) and are attributed to the role that
+ * authored the retrospective — the "retrospective" phase task always runs as
+ * coo (see createPhaseTask(..., "coo") above), so that's the authoring role.
  * Non-critical — never blocks the run.
  */
 async function recordDistilledSkills(retrospective: DirectiveRetrospective, directive: DirectiveRow, run: RunRow): Promise<void> {
@@ -1103,7 +1109,7 @@ async function recordDistilledSkills(retrospective: DirectiveRetrospective, dire
     let created = 0;
     let refined = 0;
     for (const s of retrospective.skills) {
-      const r = await upsertSkill({ name: s.name, description: s.description, tags: s.tags, body: s.body, source: `directive:${run._id}` });
+      const r = await upsertSkill({ name: s.name, description: s.description, tags: s.tags, body: s.body, source: `directive:${run._id}`, trusted: false, roles: ["coo"] });
       if (r.created) created++;
       else if (r.refined) refined++;
     }

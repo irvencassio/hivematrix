@@ -851,6 +851,7 @@ test("Roles screen: the Learned panel shows real attributed skills, with an hone
   assert.match(body, /_rolesState\.skills/, "reads real skills from state, not a hardcoded placeholder");
   assert.match(body, /No skills learned yet/, "empty state still shown honestly when sk.length === 0");
   assert.match(body, /sk\.map\(s => /, "non-empty skills render each attributed skill");
+  assert.match(body, /untrusted — review/, "an untrusted (retrospective-distilled) skill carries a visible review chip");
 });
 
 test("Roles screen: loadRoleDetail fetches /agents/profiles/:id/skills alongside profile+stats", () => {

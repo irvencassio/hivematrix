@@ -7621,7 +7621,7 @@ function renderRoleDossier() {
   } else if (sk.length === 0) {
     learnedBody = '<div class="muted">No skills learned yet. Roles begin authoring skills once retrospection is wired.</div>';
   } else {
-    learnedBody = sk.map(s => '<div class="kv"><span class="k">' + esc(s.name) + (s.trusted ? '' : ' <span class="badge">untrusted</span>') + '</span><span>' + (s.useCount > 0 ? 'used ' + s.useCount + '×' : 'unused') + '</span></div>').join('');
+    learnedBody = sk.map(s => '<div class="kv"><span class="k">' + esc(s.name) + (s.trusted ? '' : ' <span class="sk-badge warn" title="distilled from a retrospective — approve in the Skills panel before agents use it">untrusted — review</span>') + '</span><span>' + (s.useCount > 0 ? 'used ' + s.useCount + '×' : 'unused') + '</span></div>').join('');
   }
   const learned = '<div class="roles-block">'
     + '<div class="roles-block-head">Learned</div>'
