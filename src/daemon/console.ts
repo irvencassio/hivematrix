@@ -1096,6 +1096,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
           <label class="flbl" style="margin-top:10px">Public URL</label>
           <div class="row"><input id="s_tunnel_url" readonly style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:11px" />
             <button class="copybtn" onclick="copyField('s_tunnel_url')">Copy</button></div>
+
+          <label class="flbl" style="margin-top:10px">Scan on iPhone</label>
+          <div id="s_cf_qr" style="background:#fff;border-radius:8px;padding:8px;width:188px;height:188px"></div>
+          <div class="muted" style="font-size:11px;margin-top:4px">⚠ Encodes the hostname + access token (and the Cloudflare Access secret, if configured) — treat this QR like a password, same as the token field above.</div>
         </div>
       </div>
 
@@ -8672,6 +8676,7 @@ async function loadTunnel() {
     : ts.magicDNSName ? ("Serving as " + ts.magicDNSName) : "Serving (enable MagicDNS for a hostname).";
   if (tsUrl && document.activeElement !== tsUrl) tsUrl.value = ts.pairingUrl || "";
   if (tsOn && ts.serving) loadTunnelQr();
+  if (cfOn && tunnel.url) loadCloudflareQr();
 
   // Cloudflare body — reflect saved creds without ever echoing a secret.
   const idField = document.getElementById("s_cf_access_id");
@@ -8709,6 +8714,22 @@ async function loadTunnelQr() {
     if (r.ok) { box.innerHTML = await r.text(); return; }
     // Endpoint returns a JSON reason (Pro-license gate, Tailscale off, missing
     // qrencode) — surface it instead of leaving a silently-broken box.
+    let reason = "QR unavailable";
+    try { const j = await r.json(); if (j && j.error) reason = j.error; } catch (e) { /* non-JSON */ }
+    box.innerHTML = '<div class="muted" style="font-size:11px;padding:8px;text-align:center">' + esc(reason) + '</div>';
+  } catch (e) {
+    box.innerHTML = '<div class="muted" style="font-size:11px;padding:8px;text-align:center">QR request failed</div>';
+  }
+}
+async function loadCloudflareQr() {
+  const box = document.getElementById("s_cf_qr");
+  if (!box) return;
+  box.innerHTML = '<div class="muted" style="font-size:11px;padding:8px;text-align:center">Loading QR…</div>';
+  try {
+    const r = await fetch("/tunnel/qr/cloudflare", { headers: { "Authorization": "Bearer " + HM_TOKEN } });
+    if (r.ok) { box.innerHTML = await r.text(); return; }
+    // Endpoint returns a JSON reason (Pro-license gate, missing hostname,
+    // incomplete Access creds, missing qrencode) — surface it.
     let reason = "QR unavailable";
     try { const j = await r.json(); if (j && j.error) reason = j.error; } catch (e) { /* non-JSON */ }
     box.innerHTML = '<div class="muted" style="font-size:11px;padding:8px;text-align:center">' + esc(reason) + '</div>';

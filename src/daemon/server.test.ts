@@ -2699,3 +2699,15 @@ test("GET /tunnel/qr: the companion_pairing license gate still runs first (uncha
   const body = await res.json() as Record<string, unknown>;
   assert.equal(body.upgradeRequired, true);
 });
+
+test("GET /tunnel/qr/cloudflare: the companion_pairing license gate still runs first", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  // Same reasoning as the Tailscale QR gate test above: a fresh temp HOME has
+  // no license.json → Free tier → the Pro gate blocks before the route ever
+  // reads the saved Cloudflare hostname/Access state.
+  const res = await fetch(`${base}/tunnel/qr/cloudflare`, { headers });
+  assert.equal(res.status, 403);
+  const body = await res.json() as Record<string, unknown>;
+  assert.equal(body.upgradeRequired, true);
+});

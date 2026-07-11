@@ -27,6 +27,10 @@ export interface FlashSessionRow {
   createdAt: string;
   lastActiveAt: string;
   distilledAt?: string | null;
+  /** The `claude` CLI's own session id, for `--resume` continuity — null until
+   *  the first turn's stream-json `session` event is captured, and cleared
+   *  whenever a `--resume` attempt turns out to be stale. */
+  cliSessionId?: string | null;
 }
 
 export interface FlashTurnRow {

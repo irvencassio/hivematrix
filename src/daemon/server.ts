@@ -1436,6 +1436,42 @@ export function createDaemonServer() {
         return;
       }
 
+      // GET /tunnel/qr/cloudflare — QR (SVG) of the pairing payload for the
+      // Cloudflare named tunnel (Apple Watch's permanent path). Unlike the
+      // Tailscale QR, this one legitimately needs the Cloudflare Access
+      // service-token creds baked in (the tunnel is public, so Access is the
+      // barrier) — generated locally via qrencode, never leaves the machine.
+      if (req.method === "GET" && urlPath === "/tunnel/qr/cloudflare") {
+        const { checkGate } = await import("@/lib/license/gates");
+        const pairingGate = checkGate("companion_pairing");
+        if (!pairingGate.permitted) { json(res, 403, { error: pairingGate.reason, upgradeRequired: pairingGate.upgradeRequired }); return; }
+        const { pairingPayload, generateQrSvg, qrencodeInstalled } = await import("@/lib/tunnel/cloudflared");
+        const { readRemoteAccessSettings } = await import("@/lib/tunnel/remote-access-settings");
+        const settings = readRemoteAccessSettings();
+        if (!settings.namedHostname) {
+          json(res, 400, { error: "Save a Cloudflare public hostname first." });
+          return;
+        }
+        const hasId = !!settings.cloudflareAccessClientId;
+        const hasSecret = !!settings.cloudflareAccessClientSecret;
+        if (hasId !== hasSecret) {
+          // Partially configured Access — a QR without both would silently
+          // fail to authenticate through the tunnel, so refuse rather than
+          // hand out a QR that looks fine but doesn't work.
+          json(res, 400, { error: "Cloudflare Access credentials are incomplete — save both the client ID and secret before pairing." });
+          return;
+        }
+        if (!qrencodeInstalled()) { json(res, 503, { error: "qrencode not installed (brew install qrencode)" }); return; }
+        const svg = await generateQrSvg(pairingPayload(settings.namedHostname, AUTH_TOKEN, {
+          cloudflareAccessClientId: settings.cloudflareAccessClientId,
+          cloudflareAccessClientSecret: settings.cloudflareAccessClientSecret,
+        }));
+        if (!svg) { json(res, 500, { error: "qr generation failed" }); return; }
+        res.writeHead(200, { "Content-Type": "image/svg+xml" });
+        res.end(svg);
+        return;
+      }
+
       // GET /lanes — status of every embedded/managed lane (Settings view)
       if (req.method === "GET" && urlPath === "/lanes") {
         const { listLaneServiceStatuses } = await import("@/lib/lanes/status");

@@ -14,13 +14,21 @@
  * Budget: MAX_TOOL_CALLS tool calls (passed as --max-turns) / MAX_WALL_MS
  * wall clock (enforced here by killing the child process).
  *
- * History: full-history-per-turn serialization (system messages via
- * --append-system-prompt, prior turns folded into the -p prompt as a
- * transcript) — NOT --resume/session-continuity. This is simpler and
- * correct; it costs a little more input-token overhead per turn than
- * --resume would, since --resume was deferred (it needs a sessionId→CLI
- * session-id mapping persisted in flash session state, which the current
- * schema doesn't carry — a follow-up, not required for correctness here).
+ * History: two modes, chosen per-turn by whether a CLI session id is on file
+ * for this flash session (flash/store.ts's cliSessionId column):
+ *   - No stored id (first turn, or after a stale-session fallback): full
+ *     history is re-serialized every turn (system messages via
+ *     --append-system-prompt, prior turns folded into the -p prompt as a
+ *     transcript).
+ *   - Stored id present: `--resume <id>` is passed and only the latest user
+ *     message goes over stdin — the CLI keeps the conversation server-side,
+ *     so re-sending the transcript would just be wasted input tokens.
+ * Either way the turn's `session` stream event (the CLI's own session id,
+ * which may rotate) is captured and persisted for next time. If a --resume
+ * attempt fails in a way that looks like a stale/expired session (nonzero
+ * exit + stderr mentioning session/resume), the turn is retried once without
+ * --resume using full-history serialization, and the stale id is dropped —
+ * a bad id must never break a turn.
  */
 
 import { spawn, type ChildProcess } from "child_process";
@@ -30,6 +38,7 @@ import { StreamParser } from "@/lib/orchestrator/stream-parser";
 import { backendConfigured } from "@/lib/models/backends";
 import type { LaneToolContext } from "@/lib/orchestrator/lane-tools";
 import { prepareFlashMcp } from "./flash-mcp";
+import { clearFlashCliSessionId, getFlashCliSessionId, setFlashCliSessionId } from "./store";
 import type { FlashEmitter, FlashMessage } from "./types";
 
 const MAX_TOOL_CALLS = 12;
@@ -79,9 +88,11 @@ export interface FlashPromptParts {
  * message, as built fresh per-turn by flash/context.ts:buildInitialMessages)
  * into the CLI's shape: system messages become --append-system-prompt args,
  * prior user/assistant turns become a transcript block prepended to the
- * final user message (which becomes the actual -p prompt).
+ * final user message (which becomes the actual -p prompt) — UNLESS `resume`
+ * is set, in which case the CLI already has the prior turns server-side
+ * (via --resume) and only the latest user message is sent.
  */
-export function buildFlashPrompt(messages: FlashMessage[]): FlashPromptParts {
+export function buildFlashPrompt(messages: FlashMessage[], resume = false): FlashPromptParts {
   const systemPrompts: string[] = [];
   const convo: Array<{ role: "user" | "assistant"; content: string }> = [];
   for (const m of messages) {
@@ -98,6 +109,8 @@ export function buildFlashPrompt(messages: FlashMessage[]): FlashPromptParts {
   if (convo.length === 0) return { systemPrompts, prompt: "" };
 
   const last = convo[convo.length - 1];
+  if (resume) return { systemPrompts, prompt: last.content };
+
   const prior = convo.slice(0, -1);
   const transcript = prior.length
     ? "--- Prior conversation (for context; do not repeat unless asked) ---\n" +
@@ -112,6 +125,8 @@ export interface FlashSpawnArgsInput {
   mcpConfigPath: string;
   toolNames: string[];
   maxTurns: number;
+  /** CLI session id to resume, if this flash session has one on file. */
+  resumeSessionId?: string | null;
 }
 
 /**
@@ -124,8 +139,9 @@ export interface FlashSpawnArgsInput {
  * print-mode flag; with no positional prompt the CLI reads the query from stdin.
  */
 export function buildFlashSpawnArgs(input: FlashSpawnArgsInput): string[] {
-  return [
-    "-p",
+  const args = ["-p"];
+  if (input.resumeSessionId) args.push("--resume", input.resumeSessionId);
+  args.push(
     "--model",
     "haiku",
     "--output-format",
@@ -138,7 +154,8 @@ export function buildFlashSpawnArgs(input: FlashSpawnArgsInput): string[] {
     "--allowedTools",
     input.toolNames.join(","),
     ...input.systemPrompts.flatMap((sp) => ["--append-system-prompt", sp]),
-  ];
+  );
+  return args;
 }
 
 export interface FlashStreamState {
@@ -166,14 +183,19 @@ export function consumeFlashStreamLine(
   parser: StreamParser,
   state: FlashStreamState,
   emit: FlashEmitter,
-): { textDelta?: string; resultText?: string } {
+): { textDelta?: string; resultText?: string; cliSessionId?: string } {
   if (!line.trim()) return {};
   const events = parser.parseLine(line);
   let textDelta: string | undefined;
   let resultText: string | undefined;
+  let cliSessionId: string | undefined;
 
   for (const event of events) {
-    if (event.type === "text") {
+    if (event.type === "session") {
+      // The CLI's own session id (from system:init) — captured every turn so
+      // the caller can persist it for --resume continuity next time.
+      cliSessionId = event.sessionId;
+    } else if (event.type === "text") {
       textDelta = (textDelta ?? "") + event.content;
       emit.token(event.content);
     } else if (event.type === "tool_use") {
@@ -198,14 +220,146 @@ export function consumeFlashStreamLine(
       textDelta = (textDelta ?? "") + msg;
       emit.token(msg);
     }
-    // "init"/"session"/"log"/"question"/"unknown" — not surfaced to Flash.
+    // "init"/"log"/"question"/"unknown" — not surfaced to Flash.
   }
-  return { textDelta, resultText };
+  return { textDelta, resultText, cliSessionId };
 }
 
 // ------------------------------------------------------------------
 // Main agent loop
 // ------------------------------------------------------------------
+
+interface FlashAttemptResult {
+  /** Full text to persist as the assistant turn — streamed content, plus a
+   *  terminal error appended if one occurred (or just the error if no content). */
+  text: string;
+  /** The terminal failure message alone (`\n\n[Flash model error: …]`), or null
+   *  on success. When `suppressTerminalError` was set this was NOT emitted, so a
+   *  caller that decides to keep the attempt must emit it itself; content tokens
+   *  (if any) already streamed live. */
+  terminalError: string | null;
+  /** The CLI's own session id captured from this attempt's `session` stream event, if any. */
+  cliSessionId: string | null;
+  /** Process exit code, or null if the attempt never got a real exit (launch failure / wall-timeout kill). */
+  exitCode: number | null;
+  stderr: string;
+}
+
+/**
+ * One spawn-through-close cycle of the `claude` CLI. Pure aside from `emit`
+ * calls. Content tokens, tool events, and mid-stream stream-json `error`
+ * events always stream LIVE through `emit` as they arrive.
+ *
+ * `suppressTerminalError` (used by the --resume path): when true, the two
+ * TERMINAL failure messages — a non-zero exit ("claude exited with code N")
+ * and a launch/`proc.on("error")` failure — are NOT emitted; they're only
+ * returned in `FlashAttemptResult.text` so the caller can decide whether this
+ * was a stale-session failure worth a silent fallback. A stale `--resume`
+ * fails at session lookup BEFORE any content streams, so nothing user-visible
+ * is withheld. (The wall-timeout budget message still emits — that's not a
+ * resume-staleness case and the user should see it.)
+ */
+function runFlashAttempt(
+  binary: string,
+  args: string[],
+  prompt: string,
+  spawnImpl: typeof spawn,
+  emit: FlashEmitter,
+  suppressTerminalError = false,
+): Promise<FlashAttemptResult> {
+  return new Promise<FlashAttemptResult>((resolve) => {
+    let proc: ChildProcess;
+    try {
+      proc = spawnImpl(binary, args, { stdio: ["pipe", "pipe", "pipe"] });
+    } catch (err) {
+      const msg = `\n\n[Flash model error: failed to launch claude — ${err instanceof Error ? err.message : String(err)}]`;
+      if (!suppressTerminalError) emit.token(msg);
+      resolve({ text: msg, terminalError: msg, cliSessionId: null, exitCode: null, stderr: "" });
+      return;
+    }
+
+    // Feed the prompt via stdin (never as an argv value — see buildFlashSpawnArgs).
+    try {
+      proc.stdin?.on("error", () => { /* child may exit before we finish writing */ });
+      proc.stdin?.write(prompt);
+      proc.stdin?.end();
+    } catch { /* child already gone; stdout/exit handlers below settle the turn */ }
+
+    const parser = new StreamParser();
+    const streamState = createFlashStreamState();
+    let lineBuffer = "";
+    let stderrBuf = "";
+    let fullText = "";
+    let resultText = "";
+    let cliSessionId: string | null = null;
+    let settled = false;
+
+    const finish = (text: string, exitCode: number | null, terminalError: string | null = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(wallTimer);
+      resolve({ text, terminalError, cliSessionId, exitCode, stderr: stderrBuf });
+    };
+
+    const wallTimer = setTimeout(() => {
+      try { proc.kill("SIGTERM"); } catch { /* already dead */ }
+      const elapsedS = Math.round(MAX_WALL_MS / 1000);
+      const budgetMsg = `\n\n[Budget reached: ${elapsedS}s wall clock. Use "escalate this to a task" for longer tasks.]`;
+      // Not a resume-staleness case — always show it, even under suppression.
+      emit.token(budgetMsg);
+      finish((fullText || resultText) + budgetMsg, null);
+    }, MAX_WALL_MS);
+
+    const consumeLine = (line: string) => {
+      const r = consumeFlashStreamLine(line, parser, streamState, emit);
+      if (r.textDelta) fullText += r.textDelta;
+      if (r.resultText != null) resultText = r.resultText;
+      if (r.cliSessionId) cliSessionId = r.cliSessionId;
+    };
+
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      lineBuffer += chunk.toString();
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() ?? "";
+      for (const line of lines) consumeLine(line);
+    });
+
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      stderrBuf += chunk.toString();
+    });
+
+    proc.on("error", (err) => {
+      const msg = `\n\n[Flash model error: ${err.message}]`;
+      // Terminal error: stream it live unless we're deciding whether to fall
+      // back. Any content that already streamed is kept and the error appended.
+      if (!suppressTerminalError) emit.token(msg);
+      const base = fullText || resultText;
+      finish(base ? base + msg : msg, null, msg);
+    });
+
+    proc.on("close", (code) => {
+      if (lineBuffer.trim()) consumeLine(lineBuffer);
+      const base = fullText || resultText;
+      if (!base && code !== 0) {
+        const msg = `\n\n[Flash model error: claude exited with code ${code}${stderrBuf.trim() ? ` — ${stderrBuf.trim().slice(0, 400)}` : ""}]`;
+        if (!suppressTerminalError) emit.token(msg);
+        finish(msg, code, msg);
+        return;
+      }
+      // Content present (a non-zero exit after real output is treated as the
+      // answer, matching prior behavior) or a clean success — no terminal error.
+      finish(base, code);
+    });
+  });
+}
+
+// A --resume attempt that fails this way looks like a stale/expired CLI
+// session (daemon restart, session pruned by the CLI, etc.) rather than a
+// real turn failure — worth a silent retry rather than surfacing raw CLI
+// plumbing to the user. A stale --resume fails at session lookup BEFORE any
+// content streams, so live streaming loses nothing by suppressing only the
+// terminal error until we've classified it.
+const STALE_RESUME_RE = /\bsession\b|\bresume\b/i;
 
 export async function runFlashAgentLoop(
   messages: FlashMessage[],
@@ -232,90 +386,60 @@ export async function runFlashAgentLoop(
     { allowedTools: options.allowedTools, brainRoot, ctx, sessionId },
   );
 
-  const { systemPrompts, prompt } = buildFlashPrompt(messages);
-  const args = buildFlashSpawnArgs({
-    systemPrompts,
-    mcpConfigPath: configPath,
-    toolNames,
-    maxTurns: MAX_TOOL_CALLS,
-  });
-
   const binary = options.__claudeBinary ?? resolveClaudeBinary();
   const spawnImpl = options.__spawn ?? spawn;
 
-  return new Promise<string>((resolve) => {
-    let proc: ChildProcess;
-    try {
-      proc = spawnImpl(binary, args, { stdio: ["pipe", "pipe", "pipe"] });
-    } catch (err) {
-      const msg = `\n\n[Flash model error: failed to launch claude — ${err instanceof Error ? err.message : String(err)}]`;
-      emit.token(msg);
-      resolve(msg);
-      return;
-    }
-
-    // Feed the prompt via stdin (never as an argv value — see buildFlashSpawnArgs).
-    try {
-      proc.stdin?.on("error", () => { /* child may exit before we finish writing */ });
-      proc.stdin?.write(prompt);
-      proc.stdin?.end();
-    } catch { /* child already gone; stdout/exit handlers below settle the turn */ }
-
-    const parser = new StreamParser();
-    const streamState = createFlashStreamState();
-    let lineBuffer = "";
-    let stderrBuf = "";
-    let fullText = "";
-    let resultText = "";
-    let settled = false;
-
-    const finish = (text: string) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(wallTimer);
-      resolve(text);
-    };
-
-    const wallTimer = setTimeout(() => {
-      try { proc.kill("SIGTERM"); } catch { /* already dead */ }
-      const elapsedS = Math.round(MAX_WALL_MS / 1000);
-      const budgetMsg = `\n\n[Budget reached: ${elapsedS}s wall clock. Use "escalate this to a task" for longer tasks.]`;
-      emit.token(budgetMsg);
-      finish((fullText || resultText) + budgetMsg);
-    }, MAX_WALL_MS);
-
-    const consumeLine = (line: string) => {
-      const r = consumeFlashStreamLine(line, parser, streamState, emit);
-      if (r.textDelta) fullText += r.textDelta;
-      if (r.resultText != null) resultText = r.resultText;
-    };
-
-    proc.stdout?.on("data", (chunk: Buffer) => {
-      lineBuffer += chunk.toString();
-      const lines = lineBuffer.split("\n");
-      lineBuffer = lines.pop() ?? "";
-      for (const line of lines) consumeLine(line);
+  const buildTurn = (resumeId: string | null) => {
+    const { systemPrompts, prompt } = buildFlashPrompt(messages, !!resumeId);
+    const args = buildFlashSpawnArgs({
+      systemPrompts,
+      mcpConfigPath: configPath,
+      toolNames,
+      maxTurns: MAX_TOOL_CALLS,
+      resumeSessionId: resumeId,
     });
+    return { args, prompt };
+  };
 
-    proc.stderr?.on("data", (chunk: Buffer) => {
-      stderrBuf += chunk.toString();
-    });
+  const storedCliSessionId = getFlashCliSessionId(sessionId);
 
-    proc.on("error", (err) => {
-      const msg = `\n\n[Flash model error: ${err.message}]`;
-      emit.token(msg);
-      finish((fullText || resultText) + msg);
-    });
+  if (!storedCliSessionId) {
+    // First turn (or a prior stale-session fallback already cleared the id):
+    // full-history serialization, streamed straight through.
+    const { args, prompt } = buildTurn(null);
+    const result = await runFlashAttempt(binary, args, prompt, spawnImpl, emit);
+    if (result.cliSessionId) setFlashCliSessionId(sessionId, result.cliSessionId);
+    return result.text;
+  }
 
-    proc.on("close", (code) => {
-      if (lineBuffer.trim()) consumeLine(lineBuffer);
-      let text = fullText || resultText;
-      if (!text && code !== 0) {
-        const msg = `\n\n[Flash model error: claude exited with code ${code}${stderrBuf.trim() ? ` — ${stderrBuf.trim().slice(0, 400)}` : ""}]`;
-        emit.token(msg);
-        text = msg;
-      }
-      finish(text);
-    });
-  });
+  // --resume attempt: stream content/tool/error events LIVE through the real
+  // emit, but suppress only the TERMINAL failure message. A stale session
+  // fails at lookup before any content streams, so the user sees nothing
+  // withheld; if it turns out non-stale, we surface the withheld error below.
+  const { args, prompt } = buildTurn(storedCliSessionId);
+  const resumeResult = await runFlashAttempt(binary, args, prompt, spawnImpl, emit, true);
+
+  const looksStale =
+    resumeResult.exitCode !== null &&
+    resumeResult.exitCode !== 0 &&
+    STALE_RESUME_RE.test(`${resumeResult.stderr} ${resumeResult.text}`);
+
+  if (looksStale) {
+    // Stale/expired session — drop it and retry the SAME turn once, for real
+    // this time: no --resume, full-history serialization, live streaming, and
+    // terminal errors surfaced normally. (Stale produced no content, so there
+    // is nothing already on screen to conflict with the retry.)
+    clearFlashCliSessionId(sessionId);
+    const fallback = buildTurn(null);
+    const fallbackResult = await runFlashAttempt(binary, fallback.args, fallback.prompt, spawnImpl, emit);
+    if (fallbackResult.cliSessionId) setFlashCliSessionId(sessionId, fallbackResult.cliSessionId);
+    return fallbackResult.text;
+  }
+
+  // Not stale. If the attempt still errored (a real, non-session failure), the
+  // terminal message was suppressed above — surface it now (any content that
+  // streamed live is already on screen; we only append the error, no re-run).
+  if (resumeResult.terminalError) emit.token(resumeResult.terminalError);
+  if (resumeResult.cliSessionId) setFlashCliSessionId(sessionId, resumeResult.cliSessionId);
+  return resumeResult.text;
 }

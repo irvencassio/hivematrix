@@ -720,6 +720,14 @@ const MIGRATIONS: Migration[] = [
   // existed), never a fake 0 — see task_telemetry's NULL convention above.
   m("v33", `ALTER TABLE task_telemetry ADD COLUMN cacheCreate5mTokens INTEGER;
    ALTER TABLE task_telemetry ADD COLUMN cacheCreate1hTokens INTEGER;`),
+
+  // v34: Flash Lane `claude --resume` continuity — the CLI's own session id,
+  // captured from the stream-json `system:init` event, so subsequent turns
+  // can resume server-side instead of re-serializing the full transcript
+  // over stdin every turn. NULL means "no CLI session yet" (first turn, or a
+  // stale id was cleared after a failed --resume) — the loop falls back to
+  // full-history serialization in that case.
+  m("v34", `ALTER TABLE flash_sessions ADD COLUMN cliSessionId TEXT;`),
 ];
 
 // ------------------------------------------------------------------

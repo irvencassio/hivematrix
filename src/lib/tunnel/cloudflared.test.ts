@@ -45,6 +45,19 @@ test("pairingPayload includes optional Cloudflare Access credentials for one-tim
   );
 });
 
+test("pairingPayload omits cloudflareAccess when only one of the two credentials is present", async () => {
+  const mod = await import(`./cloudflared.ts?case=${Date.now()}`);
+
+  assert.equal(
+    mod.pairingPayload("https://hivey.cassio.io", "hm-token", { cloudflareAccessClientId: "client-id" }),
+    JSON.stringify({ type: "hivematrix-connection", version: 1, url: "https://hivey.cassio.io", token: "hm-token" }),
+  );
+  assert.equal(
+    mod.pairingPayload("https://hivey.cassio.io", "hm-token", { cloudflareAccessClientSecret: "client-secret" }),
+    JSON.stringify({ type: "hivematrix-connection", version: 1, url: "https://hivey.cassio.io", token: "hm-token" }),
+  );
+});
+
 test("configured named tunnel persists the hostname but stays not-running until the Cloudflare toggle is on", async () => {
   const root = mkdtempSync(join(tmpdir(), "hm-cloudflared-"));
   const previousHome = process.env.HOME;

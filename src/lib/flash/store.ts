@@ -144,6 +144,25 @@ export function markSessionDistilled(sessionId: string, distilledAt?: string): v
     .run(distilledAt ?? new Date().toISOString(), sessionId);
 }
 
+/** The `claude` CLI's own session id for this flash session, or null if none is stored yet
+ *  (first turn, or a stale one was cleared after a failed `--resume`). */
+export function getFlashCliSessionId(sessionId: string): string | null {
+  const row = getDb()
+    .prepare("SELECT cliSessionId FROM flash_sessions WHERE id = ?")
+    .get(sessionId) as { cliSessionId: string | null } | undefined;
+  return row?.cliSessionId ?? null;
+}
+
+/** Persist the CLI session id captured from this turn's stream-json `session` event. */
+export function setFlashCliSessionId(sessionId: string, cliSessionId: string): void {
+  getDb().prepare("UPDATE flash_sessions SET cliSessionId = ? WHERE id = ?").run(cliSessionId, sessionId);
+}
+
+/** Drop a stale/expired CLI session id so the next turn falls back to full-history serialization. */
+export function clearFlashCliSessionId(sessionId: string): void {
+  getDb().prepare("UPDATE flash_sessions SET cliSessionId = NULL WHERE id = ?").run(sessionId);
+}
+
 export function appendFeedbackToTurn(turnId: string, rating: "good" | "bad"): FlashTurnRow {
   const db = getDb();
   const row = db.prepare("SELECT * FROM flash_turns WHERE id = ?").get(turnId) as FlashTurnRow | undefined;
