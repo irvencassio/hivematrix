@@ -1006,7 +1006,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </select>
       <span class="pill" id="modePill" style="cursor:pointer" onclick="toggleConnOverride()" title="Connectivity mode — click to override">…</span>
     </span>
-    <span class="usage-pill" id="localPill" style="display:none" title="">🧠 local</span>
     <span class="update-pill" id="updatePill" style="display:none" onclick="applyUpdate()" title="Click to install and restart">⬆ Update</span>
     <span class="hsep"></span>
     <span class="muted" id="talkStatus" style="display:none;font-size:11px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
@@ -1025,7 +1024,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="tabs"><div class="tab active" id="tab-about" onclick="switchSettingsTab('about')">About</div><div class="tab" id="tab-setup" onclick="switchSettingsTab('setup')">Setup</div><div class="tab" id="tab-features" onclick="switchSettingsTab('features')">Features</div><div class="tab" id="tab-general" onclick="switchSettingsTab('general')">Personalization</div><div class="tab" id="tab-models" onclick="switchSettingsTab('models')">Models</div><div class="tab" id="tab-lanes" onclick="switchSettingsTab('lanes')">Lanes</div><div class="tab" id="tab-remote" onclick="switchSettingsTab('remote')">Remote</div><div class="tab" id="tab-license" onclick="switchSettingsTab('license')">License</div></div>
     <div id="settingsModels" style="display:none">
       <div class="muted" style="font-size:11px;margin-bottom:12px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;line-height:1.45">
-        <b style="color:var(--text)">How HiveMatrix routes work:</b> thinking &amp; coding go to the frontier for quality; bulk and always-on ambient work (audits, digests, file ops) stays on-device — free, private, 24/7. <b>Mixed</b> is the recommended default.</div>
+        <b style="color:var(--text)">How HiveMatrix routes work:</b> every role runs on Claude — <b>Thinking</b> → Opus, <b>Coding</b> → Sonnet, <b>Operational &amp; Chat</b> → Haiku, <b>Writer</b> → Sonnet. Override any role below.</div>
       <label class="flbl">Default model</label>
       <select id="s_default" style="width:100%" onchange="saveDefault()"></select>
 
@@ -1034,7 +1033,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 
       <div id="s_provider_toggles" style="margin-top:14px">
         <label class="flbl">Providers</label>
-        <div class="muted" style="font-size:11px;margin-bottom:6px">Turn a provider on or off within HiveMatrix. Off disables it here only — Claude/Codex CLIs stay installed and signed in for your own terminal use; Rapid-MLX weights and the engine stay on disk.</div>
+        <div class="muted" style="font-size:11px;margin-bottom:6px">Turn a provider on or off within HiveMatrix. Off disables it here only — Claude/Codex CLIs stay installed and signed in for your own terminal use.</div>
         <div id="s_provider_toggle_rows"><div class="muted">Loading…</div></div>
       </div>
 
@@ -1049,23 +1048,20 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <div class="muted" style="font-size:11px;margin-top:2px">Which provider handles the frontier tier in Mixed and Cloud-only modes.</div>
       </div>
 
-      <div id="s_role_models" style="display:none;margin-top:16px">
-        <label class="flbl">Mixed-mode role models</label>
-        <div class="muted" style="font-size:11px;margin-bottom:8px">In Mixed mode each kind of work routes to its own model. Pick which one — or leave on Default.</div>
+      <div id="s_role_models" style="margin-top:16px">
+        <label class="flbl">Models</label>
+        <div class="muted" style="font-size:11px;margin-bottom:8px">Each kind of work routes to its own Claude model by default. Override any role — or leave on Default.</div>
         <div id="s_role_frontier_rows">
           <div class="role-row"><span class="role-name">🧠 Thinking <span class="muted">planning · architecture · review</span></span>
             <select id="s_role_thinking" onchange="saveRoleModel('thinking', this.value)"></select></div>
           <div class="role-row"><span class="role-name">⌨️ Coding <span class="muted">critical implementation · UI</span></span>
             <select id="s_role_coding" onchange="saveRoleModel('coding', this.value)"></select></div>
         </div>
-        <div class="role-row"><span class="role-name">⚙️ Operational <span class="muted">bulk execution · file ops (on-device)</span></span>
+        <div class="role-row"><span class="role-name">⚙️ Operational + Chat <span class="muted">bulk execution · file ops · Flash chat</span></span>
           <select id="s_role_operational" onchange="saveRoleModel('operational', this.value)"></select></div>
         <div class="role-row"><span class="role-name">✍️ Writer <span class="muted">briefings · summaries · drafts</span></span>
           <select id="s_role_writer" onchange="saveRoleModel('writer', this.value)"></select></div>
       </div>
-
-      <label class="flbl" style="margin-top:16px">Local server endpoint</label>
-      <input id="s_endpoint" placeholder="http://localhost:1234/v1" style="width:100%" onchange="saveEndpoint()" />
 
       <label class="flbl" style="margin-top:16px">Embeddings</label>
       <div class="row" style="align-items:center;gap:8px;margin-bottom:6px">
@@ -1717,12 +1713,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
           <div class="ob-model-status" id="ob_lm_status">Not configured</div>
           <div class="ob-model-expand" onclick="obToggleDetail('ob_lm_detail')">▸ Configure local model</div>
           <div class="ob-model-detail" id="ob_lm_detail">
-            <div class="muted" style="font-size:11px;margin-bottom:8px">Run any OpenAI-compatible local model (LM Studio, Ollama, or Rapid-MLX). Start your server, then paste its URL and model name below.</div>
-            <div class="ob-btn-row" style="margin-bottom:8px">
-              <button id="ob_lm_provision" onclick="obProvisionLocalEngine()">Provision Rapid-MLX →</button>
-              <span class="muted" style="font-size:11px">Installs the recommended local model for this Mac.</span>
-            </div>
-            <div class="muted" id="ob_lm_provision_log" style="font-size:11px;margin:-3px 0 8px"></div>
+            <div class="muted" style="font-size:11px;margin-bottom:8px">Run any OpenAI-compatible local model (LM Studio, Ollama, etc). Start your server, then paste its URL and model name below.</div>
             <input class="dialog-input" id="ob_lm_ep" placeholder="http://127.0.0.1:1234/v1" value="http://127.0.0.1:1234/v1" />
             <input class="dialog-input" id="ob_lm_model" placeholder="model-id  e.g. qwen3.6-27b" />
             <div class="ob-btn-row">
@@ -4545,41 +4536,6 @@ async function obSetCloudOnly() {
   } catch(e) { /* ignore */ }
 }
 
-async function obProvisionLocalEngine() {
-  const btn = document.getElementById('ob_lm_provision');
-  const log = document.getElementById('ob_lm_provision_log');
-  if (btn) btn.disabled = true;
-  if (log) log.textContent = 'Starting Rapid-MLX provisioning…';
-  try {
-    await api('/local-engine/provision', { method: 'POST' });
-    obPollLocalEngineProvision();
-  } catch(e) {
-    if (log) log.textContent = 'Provisioning failed to start: ' + e;
-    if (btn) btn.disabled = false;
-  }
-}
-
-async function obPollLocalEngineProvision() {
-  const btn = document.getElementById('ob_lm_provision');
-  const logEl = document.getElementById('ob_lm_provision_log');
-  let r;
-  try { r = await api('/local-engine/provision'); } catch(e) {
-    if (logEl) logEl.textContent = 'Provisioning status unavailable.';
-    if (btn) btn.disabled = false;
-    return;
-  }
-  const s = (r && r.status) || {};
-  const log = (s.log || []).slice(-8).join('\n');
-  const tail = s.phase === 'error' ? '\n✗ ' + (s.error || 'failed')
-    : s.phase === 'done' ? '\n✓ done — restart the daemon to serve the new tiers'
-      : s.phase === 'running' ? '\nProvisioning…'
-        : '';
-  if (logEl) logEl.textContent = (log + tail).trim() || 'Provisioning idle.';
-  if (s.phase === 'running') { setTimeout(obPollLocalEngineProvision, 1500); return; }
-  if (btn) btn.disabled = false;
-  await obDetectModels();
-}
-
 // ── Step 2: brain location ────────────────────────────────────────────────────
 
 function _obInitBrain() {
@@ -5365,30 +5321,15 @@ async function checkUsage(forceRefresh) {
   } catch (e) { /* transient */ }
 }
 
-// Local engine + embeddings status for the "Models" panel. Local-engine tier
-// detail comes from the (already-loaded) global models object; the serving supervisor
-// and embeddings status are cheap polls. Also drives the header "local" pill.
+// Embeddings status for the "Models" panel (the one remaining on-box model —
+// see docs/superpowers/plans/2026-07-11-claude-native-cutover.md, "Out of scope").
 async function checkModels() {
   const el = document.getElementById("modelStatus");
   if (!el || !models) return;
-  let serving = null, emb = null;
-  try { [serving, emb] = await Promise.all([api("/local-model/status"), api("/embeddings")]); } catch (e) { /* transient */ }
+  let emb = null;
+  try { emb = await api("/embeddings"); } catch (e) { /* transient */ }
 
-  const le = models.localEngine, cap = models.localEngineCapability;
   let html = "";
-
-  // — Local (on-device) —
-  if (le || (cap && !cap.localCapable)) {
-    html += '<div class="mdl-grp">Local · on-device</div>';
-    html += renderLocalEngine(le, cap) || "";
-    if (serving && serving.managed) {
-      const bits = [];
-      if (serving.modelId) bits.push(esc(serving.modelId));
-      if (serving.restarts) bits.push(serving.restarts + " restart" + (serving.restarts === 1 ? "" : "s"));
-      if (serving.lastError) bits.push('<span style="color:var(--err)">' + esc(serving.lastError) + '</span>');
-      if (bits.length) html += '<div class="muted" style="font-size:11px;margin:2px 0 6px 2px">' + bits.join(" · ") + '</div>';
-    }
-  }
 
   // — Embeddings (shared with Brainpower) —
   if (emb) {
@@ -5410,22 +5351,6 @@ async function checkModels() {
 
   // Frontier (cloud) usage now lives in its own Usage section, above Models.
   el.innerHTML = html;
-
-  // Header pill — at-a-glance "is the local engine running".
-  const pill = document.getElementById("localPill");
-  if (pill) {
-    if (le && (!cap || cap.localCapable)) {
-      const up = !!le.up;
-      const live = (le.tiers || []).filter(t => t.healthy).map(t => t.key);
-      pill.textContent = "🧠 local";
-      pill.style.display = "";
-      pill.title = up
-        ? "Local engine running" + (live.length ? " — " + live.join(", ") : "")
-        : "Local engine not running";
-    } else {
-      pill.style.display = "none";
-    }
-  }
 }
 
 async function reindexEmbeddings() {
@@ -5442,8 +5367,8 @@ async function refreshModelsNow() {
   const btn = document.getElementById("modelsRefresh");
   if (btn) { btn.disabled = true; btn.textContent = "…"; }
   try {
-    await loadModels();                          // refresh local-engine tier health
-    await checkModels();                         // Models panel = local engine + embeddings only
+    await loadModels();                          // refresh model status
+    await checkModels();                         // Models panel = embeddings only
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "↻"; }
   }
@@ -5682,39 +5607,6 @@ function renderLocalBackendChoice(backend, health) {
     + '</div>';
 }
 
-// Live status of the local inference engine (Rapid-MLX) + each tier, so you can
-// see at a glance that local is up and serving everything.
-function renderLocalEngine(le, cap) {
-  if (!le) return "";
-  const name = le.engine === "rapid-mlx" ? "Rapid-MLX" : le.engine === "ollama" ? "Ollama" : "LM Studio";
-  const capByKey = {};
-  if (cap && cap.tiers) for (const t of cap.tiers) capByKey[t.key] = t;
-  const tierDivs = (le.tiers || []).map(t => {
-    const c = capByKey[t.key];
-    const grey = c && !c.residentCapable;
-    const body = (t.healthy ? '<span style="color:var(--ok)">●</span>' : '<span style="color:var(--muted)">○</span>')
-      + ' <b>' + esc(t.key) + '</b>'
-      + '<span class="mdl-tier-alias">' + esc(t.alias) + ' :' + t.port
-      + ' · reasoning ' + (t.reasoning ? 'on' : 'off') + (t.healthy ? '' : ' · not running')
-      + (t.optional ? ' · optional preset' : '')
-      + (grey && c.reason ? ' · <span style="color:#c8922b">' + esc(c.reason) + '</span>' : '')
-      + '</span>';
-    return '<div class="mdl-tier">' + (grey ? '<span style="opacity:.5" title="' + esc(c.reason || '') + '">' + body + '</span>' : body) + '</div>';
-  }).join('');
-  let footContent = '';
-  if (cap && !cap.localCapable) {
-    footContent = '<span style="color:#c8922b">' + esc(cap.reason || 'Local models unavailable on this Mac — running cloud-only.') + '</span>';
-  } else if (cap && cap.recommendedTiers && cap.recommendedTiers.length) {
-    footContent = 'Recommended for this Mac (' + Math.round(cap.ramGB || 0) + ' GB): <b>' + esc(cap.recommendedTiers.join(' + ')) + '</b> resident.';
-  }
-  return '<div class="mdl-card">'
-    + '<div class="mdl-card-head"><span class="mdl-card-name">Local engine — ' + name + '</span>'
-    + '<span class="st ' + (le.up ? 'ok' : 'no') + '">' + (le.up ? '✓ running' : 'not running') + '</span></div>'
-    + tierDivs
-    + (footContent ? '<div class="mdl-card-foot">' + footContent + '</div>' : '')
-    + '</div>';
-}
-
 function localHealthProviderName(provider) {
   if (provider === "mlx") return "Rapid-MLX";
   if (provider === "vllm") return "vLLM";
@@ -5722,57 +5614,6 @@ function localHealthProviderName(provider) {
   if (provider === "ollama") return "Ollama";
   if (provider === "nanai") return "Nan AI";
   return provider || "local";
-}
-
-// One-click provisioner: sizes Rapid-MLX to this Mac, installs it, pulls the
-// models that fit, writes config. Shown only when the Mac can run local.
-// selection (from GET /local-engine) is the operator's explicit picks, if any —
-// once set, the caption must describe what will ACTUALLY be pulled, not the
-// generic auto-recommendation (that's what the Providers toggle's own picker
-// caption already gets right; this legacy one-click button needs to match).
-function provisionCaptionText(cap, selection) {
-  const hasSelection = selection && Object.keys(selection).length;
-  const profile = hasSelection
-    ? Object.keys(selection).map(k => k + "@" + selection[k]).join(" + ")
-    : ((cap && cap.recommendedTiers) || []).join(" + ");
-  return "Installs Rapid-MLX + pulls " + profile + " for this Mac.";
-}
-
-function renderProvisionUI(cap, selection) {
-  if (!cap || !cap.localCapable) return "";
-  return '<div style="margin:6px 0 4px 2px">'
-    + '<button id="provisionBtn" class="create" onclick="provisionLocalEngine()" style="font-size:12px">Provision local engine</button>'
-    + '<span id="provisionCaption" class="muted" style="font-size:11px;margin-left:8px">' + esc(provisionCaptionText(cap, selection)) + '</span>'
-    + '<div id="provisionLog" style="margin-top:4px"></div></div>';
-}
-
-async function provisionLocalEngine() {
-  const btn = document.getElementById("provisionBtn");
-  if (btn) btn.disabled = true;
-  try {
-    await api("/local-engine/provision", { method: "POST" });
-  } catch (e) {
-    if (btn) btn.disabled = false;
-    const el = document.getElementById("provisionLog");
-    if (el) el.innerHTML = '<div class="muted" style="font-size:11px">✗ provision request failed — is the daemon reachable?</div>';
-    return;
-  }
-  pollProvision();
-}
-
-async function pollProvision() {
-  let r;
-  try { r = await api("/local-engine/provision"); } catch (e) { return; }
-  const s = (r && r.status) || {};
-  const el = document.getElementById("provisionLog");
-  if (el) {
-    const log = (s.log || []).join("\n");
-    const tail = s.phase === "error" ? "\n✗ " + (s.error || "failed") : s.phase === "done" ? "\n✓ done — restart the daemon to serve the new tiers" : "";
-    el.innerHTML = '<pre class="muted" style="font-size:11px;white-space:pre-wrap;max-height:160px;overflow:auto;margin:2px 0">' + esc(log + tail) + "</pre>";
-  }
-  if (s.phase === "running") { setTimeout(pollProvision, 1500); return; }
-  const btn = document.getElementById("provisionBtn");
-  if (btn) btn.disabled = false;
 }
 
 function applyTheme(theme, hasWallpaper) {
@@ -5865,7 +5706,7 @@ async function loadModels() {
   // Default selection
   const def = models.available.find(m => m.modelId === models.defaultModel || m.id === models.defaultModel);
   if (def) sel.value = def.id;
-  // Refresh the Models panel now that local-engine tier health is loaded.
+  // Refresh the Models panel (embeddings status) now that /models has loaded.
   checkModels();
   // About can be opened before /models finishes; patch its version rows once
   // the version-bearing payload arrives.
@@ -6403,9 +6244,9 @@ function providerStatusChip(p) {
 async function renderProviderToggles() {
   const wrap = document.getElementById("s_provider_toggle_rows");
   if (!wrap) return;
-  let r, le;
+  let r;
   try {
-    [r, le] = await Promise.all([api("/providers"), api("/local-engine").catch(() => null)]);
+    r = await api("/providers");
   } catch (e) { wrap.innerHTML = '<div class="muted">Could not load provider status.</div>'; return; }
   const providers = (r && r.providers) || [];
   let html = providers.map(p => {
@@ -6420,501 +6261,7 @@ async function renderProviderToggles() {
       + settingsSwitch(p.enabled, 'toggleProvider(\'' + esc(p.id) + '\',' + (!p.enabled) + ')', { title: (p.enabled ? 'Turn off ' : 'Turn on ') + (PROVIDER_LABELS[p.id] || p.id) })
       + '</div></div>';
   }).join('');
-  html += renderLocalEngineToggleRow(le);
   wrap.innerHTML = html || '<div class="muted">No providers.</div>';
-
-  // Keep the legacy "Provision local engine" button's caption (in #s_backends,
-  // Settings > Models) honest once the operator has an explicit selection.
-  // Patch the span directly rather than re-rendering the whole Settings form,
-  // which would clobber any in-progress edit elsewhere on the page (endpoint
-  // URL, theme, etc.).
-  if (models) models.localEngineSelection = le ? le.selection : undefined;
-  const caption = document.getElementById("provisionCaption");
-  if (caption && models) caption.textContent = provisionCaptionText(models.localEngineCapability, le ? le.selection : undefined);
-}
-
-// --- Rapid-MLX (local engine) toggle row + HuggingFace-style model/quant picker ---
-
-// KV-cache footprint arithmetic — mirrors src/lib/models/local-tuning.ts exactly
-// (this file has no import path into the Node backend, so the formula is
-// duplicated; keep both in sync). Lets the context slider show a live GiB
-// estimate without a server round-trip per drag.
-const KV_SHAPE_BY_TIER = {
-  fast: { layers: 40, kvHeads: 2, headDim: 256 },   // Qwen3.6-35B-A3B (MoE)
-  coding: { layers: 64, kvHeads: 4, headDim: 256 }, // Qwen3.6-27B (dense)
-};
-const KV_BYTES_PER_ELEM = { int4: 0.5 + 4 / 64, int8: 1.0 + 4 / 64, bf16: 2.0 };
-function estimateKvCacheGiB(tier, contextTokens, dtype) {
-  const shape = KV_SHAPE_BY_TIER[tier];
-  if (!shape) return 0;
-  const bytesPerToken = 2 * shape.layers * shape.kvHeads * shape.headDim * (KV_BYTES_PER_ELEM[dtype] || KV_BYTES_PER_ELEM.int4);
-  return (bytesPerToken * contextTokens) / 1024 ** 3;
-}
-// Slider stops — powers of two from 8192 up to whatever the RAM band recommends.
-const CONTEXT_STEPS = [8192, 16384, 32768, 65536, 131072, 262144];
-function contextStepsForTier(maxRecommendedContext) {
-  const steps = CONTEXT_STEPS.filter((n) => n <= (maxRecommendedContext || 262144));
-  return steps.length ? steps : [maxRecommendedContext || 8192];
-}
-function nearestStepIndex(steps, value) {
-  let best = 0, bestDiff = Infinity;
-  steps.forEach((s, i) => { const d = Math.abs(s - value); if (d < bestDiff) { bestDiff = d; best = i; } });
-  return best;
-}
-function fmtTokens(n) {
-  return n >= 1024 ? (n / 1024).toFixed(n % 1024 === 0 ? 0 : 1) + "k" : String(n);
-}
-
-function localEngineStatusChip(le) {
-  if (!le || !le.capable) return '<span class="muted" style="font-size:11px">Unavailable' + (le && le.reason ? ' · ' + esc(le.reason) : '') + '</span>';
-  if (!le.enabled) return '<span class="muted" style="font-size:11px">Off</span>';
-  if (!le.installed) return '<span class="muted" style="font-size:11px;color:var(--accent)">Enabling — installing engine + model</span>';
-  if (!le.ready) return '<span class="muted" style="font-size:11px;color:var(--accent)">On — starting</span>';
-  return '<span class="muted" style="font-size:11px;color:var(--ok)">On</span>';
-}
-
-function renderLocalEngineToggleRow(le) {
-  if (!le) return '';
-  const disabled = !le.capable;
-  const row = '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
-    + '<div style="flex:1"><div style="font-weight:600">Rapid-MLX (local)</div>'
-    + '<div style="margin-top:2px">' + localEngineStatusChip(le) + '</div></div>'
-    + '<div class="row" style="align-items:center;gap:8px">'
-    + settingsSwitch(le.enabled, 'toggleLocalEngine(' + (!le.enabled) + ')', {
-        title: (le.enabled ? 'Turn off ' : 'Turn on ') + 'Rapid-MLX',
-        disabled,
-      })
-    + '</div></div>';
-  const picker = (le.enabled && le.capable) ? renderLocalModelPicker(le) : '';
-  return row + picker;
-}
-
-async function toggleLocalEngine(enabled) {
-  await api("/local-engine/enabled", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
-  });
-  if (enabled) {
-    // First-ever enable: seed a default selection (mirrors today's auto-pick —
-    // fast@4bit, plus coding@4bit once this Mac offers it) so "on" always means
-    // something is actually being installed, not an empty picker.
-    const le = await api("/local-engine").catch(() => null);
-    if (le && !Object.keys(le.selection || {}).length) {
-      const body = { fast: "4bit" };
-      if ((le.options || []).some(o => o.tier === "coding")) body.coding = "4bit";
-      await api("/local-engine/selection", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      }).catch(() => {});
-    }
-    await api("/local-engine/provision", { method: "POST" }).catch(() => {});
-  }
-  _localPending = null;
-  await renderProviderToggles();
-  models = await loadModels().catch(() => models);
-  renderSettingsModelControls();
-  if (enabled) pollLocalProvision();
-}
-
-// Client-side pending edits, kept across re-renders until Apply/Reset — so
-// clicking a radio doesn't have to round-trip to the server before the UI updates.
-let _localPending = null;
-// Context/KV-cache tuning pending edits — separate state from _localPending
-// (which quant to install) since they're independent axes (§3.2, 2026-07-09
-// tuning spec): the operator can change KV dtype without re-downloading a model.
-let _tuningPending = null;
-// Last-rendered /local-engine response, so the slider/dtype onchange handlers
-// (invoked from plain onclick/oninput strings, not closures) can read
-// maxRecommendedContext without a server round-trip per drag.
-let _leCache = null;
-// Flash sampling pending edits (temperature/top-p/rep-penalty/max-tokens). Null
-// until the operator touches a slider, then holds a full param object; cleared on
-// Save/Reset. Independent of _tuningPending — sampling is per-request, not launch argv.
-let _samplingPending = null;
-// Field metadata for the sampling card — labels + one-line hints. Ranges/steps come
-// from the server (le.sampling.bounds), so this never hardcodes numbers.
-const SAMPLING_FIELDS = [
-  { key: "temperature", label: "Temperature", hint: "randomness · lower = steadier" },
-  { key: "topP", label: "Top-p", hint: "nucleus cutoff · trims the long tail" },
-  { key: "topK", label: "Top-k", hint: "keep top K tokens · 0 = off · strongest anti-degeneration lever" },
-  { key: "minP", label: "Min-p", hint: "drop low-prob tokens · 0 = off" },
-  { key: "presencePenalty", label: "Presence penalty", hint: "discourages reused tokens (weak on rapid-mlx)" },
-  { key: "frequencyPenalty", label: "Frequency penalty", hint: "penalizes token frequency" },
-  { key: "repetitionPenalty", label: "Repetition penalty", hint: "higher = less looping (honored by rapid-mlx)" },
-  { key: "maxTokens", label: "Max tokens", hint: "model-level output cap" },
-  { key: "maxReplyChars", label: "Reply length cap", hint: "chars · hard-stops a runaway reply" },
-];
-// Integer-valued params (bounds.step >= 1) render without decimals.
-function samplingIsInt(key) { const b = _leCache && _leCache.sampling && _leCache.sampling.bounds[key]; return b ? b.step >= 1 : (key === "maxTokens" || key === "maxReplyChars"); }
-function fmtSampling(key, val) { return samplingIsInt(key) ? String(val) : Number(val).toFixed(2); }
-
-function localDefaultSelection(le) {
-  const sel = {};
-  sel.fast = (le.selection && le.selection.fast) || "4bit";
-  const hasCoding = (le.options || []).some(o => o.tier === "coding");
-  if (hasCoding && le.selection && le.selection.coding) sel.coding = le.selection.coding;
-  return sel;
-}
-
-function localDefaultTuning(le) {
-  const t = {};
-  for (const key of ["fast", "coding"]) {
-    const info = le.tuning && le.tuning[key];
-    if (!info) continue;
-    t[key] = { contextLimit: info.effectiveContext, kvCacheDtype: info.effectiveKvDtype, reasoning: !!info.effectiveReasoning };
-  }
-  return t;
-}
-
-function renderLocalModelPicker(le) {
-  _leCache = le;
-  if (!_localPending) _localPending = localDefaultSelection(le);
-  if (!_tuningPending) _tuningPending = localDefaultTuning(le);
-  const pending = _localPending;
-  const pendingTuning = _tuningPending;
-  const optionsByTier = { fast: [], coding: [] };
-  for (const o of (le.options || [])) (optionsByTier[o.tier] || (optionsByTier[o.tier] = [])).push(o);
-
-  const tuningBlock = (tier) => {
-    const info = (le.tuning || {})[tier];
-    const tune = pendingTuning[tier];
-    if (!info || !tune) return '';
-    const steps = contextStepsForTier(info.maxRecommendedContext);
-    const idx = nearestStepIndex(steps, tune.contextLimit);
-    const dtype = tune.kvCacheDtype;
-    const reasoningOn = tune.reasoning != null ? !!tune.reasoning : !!info.effectiveReasoning;
-    const kvGiB = estimateKvCacheGiB(tier, steps[idx], dtype);
-    const dtypeButtons = ["int4", "int8", "bf16"].map((d) => {
-      const active = d === dtype;
-      return '<button type="button" class="linklike" style="font-size:11px;padding:2px 7px;border:1px solid var(--border);border-radius:4px'
-        + (active ? ';background:var(--accent);color:#fff;border-color:var(--accent)' : '')
-        + '" onclick="setTuningKvDtype(\'' + tier + '\',\'' + d + '\')">' + d + '</button>';
-    }).join(' ');
-    const overrideNote = info.override
-      ? ' <button class="linklike" style="font-size:10px" onclick="resetTierTuning(\'' + tier + '\')">reset to default</button>'
-      : '';
-    return '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'
-      + '<div class="row" style="justify-content:space-between;align-items:baseline;font-size:11px">'
-      + '<span>Context: <b>' + fmtTokens(steps[idx]) + '</b> tokens' + overrideNote + '</span>'
-      + '<span class="muted">KV cache ~' + kvGiB.toFixed(2) + ' GiB</span>'
-      + '</div>'
-      + '<input type="range" min="0" max="' + (steps.length - 1) + '" step="1" value="' + idx + '"'
-      + ' style="width:100%;margin:4px 0" onchange="setTuningContext(\'' + tier + '\', this.value)">'
-      + '<div class="row" style="justify-content:space-between;align-items:center;margin-top:2px">'
-      + '<span class="muted" style="font-size:10px">KV cache dtype</span>'
-      + '<span>' + dtypeButtons + '</span>'
-      + '</div>'
-      // Thinking mode: a physical ON/OFF representation of this tier's reasoning
-      // flag (serves --reasoning vs --no-thinking), toggleable per tier. OFF is
-      // the latency default; ON re-enables <think> (slower turns, more tokens).
-      + '<div class="row" style="justify-content:space-between;align-items:center;margin-top:6px">'
-      + '<span class="muted" style="font-size:10px">Thinking mode <span style="opacity:.7">' + (reasoningOn ? '· slower, reasons before replying' : '· fastest (--no-thinking)') + '</span></span>'
-      + '<span class="row" style="align-items:center;gap:6px">'
-      + '<span style="font-size:11px;font-weight:600;color:' + (reasoningOn ? 'var(--accent)' : 'var(--muted)') + '">' + (reasoningOn ? 'ON' : 'OFF') + '</span>'
-      + settingsSwitch(reasoningOn, 'setTuningReasoning(\'' + tier + '\',' + (!reasoningOn) + ')', { title: (reasoningOn ? 'Turn thinking off' : 'Turn thinking on') + ' for the ' + tier + ' tier' })
-      + '</span>'
-      + '</div></div>';
-  };
-
-  const tierBlock = (tier, title, showRemove) => {
-    const opts = optionsByTier[tier] || [];
-    if (!opts.length) return '';
-    const rows = opts.map(o => {
-      const checked = pending[tier] === o.quant;
-      const badge = o.cached
-        ? '<span style="color:var(--ok)">✓ downloaded</span>'
-        : (o.downloadGiB.toFixed(1) + ' GiB download');
-      return '<label class="row" style="align-items:center;gap:8px;padding:2px 0;cursor:pointer">'
-        + '<input type="radio" name="localquant_' + tier + '"' + (checked ? ' checked' : '')
-        + ' onchange="pickLocalQuant(\'' + tier + '\',\'' + o.quant + '\')">'
-        + '<span style="min-width:40px">' + esc(o.quant) + '</span>'
-        + '<span class="muted" style="font-size:11px">' + badge + '</span>'
-        + '</label>';
-    }).join('');
-    const removeBtn = showRemove
-      ? ' <button class="linklike" style="font-size:11px" onclick="removeLocalTier(\'' + tier + '\')">Remove</button>'
-      : '';
-    return '<div style="margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:6px">'
-      + '<div class="row" style="justify-content:space-between;align-items:center">'
-      + '<b style="font-size:12px">' + esc(title) + '</b>'
-      + '<span>' + '<span class="muted" style="font-size:11px">' + esc(tier) + '</span>' + removeBtn + '</span>'
-      + '</div>' + rows + tuningBlock(tier) + '</div>';
-  };
-
-  let html = '<div style="margin:4px 0 10px 2px">';
-  html += tierBlock('fast', 'Qwen3.6-35B-A3B', false);
-  if ((optionsByTier.coding || []).length) {
-    if (pending.coding) {
-      html += tierBlock('coding', 'Qwen3.6-27B', true);
-    } else {
-      html += '<div style="margin-top:8px"><button class="linklike" style="font-size:12px" onclick="addLocalCodingTier()">+ Add Qwen3.6-27B</button></div>';
-    }
-  }
-
-  // Estimated resident footprint: pending weight quants + pending KV cache,
-  // against this Mac's RAM at Rapid-MLX's default 90% Metal ceiling (§3.2).
-  let footprintGiB = 0;
-  for (const tier of Object.keys(pending)) {
-    const opt = (optionsByTier[tier] || []).find(o => o.quant === pending[tier]);
-    if (opt) footprintGiB += opt.downloadGiB;
-    const tune = pendingTuning[tier];
-    const info = (le.tuning || {})[tier];
-    if (tune && info) {
-      const steps = contextStepsForTier(info.maxRecommendedContext);
-      footprintGiB += estimateKvCacheGiB(tier, steps[nearestStepIndex(steps, tune.contextLimit)], tune.kvCacheDtype);
-    }
-  }
-  if (footprintGiB > 0 && le.ramGB) {
-    const ceilingGiB = le.ramGB * 0.90;
-    const pct = footprintGiB / ceilingGiB;
-    const color = pct > 0.95 ? 'var(--danger, #c33)' : pct > 0.85 ? 'var(--accent)' : 'var(--ok)';
-    html += '<div class="muted" style="margin-top:8px;font-size:11px">Estimated resident footprint: '
-      + '<b style="color:' + color + '">' + footprintGiB.toFixed(1) + ' GiB</b>'
-      + ' of ~' + ceilingGiB.toFixed(0) + ' GiB (90% of ' + Math.round(le.ramGB) + ' GB RAM)</div>';
-  }
-
-  // Sampling card — the operator-tunable decode controls for Flash chat, sitting
-  // alongside the context slider. Self-contained Save (sampling is per-request, so
-  // no re-provision) instead of folding into the Apply-restart flow above.
-  if (le.sampling) {
-    const s = le.sampling;
-    const cur = _samplingPending || s.current;
-    const rows = SAMPLING_FIELDS.map((f) => {
-      const b = s.bounds[f.key];
-      if (!b) return '';
-      return '<div style="margin-top:6px">'
-        + '<div class="row" style="justify-content:space-between;align-items:baseline;font-size:11px">'
-        + '<span>' + f.label + ' <span class="muted" style="font-size:10px">· ' + f.hint + '</span></span>'
-        + '<b>' + fmtSampling(f.key, cur[f.key]) + '</b></div>'
-        + '<input type="range" min="' + b.min + '" max="' + b.max + '" step="' + b.step + '" value="' + cur[f.key] + '"'
-        + ' style="width:100%;margin:2px 0" onchange="setSampling(\'' + f.key + '\', this.value)">'
-        + '</div>';
-    }).join('');
-    const dirty = JSON.stringify(cur) !== JSON.stringify(s.current);
-    // Preset buttons stage a full param set (then the operator Saves). Highlight the one
-    // that matches the current values so it's clear which preset is active.
-    const matches = (preset) => preset && JSON.stringify(cur) === JSON.stringify(preset);
-    const presetBtn = (label, preset, fn) => {
-      if (!preset) return '';
-      const on = matches(preset);
-      return '<button type="button" class="linklike" style="font-size:11px;padding:2px 8px;border:1px solid var(--border);border-radius:4px'
-        + (on ? ';background:var(--accent);color:#fff;border-color:var(--accent)' : '')
-        + '" onclick="' + fn + '()">' + label + '</button>';
-    };
-    const presets = '<div class="row" style="margin-top:6px;gap:6px;align-items:center;flex-wrap:wrap">'
-      + '<span class="muted" style="font-size:10px">Presets</span>'
-      + presetBtn('HiveMatrix default', s.defaults, 'resetSamplingDefaults')
-      + presetBtn('Qwen recommended', s.qwenRecommended, 'applyQwenSampling')
-      + '</div>';
-    const actions = dirty
-      ? '<div class="row" style="margin-top:8px;gap:8px;align-items:center">'
-        + '<button class="create" style="font-size:12px" onclick="saveSampling()">Save sampling</button>'
-        + '<button class="linklike" style="font-size:12px" onclick="resetSampling()">Cancel</button></div>'
-      : '';
-    html += '<div style="margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:6px">'
-      + '<div class="row" style="justify-content:space-between;align-items:center"><b style="font-size:12px">Sampling</b>'
-      + '<span class="muted" style="font-size:10px">applies next reply · no restart</span></div>'
-      + '<div class="muted" style="font-size:10px;margin-top:2px">Decode controls for Flash chat — the anti-degeneration knobs. Defaults are tuned for rapid-mlx; the Qwen preset is the model-card recommendation.</div>'
-      + presets + rows + actions
-      + '<div id="samplingSaveLog" style="font-size:11px;margin-top:4px"></div></div>';
-  }
-
-  const currentSelection = le.selection || {};
-  const currentTuning = {};
-  for (const key of Object.keys(le.tuning || {})) {
-    currentTuning[key] = { contextLimit: le.tuning[key].effectiveContext, kvCacheDtype: le.tuning[key].effectiveKvDtype };
-  }
-  const dirty = JSON.stringify(pending) !== JSON.stringify(currentSelection)
-    || JSON.stringify(pendingTuning) !== JSON.stringify(currentTuning);
-  if (dirty) {
-    let downloadGiB = 0;
-    for (const tier of Object.keys(pending)) {
-      const opt = (optionsByTier[tier] || []).find(o => o.quant === pending[tier]);
-      if (opt && !opt.cached) downloadGiB += opt.downloadGiB;
-    }
-    html += '<div class="row" style="margin-top:8px;gap:8px;align-items:center">'
-      + '<button id="localApplyBtn" class="create" style="font-size:12px" onclick="applyLocalSelection()">'
-      + (downloadGiB > 0 ? 'Apply — downloads ' + downloadGiB.toFixed(1) + ' GiB' : 'Apply — restart only, already downloaded')
-      + '</button>'
-      + '<button class="linklike" style="font-size:12px" onclick="resetLocalSelection()">Reset</button>'
-      + '</div>';
-  }
-  html += '<div id="localProvisionLog" style="margin-top:6px"></div>';
-  html += '</div>';
-  return html;
-}
-
-function pickLocalQuant(tier, quant) {
-  if (!_localPending) return;
-  _localPending[tier] = quant;
-  renderProviderToggles();
-}
-
-function addLocalCodingTier() {
-  if (!_localPending) return;
-  _localPending.coding = "4bit";
-  renderProviderToggles();
-}
-
-function removeLocalTier(tier) {
-  if (!_localPending) return;
-  delete _localPending[tier];
-  renderProviderToggles();
-}
-
-function setTuningContext(tier, stepIndexStr) {
-  if (!_tuningPending || !_leCache) return;
-  const info = (_leCache.tuning || {})[tier];
-  if (!info) return;
-  const steps = contextStepsForTier(info.maxRecommendedContext);
-  const idx = Math.max(0, Math.min(steps.length - 1, Number(stepIndexStr) || 0));
-  const cur = _tuningPending[tier] || { kvCacheDtype: info.defaultKvCacheDtype || "int4" };
-  _tuningPending[tier] = { ...cur, contextLimit: steps[idx] };
-  renderProviderToggles();
-}
-
-function setTuningKvDtype(tier, dtype) {
-  if (!_tuningPending || !_leCache) return;
-  const info = (_leCache.tuning || {})[tier];
-  if (!info) return;
-  const cur = _tuningPending[tier] || { contextLimit: info.defaultContext };
-  _tuningPending[tier] = { ...cur, kvCacheDtype: dtype };
-  renderProviderToggles();
-}
-
-function setTuningReasoning(tier, on) {
-  if (!_tuningPending || !_leCache) return;
-  const info = (_leCache.tuning || {})[tier];
-  if (!info) return;
-  const cur = _tuningPending[tier] || { contextLimit: info.effectiveContext, kvCacheDtype: info.effectiveKvDtype || "int4" };
-  _tuningPending[tier] = { ...cur, reasoning: !!on };
-  renderProviderToggles();
-}
-
-function resetTierTuning(tier) {
-  if (!_tuningPending || !_leCache) return;
-  const info = (_leCache.tuning || {})[tier];
-  if (!info) return;
-  _tuningPending[tier] = { contextLimit: info.defaultContext, kvCacheDtype: info.defaultKvCacheDtype || "int4", reasoning: !!info.defaultReasoning };
-  renderProviderToggles();
-}
-
-function resetLocalSelection() {
-  _localPending = null; // re-seeded from server state on next render
-  _tuningPending = null;
-  renderProviderToggles();
-}
-
-// --- Flash sampling controls ---
-function setSampling(key, valueStr) {
-  if (!_leCache || !_leCache.sampling) return;
-  const b = _leCache.sampling.bounds[key];
-  if (!b) return;
-  let v = Number(valueStr);
-  if (!isFinite(v)) return;
-  v = Math.min(b.max, Math.max(b.min, v));
-  if (b.step >= 1) v = Math.round(v); // integer-valued param
-  const cur = _samplingPending ? { ..._samplingPending } : { ..._leCache.sampling.current };
-  cur[key] = v;
-  _samplingPending = cur;
-  renderProviderToggles();
-}
-
-function resetSampling() { // cancel pending edits, revert to saved values
-  _samplingPending = null;
-  renderProviderToggles();
-}
-
-function resetSamplingDefaults() { // stage the HiveMatrix-tuned defaults (still needs Save)
-  if (!_leCache || !_leCache.sampling) return;
-  _samplingPending = { ..._leCache.sampling.defaults };
-  renderProviderToggles();
-}
-
-function applyQwenSampling() { // stage the Qwen model-card preset (still needs Save)
-  if (!_leCache || !_leCache.sampling || !_leCache.sampling.qwenRecommended) return;
-  _samplingPending = { ..._leCache.sampling.qwenRecommended };
-  renderProviderToggles();
-}
-
-async function saveSampling() {
-  if (!_samplingPending) return;
-  try {
-    await api("/local-engine/sampling", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(_samplingPending),
-    });
-  } catch (e) {
-    const log = document.getElementById("samplingSaveLog");
-    if (log) log.innerHTML = '<span style="color:var(--danger,#c33)">✗ save failed — is the daemon reachable?</span>';
-    return;
-  }
-  _samplingPending = null;
-  await renderProviderToggles();
-  const log = document.getElementById("samplingSaveLog");
-  if (log) log.innerHTML = '<span style="color:var(--ok)">✓ saved — applies on your next reply</span>';
-}
-
-// Only sends a tier's tuning if it actually differs from that tier's preset
-// default — otherwise every Apply would persist a redundant override equal to
-// the default. A tier reset back to its default (via resetTierTuning) sends
-// null so an existing stored override is cleared, not left stale.
-function pendingTuningBody() {
-  const body = {};
-  const le = _leCache || {};
-  for (const key of ["fast", "coding"]) {
-    const info = (le.tuning || {})[key];
-    if (!info) continue;
-    if (_localPending && _localPending[key] === undefined) { body[key] = null; continue; }
-    const tune = _tuningPending && _tuningPending[key];
-    if (!tune) continue;
-    const tuneReasoning = tune.reasoning != null ? !!tune.reasoning : !!info.effectiveReasoning;
-    const isDefault = tune.contextLimit === info.defaultContext
-      && tune.kvCacheDtype === (info.defaultKvCacheDtype || "int4")
-      && tuneReasoning === !!info.defaultReasoning;
-    if (isDefault) { if (info.override) body[key] = null; }
-    else body[key] = { contextLimit: tune.contextLimit, kvCacheDtype: tune.kvCacheDtype, reasoning: tuneReasoning };
-  }
-  return body;
-}
-
-async function applyLocalSelection() {
-  const btn = document.getElementById("localApplyBtn");
-  if (btn) { btn.disabled = true; btn.textContent = "Applying…"; }
-  const body = { fast: (_localPending && _localPending.fast) || null, coding: (_localPending && _localPending.coding) || null };
-  try {
-    await api("/local-engine/selection", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    });
-    const tuningBody = pendingTuningBody();
-    if (Object.keys(tuningBody).length) {
-      await api("/local-engine/tuning", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(tuningBody),
-      });
-    }
-    await api("/local-engine/provision", { method: "POST" });
-  } catch (e) {
-    if (btn) { btn.disabled = false; btn.textContent = "Apply"; }
-    const el = document.getElementById("localProvisionLog");
-    if (el) el.innerHTML = '<div class="muted" style="font-size:11px">✗ request failed — is the daemon reachable?</div>';
-    return;
-  }
-  pollLocalProvision();
-}
-
-async function pollLocalProvision() {
-  let r;
-  try { r = await api("/local-engine/provision"); } catch (e) { return; }
-  const s = (r && r.status) || {};
-  const el = document.getElementById("localProvisionLog");
-  if (el) {
-    const log = (s.log || []).join("\n");
-    const tail = s.phase === "error" ? "\n✗ " + (s.error || "failed") : s.phase === "done" ? "\n✓ done" : "";
-    el.innerHTML = '<pre class="muted" style="font-size:11px;white-space:pre-wrap;max-height:160px;overflow:auto;margin:2px 0">' + esc(log + tail) + "</pre>";
-  }
-  if (s.phase === "running") { setTimeout(pollLocalProvision, 1500); return; }
-  _localPending = null; // done — re-seed the picker from the now-current server selection
-  _tuningPending = null;
-  await renderProviderToggles();
-  models = await loadModels().catch(() => models);
-  renderSettingsModelControls();
 }
 
 async function toggleProvider(id, enabled) {
@@ -6945,7 +6292,6 @@ function renderSettingsModelControls() {
   const m = models || {};
   const available = Array.isArray(m.available) ? m.available : [];
   const backends = Array.isArray(m.backends) ? m.backends : [];
-  const local = backends.find(b => b.id === "local");
   const sd = document.getElementById("s_default");
   const selectable = available.filter(m => !m.disabled); // greyed "set up X" placeholders aren't valid defaults
   sd.disabled = !selectable.length;
@@ -6959,9 +6305,6 @@ function renderSettingsModelControls() {
     '<div class="mdl-card"><div class="mdl-card-head"><span class="mdl-card-name">'+esc(b.name)+'</span>'
     + '<span class="st '+(b.configured?'ok':'no')+'">'+(b.configured?'✓ '+esc(b.detail):'not set up')+'</span></div>'
     + (b.configured?'':'<div class="mdl-card-foot">'+esc(b.connect||'')+'</div>')+'</div>').join("") : '<div class="mdl-card"><div class="mdl-card-foot" style="border:none;margin:0;padding:0">Model status unavailable.</div></div>';
-  document.getElementById("s_backends").innerHTML += renderLocalEngine(m.localEngine, m.localEngineCapability);
-  document.getElementById("s_backends").innerHTML += renderProvisionUI(m.localEngineCapability, m.localEngineSelection);
-  document.getElementById("s_endpoint").value = (local && local.endpoint) || "http://localhost:1234/v1";
   renderEmbeddingSettings();
   const v = m.version || {};
   document.getElementById("s_version").textContent = "HiveMatrix v" + (v.version||"?") + " · build " + (v.build||"?") + " · " + (v.date||"?");
@@ -7012,15 +6355,13 @@ async function openReleases() {
 }
 function closeReleases() { document.getElementById("releasesOverlay").classList.remove("open"); }
 
-// Mixed-mode role models: thinking → frontier-premium, coding → frontier,
-// operational → local. Shown only when a Mixed posture is possible (local +
-// frontier both configured). Empty value = the router's built-in default.
+// Per-role Claude routing: thinking → Opus, coding → Sonnet, operational
+// (bulk work + Flash chat) → Haiku, writer → Sonnet. Always shown — every
+// role resolves to Claude (or Codex, if picked as the frontier provider).
+// Empty value = the router's built-in default.
 function renderRoleModels() {
   const wrap = document.getElementById("s_role_models");
   if (!wrap || !models) return;
-  const mixedAvailable = models.available.some(m => m.id === "mixed");
-  wrap.style.display = mixedAvailable ? "" : "none";
-  if (!mixedAvailable) return;
   const rm = models.roleModels || { thinking: "", coding: "", operational: "", writer: "" };
   const opts = models.roleModelOptions || { thinking: [], coding: [], operational: [], writer: [] };
   const provider = models.frontierProvider || "claude";
@@ -7038,8 +6379,8 @@ function renderRoleModels() {
   };
   fill("s_role_thinking", opts.thinking || [], provider === "codex" ? "Default — Codex GPT-5.5" : "Default — Opus", rm.thinking);
   fill("s_role_coding", opts.coding || [], provider === "codex" ? "Default — Codex Spark" : "Default — Sonnet", rm.coding);
-  fill("s_role_operational", opts.operational || [], "Default — local model", rm.operational);
-  fill("s_role_writer", opts.writer || [], provider === "codex" ? "Default — Codex GPT-5.5 online, local offline" : "Default — Sonnet online, local offline", rm.writer);
+  fill("s_role_operational", opts.operational || [], "Default — Haiku", rm.operational);
+  fill("s_role_writer", opts.writer || [], provider === "codex" ? "Default — Codex GPT-5.5" : "Default — Sonnet", rm.writer);
 }
 
 async function saveRoleModel(role, modelId) {
@@ -9765,12 +9106,6 @@ async function saveFrontierProvider() {
   await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ frontierProvider }) });
   await loadModels();
   hmToast("Frontier provider saved", "ok");
-}
-async function saveEndpoint() {
-  const localEndpoint = document.getElementById("s_endpoint").value.trim();
-  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ localEndpoint }) });
-  await loadModels();
-  hmToast("Endpoint saved", "ok");
 }
 
 function embeddingChoices() {

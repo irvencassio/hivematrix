@@ -411,13 +411,16 @@ test("onboarding wizard displays setup localModel status on the model card", () 
   assert.match(detectModels, /localMod[^;]+detail/, "local model detail is displayed when available");
 });
 
-test("onboarding wizard exposes one-click local engine provisioning", () => {
+test("onboarding wizard no longer offers one-click Rapid-MLX provisioning (Claude-native cutover Phase 4)", () => {
   const js = extractScript(CONSOLE_HTML);
 
-  assert.match(CONSOLE_HTML, /id="ob_lm_provision"/, "first-run local model card has a provisioning button");
-  assert.match(CONSOLE_HTML, /id="ob_lm_provision_log"/, "first-run local model card has provisioning status output");
-  assert.match(js, /async function obProvisionLocalEngine\(/, "first-run provision action exists");
-  assert.match(js, /\/local-engine\/provision/, "first-run provision action uses the shared provision endpoint");
+  assert.doesNotMatch(CONSOLE_HTML, /id="ob_lm_provision"/, "provisioning button removed");
+  assert.doesNotMatch(CONSOLE_HTML, /id="ob_lm_provision_log"/, "provisioning status output removed");
+  assert.doesNotMatch(js, /async function obProvisionLocalEngine\(/, "provision action removed");
+  assert.doesNotMatch(js, /\/local-engine\/provision/, "no client code calls the removed provision endpoint");
+  // The manual connect + cloud-only path still works.
+  assert.match(js, /async function obSetupLocalModel\(/);
+  assert.match(js, /async function obSetCloudOnly\(/);
 });
 
 test("onboarding wizard exposes persona birth ritual setup", () => {
@@ -597,7 +600,7 @@ test("remote access UI is two toggles — Tailscale for iPhone, Cloudflare for A
   assert.match(CONSOLE_HTML, /switchSettingsTab\('remote'\)/);
 });
 
-test("settings expose Mixed-mode role models for thinking, coding, and operational", () => {
+test("settings expose per-role Claude models for thinking, coding, and operational", () => {
   for (const id of ["s_role_thinking", "s_role_coding", "s_role_operational"]) {
     assert.match(CONSOLE_HTML, new RegExp('id="' + id + '"'), id + " selector present");
   }
@@ -607,8 +610,8 @@ test("settings expose Mixed-mode role models for thinking, coding, and operation
   assert.match(CONSOLE_HTML, /saveRoleModel\('operational'/);
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /async function saveRoleModel\(/);
-  // The role-model block is gated on a Mixed posture being available.
-  assert.match(js, /m\.id === "mixed"/);
+  // The role-model block is always shown now — every role routes to Claude.
+  assert.doesNotMatch(js, /mixedAvailable/);
 });
 
 test("MessageBee modal fetches structured status before reporting readability", () => {
@@ -1120,9 +1123,7 @@ test("header is grouped into zones with a theme toggle and grouped connectivity"
 test("settings auto-save with toast feedback and open on About", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(CONSOLE_HTML, /id="s_default"[^>]*onchange="saveDefault\(\)"/, "default model auto-saves on change");
-  assert.match(CONSOLE_HTML, /id="s_endpoint"[^>]*onchange="saveEndpoint\(\)"/, "endpoint auto-saves on change");
   assert.doesNotMatch(CONSOLE_HTML, /onclick="saveDefault\(\)"/, "no separate Save-default button");
-  assert.doesNotMatch(CONSOLE_HTML, /onclick="saveEndpoint\(\)"/, "no separate Save-endpoint button");
   assert.match(js, /function hmToast\(/, "toast helper present");
   assert.match(js, /function openSettings\(\)[\s\S]*switchSettingsTab\("about"\)/, "settings lands on About by default");
 });
@@ -1481,30 +1482,28 @@ test("per-window usage details remain available but secondary", () => {
   assert.doesNotMatch(js, /Frontier · cloud/, "usage no longer buried under a Models 'Frontier · cloud' header");
 });
 
-test("Models panel still shows local engine and embeddings", () => {
+test("Models panel shows embeddings only — the local-engine UI is gone (Claude-native cutover Phase 4)", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /Local · on-device/, "local engine group kept in Models");
-  assert.match(js, /optional preset/, "local engine card labels optional local model presets");
+  assert.doesNotMatch(js, /Local · on-device/, "local-engine group removed from Models");
   assert.match(js, /Embeddings/, "embeddings group kept in Models");
   assert.match(js, /getElementById\("modelStatus"\)/, "checkModels still fills modelStatus");
 });
 
-test("Models panel renders the Rapid-MLX local engine", () => {
+test("checkModels no longer renders the Rapid-MLX local engine", () => {
   const js = extractScript(CONSOLE_HTML);
   const checkModels = extractBetween(js, "async function checkModels()", "async function reindexEmbeddings()");
 
-  assert.match(checkModels, /renderLocalEngine\(le, cap\)/, "local engine card renders");
-  assert.doesNotMatch(checkModels, /renderLocalBackendChoice/, "no backend-specific local-model branch remains");
+  assert.doesNotMatch(checkModels, /renderLocalEngine\(/, "local engine card no longer renders");
+  assert.doesNotMatch(checkModels, /localPill/, "local-engine health pill removed");
 });
 
-test("Settings Models renders local engine and provisioning controls without cached health card", () => {
+test("Settings Models no longer renders local-engine provisioning controls", () => {
   const js = extractScript(CONSOLE_HTML);
   const renderSettings = extractBetween(js, "function renderSettingsModelControls()", "function closeSettings()");
 
-  assert.match(renderSettings, /renderLocalEngine\(m\.localEngine, m\.localEngineCapability\)/);
-  assert.doesNotMatch(renderSettings, /renderLocalModelHealth\(m\.localModelHealth\)/);
-  assert.match(renderSettings, /renderProvisionUI\(m\.localEngineCapability,\s*m\.localEngineSelection\)/);
-  assert.doesNotMatch(renderSettings, /renderLocalBackendChoice/);
+  assert.doesNotMatch(renderSettings, /renderLocalEngine\(/);
+  assert.doesNotMatch(renderSettings, /renderProvisionUI\(/);
+  assert.doesNotMatch(renderSettings, /s_endpoint/);
 });
 
 test("console generic local-model copy does not hardcode Qwen", () => {
@@ -2330,24 +2329,6 @@ test("runSelectedCommand success message reports project mismatch when board fil
 
   // When no board filter is active the plain "see the board" fallback is used.
   assert.match(body, /see the board/, "default success message remains available for the no-filter case");
-});
-
-test("provisionLocalEngine surfaces a failed provision request and re-enables the button", async () => {
-  const js = extractScript(CONSOLE_HTML);
-  const src = fnBody(js, "provisionLocalEngine");
-
-  const btn = { disabled: false };
-  const log = { innerHTML: "" };
-  const doc = { getElementById: (id: string) => (id === "provisionBtn" ? btn : id === "provisionLog" ? log : null) };
-  let polled = 0;
-
-  const run = new Function("document", "api", "pollProvision", `${src}; return provisionLocalEngine();`) as
-    (document: unknown, api: unknown, pollProvision: unknown) => Promise<void>;
-  await run(doc, async () => { throw new Error("daemon down"); }, () => { polled += 1; });
-
-  assert.equal(btn.disabled, false, "button must be re-enabled after a failed provision request");
-  assert.match(log.innerHTML, /failed/i, "the failure must be shown in the provision log");
-  assert.equal(polled, 0, "status polling must not start after a failed provision request");
 });
 
 test("talk audio playback handles the async play() rejection (sync try/catch cannot see it)", () => {

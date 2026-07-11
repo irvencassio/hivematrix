@@ -335,11 +335,9 @@ function localRoleOptions(local: BackendStatus | undefined): RoleModelOption[] {
 
 export function buildRoleModelOptions(backends: BackendStatus[] = detectBackends()): RoleModelOptions {
   const by = (id: BackendId) => backends.find((b) => b.id === id);
-  const local = by("local");
   const claude = by("claude");
   const codex = by("codex");
 
-  const localOptions = localRoleOptions(local);
   const opus = claude?.configured ? roleOption(CLAUDE_OPUS_ID, "Claude Opus", "claude") : null;
   const sonnet = claude?.configured ? roleOption(CLAUDE_SONNET_ID, "Claude Sonnet", "claude") : null;
   const haiku = claude?.configured ? roleOption(CLAUDE_HAIKU_ID, "Claude Haiku", "claude", "fast/cheap — chat and ambient work") : null;
@@ -348,15 +346,14 @@ export function buildRoleModelOptions(backends: BackendStatus[] = detectBackends
 
   return {
     // Thinking defaults to frontier-premium (a weak plan poisons everything
-    // downstream); Haiku and local are offered last-resort for a fully on-box
-    // posture — the resolver already honors a local thinkModel override.
-    thinking: [opus, sonnet, gpt55, spark, haiku, ...localOptions].filter((m): m is RoleModelOption => m !== null),
-    coding: [opus, sonnet, gpt55, spark, haiku, ...localOptions].filter((m): m is RoleModelOption => m !== null),
+    // downstream); Haiku is offered last-resort for a fully-Claude posture.
+    thinking: [opus, sonnet, gpt55, spark, haiku].filter((m): m is RoleModelOption => m !== null),
+    coding: [opus, sonnet, gpt55, spark, haiku].filter((m): m is RoleModelOption => m !== null),
     // Operational: Claude-first (Haiku is the default), Codex Spark as the
-    // cheap-pool alternative; local options kept until Phase 5 removes them.
-    operational: [haiku, sonnet, spark, opus, ...localOptions].filter((m): m is RoleModelOption => m !== null),
-    // Writer: frontier for quality, or the local model to lock everything free.
-    writer: [sonnet, opus, gpt55, haiku, ...localOptions].filter((m): m is RoleModelOption => m !== null),
+    // cheap-pool alternative.
+    operational: [haiku, sonnet, spark, opus].filter((m): m is RoleModelOption => m !== null),
+    // Writer: frontier for quality.
+    writer: [sonnet, opus, gpt55, haiku].filter((m): m is RoleModelOption => m !== null),
   };
 }
 

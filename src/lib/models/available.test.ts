@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildAvailableModels, buildRoleModelOptions, CLAUDE_OPUS_ID, CLAUDE_SONNET_ID, CODEX_NEWEST_ID } from "./available";
-import { QWEN36_35B_API_MODEL_ID } from "./local-presets";
 import type { BackendStatus } from "./backends";
 
 function backends(local: boolean, claude: boolean, codex: boolean): BackendStatus[] {
@@ -95,7 +94,7 @@ test("Cloud-only model id is the cloud-only sentinel", () => {
   assert.equal(m?.modelId, "cloud-only");
 });
 
-test("role options expose Coding choices across Claude, Codex, and local Qwen, with Haiku as a last resort", () => {
+test("role options expose Coding choices across Claude and Codex, with Haiku as a last resort — no local options (Claude-native cutover Phase 4)", () => {
   const options = buildRoleModelOptions(backends(true, true, true));
   const coding = options.coding.map((m) => m.modelId);
   assert.deepEqual(coding, [
@@ -104,32 +103,24 @@ test("role options expose Coding choices across Claude, Codex, and local Qwen, w
     "codex:gpt-5.5",
     "codex:gpt-5.3-codex-spark",
     "haiku",
-    "qwen/qwen3.6-27b",
-    "qwen3.6-35b-4bit",
-    "qwen3.6-27b-4bit",
-    QWEN36_35B_API_MODEL_ID,
   ]);
 });
 
-test("role options offer local for Thinking too, but keep frontier-premium first", () => {
+test("role options keep frontier-premium first for Thinking — no local escape hatch anymore", () => {
   const options = buildRoleModelOptions(backends(true, true, true));
   const thinking = options.thinking.map((m) => m.modelId);
   // Frontier stays at the front so the default (empty → frontier-premium) is
-  // unchanged; Haiku and local are appended as opt-in escape hatches.
+  // unchanged; Haiku is appended as an opt-in escape hatch.
   assert.deepEqual(thinking, [
     "opus",
     "sonnet",
     "codex:gpt-5.5",
     "codex:gpt-5.3-codex-spark",
     "haiku",
-    "qwen/qwen3.6-27b",
-    "qwen3.6-35b-4bit",
-    "qwen3.6-27b-4bit",
-    QWEN36_35B_API_MODEL_ID,
   ]);
 });
 
-test("role options put Operational Claude-first (Haiku default), local kept as an escape hatch", () => {
+test("role options put Operational Claude-first (Haiku default) — no local fallback anymore", () => {
   const options = buildRoleModelOptions(backends(true, true, true));
   const operational = options.operational.map((m) => m.modelId);
   assert.deepEqual(operational, [
@@ -137,9 +128,5 @@ test("role options put Operational Claude-first (Haiku default), local kept as a
     "sonnet",
     "codex:gpt-5.3-codex-spark",
     "opus",
-    "qwen/qwen3.6-27b",
-    "qwen3.6-35b-4bit",
-    "qwen3.6-27b-4bit",
-    QWEN36_35B_API_MODEL_ID,
   ]);
 });
