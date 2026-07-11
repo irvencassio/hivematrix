@@ -45,9 +45,13 @@ SYSTEM_PROMPT = (
     "- the current time or today's date → the datetime tool\n"
     "For the weather, news, prices, web searches, math, or general knowledge, do NOT "
     "call any tool — answer directly or follow the handoff rules below.\n"
-    "If the user asks you to remind them of something, follow up on something, add "
-    "a task, or create a note, reply with exactly: 'Got it — I've added that to "
-    "your HiveMatrix tasks.' Do not try to set the reminder yourself.\n"
+    "If the user asks you to REMIND them of something ('remind me to X', 'set a "
+    "reminder for X at 5'), call the create_reminder tool with the reminder text "
+    "and their words about when — it sets a real Reminder on their devices. Then "
+    "confirm briefly.\n"
+    "If the user asks you to follow up on something, add a task, or create a note "
+    "(not a reminder), reply with exactly: 'Got it — I've added that to your "
+    "HiveMatrix tasks.'\n"
     "If the user asks you to use Browser Lane, open a website, search the web, browse "
     "a page, or navigate to a URL — reply with exactly: 'I'll open that in Browser "
     "Lane now.' Do not try to browse yourself; HiveMatrix Browser Lane will handle it.\n"
@@ -232,16 +236,26 @@ ESCALATION_ACK = "Got it — I'm looking into that now and I've added it to your
 OUTBOUND_ACK = "Got it — I'll send that for you. It's queued in your HiveMatrix tasks."
 
 
-def resolve_escalation(transcript: str, reply: str) -> tuple[bool, str]:
+def resolve_escalation(transcript: str, reply: str,
+                       tool_runs: list[dict] | None = None) -> tuple[bool, str]:
     """Decide whether a spoken turn escalates to a full HiveMatrix agent task, and
     pick the reply to speak. A handoff fires when the model couldn't answer
     (is_uncertain / is_refusal) or the user asked for capability the local model
     lacks (needs_research). Sending a message/text/email (wants_outbound) ALSO
     escalates — the local model can't send, so a full agent task must spawn (else
     we'd say "sent"/"added" with nothing in the queue). An explicit reminder/task
-    ask (wants_task) escalates but keeps the model's own acknowledgment.
+    ask (wants_task) escalates but keeps the model's own acknowledgment — UNLESS
+    the turn already set a real Reminder live (a successful create_reminder in
+    tool_runs): the work is done, so spawning a duplicate task would be wrong.
     Returns (escalated, spoken_reply)."""
+    reminder_done = any(
+        r.get("name") == "create_reminder" and str(r.get("output", "")).startswith("Reminder set")
+        for r in (tool_runs or [])
+    )
     handoff = is_uncertain(reply) or is_refusal(reply) or is_stall(reply) or needs_research(transcript)
+    if reminder_done:
+        # The live write succeeded; a stall/uncertainty phrasing can't undo it.
+        return False, reply
     outbound = wants_outbound(transcript)
     escalated = handoff or outbound or wants_task(transcript)
     if outbound:
@@ -348,6 +362,26 @@ TOOLS = [
             "description": "Get the CURRENT local date and time. Use for 'what time is it', "
                            "'what's today's date', 'what day is it'.",
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_reminder",
+            "description": "CREATE a real Reminder on the user's devices (Apple Reminders). "
+                           "Use when the user says 'remind me to X', 'set a reminder to X', "
+                           "'add a reminder for X'. Pass the reminder text in 'name' (what to "
+                           "be reminded of, without the words 'remind me to') and the user's "
+                           "own words about when in 'due' (e.g. 'tomorrow at 5pm', 'in 20 "
+                           "minutes', 'friday morning') — leave 'due' empty if no time was given.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "What to remind the user about (required)."},
+                    "due": {"type": "string", "description": "When, in the user's words (optional): 'tomorrow 5pm', 'in 2 hours', 'monday at noon'."},
+                },
+                "required": ["name"],
+            },
         },
     },
 ]
@@ -594,6 +628,116 @@ def _get_datetime() -> str:
     return now.strftime("It is %A, %B %-d, %Y, %-I:%M %p %Z.")
 
 
+# --- Reminder creation: the one WRITE that runs live in the spoken turn. It's
+# local, instant, low-risk, and exactly what the user asked for — detouring
+# "remind me to call mom at 5" through a background agent task was the old,
+# slow path. Due-date parsing is deterministic Python (the small model only
+# relays the user's own words); the AppleScript sets date components explicitly
+# so nothing depends on locale date-string parsing. ---
+
+_WEEKDAY_IDX = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+                "friday": 4, "saturday": 5, "sunday": 6}
+_DAYPART_HOUR = {"morning": 9, "noon": 12, "afternoon": 15, "evening": 18,
+                 "tonight": 20, "night": 20, "midnight": 0}
+
+
+def _parse_due(text: str, now=None):
+    """Parse a spoken due phrase ('tomorrow at 5pm', 'in 20 minutes', 'friday
+    morning', '5:30 pm') into a local datetime, or None if nothing parses.
+    Deterministic and forgiving — unknown words are ignored, not errors."""
+    from datetime import datetime, timedelta
+    t = (text or "").strip().lower()
+    if not t:
+        return None
+    now = now or datetime.now()
+
+    # "in N minutes/hours/days/weeks" — relative wins outright.
+    m = re.search(r"\bin\s+(\d+|a|an)\s+(minute|min|hour|hr|day|week)s?\b", t)
+    if m:
+        n = 1 if m.group(1) in ("a", "an") else int(m.group(1))
+        unit = m.group(2)
+        delta = {"minute": timedelta(minutes=n), "min": timedelta(minutes=n),
+                 "hour": timedelta(hours=n), "hr": timedelta(hours=n),
+                 "day": timedelta(days=n), "week": timedelta(weeks=n)}[unit]
+        return now + delta
+
+    # Day: today / tonight / tomorrow / a weekday name. Default = today.
+    day = now
+    explicit_day = False
+    if re.search(r"\btomorrow\b", t):
+        day = now + timedelta(days=1)
+        explicit_day = True
+    else:
+        for name, idx in _WEEKDAY_IDX.items():
+            if re.search(rf"\b{name}\b", t):
+                ahead = (idx - now.weekday()) % 7 or 7  # "friday" = the NEXT friday
+                day = now + timedelta(days=ahead)
+                explicit_day = True
+                break
+        if not explicit_day and re.search(r"\btoday\b|\btonight\b|\bthis\b", t):
+            explicit_day = True
+
+    # Time: "at 5", "5:30 pm", "17:45", noon/midnight/morning/evening...
+    hour, minute = None, 0
+    m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\b", t)
+    if m:
+        h = int(m.group(1))
+        if 0 <= h <= 23:
+            minute = int(m.group(2) or 0)
+            ampm = (m.group(3) or "").replace(".", "")
+            if ampm == "pm" and h < 12:
+                h += 12
+            elif ampm == "am" and h == 12:
+                h = 0
+            elif not ampm and h <= 7:
+                h += 12  # bare "at 5" almost always means 5 PM in speech
+            hour = h
+    if hour is None:
+        for word, h in _DAYPART_HOUR.items():
+            if re.search(rf"\b{word}\b", t):
+                hour = h
+                break
+    if hour is None and not explicit_day:
+        return None  # nothing usable ("someday", "later")
+    if hour is None:
+        hour = 9  # a day with no time → 9 AM
+
+    due = day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if due <= now and not explicit_day:
+        due += timedelta(days=1)  # "at 5" said at 6 PM → tomorrow 5 PM
+    return due
+
+
+def _create_reminder(name: str = "", due: str = "") -> str:
+    clean = re.sub(r'["\\]', "", (name or "").strip())[:120]
+    if not clean:
+        return "No reminder text was given."
+    when = _parse_due(due)
+    lines = []
+    if when:
+        lines += [
+            "set d to current date",
+            f"set year of d to {when.year}",
+            f"set month of d to {when.month}",
+            f"set day of d to {when.day}",
+            f"set hours of d to {when.hour}",
+            f"set minutes of d to {when.minute}",
+            "set seconds of d to 0",
+            'tell application "Reminders" to make new reminder with properties '
+            f'{{name:"{clean}", due date:d, remind me date:d}}',
+        ]
+    else:
+        lines.append(
+            f'tell application "Reminders" to make new reminder with properties {{name:"{clean}"}}'
+        )
+    ok, out = _osascript("\n".join(lines))
+    if not ok:
+        return f"Could not set the reminder: {out}"
+    if when:
+        return f"Reminder set: \"{clean}\" for {when.strftime('%A %B %-d at %-I:%M %p')}."
+    return f"Reminder set: \"{clean}\" (no due time)."
+
+
 def _run_tool(name: str, args: dict) -> str:
     if name == "get_recent_emails":
         return _get_recent_emails(args.get("limit", 5))
@@ -607,6 +751,8 @@ def _run_tool(name: str, args: dict) -> str:
         return _get_contact(args.get("name", ""))
     if name == "get_datetime":
         return _get_datetime()
+    if name == "create_reminder":
+        return _create_reminder(args.get("name", ""), args.get("due", ""))
     return f"Unknown tool: {name}"
 
 
@@ -654,9 +800,19 @@ _DATETIME_RE = re.compile(
     r"current\s+(?:time|date))\b",
     re.I,
 )
+# CREATE (not read) — "remind me to X", "set/add a reminder". Distinct from
+# _REMINDER_RE (which reads the list) so "what are my reminders" never offers
+# the write tool and "remind me to call mom" never merely reads the list.
+_REMINDER_CREATE_RE = re.compile(
+    r"\b(remind\s+me|(?:set|add|create|make)\s+(?:a\s+|another\s+)?reminder)\b",
+    re.I,
+)
 
 # Gate → tool name. Order is the offer order when several match (rare).
+# create_reminder is FIRST so "remind me to email Bob at 4" offers the write
+# tool ahead of any read the sentence's nouns also happen to gate.
 _TOOL_GATES = [
+    ("create_reminder", _REMINDER_CREATE_RE),
     ("get_datetime", _DATETIME_RE),
     ("get_recent_emails", _EMAIL_RE),
     ("get_recent_imessages", _IMESSAGE_RE),
@@ -675,6 +831,61 @@ def _tools_for(text: str) -> list[dict]:
 
 def _mentions_email(text: str) -> bool:  # retained for back-compat / external callers
     return bool(_EMAIL_RE.search(text or ""))
+
+
+# --- Structured actions: deterministic, client-renderable follow-ups extracted
+# from a turn (never model-generated). Today: dial/text buttons for any phone
+# number a contact lookup surfaced, so "what's John's number" on the iPhone or
+# Watch answers with a tappable CALL button, not just spoken digits. ---
+
+_PHONE_RE = re.compile(r"(\+?1?[\s.\-(]*\d{3}[\s.\-)]*\d{3}[\s.\-]*\d{4}|\+\d{7,15})")
+
+
+def _normalize_phone(raw: str) -> str:
+    digits = re.sub(r"[^\d+]", "", raw or "")
+    if digits.startswith("+"):
+        return digits
+    if len(digits) == 11 and digits.startswith("1"):
+        return "+" + digits
+    if len(digits) == 10:
+        return "+1" + digits  # bare US-format number from Contacts
+    return digits
+
+
+def extract_actions(tool_runs: list[dict] | None, reply: str = "") -> list[dict]:
+    """Build the turn's structured actions. Contact-lookup output yields
+    dial + sms actions labeled with the person's name; phone numbers the model
+    spoke in the reply (rare) yield unlabeled dial actions. Deduped, capped."""
+    actions: list[dict] = []
+    seen: set[str] = set()
+
+    def add(kind: str, label: str, number: str):
+        num = _normalize_phone(number)
+        if not num or len(re.sub(r"\D", "", num)) < 7 or (kind, num) in seen:
+            return
+        seen.add((kind, num))
+        actions.append({"type": kind, "label": label, "number": num})
+
+    for run in tool_runs or []:
+        if run.get("name") != "get_contact":
+            continue
+        person = ""
+        for line in str(run.get("output", "")).splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if not line.startswith(" "):  # contact-name row (phones/emails are indented)
+                person = stripped
+            elif stripped.lower().startswith("phone:"):
+                num = stripped.split(":", 1)[1].strip()
+                who = person or "them"
+                add("dial", f"Call {who}", num)
+                add("sms", f"Text {who}", num)
+
+    for m in _PHONE_RE.finditer(reply or ""):
+        add("dial", "Call this number", m.group(0))
+
+    return actions[:6]
 
 
 class LocalLLM:
@@ -703,17 +914,28 @@ class LocalLLM:
 
     def respond_with_tools(self, user_text: str, system: str = SYSTEM_PROMPT,
                            history: list[dict] | None = None) -> str:
+        """Back-compat wrapper — spoken text only. See respond_with_tools_meta."""
+        return self.respond_with_tools_meta(user_text, system, history)[0]
+
+    def respond_with_tools_meta(self, user_text: str, system: str = SYSTEM_PROMPT,
+                                history: list[dict] | None = None) -> tuple[str, list[dict]]:
         """Like respond(), but when the user asks about a local read (email, texts,
-        calendar, reminders, contacts, the time) the model may call the matching tool
-        first, then give a spoken-style summary. Only the gated subset of tools is
-        offered (see _tools_for) — every other question goes straight to a plain reply,
-        so no spurious tool stalls. Outbound sends are skipped here: they can't run
-        live and escalate to a full agent (resolve_escalation), so don't waste a read."""
+        calendar, reminders, contacts, the time) — or a live reminder write — the
+        model may call the matching tool first, then give a spoken-style summary.
+        Only the gated subset of tools is offered (see _tools_for) — every other
+        question goes straight to a plain reply, so no spurious tool stalls.
+        Outbound sends are skipped here: they can't run live and escalate to a
+        full agent (resolve_escalation), so don't waste a read.
+
+        Returns (spoken_text, tool_runs) where tool_runs is
+        [{"name", "args", "output"}] for every tool executed this turn — the
+        caller uses it for escalation decisions and structured actions
+        (extract_actions), so a contact lookup can become a tap-to-dial button."""
         if wants_outbound(user_text):
-            return self.respond(user_text, system, history)
+            return self.respond(user_text, system, history), []
         tools = _tools_for(user_text)
         if not tools:
-            return self.respond(user_text, system, history)
+            return self.respond(user_text, system, history), []
         messages: list[dict] = [{"role": "system", "content": system}]
         if history:
             messages += history
@@ -725,7 +947,7 @@ class LocalLLM:
             )
         except Exception:
             traceback.print_exc()
-            return self.respond(user_text, system, history)
+            return self.respond(user_text, system, history), []
         msg = first.choices[0].message
         calls = getattr(msg, "tool_calls", None)
         if not calls:
@@ -733,20 +955,22 @@ class LocalLLM:
             # came back empty (reasoning ate the budget, or a stray empty turn),
             # fall back to a plain reply so the user never hears silence.
             text = _THINK_RE.sub("", msg.content or "").strip()
-            return text or self.respond(user_text, system, history)
+            return (text or self.respond(user_text, system, history)), []
         messages.append({
             "role": "assistant", "content": msg.content or "",
             "tool_calls": [{"id": c.id, "type": "function",
                             "function": {"name": c.function.name, "arguments": c.function.arguments}}
                            for c in calls],
         })
+        tool_runs: list[dict] = []
         for c in calls:
             try:
                 args = json.loads(c.function.arguments or "{}")
             except (TypeError, ValueError, json.JSONDecodeError):
                 args = {}
-            messages.append({"role": "tool", "tool_call_id": c.id,
-                             "content": _run_tool(c.function.name, args)})
+            output = _run_tool(c.function.name, args)
+            tool_runs.append({"name": c.function.name, "args": args, "output": output})
+            messages.append({"role": "tool", "tool_call_id": c.id, "content": output})
         final = self.client.chat.completions.create(
             model=self.model, messages=messages, max_tokens=SPOKEN_MAX_TOKENS, temperature=0.4,
             extra_body=THINKING_OFF,
@@ -760,7 +984,7 @@ class LocalLLM:
                 f"{user_text}\n\n(Information retrieved:\n{tool_context}\n)\nAnswer the user aloud.",
                 system, history,
             )
-        return text
+        return text, tool_runs
 
     def respond_stream(self, user_text: str, system: str = SYSTEM_PROMPT,
                        history: list[dict] | None = None):

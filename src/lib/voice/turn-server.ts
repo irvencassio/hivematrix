@@ -56,7 +56,21 @@ async function startServer(): Promise<number> {
   });
 }
 
-export interface TurnResult { transcript: string; reply: string; audioBase64: string; escalated: boolean; }
+/** A client-renderable follow-up the turn produced (e.g. tap-to-dial a number a
+ * contact lookup surfaced). Built deterministically sidecar-side, never by the
+ * model — see voice-sidecar/llm.py extract_actions. */
+export interface TurnAction { type: string; label: string; number?: string; }
+
+export interface TurnResult { transcript: string; reply: string; audioBase64: string; escalated: boolean; actions: TurnAction[]; }
+
+function sanitizeActions(raw: unknown): TurnAction[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((a): a is Record<string, unknown> => !!a && typeof a === "object")
+    .filter((a) => typeof a.type === "string" && typeof a.label === "string")
+    .map((a) => ({ type: a.type as string, label: a.label as string, ...(typeof a.number === "string" ? { number: a.number } : {}) }))
+    .slice(0, 6);
+}
 
 async function postTurn(body: Record<string, unknown>): Promise<TurnResult> {
   const port = await ensureTurnServer();
@@ -67,7 +81,13 @@ async function postTurn(body: Record<string, unknown>): Promise<TurnResult> {
   });
   const data = (await r.json()) as Partial<TurnResult> & { error?: string };
   if (!r.ok) throw new Error(data.error || `turn worker ${r.status}`);
-  return { transcript: data.transcript || "", reply: data.reply || "", audioBase64: data.audioBase64 || "", escalated: (data as Record<string, unknown>).escalated === true };
+  return {
+    transcript: data.transcript || "",
+    reply: data.reply || "",
+    audioBase64: data.audioBase64 || "",
+    escalated: (data as Record<string, unknown>).escalated === true,
+    actions: sanitizeActions((data as Record<string, unknown>).actions),
+  };
 }
 
 /** Relay one push-to-talk turn (recorded audio → server STT) to the warm worker. */

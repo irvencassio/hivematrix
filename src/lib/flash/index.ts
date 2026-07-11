@@ -23,6 +23,7 @@ import {
 } from "./store";
 import { assembleSystemPrompt, buildInitialMessages } from "./context";
 import { runFlashAgentLoop } from "./loop";
+import { extractPimActions } from "@/lib/orchestrator/pim-tools";
 
 // Re-export store helpers for the server routes
 export { appendFeedbackToTurn, createSession, getSession, getTurnsForSession, listSessions };
@@ -39,7 +40,7 @@ export async function runFlashTurnText(opts: {
   sessionId?: string;
   /** Restrict which tools this turn may use (offer + dispatch). */
   allowedTools?: (name: string) => boolean;
-}): Promise<{ reply: string; sessionId: string; turnId: string }> {
+}): Promise<{ reply: string; sessionId: string; turnId: string; toolRuns?: Array<{ name: string; output: string }> }> {
   const brainRoot = configuredBrainRootDir();
   const session = getOrCreateSession(opts.channel, opts.peer, opts.sessionId);
 
@@ -50,10 +51,13 @@ export async function runFlashTurnText(opts: {
   const historyTurns = recentTurns.filter((t) => !(t.role === "user" && t.content === opts.text));
   const messages = buildInitialMessages(systemPrompt, historyTurns, opts.text);
 
+  // Collect successful tool runs so callers (e.g. /voice/turn) can derive
+  // structured client actions — a contacts_lookup becomes a tap-to-dial button.
+  const toolRuns: Array<{ name: string; output: string }> = [];
   const emit: FlashEmitter = {
     token: () => {},
     toolStart: () => {},
-    toolResult: () => {},
+    toolResult: (name, ok, summary) => { if (ok) toolRuns.push({ name, output: summary }); },
     escalated: () => {},
     done: () => {},
   };
@@ -62,7 +66,7 @@ export async function runFlashTurnText(opts: {
     allowedTools: opts.allowedTools,
   });
   const assistantTurn = appendTurn(session.id, "assistant", fullText);
-  return { reply: fullText, sessionId: session.id, turnId: assistantTurn.id };
+  return { reply: fullText, sessionId: session.id, turnId: assistantTurn.id, toolRuns };
 }
 
 function writeSse(res: ServerResponse, event: string, data: unknown): void {
@@ -103,13 +107,25 @@ export async function handleFlashTurn(
   const historyTurns = recentTurns.filter((t) => !(t.role === "user" && t.content === input.text));
   const messages = buildInitialMessages(systemPrompt, historyTurns, input.text);
 
+  // Successful tool runs feed structured client actions on the done event
+  // (e.g. a contacts_lookup number → a tap-to-dial button on the phone).
+  const toolRuns: Array<{ name: string; output: string }> = [];
   const emit: FlashEmitter = {
     token: (delta) => writeSse(res, "token", { delta }),
     toolStart: (name, args_summary) => writeSse(res, "tool_start", { name, args_summary }),
-    toolResult: (name, ok, summary) => writeSse(res, "tool_result", { name, ok, summary }),
+    toolResult: (name, ok, summary) => {
+      if (ok) toolRuns.push({ name, output: summary });
+      writeSse(res, "tool_result", { name, ok, summary });
+    },
     escalated: (taskId) => writeSse(res, "escalated", { taskId }),
-    done: (sessionId, turnId, fullText, audioRef) =>
-      writeSse(res, "done", { sessionId, turnId, fullText, ...(audioRef ? { audioRef } : {}) }),
+    done: (sessionId, turnId, fullText, audioRef) => {
+      const actions = extractPimActions(toolRuns, fullText);
+      writeSse(res, "done", {
+        sessionId, turnId, fullText,
+        ...(audioRef ? { audioRef } : {}),
+        ...(actions.length ? { actions } : {}),
+      });
+    },
   };
 
   const fullText = await runFlashAgentLoop(messages, emit, session.id, brainRoot);

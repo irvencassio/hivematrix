@@ -389,6 +389,11 @@ export const READ_ONLY_FLASH_TOOLS: ReadonlySet<string> = new Set([
   "brain_search",
   "workflow_inbox",
   "code_graph",
+  // PIM reads — lets the heartbeat / daily brief observe the operator's real
+  // day (calendar, open reminders, contacts) without any write capability.
+  "contacts_lookup",
+  "calendar_today",
+  "reminders_list",
 ]);
 
 export interface FlashLoopOptions {

@@ -3414,11 +3414,16 @@ export function createDaemonServer() {
         }
 
         const { runFlashTurnText } = await import("@/lib/flash");
-        const { reply, sessionId: flashSessionId } = await runFlashTurnText({
+        const { reply, sessionId: flashSessionId, toolRuns } = await runFlashTurnText({
           text,
           channel: "voice",
           peer: "operator",
         });
+
+        // Structured actions (tap-to-dial/text) derived from this turn's tool
+        // runs + reply — the iPhone/Watch render these as buttons.
+        const { extractPimActions } = await import("@/lib/orchestrator/pim-tools");
+        const actions = extractPimActions(toolRuns ?? [], reply);
 
         // Optional TTS: synthesize reply audio for clients that consume audioBase64
         let audioBase64 = "";
@@ -3431,7 +3436,12 @@ export function createDaemonServer() {
           audioBase64 = audioPath ? readFileSync(audioPath).toString("base64") : "";
         } catch { /* TTS is optional — clients must handle missing audio */ }
 
-        json(res, 200, { transcript: text, reply, ...(audioBase64 ? { audioBase64 } : {}), sessionId: flashSessionId });
+        json(res, 200, {
+          transcript: text, reply,
+          ...(audioBase64 ? { audioBase64 } : {}),
+          ...(actions.length ? { actions } : {}),
+          sessionId: flashSessionId,
+        });
         return;
       }
 

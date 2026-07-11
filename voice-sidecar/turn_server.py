@@ -32,7 +32,7 @@ import uuid
 from aiohttp import web
 
 from stt import transcribe
-from llm import LocalLLM, resolve_escalation
+from llm import LocalLLM, extract_actions, resolve_escalation
 from tts import synthesize
 
 
@@ -68,18 +68,23 @@ def _one_turn(audio_b64: str, lang: str, text: str | None = None) -> dict:
                 f.write(base64.b64decode(audio_b64))
             transcript = transcribe(inp)
         if not transcript.strip():
-            return {"transcript": "", "reply": "", "audioBase64": "", "escalated": False}
-        reply = LocalLLM().respond_with_tools(transcript)
+            return {"transcript": "", "reply": "", "audioBase64": "", "escalated": False, "actions": []}
+        reply, tool_runs = LocalLLM().respond_with_tools_meta(transcript)
         # Voice prompt action: log when the Browser Lane system-prompt phrase fires so
         # it's visible in turn_server logs that the model followed the instruction.
         if "browser lane" in reply.lower():
             print(f"[voice][prompt-action] browser_lane transcript={transcript!r} reply={reply!r}", flush=True)
         # Hand off to a full HiveMatrix agent task when the local model can't do the
         # ask (research, web/repo lookups) — and speak an acknowledgment, not a refusal.
-        escalated, reply = resolve_escalation(transcript, reply)
-        print(f"[voice][turn] escalated={escalated} transcript={transcript!r}", flush=True)
+        # tool_runs lets a live write (create_reminder) suppress a duplicate task.
+        escalated, reply = resolve_escalation(transcript, reply, tool_runs)
+        # Structured actions (tap-to-dial etc.) ride alongside the spoken reply.
+        actions = extract_actions(tool_runs, reply)
+        print(f"[voice][turn] escalated={escalated} actions={len(actions)} "
+              f"tools={[r['name'] for r in tool_runs]} transcript={transcript!r}", flush=True)
         audio_out = _synth_to_m4a_b64(reply, lang, work)  # same warm voice as /synth
-        return {"transcript": transcript, "reply": reply, "audioBase64": audio_out, "escalated": escalated}
+        return {"transcript": transcript, "reply": reply, "audioBase64": audio_out,
+                "escalated": escalated, "actions": actions}
     finally:
         try:
             for f in os.listdir(work):

@@ -20,6 +20,7 @@ import type { ChatTool } from "./tool-bridge";
 import { readToken } from "@/lib/auth/token";
 import { defaultTermBeeProvider } from "@/lib/termbee/provider";
 import type { CooDispatchResult } from "@/lib/coo/dispatch";
+import { PIM_TOOL_DEFINITIONS, executePimTool } from "./pim-tools";
 
 /** Tool name → the connectivity capability that gates it. */
 const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
@@ -36,6 +37,12 @@ const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
   skill_used: "brain",
   digest_url: "webbee",
   code_graph: "codegraph",
+  // PIM tools are local osascript against this Mac's Contacts/Calendar/Reminders —
+  // available in every connectivity mode (like brain), including fully offline.
+  contacts_lookup: "brain",
+  calendar_today: "brain",
+  reminders_list: "brain",
+  reminder_create: "brain",
 };
 
 /**
@@ -308,6 +315,9 @@ export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
       },
     },
   },
+  // PIM: Contacts / Calendar / Reminders — live local reads + the one low-risk
+  // write (reminder_create). Definitions live in pim-tools.ts.
+  ...PIM_TOOL_DEFINITIONS,
 ];
 
 export function isLaneTool(name: string): boolean {
@@ -337,6 +347,7 @@ const CAPABILITY_ROUTING_LINES: Record<string, string> = {
   terminal_run: "Run shell commands in a HiveMatrix-owned persistent terminal session → **terminal_run**.",
   brain_search: "Recall a stored document / brain doc / past decision → **brain_search** (search durable memory before assuming it isn't written down).",
   code_graph: "Find where a symbol is defined + every place it's used → **code_graph** (exact, deterministic — use it to verify you found ALL usages of anything you changed, not just the obvious ones).",
+  contacts_lookup: "A person's phone number or email → **contacts_lookup**. Today's schedule → **calendar_today**. Open to-dos → **reminders_list**. \"Remind me to X\" → **reminder_create** (sets a real Reminder NOW — don't spawn a task for it).",
 };
 
 /**
@@ -410,6 +421,11 @@ export async function executeLaneTool(
       return executeDigestUrl(args);
     case "code_graph":
       return executeCodeGraph(args, ctx);
+    case "contacts_lookup":
+    case "calendar_today":
+    case "reminders_list":
+    case "reminder_create":
+      return executePimTool(name, args);
     default:
       return `Error: Unknown lane tool "${name}"`;
   }
