@@ -161,27 +161,54 @@ if os.path.isdir(IOS_APPICONSET):
 else:
     print("iOS repo not found; skipped iOS icon copy")
 
-# Push the same green-on-white identity into the sibling hivematrix-watch repo.
-# watchOS uses a single-size (1024, no alpha) marketing icon; the system derives
-# every home-screen/notification size and App Store Connect pulls this one for the
-# listing. No dark/tinted appearances on watchOS.
+# Push the same green-on-white identity into the embedded watch app, which now
+# lives in the sibling hivematrix-ios repo (HiveMatrixWatch target). watchOS needs
+# the FULL app-icon set (idiom "watch" + "watch-marketing") — a single-size
+# "universal" icon does NOT compile via actool for watchOS and fails App Store
+# validation ("Missing Icons"). All renditions derive from the 1024 no-alpha
+# master (no alpha, per App Store requirement).
 WATCH_APPICONSET = os.path.abspath(os.path.join(
-    REPO, "..", "hivematrix-watch", "HiveMatrixWatch", "Resources",
+    REPO, "..", "hivematrix-ios", "HiveMatrixWatch", "Resources",
     "Assets.xcassets", "AppIcon.appiconset"))
 if os.path.isdir(WATCH_APPICONSET):
-    shutil.copy2(os.path.join(OUT, "AppIcon.png"),
-                 os.path.join(WATCH_APPICONSET, "AppIcon.png"))
-    watch_contents = {
-        "images": [
-            {"filename": "AppIcon.png", "idiom": "universal",
-             "platform": "watchOS", "size": "1024x1024"},
-        ],
-        "info": {"author": "xcode", "version": 1},
-    }
+    # (px, idiom, size, scale, role, subtype)
+    watch_icons = [
+        (48,  "watch", "24x24",     "2x", "notificationCenter", "38mm"),
+        (55,  "watch", "27.5x27.5", "2x", "notificationCenter", "42mm"),
+        (66,  "watch", "33x33",     "2x", "notificationCenter", "45mm"),
+        (58,  "watch", "29x29",     "2x", "companionSettings",  None),
+        (87,  "watch", "29x29",     "3x", "companionSettings",  None),
+        (80,  "watch", "40x40",     "2x", "appLauncher",        "38mm"),
+        (88,  "watch", "44x44",     "2x", "appLauncher",        "40mm"),
+        (92,  "watch", "46x46",     "2x", "appLauncher",        "41mm"),
+        (100, "watch", "50x50",     "2x", "appLauncher",        "44mm"),
+        (102, "watch", "51x51",     "2x", "appLauncher",        "45mm"),
+        (108, "watch", "54x54",     "2x", "appLauncher",        "49mm"),
+        (172, "watch", "86x86",     "2x", "quickLook",          "38mm"),
+        (196, "watch", "98x98",     "2x", "quickLook",          "42mm"),
+        (216, "watch", "108x108",   "2x", "quickLook",          "44mm"),
+        (234, "watch", "117x117",   "2x", "quickLook",          "45mm"),
+        (258, "watch", "129x129",   "2x", "quickLook",          "49mm"),
+        (1024, "watch-marketing", "1024x1024", "1x", None,      None),
+    ]
+    watch_src = Image.open(os.path.join(OUT, "AppIcon.png")).convert("RGB")
+    _stale = os.path.join(WATCH_APPICONSET, "AppIcon.png")  # old single-size file
+    if os.path.exists(_stale):
+        os.remove(_stale)
+    watch_images = []
+    for px, idiom, size, scale, role, subtype in watch_icons:
+        fn = f"icon_{px}.png"
+        resize(watch_src, px).save(os.path.join(WATCH_APPICONSET, fn))
+        entry = {"idiom": idiom, "size": size, "scale": scale, "filename": fn}
+        if role:
+            entry["role"] = role
+        if subtype:
+            entry["subtype"] = subtype
+        watch_images.append(entry)
     import json
     with open(os.path.join(WATCH_APPICONSET, "Contents.json"), "w") as fh:
-        json.dump(watch_contents, fh, indent=2)
+        json.dump({"images": watch_images, "info": {"author": "xcode", "version": 1}}, fh, indent=2)
         fh.write("\n")
-    print("copied watchOS icon (single-size) ->", WATCH_APPICONSET)
+    print("copied watchOS icon set (full) ->", WATCH_APPICONSET)
 else:
-    print("watch repo not found; skipped watch icon copy")
+    print("hivematrix-ios watch appiconset not found; skipped watch icon copy")
