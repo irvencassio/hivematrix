@@ -20,6 +20,7 @@ import asyncio
 import os
 from typing import Optional
 
+import aiohttp
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -30,10 +31,34 @@ from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 # Reuse the VAD factory, TTS service, and transport builder from realtime.py
 # so changes to VAD tuning / TTS apply uniformly to both pipelines.
 from realtime import KokoroTTS, build_transport, make_vad  # noqa: F401 (re-exported)
-from flash_llm import FlashLLMProcessor
+from flash_llm import DAEMON_TOKEN, DAEMON_URL, FlashLLMProcessor
 from whisper_stt import WhisperCppSTT
 
 GREETING = "Hi, I'm ready. How can I help?"
+
+# Contextual greeting (2026-07-10 "system shows up" spec): on connect, ask the
+# daemon's GET /voice/greeting for a short, live-signal greeting (next
+# meeting / approvals+review count / most recent loop-closure) instead of the
+# static GREETING above. Short, hard timeout — the daemon route itself
+# already answers in <1.5s with its own deterministic fallback, so this is a
+# second, independent safety net: ANY failure here (network, timeout,
+# non-200, bad JSON) just speaks the static GREETING, same as before this
+# feature existed.
+_GREETING_FETCH_TIMEOUT = aiohttp.ClientTimeout(total=1.5, connect=1.0)
+
+
+async def _fetch_greeting() -> str:
+    headers = {"Authorization": f"Bearer {DAEMON_TOKEN}"} if DAEMON_TOKEN else {}
+    try:
+        async with aiohttp.ClientSession(timeout=_GREETING_FETCH_TIMEOUT) as session:
+            async with session.get(f"{DAEMON_URL}/voice/greeting", headers=headers) as resp:
+                if resp.status != 200:
+                    return GREETING
+                data = await resp.json()
+                text = data.get("text") if isinstance(data, dict) else None
+                return text.strip() if isinstance(text, str) and text.strip() else GREETING
+    except Exception:
+        return GREETING
 
 
 def build_flash_pipeline(
@@ -72,7 +97,8 @@ async def build_flash_session(
 
     @transport.event_handler("on_client_connected")
     async def _greet(_transport, _client):
-        await task.queue_frames([TTSSpeakFrame(GREETING)])
+        greeting = await _fetch_greeting()
+        await task.queue_frames([TTSSpeakFrame(greeting)])
 
     return task, runner
 
@@ -94,7 +120,8 @@ async def answer_flash_offer(
 
     @transport.event_handler("on_client_connected")
     async def _greet(_transport, _conn):
-        await task.queue_frames([TTSSpeakFrame(GREETING)])
+        greeting = await _fetch_greeting()
+        await task.queue_frames([TTSSpeakFrame(greeting)])
 
     asyncio.create_task(runner.run(task))
     answer = connection.get_answer()
