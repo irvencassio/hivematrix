@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.175 — 2026-07-11
+
+Flash sampling: add top_k=20 (the honored anti-degeneration lever rapid-mlx was missing), expose full sampling param set in settings with a one-click Qwen-recommended preset
+
 ## v0.1.174 — 2026-07-11
 
 Flash: catch repetition-with-drift degeneration (normalized unit-cycle guard); send repeat_penalty for rapid-mlx; prune drift-loop history
