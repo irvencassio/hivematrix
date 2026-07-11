@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.173 — 2026-07-11
+
+Flash chat hardening: length-cap runaway guard for varied rambling, lower default max_tokens (2048→1024), both tunable in Settings > Local Model > Sampling; pruned poisoned chat history
+
 ## v0.1.172 — 2026-07-11
 
 Fix Flash chat degeneration (word-loop repetition guard + repetition_penalty); expose sampling params (temperature/top_p/repetition_penalty/max_tokens) in Settings > Local Model
