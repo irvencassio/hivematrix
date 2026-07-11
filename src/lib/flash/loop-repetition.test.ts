@@ -9,6 +9,8 @@ import {
   collapseWordRepetition,
   WORD_REPEAT_LIMIT,
   isOverReplyCap,
+  isRepeatingUnitCycle,
+  collapseUnitCycle,
 } from "./loop";
 
 const S = "Let me check the latest financial news and market data for yesterday.";
@@ -67,6 +69,33 @@ test("collapseWordRepetition: keeps one instance of a degenerate word tail", () 
   // Varied text is returned unchanged.
   const varied = "planes ships boats trains";
   assert.equal(collapseWordRepetition(varied), varied);
+});
+
+test("isRepeatingUnitCycle: catches repetition-with-drift (case/spacing mutation)", () => {
+  // The real field failure: a 2-line cycle that loops while its case & spacing mutate.
+  const clean = "First step : look up the contact.\nNext step : send the message.\n";
+  const drift =
+    "First step : look up the contact.\nNext step : send the message.\n" +
+    "First step : look up the contact.\nNext step : send the message.\n" +
+    "Firststep：lookupthecontact.\nNextstep：sendthemessage.\n" +
+    "fIrStStEp：LoOkUpThEcOnTaCt.\nNeXtStEp：SeNdThEmEsSaGe.\n";
+  assert.equal(isRepeatingTail(drift), false); // exact-match guard is blind to the drift
+  assert.equal(isRepeatingUnitCycle(drift), true); // normalized cycle detector catches it
+  // A single occurrence of a "First/Next" structure is fine — not a loop.
+  assert.equal(isRepeatingUnitCycle(clean), false);
+  // Varied step-by-step instructions are NOT flagged.
+  assert.equal(isRepeatingUnitCycle("First, open the file. Then edit line 3. Finally, save it."), false);
+});
+
+test("collapseUnitCycle: keeps one instance of a drift-loop for storage", () => {
+  const looped =
+    "Here is the plan for you.\n" +
+    "Look up the contact first.\nLook up the contact first.\n" +
+    "LookUpTheContactFirst.\nlookupthecontactfirst.\n";
+  const collapsed = collapseUnitCycle(looped);
+  // The lead-in survives; the repeated tail is reduced.
+  assert.ok(collapsed.includes("Here is the plan"));
+  assert.ok(collapsed.length < looped.length);
 });
 
 test("isOverReplyCap: catches varied runaway that the repetition guards miss", () => {

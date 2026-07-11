@@ -125,6 +125,47 @@ export function isOverReplyCap(text: string, cap: number): boolean {
   return cap > 0 && text.length > cap;
 }
 
+/** Consecutive normalized-unit cycles before we call it a drift-repetition loop. */
+export const UNIT_CYCLE_LIMIT = 3;
+
+/** Normalize a sentence/line for drift-tolerant comparison. A degenerating local model
+ * repeats a line while mutating only case and spacing ("First step: look up" →
+ * "FirsTstEp：lOokUp" → "firststeplookup"), which defeats exact-match detection.
+ * Lowercasing and stripping every non-alphanumeric collapses those cosmetic mutations
+ * — the letter sequence is preserved, so the drifted variants become identical. */
+function normalizeUnit(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** Find a trailing repeating cycle (period 1..3) of NORMALIZED sentence/line units,
+ * repeated >= limit times. Drift-tolerant. Requires the cycle to be substantive
+ * (>= 12 normalized chars) so short interjections ("ok." / "yes.") don't trip it. */
+function trailingUnitCycle(text: string, limit: number): { period: number; reps: number } | null {
+  const norm = sentenceUnits(text).map(normalizeUnit).filter((s) => s.length > 0);
+  const cyc = trailingWordCycle(norm, limit);
+  if (!cyc) return null;
+  const periodChars = norm.slice(norm.length - cyc.period).join("").length;
+  return periodChars >= 12 ? cyc : null;
+}
+
+/** Pure: is the tail a normalized-unit cycle repeated >= limit times? Catches
+ * repetition-with-drift — "First step… Next step…" looping while case/spacing mutate —
+ * that isRepeatingTail (exact sentence match) and isRepeatingWordTail (word cycle)
+ * both miss because the mutation breaks every exact comparison. */
+export function isRepeatingUnitCycle(text: string, limit = UNIT_CYCLE_LIMIT): boolean {
+  return trailingUnitCycle(text, limit) !== null;
+}
+
+/** Pure: collapse a degenerate trailing unit-cycle down to one instance for storage,
+ * so the drift-loop isn't kept verbatim in the conversation history. */
+export function collapseUnitCycle(text: string, limit = UNIT_CYCLE_LIMIT): string {
+  const raw = sentenceUnits(text);
+  const cyc = trailingUnitCycle(text, limit);
+  if (!cyc) return text;
+  const drop = cyc.period * (cyc.reps - 1);
+  return raw.slice(0, Math.max(1, raw.length - drop)).join(" ");
+}
+
 // ------------------------------------------------------------------
 // Flash-only tool definitions
 // ------------------------------------------------------------------
@@ -240,13 +281,15 @@ async function* streamFromLocalModel(
     top_p: sampling.topP,
     max_tokens: sampling.maxTokens,
     // Discourage the local model from looping a phrase or free-associating into a
-    // word-salad (esp. when it wants a capability it lacks). `repetition_penalty` is
-    // the knob MLX / rapid-mlx actually honors; `frequency_penalty`/`presence_penalty`
-    // are the OpenAI-named equivalents that LM Studio honors instead. Send all three
-    // so whichever backend is live gets a working anti-loop penalty — servers silently
-    // ignore the params they don't recognize. All operator-tunable in Settings →
-    // Local Model (config.qwen.sampling).
+    // word-salad (esp. when it wants a capability it lacks). Different backends honor
+    // different penalty names, and probing rapid-mlx showed it responds to the
+    // llama.cpp-style `repeat_penalty` more reliably than the mlx_lm-style
+    // `repetition_penalty`; LM Studio honors the OpenAI-named frequency/presence
+    // penalties instead. Send all of them so whichever backend is live gets a working
+    // anti-loop penalty — servers silently ignore the names they don't recognize.
+    // Tunable value in Settings → Local Model (config.qwen.sampling).
     repetition_penalty: sampling.repetitionPenalty,
+    repeat_penalty: sampling.repetitionPenalty,
     frequency_penalty: 0.4,
     presence_penalty: 0.3,
     ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
@@ -539,6 +582,13 @@ export async function runFlashAgentLoop(
             degenerated = true;
             break;
           }
+          // Drift-tolerant: catches a repeated line/sentence that mutates only its case
+          // and spacing as it degenerates ("First step… Next step…" looping into
+          // "FirsTstEp…"), which the exact-match guards above are structurally blind to.
+          if (/[.!?\n]/.test(event.content) && isRepeatingUnitCycle(turnText)) {
+            degenerated = true;
+            break;
+          }
           if (/\s/.test(event.content) && isRepeatingWordTail(turnText)) {
             degenerated = true;
             break;
@@ -574,7 +624,7 @@ export async function runFlashAgentLoop(
     // out of the returned text (the client already saw the emitted tokens, but the
     // stored history and any summary shouldn't carry the wall of duplicates).
     if (degenerated) {
-      return collapseWordRepetition(collapseRepetition(fullText));
+      return collapseUnitCycle(collapseWordRepetition(collapseRepetition(fullText)));
     }
 
     const toolCalls = [...accumulatedTools.values()].filter((tc) => tc.function.name);
