@@ -16,14 +16,28 @@ export interface QwenModelConfig {
   maxOutputTokens: number;
 }
 
-/** Per-request decode controls for the Flash lane. These are sent on every
- * chat/completions call (see flash/loop.ts streamFromLocalModel) and are the
- * operator-tunable defense against runaway repetition / word-salad degeneration.
- * `repetitionPenalty` is the knob MLX/rapid-mlx honors; LM Studio honors the
- * OpenAI-named frequency/presence penalties instead (both are sent). */
+/** Per-request decode controls for the Flash lane. Sent on every chat/completions call
+ * (see flash/loop.ts streamFromLocalModel) and the operator-tunable defense against
+ * runaway repetition / word-salad degeneration.
+ *
+ * Empirically calibrated against the live rapid-mlx server (July 2026), which — unlike
+ * the vLLM/SGLang reference server the Qwen model card assumes — honors `top_k`,
+ * `min_p`, and `repetition_penalty` per-request but only weakly honors `presence_penalty`
+ * (verified by A/B probes). The key lever we long omitted is `top_k`: without it the
+ * model samples from its full vocabulary tail at every step, which at low temperature on
+ * a 4-bit quant is the primary degeneration mechanism. `topK`/`minP` clamp that tail.
+ * QWEN_RECOMMENDED_SAMPLING holds the model-card values as a one-click preset. */
 export interface SamplingParams {
   temperature: number;
   topP: number;
+  /** Keep only the K highest-probability tokens each step. 0 = disabled. The lever the
+   * Qwen card recommends (20) and the strongest anti-tail-degeneration knob rapid-mlx
+   * honors. */
+  topK: number;
+  /** Drop tokens below minP × top-token probability. 0 = disabled. */
+  minP: number;
+  presencePenalty: number;
+  frequencyPenalty: number;
   repetitionPenalty: number;
   maxTokens: number;
   /** HiveMatrix-side runaway guard: hard-stop a Flash reply once it exceeds this many
@@ -35,14 +49,39 @@ export interface SamplingParams {
   maxReplyChars: number;
 }
 
+/** HiveMatrix defaults — empirically tuned for rapid-mlx (adds the honored top_k=20 the
+ * code long omitted; keeps the repetition_penalty rapid-mlx honors rather than Qwen's
+ * 1.0, which regressed in A/B testing on this server). */
 export const DEFAULT_SAMPLING: SamplingParams = {
   temperature: 0.6,
   topP: 0.9,
+  topK: 20,
+  minP: 0,
+  presencePenalty: 0.3,
+  frequencyPenalty: 0.4,
   repetitionPenalty: 1.15,
   // Model-level output cap. Lowered from 2048: a chat/voice reply never needs that
   // much, and a smaller ceiling bounds any degeneration to something recoverable.
   maxTokens: 1024,
   maxReplyChars: 3000,
+};
+
+/** Qwen3.6 model-card recommendation for instruct/non-thinking mode. Exposed as a
+ * one-click preset so the documented values are visible and applyable — but NOT the
+ * default, because A/B probes showed rapid-mlx honors presence_penalty weakly, so the
+ * card's "repetition_penalty 1.0 + presence_penalty 1.5" combo degenerates more here
+ * than the HiveMatrix defaults. maxTokens/maxReplyChars are HiveMatrix guards, not model
+ * params, so they carry over from the defaults. */
+export const QWEN_RECOMMENDED_SAMPLING: SamplingParams = {
+  temperature: 0.7,
+  topP: 0.8,
+  topK: 20,
+  minP: 0,
+  presencePenalty: 1.5,
+  frequencyPenalty: 0,
+  repetitionPenalty: 1.0,
+  maxTokens: DEFAULT_SAMPLING.maxTokens,
+  maxReplyChars: DEFAULT_SAMPLING.maxReplyChars,
 };
 
 /** Slider bounds + step for each sampling param — surfaced to the settings UI so
@@ -51,6 +90,10 @@ export const DEFAULT_SAMPLING: SamplingParams = {
 export const SAMPLING_BOUNDS: Record<keyof SamplingParams, { min: number; max: number; step: number }> = {
   temperature: { min: 0, max: 1.5, step: 0.05 },
   topP: { min: 0.1, max: 1, step: 0.05 },
+  topK: { min: 0, max: 100, step: 1 },
+  minP: { min: 0, max: 0.5, step: 0.01 },
+  presencePenalty: { min: 0, max: 2, step: 0.1 },
+  frequencyPenalty: { min: 0, max: 2, step: 0.1 },
   repetitionPenalty: { min: 1, max: 1.5, step: 0.01 },
   maxTokens: { min: 256, max: 8192, step: 256 },
   maxReplyChars: { min: 500, max: 8000, step: 250 },
@@ -94,20 +137,15 @@ function clamp(n: number, min: number, max: number): number {
 function parseSampling(raw: unknown): SamplingParams {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_SAMPLING };
   const r = raw as Record<string, unknown>;
-  const pick = (key: keyof SamplingParams): number => {
+  const out = { ...DEFAULT_SAMPLING };
+  for (const key of Object.keys(SAMPLING_BOUNDS) as (keyof SamplingParams)[]) {
     const v = r[key];
+    if (typeof v !== "number" || !Number.isFinite(v)) continue;
     const b = SAMPLING_BOUNDS[key];
-    if (typeof v !== "number" || !Number.isFinite(v)) return DEFAULT_SAMPLING[key];
     const clamped = clamp(v, b.min, b.max);
-    return b.step >= 1 ? Math.round(clamped) : clamped; // step >= 1 ⇒ integer param
-  };
-  return {
-    temperature: pick("temperature"),
-    topP: pick("topP"),
-    repetitionPenalty: pick("repetitionPenalty"),
-    maxTokens: pick("maxTokens"),
-    maxReplyChars: pick("maxReplyChars"),
-  };
+    out[key] = b.step >= 1 ? Math.round(clamped) : clamped; // step >= 1 ⇒ integer param
+  }
+  return out;
 }
 
 function parseModelConfig(raw: unknown, fallback: QwenModelConfig): QwenModelConfig {

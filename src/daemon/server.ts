@@ -1499,7 +1499,8 @@ export function createDaemonServer() {
           };
         }
 
-        const { getQwenSampling, DEFAULT_SAMPLING, SAMPLING_BOUNDS } = await import("@/lib/config/qwen-profile");
+        const { getQwenSampling, DEFAULT_SAMPLING, QWEN_RECOMMENDED_SAMPLING, SAMPLING_BOUNDS } =
+          await import("@/lib/config/qwen-profile");
 
         json(res, 200, {
           enabled,
@@ -1511,9 +1512,15 @@ export function createDaemonServer() {
           selection: getLocalEngineSelection(),
           options,
           tuning: tuningByTier,
-          // Flash decode controls — current values + defaults + slider bounds, so the
-          // picker renders the sampling card without hardcoding any ranges.
-          sampling: { current: getQwenSampling(), defaults: DEFAULT_SAMPLING, bounds: SAMPLING_BOUNDS },
+          // Flash decode controls — current values + presets + slider bounds, so the
+          // picker renders the sampling card without hardcoding any ranges. `defaults`
+          // is the HiveMatrix-tuned baseline; `qwenRecommended` is the model-card preset.
+          sampling: {
+            current: getQwenSampling(),
+            defaults: DEFAULT_SAMPLING,
+            qwenRecommended: QWEN_RECOMMENDED_SAMPLING,
+            bounds: SAMPLING_BOUNDS,
+          },
         });
         return;
       }

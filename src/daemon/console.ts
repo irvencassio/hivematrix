@@ -6534,7 +6534,11 @@ let _samplingPending = null;
 const SAMPLING_FIELDS = [
   { key: "temperature", label: "Temperature", hint: "randomness · lower = steadier" },
   { key: "topP", label: "Top-p", hint: "nucleus cutoff · trims the long tail" },
-  { key: "repetitionPenalty", label: "Repetition penalty", hint: "higher = less looping" },
+  { key: "topK", label: "Top-k", hint: "keep top K tokens · 0 = off · strongest anti-degeneration lever" },
+  { key: "minP", label: "Min-p", hint: "drop low-prob tokens · 0 = off" },
+  { key: "presencePenalty", label: "Presence penalty", hint: "discourages reused tokens (weak on rapid-mlx)" },
+  { key: "frequencyPenalty", label: "Frequency penalty", hint: "penalizes token frequency" },
+  { key: "repetitionPenalty", label: "Repetition penalty", hint: "higher = less looping (honored by rapid-mlx)" },
   { key: "maxTokens", label: "Max tokens", hint: "model-level output cap" },
   { key: "maxReplyChars", label: "Reply length cap", hint: "chars · hard-stops a runaway reply" },
 ];
@@ -6685,17 +6689,31 @@ function renderLocalModelPicker(le) {
         + '</div>';
     }).join('');
     const dirty = JSON.stringify(cur) !== JSON.stringify(s.current);
-    const isDefaults = JSON.stringify(s.current) === JSON.stringify(s.defaults);
+    // Preset buttons stage a full param set (then the operator Saves). Highlight the one
+    // that matches the current values so it's clear which preset is active.
+    const matches = (preset) => preset && JSON.stringify(cur) === JSON.stringify(preset);
+    const presetBtn = (label, preset, fn) => {
+      if (!preset) return '';
+      const on = matches(preset);
+      return '<button type="button" class="linklike" style="font-size:11px;padding:2px 8px;border:1px solid var(--border);border-radius:4px'
+        + (on ? ';background:var(--accent);color:#fff;border-color:var(--accent)' : '')
+        + '" onclick="' + fn + '()">' + label + '</button>';
+    };
+    const presets = '<div class="row" style="margin-top:6px;gap:6px;align-items:center;flex-wrap:wrap">'
+      + '<span class="muted" style="font-size:10px">Presets</span>'
+      + presetBtn('HiveMatrix default', s.defaults, 'resetSamplingDefaults')
+      + presetBtn('Qwen recommended', s.qwenRecommended, 'applyQwenSampling')
+      + '</div>';
     const actions = dirty
       ? '<div class="row" style="margin-top:8px;gap:8px;align-items:center">'
         + '<button class="create" style="font-size:12px" onclick="saveSampling()">Save sampling</button>'
         + '<button class="linklike" style="font-size:12px" onclick="resetSampling()">Cancel</button></div>'
-      : (isDefaults ? '' : '<div style="margin-top:6px"><button class="linklike" style="font-size:11px" onclick="resetSamplingDefaults()">Restore defaults</button></div>');
+      : '';
     html += '<div style="margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:6px">'
       + '<div class="row" style="justify-content:space-between;align-items:center"><b style="font-size:12px">Sampling</b>'
       + '<span class="muted" style="font-size:10px">applies next reply · no restart</span></div>'
-      + '<div class="muted" style="font-size:10px;margin-top:2px">Decode controls for Flash chat — the anti-degeneration knobs.</div>'
-      + rows + actions
+      + '<div class="muted" style="font-size:10px;margin-top:2px">Decode controls for Flash chat — the anti-degeneration knobs. Defaults are tuned for rapid-mlx; the Qwen preset is the model-card recommendation.</div>'
+      + presets + rows + actions
       + '<div id="samplingSaveLog" style="font-size:11px;margin-top:4px"></div></div>';
   }
 
@@ -6805,9 +6823,15 @@ function resetSampling() { // cancel pending edits, revert to saved values
   renderProviderToggles();
 }
 
-function resetSamplingDefaults() { // stage the shipped defaults (still needs Save)
+function resetSamplingDefaults() { // stage the HiveMatrix-tuned defaults (still needs Save)
   if (!_leCache || !_leCache.sampling) return;
   _samplingPending = { ..._leCache.sampling.defaults };
+  renderProviderToggles();
+}
+
+function applyQwenSampling() { // stage the Qwen model-card preset (still needs Save)
+  if (!_leCache || !_leCache.sampling || !_leCache.sampling.qwenRecommended) return;
+  _samplingPending = { ..._leCache.sampling.qwenRecommended };
   renderProviderToggles();
 }
 

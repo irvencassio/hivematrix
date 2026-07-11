@@ -279,19 +279,21 @@ async function* streamFromLocalModel(
     stream: true,
     temperature: sampling.temperature,
     top_p: sampling.topP,
+    // top_k is the strongest anti-degeneration lever rapid-mlx honors (verified by A/B
+    // probe): it keeps the sampler on the high-probability head instead of the full
+    // vocabulary tail. 0 = disabled, so only send it when set. min_p likewise.
+    ...(sampling.topK > 0 ? { top_k: sampling.topK } : {}),
+    ...(sampling.minP > 0 ? { min_p: sampling.minP } : {}),
     max_tokens: sampling.maxTokens,
-    // Discourage the local model from looping a phrase or free-associating into a
-    // word-salad (esp. when it wants a capability it lacks). Different backends honor
-    // different penalty names, and probing rapid-mlx showed it responds to the
-    // llama.cpp-style `repeat_penalty` more reliably than the mlx_lm-style
-    // `repetition_penalty`; LM Studio honors the OpenAI-named frequency/presence
-    // penalties instead. Send all of them so whichever backend is live gets a working
-    // anti-loop penalty — servers silently ignore the names they don't recognize.
-    // Tunable value in Settings → Local Model (config.qwen.sampling).
+    // Penalties: rapid-mlx honors `repetition_penalty` (and the llama.cpp-alias
+    // `repeat_penalty`) well and `presence_penalty` weakly; LM Studio honors the
+    // OpenAI-named frequency/presence penalties. Send all so whichever backend is live
+    // gets a working anti-loop knob — servers ignore names they don't recognize. All
+    // operator-tunable in Settings → Local Model → Sampling (config.qwen.sampling).
     repetition_penalty: sampling.repetitionPenalty,
     repeat_penalty: sampling.repetitionPenalty,
-    frequency_penalty: 0.4,
-    presence_penalty: 0.3,
+    frequency_penalty: sampling.frequencyPenalty,
+    presence_penalty: sampling.presencePenalty,
     ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
   });
 
