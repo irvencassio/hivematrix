@@ -25,10 +25,25 @@
  * Briefing brand (0.1.111) per NEXT-LEVEL-SPEC W8 without resurrecting it:
  * startMorningBriefingLoop stays unused (see src/daemon/index.test.ts).
  *
+ * A THIRD pair of daily moments — the Day Brief ritual (2026-07-10 "system
+ * shows up" spec) — rides the exact same tick/config mechanism (no second
+ * scheduler): a morning contract + evening ledger, each a deterministic
+ * `composeDayBrief()` assembly (day-brief.ts; no model pass, unlike the daily
+ * moments above) delivered via `notify()`. It has its own enable flag
+ * (`dayBriefEnabled`, default off — matching this file's off-by-default
+ * posture) and minute-precision hours (07:30 / 21:00 by default) since the
+ * existing daily moments only support whole hours. Idempotence is per local
+ * day (`lastDayBriefMorningSentDay`/`lastDayBriefEveningSentDay`, a `YYYY-MM-DD`
+ * string) rather than a timestamp compared against a hourly target, the same
+ * "mark before send" ordering as the moments above.
+ *
  * Config (`~/.hivematrix/config.json`):
  *   heartbeat: { enabled, intervalMinutes, quietHours?: {startHour, endHour},
  *                morningBriefHour: number|null, eveningRecapHour: number|null,
- *                lastRunAt?, lastMorningBriefAt?, lastEveningRecapAt? }
+ *                lastRunAt?, lastMorningBriefAt?, lastEveningRecapAt?,
+ *                dayBriefEnabled, dayBriefMorningHour, dayBriefMorningMinute,
+ *                dayBriefEveningHour, dayBriefEveningMinute,
+ *                lastDayBriefMorningSentDay?, lastDayBriefEveningSentDay? }
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
@@ -41,6 +56,7 @@ import { appendTurn, getOrCreateSession } from "./store";
 import { READ_ONLY_FLASH_TOOLS } from "./loop";
 import { runFlashTurnText } from "./index";
 import { startPollLoop } from "@/lib/lanes/poll-loop";
+import { composeDayBrief, type DayBriefKind } from "./day-brief";
 
 export const HEARTBEAT_STAND_DOWN = "HEARTBEAT_STAND_DOWN";
 
@@ -59,12 +75,25 @@ export interface HeartbeatConfig {
   eveningRecapHour: number | null;   // default 21
   lastMorningBriefAt?: string;
   lastEveningRecapAt?: string;
+  /** Day Brief ritual (2026-07-10 spec) — deterministic morning contract /
+   * evening ledger, independent enable flag, minute-precision hours. */
+  dayBriefEnabled: boolean;
+  dayBriefMorningHour: number;   // default 7
+  dayBriefMorningMinute: number; // default 30
+  dayBriefEveningHour: number;   // default 21
+  dayBriefEveningMinute: number; // default 0
+  lastDayBriefMorningSentDay?: string; // local YYYY-MM-DD
+  lastDayBriefEveningSentDay?: string; // local YYYY-MM-DD
 }
 
 const DEFAULT_INTERVAL_MINUTES = 30;
 const MIN_INTERVAL_MINUTES = 5;
 const DEFAULT_MORNING_HOUR = 8;
 const DEFAULT_EVENING_HOUR = 21;
+const DEFAULT_DAY_BRIEF_MORNING_HOUR = 7;
+const DEFAULT_DAY_BRIEF_MORNING_MINUTE = 30;
+const DEFAULT_DAY_BRIEF_EVENING_HOUR = 21;
+const DEFAULT_DAY_BRIEF_EVENING_MINUTE = 0;
 const CHECK_INTERVAL_MS = 60_000; // cheap 1-minute due check, same pattern as the readiness sweep
 
 const DEFAULT_CONFIG: HeartbeatConfig = {
@@ -72,11 +101,21 @@ const DEFAULT_CONFIG: HeartbeatConfig = {
   intervalMinutes: DEFAULT_INTERVAL_MINUTES,
   morningBriefHour: DEFAULT_MORNING_HOUR,
   eveningRecapHour: DEFAULT_EVENING_HOUR,
+  dayBriefEnabled: false,
+  dayBriefMorningHour: DEFAULT_DAY_BRIEF_MORNING_HOUR,
+  dayBriefMorningMinute: DEFAULT_DAY_BRIEF_MORNING_MINUTE,
+  dayBriefEveningHour: DEFAULT_DAY_BRIEF_EVENING_HOUR,
+  dayBriefEveningMinute: DEFAULT_DAY_BRIEF_EVENING_MINUTE,
 };
 
 function clampHour(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.min(23, Math.max(0, Math.floor(value)));
+}
+
+function clampMinute(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.min(59, Math.max(0, Math.floor(value)));
 }
 
 /** null disables a daily moment; undefined/invalid falls back to the default. */
@@ -100,6 +139,13 @@ export function parseHeartbeatConfig(input: unknown): HeartbeatConfig {
     eveningRecapHour: parseMomentHour(obj.eveningRecapHour, DEFAULT_EVENING_HOUR),
     lastMorningBriefAt: typeof obj.lastMorningBriefAt === "string" ? obj.lastMorningBriefAt : undefined,
     lastEveningRecapAt: typeof obj.lastEveningRecapAt === "string" ? obj.lastEveningRecapAt : undefined,
+    dayBriefEnabled: obj.dayBriefEnabled === true,
+    dayBriefMorningHour: clampHour(obj.dayBriefMorningHour) ?? DEFAULT_DAY_BRIEF_MORNING_HOUR,
+    dayBriefMorningMinute: clampMinute(obj.dayBriefMorningMinute) ?? DEFAULT_DAY_BRIEF_MORNING_MINUTE,
+    dayBriefEveningHour: clampHour(obj.dayBriefEveningHour) ?? DEFAULT_DAY_BRIEF_EVENING_HOUR,
+    dayBriefEveningMinute: clampMinute(obj.dayBriefEveningMinute) ?? DEFAULT_DAY_BRIEF_EVENING_MINUTE,
+    lastDayBriefMorningSentDay: typeof obj.lastDayBriefMorningSentDay === "string" ? obj.lastDayBriefMorningSentDay : undefined,
+    lastDayBriefEveningSentDay: typeof obj.lastDayBriefEveningSentDay === "string" ? obj.lastDayBriefEveningSentDay : undefined,
   };
   if (obj.quietHours && typeof obj.quietHours === "object") {
     const q = obj.quietHours as Record<string, unknown>;
@@ -141,9 +187,39 @@ export function setHeartbeatConfig(patch: Partial<HeartbeatConfig>): HeartbeatCo
     if (!("lastMorningBriefAt" in patch)) next.lastMorningBriefAt = current.lastMorningBriefAt ?? nowIso;
     if (!("lastEveningRecapAt" in patch)) next.lastEveningRecapAt = current.lastEveningRecapAt ?? nowIso;
   }
+  // Same seeding rationale for the Day Brief ritual: enabling it mid-evening
+  // must not immediately fire the morning contract from a stale/absent marker.
+  if (next.dayBriefEnabled && !current.dayBriefEnabled) {
+    const today = localDateString(new Date());
+    if (!("lastDayBriefMorningSentDay" in patch)) next.lastDayBriefMorningSentDay = current.lastDayBriefMorningSentDay ?? today;
+    if (!("lastDayBriefEveningSentDay" in patch)) next.lastDayBriefEveningSentDay = current.lastDayBriefEveningSentDay ?? today;
+  }
   config.heartbeat = next;
   saveHiveConfig(config);
   return next;
+}
+
+/** Pure: local (not UTC) `YYYY-MM-DD` for a Date — the Day Brief ritual's
+ * once-per-day idempotence key. */
+export function localDateString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Pure: is a Day Brief ritual moment (morning contract / evening ledger) due?
+ * Minute-precision sibling of `dailyMomentDue` above — fires once we reach
+ * today's target hour:minute and it hasn't already been sent today (a
+ * day-string comparison, not a timestamp one, since the ritual can be minutes
+ * off the hour and a restart just after firing must not double-send).
+ */
+export function dayBriefMomentDue(hour: number, minute: number, lastSentDay: string | undefined, now: Date): boolean {
+  if (lastSentDay === localDateString(now)) return false;
+  const target = new Date(now);
+  target.setHours(hour, minute, 0, 0);
+  return now >= target;
 }
 
 /** Pure: is `now` inside the quiet window? Handles wrap-around (22 -> 7). */
@@ -299,6 +375,8 @@ export interface HeartbeatDeps {
   /** APNs push for daily moments — daemon wires notify/apns. */
   sendApnsPush?: (opts: { title: string; body: string; data?: Record<string, unknown> }) => Promise<{ sent: number }>;
   runTurn?: typeof runFlashTurnText;
+  /** Day Brief assembly (day-brief.ts) — injectable for tests; defaults to the real one. */
+  composeDayBrief?: typeof composeDayBrief;
   now?: () => Date;
 }
 
@@ -442,12 +520,77 @@ export async function runDailyMomentOnce(
   return { text, pushed };
 }
 
+/**
+ * Run one Day Brief ritual moment (morning contract / evening ledger)
+ * immediately: a deterministic `composeDayBrief()` assembly (no model pass)
+ * delivered via `notify()`. Unlike `runDailyMomentOnce`, there is no APNs
+ * push or operator-session turn — this is a short ritual text, not a report.
+ */
+export async function runDayBriefRitualOnce(
+  kind: DayBriefKind,
+  deps: HeartbeatDeps = {},
+): Promise<{ text: string }> {
+  const now = (deps.now ?? (() => new Date()))();
+  const compose = deps.composeDayBrief ?? composeDayBrief;
+  const text = await compose(kind);
+
+  if (deps.notify) {
+    try { await deps.notify(text); } catch { /* channels are best-effort */ }
+  }
+  broadcastEvent("flash:day-brief", { kind, text, ts: now.toISOString() });
+  // Mark sent so a manual fire (POST /heartbeat/run) isn't followed by the
+  // scheduled one the same day — same "mark so a duplicate can't follow" intent
+  // as runDailyMomentOnce's own end-of-run mark above.
+  try {
+    setHeartbeatConfig(
+      kind === "morning"
+        ? { lastDayBriefMorningSentDay: localDateString(now) }
+        : { lastDayBriefEveningSentDay: localDateString(now) },
+    );
+  } catch { /* best effort */ }
+  return { text };
+}
+
+/**
+ * Day Brief ritual due-check + dispatch — folded into the shared tick so
+ * there's no second scheduler. Independent of `config.enabled` (the
+ * pulse/daily-moment toggle): the ritual has its own `dayBriefEnabled` flag.
+ */
+async function tickDayBriefRitual(config: HeartbeatConfig, now: Date, deps: HeartbeatDeps): Promise<void> {
+  if (!config.dayBriefEnabled) return;
+
+  if (dayBriefMomentDue(config.dayBriefMorningHour, config.dayBriefMorningMinute, config.lastDayBriefMorningSentDay, now)) {
+    setHeartbeatConfig({ lastDayBriefMorningSentDay: localDateString(now) });
+    try {
+      await runDayBriefRitualOnce("morning", deps);
+      console.log("[heartbeat] day-brief morning contract delivered");
+    } catch (e) {
+      console.error(`[heartbeat] day-brief morning contract failed: ${e instanceof Error ? e.message : e}`);
+    }
+    return;
+  }
+  if (dayBriefMomentDue(config.dayBriefEveningHour, config.dayBriefEveningMinute, config.lastDayBriefEveningSentDay, now)) {
+    setHeartbeatConfig({ lastDayBriefEveningSentDay: localDateString(now) });
+    try {
+      await runDayBriefRitualOnce("evening", deps);
+      console.log("[heartbeat] day-brief evening ledger delivered");
+    } catch (e) {
+      console.error(`[heartbeat] day-brief evening ledger failed: ${e instanceof Error ? e.message : e}`);
+    }
+    return;
+  }
+}
+
 let stopFn: (() => void) | null = null;
 
 async function tick(deps: HeartbeatDeps): Promise<void> {
   const config = getHeartbeatConfig();
-  if (!config.enabled) return;
   const now = (deps.now ?? (() => new Date()))();
+
+  // Day Brief ritual — own enable flag, runs regardless of the pulse toggle.
+  await tickDayBriefRitual(config, now, deps);
+
+  if (!config.enabled) return;
 
   // Daily moments take precedence over the pulse and ignore quiet hours —
   // they are pinned to explicit hours the operator chose.

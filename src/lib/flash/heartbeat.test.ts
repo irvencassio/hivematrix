@@ -13,12 +13,15 @@ const {
   buildDailyMomentPrompt,
   buildHeartbeatPrompt,
   dailyMomentDue,
+  dayBriefMomentDue,
   ensureHeartbeatChecklist,
   extractHeartbeatReport,
   heartbeatDue,
   inQuietHours,
+  localDateString,
   parseHeartbeatConfig,
   runDailyMomentOnce,
+  runDayBriefRitualOnce,
   runHeartbeatOnce,
 } = await import("./heartbeat");
 
@@ -33,6 +36,11 @@ test("parseHeartbeatConfig defaults + clamping", () => {
     intervalMinutes: 30,
     morningBriefHour: 8,
     eveningRecapHour: 21,
+    dayBriefEnabled: false,
+    dayBriefMorningHour: 7,
+    dayBriefMorningMinute: 30,
+    dayBriefEveningHour: 21,
+    dayBriefEveningMinute: 0,
   });
   assert.equal(parseHeartbeatConfig({ intervalMinutes: 1 }).intervalMinutes, 5); // floor at 5
   assert.equal(parseHeartbeatConfig({ enabled: true }).enabled, true);
@@ -44,6 +52,18 @@ test("parseHeartbeatConfig defaults + clamping", () => {
   assert.equal(parseHeartbeatConfig({ morningBriefHour: null }).morningBriefHour, null);
   assert.equal(parseHeartbeatConfig({ morningBriefHour: "x" }).morningBriefHour, 8);
   assert.equal(parseHeartbeatConfig({ eveningRecapHour: 99 }).eveningRecapHour, 23);
+});
+
+test("parseHeartbeatConfig: Day Brief ritual defaults off with 07:30/21:00, clamps minutes/hours", () => {
+  assert.equal(parseHeartbeatConfig({}).dayBriefEnabled, false);
+  assert.equal(parseHeartbeatConfig({ dayBriefEnabled: true }).dayBriefEnabled, true);
+  assert.equal(parseHeartbeatConfig({ dayBriefMorningMinute: 99 }).dayBriefMorningMinute, 59);
+  assert.equal(parseHeartbeatConfig({ dayBriefMorningMinute: "x" }).dayBriefMorningMinute, 30);
+  assert.equal(parseHeartbeatConfig({ dayBriefEveningHour: 99 }).dayBriefEveningHour, 23);
+  assert.equal(
+    parseHeartbeatConfig({ lastDayBriefMorningSentDay: "2026-07-09" }).lastDayBriefMorningSentDay,
+    "2026-07-09",
+  );
 });
 
 const at = (h: number, m = 0) => new Date(2026, 6, 4, h, m, 0, 0); // local time
@@ -58,7 +78,10 @@ test("inQuietHours handles plain and midnight-wrapped windows", () => {
 });
 
 test("heartbeatDue: disabled/quiet/interval gating", () => {
-  const cfg = { enabled: true, intervalMinutes: 30, morningBriefHour: null, eveningRecapHour: null };
+  const cfg = {
+    enabled: true, intervalMinutes: 30, morningBriefHour: null, eveningRecapHour: null,
+    dayBriefEnabled: false, dayBriefMorningHour: 7, dayBriefMorningMinute: 30, dayBriefEveningHour: 21, dayBriefEveningMinute: 0,
+  };
   assert.equal(heartbeatDue({ ...cfg, enabled: false }, at(10)), false);
   assert.equal(heartbeatDue(cfg, at(10)), true); // never ran
   const ran = { ...cfg, lastRunAt: at(10).toISOString() };
@@ -151,6 +174,21 @@ test("dailyMomentDue: fires once at/after the hour, again the next day; null dis
   assert.equal(dailyMomentDue(8, ranAt, nextDay), true);
 });
 
+test("localDateString: local YYYY-MM-DD, zero-padded", () => {
+  assert.equal(localDateString(at(9)), "2026-07-04");
+  assert.equal(localDateString(new Date(2026, 0, 5, 23, 59)), "2026-01-05");
+});
+
+test("dayBriefMomentDue: fires once at/after hour:minute, again the next day; already-sent-today blocks it", () => {
+  assert.equal(dayBriefMomentDue(7, 30, undefined, at(7, 29)), false);
+  assert.equal(dayBriefMomentDue(7, 30, undefined, at(7, 30)), true);
+  assert.equal(dayBriefMomentDue(7, 30, undefined, at(9)), true); // still due later the same day if never sent
+  const today = localDateString(at(7, 30));
+  assert.equal(dayBriefMomentDue(7, 30, today, at(9)), false); // already sent today
+  const nextDay = new Date(2026, 6, 5, 7, 30, 0, 0);
+  assert.equal(dayBriefMomentDue(7, 30, today, nextDay), true); // new day, due again
+});
+
 test("buildDailyMomentPrompt: morning asks for the one decision; evening asks for the day's story", () => {
   const morning = buildDailyMomentPrompt({ moment: "morning-brief", statusSnapshot: "3 tasks done", now: at(8) });
   assert.match(morning, /Morning brief/);
@@ -187,6 +225,28 @@ test("runDailyMomentOnce: APNs success skips notify; failure falls back; operato
   assert.equal(notified.length, 1);
   assert.match(notified[0], /🌙 Evening recap\nShipped two fixes today\./);
   assert.deepEqual(operatorTurns, ["Good morning — approve the release, then we ship.", "Shipped two fixes today."]);
+});
+
+test("runDayBriefRitualOnce: sends composeDayBrief's text via notify and marks the day sent (no APNs, no operator turn)", async () => {
+  const notified: string[] = [];
+  const seenKinds: string[] = [];
+  const result = await runDayBriefRitualOnce("morning", {
+    notify: async (t) => { notified.push(t); },
+    composeDayBrief: async (kind) => { seenKinds.push(kind); return "No meetings today.\nNo reminders due."; },
+    now: () => at(7, 30),
+  });
+  assert.equal(result.text, "No meetings today.\nNo reminders due.");
+  assert.deepEqual(notified, ["No meetings today.\nNo reminders due."]);
+  assert.deepEqual(seenKinds, ["morning"]);
+});
+
+test("runDayBriefRitualOnce survives a failing notify channel and still returns the composed text", async () => {
+  const result = await runDayBriefRitualOnce("evening", {
+    notify: async () => { throw new Error("imessage down"); },
+    composeDayBrief: async () => "Nothing shipped today.",
+    now: () => at(21),
+  });
+  assert.equal(result.text, "Nothing shipped today.");
 });
 
 test("runHeartbeatOnce survives a failing notify channel", async () => {

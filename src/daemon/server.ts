@@ -706,6 +706,12 @@ export function createDaemonServer() {
         if ("quietHours" in body) patch.quietHours = body.quietHours;
         if ("morningBriefHour" in body) patch.morningBriefHour = body.morningBriefHour;
         if ("eveningRecapHour" in body) patch.eveningRecapHour = body.eveningRecapHour;
+        // Day Brief ritual (2026-07-10 spec) — own enable flag + minute-precision hours.
+        if ("dayBriefEnabled" in body) patch.dayBriefEnabled = body.dayBriefEnabled === true;
+        if (typeof body.dayBriefMorningHour === "number") patch.dayBriefMorningHour = body.dayBriefMorningHour;
+        if (typeof body.dayBriefMorningMinute === "number") patch.dayBriefMorningMinute = body.dayBriefMorningMinute;
+        if (typeof body.dayBriefEveningHour === "number") patch.dayBriefEveningHour = body.dayBriefEveningHour;
+        if (typeof body.dayBriefEveningMinute === "number") patch.dayBriefEveningMinute = body.dayBriefEveningMinute;
         json(res, 200, { heartbeat: setHeartbeatConfig(patch) });
         return;
       }
@@ -723,9 +729,10 @@ export function createDaemonServer() {
         json(res, 200, { ledger: readTrustLedger() });
         return;
       }
-      // POST /heartbeat/run — fire one pass now (pulse by default; body.moment for a daily moment).
+      // POST /heartbeat/run — fire one pass now (pulse by default; body.moment for a daily
+      // moment or a Day Brief ritual moment).
       if (req.method === "POST" && urlPath === "/heartbeat/run") {
-        const { runHeartbeatOnce, runDailyMomentOnce } = await import("@/lib/flash/heartbeat");
+        const { runHeartbeatOnce, runDailyMomentOnce, runDayBriefRitualOnce } = await import("@/lib/flash/heartbeat");
         const { notify } = await import("@/lib/notify/notify");
         const { sendApnsPush } = await import("@/lib/notify/apns");
         const { composeBriefing } = await import("@/lib/voice/command-turn");
@@ -737,6 +744,12 @@ export function createDaemonServer() {
         };
         if (body.moment === "morning-brief" || body.moment === "evening-recap") {
           const result = await runDailyMomentOnce(body.moment, deps);
+          json(res, 200, { moment: body.moment, ...result });
+          return;
+        }
+        if (body.moment === "day-brief-morning" || body.moment === "day-brief-evening") {
+          const kind = body.moment === "day-brief-morning" ? "morning" : "evening";
+          const result = await runDayBriefRitualOnce(kind, deps);
           json(res, 200, { moment: body.moment, ...result });
           return;
         }
@@ -3465,6 +3478,22 @@ export function createDaemonServer() {
       if (req.method === "GET" && urlPath === "/voice/provision/status") {
         const { provisionStatus } = await import("@/lib/voice/provision");
         json(res, 200, provisionStatus());
+        return;
+      }
+
+      // GET /voice/greeting — contextual live-call greeting (2026-07-10 "system
+      // shows up" spec): a <=2-sentence spoken greeting (time-of-day salutation +
+      // up to 2 highest-signal facts) assembled from day-brief.ts internals — no
+      // model call, so it can answer in <1.5s. flash_pipeline.py fetches this on
+      // client connect and speaks it; ANY failure here still returns 200 with the
+      // deterministic fallback so the sidecar never has to special-case an error.
+      if (req.method === "GET" && urlPath === "/voice/greeting") {
+        const { isFeatureEnabled } = await import("@/lib/config/features");
+        if (!isFeatureEnabled("voice")) { json(res, 403, { error: "voice feature is off — enable it in Settings → Features" }); return; }
+        const { buildVoiceGreeting, GREETING_FALLBACK } = await import("@/lib/flash/day-brief");
+        let text = GREETING_FALLBACK;
+        try { text = await buildVoiceGreeting(); } catch { /* buildVoiceGreeting itself falls back — this is belt-and-suspenders */ }
+        json(res, 200, { text });
         return;
       }
 
