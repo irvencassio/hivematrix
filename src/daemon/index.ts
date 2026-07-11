@@ -23,6 +23,12 @@ const PORT = parseInt(process.env.HIVEMATRIX_PORT ?? "3747", 10);
 async function main(): Promise<void> {
   console.log("[hivematrix] Starting daemon...");
 
+  // One-time config.json migration (Claude-native cutover): drops dead
+  // qwen/localEngine/localModel keys and resets any role-model override that
+  // names a stale local id. Runs before anything else reads config.json.
+  const { migrateConfig } = await import("@/lib/config/migrate");
+  migrateConfig();
+
   // Decide fresh / update / same BEFORE getDb() creates or migrates the DB.
   const { getBundledVersion } = await import("@/lib/version/bundle-version");
   const { planBoot, recordInstalledVersion } = await import("@/lib/onboarding/install-state");
@@ -120,11 +126,6 @@ async function main(): Promise<void> {
   // one via Apple Mail. Self-gates: no-ops when the outbox directory is absent.
   const { startVoiceEmailOutboxPoller } = await import("@/lib/voice/voice-email-outbox");
   startVoiceEmailOutboxPoller();
-
-  // Supervise the local model server when Qwen is "on this laptop": launch it,
-  // health-probe it, relaunch on crash (self-gates on location === "local").
-  const { startLocalServingSupervisor } = await import("@/lib/local-model/serving");
-  startLocalServingSupervisor();
 
   // Notification loop: escalate stuck tasks / approvals to the founder's phone
   // (Telegram/iMessage/email) and read button taps back. Self-gates on config.

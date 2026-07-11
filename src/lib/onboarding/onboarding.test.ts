@@ -26,54 +26,37 @@ function step(status: ReturnType<typeof getOnboardingStatus>, id: string) {
   return status.steps.find((s) => s.id === id)!;
 }
 
+const noCli: NonNullable<Parameters<typeof getOnboardingStatus>[0]>["findBinaryImpl"] = () => null;
+const claudeCli: NonNullable<Parameters<typeof getOnboardingStatus>[0]>["findBinaryImpl"] =
+  (name) => (name === "claude" ? "/fake/bin/claude" : null);
+
 test("fresh machine: required steps incomplete", () => {
-  const status = withHome(() => {}, () => getOnboardingStatus({ now: "T" }));
+  const status = withHome(() => {}, () => getOnboardingStatus({ now: "T", findBinaryImpl: noCli }));
   assert.equal(step(status, "config").state, "incomplete");
-  assert.equal(step(status, "local-model").state, "incomplete");
   assert.equal(step(status, "daemon").state, "incomplete");
+  assert.equal(step(status, "frontier").state, "incomplete");
   assert.equal(status.requiredComplete, false);
   assert.equal(status.allComplete, false);
 });
 
-test("config + qwen + daemon + brain => required complete", () => {
+test("config + frontier CLI + daemon + brain => required complete", () => {
   const status = withHome((home) => {
     mkdirSync(join(home, ".hivematrix"), { recursive: true });
     writeFileSync(join(home, ".hivematrix", "config.json"), JSON.stringify({
-      qwen: { primary: { modelId: "qwen/qwen3.6-27b", endpoint: "http://localhost:1234/v1" } },
       memory: { brainRootDir: join(home, "brain") },
     }));
     mkdirSync(join(home, "brain"), { recursive: true });
     mkdirSync(join(home, "Library", "LaunchAgents"), { recursive: true });
     writeFileSync(join(home, "Library", "LaunchAgents", "com.hivematrix.daemon.plist"), "<plist/>");
-  }, () => getOnboardingStatus({ now: "T" }));
+  }, () => getOnboardingStatus({ now: "T", findBinaryImpl: claudeCli }));
 
   assert.equal(step(status, "config").state, "done");
-  assert.equal(step(status, "local-model").state, "done");
   assert.equal(step(status, "daemon").state, "done");
   assert.equal(step(status, "brain").state, "done");
+  assert.equal(step(status, "frontier").state, "done");
   assert.equal(status.requiredComplete, true);
-  // frontier + desktopbee optional, still incomplete → not allComplete
+  // desktopbee optional, still incomplete → not allComplete
   assert.equal(status.allComplete, false);
-});
-
-test("local-model step is satisfied by cloud-only posture (no local model)", () => {
-  const status = withHome((home) => {
-    mkdirSync(join(home, ".hivematrix"), { recursive: true });
-    writeFileSync(join(home, ".hivematrix", "config.json"), JSON.stringify({ runMode: "cloud-only" }));
-  }, () => getOnboardingStatus({ now: "T" }));
-  assert.equal(step(status, "local-model").state, "done");
-  assert.match(step(status, "local-model").detail, /cloud-only/);
-});
-
-test("local-model step is satisfied by the cloud-first default", () => {
-  const status = withHome((home) => {
-    mkdirSync(join(home, ".hivematrix"), { recursive: true });
-    writeFileSync(join(home, ".hivematrix", "config.json"), JSON.stringify({
-      memory: { brainRootDir: join(home, "brain") },
-    }));
-  }, () => getOnboardingStatus({ now: "T" }));
-  assert.equal(step(status, "local-model").state, "done");
-  assert.match(step(status, "local-model").detail, /cloud-first/i);
 });
 
 test("desktopbee done only when helper built AND both permissions granted", () => {
@@ -101,12 +84,17 @@ test("optional onboarding setup copy uses lane names", () => {
   }
 });
 
-test("frontier step reflects env credentials", () => {
+test("frontier step is CLI-only — an API key alone does not satisfy it (no keys, ever)", () => {
   const status = withHome(() => {}, () => {
     process.env.OPENAI_API_KEY = "sk-test";
-    try { return getOnboardingStatus({ now: "T" }); }
+    try { return getOnboardingStatus({ now: "T", findBinaryImpl: noCli }); }
     finally { delete process.env.OPENAI_API_KEY; }
   });
+  assert.equal(step(status, "frontier").state, "incomplete");
+});
+
+test("frontier step is done when a frontier CLI is found", () => {
+  const status = withHome(() => {}, () => getOnboardingStatus({ now: "T", findBinaryImpl: claudeCli }));
   assert.equal(step(status, "frontier").state, "done");
 });
 

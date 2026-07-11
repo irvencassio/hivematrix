@@ -2,7 +2,6 @@ import { getDb } from "@/lib/db";
 import { getBrowserLaneReadinessDashboard, type BrowserLaneReadinessDashboard } from "@/lib/browser-lane/store";
 import { getBrowserLaneReadinessConfig } from "@/lib/browser-lane/readiness-schedule";
 import { getAllLaneAppStates } from "@/lib/lane-apps";
-import { readConfigMatchedLocalModelHealth, type LocalModelHealth } from "@/lib/local-model/health";
 import { getWorkflowInbox, type WorkflowInbox } from "@/lib/workflows/inbox";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { getBundledVersion } from "@/lib/version/bundle-version";
@@ -70,10 +69,6 @@ interface MinimalBrowserDashboard {
   }>;
 }
 
-type MinimalLocalModelHealth = Partial<Omit<LocalModelHealth, "provider">> & {
-  provider?: string;
-};
-
 export interface SystemReadinessDeps {
   now?: () => Date;
   version?: () => string;
@@ -81,7 +76,6 @@ export interface SystemReadinessDeps {
   getBrowserDashboard?: () => MinimalBrowserDashboard;
   getLaneApps?: () => Promise<MinimalLaneAppState[]> | MinimalLaneAppState[];
   getWorkflowInbox?: () => WorkflowInbox;
-  readLocalModelHealth?: () => MinimalLocalModelHealth | null;
 }
 
 const SEVERITIES: SystemReadinessSeverity[] = ["critical", "warn", "info", "ok"];
@@ -226,33 +220,6 @@ function workflowInboxCheck(inbox: WorkflowInbox): SystemReadinessCheck {
   return check("workflow-inbox", "Workflow inbox", "ok", "Workflow inbox is empty.", undefined, { counts: c });
 }
 
-function localModelCheck(health: MinimalLocalModelHealth | null): SystemReadinessCheck {
-  if (!health) {
-    return check("local-model", "Local model", "info", "No cached local model readiness result yet.", "Run the local model readiness check if local/offline routing quality matters.");
-  }
-  const ready = health.qwenReady === true || health.ready === true;
-  const providerLabel = health.provider === "mlx" ? "Rapid-MLX"
-    : health.provider === "vllm" ? "vLLM"
-    : health.provider === "lmstudio" ? "LM Studio"
-    : health.provider === "ollama" ? "Ollama"
-    : health.provider ?? "local";
-  const modelLabel = `${providerLabel} ${health.modelName ?? "model"}`;
-  const detail = {
-    provider: health.provider,
-    endpoint: health.endpoint,
-    modelName: health.modelName,
-    checkedAt: health.checkedAt,
-    decodeRateTokPerSec: health.decodeRateTokPerSec,
-    message: cleanSnippet(health.message),
-  };
-  if (!ready) {
-    const next = "Run qwen readiness and fix the local endpoint before relying on local-only mode.";
-    return check("local-model", "Local model", "warn", `${modelLabel} is not ready: ${cleanSnippet(health.message) || "readiness failed"}.`, next, detail);
-  }
-  const rate = typeof health.decodeRateTokPerSec === "number" ? ` at ${health.decodeRateTokPerSec.toFixed(1)} tok/s` : "";
-  return check("local-model", "Local model", "ok", `${modelLabel} ready${rate}.`, undefined, detail);
-}
-
 function recentFailedTasksCheck(): SystemReadinessCheck {
   const rows = getDb().prepare(`
     SELECT _id, title, source, error, updatedAt
@@ -307,11 +274,9 @@ export async function getSystemReadinessReport(deps: SystemReadinessDeps = {}): 
     ?? (() => getBrowserLaneReadinessDashboard({ staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours }) as unknown as MinimalBrowserDashboard);
   const getLaneApps = deps.getLaneApps ?? (() => getAllLaneAppStates());
   const getInbox = deps.getWorkflowInbox ?? (() => getWorkflowInbox({ limit: 50 }));
-  const readLocal = deps.readLocalModelHealth ?? (() => readConfigMatchedLocalModelHealth());
 
   const checks: SystemReadinessCheck[] = [
     daemonCheck({ version, connectivity }),
-    localModelCheck(readLocal()),
     cooRoutingCheck(),
     browserReadinessCheck(getBrowserDashboard()),
     laneAppsCheck(await getLaneApps()),

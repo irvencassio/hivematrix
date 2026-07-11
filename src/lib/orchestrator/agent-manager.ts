@@ -19,7 +19,6 @@ import { deliverTrustedMailBeeReply } from "@/lib/mailbee/delivery";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { getLocalFallbackDecision, type LocalFallbackReason } from "@/lib/local-model/fallback";
 import { closeVoiceLoop } from "@/lib/voice/loop-closer";
 import {
   notifySuperwhisperSession,
@@ -489,22 +488,6 @@ class AgentManager {
     return detectTransientFailureText(agent.textBuffer);
   }
 
-  private detectLocalFallbackReason(agent: AgentProcess): LocalFallbackReason | null {
-    const text = agent.textBuffer.toLowerCase();
-    if (/out of extra usage|rate limit|quota|usage limit|too many requests|http 429|\b429\b/i.test(text)) {
-      return "usage";
-    }
-    if (
-      /offline|network.*unreachable|internet.*unreachable|enotfound|eai_again|timed out|fetch failed|connection error|could not resolve|dns|socket hang up/i.test(text)
-    ) {
-      return "offline";
-    }
-    if (/api overloaded|service unavailable|bad gateway|temporarily unavailable|http 503|http 502|overloaded/i.test(text)) {
-      return "provider_unavailable";
-    }
-    return null;
-  }
-
   private async handleExit(taskId: string, code: number | null, signal: string | null) {
     // Ensure spawn gate is open so next agent can start
     this.openSpawnGate();
@@ -585,56 +568,6 @@ class AgentManager {
         this.pendingSteers.delete(taskId);
         await this.restartTaskWithSteer(taskId, task, accumulatedOutput, pendingSteer);
         return;
-      }
-
-      if (code !== 0) {
-        const fallbackReason = this.detectLocalFallbackReason(agent);
-        if (fallbackReason) {
-          const currentTask = task as Record<string, unknown> | null;
-          const fallback = await getLocalFallbackDecision({
-            currentModelId: currentTask?.model as string | null | undefined,
-            project: String(currentTask?.project ?? ""),
-            reason: fallbackReason,
-          });
-          if (fallback) {
-            const output = {
-              ...accumulatedOutput,
-              transientRetries: 0,
-              fallbackReason,
-              fallbackSourceModel: currentTask?.model ?? "claude-default",
-              fallbackTargetModel: fallback.modelId,
-              fallbackAt: new Date().toISOString(),
-            };
-            await Task.findByIdAndUpdate(taskId, {
-              status: "backlog",
-              model: fallback.modelId,
-              project: fallback.project,
-              projectPath: fallback.projectPath,
-              agentPid: null,
-              completedAt: null,
-              startedAt: null,
-              error: null,
-              delayUntil: null,
-              delayReason: null,
-              output,
-              logs: [],
-              turns: [],
-            });
-
-            this.broadcaster(taskId, {
-              type: "text",
-              content: fallback.summary,
-            });
-            notifySuperwhisperTaskStop({
-              taskId,
-              sessionId: agent.sessionId,
-              projectPath: fallback.projectPath,
-              status: "backlog",
-              summary: fallback.summary,
-            });
-            return;
-          }
-        }
       }
 
       // Auto-retry transient failures (rate limit, auth) instead of marking failed.

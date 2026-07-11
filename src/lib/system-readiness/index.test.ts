@@ -60,7 +60,6 @@ function baseDeps() {
       { id: "terminal-lane", displayName: "Terminal Lane", status: "installed", installed: { short: "0.1.1", build: "2" }, expected: { short: "0.1.1", build: "2" } },
     ],
     getWorkflowInbox: () => emptyInbox,
-    readLocalModelHealth: () => ({ ready: true, qwenReady: true, provider: "mlx", modelName: "qwen", endpoint: "http://127.0.0.1:8000/v1", checkedAt: "2026-06-26T11:59:00Z", message: "ready" }),
     connectivity: () => "cloud-ok",
     version: () => "0.1.87",
   };
@@ -94,45 +93,6 @@ test("reports Browser Lane attention and stale readiness", async () => {
   assert.equal(browser?.severity, "warn");
   assert.match(browser?.summary ?? "", /2.*attention/i);
   assert.match(browser?.summary ?? "", /1 stale/i);
-});
-
-test("reports Rapid-MLX Qwen local model health by name", async () => {
-  const report = await getSystemReadinessReport({
-    ...baseDeps(),
-    readLocalModelHealth: () => ({
-      ready: true,
-      qwenReady: true,
-      provider: "mlx",
-      modelName: "qwen3.6-35b-4bit",
-      endpoint: "http://127.0.0.1:8000/v1",
-      checkedAt: "2026-07-03T12:00:00Z",
-      message: "ready",
-    }),
-  });
-  const local = report.checks.find((c) => c.id === "local-model");
-  assert.equal(local?.severity, "ok");
-  assert.match(local?.summary ?? "", /Rapid-MLX qwen3\.6-35b-4bit/i);
-  assert.equal(local?.details?.provider, "mlx");
-  assert.equal(local?.details?.endpoint, "http://127.0.0.1:8000/v1");
-});
-
-test("reports Qwen not-ready action", async () => {
-  const report = await getSystemReadinessReport({
-    ...baseDeps(),
-    readLocalModelHealth: () => ({
-      ready: false,
-      qwenReady: false,
-      provider: "mlx",
-      modelName: "qwen3.6-35b-4bit",
-      endpoint: "http://127.0.0.1:8000/v1",
-      checkedAt: "2026-07-03T12:00:00Z",
-      message: "connection refused",
-    }),
-  });
-  const local = report.checks.find((c) => c.id === "local-model");
-  assert.equal(local?.severity, "warn");
-  assert.match(local?.summary ?? "", /Rapid-MLX qwen3\.6-35b-4bit/i);
-  assert.match(local?.nextAction ?? "", /qwen readiness/i);
 });
 
 test("reports lane app install/update/broken states", async () => {

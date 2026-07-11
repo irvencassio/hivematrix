@@ -95,11 +95,6 @@ test("cache rollup: supported providers get a hit-rate, local does not", async (
   // Local engines: caching not supported → null hit-rate.
   assert.equal(byProv["local-qwen"].supported, false);
   assert.equal(byProv["local-qwen"].hitRatePct, null);
-
-  // localEngineCache is a separate, non-window-scoped live scrape — present
-  // as an array regardless of whether the engine is actually reachable in
-  // this test environment (it resolves to metrics:null when it can't connect).
-  assert.ok(Array.isArray(s.localEngineCache));
 });
 
 test("cache rollup: a known 5m/1h split computes a real netBenefitTokens", async () => {

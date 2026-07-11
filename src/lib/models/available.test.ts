@@ -3,9 +3,8 @@ import assert from "node:assert/strict";
 import { buildAvailableModels, buildRoleModelOptions, CLAUDE_OPUS_ID, CLAUDE_SONNET_ID, CODEX_NEWEST_ID } from "./available";
 import type { BackendStatus } from "./backends";
 
-function backends(local: boolean, claude: boolean, codex: boolean): BackendStatus[] {
+function backends(claude: boolean, codex: boolean): BackendStatus[] {
   return [
-    { id: "local", name: "Local", configured: local, installed: local, enabled: true, detail: "", modelId: local ? "qwen/qwen3.6-27b" : undefined },
     { id: "claude", name: "Claude Code", configured: claude, installed: claude, enabled: claude, detail: "" },
     { id: "codex", name: "Codex", configured: codex, installed: codex, enabled: codex, detail: "" },
   ];
@@ -14,59 +13,35 @@ function backends(local: boolean, claude: boolean, codex: boolean): BackendStatu
 // asserted separately.
 const ids = (b: BackendStatus[]) => buildAvailableModels(b).filter((m) => !m.disabled).map((m) => m.id);
 
-test("only configured backends produce selectable models (deduped by family)", () => {
-  // Local model is qwen3.6-27b here, so the 27b coding tier collapses into it and
-  // the 35b rapid-mlx preset collapses into the 35b fast tier — no family twice.
-  assert.deepEqual(ids(backends(true, false, false)), ["local", "local-fast"]);
-  assert.deepEqual(ids(backends(false, false, false)), []);
-});
-
-test("local models are deduped by family — the same base model is never offered twice", () => {
-  // Configured local is the 35b fast tier; the 35b rapid-mlx preset (8-bit) is the
-  // same family and must NOT appear as a second Qwen-35B entry. The 27b coding tier
-  // is a different family and stays.
-  const backs = [
-    { id: "local" as const, name: "Local", configured: true, installed: true, enabled: true, detail: "", modelId: "qwen3.6-35b-4bit" },
-    { id: "claude" as const, name: "Claude Code", configured: false, installed: false, enabled: false, detail: "" },
-    { id: "codex" as const, name: "Codex", configured: false, installed: false, enabled: false, detail: "" },
-  ];
-  const localIds = buildAvailableModels(backs).filter((m) => m.backend === "local").map((m) => m.id);
-  assert.deepEqual(localIds, ["local", "local-coding"]);
-  assert.ok(!localIds.includes("rapid-mlx-qwen36-35b"), "the redundant 35B preset is deduped away");
+test("no backends configured -> no selectable models", () => {
+  assert.deepEqual(ids(backends(false, false)), []);
 });
 
 test("unconfigured frontier providers appear as greyed, unselectable placeholders", () => {
-  const all = buildAvailableModels(backends(true, false, false)); // local only, no frontier
+  const all = buildAvailableModels(backends(false, false));
   const claudeSetup = all.find((m) => m.id === "claude-setup");
   const codexSetup = all.find((m) => m.id === "codex-setup");
   assert.ok(claudeSetup?.disabled, "Claude shown as a disabled setup entry");
   assert.ok(codexSetup?.disabled, "Codex shown as a disabled setup entry");
-  assert.equal(claudeSetup!.backend, "claude"); // groups under "Cloud frontier"
+  assert.equal(claudeSetup!.backend, "claude");
   assert.equal(codexSetup!.backend, "codex");
   assert.match(claudeSetup!.note ?? "", /sign in|enable/i);
   // A configured frontier provider is NOT duplicated as a setup placeholder.
-  const withClaude = buildAvailableModels(backends(true, true, false));
+  const withClaude = buildAvailableModels(backends(true, false));
   assert.equal(withClaude.find((m) => m.id === "claude-setup"), undefined);
   assert.ok(withClaude.find((m) => m.id === "codex-setup")?.disabled, "codex still greyed when only claude is set up");
 });
 
-test("local model carries the concrete configured id", () => {
-  const m = buildAvailableModels(backends(true, false, false)).find((x) => x.id === "local");
-  assert.ok(m);
-  assert.equal(m.modelId, "qwen/qwen3.6-27b");
-  assert.match(m!.name, /qwen\/qwen3\.6-27b/);
-});
-
 test("claude backend yields Opus + Sonnet with pinned ids", () => {
-  const ms = buildAvailableModels(backends(false, true, false)).filter((m) => !m.disabled);
+  const ms = buildAvailableModels(backends(true, false)).filter((m) => !m.disabled);
   const byId = Object.fromEntries(ms.map((m) => [m.id, m.modelId]));
   assert.equal(byId["claude-opus"], CLAUDE_OPUS_ID);
   assert.equal(byId["claude-sonnet"], CLAUDE_SONNET_ID);
-  assert.deepEqual(Object.keys(byId), ["claude-opus", "claude-sonnet", "cloud-only"]);
+  assert.deepEqual(Object.keys(byId), ["claude-opus", "claude-sonnet", "mixed", "cloud-only"]);
 });
 
 test("codex backend yields newest + fast variant on the same model id", () => {
-  const ms = buildAvailableModels(backends(false, false, true));
+  const ms = buildAvailableModels(backends(false, true));
   const codex = ms.find((m) => m.id === "codex");
   const fast = ms.find((m) => m.id === "codex-fast");
   assert.equal(codex?.modelId, CODEX_NEWEST_ID);
@@ -75,27 +50,22 @@ test("codex backend yields newest + fast variant on the same model id", () => {
   assert.equal(codex?.fast ?? false, false);
 });
 
-test("Mixed appears only with local AND a frontier backend", () => {
-  assert.ok(!ids(backends(true, false, false)).includes("mixed"), "local only → no mixed");
-  assert.ok(!ids(backends(false, true, false)).includes("mixed"), "frontier only → no mixed");
-  assert.ok(ids(backends(true, true, false)).includes("mixed"), "local + claude → mixed");
-  assert.ok(ids(backends(true, false, true)).includes("mixed"), "local + codex → mixed");
-});
-
-test("Cloud-only appears with any frontier backend, no local required", () => {
-  assert.ok(!ids(backends(true, false, false)).includes("cloud-only"), "local only → no cloud-only");
-  assert.ok(ids(backends(false, true, false)).includes("cloud-only"), "claude only → cloud-only");
-  assert.ok(ids(backends(false, false, true)).includes("cloud-only"), "codex only → cloud-only");
-  assert.ok(ids(backends(true, true, false)).includes("cloud-only"), "local + claude → cloud-only");
+test("Mixed and Cloud-only appear with any frontier backend configured (no local backend anymore)", () => {
+  assert.ok(!ids(backends(false, false)).includes("mixed"), "no frontier → no mixed");
+  assert.ok(ids(backends(true, false)).includes("mixed"), "claude → mixed");
+  assert.ok(ids(backends(false, true)).includes("mixed"), "codex → mixed");
+  assert.ok(!ids(backends(false, false)).includes("cloud-only"), "no frontier → no cloud-only");
+  assert.ok(ids(backends(true, false)).includes("cloud-only"), "claude → cloud-only");
+  assert.ok(ids(backends(false, true)).includes("cloud-only"), "codex → cloud-only");
 });
 
 test("Cloud-only model id is the cloud-only sentinel", () => {
-  const m = buildAvailableModels(backends(false, true, false)).find((x) => x.id === "cloud-only");
+  const m = buildAvailableModels(backends(true, false)).find((x) => x.id === "cloud-only");
   assert.equal(m?.modelId, "cloud-only");
 });
 
-test("role options expose Coding choices across Claude and Codex, with Haiku as a last resort — no local options (Claude-native cutover Phase 4)", () => {
-  const options = buildRoleModelOptions(backends(true, true, true));
+test("role options expose Coding choices across Claude and Codex, with Haiku as a last resort — no local options (Claude-native cutover)", () => {
+  const options = buildRoleModelOptions(backends(true, true));
   const coding = options.coding.map((m) => m.modelId);
   assert.deepEqual(coding, [
     "opus",
@@ -107,7 +77,7 @@ test("role options expose Coding choices across Claude and Codex, with Haiku as 
 });
 
 test("role options keep frontier-premium first for Thinking — no local escape hatch anymore", () => {
-  const options = buildRoleModelOptions(backends(true, true, true));
+  const options = buildRoleModelOptions(backends(true, true));
   const thinking = options.thinking.map((m) => m.modelId);
   // Frontier stays at the front so the default (empty → frontier-premium) is
   // unchanged; Haiku is appended as an opt-in escape hatch.
@@ -121,7 +91,7 @@ test("role options keep frontier-premium first for Thinking — no local escape 
 });
 
 test("role options put Operational Claude-first (Haiku default) — no local fallback anymore", () => {
-  const options = buildRoleModelOptions(backends(true, true, true));
+  const options = buildRoleModelOptions(backends(true, true));
   const operational = options.operational.map((m) => m.modelId);
   assert.deepEqual(operational, [
     "haiku",

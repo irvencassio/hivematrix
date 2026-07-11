@@ -8,10 +8,9 @@
  *
  * Steps (required ones gate a green first-run):
  *   config        — ~/.hivematrix/config.json present
- *   local-model   — a Qwen/local model profile is configured       [required]
  *   daemon        — launchd agent installed                         [required]
  *   brain         — brain memory root exists                        [required]
- *   frontier      — a frontier API key/auth is available            [optional]
+ *   frontier      — a frontier CLI (Claude/Codex) is available      [required]
  *   desktopbee    — Desktop Lane helper built + permissions granted [optional]
  */
 
@@ -20,7 +19,6 @@ import { join } from "path";
 import { homedir } from "os";
 import { findBinary, CLAUDE_BINARY_SEARCH_PATHS, CODEX_BINARY_SEARCH_PATHS } from "@/lib/config/binary-detection";
 import { resolveMemorySettings } from "@/lib/brain/settings";
-import { localEngineCapability } from "@/lib/models/local-engine";
 
 export type StepState = "done" | "incomplete";
 
@@ -60,7 +58,9 @@ function launchdPlistPath(): string {
 /**
  * Compute onboarding status. `now` is injectable for deterministic timestamps;
  * `helperReachable`/`desktopPermissions` can be injected from a live probe of
- * the Desktop Lane helper (the file checks alone can't see runtime TCC grants).
+ * the Desktop Lane helper (the file checks alone can't see runtime TCC grants);
+ * `findBinaryImpl` is injectable so tests don't depend on the real machine's
+ * claude/codex CLI installation.
  */
 export function getOnboardingStatus(opts: {
   now?: string;
@@ -68,6 +68,7 @@ export function getOnboardingStatus(opts: {
   desktopPermissions?: { accessibility: boolean; screenRecording: boolean } | null;
   messagebee?: { enabled: boolean; chatDbReadable: boolean; chatDbDetail?: string } | null;
   mailbee?: { enabled: boolean; mailControllable: boolean } | null;
+  findBinaryImpl?: typeof findBinary;
 } = {}): OnboardingStatus {
   const cfg = readConfig();
   const steps: OnboardingStep[] = [];
@@ -80,46 +81,6 @@ export function getOnboardingStatus(opts: {
     state: cfg ? "done" : "incomplete",
     detail: cfg ? "~/.hivematrix/config.json present" : "no config file",
     remediation: cfg ? undefined : "Create ~/.hivematrix/config.json (the onboarding flow writes it).",
-  });
-
-  // local-model — satisfied by a configured Rapid-MLX localEngine, a legacy
-  // local model (LM Studio/Qwen profile), OR the default cloud-first posture.
-  // Users can still explicitly choose local-only, in which case this becomes
-  // a real required setup step again.
-  const qwen = cfg?.qwen as Record<string, unknown> | undefined;
-  const localEngine = cfg?.localEngine as Record<string, unknown> | undefined;
-  const engineTiers = Array.isArray(localEngine?.tiers) ? (localEngine!.tiers as unknown[]) : [];
-  const engineConfigured = engineTiers.length > 0;
-  const legacyConfigured = !!(qwen && (qwen.primary as Record<string, unknown>)?.modelId) ||
-    !!(cfg?.localModel as Record<string, unknown>)?.modelName;
-  const modelConfigured = engineConfigured || legacyConfigured;
-  const cap = localEngineCapability();
-  // cloud-only by explicit posture, because the hardware can't run local, OR
-  // cloud-first by default once the app has a config file.
-  const cloudOnly = cfg?.runMode === "cloud-only" || !cap.localCapable;
-  const cloudFirst = !!cfg && cfg.runMode !== "local-only";
-  const localOk = modelConfigured || cloudOnly || cloudFirst;
-  const engineModel = engineConfigured
-    ? (engineTiers.map((t) => (t as Record<string, unknown>)?.alias).filter(Boolean).join(" + ") || "rapid-mlx")
-    : null;
-  steps.push({
-    id: "local-model",
-    title: "Local model (Rapid-MLX)",
-    required: true,
-    state: localOk ? "done" : "incomplete",
-    detail: engineModel
-      ? `Rapid-MLX tiers: ${engineModel}`
-      : legacyConfigured
-        ? `model: ${(qwen?.primary as Record<string, unknown>)?.modelId ?? (cfg?.localModel as Record<string, unknown>)?.modelName}`
-        : !cap.localCapable
-          ? `cloud-only — ${cap.reason ?? "this Mac can't run a local model"}`
-        : cloudOnly
-          ? "cloud-only mode — no local model required"
-          : cloudFirst
-            ? "cloud-first mode — local model can be provisioned later"
-            : "no local model configured",
-    remediation: localOk ? undefined
-      : `Run the provisioner to size + install the local engine for this Mac (recommended: ${cap.recommendedTiers.join(" + ") || "cloud-only"}): npx tsx scripts/provision-local-engine.mts --apply`,
   });
 
   // daemon (launchd)
@@ -163,27 +124,26 @@ export function getOnboardingStatus(opts: {
       : "Open Setup → Persona in the console and run the birth ritual to give your assistant a name and identity.",
   });
 
-  // frontier (optional) — API keys OR installed CLIs both count
-  const hasFrontierKey = !!process.env.OPENAI_API_KEY || !!process.env.ANTHROPIC_API_KEY ||
-    !!((cfg?.providers as Record<string, unknown>)?.openai);
-  const claudePath = findBinary("claude", CLAUDE_BINARY_SEARCH_PATHS);
-  const codexPath  = findBinary("codex",  CODEX_BINARY_SEARCH_PATHS);
-  const hasFrontierCli = !!(claudePath || codexPath);
-  const hasFrontier = hasFrontierKey || hasFrontierCli;
+  // frontier — required post-cutover: HiveMatrix is Claude-native, so a
+  // frontier CLI (claude or codex, subscription OAuth) is the ONLY text
+  // inference path. No local model fallback remains.
+  const find = opts.findBinaryImpl ?? findBinary;
+  const claudePath = find("claude", CLAUDE_BINARY_SEARCH_PATHS);
+  const codexPath  = find("codex",  CODEX_BINARY_SEARCH_PATHS);
+  const hasFrontier = !!(claudePath || codexPath);
   const frontierDetail = hasFrontier
     ? [
-        hasFrontierKey ? "API key present" : null,
         claudePath ? `claude CLI (${claudePath})` : null,
         codexPath  ? `codex CLI (${codexPath})`  : null,
       ].filter(Boolean).join(", ")
-    : "no frontier key or CLI found (local-only operation)";
+    : "no frontier CLI found — install claude or codex to enable text inference";
   steps.push({
     id: "frontier",
     title: "Frontier model access",
-    required: false,
+    required: true,
     state: hasFrontier ? "done" : "incomplete",
     detail: frontierDetail,
-    remediation: hasFrontier ? undefined : "Optional: install the claude or codex CLI, or provide an ANTHROPIC_API_KEY/OPENAI_API_KEY for cloud-ok mode.",
+    remediation: hasFrontier ? undefined : "Install the claude CLI (https://claude.com/claude-code) or the codex CLI and sign in.",
   });
 
   steps.push({

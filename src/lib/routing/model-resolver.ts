@@ -33,7 +33,9 @@ function readConfig(): Record<string, unknown> {
   }
 }
 
-function isFrontierOverride(modelId: string): boolean {
+/** Exported for the config migration (config/migrate.ts) — a role-override
+ * value that does NOT match this names a stale local/Qwen model id. */
+export function isFrontierOverride(modelId: string): boolean {
   return /^(claude-|codex:|gpt-|o[0-9]|opus$|sonnet$|haiku$)/i.test(modelId);
 }
 

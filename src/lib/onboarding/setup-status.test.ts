@@ -1,9 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildFirstRunSetupStatus } from "./setup-status";
-import { LOCAL_MEMORY_PRESETS } from "@/lib/models/local-engine";
-
-const PRESET_32GB = LOCAL_MEMORY_PRESETS.find((preset) => preset.id === "32gb")!;
 
 function item<T extends { id: string }>(items: T[], id: string): T {
   const found = items.find((i) => i.id === id);
@@ -89,28 +86,15 @@ test("microphone opened is not represented as granted", () => {
   assert.match(row.detail, /request.*first Talk Mode/i);
 });
 
-test("local model provisioning is optional until the user starts Rapid-MLX setup", () => {
+test("frontier model access is required and reflects the onboarding step (Claude-native cutover)", () => {
   const status = buildFirstRunSetupStatus({
-    localModel: {
-      plan: {
-        arch: "arm64",
-        ramGB: 32,
-        presetId: "32gb",
-        mode: "local_agent_light",
-        localCapable: true,
-        recommendedTiers: ["fast"],
-        tiers: [],
-        preset: PRESET_32GB,
-        tuning: {},
-      },
-      status: {
-        phase: "idle",
-        log: [],
-        startedAt: null,
-        finishedAt: null,
-        error: null,
-        plan: null,
-      },
+    onboarding: {
+      requiredComplete: false,
+      allComplete: false,
+      generatedAt: "T",
+      steps: [
+        { id: "frontier", title: "Frontier model access", required: true, state: "incomplete", detail: "no frontier CLI found — install claude or codex to enable text inference" },
+      ],
     },
     persona: {
       exists: false,
@@ -118,11 +102,10 @@ test("local model provisioning is optional until the user starts Rapid-MLX setup
     },
   });
 
-  const localModel = item(status.models, "localModel");
-  assert.equal(localModel.state, "not_requested");
-  assert.equal(localModel.action, "provision_local_model");
-  assert.match(localModel.detail, /Optional: provision Rapid-MLX/i);
-  assert.match(item(status.models, "localModel").detail, /fast/);
+  const frontierModel = item(status.models, "frontierModel");
+  assert.equal(frontierModel.state, "needs_action");
+  assert.equal(frontierModel.action, "configure_frontier");
+  assert.match(frontierModel.detail, /no frontier CLI found/i);
   assert.equal(item(status.memory, "persona").state, "needs_action");
   assert.match(item(status.memory, "persona").detail, /birth ritual/i);
 });

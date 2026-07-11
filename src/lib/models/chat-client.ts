@@ -11,10 +11,7 @@
  * loop-closer, enhance-prompt, learning-loop, persona-evolution) — see
  * docs/superpowers/plans/2026-07-11-claude-native-cutover.md.
  *
- * `localChatComplete()` (local Qwen over LM Studio HTTP) is kept only as a
- * legacy backend during the cutover — Phase 5 deletes it.
- *
- * The HTTP `fetch` / CLI subprocess call is injectable so unit tests touch
+ * The CLI subprocess call is injectable so unit tests touch
  * neither the network nor a real model/binary.
  *
  * See docs/superpowers/specs/2026-06-27-model-advised-decomposition-design.md.
@@ -22,7 +19,6 @@
 
 import { execFile as execFileCb } from "child_process";
 import { promisify } from "util";
-import { getQwenProfile } from "@/lib/config/qwen-profile";
 import { resolveClaudeBinary } from "@/lib/orchestrator/subprocess";
 import { backendConfigured } from "@/lib/models/backends";
 
@@ -40,57 +36,6 @@ export interface ChatOpts {
 }
 
 export type ChatComplete = (messages: ChatMessage[], opts?: ChatOpts) => Promise<string>;
-
-const DEFAULT_TIMEOUT_MS = 12_000;
-
-function normalizeBaseUrl(endpoint: string): string {
-  return endpoint.trim().replace(/\/+$/, "");
-}
-function candidateUrls(endpoint: string, path: string): string[] {
-  const base = normalizeBaseUrl(endpoint);
-  const urls = [`${base}/${path}`];
-  if (!base.endsWith("/v1")) urls.push(`${base}/v1/${path}`);
-  return urls;
-}
-
-/** Local Qwen via LM Studio /chat/completions. Keyless. Tries /chat then /v1/chat. */
-export async function localChatComplete(messages: ChatMessage[], opts: ChatOpts = {}): Promise<string> {
-  const profile = getQwenProfile();
-  const endpoint = opts.endpoint ?? profile?.primary.endpoint;
-  const model = opts.model ?? profile?.primary.modelId;
-  if (!endpoint || !model) throw new Error("local model not configured (no qwen profile / endpoint)");
-  const doFetch = opts.fetchImpl ?? fetch;
-  const body = JSON.stringify({
-    model,
-    messages,
-    stream: false,
-    max_tokens: opts.maxTokens ?? 1024,
-    temperature: opts.temperature ?? 0,
-  });
-
-  let lastErr: unknown = null;
-  for (const url of candidateUrls(endpoint, "chat/completions")) {
-    try {
-      const res = await doFetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-        signal: AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
-      });
-      if (res.status === 404) { lastErr = new Error("404"); continue; } // try the next candidate URL
-      if (!res.ok) throw new Error(`local model HTTP ${res.status}`);
-      const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
-      const content = data.choices?.[0]?.message?.content;
-      if (typeof content !== "string") throw new Error("local model returned no content");
-      return content;
-    } catch (e) {
-      lastErr = e;
-      // On an abort/timeout or a real HTTP error, don't keep trying URLs.
-      if (e instanceof Error && /HTTP \d|content/.test(e.message)) throw e;
-    }
-  }
-  throw new Error(`local model completion failed: ${lastErr instanceof Error ? lastErr.message : lastErr}`);
-}
 
 // ---------------------------------------------------------------------------
 // Claude CLI (subscription OAuth) — the default operational backend.

@@ -25,7 +25,6 @@ test("every config.json writer goes through writeJsonAtomic (a crash mid-write m
     "src/lib/config/features.ts",
     "src/lib/config/autonomy.ts",
     "src/lib/embeddings/provider.ts",
-    "src/lib/models/provision.ts",
     "src/lib/models/available.ts",
   ]) {
     const body = readFileSync(rel, "utf-8");

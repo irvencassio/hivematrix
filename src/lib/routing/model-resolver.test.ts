@@ -25,7 +25,6 @@ function frontierBackendsQuadrant(opts: {
   claudeInstalled: boolean; claudeEnabled: boolean; codexInstalled: boolean; codexEnabled: boolean;
 }) {
   return [
-    { id: "local" as const, name: "Local", configured: false, installed: false, enabled: true, detail: "" },
     { id: "claude" as const, name: "Claude Code", configured: opts.claudeInstalled && opts.claudeEnabled, installed: opts.claudeInstalled, enabled: opts.claudeEnabled, detail: "" },
     { id: "codex" as const, name: "Codex", configured: opts.codexInstalled && opts.codexEnabled, installed: opts.codexInstalled, enabled: opts.codexEnabled, detail: "" },
   ];

@@ -146,7 +146,6 @@ async function buildFirstRunSetupResponse(opts: {
   const { probeDesktopBeeHelper, dispatchDesktopBeeAction } = await import("@/lib/desktopbee/client");
   const { getMessagebeeStatus } = await import("@/lib/messagebee/status");
   const { getMailbeeStatus } = await import("@/lib/mailbee/status");
-  const { planLocalEngine, getProvisionStatus } = await import("@/lib/models/provision");
   const { configuredBrainRootDir } = await import("@/lib/brain/settings");
   const { getPersonaStatus } = await import("@/lib/onboarding/birth-ritual");
 
@@ -176,12 +175,6 @@ async function buildFirstRunSetupResponse(opts: {
     mailbee,
     mailAutomationProbe: opts.mailAutomationProbe ? mailbee : null,
     desktop: { helperBuilt, helperReachable, permissions: desktopPermissions },
-    localModel: {
-      configured: onboarding.steps.find((s) => s.id === "local-model")?.state === "done",
-      detail: onboarding.steps.find((s) => s.id === "local-model")?.detail,
-      plan: planLocalEngine(),
-      status: getProvisionStatus(),
-    },
     persona: getPersonaStatus(brainRoot),
   });
 }
@@ -389,21 +382,14 @@ export function createDaemonServer() {
         const { detectBackends } = await import("@/lib/models/backends");
         const { buildAvailableModels, buildRoleModelOptions, getDefaultModel, getThemeSettings } = await import("@/lib/models/available");
         const { embeddingModelChoices, getEmbeddingsConfig } = await import("@/lib/embeddings/provider");
-        const { localEngineStatus, localEngineCapability } = await import("@/lib/models/local-engine");
-        const { readConfigMatchedLocalModelHealth } = await import("@/lib/local-model/health");
         const { versionInfo } = await import("@/lib/version");
         const backends = detectBackends();
         const available = buildAvailableModels(backends);
         const theme = getThemeSettings();
-        const localEngine = await localEngineStatus();
-        const localEngineCap = localEngineCapability();
         const { getLocation, getAutoUpdate, getFrontierProvider, getRoleModelsForDisplay } = await import("@/lib/models/available");
         const { getTelemetryConfig } = await import("@/lib/telemetry/telemetry");
         json(res, 200, {
           backends,
-          localEngine,
-          localModelHealth: readConfigMatchedLocalModelHealth(),
-          localEngineCapability: localEngineCap,
           available,
           defaultModel: getDefaultModel(available),
           version: versionInfo(),
@@ -817,7 +803,6 @@ export function createDaemonServer() {
         const body = await parseBody(req) as Record<string, unknown>;
         const m = await import("@/lib/models/available");
         if (typeof body.defaultModel === "string") m.setDefaultModel(body.defaultModel);
-        if (typeof body.localEndpoint === "string" && body.localEndpoint.trim()) m.setLocalEndpoint(body.localEndpoint.trim());
         if (body.theme === "system" || body.theme === "light" || body.theme === "dark" || body.theme === "matrix") m.setTheme(body.theme);
         if (typeof body.wallpaperPath === "string") m.setWallpaperPath(body.wallpaperPath.trim() || null);
         if (body.wallpaperPath === null) m.setWallpaperPath(null);
@@ -1103,20 +1088,6 @@ export function createDaemonServer() {
           brainRootDir: String(body.brainRootDir ?? ""),
           createIfMissing: body.createIfMissing !== false,
           makeShortcut: body.makeShortcut === true,
-        }));
-        return;
-      }
-
-      // POST /onboarding/local-model — point-at / cloud-only / download
-      if (req.method === "POST" && urlPath === "/onboarding/local-model") {
-        const body = await parseBody(req) as Record<string, unknown>;
-        const { configureLocalModel } = await import("@/lib/onboarding/actions");
-        const mode = body.mode === "endpoint" || body.mode === "cloud-only" || body.mode === "download" ? body.mode : "endpoint";
-        json(res, 200, await configureLocalModel({
-          mode,
-          endpoint: typeof body.endpoint === "string" ? body.endpoint : undefined,
-          modelId: typeof body.modelId === "string" ? body.modelId : undefined,
-          provider: typeof body.provider === "string" ? body.provider : undefined,
         }));
         return;
       }
@@ -4152,8 +4123,9 @@ export function createDaemonServer() {
       }
 
       // Prompt wizard: rewrites a rough New-Task description into a structured prompt via
-      // the local Qwen model. Always 200s — a wizard failure must never block task creation,
-      // so on any internal error this falls back to echoing the original description.
+      // haikuChatComplete (Claude Haiku CLI). Always 200s — a wizard failure must never
+      // block task creation, so on any internal error this falls back to echoing the
+      // original description.
       if (req.method === "POST" && urlPath === "/tasks/enhance") {
         const body = await parseBody(req) as Record<string, unknown>;
         const description = typeof body.description === "string" ? body.description : "";

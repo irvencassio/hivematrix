@@ -22,14 +22,10 @@ import { getAgentProfile } from "@/lib/config/agent-profiles";
 import { buildBrainMemoryBundle, buildBrainIndexBlock } from "@/lib/brain/memory-bundle";
 import { brainDocPolicyText } from "@/lib/brain/settings";
 import { resolveThinkingMode } from "@/lib/config/budget-policy";
-import { governContext, ContextBudgetExceededError } from "@/lib/local-model/context-governor";
 
 const MAX_TURNS = 50;
 const MODEL_TOOL_RESULT_MAX_CHARS = 12_000;
 const LOCAL_OPENAI_COMPATIBLE_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm", "nanai"]);
-// Providers HiveMatrix serves locally (Qwen). nanai is excluded — it's cloud
-// image generation, not a self-hosted endpoint we wait on for cold start.
-const LOCAL_SERVED_PROVIDERS = new Set(["ollama", "lmstudio", "mlx", "vllm"]);
 
 // Loop-guard thresholds: how many identical tool calls before intervening
 const LOOP_WARN_THRESHOLD = 3;  // inject "you already have this" into tool result
@@ -610,27 +606,6 @@ async function runAgentLoop(
   const messages = await buildMessages(description, projectPath, agentType, thinkingMode);
   const profileTools = getProfileTools(agentType);
 
-  // Pre-flight: if this is a locally-served model (Qwen), make sure the server is
-  // actually up before we start. The supervisor relaunches a crashed server on a
-  // ~12s throttle and an 80B model takes time to load — without this wait a task
-  // dispatched in that window fails with a cryptic connection error and looks
-  // like "Qwen randomly doesn't work". Wait through the cold-start instead.
-  if (LOCAL_SERVED_PROVIDERS.has(provider.name)) {
-    const { isServerUp, waitForServerReady } = await import("@/lib/local-model/serving");
-    if (!(await isServerUp(provider.endpoint))) {
-      onEvent(taskId, { type: "error", content: `Local model server not ready at ${provider.endpoint} — waiting for it to come up (supervisor is (re)launching it)…` });
-      const ready = await waitForServerReady(provider.endpoint, { timeoutMs: 45_000, signal: controller.signal });
-      if (controller.signal.aborted) {
-        return { code: 1, result: "Aborted", turns: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0 };
-      }
-      if (!ready) {
-        const msg = `Local model (Qwen) at ${provider.endpoint} did not become reachable within 45s. Check that the inference server is configured to launch (config qwen.location="local" + a valid provider/serveCommand) and that the model fits in memory. Connectivity mode determines whether this task can fall back to frontier.`;
-        onEvent(taskId, { type: "error", content: msg });
-        return { code: 1, result: msg, turns: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0 };
-      }
-    }
-  }
-
   let turns = 0;
   let fullText = "";
   let totalTokens = 0;
@@ -655,28 +630,6 @@ async function runAgentLoop(
     }
 
     turns++;
-
-    // Rapid-MLX has no server-side context flag (MLX grows the KV cache
-    // lazily), so nothing else bounds a local conversation. Compact or fail
-    // loudly here rather than letting an oversized prompt hit the server as
-    // silent memory pressure (2026-07-09 local-model-tuning spec, §3.3).
-    if (LOCAL_SERVED_PROVIDERS.has(provider.name) && provider.contextLimit) {
-      try {
-        const governed = governContext(messages, { contextLimit: provider.contextLimit, maxOutputTokens: provider.maxOutputTokens });
-        if (governed.compacted) {
-          onEvent(taskId, {
-            type: "log",
-            content: `[context] compacted ${governed.droppedCount} older turn(s) — ~${governed.estimatedTokensBefore} -> ~${governed.estimatedTokensAfter} tokens (budget ${provider.contextLimit - provider.maxOutputTokens})`,
-          });
-        }
-      } catch (err) {
-        if (err instanceof ContextBudgetExceededError) {
-          onEvent(taskId, { type: "error", content: err.message });
-          return { code: 1, result: err.message, turns, totalTokens, inputTokens, outputTokens };
-        }
-        throw err;
-      }
-    }
 
     // Call API with single retry on transient errors (429, 500, 502, 503)
     let response: Response | null = null;

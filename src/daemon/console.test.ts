@@ -402,25 +402,25 @@ test("onboarding wizard uses explicit permission probe and request routes", () =
   assert.match(CONSOLE_HTML, /onclick="obRequestDesktopPerms\(\)"/, "Desktop Control button uses the setup request route");
 });
 
-test("onboarding wizard displays setup localModel status on the model card", () => {
+test("onboarding wizard detects frontier CLI backends only — no local model card (Claude-native cutover Phase 5)", () => {
   const js = extractScript(CONSOLE_HTML);
   const detectModels = extractBetween(js, "async function obDetectModels()", "function _obSetModelCard");
 
-  assert.match(detectModels, /api\('\/onboarding\/setup'\)/, "model detection consults setup status");
-  assert.match(detectModels, /localModel/, "local model card uses setup model id localModel");
-  assert.match(detectModels, /localMod[^;]+detail/, "local model detail is displayed when available");
+  assert.match(detectModels, /api\('\/providers'\)/, "model detection consults the providers endpoint");
+  assert.doesNotMatch(detectModels, /localModel/, "no local model card wiring remains");
+  assert.doesNotMatch(js, /async function obSetupLocalModel\(/, "manual local-model connect flow removed");
+  assert.doesNotMatch(js, /async function obSetCloudOnly\(/, "cloud-only local-model flow removed");
 });
 
-test("onboarding wizard no longer offers one-click Rapid-MLX provisioning (Claude-native cutover Phase 4)", () => {
+test("onboarding wizard no longer offers local-model provisioning at all (Claude-native cutover Phase 5)", () => {
   const js = extractScript(CONSOLE_HTML);
 
   assert.doesNotMatch(CONSOLE_HTML, /id="ob_lm_provision"/, "provisioning button removed");
   assert.doesNotMatch(CONSOLE_HTML, /id="ob_lm_provision_log"/, "provisioning status output removed");
+  assert.doesNotMatch(CONSOLE_HTML, /id="ob_model_lmstudio"/, "local model card removed");
   assert.doesNotMatch(js, /async function obProvisionLocalEngine\(/, "provision action removed");
   assert.doesNotMatch(js, /\/local-engine\/provision/, "no client code calls the removed provision endpoint");
-  // The manual connect + cloud-only path still works.
-  assert.match(js, /async function obSetupLocalModel\(/);
-  assert.match(js, /async function obSetCloudOnly\(/);
+  assert.doesNotMatch(js, /\/onboarding\/local-model/, "no client code calls the removed onboarding local-model endpoint");
 });
 
 test("onboarding wizard exposes persona birth ritual setup", () => {
@@ -541,22 +541,18 @@ test("prompt cache section shows the Claude 5m/1h write split and a token-based 
   assert.match(renderObsDashboard, /c\.cacheCreate5mTokens != null && c\.cacheCreate1hTokens != null/, "the split is only rendered when known, never guessed");
   assert.match(renderObsDashboard, /c\.netBenefitTokens/);
   assert.doesNotMatch(renderObsDashboard, /\$/, "cache economics are token-based — no dollar-sign pricing table");
-  // Local providers are excluded from the DB-cache loop — they get their own
-  // live section below, not the "no prompt-cache signal" fallback line.
+  // Local providers (historical telemetry rows only, e.g. "local-qwen") are
+  // excluded from the DB-cache loop entirely — no live local-engine section exists anymore.
   assert.match(renderObsDashboard, /dbCacheRows = crows\.filter\(function \(c\) \{ return c\.provider\.indexOf\("local-"\) !== 0; \}\)/);
 });
 
-test("dashboard modal has a live local-engine cache section, separate from the window-scoped DB cache rollup", () => {
+test("dashboard modal no longer renders a local-engine cache section (Claude-native cutover Phase 5)", () => {
   const js = extractScript(CONSOLE_HTML);
   const renderObsDashboard = extractBetween(js, "async function renderObsDashboard(target)", "function renderConn()");
-  assert.match(renderObsDashboard, /Local engine cache/);
-  assert.match(renderObsDashboard, /not scoped to the selected window/, "explicitly not window-scoped, unlike the Claude/Codex section above");
-  assert.match(renderObsDashboard, /s\.localEngineCache/);
-  // A tier with no reachable engine renders "engine offline", never a fake 0%.
-  assert.match(renderObsDashboard, /if \(!m\) \{/);
-  assert.match(renderObsDashboard, /engine offline/);
-  // Cache-pressure evictions (KV thrashing) get a visually distinct callout.
-  assert.match(renderObsDashboard, /pressure evictions/);
+  assert.doesNotMatch(renderObsDashboard, /Local engine cache/);
+  assert.doesNotMatch(renderObsDashboard, /s\.localEngineCache/);
+  assert.doesNotMatch(renderObsDashboard, /engine offline/);
+  assert.doesNotMatch(renderObsDashboard, /pressure evictions/);
 });
 
 test("Full dashboard opens dedicated Observability popup, not Settings", () => {

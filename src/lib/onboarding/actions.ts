@@ -247,56 +247,6 @@ export function installDesktopBeeHelper(
 }
 
 /**
- * Configure the local model. Three modes:
- *   - "endpoint": validate a reachable OpenAI-compatible endpoint and write it.
- *   - "cloud-only": no local model; set the macro mode so the step is satisfied.
- *   - "download": guided pull is initiated elsewhere (see model-download.ts);
- *     here we just record the chosen provider/model intent.
- */
-export async function configureLocalModel(opts: {
-  mode: "endpoint" | "cloud-only" | "download";
-  endpoint?: string;
-  modelId?: string;
-  provider?: string;
-  fetchImpl?: typeof fetch;
-}): Promise<ActionResult> {
-  if (opts.mode === "cloud-only") {
-    writeConfigStep({ runMode: "cloud-only" });
-    return { ok: true, detail: "cloud-only: local model skipped" };
-  }
-  if (opts.mode === "endpoint") {
-    const endpoint = (opts.endpoint ?? "").trim();
-    const modelId = (opts.modelId ?? "").trim();
-    if (!endpoint || !modelId) return { ok: false, detail: "endpoint and modelId are required" };
-    const reachable = await probeOpenAiEndpoint(endpoint, opts.fetchImpl ?? fetch);
-    if (!reachable.ok) return { ok: false, detail: `endpoint not reachable: ${reachable.detail}` };
-    writeConfigStep({
-      qwen: { primary: { modelId, endpoint } },
-      localModel: { provider: opts.provider ?? "lmstudio", endpoint, modelName: modelId },
-    });
-    return { ok: true, detail: `local model configured: ${modelId} @ ${endpoint}` };
-  }
-  // download
-  writeConfigStep({ qwen: { primary: { modelId: opts.modelId ?? "", endpoint: opts.endpoint ?? "" } } });
-  return { ok: true, detail: "download initiated", data: { provider: opts.provider } };
-}
-
-/** Quick reachability probe of an OpenAI-compatible /v1/models endpoint. */
-export async function probeOpenAiEndpoint(
-  endpoint: string,
-  fetchImpl: typeof fetch = fetch,
-): Promise<{ ok: boolean; detail: string }> {
-  const base = endpoint.replace(/\/+$/, "");
-  const url = base.endsWith("/v1") ? `${base}/models` : `${base}/v1/models`;
-  try {
-    const res = await fetchImpl(url, { signal: AbortSignal.timeout(4000) });
-    return res.ok ? { ok: true, detail: `HTTP ${res.status}` } : { ok: false, detail: `HTTP ${res.status}` };
-  } catch (e) {
-    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
-  }
-}
-
-/**
  * Guided Message Lane setup: enable/disable the iMessage channel, allowlist a
  * sender, and report whether Full Disk Access (chat.db readability) is in
  * place. Idempotent and safe to re-run; returns the live state the wizard

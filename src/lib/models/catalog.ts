@@ -30,7 +30,7 @@ export const MODEL_OPTIONS: ModelDef[] = [
   { value: "chatgpt", label: "ChatGPT", description: "OpenAI subscription via Codex CLI", modelId: "codex:gpt-5.4", provider: "codex" },
   { value: "codex-computer-use", label: "Codex Computer Use", description: "Codex driving your screen — mouse, keyboard, screenshots", modelId: "codex:gpt-5.4-computer-use", provider: "codex" },
   { value: "nano-banana", label: "Nano Banana", description: "Image generation (cloud-ok); local mflux fallback in local-only/offline", modelId: "gemini-3.1-flash-image-preview", provider: "nanai" },
-  { value: "local", label: "Local Model", description: "MLX / llama.cpp / Ollama — Qwen3 profile", modelId: null },
+  { value: "local", label: "Local Model", description: "bring-your-own OpenAI-compatible server (MLX / llama.cpp / Ollama / LM Studio)", modelId: null },
 ];
 
 export const MODEL_SHORT_NAMES: Record<string, string> = {

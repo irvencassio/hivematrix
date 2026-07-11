@@ -3,8 +3,8 @@
  *
  * Buckets the normalized `task_telemetry` rows (see contracts.ts) into a
  * continuous time axis (5-minute for 1h, hourly for 24h, daily for 7d/30d)
- * split by provider, so one set of charts covers all three executors uniformly
- * (Claude / Codex / local Qwen). Also summarizes prompt-cache usage per provider.
+ * split by provider, so one set of charts covers both executors uniformly
+ * (Claude / Codex). Also summarizes prompt-cache usage per provider.
  *
  * Buckets are computed in LOCAL time (strftime …,'localtime') so the axis lines
  * up with the operator's clock; the cutoff comparison stays on the raw UTC ISO
@@ -13,8 +13,6 @@
 
 import { getDb } from "@/lib/db";
 import { percentile, netCacheBenefitTokens } from "./contracts";
-import { getLocalEngineConfig } from "@/lib/models/local-engine";
-import { getTierMetricsCached, type RapidMlxTierMetrics } from "@/lib/local-model/metrics";
 
 export type SeriesWindow = "1h" | "24h" | "7d" | "30d";
 
@@ -57,16 +55,6 @@ export interface CacheRow {
   netBenefitTokens: number | null;
 }
 
-/** A live scrape of one running rapid-mlx tier's prefix/KV-cache counters —
- * NOT a task_telemetry rollup. `metrics` is null when the tier isn't running
- * or isn't reachable ("engine offline" in the UI), never a fabricated zero. */
-export interface LocalEngineCacheRow {
-  tierKey: string;
-  alias: string;
-  port: number;
-  metrics: RapidMlxTierMetrics | null;
-}
-
 export interface SeriesProviderTotal {
   key: string;
   runs: number;
@@ -97,10 +85,6 @@ export interface ObservabilitySeries {
   providers: string[];
   points: SeriesPoint[];
   cache: CacheRow[];
-  /** Live rapid-mlx per-tier prefix/KV-cache snapshot — not window-scoped,
-   * this is the running process's current state. Empty when the configured
-   * local engine isn't rapid-mlx (lmstudio/ollama expose no such endpoint). */
-  localEngineCache: LocalEngineCacheRow[];
   /** Per-model breakdown, window-scoped, busiest model first. */
   models: SeriesModelTotal[];
   totals: {
@@ -112,8 +96,6 @@ export interface ObservabilitySeries {
 }
 
 // Which providers report per-run prompt-cache tokens in task_telemetry.
-// Local engines don't (see CacheRow.supported); their cache signal is live,
-// not historical — see localEngineCache / getLocalEngineCacheSnapshot below.
 const CACHE_SUPPORTED = new Set(["anthropic", "openai-codex"]);
 
 interface WindowSpec {
@@ -184,27 +166,6 @@ function axis(spec: WindowSpec): string[] {
 
 function emptyCell(): ProviderCell {
   return { runs: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 };
-}
-
-/**
- * Live per-tier scrape of the configured local engine's KV/prefix-cache
- * counters. Only rapid-mlx exposes /metrics (lmstudio/ollama don't) — other
- * engines get an empty array, not a fabricated "offline" row per tier that
- * doesn't apply to them. Each tier's scrape is independently TTL-cached (see
- * getTierMetricsCached) so this never blocks a dashboard render on the full
- * timeout for an engine that's down.
- */
-async function getLocalEngineCacheSnapshot(): Promise<LocalEngineCacheRow[]> {
-  const cfg = getLocalEngineConfig();
-  if (cfg.engine !== "rapid-mlx") return [];
-  return Promise.all(
-    cfg.tiers.map(async (tier) => ({
-      tierKey: tier.key,
-      alias: tier.alias,
-      port: tier.port,
-      metrics: await getTierMetricsCached(tier.port),
-    })),
-  );
 }
 
 export async function observabilitySeries(window: SeriesWindow = "7d"): Promise<ObservabilitySeries> {
@@ -356,15 +317,12 @@ export async function observabilitySeries(window: SeriesWindow = "7d"): Promise<
     })
     .sort((a, b) => b.runs - a.runs);
 
-  const localEngineCache = await getLocalEngineCacheSnapshot();
-
   return {
     window,
     unit: spec.unit,
     providers: [...providers].sort(),
     points,
     cache,
-    localEngineCache,
     models,
     totals: {
       runs: totalRuns,

@@ -1,6 +1,5 @@
 import type { MailbeeStatus } from "@/lib/mailbee/status";
 import type { MessagebeeStatus } from "@/lib/messagebee/status";
-import type { ProvisionPlan, ProvisionStatus } from "@/lib/models/provision";
 import type { PersonaStatus } from "@/lib/onboarding/birth-ritual";
 import type { OnboardingStatus, OnboardingStep } from "@/lib/onboarding/onboarding";
 
@@ -38,13 +37,6 @@ export interface DesktopSetupSnapshot {
   } | null;
 }
 
-export interface LocalModelSetupSnapshot {
-  configured?: boolean;
-  detail?: string;
-  plan?: ProvisionPlan | null;
-  status?: ProvisionStatus | null;
-}
-
 export type PersonaSetupSnapshot = PersonaStatus | {
   exists?: boolean;
   detail?: string;
@@ -60,7 +52,6 @@ export interface FirstRunSetupStatusInput {
   mailbee?: MailbeeStatus | null;
   mailAutomationProbe?: MailbeeStatus | null;
   desktop?: DesktopSetupSnapshot | null;
-  localModel?: LocalModelSetupSnapshot | null;
   persona?: PersonaSetupSnapshot | null;
   microphoneOpened?: boolean;
 }
@@ -191,68 +182,23 @@ function buildMicrophone(opened: boolean | undefined): SetupItem {
   };
 }
 
-function buildLocalModel(input: FirstRunSetupStatusInput): SetupItem {
-  const snapshot = input.localModel ?? null;
-  const step = onboardingStep(input.onboarding, "local-model");
-  const status = snapshot?.status ?? null;
-  const plan = snapshot?.plan ?? status?.plan ?? null;
-
-  if (status?.phase === "running") {
+function buildFrontierModel(input: FirstRunSetupStatusInput): SetupItem {
+  const step = onboardingStep(input.onboarding, "frontier");
+  if (!step) {
     return {
-      id: "localModel",
-      title: "Local model provisioning",
-      state: "configured",
-      detail: "Local model provisioning is running.",
+      id: "frontierModel",
+      title: "Frontier model access",
+      state: "unknown",
+      detail: "Frontier CLI status unknown.",
+      action: "configure_frontier",
     };
   }
-
-  if (status?.phase === "done") {
-    return {
-      id: "localModel",
-      title: "Local model provisioning",
-      state: "ready",
-      detail: "Local model provisioning completed.",
-    };
-  }
-
-  if (status?.phase === "error") {
-    return {
-      id: "localModel",
-      title: "Local model provisioning",
-      state: "needs_action",
-      detail: status.error ? `Local model provisioning failed: ${status.error}` : "Local model provisioning failed.",
-      action: "provision_local_model",
-    };
-  }
-
-  if (snapshot?.configured === true || step?.state === "done") {
-    return {
-      id: "localModel",
-      title: "Local model provisioning",
-      state: "configured",
-      detail: snapshot?.detail ?? step?.detail ?? "Local model configured.",
-    };
-  }
-
-  if (plan) {
-    const tiers = plan.recommendedTiers.length ? plan.recommendedTiers.join(" + ") : "cloud-only";
-    return {
-      id: "localModel",
-      title: "Local model provisioning",
-      state: plan.localCapable ? "not_requested" : "configured",
-      detail: plan.localCapable
-        ? `Optional: provision Rapid-MLX for this Mac when you want local models: ${tiers}.`
-        : `Local model not required: ${plan.reason ?? "this Mac is cloud-only"}.`,
-      action: plan.localCapable ? "provision_local_model" : undefined,
-    };
-  }
-
   return {
-    id: "localModel",
-    title: "Local model provisioning",
-    state: step ? "needs_action" : "unknown",
-    detail: step?.detail ?? "Local model provisioning status unknown.",
-    action: "provision_local_model",
+    id: "frontierModel",
+    title: step.title,
+    state: step.state === "done" ? "configured" : "needs_action",
+    detail: step.detail,
+    action: step.state === "done" ? undefined : "configure_frontier",
   };
 }
 
@@ -406,7 +352,7 @@ export function buildFirstRunSetupStatus(input: FirstRunSetupStatusInput = {}): 
       buildMailAutomation(input),
       buildMicrophone(input.microphoneOpened),
     ],
-    models: [buildLocalModel(input)],
+    models: [buildFrontierModel(input)],
     memory: [buildBrain(input), buildPersona(input)],
     optional: [buildMessageLane(input), buildMailLane(input), buildDesktopLane(input)],
     requiredReady: input.onboarding?.requiredComplete === true,

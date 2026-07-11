@@ -1,9 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { readCachedLocalModelHealth } from "@/lib/local-model/health";
-import { tierForAlias, tierBaseUrl } from "@/lib/models/local-engine";
-import { localPresetForModel } from "@/lib/models/local-presets";
 
 // Direct cloud image provider removed. nanai retained as abstract image provider for Nano Banana.
 // TODO Phase 2: mlx supportsTools must be probe-driven via the readiness gate, not hardcoded false.
@@ -13,15 +10,10 @@ export interface ModelProvider {
   endpoint: string;
   apiKey: string;
   supportsTools: boolean;
-  /** Cap on tokens GENERATED per turn (OpenAI `max_tokens`) — never the context
-   * window. See QwenModelConfig.maxOutputTokens for the local-model source of
-   * this value; the two must never be conflated (2026-07-09 tuning spec). */
+  /** Cap on tokens GENERATED per turn (OpenAI `max_tokens`) — never the context window. */
   maxOutputTokens: number;
-  /** Prompt+history budget in tokens, enforced client-side by the context
-   * governor (local-model/context-governor.ts) before dispatch — Rapid-MLX has
-   * no server-side context flag, so nothing else bounds this. Undefined ⇒ the
-   * governor no-ops (only the Qwen local-engine flow currently populates this;
-   * see QwenModelConfig.contextLimit / buildQwenProvider). */
+  /** Prompt+history budget in tokens, if the provider needs client-side enforcement.
+   * Undefined ⇒ no client-side context budget is enforced. */
   contextLimit?: number;
 }
 
@@ -111,10 +103,6 @@ export function detectProvider(modelId: string): string | null {
       return provider;
     }
   }
-  const preset = localPresetForModel(modelId);
-  if (preset) return preset.provider;
-  // A Rapid-MLX local-engine tier alias (e.g. qwen3.6-27b-4bit) → mlx.
-  if (tierForAlias(modelId)) return "mlx";
   return null;
 }
 
@@ -135,17 +123,11 @@ export function resolveProvider(modelId: string): ModelProvider | null {
 
   if (!defaults && !userConfig) return null;
 
-  // A local-engine tier alias routes to that tier's port (two-tier Rapid-MLX);
-  // else the configured localModel endpoint; else the provider default.
-  const tier = tierForAlias(modelId);
-  const preset = localPresetForModel(modelId);
-  const endpoint = tier
-    ? tierBaseUrl(tier)
-    : preset
-      ? preset.endpoint
-    : localModel?.modelName === modelId
-      ? localModel.endpoint
-      : (userConfig?.endpoint ?? defaults?.endpoint);
+  // The configured localModel endpoint (BYO OpenAI-compatible server); else
+  // the provider default.
+  const endpoint = localModel?.modelName === modelId
+    ? localModel.endpoint
+    : (userConfig?.endpoint ?? defaults?.endpoint);
   if (!endpoint) return null;
 
   // API key: env vars only — Hive does not store keys
@@ -158,19 +140,11 @@ export function resolveProvider(modelId: string): ModelProvider | null {
   const isLocal = providerName === "ollama" || providerName === "lmstudio" || providerName === "mlx" || providerName === "vllm" || providerName === "nanai";
   if (!isLocal && !apiKey) return null;
 
-  const localHealth = isLocal ? readCachedLocalModelHealth() : null;
-  const supportsTools = localHealth &&
-    localHealth.endpoint === endpoint &&
-    localHealth.modelName === modelId &&
-    localHealth.provider === providerName
-      ? localHealth.toolCalls
-      : defaults?.supportsTools ?? true;
-
   return {
     name: providerName,
     endpoint,
     apiKey,
-    supportsTools,
+    supportsTools: defaults?.supportsTools ?? true,
     maxOutputTokens: defaults?.maxOutputTokens ?? 4096,
   };
 }

@@ -4,7 +4,6 @@ import { NO_REPO_LOCK_PROJECTS } from "@/lib/routing/aliases";
 import { agentManager } from "./agent-manager";
 import { readCachedUsage, type ProfileUsage } from "@/lib/usage/fetcher";
 import { broadcast } from "@/lib/ws/broadcaster";
-import { getLocalFallbackDecision } from "@/lib/local-model/fallback";
 import { missionTick } from "./mission-engine";
 import { syncMissionProgressDoc } from "./mission-progress-doc";
 import { scheduledRunnerTick } from "./scheduled-runner";
@@ -497,42 +496,6 @@ async function tick() {
         if (usage.provider) {
           getConnectivityPolicy().onUsageWindowExhausted(usage.provider);
         }
-        const fallback = await getLocalFallbackDecision({
-          currentModelId: effectiveModel,
-          project: task.project,
-          reason: "usage",
-        });
-        if (fallback) {
-          const output = {
-            ...(task.output ?? {}),
-            fallbackReason: "usage_exhausted",
-            fallbackSourceModel: effectiveModel ?? "claude-default",
-            fallbackTargetModel: fallback.modelId,
-            fallbackAt: new Date().toISOString(),
-          };
-          await Task.findByIdAndUpdate(task._id.toString(), {
-            model: fallback.modelId,
-            project: fallback.project,
-            projectPath: fallback.projectPath,
-            delayUntil: null,
-            delayReason: null,
-            output,
-          });
-          broadcast({
-            type: "task:updated",
-            taskId: task._id.toString(),
-            fields: {
-              model: fallback.modelId,
-              project: fallback.project,
-              projectPath: fallback.projectPath,
-              delayUntil: null,
-              delayReason: null,
-              output,
-            },
-          });
-          continue;
-        }
-
         const resetTime = usage.resetsAt
           ? new Date(usage.resetsAt).toISOString()
           : new Date(Date.now() + 15 * 60_000).toISOString();

@@ -5,7 +5,6 @@ import {
   buildDaemonPlist,
   buildHelperPlist,
   mergeConfig,
-  probeOpenAiEndpoint,
   installDaemonLaunchAgent,
   installDesktopBeeHelper,
   openSystemSettingsPane,
@@ -48,20 +47,6 @@ test("mergeConfig deep-merges objects and replaces scalars/arrays", () => {
   const base = { memory: { enabled: true, brainRootDir: "~/old" }, x: 1, arr: [1, 2] };
   const merged = mergeConfig(base, { memory: { brainRootDir: "~/new" }, x: 2, arr: [3] });
   assert.deepEqual(merged, { memory: { enabled: true, brainRootDir: "~/new" }, x: 2, arr: [3] });
-});
-
-test("probeOpenAiEndpoint normalizes the /v1/models URL and reports reachability", async () => {
-  const calls: string[] = [];
-  const okFetch = (async (url: string) => { calls.push(String(url)); return { ok: true, status: 200 } as Response; }) as unknown as typeof fetch;
-  assert.equal((await probeOpenAiEndpoint("http://127.0.0.1:1234", okFetch)).ok, true);
-  assert.equal(calls[0], "http://127.0.0.1:1234/v1/models");
-  assert.equal((await probeOpenAiEndpoint("http://127.0.0.1:1234/v1/", okFetch)).ok, true);
-  assert.equal(calls[1], "http://127.0.0.1:1234/v1/models");
-
-  const failFetch = (async () => { throw new Error("ECONNREFUSED"); }) as unknown as typeof fetch;
-  const r = await probeOpenAiEndpoint("http://127.0.0.1:9", failFetch);
-  assert.equal(r.ok, false);
-  assert.match(r.detail, /ECONNREFUSED/);
 });
 
 test("installDaemonLaunchAgent refuses outside /Applications (no side effects)", () => {

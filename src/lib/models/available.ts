@@ -1,7 +1,7 @@
 /**
  * The set of models the console offers, derived from which backends are
  * actually configured (see backends.ts). Frontier model IDs are pinned to the
- * current releases; the local model reflects the configured Qwen profile.
+ * CLI's version-agnostic aliases (opus/sonnet/haiku).
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
@@ -9,8 +9,6 @@ import { join } from "path";
 import { homedir } from "os";
 import { writeJsonAtomic } from "@/lib/config/atomic-write";
 import { detectBackends, type BackendStatus, type BackendId } from "./backends";
-import { SUPPORTED_LOCAL_TIER_PRESETS, type LocalTier } from "./local-engine";
-import { LOCAL_MODEL_PRESETS, type LocalModelPreset } from "./local-presets";
 import { claudeAliasId } from "./catalog";
 
 // Claude frontier models are referenced by the CLI's version-agnostic aliases,
@@ -34,65 +32,9 @@ export interface UiModel {
   disabled?: boolean;
 }
 
-function localTierLabel(tier: LocalTier): string {
-  if (tier.key === "coding") return `Local coding — ${tier.alias}`;
-  return `Local fast — ${tier.alias}`;
-}
-
-function localTierNote(tier: LocalTier): string {
-  if (tier.key === "coding") return "on-device 27B-dense — higher coding quality, slower";
-  return "on-device fast tier — daily, voice, and operational work";
-}
-
-/**
- * Normalize a local model id to its base family so the SAME model in different
- * quant/provider forms isn't offered twice. Both the configured "qwen3.6-35b-4bit"
- * (a tier alias) and the "mlx-community/Qwen3.6-35B-A3B-8bit" preset collapse to
- * "qwen3.6-35b". Non-qwen ids fall back to their bare basename (no over-merging).
- */
-function localModelFamily(modelId: string): string {
-  const base = (modelId.split("/").pop() ?? modelId).toLowerCase();
-  const m = base.match(/qwen[\d.]+-\d+b/); // qwen<version>-<size>b
-  return m ? m[0] : base;
-}
-
-/**
- * Local model options for the picker, deduped by FAMILY against what's already
- * shown (seeded with the configured local model's family). Prevents the same base
- * model appearing twice as a tier alias and a preset in a different quantization.
- */
-function localPresetUiModels(seenFamilies: Set<string>): UiModel[] {
-  const out: UiModel[] = [];
-  for (const tier of SUPPORTED_LOCAL_TIER_PRESETS) {
-    const fam = localModelFamily(tier.alias);
-    if (seenFamilies.has(fam)) continue;
-    seenFamilies.add(fam);
-    out.push({ id: `local-${tier.key}`, name: localTierLabel(tier), modelId: tier.alias, backend: "local", note: localTierNote(tier) });
-  }
-  for (const preset of LOCAL_MODEL_PRESETS) {
-    const fam = localModelFamily(preset.modelId);
-    if (seenFamilies.has(fam)) continue;
-    seenFamilies.add(fam);
-    out.push({ id: preset.id, name: preset.name, modelId: preset.modelId, backend: "local", note: preset.note });
-  }
-  return out;
-}
-
 export function buildAvailableModels(backends: BackendStatus[] = detectBackends()): UiModel[] {
   const by = (id: BackendId) => backends.find((b) => b.id === id);
   const models: UiModel[] = [];
-
-  const local = by("local");
-  if (local?.configured && local.modelId) {
-    models.push({
-      id: "local",
-      name: `Local — ${local.modelId}`,
-      modelId: local.modelId,
-      backend: "local",
-      note: "runs entirely on your machine",
-    });
-    for (const tierModel of localPresetUiModels(new Set([localModelFamily(local.modelId)]))) models.push(tierModel);
-  }
 
   const claude = by("claude");
   if (claude?.configured) {
@@ -118,29 +60,31 @@ export function buildAvailableModels(backends: BackendStatus[] = detectBackends(
       note: codex?.connect || "install the Codex CLI and run 'codex login' to enable" });
   }
 
-  // Mixed needs a local backend AND a frontier backend. This is the recommended
-  // posture: thinking + coding go to the frontier (quality where it counts), while
-  // bulk and always-on ambient work stays on-device (free, private, 24/7).
+  // Mixed: role-based routing — thinking/coding/operational each resolve to
+  // their own tier (Opus/Sonnet/Haiku by default; see routing/model-resolver.ts).
+  // This is the recommended posture post-cutover — every role still lands on
+  // Claude, just the tier suited to the work.
   const hasFrontier = !!(claude?.configured || codex?.configured);
-  if (local?.configured && hasFrontier) {
+  if (hasFrontier) {
     models.push({
       id: "mixed",
-      name: "Mixed — frontier codes & thinks, local runs the rest",
+      name: "Mixed — routes by role (thinking/coding/operational)",
       modelId: MIXED_ID,
       backend: "mixed",
-      note: "recommended · thinking + coding on the frontier, bulk & ambient work on-device",
+      note: "recommended · thinking on Opus, coding on Sonnet, bulk/ambient on Haiku",
     });
   }
 
-  // Cloud-only is the no-local posture: every role runs on frontier, the local
-  // model is never spawned. Only needs a frontier backend (no local required).
+  // Cloud-only pins every role to the frontier "code-critical" tier — no
+  // per-role split. Kept as a distinct option for tasks that want the
+  // highest-quality model throughout, at the highest cost.
   if (hasFrontier) {
     models.push({
       id: "cloud-only",
       name: "Cloud-only — everything on the frontier",
       modelId: CLOUD_ONLY_ID,
       backend: "mixed",
-      note: "no local model; highest quality, highest cost",
+      note: "highest quality, highest cost",
     });
   }
 
@@ -310,29 +254,6 @@ function roleOption(modelId: string, name: string, backend: BackendId, note?: st
   return { modelId, name, backend, note };
 }
 
-function presetRoleOption(preset: LocalModelPreset): RoleModelOption {
-  return roleOption(preset.modelId, preset.name, "local", preset.note);
-}
-
-function localRoleOptions(local: BackendStatus | undefined): RoleModelOption[] {
-  if (!local?.configured || !local.modelId) return [];
-  const out: RoleModelOption[] = [
-    roleOption(local.modelId, `Local — ${local.modelId}`, "local", "runs on this Mac"),
-  ];
-  const seen = new Set(out.map((m) => m.modelId));
-  for (const tier of SUPPORTED_LOCAL_TIER_PRESETS) {
-    if (seen.has(tier.alias)) continue;
-    out.push(roleOption(tier.alias, localTierLabel(tier), "local", localTierNote(tier)));
-    seen.add(tier.alias);
-  }
-  for (const preset of LOCAL_MODEL_PRESETS) {
-    if (seen.has(preset.modelId)) continue;
-    out.push(presetRoleOption(preset));
-    seen.add(preset.modelId);
-  }
-  return out;
-}
-
 export function buildRoleModelOptions(backends: BackendStatus[] = detectBackends()): RoleModelOptions {
   const by = (id: BackendId) => backends.find((b) => b.id === id);
   const claude = by("claude");
@@ -399,18 +320,4 @@ export function setRoleModel(role: keyof RoleModels, modelId: string): void {
   const v = modelId.trim();
   if (v) cfg[key] = v; else delete cfg[key];
   writeConfig(cfg);
-}
-
-/** Persist the local-server endpoint (Settings → Models → local config). */
-export function setLocalEndpoint(endpoint: string): void {
-  const cfg = readConfig();
-  const lm = (cfg.localModel as Record<string, unknown>) ?? {};
-  lm.endpoint = endpoint;
-  cfg.localModel = lm;
-  const qwen = cfg.qwen as Record<string, unknown> | undefined;
-  if (qwen && qwen.primary && typeof qwen.primary === "object") {
-    (qwen.primary as Record<string, unknown>).endpoint = endpoint;
-  }
-  mkdirSync(join(homedir(), ".hivematrix"), { recursive: true });
-  writeJsonAtomic(configPath(), cfg);
 }

@@ -1679,7 +1679,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="ob-step-panel" id="obStep1">
       <div class="ob-step-label">Step 2 of 3</div>
       <div class="ob-heading">Model Backends</div>
-      <div class="ob-subheading">HiveMatrix routes tasks between frontier models (Claude, ChatGPT) and a local model running on your Mac. Set up at least one. You bring your own subscription — HiveMatrix never meters tokens.</div>
+      <div class="ob-subheading">HiveMatrix routes tasks to frontier models (Claude, ChatGPT). Set up at least one. You bring your own subscription — HiveMatrix never meters tokens.</div>
       <div class="ob-any-status" id="ob_models_status">Detecting…</div>
 
       <div class="ob-model-card" id="ob_model_claude">
@@ -1706,25 +1706,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="ob-model-card" id="ob_model_lmstudio">
-        <div class="ob-model-icon">⬡</div>
-        <div class="ob-model-body">
-          <div class="ob-model-name">Local model <span class="ob-model-mark no" id="ob_lm_mark">—</span></div>
-          <div class="ob-model-status" id="ob_lm_status">Not configured</div>
-          <div class="ob-model-expand" onclick="obToggleDetail('ob_lm_detail')">▸ Configure local model</div>
-          <div class="ob-model-detail" id="ob_lm_detail">
-            <div class="muted" style="font-size:11px;margin-bottom:8px">Run any OpenAI-compatible local model (LM Studio, Ollama, etc). Start your server, then paste its URL and model name below.</div>
-            <input class="dialog-input" id="ob_lm_ep" placeholder="http://127.0.0.1:1234/v1" value="http://127.0.0.1:1234/v1" />
-            <input class="dialog-input" id="ob_lm_model" placeholder="model-id  e.g. qwen3.6-27b" />
-            <div class="ob-btn-row">
-              <button onclick="obSetupLocalModel()">Connect →</button>
-              <button onclick="obSetCloudOnly()">Cloud-only (no local model)</button>
-            </div>
-            <div class="err" id="ob_lm_err" style="margin-top:4px;font-size:11px"></div>
-            <div class="muted" id="ob_lm_conn_status" style="font-size:11px;margin-top:3px"></div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- ── Step 2: Brain Location ── -->
@@ -3104,7 +3085,7 @@ async function renderObsDashboard(target) {
     + obsStackedBars(s.points, providers, function (p, pr) { const c = p.byProvider[pr]; return c ? c.runs : 0; }, s.unit)
     + obsLegend(providers) + '</div>';
 
-  html += '<div class="obs-chart"><h4>Prompt cache</h4><div class="sub">cached input reuse — Claude &amp; Codex cache prompts; the local engine has its own live cache section below</div>';
+  html += '<div class="obs-chart"><h4>Prompt cache</h4><div class="sub">cached input reuse — Claude &amp; Codex cache prompts</div>';
   const crows = (s.cache || []).slice().sort(function (a, b) { return (OBS_ORDER[a.provider] ?? 9) - (OBS_ORDER[b.provider] ?? 9); });
   const dbCacheRows = crows.filter(function (c) { return c.provider.indexOf("local-") !== 0; });
   if (!dbCacheRows.length) html += '<div class="muted">No cache data.</div>';
@@ -3129,39 +3110,6 @@ async function renderObsDashboard(target) {
       + '<span class="cbar"><i style="width:' + Math.min(100, pct).toFixed(0) + '%;background:' + col + '"></i></span>'
       + '<span class="cnum">' + (c.hitRatePct != null ? c.hitRatePct.toFixed(0) + "% hit" : "—") + " · " + obsShort(c.cacheReadTokens) + " read" + written + net + '</span>'
       + '</div>';
-  }
-  html += '</div>';
-
-  // Live rapid-mlx per-tier prefix/KV-cache snapshot — NOT window-scoped
-  // (task_telemetry has no per-run local cache signal, so unlike the section
-  // above this is always "right now", regardless of the 1h/24h/7d/30d picker).
-  html += '<div class="obs-chart"><h4>Local engine cache</h4><div class="sub">rapid-mlx prefix cache — live process state, not scoped to the selected window</div>';
-  const localRows = s.localEngineCache || [];
-  if (!localRows.length) {
-    html += '<div class="muted">Configured local engine does not expose cache metrics.</div>';
-  } else {
-    for (const lr of localRows) {
-      const tierLabel = esc(lr.alias) + ' <span class="muted">(' + esc(lr.tierKey) + ')</span>';
-      const m = lr.metrics;
-      if (!m) {
-        html += '<div class="obs-cacherow"><span class="cprov">' + tierLabel + '</span>'
-          + '<span class="muted" style="font-size:11px">engine offline</span><span class="cnum"></span></div>';
-        continue;
-      }
-      const hits = m.prefixCacheHitsTotal || 0, misses = m.prefixCacheMissesTotal || 0;
-      const total = hits + misses;
-      const pct = total > 0 ? Math.round((hits / total) * 100) : 0;
-      const col = pct >= 50 ? "var(--ok,#4caf50)" : pct >= 20 ? "#f0a500" : "#e05b2c";
-      const kvPct = (m.prefixCacheCurrentBytes != null && m.prefixCacheCapBytes) ? Math.round((m.prefixCacheCurrentBytes / m.prefixCacheCapBytes) * 100) : null;
-      const pressure = m.prefixCachePressureEvictionsTotal;
-      html += '<div class="obs-cacherow">'
-        + '<span class="cprov">' + tierLabel + '</span>'
-        + '<span class="cbar"><i style="width:' + pct + '%;background:' + col + '"></i></span>'
-        + '<span class="cnum">' + (total > 0 ? pct + "% hit" : "—") + " · " + obsShort(m.prefixCacheTokensSavedTotal || 0) + " tok saved"
-        + (kvPct != null ? " · KV " + kvPct + "%" : "")
-        + (pressure ? ' · <span style="color:#e05b2c" title="Cache evictions forced by memory pressure — the KV cache is thrashing">' + fmtNum(pressure) + " pressure evictions</span>" : "")
-        + '</span></div>';
-    }
   }
   html += '</div>';
 
@@ -4287,11 +4235,6 @@ async function wizardAction(id) {
       if (!d) return;
       const sc = await hmConfirm('Also create a ~/brain shortcut pointing at it?', { okLabel: 'Yes' });
       body = { brainRootDir: d, createIfMissing: true, makeShortcut: sc };
-    } else if (id === 'local-model') {
-      const ep = await hmPrompt('Local model — enter an OpenAI-compatible endpoint (e.g. http://127.0.0.1:1234/v1), or type "cloud-only" to skip local:', 'http://127.0.0.1:1234/v1');
-      if (ep === null) return;
-      if (ep.trim().toLowerCase() === 'cloud-only') { body = { mode: 'cloud-only' }; }
-      else { const m = await hmPrompt('Model id served there:', 'qwen/qwen3.6-27b'); if (!m) return; body = { mode: 'endpoint', endpoint: ep.trim(), modelId: m.trim() }; }
     } else if (id === 'frontier') {
       const k = await hmPrompt('Paste an Anthropic or OpenAI API key (blank = rely on the claude/codex CLI):', '');
       if (k === null) return;
@@ -4461,19 +4404,15 @@ async function obDetectModels() {
   const statusEl = document.getElementById('ob_models_status');
   if (statusEl) { statusEl.textContent = 'Detecting…'; statusEl.className = 'ob-any-status'; }
   try {
-    const [setup, providersResp] = await Promise.all([api('/onboarding/setup'), api('/providers').catch(() => null)]);
-    const localMod = _obSetupItem(setup, 'models', 'localModel');
+    const providersResp = await api('/providers').catch(() => null);
     const providers = (providersResp && providersResp.providers) || [];
     const hasClaude = !!(providers.find(p => p.id === 'claude') || {}).installed;
     const hasCodex  = !!(providers.find(p => p.id === 'codex') || {}).installed;
-    const hasLocal  = _obSetupStateReady(localMod);
     _obSetModelCard('ob_model_claude', 'ob_claude_mark', 'ob_claude_status', hasClaude,
       hasClaude ? 'Detected — ready to use' : 'Not found on this Mac');
     _obSetModelCard('ob_model_codex',  'ob_codex_mark',  'ob_codex_status',  hasCodex,
       hasCodex  ? 'Detected — ready to use' : 'Not found on this Mac');
-    _obSetModelCard('ob_model_lmstudio', 'ob_lm_mark', 'ob_lm_status', hasLocal,
-      (localMod && localMod.detail) || (hasLocal ? 'Configured' : 'Not configured'));
-    const any = hasClaude || hasCodex || hasLocal;
+    const any = hasClaude || hasCodex;
     if (statusEl) {
       statusEl.textContent = any ? '✓ At least one model backend ready.' : 'No model backends found yet — set up at least one below.';
       statusEl.className = 'ob-any-status' + (any ? ' ok' : ' warn');
@@ -4495,45 +4434,6 @@ function _obSetModelCard(cardId, markId, statusId, detected, statusText) {
 function obToggleDetail(id) {
   const el = document.getElementById(id);
   if (el) el.classList.toggle('open');
-}
-
-async function obSetupLocalModel() {
-  const ep  = ((document.getElementById('ob_lm_ep')    || {}).value || '').trim() || 'http://127.0.0.1:1234/v1';
-  const mid = ((document.getElementById('ob_lm_model') || {}).value || '').trim();
-  if (!mid) { document.getElementById('ob_lm_err').textContent = 'Enter the model ID served by your local server.'; return; }
-  const errEl  = document.getElementById('ob_lm_err');
-  const connEl = document.getElementById('ob_lm_conn_status');
-  if (errEl) errEl.textContent = '';
-  if (connEl) connEl.textContent = 'Connecting…';
-  try {
-    const r = await api('/onboarding/local-model', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'endpoint', endpoint: ep, modelId: mid }),
-    });
-    if (r && r.ok) {
-      if (connEl) connEl.textContent = '✓ Connected: ' + mid;
-      await obDetectModels();
-    } else {
-      if (errEl) errEl.textContent = (r && r.detail) || 'Connection failed — is the local model server running?';
-      if (connEl) connEl.textContent = '';
-    }
-  } catch(e) {
-    if (errEl) errEl.textContent = String(e);
-    if (connEl) connEl.textContent = '';
-  }
-}
-
-async function obSetCloudOnly() {
-  try {
-    const r = await api('/onboarding/local-model', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'cloud-only' }),
-    });
-    if (r && r.ok) {
-      document.getElementById('ob_lm_conn_status').textContent = '✓ Cloud-only mode set';
-      await obDetectModels();
-    }
-  } catch(e) { /* ignore */ }
 }
 
 // ── Step 2: brain location ────────────────────────────────────────────────────
@@ -5262,15 +5162,15 @@ async function checkUsage(forceRefresh) {
       summaryEl.innerHTML = cards
         ? '<div class="usage-cards">' + cards + '</div>'
         : noFrontierEnabled
-          ? '<div class="muted">No frontier provider enabled — running local (Qwen) only. Enable Claude or Codex in Settings → Models.</div>'
-          : '<div class="muted">No frontier usage yet — local model work runs on-device.</div>';
+          ? '<div class="muted">No frontier provider enabled — enable Claude or Codex in Settings → Models to run tasks.</div>'
+          : '<div class="muted">No frontier usage yet.</div>';
     }
 
     const el = document.getElementById("usage");
     if (!el) return;
 
     if (noFrontierEnabled) {
-      el.innerHTML = '<div class="usage-breakdown"><div class="muted">No frontier provider enabled — running local (Qwen) only. Enable Claude or Codex in Settings → Models.</div></div>';
+      el.innerHTML = '<div class="usage-breakdown"><div class="muted">No frontier provider enabled — enable Claude or Codex in Settings → Models to run tasks.</div></div>';
       return;
     }
 
@@ -5558,64 +5458,6 @@ async function loadAgentProfiles() {
   return agentProfiles;
 }
 
-function localBackendText(backend, health) {
-  return [
-    backend && backend.name,
-    backend && backend.detail,
-    backend && backend.modelId,
-    backend && backend.endpoint,
-    backend && backend.connect,
-    health && health.provider,
-    health && health.modelName,
-    health && health.endpoint,
-    health && health.message,
-  ].filter(Boolean).join(" ").toLowerCase();
-}
-
-function renderLocalBackendChoice(backend, health) {
-  const provider = health ? localHealthProviderName(health.provider) : "local";
-  const title = (backend && backend.name) || ("Local model — " + provider);
-  const model = (health && health.modelName) || (backend && backend.modelId) || "local model";
-  const endpoint = (health && health.endpoint) || (backend && backend.endpoint) || "";
-  const ready = health
-    ? (health.qwenReady === true || health.ready === true || health.ok === true)
-    : !!(backend && backend.configured);
-  const checked = health && health.checkedAt ? new Date(health.checkedAt).toLocaleString() : "";
-  const bits = [];
-  if (health) {
-    bits.push(health.modelFound ? "model listed" : "model missing");
-    bits.push(health.streaming ? "streaming ok" : "streaming not verified");
-    bits.push(health.toolCalls ? "tools ok" : "tools not verified");
-    if (typeof health.decodeRateTokPerSec === "number") bits.push(health.decodeRateTokPerSec.toFixed(1) + " tok/s");
-  } else if (backend && backend.detail) {
-    bits.push(backend.detail);
-  }
-  if (backend && backend.connect && !backend.configured) {
-    bits.push(backend.connect);
-  }
-  return '<div class="mdl-card">'
-    + '<div class="mdl-card-head"><span class="mdl-card-name">Local model — ' + esc(title) + '</span>'
-    + '<span class="st ' + (ready ? "ok" : "no") + '">' + (ready ? "✓ ready" : (health ? "not ready" : "not checked")) + '</span></div>'
-    + '<div class="mdl-tier">' + (ready ? '<span style="color:var(--ok)">●</span>' : '<span style="color:var(--muted)">○</span>')
-    + ' <b>' + esc(model) + '</b><span class="mdl-tier-alias">' + (endpoint ? esc(endpoint) : esc(provider)) + '</span></div>'
-    + (bits.length || (health && health.message) || checked
-      ? '<div class="mdl-card-foot">' + esc(bits.join(" · "))
-        + (health && health.message ? '<br>' + esc(health.message) : '')
-        + (checked ? '<br>checked ' + esc(checked) : '')
-        + '</div>'
-      : '')
-    + '</div>';
-}
-
-function localHealthProviderName(provider) {
-  if (provider === "mlx") return "Rapid-MLX";
-  if (provider === "vllm") return "vLLM";
-  if (provider === "lmstudio") return "LM Studio";
-  if (provider === "ollama") return "Ollama";
-  if (provider === "nanai") return "Nan AI";
-  return provider || "local";
-}
-
 function applyTheme(theme, hasWallpaper) {
   const root = document.documentElement;
   let resolved = theme;
@@ -5695,7 +5537,7 @@ async function loadModels() {
   for (const m of models.available) { if (m.disabled) continue; modelById[m.id] = { modelId: m.modelId, fast: !!m.fast }; }
   // Populate the New Task dropdown, grouped intent-first.
   const sel = document.getElementById("t_model");
-  const catOf = m => m.backend === "mixed" ? "Recommended" : m.backend === "local" ? "Local (on-device)" : "Cloud frontier";
+  const catOf = m => m.backend === "mixed" ? "Recommended" : "Cloud frontier";
   const order = ["Recommended", "Local (on-device)", "Cloud frontier"];
   const groups = {};
   for (const m of models.available) { (groups[catOf(m)] = groups[catOf(m)] || []).push(m); }

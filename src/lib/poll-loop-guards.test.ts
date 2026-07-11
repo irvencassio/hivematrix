@@ -20,7 +20,6 @@ const LOOP_FILES = [
   "youtube/poller.ts",
   "orchestrator/frontier-debt.ts",
   "notify/notify-loop.ts",
-  "local-model/serving.ts",
 ];
 
 // The shared scaffolding is the single source of the .catch guarantee for every

@@ -1694,6 +1694,16 @@ test("local-engine settings routes no longer exist (Claude-native cutover Phase 
   }
 });
 
+test("POST /onboarding/local-model no longer exists (Claude-native cutover Phase 5 — local-Qwen deleted)", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/onboarding/local-model`, {
+    method: "POST", headers, body: JSON.stringify({ mode: "cloud-only" }),
+  });
+  assert.notEqual(res.status, 200, "the onboarding local-model provisioning route was deleted with qwen-profile.ts");
+});
+
 test("POST /claude/auth/login no longer exists — renamed to /providers/:id/setup with no back-compat alias", async (t) => {
   withTempHome(t);
   const { base, headers } = await startServer(t);
@@ -1771,7 +1781,7 @@ test("disabling a provider excludes its rows from /observability and /observabil
   assert.ok(obsBody2.recent.some((r) => r.provider === "openai-codex"), "codex row reappears once re-enabled");
 });
 
-test("/observability/series end-to-end: 1h window, per-model breakdown, cache 5m/1h split, and live local-engine cache field all round-trip over real HTTP", async (t) => {
+test("/observability/series end-to-end: 1h window, per-model breakdown, cache 5m/1h split all round-trip over real HTTP", async (t) => {
   withTempHome(t);
   const { recordRun } = await import("@/lib/observability/store");
 
@@ -1801,7 +1811,6 @@ test("/observability/series end-to-end: 1h window, per-model breakdown, cache 5m
     window: string; unit: string; points: Array<{ t: string }>;
     models: Array<{ model: string; provider: string; runs: number }>;
     cache: Array<{ provider: string; cacheCreate5mTokens: number | null; cacheCreate1hTokens: number | null; netBenefitTokens: number | null }>;
-    localEngineCache: Array<{ tierKey: string; alias: string; port: number; metrics: unknown }>;
   };
   assert.equal(body.window, "1h");
   assert.equal(body.unit, "minute");
@@ -1820,19 +1829,6 @@ test("/observability/series end-to-end: 1h window, per-model breakdown, cache 5m
   assert.equal(anthropicCache.cacheCreate5mTokens, 200);
   assert.equal(anthropicCache.cacheCreate1hTokens, 100);
   assert.ok(anthropicCache.netBenefitTokens != null, "known split → a real (non-null) net benefit number");
-
-  // localEngineCache is present with the configured tiers. `metrics` is
-  // whatever a REAL scrape of 127.0.0.1:<port> returns on the machine running
-  // this test — null if nothing is listening there, a real struct if a
-  // rapid-mlx instance happens to be up (this dev box often has one running).
-  // Deliberately not asserting which — a test that only passes when the
-  // engine is down (or only when it's up) would be network-state-flaky.
-  assert.ok(Array.isArray(body.localEngineCache));
-  assert.ok(body.localEngineCache.length >= 1, "at least the configured local tiers are reported");
-  for (const tier of body.localEngineCache) {
-    assert.equal(typeof tier.port, "number");
-    assert.ok(tier.metrics === null || typeof tier.metrics === "object", "metrics is null (offline) or a real struct — never a fabricated non-null placeholder");
-  }
 });
 
 test("disabling the current primary frontier provider corrects it to the remaining enabled provider", async (t) => {
