@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.178 — 2026-07-11
+
+Fix Flash chat crash on any multi-turn conversation: the prompt is now piped via stdin instead of an argv value, so a prompt beginning with the '--- Prior conversation ---' transcript block is no longer mis-parsed by the claude CLI as an unknown option.
+
 ## v0.1.177 — 2026-07-11
 
 Post-cutover cleanup: purge all remaining local/Qwen/Rapid-MLX UI from settings; Observability now breaks down by Claude model (Opus/Sonnet/Haiku/Codex) + 1h chart fix; Mail Lane TCC probe + auto retry so approval actually works; New Task no longer forces a Project (operations tasks run from home); retire Terminal Lane entirely (moved to Canopy); default model simplified to Opus/Sonnet (default Sonnet).
