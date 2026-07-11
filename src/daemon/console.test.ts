@@ -2283,11 +2283,13 @@ test("Flash send button is disabled for empty input and while in-flight", () => 
   assert.match(js, /_flashState\.sending = false/, "sending flag cleared in finally block");
 });
 
-test("Flash feedback records bad turns", () => {
+test("Flash chat has no thumbs-down button; assistant is labeled with Weaver's sigil", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /async function flashThumbsDown\(turnId\)/, "bad-turn feedback function exists");
-  assert.match(js, /\/flash\/turns\/' \+ encodeURIComponent\(turnId\) \+ '\/feedback'/, "feedback endpoint is called with encoded turn id");
-  assert.match(js, /rating: 'bad'/, "feedback payload marks the turn bad");
+  // The 👎 feedback button + its handler were removed (the /flash/turns/:id/feedback
+  // endpoint stays for programmatic use, but the UI no longer surfaces it).
+  assert.doesNotMatch(js, /flashThumbsDown/, "thumbs-down handler is gone");
+  assert.ok(!js.includes("👎"), "no thumbs-down button in the chat");
+  assert.match(js, /'🌀 Weaver'/, "assistant messages are labeled '🌀 Weaver'");
 });
 
 test("primary left nav uses a single active color convention", () => {
