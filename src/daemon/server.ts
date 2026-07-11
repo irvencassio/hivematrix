@@ -50,15 +50,18 @@ export function broadcast(event: string, data: unknown): void {
 
 // Observability provider names ("anthropic"/"openai-codex"/"local-*"/"other")
 // don't match the frontier-toggle ids ("claude"/"codex") — map the enabled
-// frontier ids into the observability naming. Every "local-*" provider
-// (including retired ones like "local-dwarfstar" that still own historical
-// rows) and "other" are never gated by the Claude/Codex toggles — only
-// "anthropic" and "openai-codex" are. A Set can't express the "local-*"
+// frontier ids into the observability naming. HiveMatrix is Claude-native
+// (0.1.176+): every "local-*" provider (including retired ones like
+// "local-dwarfstar"/"local-qwen" that still own historical rows) and "other"
+// are EXCLUDED from the live view unconditionally — there is no on-device
+// engine left to route to, so the operator never wants to see it in the
+// panel or have it win a routing suggestion. History stays on disk; this
+// predicate only gates what's rendered. A Set can't express the "local-*"
 // wildcard, so this is a predicate rather than an allowlist Set.
 function obsProviderAllowed(provider: string, enabledFrontier: Array<"claude" | "codex">): boolean {
   if (provider === "anthropic") return enabledFrontier.includes("claude");
   if (provider === "openai-codex") return enabledFrontier.includes("codex");
-  return true;
+  return false;
 }
 
 function json(res: ServerResponse, statusCode: number, body: unknown): void {
@@ -908,7 +911,15 @@ export function createDaemonServer() {
         // totals is filtered at the same gate as scorecard/recent — see the comment
         // on observabilitySummary(). Filtering it separately/after the fact is the
         // bug that let a disabled Codex keep inflating the headline token count.
-        json(res, 200, { totals: observabilitySummary(1000, isAllowed), scorecard, routing: routingRecommendations(), operatorRoutes: getLearnedRoutes(), recent });
+        const totals = observabilitySummary(1000, isAllowed);
+        // hiddenProviders exists to prove a *toggle*-hidden provider (Codex/Claude
+        // turned off) isn't silently vanishing — restrict it to those two, so a
+        // retired local-* (or "other") row never surfaces as "N runs hidden
+        // (disabled)": it's permanently excluded from the live view, not a
+        // reversible operator choice, and "local-dwarfstar — 49 runs hidden" is
+        // exactly the residual local-model label this cleanup removes.
+        totals.hiddenProviders = totals.hiddenProviders.filter((h) => h.key === "anthropic" || h.key === "openai-codex");
+        json(res, 200, { totals, scorecard, routing: routingRecommendations(1000, isAllowed), operatorRoutes: getLearnedRoutes(), recent });
         return;
       }
 
@@ -930,7 +941,31 @@ export function createDaemonServer() {
         const cache = series.cache.filter((row) => obsProviderAllowed(row.provider, enabledFrontier));
         const models = series.models.filter((row) => obsProviderAllowed(row.provider, enabledFrontier));
         const byProviderTotals = series.totals.byProvider.filter((row) => obsProviderAllowed(row.key, enabledFrontier));
-        json(res, 200, { ...series, providers, points, cache, models, totals: { ...series.totals, byProvider: byProviderTotals } });
+        // series.totals.runs/tokens/costUsd are unfiltered aggregates over EVERY
+        // row in the window (observabilitySeries sums them before this gate ever
+        // runs) — recompute the headline totals from the already-filtered
+        // byProviderTotals so they reconcile with what's actually rendered.
+        // Spreading the unfiltered series.totals here (as before) would keep a
+        // retired local-* provider's runs/tokens inflating the KPI cards even
+        // though its row vanished from byProvider/models/cache — the exact
+        // "hidden provider still counts" bug class observabilitySummary's own
+        // isAllowed gate (store.ts) exists to prevent.
+        let filteredRuns = 0, filteredIn = 0, filteredOut = 0, filteredCost = 0, filteredCostSeen = false;
+        for (const p of byProviderTotals) {
+          filteredRuns += p.runs;
+          filteredIn += p.inputTokens;
+          filteredOut += p.outputTokens;
+          if (p.costUsd != null) { filteredCost += p.costUsd; filteredCostSeen = true; }
+        }
+        json(res, 200, {
+          ...series, providers, points, cache, models,
+          totals: {
+            runs: filteredRuns,
+            tokens: { input: filteredIn, output: filteredOut, total: filteredIn + filteredOut },
+            costUsd: filteredCostSeen ? Math.round(filteredCost * 1e6) / 1e6 : null,
+            byProvider: byProviderTotals,
+          },
+        });
         return;
       }
 

@@ -533,6 +533,25 @@ test("dashboard modal offers a provider/model group-by toggle for the breakdown 
   assert.match(renderObsDashboard, /detail\.totals\.byModel/, "model mode reads the same totals payload — no second query");
 });
 
+test("observability sidebar panel drops the 'N local' pill — post-cutover every live run is frontier", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const renderObservability = fnBody(js, "renderObservability");
+  assert.match(renderObservability, /t\.split\.frontier/, "frontier count pill stays");
+  assert.doesNotMatch(renderObservability, /t\.split\.local/, "the local count pill is removed");
+  assert.doesNotMatch(renderObservability, /opill local/, "no local-styled pill markup remains");
+});
+
+test("PROVIDERS section shows installed/not-set-up status with an Install affordance, no on/off toggle", () => {
+  assert.doesNotMatch(CONSOLE_HTML, /Turn a provider on or off within HiveMatrix/, "the on/off explainer copy is gone");
+  const js = extractScript(CONSOLE_HTML);
+  assert.doesNotMatch(js, /function toggleProvider\(/, "the enable/disable toggle handler is removed");
+  assert.doesNotMatch(js, /providers\/[^"']*\/enabled/, "the console no longer POSTs providers/:id/enabled");
+  const renderProviderStatus = fnBody(js, "renderProviderStatus");
+  assert.match(renderProviderStatus, /runProviderSetup/, "install/sign-in reuses the existing setup flow");
+  assert.doesNotMatch(renderProviderStatus, /settingsSwitch/, "no switch control in the provider status cards");
+  assert.match(renderProviderStatus, /mdl-card/, "styled like the Backends cards, not a separate toggle-row list");
+});
+
 test("dashboard modal offers a 1h window with 5-minute bucket ticks", () => {
   assert.match(CONSOLE_HTML, /onclick="setObsWindowModal\('1h'\)"/, "1h window button present");
   const js = extractScript(CONSOLE_HTML);
@@ -1112,13 +1131,23 @@ test("skills compatibility helpers label, search, and render chips behaviorally"
   assert.match(chips, /Qwen\(local\)/);
 });
 
-test("header is grouped into zones with a theme toggle and grouped connectivity", () => {
+test("header is grouped into zones with a theme toggle; connectivity folds into the single ● live indicator, not a redundant pill", () => {
   assert.match(CONSOLE_HTML, /class="hzone"/, "header uses zones");
-  assert.match(CONSOLE_HTML, /class="hgroup"[\s\S]*id="modeSel"[\s\S]*id="modePill"/, "connectivity select + effective-mode pill grouped as one unit");
+  assert.match(CONSOLE_HTML, /id="live"[^>]*onclick="toggleConnOverride\(\)"/, "clicking the live indicator reveals the connectivity override");
+  assert.match(CONSOLE_HTML, /class="hgroup"[\s\S]*id="modeSel"/, "connectivity override select still present");
   assert.match(CONSOLE_HTML, /id="modeSel"[^>]*style="display:none"/, "manual connectivity override is hidden by default");
-  assert.match(CONSOLE_HTML, /id="modePill"[^>]*onclick="toggleConnOverride\(\)"/, "clicking the pill reveals the override");
+  assert.doesNotMatch(CONSOLE_HTML, /id="modePill"/, "the redundant cloud-ok/local-only/offline header pill is removed");
+  assert.doesNotMatch(CONSOLE_HTML, /\.pill\.cloud-ok/, "the now-unused .pill.cloud-ok CSS is removed with it");
   assert.match(CONSOLE_HTML, /id="themeToggle"[^>]*onclick="toggleThemeQuick\(\)"/, "header has a quick theme toggle");
   assert.match(CONSOLE_HTML, /@media \(max-width: 760px\)[\s\S]*\.hlabel \{ display: none/, "header labels hide on narrow widths");
+});
+
+test("renderConn folds connectivity mode into the live indicator's color/text/tooltip instead of a second pill", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const fn = fnBody(js, "renderConn");
+  assert.match(fn, /getElementById\("live"\)/, "renderConn updates the live indicator");
+  assert.doesNotMatch(fn, /modePill/, "renderConn no longer writes a separate connectivity pill");
+  assert.match(fn, /classList\.contains\("stale"\)/, "SSE-down state (set by connectSSE) takes priority over a connectivity-mode update");
 });
 
 test("settings auto-save with toast feedback and open on About", () => {

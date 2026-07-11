@@ -1755,11 +1755,22 @@ test("disabling a provider excludes its rows from /observability and /observabil
   const seriesBody = await seriesRes.json() as {
     providers: string[];
     points: Array<{ byProvider: Record<string, unknown> }>;
-    totals: { byProvider: Array<{ key: string }> };
+    totals: { runs: number; tokens: { input: number; output: number; total: number }; byProvider: Array<{ key: string; runs: number; inputTokens: number; outputTokens: number }> };
   };
   assert.ok(!seriesBody.providers.includes("openai-codex"), "codex excluded from series provider list");
   assert.ok(!seriesBody.totals.byProvider.some((p) => p.key === "openai-codex"), "codex excluded from series totals");
   for (const pt of seriesBody.points) assert.ok(!("openai-codex" in pt.byProvider), "codex excluded from every series point");
+
+  // The headline totals must reconcile with byProvider, not just count the
+  // rendered breakdown while a filtered-out provider's runs/tokens still
+  // inflate the KPI cards — the disabled codex row (100in/50out) must be
+  // gone from totals.runs/tokens.total too, not only from totals.byProvider.
+  const claudeRow = seriesBody.totals.byProvider.find((p) => p.key === "anthropic")!;
+  assert.ok(claudeRow, "sanity: claude row present in series totals");
+  assert.equal(seriesBody.totals.runs, claudeRow.runs, "totals.runs reconciles with the filtered byProvider sum");
+  assert.equal(seriesBody.totals.tokens.input, claudeRow.inputTokens, "totals.tokens.input excludes the hidden codex row");
+  assert.equal(seriesBody.totals.tokens.output, claudeRow.outputTokens, "totals.tokens.output excludes the hidden codex row");
+  assert.equal(seriesBody.totals.tokens.total, claudeRow.inputTokens + claudeRow.outputTokens, "totals.tokens.total is internally consistent");
 
   // History is retained on disk, not deleted — re-enable and confirm it reappears.
   write(join(process.env.HOME!, ".hivematrix", "config.json"), JSON.stringify({
@@ -1770,7 +1781,80 @@ test("disabling a provider excludes its rows from /observability and /observabil
   assert.ok(obsBody2.recent.some((r) => r.provider === "openai-codex"), "codex row reappears once re-enabled");
 });
 
-test("/observability/series end-to-end: 1h window, per-model breakdown, cache 5m/1h split all round-trip over real HTTP", async (t) => {
+test("/observability's 'hidden (disabled)' footnote reports a toggle-hidden Codex but never a retired local-* row", async (t) => {
+  withTempHome(t);
+  const { mkdirSync: mkdir, writeFileSync: write } = await import("node:fs");
+  mkdir(join(process.env.HOME!, ".hivematrix"), { recursive: true });
+  write(join(process.env.HOME!, ".hivematrix", "config.json"), JSON.stringify({
+    providers: { claude: { enabled: true }, codex: { enabled: false } },
+  }));
+
+  const { recordRun } = await import("@/lib/observability/store");
+  recordRun({
+    taskId: "hf-claude", runIndex: 0, model: "claude-opus-4-8", status: "done",
+    inputTokens: 100, outputTokens: 50, costUsd: 0.01, startedAtMs: 0, completedAtMs: 1000,
+  });
+  recordRun({
+    taskId: "hf-codex", runIndex: 0, model: "codex:gpt-5.5-codex", status: "done",
+    inputTokens: 100, outputTokens: 50, costUsd: 0.01, startedAtMs: 0, completedAtMs: 1000,
+  });
+  // Retired local rows — permanently excluded, never a reversible toggle, so
+  // they must never show up as "N runs hidden (disabled)" the way a
+  // deliberately-disabled Codex correctly does.
+  recordRun({
+    taskId: "hf-local-1", runIndex: 0, model: "qwen3.6-35b-4bit", status: "done",
+    inputTokens: 100, outputTokens: 50, startedAtMs: 0, completedAtMs: 1000,
+  });
+  recordRun({
+    taskId: "hf-local-2", runIndex: 0, model: "qwen3.6-27b-4bit", status: "done",
+    inputTokens: 100, outputTokens: 50, startedAtMs: 0, completedAtMs: 1000,
+  });
+
+  const { base, headers } = await startServer(t);
+  const res = await fetch(`${base}/observability`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { totals: { hiddenProviders: Array<{ key: string; runs: number }> } };
+  const hidden = body.totals.hiddenProviders;
+  assert.ok(hidden.some((h) => h.key === "openai-codex" && h.runs === 1), "the deliberately-disabled Codex is still reported as hidden");
+  assert.ok(!hidden.some((h) => h.key.startsWith("local-")), "no retired local-* provider is ever reported as 'hidden (disabled)'");
+});
+
+test("'Suggested routing' never names a retired local-* route, even when it would score highest unfiltered", async (t) => {
+  withTempHome(t);
+  const { recordRun } = await import("@/lib/observability/store");
+
+  // Retired local-qwen: 5 tasks, all first-pass success, zero reported cost —
+  // the bandit's cost-penalized score would favor this arm over Claude if it
+  // were allowed to compete (this is exactly the pre-fix "→ Local model" bug).
+  for (let i = 0; i < 5; i++) {
+    recordRun({
+      taskId: "route-local-" + i, runIndex: 0, model: "qwen3.6-35b-4bit", role: "coding", status: "done",
+      inputTokens: 100, outputTokens: 50, startedAtMs: 0, completedAtMs: 500,
+    });
+  }
+  // Claude: same class, real cost, one first-attempt failure.
+  for (let i = 0; i < 5; i++) {
+    recordRun({
+      taskId: "route-claude-" + i, runIndex: 0, model: "claude-sonnet-4-8", role: "coding",
+      status: i === 0 ? "failed" : "done",
+      inputTokens: 100, outputTokens: 50, costUsd: 0.02, startedAtMs: 0, completedAtMs: 500,
+    });
+  }
+
+  const { base, headers } = await startServer(t);
+  const res = await fetch(`${base}/observability`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { routing: Array<{ taskClass: string; route: string | null }> };
+  const codingPick = body.routing.find((r) => r.taskClass === "coding");
+  assert.ok(codingPick, "a recommendation entry exists for the coding class");
+  assert.notEqual(codingPick!.route, "local-qwen", "a retired local route must never win the suggestion");
+  // With local-qwen excluded, only one trusted arm (anthropic) remains for this
+  // class — below the bandit's two-arm floor, so it correctly defers (null),
+  // never fabricating a frontier-only pick from thin data either.
+  assert.equal(codingPick!.route, null, "insufficient (single-route) trusted data defers to the default router");
+});
+
+test("/observability/series end-to-end: 1h window, per-model breakdown, cache 5m/1h split all round-trip over real HTTP; retired local-* rows never reach the live view", async (t) => {
   withTempHome(t);
   const { recordRun } = await import("@/lib/observability/store");
 
@@ -1780,6 +1864,8 @@ test("/observability/series end-to-end: 1h window, per-model breakdown, cache 5m
     cacheCreationTokens: 300, cacheCreate5mTokens: 200, cacheCreate1hTokens: 100,
     costUsd: 0.05, project: "demo", startedAtMs: 0, completedAtMs: 1000,
   });
+  // Historical rows from the retired on-device engine — still written (history
+  // is never deleted) but must never surface in the live /observability* view.
   recordRun({
     taskId: "e2e-local-fast", runIndex: 0, model: "qwen3.6-35b-4bit", status: "done",
     inputTokens: 200, outputTokens: 80, project: "demo", startedAtMs: 0, completedAtMs: 500,
@@ -1797,21 +1883,34 @@ test("/observability/series end-to-end: 1h window, per-model breakdown, cache 5m
   const res = await fetch(`${base}/observability/series?window=1h`, { headers });
   assert.equal(res.status, 200);
   const body = await res.json() as {
-    window: string; unit: string; points: Array<{ t: string }>;
+    window: string; unit: string; points: Array<{ t: string; byProvider: Record<string, unknown> }>;
+    providers: string[];
     models: Array<{ model: string; provider: string; runs: number }>;
     cache: Array<{ provider: string; cacheCreate5mTokens: number | null; cacheCreate1hTokens: number | null; netBenefitTokens: number | null }>;
+    totals: { runs: number; tokens: { input: number; output: number; total: number }; byProvider: Array<{ key: string; runs: number; inputTokens: number; outputTokens: number }> };
   };
   assert.equal(body.window, "1h");
   assert.equal(body.unit, "minute");
   assert.equal(body.points.length, 12, "1h window buckets into 12 five-minute points");
 
-  // Per-model breakdown: two distinct local models under the same provider,
-  // not collapsed into one "local model" row.
+  // Per-model breakdown: Claude's own row is present; the retired local-qwen
+  // rows were recorded (history retained) but are filtered out of this live view.
   const byModel = Object.fromEntries(body.models.map((m) => [m.model, m]));
-  assert.ok(byModel["qwen3.6-35b-4bit"], "fast tier is its own model row");
-  assert.ok(byModel["qwen3.6-27b-4bit"], "coding tier is its own model row");
-  assert.equal(byModel["qwen3.6-35b-4bit"].provider, "local-qwen");
   assert.equal(byModel["claude-opus-4-8"].provider, "anthropic");
+  assert.ok(!byModel["qwen3.6-35b-4bit"], "retired local model excluded from the live per-model breakdown");
+  assert.ok(!byModel["qwen3.6-27b-4bit"], "retired local model excluded from the live per-model breakdown");
+  assert.ok(!body.providers.includes("local-qwen"), "retired local provider excluded from the live provider list");
+  for (const pt of body.points) assert.ok(!("local-qwen" in pt.byProvider), "retired local provider excluded from every series point");
+
+  // Headline totals reconcile with the filtered byProvider — the two retired
+  // local rows (200in/80out + 150in/60out = 350in/140out) must not inflate
+  // totals.runs/tokens.total even though they were recorded in this window.
+  assert.equal(body.totals.byProvider.length, 1, "only anthropic survives the live-view filter");
+  const claudeTotals = body.totals.byProvider[0];
+  assert.equal(claudeTotals.key, "anthropic");
+  assert.equal(body.totals.runs, claudeTotals.runs, "totals.runs excludes the retired local rows, matching byProvider");
+  assert.equal(body.totals.tokens.input, claudeTotals.inputTokens, "totals.tokens.input excludes the retired local rows");
+  assert.equal(body.totals.tokens.output, claudeTotals.outputTokens, "totals.tokens.output excludes the retired local rows");
 
   // Cache 5m/1h split + net benefit round-trip through the real HTTP response.
   const anthropicCache = body.cache.find((c) => c.provider === "anthropic")!;

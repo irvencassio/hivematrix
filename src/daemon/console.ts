@@ -157,12 +157,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     backdrop-filter: var(--mat-chrome); -webkit-backdrop-filter: var(--mat-chrome); }
   header .logo { font-weight: 700; color: var(--accent); letter-spacing: .5px; }
   header .mode { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-  .pill { padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600;
-    border: 1px solid var(--border); background: var(--panel-2);
-    transition: color .2s ease, border-color .2s ease, background .2s ease; }
-  .pill.cloud-ok { color: var(--ok); border-color: var(--ok); }
-  .pill.local-only { color: var(--warn); border-color: var(--warn); }
-  .pill.offline { color: var(--err); border-color: var(--err); }
   select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
     border-radius: 6px; padding: 3px 8px; font-size: 11px; }
   main { --col-left: 300px; --col-right: 320px; position: relative;
@@ -364,7 +358,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-head h2 { margin:0 0 10px; }
   .obs-split { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
   .obs-split .opill { font-size:11px; padding:2px 8px; border-radius:20px; border:1px solid var(--border); background:var(--panel-2); color:var(--muted); }
-  .obs-split .opill.local { color:var(--ok); border-color:rgba(54,211,153,.4); }
   .obs-tbl { width:100%; border-collapse:collapse; font-size:11.5px; }
   .obs-tbl th { text-align:left; color:var(--muted); font-weight:600; padding:3px 6px; border-bottom:1px solid var(--border); }
   .obs-tbl td { padding:3px 6px; border-bottom:1px solid var(--border); }
@@ -672,7 +665,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .dot.sleeping { background: var(--muted); } .dot.blocked, .dot.failed { background: var(--err); }
   .muted { color: var(--muted); }
   .live { font-size: 10px; color: var(--ok); }
-  .live.stale { color: var(--err); }
+  .live.degraded { color: var(--warn); }
+  .live.down, .live.stale { color: var(--err); }
   .archive-link { font-size: 11px; color: var(--accent-2); cursor: pointer; font-weight: 400; text-transform: none; letter-spacing: 0; }
   .archive-link:hover { text-decoration: underline; }
   .board-sec { margin: 0; }
@@ -986,7 +980,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <header>
   <div class="hzone">
     <span class="logo">HiveMatrix</span>
-    <span class="live" id="live">● live</span>
+    <span class="live" id="live" style="cursor:pointer" onclick="toggleConnOverride()" title="Daemon + connectivity status — click to override connectivity">● live</span>
   </div>
   <div class="hzone">
     <span class="muted hlabel">project</span>
@@ -996,7 +990,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <button class="gear" id="projectRescanBtn" title="Re-scan projects" onclick="refreshProjects()">↻</button>
   </div>
   <div class="hzone mode" style="margin-left:auto">
-    <span class="hgroup" title="Connectivity — auto by default; the pill shows the current effective mode. Click it to override.">
+    <span class="hgroup" title="Connectivity — auto by default; the ● live indicator shows the current effective mode. Click it to override.">
       <span class="muted hlabel" id="connLabel" style="display:none">override</span>
       <select id="modeSel" style="display:none">
         <option value="">(auto)</option>
@@ -1004,7 +998,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <option value="local-only">local-only</option>
         <option value="offline">offline</option>
       </select>
-      <span class="pill" id="modePill" style="cursor:pointer" onclick="toggleConnOverride()" title="Connectivity mode — click to override">…</span>
     </span>
     <span class="update-pill" id="updatePill" style="display:none" onclick="applyUpdate()" title="Click to install and restart">⬆ Update</span>
     <span class="hsep"></span>
@@ -1033,7 +1026,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 
       <div id="s_provider_toggles" style="margin-top:14px">
         <label class="flbl">Providers</label>
-        <div class="muted" style="font-size:11px;margin-bottom:6px">Turn a provider on or off within HiveMatrix. Off disables it here only — Claude/Codex CLIs stay installed and signed in for your own terminal use.</div>
+        <div class="muted" style="font-size:11px;margin-bottom:6px">A frontier CLI is used automatically once it's installed and signed in — no separate on/off switch.</div>
         <div id="s_provider_toggle_rows"><div class="muted">Loading…</div></div>
       </div>
 
@@ -2911,10 +2904,12 @@ async function renderObservability() {
   if (!data || !data.totals) return;
   const t = data.totals;
   if (!t.runs) { el.innerHTML = '<div class="muted">No task telemetry yet. <button class="linklike" onclick="openObsDashboard()">Open dashboard</button></div>'; return; }
+  // Claude-native: every live run is frontier, so the split is just a count —
+  // no "N local" pill (post-cutover the live view never carries a local-*
+  // row; see obsProviderAllowed in server.ts).
   let html = '<div style="margin-bottom:6px"><button class="linklike" onclick="openObsDashboard()">↗ Full dashboard — graphs &amp; cache</button></div>'
     + '<div class="obs-split">'
     + '<span class="opill">' + t.split.frontier + ' frontier</span>'
-    + '<span class="opill local">' + t.split.local + ' local</span>'
     + '<span class="opill">' + fmtNum(t.tokens.total) + ' tok</span>'
     + '</div>';
   html += '<table class="obs-tbl"><tr><th>provider</th><th>runs</th><th>tok in/out</th><th>p50</th><th>p95</th></tr>';
@@ -3144,8 +3139,24 @@ async function renderObsDashboard(target) {
 
 function renderConn() {
   const c = state.conn; if (!c) return;
-  document.getElementById("modePill").className = "pill "+c.mode;
-  document.getElementById("modePill").textContent = c.mode;
+  // Connectivity mode folds into the header's single "● live" indicator
+  // instead of a separate pill (Phase 2 header cleanup) — SSE reachability
+  // (set by connectSSE's onopen/onerror) takes priority: if the daemon
+  // connection itself is down/reconnecting, that "stale" state must not be
+  // clobbered by a mode-only update here.
+  const live = document.getElementById("live");
+  // "stale" is reserved for connectSSE's own onopen/onerror (the daemon
+  // connection itself dropping) — never written here, and never overwritten
+  // by this function, so the two states can't clobber each other.
+  if (live && !live.classList.contains("stale")) {
+    const ok = c.mode === "cloud-ok";
+    const bad = c.mode === "offline";
+    live.className = "live" + (ok ? "" : (bad ? " down" : " degraded"));
+    live.textContent = ok ? "● live" : "● " + c.mode;
+    live.title = ok
+      ? "Connected — click to override connectivity"
+      : "Connectivity: " + c.mode + (c.reason ? " — " + c.reason : "") + " — click to override";
+  }
   const posture = c.posture && c.posture.current ? c.posture.current : null;
   const postureHtml = posture ? '<div class="posture">'
     + '<div class="posture-summary">'+esc(posture.summary)+' <span class="muted">('+esc(posture.counts.works)+' works, '+esc(posture.counts.degraded)+' degraded, '+esc(posture.counts.queued)+' queued)</span></div>'
@@ -5434,8 +5445,8 @@ document.getElementById("modeSel").addEventListener("change", async (e) => {
 });
 
 // Connectivity auto-resolves, so the manual override stays hidden behind the
-// pill — click the pill to reveal the select, keeping the header uncluttered
-// (and the cloud-ok/local-only vocabulary out of the way of the Model dropdown).
+// "● live" indicator — click it to reveal the select, keeping the header
+// uncluttered (and the cloud-ok/local-only vocabulary out of the way day to day).
 function toggleConnOverride() {
   const sel = document.getElementById("modeSel");
   const lbl = document.getElementById("connLabel");
@@ -6135,7 +6146,7 @@ async function openSettings() {
     try { await loadModels(); } catch (e) { /* Settings can still show setup/features. */ }
   }
   renderSettingsModelControls();
-  renderProviderToggles();
+  renderProviderStatus();
   loadTunnel();
   loadAutonomy();
   loadHeartbeat();
@@ -6143,15 +6154,20 @@ async function openSettings() {
 
 const PROVIDER_LABELS = { claude: "Claude (Claude Code)", codex: "Codex (OpenAI)" };
 
+// No on/off switch: isProviderEnabled (frontier-providers.ts) already defaults
+// enablement to "is the CLI binary installed" — so status here is purely
+// installed/signed-in detection, styled like the Backends cards (mdl-card),
+// with an Install/Sign-in affordance that reuses runProviderSetup instead of
+// a toggle. installed && !authPresent still gets its own "not signed in"
+// state, distinct from "not set up", so an installed-but-unauthenticated CLI
+// isn't silently mistaken for a working one.
 function providerStatusChip(p) {
-  if (!p.installed && !p.enabled) return '<span class="muted" style="font-size:11px">Off · not installed</span>';
-  if (!p.installed && p.enabled) return '<span class="muted" style="font-size:11px;color:var(--accent)">Enabling — sign in in Terminal</span>';
-  if (p.installed && p.enabled && !p.authPresent) return '<span class="muted" style="font-size:11px;color:var(--accent)">On — needs sign-in</span>';
-  if (p.installed && p.enabled) return '<span class="muted" style="font-size:11px;color:var(--ok)">On</span>';
-  return '<span class="muted" style="font-size:11px">Off</span>'; // installed && !enabled
+  if (p.installed && p.authPresent) return '<span class="st ok">✓ installed</span>';
+  if (p.installed) return '<span class="st no">not signed in</span>';
+  return '<span class="st no">not set up</span>';
 }
 
-async function renderProviderToggles() {
+async function renderProviderStatus() {
   const wrap = document.getElementById("s_provider_toggle_rows");
   if (!wrap) return;
   let r;
@@ -6160,32 +6176,14 @@ async function renderProviderToggles() {
   } catch (e) { wrap.innerHTML = '<div class="muted">Could not load provider status.</div>'; return; }
   const providers = (r && r.providers) || [];
   let html = providers.map(p => {
-    const needsSetup = p.enabled && (!p.installed || !p.authPresent);
+    const needsSetup = !p.installed || !p.authPresent;
     const setupBtn = needsSetup
-      ? '<button class="sm" onclick="runProviderSetup(\'' + esc(p.id) + '\')">' + (p.installed ? 'Sign in' : 'Install + sign in') + '</button>'
+      ? '<div class="mdl-card-foot"><button class="sm" onclick="runProviderSetup(\'' + esc(p.id) + '\')">' + (p.installed ? 'Sign in' : 'Install + sign in') + '</button></div>'
       : '';
-    return '<div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border)">'
-      + '<div style="flex:1"><div style="font-weight:600">' + esc(PROVIDER_LABELS[p.id] || p.id) + '</div>'
-      + '<div style="margin-top:2px">' + providerStatusChip(p) + '</div></div>'
-      + '<div class="row" style="align-items:center;gap:8px">' + setupBtn
-      + settingsSwitch(p.enabled, 'toggleProvider(\'' + esc(p.id) + '\',' + (!p.enabled) + ')', { title: (p.enabled ? 'Turn off ' : 'Turn on ') + (PROVIDER_LABELS[p.id] || p.id) })
-      + '</div></div>';
+    return '<div class="mdl-card"><div class="mdl-card-head"><span class="mdl-card-name">' + esc(PROVIDER_LABELS[p.id] || p.id) + '</span>'
+      + providerStatusChip(p) + '</div>' + setupBtn + '</div>';
   }).join('');
   wrap.innerHTML = html || '<div class="muted">No providers.</div>';
-}
-
-async function toggleProvider(id, enabled) {
-  await api("/providers/" + encodeURIComponent(id) + "/enabled", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
-  });
-  if (enabled) {
-    const r = await api("/providers").catch(() => null);
-    const p = r && r.providers && r.providers.find(x => x.id === id);
-    if (p && (!p.installed || !p.authPresent)) await runProviderSetup(id);
-  }
-  await renderProviderToggles();
-  models = await loadModels().catch(() => models);
-  renderSettingsModelControls();
 }
 
 async function runProviderSetup(id) {
@@ -6195,7 +6193,9 @@ async function runProviderSetup(id) {
   } else {
     await hmAlert("Terminal opened for " + (PROVIDER_LABELS[id] || id) + " setup. Complete it there, then click refresh.");
   }
-  await renderProviderToggles();
+  await renderProviderStatus();
+  models = await loadModels().catch(() => models);
+  renderSettingsModelControls();
 }
 
 function renderSettingsModelControls() {

@@ -171,7 +171,14 @@ export function observabilityScorecard(window = 1000): RouteScorecardRow[] {
  * `window` rows. Advisory only — epsilon=0 so the display is the stable "what the
  * data says is best" pick, not a flickering exploration sample. Classes without
  * enough data recommend route=null (defer to the default router).
+ *
+ * `isAllowed` (same predicate observabilitySummary takes) restricts which rows
+ * feed the bandit — passing the live-view gate here is what keeps a retired
+ * local-* route from ever winning a "Suggested routing" pick; omit it only for
+ * an unfiltered/internal read.
  */
-export function routingRecommendations(window = 1000): RouteRecommendation[] {
-  return recommendRoutes(aggregateArms(listTaskTelemetry(window)), { epsilon: 0 });
+export function routingRecommendations(window = 1000, isAllowed?: (provider: string) => boolean): RouteRecommendation[] {
+  const rows = listTaskTelemetry(window);
+  const visible = isAllowed ? rows.filter((r) => isAllowed(r.provider)) : rows;
+  return recommendRoutes(aggregateArms(visible), { epsilon: 0 });
 }
