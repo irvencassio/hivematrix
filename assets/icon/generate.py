@@ -160,3 +160,28 @@ if os.path.isdir(IOS_APPICONSET):
     print("copied iOS icon set (light/dark/tinted) ->", IOS_APPICONSET)
 else:
     print("iOS repo not found; skipped iOS icon copy")
+
+# Push the same green-on-white identity into the sibling hivematrix-watch repo.
+# watchOS uses a single-size (1024, no alpha) marketing icon; the system derives
+# every home-screen/notification size and App Store Connect pulls this one for the
+# listing. No dark/tinted appearances on watchOS.
+WATCH_APPICONSET = os.path.abspath(os.path.join(
+    REPO, "..", "hivematrix-watch", "HiveMatrixWatch", "Resources",
+    "Assets.xcassets", "AppIcon.appiconset"))
+if os.path.isdir(WATCH_APPICONSET):
+    shutil.copy2(os.path.join(OUT, "AppIcon.png"),
+                 os.path.join(WATCH_APPICONSET, "AppIcon.png"))
+    watch_contents = {
+        "images": [
+            {"filename": "AppIcon.png", "idiom": "universal",
+             "platform": "watchOS", "size": "1024x1024"},
+        ],
+        "info": {"author": "xcode", "version": 1},
+    }
+    import json
+    with open(os.path.join(WATCH_APPICONSET, "Contents.json"), "w") as fh:
+        json.dump(watch_contents, fh, indent=2)
+        fh.write("\n")
+    print("copied watchOS icon (single-size) ->", WATCH_APPICONSET)
+else:
+    print("watch repo not found; skipped watch icon copy")
