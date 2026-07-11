@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.179 — 2026-07-11
+
+Polish + Browser Lane fix: Observability hides retired local models (Claude-only) with by-model tiers; single live header indicator (dropped cloud-ok pill); provider On/Off toggles replaced by install/sign-in status (enablement = CLI detected); new Cloudflare pairing QR endpoint + card; Flash --resume session continuity with live streaming; and flash chat now disables the CLI's built-in tools so web reads route through Browser Lane instead of dead-ending on WebFetch.
+
 ## v0.1.178 — 2026-07-11
 
 Fix Flash chat crash on any multi-turn conversation: the prompt is now piped via stdin instead of an argv value, so a prompt beginning with the '--- Prior conversation ---' transcript block is no longer mis-parsed by the claude CLI as an unknown option.
