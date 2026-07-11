@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.172 — 2026-07-11
+
+Fix Flash chat degeneration (word-loop repetition guard + repetition_penalty); expose sampling params (temperature/top_p/repetition_penalty/max_tokens) in Settings > Local Model
+
 ## v0.1.171 — 2026-07-11
 
 Voice everywhere: PIM tools (contacts/calendar/reminders read + live reminder/event creation), voice approvals, tap-to-dial actions, loop-closer (voice tasks text their answer back), day-brief rituals + contextual call greeting, capability ratchet, Weaver audit
