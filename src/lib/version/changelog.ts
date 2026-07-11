@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.177", date: "2026-07-11", note: "Post-cutover cleanup: purge all remaining local/Qwen/Rapid-MLX UI from settings; Observability now breaks down by Claude model (Opus/Sonnet/Haiku/Codex) + 1h chart fix; Mail Lane TCC probe + auto retry so approval actually works; New Task no longer forces a Project (operations tasks run from home); retire Terminal Lane entirely (moved to Canopy); default model simplified to Opus/Sonnet (default Sonnet)." },
   { version: "0.1.176", date: "2026-07-11", note: "Claude-native cutover: retire local Qwen entirely — every text role routes to Claude via the CLI (Opus=thinking, Sonnet=coding, Haiku=operational + chat). Flash chat on Haiku with lane tools as an MCP server; degeneration guards deleted; Local Model settings → Claude Models routing view; one-time config migration drops qwen/localEngine keys." },
   { version: "0.1.175", date: "2026-07-11", note: "Flash sampling: add top_k=20 (the honored anti-degeneration lever rapid-mlx was missing), expose full sampling param set in settings with a one-click Qwen-recommended preset" },
   { version: "0.1.174", date: "2026-07-11", note: "Flash: catch repetition-with-drift degeneration (normalized unit-cycle guard); send repeat_penalty for rapid-mlx; prune drift-loop history" },

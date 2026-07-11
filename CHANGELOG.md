@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.177 — 2026-07-11
+
+Post-cutover cleanup: purge all remaining local/Qwen/Rapid-MLX UI from settings; Observability now breaks down by Claude model (Opus/Sonnet/Haiku/Codex) + 1h chart fix; Mail Lane TCC probe + auto retry so approval actually works; New Task no longer forces a Project (operations tasks run from home); retire Terminal Lane entirely (moved to Canopy); default model simplified to Opus/Sonnet (default Sonnet).
+
 ## v0.1.176 — 2026-07-11
 
 Claude-native cutover: retire local Qwen entirely — every text role routes to Claude via the CLI (Opus=thinking, Sonnet=coding, Haiku=operational + chat). Flash chat on Haiku with lane tools as an MCP server; degeneration guards deleted; Local Model settings → Claude Models routing view; one-time config migration drops qwen/localEngine keys.
