@@ -249,6 +249,38 @@ async function executeCalendarToday(args: Record<string, unknown>): Promise<stri
   return out || "Nothing on the calendar today.";
 }
 
+/**
+ * Pure: the AppleScript for "is there a calendar event starting within the
+ * next N hours" — the filtering happens INSIDE the script (date comparison is
+ * native there) so the caller never has to reparse AppleScript's locale-formatted
+ * date-as-string output in JS. Returns just the first match's title, or "" for
+ * none. Used by the voice greeting's "next meeting" fact (day-brief.ts) — not
+ * exposed as a model-facing tool (not in PIM_TOOL_DEFINITIONS), since it exists
+ * purely for that deterministic assembly path.
+ */
+export function buildCalendarNextWithinScript(hours: number): string {
+  return [
+    "set d0 to (current date)",
+    `set d1 to d0 + (${hours} * hours)`,
+    'tell application "Calendar"',
+    '  set out to ""',
+    "  repeat with c in calendars",
+    "    set evs to (every event of c whose start date >= d0 and start date < d1)",
+    "    repeat with e in evs",
+    '      if out is "" then set out to (summary of e)',
+    "    end repeat",
+    "  end repeat",
+    "  return out",
+    "end tell",
+  ].join("\n");
+}
+
+async function executeCalendarNextWithin(args: Record<string, unknown>): Promise<string> {
+  const hours = clamp(args.hours, 3, 1, 24);
+  const { ok, out } = await osascript(buildCalendarNextWithinScript(hours), 15_000);
+  return ok ? out : "";
+}
+
 async function executeRemindersList(args: Record<string, unknown>): Promise<string> {
   const limit = clamp(args.limit, 10, 1, 20);
   const script = [
@@ -388,6 +420,7 @@ export async function executePimTool(name: string, args: Record<string, unknown>
     case "reminders_list": return executeRemindersList(args);
     case "reminder_create": return executeReminderCreate(args);
     case "calendar_create": return executeCalendarCreate(args);
+    case "calendar_next_within": return executeCalendarNextWithin(args);
     default: return `Unknown PIM tool: ${name}`;
   }
 }
