@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.174", date: "2026-07-11", note: "Flash: catch repetition-with-drift degeneration (normalized unit-cycle guard); send repeat_penalty for rapid-mlx; prune drift-loop history" },
   { version: "0.1.173", date: "2026-07-11", note: "Flash chat hardening: length-cap runaway guard for varied rambling, lower default max_tokens (2048→1024), both tunable in Settings > Local Model > Sampling; pruned poisoned chat history" },
   { version: "0.1.172", date: "2026-07-11", note: "Fix Flash chat degeneration (word-loop repetition guard + repetition_penalty); expose sampling params (temperature/top_p/repetition_penalty/max_tokens) in Settings > Local Model" },
   { version: "0.1.171", date: "2026-07-11", note: "Voice everywhere: PIM tools (contacts/calendar/reminders read + live reminder/event creation), voice approvals, tap-to-dial actions, loop-closer (voice tasks text their answer back), day-brief rituals + contextual call greeting, capability ratchet, Weaver audit" },
