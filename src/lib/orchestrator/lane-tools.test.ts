@@ -67,7 +67,7 @@ test("executeLaneTool dispatches a legacy bee alias to its real handler", async 
 });
 
 test("all bee tools are defined with required schemas", () => {
-  assert.equal(LANE_TOOL_DEFINITIONS.length, 17); // 13 lanes + 4 PIM tools
+  assert.equal(LANE_TOOL_DEFINITIONS.length, 18); // 13 lanes + 5 PIM tools
   for (const t of LANE_TOOL_DEFINITIONS) {
     assert.equal(t.type, "function");
     assert.ok(t.function.name.length > 0);
@@ -108,7 +108,7 @@ test("Terminal Lane tool descriptions identify a HiveMatrix-owned session (no ex
 });
 
 // PIM tools ride the "brain" capability — local osascript, present in every mode.
-const PIM_NAMES = ["calendar_today", "contacts_lookup", "reminder_create", "reminders_list"];
+const PIM_NAMES = ["calendar_create", "calendar_today", "contacts_lookup", "reminder_create", "reminders_list"];
 
 test("cloud-ok advertises every lane (web, browser, desktop, term, mail, message, brain, skill, digest, pim)", () => {
   assert.deepEqual(names(availableLaneTools(cloud())),

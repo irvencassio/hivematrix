@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseDuePhrase, extractPimActions } from "./pim-tools";
+import { parseDuePhrase, extractPimActions, executeCalendarCreate, buildCalendarCreateScript } from "./pim-tools";
 
 // Fixed reference: Friday July 10 2026, 2:00 PM local.
 const NOW = new Date(2026, 6, 10, 14, 0, 0);
@@ -63,4 +63,72 @@ test("extractPimActions: dedupes, caps, and reads numbers from the reply text", 
 
 test("extractPimActions: ignores non-contact tools and short digit runs", () => {
   assert.deepEqual(extractPimActions([{ name: "calendar_today", output: "Standup — 9:30 AM" }], "Your standup is at 9:30."), []);
+});
+
+// ---------------------------------------------------------------------------
+// calendar_create
+
+test("buildCalendarCreateScript: date-component correctness for a fixed parseDuePhrase result", () => {
+  const start = parseDuePhrase("friday at noon", NOW)!; // -> July 17 2026, 12:00
+  const end = new Date(start.getTime() + 60 * 60_000); // +60 min default
+  const script = buildCalendarCreateScript("Lunch with Sam", start, end);
+
+  // Start (d1) components — explicit, never a locale date string.
+  assert.match(script, /set year of d1 to 2026/);
+  assert.match(script, /set month of d1 to 7/);
+  assert.match(script, /set day of d1 to 17/);
+  assert.match(script, /set hours of d1 to 12/);
+  assert.match(script, /set minutes of d1 to 0/);
+
+  // End (d2) components — one hour later.
+  assert.match(script, /set year of d2 to 2026/);
+  assert.match(script, /set month of d2 to 7/);
+  assert.match(script, /set day of d2 to 17/);
+  assert.match(script, /set hours of d2 to 13/);
+  assert.match(script, /set minutes of d2 to 0/);
+
+  // Deterministic default-calendar fallback chain + the event itself.
+  assert.match(script, /writable of c is true/);
+  assert.match(script, /calendar "Home"/);
+  assert.match(script, /calendar "Calendar"/);
+  assert.match(script, /make new event at end of events of targetCal with properties \{summary:"Lunch with Sam", start date:d1, end date:d2\}/);
+  assert.doesNotMatch(script, /as string/); // never a locale date string
+});
+
+test("calendar_create: refuses without a title", async () => {
+  const out = await executeCalendarCreate({ when: "tomorrow at 2pm" }, { runOsascript: async () => ({ ok: true, out: "OK" }) });
+  assert.match(out, /No event title/);
+});
+
+test("calendar_create: refuses without a parseable time — never creates an all-day event silently", async () => {
+  let called = false;
+  const io = { runOsascript: async () => { called = true; return { ok: true, out: "OK" }; } };
+  const out = await executeCalendarCreate({ title: "Dentist" }, io);
+  assert.match(out, /needs a start time/);
+  assert.equal(called, false);
+
+  const out2 = await executeCalendarCreate({ title: "Dentist", when: "someday soon maybe" }, io);
+  assert.match(out2, /needs a start time/);
+  assert.equal(called, false);
+});
+
+test("calendar_create: surfaces an osascript failure", async () => {
+  const io = { runOsascript: async () => ({ ok: false, out: "Not authorized to send Apple events to Calendar." }) };
+  const out = await executeCalendarCreate({ title: "Dentist", when: "tomorrow at 2pm" }, io);
+  assert.match(out, /Could not create the event/);
+  assert.match(out, /Not authorized to send Apple events/);
+});
+
+test("calendar_create: surfaces an in-script ERROR (no calendar available)", async () => {
+  const io = { runOsascript: async () => ({ ok: true, out: "ERROR: no calendar available to create the event in" }) };
+  const out = await executeCalendarCreate({ title: "Dentist", when: "tomorrow at 2pm" }, io);
+  assert.match(out, /Could not create the event/);
+  assert.match(out, /no calendar available/);
+});
+
+test("calendar_create: success reply names the title, time, and duration", async () => {
+  const io = { runOsascript: async () => ({ ok: true, out: "OK" }) };
+  const out = await executeCalendarCreate({ title: "Lunch with Sam", when: "friday at noon", durationMinutes: 30 }, io);
+  assert.match(out, /Event created: "Lunch with Sam"/);
+  assert.match(out, /30 min/);
 });

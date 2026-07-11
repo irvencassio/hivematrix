@@ -8,9 +8,10 @@
  * through a background task. Mirrors voice-sidecar/llm.py's osascript tools
  * (the sidecar keeps its copies for the dev CLI paths); keep the two in sync.
  *
- * reminder_create is deliberately the ONE write here: it's local, instant,
- * low-risk, and user-visible (a Reminder appears on all their devices).
- * Everything heavier (send mail/text, browse, files) stays in its own lane.
+ * reminder_create and calendar_create are deliberately the writes here:
+ * both are local, instant, low-risk, and user-visible (a Reminder or Calendar
+ * event appears on all the operator's devices). Everything heavier (send
+ * mail/text, browse, files) stays in its own lane.
  *
  * Structured actions: contacts_lookup output is machine-parseable ("phone:"
  * lines), and extractPimActions() turns any phone numbers a turn surfaced
@@ -171,6 +172,23 @@ export const PIM_TOOL_DEFINITIONS: ChatTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "calendar_create",
+      description:
+        "Calendar: CREATE a real event on the operator's macOS Calendar, live. Use when they say \"put lunch with Sam on Friday at noon\", \"add a dentist appointment tomorrow at 2\", \"schedule X for Y\". Pass the event title in 'title' and their own words about when it starts in 'when' (e.g. \"friday at noon\", \"tomorrow at 2pm\", \"in an hour\") — an event needs a start time, so ask the operator for one if they didn't give it; never guess an all-day event. Optional 'durationMinutes' (default 60). This completes the request immediately; do NOT also create a task for it.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "The event title" },
+          when: { type: "string", description: "When it starts, in the user's words: \"tomorrow at 2pm\", \"friday at noon\", \"in an hour\"" },
+          durationMinutes: { type: "number", description: "Event length in minutes (default 60)" },
+        },
+        required: ["title", "when"],
+      },
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -283,6 +301,85 @@ async function executeReminderCreate(args: Record<string, unknown>): Promise<str
   return `Reminder set: "${name}" (no due time).`;
 }
 
+// ---------------------------------------------------------------------------
+// calendar_create — the one Calendar write. Injectable osascript IO so the
+// AppleScript generation (date-component correctness) and failure surface
+// are unit-testable without touching a live Calendar.app.
+
+export interface CalendarCreateIO {
+  runOsascript(script: string): Promise<{ ok: boolean; out: string }>;
+}
+
+/**
+ * Build the AppleScript that creates one Calendar.app event. Start/end are
+ * built from explicit date components — never a locale date string — same
+ * style as executeReminderCreate's `d`, just for two dates (start + end).
+ *
+ * Target calendar: a deterministic fallback chain resolved INSIDE the script
+ * (one round trip, like reminder_create) so no live calendar list has to be
+ * fetched into Node first: (1) the first calendar whose `writable` property
+ * is true — covers every operator regardless of what they've named their
+ * calendars; (2) a calendar literally named "Home" (macOS's default personal
+ * calendar on a fresh iCloud account); (3) a calendar named "Calendar" (the
+ * other common default name); (4) failing all of that, the first calendar at
+ * all. This choice is documented here because it can't be inspected from the
+ * tool's TypeScript signature — only from this comment and the script below.
+ */
+export function buildCalendarCreateScript(title: string, start: Date, end: Date): string {
+  const dateLines = (v: string, d: Date): string[] => [
+    `set ${v} to current date`,
+    `set year of ${v} to ${d.getFullYear()}`,
+    `set month of ${v} to ${d.getMonth() + 1}`,
+    `set day of ${v} to ${d.getDate()}`,
+    `set hours of ${v} to ${d.getHours()}`,
+    `set minutes of ${v} to ${d.getMinutes()}`,
+    `set seconds of ${v} to 0`,
+  ];
+  return [
+    ...dateLines("d1", start),
+    ...dateLines("d2", end),
+    'tell application "Calendar"',
+    "  set targetCal to missing value",
+    "  repeat with c in calendars",
+    "    if writable of c is true then",
+    "      set targetCal to c",
+    "      exit repeat",
+    "    end if",
+    "  end repeat",
+    "  if targetCal is missing value then",
+    "    try",
+    '      set targetCal to calendar "Home"',
+    "    end try",
+    "  end if",
+    "  if targetCal is missing value then",
+    "    try",
+    '      set targetCal to calendar "Calendar"',
+    "    end try",
+    "  end if",
+    "  if targetCal is missing value and (count of calendars) > 0 then set targetCal to item 1 of calendars",
+    '  if targetCal is missing value then return "ERROR: no calendar available to create the event in"',
+    `  make new event at end of events of targetCal with properties {summary:"${title}", start date:d1, end date:d2}`,
+    '  return "OK"',
+    "end tell",
+  ].join("\n");
+}
+
+export async function executeCalendarCreate(args: Record<string, unknown>, io: CalendarCreateIO = { runOsascript: osascript }): Promise<string> {
+  const title = String(args.title ?? "").replace(/["\\]/g, "").trim().slice(0, 120);
+  if (!title) return "No event title was given.";
+  const start = parseDuePhrase(String(args.when ?? ""));
+  if (!start) {
+    return `An event needs a start time — tell me when "${title}" should start (e.g. "tomorrow at 2pm", "friday at noon").`;
+  }
+  const durationMinutes = clamp(args.durationMinutes, 60, 5, 24 * 60);
+  const end = new Date(start.getTime() + durationMinutes * 60_000);
+  const script = buildCalendarCreateScript(title, start, end);
+  const { ok, out } = await io.runOsascript(script);
+  if (!ok || out.startsWith("ERROR")) return `Could not create the event: ${out || "unknown error"}`;
+  const when = start.toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return `Event created: "${title}" ${when} (${durationMinutes} min).`;
+}
+
 /** Dispatcher — lane-tools routes the pim_* names here. */
 export async function executePimTool(name: string, args: Record<string, unknown>): Promise<string> {
   switch (name) {
@@ -290,6 +387,7 @@ export async function executePimTool(name: string, args: Record<string, unknown>
     case "calendar_today": return executeCalendarToday(args);
     case "reminders_list": return executeRemindersList(args);
     case "reminder_create": return executeReminderCreate(args);
+    case "calendar_create": return executeCalendarCreate(args);
     default: return `Unknown PIM tool: ${name}`;
   }
 }

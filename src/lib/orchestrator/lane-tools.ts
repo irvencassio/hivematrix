@@ -43,6 +43,7 @@ const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
   calendar_today: "brain",
   reminders_list: "brain",
   reminder_create: "brain",
+  calendar_create: "brain",
 };
 
 /**
@@ -315,8 +316,8 @@ export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
       },
     },
   },
-  // PIM: Contacts / Calendar / Reminders — live local reads + the one low-risk
-  // write (reminder_create). Definitions live in pim-tools.ts.
+  // PIM: Contacts / Calendar / Reminders — live local reads + the two low-risk
+  // writes (reminder_create, calendar_create). Definitions live in pim-tools.ts.
   ...PIM_TOOL_DEFINITIONS,
 ];
 
@@ -347,7 +348,7 @@ const CAPABILITY_ROUTING_LINES: Record<string, string> = {
   terminal_run: "Run shell commands in a HiveMatrix-owned persistent terminal session → **terminal_run**.",
   brain_search: "Recall a stored document / brain doc / past decision → **brain_search** (search durable memory before assuming it isn't written down).",
   code_graph: "Find where a symbol is defined + every place it's used → **code_graph** (exact, deterministic — use it to verify you found ALL usages of anything you changed, not just the obvious ones).",
-  contacts_lookup: "A person's phone number or email → **contacts_lookup**. Today's schedule → **calendar_today**. Open to-dos → **reminders_list**. \"Remind me to X\" → **reminder_create** (sets a real Reminder NOW — don't spawn a task for it).",
+  contacts_lookup: "A person's phone number or email → **contacts_lookup**. Today's schedule → **calendar_today**. Open to-dos → **reminders_list**. \"Remind me to X\" → **reminder_create** (sets a real Reminder NOW — don't spawn a task for it). \"Put X on my calendar\" / \"schedule X\" → **calendar_create** (creates a real Calendar event NOW; needs a start time, so ask if none was given — don't spawn a task for it).",
 };
 
 /**
@@ -425,6 +426,7 @@ export async function executeLaneTool(
     case "calendar_today":
     case "reminders_list":
     case "reminder_create":
+    case "calendar_create":
       return executePimTool(name, args);
     default:
       return `Error: Unknown lane tool "${name}"`;
