@@ -886,10 +886,10 @@ export function createDaemonServer() {
         return;
       }
 
-      // GET /observability — normalized per-run telemetry + totals across all
-      // three providers (Claude / Codex / local Qwen). ?taskId=… for one task.
-      // A disabled frontier provider's rows stay on disk (history is retained)
-      // but are filtered out of this rendered view — never a data delete.
+      // GET /observability — normalized per-run telemetry + totals across
+      // Claude and Codex (plus any "other"/historical rows). ?taskId=… for one
+      // task. A disabled frontier provider's rows stay on disk (history is
+      // retained) but are filtered out of this rendered view — never a data delete.
       if (req.method === "GET" && urlPath === "/observability") {
         const { listTaskTelemetry, getTaskTelemetry, observabilitySummary, observabilityScorecard, routingRecommendations } = await import("@/lib/observability/store");
         const oq = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
@@ -913,7 +913,7 @@ export function createDaemonServer() {
       }
 
       // GET /observability/series?window=1h|24h|7d|30d — time-bucketed telemetry +
-      // per-provider cache rollups for the dashboard (all three providers).
+      // per-provider cache rollups for the dashboard (Claude and Codex).
       if (req.method === "GET" && urlPath === "/observability/series") {
         const { observabilitySeries } = await import("@/lib/observability/series");
         const { getEnabledProviders } = await import("@/lib/config/frontier-providers");

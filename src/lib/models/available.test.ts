@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildAvailableModels, buildRoleModelOptions, CLAUDE_OPUS_ID, CLAUDE_SONNET_ID, CODEX_NEWEST_ID } from "./available";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { buildAvailableModels, buildRoleModelOptions, getDefaultModel, CLAUDE_OPUS_ID, CLAUDE_SONNET_ID, CODEX_NEWEST_ID } from "./available";
 import type { BackendStatus } from "./backends";
 
 function backends(claude: boolean, codex: boolean): BackendStatus[] {
@@ -37,7 +40,11 @@ test("claude backend yields Opus + Sonnet with pinned ids", () => {
   const byId = Object.fromEntries(ms.map((m) => [m.id, m.modelId]));
   assert.equal(byId["claude-opus"], CLAUDE_OPUS_ID);
   assert.equal(byId["claude-sonnet"], CLAUDE_SONNET_ID);
-  assert.deepEqual(Object.keys(byId), ["claude-opus", "claude-sonnet", "mixed", "cloud-only"]);
+  // "cloud-only" was a distinct pin-everything-to-frontier UI option; removed
+  // in the Claude-native cutover's console cleanup (Mixed already covers the
+  // recommended role-routed posture; CLOUD_ONLY_ID stays defined for the
+  // directive-engine's historical noLocal check, just no longer offered here).
+  assert.deepEqual(Object.keys(byId), ["claude-opus", "claude-sonnet", "mixed"]);
 });
 
 test("codex backend yields newest + fast variant on the same model id", () => {
@@ -50,18 +57,40 @@ test("codex backend yields newest + fast variant on the same model id", () => {
   assert.equal(codex?.fast ?? false, false);
 });
 
-test("Mixed and Cloud-only appear with any frontier backend configured (no local backend anymore)", () => {
+test("Mixed appears with any frontier backend configured (no local backend anymore)", () => {
   assert.ok(!ids(backends(false, false)).includes("mixed"), "no frontier → no mixed");
   assert.ok(ids(backends(true, false)).includes("mixed"), "claude → mixed");
   assert.ok(ids(backends(false, true)).includes("mixed"), "codex → mixed");
-  assert.ok(!ids(backends(false, false)).includes("cloud-only"), "no frontier → no cloud-only");
-  assert.ok(ids(backends(true, false)).includes("cloud-only"), "claude → cloud-only");
-  assert.ok(ids(backends(false, true)).includes("cloud-only"), "codex → cloud-only");
+  // "cloud-only" is no longer offered as a selectable option (see the
+  // "cloud-only sentinel removed" test above).
+  assert.ok(!ids(backends(true, false)).includes("cloud-only"), "claude → no cloud-only option");
+  assert.ok(!ids(backends(false, true)).includes("cloud-only"), "codex → no cloud-only option");
 });
 
-test("Cloud-only model id is the cloud-only sentinel", () => {
-  const m = buildAvailableModels(backends(true, false)).find((x) => x.id === "cloud-only");
-  assert.equal(m?.modelId, "cloud-only");
+test("getDefaultModel prefers Claude Sonnet when unset, not Opus", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "hm-available-test-"));
+  const prevHome = process.env.HOME;
+  process.env.HOME = tmp;
+  try {
+    const available = buildAvailableModels(backends(true, false));
+    assert.equal(getDefaultModel(available), CLAUDE_SONNET_ID);
+  } finally {
+    process.env.HOME = prevHome;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("getDefaultModel falls back to the first selectable model when Sonnet isn't configured", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "hm-available-test-"));
+  const prevHome = process.env.HOME;
+  process.env.HOME = tmp;
+  try {
+    const available = buildAvailableModels(backends(false, true));
+    assert.equal(getDefaultModel(available), CODEX_NEWEST_ID);
+  } finally {
+    process.env.HOME = prevHome;
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test("role options expose Coding choices across Claude and Codex, with Haiku as a last resort — no local options (Claude-native cutover)", () => {

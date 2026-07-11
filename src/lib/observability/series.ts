@@ -102,7 +102,6 @@ interface WindowSpec {
   unit: "minute" | "hour" | "day";
   count: number;
   stepMs: number;
-  cutoffMs: number;
   /**
    * SQL expression (referencing `createdAt`) that yields this bucket's local-
    * time label. Not a bare strftime FORMAT string — the 5-minute bucket needs
@@ -125,7 +124,6 @@ function specFor(window: SeriesWindow): WindowSpec {
       unit: "minute",
       count: 60 / MINUTE_BUCKET_SIZE,
       stepMs: MINUTE_BUCKET_SIZE * MIN,
-      cutoffMs: HOUR,
       // "YYYY-MM-DDTHH:" || the minute floored to the nearest 5 — must
       // byte-match bucketLabel()'s JS-side minute formatting exactly, or the
       // axis join below silently drops every row into "outside the axis".
@@ -133,9 +131,9 @@ function specFor(window: SeriesWindow): WindowSpec {
         `strftime('%Y-%m-%dT%H:', createdAt, 'localtime') || printf('%02d', (CAST(strftime('%M', createdAt, 'localtime') AS INTEGER) / ${MINUTE_BUCKET_SIZE}) * ${MINUTE_BUCKET_SIZE})`,
     };
   }
-  if (window === "24h") return { unit: "hour", count: 24, stepMs: HOUR, cutoffMs: 24 * HOUR, bucketExpr: "strftime('%Y-%m-%dT%H', createdAt, 'localtime')" };
-  if (window === "30d") return { unit: "day", count: 30, stepMs: DAY, cutoffMs: 30 * DAY, bucketExpr: "strftime('%Y-%m-%d', createdAt, 'localtime')" };
-  return { unit: "day", count: 7, stepMs: DAY, cutoffMs: 7 * DAY, bucketExpr: "strftime('%Y-%m-%d', createdAt, 'localtime')" };
+  if (window === "24h") return { unit: "hour", count: 24, stepMs: HOUR, bucketExpr: "strftime('%Y-%m-%dT%H', createdAt, 'localtime')" };
+  if (window === "30d") return { unit: "day", count: 30, stepMs: DAY, bucketExpr: "strftime('%Y-%m-%d', createdAt, 'localtime')" };
+  return { unit: "day", count: 7, stepMs: DAY, bucketExpr: "strftime('%Y-%m-%d', createdAt, 'localtime')" };
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -150,13 +148,29 @@ function bucketLabel(d: Date, unit: "minute" | "hour" | "day"): string {
   return unit === "hour" ? `${base}T${pad(d.getHours())}` : base;
 }
 
-/** Continuous ascending axis of bucket labels ending at the current bucket. */
-function axis(spec: WindowSpec): string[] {
-  const now = new Date();
-  const cur = new Date(now);
-  if (spec.unit === "minute") cur.setMinutes(Math.floor(cur.getMinutes() / MINUTE_BUCKET_SIZE) * MINUTE_BUCKET_SIZE, 0, 0);
-  else if (spec.unit === "hour") cur.setMinutes(0, 0, 0);
+/**
+ * "Now", floored down to the start of its current bucket (5-min/hour/day).
+ * This is the single source of truth for both the axis (below) and the SQL
+ * cutoff in `observabilitySeries` — they MUST derive from the same floored
+ * instant, or the SQL query (which used to cut off at a raw, un-floored
+ * "now - windowMs") admits rows time-stamped in the partial bucket just
+ * before the axis's first label. Those rows were counted in the totals but
+ * had no matching bucket to land in, so they were silently dropped by the
+ * "outside the rendered axis" skip below — the most visible symptom was the
+ * 1h view (5-minute buckets, so up to a whole bucket's worth of the window
+ * could vanish this way) showing an empty/short chart while the KPI totals
+ * (summed independently, not bucket-joined) still reported nonzero runs.
+ */
+function flooredCur(unit: "minute" | "hour" | "day"): Date {
+  const cur = new Date();
+  if (unit === "minute") cur.setMinutes(Math.floor(cur.getMinutes() / MINUTE_BUCKET_SIZE) * MINUTE_BUCKET_SIZE, 0, 0);
+  else if (unit === "hour") cur.setMinutes(0, 0, 0);
   else cur.setHours(0, 0, 0, 0);
+  return cur;
+}
+
+/** Continuous ascending axis of bucket labels ending at the current (floored) bucket. */
+function axis(spec: WindowSpec, cur: Date): string[] {
   const labels: string[] = [];
   for (let i = spec.count - 1; i >= 0; i--) {
     labels.push(bucketLabel(new Date(cur.getTime() - i * spec.stepMs), spec.unit));
@@ -171,7 +185,11 @@ function emptyCell(): ProviderCell {
 export async function observabilitySeries(window: SeriesWindow = "7d"): Promise<ObservabilitySeries> {
   const spec = specFor(window);
   const db = getDb();
-  const cutoffIso = new Date(Date.now() - spec.cutoffMs).toISOString();
+  // Cutoff = the start of the axis's earliest bucket (not a raw "now -
+  // windowMs"), so every row the SQL query admits has a bucket to land in —
+  // see flooredCur()'s comment for the bug this alignment fixes.
+  const cur = flooredCur(spec.unit);
+  const cutoffIso = new Date(cur.getTime() - (spec.count - 1) * spec.stepMs).toISOString();
 
   // Bucketed (chart) rows.
   const bucketRows = db
@@ -226,7 +244,7 @@ export async function observabilitySeries(window: SeriesWindow = "7d"): Promise<
   const num = (v: unknown) => (v == null ? 0 : Number(v));
 
   // Assemble the continuous axis with zero-filled cells.
-  const labels = axis(spec);
+  const labels = axis(spec, cur);
   const byBucket = new Map<string, SeriesPoint>();
   for (const t of labels) byBucket.set(t, { t, byProvider: {} });
   const providers = new Set<string>();

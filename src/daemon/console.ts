@@ -1038,14 +1038,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </div>
 
       <div id="s_frontier_provider_row" style="display:none;margin-top:14px">
-        <label class="flbl">Frontier provider (Mixed / Cloud-only)</label>
+        <label class="flbl">Frontier provider</label>
         <div class="row" style="align-items:center;gap:8px">
           <select id="s_frontier_provider" onchange="saveFrontierProvider()" style="width:auto">
             <option value="claude">Claude (Sonnet / Opus)</option>
             <option value="codex">Codex (GPT-5.5 / Spark)</option>
           </select>
         </div>
-        <div class="muted" style="font-size:11px;margin-top:2px">Which provider handles the frontier tier in Mixed and Cloud-only modes.</div>
+        <div class="muted" style="font-size:11px;margin-top:2px">Which provider handles frontier work.</div>
       </div>
 
       <div id="s_role_models" style="margin-top:16px">
@@ -1063,24 +1063,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
           <select id="s_role_writer" onchange="saveRoleModel('writer', this.value)"></select></div>
       </div>
 
-      <label class="flbl" style="margin-top:16px">Embeddings</label>
-      <div class="row" style="align-items:center;gap:8px;margin-bottom:6px">
-        <input type="checkbox" id="s_embedding_enabled" style="width:auto" />
-        <select id="s_embedding_model" onchange="applyEmbeddingChoice(this.value)" style="flex:1">
-          <option value="custom">Custom</option>
-          <option value="rapid-mlx-qwen3-8b">Rapid-MLX Qwen3 Embedding 8B</option>
-          <option value="brainpower-ollama-qwen3-8b">Brainpower / Ollama Qwen3 Embedding 8B</option>
-        </select>
-      </div>
-      <div class="row" style="gap:6px">
-        <input id="s_embedding_endpoint" placeholder="http://localhost:8002/v1" style="flex:1" />
-        <input id="s_embedding_provider" placeholder="rapid-mlx" style="width:110px" />
-      </div>
-      <input id="s_embedding_model_id" placeholder="mlx-community/Qwen3-Embedding-8B-4bit-DWQ" style="width:100%;margin-top:6px" />
-      <div class="row" style="gap:6px;margin-top:6px;align-items:center">
-        <button class="sm" onclick="saveEmbeddingsSettings()">Save embeddings</button>
-        <span class="muted" id="s_embedding_status" style="font-size:11px">Local vectors stay on this Mac.</span>
-      </div>
     </div>
     <div id="settingsRemote" style="display:none">
       <div class="remote-status"><span class="dot" id="s_remote_dot"></span><span id="s_remote_label">…</span></div>
@@ -1287,7 +1269,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <span id="lic_activate_status" class="muted" style="font-size:11px"></span>
       </div>
       <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--border)">
-        <div class="muted" style="font-size:12px">On the <b>Free</b> tier (local models only)? <a href="https://hivematrix.app/pricing" target="_blank" style="color:var(--accent)">Upgrade to Pro — $39/mo or $349/yr</a> — voice, all channels, directives, companion pairing. No per-task fees; bring your own model subscriptions.</div>
+        <div class="muted" style="font-size:12px">On the <b>Free</b> tier? <a href="https://hivematrix.app/pricing" target="_blank" style="color:var(--accent)">Upgrade to Pro — $39/mo or $349/yr</a> — voice, all channels, directives, companion pairing. No per-task fees; bring your own model subscriptions.</div>
       </div>
     </div>
     <div id="settingsLanes" style="display:none">
@@ -1295,7 +1277,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <label class="flbl" style="margin:0">System Readiness</label>
         <button class="copybtn" onclick="renderSystemReadiness()">↻ Refresh</button>
       </div>
-      <div class="muted" style="font-size:11px;margin:4px 0 8px">Read-only result-quality checks across routing, Browser Lane auth, lane apps, workflows, local model readiness, and stale legacy task state.</div>
+      <div class="muted" style="font-size:11px;margin:4px 0 8px">Read-only result-quality checks across routing, Browser Lane auth, lane apps, workflows, model readiness, and stale legacy task state.</div>
       <div id="system_readiness" style="margin-top:6px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -1457,7 +1439,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       </span>
       <button class="copybtn" onclick="renderObsDashboard('obsDashModal')">↻ Refresh</button>
     </div>
-    <div class="muted" style="font-size:11px;margin-bottom:10px">Tokens, tasks, latency and prompt-cache across Claude, Codex (ChatGPT) and the local model. On-device local work stays on this Mac.</div>
+    <div class="muted" style="font-size:11px;margin-bottom:10px">Tokens, tasks, latency and prompt-cache across Claude and Codex (ChatGPT).</div>
     <div id="obsDashModal"><div class="muted">Loading…</div></div>
   </div>
 </div>
@@ -1833,8 +1815,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="usageSummary"><div class="muted">No frontier usage yet.</div></div>
     <details class="usage-details" id="usageDetailsSec"><summary>Per-window details</summary>
     <div id="usage"></div></details></details>
-    <details class="ctx-sec" id="modelsSec" open><summary>Models <button id="modelsRefresh" class="usage-refresh" title="Refresh model status" onclick="event.stopPropagation();refreshModelsNow()">↻</button></summary>
-    <div id="modelStatus"></div></details>
     <details class="ctx-sec" id="obsSec"><summary>Observability</summary>
     <div id="observability"><div class="muted">No task telemetry yet.</div></div></details>
     <details class="ctx-sec" id="connSec" open><summary>Connectivity</summary>
@@ -2755,28 +2735,56 @@ let _obsWindow = "7d";
 // for a granularity the operator didn't ask for (they asked which MODEL ran,
 // not a per-hour model timeline).
 let _obsGroup = "provider";
-// Any provider key not listed here (e.g. a future "local-<engine>" id) falls
-// back to its raw string as a label and to OBS_COLORS.other as a color — see
-// the "|| " fallbacks at every OBS_LABELS/OBS_COLORS read site below. Known
-// retired providers get an explicit entry so their historical rows read as
-// "known but gone", not as an unlabeled grey "other" bucket.
-const OBS_LABELS = { "anthropic": "Claude", "openai-codex": "Codex", "local-qwen": "Local model", "local-dwarfstar": "Local (retired)", "other": "other" };
-const OBS_COLORS = { "anthropic": "#c8794f", "openai-codex": "#10a37f", "local-qwen": "#7a5cff", "local-dwarfstar": "#5c6470", "other": "#8a93a6" };
-const OBS_ORDER = { "anthropic": 0, "openai-codex": 1, "local-qwen": 2, "local-dwarfstar": 3, "other": 4 };
+// Any provider key not listed here falls back to its raw string as a label
+// and to OBS_COLORS.other as a color — see the "|| " fallbacks at every
+// OBS_LABELS/OBS_COLORS read site below. A pre-cutover DB may still carry a
+// handful of historical "local-*" rows (the since-retired on-device engine);
+// they fall through to that "other" bucket rather than an explicit entry,
+// since there's no engine left to distinguish tiers for.
+const OBS_LABELS = { "anthropic": "Claude", "openai-codex": "Codex", "other": "other" };
+const OBS_COLORS = { "anthropic": "#c8794f", "openai-codex": "#10a37f", "other": "#8a93a6" };
+const OBS_ORDER = { "anthropic": 0, "openai-codex": 1, "other": 2 };
 function obsProvider(model) {
   const m = (model || "").toLowerCase().trim();
   if (/^(codex|chatgpt)/.test(m) || /^(gpt|o[0-9])/.test(m)) return "Codex";
   if (/^(claude|opus|sonnet|haiku)/.test(m)) return "Claude";
-  if (/(qwen|mistral|llama|mlx|local|gemma|phi|nan)/.test(m)) return "Local model";
   return "—";
 }
-// Display-only cleanup of a raw model id: strip the internal "codex:" prefix
-// (execution-only, not user-facing — see codex-agent.ts) and expand a
-// trailing "[1m]" 1M-context-window marker into a readable suffix. Never
-// merges distinct model ids — a [1m] variant prices differently and must
-// stay its own row.
+// Per-Claude-tier colors for the "by model" breakdown, distinct from the
+// provider-level OBS_COLORS above — Opus/Sonnet/Haiku all share the
+// "anthropic" provider color there, but the operator's ask for "by model" is
+// specifically which TIER ran, so each gets its own dot/series color here.
+const OBS_TIER_COLORS = { "Opus": "#c8794f", "Sonnet": "#e0a458", "Haiku": "#f0cf7a", "Codex": "#10a37f" };
+// Classify a raw model id into a Claude tier or "Codex". Matches the bare CLI
+// alias ("opus"/"sonnet"/"haiku") and any resolved full id the CLI reports
+// back (e.g. "claude-opus-4-8", "claude-opus-4-8[1m]"). Returns null for
+// anything else (historical local rows, unknown ids) so callers fall back to
+// the raw string / OBS_COLORS.other.
+function obsModelTier(model) {
+  const m = (model || "").toLowerCase().trim();
+  if (m.indexOf("codex:") === 0 || /^(gpt|o[0-9])/.test(m)) return "Codex";
+  if (m === "opus" || m.indexOf("claude-opus") === 0) return "Opus";
+  if (m === "sonnet" || m.indexOf("claude-sonnet") === 0) return "Sonnet";
+  if (m === "haiku" || m.indexOf("claude-haiku") === 0) return "Haiku";
+  return null;
+}
+function obsModelColor(model) {
+  const tier = obsModelTier(model);
+  return (tier && OBS_TIER_COLORS[tier]) || OBS_COLORS.other;
+}
+// Display-only cleanup of a raw model id: a Claude tier collapses to its tier
+// name (Opus/Sonnet/Haiku), keeping a "[1m]" 1M-context-window marker as a
+// distinct suffix — a [1m] variant prices differently and must stay its own
+// row, never merged into the plain tier's row. Codex keeps its specific
+// model string (stripping the internal "codex:" prefix — execution-only, not
+// user-facing, see codex-agent.ts) since "Codex" alone would collapse GPT-5.5
+// and Spark into one row.
 function obsModelLabel(model) {
   model = String(model || "");
+  const tier = obsModelTier(model);
+  if (tier === "Opus" || tier === "Sonnet" || tier === "Haiku") {
+    return tier + (/\[1m\]$/.test(model) ? " (1M ctx)" : "");
+  }
   if (model.indexOf("codex:") === 0) model = model.slice(6);
   const m1m = model.match(/^(.*)\[1m\]$/);
   if (m1m) return m1m[1] + " (1M ctx)";
@@ -2926,10 +2934,11 @@ async function renderObservability() {
       + '<td>' + fmtMs(p.latencyP50Ms) + '</td><td>' + fmtMs(p.latencyP95Ms) + '</td>'
       + '</tr>';
     // Nested per-model breakdown — the operator's ask: which specific Claude
-    // model, which specific local tier, actually ran these tasks.
+    // tier (Opus/Sonnet/Haiku), or which Codex model, actually ran these tasks.
     const models = byModel.filter(m => m.provider === p.key).sort((a, b) => b.runs - a.runs);
     for (const m of models) {
-      html += '<tr class="obs-modelrow muted" style="font-size:11px"><td style="padding-left:16px">' + esc(obsModelLabel(m.key)) + '</td><td>' + m.runs + '</td>'
+      const dot = '<i style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;background:' + obsModelColor(m.key) + '"></i>';
+      html += '<tr class="obs-modelrow muted" style="font-size:11px"><td style="padding-left:16px">' + dot + esc(obsModelLabel(m.key)) + '</td><td>' + m.runs + '</td>'
         + '<td>' + fmtNum(m.inputTokens) + ' / ' + fmtNum(m.outputTokens) + '</td>'
         + '<td>' + fmtMs(m.latencyP50Ms) + '</td><td>' + fmtMs(m.latencyP95Ms) + '</td>'
         + '</tr>';
@@ -3121,11 +3130,13 @@ async function renderObsDashboard(target) {
     html += '<div class="obs-chart"><h4>' + heading + '</h4><div class="sub">recent runs · latency percentiles · throughput</div>'
       + '<table class="obs-tbl"><tr><th>' + colHead + '</th><th>runs</th><th>tok in/out</th><th>p50</th><th>p95</th><th>tok/s</th></tr>';
     for (const p of groupRows) {
-      // In "by model" mode, a small dot in the parent provider's color keeps
-      // e.g. both Claude models visually grouped without a second heavy
-      // per-bucket-per-model query — see the _obsGroup comment above.
+      // In "by model" mode, the dot is the model's own Claude-tier/Codex color
+      // (obsModelColor) — Opus/Sonnet/Haiku/Codex each a distinct series/color,
+      // not just their shared "Claude" provider color — see the _obsGroup
+      // comment above for why this stays a second, lightweight query rather
+      // than a per-bucket-per-model time series.
       const dot = groupByModel
-        ? '<i style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;background:' + (OBS_COLORS[p.provider] || OBS_COLORS.other) + '"></i>'
+        ? '<i style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;background:' + obsModelColor(p.key) + '"></i>'
         : '';
       const label = groupByModel ? obsModelLabel(p.key) : (OBS_LABELS[p.key] || p.key);
       html += '<tr><td>' + dot + esc(label) + '</td><td>' + p.runs + '</td>'
@@ -4472,7 +4483,7 @@ async function _obRenderPersonaSetup() {
 // variant streams the same endpoint and reports progress via toasts instead.
 async function runPersonaBirthRitual() {
   const ok = await hmConfirm(
-    'Run the birth ritual?\n\nYour local model will choose a name, an emoji sigil, and an identity, then write SOUL.md, IDENTITY.md and USER.md into your brain\'s persona folder. This can take a minute.',
+    'Run the birth ritual?\n\nClaude will choose a name, an emoji sigil, and an identity, then write SOUL.md, IDENTITY.md and USER.md into your brain\'s persona folder. This can take a minute.',
     { okLabel: 'Run it' }
   );
   if (!ok) return;
@@ -5213,65 +5224,12 @@ async function checkUsage(forceRefresh) {
         + u.byModel.map(m => '<div class="urow"><span>' + esc(m.label) + '</span>'
           + '<span class="um">' + m.tasks + ' task' + (m.tasks===1?'':'s') + '</span></div>').join("");
     } else if (!sub || (!sub.fiveHour && !sub.sevenDay)) {
-      html += '<div class="muted">No frontier usage yet — local model work runs on-device.</div>';
+      html += '<div class="muted">No frontier usage yet.</div>';
     }
 
     html += '</div>';
     el.innerHTML = html;
   } catch (e) { /* transient */ }
-}
-
-// Embeddings status for the "Models" panel (the one remaining on-box model —
-// see docs/superpowers/plans/2026-07-11-claude-native-cutover.md, "Out of scope").
-async function checkModels() {
-  const el = document.getElementById("modelStatus");
-  if (!el || !models) return;
-  let emb = null;
-  try { emb = await api("/embeddings"); } catch (e) { /* transient */ }
-
-  let html = "";
-
-  // — Embeddings (shared with Brainpower) —
-  if (emb) {
-    html += '<div class="mdl-grp">Embeddings <span style="font-weight:400;text-transform:none;letter-spacing:0">· shared with Brainpower</span></div>';
-    if (emb.model) {
-      const dot = emb.enabled ? '<span style="color:var(--ok)">●</span>' : '<span style="color:var(--muted)">○</span>';
-      html += '<div class="mdl-card">'
-        + '<div class="mdl-card-head"><span class="mdl-card-name">' + dot + ' ' + esc(emb.model) + '</span>'
-        + '<span class="st ' + (emb.enabled ? "ok" : "no") + '">' + (emb.enabled ? "✓ on" : "off") + '</span></div>'
-        + '<div class="mdl-card-foot">'
-        + esc((emb.indexedDocs || 0) + " doc" + (emb.indexedDocs === 1 ? "" : "s") + " indexed")
-        + (emb.endpoint ? " · " + esc(emb.endpoint) : "")
-        + (emb.enabled ? ' &nbsp; <button class="linklike" onclick="reindexEmbeddings()">Reindex</button>' : "")
-        + '</div></div>';
-    } else {
-      html += '<div class="mdl-card"><div class="mdl-card-foot" style="border:none;margin:0;padding:0">Not configured — set <code>embeddings</code> in ~/.hivematrix/config.json (shares Brainpower\'s qwen3-embedding model over the same brain).</div></div>';
-    }
-  }
-
-  // Frontier (cloud) usage now lives in its own Usage section, above Models.
-  el.innerHTML = html;
-}
-
-async function reindexEmbeddings() {
-  hmToast("Reindexing brain…", "ok");
-  try {
-    const r = await api("/embeddings/reindex", { method: "POST" });
-    if (r && r.error) hmToast(r.error, "err");
-    else hmToast("Reindexed " + (r?.indexed || 0) + " doc(s)" + (r?.pruned ? ", pruned " + r.pruned : ""), "ok");
-  } catch (e) { hmToast("Reindex failed", "err"); }
-  checkModels();
-}
-
-async function refreshModelsNow() {
-  const btn = document.getElementById("modelsRefresh");
-  if (btn) { btn.disabled = true; btn.textContent = "…"; }
-  try {
-    await loadModels();                          // refresh model status
-    await checkModels();                         // Models panel = embeddings only
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "↻"; }
-  }
 }
 
 async function refreshUsageNow() {
@@ -5538,7 +5496,7 @@ async function loadModels() {
   // Populate the New Task dropdown, grouped intent-first.
   const sel = document.getElementById("t_model");
   const catOf = m => m.backend === "mixed" ? "Recommended" : "Cloud frontier";
-  const order = ["Recommended", "Local (on-device)", "Cloud frontier"];
+  const order = ["Recommended", "Cloud frontier"];
   const groups = {};
   for (const m of models.available) { (groups[catOf(m)] = groups[catOf(m)] || []).push(m); }
   const opt = m => '<option value="'+esc(m.id)+'"'+(m.disabled?' disabled':'')+'>'+esc(m.name)+(m.note?' — '+esc(m.note):'')+'</option>';
@@ -5548,8 +5506,6 @@ async function loadModels() {
   // Default selection
   const def = models.available.find(m => m.modelId === models.defaultModel || m.id === models.defaultModel);
   if (def) sel.value = def.id;
-  // Refresh the Models panel (embeddings status) now that /models has loaded.
-  checkModels();
   // About can be opened before /models finishes; patch its version rows once
   // the version-bearing payload arrives.
   const about = document.getElementById("settingsAbout");
@@ -6147,7 +6103,6 @@ function renderSettingsModelControls() {
     '<div class="mdl-card"><div class="mdl-card-head"><span class="mdl-card-name">'+esc(b.name)+'</span>'
     + '<span class="st '+(b.configured?'ok':'no')+'">'+(b.configured?'✓ '+esc(b.detail):'not set up')+'</span></div>'
     + (b.configured?'':'<div class="mdl-card-foot">'+esc(b.connect||'')+'</div>')+'</div>').join("") : '<div class="mdl-card"><div class="mdl-card-foot" style="border:none;margin:0;padding:0">Model status unavailable.</div></div>';
-  renderEmbeddingSettings();
   const v = m.version || {};
   document.getElementById("s_version").textContent = "HiveMatrix v" + (v.version||"?") + " · build " + (v.build||"?") + " · " + (v.date||"?");
   document.getElementById("s_theme").value = m.theme || "system";
@@ -8950,52 +8905,7 @@ async function saveFrontierProvider() {
   hmToast("Frontier provider saved", "ok");
 }
 
-function embeddingChoices() {
-  return (models && models.embeddingModelChoices) || [];
-}
-function findEmbeddingChoice(id) {
-  return embeddingChoices().find(c => c.id === id);
-}
-function matchingEmbeddingChoice(e) {
-  if (!e) return null;
-  return embeddingChoices().find(c => c.endpoint === e.endpoint && c.model === e.model && c.provider === e.provider) || null;
-}
-function renderEmbeddingSettings() {
-  const select = document.getElementById("s_embedding_model");
-  if (!select || !models) return;
-  const choices = embeddingChoices();
-  const e = models.embeddings || {};
-  select.innerHTML = '<option value="custom">Custom</option>' + choices.map(c => '<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join("");
-  const match = matchingEmbeddingChoice(e);
-  select.value = match ? match.id : "custom";
-  document.getElementById("s_embedding_enabled").checked = e.enabled === true;
-  document.getElementById("s_embedding_endpoint").value = e.endpoint || "http://localhost:8002/v1";
-  document.getElementById("s_embedding_model_id").value = e.model || "mlx-community/Qwen3-Embedding-8B-4bit-DWQ";
-  document.getElementById("s_embedding_provider").value = e.provider || "rapid-mlx";
-}
-function applyEmbeddingChoice(id) {
-  const choice = findEmbeddingChoice(id);
-  if (!choice) return;
-  document.getElementById("s_embedding_endpoint").value = choice.endpoint;
-  document.getElementById("s_embedding_model_id").value = choice.model;
-  document.getElementById("s_embedding_provider").value = choice.provider;
-  document.getElementById("s_embedding_enabled").checked = true;
-}
-async function saveEmbeddingsSettings() {
-  const embeddings = {
-    enabled: document.getElementById("s_embedding_enabled").checked,
-    endpoint: document.getElementById("s_embedding_endpoint").value.trim(),
-    model: document.getElementById("s_embedding_model_id").value.trim(),
-    provider: document.getElementById("s_embedding_provider").value.trim(),
-  };
-  models = await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ embeddings }) }) || models;
-  await loadModels();
-  renderEmbeddingSettings();
-  await checkModels();
-  hmToast("Embeddings saved", "ok");
-}
-
-// Prompt wizard: sends the raw #t_desc text to the local-model rewrite endpoint and
+// Prompt wizard: sends the raw #t_desc text to the prompt-rewrite endpoint and
 // shows the result in an editable preview. Never blocks task creation — on any
 // failure this just toasts and leaves #t_desc untouched.
 async function enhanceTaskPrompt() {
@@ -9211,10 +9121,8 @@ if (requireToken()) {
   checkUpdate();
   setInterval(checkUpdate, 5 * 60 * 1000);
   checkUsage();
-  checkModels();
   checkDaemonVersionReload();
   setInterval(checkUsage, 30 * 1000);
-  setInterval(checkModels, 30 * 1000);
   setInterval(checkDaemonVersionReload, 20 * 1000);
 }
 </script>

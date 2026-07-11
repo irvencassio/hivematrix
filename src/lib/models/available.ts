@@ -75,19 +75,6 @@ export function buildAvailableModels(backends: BackendStatus[] = detectBackends(
     });
   }
 
-  // Cloud-only pins every role to the frontier "code-critical" tier — no
-  // per-role split. Kept as a distinct option for tasks that want the
-  // highest-quality model throughout, at the highest cost.
-  if (hasFrontier) {
-    models.push({
-      id: "cloud-only",
-      name: "Cloud-only — everything on the frontier",
-      modelId: CLOUD_ONLY_ID,
-      backend: "mixed",
-      note: "highest quality, highest cost",
-    });
-  }
-
   return models;
 }
 
@@ -101,7 +88,12 @@ function readConfig(): Record<string, unknown> {
   try { return JSON.parse(readFileSync(configPath(), "utf-8")); } catch { return {}; }
 }
 
-/** The configured default model id, falling back to the first available. */
+/**
+ * The configured default model id. Falls back to Claude Sonnet when unset
+ * and available (the Claude-native default posture — fast/capable, not the
+ * highest-cost Opus); if Sonnet isn't configured, falls back to the first
+ * selectable model (e.g. a Codex-only install).
+ */
 export function getDefaultModel(available: UiModel[] = buildAvailableModels()): string | null {
   const selectable = available.filter((m) => !m.disabled);
   const cfg = readConfig();
@@ -109,7 +101,8 @@ export function getDefaultModel(available: UiModel[] = buildAvailableModels()): 
   if (configured && selectable.some((m) => m.modelId === configured || m.id === configured)) {
     return configured;
   }
-  return selectable[0]?.modelId ?? null;
+  const sonnet = selectable.find((m) => m.modelId === CLAUDE_SONNET_ID);
+  return sonnet?.modelId ?? selectable[0]?.modelId ?? null;
 }
 
 export function setDefaultModel(modelId: string): void {

@@ -461,7 +461,7 @@ test("Mixed-mode role-model defaults use version-agnostic Claude labels", () => 
 
 test("right-panel sections are collapsible <details> with persisted open state", () => {
   // Each context section is a <details class="ctx-sec"> so the long panel can be tidied.
-  for (const id of ["modelsSec", "obsSec", "connSec", "dirSec", "skillsSec", "mcpSec"]) {
+  for (const id of ["usageSec", "obsSec", "connSec", "dirSec", "skillsSec", "mcpSec"]) {
     assert.match(CONSOLE_HTML, new RegExp('<details class="ctx-sec" id="' + id + '"'), id + " is a collapsible section");
   }
   // Actionable sections default open; info-heavy ones default collapsed.
@@ -473,7 +473,7 @@ test("right-panel sections are collapsible <details> with persisted open state",
   assert.match(js, /hm_sec_/, "per-section open state persisted");
   assert.match(js, /wireCtxSections\(\);/, "wired on init");
   // In-summary controls don't toggle the section.
-  assert.match(CONSOLE_HTML, /event\.stopPropagation\(\);refreshModelsNow\(\)/);
+  assert.match(CONSOLE_HTML, /event\.stopPropagation\(\);refreshUsageNow\(\)/);
 });
 
 test("console surfaces observability: per-task strip + totals across providers", () => {
@@ -497,16 +497,21 @@ test("observability by-provider table uses fmtNum for tok in/out (null Codex tok
   assert.ok(matches.length >= 2, "both sidebar and dashboard table renders must use fmtNum for tok in/out");
 });
 
-test("observability model label strips the internal codex: prefix and expands the [1m] context marker", () => {
+test("observability model label maps Claude ids to their tier (Opus/Sonnet/Haiku) and strips the internal codex: prefix", () => {
   const js = extractScript(CONSOLE_HTML);
-  const fn = js.match(/function obsModelLabel\(model\) \{[\s\S]*?\n\}/);
-  assert.ok(fn, "console script must define obsModelLabel");
-  const factory = new Function(`${fn![0]}\nreturn obsModelLabel;`) as () => (model: string) => string;
+  const fnTier = js.match(/function obsModelTier\(model\) \{[\s\S]*?\n\}/);
+  const fnLabel = js.match(/function obsModelLabel\(model\) \{[\s\S]*?\n\}/);
+  assert.ok(fnTier, "console script must define obsModelTier");
+  assert.ok(fnLabel, "console script must define obsModelLabel");
+  const factory = new Function(`${fnTier![0]}\n${fnLabel![0]}\nreturn obsModelLabel;`) as () => (model: string) => string;
   const obsModelLabel = factory();
   assert.equal(obsModelLabel("codex:gpt-5.5"), "gpt-5.5", "codex: is execution-only, stripped for display");
-  assert.equal(obsModelLabel("claude-opus-4-8[1m]"), "claude-opus-4-8 (1M ctx)", "[1m] expands to a readable suffix, not merged into the base model");
-  assert.equal(obsModelLabel("claude-opus-4-8"), "claude-opus-4-8", "a plain model id passes through unchanged");
-  assert.equal(obsModelLabel("qwen3.6-35b-4bit"), "qwen3.6-35b-4bit");
+  assert.equal(obsModelLabel("claude-opus-4-8[1m]"), "Opus (1M ctx)", "[1m] expands to a readable suffix on the tier name, not merged into the plain-Opus row");
+  assert.equal(obsModelLabel("claude-opus-4-8"), "Opus", "a resolved Claude id collapses to its tier name");
+  assert.equal(obsModelLabel("opus"), "Opus", "the bare CLI alias also maps to its tier name");
+  assert.equal(obsModelLabel("claude-sonnet-5"), "Sonnet");
+  assert.equal(obsModelLabel("claude-haiku-4-5-20251001"), "Haiku");
+  assert.equal(obsModelLabel("qwen3.6-35b-4bit"), "qwen3.6-35b-4bit", "unclassified (e.g. historical local) ids pass through unchanged");
 });
 
 test("inline observability panel nests per-model rows under each provider row", () => {
@@ -776,10 +781,10 @@ test("frontier usage panel renders a separate Codex usage section", () => {
   assert.match(js, /renderCodexBar/);
 });
 
-test("models panel has a manual refresh that bypasses cached auth state", () => {
+test("usage panel has a manual refresh that bypasses cached auth state", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(CONSOLE_HTML, /usageRefresh/);
-  assert.match(js, /function refreshModelsNow/);
+  assert.match(js, /function refreshUsageNow/);
   assert.match(js, /checkUsage\(true\)/);
   assert.match(js, /\/usage\?refresh=1/);
 });
@@ -1450,12 +1455,12 @@ test("new task and task selection remain intact", () => {
   assert.match(js, /onclick="selectTask\(/, "task cards remain selectable in renderBoard");
 });
 
-test("frontier usage has its own Usage section above Models", () => {
+test("frontier usage has its own Usage section above Observability", () => {
   assert.match(CONSOLE_HTML, /id="usageSec"/, "standalone Usage section present");
   assert.match(CONSOLE_HTML, /<details class="ctx-sec" id="usageSec" open>/, "Usage is a collapsible ctx-sec, open by default");
   assert.ok(
-    CONSOLE_HTML.indexOf('id="usageSec"') < CONSOLE_HTML.indexOf('id="modelsSec"'),
-    "Usage section sits above the Models section",
+    CONSOLE_HTML.indexOf('id="usageSec"') < CONSOLE_HTML.indexOf('id="obsSec"'),
+    "Usage section sits above the Observability section",
   );
 });
 
@@ -1472,25 +1477,29 @@ test("per-window usage details remain available but secondary", () => {
   assert.match(CONSOLE_HTML, /id="usageDetailsSec"/, "per-window details disclosure present");
   const usageSec = CONSOLE_HTML.indexOf('id="usageSec"');
   const usage = CONSOLE_HTML.indexOf('id="usage"');
-  const modelsSec = CONSOLE_HTML.indexOf('id="modelsSec"');
-  assert.ok(usageSec >= 0 && usage > usageSec && usage < modelsSec, "#usage detail lives inside the Usage section, not Models");
+  const obsSec = CONSOLE_HTML.indexOf('id="obsSec"');
+  assert.ok(usageSec >= 0 && usage > usageSec && usage < obsSec, "#usage detail lives inside the Usage section, not spilling into the next section");
   const js = extractScript(CONSOLE_HTML);
   assert.doesNotMatch(js, /Frontier · cloud/, "usage no longer buried under a Models 'Frontier · cloud' header");
 });
 
-test("Models panel shows embeddings only — the local-engine UI is gone (Claude-native cutover Phase 4)", () => {
+test("the sidebar Models panel (embeddings-only after Phase 4) is removed entirely — redundant with Settings > Models routing summary", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.doesNotMatch(js, /Local · on-device/, "local-engine group removed from Models");
-  assert.match(js, /Embeddings/, "embeddings group kept in Models");
-  assert.match(js, /getElementById\("modelStatus"\)/, "checkModels still fills modelStatus");
+  assert.doesNotMatch(CONSOLE_HTML, /id="modelsSec"/, "sidebar Models <details> section removed");
+  assert.doesNotMatch(CONSOLE_HTML, /id="modelStatus"/, "modelStatus mount point removed");
+  assert.doesNotMatch(js, /function checkModels\(/, "checkModels (embeddings-only render) removed");
+  assert.doesNotMatch(js, /function reindexEmbeddings\(/, "reindexEmbeddings removed with its only caller");
+  assert.doesNotMatch(js, /function refreshModelsNow\(/, "refreshModelsNow removed with its only caller");
+  assert.doesNotMatch(js, /Local · on-device/, "local-engine group stays gone");
 });
 
-test("checkModels no longer renders the Rapid-MLX local engine", () => {
+test("embeddings settings UI is hidden (deferred — no Claude equivalent); backend routes are untouched by the console", () => {
   const js = extractScript(CONSOLE_HTML);
-  const checkModels = extractBetween(js, "async function checkModels()", "async function reindexEmbeddings()");
-
-  assert.doesNotMatch(checkModels, /renderLocalEngine\(/, "local engine card no longer renders");
-  assert.doesNotMatch(checkModels, /localPill/, "local-engine health pill removed");
+  assert.doesNotMatch(CONSOLE_HTML, /id="s_embedding_/, "no embeddings fields in Settings > Models");
+  assert.doesNotMatch(js, /function renderEmbeddingSettings\(/);
+  assert.doesNotMatch(js, /function saveEmbeddingsSettings\(/);
+  assert.doesNotMatch(js, /function applyEmbeddingChoice\(/);
+  assert.doesNotMatch(js, /Rapid-MLX Qwen3 Embedding/);
 });
 
 test("Settings Models no longer renders local-engine provisioning controls", () => {
@@ -1515,13 +1524,6 @@ test("console generic local-model copy does not hardcode Qwen", () => {
   }
 });
 
-test("Settings Models includes configurable embedding model choices", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(CONSOLE_HTML, /id="s_embedding_model"/, "embedding model selector present");
-  assert.match(CONSOLE_HTML, /Rapid-MLX Qwen3 Embedding 8B/, "Rapid-MLX Qwen preset is visible");
-  assert.match(js, /function saveEmbeddingsSettings\(/, "embedding settings save handler present");
-  assert.match(js, /applyEmbeddingChoice/, "embedding preset handler present");
-});
 
 test("usage section header has status dot, not a header pill", () => {
   // The old usagePill (⚡) in the header was removed; usage state is now shown

@@ -158,3 +158,25 @@ test("1h window buckets in 5-minute increments; the SQL bucketExpr and JS bucket
   assert.ok(bucket!.byProvider["anthropic"], "the row landed in its bucket — proving the SQL and JS bucket labels agree");
   assert.equal(bucket!.byProvider["anthropic"].inputTokens, 42);
 });
+
+// Regression for the "1h view misbehaves" bug: the SQL cutoff used to be a
+// raw `now - windowMs` (full-precision "now"), while the axis's earliest
+// label was built from a *floored* "now". Since floor(now) <= now, that made
+// the axis start later than the SQL cutoff — so a row landing in the sliver
+// between them was counted in `totals.runs` (a plain SUM, no bucket join) but
+// had no matching bucket and was silently dropped from `points`. This test
+// plants a row right at that historical seam (just inside the 1h SQL cutoff,
+// in the oldest 5-minute bucket) and asserts totals and the summed buckets
+// agree — the class of drop this file's other 1h test doesn't exercise
+// because it plants its row safely mid-window (6 minutes ago).
+test("1h window: every row counted in totals lands in a bucket (no edge-of-window drop)", async () => {
+  const edge = new Date(Date.now() - 59 * 60_000); // just inside the 60-minute SQL cutoff
+  recordAt(edge.toISOString(), { taskId: "edge-bucket", model: "claude-opus-4-8", inputTokens: 11, outputTokens: 3 });
+
+  const s = await observabilitySeries("1h");
+  const summedRuns = s.points.reduce(
+    (acc, p) => acc + Object.values(p.byProvider).reduce((a, c) => a + c.runs, 0),
+    0,
+  );
+  assert.equal(summedRuns, s.totals.runs, "sum of per-bucket runs must equal the independently-computed total — a mismatch means a row was counted but dropped from the chart");
+});
