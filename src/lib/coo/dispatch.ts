@@ -25,9 +25,9 @@ export class CooDispatchValidationError extends Error {
 // module turns that into a *safe* execution envelope. Browser is the first real
 // executable path: a matched browser route is turned into a Browser-Lane-ready
 // work item using the existing browser-lane/jobs abstractions. Channel and
-// native lanes (mail/message/desktop/terminal) are returned as
-// approval-required — the bridge never performs them. Memory/review have no
-// bridge yet and are reported honestly as unsupported.
+// native lanes (mail/message/desktop) are returned as approval-required — the
+// bridge never performs them. Memory/review have no bridge yet and are
+// reported honestly as unsupported.
 //
 // No secrets ever flow through here: the browser work item carries only
 // objective/url/steps. Credentials are resolved later by the lane itself via
@@ -64,21 +64,7 @@ export interface BrowserCooDispatchWorkItem {
   envelope: BrowserBeeTaskRequestEnvelope;
 }
 
-export interface TerminalLaneWorkItemEnvelope {
-  command: string;
-  profileId: string | null;
-  cwd: string | null;
-  requiresApproval: boolean;
-}
-
-export interface TerminalCooDispatchWorkItem {
-  envelopeId: string;
-  lane: "terminal";
-  capability: string;
-  envelope: TerminalLaneWorkItemEnvelope;
-}
-
-export type CooDispatchWorkItem = BrowserCooDispatchWorkItem | TerminalCooDispatchWorkItem;
+export type CooDispatchWorkItem = BrowserCooDispatchWorkItem;
 
 export interface CooDispatchApproval {
   required: boolean;
@@ -135,10 +121,6 @@ const LANE_DISPATCH_POLICY: Record<LaneId, LaneDispatchPolicy> = {
     mode: "approval_required",
     trust: "Desktop Lane controls native apps; actions need explicit approval before they run.",
   },
-  terminal: {
-    mode: "executable",
-    trust: "Terminal Lane prepares a shell-session work item; command execution still happens inside the lane with an auditable session boundary.",
-  },
   memory: {
     mode: "unsupported",
     trust: "Memory Lane has no COO execution bridge yet.",
@@ -188,20 +170,6 @@ function buildBrowserWorkItem(
   // until a root is bound at create time.
   const envelope = buildBrowserBeeTaskRequestEnvelope(payload, projectPath ?? projectLabel);
   return { envelopeId: generateId(), lane: "browser", capability: route.capability, envelope };
-}
-
-function buildTerminalWorkItem(request: CooDispatchRequest, route: CooResolvedRouteWithDisplay): TerminalCooDispatchWorkItem {
-  return {
-    envelopeId: generateId(),
-    lane: "terminal",
-    capability: route.capability,
-    envelope: {
-      command: request.text,
-      profileId: null,
-      cwd: null,
-      requiresApproval: route.riskTier !== "low",
-    },
-  };
 }
 
 /**
@@ -271,10 +239,6 @@ export function dispatchCooRequest(request: CooDispatchRequest, options: CooDisp
     reason = escalated && policy.mode === "executable"
       ? `Rule "${route.ruleName}" is risk-tier ${route.riskTier}; ${laneDisplayName(route.lane)} execution is held for explicit approval.`
       : `${laneDisplayName(route.lane)} requires approval before acting. ${policy.trust}`;
-  } else if (route.lane === "terminal") {
-    workItem = buildTerminalWorkItem(request, route);
-    status = "prepared";
-    reason = `Prepared a ${laneDisplayName(route.lane)} work item for capability "${route.capability}" (rule "${route.ruleName}").`;
   } else {
     // Executable lane (browser).
     workItem = buildBrowserWorkItem(request, route, options.projectPath ?? null);

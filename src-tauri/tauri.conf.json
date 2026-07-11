@@ -52,7 +52,6 @@
       "../dist/daemon": "daemon",
       "../desktopbee-helper/DesktopBeeHelper.app": "DesktopBeeHelper.app",
       "../build/browser-lane/Browser Lane.app": "lane-apps/Browser Lane.app",
-      "../build/terminal-lane/Terminal Lane.app": "lane-apps/Terminal Lane.app",
       "icons/app-icon-dark-green.png": "icons/app-icon-dark-green.png"
     },
     "icon": [

@@ -356,11 +356,16 @@ test("dispatch_capability: memory/review report unsupported — the COO must say
   });
 });
 
-test("dispatch_capability: terminal (executable lane) comes back prepared, with the matched capability named", async () => {
+test("dispatch_capability: browser (executable lane) comes back prepared, with the matched capability named", async () => {
   await withRealDaemon(async () => {
     const { seedDefaultCooRoutingRules } = await import("@/lib/coo/store");
     seedDefaultCooRoutingRules();
-    const result = await executeTool("dispatch_capability", JSON.stringify({ request: "run command to list files" }), "/tmp", {});
-    assert.match(result, /^Prepared \(lane: terminal/);
+    const result = await executeTool(
+      "dispatch_capability",
+      JSON.stringify({ request: "log into the site and check the dashboard", domains: ["example.com"] }),
+      "/tmp",
+      {},
+    );
+    assert.match(result, /^Prepared \(lane: browser/);
   });
 });

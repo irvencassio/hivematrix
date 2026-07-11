@@ -1,7 +1,7 @@
 /**
  * Pure intent detection for YouTube-summary requests on the POST /tasks ingress.
  *
- * Mirrors news-intent.ts / terminal-lane/intent.ts: small, IO-free helpers used to
+ * Mirrors news-intent.ts: small, IO-free helpers used to
  * route an explicit "summarize this YouTube video" request to the deterministic
  * content.youtube_summary review workflow instead of a generic Codex agent.
  *

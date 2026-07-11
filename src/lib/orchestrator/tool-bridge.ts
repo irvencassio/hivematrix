@@ -194,7 +194,7 @@ export const TOOL_DEFINITIONS: ChatTool[] = [
     type: "function" as const,
     function: {
       name: "dispatch_capability",
-      description: "Route a request to a HiveMatrix capability lane (browser, terminal, mail, message, desktop) via the typed COO dispatcher — for \"go do X in the world\" actions (browse a site, run a shell command, send an email), not for delegating to a specialist role (use create_task for that). Honors real risk tiers and approval policy: mail/message/desktop actions always come back as approval_required and are never auto-approved; memory/review report as unsupported.",
+      description: "Route a request to a HiveMatrix capability lane (browser, mail, message, desktop) via the typed COO dispatcher — for \"go do X in the world\" actions (browse a site, send an email), not for delegating to a specialist role (use create_task for that) and not for shell/terminal work (use Canopy for that). Honors real risk tiers and approval policy: mail/message/desktop actions always come back as approval_required and are never auto-approved; memory/review report as unsupported.",
       parameters: {
         type: "object",
         properties: {
@@ -612,7 +612,7 @@ function parseDependsOnColumn(value: unknown): string[] {
  * Routes through the daemon's existing typed COO dispatcher (POST
  * /coo/dispatch, prepare-only — no `create`) rather than reimplementing
  * routing/risk-tier/approval logic here. Gives delegation the same risk
- * tiers and approval gates create_task bypasses: browser/terminal come back
+ * tiers and approval gates create_task bypasses: browser comes back
  * "prepared" (a real work item), mail/message/desktop always come back
  * "approval_required" (never auto-approved), memory/review come back
  * "unsupported", and the caller must report that honestly rather than

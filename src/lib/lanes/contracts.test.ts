@@ -9,15 +9,17 @@ import {
 } from "./contracts";
 
 test("normalizes public lane ids and legacy bee capability ids", () => {
-  assert.deepEqual([...LANE_IDS], ["browser", "desktop", "terminal", "mail", "message", "memory", "review"]);
+  assert.deepEqual([...LANE_IDS], ["browser", "desktop", "mail", "message", "memory", "review"]);
   assert.equal(normalizeLaneId("Browser Lane"), "browser");
   assert.equal(normalizeLaneId("browser"), "browser");
   assert.equal(laneDisplayName("browser"), "Browser Lane");
   assert.equal(legacyCapabilityToLane("browserbee"), "browser");
   assert.equal(legacyCapabilityToLane("webbee"), "browser");
-  assert.equal(legacyCapabilityToLane("termbee"), "terminal");
 });
 
 test("rejects unknown lane ids", () => {
   assert.throws(() => normalizeLaneId("weaver"), /Unknown lane/);
+  // termbee (Terminal Lane) was retired — it no longer resolves to a lane.
+  assert.equal(legacyCapabilityToLane("termbee"), null);
+  assert.throws(() => normalizeLaneId("terminal"), /Unknown lane/);
 });

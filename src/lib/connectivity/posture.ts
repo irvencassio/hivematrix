@@ -55,7 +55,6 @@ export function describeLocalPosture(mode: ConnectivityMode): LocalPostureReport
   const caps: CapabilityPosture[] = [
     { id: "local", label: "Local model", disposition: "works", action: "run_now", note: "The configured local model runs in every mode." },
     { id: "desktopbee", label: "Desktop Lane", disposition: "works", action: "run_now", note: "Native desktop control works offline." },
-    { id: "termbee", label: "Terminal Lane", disposition: "works", action: "run_now", note: "Terminal sessions work offline (the workhorse)." },
     {
       id: "coo-router",
       label: "COO routing",

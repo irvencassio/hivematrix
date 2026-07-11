@@ -1,6 +1,6 @@
 /**
  * Lane Setup & Reliability Center — a unified, read-only model that composes the
- * existing lane-app install state with the Browser/Terminal readiness dashboards
+ * existing lane-app install state with the Browser Lane readiness dashboard
  * so the operator sees one truth per Lane: bundled? installed? current?
  * signed/launchable? daemon reachable? readiness green? and the single next
  * action to click.
@@ -15,7 +15,6 @@ import { spawnSync } from "node:child_process";
 import { LANE_APPS, getLaneApp } from "@/lib/lane-apps/catalog";
 import { getAllLaneAppStates, type LaneAppState } from "@/lib/lane-apps";
 import { getBrowserLaneReadinessDashboard } from "@/lib/browser-lane/store";
-import { getTerminalLaneReadinessDashboard } from "@/lib/terminal-lane/store";
 
 export type LaneInstallState = "not_installed" | "current" | "outdated" | "stale" | "broken";
 export type LaneLaunchState = "unknown" | "running" | "not_running" | "failed";
@@ -39,13 +38,6 @@ export interface BrowserReadinessSummary {
   stale: number;
   needsAttention: number;
 }
-export interface TerminalReadinessSummary {
-  lane: "terminal";
-  configuredProfiles: number;
-  ready: number;
-  failed: number;
-  needsAttention: number;
-}
 
 export interface LaneSetupEntry {
   id: string;
@@ -57,7 +49,7 @@ export interface LaneSetupEntry {
   launchState: LaneLaunchState;
   signingState: LaneSigningState;
   daemonState: LaneDaemonState;
-  readiness: BrowserReadinessSummary | TerminalReadinessSummary;
+  readiness: BrowserReadinessSummary;
   nextAction: { action: LaneActionId; label: string };
   disabledReasons: Record<string, string>;
   /** Build identity (HMBuildId) of the active installed copy / the bundled artifact. */
@@ -113,7 +105,6 @@ function defaultIsRunning(executable: string): boolean | null {
 export interface LaneSetupDeps {
   appStates?: () => Promise<LaneAppState[]> | LaneAppState[];
   browserDashboard?: () => { totals: { sites: number; byColor: Record<string, number>; needsAttention: number; stale: number } };
-  terminalDashboard?: () => { totals: { profiles: number; byColor: Record<string, number>; needsAttention: number } };
   isRunning?: (executable: string) => boolean | null;
   verification?: (id: string) => LaneVerificationRecord | null;
 }
@@ -157,18 +148,12 @@ function summarizeBrowser(dash: ReturnType<NonNullable<LaneSetupDeps["browserDas
   const t = dash.totals;
   return { lane: "browser", configuredSites: t.sites || 0, ready: (t.byColor?.green) || 0, stale: t.stale || 0, needsAttention: t.needsAttention || 0 };
 }
-function summarizeTerminal(dash: ReturnType<NonNullable<LaneSetupDeps["terminalDashboard"]>>): TerminalReadinessSummary {
-  const t = dash.totals;
-  const c = t.byColor || {};
-  return { lane: "terminal", configuredProfiles: t.profiles || 0, ready: c.green || 0, failed: (c.yellow || 0) + (c.orange || 0) + (c.red || 0), needsAttention: t.needsAttention || 0 };
-}
 
 export async function getLaneSetup(deps: LaneSetupDeps = {}): Promise<LaneSetup> {
   const appStates = await (deps.appStates ? deps.appStates() : getAllLaneAppStates());
   const isRunning = deps.isRunning ?? defaultIsRunning;
   const verification = deps.verification ?? getLaneVerification;
   const browserDashboard = deps.browserDashboard ?? (() => getBrowserLaneReadinessDashboard());
-  const terminalDashboard = deps.terminalDashboard ?? (() => getTerminalLaneReadinessDashboard());
 
   const lanes: LaneSetupEntry[] = LANE_APPS.map((descriptor) => {
     const state = appStates.find((s) => s.id === descriptor.id);
@@ -188,16 +173,12 @@ export async function getLaneSetup(deps: LaneSetupDeps = {}): Promise<LaneSetup>
       : "unknown";
 
     let daemonState: LaneDaemonState = "reachable";
-    let readiness: BrowserReadinessSummary | TerminalReadinessSummary;
+    let readiness: BrowserReadinessSummary;
     try {
-      readiness = descriptor.id === "browser-lane"
-        ? summarizeBrowser(browserDashboard())
-        : summarizeTerminal(terminalDashboard());
+      readiness = summarizeBrowser(browserDashboard());
     } catch {
       daemonState = "unavailable";
-      readiness = descriptor.id === "browser-lane"
-        ? { lane: "browser", configuredSites: 0, ready: 0, stale: 0, needsAttention: 0 }
-        : { lane: "terminal", configuredProfiles: 0, ready: 0, failed: 0, needsAttention: 0 };
+      readiness = { lane: "browser", configuredSites: 0, ready: 0, stale: 0, needsAttention: 0 };
     }
 
     const installedCopies: LaneInstalledCopySummary[] = (state?.installedCopies ?? []).map((c) => ({

@@ -19,7 +19,6 @@ const STATUS_KIND_TO_LANE: Record<string, LaneId> = {
   browserbee: "browser",
   webbee: "browser",
   desktopbee: "desktop",
-  termbee: "terminal",
   mailbee: "mail",
   messagebee: "message",
   brainbee: "memory",
@@ -83,8 +82,6 @@ function laneKindToManagedWorkerKind(kind: string): string | null {
       return "messagebee";
     case "desktop":
       return "desktopbee";
-    case "terminal":
-      return "termbee";
     case "browser":
       return "browserbee";
     case "memory":

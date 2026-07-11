@@ -219,7 +219,7 @@ test("consumeFlashStreamLine: blank lines are no-ops", () => {
 // ------------------------------------------------------------------
 
 test("READ_ONLY_FLASH_TOOLS excludes every write-capable lane tool", () => {
-  for (const writeTool of ["mail_send", "message_send", "desktop_action", "terminal_run", "persona_update", "escalate_to_task"]) {
+  for (const writeTool of ["mail_send", "message_send", "desktop_action", "persona_update", "escalate_to_task"]) {
     assert.equal(READ_ONLY_FLASH_TOOLS.has(writeTool), false, `${writeTool} must not be read-only`);
   }
   assert.ok(READ_ONLY_FLASH_TOOLS.has("brain_search"));

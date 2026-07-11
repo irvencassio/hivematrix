@@ -264,17 +264,6 @@ export const DEFAULT_COO_ROUTING_RULES: ReadonlyArray<Record<string, unknown>> =
     notes: "Canonical default route for authenticated browser workflows.",
   },
   {
-    id: "default.terminal",
-    name: "Default — Terminal Lane",
-    priority: 10,
-    intent: "shell",
-    match: { phrases: ["run command", "terminal", "shell", "npm", "git"] },
-    lane: "terminal",
-    capability: "terminal.run",
-    riskTier: "normal",
-    notes: "Canonical default route for local shell commands.",
-  },
-  {
     id: "default.desktop",
     name: "Default — Desktop Lane",
     priority: 10,

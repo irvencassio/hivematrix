@@ -1,12 +1,11 @@
 import { ContractValidationError } from "@/lib/central/contracts";
 
-export const LANE_IDS = ["browser", "desktop", "terminal", "mail", "message", "memory", "review"] as const;
+export const LANE_IDS = ["browser", "desktop", "mail", "message", "memory", "review"] as const;
 export type LaneId = (typeof LANE_IDS)[number];
 
 const LANE_DISPLAY_NAMES: Record<LaneId, string> = {
   browser: "Browser Lane",
   desktop: "Desktop Lane",
-  terminal: "Terminal Lane",
   mail: "Mail Lane",
   message: "Message Lane",
   memory: "Memory Lane",
@@ -17,7 +16,6 @@ const LEGACY_CAPABILITY_TO_LANE: Record<string, LaneId> = {
   browserbee: "browser",
   webbee: "browser",
   desktopbee: "desktop",
-  termbee: "terminal",
   mailbee: "mail",
   messagebee: "message",
   brain: "memory",

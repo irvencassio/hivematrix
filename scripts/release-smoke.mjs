@@ -29,47 +29,39 @@ export async function runSmoke({ quiet = false } = {}) {
     const version = getDb().pragma("user_version", { simple: true });
     add("daemon db starts + migrations apply", typeof version === "number" && version > 0, `user_version=${version}`);
 
-    // 2. Lane Apps status returns Browser Lane + Terminal Lane.
+    // 2. Lane Apps status returns Browser Lane.
     const { getAllLaneAppStates } = await import("@/lib/lane-apps");
     const apps = await getAllLaneAppStates();
     const appIds = apps.map((a) => a.id);
-    add("lane-apps status returns Browser Lane + Terminal Lane",
-      appIds.includes("browser-lane") && appIds.includes("terminal-lane"), appIds.join(", "));
+    add("lane-apps status returns Browser Lane",
+      appIds.includes("browser-lane"), appIds.join(", "));
 
-    // 3. Unified Lane Setup model returns both lanes with full state.
+    // 3. Unified Lane Setup model returns the lane with full state.
     const { getLaneSetup } = await import("@/lib/lane-setup");
     const setup = await getLaneSetup();
     const laneIds = setup.lanes.map((l) => l.id);
     const shaped = setup.lanes.every((l) => l.installState && l.launchState && l.signingState && l.daemonState && l.nextAction);
-    add("lane-setup returns both lanes with install/launch/signing/daemon state",
-      laneIds.includes("browser-lane") && laneIds.includes("terminal-lane") && shaped, laneIds.join(", "));
+    add("lane-setup returns the lane with install/launch/signing/daemon state",
+      laneIds.includes("browser-lane") && shaped, laneIds.join(", "));
 
-    // 4. Each lane reports a bundled version + honest install state (installed/launchable if bundled).
+    // 4. The lane reports a bundled version + honest install state (installed/launchable if bundled).
     const browser = setup.lanes.find((l) => l.id === "browser-lane");
-    const terminal = setup.lanes.find((l) => l.id === "terminal-lane");
     add("Browser Lane reports bundled version + install state",
       !!browser?.bundledVersion?.short && !!browser?.installState, `${browser?.installState} (bundled ${browser?.bundledVersion?.short})`);
-    add("Terminal Lane reports bundled version + install state",
-      !!terminal?.bundledVersion?.short && !!terminal?.installState, `${terminal?.installState} (bundled ${terminal?.bundledVersion?.short})`);
 
     // 5. Browser Lane site dashboard does not leak secret values.
     const { getBrowserLaneReadinessDashboard } = await import("@/lib/browser-lane/store");
     const bDash = JSON.stringify(getBrowserLaneReadinessDashboard());
     add("Browser Lane site dashboard leaks no secret values", !SECRET_VALUE_RE.test(bDash));
 
-    // 6. Terminal Lane profile dashboard does not leak secret values.
-    const { getTerminalLaneReadinessDashboard } = await import("@/lib/terminal-lane/store");
-    const tDash = JSON.stringify(getTerminalLaneReadinessDashboard());
-    add("Terminal Lane profile dashboard leaks no secret values", !SECRET_VALUE_RE.test(tDash));
-
-    // 7. Workflow inbox loads.
+    // 6. Workflow inbox loads.
     const { getWorkflowInbox } = await import("@/lib/workflows/inbox");
     const inbox = getWorkflowInbox();
     add("workflow inbox loads", !!inbox && !!inbox.groups && !!inbox.counts);
 
-    // 8. Daemon declares the Settings → Lanes endpoints.
+    // 7. Daemon declares the Settings → Lanes endpoints.
     const server = readFileSync(new URL("../src/daemon/server.ts", import.meta.url), "utf8");
-    const endpoints = ['"/lane-apps"', '"/lane-setup"', '"/browser-lane/dashboard"', '"/terminal-lane/dashboard"', '"/workflows/inbox"'];
+    const endpoints = ['"/lane-apps"', '"/lane-setup"', '"/browser-lane/dashboard"', '"/workflows/inbox"'];
     const missing = endpoints.filter((e) => !server.includes(e));
     add("daemon declares Settings → Lanes endpoints", missing.length === 0, missing.length ? `missing ${missing.join(", ")}` : "");
   } catch (err) {

@@ -1,12 +1,12 @@
 // Lane App Manager — shared types.
 //
-// HiveMatrix updates itself automatically; the standalone lane apps (Browser
-// Lane, Terminal Lane) are installed EXPLICITLY through this surface. The lane
-// apps use normal generic Keychain service/account access; a prior launch
-// blocker was fixed by removing a restricted Keychain access-groups entitlement.
-// Do not reintroduce that entitlement.
+// HiveMatrix updates itself automatically; the standalone lane app (Browser
+// Lane) is installed EXPLICITLY through this surface. The lane app(s) use
+// normal generic Keychain service/account access; a prior launch blocker was
+// fixed by removing a restricted Keychain access-groups entitlement. Do not
+// reintroduce that entitlement.
 
-export const LANE_APP_IDS = ["browser-lane", "terminal-lane"] as const;
+export const LANE_APP_IDS = ["browser-lane"] as const;
 export type LaneAppId = (typeof LANE_APP_IDS)[number];
 
 export const LANE_APP_STATUSES = [

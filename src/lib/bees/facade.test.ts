@@ -19,7 +19,7 @@ test("bees/catalog facade re-exports the lane catalog under legacy names", () =>
 });
 
 test("bees/service-manager facade re-exports the lane service manager under legacy names", () => {
-  assert.equal(getBeeRuntimeDescriptor("termbee").runtimeMode, "embedded");
+  assert.equal(getBeeRuntimeDescriptor("desktopbee").runtimeMode, "embedded");
   assert.equal(embeddedHealthRoute("managerbee"), "/api/managerbee/health");
   // Type alias still resolves to the lane worker status shape.
   const status: BeeServiceStatus["runtimeMode"] = "embedded";

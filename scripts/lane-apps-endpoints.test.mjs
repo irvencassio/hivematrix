@@ -9,16 +9,17 @@ function read(path) {
 test("daemon exposes the four /lane-apps routes wired to the lane-apps module", () => {
   const server = read("src/daemon/server.ts");
 
-  // GET /lane-apps — list install state for both lane apps.
+  // GET /lane-apps — list install state for the lane app(s).
   assert.match(server, /urlPath === "\/lane-apps"/);
   assert.match(server, /getAllLaneAppStates/);
 
-  // POST sub-routes with an id-constrained matcher (browser-lane | terminal-lane).
+  // POST sub-routes with an id-constrained matcher (browser-lane).
   // Matched against the exact escaped regex literals used in server.ts.
-  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane|terminal-lane)\\/install$"), "install route matcher");
-  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane|terminal-lane)\\/launch$"), "launch route matcher");
-  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane|terminal-lane)\\/verify$"), "verify route matcher");
-  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane|terminal-lane)\\/reveal$"), "reveal route matcher");
+  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane)\\/install$"), "install route matcher");
+  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane)\\/launch$"), "launch route matcher");
+  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane)\\/verify$"), "verify route matcher");
+  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane)\\/reveal$"), "reveal route matcher");
+  assert.doesNotMatch(server, /terminal-lane/);
 
   // Lazy import from the pure module.
   assert.match(server, /@\/lib\/lane-apps/);
@@ -32,7 +33,7 @@ test("daemon exposes the four /lane-apps routes wired to the lane-apps module", 
 test("daemon exposes a typed repair-applications route + install reports active path", () => {
   const server = read("src/daemon/server.ts");
   // Repair is id-constrained (no arbitrary path, no shell).
-  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane|terminal-lane)\\/repair-applications$"), "repair route matcher");
+  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane)\\/repair-applications$"), "repair route matcher");
   assert.match(server, /repairApplicationsCopy/);
   // Install result surfaces the active path + shadow warning honestly.
   assert.match(server, /activePath/);

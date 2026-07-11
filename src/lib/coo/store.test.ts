@@ -129,9 +129,9 @@ test("delete removes the rule and records delete history", () => {
 test("seeding default rules is idempotent and uses canonical lanes", () => {
   const created = seedDefaultCooRoutingRules();
   assert.equal(created, DEFAULT_COO_ROUTING_RULES.length);
-  // Every seeded rule resolves to one of the seven canonical lanes.
+  // Every seeded rule resolves to one of the six canonical lanes.
   const lanes = new Set(listCooRoutingRules({ enabledOnly: true }).map((r) => r.lane));
-  for (const lane of ["browser", "mail", "message", "terminal", "desktop", "memory", "review"]) {
+  for (const lane of ["browser", "mail", "message", "desktop", "memory", "review"]) {
     assert.ok(lanes.has(lane as never), `expected a default rule for lane ${lane}`);
   }
   // Re-seeding creates nothing new.

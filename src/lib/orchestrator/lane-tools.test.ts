@@ -31,8 +31,6 @@ test("isLaneTool recognizes active lane tools and rejects removed browser aliase
 
 test("resolveLaneToolName maps legacy bee ids to their lane-native handler names", () => {
   assert.equal(resolveLaneToolName("desktopbee_action"), "desktop_action");
-  assert.equal(resolveLaneToolName("termbee_session"), "terminal_session");
-  assert.equal(resolveLaneToolName("termbee_run"), "terminal_run");
   assert.equal(resolveLaneToolName("mailbee_send"), "mail_send");
   assert.equal(resolveLaneToolName("mailbee_draft"), "mail_draft");
   assert.equal(resolveLaneToolName("messagebee_send"), "message_send");
@@ -46,7 +44,6 @@ test("resolveLaneToolName maps legacy bee ids to their lane-native handler names
 test("isLaneTool accepts both the advertised lane ids and legacy bee aliases", () => {
   assert.equal(isLaneTool("mail_send"), true);
   assert.equal(isLaneTool("message_send"), true);
-  assert.equal(isLaneTool("terminal_run"), true);
   assert.equal(isLaneTool("desktop_action"), true);
   // Legacy bee ids still resolve for older persisted calls.
   assert.equal(isLaneTool("mailbee_send"), true);
@@ -67,7 +64,7 @@ test("executeLaneTool dispatches a legacy bee alias to its real handler", async 
 });
 
 test("all bee tools are defined with required schemas", () => {
-  assert.equal(LANE_TOOL_DEFINITIONS.length, 18); // 13 lanes + 5 PIM tools
+  assert.equal(LANE_TOOL_DEFINITIONS.length, 16); // 11 lanes + 5 PIM tools
   for (const t of LANE_TOOL_DEFINITIONS) {
     assert.equal(t.type, "function");
     assert.ok(t.function.name.length > 0);
@@ -83,7 +80,6 @@ test("lane tools advertise lane-native names and descriptions, not bee brands", 
   })).join("\n");
 
   assert.match(prose, /Desktop Lane/);
-  assert.match(prose, /Terminal Lane/);
   assert.match(prose, /Mail Lane/);
   assert.match(prose, /Message Lane/);
   assert.doesNotMatch(prose, /DesktopBee/);
@@ -91,28 +87,18 @@ test("lane tools advertise lane-native names and descriptions, not bee brands", 
   assert.doesNotMatch(prose, /MailBee/);
   assert.doesNotMatch(prose, /MessageBee/);
   assert.ok(LANE_TOOL_DEFINITIONS.some((t) => t.function.name === "desktop_action"));
-  assert.ok(LANE_TOOL_DEFINITIONS.some((t) => t.function.name === "terminal_run"));
   assert.ok(LANE_TOOL_DEFINITIONS.some((t) => t.function.name === "mail_send"));
   assert.ok(LANE_TOOL_DEFINITIONS.some((t) => t.function.name === "message_send"));
   // The advertised surface no longer carries bee-branded ids.
   assert.ok(!LANE_TOOL_DEFINITIONS.some((t) => /bee_|bee$/.test(t.function.name)));
 });
 
-test("Terminal Lane tool descriptions identify a HiveMatrix-owned session (no external provider)", () => {
-  const termRun = LANE_TOOL_DEFINITIONS.find((t) => t.function.name === "terminal_run");
-  const termSession = LANE_TOOL_DEFINITIONS.find((t) => t.function.name === "terminal_session");
-  assert.match(termRun?.function.description ?? "", /HiveMatrix-owned/i);
-  assert.match(termSession?.function.description ?? "", /HiveMatrix-owned/i);
-  assert.doesNotMatch(termRun?.function.description ?? "", /Canopy/i);
-  assert.doesNotMatch(termSession?.function.description ?? "", /Canopy/i);
-});
-
 // PIM tools ride the "brain" capability — local osascript, present in every mode.
 const PIM_NAMES = ["calendar_create", "calendar_today", "contacts_lookup", "reminder_create", "reminders_list"];
 
-test("cloud-ok advertises every lane (web, browser, desktop, term, mail, message, brain, skill, digest, pim)", () => {
+test("cloud-ok advertises every lane (web, browser, desktop, mail, message, brain, skill, digest, pim)", () => {
   assert.deepEqual(names(availableLaneTools(cloud())),
-    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "digest_url", "hivematrix_browser", "mail_draft", "mail_send", "message_send", "skill_used", "terminal_run", "terminal_session", "workflow_inbox"].sort());
+    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "digest_url", "hivematrix_browser", "mail_draft", "mail_send", "message_send", "skill_used", "workflow_inbox"].sort());
 });
 
 test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
@@ -120,14 +106,14 @@ test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
   assert.ok(!names(availableLaneTools(local())).includes("digest_url"));
 });
 
-test("local-only drops web lanes but keeps Desktop Lane/Terminal Lane + outbound channels + brain/skill/codegraph/pim + COO routing", () => {
+test("local-only drops web lanes but keeps Desktop Lane + outbound channels + brain/skill/codegraph/pim + COO routing", () => {
   assert.deepEqual(names(availableLaneTools(local())),
-    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "terminal_run", "terminal_session", "workflow_inbox"].sort());
+    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "workflow_inbox"].sort());
 });
 
 test("offline keeps the offline workhorses + outbound channels + brain/skill/codegraph/pim + COO routing (all local)", () => {
   assert.deepEqual(names(availableLaneTools(offline())),
-    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "terminal_run", "terminal_session", "workflow_inbox"].sort());
+    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "workflow_inbox"].sort());
 });
 
 test("capabilityRoutingGuide lists email/message/brain lanes in cloud, drops web lanes offline", () => {

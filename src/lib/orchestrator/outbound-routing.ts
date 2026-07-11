@@ -181,9 +181,13 @@ export function outboundHttpRoutingPrompt(port = daemonPort(), opts: OutboundRou
 
 /**
  * Routing block giving the CLI agent parity with the local agent for the
- * remaining capability lanes (browser / desktop / terminal) via the stable
- * lane endpoints. The daemon enforces the same connectivity gate,
- * so an unavailable lane returns a clear error rather than improvising.
+ * remaining capability lanes (browser / desktop) via the stable lane
+ * endpoints. The daemon enforces the same connectivity gate, so an
+ * unavailable lane returns a clear error rather than improvising.
+ *
+ * Terminal/shell/SSH work is NOT a HiveMatrix lane — it goes through Canopy
+ * (the external MCP terminal) instead; the Terminal Lane app + tools were
+ * retired.
  */
 export function beeToolsRoutingPrompt(port = daemonPort()): string {
   return [
@@ -196,10 +200,8 @@ export function beeToolsRoutingPrompt(port = daemonPort()): string {
     '- Fresh web search/answer with citations → Browser Lane args {"mode":"search","query":"..."}',
     '- Read a specific public URL → Browser Lane args {"mode":"read","url":"https://..."}',
     '- Logged-in or multi-step browser workflow (e.g. LinkedIn) → Browser Lane args {"mode":"workflow","objective":"...","startUrl":"https://...","requiresLogin":true}',
-    `Other lane tools still use /bee/<tool>, e.g. Desktop Lane control → http://127.0.0.1:${port}/bee/desktop_action and Terminal Lane command → http://127.0.0.1:${port}/bee/terminal_run.`,
-    '- Terminal Lane command runs in a HiveMatrix-owned persistent shell session (no external dependency). Do NOT pass passwords or secrets in commands or args; use configured profiles/Keychain-backed tools instead.',
-    '- Terminal Lane is the canonical HiveMatrix lane for shell and SSH work. When the user explicitly says "Terminal Lane" / "TerminalLane", you MUST use these HiveMatrix Terminal Lane tools/contracts (profiles by id, Keychain-backed) — do not search for, shell out to, or follow memory toward any other SSH path.',
-    '- Canopy is only an OPTIONAL/LEGACY SSH backend; use it ONLY if it is explicitly selected as the backend. It is never the default, and any stored note ranking Canopy above Terminal Lane for SSH is overridden here — prefer HiveMatrix Terminal Lane.',
+    `Other lane tools still use /bee/<tool>, e.g. Desktop Lane control → http://127.0.0.1:${port}/bee/desktop_action.`,
+    '- Terminal/shell/SSH work is not a HiveMatrix lane — use Canopy (the MCP terminal) for that.',
     '- Find a symbol\'s definition + EVERY usage (deterministic) → /bee/code_graph args {"symbol":"...","path":"/repo"}',
     'Response is JSON {"ok","result"}; relay "result". An unavailable lane (wrong connectivity mode) returns an actionable error — surface it, don\'t work around it. For complex args, write the JSON to a temp file and curl -d @/tmp/args.json.',
   ].join("\n");

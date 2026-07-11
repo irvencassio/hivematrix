@@ -1284,7 +1284,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <label class="flbl" style="margin:0">Lane Apps</label>
         <button class="copybtn" onclick="renderLaneSetup()">↻ Refresh</button>
       </div>
-      <div class="muted" style="font-size:11px;margin:4px 0 8px">HiveMatrix updates itself automatically; lane apps are installed explicitly. Browser Lane and Terminal Lane are standalone signed apps — each card below shows whether it's bundled, installed, current, signed, launchable, and whether the daemon and its readiness are healthy, plus the one action to take next. A passing signature is not enough: launch is verified separately.</div>
+      <div class="muted" style="font-size:11px;margin:4px 0 8px">HiveMatrix updates itself automatically; lane apps are installed explicitly. Browser Lane is a standalone signed app — the card below shows whether it's bundled, installed, current, signed, launchable, and whether the daemon and its readiness are healthy, plus the one action to take next. A passing signature is not enough: launch is verified separately.</div>
       <div id="lane_apps" style="margin-top:6px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin:0 0 8px">Detail for the cards above</div>
@@ -1295,14 +1295,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="muted" style="font-size:11px;margin:4px 0 6px">Per-site auth/readiness for the Browser Lane app, with stale tracking. Each site shows its auth strategy (Manual session / Keychain login / Google SSO / Microsoft SSO) and an honest session state. After you sign in, you can close Browser Lane — the session persists in its WebKit data store, and the readiness check confirms it. CAPTCHA / 2FA still need you; HiveMatrix never bypasses human verification.</div>
       <div class="row" style="margin-top:4px"><button class="create" onclick="runBrowserReadiness()">Run readiness check</button></div>
       <div id="browser_readiness" style="margin-top:8px"></div>
-      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
-      <div class="row" style="justify-content:space-between;align-items:center">
-        <label class="flbl" style="margin:0">↳ Terminal Lane Profiles &amp; Readiness</label>
-        <button class="copybtn" onclick="renderTerminalReadiness()">↻ Refresh</button>
-      </div>
-      <div class="muted" style="font-size:11px;margin:4px 0 6px">Per-profile readiness for the Terminal Lane app, with stale tracking. Local profiles run a shell on this Mac (localhost) — no key or login secret needed. SSH profiles connect to a remote host; their sign-in secret lives only in the macOS Keychain and is never shown here. Run a check to probe each profile before routing terminal work.</div>
-      <div class="row" style="margin-top:4px"><button class="create" onclick="runTerminalReadiness()">Run readiness check</button></div>
-      <div id="terminal_readiness" style="margin-top:8px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">
       <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">Runtime Capabilities</label>
@@ -1334,7 +1326,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="row" style="justify-content:space-between;align-items:center">
         <label class="flbl" style="margin:0">COO Dispatch</label>
       </div>
-      <div class="muted" style="font-size:11px;margin:4px 0 8px">Route a request through your COO rules. Browser Lane is the canonical browser automation path; risky lanes (mail, message, desktop, terminal) return approval-required and never act here.</div>
+      <div class="muted" style="font-size:11px;margin:4px 0 8px">Route a request through your COO rules. Browser Lane is the canonical browser automation path; risky lanes (mail, message, desktop) return approval-required and never act here.</div>
       <textarea id="coo_text" rows="2" placeholder="Objective — e.g. Upload today's script on the site" style="width:100%;box-sizing:border-box"></textarea>
       <input id="coo_domains" placeholder="Target domain(s), comma-separated — e.g. github.com" style="width:100%;box-sizing:border-box;margin-top:6px" />
       <label class="flbl" style="margin:6px 0 2px;display:block">Project <span class="muted" style="font-size:10px;font-weight:400">(required to create a task)</span></label>
@@ -1371,7 +1363,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
             <option value="browser">Browser</option>
             <option value="mail">Mail</option>
             <option value="message">Message</option>
-            <option value="terminal">Terminal</option>
             <option value="desktop">Desktop</option>
             <option value="memory">Memory</option>
             <option value="review">Review</option>
@@ -1788,7 +1779,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
           <option value="auto" selected>Auto — route lanes, else one task</option>
           <option value="normal">Direct — one plain task</option>
         </select>
-        <div class="muted" style="font-size:11px;margin-top:2px">Auto routes browsing/terminal work to the right lane and otherwise dispatches a single task — the coding harness plans its own steps. Pick Direct to force one plain task.</div>
+        <div class="muted" style="font-size:11px;margin-top:2px">Auto routes browsing work to the right lane and otherwise dispatches a single task — the coding harness plans its own steps. Pick Direct to force one plain task.</div>
       </details>
       <label class="flbl">Attachments</label>
       <div class="attach-row attach-drop" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onAttachDrop(event)">
@@ -6361,7 +6352,7 @@ function switchSettingsTab(tab) {
     document.getElementById("tab-" + t).className = "tab" + (tab === t ? " active" : "");
     document.getElementById(panels[t]).style.display = tab === t ? "" : "none";
   }
-  if (tab === "lanes") { renderSystemReadiness(); renderLaneSetup(); renderBrowserReadiness(); renderTerminalReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); renderVaultRefs(); }
+  if (tab === "lanes") { renderSystemReadiness(); renderLaneSetup(); renderBrowserReadiness(); renderSettingsLanes(); renderSafeSenders(); renderCooRoutingRules(); renderWorkflows(); renderWorkflowInbox(); renderWorkflowActions(); renderVaultRefs(); }
   if (tab === "setup") renderSettingsSetup();
   if (tab === "features") renderFeatures();
   if (tab === "remote") loadTunnel();
@@ -7706,11 +7697,11 @@ async function activateLicense() {
 }
 
 // --- Lane Apps manager (operator) ------------------------------------------
-// HiveMatrix updates itself automatically; the standalone Browser Lane and
-// Terminal Lane apps are installed/updated EXPLICITLY here. The Lane Setup model
-// keeps launchState ("failed") DISTINCT from signingState ("invalid") —
-// codesign/spctl passing does not prove the app launches (the LaunchServices
-// lesson) — and renderLaneSetup shows them as separate chips.
+// HiveMatrix updates itself automatically; the standalone Browser Lane app is
+// installed/updated EXPLICITLY here. The Lane Setup model keeps launchState
+// ("failed") DISTINCT from signingState ("invalid") — codesign/spctl passing
+// does not prove the app launches (the LaunchServices lesson) — and
+// renderLaneSetup shows them as separate chips.
 function systemReadinessBadge(severity) {
   const color = severity === "ok" ? "var(--ok)"
     : severity === "info" ? "var(--accent-2)"
@@ -7904,13 +7895,11 @@ async function laneRepairApplications(id) {
 async function laneRunReadiness(id) {
   const msg = document.getElementById("lane_app_msg_"+id);
   if (msg) msg.textContent = "Running readiness…";
-  const url = id === "browser-lane" ? "/browser-lane/readiness/run" : "/terminal-lane/readiness/run";
-  const body = id === "browser-lane" ? { siteId: "all" } : { profileId: "all" };
-  const r = await api(url, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  const r = await api("/browser-lane/readiness/run", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ siteId: "all" }) });
   if (!r || r.ok === false) { if (msg) msg.innerHTML = '<span style="color:var(--accent-2)">'+esc((r&&r.error)||'Readiness run failed')+'</span>'; return; }
   if (msg) msg.textContent = "Readiness check complete.";
   renderLaneSetup();
-  if (id === "browser-lane") renderBrowserReadiness(); else renderTerminalReadiness();
+  renderBrowserReadiness();
 }
 
 async function laneAppAction(id, action) {
@@ -8210,7 +8199,7 @@ function cooRuleEditor(rule, index) {
   const fields = controls.map(c =>
     '<label class="flbl">'+esc(c[1])+'</label><textarea id="'+cooRuleFieldId(index,c[0])+'" rows="'+(c[0].match(/phrases|domains|projects|workflows|tags/) ? 2 : 1)+'">'+esc(c[2])+'</textarea>'
   ).join("");
-  const laneOptions = ["browser","mail","message","terminal","desktop","memory","review"].map(lane =>
+  const laneOptions = ["browser","mail","message","desktop","memory","review"].map(lane =>
     '<option value="'+lane+'" '+((rule.lane||"browser")===lane?'selected':'')+'>'+lane+'</option>'
   ).join("");
   return '<details class="card" style="cursor:default" open>'
@@ -8395,49 +8384,6 @@ async function runBrowserReadiness() {
   const r = await api("/browser-lane/readiness/run", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ siteId: "all" }) });
   if (!r || !r.ok) { if (el) el.innerHTML = '<div class="errbox">'+esc((r&&r.error)||'Readiness run failed')+'</div>'; return; }
   renderBrowserReadiness(); // re-render the dashboard after the sweep
-}
-
-// Terminal Lane readiness mirrors Browser Lane: real data from the daemon's
-// /terminal-lane/dashboard. Only non-secret fields are rendered — credentials
-// live in the macOS Keychain and never reach this payload or the UI.
-async function renderTerminalReadiness() {
-  const el = document.getElementById("terminal_readiness");
-  if (!el) return;
-  el.innerHTML = '<div class="muted">Loading…</div>';
-  const r = await api("/terminal-lane/dashboard");
-  if (!r || !r.ok) { el.innerHTML = '<div class="muted">Readiness unavailable.</div>'; return; }
-  const t = r.totals || { byColor: {} };
-  const profiles = r.profiles || [];
-  if (!profiles.length) { el.innerHTML = '<div class="muted" style="font-size:11px">No Terminal Lane profiles are configured.</div>'; return; }
-  const m = (k,v) => '<div class="m" style="margin-top:2px"><span class="badge">'+esc(k)+'</span> '+esc(v)+'</div>';
-  const head = m("profiles", t.profiles || 0) + m("needs attention", t.needsAttention || 0);
-  const attention = profiles.filter(p => ['orange','red','gray'].includes(p.readiness.color));
-  const shown = (attention.length ? attention : profiles).slice(0,5);
-  const list = shown.map(p => {
-    const lastRun = p.readiness.lastRunAt ? ' · ' + timeAgo(p.readiness.lastRunAt, Date.now()) : ' · never run';
-    const advice = terminalReadinessAdvice(p.readiness.status);
-    return '<div class="muted" style="font-size:11px">'+esc(p.displayName)+' <span class="badge">'+esc(p.kind)+'</span> — '+esc(p.readiness.status)+' ('+esc(p.readiness.color)+')'+lastRun
-      + (advice ? '<div style="font-size:10px;margin-top:1px">'+esc(advice)+'</div>' : '')
-      + '</div>';
-  }).join('');
-  el.innerHTML = '<div class="card" style="cursor:default">'+head+'<div style="margin-top:6px">'+list+'</div></div>';
-}
-// Actionable next step per readiness status (no secrets, just guidance).
-function terminalReadinessAdvice(status) {
-  switch (status) {
-    case "needs_auth": return "Add the SSH key/passphrase in Keychain, then re-run.";
-    case "blocked": return "Host unreachable — check the network and host details.";
-    case "probe_failed": return "Probe failed — open the run for details, then re-run.";
-    case "unknown": return "Never run — run a readiness check.";
-    default: return "";
-  }
-}
-async function runTerminalReadiness() {
-  const el = document.getElementById("terminal_readiness");
-  if (el) el.innerHTML = '<div class="muted">Running readiness check…</div>';
-  const r = await api("/terminal-lane/readiness/run", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ profileId: "all" }) });
-  if (!r || !r.ok) { if (el) el.innerHTML = '<div class="errbox">'+esc((r&&r.error)||'Readiness run failed')+'</div>'; return; }
-  renderTerminalReadiness(); // re-render the dashboard after the sweep
 }
 
 // --- Workflows registry (discovery) -----------------------------------------
@@ -9115,7 +9061,7 @@ async function createTask() {
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: projectName, model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent", route, agentType }) });
     // POST /tasks may return a normal task ({_id}) or a special route
-    // ({routed,taskId} for workflow / terminal-lane / browser-lane). All of these are success.
+    // ({routed,taskId} for workflow / browser-lane). All of these are success.
     const ok = t && (t._id || t.taskId || t.routed);
     if (!ok) { err.textContent = (t && t.error) ? String(t.error) : "Create failed."; return; }
     document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = "";

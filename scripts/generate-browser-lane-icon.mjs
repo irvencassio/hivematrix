@@ -67,7 +67,7 @@ im.save(sys.argv[2])
 
   // Inset the full-bleed squircle into Apple's icon grid (~0.805 content ratio)
   // on a transparent canvas, so the dock renders Browser Lane the same size as
-  // sibling app icons instead of ~23% larger. Matches Terminal Lane / src-tauri.
+  // sibling app icons instead of ~23% larger. Matches src-tauri.
   const padded = join(renderDir, `${baseName}-padded.png`);
   run("assets/icon/.venv/bin/python", ["-c", `
 from PIL import Image

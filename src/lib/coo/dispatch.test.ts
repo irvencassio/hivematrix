@@ -147,27 +147,6 @@ test("channel/native lanes return approval_required without acting", () => {
   }
 });
 
-test("terminal route prepares a Terminal Lane work item but does not run it", () => {
-  upsertCooRoutingRule({
-    id: "rule_terminal",
-    name: "Terminal rule",
-    priority: 10,
-    intent: "shell",
-    match: { phrases: ["run command"] },
-    lane: "terminal",
-    capability: "terminal.run",
-  });
-
-  const result = dispatchCooRequest({ text: "run command npm test", project: "hivematrix" });
-
-  assert.equal(result.status, "prepared");
-  assert.equal(result.lane, "terminal");
-  assert.equal(result.workItem?.lane, "terminal");
-  assert.equal(result.workItem?.capability, "terminal.run");
-  assert.match(JSON.stringify(result.workItem), /npm test/);
-  assert.equal(result.approval, null);
-});
-
 test("a sensitive-risk browser rule escalates to approval_required", () => {
   upsertCooRoutingRule({
     id: "rule_sensitive",

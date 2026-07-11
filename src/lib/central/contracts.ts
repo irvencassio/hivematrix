@@ -13,7 +13,6 @@ export const WORKER_KINDS = [
   "browserbee",
   "computerbee",
   "desktopbee",
-  "termbee",
   "cronbee",
   "authbee",
   "voicebee",
@@ -253,7 +252,6 @@ const LANE_ALIAS_TO_WORKER_KIND: Record<string, WorkerKind> = {
   mail: "mailbee",
   browser: "browserbee",
   desktop: "desktopbee",
-  terminal: "termbee",
   memory: "brainbee",
 };
 

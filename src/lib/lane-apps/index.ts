@@ -16,12 +16,10 @@ export { verifyLaneApp } from "./verify";
 // packaged daemon with no build/ tree). Verified on this machine 2026-06-26.
 const PINNED_EXPECTED: Record<string, LaneAppVersion> = {
   "browser-lane": { short: "0.1.86", build: "2" },
-  "terminal-lane": { short: "0.1.2", build: "3" },
 };
 
 const ARTIFACT_DIR: Record<string, string> = {
   "browser-lane": "build/browser-lane",
-  "terminal-lane": "build/terminal-lane",
 };
 
 export interface LaneInstalledCopy {

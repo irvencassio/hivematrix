@@ -6,7 +6,7 @@
  * Plaintext values resolve ONLY inside lane execution code via resolveVaultRef().
  *
  * Import restrictions (enforced by code review and scope-wall):
- *   - Only browser-lane, terminal-lane, daemon (server.ts), and config may import vault.
+ *   - Only browser-lane, daemon (server.ts), and config may import vault.
  *   - vault/ must NOT import from orchestrator/.
  */
 
@@ -19,9 +19,9 @@ export { scrubSecrets, scrubSecretsText, TRACE_REDACTION_MASK } from "./redactio
 /**
  * Resolve a vault:// ref to its plaintext value.
  *
- * Call ONLY from lane execution code (browser-lane login fill, terminal-lane
- * host auth, config secrets resolution). Never pass the resolved value to a
- * model, SSE event, or audit log — carry the ref instead.
+ * Call ONLY from lane execution code (browser-lane login fill, config
+ * secrets resolution). Never pass the resolved value to a model, SSE event,
+ * or audit log — carry the ref instead.
  */
 export async function resolveVaultRef(ref: import("./refs").VaultRef): Promise<string> {
   const { getVaultStore } = await import("./store");

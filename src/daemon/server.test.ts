@@ -912,21 +912,6 @@ test("POST /tasks creates an operations task with no project — 201, and a real
   assert.equal(stored.projectPath, process.env.HOME, "defaults to the home directory");
 });
 
-test("POST /tasks still routes an explicit Terminal Lane request to the lane (regression)", async (t) => {
-  withTempHome(t);
-  const { _resetDbForTests } = await import("@/lib/db");
-  _resetDbForTests();
-  const { base, headers } = await startServer(t);
-
-  const res = await fetch(`${base}/tasks`, {
-    method: "POST", headers,
-    body: JSON.stringify({ description: "Use Terminal Lane to run uptime on the build server.", project: "hivematrix", projectPath: "/tmp/x" }),
-  });
-  assert.equal(res.status, 201);
-  const body = await res.json() as Record<string, unknown>;
-  assert.equal(body.routed, "terminal-lane");
-});
-
 test("POST /tasks routes an explicit Browser Lane request to the lane (parity with voice)", async (t) => {
   withTempHome(t);
   const { _resetDbForTests, getDb } = await import("@/lib/db");
@@ -1168,20 +1153,20 @@ test("POST /tasks does not mis-route dev tasks whose description begins 'Browser
   }
 });
 
-test("POST /tasks: a broad prompt that NAMES a lane is a single task, not hijacked into Terminal Lane", async (t) => {
+test("POST /tasks: a broad prompt that NAMES a lane is a single task, not hijacked into a lane route", async (t) => {
   withTempHome(t);
-  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  const { _resetDbForTests } = await import("@/lib/db");
   _resetDbForTests();
   const { base, headers } = await startServer(t);
 
-  // A broad bug-list with a category tally that literally contains "Terminal Lane".
+  // A broad bug-list with a category tally that literally names lanes.
   const description = [
     "Fix all of these across the app, and clean everything up:",
     "BrowserLane starts at a small window size, the overview color coding is wrong,",
     "the icon resets to dark, and the wallpaper translucency is ignored.",
     "Bug tally by area:",
     "- Browser Lane: 5",
-    "- Terminal Lane: 4",
+    "- Desktop Lane: 4",
     "- Email: 12",
   ].join("\n");
 
@@ -1194,10 +1179,6 @@ test("POST /tasks: a broad prompt that NAMES a lane is a single task, not hijack
   // Broad auto → a single task (frontier self-plans), not an auto-Work-Package…
   assert.notEqual(body.routed, "work_package");
   assert.ok(body._id, "broad prompt naming a lane should create a normal task");
-  // …and, critically, it must NOT be hijacked into a Terminal Lane task just because
-  // the text mentions the lane name (the breadth guard still protects this).
-  const tl = (getDb().prepare("SELECT COUNT(*) AS n FROM tasks WHERE source = 'terminal-lane'").get() as { n: number }).n;
-  assert.equal(tl, 0, "no Terminal Lane task may be created for a broad prompt that merely names the lane");
 });
 
 test("POST /tasks route=normal creates a plain task even for a broad prompt", async (t) => {
@@ -1216,21 +1197,6 @@ test("POST /tasks route=normal creates a plain task even for a broad prompt", as
   assert.notEqual(body.routed, "work_package");
   // Explicit route=normal keeps the task a plain standalone task (not promoted to "work").
   assert.notEqual(body.workflow, "work");
-});
-
-test("POST /tasks route=terminal-lane forces the lane even without use-cue wording", async (t) => {
-  withTempHome(t);
-  const { _resetDbForTests } = await import("@/lib/db");
-  _resetDbForTests();
-  const { base, headers } = await startServer(t);
-
-  const res = await fetch(`${base}/tasks`, {
-    method: "POST", headers,
-    body: JSON.stringify({ route: "terminal-lane", description: "df -h on the build box", project: "hivematrix", projectPath: "/tmp/x" }),
-  });
-  assert.equal(res.status, 201);
-  const body = await res.json() as Record<string, unknown>;
-  assert.equal(body.routed, "terminal-lane");
 });
 
 test("New Task form exposes a Route selector and createTask sends it", () => {

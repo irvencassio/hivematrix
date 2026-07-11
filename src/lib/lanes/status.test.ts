@@ -31,10 +31,10 @@ test("lane statuses collapse browser read and workflow capabilities into one Bro
   const lanes = shapeLaneServiceStatuses([
     status({ kind: "webbee", name: "Browser Lane Read", summary: "read/search", healthy: true }),
     status({ kind: "browserbee", name: "Browser Lane Workflow", summary: "workflow", healthy: false, statusDetail: "needs auth" }),
-    status({ kind: "termbee", name: "TermBee", summary: "terminal" }),
+    status({ kind: "desktopbee", name: "DesktopBee", summary: "desktop" }),
   ]);
 
-  assert.deepEqual(lanes.map((lane) => lane.kind), ["browser", "terminal"]);
+  assert.deepEqual(lanes.map((lane) => lane.kind), ["browser", "desktop"]);
   assert.equal(lanes[0].name, "Browser Lane");
   assert.equal(lanes[0].healthy, false);
   assert.match(lanes[0].summary, /read\/search/);

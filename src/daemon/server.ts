@@ -2144,7 +2144,7 @@ export function createDaemonServer() {
 
       // POST /bee/:tool — generic capability-lane dispatch for the CLI executors
       // (Claude Code / Codex), giving them parity with the local agent for
-      // webbee/browserbee/desktopbee/termbee. Reuses executeBeeTool, so the
+      // webbee/browserbee/desktopbee. Reuses executeBeeTool, so the
       // connectivity-capability gate is enforced identically. Body: {args:{...}}.
       const beeMatch = urlPath.match(/^\/bee\/([a-z_]+)$/);
       if (req.method === "POST" && beeMatch) {
@@ -2280,9 +2280,9 @@ export function createDaemonServer() {
       }
 
       // --- Lane Apps manager -------------------------------------------------
-      // HiveMatrix updates ITSELF automatically; the standalone Browser Lane and
-      // Terminal Lane apps are installed/updated EXPLICITLY here — never silently
-      // overwritten by the updater. GET reports install state for both.
+      // HiveMatrix updates ITSELF automatically; the standalone Browser Lane
+      // app is installed/updated EXPLICITLY here — never silently overwritten by
+      // the updater. GET reports install state.
       if (req.method === "GET" && urlPath === "/lane-apps") {
         const { getAllLaneAppStates } = await import("@/lib/lane-apps");
         // ?verify=1 also runs signature + launch verification (slower; launches the app).
@@ -2304,7 +2304,7 @@ export function createDaemonServer() {
 
       // POST /lane-apps/:id/install — install/update one lane app from its
       // packaged artifact into the user-writable target (~/Applications/...).
-      const laneAppInstall = urlPath.match(/^\/lane-apps\/(browser-lane|terminal-lane)\/install$/);
+      const laneAppInstall = urlPath.match(/^\/lane-apps\/(browser-lane)\/install$/);
       if (req.method === "POST" && laneAppInstall) {
         const { installLaneAppById } = await import("@/lib/lane-apps");
         try {
@@ -2336,7 +2336,7 @@ export function createDaemonServer() {
       // POST /lane-apps/:id/repair-applications — replace a stale, user-writable
       // /Applications copy with the bundled artifact, else return exact
       // instructions. Typed + id-constrained; no arbitrary path, no shell.
-      const laneAppRepair = urlPath.match(/^\/lane-apps\/(browser-lane|terminal-lane)\/repair-applications$/);
+      const laneAppRepair = urlPath.match(/^\/lane-apps\/(browser-lane)\/repair-applications$/);
       if (req.method === "POST" && laneAppRepair) {
         const { repairApplicationsCopy } = await import("@/lib/lane-apps");
         try {
@@ -2349,7 +2349,7 @@ export function createDaemonServer() {
       }
 
       // POST /lane-apps/:id/launch — open the active installed copy.
-      const laneAppLaunch = urlPath.match(/^\/lane-apps\/(browser-lane|terminal-lane)\/launch$/);
+      const laneAppLaunch = urlPath.match(/^\/lane-apps\/(browser-lane)\/launch$/);
       if (req.method === "POST" && laneAppLaunch) {
         const { activePathFor } = await import("@/lib/lane-apps");
         const appPath = activePathFor(laneAppLaunch[1]);
@@ -2365,7 +2365,7 @@ export function createDaemonServer() {
 
       // POST /lane-apps/:id/reveal — reveal the active bundle in Finder. Scoped
       // to the lane app id (no arbitrary-path reveal) so callers can't probe the fs.
-      const laneAppReveal = urlPath.match(/^\/lane-apps\/(browser-lane|terminal-lane)\/reveal$/);
+      const laneAppReveal = urlPath.match(/^\/lane-apps\/(browser-lane)\/reveal$/);
       if (req.method === "POST" && laneAppReveal) {
         const { activePathFor } = await import("@/lib/lane-apps");
         const appPath = activePathFor(laneAppReveal[1]);
@@ -2382,7 +2382,7 @@ export function createDaemonServer() {
       // POST /lane-apps/:id/verify — rerun signature + Gatekeeper + launch
       // verification and return the refreshed status. codesign/spctl passing is
       // NOT enough; the launch probe is a separate signal (the LaunchServices lesson).
-      const laneAppVerify = urlPath.match(/^\/lane-apps\/(browser-lane|terminal-lane)\/verify$/);
+      const laneAppVerify = urlPath.match(/^\/lane-apps\/(browser-lane)\/verify$/);
       if (req.method === "POST" && laneAppVerify) {
         const { verifyLaneAppById } = await import("@/lib/lane-apps");
         const { recordLaneVerification } = await import("@/lib/lane-setup");
@@ -2486,107 +2486,6 @@ export function createDaemonServer() {
         const { runBrowserLaneReadiness } = await import("@/lib/browser-lane/probe-service");
         const result = await runBrowserLaneReadiness({ siteId: typeof body.siteId === "string" ? body.siteId : "all" });
         json(res, result.ok ? 200 : 404, result);
-        return;
-      }
-
-      if (req.method === "GET" && urlPath === "/terminal-lane/profiles") {
-        const { listTerminalProfileSummaries } = await import("@/lib/terminal-lane/store");
-        json(res, 200, { ok: true, lane: "terminal", profiles: listTerminalProfileSummaries() });
-        return;
-      }
-
-      if (req.method === "POST" && urlPath === "/terminal-lane/profiles") {
-        const body = await parseBody(req) as Record<string, unknown>;
-        try {
-          const { upsertTerminalProfile } = await import("@/lib/terminal-lane/store");
-          const profile = upsertTerminalProfile(body.profile ?? body);
-          json(res, 200, { ok: true, lane: "terminal", profile });
-        } catch (e) {
-          json(res, 400, { ok: false, lane: "terminal", error: e instanceof Error ? e.message : String(e) });
-        }
-        return;
-      }
-
-      if (req.method === "GET" && urlPath === "/terminal-lane/dashboard") {
-        const { getTerminalLaneReadinessDashboard } = await import("@/lib/terminal-lane/store");
-        json(res, 200, { ok: true, ...getTerminalLaneReadinessDashboard() });
-        return;
-      }
-
-      // DELETE /terminal-lane/profiles/:id — typed, id-constrained removal. The
-      // store refuses the local default. No secrets touched.
-      const terminalProfileDelete = urlPath.match(/^\/terminal-lane\/profiles\/([a-z0-9._:-]+)$/);
-      if (req.method === "DELETE" && terminalProfileDelete) {
-        try {
-          const { deleteTerminalProfile } = await import("@/lib/terminal-lane/store");
-          const deleted = deleteTerminalProfile(terminalProfileDelete[1]);
-          json(res, deleted ? 200 : 404, { ok: deleted, lane: "terminal", deleted });
-        } catch (e) {
-          json(res, 400, { ok: false, lane: "terminal", error: e instanceof Error ? e.message : String(e) });
-        }
-        return;
-      }
-
-      // POST /terminal-lane/open — Canopy-style: resolve an open request from a
-      // profileId ONLY (rejectInlineSecrets blocks any smuggled password). It
-      // resolves the command + honest connectability; it does NOT execute.
-      if (req.method === "POST" && urlPath === "/terminal-lane/open") {
-        const body = await parseBody(req) as Record<string, unknown>;
-        try {
-          const { resolveTerminalOpenRequest } = await import("@/lib/terminal-lane/open");
-          const { rejectInlineSecrets } = await import("@/lib/terminal-lane/contracts");
-          rejectInlineSecrets(body, "open request"); // profileId-only contract: no secrets cross this boundary
-          const profileId = typeof body.profileId === "string" ? body.profileId : "";
-          const result = resolveTerminalOpenRequest({ profileId });
-          json(res, result.ok ? 200 : 404, { lane: "terminal", ...result });
-        } catch (e) {
-          json(res, 400, { ok: false, lane: "terminal", error: e instanceof Error ? e.message : String(e) });
-        }
-        return;
-      }
-
-      if (req.method === "POST" && urlPath === "/terminal-lane/probes") {
-        const body = await parseBody(req) as Record<string, unknown>;
-        try {
-          const { upsertTerminalReadinessProbe } = await import("@/lib/terminal-lane/store");
-          const probe = upsertTerminalReadinessProbe(body.probe ?? body);
-          json(res, 200, { ok: true, lane: "terminal", probe });
-        } catch (e) {
-          json(res, 400, { ok: false, lane: "terminal", error: e instanceof Error ? e.message : String(e) });
-        }
-        return;
-      }
-
-      if (req.method === "POST" && urlPath === "/terminal-lane/readiness/run") {
-        const body = await parseBody(req) as Record<string, unknown>;
-        const { listTerminalProfiles, listEnabledTerminalReadinessProbes, recordTerminalReadinessRun } = await import("@/lib/terminal-lane/store");
-        const { runTerminalReadinessProbe } = await import("@/lib/terminal-lane/readiness");
-        const requested = typeof body.profileId === "string" && body.profileId.trim() ? body.profileId.trim() : "all";
-        const profiles = listTerminalProfiles().filter((profile) => requested === "all" || profile.id === requested);
-        const runs = [];
-        for (const profile of profiles) {
-          const probes = listEnabledTerminalReadinessProbes(profile.id);
-          const probe = probes[0] ?? { id: `${profile.id}-default`, profileId: profile.id, name: "Default", command: null };
-          const result = await runTerminalReadinessProbe({ profile });
-          const run = recordTerminalReadinessRun({
-            profileId: profile.id,
-            probeId: probe.id,
-            status: result.state.status,
-            color: result.state.color,
-            summary: result.summary,
-            metadata: { command: result.command.file, args: result.command.args },
-          });
-          runs.push({ ...run, displayName: profile.displayName });
-        }
-        json(res, profiles.length ? 200 : 404, profiles.length
-          ? { ok: true, lane: "terminal", profileId: requested, runs }
-          : { ok: false, lane: "terminal", profileId: requested, runs: [], error: requested === "all" ? "No Terminal Lane profiles are configured." : `No Terminal Lane profile is configured for "${requested}".` });
-        return;
-      }
-
-      if (req.method === "GET" && urlPath === "/terminal-lane/traces") {
-        const { listTerminalSessionAudit } = await import("@/lib/terminal-lane/store");
-        json(res, 200, { ok: true, lane: "terminal", traces: listTerminalSessionAudit() });
         return;
       }
 
@@ -4162,7 +4061,7 @@ export function createDaemonServer() {
         // of relying on content heuristics, so "developing tool X" is never
         // confused with "using tool X". auto = today's heuristics (with the
         // breadth precedence below); normal = a plain agent task with no special
-        // routing; terminal-lane = force the Terminal Lane route.
+        // routing.
         const route = typeof body.route === "string" ? body.route : "auto";
         delete body.route;
         const { isBroadPrompt } = await import("@/lib/intake/breadth");
@@ -4208,43 +4107,6 @@ export function createDaemonServer() {
             return;
           }
         }
-        // "use TerminalLane and …" → route to the HiveMatrix Terminal Lane (NOT a
-        // generic frontier agent that would fall back on stale Canopy guidance).
-        // A non-agent executor keeps the scheduler from claiming it; the task
-        // carries the structured route + transcript (intent → route → profile →
-        // prepared/needs_input) so the transcript shows Terminal Lane, not a
-        // Canopy discovery loop. profileId only — never raw ssh creds.
-        const { isTerminalLaneRequest } = await import("@/lib/terminal-lane/intent");
-        if (body.executor !== "terminal-lane" &&
-            (route === "terminal-lane" || (route === "auto" && !broad && isTerminalLaneRequest(description)))) {
-          try {
-            const { routeTerminalLaneRequest } = await import("@/lib/terminal-lane/route");
-            const { listTerminalProfileSummaries } = await import("@/lib/terminal-lane/store");
-            const terminalRoute = routeTerminalLaneRequest({ text: description, profiles: listTerminalProfileSummaries() });
-            const tTitle = (typeof body.title === "string" && body.title.trim()) || deriveTaskTitle(description);
-            const logs = terminalRoute.transcript.map((content) => ({ type: "log", content }));
-            const task = await Task.create({
-              _id: generateId(),
-              title: tTitle,
-              description,
-              project: typeof body.project === "string" ? body.project : "hivematrix",
-              projectPath: typeof body.projectPath === "string" ? body.projectPath : undefined,
-              status: "review",
-              reviewState: terminalRoute.status === "needs_input" ? "needs_input" : null,
-              executor: "terminal-lane", // scheduler skips non-agent executors
-              source: "terminal-lane",
-              model: "terminal-lane",
-              logs,
-              output: { terminalRoute },
-            });
-            broadcast("tasks:created", { taskId: task._id });
-            json(res, 201, { routed: "terminal-lane", taskId: task._id, status: terminalRoute.status, profile: terminalRoute.profile?.id ?? null, reason: terminalRoute.reason });
-            return;
-          } catch (e) {
-            console.error(`[tasks] Terminal Lane route failed; creating a normal task: ${e instanceof Error ? e.message : e}`);
-            // fall through to a normal task
-          }
-        }
         // "run the youtube thing that summarizes …" / a YouTube URL → route to the
         // deterministic content.youtube_summary review workflow (public transcript
         // fetched daemon-side, no Browser Lane), NOT a generic Codex agent that would
@@ -4288,9 +4150,9 @@ export function createDaemonServer() {
         // map turns that into a "/workflows:work" skill prefix, so the frontier
         // coding harness plans and executes its own subtasks with full code context
         // the preflight splitter never had. Non-broad tasks stay standalone. An
-        // explicit executor:"workflow"/"terminal-lane" already owns its routing.
+        // explicit executor:"workflow" already owns its routing.
         if (broad && route === "auto" &&
-            body.executor !== "workflow" && body.executor !== "terminal-lane" &&
+            body.executor !== "workflow" &&
             body.source !== "browser-lane") {
           body.workflow = "work";
         }

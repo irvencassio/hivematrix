@@ -1,6 +1,6 @@
 import type { LaneAppDescriptor, LaneAppId } from "./contracts";
 
-// The two standalone lane apps HiveMatrix knows how to install/verify. Bundle
+// The standalone lane app(s) HiveMatrix knows how to install/verify. Bundle
 // ids and executable names verified against the shipped bundles on 2026-06-26.
 //
 // These apps use normal generic Keychain access only — no restricted Keychain
@@ -12,12 +12,6 @@ export const LANE_APPS: LaneAppDescriptor[] = [
     displayName: "Browser Lane",
     bundleId: "com.irvcassio.hivematrix.browserlane",
     executable: "BrowserLane",
-  },
-  {
-    id: "terminal-lane",
-    displayName: "Terminal Lane",
-    bundleId: "com.irvcassio.hivematrix.terminallane",
-    executable: "TerminalLane",
   },
 ];
 

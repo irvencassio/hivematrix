@@ -15,8 +15,6 @@ test("offline: local workhorses work, image degrades, cloud work queues — noth
   assert.equal(by("local").disposition, "works");
   assert.equal(by("local").label, "Local model");
   assert.doesNotMatch(by("local").note, /qwen/i);
-  assert.equal(by("termbee").disposition, "works");
-  assert.equal(by("termbee").label, "Terminal Lane");
   assert.equal(by("desktopbee").disposition, "works");
   assert.equal(by("desktopbee").label, "Desktop Lane");
   assert.equal(by("image").disposition, "degraded");        // mflux fallback
@@ -29,7 +27,7 @@ test("offline: local workhorses work, image degrades, cloud work queues — noth
   assert.equal(r.allHonest, true);
   assert.match(r.summary, /Nothing silently fails/);
   assert.equal(by("coo-router").disposition, "works"); // routing is local; only execution waits
-  assert.equal(r.counts.works, 4);
+  assert.equal(r.counts.works, 3);
   assert.equal(r.counts.degraded, 1);
   assert.equal(r.counts.queued, 4);
 });

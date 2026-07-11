@@ -36,14 +36,13 @@ test("ensureHiveBrainScaffold seeds the canonical Hive brain structure", async (
   assert.ok(created.some((path) => path.endsWith("/lanes/capability-design.md")));
   assert.ok(created.some((path) => path.endsWith("/lanes/scheduler.md")));
   assert.ok(created.some((path) => path.endsWith("/lanes/desktop.md")));
-  assert.ok(created.some((path) => path.endsWith("/lanes/terminal.md")));
+  assert.ok(!created.some((path) => path.endsWith("/lanes/terminal.md")));
   assert.ok(!created.some((path) => path.includes("/bees/")));
   assert.match(scaffoldText, /Message Lane/);
   assert.match(scaffoldText, /Mail Lane/);
   assert.match(scaffoldText, /Manager Lane/);
   assert.match(scaffoldText, /Memory Lane/);
   assert.match(scaffoldText, /Desktop Lane/);
-  assert.match(scaffoldText, /Terminal Lane/);
   assert.match(scaffoldText, /Capability Design Lane/);
   assert.doesNotMatch(scaffoldText, /AuthBee|ManagerBee|BrainBee|TermBee|MessageBee|MailBee|InventorBee|new Bees|other Bees|Bee Playbook/);
   assert.match(agentBrief, new RegExp(escapeRegExp(brainRoot)));

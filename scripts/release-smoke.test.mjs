@@ -9,7 +9,7 @@ test("pre-release operator-path smoke checklist passes", async () => {
   assert.equal(ok, true, failed.length ? `failing checks:\n - ${failed.join("\n - ")}` : "all checks pass");
   // The checklist must cover the documented operator surfaces.
   const names = checks.map((c) => c.name).join("\n");
-  assert.match(names, /lane-apps status returns Browser Lane \+ Terminal Lane/);
+  assert.match(names, /lane-apps status returns Browser Lane/);
   assert.match(names, /leaks no secret values/);
   assert.match(names, /workflow inbox loads/);
 });

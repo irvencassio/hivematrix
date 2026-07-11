@@ -4,7 +4,7 @@
  * Three modes:
  *   cloud-ok    — frontier APIs reachable; full capability set available
  *   local-only  — LAN/loopback only; no cloud; Browser Lane cloud paths disabled
- *   offline     — no network at all; only local-model, Terminal Lane, Desktop Lane on local apps
+ *   offline     — no network at all; only local-model, Desktop Lane on local apps
  *
  * Mode is determined by:
  *   1. Manual override (highest priority — Irv's explicit choice)
@@ -18,7 +18,7 @@ import { getEnabledProviders } from "@/lib/config/frontier-providers";
 
 export type ConnectivityMode = "cloud-ok" | "local-only" | "offline";
 
-export type CapabilityId = "frontier" | "local" | "webbee" | "browserbee" | "desktopbee" | "termbee" | "image" | "mailbee" | "messagebee" | "brain" | "codegraph" | "coo_router" | "flash";
+export type CapabilityId = "frontier" | "local" | "webbee" | "browserbee" | "desktopbee" | "image" | "mailbee" | "messagebee" | "brain" | "codegraph" | "coo_router" | "flash";
 
 export interface CapabilityAvailability {
   available: boolean;
@@ -32,7 +32,6 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     webbee:     { available: true },
     browserbee: { available: true },
     desktopbee: { available: true },
-    termbee:    { available: true },
     image:      { available: true },
     mailbee:    { available: true },
     messagebee: { available: true },
@@ -48,7 +47,6 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     webbee:     { available: false, reason: "Browser Lane read/search requires internet access" },
     browserbee: { available: false, reason: "Browser Lane workflow requires internet access in local-only mode" },
     desktopbee: { available: true },
-    termbee:    { available: true },
     image:      { available: false, reason: "Nano Banana image generation requires cloud; local mflux fallback if configured" },
     // Apple Mail / Messages are driven via local osascript + chat.db — no cloud needed.
     mailbee:    { available: true },
@@ -66,7 +64,6 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     webbee:     { available: false, reason: "No network connectivity" },
     browserbee: { available: false, reason: "No network connectivity" },
     desktopbee: { available: true },
-    termbee:    { available: true },
     image:      { available: false, reason: "No network connectivity; local mflux fallback if configured" },
     // Mail Lane/Message Lane deliver through local apps; sending works even fully offline
     // (Mail/Messages queue + send when the host itself has a link).

@@ -57,7 +57,6 @@ function baseDeps() {
     getBrowserDashboard: () => browserOk,
     getLaneApps: async () => [
       { id: "browser-lane", displayName: "Browser Lane", status: "installed", installed: { short: "0.1.86", build: "2" }, expected: { short: "0.1.86", build: "2" } },
-      { id: "terminal-lane", displayName: "Terminal Lane", status: "installed", installed: { short: "0.1.1", build: "2" }, expected: { short: "0.1.1", build: "2" } },
     ],
     getWorkflowInbox: () => emptyInbox,
     connectivity: () => "cloud-ok",
@@ -100,7 +99,7 @@ test("reports lane app install/update/broken states", async () => {
     ...baseDeps(),
     getLaneApps: async () => [
       { id: "browser-lane", displayName: "Browser Lane", status: "missing", installed: null, expected: { short: "0.1.86", build: "2" } },
-      { id: "terminal-lane", displayName: "Terminal Lane", status: "launch_failed", installed: { short: "0.1.1", build: "2" }, expected: { short: "0.1.1", build: "2" } },
+      { id: "demo-lane", displayName: "Demo Lane", status: "launch_failed", installed: { short: "0.1.1", build: "2" }, expected: { short: "0.1.1", build: "2" } },
     ],
   });
   const apps = report.checks.find((c) => c.id === "lane-apps");

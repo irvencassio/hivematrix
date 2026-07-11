@@ -40,7 +40,6 @@ npm run verify:daemon-runtime
 
 echo "==> Building standalone lane app artifacts…"
 node scripts/package-browser-lane-app.mjs
-node scripts/package-terminal-lane-app.mjs
 
 # Sign the SOURCE resources before bundling: cargo tauri build packages the dmg
 # and the updater tarball mid-build, straight from these files — signing only
@@ -51,8 +50,6 @@ bash scripts/sign-bundled-machos.sh dist/daemon desktopbee-helper/DesktopBeeHelp
 echo "==> Signing standalone lane app artifacts…"
 codesign --force --options runtime --timestamp --sign "$IDENTITY" --entitlements browser-lane-app/Resources/entitlements.plist "build/browser-lane/Browser Lane.app/Contents/MacOS/BrowserLane"
 codesign --force --options runtime --timestamp --sign "$IDENTITY" --entitlements browser-lane-app/Resources/entitlements.plist "build/browser-lane/Browser Lane.app"
-codesign --force --options runtime --timestamp --sign "$IDENTITY" --entitlements terminal-lane-app/Resources/entitlements.plist "build/terminal-lane/Terminal Lane.app/Contents/MacOS/TerminalLane"
-codesign --force --options runtime --timestamp --sign "$IDENTITY" --entitlements terminal-lane-app/Resources/entitlements.plist "build/terminal-lane/Terminal Lane.app"
 
 echo "==> Building + signing (cargo tauri build)…"
 # Don't abort the whole script if only the dmg sub-step fails; we check artifacts next.

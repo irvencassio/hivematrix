@@ -10,15 +10,14 @@
  * advertised (see `availableLaneTools`) nor dispatched (see `executeLaneTool`).
  *
  * Naming: tools are advertised under lane-native ids (desktop_action,
- * terminal_run, mail_send, …). Legacy bee-branded ids are still accepted on
- * dispatch via LANE_TOOL_ALIASES but never advertised; the removed browser ids
+ * mail_send, …). Legacy bee-branded ids are still accepted on dispatch via
+ * LANE_TOOL_ALIASES but never advertised; the removed browser ids
  * (webbee_search/browserbee_run) are rejected outright.
  */
 
 import { getConnectivityPolicy, type CapabilityId } from "@/lib/connectivity/policy";
 import type { ChatTool } from "./tool-bridge";
 import { readToken } from "@/lib/auth/token";
-import { defaultTermBeeProvider } from "@/lib/termbee/provider";
 import type { CooDispatchResult } from "@/lib/coo/dispatch";
 import { PIM_TOOL_DEFINITIONS, executePimTool } from "./pim-tools";
 
@@ -28,8 +27,6 @@ const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
   workflow_inbox: "coo_router",
   hivematrix_browser: "browserbee",
   desktop_action: "desktopbee",
-  terminal_session: "termbee",
-  terminal_run: "termbee",
   mail_send: "mailbee",
   mail_draft: "mailbee",
   message_send: "messagebee",
@@ -58,8 +55,6 @@ const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
  */
 const LANE_TOOL_ALIASES: Record<string, string> = {
   desktopbee_action: "desktop_action",
-  termbee_session: "terminal_session",
-  termbee_run: "terminal_run",
   mailbee_send: "mail_send",
   mailbee_draft: "mail_draft",
   messagebee_send: "message_send",
@@ -163,40 +158,6 @@ export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
           params: { type: "object", description: "Action-specific parameters (AX path, coordinates, keystrokes, script text, …)" },
         },
         required: ["action"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "terminal_session",
-      description:
-        "Terminal Lane: manage HiveMatrix-owned persistent terminal sessions (real in-process shells, no external dependency). action=create starts a session (optional cwd), list shows sessions, kill ends a session. Use a session to run a multi-step build/repo workflow without passing credentials through tool args.",
-      parameters: {
-        type: "object",
-        properties: {
-          action: { type: "string", enum: ["create", "list", "kill"], description: "Session action" },
-          sessionId: { type: "string", description: "Session id (for kill; optional for create)" },
-          cwd: { type: "string", description: "Working directory for a new session" },
-        },
-        required: ["action"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "terminal_run",
-      description:
-        "Terminal Lane: run a shell command in a HiveMatrix-owned persistent session, returning combined output + exit code. Real in-process shell, no external dependency; works in every connectivity mode. Creates the session on demand if it doesn't exist. Do not pass passwords or secrets in commands/tool args.",
-      parameters: {
-        type: "object",
-        properties: {
-          sessionId: { type: "string", description: "Session to run in (created if absent)" },
-          command: { type: "string", description: "The shell command to run" },
-          timeoutMs: { type: "number", description: "Max time to wait (default 120000)" },
-        },
-        required: ["sessionId", "command"],
       },
     },
   },
@@ -345,7 +306,6 @@ const CAPABILITY_ROUTING_LINES: Record<string, string> = {
   message_send: "Send an SMS / iMessage → **message_send** (allowlisted recipients only).",
   hivematrix_browser: "Read/search the live web or drive logged-in/multi-step browser workflows → **hivematrix_browser**.",
   desktop_action: "Control a native macOS app → **desktop_action**.",
-  terminal_run: "Run shell commands in a HiveMatrix-owned persistent terminal session → **terminal_run**.",
   brain_search: "Recall a stored document / brain doc / past decision → **brain_search** (search durable memory before assuming it isn't written down).",
   code_graph: "Find where a symbol is defined + every place it's used → **code_graph** (exact, deterministic — use it to verify you found ALL usages of anything you changed, not just the obvious ones).",
   contacts_lookup: "A person's phone number or email → **contacts_lookup**. Today's schedule → **calendar_today**. Open to-dos → **reminders_list**. \"Remind me to X\" → **reminder_create** (sets a real Reminder NOW — don't spawn a task for it). \"Put X on my calendar\" / \"schedule X\" → **calendar_create** (creates a real Calendar event NOW; needs a start time, so ask if none was given — don't spawn a task for it).",
@@ -404,10 +364,6 @@ export async function executeLaneTool(
       return executeBrowserLane(args, ctx);
     case "desktop_action":
       return executeDesktopBeeAction(args);
-    case "terminal_session":
-      return executeTermBeeSession(args);
-    case "terminal_run":
-      return executeTermBeeRun(args);
     case "mail_send":
       return executeMailBeeSend(args);
     case "mail_draft":
@@ -737,36 +693,6 @@ export async function executeMessageBeeSend(args: Record<string, unknown>, io?: 
   return sent
     ? `${what} sent to ${to} via Messages.`
     : `Error: sending the message to ${to} failed. Is Messages signed in and the handle reachable via iMessage?`;
-}
-
-async function executeTermBeeSession(args: Record<string, unknown>): Promise<string> {
-  const action = args.action as string;
-  if (action === "create") {
-    const id = await defaultTermBeeProvider.createSession({
-      id: typeof args.sessionId === "string" ? args.sessionId : undefined,
-      cwd: typeof args.cwd === "string" ? args.cwd : undefined,
-    });
-    return `Terminal Lane session created: ${id}`;
-  }
-  if (action === "list") {
-    const s = await defaultTermBeeProvider.listSessions();
-    return s.length ? s.map((x) => `${x.id} (cwd=${x.cwd}, alive=${x.alive})`).join("\n") : "(no sessions)";
-  }
-  if (action === "kill") {
-    const id = typeof args.sessionId === "string" ? args.sessionId : "";
-    return await defaultTermBeeProvider.killSession(id) ? `Killed ${id}` : `No such local fallback session ${id}`;
-  }
-  return `Error: action must be create | list | kill`;
-}
-
-async function executeTermBeeRun(args: Record<string, unknown>): Promise<string> {
-  const sessionId = typeof args.sessionId === "string" ? args.sessionId.trim() : "";
-  const command = typeof args.command === "string" ? args.command : "";
-  if (!sessionId || !command) return "Error: sessionId and command are required";
-  const timeoutMs = typeof args.timeoutMs === "number" ? args.timeoutMs : undefined;
-  const r = await defaultTermBeeProvider.runCommand(sessionId, command, timeoutMs);
-  const status = r.timedOut ? "(timed out)" : `(exit ${r.exitCode})`;
-  return `${r.output}\n${status}`.slice(0, 16_000);
 }
 
 async function executeBrowserLaneRead(args: Record<string, unknown>, ctx: LaneToolContext): Promise<string> {

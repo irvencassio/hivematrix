@@ -25,6 +25,7 @@ test("catalog display names follow the lane naming strategy", () => {
   assert.equal(getLaneDefinition("mailbee")?.name, "Mail Lane");
   assert.equal(getLaneDefinition("managerbee")?.name, "Review Lane");
   assert.equal(getLaneDefinition("brainbee")?.name, "Memory Lane");
-  assert.equal(getLaneDefinition("termbee")?.name, "Terminal Lane");
   assert.equal(getLaneDefinition("desktopbee")?.name, "Desktop Lane");
+  // termbee (Terminal Lane) was retired — no lane definition resolves for it.
+  assert.equal(getLaneDefinition("termbee"), null);
 });

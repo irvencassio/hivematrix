@@ -99,7 +99,7 @@ test("updateAllStaleLaneApps installs + replaces a writable stale shadowing /App
   const repaired: string[] = [];
   const states = [
     { id: "browser-lane", displayName: "Browser Lane", status: "installed", shadowed: false, activePath: "/Applications/Browser Lane.app" },
-    { id: "terminal-lane", displayName: "Terminal Lane", status: "stale_copy", shadowed: true, activePath: "/Applications/Terminal Lane.app" },
+    { id: "demo-lane", displayName: "Demo Lane", status: "stale_copy", shadowed: true, activePath: "/Applications/Demo Lane.app" },
   ];
   const r = await updateAllStaleLaneApps({
     getStates: async () => states,
@@ -107,23 +107,23 @@ test("updateAllStaleLaneApps installs + replaces a writable stale shadowing /App
     repair: async (id) => { repaired.push(id); return { ok: true, replacedPath: `/Applications/${id}.app` }; },
   });
   // Only the stale lane is acted on.
-  assert.deepEqual(installed, ["terminal-lane"]);
-  assert.deepEqual(repaired, ["terminal-lane"]);
-  const t = r.results.find((x) => x.id === "terminal-lane");
+  assert.deepEqual(installed, ["demo-lane"]);
+  assert.deepEqual(repaired, ["demo-lane"]);
+  const t = r.results.find((x) => x.id === "demo-lane");
   assert.ok(t);
   assert.equal(t.updated, true);
-  assert.equal(t.replacedApplications, "/Applications/terminal-lane.app");
+  assert.equal(t.replacedApplications, "/Applications/demo-lane.app");
   assert.equal(r.results.find((x) => x.id === "browser-lane"), undefined, "current lane skipped");
   assert.equal(r.ok, true);
 });
 
 test("updateAllStaleLaneApps never leaves a silent shadow when /Applications is not writable", async () => {
   const r = await updateAllStaleLaneApps({
-    getStates: async () => [{ id: "terminal-lane", displayName: "Terminal Lane", status: "stale_copy", shadowed: true, activePath: "/Applications/Terminal Lane.app" }],
-    install: async () => ({ installedPath: "/Users/me/Applications/HiveMatrix Lanes/Terminal Lane.app", activePath: "/Applications/Terminal Lane.app", shadowed: true }),
-    repair: async () => ({ ok: false, instructions: "/Applications/Terminal Lane.app is not writable — drag it to the Trash, then retry." }),
+    getStates: async () => [{ id: "demo-lane", displayName: "Demo Lane", status: "stale_copy", shadowed: true, activePath: "/Applications/Demo Lane.app" }],
+    install: async () => ({ installedPath: "/Users/me/Applications/HiveMatrix Lanes/Demo Lane.app", activePath: "/Applications/Demo Lane.app", shadowed: true }),
+    repair: async () => ({ ok: false, instructions: "/Applications/Demo Lane.app is not writable — drag it to the Trash, then retry." }),
   });
-  const t = r.results.find((x) => x.id === "terminal-lane");
+  const t = r.results.find((x) => x.id === "demo-lane");
   assert.ok(t);
   assert.equal(t.shadowed, true, "still shadowed — surfaced, not hidden");
   assert.match(t.warning ?? "", /not writable|Trash/i);

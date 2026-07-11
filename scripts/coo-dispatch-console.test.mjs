@@ -58,8 +58,10 @@ test("console exposes a Browser Lane readiness maintenance block with a Run butt
   // Stale state is surfaced.
   assert.match(console, /stale/i);
 
-  // No secret material in the readiness block.
-  const start = console.indexOf("renderBrowserReadiness");
+  // No secret material in the readiness block (the actual renderer function,
+  // not the earlier onclick="renderBrowserReadiness()" HTML handler — that
+  // occurrence sits right before the unrelated Credential Vault section).
+  const start = console.indexOf("async function renderBrowserReadiness");
   const segment = console.slice(start, start + 2500);
   assert.doesNotMatch(segment, /password|credentialRef|cookie|\.secret\b/i);
 });

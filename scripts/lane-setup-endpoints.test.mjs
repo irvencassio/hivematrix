@@ -27,9 +27,9 @@ test("no arbitrary shell/exec endpoint is introduced for lanes", () => {
 
 test("existing typed, id-constrained lane action routes remain intact", () => {
   const server = read("src/daemon/server.ts");
-  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane|terminal-lane)\\/install$"));
-  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane|terminal-lane)\\/verify$"));
-  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane|terminal-lane)\\/launch$"));
+  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane)\\/install$"));
+  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane)\\/verify$"));
+  assert.ok(server.includes("^\\/lane-apps\\/(browser-lane)\\/launch$"));
   assert.match(server, /urlPath === "\/browser-lane\/readiness\/run"/);
-  assert.match(server, /urlPath === "\/terminal-lane\/readiness\/run"/);
+  assert.doesNotMatch(server, /terminal-lane/);
 });

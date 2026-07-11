@@ -133,13 +133,6 @@ const MANAGED_LANE_DESCRIPTORS: LaneWorkerDescriptor[] = [
     manageable: false,
   },
   {
-    // In-process terminal sessions (the offline workhorse). No separate health
-    // endpoint — it's live whenever the daemon is.
-    kind: "termbee",
-    runtimeMode: "embedded",
-    manageable: false,
-  },
-  {
     // The Swift helper (on :3748). Bundled + auto-started with the app; its
     // health is the /desktopbee/health probe (which pings the helper).
     kind: "desktopbee",

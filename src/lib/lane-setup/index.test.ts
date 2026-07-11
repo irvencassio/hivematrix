@@ -27,22 +27,14 @@ const browserTotals = (over = {}) => ({
   sites: [],
   ...over,
 });
-const terminalTotals = (over = {}) => ({
-  lane: "terminal",
-  totals: { profiles: 2, byColor: { green: 1, yellow: 0, orange: 1, red: 0, gray: 0 }, needsAttention: 1 },
-  profiles: [],
-  ...over,
-});
 
-// Default deps: both apps installed & current, running, verified valid, daemon up.
+// Default deps: the app installed & current, running, verified valid, daemon up.
 function deps(over = {}) {
   return {
     appStates: () => [
       appState({ id: "browser-lane", displayName: "Browser Lane", status: "installed" }),
-      appState({ id: "terminal-lane", displayName: "Terminal Lane", status: "installed" }),
     ],
     browserDashboard: () => browserTotals(),
-    terminalDashboard: () => terminalTotals(),
     isRunning: () => true,
     verification: () => ({ signatureOk: true, launchOk: true }),
     ...over,
@@ -54,15 +46,10 @@ async function browser(d: any): Promise<any> {
   assert.ok(e, "browser-lane entry present");
   return e;
 }
-async function terminal(d: any): Promise<any> {
-  const e = (await getLaneSetup(d)).lanes.find(l => l.id === "terminal-lane");
-  assert.ok(e, "terminal-lane entry present");
-  return e;
-}
 
 test("returns one entry per lane in catalog order", async () => {
   const { lanes } = await getLaneSetup(deps());
-  assert.deepEqual(lanes.map(l => l.id), ["browser-lane", "terminal-lane"]);
+  assert.deepEqual(lanes.map(l => l.id), ["browser-lane"]);
 });
 
 test("installState maps from the lane-app status", async () => {
@@ -75,23 +62,19 @@ test("installState maps from the lane-app status", async () => {
     ["invalid_signature", "broken"],
   ];
   for (const [status, expected] of cases) {
-    const d = deps({ appStates: () => [appState({ id: "browser-lane", status }), appState({ id: "terminal-lane", status })] });
+    const d = deps({ appStates: () => [appState({ id: "browser-lane", status })] });
     assert.equal((await browser(d)).installState, expected, status);
   }
 });
 
 test("needsUpdate + updateSummary aggregate the stale lane apps", async () => {
-  // browser current; terminal stale → only terminal needs update.
   const d = deps({ appStates: () => [
-    appState({ id: "browser-lane", displayName: "Browser Lane", status: "installed" }),
-    appState({ id: "terminal-lane", displayName: "Terminal Lane", status: "stale_copy", shadowed: false, activeIsStale: true }),
+    appState({ id: "browser-lane", displayName: "Browser Lane", status: "stale_copy", shadowed: false, activeIsStale: true }),
   ] });
   const setup = await getLaneSetup(d);
   const b = setup.lanes.find(l => l.id === "browser-lane");
-  const t = setup.lanes.find(l => l.id === "terminal-lane");
-  assert.equal(b?.needsUpdate, false);
-  assert.equal(t?.needsUpdate, true);
-  assert.deepEqual(setup.updateSummary.needsUpdate, ["Terminal Lane"]);
+  assert.equal(b?.needsUpdate, true);
+  assert.deepEqual(setup.updateSummary.needsUpdate, ["Browser Lane"]);
   assert.equal(setup.updateSummary.count, 1);
   assert.equal(setup.updateSummary.anyShadowed, false);
 });
@@ -99,7 +82,6 @@ test("needsUpdate + updateSummary aggregate the stale lane apps", async () => {
 test("a shadowed lane counts as needing update and flags anyShadowed", async () => {
   const d = deps({ appStates: () => [
     appState({ id: "browser-lane", displayName: "Browser Lane", status: "stale_copy", shadowed: true, activeIsStale: true, activePath: "/Applications/Browser Lane.app" }),
-    appState({ id: "terminal-lane", displayName: "Terminal Lane", status: "installed" }),
   ] });
   const setup = await getLaneSetup(d);
   assert.equal(setup.lanes.find(l => l.id === "browser-lane")?.needsUpdate, true);
@@ -110,7 +92,6 @@ test("a shadowed lane counts as needing update and flags anyShadowed", async () 
 test("entries surface installed + bundled build identity (HMBuildId)", async () => {
   const d = deps({ appStates: () => [
     appState({ id: "browser-lane", installedBuildId: "old1234", expectedBuildId: "new5678" }),
-    appState({ id: "terminal-lane", installedBuildId: "new5678", expectedBuildId: "new5678" }),
   ] });
   const b = (await getLaneSetup(d)).lanes.find(l => l.id === "browser-lane");
   assert.ok(b);
@@ -133,7 +114,6 @@ test("a stale_copy never reads as current and carries the shadow detail", async 
         { path: USER, location: "user", active: false, current: true, version: { short: "0.1.87", build: "1" }, buildId: "new" },
       ],
     }),
-    appState({ id: "terminal-lane" }),
   ] });
   const b = await browser(d);
   assert.equal(b.installState, "stale");
@@ -171,8 +151,6 @@ test("daemonState is unavailable when the readiness store throws (never silent s
   const b = await browser(d);
   assert.equal(b.daemonState, "unavailable");
   assert.equal(b.readiness.configuredSites, 0);
-  // The other lane is unaffected.
-  assert.equal((await terminal(d)).daemonState, "reachable");
 });
 
 test("browser readiness summary is counts only", async () => {
@@ -180,13 +158,8 @@ test("browser readiness summary is counts only", async () => {
   assert.deepEqual(b.readiness, { lane: "browser", configuredSites: 3, ready: 2, stale: 1, needsAttention: 1 });
 });
 
-test("terminal readiness summary is counts only", async () => {
-  const t = await terminal(deps());
-  assert.deepEqual(t.readiness, { lane: "terminal", configuredProfiles: 2, ready: 1, failed: 1, needsAttention: 1 });
-});
-
 test("nextAction follows the repair priority", async () => {
-  const mk = (over: any) => deps({ appStates: () => [appState({ id: "browser-lane", ...over }), appState({ id: "terminal-lane" })], ...over.depOver });
+  const mk = (over: any) => deps({ appStates: () => [appState({ id: "browser-lane", ...over })], ...over.depOver });
   assert.equal((await browser(mk({ status: "missing" }))).nextAction.action, "install");
   assert.equal((await browser(mk({ status: "update_available" }))).nextAction.action, "update");
   assert.equal((await browser(mk({ status: "launch_failed" }))).nextAction.action, "verify");
@@ -207,17 +180,16 @@ test("nextAction follows the repair priority", async () => {
 });
 
 test("disabledReasons explain unavailable actions when not installed", async () => {
-  const d = deps({ appStates: () => [appState({ id: "browser-lane", status: "missing", installed: null, activePath: null }), appState({ id: "terminal-lane" })] });
+  const d = deps({ appStates: () => [appState({ id: "browser-lane", status: "missing", installed: null, activePath: null })] });
   const b = await browser(d);
   assert.ok(b.disabledReasons.verify && /install/i.test(b.disabledReasons.verify), "verify disabled with reason");
   assert.ok(b.disabledReasons.launch && /install/i.test(b.disabledReasons.launch), "launch disabled with reason");
 });
 
 test("lane setup output carries NO secret material", async () => {
-  // Stub dashboards that DO carry secrets in their detail rows (as the real ones do).
+  // Stub a dashboard that DOES carry secrets in its detail rows (as the real one does).
   const d = deps({
     browserDashboard: () => browserTotals({ sites: [{ credentialRef: "hivematrix.browser.foo", providerAccount: "me@example.com", homeUrl: "https://x" }] }),
-    terminalDashboard: () => terminalTotals({ profiles: [{ credentialRef: "hivematrix.terminal.bar", host: "10.0.0.9", user: "root", port: 22 }] }),
   });
   const json = JSON.stringify(await getLaneSetup(d));
   assert.doesNotMatch(json, /credentialRef|password|private_key|passphrase|providerAccount|"host"|"user"/, "no secret/identifying fields leak into the unified model");

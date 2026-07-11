@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
 
-// Injectable command runner — same shape as terminal-lane/readiness.ts so unit
-// tests never shell out.
+// Injectable command runner so unit tests never shell out.
 export interface LaneAppCommandResult {
   exitCode: number | null;
   stdout: string;

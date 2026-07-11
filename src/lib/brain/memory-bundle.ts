@@ -301,7 +301,6 @@ Hive is the control plane for capability lanes and focused workers.
 - Legacy role and project playbooks remain readable until their contents are migrated into the canonical structure.
 - Manager Lane is the first lane that should consume the shared brain-memory bundle, because it coordinates strategy, planning, review, and task execution.
 - Video workflows should consume shared browser, web, and brain capabilities instead of owning a separate runtime story.
-- Terminal Lane is the terminal capability contract, owned end-to-end by HiveMatrix: persistent in-process shell sessions, no external provider.
 `,
     },
     {
@@ -399,15 +398,6 @@ Memory Lane is Hive's dedicated durable-memory worker. It curates the canonical 
 - Own approval-heavy native desktop automation for macOS app flows, dialogs, installers, and settings work.
 - Prefer Browser Lane or direct APIs when they are safer and more stable than desktop control.
 - Keep app scope, approvals, screenshots, and traces explicit.
-`,
-    },
-    {
-      path: "lanes/terminal.md",
-      content: `# Terminal Lane
-
-- Define Hive's terminal, repo, and session contract.
-- Own the capability surface end-to-end inside HiveMatrix: persistent in-process shell sessions, no external provider.
-- Keep terminal execution distinct from browser, web, and voice layers while sharing the same mission and memory substrate.
 `,
     },
     {

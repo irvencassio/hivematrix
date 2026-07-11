@@ -109,7 +109,7 @@ test("Browser Lane app has a HiveMatrix-themed bundle icon", () => {
 });
 
 // The squircle must be INSET inside the 1024 canvas (~Apple's 0.805 content
-// ratio, matching Terminal Lane and src-tauri/icons/icon.png) with a transparent
+// ratio, matching src-tauri/icons/icon.png) with a transparent
 // margin — not full-bleed — so the dock doesn't render Browser Lane larger than
 // neighboring app icons.
 test("Browser Lane bundle icon is inset (~0.805) with a transparent margin", () => {

@@ -4,16 +4,12 @@ import { readFileSync } from "node:fs";
 
 import { LANE_APPS, getLaneApp } from "./catalog";
 
-test("catalog covers Browser Lane and Terminal Lane with correct identity", () => {
-  assert.equal(LANE_APPS.length, 2);
+test("catalog covers Browser Lane with correct identity", () => {
+  assert.equal(LANE_APPS.length, 1);
   const browser = getLaneApp("browser-lane");
   assert.equal(browser.displayName, "Browser Lane");
   assert.equal(browser.bundleId, "com.irvcassio.hivematrix.browserlane");
   assert.equal(browser.executable, "BrowserLane");
-  const terminal = getLaneApp("terminal-lane");
-  assert.equal(terminal.displayName, "Terminal Lane");
-  assert.equal(terminal.bundleId, "com.irvcassio.hivematrix.terminallane");
-  assert.equal(terminal.executable, "TerminalLane");
 });
 
 test("getLaneApp throws on unknown id", () => {

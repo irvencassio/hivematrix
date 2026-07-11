@@ -1270,27 +1270,26 @@ test("settings lanes sections have distinct, non-duplicate labels", () => {
   assert.match(CONSOLE_HTML, /Lane Apps/, "Lane Apps card kept as the app installer");
   assert.match(CONSOLE_HTML, /Runtime Capabilities/, "embedded lanes relabeled to Runtime Capabilities");
   assert.match(CONSOLE_HTML, /Browser Lane Sites &amp; Auth/, "browser readiness relabeled to Sites & Auth");
-  assert.match(CONSOLE_HTML, /Terminal Lane Profiles &amp; Readiness/, "matching Terminal Lane readiness card added");
+  assert.doesNotMatch(CONSOLE_HTML, /Terminal Lane Profiles &amp; Readiness/, "Terminal Lane readiness card retired");
   assert.doesNotMatch(CONSOLE_HTML, /Embedded capability lanes/, "old duplicate-feeling label is gone");
 });
 
-test("Lane Apps still names both Browser Lane and Terminal Lane", () => {
-  // Lane Apps is the canonical install/update/verify/launch surface for both apps.
+test("Lane Apps still names Browser Lane", () => {
+  // Lane Apps is the canonical install/update/verify/launch surface for the app.
   const start = CONSOLE_HTML.indexOf("Lane Apps");
   const end = CONSOLE_HTML.indexOf("Runtime Capabilities");
   assert.ok(start >= 0 && end > start, "Lane Apps precedes Runtime Capabilities");
   const laneAppsCopy = CONSOLE_HTML.slice(start, end);
-  assert.match(laneAppsCopy, /Browser Lane and Terminal Lane are standalone signed apps/, "Lane Apps copy names both apps");
+  assert.match(laneAppsCopy, /Browser Lane is a standalone signed app/, "Lane Apps copy names the app");
+  assert.doesNotMatch(laneAppsCopy, /Terminal Lane/, "Terminal Lane no longer named here");
 });
 
-test("readiness cards sit directly under Lane Apps, before Runtime Capabilities", () => {
+test("readiness card sits directly under Lane Apps, before Runtime Capabilities", () => {
   const laneApps = CONSOLE_HTML.indexOf("Lane Apps");
   const browserSites = CONSOLE_HTML.indexOf("Browser Lane Sites &amp; Auth");
-  const terminalReadiness = CONSOLE_HTML.indexOf("Terminal Lane Profiles &amp; Readiness");
   const runtime = CONSOLE_HTML.indexOf("Runtime Capabilities");
   assert.ok(laneApps >= 0 && browserSites > laneApps, "Browser Lane Sites & Auth follows Lane Apps");
-  assert.ok(terminalReadiness > browserSites, "Terminal readiness follows Browser readiness");
-  assert.ok(runtime > terminalReadiness, "Runtime Capabilities comes after both readiness cards");
+  assert.ok(runtime > browserSites, "Runtime Capabilities comes after the readiness card");
 });
 
 test("the lane 'update' action targets the real install endpoint (not a dead /update route)", () => {
@@ -1299,11 +1298,11 @@ test("the lane 'update' action targets the real install endpoint (not a dead /up
   assert.ok(body.length > 20, "laneActionCall extracted");
   const laneActionCall = new Function(body + "\nreturn laneActionCall;")() as (id: string, action: string) => string;
   // The bug: "update" mapped to laneAppAction(id,'update') → POST /lane-apps/:id/update (404).
-  assert.equal(laneActionCall("terminal-lane", "update"), "laneAppAction('terminal-lane','install')");
-  assert.equal(laneActionCall("terminal-lane", "install"), "laneAppAction('terminal-lane','install')");
-  assert.equal(laneActionCall("terminal-lane", "open"), "laneAppAction('terminal-lane','launch')");
-  assert.equal(laneActionCall("terminal-lane", "repair"), "laneRepairApplications('terminal-lane')");
-  assert.equal(laneActionCall("terminal-lane", "run_readiness"), "laneRunReadiness('terminal-lane')");
+  assert.equal(laneActionCall("browser-lane", "update"), "laneAppAction('browser-lane','install')");
+  assert.equal(laneActionCall("browser-lane", "install"), "laneAppAction('browser-lane','install')");
+  assert.equal(laneActionCall("browser-lane", "open"), "laneAppAction('browser-lane','launch')");
+  assert.equal(laneActionCall("browser-lane", "repair"), "laneRepairApplications('browser-lane')");
+  assert.equal(laneActionCall("browser-lane", "run_readiness"), "laneRunReadiness('browser-lane')");
 });
 
 test("the lane primary action button is prominent and color-coded for updates", () => {
@@ -1363,15 +1362,9 @@ test("Browser Lane dashboard surfaces auth strategy and never claims to bypass h
   assert.match(CONSOLE_HTML, /never bypass(es)? human verification|still need you/i, "no bypass claim");
 });
 
-test("Terminal Lane copy explains local vs SSH (local needs no key)", () => {
-  assert.match(CONSOLE_HTML, /Local profiles run a shell on this Mac/, "local shell explained");
-  assert.match(CONSOLE_HTML, /no key or login secret needed/i, "local needs no auth material");
-  assert.match(CONSOLE_HTML, /Keychain/, "SSH secret lives in Keychain");
-});
-
-test("subordinate readiness sections remain below the Lane Apps cards", () => {
+test("subordinate readiness section remains below the Lane Apps card", () => {
   assert.match(CONSOLE_HTML, /Browser Lane Sites &amp; Auth/, "browser drill-down kept");
-  assert.match(CONSOLE_HTML, /Terminal Lane Profiles &amp; Readiness/, "terminal drill-down kept");
+  assert.doesNotMatch(CONSOLE_HTML, /Terminal Lane Profiles &amp; Readiness/, "terminal drill-down retired");
   const laneApps = CONSOLE_HTML.indexOf("Lane Apps");
   const browserSites = CONSOLE_HTML.indexOf("Browser Lane Sites &amp; Auth");
   assert.ok(laneApps >= 0 && browserSites > laneApps, "Lane Apps cards stay above the drill-downs");
@@ -1822,19 +1815,12 @@ test("provenance pills are wired into the task detail view, right after the stat
   assert.match(body, /taskProvenancePills\(t, out, logs, children\)/, "selectTask renders the pills (with fetched children for plural role pills)");
 });
 
-test("settings surfaces a real Terminal Lane readiness card with no secrets", () => {
-  assert.match(CONSOLE_HTML, /id="terminal_readiness"/, "Terminal readiness mount point present");
+test("Terminal Lane readiness card and endpoints are fully retired", () => {
+  assert.doesNotMatch(CONSOLE_HTML, /id="terminal_readiness"/, "Terminal readiness mount point removed");
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /async function renderTerminalReadiness\(/, "Terminal readiness renderer present");
-  assert.match(js, /api\("\/terminal-lane\/dashboard"\)/, "uses the existing daemon dashboard endpoint");
-  assert.match(js, /\/terminal-lane\/readiness\/run/, "uses the existing daemon run-probe endpoint");
-  assert.match(js, /renderTerminalReadiness\(\);/, "rendered when the Lanes tab opens");
-  // No fabricated readiness: honest empty state when nothing is configured.
-  assert.match(js, /No Terminal Lane profiles are configured\./, "honest empty state, no fake green");
-  // Secrets guard: the readiness render must not surface any credential ref/value.
-  const render = js.match(/async function renderTerminalReadiness\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
-  assert.ok(render.length > 50, "renderTerminalReadiness body extracted");
-  assert.doesNotMatch(render, /credentialRef|password|private_key|ssh_key_passphrase/, "no secrets surfaced in the UI");
+  assert.doesNotMatch(js, /renderTerminalReadiness/, "Terminal readiness renderer removed");
+  assert.doesNotMatch(js, /\/terminal-lane\/dashboard/, "terminal-lane dashboard endpoint no longer called");
+  assert.doesNotMatch(js, /\/terminal-lane\/readiness\/run/, "terminal-lane run-probe endpoint no longer called");
 });
 
 test("settings includes a vault section for alias management without exposing values", () => {

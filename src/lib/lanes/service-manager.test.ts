@@ -14,11 +14,12 @@ test("embeddedHealthRoute points at health routes the daemon actually serves", (
   assert.equal(embeddedHealthRoute("webbee"), null);
 });
 
-test("termbee and desktopbee are registered runtimes (not 'planned')", () => {
-  // Regression: both showed "planned · No runtime registered yet" because they
-  // were absent from the descriptor map and fell through to the default.
-  assert.equal(getLaneWorkerRuntimeDescriptor("termbee").runtimeMode, "embedded");
+test("desktopbee is a registered runtime (not 'planned')", () => {
+  // Regression: it showed "planned · No runtime registered yet" because it
+  // was absent from the descriptor map and fell through to the default.
   assert.equal(getLaneWorkerRuntimeDescriptor("desktopbee").runtimeMode, "embedded");
+  // termbee (Terminal Lane) was retired — it now falls through to "planned".
+  assert.equal(getLaneWorkerRuntimeDescriptor("termbee").runtimeMode, "planned");
 });
 
 test("buildLaunchAgentPlist emits a KeepAlive launch agent with the compatibility label", () => {
