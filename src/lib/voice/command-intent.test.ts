@@ -233,6 +233,26 @@ test("approvals reply guides the next voice action", () => {
   assert.match(approvalsReply([{ title: "a", kind: "tool" }, { title: "b", kind: "content" }]), /2 approvals/);
 });
 
+test("approvals reply speaks each pending item with its index", () => {
+  const reply = approvalsReply([
+    { title: "mail draft to Bob", kind: "tool" },
+    { title: "browser step on Chase", kind: "checkpoint" },
+  ]);
+  assert.match(reply, /2 approvals waiting/);
+  assert.match(reply, /one, mail draft to Bob/);
+  assert.match(reply, /two, browser step on Chase/);
+});
+
+test("approvals reply caps the spoken list and notes how many more are waiting", () => {
+  const items = Array.from({ length: 7 }, (_, i) => ({ title: `item ${i + 1}`, kind: "tool" }));
+  const reply = approvalsReply(items);
+  assert.match(reply, /7 approvals waiting/);
+  assert.match(reply, /one, item 1/);
+  assert.match(reply, /five, item 5/);
+  assert.doesNotMatch(reply, /item 6/);
+  assert.match(reply, /and 2 more/);
+});
+
 test("resolved + scheduled + task + connectivity replies", () => {
   assert.match(resolvedReply("approve", "send email"), /Approved: send email/);
   assert.match(resolvedReply("deny", null), /Denied/);

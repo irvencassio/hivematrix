@@ -42,6 +42,42 @@ test("commandTurnOverride resolves focused approval after listing approvals", as
   assert.deepEqual(resolved, [{ taskId: "t1", timestamp: "checkpoint-plan", decision: "approve", via: "voice" }]);
 });
 
+test("commandTurnOverride lists pending approvals with a spoken index each", async () => {
+  const out = await commandTurnOverride("anything to approve", {
+    sessionId: "list-with-index",
+    buildApprovalQueue: async () => approvals,
+    synthesize: async () => "",
+  });
+
+  assert.ok(out);
+  assert.match(out?.reply ?? "", /2 approvals waiting/);
+  assert.match(out?.reply ?? "", /one, Review plan/);
+  assert.match(out?.reply ?? "", /two, Run deploy/);
+});
+
+test("commandTurnOverride resolves an approval by kind keyword or a unique title substring, without listing first", async () => {
+  const resolved: Array<{ taskId: string; timestamp: string; decision: string; via: string }> = [];
+  const deps = {
+    sessionId: "match-by-text",
+    buildApprovalQueue: async () => approvals,
+    resolveApproval: async (taskId: string, timestamp: string, decision: "approve" | "done" | "denied", via: string) => {
+      resolved.push({ taskId, timestamp, decision, via });
+    },
+    synthesize: async () => "",
+  };
+
+  const byKind = await commandTurnOverride("approve the checkpoint", deps);
+  assert.match(byKind?.reply ?? "", /Approved: Review plan/);
+
+  const bySubstring = await commandTurnOverride("deny the deploy", deps);
+  assert.match(bySubstring?.reply ?? "", /Denied: Run deploy/);
+
+  assert.deepEqual(resolved, [
+    { taskId: "t1", timestamp: "checkpoint-plan", decision: "approve", via: "voice" },
+    { taskId: "t2", timestamp: "123", decision: "denied", via: "voice" },
+  ]);
+});
+
 test("commandTurnOverride returns briefing and usage summaries", async () => {
   const out = await commandTurnOverride("good morning", {
     sessionId: "briefing",

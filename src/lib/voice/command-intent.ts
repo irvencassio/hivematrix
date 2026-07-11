@@ -52,6 +52,10 @@ export interface CommandIntent {
   taskText?: string;   // createTask
   mode?: ConnMode;     // setConnectivity
   ordinal?: number;    // approve / deny target, 1-based
+  /** approve / deny target by kind keyword or a substring of its title (e.g.
+   * "the mail draft", "the browser step on chase"), verb/ordinal words
+   * stripped. Undefined for a bare "approve it" with no descriptive text. */
+  matchText?: string;
   taskRef?: string;    // setTaskModel target
   model?: string;      // setTaskModel model id / alias
   directiveText?: string; // startDirective / pauseDirective target
@@ -162,6 +166,33 @@ const CARDINAL_WORDS: Array<[string, number]> = [
   ["nine", 9],
   ["ten", 10],
 ];
+
+// Words that carry no identifying content for an approve/deny target: the verb
+// itself, pronouns/articles, and the ordinal/cardinal/"number N" vocabulary
+// parseOrdinal() already extracts into `ordinal`. Whatever words remain after
+// stripping these become `matchText` — the phrase the matcher compares
+// against a candidate's kind ("checkpoint"/"content"/"tool"/"stuck") or as a
+// substring of its title.
+const APPROVAL_MATCH_STOPWORDS = new Set([
+  "approve", "deny", "reject", "decline", "disapprove",
+  "the", "a", "an", "that", "this", "it", "please", "now",
+  "number", "option", "item",
+  "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+  "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
+]);
+
+/** Extract the descriptive remainder of an approve/deny utterance (lowercased
+ * `t`), e.g. "approve the mail draft" -> "mail draft". Undefined when nothing
+ * but the verb/pronoun/ordinal vocabulary was said ("approve it", "deny the
+ * second one"). */
+export function extractApprovalMatchText(t: string): string | undefined {
+  const words = t
+    .replace(/[.?!,]/g, "")
+    .split(/\s+/)
+    .filter((w) => w && !APPROVAL_MATCH_STOPWORDS.has(w) && !/^\d+(st|nd|rd|th)?$/.test(w));
+  const text = words.join(" ").trim();
+  return text.length > 0 ? text : undefined;
+}
 
 export function parseOrdinal(text: string): number | undefined {
   const t = (text || "").toLowerCase();
@@ -293,10 +324,12 @@ export function detectCommandIntent(text: string): CommandIntent {
     return { kind: "approvalsList" };
   }
   if (/\b(deny|reject|decline|disapprove)\b/.test(t)) {
-    return { kind: "deny", ordinal: parseOrdinal(t) };
+    const matchText = extractApprovalMatchText(t);
+    return { kind: "deny", ordinal: parseOrdinal(t), ...(matchText ? { matchText } : {}) };
   }
   if (/\bapprove\b/.test(t)) {
-    return { kind: "approve", ordinal: parseOrdinal(t) };
+    const matchText = extractApprovalMatchText(t);
+    return { kind: "approve", ordinal: parseOrdinal(t), ...(matchText ? { matchText } : {}) };
   }
 
   // --- Scheduled items (formerly "directives") / standing goals ---
@@ -331,12 +364,19 @@ export function boardReply(counts: Record<string, number>): string {
   return `On the board: ${head}. ${done} done.`;
 }
 
+const SPOKEN_COUNT = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+const MAX_SPOKEN_APPROVALS = 5;
+
 export interface SpokenApproval { title: string; kind: string }
 export function approvalsReply(items: SpokenApproval[]): string {
   if (!items.length) return "Nothing is waiting for your approval.";
-  const first = items[0];
-  if (items.length === 1) return `One approval waiting: ${first.title}. Say "approve it" or "deny it".`;
-  return `${items.length} approvals waiting. First up: ${first.title}. Say "approve it" or "deny it".`;
+  if (items.length === 1) {
+    return `One approval waiting: ${items[0].title}. Say "approve it" or "deny it".`;
+  }
+  const spoken = items.slice(0, MAX_SPOKEN_APPROVALS);
+  const list = spoken.map((item, i) => `${SPOKEN_COUNT[i] ?? String(i + 1)}, ${item.title}`).join("; ");
+  const more = items.length > spoken.length ? `, and ${items.length - spoken.length} more` : "";
+  return `${items.length} approvals waiting: ${list}${more}. Say "approve" or "deny" by number, or say which one.`;
 }
 
 export function resolvedReply(decision: "approve" | "deny", title: string | null): string {
