@@ -45,9 +45,29 @@ const RULES = [
     allowFiles: ['COMPONENT-MAP.md', 'DECISIONS.md'],
   },
   {
-    pattern: '\bWeaver\b|\bAuthBee\b',
-    label: 'AuthBee/Weaver as public brand (internal only; use Session* names)',
-    allowFiles: ['COMPONENT-MAP.md', 'DECISIONS.md'],
+    // "Weaver" is narrowly re-sanctioned as the Weaver Audit's accountability-auditor
+    // persona name (2026-07-10 Capability Ratchet + Weaver Audit spec; see DECISIONS.md
+    // Q18) — distinct from the legacy AuthBee/session internal codename this rule still
+    // bans everywhere else. Only the files implementing/wiring/testing that one named
+    // feature may use the string (comments included) — not a general re-opening.
+    // NOTE: this pattern uses '\\b' (escaped) rather than '\b' — in a single-quoted JS
+    // string '\b' is the BACKSPACE control character, not a literal regex word-boundary,
+    // so the un-escaped form silently never matches anything (a pre-existing bug shared
+    // by every other \b-anchored rule in this file — see the spawned follow-up task).
+    pattern: '\\bWeaver\\b|\\bAuthBee\\b',
+    label: 'AuthBee/Weaver as public brand (internal only outside the sanctioned Weaver Audit persona; use Session* names) — see DECISIONS.md Q18',
+    allowFiles: [
+      'COMPONENT-MAP.md', 'DECISIONS.md',
+      // Fixing this rule's '\b' escaping bug (see the NOTE above) surfaced two
+      // pre-existing, legitimate regression assertions that the AuthBee brand is
+      // ABSENT — not a reintroduction of it — which the rule had never actually
+      // been checking until now.
+      'lib/lanes/catalog.test.ts', 'lib/brain/memory-bundle.test.ts',
+      'lib/flash/weaver-audit.ts', 'lib/flash/weaver-audit.test.ts',
+      'lib/flash/ratchet.ts', 'lib/flash/ratchet.test.ts',
+      'lib/flash/heartbeat.ts', 'lib/flash/heartbeat.test.ts',
+      'daemon/server.ts', 'daemon/server.test.ts',
+    ],
   },
   // ── Removed data model ────────────────────────────────────────
   {

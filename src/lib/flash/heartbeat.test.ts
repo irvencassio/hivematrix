@@ -26,6 +26,7 @@ const {
   weekKey,
   weeklyMomentDue,
   runRatchetOnce,
+  runWeaverOnce,
 } = await import("./heartbeat");
 
 test.after(() => {
@@ -47,6 +48,9 @@ test("parseHeartbeatConfig defaults + clamping", () => {
     ratchetEnabled: false,
     ratchetHour: 18,
     ratchetMinute: 0,
+    weaverEnabled: false,
+    weaverHour: 17,
+    weaverMinute: 0,
   });
   assert.equal(parseHeartbeatConfig({ intervalMinutes: 1 }).intervalMinutes, 5); // floor at 5
   assert.equal(parseHeartbeatConfig({ enabled: true }).enabled, true);
@@ -72,15 +76,20 @@ test("parseHeartbeatConfig: Day Brief ritual defaults off with 07:30/21:00, clam
   );
 });
 
-test("parseHeartbeatConfig: Capability Ratchet defaults off with 18:00, clamp + passthrough lastSentWeek", () => {
+test("parseHeartbeatConfig: Capability Ratchet + Weaver Audit default off with 18:00/17:00, clamp + passthrough lastSentWeek", () => {
   assert.equal(parseHeartbeatConfig({}).ratchetEnabled, false);
   assert.equal(parseHeartbeatConfig({}).ratchetHour, 18);
   assert.equal(parseHeartbeatConfig({}).ratchetMinute, 0);
+  assert.equal(parseHeartbeatConfig({}).weaverEnabled, false);
+  assert.equal(parseHeartbeatConfig({}).weaverHour, 17);
+  assert.equal(parseHeartbeatConfig({}).weaverMinute, 0);
   assert.equal(parseHeartbeatConfig({ ratchetEnabled: true }).ratchetEnabled, true);
+  assert.equal(parseHeartbeatConfig({ weaverEnabled: true }).weaverEnabled, true);
   assert.equal(parseHeartbeatConfig({ ratchetHour: 99 }).ratchetHour, 23);
   assert.equal(parseHeartbeatConfig({ ratchetHour: "x" }).ratchetHour, 18);
-  assert.equal(parseHeartbeatConfig({ ratchetMinute: 99 }).ratchetMinute, 59);
+  assert.equal(parseHeartbeatConfig({ weaverMinute: 99 }).weaverMinute, 59);
   assert.equal(parseHeartbeatConfig({ lastRatchetSentWeek: "2026-W27" }).lastRatchetSentWeek, "2026-W27");
+  assert.equal(parseHeartbeatConfig({ lastWeaverSentWeek: "2026-W28" }).lastWeaverSentWeek, "2026-W28");
 });
 
 const at = (h: number, m = 0) => new Date(2026, 6, 4, h, m, 0, 0); // local time
@@ -99,6 +108,7 @@ test("heartbeatDue: disabled/quiet/interval gating", () => {
     enabled: true, intervalMinutes: 30, morningBriefHour: null, eveningRecapHour: null,
     dayBriefEnabled: false, dayBriefMorningHour: 7, dayBriefMorningMinute: 30, dayBriefEveningHour: 21, dayBriefEveningMinute: 0,
     ratchetEnabled: false, ratchetHour: 18, ratchetMinute: 0,
+    weaverEnabled: false, weaverHour: 17, weaverMinute: 0,
   };
   assert.equal(heartbeatDue({ ...cfg, enabled: false }, at(10)), false);
   assert.equal(heartbeatDue(cfg, at(10)), true); // never ran
@@ -319,6 +329,34 @@ test("runRatchetOnce survives a failing notify channel and still returns the pas
   });
   assert.equal(result.created, true);
   assert.equal(result.taskId, "t2");
+});
+
+test("runWeaverOnce: notifies composeWeaverAudit's text prefixed '🌀 Weaver weekly:'", async () => {
+  const notified: string[] = [];
+  const result = await runWeaverOnce({
+    notify: async (t) => { notified.push(t); },
+    composeWeaverAudit: async () => "What moved: shipped X.\nWhy haven't you started Y?",
+  });
+  assert.equal(result.text, "What moved: shipped X.\nWhy haven't you started Y?");
+  assert.deepEqual(notified, ["🌀 Weaver weekly:\nWhat moved: shipped X.\nWhy haven't you started Y?"]);
+});
+
+test("runWeaverOnce: a null audit (no signal / model failure) sends NOTHING", async () => {
+  const notified: string[] = [];
+  const result = await runWeaverOnce({
+    notify: async (t) => { notified.push(t); },
+    composeWeaverAudit: async () => null,
+  });
+  assert.equal(result.text, null);
+  assert.equal(notified.length, 0);
+});
+
+test("runWeaverOnce survives a failing notify channel and still returns the audit text", async () => {
+  const result = await runWeaverOnce({
+    notify: async () => { throw new Error("imessage down"); },
+    composeWeaverAudit: async () => "some audit text",
+  });
+  assert.equal(result.text, "some audit text");
 });
 
 test("runHeartbeatOnce survives a failing notify channel", async () => {

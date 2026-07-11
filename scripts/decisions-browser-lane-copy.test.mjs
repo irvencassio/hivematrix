@@ -20,5 +20,10 @@ test("decisions doc uses Browser Lane wording for browser capability decisions",
   assert.match(decisions, /browserbee\.desktopFallback/);
   assert.match(decisions, /webbee_search\/browserbee_run\/desktopbee_action/);
 
-  assert.doesNotMatch(decisions, /\bBrowserBee\b|\bWebBee\b|\bWeaver\b|Bee lanes|Bees view/);
+  // Q18 (2026-07-10) sanctions "Weaver 🌀" as the Weaver Audit's accountability-auditor
+  // persona name — a deliberate, documented reuse distinct from the legacy AuthBee/
+  // browser-lane "Weaver" brand this check otherwise still guards against. Excise that
+  // one section (the file's last) before checking for the legacy terms.
+  const withoutWeaverAuditDecision = decisions.replace(/## Q18[\s\S]*$/, "");
+  assert.doesNotMatch(withoutWeaverAuditDecision, /\bBrowserBee\b|\bWebBee\b|\bWeaver\b|Bee lanes|Bees view/);
 });

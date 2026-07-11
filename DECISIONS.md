@@ -1322,3 +1322,23 @@ subprocess; `server.test.ts` proves a failed Tailscale/Cloudflare enable does no
 as enabled, and that disabling an externally-adopted (not-HiveMatrix-owned) Cloudflare
 connector never calls `stopTunnel` on it. `grep -ri "trycloudflare\|startQuickTunnel" src/`
 returns nothing.
+
+## Q18 — "Weaver 🌀" reused as the accountability-auditor persona name (2026-07-10)
+
+**Decision:** `src/lib/flash/weaver-audit.ts` (Capability Ratchet + Weaver Audit spec,
+`docs/superpowers/specs/2026-07-10-ratchet-and-weaver-spec.md`) names its weekly
+commitments-vs-activity audit persona **"Weaver 🌀"** — the string appears in the model
+prompt and in the `notify()` text it produces (`"🌀 Weaver weekly: …"`). This is a
+**distinct, sanctioned reuse** of the name, not a resurrection of the legacy AuthBee/session
+internal codename `scope-wall.mjs` otherwise still forbids as a public brand ("AuthBee/Weaver
+as public brand (internal only; use Session\* names)" — see Q-numbered entries above and
+`COMPONENT-MAP.md`'s "legacy auth/browser public brands" line). The two have nothing to do
+with each other beyond sharing a word: the old one was an internal session/auth component
+name that must never leak into user-facing text; the new one is a deliberately-named
+operator-facing accountability persona, specified by name in this spec.
+
+**Scope-wall:** the `\bWeaver\b` rule in `scripts/scope-wall.mjs` is narrowed to allow exactly
+`lib/flash/weaver-audit.ts` and `lib/flash/weaver-audit.test.ts` (plus this file and
+`COMPONENT-MAP.md`) rather than banning the string outright. Any *other* new appearance of
+"Weaver" in `src/` still hard-fails the gate — this decision authorizes one named file, not
+a general re-opening of the brand.

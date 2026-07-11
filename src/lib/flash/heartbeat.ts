@@ -37,16 +37,16 @@
  * string) rather than a timestamp compared against a hourly target, the same
  * "mark before send" ordering as the moments above.
  *
- * A WEEKLY ritual — the Capability Ratchet (2026-07-10 spec, see
- * docs/superpowers/specs/2026-07-10-ratchet-and-weaver-spec.md) — clones
- * that same pattern once more, at week granularity: its own enable flag
- * (`ratchetEnabled`, default off), a fixed day of week (Sunday 18:00 by
- * default, minute-precision hour/minute config
- * like the Day Brief ritual), and its own weekly idempotence key
- * (`lastRatchetSentWeek`, an ISO `YYYY-Www` string from `weekKey()` below —
- * a week-granularity sibling of `localDateString()`). The clustering logic
- * itself lives in its own module (ratchet.ts), same split as day-brief.ts;
- * this file only owns the due-check + dispatch + notify/mark-sent wiring.
+ * Two WEEKLY rituals — the Capability Ratchet + Weaver Audit (2026-07-10
+ * spec) — clone that same pattern once more, at week granularity: each has
+ * its own enable flag (`ratchetEnabled` / `weaverEnabled`, both default off),
+ * a fixed day of week (Sunday 18:00 / Friday 17:00 by default, minute-precision
+ * hour/minute config like the Day Brief ritual), and its own weekly
+ * idempotence key (`lastRatchetSentWeek` / `lastWeaverSentWeek`, an ISO
+ * `YYYY-Www` string from `weekKey()` below — a week-granularity sibling of
+ * `localDateString()`). The clustering (ratchet.ts) and audit (weaver-audit.ts)
+ * logic itself lives in its own module, same split as day-brief.ts; this file
+ * only owns the due-check + dispatch + notify/mark-sent wiring.
  *
  * Config (`~/.hivematrix/config.json`):
  *   heartbeat: { enabled, intervalMinutes, quietHours?: {startHour, endHour},
@@ -55,7 +55,8 @@
  *                dayBriefEnabled, dayBriefMorningHour, dayBriefMorningMinute,
  *                dayBriefEveningHour, dayBriefEveningMinute,
  *                lastDayBriefMorningSentDay?, lastDayBriefEveningSentDay?,
- *                ratchetEnabled, ratchetHour, ratchetMinute, lastRatchetSentWeek? }
+ *                ratchetEnabled, ratchetHour, ratchetMinute, lastRatchetSentWeek?,
+ *                weaverEnabled, weaverHour, weaverMinute, lastWeaverSentWeek? }
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
@@ -70,6 +71,7 @@ import { runFlashTurnText } from "./index";
 import { startPollLoop } from "@/lib/lanes/poll-loop";
 import { composeDayBrief, type DayBriefKind } from "./day-brief";
 import { runRatchetPass, type RatchetRunResult } from "./ratchet";
+import { composeWeaverAudit } from "./weaver-audit";
 
 export const HEARTBEAT_STAND_DOWN = "HEARTBEAT_STAND_DOWN";
 
@@ -102,6 +104,11 @@ export interface HeartbeatConfig {
   ratchetHour: number;   // default 18
   ratchetMinute: number; // default 0
   lastRatchetSentWeek?: string; // ISO YYYY-Www
+  /** Weaver Audit (2026-07-10 spec) — weekly, Friday 17:00 by default. */
+  weaverEnabled: boolean;
+  weaverHour: number;   // default 17
+  weaverMinute: number; // default 0
+  lastWeaverSentWeek?: string; // ISO YYYY-Www
 }
 
 const DEFAULT_INTERVAL_MINUTES = 30;
@@ -116,9 +123,12 @@ const CHECK_INTERVAL_MS = 60_000; // cheap 1-minute due check, same pattern as t
 
 const DEFAULT_RATCHET_HOUR = 18;
 const DEFAULT_RATCHET_MINUTE = 0;
+const DEFAULT_WEAVER_HOUR = 17;
+const DEFAULT_WEAVER_MINUTE = 0;
 // JS Date#getDay(): Sunday=0 .. Saturday=6. Fixed per spec — not operator-configurable
-// (only the hour/minute are), matching "(default Sunday 18:00)".
+// (only the hour/minute are), matching "(default Sunday 18:00 / Friday 17:00)".
 const RATCHET_DAY_OF_WEEK = 0; // Sunday
+const WEAVER_DAY_OF_WEEK = 5;  // Friday
 
 const DEFAULT_CONFIG: HeartbeatConfig = {
   enabled: false,
@@ -133,6 +143,9 @@ const DEFAULT_CONFIG: HeartbeatConfig = {
   ratchetEnabled: false,
   ratchetHour: DEFAULT_RATCHET_HOUR,
   ratchetMinute: DEFAULT_RATCHET_MINUTE,
+  weaverEnabled: false,
+  weaverHour: DEFAULT_WEAVER_HOUR,
+  weaverMinute: DEFAULT_WEAVER_MINUTE,
 };
 
 function clampHour(value: unknown): number | null {
@@ -177,6 +190,10 @@ export function parseHeartbeatConfig(input: unknown): HeartbeatConfig {
     ratchetHour: clampHour(obj.ratchetHour) ?? DEFAULT_RATCHET_HOUR,
     ratchetMinute: clampMinute(obj.ratchetMinute) ?? DEFAULT_RATCHET_MINUTE,
     lastRatchetSentWeek: typeof obj.lastRatchetSentWeek === "string" ? obj.lastRatchetSentWeek : undefined,
+    weaverEnabled: obj.weaverEnabled === true,
+    weaverHour: clampHour(obj.weaverHour) ?? DEFAULT_WEAVER_HOUR,
+    weaverMinute: clampMinute(obj.weaverMinute) ?? DEFAULT_WEAVER_MINUTE,
+    lastWeaverSentWeek: typeof obj.lastWeaverSentWeek === "string" ? obj.lastWeaverSentWeek : undefined,
   };
   if (obj.quietHours && typeof obj.quietHours === "object") {
     const q = obj.quietHours as Record<string, unknown>;
@@ -225,11 +242,15 @@ export function setHeartbeatConfig(patch: Partial<HeartbeatConfig>): HeartbeatCo
     if (!("lastDayBriefMorningSentDay" in patch)) next.lastDayBriefMorningSentDay = current.lastDayBriefMorningSentDay ?? today;
     if (!("lastDayBriefEveningSentDay" in patch)) next.lastDayBriefEveningSentDay = current.lastDayBriefEveningSentDay ?? today;
   }
-  // Same seeding rationale, week-granularity: enabling Ratchet must not
+  // Same seeding rationale, week-granularity: enabling Ratchet/Weaver must not
   // immediately fire this week's pass from a stale/absent marker.
   if (next.ratchetEnabled && !current.ratchetEnabled) {
     const week = weekKey(new Date());
     if (!("lastRatchetSentWeek" in patch)) next.lastRatchetSentWeek = current.lastRatchetSentWeek ?? week;
+  }
+  if (next.weaverEnabled && !current.weaverEnabled) {
+    const week = weekKey(new Date());
+    if (!("lastWeaverSentWeek" in patch)) next.lastWeaverSentWeek = current.lastWeaverSentWeek ?? week;
   }
   config.heartbeat = next;
   saveHiveConfig(config);
@@ -261,7 +282,7 @@ export function dayBriefMomentDue(hour: number, minute: number, lastSentDay: str
 
 /**
  * Pure: local ISO-8601 week string (`YYYY-Www`, Monday-start, Thursday-anchored)
- * for a Date — the Capability Ratchet weekly ritual's once-per-week idempotence
+ * for a Date — the weekly rituals' (Ratchet/Weaver) once-per-week idempotence
  * key, the week-granularity sibling of `localDateString()`. Computed entirely
  * from local calendar fields (no UTC conversion) so it agrees with the local
  * `now` the rest of this file reasons about.
@@ -278,11 +299,10 @@ export function weekKey(now: Date): string {
 }
 
 /**
- * Pure: is a weekly ritual moment due? Fires once we reach the configured
- * day-of-week (`Date#getDay()` convention: Sun=0..Sat=6) at its target
- * hour:minute, and it hasn't already been sent this ISO week — the
- * week-granularity sibling of `dayBriefMomentDue` above. Generic over any
- * weekly ritual (Capability Ratchet today; reused as-is by its sibling).
+ * Pure: is a weekly ritual (Ratchet / Weaver) moment due? Fires once we reach
+ * the configured day-of-week (`Date#getDay()` convention: Sun=0..Sat=6) at
+ * its target hour:minute, and it hasn't already been sent this ISO week —
+ * the week-granularity sibling of `dayBriefMomentDue` above.
  */
 export function weeklyMomentDue(dayOfWeek: number, hour: number, minute: number, lastSentWeek: string | undefined, now: Date): boolean {
   if (now.getDay() !== dayOfWeek) return false;
@@ -449,6 +469,8 @@ export interface HeartbeatDeps {
   composeDayBrief?: typeof composeDayBrief;
   /** Capability Ratchet weekly pass (ratchet.ts) — injectable for tests; defaults to the real one. */
   runRatchetPass?: typeof runRatchetPass;
+  /** Weaver Audit weekly pass (weaver-audit.ts) — injectable for tests; defaults to the real one. */
+  composeWeaverAudit?: typeof composeWeaverAudit;
   now?: () => Date;
 }
 
@@ -643,6 +665,24 @@ export async function runRatchetOnce(deps: HeartbeatDeps = {}): Promise<RatchetR
 }
 
 /**
+ * Run one Weaver Audit weekly pass immediately: assemble commitments vs
+ * activity, one model pass, `notify()` the result prefixed "🌀 Weaver weekly:".
+ * A null result (no signal to audit, empty reply, or model failure) sends
+ * NOTHING — no fallback, no operator-session turn, no APNs.
+ */
+export async function runWeaverOnce(deps: HeartbeatDeps = {}): Promise<{ text: string | null }> {
+  const now = (deps.now ?? (() => new Date()))();
+  const compose = deps.composeWeaverAudit ?? composeWeaverAudit;
+  const text = await compose();
+
+  if (text && deps.notify) {
+    try { await deps.notify(`🌀 Weaver weekly:\n${text}`); } catch { /* channels are best-effort */ }
+  }
+  broadcastEvent("flash:weaver", { sent: text !== null, ts: now.toISOString() });
+  return { text };
+}
+
+/**
  * Day Brief ritual due-check + dispatch — folded into the shared tick so
  * there's no second scheduler. Independent of `config.enabled` (the
  * pulse/daily-moment toggle): the ritual has its own `dayBriefEnabled` flag.
@@ -690,6 +730,23 @@ async function tickRatchet(config: HeartbeatConfig, now: Date, deps: HeartbeatDe
   }
 }
 
+/**
+ * Weaver Audit due-check + dispatch — same shape as `tickRatchet`.
+ */
+async function tickWeaver(config: HeartbeatConfig, now: Date, deps: HeartbeatDeps): Promise<void> {
+  if (!config.weaverEnabled) return;
+  if (!weeklyMomentDue(WEAVER_DAY_OF_WEEK, config.weaverHour, config.weaverMinute, config.lastWeaverSentWeek, now)) return;
+
+  // Mark BEFORE the pass so a slow model call can't double-fire later this week.
+  setHeartbeatConfig({ lastWeaverSentWeek: weekKey(now) });
+  try {
+    const result = await runWeaverOnce(deps);
+    console.log(`[heartbeat] weaver audit pass complete (sent=${result.text !== null})`);
+  } catch (e) {
+    console.error(`[heartbeat] weaver audit pass failed: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 let stopFn: (() => void) | null = null;
 
 async function tick(deps: HeartbeatDeps): Promise<void> {
@@ -698,9 +755,10 @@ async function tick(deps: HeartbeatDeps): Promise<void> {
 
   // Day Brief ritual — own enable flag, runs regardless of the pulse toggle.
   await tickDayBriefRitual(config, now, deps);
-  // Capability Ratchet — own enable flag, weekly, likewise independent of
-  // the pulse toggle.
+  // Capability Ratchet + Weaver Audit — own enable flags, weekly, likewise
+  // independent of the pulse toggle.
   await tickRatchet(config, now, deps);
+  await tickWeaver(config, now, deps);
 
   if (!config.enabled) return;
 
