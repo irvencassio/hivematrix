@@ -2382,6 +2382,34 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /flash/tool/:name — Flash-only tool dispatch (persona_update,
+      // generate_avatar, deep_think, escalate_to_task) for the Flash MCP
+      // server (flash-mcp.ts). These tools carry real business logic (file
+      // writes to the persona dir, Task creation, deep-think) that must run
+      // in the daemon process, not the MCP server's child stdio process —
+      // this route is that bridge. Auth-gated like every other non-public
+      // route (the global token check above already covers it). Body:
+      // {args:{...}, brainRoot, sessionId}.
+      const flashToolMatch = urlPath.match(/^\/flash\/tool\/([a-z_]+)$/);
+      if (req.method === "POST" && flashToolMatch) {
+        const tool = flashToolMatch[1];
+        const { isFlashOnlyTool, dispatchFlashOnlyTool } = await import("@/lib/flash/flash-mcp");
+        if (!isFlashOnlyTool(tool)) { json(res, 404, { error: `unknown flash tool "${tool}"` }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        const args = (body.args && typeof body.args === "object" && !Array.isArray(body.args))
+          ? body.args as Record<string, unknown>
+          : {};
+        const brainRoot = typeof body.brainRoot === "string" && body.brainRoot ? body.brainRoot : null;
+        const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+        try {
+          const result = await dispatchFlashOnlyTool(tool, args, { brainRoot, sessionId });
+          json(res, result.startsWith("Error") ? 400 : 200, { ok: !result.startsWith("Error"), result });
+        } catch (err) {
+          json(res, 500, { ok: false, result: `Error: ${err instanceof Error ? err.message : String(err)}` });
+        }
+        return;
+      }
+
       // POST /lane/browser — stable Browser Lane dispatch for CLI executors and
       // external model adapters. Body: {args:{mode:"search|read|open|snapshot|workflow", ...}}.
       if (req.method === "POST" && urlPath === "/lane/browser") {

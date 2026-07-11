@@ -63,9 +63,3 @@ export interface ToolCallRecord {
   type: "function";
   function: { name: string; arguments: string };
 }
-
-/** Typed streaming events yielded by the model stream parser. */
-export type StreamEvent =
-  | { type: "token"; content: string }
-  | { type: "tool_call_delta"; index: number; id?: string; name?: string; arguments?: string }
-  | { type: "done"; finishReason: string };

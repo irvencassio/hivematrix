@@ -1,514 +1,47 @@
 /**
  * Flash Lane — agent loop with streaming SSE output.
  *
- * Calls the local Qwen model via LM Studio (OpenAI-compatible streaming).
- * Tool calls are accumulated across streaming chunks, executed, and results
- * fed back into the next model call. Budget: 12 tool calls / 3 min wall clock.
+ * Runs one Flash turn as a single `claude --model haiku` CLI invocation:
+ * the Flash lane tools (+ the four Flash-only tools) are exposed to the CLI
+ * as a stdio MCP server (flash-mcp.ts), and the CLI's own native tool-calling
+ * drives them end to end — this loop is a pure observer/renderer of the
+ * resulting `--output-format stream-json` stream, not a tool-call executor.
+ * (A one-shot `claude -p` cannot emit externally-executable OpenAI-style
+ * tool_calls the way the old local-model loop did; MCP is the CLI's
+ * supported extension point, so tool execution moved into the MCP server's
+ * process boundary.)
  *
- * Flash-only tools (persona_update, escalate_to_task) live here;
- * the rest delegate to the existing lane-tools dispatcher.
+ * Budget: MAX_TOOL_CALLS tool calls (passed as --max-turns) / MAX_WALL_MS
+ * wall clock (enforced here by killing the child process).
+ *
+ * History: full-history-per-turn serialization (system messages via
+ * --append-system-prompt, prior turns folded into the -p prompt as a
+ * transcript) — NOT --resume/session-continuity. This is simpler and
+ * correct; it costs a little more input-token overhead per turn than
+ * --resume would, since --resume was deferred (it needs a sessionId→CLI
+ * session-id mapping persisted in flash session state, which the current
+ * schema doesn't carry — a follow-up, not required for correctness here).
  */
 
-import { existsSync, mkdirSync, writeFileSync } from "fs";
-import { join } from "path";
+import { spawn, type ChildProcess } from "child_process";
 import { homedir } from "os";
-import { getQwenProfile, type SamplingParams } from "@/lib/config/qwen-profile";
-import { availableLaneTools, executeLaneTool } from "@/lib/orchestrator/lane-tools";
-import { broadcastEvent } from "@/lib/ws/broadcaster";
-import { getConnectivityPolicy } from "@/lib/connectivity/policy";
-import type { FlashEmitter, FlashMessage, StreamEvent, ToolCallRecord } from "./types";
+import { resolveClaudeBinary } from "@/lib/orchestrator/subprocess";
+import { StreamParser } from "@/lib/orchestrator/stream-parser";
+import { backendConfigured } from "@/lib/models/backends";
+import type { LaneToolContext } from "@/lib/orchestrator/lane-tools";
+import { prepareFlashMcp } from "./flash-mcp";
+import type { FlashEmitter, FlashMessage } from "./types";
 
 const MAX_TOOL_CALLS = 12;
 const MAX_WALL_MS = 3 * 60 * 1000;
-const MODEL_TIMEOUT_MS = 120_000;
-
-/** Consecutive identical sentences before we call it a degenerate repetition loop. */
-export const REPEAT_LIMIT = 4;
-
-/** Split text into trimmed sentence/line units (on . ! ? or newline). */
-function sentenceUnits(text: string): string[] {
-  return text
-    .split(/(?<=[.!?])\s+|\n+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-/**
- * Pure: is the model degenerating into repetition? True when the last substantive
- * sentence has repeated >= REPEAT_LIMIT times in a row at the tail. A small local
- * model with no repetition penalty can loop a sentence up to max_tokens — this lets
- * the stream stop early instead of showing the operator a wall of the same line.
- */
-export function isRepeatingTail(text: string, limit = REPEAT_LIMIT): boolean {
-  const units = sentenceUnits(text);
-  if (units.length < limit) return false;
-  const last = units[units.length - 1];
-  if (last.length < 20) return false; // ignore short interjections ("ok.", "yes.")
-  let run = 0;
-  for (let i = units.length - 1; i >= 0 && units[i] === last; i--) run++;
-  return run >= limit;
-}
-
-/** Pure: collapse a run of >= limit identical trailing sentences down to one, so a
- *  degenerate generation isn't stored verbatim in the conversation history. */
-export function collapseRepetition(text: string, limit = REPEAT_LIMIT): string {
-  const units = sentenceUnits(text);
-  if (units.length < limit) return text;
-  const last = units[units.length - 1];
-  let run = 0;
-  for (let i = units.length - 1; i >= 0 && units[i] === last; i--) run++;
-  if (run < limit) return text;
-  const kept = units.slice(0, units.length - run + 1); // keep exactly one copy
-  return kept.join(" ");
-}
-
-/** Consecutive identical words (or short word-cycles) before we call it a loop. */
-export const WORD_REPEAT_LIMIT = 6;
-/** Longest word-cycle period we scan for (catches "a a a", "a b a b", "a b c a b c"). */
-const MAX_CYCLE_PERIOD = 3;
-
-/**
- * Detect a degenerate trailing word-cycle. Scans cycle periods 1..MAX_CYCLE_PERIOD and
- * returns `{ period, reps }` for the shortest period whose cycle repeats >= limit times
- * at the tail, else null. This catches sub-sentence degeneration —
- * "submarines submarines submarines ..." — that the sentence-based guards miss, since a
- * word-salad tail has no . ! ? or newline to split on.
- */
-function trailingWordCycle(
-  words: string[],
-  limit: number,
-): { period: number; reps: number } | null {
-  for (let p = 1; p <= MAX_CYCLE_PERIOD; p++) {
-    if (words.length < p * limit) continue;
-    let reps = 1;
-    let i = words.length - p;
-    while (i - p >= 0) {
-      let match = true;
-      for (let k = 0; k < p; k++) {
-        if (words[i + k] !== words[i - p + k]) { match = false; break; }
-      }
-      if (!match) break;
-      reps++;
-      i -= p;
-    }
-    if (reps >= limit) return { period: p, reps };
-  }
-  return null;
-}
-
-/** Pure: is the tail collapsing into the same word/short cycle repeated over and over? */
-export function isRepeatingWordTail(text: string, limit = WORD_REPEAT_LIMIT): boolean {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  return trailingWordCycle(words, limit) !== null;
-}
-
-/** Pure: collapse a degenerate trailing word-cycle down to a single instance, so the
- *  word-salad isn't stored verbatim in the conversation history. */
-export function collapseWordRepetition(text: string, limit = WORD_REPEAT_LIMIT): string {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  const cycle = trailingWordCycle(words, limit);
-  if (!cycle) return text;
-  // Keep everything before the loop plus exactly one instance of the cycle.
-  const drop = cycle.period * (cycle.reps - 1);
-  return words.slice(0, words.length - drop).join(" ");
-}
-
-/**
- * Pure: has the reply blown past its length cap? The repetition guards only catch a
- * repeated *sentence* or *word-cycle* — they're structurally blind to a reply that
- * rambles with all-distinct words ("Nation Building State-Building Institution-Building
- * ..."). This length ceiling is the catch-all for that varied-runaway mode: once a
- * Flash reply exceeds `cap` chars we end the turn, which also stops a degenerate reply
- * from being stored and poisoning later turns' context. cap <= 0 disables the guard.
- */
-export function isOverReplyCap(text: string, cap: number): boolean {
-  return cap > 0 && text.length > cap;
-}
-
-/** Consecutive normalized-unit cycles before we call it a drift-repetition loop. */
-export const UNIT_CYCLE_LIMIT = 3;
-
-/** Normalize a sentence/line for drift-tolerant comparison. A degenerating local model
- * repeats a line while mutating only case and spacing ("First step: look up" →
- * "FirsTstEp：lOokUp" → "firststeplookup"), which defeats exact-match detection.
- * Lowercasing and stripping every non-alphanumeric collapses those cosmetic mutations
- * — the letter sequence is preserved, so the drifted variants become identical. */
-function normalizeUnit(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-/** Find a trailing repeating cycle (period 1..3) of NORMALIZED sentence/line units,
- * repeated >= limit times. Drift-tolerant. Requires the cycle to be substantive
- * (>= 12 normalized chars) so short interjections ("ok." / "yes.") don't trip it. */
-function trailingUnitCycle(text: string, limit: number): { period: number; reps: number } | null {
-  const norm = sentenceUnits(text).map(normalizeUnit).filter((s) => s.length > 0);
-  const cyc = trailingWordCycle(norm, limit);
-  if (!cyc) return null;
-  const periodChars = norm.slice(norm.length - cyc.period).join("").length;
-  return periodChars >= 12 ? cyc : null;
-}
-
-/** Pure: is the tail a normalized-unit cycle repeated >= limit times? Catches
- * repetition-with-drift — "First step… Next step…" looping while case/spacing mutate —
- * that isRepeatingTail (exact sentence match) and isRepeatingWordTail (word cycle)
- * both miss because the mutation breaks every exact comparison. */
-export function isRepeatingUnitCycle(text: string, limit = UNIT_CYCLE_LIMIT): boolean {
-  return trailingUnitCycle(text, limit) !== null;
-}
-
-/** Pure: collapse a degenerate trailing unit-cycle down to one instance for storage,
- * so the drift-loop isn't kept verbatim in the conversation history. */
-export function collapseUnitCycle(text: string, limit = UNIT_CYCLE_LIMIT): string {
-  const raw = sentenceUnits(text);
-  const cyc = trailingUnitCycle(text, limit);
-  if (!cyc) return text;
-  const drop = cyc.period * (cyc.reps - 1);
-  return raw.slice(0, Math.max(1, raw.length - drop)).join(" ");
-}
-
-// ------------------------------------------------------------------
-// Flash-only tool definitions
-// ------------------------------------------------------------------
-
-const FLASH_ONLY_TOOLS = [
-  {
-    type: "function" as const,
-    function: {
-      name: "persona_update",
-      description:
-        "Write a persona file (SOUL.md, IDENTITY.md, USER.md, or GOALS.md) in the brain persona directory. " +
-        "Use when the operator asks to update identity/persona, or to record a goal they state in GOALS.md. " +
-        "Every call emits a visible notice and an audit event.",
-      parameters: {
-        type: "object",
-        properties: {
-          file: { type: "string", enum: ["SOUL.md", "IDENTITY.md", "USER.md", "GOALS.md"] },
-          content: { type: "string", description: "Full new content for the file" },
-          reason: { type: "string", description: "Brief reason shown to the operator" },
-        },
-        required: ["file", "content", "reason"],
-      },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "generate_avatar",
-      description:
-        "Generate an avatar image and save it as the persona avatar (persona/avatar.png). " +
-        "Use during the birth ritual when the agent is choosing its visual identity. " +
-        "Accepts an image generation prompt describing the desired image.",
-      parameters: {
-        type: "object",
-        properties: {
-          prompt: { type: "string", description: "Concrete visual description for the image generator (shape, colors, style)" },
-        },
-        required: ["prompt"],
-      },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "deep_think",
-      description:
-        "Deep reasoning for HARD questions: runs several independent attempts on the local model, " +
-        "cross-checks them for agreement, and reconciles disagreements with a skeptical revision pass. " +
-        "Slow (1-3 minutes) but far more reliable than a single answer. Use for strategy decisions, " +
-        "tricky analysis, math/logic, or anything where a wrong answer is costly. " +
-        "NOT for simple lookups, casual chat, or things a tool can answer directly.",
-      parameters: {
-        type: "object",
-        properties: {
-          question: {
-            type: "string",
-            description: "The question, fully self-contained — include all context needed to answer it, since this runs fresh without the conversation history.",
-          },
-        },
-        required: ["question"],
-      },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "escalate_to_task",
-      description:
-        "Escalate a complex multi-step request to a background task (the coding harness plans and executes it). " +
-        "Use when the task cannot be completed in a single conversation turn.",
-      parameters: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "Short title for the task" },
-          description: { type: "string", description: "Full description of what needs to be done" },
-          projectPath: { type: "string", description: "Absolute path to the project (optional)" },
-        },
-        required: ["title", "description"],
-      },
-    },
-  },
-];
-
-// ------------------------------------------------------------------
-// LM Studio streaming client
-// ------------------------------------------------------------------
-
-function normalizeEndpoint(endpoint: string): string {
-  return endpoint.trim().replace(/\/+$/, "");
-}
-
-function candidateUrls(endpoint: string): string[] {
-  const base = normalizeEndpoint(endpoint);
-  const path = "chat/completions";
-  return base.endsWith("/v1")
-    ? [`${base}/${path}`]
-    : [`${base}/v1/${path}`, `${base}/${path}`];
-}
-
-async function* streamFromLocalModel(
-  messages: FlashMessage[],
-  tools: unknown[],
-  endpoint: string,
-  modelId: string,
-  sampling: SamplingParams,
-): AsyncGenerator<StreamEvent> {
-  let response: Response | null = null;
-  const body = JSON.stringify({
-    model: modelId,
-    messages,
-    stream: true,
-    temperature: sampling.temperature,
-    top_p: sampling.topP,
-    // top_k is the strongest anti-degeneration lever rapid-mlx honors (verified by A/B
-    // probe): it keeps the sampler on the high-probability head instead of the full
-    // vocabulary tail. 0 = disabled, so only send it when set. min_p likewise.
-    ...(sampling.topK > 0 ? { top_k: sampling.topK } : {}),
-    ...(sampling.minP > 0 ? { min_p: sampling.minP } : {}),
-    max_tokens: sampling.maxTokens,
-    // Penalties: rapid-mlx honors `repetition_penalty` (and the llama.cpp-alias
-    // `repeat_penalty`) well and `presence_penalty` weakly; LM Studio honors the
-    // OpenAI-named frequency/presence penalties. Send all so whichever backend is live
-    // gets a working anti-loop knob — servers ignore names they don't recognize. All
-    // operator-tunable in Settings → Local Model → Sampling (config.qwen.sampling).
-    repetition_penalty: sampling.repetitionPenalty,
-    repeat_penalty: sampling.repetitionPenalty,
-    frequency_penalty: sampling.frequencyPenalty,
-    presence_penalty: sampling.presencePenalty,
-    ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
-  });
-
-  for (const url of candidateUrls(endpoint)) {
-    try {
-      response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-        signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
-      });
-      if (response.status !== 404) break;
-      response = null;
-    } catch (err) {
-      // Propagate timeouts; retry next URL on connection errors
-      if (err instanceof Error && /timeout|abort/i.test(err.message)) throw err;
-      response = null;
-    }
-  }
-
-  if (!response) throw new Error("Flash model: all candidate URLs unreachable");
-  if (!response.ok) throw new Error(`Flash model HTTP ${response.status}`);
-  if (!response.body) throw new Error("Flash model: empty response body");
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data: ")) continue;
-        const data = trimmed.slice(6).trim();
-        if (data === "[DONE]") { yield { type: "done", finishReason: "stop" }; return; }
-
-        let parsed: Record<string, unknown>;
-        try { parsed = JSON.parse(data) as Record<string, unknown>; } catch { continue; }
-
-        const choices = parsed.choices as Array<Record<string, unknown>> | undefined;
-        if (!choices?.length) continue;
-
-        const choice = choices[0] as Record<string, unknown>;
-        const delta = choice.delta as Record<string, unknown> | undefined;
-        const finishReason = choice.finish_reason as string | null | undefined;
-
-        if (delta?.content && typeof delta.content === "string") {
-          yield { type: "token", content: delta.content };
-        }
-
-        const toolCalls = delta?.tool_calls as Array<Record<string, unknown>> | undefined;
-        if (toolCalls) {
-          for (const tc of toolCalls) {
-            const fn = tc.function as Record<string, unknown> | undefined;
-            yield {
-              type: "tool_call_delta",
-              index: (tc.index as number) ?? 0,
-              id: tc.id as string | undefined,
-              name: fn?.name as string | undefined,
-              arguments: fn?.arguments as string | undefined,
-            };
-          }
-        }
-
-        if (finishReason) {
-          yield { type: "done", finishReason };
-          return;
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  yield { type: "done", finishReason: "stop" };
-}
-
-// ------------------------------------------------------------------
-// Flash-only tool handlers
-// ------------------------------------------------------------------
-
-async function handlePersonaUpdate(
-  args: Record<string, unknown>,
-  emit: FlashEmitter,
-  brainRoot: string | null,
-): Promise<string> {
-  const file = String(args.file ?? "");
-  const content = String(args.content ?? "");
-  const reason = String(args.reason ?? "");
-
-  if (!["SOUL.md", "IDENTITY.md", "USER.md", "GOALS.md"].includes(file)) {
-    return `Error: invalid persona file "${file}" — must be SOUL.md, IDENTITY.md, USER.md, or GOALS.md`;
-  }
-  if (!brainRoot) return "Error: brain root not configured";
-
-  const dir = join(brainRoot, "persona");
-  mkdirSync(dir, { recursive: true });
-  const path = join(dir, file);
-
-  if (existsSync(path)) {
-    // Keep a timestamped backup in the same directory
-    const backup = join(dir, `${file}.${Date.now()}.bak`);
-    const { readFileSync } = await import("fs");
-    writeFileSync(backup, readFileSync(path));
-  }
-
-  writeFileSync(path, content, "utf-8");
-  broadcastEvent("flash:persona_updated", { file, reason, ts: new Date().toISOString() });
-
-  const notice = `\n\n[Persona updated: ${file} — ${reason}]\n`;
-  emit.token(notice);
-
-  return `persona_update: ${file} written (${content.length} chars). Reason: ${reason}`;
-}
-
-async function handleGenerateAvatar(
-  args: Record<string, unknown>,
-  brainRoot: string | null,
-): Promise<string> {
-  const prompt = String(args.prompt ?? "").trim();
-  if (!prompt) return "Error: prompt is required";
-  if (!brainRoot) return "Error: brain root not configured";
-
-  const dir = join(brainRoot, "persona");
-  mkdirSync(dir, { recursive: true });
-  const outPath = join(dir, "avatar.png");
-
-  const mode = getConnectivityPolicy().mode;
-  const { generateViaNanai, generateViaMflux } = await import("@/lib/orchestrator/image-gen");
-
-  let result: { ok: boolean; detail: string };
-  if (mode === "cloud-ok") {
-    result = await generateViaNanai(prompt, outPath);
-    if (!result.ok) result = await generateViaMflux(prompt, outPath);
-  } else {
-    result = await generateViaMflux(prompt, outPath);
-  }
-
-  if (result.ok) {
-    broadcastEvent("flash:persona_updated", { file: "avatar.png", reason: "avatar generated", ts: new Date().toISOString() });
-    return `Avatar generated at ${outPath}`;
-  }
-  return `Avatar generation attempted but failed: ${result.detail}. You can describe yourself in text instead — the operator can add an image manually later.`;
-}
-
-async function handleDeepThink(args: Record<string, unknown>): Promise<string> {
-  const question = String(args.question ?? "").trim();
-  if (!question) return "Error: question is required";
-  const { deepThink } = await import("@/lib/models/deep-think");
-  // Bounded to fit inside the flash turn budget (3 min wall): 3 rollouts,
-  // 60s per call, 150s total. The result carries calibration metadata so the
-  // model can present the answer with honest confidence.
-  const r = await deepThink(question, { samples: 3, callTimeoutMs: 60_000, maxWallMs: 150_000 });
-  return (
-    `${r.answer}\n\n` +
-    `[deep-think: ${r.candidates} attempts, ${Math.round(r.agreement * 100)}% agreement, ` +
-    `confidence ${r.confidence}${r.reflected ? ", revised after disagreement" : ""}, ${Math.round(r.elapsedMs / 1000)}s]`
-  );
-}
-
-async function handleEscalateToTask(
-  args: Record<string, unknown>,
-  emit: FlashEmitter,
-  sessionId: string,
-): Promise<string> {
-  const { Task, generateId } = await import("@/lib/db");
-  const { getSession } = await import("./store");
-  const { markVoiceOrigin } = await import("@/lib/voice/loop-closer");
-
-  const title = String(args.title ?? "Task");
-  const description = String(args.description ?? "");
-  const projectPath = String(args.projectPath ?? homedir());
-
-  // A task escalated from a voice-channel flash session gets the same
-  // voice-origin marker the /voice/session route uses, so the loop-closer
-  // (src/lib/voice/loop-closer.ts) texts the outcome back once this task
-  // reaches a terminal state.
-  const isVoice = getSession(sessionId)?.channel === "voice";
-
-  // Broad multi-step work dispatches as a SINGLE task that self-plans via
-  // Superpowers: workflow:"work" triggers the "/workflows:work" skill prefix so
-  // the frontier coding harness plans and executes its own subtasks.
-  const task = await Task.create({
-    _id: generateId(),
-    title,
-    description,
-    project: "hivematrix",
-    projectPath,
-    executor: "agent",
-    model: "mixed",
-    workflow: "work",
-    source: `flash:${sessionId}`,
-    ...(isVoice ? { output: markVoiceOrigin() } : {}),
-  });
-
-  emit.escalated(task._id);
-  return `Escalated to task ${task._id}: "${title}"`;
-}
-
-// ------------------------------------------------------------------
-// Main agent loop
-// ------------------------------------------------------------------
 
 /**
  * Read-only tool names — the set an observe-only pass (manual-autonomy
  * heartbeat, daily briefs) is allowed to call. HARD enforcement: gating the
  * tool list is the guarantee; prompt guidance alone is not (the prompt embeds
- * operator-editable and inbound-derived text).
+ * operator-editable and inbound-derived text). Enforced both at CLI offer
+ * time (--allowedTools, via FlashLoopOptions.allowedTools below) AND at MCP
+ * dispatch time (flash-mcp.ts's HIVE_FLASH_ALLOWED gate).
  */
 export const READ_ONLY_FLASH_TOOLS: ReadonlySet<string> = new Set([
   "brain_search",
@@ -524,7 +57,149 @@ export const READ_ONLY_FLASH_TOOLS: ReadonlySet<string> = new Set([
 export interface FlashLoopOptions {
   /** When set, only tools passing the filter are OFFERED to the model. */
   allowedTools?: (name: string) => boolean;
+  /** Test-only: override the `claude` binary path (e.g. a fake stream-json emitter script). */
+  __claudeBinary?: string;
+  /** Test-only: override child_process.spawn. */
+  __spawn?: typeof spawn;
 }
+
+// ------------------------------------------------------------------
+// Pure helpers — prompt/args construction, stream-line consumption. Kept
+// decoupled from the actual spawn so they're unit-testable without a real
+// `claude` subprocess.
+// ------------------------------------------------------------------
+
+export interface FlashPromptParts {
+  systemPrompts: string[];
+  prompt: string;
+}
+
+/**
+ * Serialize FlashMessage[] history (system + prior turns + the new user
+ * message, as built fresh per-turn by flash/context.ts:buildInitialMessages)
+ * into the CLI's shape: system messages become --append-system-prompt args,
+ * prior user/assistant turns become a transcript block prepended to the
+ * final user message (which becomes the actual -p prompt).
+ */
+export function buildFlashPrompt(messages: FlashMessage[]): FlashPromptParts {
+  const systemPrompts: string[] = [];
+  const convo: Array<{ role: "user" | "assistant"; content: string }> = [];
+  for (const m of messages) {
+    if (m.role === "system") {
+      if (m.content.trim()) systemPrompts.push(m.content);
+    } else if (m.role === "user") {
+      convo.push({ role: "user", content: m.content });
+    } else if (m.role === "assistant") {
+      convo.push({ role: "assistant", content: m.content ?? "" });
+    }
+    // role "tool" — buildInitialMessages never emits these (there is no live
+    // tool-call loop to replay); nothing to serialize.
+  }
+  if (convo.length === 0) return { systemPrompts, prompt: "" };
+
+  const last = convo[convo.length - 1];
+  const prior = convo.slice(0, -1);
+  const transcript = prior.length
+    ? "--- Prior conversation (for context; do not repeat unless asked) ---\n" +
+      prior.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`).join("\n\n") +
+      "\n--- End prior conversation ---\n\n"
+    : "";
+  return { systemPrompts, prompt: `${transcript}${last.content}` };
+}
+
+export interface FlashSpawnArgsInput {
+  prompt: string;
+  systemPrompts: string[];
+  mcpConfigPath: string;
+  toolNames: string[];
+  maxTurns: number;
+}
+
+/** Build the `claude` CLI argv for one Flash turn. Pure. */
+export function buildFlashSpawnArgs(input: FlashSpawnArgsInput): string[] {
+  return [
+    "-p",
+    input.prompt,
+    "--model",
+    "haiku",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--max-turns",
+    String(input.maxTurns),
+    "--mcp-config",
+    input.mcpConfigPath,
+    "--allowedTools",
+    input.toolNames.join(","),
+    ...input.systemPrompts.flatMap((sp) => ["--append-system-prompt", sp]),
+  ];
+}
+
+export interface FlashStreamState {
+  /** FIFO queue of tool names from `tool_use` events, consumed in order by
+   *  the `tool_result` events that follow — the stream-json parser doesn't
+   *  carry the tool name on the result event itself, but Claude Code emits
+   *  tool_use/tool_result pairs in matching order. */
+  pendingToolNames: string[];
+}
+
+export function createFlashStreamState(): FlashStreamState {
+  return { pendingToolNames: [] };
+}
+
+const ESCALATED_TASK_RE = /^Escalated to task (\S+):/;
+
+/**
+ * Consume one stream-json line, driving FlashEmitter calls, and reporting any
+ * text/result text it produced. Side-effecting on `emit` only — otherwise
+ * pure/deterministic, so it can be unit tested against canned stream-json
+ * lines without a real `claude` subprocess.
+ */
+export function consumeFlashStreamLine(
+  line: string,
+  parser: StreamParser,
+  state: FlashStreamState,
+  emit: FlashEmitter,
+): { textDelta?: string; resultText?: string } {
+  if (!line.trim()) return {};
+  const events = parser.parseLine(line);
+  let textDelta: string | undefined;
+  let resultText: string | undefined;
+
+  for (const event of events) {
+    if (event.type === "text") {
+      textDelta = (textDelta ?? "") + event.content;
+      emit.token(event.content);
+    } else if (event.type === "tool_use") {
+      state.pendingToolNames.push(event.tool);
+      emit.toolStart(event.tool, event.input);
+    } else if (event.type === "tool_result") {
+      const name = state.pendingToolNames.shift() ?? "tool";
+      const ok = !event.content.startsWith("[error]") && !event.content.startsWith("Error:");
+      emit.toolResult(name, ok, event.content.slice(0, 400));
+      // Preserve the escalation signal across the MCP process boundary: the
+      // handler (flash-mcp.ts:handleEscalateToTask) can't call emit directly
+      // (it runs in a bridged HTTP request, not this turn's own scope), so it
+      // returns a recognizable string and we parse the taskId back out here.
+      if (ok && name === "escalate_to_task") {
+        const m = event.content.match(ESCALATED_TASK_RE);
+        if (m) emit.escalated(m[1]);
+      }
+    } else if (event.type === "result") {
+      resultText = event.result;
+    } else if (event.type === "error") {
+      const msg = `\n\n[Flash model error: ${event.content}]`;
+      textDelta = (textDelta ?? "") + msg;
+      emit.token(msg);
+    }
+    // "init"/"session"/"log"/"question"/"unknown" — not surfaced to Flash.
+  }
+  return { textDelta, resultText };
+}
+
+// ------------------------------------------------------------------
+// Main agent loop
+// ------------------------------------------------------------------
 
 export async function runFlashAgentLoop(
   messages: FlashMessage[],
@@ -533,153 +208,102 @@ export async function runFlashAgentLoop(
   brainRoot: string | null,
   options: FlashLoopOptions = {},
 ): Promise<string> {
-  const profile = getQwenProfile();
-  if (!profile) {
-    const msg = "No local model configured. Please set up Qwen in Settings → Local Model.";
+  if (!backendConfigured("claude")) {
+    const msg = "Claude not configured — set it up in Settings → Models.";
     emit.token(msg);
     return msg;
   }
 
-  const policy = getConnectivityPolicy();
-  const laneTools = availableLaneTools(policy);
-  let allTools = [...laneTools, ...FLASH_ONLY_TOOLS];
-  if (options.allowedTools) {
-    allTools = allTools.filter((t) => options.allowedTools!(t.function.name));
-  }
-
-  const ctx = {
+  const ctx: LaneToolContext = {
     projectPath: brainRoot ?? homedir(),
     project: "hivematrix",
     requestedBy: `flash:${sessionId}`,
   };
 
-  const currentMessages = [...messages];
-  let toolCallDepth = 0;
-  const startTime = Date.now();
-  let fullText = "";
+  const { configPath, toolNames } = prepareFlashMcp(
+    process.env.HIVEMATRIX_PORT ?? "3747",
+    process.execPath,
+    { allowedTools: options.allowedTools, brainRoot, ctx, sessionId },
+  );
 
-  while (toolCallDepth < MAX_TOOL_CALLS && Date.now() - startTime < MAX_WALL_MS) {
-    const accumulatedTools = new Map<number, ToolCallRecord>();
-    let turnText = "";
-    let finishReason = "stop";
-    let degenerated = false;
+  const { systemPrompts, prompt } = buildFlashPrompt(messages);
+  const args = buildFlashSpawnArgs({
+    prompt,
+    systemPrompts,
+    mcpConfigPath: configPath,
+    toolNames,
+    maxTurns: MAX_TOOL_CALLS,
+  });
 
+  const binary = options.__claudeBinary ?? resolveClaudeBinary();
+  const spawnImpl = options.__spawn ?? spawn;
+
+  return new Promise<string>((resolve) => {
+    let proc: ChildProcess;
     try {
-      for await (const event of streamFromLocalModel(
-        currentMessages,
-        allTools,
-        profile.primary.endpoint,
-        profile.primary.modelId,
-        profile.sampling,
-      )) {
-        if (event.type === "token") {
-          turnText += event.content;
-          fullText += event.content;
-          emit.token(event.content);
-          // Stop a runaway repetition loop early instead of streaming the same
-          // content up to max_tokens. Check on a sentence boundary for repeated
-          // sentences, and on any whitespace for a word/word-cycle collapse
-          // ("submarines submarines ...") that has no sentence punctuation.
-          if (/[.!?\n]/.test(event.content) && isRepeatingTail(turnText)) {
-            degenerated = true;
-            break;
-          }
-          // Drift-tolerant: catches a repeated line/sentence that mutates only its case
-          // and spacing as it degenerates ("First step… Next step…" looping into
-          // "FirsTstEp…"), which the exact-match guards above are structurally blind to.
-          if (/[.!?\n]/.test(event.content) && isRepeatingUnitCycle(turnText)) {
-            degenerated = true;
-            break;
-          }
-          if (/\s/.test(event.content) && isRepeatingWordTail(turnText)) {
-            degenerated = true;
-            break;
-          }
-          // Catch-all runaway guard: a reply that rambles on with all-distinct words
-          // slips past both repetition guards. Cap total length, cutting at the next
-          // whitespace/punctuation so we end on a clean boundary rather than mid-word.
-          if (/[\s.!?]/.test(event.content) && isOverReplyCap(turnText, profile.sampling.maxReplyChars)) {
-            degenerated = true;
-            break;
-          }
-        } else if (event.type === "tool_call_delta") {
-          const existing = accumulatedTools.get(event.index) ?? {
-            id: event.id ?? `call_${event.index}`,
-            type: "function" as const,
-            function: { name: event.name ?? "", arguments: "" },
-          };
-          if (event.id) existing.id = event.id;
-          if (event.name) existing.function.name = event.name;
-          if (event.arguments) existing.function.arguments += event.arguments;
-          accumulatedTools.set(event.index, existing);
-        } else if (event.type === "done") {
-          finishReason = event.finishReason;
-        }
-      }
+      proc = spawnImpl(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
     } catch (err) {
-      const errMsg = `\n\n[Flash model error: ${err instanceof Error ? err.message : String(err)}]`;
-      emit.token(errMsg);
-      return fullText + errMsg;
+      const msg = `\n\n[Flash model error: failed to launch claude — ${err instanceof Error ? err.message : String(err)}]`;
+      emit.token(msg);
+      resolve(msg);
+      return;
     }
 
-    // The model looped a sentence — end the turn now and collapse the repeated tail
-    // out of the returned text (the client already saw the emitted tokens, but the
-    // stored history and any summary shouldn't carry the wall of duplicates).
-    if (degenerated) {
-      return collapseUnitCycle(collapseWordRepetition(collapseRepetition(fullText)));
-    }
+    const parser = new StreamParser();
+    const streamState = createFlashStreamState();
+    let lineBuffer = "";
+    let stderrBuf = "";
+    let fullText = "";
+    let resultText = "";
+    let settled = false;
 
-    const toolCalls = [...accumulatedTools.values()].filter((tc) => tc.function.name);
+    const finish = (text: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(wallTimer);
+      resolve(text);
+    };
 
-    if (finishReason !== "tool_calls" || toolCalls.length === 0) {
-      return fullText;
-    }
+    const wallTimer = setTimeout(() => {
+      try { proc.kill("SIGTERM"); } catch { /* already dead */ }
+      const elapsedS = Math.round(MAX_WALL_MS / 1000);
+      const budgetMsg = `\n\n[Budget reached: ${elapsedS}s wall clock. Use "escalate this to a task" for longer tasks.]`;
+      emit.token(budgetMsg);
+      finish((fullText || resultText) + budgetMsg);
+    }, MAX_WALL_MS);
 
-    // Push the assistant's tool-call turn into the message history
-    currentMessages.push({ role: "assistant", content: turnText || null, tool_calls: toolCalls });
+    const consumeLine = (line: string) => {
+      const r = consumeFlashStreamLine(line, parser, streamState, emit);
+      if (r.textDelta) fullText += r.textDelta;
+      if (r.resultText != null) resultText = r.resultText;
+    };
 
-    for (const tc of toolCalls) {
-      const name = tc.function.name;
-      let argsObj: Record<string, unknown> = {};
-      try { argsObj = JSON.parse(tc.function.arguments || "{}") as Record<string, unknown>; } catch { /* */ }
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      lineBuffer += chunk.toString();
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() ?? "";
+      for (const line of lines) consumeLine(line);
+    });
 
-      emit.toolStart(name, JSON.stringify(argsObj).slice(0, 300));
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      stderrBuf += chunk.toString();
+    });
 
-      let result: string;
-      let ok = true;
+    proc.on("error", (err) => {
+      const msg = `\n\n[Flash model error: ${err.message}]`;
+      emit.token(msg);
+      finish((fullText || resultText) + msg);
+    });
 
-      try {
-        // Execution-time gate too: a model can emit a call for a tool it was
-        // never offered; the filter must hold at dispatch, not just at offer.
-        if (options.allowedTools && !options.allowedTools(name)) {
-          throw new Error(`tool ${name} is not permitted in this pass`);
-        }
-        if (name === "persona_update") {
-          result = await handlePersonaUpdate(argsObj, emit, brainRoot);
-        } else if (name === "deep_think") {
-          result = await handleDeepThink(argsObj);
-        } else if (name === "generate_avatar") {
-          result = await handleGenerateAvatar(argsObj, brainRoot);
-        } else if (name === "escalate_to_task") {
-          result = await handleEscalateToTask(argsObj, emit, sessionId);
-        } else {
-          result = await executeLaneTool(name, argsObj, ctx);
-        }
-      } catch (err) {
-        ok = false;
-        result = `Error: ${err instanceof Error ? err.message : String(err)}`;
+    proc.on("close", (code) => {
+      if (lineBuffer.trim()) consumeLine(lineBuffer);
+      let text = fullText || resultText;
+      if (!text && code !== 0) {
+        const msg = `\n\n[Flash model error: claude exited with code ${code}${stderrBuf.trim() ? ` — ${stderrBuf.trim().slice(0, 400)}` : ""}]`;
+        emit.token(msg);
+        text = msg;
       }
-
-      emit.toolResult(name, ok, result.slice(0, 400));
-
-      currentMessages.push({ role: "tool", content: result, tool_call_id: tc.id });
-      toolCallDepth++;
-    }
-  }
-
-  // Budget exhausted — summarise and offer escalation
-  const elapsedS = Math.round((Date.now() - startTime) / 1000);
-  const budgetMsg = `\n\n[Budget reached: ${toolCallDepth} tool calls in ${elapsedS}s. Use "escalate this to a task" for longer tasks.]`;
-  emit.token(budgetMsg);
-  return fullText + budgetMsg;
+      finish(text);
+    });
+  });
 }
