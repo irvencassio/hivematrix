@@ -351,10 +351,18 @@ async function handleEscalateToTask(
   sessionId: string,
 ): Promise<string> {
   const { Task, generateId } = await import("@/lib/db");
+  const { getSession } = await import("./store");
+  const { markVoiceOrigin } = await import("@/lib/voice/loop-closer");
 
   const title = String(args.title ?? "Task");
   const description = String(args.description ?? "");
   const projectPath = String(args.projectPath ?? homedir());
+
+  // A task escalated from a voice-channel flash session gets the same
+  // voice-origin marker the /voice/session route uses, so the loop-closer
+  // (src/lib/voice/loop-closer.ts) texts the outcome back once this task
+  // reaches a terminal state.
+  const isVoice = getSession(sessionId)?.channel === "voice";
 
   // Broad multi-step work dispatches as a SINGLE task that self-plans via
   // Superpowers: workflow:"work" triggers the "/workflows:work" skill prefix so
@@ -369,6 +377,7 @@ async function handleEscalateToTask(
     model: "mixed",
     workflow: "work",
     source: `flash:${sessionId}`,
+    ...(isVoice ? { output: markVoiceOrigin() } : {}),
   });
 
   emit.escalated(task._id);

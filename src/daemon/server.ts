@@ -3330,13 +3330,17 @@ export function createDaemonServer() {
         const { parseVoiceSessionBody, routeVoiceSession } = await import("@/lib/voice/session");
         const { Task, generateId } = await import("@/lib/db");
         const { DEFAULT_TASK_PROJECT } = await import("@/lib/routing/project-constants");
+        const { markVoiceOrigin } = await import("@/lib/voice/loop-closer");
         const parsed = parseVoiceSessionBody(await parseBody(req) as Record<string, unknown>);
         if ("error" in parsed) { json(res, 400, { error: parsed.error }); return; }
         const route = routeVoiceSession(parsed.session, { escalated: parsed.escalated });
         if (route.kind === "none") { json(res, 200, { created: false, reason: route.reason }); return; }
         const { sessionId, surface, handle } = parsed.session;
+        // Every task spawned off this route originated from voice — mark it so
+        // the loop-closer (src/lib/voice/loop-closer.ts) texts the outcome back
+        // once the task reaches a terminal state (agent-manager.ts handleExit).
         const task = await Task.create(route.kind === "browserLaneTask"
-          ? { _id: generateId(), ...route.task, output: { ...route.task.output, voice: { sessionId, surface, handle } } }
+          ? { _id: generateId(), ...route.task, output: markVoiceOrigin({ ...route.task.output, voice: { sessionId, surface, handle } }) }
           : {
               _id: generateId(),
               title: route.title,
@@ -3346,7 +3350,7 @@ export function createDaemonServer() {
               status: "backlog",
               executor: "agent",
               source: "voice",
-              output: { voice: { sessionId, surface, handle } },
+              output: markVoiceOrigin({ voice: { sessionId, surface, handle } }),
             });
         broadcast("tasks:created", { taskId: task._id });
         json(res, 201, { created: true, taskId: task._id });
