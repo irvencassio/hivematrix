@@ -12,12 +12,17 @@ const SRC = join(ROOT, 'src')
 // Each rule: { pattern (grep -E regex), label, allowFiles (array of path substrings to skip) }
 const RULES = [
   // ── Removed product surfaces ──────────────────────────────────
+  // NOTE on '\\b' vs '\b' throughout this file: in a JS string literal (single- OR
+  // double-quoted) '\b' is the BACKSPACE control character, not a literal
+  // backslash-b — so an un-escaped '\b' regex silently never matches and the rule
+  // is inert. Always write '\\b'. (Bug found 2026-07-10 on the AuthBee/Weaver rule,
+  // fixed file-wide 2026-07-11.)
   {
-    pattern: '\bIdeation\b',
+    pattern: '\\bIdeation\\b',
     label: 'Ideation surface (removed from Hive 2)',
   },
   {
-    pattern: '\bGoalsBee\b|personal.*Goals|Goals.*personal|isPersonal.*goal|goal.*surface',
+    pattern: '\\bGoalsBee\\b|personal.*Goals|Goals.*personal|isPersonal.*goal|goal.*surface',
     label: 'Personal Goals surface (removed from Hive 2)',
   },
   {
@@ -35,12 +40,14 @@ const RULES = [
   // VoiceBee un-deferred 2026-06-16 (Q12) — now an active voice ingress/egress
   // lane; see DECISIONS.md Q12 + the voice/video persona plan in brain.
   {
-    pattern: '\bTubeBee\b',
+    pattern: '\\bTubeBee\\b',
     label: 'TubeBee (deferred from HiveMatrix v1 — no code allowed)',
-    allowFiles: ['COMPONENT-MAP.md', 'DECISIONS.md'],
+    // catalog.test.ts: a comment asserting TubeBee is REMOVED, not a reintroduction
+    // (surfaced when the \b escaping fix made this rule actually run, 2026-07-11).
+    allowFiles: ['COMPONENT-MAP.md', 'DECISIONS.md', 'lib/lanes/catalog.test.ts'],
   },
   {
-    pattern: '\bComputerBee\b',
+    pattern: '\\bComputerBee\\b',
     label: 'ComputerBee (renamed to DesktopBee — use DesktopBee everywhere)',
     allowFiles: ['COMPONENT-MAP.md', 'DECISIONS.md'],
   },
@@ -50,10 +57,6 @@ const RULES = [
     // Q18) — distinct from the legacy AuthBee/session internal codename this rule still
     // bans everywhere else. Only the files implementing/wiring/testing that one named
     // feature may use the string (comments included) — not a general re-opening.
-    // NOTE: this pattern uses '\\b' (escaped) rather than '\b' — in a single-quoted JS
-    // string '\b' is the BACKSPACE control character, not a literal regex word-boundary,
-    // so the un-escaped form silently never matches anything (a pre-existing bug shared
-    // by every other \b-anchored rule in this file — see the spawned follow-up task).
     pattern: '\\bWeaver\\b|\\bAuthBee\\b',
     label: 'AuthBee/Weaver as public brand (internal only outside the sanctioned Weaver Audit persona; use Session* names) — see DECISIONS.md Q18',
     allowFiles: [
@@ -67,11 +70,14 @@ const RULES = [
       'lib/flash/ratchet.ts', 'lib/flash/ratchet.test.ts',
       'lib/flash/heartbeat.ts', 'lib/flash/heartbeat.test.ts',
       'daemon/server.ts', 'daemon/server.test.ts',
+      // The 0.1.171 release note names the sanctioned Weaver Audit feature.
+      'lib/version/changelog.ts',
     ],
   },
   // ── Removed data model ────────────────────────────────────────
   {
-    pattern: "CREATE TABLE.*missions\b|FROM missions\b|INSERT INTO missions\b",
+    // Double-quoted strings have the same \b-is-backspace pitfall — escaped here too.
+    pattern: "CREATE TABLE.*missions\\b|FROM missions\\b|INSERT INTO missions\\b",
     label: 'missions table (replaced by directives/runs — do not create or query)',
   },
   // ── Removed subsystem: Flights / Work Packages (2026-07-06) ────
@@ -114,13 +120,14 @@ const RULES = [
   },
   // ── Scope freeze: no new Bee brands ──────────────────────────
   {
-    pattern: '\b[A-Z][a-z]+Bee\b',
+    pattern: '\\b[A-Z][a-z]+Bee\\b',
     label: 'Possible new Bee brand — check COMPONENT-MAP.md to confirm it is listed there',
-    allowFiles: [
-      'TermBee', 'BrowserBee', 'WebBee', 'DesktopBee', 'CronBee', 'MessageBee',
-      'messagebee', 'MailBee', 'mailbee', 'VoiceBee', 'voicebee', 'TraderBee', 'traderbee',
-      'COMPONENT-MAP.md', 'DECISIONS.md',
-    ],
+    allowFiles: ['COMPONENT-MAP.md', 'DECISIONS.md'],
+    // Known/retired brands are allowed by CONTENT, not path — the old allowFiles
+    // entries like 'TermBee' were path substrings that never matched anything.
+    // (AuthBee/TubeBee/ComputerBee appear here so their absence-assertions don't
+    // double-report; their own dedicated rules above still enforce the ban.)
+    allowContent: /\b(Term|Browser|Web|Desktop|Cron|Message|Mail|Voice|Trader|Manager|Brain|Inventor|Auth|Tube|Computer)Bee\b/,
     warnOnly: true,  // warning, not hard fail — false positives possible with this broad pattern
   },
 ]
@@ -128,7 +135,7 @@ const RULES = [
 let violations = 0
 let warnings = 0
 
-function grepSrc(pattern, allowFiles) {
+function grepSrc(pattern, allowFiles, allowContent) {
   try {
     const out = execFileSync('grep', [
       '-rEn',
@@ -142,7 +149,14 @@ function grepSrc(pattern, allowFiles) {
     return out.split('\n').filter(line => {
       if (!line) return false
       const relPath = relative(ROOT, line.split(':')[0])
-      return !allowFiles || !allowFiles.some(allow => relPath.includes(allow))
+      if (allowFiles && allowFiles.some(allow => relPath.includes(allow))) return false
+      // Content-level allowance (e.g. known Bee brands): skip a hit line whose
+      // matched content is sanctioned even though its path isn't allowlisted.
+      if (allowContent) {
+        const content = line.split(':').slice(2).join(':')
+        if (allowContent.test(content)) return false
+      }
+      return true
     })
   } catch {
     return []
@@ -152,7 +166,7 @@ function grepSrc(pattern, allowFiles) {
 console.log('\n🔍 HiveMatrix scope-wall check\n')
 
 for (const rule of RULES) {
-  const hits = grepSrc(rule.pattern, rule.allowFiles)
+  const hits = grepSrc(rule.pattern, rule.allowFiles, rule.allowContent)
   if (hits.length === 0) {
     console.log(`  ✓ ${rule.label}`)
     continue
