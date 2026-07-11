@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.176 — 2026-07-11
+
+Claude-native cutover: retire local Qwen entirely — every text role routes to Claude via the CLI (Opus=thinking, Sonnet=coding, Haiku=operational + chat). Flash chat on Haiku with lane tools as an MCP server; degeneration guards deleted; Local Model settings → Claude Models routing view; one-time config migration drops qwen/localEngine keys.
+
 ## v0.1.175 — 2026-07-11
 
 Flash sampling: add top_k=20 (the honored anti-degeneration lever rapid-mlx was missing), expose full sampling param set in settings with a one-click Qwen-recommended preset
