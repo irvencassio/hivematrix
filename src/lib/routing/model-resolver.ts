@@ -1,20 +1,19 @@
 /**
  * Resolve an abstract ModelTier to a concrete model ID from settings.
  *
- * The router decides a tier (frontier / local-primary / local-secondary / nanai
- * / unavailable) from role + connectivity. This module is the single place that
- * turns a tier into the actual model string a task carries — reading the Qwen
- * profile for local tiers, the configured frontier favorite for frontier, and
- * the Nano Banana catalog entry for images. No model IDs are hard-coded in the
- * router or the directive engine.
+ * The router decides a tier (frontier / operational / nanai / unavailable)
+ * from role + connectivity. This module is the single place that turns a tier
+ * into the actual model string a task carries — reading the operational
+ * override or Haiku default for the operational tier, the configured frontier
+ * favorite for frontier, and the Nano Banana catalog entry for images. No
+ * model IDs are hard-coded in the router or the directive engine.
  */
 
 import { readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import type { ModelTier } from "@/lib/connectivity/policy";
-import { getQwenProfile } from "@/lib/config/qwen-profile";
-import { CLAUDE_OPUS_ID, CLAUDE_SONNET_ID, CODEX_NEWEST_ID, CODEX_SPARK_ID } from "@/lib/models/available";
+import { CLAUDE_OPUS_ID, CLAUDE_SONNET_ID, CLAUDE_HAIKU_ID, CODEX_NEWEST_ID, CODEX_SPARK_ID } from "@/lib/models/available";
 import { detectBackends, type BackendStatus } from "@/lib/models/backends";
 
 const NANO_BANANA = "nano-banana";
@@ -85,17 +84,15 @@ export function resolveModelId(tier: ModelTier, options: ResolveModelOptions = {
       if (provider === "claude") return CLAUDE_SONNET_ID;
       return null;
     }
-    case "local-primary": {
-      const profile = getQwenProfile();
-      return profile?.primary.modelId ?? null;
-    }
-    case "local-secondary": {
-      // Operator override (Settings → Models → operational role) wins, then the
-      // Qwen profile's secondary, then its primary.
-      const op = (readConfig().operationalModel as string | undefined)?.trim();
-      if (op) return op;
-      const profile = getQwenProfile();
-      return profile?.secondary?.modelId ?? profile?.primary.modelId ?? null;
+    case "operational": {
+      const cfg = readConfig();
+      const backends = options.frontierBackends ?? detectBackends();
+      const op = (cfg.operationalModel as string | undefined)?.trim();
+      if (op && modelSupportedByBackends(op, backends)) return op;
+      if (backendConfigured(backends, "claude")) return CLAUDE_HAIKU_ID;
+      // Codex-only installs: fall back to the cheap Codex pool rather than null.
+      if (backendConfigured(backends, "codex")) return CODEX_SPARK_ID;
+      return null;
     }
     case "nanai":
       return NANO_BANANA;

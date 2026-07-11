@@ -16,8 +16,8 @@ test("no frontier provider enabled degrades to local-only, same branch as usage 
   const p = freshPolicy(() => false);
   assert.equal(p.mode, "local-only");
   assert.equal(p.canUseCloud(), false);
-  assert.equal(p.resolveModelTier("think"), "local-primary");
-  assert.equal(p.resolveModelTier("code-critical"), "local-primary");
+  assert.equal(p.resolveModelTier("think"), "unavailable");
+  assert.equal(p.resolveModelTier("code-critical"), "unavailable");
 });
 
 test("an explicit manual cloud-ok override wins even with no frontier provider enabled (not silently overwritten)", () => {
@@ -127,23 +127,23 @@ test("resolveModelTier — cloud-ok maps think to frontier-premium (Opus)", () =
   const p = freshPolicy();
   assert.equal(p.resolveModelTier("think"), "frontier-premium");
   assert.equal(p.resolveModelTier("code-critical"), "frontier");
-  assert.equal(p.resolveModelTier("execute"), "local-secondary");
+  assert.equal(p.resolveModelTier("execute"), "operational");
   assert.equal(p.resolveModelTier("image"), "nanai");
 });
 
-test("resolveModelTier — local-only maps think to local-primary", () => {
+test("resolveModelTier — local-only maps every text role to unavailable", () => {
   const p = freshPolicy();
   p.setManualOverride("local-only");
-  assert.equal(p.resolveModelTier("think"), "local-primary");
-  assert.equal(p.resolveModelTier("code-critical"), "local-primary");
+  assert.equal(p.resolveModelTier("think"), "unavailable");
+  assert.equal(p.resolveModelTier("code-critical"), "unavailable");
   assert.equal(p.resolveModelTier("image"), "unavailable");
 });
 
-test("resolveModelTier — offline maps all to local", () => {
+test("resolveModelTier — offline maps every role to unavailable", () => {
   const p = freshPolicy();
   p.setManualOverride("offline");
-  assert.equal(p.resolveModelTier("think"), "local-primary");
-  assert.equal(p.resolveModelTier("execute"), "local-secondary");
+  assert.equal(p.resolveModelTier("think"), "unavailable");
+  assert.equal(p.resolveModelTier("execute"), "unavailable");
   assert.equal(p.resolveModelTier("image"), "unavailable");
 });
 

@@ -5,14 +5,14 @@
  *
  * Unlike the fixed role→tier roles, the writer can be EITHER frontier or local,
  * so it gets its own resolver instead of the generic router:
- *   - a frontier model id  → that model when cloud-ok, local fallback when offline
+ *   - a frontier model id  → that model when cloud-ok, Claude Sonnet default when offline
  *   - a local model id     → locked to free/local always
- *   - unset (default)      → frontier favorite when cloud-ok, local otherwise
+ *   - unset (default)      → frontier favorite when cloud-ok, Claude Sonnet default otherwise
  */
 
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { resolveModelId } from "@/lib/routing/model-resolver";
-import { getRoleModels } from "./available";
+import { getRoleModels, CLAUDE_SONNET_ID } from "./available";
 
 export type WriterProvider = "anthropic" | "codex" | "local";
 
@@ -42,9 +42,11 @@ export function resolveWriterModel(opts: { canUseCloud?: boolean; writerModel?: 
   if (choice && !isFrontierModelId(choice)) {
     return { provider: "local", modelId: choice, lockedLocal: true, reason: "writer locked to a local model" };
   }
-  // Offline (or local-only posture) → local regardless of the pick.
+  // Offline (or local-only posture) — no local text inference remains after the
+  // cutover, so this just names the Claude default; the caller still has to
+  // handle "no connectivity" upstream (see connectivity/policy.ts risk notes).
   if (!canCloud) {
-    return { provider: "local", modelId: resolveModelId("local-primary"), lockedLocal: false, reason: "offline → local writer" };
+    return { provider: "anthropic", modelId: CLAUDE_SONNET_ID, lockedLocal: false, reason: "offline → default Claude writer (no local fallback)" };
   }
   // Frontier: the chosen frontier model, else the frontier favorite.
   const modelId = choice && isFrontierModelId(choice) ? choice : resolveModelId("frontier");

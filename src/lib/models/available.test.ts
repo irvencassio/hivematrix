@@ -95,7 +95,7 @@ test("Cloud-only model id is the cloud-only sentinel", () => {
   assert.equal(m?.modelId, "cloud-only");
 });
 
-test("role options expose Coding choices across Claude, Codex, and local Qwen", () => {
+test("role options expose Coding choices across Claude, Codex, and local Qwen, with Haiku as a last resort", () => {
   const options = buildRoleModelOptions(backends(true, true, true));
   const coding = options.coding.map((m) => m.modelId);
   assert.deepEqual(coding, [
@@ -103,6 +103,7 @@ test("role options expose Coding choices across Claude, Codex, and local Qwen", 
     "sonnet",
     "codex:gpt-5.5",
     "codex:gpt-5.3-codex-spark",
+    "haiku",
     "qwen/qwen3.6-27b",
     "qwen3.6-35b-4bit",
     "qwen3.6-27b-4bit",
@@ -114,12 +115,13 @@ test("role options offer local for Thinking too, but keep frontier-premium first
   const options = buildRoleModelOptions(backends(true, true, true));
   const thinking = options.thinking.map((m) => m.modelId);
   // Frontier stays at the front so the default (empty → frontier-premium) is
-  // unchanged; local is appended as an opt-in on-box choice.
+  // unchanged; Haiku and local are appended as opt-in escape hatches.
   assert.deepEqual(thinking, [
     "opus",
     "sonnet",
     "codex:gpt-5.5",
     "codex:gpt-5.3-codex-spark",
+    "haiku",
     "qwen/qwen3.6-27b",
     "qwen3.6-35b-4bit",
     "qwen3.6-27b-4bit",
@@ -127,15 +129,17 @@ test("role options offer local for Thinking too, but keep frontier-premium first
   ]);
 });
 
-test("role options expose Operational escape hatches without making them the default", () => {
+test("role options put Operational Claude-first (Haiku default), local kept as an escape hatch", () => {
   const options = buildRoleModelOptions(backends(true, true, true));
   const operational = options.operational.map((m) => m.modelId);
   assert.deepEqual(operational, [
+    "haiku",
+    "sonnet",
+    "codex:gpt-5.3-codex-spark",
+    "opus",
     "qwen/qwen3.6-27b",
     "qwen3.6-35b-4bit",
     "qwen3.6-27b-4bit",
     QWEN36_35B_API_MODEL_ID,
-    "codex:gpt-5.3-codex-spark",
-    "sonnet",
   ]);
 });

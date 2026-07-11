@@ -13,9 +13,9 @@ test("cloud-ok: think → frontier-premium (Opus), no debt", () => {
   assert.equal(r.frontierReviewDebt, false);
 });
 
-test("cloud-ok: execute → local-secondary (always cheap)", () => {
+test("cloud-ok: execute → operational (always cheap)", () => {
   const r = routeByRole("execute", cloud());
-  assert.equal(r.tier, "local-secondary");
+  assert.equal(r.tier, "operational");
   assert.equal(r.frontierReviewDebt, false);
 });
 
@@ -30,15 +30,15 @@ test("cloud-ok: image → nanai", () => {
   assert.equal(r.tier, "nanai");
 });
 
-test("local-only: think → local-primary", () => {
+test("local-only: think → unavailable (no local text inference)", () => {
   const r = routeByRole("think", local());
-  assert.equal(r.tier, "local-primary");
+  assert.equal(r.tier, "unavailable");
 });
 
-test("local-only: code-critical → local-primary with frontier review debt", () => {
+test("local-only: code-critical → unavailable, no frontier review debt (nothing ran)", () => {
   const r = routeByRole("code-critical", local());
-  assert.equal(r.tier, "local-primary");
-  assert.equal(r.frontierReviewDebt, true);
+  assert.equal(r.tier, "unavailable");
+  assert.equal(r.frontierReviewDebt, false);
 });
 
 test("local-only: image → unavailable", () => {
@@ -46,9 +46,9 @@ test("local-only: image → unavailable", () => {
   assert.equal(r.tier, "unavailable");
 });
 
-test("offline: execute → local-secondary", () => {
+test("offline: execute → unavailable (no local text inference)", () => {
   const r = routeByRole("execute", offline());
-  assert.equal(r.tier, "local-secondary");
+  assert.equal(r.tier, "unavailable");
 });
 
 test("offline: image → unavailable", () => {
@@ -67,10 +67,10 @@ test("isTierAvailable: frontier false when not cloud-ok", () => {
   assert.equal(isTierAvailable("frontier", offline()), false);
 });
 
-test("isTierAvailable: local-primary always true", () => {
-  assert.equal(isTierAvailable("local-primary", cloud()), true);
-  assert.equal(isTierAvailable("local-primary", local()), true);
-  assert.equal(isTierAvailable("local-primary", offline()), true);
+test("isTierAvailable: operational always true", () => {
+  assert.equal(isTierAvailable("operational", cloud()), true);
+  assert.equal(isTierAvailable("operational", local()), true);
+  assert.equal(isTierAvailable("operational", offline()), true);
 });
 
 test("reason string is present and non-empty", () => {
@@ -110,8 +110,8 @@ test("noLocal does not affect image role", () => {
   assert.equal(routeByRole("image", cloud(), { noLocal: true }).tier, "nanai");
 });
 
-test("cheap-web always routes to local-secondary", () => {
-  assert.equal(routeByRole("cheap-web", cloud()).tier, "local-secondary");
-  assert.equal(routeByRole("cheap-web", local()).tier, "local-secondary");
-  assert.equal(routeByRole("cheap-web", offline()).tier, "local-secondary");
+test("cheap-web routes to operational in cloud-ok, unavailable with no cloud", () => {
+  assert.equal(routeByRole("cheap-web", cloud()).tier, "operational");
+  assert.equal(routeByRole("cheap-web", local()).tier, "unavailable");
+  assert.equal(routeByRole("cheap-web", offline()).tier, "unavailable");
 });

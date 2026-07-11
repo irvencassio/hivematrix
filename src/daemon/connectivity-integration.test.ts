@@ -73,13 +73,14 @@ test("scenario 2: usage exhaustion → local-only — frontier blocked, local av
   assert.equal(caps.webbee.available, false, "Browser Lane read capability disabled in local-only");
   assert.equal(caps.image.available, false, "Image requires cloud");
 
-  // "Queued frontier work stays pending" — code-critical accrues debt
+  // With Qwen gone there is no local fallback — code-critical is unavailable
+  // (waits for cloud) rather than running locally, so no review debt accrues.
   const route = routeByRole("code-critical", policy);
-  assert.equal(route.tier, "local-primary");
-  assert.equal(route.frontierReviewDebt, true, "Debt accrued for later frontier review");
+  assert.equal(route.tier, "unavailable");
+  assert.equal(route.frontierReviewDebt, false, "nothing ran locally — no debt to review later");
 
-  // execute still goes to local (same as cloud-ok — it's always local)
-  assert.equal(routeByRole("execute", policy).tier, "local-secondary");
+  // execute has no local fallback either — unavailable until cloud returns
+  assert.equal(routeByRole("execute", policy).tier, "unavailable");
 });
 
 test("scenario 2b: usage window restored → cloud-ok recovers", () => {

@@ -6,14 +6,15 @@
  * config. The router never hard-codes model IDs — those come from settings.
  *
  * Roles:
- *   think        — planning, review, architecture → frontier in cloud-ok, local-primary otherwise
- *   execute      — bulk coding, file ops, extraction → local-secondary always (cheapest local)
- *   code-critical — final implementation, UI → frontier while headroom exists; else queue + local
+ *   think        — planning, review, architecture → frontier in cloud-ok, unavailable otherwise
+ *   execute      — bulk coding, file ops, extraction → operational (Haiku) always in cloud-ok
+ *   code-critical — final implementation, UI → frontier while headroom exists; else queue + unavailable
  *   image        — image generation → Nano Banana in cloud-ok; mflux in local/offline
- *   cheap-web    — Browser Lane summarization → local-secondary always
+ *   cheap-web    — Browser Lane summarization → operational (Haiku) always in cloud-ok
  *
- * Frontier-review debt: when code-critical runs on local due to mode, a review
- * task is enqueued so it gets a frontier pass when cloud-ok is restored.
+ * Frontier-review debt: when code-critical runs on the operational tier due to
+ * mode, a review task is enqueued so it gets a frontier pass when cloud-ok is
+ * restored.
  */
 
 import type { ConnectivityPolicy, ModelRole, ModelTier } from "@/lib/connectivity/policy";
@@ -28,10 +29,10 @@ export interface RouterResult {
 
 export interface RouteOptions {
   /**
-   * "Cloud-only" posture: never route to the local model. Any role that would
-   * resolve to a local tier is promoted to frontier when the cloud is
-   * reachable, or marked unavailable otherwise (so the task waits for cloud
-   * rather than silently falling back to local Qwen).
+   * "Cloud-only" posture: never route to the cheap operational tier. Any role
+   * that would resolve to operational is promoted to frontier when the cloud
+   * is reachable, or marked unavailable otherwise (so the task waits for
+   * cloud rather than silently falling back to a cheaper model).
    */
   noLocal?: boolean;
 }
@@ -39,7 +40,7 @@ export interface RouteOptions {
 export function routeByRole(role: ModelRole, policy: ConnectivityPolicy, opts: RouteOptions = {}): RouterResult {
   let tier = policy.resolveModelTier(role);
 
-  if (opts.noLocal && (tier === "local-primary" || tier === "local-secondary")) {
+  if (opts.noLocal && tier === "operational") {
     tier = policy.canUseCloud() ? "frontier" : "unavailable";
   }
 
@@ -56,11 +57,8 @@ export function routeByRole(role: ModelRole, policy: ConnectivityPolicy, opts: R
     case "frontier":
       reason = `${role} → frontier (cloud-ok)`;
       break;
-    case "local-primary":
-      reason = `${role} → local-primary (connectivity: ${policy.mode})`;
-      break;
-    case "local-secondary":
-      reason = `${role} → local-secondary (bulk/cheap path)`;
+    case "operational":
+      reason = `${role} → operational (connectivity: ${policy.mode})`;
       break;
     case "nanai":
       reason = `${role} → nanai (image generation)`;
@@ -89,5 +87,5 @@ export function routeMultiple(
 export function isTierAvailable(tier: ModelTier, policy: ConnectivityPolicy): boolean {
   if (tier === "unavailable") return false;
   if (tier === "frontier-premium" || tier === "frontier" || tier === "nanai") return policy.canUseCloud();
-  return true; // local-primary and local-secondary are always available (if model loaded)
+  return true; // operational is always available (Haiku/Codex Spark, or an operator override)
 }

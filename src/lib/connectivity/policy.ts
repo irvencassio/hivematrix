@@ -39,7 +39,7 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     brain:      { available: true },
     codegraph:  { available: true },
     coo_router: { available: true },
-    // Flash Lane: local-model conversational loop — always available if Qwen is loaded.
+    // Flash Lane: Claude-routed conversational loop — always available when cloud is reachable.
     flash:      { available: true },
   },
   "local-only": {
@@ -58,7 +58,7 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     // COO routing resolves rules + prepares plans locally; only lane *execution*
     // (e.g. Browser Lane workflow) is connectivity-gated, downstream of routing.
     coo_router: { available: true },
-    flash:      { available: true }, // local-primary model; cloud tools degrade gracefully
+    flash:      { available: false, reason: "no cloud connectivity; Claude required" },
   },
   "offline": {
     frontier:   { available: false, reason: "No network connectivity" },
@@ -75,33 +75,33 @@ const CAPABILITY_MATRIX: Record<ConnectivityMode, Record<CapabilityId, Capabilit
     brain:      { available: true }, // brain docs are local files
     codegraph:  { available: true }, // local symbol search works offline
     coo_router: { available: true }, // routing/preparation needs no network
-    flash:      { available: true }, // local model only; internet-dependent tools degrade
+    flash:      { available: false, reason: "no cloud connectivity; Claude required" },
   },
 };
 
 export type ModelRole = "think" | "execute" | "code-critical" | "image" | "cheap-web" | "converse";
-export type ModelTier = "frontier-premium" | "frontier" | "local-primary" | "local-secondary" | "nanai" | "unavailable";
+export type ModelTier = "frontier-premium" | "frontier" | "operational" | "nanai" | "unavailable";
 
 const ROLE_TIER_CLOUD_OK: Record<ModelRole, ModelTier> = {
   think:          "frontier-premium", // planning/review/architecture → Opus
   "code-critical": "frontier",        // final implementation/UI → Sonnet
-  execute:        "local-secondary",  // bulk/file ops → local Qwen
-  "cheap-web":    "local-secondary",
+  execute:        "operational",      // bulk/file ops → Haiku
+  "cheap-web":    "operational",
   image:          "nanai",
-  // converse: local-primary for latency; Flash loop escalates to frontier on depth>3
-  converse:       "local-primary",
+  // converse: operational (Haiku) for cost/latency; Flash loop escalates to frontier on depth>3
+  converse:       "operational",
 };
 
-// local-only and offline route identically — no frontier either way, so every
-// role lands on its local tier (image has no local generator → unavailable). One
-// map, so the two modes can never silently drift apart when routing is edited.
+// local-only and offline route identically — with Qwen gone there is no offline
+// inference, so every text role is unavailable (image already was). One map, so
+// the two modes can never silently drift apart when routing is edited.
 const ROLE_TIER_NO_CLOUD: Record<ModelRole, ModelTier> = {
-  think:          "local-primary",
-  "code-critical": "local-primary",
-  execute:        "local-secondary",
-  "cheap-web":    "local-secondary",
+  think:          "unavailable",
+  "code-critical": "unavailable",
+  execute:        "unavailable",
+  "cheap-web":    "unavailable",
   image:          "unavailable",
-  converse:       "local-primary",
+  converse:       "unavailable",
 };
 
 export interface PolicyState {

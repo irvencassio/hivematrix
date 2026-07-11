@@ -17,6 +17,7 @@ import { claudeAliasId } from "./catalog";
 // so they always resolve to the latest model for the tier (no version to bump).
 export const CLAUDE_OPUS_ID = "opus";     // alias → latest Opus
 export const CLAUDE_SONNET_ID = "sonnet"; // alias → latest Sonnet
+export const CLAUDE_HAIKU_ID = "haiku";   // alias → latest Haiku
 export const CODEX_NEWEST_ID = "codex:gpt-5.5"; // GPT-5.5 (the -codex variants are API-key-only, rejected on ChatGPT subscriptions)
 export const CODEX_SPARK_ID = "codex:gpt-5.3-codex-spark"; // Spark has a separate Codex usage pool
 export const MIXED_ID = "mixed";
@@ -275,7 +276,7 @@ export function setFrontierProvider(provider: FrontierProvider): void {
 // tier into a concrete model. Three of those are operator-pickable here:
 //   thinking     → frontier-premium tier  → config key `thinkModel`        (default Opus)
 //   coding       → frontier tier          → config key `frontierModel`     (default Sonnet)
-//   operational  → local-secondary tier   → config key `operationalModel`  (default Qwen profile)
+//   operational  → operational tier       → config key `operationalModel`  (default Haiku)
 // An empty value means "use the built-in default" (the resolver's fallback).
 
 export interface RoleModels {
@@ -283,7 +284,7 @@ export interface RoleModels {
   thinking: string;
   /** Critical implementation/UI — frontier tier. */
   coding: string;
-  /** Bulk execution/file ops — local-secondary tier (on-device in Mixed mode). */
+  /** Bulk execution/file ops — operational tier (Haiku by default). */
   operational: string;
   /** Prose generation (video scripts, briefings, summaries, drafted messages).
    * A frontier model id → frontier when cloud-ok; a local model id → locked to
@@ -341,19 +342,21 @@ export function buildRoleModelOptions(backends: BackendStatus[] = detectBackends
   const localOptions = localRoleOptions(local);
   const opus = claude?.configured ? roleOption(CLAUDE_OPUS_ID, "Claude Opus", "claude") : null;
   const sonnet = claude?.configured ? roleOption(CLAUDE_SONNET_ID, "Claude Sonnet", "claude") : null;
+  const haiku = claude?.configured ? roleOption(CLAUDE_HAIKU_ID, "Claude Haiku", "claude", "fast/cheap — chat and ambient work") : null;
   const gpt55 = codex?.configured ? roleOption(CODEX_NEWEST_ID, "Codex GPT-5.5", "codex") : null;
   const spark = codex?.configured ? roleOption(CODEX_SPARK_ID, "Codex GPT-5.3 Spark", "codex", "separate coding pool") : null;
 
   return {
     // Thinking defaults to frontier-premium (a weak plan poisons everything
-    // downstream), but local is offered last for a fully on-box posture — the
-    // resolver already honors a local thinkModel override, and offline routing
-    // already sends this role to local-primary anyway.
-    thinking: [opus, sonnet, gpt55, spark, ...localOptions].filter((m): m is RoleModelOption => m !== null),
-    coding: [opus, sonnet, gpt55, spark, ...localOptions].filter((m): m is RoleModelOption => m !== null),
-    operational: [...localOptions, spark, sonnet].filter((m): m is RoleModelOption => m !== null),
+    // downstream); Haiku and local are offered last-resort for a fully on-box
+    // posture — the resolver already honors a local thinkModel override.
+    thinking: [opus, sonnet, gpt55, spark, haiku, ...localOptions].filter((m): m is RoleModelOption => m !== null),
+    coding: [opus, sonnet, gpt55, spark, haiku, ...localOptions].filter((m): m is RoleModelOption => m !== null),
+    // Operational: Claude-first (Haiku is the default), Codex Spark as the
+    // cheap-pool alternative; local options kept until Phase 5 removes them.
+    operational: [haiku, sonnet, spark, opus, ...localOptions].filter((m): m is RoleModelOption => m !== null),
     // Writer: frontier for quality, or the local model to lock everything free.
-    writer: [sonnet, opus, gpt55, ...localOptions].filter((m): m is RoleModelOption => m !== null),
+    writer: [sonnet, opus, gpt55, haiku, ...localOptions].filter((m): m is RoleModelOption => m !== null),
   };
 }
 

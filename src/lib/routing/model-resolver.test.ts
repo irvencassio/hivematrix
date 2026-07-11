@@ -106,10 +106,17 @@ test("cloud-only resolution ignores local role overrides", () => {
   assert.equal(resolveModelId("frontier", { noLocalOverrides: true, frontierBackends: frontierBackends(true, false) }), "sonnet");
 });
 
-test("local-secondary honors operationalModel override before the Qwen profile", () => {
-  writeCfg({ operationalModel: "qwen3-coder-30b" });
-  assert.equal(resolveModelId("local-secondary"), "qwen3-coder-30b");
-  // no override + no qwen profile → null (caller queues/skips)
+test("operational honors operationalModel override, else Haiku, else Codex Spark, else null", () => {
+  writeCfg({ operationalModel: "haiku" });
+  assert.equal(resolveModelId("operational", { frontierBackends: frontierBackends(true, false) }), "haiku");
+  // override that no configured backend supports is ignored
+  writeCfg({ operationalModel: "codex:gpt-5.3-codex-spark" });
+  assert.equal(resolveModelId("operational", { frontierBackends: frontierBackends(true, false) }), "haiku");
+  // no override → Claude configured → Haiku default
   writeCfg({});
-  assert.equal(resolveModelId("local-secondary"), null);
+  assert.equal(resolveModelId("operational", { frontierBackends: frontierBackends(true, false) }), "haiku");
+  // no override, no Claude, Codex only → Spark
+  assert.equal(resolveModelId("operational", { frontierBackends: frontierBackends(false, true) }), "codex:gpt-5.3-codex-spark");
+  // no backend configured → null
+  assert.equal(resolveModelId("operational", { frontierBackends: frontierBackends(false, false) }), null);
 });

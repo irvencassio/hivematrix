@@ -26,9 +26,10 @@ test("a local pick locks writing to local, even when cloud is available", () => 
   assert.equal(w.modelId, "mlx-community/Qwen3.6-35B-A3B-4bit");
 });
 
-test("offline falls back to local even with a frontier pick", () => {
+test("offline falls back to the Claude Sonnet default (no local fallback remains)", () => {
   const w = resolveWriterModel({ canUseCloud: false, writerModel: "claude-opus-4-8" });
-  assert.equal(w.provider, "local");
+  assert.equal(w.provider, "anthropic");
+  assert.equal(w.modelId, "sonnet");
   assert.equal(w.lockedLocal, false);
 });
 
