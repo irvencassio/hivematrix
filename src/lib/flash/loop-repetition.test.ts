@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isRepeatingTail, collapseRepetition, REPEAT_LIMIT } from "./loop";
+import {
+  isRepeatingTail,
+  collapseRepetition,
+  REPEAT_LIMIT,
+  isRepeatingWordTail,
+  collapseWordRepetition,
+  WORD_REPEAT_LIMIT,
+} from "./loop";
 
 const S = "Let me check the latest financial news and market data for yesterday.";
 
@@ -29,4 +36,34 @@ test("collapseRepetition: keeps exactly one copy of a degenerate tail", () => {
   // Non-degenerate text is returned unchanged.
   const varied = "One. Two. Three.";
   assert.equal(collapseRepetition(varied), varied);
+});
+
+test("isRepeatingWordTail: flags a single word looped WORD_REPEAT_LIMIT+ times", () => {
+  // The exact failure mode from the field: "submarines submarines submarines ..."
+  assert.equal(isRepeatingWordTail(Array(WORD_REPEAT_LIMIT).fill("submarines").join(" ")), true);
+  assert.equal(isRepeatingWordTail("cars trucks buses " + Array(20).fill("submarines").join(" ")), true);
+  // Below the limit → not yet a loop.
+  assert.equal(isRepeatingWordTail(Array(WORD_REPEAT_LIMIT - 1).fill("submarines").join(" ")), false);
+});
+
+test("isRepeatingWordTail: flags short word-cycles, not varied lists", () => {
+  // A genuine 2-word cycle repeated enough times.
+  assert.equal(isRepeatingWordTail(Array(WORD_REPEAT_LIMIT).fill("ping pong").join(" ")), true);
+  // A long but varied word list (the model rambling, not looping) is NOT flagged.
+  assert.equal(
+    isRepeatingWordTail("databases schemas tables columns rows cells fields records entries items objects"),
+    false,
+  );
+});
+
+test("collapseWordRepetition: keeps one instance of a degenerate word tail", () => {
+  assert.equal(
+    collapseWordRepetition("cars trucks buses " + Array(20).fill("submarines").join(" ")),
+    "cars trucks buses submarines",
+  );
+  // A genuine 2-word cycle collapses to a single instance of the cycle.
+  assert.equal(collapseWordRepetition("go " + Array(8).fill("ping pong").join(" ")), "go ping pong");
+  // Varied text is returned unchanged.
+  const varied = "planes ships boats trains";
+  assert.equal(collapseWordRepetition(varied), varied);
 });

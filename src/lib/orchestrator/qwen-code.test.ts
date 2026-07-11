@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildQwenProvider, isQwenCodeAvailable } from "./qwen-code";
-import type { QwenProfile } from "@/lib/config/qwen-profile";
+import { type QwenProfile, DEFAULT_SAMPLING } from "@/lib/config/qwen-profile";
 
 function withTempHome<T>(config: Record<string, unknown>, run: () => T): T {
   const originalHome = process.env.HOME;
@@ -39,6 +39,7 @@ const sampleProfile: QwenProfile = {
   thinkingEnabled: true,
   minDecodeRate: 15,
   probeTimeoutMs: 60000,
+  sampling: DEFAULT_SAMPLING,
 };
 
 test("buildQwenProvider returns provider with primary model's output cap, not its context window", () => {

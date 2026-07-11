@@ -12,7 +12,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { getQwenProfile } from "@/lib/config/qwen-profile";
+import { getQwenProfile, type SamplingParams } from "@/lib/config/qwen-profile";
 import { availableLaneTools, executeLaneTool } from "@/lib/orchestrator/lane-tools";
 import { broadcastEvent } from "@/lib/ws/broadcaster";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
@@ -60,6 +60,57 @@ export function collapseRepetition(text: string, limit = REPEAT_LIMIT): string {
   if (run < limit) return text;
   const kept = units.slice(0, units.length - run + 1); // keep exactly one copy
   return kept.join(" ");
+}
+
+/** Consecutive identical words (or short word-cycles) before we call it a loop. */
+export const WORD_REPEAT_LIMIT = 6;
+/** Longest word-cycle period we scan for (catches "a a a", "a b a b", "a b c a b c"). */
+const MAX_CYCLE_PERIOD = 3;
+
+/**
+ * Detect a degenerate trailing word-cycle. Scans cycle periods 1..MAX_CYCLE_PERIOD and
+ * returns `{ period, reps }` for the shortest period whose cycle repeats >= limit times
+ * at the tail, else null. This catches sub-sentence degeneration —
+ * "submarines submarines submarines ..." — that the sentence-based guards miss, since a
+ * word-salad tail has no . ! ? or newline to split on.
+ */
+function trailingWordCycle(
+  words: string[],
+  limit: number,
+): { period: number; reps: number } | null {
+  for (let p = 1; p <= MAX_CYCLE_PERIOD; p++) {
+    if (words.length < p * limit) continue;
+    let reps = 1;
+    let i = words.length - p;
+    while (i - p >= 0) {
+      let match = true;
+      for (let k = 0; k < p; k++) {
+        if (words[i + k] !== words[i - p + k]) { match = false; break; }
+      }
+      if (!match) break;
+      reps++;
+      i -= p;
+    }
+    if (reps >= limit) return { period: p, reps };
+  }
+  return null;
+}
+
+/** Pure: is the tail collapsing into the same word/short cycle repeated over and over? */
+export function isRepeatingWordTail(text: string, limit = WORD_REPEAT_LIMIT): boolean {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  return trailingWordCycle(words, limit) !== null;
+}
+
+/** Pure: collapse a degenerate trailing word-cycle down to a single instance, so the
+ *  word-salad isn't stored verbatim in the conversation history. */
+export function collapseWordRepetition(text: string, limit = WORD_REPEAT_LIMIT): string {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const cycle = trailingWordCycle(words, limit);
+  if (!cycle) return text;
+  // Keep everything before the loop plus exactly one instance of the cycle.
+  const drop = cycle.period * (cycle.reps - 1);
+  return words.slice(0, words.length - drop).join(" ");
 }
 
 // ------------------------------------------------------------------
@@ -166,16 +217,24 @@ async function* streamFromLocalModel(
   tools: unknown[],
   endpoint: string,
   modelId: string,
+  sampling: SamplingParams,
 ): AsyncGenerator<StreamEvent> {
   let response: Response | null = null;
   const body = JSON.stringify({
     model: modelId,
     messages,
     stream: true,
-    temperature: 0.7,
-    max_tokens: 2048,
-    // Discourage the local model from looping a phrase (esp. when it wants a
-    // capability it lacks). OpenAI-compatible; ignored by servers that don't support it.
+    temperature: sampling.temperature,
+    top_p: sampling.topP,
+    max_tokens: sampling.maxTokens,
+    // Discourage the local model from looping a phrase or free-associating into a
+    // word-salad (esp. when it wants a capability it lacks). `repetition_penalty` is
+    // the knob MLX / rapid-mlx actually honors; `frequency_penalty`/`presence_penalty`
+    // are the OpenAI-named equivalents that LM Studio honors instead. Send all three
+    // so whichever backend is live gets a working anti-loop penalty — servers silently
+    // ignore the params they don't recognize. All operator-tunable in Settings →
+    // Local Model (config.qwen.sampling).
+    repetition_penalty: sampling.repetitionPenalty,
     frequency_penalty: 0.4,
     presence_penalty: 0.3,
     ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
@@ -454,14 +513,21 @@ export async function runFlashAgentLoop(
         allTools,
         profile.primary.endpoint,
         profile.primary.modelId,
+        profile.sampling,
       )) {
         if (event.type === "token") {
           turnText += event.content;
           fullText += event.content;
           emit.token(event.content);
           // Stop a runaway repetition loop early instead of streaming the same
-          // sentence up to max_tokens. Only check on a sentence boundary (cheap).
+          // content up to max_tokens. Check on a sentence boundary for repeated
+          // sentences, and on any whitespace for a word/word-cycle collapse
+          // ("submarines submarines ...") that has no sentence punctuation.
           if (/[.!?\n]/.test(event.content) && isRepeatingTail(turnText)) {
+            degenerated = true;
+            break;
+          }
+          if (/\s/.test(event.content) && isRepeatingWordTail(turnText)) {
             degenerated = true;
             break;
           }
@@ -489,7 +555,7 @@ export async function runFlashAgentLoop(
     // out of the returned text (the client already saw the emitted tokens, but the
     // stored history and any summary shouldn't carry the wall of duplicates).
     if (degenerated) {
-      return collapseRepetition(fullText);
+      return collapseWordRepetition(collapseRepetition(fullText));
     }
 
     const toolCalls = [...accumulatedTools.values()].filter((tc) => tc.function.name);

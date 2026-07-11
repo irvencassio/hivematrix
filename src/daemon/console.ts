@@ -6525,6 +6525,19 @@ let _tuningPending = null;
 // (invoked from plain onclick/oninput strings, not closures) can read
 // maxRecommendedContext without a server round-trip per drag.
 let _leCache = null;
+// Flash sampling pending edits (temperature/top-p/rep-penalty/max-tokens). Null
+// until the operator touches a slider, then holds a full param object; cleared on
+// Save/Reset. Independent of _tuningPending — sampling is per-request, not launch argv.
+let _samplingPending = null;
+// Field metadata for the sampling card — labels + one-line hints. Ranges/steps come
+// from the server (le.sampling.bounds), so this never hardcodes numbers.
+const SAMPLING_FIELDS = [
+  { key: "temperature", label: "Temperature", hint: "randomness · lower = steadier" },
+  { key: "topP", label: "Top-p", hint: "nucleus cutoff · trims the long tail" },
+  { key: "repetitionPenalty", label: "Repetition penalty", hint: "higher = less looping" },
+  { key: "maxTokens", label: "Max tokens", hint: "per-reply length cap" },
+];
+function fmtSampling(key, val) { return key === "maxTokens" ? String(val) : Number(val).toFixed(2); }
 
 function localDefaultSelection(le) {
   const sel = {};
@@ -6651,6 +6664,38 @@ function renderLocalModelPicker(le) {
       + ' of ~' + ceilingGiB.toFixed(0) + ' GiB (90% of ' + Math.round(le.ramGB) + ' GB RAM)</div>';
   }
 
+  // Sampling card — the operator-tunable decode controls for Flash chat, sitting
+  // alongside the context slider. Self-contained Save (sampling is per-request, so
+  // no re-provision) instead of folding into the Apply-restart flow above.
+  if (le.sampling) {
+    const s = le.sampling;
+    const cur = _samplingPending || s.current;
+    const rows = SAMPLING_FIELDS.map((f) => {
+      const b = s.bounds[f.key];
+      if (!b) return '';
+      return '<div style="margin-top:6px">'
+        + '<div class="row" style="justify-content:space-between;align-items:baseline;font-size:11px">'
+        + '<span>' + f.label + ' <span class="muted" style="font-size:10px">· ' + f.hint + '</span></span>'
+        + '<b>' + fmtSampling(f.key, cur[f.key]) + '</b></div>'
+        + '<input type="range" min="' + b.min + '" max="' + b.max + '" step="' + b.step + '" value="' + cur[f.key] + '"'
+        + ' style="width:100%;margin:2px 0" onchange="setSampling(\'' + f.key + '\', this.value)">'
+        + '</div>';
+    }).join('');
+    const dirty = JSON.stringify(cur) !== JSON.stringify(s.current);
+    const isDefaults = JSON.stringify(s.current) === JSON.stringify(s.defaults);
+    const actions = dirty
+      ? '<div class="row" style="margin-top:8px;gap:8px;align-items:center">'
+        + '<button class="create" style="font-size:12px" onclick="saveSampling()">Save sampling</button>'
+        + '<button class="linklike" style="font-size:12px" onclick="resetSampling()">Cancel</button></div>'
+      : (isDefaults ? '' : '<div style="margin-top:6px"><button class="linklike" style="font-size:11px" onclick="resetSamplingDefaults()">Restore defaults</button></div>');
+    html += '<div style="margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:6px">'
+      + '<div class="row" style="justify-content:space-between;align-items:center"><b style="font-size:12px">Sampling</b>'
+      + '<span class="muted" style="font-size:10px">applies next reply · no restart</span></div>'
+      + '<div class="muted" style="font-size:10px;margin-top:2px">Decode controls for Flash chat — the anti-degeneration knobs.</div>'
+      + rows + actions
+      + '<div id="samplingSaveLog" style="font-size:11px;margin-top:4px"></div></div>';
+  }
+
   const currentSelection = le.selection || {};
   const currentTuning = {};
   for (const key of Object.keys(le.tuning || {})) {
@@ -6735,6 +6780,49 @@ function resetLocalSelection() {
   _localPending = null; // re-seeded from server state on next render
   _tuningPending = null;
   renderProviderToggles();
+}
+
+// --- Flash sampling controls ---
+function setSampling(key, valueStr) {
+  if (!_leCache || !_leCache.sampling) return;
+  const b = _leCache.sampling.bounds[key];
+  if (!b) return;
+  let v = Number(valueStr);
+  if (!isFinite(v)) return;
+  v = Math.min(b.max, Math.max(b.min, v));
+  if (key === "maxTokens") v = Math.round(v);
+  const cur = _samplingPending ? { ..._samplingPending } : { ..._leCache.sampling.current };
+  cur[key] = v;
+  _samplingPending = cur;
+  renderProviderToggles();
+}
+
+function resetSampling() { // cancel pending edits, revert to saved values
+  _samplingPending = null;
+  renderProviderToggles();
+}
+
+function resetSamplingDefaults() { // stage the shipped defaults (still needs Save)
+  if (!_leCache || !_leCache.sampling) return;
+  _samplingPending = { ..._leCache.sampling.defaults };
+  renderProviderToggles();
+}
+
+async function saveSampling() {
+  if (!_samplingPending) return;
+  try {
+    await api("/local-engine/sampling", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(_samplingPending),
+    });
+  } catch (e) {
+    const log = document.getElementById("samplingSaveLog");
+    if (log) log.innerHTML = '<span style="color:var(--danger,#c33)">✗ save failed — is the daemon reachable?</span>';
+    return;
+  }
+  _samplingPending = null;
+  await renderProviderToggles();
+  const log = document.getElementById("samplingSaveLog");
+  if (log) log.innerHTML = '<span style="color:var(--ok)">✓ saved — applies on your next reply</span>';
 }
 
 // Only sends a tier's tuning if it actually differs from that tier's preset

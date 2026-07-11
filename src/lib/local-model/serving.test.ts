@@ -10,7 +10,7 @@ import {
   startLocalServingSupervisor, stopLocalServingSupervisor, getServingStatus, isServerUp,
   waitForServerReady,
 } from "./serving";
-import type { QwenProfile } from "@/lib/config/qwen-profile";
+import { type QwenProfile, DEFAULT_SAMPLING } from "@/lib/config/qwen-profile";
 
 // Fixed test ports collide when two checkouts/sessions run the suite at once
 // (EADDRINUSE flakes). Bind :0, take the kernel-assigned port, release it —
@@ -34,6 +34,7 @@ const profile = (over: Partial<QwenProfile["primary"]> & { location?: QwenProfil
     maxOutputTokens: over.maxOutputTokens ?? 16384,
   },
   secondary: null, thinkingEnabled: true, minDecodeRate: 15, probeTimeoutMs: 60000,
+  sampling: DEFAULT_SAMPLING,
 });
 
 test("portFromEndpoint parses the port (default 8080)", () => {

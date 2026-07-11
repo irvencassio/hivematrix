@@ -26,7 +26,7 @@ import {
 } from "./local-engine";
 import { DEFAULT_KV_CACHE_DTYPE } from "./local-tuning";
 import { optionFor, LOCAL_MODEL_CATALOG, type LocalSelection } from "./local-quant";
-import type { QwenProfile } from "@/lib/config/qwen-profile";
+import { type QwenProfile, DEFAULT_SAMPLING } from "@/lib/config/qwen-profile";
 import { provisioningPython } from "@/lib/voice/provision";
 
 const execFileP = promisify(execFile);
@@ -180,6 +180,7 @@ export function qwenProfileForProvisionPlan(plan: ProvisionPlan): QwenProfile | 
     thinkingEnabled: false,
     minDecodeRate: 15,
     probeTimeoutMs: 60_000,
+    sampling: DEFAULT_SAMPLING,
   };
 }
 

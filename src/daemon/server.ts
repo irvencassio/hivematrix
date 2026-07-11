@@ -1499,6 +1499,8 @@ export function createDaemonServer() {
           };
         }
 
+        const { getQwenSampling, DEFAULT_SAMPLING, SAMPLING_BOUNDS } = await import("@/lib/config/qwen-profile");
+
         json(res, 200, {
           enabled,
           installed,
@@ -1509,7 +1511,28 @@ export function createDaemonServer() {
           selection: getLocalEngineSelection(),
           options,
           tuning: tuningByTier,
+          // Flash decode controls — current values + defaults + slider bounds, so the
+          // picker renders the sampling card without hardcoding any ranges.
+          sampling: { current: getQwenSampling(), defaults: DEFAULT_SAMPLING, bounds: SAMPLING_BOUNDS },
         });
+        return;
+      }
+
+      // POST /local-engine/sampling { temperature?, topP?, repetitionPenalty?, maxTokens? }
+      // — persist the operator's Flash decode controls (config.qwen.sampling). Each field
+      // is bounds-checked against SAMPLING_BOUNDS. Takes effect on the next Flash turn; no
+      // restart needed (sampling is per-request, unlike context/KV which is launch-time argv).
+      if (req.method === "POST" && urlPath === "/local-engine/sampling") {
+        const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
+        const { validateSampling, setQwenSampling } = await import("@/lib/config/qwen-profile");
+        const result = validateSampling(body);
+        if (!result.ok) {
+          json(res, 400, { ok: false, error: result.error });
+          return;
+        }
+        setQwenSampling(result.sampling);
+        broadcast("local-engine:changed", { sampling: result.sampling });
+        json(res, 200, { ok: true, sampling: result.sampling });
         return;
       }
       // POST /local-engine/enabled { enabled } — persist the operator's toggle and broadcast.
