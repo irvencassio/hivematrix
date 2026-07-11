@@ -16,12 +16,17 @@ import { type InboundEmail } from "./contracts";
 const RS = "\x1e"; // record separator
 const US = "\x1f"; // unit separator
 
-type OsascriptRunner = (script: string, args: string[], timeoutMs: number) => Promise<{ ok: boolean; stdout: string }>;
+type OsascriptResult = { ok: boolean; stdout: string; stderr?: string; timedOut?: boolean };
+type OsascriptRunner = (script: string, args: string[], timeoutMs: number) => Promise<OsascriptResult>;
 
-function defaultOsascript(script: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; stdout: string }> {
+function defaultOsascript(script: string, args: string[], timeoutMs: number): Promise<OsascriptResult> {
   return new Promise((resolve) => {
-    execFile("osascript", ["-e", script, ...args], { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
-      resolve({ ok: !err, stdout: String(stdout ?? "") });
+    execFile("osascript", ["-e", script, ...args], { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+      // execFile signals a timeout kill via err.killed + err.signal (SIGTERM by
+      // default) — used to distinguish "Mail didn't respond" from a hard
+      // AppleScript error (permission denied, not running, etc).
+      const timedOut = !!err && (err as NodeJS.ErrnoException & { killed?: boolean; signal?: string }).killed === true;
+      resolve({ ok: !err, stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), timedOut });
     });
   });
 }
@@ -117,11 +122,55 @@ export async function readInboxSince(sinceId: number, limit = 25, timeoutMs = 30
   return parseMailRecords(res.stdout);
 }
 
+export type MailProbeKind = "granted" | "not_authorized" | "not_running" | "timeout" | "error";
+
+export interface MailProbeResult {
+  ok: boolean;
+  kind: MailProbeKind;
+  detail: string;
+}
+
+// AppleScript surfaces TCC/Automation denial as error -1743 ("not allowed to
+// send Apple events"), and "Mail isn't running" as error -600 when a script
+// explicitly avoids auto-launching it. Match on both the numeric code and the
+// wording, since osascript's stderr format has drifted across macOS releases.
+function classifyOsascriptFailure(stderr: string, timedOut: boolean): { kind: MailProbeKind; detail: string } {
+  if (timedOut) {
+    return { kind: "timeout", detail: "Mail did not respond in time." };
+  }
+  if (/-1743|not authorized|not allowed to send apple events/i.test(stderr)) {
+    return {
+      kind: "not_authorized",
+      detail: 'HiveMatrix is not authorized to control Mail. Approve the "HiveMatrix wants to control Mail" prompt, or turn it on in System Settings → Privacy & Security → Automation.',
+    };
+  }
+  if (/-600|isn.t running|is not running|application isn.t running/i.test(stderr)) {
+    return { kind: "not_running", detail: "Mail.app is not running." };
+  }
+  return { kind: "error", detail: stderr.trim() || "Could not control Mail.app (unknown error)." };
+}
+
+/**
+ * Explicit Apple Mail Automation probe that distinguishes WHY control failed
+ * (not authorized vs. not running vs. timed out) instead of a bare boolean —
+ * the setup UI needs the real reason to show something better than a generic
+ * "approval needed" dead end. With allowLaunch, `tell application "Mail"`
+ * both launches Mail and fires the AppleEvent that makes macOS register
+ * HiveMatrix under Mail's Automation entry (it won't appear there otherwise).
+ */
+export async function probeAppleMail(timeoutMs = 8_000, opts: { allowLaunch?: boolean } = {}): Promise<MailProbeResult> {
+  if (!opts.allowLaunch && !isMailAppRunningForApplemail()) {
+    return { kind: "not_running", ok: false, detail: "Mail.app is not running." };
+  }
+  const res = await osascriptRunner(`tell application "Mail" to return (count of mailboxes)`, [], timeoutMs);
+  if (res.ok) return { ok: true, kind: "granted", detail: "HiveMatrix can control Apple Mail." };
+  const { kind, detail } = classifyOsascriptFailure(res.stderr ?? "", res.timedOut === true);
+  return { ok: false, kind, detail };
+}
+
 /** Can we drive Mail.app (running + Automation permission granted)? */
 export async function canControlMail(timeoutMs = 8_000, opts: { allowLaunch?: boolean } = {}): Promise<boolean> {
-  if (!opts.allowLaunch && !isMailAppRunningForApplemail()) return false;
-  const res = await osascriptRunner(`tell application "Mail" to return (count of mailboxes)`, [], timeoutMs);
-  return res.ok;
+  return (await probeAppleMail(timeoutMs, opts)).ok;
 }
 
 // argv: to, subject, body, "send"|"draft", then 0+ attachment file paths.

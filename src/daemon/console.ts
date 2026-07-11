@@ -1562,8 +1562,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="mb-body">
         <div class="t">Apple Mail Automation</div>
         <div class="muted" id="ml_auto_detail">HiveMatrix needs permission to control Mail (read inbox + draft/send).</div>
-        <button onclick="openSystemPane('automation')">Open Automation settings</button>
-        <div class="muted" style="font-size:11px;margin-top:3px">Open Mail.app first so it appears in the Automation list.</div>
+        <button id="ml_auto_retry_btn" onclick="mlRetryAutomationProbe()">Grant Mail Automation</button>
+        <button onclick="mlOpenAutomationSettings()">Open Automation settings</button>
+        <div class="muted" style="font-size:11px;margin-top:3px" id="ml_auto_hint">Click "Grant Mail Automation" — HiveMatrix will launch Mail and macOS will ask you to approve control. If the prompt was dismissed, use "Open Automation settings" to turn it on by hand.</div>
       </div>
     </div>
     <div class="mb-step">
@@ -1755,9 +1756,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <input id="t_skill_q" placeholder="Search your skills & commands…" oninput="searchTaskSkills()" style="margin-bottom:4px" />
         <div id="t_skill_results" style="max-height:170px;overflow:auto"></div>
       </div>
-      <label class="flbl">Project</label>
+      <label class="flbl">Project <span class="muted" style="font-size:10px;font-weight:400">(optional — defaults to Inbox / your home directory)</span></label>
       <div id="t_project_wrapper" class="project-search">
-        <input id="t_project_search" type="text" placeholder="Search projects…" autocomplete="off" oninput="filterProjectDropdown()" onfocus="openProjectDropdown()" onkeydown="onProjectSearchKeydown(event)" />
+        <input id="t_project_search" type="text" placeholder="Search projects… (leave blank for an operations task)" autocomplete="off" oninput="filterProjectDropdown()" onfocus="openProjectDropdown()" onkeydown="onProjectSearchKeydown(event)" />
         <div id="t_project_dropdown" class="project-dropdown hidden">
           <div class="project-sort-row">
             <span class="project-sort-btn active" data-sort="recent" onclick="sortProjectsDropdown('recent')">Most recent</span>
@@ -4374,13 +4375,37 @@ async function obRequestDesktopPerms() {
   } catch(e) { await hmAlert('Desktop permission request failed: ' + e, 'Setup'); }
 }
 
+let _obMailRetryTimer = null;
+let _obMailRetryElapsedMs = 0;
 async function obProbeMailAutomation() {
+  clearTimeout(_obMailRetryTimer); _obMailRetryTimer = null; _obMailRetryElapsedMs = 0;
   try {
     const setup = await api('/onboarding/setup/mail-automation/probe', { method: 'POST' });
     _obRenderSetupPerms(setup);
     const mail = _obSetupItem(setup, 'permissions', 'mailAutomation');
-    if (!_obSetupStateReady(mail)) await openSystemPane('automation');
+    if (!_obSetupStateReady(mail)) {
+      await openSystemPane('automation');
+      // Poll the same probe (fires the AppleEvent again) until the "HiveMatrix
+      // wants to control Mail" prompt is answered, so the wizard flips to
+      // Granted on its own instead of leaving the user to re-click.
+      obRetryMailAutomationProbe();
+    }
   } catch(e) { await hmAlert('Mail Automation check failed: ' + e, 'Setup'); }
+}
+
+async function obRetryMailAutomationProbe() {
+  clearTimeout(_obMailRetryTimer); _obMailRetryTimer = null;
+  async function tick() {
+    let setup = null;
+    try { setup = await api('/onboarding/setup/mail-automation/probe', { method: 'POST' }); } catch (e) { /* transient — keep retrying */ }
+    if (setup) _obRenderSetupPerms(setup);
+    const mail = setup ? _obSetupItem(setup, 'permissions', 'mailAutomation') : null;
+    if (mail && _obSetupStateReady(mail)) { _obMailRetryElapsedMs = 0; return; }
+    _obMailRetryElapsedMs += 2000;
+    if (_obMailRetryElapsedMs >= 30000) { _obMailRetryElapsedMs = 0; return; }
+    _obMailRetryTimer = setTimeout(tick, 2000);
+  }
+  await tick();
 }
 
 // Microphone can't be probed from the daemon without Swift; mark it as opened
@@ -4874,7 +4899,20 @@ async function submitMessageBee() {
 }
 
 // --- Mail Lane guided setup -------------------------------------------------
+// macOS only lists a target app under Privacy & Security → Automation AFTER
+// the controlling app has actually fired an AppleEvent at it WHILE it is
+// running. Opening the Automation pane cold (no prior probe) shows Mail
+// nowhere — nothing to toggle, a dead end. So every entry point here fires
+// the real probe (POST /mailbee/probe, which launches Mail and sends the
+// AppleEvent) BEFORE it ever points the user at System Settings, and then
+// polls until the "HiveMatrix wants to control Mail" prompt is answered —
+// the user should not have to re-click after approving it.
 let _mlPollTimer = null;
+let _mlRetryTimer = null;
+let _mlRetryElapsedMs = 0;
+const ML_RETRY_INTERVAL_MS = 2000;
+const ML_RETRY_CAP_MS = 30000;
+
 function openMailBeeSetup() {
   document.getElementById('ml_err').textContent = '';
   document.getElementById('ml_status').textContent = '';
@@ -4882,6 +4920,9 @@ function openMailBeeSetup() {
   renderMailBeeState(null);
   document.getElementById('mailOverlay').classList.add('open');
   async function pollMl() {
+    // Passive refresh for the channel/trusted-sender marks — never probes
+    // Mail itself (that's mlRetryAutomationProbe's job) so it can't trigger a
+    // surprise TCC prompt just from having the dialog open.
     const data = await api('/mailbee');
     if (data) renderMailBeeState(data);
     if (document.getElementById('mailOverlay').classList.contains('open'))
@@ -4889,11 +4930,72 @@ function openMailBeeSetup() {
   }
   clearTimeout(_mlPollTimer);
   pollMl();
+  // Fire the real probe as soon as the dialog opens, with Mail launched, so
+  // the permission prompt has a chance to appear right away instead of
+  // requiring an extra click.
+  mlRetryAutomationProbe();
 }
 function closeMailBee() {
   clearTimeout(_mlPollTimer);
   _mlPollTimer = null;
+  mlStopAutomationRetry();
   document.getElementById('mailOverlay').classList.remove('open');
+}
+function mlStopAutomationRetry() {
+  clearTimeout(_mlRetryTimer);
+  _mlRetryTimer = null;
+  _mlRetryElapsedMs = 0;
+  const btn = document.getElementById('ml_auto_retry_btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Grant Mail Automation'; }
+}
+// One explicit probe: launches Mail (if needed) and fires the AppleEvent that
+// makes macOS register HiveMatrix under Mail's Automation entry. Renders
+// whatever real result comes back (granted / not authorized / not running /
+// timed out) instead of a generic "approval needed".
+async function mlFireProbeOnce() {
+  let data = null;
+  try { data = await api('/mailbee/probe', { method: 'POST' }); } catch (e) { /* transient — the retry loop will try again */ }
+  if (data) renderMailBeeState(data);
+  return data;
+}
+// Fire the probe, then poll every ~2s (capped ~30s) until it succeeds, macOS
+// reports explicit denial, or the cap is hit — flipping the dialog to
+// "Mail connected" automatically so the user never has to re-click Enable.
+async function mlRetryAutomationProbe() {
+  mlStopAutomationRetry();
+  const btn = document.getElementById('ml_auto_retry_btn');
+  const status = document.getElementById('ml_status');
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  async function tick() {
+    const data = await mlFireProbeOnce();
+    if (data && data.mailControllable) {
+      if (status) status.textContent = 'Mail connected ✓';
+      mlStopAutomationRetry();
+      return;
+    }
+    if (data && data.mailProbeKind === 'not_authorized' && status) {
+      status.textContent = 'Waiting for you to approve the "HiveMatrix wants to control Mail" prompt…';
+    } else if (status) {
+      status.textContent = 'Waiting for Mail Automation approval…';
+    }
+    _mlRetryElapsedMs += ML_RETRY_INTERVAL_MS;
+    if (_mlRetryElapsedMs >= ML_RETRY_CAP_MS) {
+      if (status) status.textContent = (data && data.mailProbeDetail) || 'Still not approved. Use "Open Automation settings" to turn it on by hand, then try again.';
+      mlStopAutomationRetry();
+      return;
+    }
+    _mlRetryTimer = setTimeout(tick, ML_RETRY_INTERVAL_MS);
+  }
+  await tick();
+}
+// "Open Automation settings" fallback — fires one probe first (so Mail is
+// actually registered and has something to show), THEN opens the pane, and
+// keeps the retry loop running in the background so approving the toggle by
+// hand is picked up without another click.
+async function mlOpenAutomationSettings() {
+  await mlFireProbeOnce();
+  await openSystemPane('automation');
+  mlRetryAutomationProbe();
 }
 function renderMailBeeState(data) {
   const mark = (id, ok) => { const el = document.getElementById(id); el.textContent = ok ? '✓' : '○'; el.className = 'mb-mark ' + (ok ? 'ok' : 'no'); };
@@ -4901,9 +5003,22 @@ function renderMailBeeState(data) {
   const enabled = data ? !!data.enabled : false;
   mark('ml_auto_mark', controllable);
   mark('ml_chan_mark', enabled);
-  document.getElementById('ml_auto_detail').textContent = controllable
-    ? 'Granted — HiveMatrix can control Apple Mail.'
-    : 'HiveMatrix needs permission to control Mail (read inbox + draft/send). Open Mail, then approve.';
+  const detailEl = document.getElementById('ml_auto_detail');
+  if (detailEl) {
+    if (controllable) {
+      detailEl.textContent = 'Granted — HiveMatrix can control Apple Mail.';
+    } else if (data && data.mailProbeKind === 'not_authorized') {
+      detailEl.textContent = data.mailProbeDetail || 'Not authorized yet — approve the "HiveMatrix wants to control Mail" prompt, or turn it on in Automation settings.';
+    } else if (data && data.mailProbeKind === 'not_running') {
+      detailEl.textContent = 'Mail.app is not running. Click "Grant Mail Automation" to launch it and ask for permission.';
+    } else if (data && data.mailProbeKind === 'timeout') {
+      detailEl.textContent = 'Mail did not respond in time. Click "Grant Mail Automation" to try again.';
+    } else if (data && data.mailProbeDetail) {
+      detailEl.textContent = data.mailProbeDetail;
+    } else {
+      detailEl.textContent = 'HiveMatrix needs permission to control Mail (read inbox + draft/send). Click "Grant Mail Automation" to ask.';
+    }
+  }
   if (data && data.identities) {
     const trusted = data.identities.filter(i => i.status === 'allowed' || i.status === 'paired');
     mark('ml_trust_mark', trusted.length > 0);
@@ -4925,6 +5040,12 @@ async function submitMailBee() {
     renderMailBeeState(r.data || {});
     status.textContent = r.detail || (r.ok ? 'Configured.' : 'Done.');
     document.getElementById('ml_email').value = '';
+    // Enabling fires one probe attempt server-side (see configureMailBee).
+    // The very first AppleEvent macOS ever sees for an app typically fails
+    // immediately while it shows the permission prompt — so if we're not
+    // controllable yet, keep polling instead of leaving the user stuck on a
+    // stale "needs action" state after they click OK.
+    if (!(r.data && r.data.mailControllable)) mlRetryAutomationProbe();
     await refresh();
   } catch (e) { err.textContent = String(e); status.textContent = ''; }
 }
@@ -6128,7 +6249,7 @@ function renderSettingsModelControls() {
         : m.frontierProvider || "claude";
     frontierSelect.value = effectiveFrontierProvider;
     frontierSelect.disabled = !hasBothFrontier;
-    frontierSelect.title = hasBothFrontier ? "Choose which frontier CLI handles Mixed and Cloud-only work." : "Only one frontier CLI is available.";
+    frontierSelect.title = hasBothFrontier ? "Choose which frontier CLI (Claude or Codex) handles frontier work." : "Only one frontier CLI is available.";
   }
   renderRoleModels();
 }
@@ -8970,7 +9091,6 @@ async function createTask() {
   const modelValue = document.getElementById("t_model").value;
   const sel = modelById[modelValue] || { modelId: null, fast: false };
   if (!description) { err.textContent = "Please describe what the agent should do."; return; }
-  if (!selectedProject?.name || !selectedProject?.path) { err.textContent = "Please choose a project — or use \"Another folder\" to pick one manually."; return; }
   if (!modelValue) { err.textContent = "Please choose a model before creating the task."; return; }
   if (_attachUploading > 0) { err.textContent = "Wait for attachments to finish uploading."; return; }
   if (_attachError) { err.textContent = "Try attaching failed files again before creating the task."; return; }
@@ -8980,8 +9100,14 @@ async function createTask() {
     return; // Preview shown (or a "no changes" toast) — user confirms, then Create again.
   }
   const attachments = _attachments.slice();
-  const projectPath = selectedProject.path;
-  const projectName = selectedProject.name;
+  // Project is optional — an operational task (e.g. running a skill with no
+  // directory of its own) doesn't need one. When nothing is picked, fall back
+  // to the built-in Inbox catch-all ("~", expanded to the home dir server-side)
+  // instead of blocking Create.
+  const inboxFallback = projectDropdownItems.find(p => p.name === "inbox") || { name: "inbox", path: "~" };
+  const projSel = (selectedProject?.name && selectedProject?.path) ? selectedProject : inboxFallback;
+  const projectPath = projSel.path;
+  const projectName = projSel.name;
   try {
     // Title optional — omit when blank so the daemon derives it from the instructions.
     const route = (document.getElementById("t_route") || {}).value || "auto";

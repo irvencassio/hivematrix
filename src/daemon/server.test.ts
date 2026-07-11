@@ -889,6 +889,29 @@ test("POST /tasks expands a '~/sub' projectPath prefix, leaves other absolute pa
   assert.equal(s2.projectPath, "/tmp/some-repo", "a normal absolute path outside $HOME is left as-is");
 });
 
+test("POST /tasks creates an operations task with no project — 201, and a real (non-empty) default working directory", async (t) => {
+  // The New Task form no longer forces a project (an operational task, e.g. a
+  // skill run with nothing to check out, has no directory of its own). The
+  // client now falls back to the Inbox project client-side, but the server
+  // must independently never persist an empty projectPath — cwd:"" throws
+  // ENOENT in child_process.spawn once the scheduler tries to run the agent.
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "Summarize today's inbox and text me the highlights." }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  const stored = getDb().prepare("SELECT projectPath, project FROM tasks WHERE _id = ?").get(body._id as string) as { projectPath: string; project: string };
+  assert.ok(stored.projectPath, "a project-less task still gets a real working directory");
+  assert.notEqual(stored.projectPath, "", "projectPath is never persisted as an empty string");
+  assert.equal(stored.projectPath, process.env.HOME, "defaults to the home directory");
+});
+
 test("POST /tasks still routes an explicit Terminal Lane request to the lane (regression)", async (t) => {
   withTempHome(t);
   const { _resetDbForTests } = await import("@/lib/db");

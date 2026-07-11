@@ -4299,7 +4299,11 @@ export function createDaemonServer() {
         body.title = title || deriveTaskTitle(description);
         if (typeof body.project !== "string" || !body.project.trim()) body.project = "hivematrix";
         if (typeof body.projectPath !== "string" || !body.projectPath.trim()) {
-          body.projectPath = "";
+          // No project/directory given (an "operations" task, e.g. a skill run
+          // with nothing to check out) — fall back to the home dir rather than
+          // an empty string, which crashes child_process.spawn's cwd option
+          // (ENOENT) once the scheduler tries to spawn the agent.
+          body.projectPath = homedir();
         } else {
           // Expand a leading "~" (the built-in Inbox project's path) so it's a real
           // absolute directory by the time the agent spawns — otherwise

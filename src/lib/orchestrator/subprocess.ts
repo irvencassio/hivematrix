@@ -363,6 +363,12 @@ export async function spawnAgent(
   thinkingMode?: string,
   fastMode?: boolean,
 ): Promise<AgentProcess> {
+  // Defense in depth: an empty/blank projectPath (a project-less "operations"
+  // task, or any legacy caller that forgot to set one) must never reach
+  // child_process.spawn's cwd option below — cwd:"" throws ENOENT rather than
+  // inheriting the current directory. Callers should already default to a real
+  // directory (see server.ts POST /tasks), but this is the last line of defense.
+  if (!projectPath || !projectPath.trim()) projectPath = homedir();
   // "mixed" is resolved through the role-based router + connectivity policy:
   // frontier for thinking-heavy work when available, local otherwise (with a
   // frontier-review debt). This wires the New-Task "Mixed" option into the

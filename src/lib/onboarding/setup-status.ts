@@ -163,9 +163,12 @@ function buildMailAutomation(input: FirstRunSetupStatusInput): SetupItem {
     id: "mailAutomation",
     title: "Mail Automation",
     state: probe.mailControllable ? "granted" : "needs_action",
+    // mailProbeDetail carries the real reason (not authorized / not running /
+    // timed out) from applemail.ts's probeAppleMail, instead of a generic
+    // "permission is needed" that leaves the user guessing what to do next.
     detail: probe.mailControllable
       ? "Mail.app automation is available."
-      : "Mail.app automation permission is needed.",
+      : probe.mailProbeDetail || "Mail.app automation permission is needed.",
     action: probe.mailControllable ? undefined : "check_mail_automation",
   };
 }

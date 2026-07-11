@@ -1883,9 +1883,10 @@ test("New task path field is hidden, not a primary editable input", () => {
   assert.doesNotMatch(slice, /placeholder="Project path/, "no visible project-path input in the task form");
 });
 
-test("New task uses one Project control with derived path as secondary text", () => {
+test("New task uses one Project control with derived path as secondary text, and it's optional", () => {
   const slice = taskFormSlice(CONSOLE_HTML);
-  assert.match(slice, />Project<\/label>/, "a single 'Project' label");
+  assert.match(slice, /<label class="flbl">Project /, "a single 'Project' label");
+  assert.match(slice, /\(optional/i, "project is explicitly marked optional — operational tasks don't need one");
   assert.match(slice, /id="t_project_search"/, "searchable combobox kept");
   assert.match(slice, /id="t_project_selected"/, "selected-project row (name + muted path) present");
 });
@@ -1936,21 +1937,26 @@ test("board card title has a native tooltip so a truncated title stays readable 
     "card title span carries a title= tooltip with the full (untruncated) task name");
 });
 
-test("createTask builds the payload from the selection (no freeform path/search read)", () => {
+test("createTask builds the payload from the selection, falling back to Inbox when nothing is picked (no freeform path/search read)", () => {
   const js = extractScript(CONSOLE_HTML);
   const body = fnBody(js, "createTask");
-  assert.match(body, /const projectPath = selectedProject\.path/, "project path comes from the selection state");
-  assert.match(body, /const projectName = selectedProject\.name/, "project name comes from the selection state");
+  // Project is optional: an operational task with no directory of its own
+  // must still be creatable, so createTask falls back to the built-in Inbox
+  // catch-all rather than requiring a selection.
+  assert.match(body, /projectDropdownItems\.find\(p => p\.name === "inbox"\)/, "falls back to the Inbox project when none is selected");
+  assert.match(body, /const projectPath = projSel\.path/, "project path comes from the (possibly-fallback) selection state");
+  assert.match(body, /const projectName = projSel\.name/, "project name comes from the (possibly-fallback) selection state");
   assert.match(body, /project: projectName/, "payload project is the selected name, not the search box");
   assert.doesNotMatch(body, /getElementById\("t_project_search"\)\.value/, "never reads the freeform filter text into the payload");
 });
 
-test("createTask validates with human-readable messages", () => {
+test("createTask never blocks Create on a missing project", () => {
   const js = extractScript(CONSOLE_HTML);
   const body = fnBody(js, "createTask");
   assert.match(body, /Please describe what the agent should do\./, "description required");
-  assert.match(body, /Please choose a project/, "project required");
   assert.match(body, /Please choose a model before creating the task\./, "model required");
+  // The old hard block on project selection is gone — project is optional.
+  assert.doesNotMatch(body, /Please choose a project/, "no longer blocks Create for a missing project");
   // Old technical phrasing is gone.
   assert.doesNotMatch(body, /Description and project path are required\./, "stale technical error removed");
 });

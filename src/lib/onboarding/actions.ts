@@ -331,7 +331,7 @@ export async function configureMailBee(opts: {
   displayName?: string;
 }): Promise<ActionResult> {
   const store = await import("@/lib/mailbee/store");
-  const { canControlMail, readInboxSince } = await import("@/lib/mailbee/applemail");
+  const { probeAppleMail, readInboxSince } = await import("@/lib/mailbee/applemail");
 
   const warnings: string[] = [];
   const raw = (opts.email ?? "").trim();
@@ -340,7 +340,13 @@ export async function configureMailBee(opts: {
     else store.upsertIdentity(raw, "allowed", opts.displayName ?? null);
   }
 
-  const mailControllable = await canControlMail(undefined, { allowLaunch: true });
+  // allowLaunch: true both launches Mail (if needed) and fires the AppleEvent
+  // that makes macOS register HiveMatrix under Mail's Automation entry — the
+  // very first attempt commonly fails with "not authorized" WHILE the TCC
+  // prompt is shown; the console's guided dialog polls this same probe again
+  // after the user responds (see mlRetryAutomationProbe in console.ts).
+  const probe = await probeAppleMail(undefined, { allowLaunch: true });
+  const mailControllable = probe.ok;
   // Only enable once Mail is controllable, and pin the high-water to the newest
   // message so existing inbox mail isn't turned into a flood of tasks.
   if (opts.enable !== false && mailControllable) {
@@ -356,7 +362,7 @@ export async function configureMailBee(opts: {
   const ok = enabled && mailControllable;
 
   let detail: string;
-  if (!mailControllable) detail = "Grant Apple Mail Automation permission (open Mail, then approve), then re-run.";
+  if (!mailControllable) detail = probe.detail;
   else if (!enabled) detail = "Mail controllable — enabling the channel…";
   else detail = trusted > 0
     ? "Mail Lane ready: channel on, Mail controllable, trusted sender set."
@@ -368,6 +374,8 @@ export async function configureMailBee(opts: {
     data: {
       enabled,
       mailControllable,
+      mailProbeKind: probe.kind,
+      mailProbeDetail: probe.detail,
       identities,
       deepLinks: { automation: TCC_DEEP_LINKS.automation },
       warnings: warnings.length ? warnings : undefined,
