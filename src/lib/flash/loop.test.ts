@@ -87,14 +87,16 @@ test("buildFlashPrompt: blank system messages are dropped", () => {
 
 test("buildFlashSpawnArgs: wires model, budgets, mcp config, and allowed tools", () => {
   const args = buildFlashSpawnArgs({
-    prompt: "hello",
     systemPrompts: ["sys1", "sys2"],
     mcpConfigPath: "/p/flash-mcp-config.json",
     toolNames: ["mcp__flash__brain_search", "mcp__flash__mail_send"],
     maxTurns: 12,
   });
 
-  assert.deepEqual(args.slice(0, 2), ["-p", "hello"]);
+  // The prompt is NOT in argv — it goes via stdin (a prompt starting with "--" would
+  // otherwise be parsed as an unknown CLI option). `-p` stays as the print flag.
+  assert.equal(args[0], "-p");
+  assert.ok(!args.includes("hello"));
   assert.equal(args[args.indexOf("--model") + 1], "haiku");
   assert.equal(args[args.indexOf("--output-format") + 1], "stream-json");
   assert.ok(args.includes("--verbose"));

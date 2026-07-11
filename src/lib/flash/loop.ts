@@ -108,18 +108,24 @@ export function buildFlashPrompt(messages: FlashMessage[]): FlashPromptParts {
 }
 
 export interface FlashSpawnArgsInput {
-  prompt: string;
   systemPrompts: string[];
   mcpConfigPath: string;
   toolNames: string[];
   maxTurns: number;
 }
 
-/** Build the `claude` CLI argv for one Flash turn. Pure. */
+/**
+ * Build the `claude` CLI argv for one Flash turn. Pure. The prompt is NOT an argv
+ * element — it is written to the child's stdin — because a prompt that starts with
+ * `--` (our transcript block leads with "--- Prior conversation ---") gets parsed by
+ * the CLI as an unknown option and the process exits 1. stdin sidesteps arg parsing
+ * entirely and has no start-of-string ambiguity, unlike `-p <value>` or a `--`
+ * end-of-options marker (the latter also triggers a 3s stdin-wait). `-p` stays as the
+ * print-mode flag; with no positional prompt the CLI reads the query from stdin.
+ */
 export function buildFlashSpawnArgs(input: FlashSpawnArgsInput): string[] {
   return [
     "-p",
-    input.prompt,
     "--model",
     "haiku",
     "--output-format",
@@ -228,7 +234,6 @@ export async function runFlashAgentLoop(
 
   const { systemPrompts, prompt } = buildFlashPrompt(messages);
   const args = buildFlashSpawnArgs({
-    prompt,
     systemPrompts,
     mcpConfigPath: configPath,
     toolNames,
@@ -241,13 +246,20 @@ export async function runFlashAgentLoop(
   return new Promise<string>((resolve) => {
     let proc: ChildProcess;
     try {
-      proc = spawnImpl(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
+      proc = spawnImpl(binary, args, { stdio: ["pipe", "pipe", "pipe"] });
     } catch (err) {
       const msg = `\n\n[Flash model error: failed to launch claude — ${err instanceof Error ? err.message : String(err)}]`;
       emit.token(msg);
       resolve(msg);
       return;
     }
+
+    // Feed the prompt via stdin (never as an argv value — see buildFlashSpawnArgs).
+    try {
+      proc.stdin?.on("error", () => { /* child may exit before we finish writing */ });
+      proc.stdin?.write(prompt);
+      proc.stdin?.end();
+    } catch { /* child already gone; stdout/exit handlers below settle the turn */ }
 
     const parser = new StreamParser();
     const streamState = createFlashStreamState();
