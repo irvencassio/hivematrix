@@ -24,7 +24,7 @@
  */
 
 import { Task, generateId } from "@/lib/db";
-import { localChatComplete, type ChatComplete } from "@/lib/models/chat-client";
+import { haikuChatComplete, type ChatComplete } from "@/lib/models/chat-client";
 
 export interface RatchetEscalation {
   title: string;
@@ -57,7 +57,7 @@ const RATCHET_TERMINAL_STATUSES: ReadonlySet<string> = new Set(["review", "done"
 export interface RatchetDeps {
   /** Terminal voice-origin tasks updated at/after `sinceIso`, most-recent first. */
   listVoiceEscalations: (sinceIso: string) => Promise<RatchetEscalation[]> | RatchetEscalation[];
-  /** Local-model clustering pass. Any failure falls back to the deterministic listing. */
+  /** Haiku clustering pass. Any failure falls back to the deterministic listing. */
   chatComplete: ChatComplete;
   /** Create the proposal task — same shape `escalate_to_task` uses (see flash/loop.ts). */
   createTask: (payload: { title: string; description: string }) => Promise<{ _id: string }>;
@@ -91,7 +91,7 @@ async function defaultCreateTask(payload: { title: string; description: string }
 
 export const defaultRatchetDeps: RatchetDeps = {
   listVoiceEscalations: defaultListVoiceEscalations,
-  chatComplete: localChatComplete,
+  chatComplete: haikuChatComplete,
   createTask: defaultCreateTask,
   now: () => new Date(),
 };

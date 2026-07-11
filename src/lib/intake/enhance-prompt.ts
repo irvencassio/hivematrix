@@ -1,11 +1,11 @@
 /**
  * Prompt wizard: rewrites a rough New-Task ask into a clear, self-contained
- * prompt using the local Qwen model, and SUGGESTS an agent role for it — a
- * human is looking at the preview before Create, so classification happens
- * where it can be corrected, instead of silently in a scheduler tick later.
- * Never blocks task creation — every failure path (no local model, HTTP
- * error, bad JSON, an invalid/hallucinated role) falls back to returning the
- * raw prompt with agentType "auto", unchanged.
+ * prompt using Claude Haiku (via the subscription-OAuth CLI), and SUGGESTS an
+ * agent role for it — a human is looking at the preview before Create, so
+ * classification happens where it can be corrected, instead of silently in a
+ * scheduler tick later. Never blocks task creation — every failure path (CLI
+ * not configured, subprocess error, bad JSON, an invalid/hallucinated role)
+ * falls back to returning the raw prompt with agentType "auto", unchanged.
  *
  * Role-neutral by design: earlier versions of this prompt hard-coded "a
  * coding-agent task queue" and told the model to infer file paths, so every
@@ -17,7 +17,7 @@
  * pulls in file-path/test-shaped structure.
  */
 
-import { hasLocalCompletionModel, localChatComplete, type ChatComplete, type ChatMessage } from "@/lib/models/chat-client";
+import { hasCompletionModel, haikuChatComplete, type ChatComplete, type ChatMessage } from "@/lib/models/chat-client";
 import { stripThinkBlocks } from "@/lib/models/deep-think";
 import { getCoreAgentProfiles } from "@/lib/config/agent-profiles";
 
@@ -69,8 +69,8 @@ function passthrough(raw: string): EnhanceResult {
 
 export async function enhancePrompt(raw: string, opts?: { chatComplete?: ChatComplete }): Promise<EnhanceResult> {
   const chatComplete = opts?.chatComplete;
-  if (!chatComplete && !hasLocalCompletionModel()) return passthrough(raw);
-  const complete = chatComplete ?? ((messages: ChatMessage[], chatOpts?: Parameters<ChatComplete>[1]) => localChatComplete(messages, chatOpts));
+  if (!chatComplete && !hasCompletionModel()) return passthrough(raw);
+  const complete = chatComplete ?? ((messages: ChatMessage[], chatOpts?: Parameters<ChatComplete>[1]) => haikuChatComplete(messages, chatOpts));
 
   let reply: string;
   try {

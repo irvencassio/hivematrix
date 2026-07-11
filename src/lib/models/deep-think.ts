@@ -1,13 +1,13 @@
 /**
- * Deep Think — test-time compute scaling on the local Qwen model.
+ * Deep Think — test-time compute scaling on Claude Opus.
  *
- * The operator's tokens are free (M-series, keyless loopback), so the lever for
- * "smarter" is structured extra inference, not a bigger model. This harness
- * implements the four techniques that survive the 2026 test-time-scaling
- * literature for agents:
+ * Deep-think is a THINKING role (2026-07-11 Claude-native cutover): the lever
+ * for "smarter" is structured extra inference on the frontier-premium model,
+ * not a bigger local model. This harness implements the four techniques that
+ * survive the 2026 test-time-scaling literature for agents:
  *
- *   1. Diversified parallel rollouts — N candidates at varied temperatures,
- *      thinking mode ON (Qwen reasoning is the whole point here).
+ *   1. Diversified parallel rollouts — N candidates at varied temperatures
+ *      (reasoning effort held high across all of them).
  *   2. Self-consistency signal — cheap pairwise agreement across candidates;
  *      high agreement = the answer is stable, low = the problem is genuinely hard.
  *   3. List-wise synthesis — one temperature-0 pass that sees ALL candidates,
@@ -16,12 +16,13 @@
  *   4. Know-when-to-reflect — only when candidates DISAGREE does a sequential
  *      critique-revise pass run on the synthesis. Easy questions stay cheap.
  *
- * Keyless + local-only by construction: the only backend is localChatComplete
- * (loopback HTTP). No cloud call, ever. `complete` is injectable so tests touch
- * no network and no model.
+ * Default backend is `opusChatComplete` — Haiku's `haikuChatComplete` with
+ * `model: "opus"` passed through — invoked via the subscription-OAuth `claude`
+ * CLI (no API key, no SDK, ever). `complete` is injectable so tests touch no
+ * network, no subprocess, and no model.
  */
 
-import { localChatComplete, type ChatComplete } from "./chat-client";
+import { opusChatComplete, type ChatComplete } from "./chat-client";
 
 export interface DeepThinkOpts {
   /** Parallel candidates. 3 is the sweet spot for a single local server. */
@@ -133,7 +134,7 @@ export function buildReflectionPrompt(question: string, draft: string): string {
  */
 export async function deepThink(question: string, opts: DeepThinkOpts = {}): Promise<DeepThinkResult> {
   const started = Date.now();
-  const complete = opts.complete ?? localChatComplete;
+  const complete = opts.complete ?? opusChatComplete;
   const samples = Math.max(1, Math.min(8, opts.samples ?? DEFAULT_SAMPLES));
   const wallMs = opts.maxWallMs ?? DEFAULT_WALL_MS;
   const callTimeoutMs = opts.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;

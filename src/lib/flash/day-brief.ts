@@ -24,7 +24,7 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { executePimTool as defaultExecutePimTool } from "@/lib/orchestrator/pim-tools";
 import { getWorkflowInbox as defaultGetWorkflowInbox, type WorkflowInbox } from "@/lib/workflows/inbox";
-import { localChatComplete, type ChatComplete } from "@/lib/models/chat-client";
+import { haikuChatComplete, type ChatComplete } from "@/lib/models/chat-client";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { Task } from "@/lib/db";
 
@@ -62,7 +62,7 @@ export interface DayBriefDeps {
   listOpenTasks: () => Promise<DayBriefTaskRef[]> | DayBriefTaskRef[];
   /** Evening only: tasks queued to run later (backlog with a future delayUntil). */
   listQueuedOvernight: () => Promise<DayBriefTaskRef[]> | DayBriefTaskRef[];
-  /** Local-model pass for the morning "ONE thing" line. Any failure omits the line. */
+  /** Haiku pass for the morning "ONE thing" line. Any failure omits the line. */
   chatComplete: ChatComplete;
   /** GOALS.md persona content, if present — context for the "ONE thing" pass. */
   readGoalsPersona: () => string | null;
@@ -126,7 +126,7 @@ export const defaultDayBriefDeps: DayBriefDeps = {
   listCompletedSince: defaultListCompletedSince,
   listOpenTasks: defaultListOpenTasks,
   listQueuedOvernight: defaultListQueuedOvernight,
-  chatComplete: localChatComplete,
+  chatComplete: haikuChatComplete,
   readGoalsPersona: defaultReadGoalsPersona,
   now: () => new Date(),
 };
@@ -210,7 +210,7 @@ export function queuedLine(tasks: DayBriefTaskRef[]): string {
   return tasks.length === 1 ? `Queued overnight: ${first}.` : `${tasks.length} queued overnight, incl. ${first}.`;
 }
 
-/** Pure: build the local-model prompt for the "ONE thing" line. */
+/** Pure: build the model prompt for the "ONE thing" line. */
 export function buildOneThingPrompt(facts: string, goalsPersona: string | null): { system: string; user: string } {
   return {
     system:

@@ -2,7 +2,8 @@
  * Flash Lane — session distillation.
  *
  * When a session goes cold (6h inactivity) or on daily rollover, this module
- * runs a cheap local-model pass over the session turns to:
+ * runs a cheap Haiku pass (subscription-OAuth `claude` CLI) over the session
+ * turns to:
  *   1. Extract reusable how-tos into skills (via upsertSkill — dedupe/refine on
  *      re-distillation, same as directive retrospectives).
  *   2. File failures, friction, and unmet capability needs into the feedback
@@ -24,7 +25,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
-import { getQwenProfile } from "@/lib/config/qwen-profile";
+import { haikuChatComplete, hasCompletionModel, type ChatComplete } from "@/lib/models/chat-client";
 import { upsertSkill } from "@/lib/skills/store";
 import { recordFeedbackDedup } from "@/lib/feedback/feedback";
 import { broadcastEvent } from "@/lib/ws/broadcaster";
@@ -133,46 +134,6 @@ Rules:
 - Never invent anything absent from the transcript.`;
 }
 
-function normalizeEndpoint(endpoint: string): string {
-  return endpoint.trim().replace(/\/+$/, "");
-}
-
-async function callLocalModel(prompt: string, endpoint: string, modelId: string): Promise<string> {
-  const base = normalizeEndpoint(endpoint);
-  const candidates = base.endsWith("/v1")
-    ? [`${base}/chat/completions`]
-    : [`${base}/v1/chat/completions`, `${base}/chat/completions`];
-
-  const body = JSON.stringify({
-    model: modelId,
-    messages: [{ role: "user", content: prompt }],
-    stream: false,
-    temperature: 0.3,
-    max_tokens: 1024,
-  });
-
-  let lastErr: unknown;
-  for (const url of candidates) {
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-        signal: AbortSignal.timeout(DISTILL_TIMEOUT_MS),
-      });
-      if (res.status === 404) continue;
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json() as Record<string, unknown>;
-      const choices = data.choices as Array<Record<string, unknown>> | undefined;
-      const msg = choices?.[0]?.message as Record<string, unknown> | undefined;
-      return typeof msg?.content === "string" ? msg.content : "";
-    } catch (err) {
-      lastErr = err;
-    }
-  }
-  throw lastErr ?? new Error("local model unreachable for distillation");
-}
-
 // ------------------------------------------------------------------
 // Response parser (tolerant of markdown fences / extra text)
 // ------------------------------------------------------------------
@@ -279,10 +240,17 @@ function appendToMemoryNote(brainRoot: string, lines: string[], date: string): v
  * Distill a single Flash session: extract skills, file feedback, append memory.
  * Marks the session as distilledAt on completion (or permanent failure) to
  * prevent the scheduler from retrying it on every poll. Never throws.
+ *
+ * `chatComplete` is injectable (tests supply a fake); when omitted, the real
+ * default (`haikuChatComplete`, the subscription-OAuth Claude CLI) is used,
+ * gated by `hasCompletionModel()` — matching intake/enhance-prompt.ts's
+ * convention so a missing backend short-circuits without ever attempting the
+ * CLI call.
  */
 export async function distillSession(
   sessionId: string,
   brainRoot?: string | null,
+  chatComplete?: ChatComplete,
 ): Promise<DistillSummary> {
   const empty: DistillSummary = { skipped: false, skillsCreated: 0, skillsRefined: 0, feedbackFiled: 0, operatorFactsLearned: 0, operatorGoalsLearned: 0 };
 
@@ -300,19 +268,22 @@ export async function distillSession(
       return { ...empty, skipped: true };
     }
 
-    const profile = getQwenProfile();
-    if (!profile) {
-      // No local model — mark distilled so we don't spin on every poll
+    if (!chatComplete && !hasCompletionModel()) {
+      // No completion backend configured — mark distilled so we don't spin on every poll
       markSessionDistilled(sessionId);
       return { ...empty, skipped: true };
     }
+    const complete = chatComplete ?? haikuChatComplete;
 
     const transcript = buildTranscript(turns);
     const prompt = buildDistillPrompt(session.channel, session.peer, transcript);
 
     let raw: string;
     try {
-      raw = await callLocalModel(prompt, profile.primary.endpoint, profile.primary.modelId);
+      raw = await complete(
+        [{ role: "user", content: prompt }],
+        { temperature: 0.3, maxTokens: 1024, timeoutMs: DISTILL_TIMEOUT_MS },
+      );
     } catch (err) {
       console.warn(`[flash:distill] model call failed for session ${sessionId}:`, err);
       // Don't mark distilled — let the loop retry after the model recovers

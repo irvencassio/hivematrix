@@ -25,7 +25,7 @@ import { join } from "path";
 import { Task } from "@/lib/db";
 import { searchBrain } from "@/lib/brain/search";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
-import { localChatComplete, type ChatComplete } from "@/lib/models/chat-client";
+import { haikuChatComplete, type ChatComplete } from "@/lib/models/chat-client";
 
 export interface WeaverBrainHit {
   path: string;
@@ -53,7 +53,7 @@ export interface WeaverAuditDeps {
   searchBrainDocs: (query: string) => Promise<WeaverBrainHit[]>;
   /** Tasks completed in the last 7 days. */
   listCompletedTasks: (sinceIso: string) => Promise<WeaverCompletedTask[]> | WeaverCompletedTask[];
-  /** Local-model audit pass. Any failure means send NOTHING — no fallback. */
+  /** Haiku audit pass. Any failure means send NOTHING — no fallback. */
   chatComplete: ChatComplete;
   now: () => Date;
 }
@@ -85,7 +85,7 @@ export const defaultWeaverAuditDeps: WeaverAuditDeps = {
   readGoalsPersona: defaultReadGoalsPersona,
   searchBrainDocs: defaultSearchBrainDocs,
   listCompletedTasks: defaultListCompletedTasks,
-  chatComplete: localChatComplete,
+  chatComplete: haikuChatComplete,
   now: () => new Date(),
 };
 

@@ -28,7 +28,7 @@
 
 import { notify as defaultNotify } from "@/lib/notify/notify";
 import { sendApnsPush as defaultSendApnsPush } from "@/lib/notify/apns";
-import { localChatComplete, type ChatComplete } from "@/lib/models/chat-client";
+import { haikuChatComplete, type ChatComplete } from "@/lib/models/chat-client";
 import { Task } from "@/lib/db";
 
 export const VOICE_ORIGIN = "voice";
@@ -115,14 +115,14 @@ export function buildLoopMessage(task: LoopCloserTask, distilled: string): strin
 // ---------------------------------------------------------------------------
 
 /**
- * Distill a task's result to <=2 short spoken-style sentences via the local
- * model. On any model failure (not configured, timeout, bad response) falls
- * back to a deterministic truncation. Never throws.
+ * Distill a task's result to <=2 short spoken-style sentences via Haiku (the
+ * subscription-OAuth Claude CLI). On any model failure (CLI not configured,
+ * timeout, bad response) falls back to a deterministic truncation. Never throws.
  */
 export async function distillLoopResult(
   title: string,
   resultText: string,
-  chatComplete: ChatComplete = localChatComplete,
+  chatComplete: ChatComplete = haikuChatComplete,
 ): Promise<string> {
   if (!resultText.trim()) return "";
   try {
@@ -167,7 +167,7 @@ async function defaultMarkNotified(taskId: string, notifiedAt: string): Promise<
 }
 
 export const defaultLoopCloserDeps: LoopCloserDeps = {
-  chatComplete: localChatComplete,
+  chatComplete: haikuChatComplete,
   notify: defaultNotify,
   sendApnsPush: defaultSendApnsPush,
   markNotified: defaultMarkNotified,

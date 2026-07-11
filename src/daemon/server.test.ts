@@ -673,7 +673,7 @@ test("voice logic diagnostic endpoint runs canned scenarios without audio", asyn
   assert.ok(body.scenarios.every((s) => s.audioBytes === 0));
 });
 
-test("POST /tasks/enhance returns { enhanced, rationale, title } and soft-falls-back with no local model configured", async (t) => {
+test("POST /tasks/enhance returns { enhanced, rationale, title } and soft-falls-back when the Claude CLI call fails", async (t) => {
   const originalHome = process.env.HOME;
   const tmp = mkdtempSync(join(tmpdir(), "hm-server-enhance-"));
   process.env.HOME = tmp;
@@ -681,6 +681,20 @@ test("POST /tasks/enhance returns { enhanced, rationale, title } and soft-falls-
     if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
     rmSync(tmp, { recursive: true, force: true });
   });
+
+  // The route calls enhancePrompt() with no injected chatComplete, so it falls
+  // through to the real default: haikuChatComplete() over the subscription-OAuth
+  // claude CLI. That CLI is genuinely installed on dev/CI machines running this
+  // suite (see chat-client.ts), so without stubbing execFile this test would spawn
+  // a real `claude -p ...` subprocess and hit the operator's live Anthropic usage.
+  // Force the CLI call to fail instead — enhancePrompt() treats ANY chatComplete
+  // failure as a soft-fallback (passthrough), which is exactly the behavior this
+  // test verifies.
+  const { _setExecFileForTests } = await import("@/lib/models/chat-client");
+  _setExecFileForTests((async () => {
+    throw new Error("stubbed: claude CLI must not be invoked for real in this test");
+  }) as unknown as Parameters<typeof _setExecFileForTests>[0]);
+  t.after(() => _setExecFileForTests(null));
 
   const token = getOrCreateToken(DAEMON_TOKEN_FILE);
   const server = createDaemonServer();
@@ -695,8 +709,7 @@ test("POST /tasks/enhance returns { enhanced, rationale, title } and soft-falls-
   });
   assert.equal(res.status, 200);
   const body = await res.json() as { enhanced: string; rationale: string; title: string; agentType: string };
-  // No ~/.hivematrix/config.json in this fresh temp HOME → no Qwen profile →
-  // hasLocalCompletionModel() is false → enhancePrompt() passes through.
+  // Claude CLI call fails → enhancePrompt() passes through unchanged.
   assert.equal(body.enhanced, "fix the login bug");
   assert.equal(body.rationale, "");
   assert.equal(body.title, "");

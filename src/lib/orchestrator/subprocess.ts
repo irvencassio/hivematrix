@@ -46,7 +46,7 @@ function resolveClaudeCommand(): { binary: string; extraArgs: string[] } {
   return { binary: resolveClaudeBinary(), extraArgs: [] };
 }
 
-function resolveClaudeBinary(): string {
+export function resolveClaudeBinary(): string {
   // 1. Check config for cached path
   try {
     const configPath = join(homedir(), ".hivematrix", "config.json");
