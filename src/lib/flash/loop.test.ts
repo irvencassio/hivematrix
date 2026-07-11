@@ -140,6 +140,9 @@ test("buildFlashSpawnArgs: wires model, budgets, mcp config, and allowed tools",
   assert.equal(args[args.indexOf("--max-turns") + 1], "12");
   assert.equal(args[args.indexOf("--mcp-config") + 1], "/p/flash-mcp-config.json");
   assert.equal(args[args.indexOf("--allowedTools") + 1], "mcp__flash__brain_search,mcp__flash__mail_send");
+  // Built-in CLI tools disabled (flash acts only through its MCP lane tools; web → Browser Lane).
+  assert.equal(args[args.indexOf("--tools") + 1], "");
+  assert.ok(args.includes("--strict-mcp-config"));
   // Each system prompt gets its own --append-system-prompt flag.
   const sysIdxs = args.reduce<number[]>((acc, a, i) => (a === "--append-system-prompt" ? [...acc, i] : acc), []);
   assert.equal(sysIdxs.length, 2);

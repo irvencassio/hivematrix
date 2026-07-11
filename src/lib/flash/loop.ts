@@ -149,6 +149,16 @@ export function buildFlashSpawnArgs(input: FlashSpawnArgsInput): string[] {
     "--verbose",
     "--max-turns",
     String(input.maxTurns),
+    // Disable ALL of the CLI's built-in tools (WebFetch/WebSearch/Bash/Read/Write/…).
+    // Flash chat must act only through its gated HiveMatrix lane tools — e.g. web reads
+    // go through Browser Lane (mcp__flash__hivematrix_browser), not the CLI's WebFetch
+    // (which needs an interactive permission grant flash can't provide → dead-ends, and
+    // bypasses our lane policy/telemetry). Removing the built-in set also keeps the MCP
+    // tool count low enough that the tools aren't CLI-deferred behind a ToolSearch.
+    "--tools",
+    "",
+    // Only the flash MCP server, never the operator's other configured MCP servers.
+    "--strict-mcp-config",
     "--mcp-config",
     input.mcpConfigPath,
     "--allowedTools",

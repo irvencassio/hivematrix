@@ -101,6 +101,9 @@ export async function assembleSystemPrompt(
     identityLine,
     "Respond helpfully and concisely. Use available tools when they would genuinely help.",
     "Do not invent tool results — always call the tool and wait for the response.",
+    // The CLI's built-in web/file/shell tools are disabled here — the model can only act
+    // through the HiveMatrix lane tools it is offered. Steer web work to Browser Lane.
+    "For anything on the web (fetching a page, current weather, news, live info), use the hivematrix_browser (Browser Lane) tool — you have no other web access.",
   ];
 
   if (channel && SPOKEN_CHANNELS.has(channel)) sections.push(SPOKEN_STYLE);
