@@ -8,6 +8,7 @@ import {
   isRepeatingWordTail,
   collapseWordRepetition,
   WORD_REPEAT_LIMIT,
+  isOverReplyCap,
 } from "./loop";
 
 const S = "Let me check the latest financial news and market data for yesterday.";
@@ -66,4 +67,17 @@ test("collapseWordRepetition: keeps one instance of a degenerate word tail", () 
   // Varied text is returned unchanged.
   const varied = "planes ships boats trains";
   assert.equal(collapseWordRepetition(varied), varied);
+});
+
+test("isOverReplyCap: catches varied runaway that the repetition guards miss", () => {
+  // The screenshot failure mode: a long reply of all-DISTINCT words — no repeated
+  // sentence, no repeated word-cycle, so only the length cap can stop it.
+  const rambling = "Nation Building State-Building Institution-Building Capacity-Building Rule-Law Governance Accountability Transparency Cooperation Development Sustainability".repeat(30);
+  assert.equal(isRepeatingTail(rambling), false); // repetition guards are blind to it
+  assert.equal(isRepeatingWordTail(rambling), false);
+  assert.equal(isOverReplyCap(rambling, 3000), true); // length cap catches it
+  // Under the cap → allowed.
+  assert.equal(isOverReplyCap("A normal, concise reply.", 3000), false);
+  // cap <= 0 disables the guard (never fires, even on huge text).
+  assert.equal(isOverReplyCap(rambling, 0), false);
 });

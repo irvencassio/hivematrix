@@ -26,22 +26,34 @@ export interface SamplingParams {
   topP: number;
   repetitionPenalty: number;
   maxTokens: number;
+  /** HiveMatrix-side runaway guard: hard-stop a Flash reply once it exceeds this many
+   * characters at a sentence/whitespace boundary. Catches *varied* rambling (a
+   * word-salad of distinct words) that the repetition guards structurally can't see —
+   * and prevents a degenerate turn from poisoning later turns' context. This is a
+   * client-side cap enforced in loop.ts, NOT a model param, so it bounds output even
+   * when the server ignores penalties. */
+  maxReplyChars: number;
 }
 
 export const DEFAULT_SAMPLING: SamplingParams = {
   temperature: 0.6,
   topP: 0.9,
   repetitionPenalty: 1.15,
-  maxTokens: 2048,
+  // Model-level output cap. Lowered from 2048: a chat/voice reply never needs that
+  // much, and a smaller ceiling bounds any degeneration to something recoverable.
+  maxTokens: 1024,
+  maxReplyChars: 3000,
 };
 
 /** Slider bounds + step for each sampling param — surfaced to the settings UI so
- * it never hardcodes ranges, and reused by validateSampling as the clamp window. */
+ * it never hardcodes ranges, and reused by validateSampling as the clamp window.
+ * A `step >= 1` marks an integer-valued param (rounded on parse/validate). */
 export const SAMPLING_BOUNDS: Record<keyof SamplingParams, { min: number; max: number; step: number }> = {
   temperature: { min: 0, max: 1.5, step: 0.05 },
   topP: { min: 0.1, max: 1, step: 0.05 },
   repetitionPenalty: { min: 1, max: 1.5, step: 0.01 },
   maxTokens: { min: 256, max: 8192, step: 256 },
+  maxReplyChars: { min: 500, max: 8000, step: 250 },
 };
 
 export interface QwenProfile {
@@ -84,15 +96,17 @@ function parseSampling(raw: unknown): SamplingParams {
   const r = raw as Record<string, unknown>;
   const pick = (key: keyof SamplingParams): number => {
     const v = r[key];
-    if (typeof v !== "number" || !Number.isFinite(v)) return DEFAULT_SAMPLING[key];
     const b = SAMPLING_BOUNDS[key];
-    return clamp(v, b.min, b.max);
+    if (typeof v !== "number" || !Number.isFinite(v)) return DEFAULT_SAMPLING[key];
+    const clamped = clamp(v, b.min, b.max);
+    return b.step >= 1 ? Math.round(clamped) : clamped; // step >= 1 ⇒ integer param
   };
   return {
     temperature: pick("temperature"),
     topP: pick("topP"),
     repetitionPenalty: pick("repetitionPenalty"),
-    maxTokens: Math.round(pick("maxTokens")),
+    maxTokens: pick("maxTokens"),
+    maxReplyChars: pick("maxReplyChars"),
   };
 }
 
@@ -184,7 +198,7 @@ export function validateSampling(
     if (typeof v !== "number" || !Number.isFinite(v) || v < b.min || v > b.max) {
       return { ok: false, error: `${key} must be a number in [${b.min}, ${b.max}]` };
     }
-    out[key] = key === "maxTokens" ? Math.round(v) : v;
+    out[key] = b.step >= 1 ? Math.round(v) : v; // step >= 1 ⇒ integer param
   }
   return { ok: true, sampling: out };
 }

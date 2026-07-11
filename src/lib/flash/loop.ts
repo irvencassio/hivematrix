@@ -113,6 +113,18 @@ export function collapseWordRepetition(text: string, limit = WORD_REPEAT_LIMIT):
   return words.slice(0, words.length - drop).join(" ");
 }
 
+/**
+ * Pure: has the reply blown past its length cap? The repetition guards only catch a
+ * repeated *sentence* or *word-cycle* — they're structurally blind to a reply that
+ * rambles with all-distinct words ("Nation Building State-Building Institution-Building
+ * ..."). This length ceiling is the catch-all for that varied-runaway mode: once a
+ * Flash reply exceeds `cap` chars we end the turn, which also stops a degenerate reply
+ * from being stored and poisoning later turns' context. cap <= 0 disables the guard.
+ */
+export function isOverReplyCap(text: string, cap: number): boolean {
+  return cap > 0 && text.length > cap;
+}
+
 // ------------------------------------------------------------------
 // Flash-only tool definitions
 // ------------------------------------------------------------------
@@ -528,6 +540,13 @@ export async function runFlashAgentLoop(
             break;
           }
           if (/\s/.test(event.content) && isRepeatingWordTail(turnText)) {
+            degenerated = true;
+            break;
+          }
+          // Catch-all runaway guard: a reply that rambles on with all-distinct words
+          // slips past both repetition guards. Cap total length, cutting at the next
+          // whitespace/punctuation so we end on a clean boundary rather than mid-word.
+          if (/[\s.!?]/.test(event.content) && isOverReplyCap(turnText, profile.sampling.maxReplyChars)) {
             degenerated = true;
             break;
           }

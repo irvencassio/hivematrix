@@ -6535,9 +6535,12 @@ const SAMPLING_FIELDS = [
   { key: "temperature", label: "Temperature", hint: "randomness · lower = steadier" },
   { key: "topP", label: "Top-p", hint: "nucleus cutoff · trims the long tail" },
   { key: "repetitionPenalty", label: "Repetition penalty", hint: "higher = less looping" },
-  { key: "maxTokens", label: "Max tokens", hint: "per-reply length cap" },
+  { key: "maxTokens", label: "Max tokens", hint: "model-level output cap" },
+  { key: "maxReplyChars", label: "Reply length cap", hint: "chars · hard-stops a runaway reply" },
 ];
-function fmtSampling(key, val) { return key === "maxTokens" ? String(val) : Number(val).toFixed(2); }
+// Integer-valued params (bounds.step >= 1) render without decimals.
+function samplingIsInt(key) { const b = _leCache && _leCache.sampling && _leCache.sampling.bounds[key]; return b ? b.step >= 1 : (key === "maxTokens" || key === "maxReplyChars"); }
+function fmtSampling(key, val) { return samplingIsInt(key) ? String(val) : Number(val).toFixed(2); }
 
 function localDefaultSelection(le) {
   const sel = {};
@@ -6790,7 +6793,7 @@ function setSampling(key, valueStr) {
   let v = Number(valueStr);
   if (!isFinite(v)) return;
   v = Math.min(b.max, Math.max(b.min, v));
-  if (key === "maxTokens") v = Math.round(v);
+  if (b.step >= 1) v = Math.round(v); // integer-valued param
   const cur = _samplingPending ? { ..._samplingPending } : { ..._leCache.sampling.current };
   cur[key] = v;
   _samplingPending = cur;
