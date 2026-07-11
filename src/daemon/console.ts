@@ -7425,7 +7425,7 @@ function flashRenderMessages() {
   }
   el.innerHTML = msgs.map(function(m) {
     const ts = m.ts ? new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '';
-    const roleLabel = m.role === 'assistant' ? 'Assistant' : (m.role === 'user' ? 'You' : m.role);
+    const roleLabel = m.role === 'assistant' ? '🌀 Weaver' : (m.role === 'user' ? 'You' : m.role);
     let toolHtml = '';
     if (m.toolLines && m.toolLines.length) {
       toolHtml = '<div style="margin:4px 0 2px;font-size:11px;color:var(--muted)">'
@@ -7441,14 +7441,10 @@ function flashRenderMessages() {
         }).join('') + '</div>';
     }
     const streamingCursor = (m.streaming && m.role === 'assistant') ? '<span style="opacity:.5">▌</span>' : '';
-    const thumbBtn = (!m.streaming && m.role === 'assistant' && m.turnId)
-      ? '<button class="copybtn" style="font-size:10px;padding:2px 6px;margin-top:4px" onclick="flashThumbsDown(\'' + esc(m.turnId) + '\')" title="Mark as bad — added to regression eval set">👎</button>'
-      : '';
     return '<div class="oc-msg oc-msg-' + esc(m.role) + '">'
       + '<div class="oc-msg-meta">' + esc(roleLabel) + (ts ? ' · ' + ts : '') + '</div>'
       + toolHtml
       + '<div class="oc-msg-text">' + esc(m.content || '').replace(/\n/g, '<br>') + streamingCursor + '</div>'
-      + thumbBtn
       + '</div>';
   }).join('');
   el.scrollTop = el.scrollHeight;
@@ -7567,18 +7563,6 @@ function flashInputResize(el) {
 function flashFocusInput() {
   const input = document.getElementById('flashInput');
   if (input) input.focus();
-}
-
-async function flashThumbsDown(turnId) {
-  try {
-    await api('/flash/turns/' + encodeURIComponent(turnId) + '/feedback', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rating: 'bad' })
-    });
-    hmToast('Marked as bad — added to eval set.', 'ok');
-  } catch (e) {
-    hmToast('Could not record feedback.', 'err');
-  }
 }
 
 function talkStatus(msg, show) {
