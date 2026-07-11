@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.180 — 2026-07-11
+
+Flash chat: remove the thumbs-down button, mark the assistant with the cyclone sigil; refresh the Cloudflare card copy to point at the Scan-on-iPhone pairing QR.
+
 ## v0.1.179 — 2026-07-11
 
 Polish + Browser Lane fix: Observability hides retired local models (Claude-only) with by-model tiers; single live header indicator (dropped cloud-ok pill); provider On/Off toggles replaced by install/sign-in status (enablement = CLI detected); new Cloudflare pairing QR endpoint + card; Flash --resume session continuity with live streaming; and flash chat now disables the CLI's built-in tools so web reads route through Browser Lane instead of dead-ending on WebFetch.
