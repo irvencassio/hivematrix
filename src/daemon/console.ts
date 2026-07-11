@@ -1077,7 +1077,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="remote-card">
         <div class="remote-card-h" style="justify-content:space-between"><span>Cloudflare <span class="badge">Apple Watch · permanent tunnel</span></span><span id="s_cf_switch"></span></div>
         <div id="s_cf_body" style="display:none">
-          <div class="muted" style="font-size:11px;margin:4px 0 8px">The Apple Watch can't join a mesh, so it reaches the daemon over a permanent named tunnel. There is no QR for the Watch — enter these values in HiveMatrix on iPhone, then tap Sync Apple Watch.</div>
+          <div class="muted" style="font-size:11px;margin:4px 0 8px">The Apple Watch can't join a mesh, so it reaches the daemon over a permanent named tunnel. Scan the QR below on iPhone (it encodes the hostname + token, and the Access credentials when configured) — or enter the values by hand — then tap Sync Apple Watch. The Watch itself can't scan; it inherits the config from iPhone.</div>
           <label class="flbl" style="margin-top:0">Public hostname</label>
           <div class="row"><input id="s_named_host" placeholder="hivey.cassio.io" style="flex:1" />
             <button class="copybtn" onclick="configureNamedTunnel()">Save hostname</button></div>
@@ -7425,7 +7425,7 @@ function flashRenderMessages() {
   }
   el.innerHTML = msgs.map(function(m) {
     const ts = m.ts ? new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '';
-    const roleLabel = m.role === 'assistant' ? '🌀 Weaver' : (m.role === 'user' ? 'You' : m.role);
+    const roleLabel = m.role === 'assistant' ? '🌀' : (m.role === 'user' ? 'You' : m.role);
     let toolHtml = '';
     if (m.toolLines && m.toolLines.length) {
       toolHtml = '<div style="margin:4px 0 2px;font-size:11px;color:var(--muted)">'

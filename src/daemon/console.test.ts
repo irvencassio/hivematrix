@@ -2283,13 +2283,15 @@ test("Flash send button is disabled for empty input and while in-flight", () => 
   assert.match(js, /_flashState\.sending = false/, "sending flag cleared in finally block");
 });
 
-test("Flash chat has no thumbs-down button; assistant is labeled with Weaver's sigil", () => {
+test("Flash chat has no thumbs-down button; assistant is labeled with the cyclone sigil", () => {
   const js = extractScript(CONSOLE_HTML);
   // The 👎 feedback button + its handler were removed (the /flash/turns/:id/feedback
   // endpoint stays for programmatic use, but the UI no longer surfaces it).
   assert.doesNotMatch(js, /flashThumbsDown/, "thumbs-down handler is gone");
   assert.ok(!js.includes("👎"), "no thumbs-down button in the chat");
-  assert.match(js, /'🌀 Weaver'/, "assistant messages are labeled '🌀 Weaver'");
+  // The assistant is marked with the cyclone sigil (🌀) alone — the persona name is
+  // scope-walled out of public/user-facing surfaces (DECISIONS.md Q18), so just the icon.
+  assert.match(js, /'🌀'/, "assistant messages are labeled with the cyclone sigil");
 });
 
 test("primary left nav uses a single active color convention", () => {
