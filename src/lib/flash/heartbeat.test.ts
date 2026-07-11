@@ -23,6 +23,9 @@ const {
   runDailyMomentOnce,
   runDayBriefRitualOnce,
   runHeartbeatOnce,
+  weekKey,
+  weeklyMomentDue,
+  runRatchetOnce,
 } = await import("./heartbeat");
 
 test.after(() => {
@@ -41,6 +44,9 @@ test("parseHeartbeatConfig defaults + clamping", () => {
     dayBriefMorningMinute: 30,
     dayBriefEveningHour: 21,
     dayBriefEveningMinute: 0,
+    ratchetEnabled: false,
+    ratchetHour: 18,
+    ratchetMinute: 0,
   });
   assert.equal(parseHeartbeatConfig({ intervalMinutes: 1 }).intervalMinutes, 5); // floor at 5
   assert.equal(parseHeartbeatConfig({ enabled: true }).enabled, true);
@@ -66,6 +72,17 @@ test("parseHeartbeatConfig: Day Brief ritual defaults off with 07:30/21:00, clam
   );
 });
 
+test("parseHeartbeatConfig: Capability Ratchet defaults off with 18:00, clamp + passthrough lastSentWeek", () => {
+  assert.equal(parseHeartbeatConfig({}).ratchetEnabled, false);
+  assert.equal(parseHeartbeatConfig({}).ratchetHour, 18);
+  assert.equal(parseHeartbeatConfig({}).ratchetMinute, 0);
+  assert.equal(parseHeartbeatConfig({ ratchetEnabled: true }).ratchetEnabled, true);
+  assert.equal(parseHeartbeatConfig({ ratchetHour: 99 }).ratchetHour, 23);
+  assert.equal(parseHeartbeatConfig({ ratchetHour: "x" }).ratchetHour, 18);
+  assert.equal(parseHeartbeatConfig({ ratchetMinute: 99 }).ratchetMinute, 59);
+  assert.equal(parseHeartbeatConfig({ lastRatchetSentWeek: "2026-W27" }).lastRatchetSentWeek, "2026-W27");
+});
+
 const at = (h: number, m = 0) => new Date(2026, 6, 4, h, m, 0, 0); // local time
 
 test("inQuietHours handles plain and midnight-wrapped windows", () => {
@@ -81,6 +98,7 @@ test("heartbeatDue: disabled/quiet/interval gating", () => {
   const cfg = {
     enabled: true, intervalMinutes: 30, morningBriefHour: null, eveningRecapHour: null,
     dayBriefEnabled: false, dayBriefMorningHour: 7, dayBriefMorningMinute: 30, dayBriefEveningHour: 21, dayBriefEveningMinute: 0,
+    ratchetEnabled: false, ratchetHour: 18, ratchetMinute: 0,
   };
   assert.equal(heartbeatDue({ ...cfg, enabled: false }, at(10)), false);
   assert.equal(heartbeatDue(cfg, at(10)), true); // never ran
@@ -189,6 +207,31 @@ test("dayBriefMomentDue: fires once at/after hour:minute, again the next day; al
   assert.equal(dayBriefMomentDue(7, 30, today, nextDay), true); // new day, due again
 });
 
+test("weekKey: same week for any day Mon-Sun, different across a week boundary, YYYY-Www format", () => {
+  const sunday = new Date(2026, 6, 5); // 2026-07-05 is a Sunday
+  const mondayBefore = new Date(2026, 5, 29); // the Monday that starts that same ISO week
+  assert.equal(weekKey(sunday), weekKey(mondayBefore));
+  const nextSunday = new Date(2026, 6, 12);
+  assert.notEqual(weekKey(sunday), weekKey(nextSunday));
+  assert.match(weekKey(sunday), /^\d{4}-W\d{2}$/);
+});
+
+test("weeklyMomentDue: fires once on the target weekday at/after hour:minute, blocked once sent this week, due again next week", () => {
+  const sunday = (h: number, m = 0) => new Date(2026, 6, 5, h, m, 0, 0); // Sunday
+  const saturday = new Date(2026, 6, 4, 20, 0, 0, 0); // wrong weekday, well past the hour
+
+  assert.equal(weeklyMomentDue(0, 18, 0, undefined, saturday), false); // not Sunday
+  assert.equal(weeklyMomentDue(0, 18, 0, undefined, sunday(17, 59)), false); // Sunday, before 18:00
+  assert.equal(weeklyMomentDue(0, 18, 0, undefined, sunday(18, 0)), true); // Sunday, at 18:00
+  assert.equal(weeklyMomentDue(0, 18, 0, undefined, sunday(20, 0)), true); // still due later the same day if never sent
+
+  const thisWeek = weekKey(sunday(18));
+  assert.equal(weeklyMomentDue(0, 18, 0, thisWeek, sunday(20)), false); // already sent this week
+
+  const nextSunday = new Date(2026, 6, 12, 18, 0, 0, 0);
+  assert.equal(weeklyMomentDue(0, 18, 0, thisWeek, nextSunday), true); // new week, due again
+});
+
 test("buildDailyMomentPrompt: morning asks for the one decision; evening asks for the day's story", () => {
   const morning = buildDailyMomentPrompt({ moment: "morning-brief", statusSnapshot: "3 tasks done", now: at(8) });
   assert.match(morning, /Morning brief/);
@@ -247,6 +290,35 @@ test("runDayBriefRitualOnce survives a failing notify channel and still returns 
     now: () => at(21),
   });
   assert.equal(result.text, "Nothing shipped today.");
+});
+
+test("runRatchetOnce: notifies with runRatchetPass's notify text when a proposal was created", async () => {
+  const notified: string[] = [];
+  const result = await runRatchetOnce({
+    notify: async (t) => { notified.push(t); },
+    runRatchetPass: async () => ({ created: true, notifyText: "line one\nline two", taskId: "t1" }),
+  });
+  assert.deepEqual(result, { created: true, notifyText: "line one\nline two", taskId: "t1" });
+  assert.deepEqual(notified, ["line one\nline two"]);
+});
+
+test("runRatchetOnce: zero-escalation no-op sends no notify at all", async () => {
+  const notified: string[] = [];
+  const result = await runRatchetOnce({
+    notify: async (t) => { notified.push(t); },
+    runRatchetPass: async () => ({ created: false, notifyText: null }),
+  });
+  assert.equal(result.created, false);
+  assert.equal(notified.length, 0);
+});
+
+test("runRatchetOnce survives a failing notify channel and still returns the pass result", async () => {
+  const result = await runRatchetOnce({
+    notify: async () => { throw new Error("imessage down"); },
+    runRatchetPass: async () => ({ created: true, notifyText: "line one\nline two", taskId: "t2" }),
+  });
+  assert.equal(result.created, true);
+  assert.equal(result.taskId, "t2");
 });
 
 test("runHeartbeatOnce survives a failing notify channel", async () => {

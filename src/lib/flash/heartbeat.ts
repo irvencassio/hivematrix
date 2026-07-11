@@ -37,13 +37,25 @@
  * string) rather than a timestamp compared against a hourly target, the same
  * "mark before send" ordering as the moments above.
  *
+ * A WEEKLY ritual — the Capability Ratchet (2026-07-10 spec, see
+ * docs/superpowers/specs/2026-07-10-ratchet-and-weaver-spec.md) — clones
+ * that same pattern once more, at week granularity: its own enable flag
+ * (`ratchetEnabled`, default off), a fixed day of week (Sunday 18:00 by
+ * default, minute-precision hour/minute config
+ * like the Day Brief ritual), and its own weekly idempotence key
+ * (`lastRatchetSentWeek`, an ISO `YYYY-Www` string from `weekKey()` below —
+ * a week-granularity sibling of `localDateString()`). The clustering logic
+ * itself lives in its own module (ratchet.ts), same split as day-brief.ts;
+ * this file only owns the due-check + dispatch + notify/mark-sent wiring.
+ *
  * Config (`~/.hivematrix/config.json`):
  *   heartbeat: { enabled, intervalMinutes, quietHours?: {startHour, endHour},
  *                morningBriefHour: number|null, eveningRecapHour: number|null,
  *                lastRunAt?, lastMorningBriefAt?, lastEveningRecapAt?,
  *                dayBriefEnabled, dayBriefMorningHour, dayBriefMorningMinute,
  *                dayBriefEveningHour, dayBriefEveningMinute,
- *                lastDayBriefMorningSentDay?, lastDayBriefEveningSentDay? }
+ *                lastDayBriefMorningSentDay?, lastDayBriefEveningSentDay?,
+ *                ratchetEnabled, ratchetHour, ratchetMinute, lastRatchetSentWeek? }
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
@@ -57,6 +69,7 @@ import { READ_ONLY_FLASH_TOOLS } from "./loop";
 import { runFlashTurnText } from "./index";
 import { startPollLoop } from "@/lib/lanes/poll-loop";
 import { composeDayBrief, type DayBriefKind } from "./day-brief";
+import { runRatchetPass, type RatchetRunResult } from "./ratchet";
 
 export const HEARTBEAT_STAND_DOWN = "HEARTBEAT_STAND_DOWN";
 
@@ -84,6 +97,11 @@ export interface HeartbeatConfig {
   dayBriefEveningMinute: number; // default 0
   lastDayBriefMorningSentDay?: string; // local YYYY-MM-DD
   lastDayBriefEveningSentDay?: string; // local YYYY-MM-DD
+  /** Capability Ratchet (2026-07-10 spec) — weekly, Sunday 18:00 by default. */
+  ratchetEnabled: boolean;
+  ratchetHour: number;   // default 18
+  ratchetMinute: number; // default 0
+  lastRatchetSentWeek?: string; // ISO YYYY-Www
 }
 
 const DEFAULT_INTERVAL_MINUTES = 30;
@@ -96,6 +114,12 @@ const DEFAULT_DAY_BRIEF_EVENING_HOUR = 21;
 const DEFAULT_DAY_BRIEF_EVENING_MINUTE = 0;
 const CHECK_INTERVAL_MS = 60_000; // cheap 1-minute due check, same pattern as the readiness sweep
 
+const DEFAULT_RATCHET_HOUR = 18;
+const DEFAULT_RATCHET_MINUTE = 0;
+// JS Date#getDay(): Sunday=0 .. Saturday=6. Fixed per spec — not operator-configurable
+// (only the hour/minute are), matching "(default Sunday 18:00)".
+const RATCHET_DAY_OF_WEEK = 0; // Sunday
+
 const DEFAULT_CONFIG: HeartbeatConfig = {
   enabled: false,
   intervalMinutes: DEFAULT_INTERVAL_MINUTES,
@@ -106,6 +130,9 @@ const DEFAULT_CONFIG: HeartbeatConfig = {
   dayBriefMorningMinute: DEFAULT_DAY_BRIEF_MORNING_MINUTE,
   dayBriefEveningHour: DEFAULT_DAY_BRIEF_EVENING_HOUR,
   dayBriefEveningMinute: DEFAULT_DAY_BRIEF_EVENING_MINUTE,
+  ratchetEnabled: false,
+  ratchetHour: DEFAULT_RATCHET_HOUR,
+  ratchetMinute: DEFAULT_RATCHET_MINUTE,
 };
 
 function clampHour(value: unknown): number | null {
@@ -146,6 +173,10 @@ export function parseHeartbeatConfig(input: unknown): HeartbeatConfig {
     dayBriefEveningMinute: clampMinute(obj.dayBriefEveningMinute) ?? DEFAULT_DAY_BRIEF_EVENING_MINUTE,
     lastDayBriefMorningSentDay: typeof obj.lastDayBriefMorningSentDay === "string" ? obj.lastDayBriefMorningSentDay : undefined,
     lastDayBriefEveningSentDay: typeof obj.lastDayBriefEveningSentDay === "string" ? obj.lastDayBriefEveningSentDay : undefined,
+    ratchetEnabled: obj.ratchetEnabled === true,
+    ratchetHour: clampHour(obj.ratchetHour) ?? DEFAULT_RATCHET_HOUR,
+    ratchetMinute: clampMinute(obj.ratchetMinute) ?? DEFAULT_RATCHET_MINUTE,
+    lastRatchetSentWeek: typeof obj.lastRatchetSentWeek === "string" ? obj.lastRatchetSentWeek : undefined,
   };
   if (obj.quietHours && typeof obj.quietHours === "object") {
     const q = obj.quietHours as Record<string, unknown>;
@@ -194,6 +225,12 @@ export function setHeartbeatConfig(patch: Partial<HeartbeatConfig>): HeartbeatCo
     if (!("lastDayBriefMorningSentDay" in patch)) next.lastDayBriefMorningSentDay = current.lastDayBriefMorningSentDay ?? today;
     if (!("lastDayBriefEveningSentDay" in patch)) next.lastDayBriefEveningSentDay = current.lastDayBriefEveningSentDay ?? today;
   }
+  // Same seeding rationale, week-granularity: enabling Ratchet must not
+  // immediately fire this week's pass from a stale/absent marker.
+  if (next.ratchetEnabled && !current.ratchetEnabled) {
+    const week = weekKey(new Date());
+    if (!("lastRatchetSentWeek" in patch)) next.lastRatchetSentWeek = current.lastRatchetSentWeek ?? week;
+  }
   config.heartbeat = next;
   saveHiveConfig(config);
   return next;
@@ -217,6 +254,39 @@ export function localDateString(d: Date): string {
  */
 export function dayBriefMomentDue(hour: number, minute: number, lastSentDay: string | undefined, now: Date): boolean {
   if (lastSentDay === localDateString(now)) return false;
+  const target = new Date(now);
+  target.setHours(hour, minute, 0, 0);
+  return now >= target;
+}
+
+/**
+ * Pure: local ISO-8601 week string (`YYYY-Www`, Monday-start, Thursday-anchored)
+ * for a Date — the Capability Ratchet weekly ritual's once-per-week idempotence
+ * key, the week-granularity sibling of `localDateString()`. Computed entirely
+ * from local calendar fields (no UTC conversion) so it agrees with the local
+ * `now` the rest of this file reasons about.
+ */
+export function weekKey(now: Date): string {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayNum = (d.getDay() + 6) % 7; // Mon=0 .. Sun=6
+  d.setDate(d.getDate() - dayNum + 3); // Thursday of this ISO week
+  const firstThursday = new Date(d.getFullYear(), 0, 4);
+  const firstDayNum = (firstThursday.getDay() + 6) % 7;
+  firstThursday.setDate(firstThursday.getDate() - firstDayNum + 3);
+  const weekNo = 1 + Math.round((d.getTime() - firstThursday.getTime()) / (7 * 86_400_000));
+  return `${d.getFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+}
+
+/**
+ * Pure: is a weekly ritual moment due? Fires once we reach the configured
+ * day-of-week (`Date#getDay()` convention: Sun=0..Sat=6) at its target
+ * hour:minute, and it hasn't already been sent this ISO week — the
+ * week-granularity sibling of `dayBriefMomentDue` above. Generic over any
+ * weekly ritual (Capability Ratchet today; reused as-is by its sibling).
+ */
+export function weeklyMomentDue(dayOfWeek: number, hour: number, minute: number, lastSentWeek: string | undefined, now: Date): boolean {
+  if (now.getDay() !== dayOfWeek) return false;
+  if (lastSentWeek === weekKey(now)) return false;
   const target = new Date(now);
   target.setHours(hour, minute, 0, 0);
   return now >= target;
@@ -377,6 +447,8 @@ export interface HeartbeatDeps {
   runTurn?: typeof runFlashTurnText;
   /** Day Brief assembly (day-brief.ts) — injectable for tests; defaults to the real one. */
   composeDayBrief?: typeof composeDayBrief;
+  /** Capability Ratchet weekly pass (ratchet.ts) — injectable for tests; defaults to the real one. */
+  runRatchetPass?: typeof runRatchetPass;
   now?: () => Date;
 }
 
@@ -552,6 +624,25 @@ export async function runDayBriefRitualOnce(
 }
 
 /**
+ * Run one Capability Ratchet weekly pass immediately: fetch + cluster + (unless
+ * zero escalations) create the proposal task, then `notify()` the result.
+ * Unlike the Day Brief ritual there is no APNs push or operator-session turn —
+ * this is a proposal notice, not a report. Zero escalations is a silent no-op
+ * (no notify call at all), per spec.
+ */
+export async function runRatchetOnce(deps: HeartbeatDeps = {}): Promise<RatchetRunResult> {
+  const now = (deps.now ?? (() => new Date()))();
+  const runPass = deps.runRatchetPass ?? runRatchetPass;
+  const result = await runPass();
+
+  if (result.notifyText && deps.notify) {
+    try { await deps.notify(result.notifyText); } catch { /* channels are best-effort */ }
+  }
+  broadcastEvent("flash:ratchet", { created: result.created, ts: now.toISOString() });
+  return result;
+}
+
+/**
  * Day Brief ritual due-check + dispatch — folded into the shared tick so
  * there's no second scheduler. Independent of `config.enabled` (the
  * pulse/daily-moment toggle): the ritual has its own `dayBriefEnabled` flag.
@@ -581,6 +672,24 @@ async function tickDayBriefRitual(config: HeartbeatConfig, now: Date, deps: Hear
   }
 }
 
+/**
+ * Capability Ratchet due-check + dispatch — same "own enable flag, folded into
+ * the shared tick" shape as `tickDayBriefRitual`, at week granularity.
+ */
+async function tickRatchet(config: HeartbeatConfig, now: Date, deps: HeartbeatDeps): Promise<void> {
+  if (!config.ratchetEnabled) return;
+  if (!weeklyMomentDue(RATCHET_DAY_OF_WEEK, config.ratchetHour, config.ratchetMinute, config.lastRatchetSentWeek, now)) return;
+
+  // Mark BEFORE the pass so a slow model call can't double-fire later this week.
+  setHeartbeatConfig({ lastRatchetSentWeek: weekKey(now) });
+  try {
+    const result = await runRatchetOnce(deps);
+    console.log(`[heartbeat] capability ratchet pass complete (created=${result.created})`);
+  } catch (e) {
+    console.error(`[heartbeat] capability ratchet pass failed: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 let stopFn: (() => void) | null = null;
 
 async function tick(deps: HeartbeatDeps): Promise<void> {
@@ -589,6 +698,9 @@ async function tick(deps: HeartbeatDeps): Promise<void> {
 
   // Day Brief ritual — own enable flag, runs regardless of the pulse toggle.
   await tickDayBriefRitual(config, now, deps);
+  // Capability Ratchet — own enable flag, weekly, likewise independent of
+  // the pulse toggle.
+  await tickRatchet(config, now, deps);
 
   if (!config.enabled) return;
 

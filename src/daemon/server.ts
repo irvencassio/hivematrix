@@ -712,6 +712,10 @@ export function createDaemonServer() {
         if (typeof body.dayBriefMorningMinute === "number") patch.dayBriefMorningMinute = body.dayBriefMorningMinute;
         if (typeof body.dayBriefEveningHour === "number") patch.dayBriefEveningHour = body.dayBriefEveningHour;
         if (typeof body.dayBriefEveningMinute === "number") patch.dayBriefEveningMinute = body.dayBriefEveningMinute;
+        // Capability Ratchet (2026-07-10 spec) — own enable flag, weekly.
+        if ("ratchetEnabled" in body) patch.ratchetEnabled = body.ratchetEnabled === true;
+        if (typeof body.ratchetHour === "number") patch.ratchetHour = body.ratchetHour;
+        if (typeof body.ratchetMinute === "number") patch.ratchetMinute = body.ratchetMinute;
         json(res, 200, { heartbeat: setHeartbeatConfig(patch) });
         return;
       }
@@ -732,7 +736,7 @@ export function createDaemonServer() {
       // POST /heartbeat/run — fire one pass now (pulse by default; body.moment for a daily
       // moment or a Day Brief ritual moment).
       if (req.method === "POST" && urlPath === "/heartbeat/run") {
-        const { runHeartbeatOnce, runDailyMomentOnce, runDayBriefRitualOnce } = await import("@/lib/flash/heartbeat");
+        const { runHeartbeatOnce, runDailyMomentOnce, runDayBriefRitualOnce, runRatchetOnce } = await import("@/lib/flash/heartbeat");
         const { notify } = await import("@/lib/notify/notify");
         const { sendApnsPush } = await import("@/lib/notify/apns");
         const { composeBriefing } = await import("@/lib/voice/command-turn");
@@ -750,6 +754,12 @@ export function createDaemonServer() {
         if (body.moment === "day-brief-morning" || body.moment === "day-brief-evening") {
           const kind = body.moment === "day-brief-morning" ? "morning" : "evening";
           const result = await runDayBriefRitualOnce(kind, deps);
+          json(res, 200, { moment: body.moment, ...result });
+          return;
+        }
+        // Capability Ratchet (2026-07-10 spec) — manual moment.
+        if (body.moment === "ratchet") {
+          const result = await runRatchetOnce(deps);
           json(res, 200, { moment: body.moment, ...result });
           return;
         }
