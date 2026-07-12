@@ -13,8 +13,10 @@ import {
   buildFlashMcpToolCatalog,
   ensureFlashMcpServer,
   prepareFlashMcp,
+  deliverLearnSkillReply,
 } from "./flash-mcp";
 import type { LaneToolContext } from "@/lib/orchestrator/lane-tools";
+import type { AcquireResult } from "@/lib/skills/acquire";
 
 test("flash-only tool names match the exported definitions 1:1", () => {
   assert.deepEqual(
@@ -26,8 +28,22 @@ test("flash-only tool names match the exported definitions 1:1", () => {
 test("isFlashOnlyTool distinguishes flash-only tools from lane tools", () => {
   assert.equal(isFlashOnlyTool("persona_update"), true);
   assert.equal(isFlashOnlyTool("escalate_to_task"), true);
+  assert.equal(isFlashOnlyTool("learn_skill"), true);
   assert.equal(isFlashOnlyTool("brain_search"), false);
   assert.equal(isFlashOnlyTool("mail_send"), false);
+});
+
+test("FLASH_ONLY_TOOL_DEFS: learn_skill requires goal and why_needed, accepts an optional suggested_kind enum", () => {
+  const def = FLASH_ONLY_TOOL_DEFS.find((t) => t.function.name === "learn_skill");
+  assert.ok(def, "learn_skill def must exist");
+  const params = def!.function.parameters as {
+    properties: Record<string, { type: string; enum?: string[] }>;
+    required: string[];
+  };
+  assert.ok(params.properties.goal);
+  assert.ok(params.properties.why_needed);
+  assert.deepEqual(params.required.slice().sort(), ["goal", "why_needed"]);
+  assert.deepEqual(params.properties.suggested_kind?.enum, ["instruction", "script"]);
 });
 
 test("dispatchFlashOnlyTool refuses an unknown tool name", async () => {
@@ -69,6 +85,18 @@ test("embedded server hard-gates tools/call against the allow-list, independent 
   assert.match(FLASH_MCP_SERVER_JS, /HIVE_FLASH_ALLOWED/);
   assert.match(FLASH_MCP_SERVER_JS, /is not permitted in this pass/);
   assert.match(FLASH_MCP_SERVER_JS, /isAllowed/);
+});
+
+test("generated server: learn_skill is routed as a FLASH_ONLY tool (to /flash/tool/), and the on-disk copy is rewritten to match", () => {
+  assert.match(FLASH_MCP_SERVER_JS, /FLASH_ONLY\s*=\s*\{[^}]*learn_skill:\s*1[^}]*\}/);
+
+  // SERVER_VERSION must have been bumped so ensureFlashMcpServer() actually
+  // rewrites a stale on-disk copy (from before this change) to include
+  // learn_skill — prove the round trip end to end.
+  const serverPath = ensureFlashMcpServer();
+  const onDisk = readFileSync(serverPath, "utf-8");
+  assert.equal(onDisk, FLASH_MCP_SERVER_JS + "\n");
+  assert.match(onDisk, /learn_skill:\s*1/);
 });
 
 test("prepareFlashMcp: gating filter narrows --allowedTools to the read-only set", () => {
@@ -187,4 +215,115 @@ test("flash MCP server smoke test: initialize, tools/list, then read-tool allowe
   const writeResult = writeCall.result as { content: Array<{ text: string }>; isError?: boolean };
   assert.equal(writeResult.isError, true);
   assert.match(writeResult.content[0].text, /is not permitted in this pass/);
+});
+
+// ------------------------------------------------------------------
+// learn_skill (P2.4) — async speak-back, mirroring deep_think/heartbeat's
+// pattern in voice/command-turn.ts. dispatchFlashOnlyTool has no injectable
+// acquire seam (by design — it's the real daemon dispatch point), so the
+// "returns immediately, never blocks on acquisition" property is proven two
+// ways: (a) the missing-goal path below, which returns before delivery is
+// ever kicked off, and (b) deliverLearnSkillReply's own tests, which inject
+// acquire/synthesize/broadcast stubs directly rather than routing through
+// dispatch — routing a *valid* goal through dispatch here would fire the
+// REAL acquireSkill defaults (a live Sonnet mint + Haiku critic pass against
+// this machine's actual skill library), which is not something a fast,
+// side-effect-free unit test should ever trigger.
+// ------------------------------------------------------------------
+
+test("dispatchFlashOnlyTool: learn_skill requires a goal and returns immediately without kicking off delivery", async () => {
+  const result = await dispatchFlashOnlyTool("learn_skill", { why_needed: "test" }, { brainRoot: null, sessionId: "s1" });
+  assert.equal(result, "Error: goal is required");
+});
+
+test("deliverLearnSkillReply: voice channel broadcasts voice:result with the honest reason, ok:true, and synthesizes audio", async () => {
+  const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+  let synthCalled = false;
+  await deliverLearnSkillReply({
+    sessionId: "s1",
+    channel: "voice",
+    goal: "count files in Downloads",
+    whyNeeded: "user asked",
+    acquire: async () =>
+      ({ outcome: "registered", skillName: "count_files", reason: "I learned a new skill: x." } as AcquireResult),
+    synthesize: async () => { synthCalled = true; return ""; },
+    broadcast: (event, data) => events.push({ event, data: data as Record<string, unknown> }),
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "voice:result");
+  assert.equal(events[0].data.text, "I learned a new skill: x.");
+  assert.equal(events[0].data.ok, true);
+  assert.equal(events[0].data.sessionId, "s1");
+  assert.equal(synthCalled, true);
+});
+
+test("deliverLearnSkillReply: chat channel broadcasts flash:notice with the honest reason, ok:true, no synth needed", async () => {
+  const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+  let synthCalled = false;
+  await deliverLearnSkillReply({
+    sessionId: "s2",
+    channel: "console",
+    goal: "count files in Downloads",
+    whyNeeded: "user asked",
+    acquire: async () =>
+      ({ outcome: "already-have", skillName: "count_files", reason: "I already have a skill for that." } as AcquireResult),
+    synthesize: async () => { synthCalled = true; return ""; },
+    broadcast: (event, data) => events.push({ event, data: data as Record<string, unknown> }),
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "flash:notice");
+  assert.equal(events[0].data.text, "I already have a skill for that.");
+  assert.equal(events[0].data.ok, true);
+  assert.equal(synthCalled, false);
+});
+
+test("deliverLearnSkillReply: a failure outcome still speaks the honest reason, with ok:false", async () => {
+  const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+  await deliverLearnSkillReply({
+    sessionId: "s3",
+    channel: "console",
+    goal: "do something impossible",
+    whyNeeded: "user asked",
+    acquire: async () => ({ outcome: "draft-failed", reason: "it didn't pass its own tests" } as AcquireResult),
+    broadcast: (event, data) => events.push({ event, data: data as Record<string, unknown> }),
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "flash:notice");
+  assert.equal(events[0].data.text, "it didn't pass its own tests");
+  assert.equal(events[0].data.ok, false);
+});
+
+test("deliverLearnSkillReply: the hard wall-clock cap fires before a never-resolving acquisition, ok:false, completes quickly", async () => {
+  const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+  const start = Date.now();
+  await deliverLearnSkillReply({
+    sessionId: "s4",
+    channel: "console",
+    goal: "never finishes",
+    whyNeeded: "user asked",
+    acquire: () => new Promise<AcquireResult>(() => { /* never resolves */ }),
+    wallClockMs: 20,
+    broadcast: (event, data) => events.push({ event, data: data as Record<string, unknown> }),
+  });
+  const elapsed = Date.now() - start;
+  assert.ok(elapsed < 2000, `expected the wall-clock cap to fire quickly, took ${elapsed}ms`);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "flash:notice");
+  assert.match(String(events[0].data.text), /couldn't finish learning that in time/);
+  assert.equal(events[0].data.ok, false);
+});
+
+test("deliverLearnSkillReply: a throwing acquire still delivers an honest failure notice, never rejects", async () => {
+  const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+  await deliverLearnSkillReply({
+    sessionId: "s5",
+    channel: "console",
+    goal: "count files in Downloads",
+    whyNeeded: "user asked",
+    acquire: async () => { throw new Error("mint backend unreachable"); },
+    broadcast: (event, data) => events.push({ event, data: data as Record<string, unknown> }),
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].data.ok, false);
+  assert.match(String(events[0].data.text), /mint backend unreachable/);
 });

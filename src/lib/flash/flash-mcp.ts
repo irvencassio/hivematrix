@@ -36,6 +36,7 @@ import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { availableLaneTools, type LaneToolContext } from "@/lib/orchestrator/lane-tools";
 import type { ChatTool } from "@/lib/orchestrator/tool-bridge";
 import { broadcastEvent } from "@/lib/ws/broadcaster";
+import type { AcquireResult } from "@/lib/skills/acquire";
 
 /** MCP server name → Claude namespaces its tools as `mcp__flash__<tool>`. */
 export const FLASH_MCP_SERVER_NAME = "flash";
@@ -45,7 +46,7 @@ export const FLASH_MCP_SERVER_NAME = "flash";
 // real imports/logic, unlike the lane tools which just proxy to /bee/:tool).
 // ------------------------------------------------------------------
 
-export const FLASH_ONLY_TOOL_NAMES = ["persona_update", "generate_avatar", "deep_think", "escalate_to_task"] as const;
+export const FLASH_ONLY_TOOL_NAMES = ["persona_update", "generate_avatar", "deep_think", "escalate_to_task", "learn_skill"] as const;
 export type FlashOnlyToolName = (typeof FLASH_ONLY_TOOL_NAMES)[number];
 
 export function isFlashOnlyTool(name: string): name is FlashOnlyToolName {
@@ -126,6 +127,25 @@ export const FLASH_ONLY_TOOL_DEFS: ChatTool[] = [
           projectPath: { type: "string", description: "Absolute path to the project (optional)" },
         },
         required: ["title", "description"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "learn_skill",
+      description:
+        "Use when the operator asks for a capability you don't have and no existing tool/skill covers it — " +
+        "you'll learn it as a new skill. Acquisition takes a few minutes: you'll ack now and speak the result " +
+        "when it's ready. Do NOT use for things a tool/skill already does.",
+      parameters: {
+        type: "object",
+        properties: {
+          goal: { type: "string", description: "What capability to acquire, fully self-contained (this runs without the conversation history)." },
+          why_needed: { type: "string", description: "Why this is needed / the operator's ask." },
+          suggested_kind: { type: "string", enum: ["instruction", "script"], description: "Optional hint at the skill shape." },
+        },
+        required: ["goal", "why_needed"],
       },
     },
   },
@@ -237,6 +257,126 @@ async function handleEscalateToTask(args: Record<string, unknown>, sessionId: st
   return `Escalated to task ${task._id}: "${title}"`;
 }
 
+const LEARN_SKILL_ACK =
+  "I don't know how to do that yet. Give me a few minutes to learn it — I'll speak up when I've got it.";
+
+/** Test seam type for `deliverLearnSkillReply`'s injectable `acquire` — narrower than the
+ *  full `AcquireOptions` since only these three fields are ever passed from the tool call. */
+type LearnSkillAcquireFn = (opts: {
+  goal: string;
+  whyNeeded: string;
+  suggestedKind?: "instruction" | "script";
+}) => Promise<AcquireResult>;
+
+async function handleLearnSkill(
+  args: Record<string, unknown>,
+  opts: { brainRoot: string | null; sessionId: string },
+): Promise<string> {
+  const goal = String(args.goal ?? "").trim();
+  if (!goal) return "Error: goal is required";
+  const whyNeeded = String(args.why_needed ?? "").trim();
+  const suggestedKindRaw = args.suggested_kind;
+  const suggestedKind: "instruction" | "script" | undefined =
+    suggestedKindRaw === "instruction" || suggestedKindRaw === "script" ? suggestedKindRaw : undefined;
+
+  const channel = opts.sessionId
+    ? ((await import("./store")).getSession(opts.sessionId)?.channel ?? "chat")
+    : "chat";
+
+  // Acquisition takes minutes — kick it off DETACHED (never awaited here) and
+  // return the ack immediately, mirroring deep_think/heartbeat's async
+  // speak-back pattern (voice/command-turn.ts's deliverDeepThinkReply /
+  // deliverHeartbeatReply). The outcome is broadcast once it lands.
+  void deliverLearnSkillReply({ sessionId: opts.sessionId, channel, goal, whyNeeded, suggestedKind }).catch((err) => {
+    console.error(`[flash] learn_skill delivery failed: ${err instanceof Error ? err.message : err}`);
+  });
+
+  return LEARN_SKILL_ACK;
+}
+
+/**
+ * Run skill acquisition in the background, then speak/notice the outcome —
+ * mirrors `deliverDeepThinkReply` in voice/command-turn.ts (voice/ must not
+ * import flash/, but flash/ may import voice/, so this delivery helper lives
+ * here and calls into voice utilities for synthesis).
+ *
+ * Budget rail: a HARD wall-clock cap (default 10 min) races the acquisition —
+ * on expiry we speak an honest "still working" style failure rather than
+ * hanging the speak-back forever. On success/failure, `result.reason` is
+ * ALWAYS the spoken outcome (acquireSkill's contract: honest even on
+ * failure), only `ok` distinguishes a genuine capability gain from a miss.
+ */
+export async function deliverLearnSkillReply(opts: {
+  sessionId: string;
+  channel: string;
+  goal: string;
+  whyNeeded: string;
+  suggestedKind?: "instruction" | "script";
+  acquire?: LearnSkillAcquireFn;
+  synthesize?: (text: string) => Promise<string>;
+  broadcast?: (event: string, data: unknown) => void;
+  wallClockMs?: number;
+}): Promise<void> {
+  const { sessionId, channel, goal, whyNeeded, suggestedKind } = opts;
+  const wallClockMs = opts.wallClockMs ?? 10 * 60 * 1000;
+
+  let text: string;
+  let ok: boolean;
+  try {
+    const acquire: LearnSkillAcquireFn =
+      opts.acquire ?? (await import("@/lib/skills/acquire")).acquireSkill;
+
+    const TIMED_OUT = Symbol("learn-skill-timeout");
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+      timer = setTimeout(() => resolve(TIMED_OUT), wallClockMs);
+    });
+
+    // `finally` (not a bare statement after the await) so the timer is
+    // cleared on EITHER outcome of the race, including when `acquire`
+    // rejects — a rejection makes Promise.race itself reject, which would
+    // otherwise skip straight past a clearTimeout placed after the await and
+    // leave a 10-minute timer alive, blocking process exit.
+    let result: AcquireResult | typeof TIMED_OUT;
+    try {
+      result = await Promise.race([acquire({ goal, whyNeeded, suggestedKind }), timeout]);
+    } finally {
+      clearTimeout(timer!);
+    }
+    if (result === TIMED_OUT) {
+      ok = false;
+      text = "I couldn't finish learning that in time — I've saved my progress and will try again later.";
+    } else {
+      // Non-failure outcomes: a skill was actually gained (or already existed).
+      ok = result.outcome === "registered" || result.outcome === "probation" || result.outcome === "already-have";
+      text = result.reason;
+    }
+  } catch (e) {
+    ok = false;
+    text = `I couldn't learn that: ${e instanceof Error ? e.message : "unknown error"}.`;
+  }
+
+  let audioBase64 = "";
+  if (channel === "voice") {
+    try {
+      const synth = opts.synthesize ?? (await import("@/lib/voice/turn-server")).synthesizeReplyVoice;
+      const path = await synth(text);
+      audioBase64 = path ? readFileSync(path).toString("base64") : "";
+    } catch { /* speak-less fallback */ }
+  }
+
+  const broadcastFn = opts.broadcast ?? broadcastEvent;
+  try {
+    if (channel === "voice") {
+      broadcastFn("voice:result", { sessionId, text, audioBase64, ok });
+    } else {
+      broadcastFn("flash:notice", { sessionId, text, ok });
+    }
+  } catch (e) {
+    console.error(`[flash] learn_skill broadcast failed: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 /** Dispatch a Flash-only tool call — called by the `/flash/tool/:name` daemon route. */
 export async function dispatchFlashOnlyTool(
   name: string,
@@ -252,6 +392,8 @@ export async function dispatchFlashOnlyTool(
       return handleDeepThink(args);
     case "escalate_to_task":
       return handleEscalateToTask(args, opts.sessionId);
+    case "learn_skill":
+      return handleLearnSkill(args, opts);
     default:
       return `Error: Unknown flash-only tool "${name}"`;
   }
@@ -277,7 +419,7 @@ export function buildFlashMcpToolCatalog(tools: ChatTool[]): FlashMcpToolDef[] {
 }
 
 // Bump when FLASH_MCP_SERVER_JS changes so the on-disk copy is rewritten.
-const SERVER_VERSION = "1";
+export const SERVER_VERSION = "2";
 
 // The stdio MCP server (CommonJS, run by the bundled node). Deliberately avoids
 // template literals / ${} so it nests cleanly in this TS array-join string
@@ -295,7 +437,7 @@ export const FLASH_MCP_SERVER_JS = [
   'var PROJECT_PATH = process.env.HIVE_FLASH_PROJECT_PATH || "";',
   'var PROJECT = process.env.HIVE_FLASH_PROJECT || "hivematrix";',
   'var SESSION_ID = process.env.HIVE_FLASH_SESSION_ID || "";',
-  'var FLASH_ONLY = { persona_update: 1, generate_avatar: 1, deep_think: 1, escalate_to_task: 1 };',
+  'var FLASH_ONLY = { persona_update: 1, generate_avatar: 1, deep_think: 1, escalate_to_task: 1, learn_skill: 1 };',
   "function token() {",
   '  try { return fs.readFileSync(path.join(os.homedir(), ".hivematrix", "auth-token"), "utf8").trim(); }',
   '  catch (e) { return ""; }',
