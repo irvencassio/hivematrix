@@ -525,6 +525,11 @@ test("reminder_create: happy path via helper — passes name/due through, report
   assert.deepEqual(capturedArgs.slice(0, 4), ["reminders", "create", "--name", "Call mom"]);
   assert.equal(capturedArgs[4], "--due");
   assert.ok(!Number.isNaN(Date.parse(capturedArgs[5])), `expected an ISO date, got: ${capturedArgs[5]}`);
+  // Regression: the DesktopBeeHelper's ISO8601DateFormatter rejects fractional
+  // seconds, so the --due value must NOT carry milliseconds (a `.SSS` before the
+  // Z). `Date.toISOString()` always includes them; toHelperIso strips them.
+  assert.doesNotMatch(capturedArgs[5], /\.\d{3}Z$/, `--due must not carry milliseconds, got: ${capturedArgs[5]}`);
+  assert.match(capturedArgs[5], /T\d{2}:\d{2}:\d{2}Z$/, `--due must be second-precision ISO, got: ${capturedArgs[5]}`);
 });
 
 test("reminder_create: happy path via helper without a due date — no --due flag, 'no due time' reply", async () => {

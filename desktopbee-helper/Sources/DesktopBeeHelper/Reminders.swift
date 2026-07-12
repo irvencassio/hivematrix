@@ -142,8 +142,7 @@ enum RemindersCLI {
                 }
                 var due: Date? = nil
                 if let dueStr = flags["due"] {
-                    let formatter = ISO8601DateFormatter()
-                    guard let d = formatter.date(from: dueStr) else {
+                    guard let d = parseISO8601Flexible(dueStr) else {
                         throw CLIError(message: "--due must be ISO-8601: \(dueStr)")
                     }
                     due = d

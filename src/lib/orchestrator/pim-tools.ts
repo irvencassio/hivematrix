@@ -175,6 +175,17 @@ function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
+/**
+ * Format a Date for the DesktopBeeHelper's --due/--start/--end args. The helper
+ * parses with Swift's ISO8601DateFormatter in its default configuration, which
+ * REJECTS fractional seconds — so `Date.toISOString()` (always `…SS.sssZ`) makes
+ * every timed reminder/event fail with `--due must be ISO-8601`. Drop the
+ * milliseconds so the value is `2026-07-12T18:05:00Z`, which the helper accepts.
+ */
+export function toHelperIso(d: Date): string {
+  return d.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 export function parseDuePhrase(text: string, now: Date = new Date()): Date | null {
   let t = (text || "").trim().toLowerCase();
   if (!t) return null;
@@ -621,7 +632,7 @@ export async function executeReminderCreate(args: Record<string, unknown>, io: R
   const binary = resolveBinary();
   if (binary) {
     const helperArgs = ["reminders", "create", "--name", name];
-    if (due) helperArgs.push("--due", due.toISOString());
+    if (due) helperArgs.push("--due", toHelperIso(due));
     const { code, stdout, stderr } = await run(binary, helperArgs);
     if (code === 77) return permissionNeeded("Reminders", REMEDIATION.Reminders);
     if (code === HELPER_TIMEOUT_CODE) return classifyReminderHelperTimeout(stderr);
@@ -747,8 +758,8 @@ export async function executeCalendarCreate(args: Record<string, unknown>, io: C
     const { code, stdout, stderr } = await run(binary, [
       "calendar", "create",
       "--title", title,
-      "--start", start.toISOString(),
-      "--end", end.toISOString(),
+      "--start", toHelperIso(start),
+      "--end", toHelperIso(end),
     ]);
     if (code === 77) return permissionNeeded("Calendars", REMEDIATION.Calendars);
     if (code === HELPER_TIMEOUT_CODE) return classifyHelperTimeout(stderr);

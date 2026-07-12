@@ -134,11 +134,10 @@ enum CalendarCLI {
                 guard let title = flags["title"], let startStr = flags["start"], let endStr = flags["end"] else {
                     throw CLIError(message: "usage: calendar create --title T --start ISO --end ISO [--calendar name]")
                 }
-                let formatter = ISO8601DateFormatter()
-                guard let start = formatter.date(from: startStr) else {
+                guard let start = parseISO8601Flexible(startStr) else {
                     throw CLIError(message: "--start must be ISO-8601: \(startStr)")
                 }
-                guard let end = formatter.date(from: endStr) else {
+                guard let end = parseISO8601Flexible(endStr) else {
                     throw CLIError(message: "--end must be ISO-8601: \(endStr)")
                 }
                 let id = try createEvent(store: store, title: title, start: start, end: end, calendarName: flags["calendar"])
