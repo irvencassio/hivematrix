@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.199 — 2026-07-12
+
+Voice replies now speak in full — long, multi-paragraph answers (like your solo-founder goals) no longer cut off after the first paragraph, and stay in one consistent voice. Plus: HiveMatrix now texts you when a reminder comes due, so you never miss one even if you don't see the alarm.
+
 ## v0.1.198 — 2026-07-12
 
 Voice reminders now actually work. Saying 'remind me to call the dentist in 5 minutes' (or any 'remind me…' / 'set a reminder…') over voice now sets a REAL reminder on your devices instead of silently queuing a do-nothing task. Same reliable behavior in chat.

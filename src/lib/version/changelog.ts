@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.199", date: "2026-07-12", note: "Voice replies now speak in full — long, multi-paragraph answers (like your solo-founder goals) no longer cut off after the first paragraph, and stay in one consistent voice. Plus: HiveMatrix now texts you when a reminder comes due, so you never miss one even if you don't see the alarm." },
   { version: "0.1.198", date: "2026-07-12", note: "Voice reminders now actually work. Saying 'remind me to call the dentist in 5 minutes' (or any 'remind me…' / 'set a reminder…') over voice now sets a REAL reminder on your devices instead of silently queuing a do-nothing task. Same reliable behavior in chat." },
   { version: "0.1.197", date: "2026-07-12", note: "Fixes 'remind me to X in 5 minutes' (and calendar events) failing silently in chat and streaming voice. The reminders/calendar helper was rejecting timestamps that carried milliseconds, so every timed reminder quietly failed and voice fell back to queuing a do-nothing task. Reminders and events with a time now set reliably." },
   { version: "0.1.196", date: "2026-07-12", note: "The assistant can now SEE photos — attach one in chat (📎) or text one over iMessage and it describes/acts on it. HiveMatrix is now proactive by default: morning/evening briefs, an unprompted heartbeat, and weekly reviews; overdue goals surface in the brief; and recurring accountability rituals no longer silently die. Plus the iPad 'reconnecting' indicator is fixed." },
