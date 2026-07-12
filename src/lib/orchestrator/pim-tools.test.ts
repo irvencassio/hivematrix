@@ -224,10 +224,52 @@ test("calendar_today: helper timeout (exit 124, first-run TCC prompt pending) re
   assert.match(parsed!.remediation, /permission prompt/i);
 });
 
+test("calendar_today: helper timeout with the daemon-listening marker in stderr means a STALE helper, not a pending permission prompt", async () => {
+  const io = fakeHelperIO({
+    run: async () => ({ code: 124, stdout: "", stderr: "[desktopbee-helper] listening on 127.0.0.1:3748\n" }),
+  });
+  const out = await executeCalendarToday({}, io);
+  assert.equal(parsePermissionNeeded(out), null, `expected no PERMISSION_NEEDED wire format, got: ${out}`);
+  assert.match(out, /calendar helper/i);
+  assert.match(out, /out of date|reinstall/i);
+});
+
+test("calendar_today: helper timeout with EMPTY stderr is still the genuine pending-consent case (regression guard)", async () => {
+  const io = fakeHelperIO({ run: async () => ({ code: 124, stdout: "", stderr: "" }) });
+  const out = await executeCalendarToday({}, io);
+  const parsed = parsePermissionNeeded(out);
+  assert.ok(parsed, `expected a permissionNeeded reply, got: ${out}`);
+  assert.equal(parsed!.grant, "Calendars");
+  assert.match(parsed!.remediation, /permission prompt/i);
+});
+
 test("calendar_create: helper timeout (exit 124) returns permissionNeeded('Calendars', ...)", async () => {
   const out = await executeCalendarCreate(
     { title: "Coffee", when: "tomorrow at 9am" },
     { resolveBinary: () => "/fake/helper", run: async () => ({ code: 124, stdout: "", stderr: "helper timed out" }) },
+  );
+  const parsed = parsePermissionNeeded(out);
+  assert.ok(parsed, `expected a permissionNeeded reply, got: ${out}`);
+  assert.equal(parsed!.grant, "Calendars");
+});
+
+test("calendar_create: helper timeout with the daemon-listening marker in stderr means a STALE helper, not a pending permission prompt", async () => {
+  const out = await executeCalendarCreate(
+    { title: "Coffee", when: "tomorrow at 9am" },
+    {
+      resolveBinary: () => "/fake/helper",
+      run: async () => ({ code: 124, stdout: "", stderr: "[desktopbee-helper] listening on 127.0.0.1:3748\n" }),
+    },
+  );
+  assert.equal(parsePermissionNeeded(out), null, `expected no PERMISSION_NEEDED wire format, got: ${out}`);
+  assert.match(out, /calendar helper/i);
+  assert.match(out, /out of date|reinstall/i);
+});
+
+test("calendar_create: helper timeout with EMPTY stderr is still the genuine pending-consent case (regression guard)", async () => {
+  const out = await executeCalendarCreate(
+    { title: "Coffee", when: "tomorrow at 9am" },
+    { resolveBinary: () => "/fake/helper", run: async () => ({ code: 124, stdout: "", stderr: "" }) },
   );
   const parsed = parsePermissionNeeded(out);
   assert.ok(parsed, `expected a permissionNeeded reply, got: ${out}`);

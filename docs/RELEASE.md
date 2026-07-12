@@ -36,11 +36,13 @@ bash scripts/build-app.sh      # build:daemon -> cargo tauri build -> sign inner
 bash scripts/build-dmg.sh 0.1.0   # drag-to-Applications DMG -> sign -> notarize -> staple
 ```
 `build-app.sh` runs `npm run build:daemon` first so Tauri bundles `dist/daemon/`
-as a resource, then signs the injected binaries (bundled **Node**,
-`better_sqlite3.node`, and the Desktop Lane helper compatibility bundle,
-`DesktopBeeHelper.app`) with our Developer ID +
-hardened runtime + entitlements (`src-tauri/entitlements/`), then re-seals the
-outer app so notarization accepts the whole bundle.
+as a resource, then rebuilds the Desktop Lane helper compatibility bundle,
+`DesktopBeeHelper.app`, from source (`bash desktopbee-helper/build-app.sh`) so
+a stale helper binary can never ship silently, then signs the injected
+binaries (bundled **Node**, `better_sqlite3.node`, and the freshly rebuilt
+`DesktopBeeHelper.app`) with our Developer ID + hardened runtime +
+entitlements (`src-tauri/entitlements/`), then re-seals the outer app so
+notarization accepts the whole bundle.
 
 Pinned Node version lives in `scripts/build-daemon.mjs` (`NODE_VERSION`) and must
 match the ABI of `node_modules/better-sqlite3/build/Release/better_sqlite3.node`

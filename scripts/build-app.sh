@@ -41,6 +41,9 @@ npm run verify:daemon-runtime
 echo "==> Building standalone lane app artifacts…"
 node scripts/package-browser-lane-app.mjs
 
+echo "==> Rebuilding Desktop Lane helper (DesktopBeeHelper.app) from source…"
+bash desktopbee-helper/build-app.sh
+
 # Sign the SOURCE resources before bundling: cargo tauri build packages the dmg
 # and the updater tarball mid-build, straight from these files — signing only
 # the bundled copies afterwards ships unsigned Mach-Os in those artifacts and
