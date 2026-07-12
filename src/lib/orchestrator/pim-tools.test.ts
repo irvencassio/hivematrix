@@ -5,7 +5,10 @@ import {
   extractPimActions,
   executeCalendarCreate,
   executeCalendarToday,
+  executeRemindersList,
+  executeReminderCreate,
   buildCalendarCreateScript,
+  buildReminderCreateScript,
   defaultCalendarHelperIO,
   looksLikeStaleHelper,
   type CalendarHelperIO,
@@ -345,6 +348,191 @@ test("calendar_create: still supports the old osascript-only IO shape (backward 
     { runOsascript: async () => ({ ok: true, out: "OK" }) },
   );
   assert.match(out, /Event created: "Lunch with Sam"/);
+});
+
+// ---------------------------------------------------------------------------
+// reminders_list / reminder_create via the DesktopBeeHelper binary
+//
+// Mirrors the calendar_today/calendar_create helper-seam tests above exactly
+// — reminders got the same EventKit-helper treatment as calendar (see
+// Reminders.swift), so pim-tools.ts's permission/timeout/stale-helper
+// classification is exercised the same way for both.
+
+test("reminders_list: happy path via helper — formats JSON into '- name (due …)' lines", async () => {
+  const reminders = [
+    { title: "Call mom", due: "2026-07-13T22:00:00.000Z" },
+    { title: "Buy milk" }, // no due date -> no "(due ...)" suffix
+  ];
+  const io = fakeHelperIO({ run: async () => ({ code: 0, stdout: JSON.stringify(reminders), stderr: "" }) });
+  const out = await executeRemindersList({}, io);
+  const lines = out.split("\n");
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /^- Call mom \(due .+\)$/);
+  assert.match(lines[1], /^- Buy milk$/);
+});
+
+test("reminders_list: empty array -> 'No open reminders.'", async () => {
+  const io = fakeHelperIO({ run: async () => ({ code: 0, stdout: "[]", stderr: "" }) });
+  const out = await executeRemindersList({}, io);
+  assert.equal(out, "No open reminders.");
+});
+
+test("reminders_list: permission denied (exit 77) returns permissionNeeded('Reminders', ...)", async () => {
+  const io = fakeHelperIO({ run: async () => ({ code: 77, stdout: '{"error":"permission"}', stderr: "" }) });
+  const out = await executeRemindersList({}, io);
+  const parsed = parsePermissionNeeded(out);
+  assert.ok(parsed, `expected a permissionNeeded reply, got: ${out}`);
+  assert.equal(parsed!.grant, "Reminders");
+});
+
+test("reminders_list: helper timeout (exit 124, first-run TCC prompt pending) returns permissionNeeded('Reminders', ...)", async () => {
+  const io = fakeHelperIO({ run: async () => ({ code: 124, stdout: "", stderr: "helper timed out" }) });
+  const out = await executeRemindersList({}, io);
+  const parsed = parsePermissionNeeded(out);
+  assert.ok(parsed, `expected a permissionNeeded reply, got: ${out}`);
+  assert.equal(parsed!.grant, "Reminders");
+  assert.match(parsed!.remediation, /permission prompt/i);
+});
+
+test("reminders_list: helper timeout with the daemon-listening marker in stderr means a STALE helper, not a pending permission prompt", async () => {
+  const io = fakeHelperIO({
+    run: async () => ({ code: 124, stdout: "", stderr: "[desktopbee-helper] listening on 127.0.0.1:3748\n" }),
+  });
+  const out = await executeRemindersList({}, io);
+  assert.equal(parsePermissionNeeded(out), null, `expected no PERMISSION_NEEDED wire format, got: ${out}`);
+  assert.match(out, /reminders helper/i);
+  assert.match(out, /out of date|reinstall/i);
+});
+
+test("reminders_list: other nonzero exit is a generic failure, never misclassified as permission", async () => {
+  const io = fakeHelperIO({ run: async () => ({ code: 1, stdout: '{"error":"boom"}', stderr: "boom" }) });
+  const out = await executeRemindersList({}, io);
+  assert.equal(parsePermissionNeeded(out), null);
+  assert.match(out, /Could not read reminders/);
+});
+
+test("reminders_list: malformed JSON never crashes, returns a generic failure", async () => {
+  const io = fakeHelperIO({ run: async () => ({ code: 0, stdout: "not json", stderr: "" }) });
+  const out = await executeRemindersList({}, io);
+  assert.equal(parsePermissionNeeded(out), null);
+  assert.match(out, /Could not read reminders/);
+});
+
+test("reminders_list: binary absent falls back to the osascript path (never calls run)", async () => {
+  let ranHelper = false;
+  const io = fakeHelperIO({ binary: null, run: async () => { ranHelper = true; return { code: 0, stdout: "[]", stderr: "" }; } });
+  let fellBackTo: unknown = null;
+  const fallback = async (a: Record<string, unknown>) => { fellBackTo = a; return "osascript fallback reply"; };
+  const out = await executeRemindersList({ limit: 5 }, io, fallback);
+  assert.equal(ranHelper, false);
+  assert.deepEqual(fellBackTo, { limit: 5 });
+  assert.equal(out, "osascript fallback reply");
+});
+
+test("buildReminderCreateScript: no due date -> minimal 'make new reminder' with just a name", () => {
+  const script = buildReminderCreateScript("Call mom", null);
+  assert.match(script, /make new reminder with properties \{name:"Call mom"\}/);
+  assert.doesNotMatch(script, /due date/);
+});
+
+test("buildReminderCreateScript: with a due date -> explicit date components, never a locale string", () => {
+  const due = parseDuePhrase("friday at noon", NOW)!; // -> July 17 2026, 12:00
+  const script = buildReminderCreateScript("Call mom", due);
+  assert.match(script, /set year of d to 2026/);
+  assert.match(script, /set month of d to 7/);
+  assert.match(script, /set day of d to 17/);
+  assert.match(script, /set hours of d to 12/);
+  assert.match(script, /set minutes of d to 0/);
+  assert.match(script, /due date:d, remind me date:d/);
+  assert.doesNotMatch(script, /as string/);
+});
+
+test("reminder_create: no name given -> refuses without touching any IO", async () => {
+  let called = false;
+  const io = { runOsascript: async () => { called = true; return { ok: true, out: "" }; } };
+  const out = await executeReminderCreate({ due: "tomorrow at 5pm" }, io);
+  assert.match(out, /No reminder text was given/);
+  assert.equal(called, false);
+});
+
+test("reminder_create: happy path via helper — passes name/due through, reports success", async () => {
+  let capturedArgs: string[] = [];
+  const io = {
+    resolveBinary: () => "/fake/DesktopBeeHelper",
+    run: async (_binary: string, args: string[]) => {
+      capturedArgs = args;
+      return { code: 0, stdout: JSON.stringify({ ok: true, id: "abc123" }), stderr: "" };
+    },
+  };
+  const out = await executeReminderCreate({ name: "Call mom", due: "tomorrow at 5pm" }, io);
+  assert.match(out, /Reminder set: "Call mom"/);
+  assert.ok(capturedArgs.length > 0, "expected the helper to be invoked");
+  assert.deepEqual(capturedArgs.slice(0, 4), ["reminders", "create", "--name", "Call mom"]);
+  assert.equal(capturedArgs[4], "--due");
+  assert.ok(!Number.isNaN(Date.parse(capturedArgs[5])), `expected an ISO date, got: ${capturedArgs[5]}`);
+});
+
+test("reminder_create: happy path via helper without a due date — no --due flag, 'no due time' reply", async () => {
+  let capturedArgs: string[] | null = null;
+  const io = {
+    resolveBinary: () => "/fake/DesktopBeeHelper",
+    run: async (_binary: string, args: string[]) => {
+      capturedArgs = args;
+      return { code: 0, stdout: JSON.stringify({ ok: true, id: "abc123" }), stderr: "" };
+    },
+  };
+  const out = await executeReminderCreate({ name: "Buy milk" }, io);
+  assert.match(out, /Reminder set: "Buy milk" \(no due time\)/);
+  assert.deepEqual(capturedArgs, ["reminders", "create", "--name", "Buy milk"]);
+});
+
+test("reminder_create: permission denied (exit 77) via helper returns permissionNeeded('Reminders', ...)", async () => {
+  const io = {
+    resolveBinary: () => "/fake/DesktopBeeHelper",
+    run: async () => ({ code: 77, stdout: '{"error":"permission"}', stderr: "" }),
+  };
+  const out = await executeReminderCreate({ name: "Call mom" }, io);
+  const parsed = parsePermissionNeeded(out);
+  assert.ok(parsed, `expected a permissionNeeded reply, got: ${out}`);
+  assert.equal(parsed!.grant, "Reminders");
+});
+
+test("reminder_create: helper timeout (exit 124) returns permissionNeeded('Reminders', ...)", async () => {
+  const io = {
+    resolveBinary: () => "/fake/DesktopBeeHelper",
+    run: async () => ({ code: 124, stdout: "", stderr: "helper timed out" }),
+  };
+  const out = await executeReminderCreate({ name: "Call mom" }, io);
+  const parsed = parsePermissionNeeded(out);
+  assert.ok(parsed, `expected a permissionNeeded reply, got: ${out}`);
+  assert.equal(parsed!.grant, "Reminders");
+});
+
+test("reminder_create: helper timeout with the daemon-listening marker in stderr means a STALE helper, not a pending permission prompt", async () => {
+  const io = {
+    resolveBinary: () => "/fake/DesktopBeeHelper",
+    run: async () => ({ code: 124, stdout: "", stderr: "[desktopbee-helper] listening on 127.0.0.1:3748\n" }),
+  };
+  const out = await executeReminderCreate({ name: "Call mom" }, io);
+  assert.equal(parsePermissionNeeded(out), null, `expected no PERMISSION_NEEDED wire format, got: ${out}`);
+  assert.match(out, /reminders helper/i);
+  assert.match(out, /out of date|reinstall/i);
+});
+
+test("reminder_create: still supports the old osascript-only IO shape (backward compatibility)", async () => {
+  const out = await executeReminderCreate(
+    { name: "Call mom", due: "tomorrow at 5pm" },
+    { runOsascript: async () => ({ ok: true, out: "" }) },
+  );
+  assert.match(out, /Reminder set: "Call mom"/);
+});
+
+test("reminder_create: osascript fallback surfaces a permission error", async () => {
+  const io = { runOsascript: async () => ({ ok: false, out: "Not authorized to send Apple events to Reminders." }) };
+  const out = await executeReminderCreate({ name: "Call mom" }, io);
+  const parsed = parsePermissionNeeded(out);
+  assert.ok(parsed, `expected a permissionNeeded reply, got: ${out}`);
+  assert.equal(parsed!.grant, "Reminders");
 });
 
 test("gated real-run: DesktopBeeHelper against the real binary (HIVE_TEST_EVENTKIT=1 only)", async (t) => {

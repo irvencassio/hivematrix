@@ -65,11 +65,31 @@ export function looksLikeStaleHelper(stderr: string): boolean {
 const STALE_HELPER_MESSAGE =
   "HiveMatrix's calendar helper is out of date and can't read your calendar — reopen HiveMatrix or reinstall it to update it.";
 
+/** Same as STALE_HELPER_MESSAGE, worded for the reminders subcommand — kept
+ * as a distinct string (not shared) because the two speak about different
+ * data (calendar vs. reminders) even though the underlying cause (a stale
+ * DesktopBeeHelper binary) is identical. */
+const REMINDERS_STALE_HELPER_MESSAGE =
+  "HiveMatrix's reminders helper is out of date and can't read your reminders — reopen HiveMatrix or reinstall it to update it.";
+
 /** Single source of truth for both `executeCalendarToday` and
  * `executeCalendarCreate`'s HELPER_TIMEOUT_CODE branch, so the stale-helper
  * vs. pending-consent classification can't drift between the two call sites. */
 function classifyHelperTimeout(stderr: string): string {
   return looksLikeStaleHelper(stderr) ? STALE_HELPER_MESSAGE : permissionNeeded("Calendars", REMEDIATION.CalendarsPromptPending);
+}
+
+/** Same classification as classifyHelperTimeout, but for the Reminders grant
+ * — used by executeRemindersList/executeReminderCreate's HELPER_TIMEOUT_CODE
+ * branch. A stale helper binary is stderr-detectable the same way regardless
+ * of which subcommand (calendar/reminders) it was invoked with. */
+function classifyReminderHelperTimeout(stderr: string): string {
+  return looksLikeStaleHelper(stderr)
+    ? REMINDERS_STALE_HELPER_MESSAGE
+    : permissionNeeded(
+        "Reminders",
+        "I need reminders access — there may be a permission prompt waiting on your Mac's screen; approve it, or enable HiveMatrix under System Settings, Privacy & Security, Reminders, then ask me again.",
+      );
 }
 
 // ---------------------------------------------------------------------------
@@ -423,7 +443,15 @@ async function executeCalendarNextWithin(args: Record<string, unknown>): Promise
   return ok ? out : "";
 }
 
-async function executeRemindersList(args: Record<string, unknown>): Promise<string> {
+/**
+ * Preserved verbatim as the dev-run / unbundled-build fallback for
+ * reminders_list (same role as executeCalendarTodayOsascript for
+ * calendar_today) — launches Reminders.app via AppleScript, which needs
+ * Automation TCC access the headless daemon can't obtain. The DesktopBeeHelper
+ * EventKit path (executeRemindersList below) is what actually runs in the
+ * shipped app.
+ */
+async function executeRemindersListOsascript(args: Record<string, unknown>): Promise<string> {
   const limit = clamp(args.limit, 10, 1, 20);
   const script = [
     'tell application "Reminders"',
@@ -450,26 +478,118 @@ async function executeRemindersList(args: Record<string, unknown>): Promise<stri
   return out || "No open reminders.";
 }
 
-async function executeReminderCreate(args: Record<string, unknown>): Promise<string> {
+interface ReminderDTO {
+  title: string;
+  due?: string;
+}
+
+function formatReminderDue(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", {
+    weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+}
+
+/**
+ * reminders_list — reads via the DesktopBeeHelper EventKit binary when it's
+ * available (no Reminders.app launch, its own TCC prompt — a separate grant
+ * from Calendars); falls back to the osascript path (preserved verbatim as
+ * executeRemindersListOsascript) in dev runs or builds without the bundled
+ * helper. `osascriptFallback` is an additional test seam only — the
+ * dispatcher always calls the two-arg form. Mirrors executeCalendarToday.
+ */
+export async function executeRemindersList(
+  args: Record<string, unknown>,
+  io: CalendarHelperIO = defaultCalendarHelperIO,
+  osascriptFallback: (a: Record<string, unknown>) => Promise<string> = executeRemindersListOsascript,
+): Promise<string> {
+  const limit = clamp(args.limit, 10, 1, 20);
+  const binary = io.resolveBinary();
+  if (!binary) return osascriptFallback(args);
+
+  const { code, stdout, stderr } = await io.run(binary, ["reminders", "list", "--limit", String(limit)]);
+  if (code === 77) return permissionNeeded("Reminders", REMEDIATION.Reminders);
+  if (code === HELPER_TIMEOUT_CODE) return classifyReminderHelperTimeout(stderr);
+  if (code !== 0) return `Could not read reminders: ${(stderr || stdout || "unknown error").trim()}`;
+
+  try {
+    const reminders = JSON.parse(stdout) as unknown;
+    if (!Array.isArray(reminders)) throw new Error("expected a JSON array of reminders");
+    if (reminders.length === 0) return "No open reminders.";
+    return (reminders as ReminderDTO[])
+      .map((r) => (r.due ? `- ${r.title} (due ${formatReminderDue(r.due)})` : `- ${r.title}`))
+      .join("\n");
+  } catch (e) {
+    return `Could not read reminders: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+/**
+ * Build the AppleScript that creates one Reminders.app reminder. Preserved
+ * verbatim (factored out for testability) from the pre-helper
+ * executeReminderCreate — used only by the osascript fallback path now.
+ */
+export function buildReminderCreateScript(name: string, due: Date | null): string {
+  if (!due) {
+    return `tell application "Reminders" to make new reminder with properties {name:"${name}"}`;
+  }
+  return [
+    "set d to current date",
+    `set year of d to ${due.getFullYear()}`,
+    `set month of d to ${due.getMonth() + 1}`,
+    `set day of d to ${due.getDate()}`,
+    `set hours of d to ${due.getHours()}`,
+    `set minutes of d to ${due.getMinutes()}`,
+    "set seconds of d to 0",
+    `tell application "Reminders" to make new reminder with properties {name:"${name}", due date:d, remind me date:d}`,
+  ].join("\n");
+}
+
+/**
+ * reminder_create — the one Reminders write. Same IO shape as
+ * executeCalendarCreate's CalendarCreateIO: creates via the DesktopBeeHelper
+ * EventKit binary when available, falling back to the osascript path
+ * (buildReminderCreateScript + runOsascript) in dev runs or builds without
+ * the bundled helper. Every IO field is optional and defaults independently.
+ */
+export interface ReminderCreateIO {
+  runOsascript?(script: string): Promise<{ ok: boolean; out: string }>;
+  /** Optional DesktopBeeHelper seam — defaults to defaultCalendarHelperIO's when omitted. */
+  resolveBinary?(): string | null;
+  run?(binary: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }>;
+}
+
+export async function executeReminderCreate(args: Record<string, unknown>, io: ReminderCreateIO = {}): Promise<string> {
   const name = String(args.name ?? "").replace(/["\\]/g, "").trim().slice(0, 120);
   if (!name) return "No reminder text was given.";
   const due = parseDuePhrase(String(args.due ?? ""));
-  const lines: string[] = [];
-  if (due) {
-    lines.push(
-      "set d to current date",
-      `set year of d to ${due.getFullYear()}`,
-      `set month of d to ${due.getMonth() + 1}`,
-      `set day of d to ${due.getDate()}`,
-      `set hours of d to ${due.getHours()}`,
-      `set minutes of d to ${due.getMinutes()}`,
-      "set seconds of d to 0",
-      `tell application "Reminders" to make new reminder with properties {name:"${name}", due date:d, remind me date:d}`,
-    );
-  } else {
-    lines.push(`tell application "Reminders" to make new reminder with properties {name:"${name}"}`);
+
+  const resolveBinary = io.resolveBinary ?? defaultCalendarHelperIO.resolveBinary;
+  const run = io.run ?? defaultCalendarHelperIO.run;
+  const binary = resolveBinary();
+  if (binary) {
+    const helperArgs = ["reminders", "create", "--name", name];
+    if (due) helperArgs.push("--due", due.toISOString());
+    const { code, stdout, stderr } = await run(binary, helperArgs);
+    if (code === 77) return permissionNeeded("Reminders", REMEDIATION.Reminders);
+    if (code === HELPER_TIMEOUT_CODE) return classifyReminderHelperTimeout(stderr);
+    if (code === 0) {
+      try {
+        const parsed = JSON.parse(stdout) as { ok?: boolean; id?: string };
+        if (parsed && parsed.ok) {
+          return due
+            ? `Reminder set: "${name}" for ${due.toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}.`
+            : `Reminder set: "${name}" (no due time).`;
+        }
+      } catch {
+        // fall through to the generic failure below — never crash on malformed JSON
+      }
+    }
+    return `Could not set the reminder: ${(stderr || stdout || "unknown error").trim()}`;
   }
-  const { ok, out } = await osascript(lines.join("\n"));
+
+  const runOsascript = io.runOsascript ?? osascript;
+  const script = buildReminderCreateScript(name, due);
+  const { ok, out } = await runOsascript(script);
   if (!ok) {
     if (isPermissionError(out)) return permissionNeeded("Reminders", REMEDIATION.Reminders);
     return `Could not set the reminder: ${out}`;

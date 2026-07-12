@@ -34,5 +34,13 @@
        string on a non-sandboxed, hardened-runtime Developer ID build. -->
   <key>NSCalendarsFullAccessUsageDescription</key>
   <string>HiveMatrix reads and creates your calendar events on your behalf, with your approval.</string>
+  <!-- EventKit (reminders subcommand): reads/creates reminders via
+       EKEventStore.requestFullAccessToReminders. Same clean EventKit TCC
+       grant as Calendars above, attributed to this helper binary, and does
+       NOT go through AppleScript/"tell application Reminders" — it does not
+       launch Reminders.app. This is a separate macOS permission from
+       Calendars; the operator will see its own one-time system prompt. -->
+  <key>NSRemindersFullAccessUsageDescription</key>
+  <string>HiveMatrix reads and creates your reminders when you ask.</string>
 </dict>
 </plist>
