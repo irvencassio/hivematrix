@@ -42,7 +42,7 @@ test("appleDateToIso handles seconds and nanoseconds since 2001", () => {
   assert.equal(appleDateToIso(631_152_000 * 1e9).slice(0, 4), "2021");
 });
 
-/** Build a minimal chat.db (message + handle) for the reader test. */
+/** Build a minimal chat.db (message + handle + attachment tables) for the reader test. */
 function makeChatDb(): string {
   const dir = mkdtempSync(join(tmpdir(), "mb-chatdb-"));
   const path = join(dir, "chat.db");
@@ -53,6 +53,8 @@ function makeChatDb(): string {
       ROWID INTEGER PRIMARY KEY, text TEXT, is_from_me INTEGER,
       date INTEGER, handle_id INTEGER, service TEXT
     );
+    CREATE TABLE attachment (ROWID INTEGER PRIMARY KEY, filename TEXT);
+    CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
     INSERT INTO handle (ROWID, id) VALUES (1, '+15551234567'), (2, 'friend@example.com');
     INSERT INTO message (ROWID, text, is_from_me, date, handle_id, service) VALUES
       (10, 'first inbound', 0, 631152000000000000, 1, 'iMessage'),
@@ -60,6 +62,40 @@ function makeChatDb(): string {
       (12, 'second inbound',0, 631152002000000000, 2, 'iMessage'),
       (13, '',              0, 631152003000000000, 1, 'iMessage'),
       (14, 'no handle',     0, 631152004000000000, NULL, 'SMS');
+  `);
+  db.close();
+  return path;
+}
+
+/** Same as makeChatDb, plus a photo-only message (empty/placeholder text + one
+ *  image attachment) and a captioned photo message, to exercise attachment
+ *  extraction and the "don't drop a photo-only message" behavior. */
+function makeChatDbWithAttachments(): string {
+  const dir = mkdtempSync(join(tmpdir(), "mb-chatdb-attach-"));
+  const path = join(dir, "chat.db");
+  const db = new Database(path);
+  db.exec(`
+    CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
+    CREATE TABLE message (
+      ROWID INTEGER PRIMARY KEY, text TEXT, is_from_me INTEGER,
+      date INTEGER, handle_id INTEGER, service TEXT
+    );
+    CREATE TABLE attachment (ROWID INTEGER PRIMARY KEY, filename TEXT);
+    CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
+    INSERT INTO handle (ROWID, id) VALUES (1, '+15551234567');
+    -- photo-only: text is the U+FFFC object-replacement placeholder
+    INSERT INTO message (ROWID, text, is_from_me, date, handle_id, service) VALUES
+      (20, '￼', 0, 631152000000000000, 1, 'iMessage'),
+      (21, 'check this out', 0, 631152001000000000, 1, 'iMessage'),
+      (22, 'a voice note, no image', 0, 631152002000000000, 1, 'iMessage');
+    INSERT INTO attachment (ROWID, filename) VALUES
+      (1, '~/Library/Messages/Attachments/aa/00/guid1/photo.heic'),
+      (2, '~/Library/Messages/Attachments/bb/00/guid2/pic.jpg'),
+      (3, '~/Library/Messages/Attachments/cc/00/guid3/note.caf');
+    INSERT INTO message_attachment_join (message_id, attachment_id) VALUES
+      (20, 1),
+      (21, 2),
+      (22, 3);
   `);
   db.close();
   return path;
@@ -127,6 +163,37 @@ test("readInboundSince returns only new inbound text messages, sets high-water",
     // since the last-seen rowid → nothing new
     assert.deepEqual(readInboundSince(14, 50, path).messages, []);
     assert.equal(currentMaxRowid(path), 14);
+  } finally {
+    rmSync(join(path, ".."), { recursive: true, force: true });
+  }
+});
+
+test("readInboundSince extracts image attachments and does not drop a photo-only message", () => {
+  const path = makeChatDbWithAttachments();
+  try {
+    const { messages, maxRowid } = readInboundSince(0, 50, path);
+    assert.equal(maxRowid, 22);
+    assert.deepEqual(messages.map((m) => m.rowid), [20, 21, 22]);
+
+    // Photo-only: the U+FFFC placeholder is stripped down to an empty string,
+    // but the message survives (not dropped as "empty") and carries the image.
+    const photoOnly = messages[0];
+    assert.equal(photoOnly.text, "");
+    assert.equal(photoOnly.attachments?.length, 1);
+    // imessage.ts only expands the path; HEIC→JPEG conversion happens later in flash/images.ts.
+    assert.match(photoOnly.attachments![0], /photo\.heic$/);
+    assert.ok(!photoOnly.attachments![0].startsWith("~"), "the leading ~ is expanded to an absolute path");
+
+    // Captioned photo: text is kept AND the image attachment is present.
+    const captioned = messages[1];
+    assert.equal(captioned.text, "check this out");
+    assert.deepEqual(captioned.attachments, [captioned.attachments![0]]);
+    assert.match(captioned.attachments![0], /pic\.jpg$/);
+
+    // Non-image attachment (a .caf voice note) is not surfaced as an image attachment.
+    const nonImage = messages[2];
+    assert.equal(nonImage.text, "a voice note, no image");
+    assert.deepEqual(nonImage.attachments, []);
   } finally {
     rmSync(join(path, ".."), { recursive: true, force: true });
   }

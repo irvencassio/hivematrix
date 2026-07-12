@@ -41,6 +41,10 @@ export async function runFlashTurnText(opts: {
   sessionId?: string;
   /** Restrict which tools this turn may use (offer + dispatch). */
   allowedTools?: (name: string) => boolean;
+  /** Local, already-normalized (flash/images.ts) image paths for this turn —
+   *  see FlashLoopOptions.imagePaths for how this enables vision for just
+   *  this one spawn. */
+  imagePaths?: string[];
 }): Promise<{ reply: string; sessionId: string; turnId: string; toolRuns?: Array<{ name: string; output: string }> }> {
   const brainRoot = configuredBrainRootDir();
   const session = getOrCreateSession(opts.channel, opts.peer, opts.sessionId);
@@ -66,6 +70,7 @@ export async function runFlashTurnText(opts: {
   const fullText = await runFlashAgentLoop(messages, emit, session.id, brainRoot, {
     allowedTools: opts.allowedTools,
     channel: opts.channel,
+    imagePaths: opts.imagePaths,
   });
   const assistantTurn = appendTurn(session.id, "assistant", fullText);
   return { reply: fullText, sessionId: session.id, turnId: assistantTurn.id, toolRuns };
@@ -89,6 +94,12 @@ export async function handleFlashTurn(
     peer: typeof body.peer === "string" && body.peer ? body.peer : "operator",
     text: typeof body.text === "string" ? body.text : "",
     attachments: Array.isArray(body.attachments) ? body.attachments : [],
+    // Populated by the /flash/turn route BEFORE calling handleFlashTurn, from
+    // the wire-level `imagesBase64` field (see server.ts) — already decoded
+    // and normalized to local paths by flash/images.ts.
+    imagePaths: Array.isArray(body.imagePaths)
+      ? body.imagePaths.filter((p): p is string => typeof p === "string")
+      : undefined,
   };
 
   if (!input.text.trim()) {
@@ -130,7 +141,10 @@ export async function handleFlashTurn(
     },
   };
 
-  const fullText = await runFlashAgentLoop(messages, emit, session.id, brainRoot, { channel: input.channel });
+  const fullText = await runFlashAgentLoop(messages, emit, session.id, brainRoot, {
+    channel: input.channel,
+    imagePaths: input.imagePaths,
+  });
 
   // Persist the assistant's full response
   const assistantTurn = appendTurn(session.id, "assistant", fullText);

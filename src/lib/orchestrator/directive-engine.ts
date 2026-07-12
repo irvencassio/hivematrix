@@ -43,6 +43,8 @@ import {
   getRecentTerminalRuns,
   markCriterionProven,
   allCriteriaProven,
+  listDirectives,
+  reopenCriteria,
 } from "./directive-store";
 import { computeNextRunAt, parseTriggerPolicy, type TriggerPolicy } from "@/lib/scheduling/trigger-policy";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
@@ -1119,10 +1121,59 @@ async function recordDistilledSkills(retrospective: DirectiveRetrospective, dire
   }
 }
 
+/**
+ * Recurring = schedule-triggered (daily/weekly/interval/cron, via ISO-8601
+ * `interval` or a `dailyAt` hour on a `{ type: "schedule" }` trigger policy).
+ * Every other trigger type (manual, watcher, dependency, continuous) is
+ * genuinely one-shot for the purposes of "criteria proven ⇒ terminate": none
+ * of them produce a fresh wall-clock `nextRunAt` the way a schedule does, so
+ * proving out is the natural end of the standing objective for them, same as
+ * before this fix.
+ */
+function isRecurringTriggerPolicy(policy: TriggerPolicy | null): boolean {
+  return policy?.type === "schedule";
+}
+
+/**
+ * Revive a recurring (schedule-triggered) directive that was wrongly
+ * terminated by the pre-fix reflect logic — left `status: "done"` with
+ * `nextRunAt: null` after a clean run, even though its trigger policy says it
+ * should keep recurring. Recomputes `nextRunAt` from the directive's own
+ * trigger policy (based off `lastRunAt`, same as a normal re-arm) and reopens
+ * its criteria so the next episode has something to (re-)verify, then
+ * reactivates it. A directive that is not stuck-done, is not schedule-
+ * triggered, or whose policy can't produce a next run time (e.g. a malformed
+ * interval) is left untouched.
+ *
+ * Returns the ids of the directives it revived.
+ */
+export function rearmStaleRecurringDirectives(nowIso: string = new Date().toISOString()): string[] {
+  const revived: string[] = [];
+  for (const directive of listDirectives()) {
+    if (directive.status !== "done" || directive.nextRunAt !== null) continue;
+    const policy = parseTriggerPolicy(directive.triggerPolicy);
+    if (!isRecurringTriggerPolicy(policy)) continue;
+    const nextRunAt = computeNextRunAt(policy as TriggerPolicy, directive.lastRunAt, new Date(nowIso));
+    if (!nextRunAt) continue;
+    reopenCriteria(directive._id);
+    updateDirective(directive._id, { status: "active", nextRunAt });
+    revived.push(directive._id);
+  }
+  return revived;
+}
+
 async function reflectAndYield(directive: DirectiveRow, run: RunRow, nowIso: string, options: DirectiveTickOptions = {}): Promise<void> {
-  const done = allCriteriaProven(directive._id);
-  const reflection = done
-    ? `All criteria proven; directive complete.`
+  const criteriaProven = allCriteriaProven(directive._id);
+  const policy: TriggerPolicy | null = parseTriggerPolicy(directive.triggerPolicy);
+  const recurring = isRecurringTriggerPolicy(policy);
+  // "Directive complete" (terminal) means criteria proven AND the directive is not
+  // recurring. A recurring directive proving its criteria for this episode is a
+  // successful run, not retirement — it must fall through to the re-arm path below.
+  const terminal = criteriaProven && !recurring;
+  const reflection = criteriaProven
+    ? recurring
+      ? `All criteria proven for this episode; re-arming for the next run per trigger policy.`
+      : `All criteria proven; directive complete.`
     : `Run complete; criteria remain open. Re-arming per trigger policy.`;
   const brainRootDir = options.brainRootDir ?? configuredBrainRootDir() ?? defaultBrainRootDir();
   let useProductionRetrospectiveTask = true;
@@ -1130,7 +1181,7 @@ async function reflectAndYield(directive: DirectiveRow, run: RunRow, nowIso: str
   if (directiveRetrospectiveForTests) {
     useProductionRetrospectiveTask = false;
     try {
-      const retrospectiveText = await directiveRetrospectiveForTests({ directive, run, done, reflection });
+      const retrospectiveText = await directiveRetrospectiveForTests({ directive, run, done: terminal, reflection });
       if (retrospectiveText) {
         const parsed = parseDirectiveRetrospectiveOutput(retrospectiveText);
         if (parsed.retrospective) {
@@ -1161,7 +1212,7 @@ async function reflectAndYield(directive: DirectiveRow, run: RunRow, nowIso: str
         run,
         "retrospective",
         `[directive retrospective] ${directive.goal.slice(0, 45)}`,
-        buildRetrospectivePrompt(directive, run, done, reflection),
+        buildRetrospectivePrompt(directive, run, terminal, reflection),
         "coo"
       );
       journal(run._id, directive._id, "retrospective_task_started", { taskId: task._id.toString() });
@@ -1214,16 +1265,21 @@ async function reflectAndYield(directive: DirectiveRow, run: RunRow, nowIso: str
   }
 
   setRunPhase(run._id, "done", { reflectionText: reflection, completedAt: nowIso });
-  journal(run._id, directive._id, "reflected", { done, reflection });
+  journal(run._id, directive._id, "reflected", { done: criteriaProven, recurring, terminal, reflection });
 
-  if (done) {
+  if (terminal) {
     updateDirective(directive._id, { status: "done", lastRunId: run._id, lastRunAt: nowIso, nextRunAt: null });
     journal(run._id, directive._id, "yielded", { directiveStatus: "done" });
     return;
   }
 
-  // Re-arm: compute next run time from the trigger policy.
-  const policy: TriggerPolicy | null = parseTriggerPolicy(directive.triggerPolicy);
+  // Re-arm: compute next run time from the trigger policy. A recurring directive
+  // whose criteria were fully proven THIS episode is not retired — reopen its
+  // criteria so the next episode has something to (re-)verify, rather than
+  // leaving them permanently proven and never checked again.
+  if (criteriaProven && recurring) {
+    reopenCriteria(directive._id);
+  }
   const nextRunAt = policy ? computeNextRunAt(policy, nowIso, new Date(nowIso)) : null;
   // Manual/one-shot triggers (no schedule) go to sleep until re-triggered.
   const nextStatus = nextRunAt ? "active" : "sleeping";

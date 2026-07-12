@@ -103,13 +103,33 @@ async function main(): Promise<void> {
   const { startScheduler } = await import("@/lib/orchestrator/scheduler");
   startScheduler();
 
+  // Self-heal: revive any recurring directive that was wrongly retired (criteria
+  // proven once → status:done/nextRunAt:null) before the recurring-vs-one-shot
+  // fix landed. Runs every boot so the accountability rituals can't stay dead.
+  try {
+    const { rearmStaleRecurringDirectives } = await import("@/lib/orchestrator/directive-engine");
+    const revived = rearmStaleRecurringDirectives();
+    if (revived.length) console.log(`[directives] revived ${revived.length} stale recurring directive(s): ${revived.join(", ")}`);
+  } catch (e) { console.error("[directives] rearm-on-boot failed:", e instanceof Error ? e.message : e); }
+
   // Flash dispatch: shared callback for both inbound channel pollers. Wraps
   // runFlashTurnText so messagebee/mailbee (lib/) never import from flash/ directly.
+  // imagePaths (currently only messagebee sends these, for iMessage photo
+  // attachments) are normalized here — copied into the daemon-owned vision
+  // temp dir + HEIC→JPEG converted — via flash/images.ts before being handed
+  // to the flash loop, which allows Read for just this turn's spawn.
   const { runFlashTurnText } = await import("@/lib/flash");
   const makeFlashDispatch =
     (channel: "imessage" | "mail") =>
-    (text: string, peer: string) =>
-      runFlashTurnText({ text, channel, peer }).then((r) => r.reply);
+    async (text: string, peer: string, imagePaths?: string[]) => {
+      let normalizedImagePaths: string[] | undefined;
+      if (imagePaths?.length) {
+        const { normalizeImagePaths } = await import("@/lib/flash/images");
+        normalizedImagePaths = await normalizeImagePaths(imagePaths);
+      }
+      const r = await runFlashTurnText({ text, channel, peer, imagePaths: normalizedImagePaths });
+      return r.reply;
+    };
 
   // Start the Message Lane poll loop (self-gates: no-ops unless the imessage
   // channel is enabled + chat.db is readable). Allowlisted senders go to Flash Lane.

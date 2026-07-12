@@ -76,6 +76,11 @@ export interface FlashLoopOptions {
    *  actual request surface instead of the session row's (now possibly
    *  unified) `channel` column. See flash-mcp.ts's FlashMcpOptions.channel. */
   channel?: string;
+  /** Local, already-normalized (see flash/images.ts) image paths attached to
+   *  THIS turn. When non-empty, the CLI's built-in Read tool is allowed for
+   *  just this one spawn (see buildFlashSpawnArgs) and the paths are named in
+   *  the prompt — every other turn keeps the lane-only, no-Read posture. */
+  imagePaths?: string[];
   /** Test-only: override the `claude` binary path (e.g. a fake stream-json emitter script). */
   __claudeBinary?: string;
   /** Test-only: override child_process.spawn. */
@@ -130,6 +135,21 @@ export function buildFlashPrompt(messages: FlashMessage[], resume = false): Flas
   return { systemPrompts, prompt: `${transcript}${last.content}` };
 }
 
+/**
+ * Prepend an instruction naming this turn's image attachment paths ahead of
+ * the rest of the stdin prompt — paired with buildFlashSpawnArgs allowing the
+ * Read tool for the same spawn, this is the whole vision mechanism: the model
+ * reads each path with Read and sees it. A no-op when there are no images, so
+ * a text-only turn's prompt is untouched.
+ */
+export function withImageNote(prompt: string, imagePaths?: string[]): string {
+  if (!imagePaths || imagePaths.length === 0) return prompt;
+  const note =
+    `The operator attached image(s) at these paths — Read each one to see it, then respond: ` +
+    imagePaths.join(" ");
+  return prompt ? `${note}\n\n${prompt}` : note;
+}
+
 export interface FlashSpawnArgsInput {
   systemPrompts: string[];
   mcpConfigPath: string;
@@ -137,6 +157,8 @@ export interface FlashSpawnArgsInput {
   maxTurns: number;
   /** CLI session id to resume, if this flash session has one on file. */
   resumeSessionId?: string | null;
+  /** Set when this turn has image attachments — see buildFlashSpawnArgs. */
+  hasImages?: boolean;
 }
 
 /**
@@ -147,10 +169,22 @@ export interface FlashSpawnArgsInput {
  * entirely and has no start-of-string ambiguity, unlike `-p <value>` or a `--`
  * end-of-options marker (the latter also triggers a 3s stdin-wait). `-p` stays as the
  * print-mode flag; with no positional prompt the CLI reads the query from stdin.
+ *
+ * `hasImages`: normal turns disable every built-in CLI tool (see the block
+ * comment below) — but a turn with image attachments needs a way for the
+ * model to actually SEE them, and the only vision path this CLI exposes
+ * without an API key is `Read` on a local file path (confirmed by spawning
+ * `claude -p --model haiku --tools "Read" --allowedTools "Read"` against a
+ * real image — it reads the path and describes the image). So an image turn
+ * ONLY enables `Read` among built-ins (never the full `default` set — Bash/
+ * WebFetch/etc. stay off) and adds `Read` to the MCP allowedTools list
+ * alongside the usual lane tools. A text-only turn is byte-for-byte identical
+ * to before this existed.
  */
 export function buildFlashSpawnArgs(input: FlashSpawnArgsInput): string[] {
   const args = ["-p"];
   if (input.resumeSessionId) args.push("--resume", input.resumeSessionId);
+  const allowedToolNames = input.hasImages ? [...input.toolNames, "Read"] : input.toolNames;
   args.push(
     "--model",
     "haiku",
@@ -159,20 +193,22 @@ export function buildFlashSpawnArgs(input: FlashSpawnArgsInput): string[] {
     "--verbose",
     "--max-turns",
     String(input.maxTurns),
-    // Disable ALL of the CLI's built-in tools (WebFetch/WebSearch/Bash/Read/Write/…).
-    // Flash chat must act only through its gated HiveMatrix lane tools — e.g. web reads
-    // go through Browser Lane (mcp__flash__hivematrix_browser), not the CLI's WebFetch
-    // (which needs an interactive permission grant flash can't provide → dead-ends, and
-    // bypasses our lane policy/telemetry). Removing the built-in set also keeps the MCP
-    // tool count low enough that the tools aren't CLI-deferred behind a ToolSearch.
+    // Disable ALL of the CLI's built-in tools (WebFetch/WebSearch/Bash/Read/Write/…)
+    // — EXCEPT Read, and only on a turn with image attachments (see doc comment).
+    // Flash chat must otherwise act only through its gated HiveMatrix lane tools —
+    // e.g. web reads go through Browser Lane (mcp__flash__hivematrix_browser), not
+    // the CLI's WebFetch (which needs an interactive permission grant flash can't
+    // provide → dead-ends, and bypasses our lane policy/telemetry). Removing the
+    // built-in set also keeps the MCP tool count low enough that the tools aren't
+    // CLI-deferred behind a ToolSearch.
     "--tools",
-    "",
+    input.hasImages ? "Read" : "",
     // Only the flash MCP server, never the operator's other configured MCP servers.
     "--strict-mcp-config",
     "--mcp-config",
     input.mcpConfigPath,
     "--allowedTools",
-    input.toolNames.join(","),
+    allowedToolNames.join(","),
     ...input.systemPrompts.flatMap((sp) => ["--append-system-prompt", sp]),
   );
   return args;
@@ -549,6 +585,8 @@ export async function runFlashAgentLoop(
   const spawnImpl = options.__spawn ?? spawn;
   const startedAtMs = Date.now();
 
+  const hasImages = !!options.imagePaths && options.imagePaths.length > 0;
+
   const buildTurn = (resumeId: string | null) => {
     const { systemPrompts, prompt } = buildFlashPrompt(messages, !!resumeId);
     const args = buildFlashSpawnArgs({
@@ -557,8 +595,9 @@ export async function runFlashAgentLoop(
       toolNames,
       maxTurns: MAX_TOOL_CALLS,
       resumeSessionId: resumeId,
+      hasImages,
     });
-    return { args, prompt };
+    return { args, prompt: withImageNote(prompt, options.imagePaths) };
   };
 
   const storedCliSessionId = getFlashCliSessionId(sessionId);

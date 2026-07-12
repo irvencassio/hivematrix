@@ -10,12 +10,17 @@ export interface InboundMessage {
   rowid: number;
   /** Raw sender identity (phone number or email handle). */
   handle: string;
-  /** Plain message text. */
+  /** Plain message text (the U+FFFC attachment-placeholder char, if present, is
+   *  already stripped by imessage.ts — a photo-only message has text === ""). */
   text: string;
   /** ISO timestamp the message was received. */
   receivedAt: string;
   /** "iMessage" | "SMS" (best-effort from chat.db). */
   service: string;
+  /** Absolute local paths to this message's IMAGE attachments (jpg/jpeg/png/gif/
+   *  heic/heif/webp only — other attachment types, e.g. audio, are omitted here).
+   *  Empty/undefined for a message with no image attachments. */
+  attachments?: string[];
 }
 
 /**

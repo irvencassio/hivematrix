@@ -13,6 +13,7 @@ import {
   createFlashStreamState,
   guardFabricatedToolCalls,
   runFlashAgentLoop,
+  withImageNote,
   READ_ONLY_FLASH_TOOLS,
 } from "./loop";
 import { createSession, getFlashCliSessionId, setFlashCliSessionId } from "./store";
@@ -120,6 +121,30 @@ test("buildFlashPrompt: resume=true with no turns yields an empty prompt (same a
 });
 
 // ------------------------------------------------------------------
+// withImageNote — prompt-level vision instruction
+// ------------------------------------------------------------------
+
+test("withImageNote: no imagePaths leaves the prompt untouched", () => {
+  assert.equal(withImageNote("hello"), "hello");
+  assert.equal(withImageNote("hello", []), "hello");
+});
+
+test("withImageNote: prepends a Read instruction naming every path, ahead of the prompt", () => {
+  const out = withImageNote("what is this?", ["/tmp/a.jpg", "/tmp/b.jpg"]);
+  assert.match(out, /Read each one to see it/);
+  assert.match(out, /\/tmp\/a\.jpg/);
+  assert.match(out, /\/tmp\/b\.jpg/);
+  assert.ok(out.trim().endsWith("what is this?"), "the original prompt still follows the note");
+  assert.ok(out.indexOf("/tmp/a.jpg") < out.indexOf("what is this?"), "the note comes first");
+});
+
+test("withImageNote: an empty prompt with images yields just the note (no dangling blank prompt)", () => {
+  const out = withImageNote("", ["/tmp/a.jpg"]);
+  assert.match(out, /\/tmp\/a\.jpg/);
+  assert.doesNotMatch(out, /\n\n$/);
+});
+
+// ------------------------------------------------------------------
 // buildFlashSpawnArgs — pure argv construction
 // ------------------------------------------------------------------
 
@@ -149,6 +174,59 @@ test("buildFlashSpawnArgs: wires model, budgets, mcp config, and allowed tools",
   assert.equal(sysIdxs.length, 2);
   assert.equal(args[sysIdxs[0] + 1], "sys1");
   assert.equal(args[sysIdxs[1] + 1], "sys2");
+});
+
+test("buildFlashSpawnArgs: with no imagePaths (hasImages unset), args are byte-identical to the pre-vision baseline", () => {
+  const input = {
+    systemPrompts: ["sys1"],
+    mcpConfigPath: "/p/flash-mcp-config.json",
+    toolNames: ["mcp__flash__brain_search", "mcp__flash__mail_send"],
+    maxTurns: 12,
+  };
+  const withoutHasImages = buildFlashSpawnArgs(input);
+  const withHasImagesFalse = buildFlashSpawnArgs({ ...input, hasImages: false });
+  // Text-only turns (the overwhelming majority) must be unaffected by this feature.
+  assert.deepEqual(withoutHasImages, withHasImagesFalse);
+  assert.equal(withoutHasImages[withoutHasImages.indexOf("--tools") + 1], "");
+  assert.equal(
+    withoutHasImages[withoutHasImages.indexOf("--allowedTools") + 1],
+    "mcp__flash__brain_search,mcp__flash__mail_send",
+  );
+  assert.ok(!withoutHasImages.includes("Read"));
+});
+
+test("buildFlashSpawnArgs: hasImages allows ONLY the Read built-in tool, plus Read added to --allowedTools", () => {
+  const args = buildFlashSpawnArgs({
+    systemPrompts: [],
+    mcpConfigPath: "/p/flash-mcp-config.json",
+    toolNames: ["mcp__flash__brain_search", "mcp__flash__mail_send"],
+    maxTurns: 12,
+    hasImages: true,
+  });
+  // --tools enables Read and nothing else from the built-in set (never "default").
+  assert.equal(args[args.indexOf("--tools") + 1], "Read");
+  // --allowedTools keeps every usual lane tool AND adds bare "Read".
+  assert.equal(
+    args[args.indexOf("--allowedTools") + 1],
+    "mcp__flash__brain_search,mcp__flash__mail_send,Read",
+  );
+});
+
+test("buildFlashSpawnArgs: hasImages=false behaves exactly like hasImages omitted", () => {
+  const a = buildFlashSpawnArgs({
+    systemPrompts: [],
+    mcpConfigPath: "/p",
+    toolNames: ["mcp__flash__brain_search"],
+    maxTurns: 12,
+    hasImages: false,
+  });
+  const b = buildFlashSpawnArgs({
+    systemPrompts: [],
+    mcpConfigPath: "/p",
+    toolNames: ["mcp__flash__brain_search"],
+    maxTurns: 12,
+  });
+  assert.deepEqual(a, b);
 });
 
 test("buildFlashSpawnArgs: a resumeSessionId adds --resume <id>; omitting it adds nothing", () => {
@@ -311,6 +389,73 @@ function fakeSpawn(lines: string[], exitCode = 0): (...args: unknown[]) => Child
 }
 
 const claudeReady = backendConfigured("claude");
+
+// ------------------------------------------------------------------
+// runFlashAgentLoop — imagePaths threads through to the spawned CLI args
+// ------------------------------------------------------------------
+
+test(
+  "runFlashAgentLoop: options.imagePaths makes the spawned claude args allow Read and name the path in the prompt",
+  { skip: claudeReady ? false : "claude CLI not configured in this environment" },
+  async () => {
+    const session = createSession("console", "vision-test");
+    const emit = fakeEmitter();
+    let sawArgs: string[] = [];
+    let sawPrompt = "";
+    const spawnImpl = (_bin: unknown, args: string[]) => {
+      sawArgs = args;
+      const proc = new EventEmitter() as unknown as ChildProcess;
+      const stdout = new EventEmitter();
+      const stderr = new EventEmitter();
+      const stdin = { write: (chunk: string) => { sawPrompt += chunk; }, end: () => {}, on: () => {} };
+      Object.assign(proc, { stdout, stderr, stdin, kill: () => true });
+      setImmediate(() => {
+        stdout.emit("data", Buffer.from(JSON.stringify({ type: "result", result: "I see a cat", session_id: "s1", usage: {} }) + "\n"));
+        proc.emit("close", 0, null);
+      });
+      return proc;
+    };
+
+    const text = await runFlashAgentLoop([{ role: "user", content: "what is this?" }], emit, session.id, null, {
+      __spawn: spawnImpl as never,
+      imagePaths: ["/tmp/vision-test.jpg"],
+    });
+
+    assert.equal(text, "I see a cat");
+    assert.equal(sawArgs[sawArgs.indexOf("--tools") + 1], "Read");
+    assert.match(sawArgs[sawArgs.indexOf("--allowedTools") + 1], /(^|,)Read(,|$)/);
+    assert.match(sawPrompt, /\/tmp\/vision-test\.jpg/);
+    assert.match(sawPrompt, /Read each one to see it/);
+  },
+);
+
+test(
+  "runFlashAgentLoop: no imagePaths keeps --tools empty (text-only posture unchanged)",
+  { skip: claudeReady ? false : "claude CLI not configured in this environment" },
+  async () => {
+    const session = createSession("console", "no-vision-test");
+    const emit = fakeEmitter();
+    let sawArgs: string[] = [];
+    const spawnImpl = (_bin: unknown, args: string[]) => {
+      sawArgs = args;
+      const proc = new EventEmitter() as unknown as ChildProcess;
+      const stdout = new EventEmitter();
+      const stderr = new EventEmitter();
+      Object.assign(proc, { stdout, stderr, kill: () => true });
+      setImmediate(() => {
+        stdout.emit("data", Buffer.from(JSON.stringify({ type: "result", result: "hi", session_id: "s1", usage: {} }) + "\n"));
+        proc.emit("close", 0, null);
+      });
+      return proc;
+    };
+
+    await runFlashAgentLoop([{ role: "user", content: "hi" }], emit, session.id, null, {
+      __spawn: spawnImpl as never,
+    });
+
+    assert.equal(sawArgs[sawArgs.indexOf("--tools") + 1], "");
+  },
+);
 
 test(
   "runFlashAgentLoop: streams tokens from a fake claude process and returns the final text",

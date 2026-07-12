@@ -2289,7 +2289,8 @@ test("Flash send posts to /flash/turn and streams SSE events", () => {
 test("Flash send button is disabled for empty input and while in-flight", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /id="flashSendBtn"[^']*disabled/, "Send button starts disabled in the center panel");
-  assert.match(js, /if \(!input \|\| !input\.value\.trim\(\) \|\| _flashState\.sending\) return/, "flashSend bails on empty or in-flight");
+  // Bails when there's nothing to send (no text AND no attached photo) or in-flight.
+  assert.match(js, /if \(!input \|\| \(!input\.value\.trim\(\) && !images\.length\) \|\| _flashState\.sending\) return/, "flashSend bails on empty (no text+no image) or in-flight");
   assert.match(js, /_flashState\.sending = true/, "sending flag set before request");
   assert.match(js, /_flashState\.sending = false/, "sending flag cleared in finally block");
 });

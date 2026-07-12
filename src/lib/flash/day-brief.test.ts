@@ -8,6 +8,7 @@ import {
   reviewLine,
   reviewAttentionCount,
   loopClosureLine,
+  goalsDueLine,
   completedLine,
   openLine,
   queuedLine,
@@ -17,6 +18,7 @@ import {
   GREETING_FALLBACK,
   type DayBriefDeps,
   type DayBriefTaskRef,
+  type DayBriefGoalDue,
   type VoiceLoopClosure,
 } from "./day-brief";
 import type { WorkflowInbox, InboxGroup } from "@/lib/workflows/inbox";
@@ -46,6 +48,7 @@ function fakeDeps(over: Partial<DayBriefDeps> = {}): DayBriefDeps {
     listCompletedSince: async () => [],
     listOpenTasks: async () => [],
     listQueuedOvernight: async () => [],
+    listGoalsDueToday: async () => [],
     chatComplete: async () => "",
     readGoalsPersona: () => null,
     now: () => new Date("2026-07-10T08:00:00"),
@@ -96,6 +99,14 @@ test("loopClosureLine: null when empty, names the most recent otherwise", () => 
   assert.equal(loopClosureLine(two), "Closed the loop on 2, incl. Called the vet back.");
 });
 
+test("goalsDueLine: null when empty, names the first due goal otherwise", () => {
+  assert.equal(goalsDueLine([]), null);
+  const one: DayBriefGoalDue[] = [{ title: "Read scripture" }];
+  assert.equal(goalsDueLine(one), "Goal due today: Read scripture.");
+  const two: DayBriefGoalDue[] = [...one, { title: "Log a workout" }];
+  assert.equal(goalsDueLine(two), "2 goals due today, incl. Read scripture.");
+});
+
 test("completedLine / openLine / queuedLine: empty vs counted", () => {
   const t = (title: string): DayBriefTaskRef => ({ title });
   assert.equal(completedLine([]), "Nothing shipped today.");
@@ -136,6 +147,14 @@ test("composeDayBrief('morning'): includes a recent voice loop-closure when pres
   });
   const text = await composeDayBrief("morning", deps);
   assert.ok(text.includes("Closed the loop on: Rebooked the dentist."));
+});
+
+test("composeDayBrief('morning'): includes the due-goals line when the fetcher returns some", async () => {
+  const deps = fakeDeps({
+    listGoalsDueToday: async () => [{ title: "Read scripture" }, { title: "Log a workout" }],
+  });
+  const text = await composeDayBrief("morning", deps);
+  assert.ok(text.includes("2 goals due today, incl. Read scripture."));
 });
 
 test("composeDayBrief('morning'): empty day still produces a valid, short brief", async () => {

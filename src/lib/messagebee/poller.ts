@@ -29,8 +29,10 @@ import {
 import { getLocation } from "@/lib/models/available";
 import { startPollLoop } from "@/lib/lanes/poll-loop";
 
-/** Injected by daemon/index.ts; accepts (text, peer) and returns the Flash reply. */
-type FlashDispatch = (text: string, peer: string) => Promise<string>;
+/** Injected by daemon/index.ts; accepts (text, peer, imagePaths?) and returns
+ *  the Flash reply. imagePaths carries a photo-only or photo+caption message's
+ *  image attachment paths through to Flash's vision-enabled turn. */
+type FlashDispatch = (text: string, peer: string, imagePaths?: string[]) => Promise<string>;
 let flashDispatch: FlashDispatch | null = null;
 
 const POLL_INTERVAL_MS = 3_000;
@@ -68,7 +70,7 @@ async function pendingInputForSender(handle: string): Promise<PendingInput[]> {
 }
 
 /** Process one inbound message end-to-end. */
-async function handleInbound(msg: { rowid: number; handle: string; text: string; service: string }): Promise<void> {
+async function handleInbound(msg: { rowid: number; handle: string; text: string; service: string; attachments?: string[] }): Promise<void> {
   // Loop-guard: on a shared Apple ID, the agent's own outbound to its own number
   // echoes back as is_from_me=0. Never treat that echo as an inbound message — it
   // would trigger a reply that echoes again, forever. Drop it silently (not even
@@ -76,7 +78,10 @@ async function handleInbound(msg: { rowid: number; handle: string; text: string;
   if (isSelf(msg.handle)) return;
 
   const route = routeInbound(
-    { rowid: msg.rowid, handle: msg.handle, text: msg.text, receivedAt: new Date().toISOString(), service: msg.service },
+    {
+      rowid: msg.rowid, handle: msg.handle, text: msg.text,
+      receivedAt: new Date().toISOString(), service: msg.service, attachments: msg.attachments,
+    },
     { allowlisted: isAllowed(msg.handle), pendingInput: await pendingInputForSender(msg.handle) },
   );
 
@@ -99,7 +104,7 @@ async function handleInbound(msg: { rowid: number; handle: string; text: string;
   const loc = getLocation();
   const text = loc ? route.text + "\n\n[Operator location: " + loc + "]" : route.text;
   try {
-    const reply = await flashDispatch(text, route.peer);
+    const reply = await flashDispatch(text, route.peer, route.imagePaths.length ? route.imagePaths : undefined);
     if (reply.trim()) {
       const sent = await sendGuarded(route.peer, reply);
       if (sent) recordOutbound();

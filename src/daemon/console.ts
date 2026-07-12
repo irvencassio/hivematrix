@@ -873,6 +873,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .oc-input:focus { outline:none; border-color:var(--accent); }
   .oc-panel-composer-actions { display:flex; flex-direction:column; gap:7px; min-width:0; }
   .oc-panel-composer-actions button { width:100%; min-width:0; text-align:center; }
+  .oc-img-preview { display:flex; gap:8px; flex-wrap:wrap; padding:0 12px; }
+  .oc-img-preview:empty { display:none; }
+  .oc-img-chip { position:relative; width:56px; height:56px; border-radius:8px; overflow:hidden;
+    border:1px solid var(--border); flex:0 0 auto; }
+  .oc-img-chip img { width:100%; height:100%; object-fit:cover; display:block; }
+  .oc-img-chip .rm { position:absolute; top:1px; right:1px; width:16px; height:16px; line-height:14px;
+    text-align:center; border-radius:50%; background:rgba(0,0,0,0.65); color:#fff; font-size:11px;
+    cursor:pointer; border:none; padding:0; }
   .oc-mic-btn { padding:7px 6px; border:1px solid var(--border); border-radius:8px;
     background:var(--code-bg); color:var(--text); font-size:12px; font-family:inherit;
     cursor:pointer; white-space:nowrap; }
@@ -6861,7 +6869,8 @@ let _flashState = {
   panelOpen: false,
   sessionId: null,
   sending: false,
-  messages: []
+  messages: [],
+  pendingImages: [] // [{ dataUrl, name }] — attached photos for the next turn (sent as imagesBase64)
 };
 
 function flashPanelHtml() {
@@ -6874,9 +6883,12 @@ function flashPanelHtml() {
     + '</div>'
     + '<div class="oc-panel-body">'
     + '<div class="oc-transcript" id="flashTranscript"></div>'
+    + '<div id="flashImgPreview" class="oc-img-preview"></div>'
     + '<div class="oc-panel-composer-shell" onclick="flashFocusInput()">'
     + '<textarea class="oc-input" id="flashInput" placeholder="Message…" rows="3" onkeydown="flashInputKeydown(event)" oninput="flashInputResize(this)"></textarea>'
     + '<div class="oc-panel-composer-actions">'
+    + '<input type="file" id="flashPhotoInput" accept="image/*" multiple style="display:none" onchange="flashPhotoSelected(this)">'
+    + '<button class="oc-mic-btn" id="flashPhotoBtn" onclick="event.stopPropagation();document.getElementById(\'flashPhotoInput\').click()" title="Attach a photo — the assistant can see it">📎 Photo</button>'
     + '<button class="oc-mic-btn" id="flashMicBtn" onclick="event.stopPropagation();flashDictate()" title="Dictate — speak and your words fill the box">🎤 Mic</button>'
     + '<button class="create" id="flashSendBtn" onclick="event.stopPropagation();flashSend()" disabled>Send</button>'
     + '</div></div></div></div>';
@@ -6894,6 +6906,9 @@ function renderFlashPanel() {
   if (input && draft) { input.value = draft; flashInputResize(input); }
   const mic = document.getElementById('flashMicBtn');
   if (mic && !_voiceOn) mic.style.display = 'none';
+  renderFlashImgPreview();
+  const sendBtn = document.getElementById('flashSendBtn');
+  if (sendBtn) sendBtn.disabled = !((input && input.value.trim()) || _flashState.pendingImages.length);
   flashRenderMessages();
   if (active && input) input.focus();
 }
@@ -8000,33 +8015,78 @@ function flashRenderMessages() {
         }).join('') + '</div>';
     }
     const streamingCursor = (m.streaming && m.role === 'assistant') ? '<span style="opacity:.5">▌</span>' : '';
+    const imgs = (m.images && m.images.length)
+      ? '<div class="oc-img-preview" style="padding:0 0 5px">' + m.images.map(function (u) {
+          return '<div class="oc-img-chip"><img src="' + u + '" alt="attached"></div>';
+        }).join('') + '</div>'
+      : '';
     return '<div class="oc-msg oc-msg-' + esc(m.role) + '">'
       + '<div class="oc-msg-meta">' + esc(roleLabel) + (ts ? ' · ' + ts : '') + '</div>'
-      + toolHtml
+      + toolHtml + imgs
       + '<div class="oc-msg-text">' + esc(m.content || '').replace(/\n/g, '<br>') + streamingCursor + '</div>'
       + '</div>';
   }).join('');
   el.scrollTop = el.scrollHeight;
 }
 
+// Attach photos to the next chat turn — the assistant can SEE them (sent as
+// imagesBase64 data URLs; the daemon decodes + lets the model Read them).
+function flashPhotoSelected(inputEl) {
+  const files = Array.from(inputEl.files || []);
+  let remaining = files.length;
+  files.slice(0, 6).forEach(function (f) {
+    if (!/^image\//.test(f.type)) { remaining--; return; }
+    const fr = new FileReader();
+    fr.onload = function () {
+      _flashState.pendingImages.push({ dataUrl: String(fr.result), name: f.name });
+      renderFlashImgPreview();
+      const sendBtn = document.getElementById('flashSendBtn');
+      if (sendBtn) sendBtn.disabled = false;
+    };
+    fr.readAsDataURL(f);
+  });
+  inputEl.value = ''; // allow re-selecting the same file
+}
+
+function renderFlashImgPreview() {
+  const el = document.getElementById('flashImgPreview');
+  if (!el) return;
+  el.innerHTML = _flashState.pendingImages.map(function (img, i) {
+    return '<div class="oc-img-chip"><img src="' + img.dataUrl + '" alt="attached">'
+      + '<button class="rm" title="Remove" onclick="flashRemoveImg(' + i + ')">✕</button></div>';
+  }).join('');
+}
+
+function flashRemoveImg(i) {
+  _flashState.pendingImages.splice(i, 1);
+  renderFlashImgPreview();
+  const input = document.getElementById('flashInput');
+  const sendBtn = document.getElementById('flashSendBtn');
+  if (sendBtn) sendBtn.disabled = !((input && input.value.trim()) || _flashState.pendingImages.length);
+}
+
 async function flashSend() {
   const input = document.getElementById('flashInput');
   const sendBtn = document.getElementById('flashSendBtn');
-  if (!input || !input.value.trim() || _flashState.sending) return;
+  const images = _flashState.pendingImages.slice();
+  if (!input || (!input.value.trim() && !images.length) || _flashState.sending) return;
   const msg = input.value.trim();
   _flashState.sending = true;
   if (sendBtn) sendBtn.disabled = true;
   input.value = '';
+  _flashState.pendingImages = [];
+  renderFlashImgPreview();
   flashInputResize(input);
   updateFlashNav();
 
-  _flashState.messages.push({ role: 'user', content: msg, ts: Date.now() });
+  _flashState.messages.push({ role: 'user', content: msg || (images.length ? '📷 Photo' : ''), ts: Date.now(), images: images.map(i => i.dataUrl) });
   const assistantIdx = _flashState.messages.length;
   _flashState.messages.push({ role: 'assistant', content: '', ts: Date.now(), streaming: true, toolLines: [] });
   flashRenderMessages();
 
   const reqBody = JSON.stringify(Object.assign(
     { channel: 'console', peer: 'operator', text: msg },
+    images.length ? { imagesBase64: images.map(i => i.dataUrl) } : {},
     _flashState.sessionId ? { sessionId: _flashState.sessionId } : {}
   ));
 
@@ -8116,7 +8176,7 @@ function flashInputResize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 180) + 'px';
   const sendBtn = document.getElementById('flashSendBtn');
-  if (sendBtn) sendBtn.disabled = !el.value.trim();
+  if (sendBtn) sendBtn.disabled = !el.value.trim() && !_flashState.pendingImages.length;
 }
 
 function flashFocusInput() {

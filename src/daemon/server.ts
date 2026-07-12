@@ -4671,11 +4671,25 @@ export function createDaemonServer() {
 
       // ── Flash Lane ────────────────────────────────────────────────────────────
       // POST /flash/turn — ad-hoc conversational agent turn; response is SSE.
-      // Body: { sessionId?, channel, peer, text, attachments? }
+      // Body: { sessionId?, channel, peer, text, attachments?, imagesBase64? }
+      //   imagesBase64: string[] — each entry a `data:<mime>;base64,<data>` URL
+      //   (a bare base64 string is also accepted, treated as JPEG). This is the
+      //   shape a browser/iOS composer produces directly from FileReader/
+      //   PhotosPicker with no extra encoding step. Decoded + normalized to
+      //   local paths here (flash/images.ts) before the turn runs — the model
+      //   never sees base64, only the resulting file paths (see loop.ts's
+      //   Read-for-this-spawn-only vision mechanism).
       // Events: token {delta}, tool_start {name,args_summary}, tool_result {name,ok,summary},
       //         escalated {workPackageId}, done {sessionId,turnId,fullText,audioRef?}
       if (req.method === "POST" && urlPath === "/flash/turn") {
         const body = await parseBody(req) as Record<string, unknown>;
+        const imagesBase64 = Array.isArray(body.imagesBase64)
+          ? body.imagesBase64.filter((s): s is string => typeof s === "string")
+          : [];
+        if (imagesBase64.length) {
+          const { saveBase64Images } = await import("@/lib/flash/images");
+          body.imagePaths = await saveBase64Images(imagesBase64);
+        }
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",

@@ -44,6 +44,54 @@ function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// Image extensions we'll forward to Flash as vision attachments. Other
+// attachment kinds (audio notes, vcards, etc.) are intentionally excluded —
+// there's no Read-based vision path for them yet.
+const IMAGE_ATTACHMENT_RE = /\.(jpe?g|png|gif|heic|heif|webp)$/i;
+
+function isImageAttachment(filename: string): boolean {
+  return IMAGE_ATTACHMENT_RE.test(filename);
+}
+
+// chat.db attachment.filename stores a literal `~/Library/Messages/Attachments/...`
+// path (tilde un-expanded) — expand it against the current user's home so it's
+// directly readable.
+function expandTilde(path: string): string {
+  return path.startsWith("~") ? join(homedir(), path.slice(1)) : path;
+}
+
+// A photo-only iMessage carries the Unicode "object replacement character"
+// (U+FFFC) in m.text as a placeholder for the inline attachment — strip it so
+// callers see a clean empty string (not a mystery character) for photo-only text.
+const ATTACHMENT_PLACEHOLDER_RE = /￼/g;
+
+function stripAttachmentPlaceholder(text: string): string {
+  return text.replace(ATTACHMENT_PLACEHOLDER_RE, "").trim();
+}
+
+/** Fetch image-only attachment paths for a batch of message ROWIDs, grouped by message. */
+function fetchImageAttachments(db: Database.Database, rowids: number[]): Map<number, string[]> {
+  if (rowids.length === 0) return new Map();
+  const placeholders = rowids.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT maj.message_id AS messageId, a.filename AS filename
+         FROM message_attachment_join maj
+         JOIN attachment a ON a.ROWID = maj.attachment_id
+        WHERE maj.message_id IN (${placeholders})`,
+    )
+    .all(...rowids) as Array<{ messageId: number; filename: string | null }>;
+
+  const byMessage = new Map<number, string[]>();
+  for (const row of rows) {
+    if (!row.filename || !isImageAttachment(row.filename)) continue;
+    const list = byMessage.get(row.messageId) ?? [];
+    list.push(expandTilde(row.filename));
+    byMessage.set(row.messageId, list);
+  }
+  return byMessage;
+}
+
 /**
  * Diagnose whether the daemon can read chat.db. Opening and schema probing are
  * split so the UI can avoid blaming Full Disk Access for schema/drift failures.
@@ -87,8 +135,13 @@ export function canReadChatDb(path = chatDbPath()): boolean {
 }
 
 /**
- * Read inbound (is_from_me = 0) text messages with ROWID > sinceRowid.
- * Returns them ascending plus the new high-water ROWID. Read-only; never writes.
+ * Read inbound (is_from_me = 0) messages with ROWID > sinceRowid — text
+ * messages as before, PLUS photo-only messages (empty/placeholder text but at
+ * least one attachment): `message_attachment_join` is LEFT JOINed so a row
+ * with a non-empty text OR any attachment survives the WHERE clause; image
+ * attachment paths are fetched in a second query (fetchImageAttachments) to
+ * avoid GROUP_CONCAT separator/escaping headaches. Returns rows ascending
+ * plus the new high-water ROWID. Read-only; never writes.
  */
 export function readInboundSince(
   sinceRowid: number,
@@ -99,26 +152,33 @@ export function readInboundSince(
   try {
     db = new Database(path, { readonly: true, fileMustExist: true });
     const rows = db.prepare(
-      `SELECT m.ROWID AS rowid, m.text AS text, m.date AS appleDate,
+      `SELECT DISTINCT m.ROWID AS rowid, m.text AS text, m.date AS appleDate,
               h.id AS handle, m.service AS service
          FROM message m
          LEFT JOIN handle h ON m.handle_id = h.ROWID
+         LEFT JOIN message_attachment_join maj ON maj.message_id = m.ROWID
         WHERE m.ROWID > ? AND m.is_from_me = 0
-          AND m.text IS NOT NULL AND TRIM(m.text) != ''
+          AND (
+            (m.text IS NOT NULL AND TRIM(m.text) != '')
+            OR maj.attachment_id IS NOT NULL
+          )
         ORDER BY m.ROWID ASC
         LIMIT ?`,
     ).all(sinceRowid, limit) as Array<{
-      rowid: number; text: string; appleDate: number; handle: string | null; service: string | null;
+      rowid: number; text: string | null; appleDate: number; handle: string | null; service: string | null;
     }>;
+
+    const attachmentsByMessage = fetchImageAttachments(db, rows.map((r) => r.rowid));
 
     const messages: InboundMessage[] = rows
       .filter((r) => r.handle) // drop group/unknown-sender rows for the v1 slice
       .map((r) => ({
         rowid: r.rowid,
         handle: r.handle as string,
-        text: r.text,
+        text: stripAttachmentPlaceholder(r.text ?? ""),
         receivedAt: appleDateToIso(r.appleDate),
         service: r.service ?? "iMessage",
+        attachments: attachmentsByMessage.get(r.rowid) ?? [],
       }));
 
     const maxRowid = rows.reduce((mx, r) => Math.max(mx, r.rowid), sinceRowid);

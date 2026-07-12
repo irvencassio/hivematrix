@@ -21,6 +21,8 @@ const {
   createRun,
   setRunPhase,
   deleteDirective,
+  updateDirective,
+  markCriterionProven,
 } = await import("./directive-store");
 const {
   directiveTick,
@@ -29,6 +31,7 @@ const {
   _setDirectiveReviewerForTests,
   _setDirectiveRetrospectiveForTests,
   _setDirectiveCheckpointResolverForTests,
+  rearmStaleRecurringDirectives,
 } = await import("./directive-engine");
 
 // Fresh DB for this file.
@@ -162,9 +165,12 @@ test("execute phase waits for tasks, then verify proves criteria, reflect re-arm
   const finalRun = getRun(run._id)!;
   assert.equal(finalRun.phase, "done");
 
-  // Criterion proven → directive marked done.
-  assert.ok(getCriteria(d._id).every((c) => c.proven === 1));
-  assert.equal(getDirective(d._id)!.status, "done");
+  // mkDirective() is schedule-triggered (recurring): proving the criterion for
+  // this episode re-arms the directive for its next run instead of terminating
+  // it — criteria are reopened so the next episode has something to re-verify.
+  assert.ok(getCriteria(d._id).every((c) => c.proven === 0), "criteria reopened for the next episode");
+  assert.equal(getDirective(d._id)!.status, "active");
+  assert.ok(getDirective(d._id)!.nextRunAt, "recurring directive re-armed with a nextRunAt");
 
   const steps = getJournal(run._id).map((j) => j.step);
   for (const expected of ["run_started", "planned", "executed", "verified", "reflected", "yielded"]) {
@@ -894,4 +900,99 @@ test("planner prompt carries the directive's run history: prior outcomes + last 
   assert.match(desc, /incremental updates worked/);
   assert.match(desc, /do not repeat an approach that already failed/);
   deleteDirective(d._id);
+});
+
+// ---------------------------------------------------------------------------
+// Recurring vs one-shot directives at reflect time (the "directives silently
+// self-terminate" fix): a schedule-triggered directive proving its criteria
+// for one episode must re-arm for the next one, not retire; a genuinely
+// one-shot (manual/etc.) directive still terminates as before.
+// ---------------------------------------------------------------------------
+
+function passingReviewer() {
+  return async () => `\`\`\`json
+{
+  "status": "pass",
+  "findings": [],
+  "gaps": [],
+  "correctiveTasks": [],
+  "summary": "Proven."
+}
+\`\`\``;
+}
+
+test("one-shot (manual) directive terminates when its criteria are proven", async () => {
+  _setDirectivePlannerForTests(async () => null);
+  _setDirectiveRetrospectiveForTests(async () => null);
+  _setDirectiveReviewerForTests(passingReviewer());
+  const d = mkDirective({ triggerPolicy: { type: "manual" } });
+  addCriterion(d._id, "one-shot criterion");
+
+  await directiveTick(new Date("2026-06-13T09:00:00Z"));
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-06-13T09:00:01Z")); // plan → execute
+  await completeRunTasks(d._id, run._id, "review");
+  await directiveTick(new Date("2026-06-13T09:00:02Z")); // execute → verify
+  await directiveTick(new Date("2026-06-13T09:00:03Z")); // verify → reflect
+  await directiveTick(new Date("2026-06-13T09:00:04Z")); // reflect → done
+
+  assert.ok(getCriteria(d._id).every((c) => c.proven === 1), "criteria stay proven for a one-shot directive");
+  const dir = getDirective(d._id)!;
+  assert.equal(dir.status, "done");
+  assert.equal(dir.nextRunAt, null);
+  _setDirectiveReviewerForTests(null);
+});
+
+test("schedule-triggered directive re-arms (does not terminate) after its criteria are proven", async () => {
+  _setDirectivePlannerForTests(async () => null);
+  _setDirectiveRetrospectiveForTests(async () => null);
+  _setDirectiveReviewerForTests(passingReviewer());
+  const d = mkDirective({ triggerPolicy: { type: "schedule", interval: "PT2H" } });
+  addCriterion(d._id, "recurring criterion");
+
+  await directiveTick(new Date("2026-06-13T10:00:00Z"));
+  const run = getActiveRuns().find((r) => r.directiveId === d._id)!;
+  await directiveTick(new Date("2026-06-13T10:00:01Z")); // plan → execute
+  await completeRunTasks(d._id, run._id, "review");
+  await directiveTick(new Date("2026-06-13T10:00:02Z")); // execute → verify
+  await directiveTick(new Date("2026-06-13T10:00:03Z")); // verify → reflect
+  await directiveTick(new Date("2026-06-13T10:00:04Z")); // reflect → re-arm
+
+  const dir = getDirective(d._id)!;
+  assert.notEqual(dir.status, "done", "recurring directive is not terminated");
+  assert.equal(dir.status, "active");
+  assert.ok(dir.nextRunAt && dir.nextRunAt > "2026-06-13T10:00:04Z", "nextRunAt re-armed into the future");
+  assert.ok(getCriteria(d._id).every((c) => c.proven === 0), "criteria reopened for the next episode");
+  _setDirectiveReviewerForTests(null);
+});
+
+test("rearmStaleRecurringDirectives revives a stuck recurring directive but leaves a legitimately-done one-shot alone", async () => {
+  // Simulate the pre-fix bug: a schedule-triggered directive wrongly left
+  // status:"done", nextRunAt:null after a clean run.
+  const stuck = mkDirective({ triggerPolicy: { type: "schedule", interval: "PT1H" } });
+  const stuckCriterion = addCriterion(stuck._id, "stuck criterion");
+  markCriterionProven(stuckCriterion._id, "2026-06-01T00:00:00Z");
+  updateDirective(stuck._id, { status: "done", nextRunAt: null, lastRunAt: "2026-06-01T00:00:00Z" });
+
+  // A genuinely one-shot (manual) directive that is legitimately done — must be left alone.
+  const oneShot = mkDirective({ triggerPolicy: { type: "manual" } });
+  const oneShotCriterion = addCriterion(oneShot._id, "one-shot criterion");
+  markCriterionProven(oneShotCriterion._id, "2026-06-01T00:00:00Z");
+  updateDirective(oneShot._id, { status: "done", nextRunAt: null, lastRunAt: "2026-06-01T00:00:00Z" });
+
+  const revived = rearmStaleRecurringDirectives("2026-06-02T00:00:00Z");
+
+  assert.deepEqual(revived, [stuck._id]);
+  const revivedRow = getDirective(stuck._id)!;
+  assert.equal(revivedRow.status, "active");
+  assert.ok(revivedRow.nextRunAt, "stuck recurring directive got a fresh nextRunAt");
+  assert.ok(getCriteria(stuck._id).every((c) => c.proven === 0), "stuck directive's criteria reopened");
+
+  const untouchedRow = getDirective(oneShot._id)!;
+  assert.equal(untouchedRow.status, "done", "legitimately-done one-shot directive is left alone");
+  assert.equal(untouchedRow.nextRunAt, null);
+  assert.ok(getCriteria(oneShot._id).every((c) => c.proven === 1), "one-shot directive's criteria untouched");
+
+  deleteDirective(stuck._id);
+  deleteDirective(oneShot._id);
 });

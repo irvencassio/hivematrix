@@ -20,6 +20,10 @@ export interface FlashTurnInput {
   peer: string;
   text: string;
   attachments?: unknown[];
+  /** Local, already-normalized (flash/images.ts) image paths for this turn —
+   *  the wire format (POST /flash/turn's `imagesBase64`) is decoded to these
+   *  paths by the server route before handleFlashTurn ever sees the body. */
+  imagePaths?: string[];
 }
 
 export interface FlashSessionRow {

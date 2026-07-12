@@ -130,20 +130,27 @@ const DEFAULT_WEAVER_MINUTE = 0;
 const RATCHET_DAY_OF_WEEK = 0; // Sunday
 const WEAVER_DAY_OF_WEEK = 5;  // Friday
 
+// The proactive layer (pulse, Day Brief, Capability Ratchet, Weaver Audit) ships
+// ON by default (2026-07-12 fix — it was built + tested but never actually
+// enabled for new installs). This only affects installs where the `heartbeat`
+// config key is entirely absent (see parseHeartbeatConfig's `!input` branch
+// below) — an install that has ever called setHeartbeatConfig, including one
+// that explicitly turned a flag off, always has that value persisted and is
+// unaffected by this default.
 const DEFAULT_CONFIG: HeartbeatConfig = {
-  enabled: false,
+  enabled: true,
   intervalMinutes: DEFAULT_INTERVAL_MINUTES,
   morningBriefHour: DEFAULT_MORNING_HOUR,
   eveningRecapHour: DEFAULT_EVENING_HOUR,
-  dayBriefEnabled: false,
+  dayBriefEnabled: true,
   dayBriefMorningHour: DEFAULT_DAY_BRIEF_MORNING_HOUR,
   dayBriefMorningMinute: DEFAULT_DAY_BRIEF_MORNING_MINUTE,
   dayBriefEveningHour: DEFAULT_DAY_BRIEF_EVENING_HOUR,
   dayBriefEveningMinute: DEFAULT_DAY_BRIEF_EVENING_MINUTE,
-  ratchetEnabled: false,
+  ratchetEnabled: true,
   ratchetHour: DEFAULT_RATCHET_HOUR,
   ratchetMinute: DEFAULT_RATCHET_MINUTE,
-  weaverEnabled: false,
+  weaverEnabled: true,
   weaverHour: DEFAULT_WEAVER_HOUR,
   weaverMinute: DEFAULT_WEAVER_MINUTE,
 };
@@ -343,6 +350,7 @@ edit it as your standing "when idle, care about these" list.
 - Any pending approval sitting unanswered for hours?
 - Anything in today's daily note that needs follow-up?
 - Anything on WISHLIST.md worth an opportunistic check?
+- Any goal due or overdue today (check the goals list / goalsDueToday)?
 
 Message the operator only when it is genuinely useful. Silence is fine.
 `;

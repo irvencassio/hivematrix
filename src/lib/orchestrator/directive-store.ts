@@ -217,6 +217,19 @@ export function allCriteriaProven(directiveId: string): boolean {
   return criteria.every((c) => c.proven === 1);
 }
 
+/**
+ * Reopen every criterion for a directive (proven -> 0, provenAt -> null). Used
+ * when a recurring (schedule-triggered) directive re-arms after this episode's
+ * criteria were fully proven: the episode succeeded, but the standing objective
+ * is not retired, so the next episode needs unproven criteria to (re-)verify
+ * against instead of trivially "already done" ones that are never checked again.
+ */
+export function reopenCriteria(directiveId: string): void {
+  getDb()
+    .prepare("UPDATE directive_criteria SET proven = 0, provenAt = NULL, updatedAt = datetime('now') WHERE directiveId = ?")
+    .run(directiveId);
+}
+
 /** Delete a directive and all its runs, criteria, and journal entries. */
 export function deleteDirective(id: string): boolean {
   const db = getDb();

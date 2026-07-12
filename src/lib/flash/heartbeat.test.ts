@@ -35,20 +35,26 @@ test.after(() => {
 });
 
 test("parseHeartbeatConfig defaults + clamping", () => {
+  // The proactive layer ships ON by default (2026-07-12): parseHeartbeatConfig(undefined)
+  // is the "heartbeat key entirely absent" path (a brand-new config.json, or an install
+  // that has never called setHeartbeatConfig), which now defaults every ritual's enable
+  // flag to true. An install with an explicit stored value (even `false`) is a `{...}`
+  // input, not `undefined`, and is unaffected — see the dedicated dayBrief/ratchet/weaver
+  // "default off with {}" tests below, which cover that explicit-`{}`-input path.
   assert.deepEqual(parseHeartbeatConfig(undefined), {
-    enabled: false,
+    enabled: true,
     intervalMinutes: 30,
     morningBriefHour: 8,
     eveningRecapHour: 21,
-    dayBriefEnabled: false,
+    dayBriefEnabled: true,
     dayBriefMorningHour: 7,
     dayBriefMorningMinute: 30,
     dayBriefEveningHour: 21,
     dayBriefEveningMinute: 0,
-    ratchetEnabled: false,
+    ratchetEnabled: true,
     ratchetHour: 18,
     ratchetMinute: 0,
-    weaverEnabled: false,
+    weaverEnabled: true,
     weaverHour: 17,
     weaverMinute: 0,
   });

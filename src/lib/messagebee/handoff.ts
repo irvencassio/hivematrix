@@ -16,7 +16,7 @@ import {
 export type MessageRoute =
   | { kind: "ignore"; reason: string }
   | { kind: "reply_to_task"; taskId: string; stuckTimestamp: string; text: string }
-  | { kind: "flash_turn"; text: string; peer: string };
+  | { kind: "flash_turn"; text: string; peer: string; imagePaths: string[] };
 
 export interface PendingInput {
   taskId: string;
@@ -33,7 +33,11 @@ export interface RouteContext {
 
 export function routeInbound(msg: InboundMessage, ctx: RouteContext): MessageRoute {
   const text = (msg.text ?? "").trim();
-  if (!text) return { kind: "ignore", reason: "empty message" };
+  const imagePaths = msg.attachments ?? [];
+  const hasImages = imagePaths.length > 0;
+  // A photo-only message has empty text (imessage.ts already strips the
+  // U+FFFC placeholder) but must still route — don't drop it as "empty".
+  if (!text && !hasImages) return { kind: "ignore", reason: "empty message" };
 
   // Security gate: only allowlisted senders can drive the system.
   if (!ctx.allowlisted) {
@@ -41,12 +45,14 @@ export function routeInbound(msg: InboundMessage, ctx: RouteContext): MessageRou
   }
 
   // If the sender owes an answer to a waiting task, their text resolves it.
-  if (ctx.pendingInput.length > 0) {
+  // (Images aren't routed into a needs_input reply — only the text matters there.)
+  if (ctx.pendingInput.length > 0 && text) {
     const latest = [...ctx.pendingInput].sort((a, b) => b.stuckTimestamp.localeCompare(a.stuckTimestamp))[0];
     return { kind: "reply_to_task", taskId: latest.taskId, stuckTimestamp: latest.stuckTimestamp, text };
   }
 
   // Route to Flash Lane — strip any /model directive (Flash uses its own routing).
   const { cleanedText } = parseModelDirective(text);
-  return { kind: "flash_turn", text: cleanedText || text, peer: msg.handle };
+  const flashText = cleanedText || text || (hasImages ? "[Photo attached — no caption]" : "");
+  return { kind: "flash_turn", text: flashText, peer: msg.handle, imagePaths };
 }

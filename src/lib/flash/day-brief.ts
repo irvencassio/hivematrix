@@ -27,6 +27,7 @@ import { getWorkflowInbox as defaultGetWorkflowInbox, type WorkflowInbox } from 
 import { haikuChatComplete, type ChatComplete } from "@/lib/models/chat-client";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { Task } from "@/lib/db";
+import { goalsDueToday as defaultGoalsDueToday } from "@/lib/goals/store";
 
 export type DayBriefKind = "morning" | "evening";
 
@@ -37,6 +38,10 @@ export interface DayBriefTaskRef {
 export interface VoiceLoopClosure {
   title: string;
   notifiedAt: string;
+}
+
+export interface DayBriefGoalDue {
+  title: string;
 }
 
 const MAX_LINES = 6;
@@ -56,6 +61,8 @@ export interface DayBriefDeps {
   getWorkflowInbox: () => WorkflowInbox | Promise<WorkflowInbox>;
   /** Voice-origin loop-closures notified at/after `sinceIso`, most-recent first. */
   listVoiceLoopClosures: (sinceIso: string) => Promise<VoiceLoopClosure[]> | VoiceLoopClosure[];
+  /** Morning only: structured goals (goals/store.ts) due or overdue today per their cadence. */
+  listGoalsDueToday: () => Promise<DayBriefGoalDue[]> | DayBriefGoalDue[];
   /** Evening only: tasks that went terminal (with completedAt) at/after `sinceIso`. */
   listCompletedSince: (sinceIso: string) => Promise<DayBriefTaskRef[]> | DayBriefTaskRef[];
   /** Evening only: tasks still open (backlog/in_progress/review). */
@@ -119,6 +126,12 @@ function defaultReadGoalsPersona(): string | null {
   }
 }
 
+/** Structured goals (goals/store.ts — distinct from the freeform GOALS.md persona
+ * above) that are due or overdue today per their cadence rule. */
+function defaultListGoalsDueToday(): DayBriefGoalDue[] {
+  return defaultGoalsDueToday().map((g) => ({ title: g.title }));
+}
+
 export const defaultDayBriefDeps: DayBriefDeps = {
   executePimTool: defaultExecutePimTool,
   getWorkflowInbox: defaultGetWorkflowInbox,
@@ -126,6 +139,7 @@ export const defaultDayBriefDeps: DayBriefDeps = {
   listCompletedSince: defaultListCompletedSince,
   listOpenTasks: defaultListOpenTasks,
   listQueuedOvernight: defaultListQueuedOvernight,
+  listGoalsDueToday: defaultListGoalsDueToday,
   chatComplete: haikuChatComplete,
   readGoalsPersona: defaultReadGoalsPersona,
   now: () => new Date(),
@@ -178,6 +192,16 @@ export function reviewAttentionCount(inbox: WorkflowInbox | null | undefined): n
 export function reviewLine(inbox: WorkflowInbox | null | undefined): string {
   const n = reviewAttentionCount(inbox);
   return n === 0 ? "Nothing awaiting your review." : `${n} item${n === 1 ? "" : "s"} awaiting review/approval.`;
+}
+
+/** Pure: "structured goals due/overdue today" line for the morning brief, or
+ * null when nothing's due — same shape as `loopClosureLine`. */
+export function goalsDueLine(dueGoals: DayBriefGoalDue[]): string | null {
+  if (dueGoals.length === 0) return null;
+  const first = dueGoals[0].title;
+  return dueGoals.length === 1
+    ? `Goal due today: ${first}.`
+    : `${dueGoals.length} goals due today, incl. ${first}.`;
 }
 
 /** Pure: recent voice loop-closure line, or null when there's nothing to say. */
@@ -255,11 +279,12 @@ export async function composeDayBrief(kind: DayBriefKind, deps: DayBriefDeps = d
   const sinceLoopClosures = new Date(now.getTime() - LOOP_CLOSURE_LOOKBACK_MS).toISOString();
 
   if (kind === "morning") {
-    const [calendarText, remindersText, inbox, closures] = await Promise.all([
+    const [calendarText, remindersText, inbox, closures, dueGoals] = await Promise.all([
       safeCall(() => deps.executePimTool("calendar_today", { limit: 5 }), ""),
       safeCall(() => deps.executePimTool("reminders_list", { limit: 10 }), ""),
       safeCall(() => deps.getWorkflowInbox(), null as WorkflowInbox | null),
       safeCall(() => deps.listVoiceLoopClosures(sinceLoopClosures), [] as VoiceLoopClosure[]),
+      safeCall(() => deps.listGoalsDueToday(), [] as DayBriefGoalDue[]),
     ]);
 
     lines.push(calendarLine(calendarText));
@@ -267,7 +292,11 @@ export async function composeDayBrief(kind: DayBriefKind, deps: DayBriefDeps = d
     lines.push(reviewLine(inbox));
     const closureLine = loopClosureLine(closures);
     if (closureLine) lines.push(closureLine);
+    const dueGoalsLine = goalsDueLine(dueGoals);
+    if (dueGoalsLine) lines.push(dueGoalsLine);
 
+    // dueGoalsLine (when present) is already in `lines` here, so it flows into
+    // the "ONE thing" facts string below along with everything else.
     const goalsPersona = safeSyncOrNull(deps.readGoalsPersona);
     const oneThing = await composeOneThingLine(lines.join(" "), goalsPersona, deps.chatComplete);
     if (oneThing) lines.push(oneThing);
