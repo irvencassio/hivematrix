@@ -1342,3 +1342,61 @@ operator-facing accountability persona, specified by name in this spec.
 `COMPONENT-MAP.md`) rather than banning the string outright. Any *other* new appearance of
 "Weaver" in `src/` still hard-fails the gate — this decision authorizes one named file, not
 a general re-opening of the brand.
+
+## Q19 — Live skill acquisition: HiveMatrix learns new skills mid-turn (2026-07-11)
+
+**Context.** The skill library was 70% of a self-improving loop: skills were distilled
+from cold sessions (`distill.ts`), fanned out to the harness dirs (`fanout.ts`), and a
+capability-gap detector (`capability-gaps.ts`) classified misses — but by design it
+*never acquired anything*, and Flash could not even *run* a library skill (it ran with
+`--tools ""`). Two live failures forced the close: a voice "what are my events today?"
+opened Calendar.app and returned nothing (AppleScript needs an Automation TCC grant the
+daemon never had), and "update HiveMatrix to do X" dead-ended (Flash had no doctrine or
+tool for "acquire this capability").
+
+**Decision.** Close the loop with skills as the ONLY self-serviceable capability unit
+(the ClawHavoc line, unchanged): lanes (credentials) and packs (signed installs) stay
+operator-gated forever; nothing here auto-enables either. New capability is acquired
+exclusively as first-party skills that pass the existing scan gate plus a new
+verification ladder.
+
+- **`skill_run`** (lane tool) lets Flash/voice *run* a library skill live — instruction
+  skills return their recipe in-turn, script skills execute in a new hard **sandbox**
+  (`skills/sandbox.ts`: `sandbox-exec` network-deny on darwin, env-scrubbed of `HIVE_*`
+  tokens, scratch cwd, timeout, output caps, per-run audit). Script execution is gated on
+  `scanVerdict != block` AND (`trusted` or `probation`).
+- **`learn_skill`** (flash-only tool) → **`skills/acquire.ts`**: mint (Sonnet) → ladder
+  (`parseSkillFile` → `scanSkill` block=fatal → sandboxed evals → independent Haiku
+  critic, fail-closed) → register. Instruction skills register trusted + fan out; script
+  skills start on **probation** (runnable, promoted to trusted after 3 clean runs, never
+  fanned out until trusted). Acquisition is async (10-min cap) with a deep_think-style
+  speak-back. Failures **archive** the draft (DGM: never delete) + file a capability-gap
+  proposal + speak honestly. ACE-style twin counters (`useCount`/`failures`) drive
+  promotion/demotion; prune **archives** rather than deletes.
+- **Calendar** reads/writes move to a Swift **EventKit** helper (`desktopbee-helper`
+  `calendar` subcommand) so Calendar.app never launches and TCC is the helper's own
+  clean prompt; PIM tools return a structured `PERMISSION_NEEDED` result so Flash speaks
+  the fix instead of dead-ending.
+- **Self-improvement** requests route through the *normal* task pipeline:
+  `escalate_to_task` gains `kind:"self-improvement"` → `projectPath` = the configured
+  HiveMatrix repo + a Superpowers/no-release description prefix. No self-modification
+  outside the reviewed task pipeline.
+
+**Complexity accounting (Q14 budget).** New product concepts: **0** — this is an adapter
+over the five-concept kernel and existing seams (skills store, feedback, audit, flash
+MCP, lane tools). New persistent stores: **0** — no `CREATE TABLE`; the acquisition
+ledger is a plain `<brainRoot>/skills/ACQUISITIONS.md` file, drafts/archive are
+directories. New modules: `skills/acquire.ts`, `skills/sandbox.ts`, the
+`calendar-helper` subcommand; everything else is edits to existing files. New tools:
+`skill_run` (lane), `learn_skill` (flash-only). **Not built** (scope wall): no vector
+DB (description-based retrieval via the skill index is enough at this size), no runtime
+native-tool registration, no autonomous lane/pack acquisition ever, no DGM-style
+agent-code self-rewriting.
+
+**Provers.** P0 `src/lib/voice/calendar-read-prover.test.ts`; P1
+`src/lib/flash/skill-run-prover.test.ts` (real sandbox execution); P2
+`src/lib/skills/acquire-prover.test.ts` (real fanout + already-have); P3
+`src/lib/flash/self-improve-prover.test.ts` (repo projectPath + workflow work +
+voice-origin). Full pipeline unit-tested with stubbed mint/critic (fake claude via
+`_setExecFileForTests`). Design + plan: `docs/superpowers/specs/2026-07-11-self-learning-design.md`,
+`docs/superpowers/plans/2026-07-11-self-learning.md`.

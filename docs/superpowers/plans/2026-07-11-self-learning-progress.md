@@ -32,7 +32,10 @@ Rule: after each phase all three gates must be green with NO NEW failures vs thi
 | P3.1 capability doctrine in Flash prompt | always-on escalation ladder; 3/3 | ACCEPT | 779f3fd3 |
 | P3.2 escalate_to_task self-improvement | kind → repo path + Superpowers prefix; pure resolveEscalationTarget; 25/25 | ACCEPT — voice-origin/workflow preserved | 41296a96 |
 | P3.3 regex de-confliction | early guard returns none for update/improve/teach/upgrade + yourself/hivematrix; 42/42 | ACCEPT — negative controls hold | acdd479c |
-| P3.4 self-improvement routing prover | dispatch-layer: Task row has repo projectPath + workflow work + voice-origin; 3/3 | ACCEPT | (P3.4 commit) |
+| P3.4 self-improvement routing prover | dispatch-layer: Task row has repo projectPath + workflow work + voice-origin; 3/3 | ACCEPT | 5b... (P3.4 commit) |
+| P4.1 gap → acquisition (autonomy-gated) | autonomous→acquireSkill for skill gaps; lane/pack never auto-acquired; learning-loop awaits; 9/9 | ACCEPT — ClawHavoc reaffirmed | 5f63c992 |
+| P4.2 archive-not-delete + demote | archiveSkill (DGM, collision-safe) + pure demotionCandidates(failures≥max(3,useCount)); 31/31 | ACCEPT — prune is advisory-only today; archiveSkill is the primitive to use | f488ea64 |
+| P4.3 briefing learned-skills line | recentlyAcquiredSkillNames (24h registered/probation) → "I learned N new skills recently"; 36/36 | ACCEPT | a1db2392 |
 
 ## Phase gate results
 
@@ -43,6 +46,28 @@ Rule: after each phase all three gates must be green with NO NEW failures vs thi
 | P1 | ✓ 0 | ✓ 2586 pass / 1 skip / 0 fail | ✓ 0 |
 | P2 | ✓ 0 | ✓ 2618 pass / 1 skip / 0 fail | ✓ 0 |
 | P3 | ✓ 0 | ✓ 2629 pass / 1 skip / 0 fail | ✓ 0 |
+| P4 | ✓ 0 | ✓ 2646 pass / 1 skip / 0 fail | ✓ 0 |
+
+## F.1 — final integration
+
+- **COMPONENT-MAP.md**: added a "Self-learning (live skill acquisition)" section (skill_run,
+  sandbox, acquire, learn_skill, ACE counters, background loop, EventKit calendar); updated
+  the Flash agent-loop tool list + capability-doctrine note; updated capability-self-assessment
+  for autonomy-gated acquisition.
+- **DECISIONS.md**: added **Q19 — Live skill acquisition**, with the ClawHavoc line, the
+  verification ladder, the complexity accounting (0 new concepts, 0 new stores; new modules
+  acquire.ts/sandbox.ts/calendar-helper; new tools skill_run/learn_skill), scope-wall of what
+  was NOT built, and the four phase provers.
+- **CHANGELOG.md**: NOT edited — it is a generated artifact (source of truth is the
+  version-keyed `CHANGELOG` array in `src/lib/version/changelog.ts`, written by the release
+  script). Adding an entry would pre-empt the operator's release and break the version schema.
+  **Ready-to-paste changelog note for the operator's next release:**
+  > Self-learning: HiveMatrix can now learn new skills mid-conversation. Flash/voice can run
+  > library skills live (`skill_run`, sandboxed) and acquire missing ones (`learn_skill`) —
+  > mint → scan → sandboxed evals → independent critic → register (scripts on probation).
+  > Calendar reads/writes now use EventKit (no more Calendar.app launch; clean permission
+  > prompt), PIM tools speak the fix on a permission denial, and "improve HiveMatrix to do X"
+  > routes to a self-improvement task on the repo. Skills that fail are archived, never deleted.
 
 ## Deviations / notes
 
