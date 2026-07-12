@@ -639,6 +639,10 @@ _WEEKDAY_IDX = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
                 "friday": 4, "saturday": 5, "sunday": 6}
 _DAYPART_HOUR = {"morning": 9, "noon": 12, "afternoon": 15, "evening": 18,
                  "tonight": 20, "night": 20, "midnight": 0}
+_MONTH_IDX = {"january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+              "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+              "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9, "october": 10,
+              "oct": 10, "november": 11, "nov": 11, "december": 12, "dec": 12}
 
 
 def _parse_due(text: str, now=None):
@@ -661,23 +665,64 @@ def _parse_due(text: str, now=None):
                  "day": timedelta(days=n), "week": timedelta(weeks=n)}[unit]
         return now + delta
 
-    # Day: today / tonight / tomorrow / a weekday name. Default = today.
     day = now
     explicit_day = False
-    if re.search(r"\btomorrow\b", t):
-        day = now + timedelta(days=1)
-        explicit_day = True
-    else:
-        for name, idx in _WEEKDAY_IDX.items():
-            if re.search(rf"\b{name}\b", t):
-                ahead = (idx - now.weekday()) % 7 or 7  # "friday" = the NEXT friday
-                day = now + timedelta(days=ahead)
-                explicit_day = True
-                break
-        if not explicit_day and re.search(r"\btoday\b|\btonight\b|\bthis\b", t):
-            explicit_day = True
 
-    # Time: "at 5", "5:30 pm", "17:45", noon/midnight/morning/evening...
+    # Explicit calendar date FIRST — and CONSUME it from the text so its day
+    # number ("July 19", "7/19", "the 19th") is never later read as the hour.
+    # A named month wins over a weekday word ("Saturday July 19" -> July 19).
+    md = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b", t)
+    numeric = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b", t)
+    try:
+        if md and md.group(1) in _MONTH_IDX and 1 <= int(md.group(2)) <= 31:
+            day = day.replace(month=_MONTH_IDX[md.group(1)], day=int(md.group(2)))
+            if day.date() < now.date():
+                day = day.replace(year=day.year + 1)
+            explicit_day = True
+            t = t.replace(md.group(0), " ")
+        elif numeric and 1 <= int(numeric.group(1)) <= 12 and 1 <= int(numeric.group(2)) <= 31:
+            day = day.replace(month=int(numeric.group(1)), day=int(numeric.group(2)))
+            if numeric.group(3):
+                yr = int(numeric.group(3))
+                day = day.replace(year=2000 + yr if yr < 100 else yr)
+            elif day.date() < now.date():
+                day = day.replace(year=day.year + 1)
+            explicit_day = True
+            t = t.replace(numeric.group(0), " ")
+    except ValueError:
+        day, explicit_day = now, False  # invalid date (e.g. Feb 30) -> ignore
+
+    # Relative day words — only if no explicit calendar date was given.
+    if not explicit_day:
+        if re.search(r"\btomorrow\b", t):
+            day = now + timedelta(days=1)
+            explicit_day = True
+        else:
+            for name, idx in _WEEKDAY_IDX.items():
+                if re.search(rf"\b{name}\b", t):
+                    ahead = (idx - now.weekday()) % 7 or 7  # "friday" = the NEXT friday
+                    day = now + timedelta(days=ahead)
+                    explicit_day = True
+                    break
+            if not explicit_day and re.search(r"\btoday\b|\btonight\b|\bthis\b", t):
+                explicit_day = True
+
+    # "the 19th" — day-of-month with no month word; consume so it isn't read as an hour.
+    if not explicit_day:
+        dm = re.search(r"\b(\d{1,2})(?:st|nd|rd|th)\b", t)
+        if dm and 1 <= int(dm.group(1)) <= 31:
+            try:
+                day = day.replace(day=int(dm.group(1)))
+                if day.date() < now.date():
+                    day = (day.replace(year=day.year + 1, month=1) if day.month == 12
+                           else day.replace(month=day.month + 1))
+                explicit_day = True
+                t = t.replace(dm.group(0), " ")
+            except ValueError:
+                pass
+
+    # Time: "at 5", "5:30 pm", "17:45", noon/midnight/morning/evening... (parsed
+    # from the date-stripped text, so a day number can't be grabbed as the hour).
     hour, minute = None, 0
     m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\b", t)
     if m:

@@ -12,6 +12,7 @@ import {
   defaultCalendarHelperIO,
   looksLikeStaleHelper,
   type CalendarHelperIO,
+  type CalendarCreateIO,
 } from "./pim-tools";
 import { isPermissionError, permissionNeeded, parsePermissionNeeded } from "./pim-preconditions";
 
@@ -374,6 +375,34 @@ test("calendar_create: still supports the old osascript-only IO shape (backward 
     { runOsascript: async () => ({ ok: true, out: "OK" }) },
   );
   assert.match(out, /Event created: "Lunch with Sam"/);
+});
+
+test("calendar_create: explicit month+day 'when' end-to-end — the day-of-month is never read as the hour", async () => {
+  let capturedArgs: string[] = [];
+  const io: CalendarCreateIO = {
+    resolveBinary: () => "/fake/DesktopBeeHelper",
+    run: async (_binary: string, args: string[]) => {
+      capturedArgs = args;
+      return { code: 0, stdout: JSON.stringify({ ok: true, id: "abc123" }), stderr: "" };
+    },
+  };
+  await executeCalendarCreate({ title: "Dentist", when: "July 19 at 3 PM" }, io);
+  const start = new Date(capturedArgs[capturedArgs.indexOf("--start") + 1]);
+  assert.deepEqual([start.getMonth(), start.getDate(), start.getHours(), start.getMinutes()], [6, 19, 15, 0]);
+});
+
+test("calendar_create: a named month+day wins over a weekday word, end-to-end", async () => {
+  let capturedArgs: string[] = [];
+  const io: CalendarCreateIO = {
+    resolveBinary: () => "/fake/DesktopBeeHelper",
+    run: async (_binary: string, args: string[]) => {
+      capturedArgs = args;
+      return { code: 0, stdout: JSON.stringify({ ok: true, id: "abc123" }), stderr: "" };
+    },
+  };
+  await executeCalendarCreate({ title: "Dentist", when: "Saturday July 19 at 3pm" }, io);
+  const start = new Date(capturedArgs[capturedArgs.indexOf("--start") + 1]);
+  assert.deepEqual([start.getMonth(), start.getDate(), start.getHours()], [6, 19, 15]);
 });
 
 // ---------------------------------------------------------------------------
