@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.188 — 2026-07-12
+
+Learning pipeline hardened: skills with embedded code no longer get truncated during authoring, and the assistant prefers learning a quick script over driving the GUI for computable tasks.
+
 ## v0.1.187 — 2026-07-12
 
 Learning resilience: a momentary model-call failure no longer cancels skill learning — HiveMatrix retries and finishes the job.
