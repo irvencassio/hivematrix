@@ -51,14 +51,17 @@ export function qrencodeInstalled(): boolean {
   return !!findBinary("qrencode", QRENCODE_PATHS);
 }
 
-/** Render `data` to an SVG QR locally via qrencode (token never leaves the box). */
-export function generateQrSvg(data: string): Promise<string | null> {
+/** Render `data` to an SVG QR locally via qrencode (token never leaves the box).
+ * `level` = error-correction: "L" (7%) yields fewer modules → bigger, easier-to-scan
+ * cells for a dense payload; use it for the Cloudflare QR (hostname + token + Access
+ * client id/secret is a lot of data). Default "M" for the small Tailscale payload. */
+export function generateQrSvg(data: string, level: "L" | "M" | "Q" | "H" = "M"): Promise<string | null> {
   const bin = findBinary("qrencode", QRENCODE_PATHS);
   if (!bin) return Promise.resolve(null);
   return new Promise((resolve) => {
     // Pass the payload as a positional arg (no shell → safe); qrencode's
-    // stdin (-r -) isn't supported. -l M = medium error correction.
-    const proc = spawn(bin, ["-t", "SVG", "-o", "-", "-m", "2", "-l", "M", data], { env: { ...process.env, PATH: buildCliPath() } });
+    // stdin (-r -) isn't supported. -m 2 = 2-module quiet zone (needed to scan).
+    const proc = spawn(bin, ["-t", "SVG", "-o", "-", "-m", "2", "-l", level, data], { env: { ...process.env, PATH: buildCliPath() } });
     let out = "";
     proc.stdout.on("data", (d) => (out += d.toString()));
     proc.on("error", () => resolve(null));

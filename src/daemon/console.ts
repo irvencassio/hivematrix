@@ -781,7 +781,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .disp.works { color: var(--ok); background: rgba(37, 211, 102, .12); }
   .disp.degraded { color: var(--warn); background: rgba(249, 174, 66, .14); }
   .disp.queued { color: var(--err); background: rgba(255, 92, 122, .12); }
-  #s_qr svg { width: 100%; height: 100%; }
+  #s_qr svg, #s_cf_qr svg { width: 100%; height: 100%; display: block; }
   /* Project search dropdown */
   .project-search { position: relative; margin-bottom: 6px; }
   .project-search input { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
@@ -1098,7 +1098,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
             <button class="copybtn" onclick="copyField('s_tunnel_url')">Copy</button></div>
 
           <label class="flbl" style="margin-top:10px">Scan on iPhone</label>
-          <div id="s_cf_qr" style="background:#fff;border-radius:8px;padding:8px;width:188px;height:188px"></div>
+          <div id="s_cf_qr" style="background:#fff;border-radius:8px;padding:10px;width:240px;height:240px;max-width:100%"></div>
           <div class="muted" style="font-size:11px;margin-top:4px">⚠ Encodes the hostname + access token (and the Cloudflare Access secret, if configured) — treat this QR like a password, same as the token field above.</div>
         </div>
       </div>

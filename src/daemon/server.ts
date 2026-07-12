@@ -1465,7 +1465,7 @@ export function createDaemonServer() {
         const svg = await generateQrSvg(pairingPayload(settings.namedHostname, AUTH_TOKEN, {
           cloudflareAccessClientId: settings.cloudflareAccessClientId,
           cloudflareAccessClientSecret: settings.cloudflareAccessClientSecret,
-        }));
+        }), "L"); // low ECC → fewer/bigger modules for the dense Cloudflare payload → scannable
         if (!svg) { json(res, 500, { error: "qr generation failed" }); return; }
         res.writeHead(200, { "Content-Type": "image/svg+xml" });
         res.end(svg);
