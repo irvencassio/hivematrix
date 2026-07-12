@@ -28,7 +28,11 @@ Rule: after each phase all three gates must be green with NO NEW failures vs thi
 | P2.2 real mint (Sonnet) | defaultMint: tool catalog+skill index+sandbox contract+evals+Reflexion; 2-block parse; 16/16 | ACCEPT — dynamic import avoids cycle | 6ec96131 |
 | P2.3 critic (Haiku, fail-closed) | defaultCritic: PASS/FAIL no-tools; ambiguous→fail; both defaults wired; 21/21 | ACCEPT — fail-closed correct | 635963bd |
 | P2.4 learn_skill flash tool + async | flash-only tool, 10-min cap, voice:result/flash:notice; SERVER_VERSION bumped; 19/19 | ACCEPT — worker caught+fixed a timer-leak hang | 1bdfe217 |
-| P2.5 acquisition integration prover | real fanOutSkills + on-disk ledger; script probation not fanned, instruction SKILL.md written, already-have; 3/3 | ACCEPT — real fanout path confirmed | (P2.5 commit) |
+| P2.5 acquisition integration prover | real fanOutSkills + on-disk ledger; script probation not fanned, instruction SKILL.md written, already-have; 3/3 | ACCEPT — real fanout path confirmed | 4e01c893 |
+| P3.1 capability doctrine in Flash prompt | always-on escalation ladder; 3/3 | ACCEPT | 779f3fd3 |
+| P3.2 escalate_to_task self-improvement | kind → repo path + Superpowers prefix; pure resolveEscalationTarget; 25/25 | ACCEPT — voice-origin/workflow preserved | 41296a96 |
+| P3.3 regex de-confliction | early guard returns none for update/improve/teach/upgrade + yourself/hivematrix; 42/42 | ACCEPT — negative controls hold | acdd479c |
+| P3.4 self-improvement routing prover | dispatch-layer: Task row has repo projectPath + workflow work + voice-origin; 3/3 | ACCEPT | (P3.4 commit) |
 
 ## Phase gate results
 
@@ -38,6 +42,7 @@ Rule: after each phase all three gates must be green with NO NEW failures vs thi
 | P0 | ✓ 0 | ✓ 2556 pass / 1 skip / 0 fail | ✓ 0 |
 | P1 | ✓ 0 | ✓ 2586 pass / 1 skip / 0 fail | ✓ 0 |
 | P2 | ✓ 0 | ✓ 2618 pass / 1 skip / 0 fail | ✓ 0 |
+| P3 | ✓ 0 | ✓ 2629 pass / 1 skip / 0 fail | ✓ 0 |
 
 ## Deviations / notes
 
