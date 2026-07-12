@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.194 — 2026-07-12
+
+New Goals surface: track long-horizon goals (Solo Founder, fitness, Italian, Bible) with per-cadence check-ins and a 'due today' review — from the 🎯 Goals panel or in chat. Plus a calendar date-parsing fix so 'July 19 at 3 PM' lands on the right day and time.
+
 ## v0.1.193 — 2026-07-12
 
 Drop a YouTube link into chat (digest_url) and get a rich HTML summary saved to your brain: clickable video link, thumbnail, a detailed transcript-based summary, and a 'how this applies to me' section tied to HiveMatrix and your Solo Founder goals.
