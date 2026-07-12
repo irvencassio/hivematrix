@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.181", date: "2026-07-12", note: "Cloudflare pairing QR: fix the display overflow (it was overlapping the security note and corrupting the scannable quiet zone) and make the dense QR scannable — constrain the SVG to its box, enlarge it 188→240px, and render at error-correction level L for bigger modules." },
   { version: "0.1.180", date: "2026-07-11", note: "Flash chat: remove the thumbs-down button, mark the assistant with the cyclone sigil; refresh the Cloudflare card copy to point at the Scan-on-iPhone pairing QR." },
   { version: "0.1.179", date: "2026-07-11", note: "Polish + Browser Lane fix: Observability hides retired local models (Claude-only) with by-model tiers; single live header indicator (dropped cloud-ok pill); provider On/Off toggles replaced by install/sign-in status (enablement = CLI detected); new Cloudflare pairing QR endpoint + card; Flash --resume session continuity with live streaming; and flash chat now disables the CLI's built-in tools so web reads route through Browser Lane instead of dead-ending on WebFetch." },
   { version: "0.1.178", date: "2026-07-11", note: "Fix Flash chat crash on any multi-turn conversation: the prompt is now piped via stdin instead of an argv value, so a prompt beginning with the '--- Prior conversation ---' transcript block is no longer mis-parsed by the claude CLI as an unknown option." },

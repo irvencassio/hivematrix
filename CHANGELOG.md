@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.181 — 2026-07-12
+
+Cloudflare pairing QR: fix the display overflow (it was overlapping the security note and corrupting the scannable quiet zone) and make the dense QR scannable — constrain the SVG to its box, enlarge it 188→240px, and render at error-correction level L for bigger modules.
+
 ## v0.1.180 — 2026-07-11
 
 Flash chat: remove the thumbs-down button, mark the assistant with the cyclone sigil; refresh the Cloudflare card copy to point at the Scan-on-iPhone pairing QR.
