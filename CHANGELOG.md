@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.193 — 2026-07-12
+
+Drop a YouTube link into chat (digest_url) and get a rich HTML summary saved to your brain: clickable video link, thumbnail, a detailed transcript-based summary, and a 'how this applies to me' section tied to HiveMatrix and your Solo Founder goals.
+
 ## v0.1.192 — 2026-07-12
 
 Observability redesigned: the full dashboard now takes over the center like New Task, tokens-by-model shows side-by-side bars so you can see which model you use most, and the scorecard is per-model (Opus/Sonnet/Haiku/Codex) with first-pass rate and cost per task.

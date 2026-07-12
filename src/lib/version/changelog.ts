@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.193", date: "2026-07-12", note: "Drop a YouTube link into chat (digest_url) and get a rich HTML summary saved to your brain: clickable video link, thumbnail, a detailed transcript-based summary, and a 'how this applies to me' section tied to HiveMatrix and your Solo Founder goals." },
   { version: "0.1.192", date: "2026-07-12", note: "Observability redesigned: the full dashboard now takes over the center like New Task, tokens-by-model shows side-by-side bars so you can see which model you use most, and the scorecard is per-model (Opus/Sonnet/Haiku/Codex) with first-pass rate and cost per task." },
   { version: "0.1.191", date: "2026-07-12", note: "New Tools panel shows every capability the assistant has and what backs it; curated skills are now first-class tools; reminders read/create moved to the reliable EventKit helper (needs a one-time Reminders permission grant)." },
   { version: "0.1.190", date: "2026-07-12", note: "Chat now reads your goals/plans (brain_read), unified voice+chat thread with task-completion posted back, dictation mic auto-sends, calendar access fixed (helper rebuilt), Talk button retired, qwen removed." },
