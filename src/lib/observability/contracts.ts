@@ -228,6 +228,28 @@ export interface RouteScorecardRow {
   costPerTask: number | null;
 }
 
+/** Shared scorecard math (first-pass rate, rework, cost/task) for one group of
+ * runs, independent of what the group is keyed by (provider route or model
+ * tier) — routeScorecard and modelTierScorecard both build on this so the two
+ * views can never silently drift apart on how a metric is computed. */
+function scorecardMetrics(rs: TaskTelemetry[]): Omit<RouteScorecardRow, "route"> {
+  const tasks = new Set(rs.map((r) => r.taskId)).size;
+  const firstRuns = rs.filter((r) => r.runIndex === 0);
+  const firstAttempts = new Set(firstRuns.map((r) => r.taskId)).size;
+  const firstPasses = firstRuns.filter((r) => r.status === "done" || r.status === "review").length;
+  const costs = rs.map((r) => r.costUsd).filter((v): v is number => v != null);
+  const costUsd = costs.length ? Math.round(costs.reduce((a, b) => a + b, 0) * 1e6) / 1e6 : null;
+  return {
+    tasks,
+    runs: rs.length,
+    avgRunsPerTask: tasks ? Math.round((rs.length / tasks) * 100) / 100 : 0,
+    firstAttempts,
+    firstPassRate: firstAttempts ? Math.round((firstPasses / firstAttempts) * 1000) / 1000 : null,
+    costUsd,
+    costPerTask: costUsd != null && tasks ? Math.round((costUsd / tasks) * 1e6) / 1e6 : null,
+  };
+}
+
 /** Pure: normalized rows → one scorecard row per route (provider), busiest first. */
 export function routeScorecard(rows: TaskTelemetry[]): RouteScorecardRow[] {
   const byRoute = new Map<Provider, TaskTelemetry[]>();
@@ -235,26 +257,80 @@ export function routeScorecard(rows: TaskTelemetry[]): RouteScorecardRow[] {
     const list = byRoute.get(r.provider) ?? byRoute.set(r.provider, []).get(r.provider)!;
     list.push(r);
   }
-  const out: RouteScorecardRow[] = [];
-  for (const [route, rs] of byRoute) {
-    const tasks = new Set(rs.map((r) => r.taskId)).size;
-    const firstRuns = rs.filter((r) => r.runIndex === 0);
-    const firstAttempts = new Set(firstRuns.map((r) => r.taskId)).size;
-    const firstPasses = firstRuns.filter((r) => r.status === "done" || r.status === "review").length;
-    const costs = rs.map((r) => r.costUsd).filter((v): v is number => v != null);
-    const costUsd = costs.length ? Math.round(costs.reduce((a, b) => a + b, 0) * 1e6) / 1e6 : null;
-    out.push({
-      route,
-      tasks,
-      runs: rs.length,
-      avgRunsPerTask: tasks ? Math.round((rs.length / tasks) * 100) / 100 : 0,
-      firstAttempts,
-      firstPassRate: firstAttempts ? Math.round((firstPasses / firstAttempts) * 1000) / 1000 : null,
-      costUsd,
-      costPerTask: costUsd != null && tasks ? Math.round((costUsd / tasks) * 1e6) / 1e6 : null,
-    });
+  return [...byRoute.entries()]
+    .map(([route, rs]) => ({ route, ...scorecardMetrics(rs) }))
+    .sort((a, b) => b.runs - a.runs);
+}
+
+// --- Model tier scorecard -------------------------------------------------
+//
+// Post the Claude-native cutover, every route IS a Claude tier (Opus/Sonnet/
+// Haiku) or Codex — there's no local model left for routeScorecard's
+// provider-route framing to compare against. The underlying signal
+// (first-pass rate, rework, cost/task) is still exactly as useful; it just
+// needs to be grouped by TIER now, since "anthropic" as a single route
+// collapses three very different-cost/quality models into one row.
+
+export type ModelTier = "Opus" | "Sonnet" | "Haiku" | "Codex";
+
+/**
+ * Classify a raw model id into a Claude tier or "Codex". Mirrors console.ts's
+ * `obsModelTier` (the client-side "by model" classifier) field-for-field —
+ * kept in sync by hand since console.ts is a raw HTML string served to the
+ * browser, not an importable module. Matches the bare CLI alias
+ * ("opus"/"sonnet"/"haiku") and any resolved full id the CLI reports back
+ * (e.g. "claude-opus-4-8", "claude-opus-4-8[1m]"), plus Codex's
+ * `codex:`-prefixed ids and raw "gpt"/"o<N>" ids. Returns null for anything
+ * else (retired local-* rows, "other", unrecognized ids) so callers can
+ * exclude them rather than fake a tier.
+ */
+export function modelTier(model: string | null | undefined): ModelTier | null {
+  const m = (model ?? "").toLowerCase().trim();
+  if (!m) return null;
+  if (m.startsWith("codex:") || /^(gpt|o[0-9])/.test(m)) return "Codex";
+  if (m === "opus" || m.startsWith("claude-opus")) return "Opus";
+  if (m === "sonnet" || m.startsWith("claude-sonnet")) return "Sonnet";
+  if (m === "haiku" || m.startsWith("claude-haiku")) return "Haiku";
+  return null;
+}
+
+export interface TierScorecardRow {
+  tier: ModelTier;
+  /** Distinct tasks this tier touched (any run). */
+  tasks: number;
+  /** Total runs (includes retries/escalations). */
+  runs: number;
+  /** runs / tasks — a rework signal (1.0 = every task one-and-done here). */
+  avgRunsPerTask: number;
+  /** Distinct tasks whose FIRST attempt (runIndex 0) ran on this tier. */
+  firstAttempts: number;
+  /** Of firstAttempts, the fraction that succeeded on that first run. null when firstAttempts=0. */
+  firstPassRate: number | null;
+  /** Total provider-reported cost across this tier's runs. null when none reported (Codex). */
+  costUsd: number | null;
+  /** costUsd / tasks. null when no cost was reported. */
+  costPerTask: number | null;
+}
+
+/**
+ * Pure: normalized rows → one scorecard row per model TIER (Opus/Sonnet/
+ * Haiku/Codex), busiest first. Rows whose model doesn't classify into a tier
+ * (retired local-* rows, "other", unrecognized ids) are excluded entirely —
+ * the same permanent-exclusion treatment the live /observability view
+ * already gives retired local rows (see `obsProviderAllowed` in server.ts),
+ * not a fake "other" bucket with no engine left behind it.
+ */
+export function modelTierScorecard(rows: TaskTelemetry[]): TierScorecardRow[] {
+  const byTier = new Map<ModelTier, TaskTelemetry[]>();
+  for (const r of rows) {
+    const tier = modelTier(r.model);
+    if (!tier) continue;
+    const list = byTier.get(tier) ?? byTier.set(tier, []).get(tier)!;
+    list.push(r);
   }
-  return out.sort((a, b) => b.runs - a.runs);
+  return [...byTier.entries()]
+    .map(([tier, rs]) => ({ tier, ...scorecardMetrics(rs) }))
+    .sort((a, b) => b.runs - a.runs);
 }
 
 // --- Cache token economics -----------------------------------------------------

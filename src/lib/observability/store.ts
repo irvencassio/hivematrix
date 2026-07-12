@@ -11,10 +11,12 @@ import {
   type TaskTelemetry,
   type ObservabilityTotals,
   type RouteScorecardRow,
+  type TierScorecardRow,
   type RunTelemetryInput,
   normalizeRun,
   summarizeTelemetry,
   routeScorecard,
+  modelTierScorecard,
 } from "./contracts";
 import { aggregateArms, recommendRoutes, type RouteRecommendation } from "@/lib/routing/bandit";
 
@@ -164,6 +166,14 @@ export function observabilitySummary(window = 1000, isAllowed?: (provider: strin
 /** Per-route scorecard (first-pass rate, rework, cost/task) over the most recent `window` rows. */
 export function observabilityScorecard(window = 1000): RouteScorecardRow[] {
   return routeScorecard(listTaskTelemetry(window));
+}
+
+/** Per-model-tier scorecard (first-pass rate, rework, cost/task, grouped by
+ * Opus/Sonnet/Haiku/Codex) over the most recent `window` rows. The
+ * post-cutover replacement for observabilityScorecard's provider-route view —
+ * see contracts.ts's modelTierScorecard for why. */
+export function observabilityTierScorecard(window = 1000): TierScorecardRow[] {
+  return modelTierScorecard(listTaskTelemetry(window));
 }
 
 /**

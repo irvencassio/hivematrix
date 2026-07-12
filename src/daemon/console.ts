@@ -898,6 +898,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .brain-pane { flex:1 1 auto; min-height:0; height:calc(100vh - 68px); max-height:calc(100vh - 68px);
     width:100%; display:flex; flex-direction:column; padding:18px 18px 14px; gap:12px; overflow:hidden; }
   .tools-pane { flex:1 1 auto; min-height:0; overflow-y:auto; padding:4px 4px 24px; }
+  .obs-panel-toggles { display:flex; align-items:center; flex-wrap:wrap; gap:4px; padding:2px 10px 12px; }
   .tools-group { margin:14px 0 4px; }
   .tools-group-h { font-size:13px; font-weight:700; color:var(--text); padding:0 4px; }
   .tools-group-h .count { font-size:11px; color:var(--muted); font-weight:600; margin-left:4px; }
@@ -2012,7 +2013,7 @@ async function toggleThemeQuick() {
 // Center overview — at-a-glance board state when no task is selected, instead of
 // leaving the widest column empty.
 function renderOverview() {
-  if (state.selected || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen || _brainState.panelOpen || _rolesState.panelOpen || _toolsState.panelOpen) return;
+  if (state.selected || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen || _brainState.panelOpen || _rolesState.panelOpen || _toolsState.panelOpen || _obsState.panelOpen) return;
   setFlashSessionMode(false);
   const el = document.getElementById("session");
   if (!el) return;
@@ -2046,6 +2047,7 @@ function showOverview() {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
+  _obsState.panelOpen = false;
   setFlashSessionMode(false);
   renderBoard();
   renderSkillList();
@@ -2060,7 +2062,7 @@ function focusBoardLane(key) {
 }
 function updateOverviewNav() {
   const nav = document.getElementById("overviewNav");
-  const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !_flashState.panelOpen && !_brainState.panelOpen && !_rolesState.panelOpen && !_toolsState.panelOpen;
+  const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !_flashState.panelOpen && !_brainState.panelOpen && !_rolesState.panelOpen && !_toolsState.panelOpen && !_obsState.panelOpen;
   if (nav) nav.classList.toggle("active", overviewActive);
   const newTaskNav = document.getElementById("newTaskNav");
   if (newTaskNav) newTaskNav.classList.toggle("active", _taskFormInSession);
@@ -2459,6 +2461,7 @@ async function selectTask(id) {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
+  _obsState.panelOpen = false;
   setFlashSessionMode(false);
   if (_taskFormInSession) _closeNewTaskPanel();
   // Switching tasks clears half-composed retry/reply state; staying on the same
@@ -2987,16 +2990,18 @@ async function renderObservability() {
       + t.hiddenProviders.map(h => esc(OBS_LABELS[h.key] || h.key) + ' — ' + h.runs + ' run' + (h.runs === 1 ? '' : 's') + ' hidden (disabled)').join(' · ')
       + '</div>';
   }
-  // Route scorecard — the empirical "local vs frontier per route" view: first-pass
-  // rate (one-and-done), rework (runs/task), and cost per task.
-  if (Array.isArray(data.scorecard) && data.scorecard.length) {
+  // Model scorecard — per-tier quality & cost (Opus/Sonnet/Haiku/Codex): first-pass
+  // rate (one-and-done), rework (runs/task), and cost per task. Reframed from the
+  // retired "local vs frontier per route" view post the Claude-native cutover.
+  const scoreRows = (Array.isArray(data.tierScorecard) && data.tierScorecard.length) ? data.tierScorecard : null;
+  if (scoreRows) {
     const pct = v => (v == null ? '—' : Math.round(v * 100) + '%');
-    const dollars = v => (v == null ? '<span class="muted" title="on-device / not reported">—</span>' : '$' + Number(v).toFixed(v < 0.01 ? 4 : 2));
-    html += '<div class="obs-sc-h" style="margin:8px 0 3px;font-size:11px;color:var(--muted)">Route scorecard <span title="How often each route lands a task on the first attempt, its rework, and cost per task.">ⓘ</span></div>';
-    html += '<table class="obs-tbl"><tr><th>route</th><th title="distinct tasks">tasks</th><th title="succeeded on first attempt">1st-pass</th><th title="runs per task — rework signal">runs/task</th><th title="provider cost per task">$/task</th></tr>';
-    for (const s of data.scorecard) {
-      const label = OBS_LABELS[s.route] || s.route;
-      html += '<tr><td>' + esc(label) + '</td><td>' + s.tasks + '</td>'
+    const dollars = v => (v == null ? '<span class="muted" title="not reported">—</span>' : '$' + Number(v).toFixed(v < 0.01 ? 4 : 2));
+    html += '<div class="obs-sc-h" style="margin:8px 0 3px;font-size:11px;color:var(--muted)">Model scorecard <span title="How often each model lands a task on the first attempt, its rework, and cost per task.">ⓘ</span></div>';
+    html += '<table class="obs-tbl"><tr><th>model</th><th title="distinct tasks">tasks</th><th title="succeeded on first attempt">1st-pass</th><th title="runs per task — rework signal">runs/task</th><th title="model cost per task">$/task</th></tr>';
+    for (const s of scoreRows) {
+      const dot = '<i style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;background:' + (OBS_TIER_COLORS[s.tier] || OBS_COLORS.other) + '"></i>';
+      html += '<tr><td>' + dot + esc(s.tier) + '</td><td>' + s.tasks + '</td>'
         + '<td>' + pct(s.firstPassRate) + '</td>'
         + '<td>' + Number(s.avgRunsPerTask).toFixed(2) + '</td>'
         + '<td>' + dollars(s.costPerTask) + '</td></tr>';
@@ -3023,10 +3028,66 @@ async function renderObservability() {
 }
 
 // --- Observability dashboard (dedicated popup) ------------------------------
-function openObsDashboard() { document.getElementById("obsOverlay").classList.add("open"); renderObsDashboard("obsDashModal"); }
-function closeObsDashboard() { document.getElementById("obsOverlay").classList.remove("open"); }
+// The full Observability dashboard now takes over the center section (like the
+// New Task / Tools panels) instead of a cramped modal — openObsDashboard routes
+// to showObs. The old overlay functions are kept as harmless no-op-ish fallbacks.
+function openObsDashboard() { showObs(); }
+function closeObsDashboard() { const o = document.getElementById("obsOverlay"); if (o) o.classList.remove("open"); }
 function setObsWindowModal(w) { _obsWindow = w; renderObsDashboard("obsDashModal"); }
 function setObsGroupModal(g) { _obsGroup = g; renderObsDashboard("obsDashModal"); }
+function setObsWindowPanel(w) { _obsWindow = w; renderObsDashboard("obsDashPanel"); }
+function setObsGroupPanel(g) { _obsGroup = g; renderObsDashboard("obsDashPanel"); }
+
+// ── Observability center panel ─────────────────────────────────────────
+let _obsState = { panelOpen: false };
+
+function showObs() {
+  state.selected = null;
+  state.selectedSkillOrCommand = null;
+  _skSel = '';
+  _ctxTask = null;
+  if (_taskFormInSession) _closeNewTaskPanel();
+  _flashState.panelOpen = false;
+  _brainState.panelOpen = false;
+  _rolesState.panelOpen = false;
+  _toolsState.panelOpen = false;
+  _obsState.panelOpen = false;
+  _obsState.panelOpen = true;
+  renderBoard();
+  renderSkillList();
+  renderObsPanel();
+  updateFlashNav();
+  updateBrainNav();
+  updateRolesNav();
+  updateToolsNav();
+}
+
+function obsPanelToggles() {
+  const wins = ["1h", "24h", "7d", "30d"];
+  const winBtns = wins.map(function (w) { return '<button data-w="' + w + '" onclick="setObsWindowPanel(\'' + w + '\')">' + w + '</button>'; }).join("");
+  const grpBtns = '<button data-g="provider" onclick="setObsGroupPanel(\'provider\')">by provider</button>'
+    + '<button data-g="model" onclick="setObsGroupPanel(\'model\')">by model</button>';
+  return '<span class="obs-win" id="obs_win_panel">' + winBtns + '</span>'
+    + '<span class="obs-win" id="obs_group_panel" style="margin-left:8px">' + grpBtns + '</span>'
+    + '<button class="copybtn" style="margin-left:8px" onclick="renderObsDashboard(\'obsDashPanel\')">↻ Refresh</button>';
+}
+
+function renderObsPanel() {
+  if (!_obsState.panelOpen) return;
+  const session = document.getElementById('session');
+  if (!session) return;
+  setFlashSessionMode(true);
+  session.innerHTML = '<div class="oc-center-pane">'
+    + '<div class="oc-panel-head"><div><div class="oc-panel-title"><span>📊 Observability</span></div>'
+    + '<div class="oc-panel-sub">Tokens, tasks, latency &amp; prompt-cache across Claude &amp; Codex</div></div>'
+    + '<span class="oc-panel-head-spacer"></span>'
+    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></div>'
+    + '<div class="tools-pane" style="padding:8px 4px 24px"><div class="obs-panel-toggles">' + obsPanelToggles() + '</div>'
+    + '<div id="obsDashPanel"><div class="muted">Loading…</div></div></div></div>';
+  renderObsDashboard('obsDashPanel');
+}
+
+function updateObsNav() { /* obs has no left-nav button; opened from the right rail */ }
 function obsKpi(v, l) { return '<div class="obs-kpi"><div class="v">' + esc(String(v)) + '</div><div class="l">' + esc(l) + '</div></div>'; }
 
 // Compact number for axes/tooltips (12.3k, 4.1M).
@@ -3107,14 +3168,62 @@ function obsStackedBars(points, keys, valueFn, unit, colorFn, labelFn) {
   return svg + '</svg>';
 }
 
+// Grouped (side-by-side) bars: within each time bucket, one sub-bar per series
+// key, so you can compare which key (model) is used most at a glance — the
+// "which models am I using" ask. y-axis scales to the max single value (bars are
+// NOT stacked). Used for the by-model view.
+function obsGroupedBars(points, keys, valueFn, unit, colorFn, labelFn) {
+  const color = colorFn || function (k) { return OBS_COLORS[k] || OBS_COLORS.other; };
+  const label = labelFn || function (k) { return OBS_LABELS[k] || k; };
+  const W = 720, H = 150, padL = 44, padR = 10, padT = 10, padB = 22;
+  const n = points.length || 1;
+  const nk = keys.length || 1;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  let maxV = 1;
+  for (const p of points) for (const k of keys) { const v = valueFn(p, k) || 0; if (v > maxV) maxV = v; }
+  const niceMax = obsNiceMax(maxV);
+  const bw = plotW / n;
+  const groupW = Math.min(bw - 2, bw * 0.82);
+  const sub = groupW / nk;
+  const subW = Math.max(0.8, sub * 0.86);
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
+  for (let g = 0; g <= 2; g++) {
+    const val = niceMax * g / 2;
+    const y = padT + plotH - (val / niceMax) * plotH;
+    svg += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" style="stroke:var(--border)" stroke-width="1"/>';
+    svg += '<text x="' + (padL - 6) + '" y="' + (y + 3).toFixed(1) + '" text-anchor="end" font-size="9" style="fill:var(--muted)">' + esc(obsShort(val)) + '</text>';
+  }
+  for (let i = 0; i < n; i++) {
+    const p = points[i];
+    const gx = padL + i * bw + (bw - groupW) / 2;
+    for (let j = 0; j < nk; j++) {
+      const k = keys[j];
+      const v = valueFn(p, k) || 0;
+      if (v <= 0) continue;
+      const h = (v / niceMax) * plotH;
+      const x = gx + j * sub + (sub - subW) / 2;
+      const y = padT + plotH - h;
+      svg += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + subW.toFixed(1) + '" height="' + Math.max(0.6, h).toFixed(1) + '" fill="' + color(k) + '"><title>' + esc(label(k) + " · " + obsBucketLabel(p.t, unit) + ": " + obsShort(v)) + '</title></rect>';
+    }
+  }
+  const idxs = n <= 1 ? [0] : [0, Math.floor(n / 2), n - 1];
+  for (const i of idxs) {
+    const x = padL + i * bw + bw / 2;
+    svg += '<text x="' + x.toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="9" style="fill:var(--muted)">' + esc(obsBucketLabel(points[i].t, unit)) + '</text>';
+  }
+  return svg + '</svg>';
+}
+
 async function renderObsDashboard(target) {
   target = target || "obsDash";
   const el = document.getElementById(target);
   if (!el) return;
-  const winSel = target === "obsDashModal" ? "#obs_win_modal button" : "#obs_win button";
+  const winSel = target === "obsDashModal" ? "#obs_win_modal button"
+    : target === "obsDashPanel" ? "#obs_win_panel button" : "#obs_win button";
   document.querySelectorAll(winSel).forEach(function (b) { b.classList.toggle("on", b.dataset.w === _obsWindow); });
-  if (target === "obsDashModal") {
-    document.querySelectorAll("#obs_group_modal button").forEach(function (b) { b.classList.toggle("on", b.dataset.g === _obsGroup); });
+  if (target === "obsDashModal" || target === "obsDashPanel") {
+    const gsel = target === "obsDashPanel" ? "#obs_group_panel button" : "#obs_group_modal button";
+    document.querySelectorAll(gsel).forEach(function (b) { b.classList.toggle("on", b.dataset.g === _obsGroup); });
   }
   el.innerHTML = '<div class="muted">Loading…</div>';
   let s, detail;
@@ -3143,16 +3252,22 @@ async function renderObsDashboard(target) {
   if (groupByModel) {
     const seen = {};
     (s.pointsByModel || []).forEach(function (p) { Object.keys(p.byModel || {}).forEach(function (k) { seen[k] = 1; }); });
-    const modelKeys = Object.keys(seen).sort(function (a, b) {
-      const d = obsTierOrder(a) - obsTierOrder(b);
-      return d !== 0 ? d : (a < b ? -1 : a > b ? 1 : 0);
-    });
+    const modelKeys = Object.keys(seen)
+      // Drop retired pre-cutover local models (qwen/deepseek/etc.) — they only
+      // linger in historical windows and are excluded from the provider view and
+      // the model scorecard too. obsModelTier is null for anything not a live
+      // Claude tier or Codex.
+      .filter(function (k) { return obsModelTier(k) !== null; })
+      .sort(function (a, b) {
+        const d = obsTierOrder(a) - obsTierOrder(b);
+        return d !== 0 ? d : (a < b ? -1 : a > b ? 1 : 0);
+      });
     const mpts = s.pointsByModel || [];
-    html += '<div class="obs-chart"><h4>Tokens over time</h4><div class="sub">input + output, stacked by model</div>'
-      + obsStackedBars(mpts, modelKeys, function (p, k) { const c = p.byModel[k]; return c ? c.inputTokens + c.outputTokens : 0; }, s.unit, obsModelColor, obsModelLabel)
+    html += '<div class="obs-chart"><h4>Tokens over time</h4><div class="sub">input + output, side-by-side by model</div>'
+      + obsGroupedBars(mpts, modelKeys, function (p, k) { const c = p.byModel[k]; return c ? c.inputTokens + c.outputTokens : 0; }, s.unit, obsModelColor, obsModelLabel)
       + obsLegend(modelKeys, obsModelColor, obsModelLabel) + '</div>';
-    html += '<div class="obs-chart"><h4>Tasks over time</h4><div class="sub">runs per ' + perStr + ', stacked by model</div>'
-      + obsStackedBars(mpts, modelKeys, function (p, k) { const c = p.byModel[k]; return c ? c.runs : 0; }, s.unit, obsModelColor, obsModelLabel)
+    html += '<div class="obs-chart"><h4>Tasks over time</h4><div class="sub">runs per ' + perStr + ', side-by-side by model</div>'
+      + obsGroupedBars(mpts, modelKeys, function (p, k) { const c = p.byModel[k]; return c ? c.runs : 0; }, s.unit, obsModelColor, obsModelLabel)
       + obsLegend(modelKeys, obsModelColor, obsModelLabel) + '</div>';
   } else {
     html += '<div class="obs-chart"><h4>Tokens over time</h4><div class="sub">input + output, stacked by provider</div>'
@@ -3212,6 +3327,25 @@ async function renderObsDashboard(target) {
         + '<td>' + fmtNum(p.inputTokens) + ' / ' + fmtNum(p.outputTokens) + '</td>'
         + '<td>' + fmtMs(p.latencyP50Ms) + '</td><td>' + fmtMs(p.latencyP95Ms) + '</td>'
         + '<td>' + (p.avgTokensPerSec != null ? p.avgTokensPerSec : "—") + '</td></tr>';
+    }
+    html += '</table></div>';
+  }
+
+  // Per-model scorecard (first-pass %, rework, cost per task) — the reframed
+  // "route scorecard", now keyed by Claude tier / Codex. Shown in the full
+  // dashboard so the center takeover is complete, not just the right-rail summary.
+  const tsc = detail && detail.tierScorecard;
+  if (Array.isArray(tsc) && tsc.length) {
+    const pct = v => (v == null ? '—' : Math.round(v * 100) + '%');
+    const dollars = v => (v == null ? '<span class="muted" title="not reported">—</span>' : '$' + Number(v).toFixed(v < 0.01 ? 4 : 2));
+    html += '<div class="obs-chart"><h4>Model scorecard</h4><div class="sub">first-pass rate · rework · cost per task, by model</div>'
+      + '<table class="obs-tbl"><tr><th>model</th><th>tasks</th><th>1st-pass</th><th>runs/task</th><th>$/task</th></tr>';
+    for (const s2 of tsc) {
+      const dot = '<i style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;background:' + (OBS_TIER_COLORS[s2.tier] || OBS_COLORS.other) + '"></i>';
+      html += '<tr><td>' + dot + esc(s2.tier) + '</td><td>' + s2.tasks + '</td>'
+        + '<td>' + pct(s2.firstPassRate) + '</td>'
+        + '<td>' + Number(s2.avgRunsPerTask).toFixed(2) + '</td>'
+        + '<td>' + dollars(s2.costPerTask) + '</td></tr>';
     }
     html += '</table></div>';
   }
@@ -3391,6 +3525,7 @@ function showSkillPanel(key) {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
+  _obsState.panelOpen = false;
   setFlashSessionMode(false);
   if (_taskFormInSession) _closeNewTaskPanel();
   renderBoard();
@@ -3407,6 +3542,7 @@ function _closeSkillPanel() {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
+  _obsState.panelOpen = false;
   setFlashSessionMode(false);
   renderSkillList();
   renderSkillDetail();
@@ -5563,6 +5699,7 @@ function showNewTaskPanel() {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
+  _obsState.panelOpen = false;
   setFlashSessionMode(false);
   _ctxTask = null;
   _taskFormInSession = true;
@@ -6615,6 +6752,7 @@ function showFlashPanel() {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
+  _obsState.panelOpen = false;
   renderBoard();
   renderSkillList();
   renderFlashPanel();
@@ -6745,6 +6883,7 @@ function showBrain() {
   _brainState.panelOpen = true;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
+  _obsState.panelOpen = false;
   renderBoard();
   renderSkillList();
   renderBrainPanel();
@@ -7265,6 +7404,7 @@ function showRoles() {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = true;
   _toolsState.panelOpen = false;
+  _obsState.panelOpen = false;
   renderBoard();
   renderSkillList();
   renderRolesPanel();
@@ -7296,6 +7436,7 @@ function showTools() {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = true;
+  _obsState.panelOpen = false;
   renderBoard();
   renderSkillList();
   renderToolsPanel();

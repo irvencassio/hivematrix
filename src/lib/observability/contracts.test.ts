@@ -6,6 +6,8 @@ import {
   normalizeRun,
   summarizeTelemetry,
   routeScorecard,
+  modelTier,
+  modelTierScorecard,
   percentile,
   type RunTelemetryInput,
 } from "./contracts";
@@ -189,6 +191,83 @@ test("routeScorecard first-pass rate is null when a route never took a first att
     normalizeRun({ taskId: "X", runIndex: 1, model: "claude-sonnet-4-6", status: "done", costUsd: 0.01 }),
   ];
   const sc = routeScorecard(rows);
+  assert.equal(sc[0].firstAttempts, 0);
+  assert.equal(sc[0].firstPassRate, null);
+});
+
+test("modelTier classifies Claude tiers, bare CLI aliases, [1m] variants, and Codex", () => {
+  assert.equal(modelTier("claude-opus-4-8"), "Opus");
+  assert.equal(modelTier("claude-opus-4-8[1m]"), "Opus");
+  assert.equal(modelTier("opus"), "Opus");
+  assert.equal(modelTier("claude-sonnet-5"), "Sonnet");
+  assert.equal(modelTier("sonnet"), "Sonnet");
+  assert.equal(modelTier("claude-haiku-4-5"), "Haiku");
+  assert.equal(modelTier("haiku"), "Haiku");
+  assert.equal(modelTier("codex:gpt-5.5-codex"), "Codex");
+  assert.equal(modelTier("gpt-5.5"), "Codex");
+  assert.equal(modelTier("o3"), "Codex");
+});
+
+test("modelTier returns null for retired local rows, unrecognized ids, and empty/missing models", () => {
+  assert.equal(modelTier("qwen3-coder-30b"), null);
+  assert.equal(modelTier("deepseek-v4-flash"), null);
+  assert.equal(modelTier(""), null);
+  assert.equal(modelTier(null), null);
+  assert.equal(modelTier(undefined), null);
+});
+
+test("modelTierScorecard groups by tier, busiest first, with the same metrics as routeScorecard", () => {
+  const rows = [
+    // Haiku: task A first attempt fails, retry succeeds → rework; task C one-and-done.
+    normalizeRun({ taskId: "A", runIndex: 0, model: "claude-haiku-4-5", status: "failed" }),
+    normalizeRun({ taskId: "A", runIndex: 1, model: "claude-haiku-4-5", status: "done" }),
+    normalizeRun({ taskId: "C", runIndex: 0, model: "claude-haiku-4-5", status: "done" }),
+    // Opus: one run, done, with a reported cost.
+    normalizeRun({ taskId: "B", runIndex: 0, model: "claude-opus-4-8", status: "done", costUsd: 0.02 }),
+    // Codex: one run, done, no reported cost.
+    normalizeRun({ taskId: "D", runIndex: 0, model: "codex:gpt-5.5-codex", status: "done", inputTokens: 100, outputTokens: 50 }),
+  ];
+  const sc = modelTierScorecard(rows);
+
+  const haiku = sc.find((r) => r.tier === "Haiku")!;
+  assert.equal(haiku.tasks, 2);            // A, C
+  assert.equal(haiku.runs, 3);             // A×2 + C×1
+  assert.equal(haiku.avgRunsPerTask, 1.5);
+  assert.equal(haiku.firstAttempts, 2);    // A@0, C@0
+  assert.equal(haiku.firstPassRate, 0.5);  // C passed, A failed
+  assert.equal(haiku.costUsd, null);
+
+  const opus = sc.find((r) => r.tier === "Opus")!;
+  assert.equal(opus.tasks, 1);
+  assert.equal(opus.firstPassRate, 1);
+  assert.equal(opus.costUsd, 0.02);
+  assert.equal(opus.costPerTask, 0.02);
+
+  const codex = sc.find((r) => r.tier === "Codex")!;
+  assert.equal(codex.tasks, 1);
+  assert.equal(codex.firstPassRate, 1);
+  assert.equal(codex.costUsd, null, "Codex cost is not provider-reported");
+
+  // Busiest tier first.
+  assert.equal(sc[0].tier, "Haiku");
+});
+
+test("modelTierScorecard excludes retired local rows and unrecognized model ids entirely (no fake 'other' bucket)", () => {
+  const rows = [
+    normalizeRun({ taskId: "E", runIndex: 0, model: "claude-sonnet-5", status: "done" }),
+    { ...normalizeRun({ taskId: "F", runIndex: 0, model: "deepseek-v4-flash", status: "done" }), provider: "local-dwarfstar" as const },
+  ];
+  const sc = modelTierScorecard(rows);
+  assert.equal(sc.length, 1);
+  assert.equal(sc[0].tier, "Sonnet");
+  assert.equal(sc[0].tasks, 1);
+});
+
+test("modelTierScorecard first-pass rate is null when a tier never took a first attempt", () => {
+  const rows = [
+    normalizeRun({ taskId: "X", runIndex: 1, model: "claude-sonnet-5", status: "done", costUsd: 0.01 }),
+  ];
+  const sc = modelTierScorecard(rows);
   assert.equal(sc[0].firstAttempts, 0);
   assert.equal(sc[0].firstPassRate, null);
 });

@@ -569,7 +569,10 @@ test("prompt cache section shows the Claude 5m/1h write split and a token-based 
   const renderObsDashboard = extractBetween(js, "async function renderObsDashboard(target)", "function renderConn()");
   assert.match(renderObsDashboard, /c\.cacheCreate5mTokens != null && c\.cacheCreate1hTokens != null/, "the split is only rendered when known, never guessed");
   assert.match(renderObsDashboard, /c\.netBenefitTokens/);
-  assert.doesNotMatch(renderObsDashboard, /\$/, "cache economics are token-based — no dollar-sign pricing table");
+  // The CACHE section specifically must stay token-based — no dollar pricing.
+  // (The separate Model scorecard legitimately shows $/task cost per model.)
+  const cacheSection = extractBetween(renderObsDashboard, "Prompt cache", "groupRows");
+  assert.doesNotMatch(cacheSection, /\$/, "cache economics are token-based — no dollar-sign pricing in the cache section");
   // Local providers (historical telemetry rows only, e.g. "local-qwen") are
   // excluded from the DB-cache loop entirely — no live local-engine section exists anymore.
   assert.match(renderObsDashboard, /dbCacheRows = crows\.filter\(function \(c\) \{ return c\.provider\.indexOf\("local-"\) !== 0; \}\)/);
@@ -584,15 +587,19 @@ test("dashboard modal no longer renders a local-engine cache section (Claude-nat
   assert.doesNotMatch(renderObsDashboard, /pressure evictions/);
 });
 
-test("Full dashboard opens dedicated Observability popup, not Settings", () => {
+test("Full dashboard takes over the center section (obs panel), not Settings", () => {
   const js = extractScript(CONSOLE_HTML);
-  // openObsDashboard must open the dedicated overlay — not Settings.
+  // The full Observability dashboard now takes over the center (like New Task /
+  // Tools), not a cramped modal — openObsDashboard routes to showObs, and must
+  // never open Settings.
   assert.doesNotMatch(js, /function openObsDashboard\(\)\s*\{[^}]*openSettings/, "openObsDashboard must not call openSettings");
-  assert.match(js, /function openObsDashboard\(\)\s*\{[^}]*obsOverlay/, "openObsDashboard targets obsOverlay");
-  // Dedicated popup, its container, and its dismiss handler.
-  assert.match(CONSOLE_HTML, /id="obsOverlay"/, "obsOverlay element present");
-  assert.match(CONSOLE_HTML, /id="obsDashModal"/, "obsDashModal container present");
-  assert.match(js, /function closeObsDashboard\(/, "closeObsDashboard present");
+  assert.match(js, /function openObsDashboard\(\)\s*\{[^}]*showObs\(\)/, "openObsDashboard opens the center panel via showObs");
+  assert.match(js, /function showObs\(/, "showObs present");
+  assert.match(js, /function renderObsPanel\(/, "renderObsPanel present");
+  assert.match(js, /_obsState\.panelOpen = true/, "showObs opens the obs panel");
+  assert.match(js, /id="obsDashPanel"/, "obs panel renders into obsDashPanel");
+  // by-model draws grouped side-by-side bars so usage is comparable at a glance.
+  assert.match(js, /function obsGroupedBars\(/, "grouped bars for the by-model view");
 });
 
 test("remote access UI is two toggles — Tailscale for iPhone, Cloudflare for Apple Watch — not the throwaway temporary tunnel", () => {

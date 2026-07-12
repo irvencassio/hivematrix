@@ -2,7 +2,7 @@
  * Pipeline self-audit — the accountability layer dogfooding its own machinery.
  *
  * "HiveMatrix as COO" stops being a metaphor when the COO files its own bug reports.
- * This inspects the pipeline's own metrics (the success scoreboard, the route
+ * This inspects the pipeline's own metrics (the success scoreboard, the model-tier
  * scorecard, feedback loop-health) and files any material concern into the SAME
  * feedback backlog that a maintenance directive works — so a pipeline regression
  * becomes tracked work, deduped so it doesn't spam a row every run.
@@ -13,14 +13,7 @@
 
 import { recordFeedbackDedup } from "./feedback";
 import type { Scoreboard } from "./scoreboard";
-import { isLocalProvider, type RouteScorecardRow } from "@/lib/observability/contracts";
-
-// Frontier routes, by allowlist rather than "not local" — `isLocalProvider` is a
-// prefix check over `local-${string}`, but that still leaves "other" (unrecognized
-// or pre-Provider-widening rows) unaccounted for. An explicit allowlist keeps "other"
-// out of both buckets instead of a `!== "local-qwen"`-style filter silently
-// miscounting it as frontier.
-const FRONTIER_ROUTES: RouteScorecardRow["route"][] = ["anthropic", "openai-codex"];
+import type { TierScorecardRow } from "@/lib/observability/contracts";
 
 export interface AuditConcern {
   kind: "bug" | "enhancement";
@@ -29,9 +22,9 @@ export interface AuditConcern {
 }
 
 // Thresholds — deliberately conservative so the audit speaks on trends, not noise.
-const LOCAL_FLOOR = 0.6;        // local first-pass below this…
-const FRONTIER_GAP = 0.2;      // …and this far under the frontier → re-route nudge
-const MIN_ROUTE_TASKS = 3;
+const TIER_FLOOR = 0.6;        // a tier's first-pass rate below this…
+const TIER_GAP = 0.2;          // …and this far under the best-performing tier → escalation nudge
+const MIN_TIER_TASKS = 3;
 const FAIL_RATE = 0.3;         // >30% of the week's tasks failing is a real problem
 const MIN_WEEK_TASKS = 5;
 const MIN_CRITERIA = 3;        // enough standing objectives to expect movement
@@ -44,24 +37,31 @@ const MIN_LOOP_ITEMS = 5;
  */
 export function pipelineConcerns(input: {
   scoreboard: Scoreboard;
-  routeScorecard: RouteScorecardRow[];
+  tierScorecard: TierScorecardRow[];
   loopResolutionRate: number | null;
   loopItems: number;
 }): AuditConcern[] {
   const out: AuditConcern[] = [];
-  const { scoreboard: s, routeScorecard } = input;
+  const { scoreboard: s, tierScorecard } = input;
 
-  // 1) Local coding quality lags the frontier → suggest re-routing coding.
-  const local = routeScorecard.find((r) => isLocalProvider(r.route) && r.tasks >= MIN_ROUTE_TASKS && r.firstPassRate !== null);
-  const frontier = routeScorecard
-    .filter((r) => FRONTIER_ROUTES.includes(r.route) && r.tasks >= MIN_ROUTE_TASKS && r.firstPassRate !== null)
-    .sort((a, b) => (b.firstPassRate ?? 0) - (a.firstPassRate ?? 0))[0];
-  if (local?.firstPassRate != null && frontier?.firstPassRate != null &&
-      local.firstPassRate < LOCAL_FLOOR && frontier.firstPassRate - local.firstPassRate >= FRONTIER_GAP) {
+  // 1) One model tier's coding quality lags the best-performing tier → suggest
+  // escalating tasks off the weak tier. Post-cutover there's no local-vs-frontier
+  // axis left — every route is a Claude tier or Codex — so the comparison is now
+  // "worst tier with enough data" vs "best tier with enough data" rather than a
+  // fixed local/frontier pairing. A single active tier can't be compared against
+  // itself, so `worst.tier !== best.tier` guards that case (matches the old
+  // guard against a retired local route leaking into the frontier side).
+  const eligible = tierScorecard.filter((r) => r.tasks >= MIN_TIER_TASKS && r.firstPassRate !== null);
+  const worst = eligible.reduce<TierScorecardRow | null>(
+    (acc, r) => (acc === null || (r.firstPassRate as number) < (acc.firstPassRate as number) ? r : acc), null);
+  const best = eligible.reduce<TierScorecardRow | null>(
+    (acc, r) => (acc === null || (r.firstPassRate as number) > (acc.firstPassRate as number) ? r : acc), null);
+  if (worst && best && worst.tier !== best.tier && worst.firstPassRate != null && best.firstPassRate != null &&
+      worst.firstPassRate < TIER_FLOOR && best.firstPassRate - worst.firstPassRate >= TIER_GAP) {
     out.push({
       kind: "enhancement",
-      title: "Route coding to the frontier by default",
-      detail: `Local first-pass (${Math.round(local.firstPassRate * 100)}%) trails the frontier (${Math.round(frontier.firstPassRate * 100)}%) — the local coding path is costing rework.`,
+      title: `Escalate ${worst.tier} tasks to a stronger tier`,
+      detail: `${worst.tier} first-pass (${Math.round(worst.firstPassRate * 100)}%) trails ${best.tier} (${Math.round(best.firstPassRate * 100)}%) — tasks landing on ${worst.tier} are costing rework.`,
     });
   }
 
@@ -100,13 +100,13 @@ export function pipelineConcerns(input: {
 export async function runPipelineSelfAudit(): Promise<{ filed: number; concerns: AuditConcern[] }> {
   try {
     const { getScoreboard } = await import("./scoreboard");
-    const { observabilityScorecard } = await import("@/lib/observability/store");
+    const { observabilityTierScorecard } = await import("@/lib/observability/store");
     const { loopHealth } = await import("./self-improvement");
 
     const lh = loopHealth();
     const concerns = pipelineConcerns({
       scoreboard: getScoreboard(0),
-      routeScorecard: observabilityScorecard(),
+      tierScorecard: observabilityTierScorecard(),
       loopResolutionRate: lh.total > 0 ? lh.resolutionRate : null,
       loopItems: lh.total,
     });

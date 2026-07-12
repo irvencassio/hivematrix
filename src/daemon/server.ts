@@ -983,7 +983,7 @@ export function createDaemonServer() {
       // task. A disabled frontier provider's rows stay on disk (history is
       // retained) but are filtered out of this rendered view — never a data delete.
       if (req.method === "GET" && urlPath === "/observability") {
-        const { listTaskTelemetry, getTaskTelemetry, observabilitySummary, observabilityScorecard, routingRecommendations } = await import("@/lib/observability/store");
+        const { listTaskTelemetry, getTaskTelemetry, observabilitySummary, observabilityScorecard, observabilityTierScorecard, routingRecommendations } = await import("@/lib/observability/store");
         const oq = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
         const taskId = oq.get("taskId");
         if (taskId) {
@@ -1008,7 +1008,7 @@ export function createDaemonServer() {
         // reversible operator choice, and "local-dwarfstar — 49 runs hidden" is
         // exactly the residual local-model label this cleanup removes.
         totals.hiddenProviders = totals.hiddenProviders.filter((h) => h.key === "anthropic" || h.key === "openai-codex");
-        json(res, 200, { totals, scorecard, routing: routingRecommendations(1000, isAllowed), operatorRoutes: getLearnedRoutes(), recent });
+        json(res, 200, { totals, scorecard, tierScorecard: observabilityTierScorecard(), routing: routingRecommendations(1000, isAllowed), operatorRoutes: getLearnedRoutes(), recent });
         return;
       }
 
