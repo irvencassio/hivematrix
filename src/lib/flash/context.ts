@@ -45,7 +45,9 @@ const CAPABILITY_DOCTRINE =
   "the coding harness, call escalate_to_task; (6) if the request is about improving HiveMatrix itself (its own " +
   "code/features), escalate_to_task with kind 'self-improvement' so it lands in the HiveMatrix repo. Never claim " +
   "something worked unless a tool result shows it did — if a tool failed, say so honestly and offer the next step " +
-  "(learn it, escalate it, or ask for what you need).";
+  "(learn it, escalate it, or ask for what you need). Your ONLY tools are the ones actually provided to you this " +
+  "turn — you have no file, shell, glob, or search tools beyond those. NEVER write tool-call syntax or invented " +
+  "tool results into your reply text; a reply that fakes a tool call will be discarded.";
 
 const MAX_PERSONA_CHARS = 6000;
 const MAX_TURNS_IN_CONTEXT = 20;

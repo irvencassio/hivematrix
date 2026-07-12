@@ -371,6 +371,35 @@ function runFlashAttempt(
 // terminal error until we've classified it.
 const STALE_RESUME_RE = /\bsession\b|\bresume\b/i;
 
+// ---------------------------------------------------------------------------
+// Fabricated-tool-call guard. A weak model under the "never dead-end" doctrine
+// can write tool-call MARKUP into its reply text and invent the "result" (live
+// regression 2026-07-12: fake `glob` calls plus a made-up file count, spoken
+// aloud). Real tool use never appears in reply text — it arrives as separate
+// tool_use stream events — so any call-syntax markup in the final text is
+// fabrication by construction. Deterministic gate, same philosophy as the
+// dispatch-time tool allow-list: prompt guidance is not a guarantee.
+// Signatures are markup-shaped on purpose — naming a tool in prose is fine.
+const FABRICATED_TOOL_MARKUP_RE = /<\/?function_calls>|<\/?invoke\b|"tool_name"\s*:|<\/?antml:/i;
+
+const FABRICATED_REPLY =
+  "I caught myself making up a tool call in that answer instead of using a real one, so I've thrown it away — " +
+  "don't trust anything I just claimed. I don't actually have a tool for that yet. Ask me again and I'll " +
+  "learn a proper skill for it instead.";
+
+/** Pure: replace a reply containing fabricated tool-call markup with an honest one. */
+export function guardFabricatedToolCalls(text: string): { text: string; fabricated: boolean } {
+  if (!FABRICATED_TOOL_MARKUP_RE.test(text)) return { text, fabricated: false };
+  return { text: FABRICATED_REPLY, fabricated: true };
+}
+
+/** Apply the guard to a finished attempt's text, logging when it fires. */
+function guardedText(raw: string, sessionId: string): string {
+  const { text, fabricated } = guardFabricatedToolCalls(raw);
+  if (fabricated) console.warn(`[flash:guard] fabricated tool-call markup in reply (session ${sessionId}) — replaced with honest refusal`);
+  return text;
+}
+
 export async function runFlashAgentLoop(
   messages: FlashMessage[],
   emit: FlashEmitter,
@@ -419,7 +448,7 @@ export async function runFlashAgentLoop(
     const { args, prompt } = buildTurn(null);
     const result = await runFlashAttempt(binary, args, prompt, spawnImpl, emit);
     if (result.cliSessionId) setFlashCliSessionId(sessionId, result.cliSessionId);
-    return result.text;
+    return guardedText(result.text, sessionId);
   }
 
   // --resume attempt: stream content/tool/error events LIVE through the real
@@ -443,7 +472,7 @@ export async function runFlashAgentLoop(
     const fallback = buildTurn(null);
     const fallbackResult = await runFlashAttempt(binary, fallback.args, fallback.prompt, spawnImpl, emit);
     if (fallbackResult.cliSessionId) setFlashCliSessionId(sessionId, fallbackResult.cliSessionId);
-    return fallbackResult.text;
+    return guardedText(fallbackResult.text, sessionId);
   }
 
   // Not stale. If the attempt still errored (a real, non-session failure), the
@@ -451,5 +480,5 @@ export async function runFlashAgentLoop(
   // streamed live is already on screen; we only append the error, no re-run).
   if (resumeResult.terminalError) emit.token(resumeResult.terminalError);
   if (resumeResult.cliSessionId) setFlashCliSessionId(sessionId, resumeResult.cliSessionId);
-  return resumeResult.text;
+  return guardedText(resumeResult.text, sessionId);
 }

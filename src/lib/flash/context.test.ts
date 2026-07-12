@@ -70,6 +70,8 @@ test("assembleSystemPrompt always includes the capability-doctrine escalation la
   assert.match(prompt, /never tell the operator to do by hand/i);
   // PERMISSION_NEEDED results are the exception: speak the fix, don't re-learn.
   assert.match(prompt, /PERMISSION_NEEDED/);
+  // Anti-fabrication clause (pairs with loop.ts's guardFabricatedToolCalls).
+  assert.match(prompt, /NEVER write tool-call syntax/);
 });
 
 test("assembleSystemPrompt omits the skill-library section when the library is empty", async () => {

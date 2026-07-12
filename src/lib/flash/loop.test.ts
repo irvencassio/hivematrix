@@ -11,6 +11,7 @@ import {
   buildFlashSpawnArgs,
   consumeFlashStreamLine,
   createFlashStreamState,
+  guardFabricatedToolCalls,
   runFlashAgentLoop,
   READ_ONLY_FLASH_TOOLS,
 } from "./loop";
@@ -525,3 +526,39 @@ test(
     assert.equal(getFlashCliSessionId(session.id), "cli-session-ok");
   },
 );
+
+// ---------------------------------------------------------------------------
+// guardFabricatedToolCalls — deterministic honesty gate (2026-07-12). A weak
+// model under the "never dead-end" doctrine can fabricate tool-call syntax in
+// its reply TEXT (live regression: fake `glob` calls + an invented file count
+// spoken aloud). The guard replaces such replies with an honest refusal.
+
+test("guardFabricatedToolCalls: clean replies pass through untouched", () => {
+  const clean = "You have three meetings today. The first is at 9:30.";
+  const r = guardFabricatedToolCalls(clean);
+  assert.equal(r.fabricated, false);
+  assert.equal(r.text, clean);
+});
+
+test("guardFabricatedToolCalls: <function_calls> markup is replaced with an honest reply", () => {
+  const fake = 'Checking now.\n<function_calls>\n[{"tool_name": "glob", "arguments": {"pattern": "/Users/x/Downloads/*"}}]\n</function_calls>\nYou have 34 files.';
+  const r = guardFabricatedToolCalls(fake);
+  assert.equal(r.fabricated, true);
+  assert.doesNotMatch(r.text, /34 files/);
+  assert.doesNotMatch(r.text, /function_calls/);
+  assert.match(r.text, /learn/i);
+});
+
+test("guardFabricatedToolCalls: bare tool_name JSON markup is also caught", () => {
+  const fake = 'Let me check: [{"tool_name": "list_files", "arguments": {}}] — you have 12 items.';
+  const r = guardFabricatedToolCalls(fake);
+  assert.equal(r.fabricated, true);
+  assert.doesNotMatch(r.text, /12 items/);
+});
+
+test("guardFabricatedToolCalls: mentioning a tool by name in prose is NOT fabrication", () => {
+  const clean = "I used the calendar_today tool and found nothing on the calendar today.";
+  const r = guardFabricatedToolCalls(clean);
+  assert.equal(r.fabricated, false);
+  assert.equal(r.text, clean);
+});
