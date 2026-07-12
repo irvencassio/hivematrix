@@ -728,6 +728,34 @@ const MIGRATIONS: Migration[] = [
   // stale id was cleared after a failed --resume) — the loop falls back to
   // full-history serialization in that case.
   m("v34", `ALTER TABLE flash_sessions ADD COLUMN cliSessionId TEXT;`),
+
+  // v35: Goals layer — the accountability/progress-tracking store, distinct
+  // from brain docs (a durable, structured record instead of prose) and from
+  // directives/tasks (long-horizon + recurring, not a one-shot work item).
+  // goal_checkins is append-only progress history; cadence/status drive the
+  // "what's due today" review computed in @/lib/goals/store.
+  m("v35", `CREATE TABLE IF NOT EXISTS goals (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      category TEXT,
+      description TEXT,
+      cadence TEXT NOT NULL DEFAULT 'weekly',
+      target TEXT,
+      metricUnit TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      sortOrder INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS goal_checkins (
+      id TEXT PRIMARY KEY,
+      goalId TEXT NOT NULL,
+      date TEXT NOT NULL,
+      note TEXT,
+      value REAL,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_checkins_goal ON goal_checkins(goalId, date);`),
 ];
 
 // ------------------------------------------------------------------

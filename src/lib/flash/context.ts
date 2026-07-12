@@ -35,7 +35,12 @@ const SPOKEN_STYLE =
  * resolve a request instead of dead-ending on "I can't do that." */
 const CAPABILITY_DOCTRINE =
   "Capability ladder — when the operator asks for something, resolve it in this order and never dead-end: " +
-  "(0) when asked about the operator's goals, plans, or notes, call brain_search to find the doc's path, then " +
+  "(0a) when the operator asks about their goals, progress, or \"what should I do today\" — or reports doing " +
+  "something (\"I ran 3 miles\", \"did 20 min of Italian\") — use the goals tools (goals_list, daily_review, " +
+  "goal_checkin, goal_upsert), NOT brain_search: goals now live in a structured, checkin-tracked store distinct " +
+  "from brain docs. If asked to \"import my goals\", read GOALS.md / the Solo Founder OS via brain_search+brain_read " +
+  "and create them with goal_upsert; " +
+  "(0b) when asked about the operator's other plans or notes, call brain_search to find the doc's path, then " +
   "brain_read on that path to get its FULL content, and answer from it — do NOT say \"I don't have file access\" " +
   "or answer from a search snippet alone when brain_read is available; " +
   "(1) answer directly if you know it; (2) use the CHEAPEST sufficient tool — desktop_action (GUI automation) is a " +

@@ -44,6 +44,12 @@ const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
   reminders_list: "brain",
   reminder_create: "brain",
   calendar_create: "brain",
+  // Goals live in the local SQLite goals store (@/lib/goals/store) — no cloud
+  // calls, so like brain/PIM they're always available, including offline.
+  goals_list: "brain",
+  goal_upsert: "brain",
+  goal_checkin: "brain",
+  daily_review: "brain",
 };
 
 /**
@@ -318,6 +324,77 @@ export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
   // PIM: Contacts / Calendar / Reminders — live local reads + the two low-risk
   // writes (reminder_create, calendar_create). Definitions live in pim-tools.ts.
   ...PIM_TOOL_DEFINITIONS,
+  // Goals: the accountability/progress-tracking layer (@/lib/goals/store) —
+  // structured, distinct from brain docs (prose) and directives/tasks
+  // (one-shot/scheduled work). Local SQLite only, always available.
+  {
+    type: "function",
+    function: {
+      name: "goals_list",
+      description:
+        "Goals: list the operator's active goals — category, cadence (daily/weekly/milestone), status, target, last check-in (date + note), and whether each is due today. Use for \"what are my goals\", \"how am I doing on X\", or before deciding what to bring up in a check-in.",
+      parameters: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["active", "paused", "done"], description: "Optional: filter to goals in this status (default active)" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "goal_upsert",
+      description:
+        "Goals: create a new goal, or update an existing one (pass id to update). Use when the operator states a new goal (\"I want to hit $500K ARR\", \"I'm learning Italian\") or asks to change one (target, cadence, pause/resume/retire it). Categories are freeform (e.g. business, health, faith, language, personal).",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Existing goal id to update (omit to create a new goal)" },
+          title: { type: "string", description: "The goal's title (required)" },
+          category: { type: "string", description: "Freeform category, e.g. business, health, faith, language, personal" },
+          description: { type: "string", description: "Longer description/context for the goal" },
+          cadence: { type: "string", enum: ["daily", "weekly", "milestone"], description: "How often it should be checked in on (default weekly)" },
+          target: { type: "string", description: "The target/definition of done, e.g. \"$500K ARR\", \"run 5k\"" },
+          metricUnit: { type: "string", description: "Unit for numeric check-in values, e.g. \"miles\", \"minutes\", \"USD\"" },
+          status: { type: "string", enum: ["active", "paused", "done"], description: "Goal status (default active)" },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "goal_checkin",
+      description:
+        "Goals: record progress against a goal — use whenever the operator reports doing something tied to a goal (\"I ran 3 miles\", \"did 20 minutes of Italian\", \"read a chapter of Proverbs\"). Resolves the goal by id or a fuzzy title match. If no goal matches, say so and suggest goals_list rather than guessing.",
+      parameters: {
+        type: "object",
+        properties: {
+          goal: { type: "string", description: "The goal id, or its title/part of its title (e.g. \"Italian\", \"running\")" },
+          note: { type: "string", description: "What was done, in a short note" },
+          value: { type: "number", description: "Optional numeric progress value (e.g. 3 for '3 miles'), matching the goal's metricUnit" },
+          date: { type: "string", description: "Optional date (YYYY-MM-DD) if not today" },
+        },
+        required: ["goal"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "daily_review",
+      description:
+        "Goals: the \"what should I do today / how am I doing\" view — active goals due today per their cadence (daily always unless already logged, weekly if not done this week, milestone if stale), each with its last check-in. Use for a morning/evening review or whenever the operator asks what they should focus on.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+    },
+  },
 ];
 
 export function isLaneTool(name: string): boolean {
@@ -354,6 +431,7 @@ const CAPABILITY_ROUTING_LINES: Record<string, string> = {
   brain_search: "Recall a stored document / brain doc / past decision → **brain_search** (search durable memory before assuming it isn't written down), then **brain_read** on the matching path to get the FULL document instead of answering from the snippet alone.",
   code_graph: "Find where a symbol is defined + every place it's used → **code_graph** (exact, deterministic — use it to verify you found ALL usages of anything you changed, not just the obvious ones).",
   contacts_lookup: "A person's phone number or email → **contacts_lookup**. Today's schedule → **calendar_today**. Open to-dos → **reminders_list**. \"Remind me to X\" → **reminder_create** (sets a real Reminder NOW — don't spawn a task for it). \"Put X on my calendar\" / \"schedule X\" → **calendar_create** (creates a real Calendar event NOW; needs a start time, so ask if none was given — don't spawn a task for it).",
+  goals_list: "\"What are my goals\" / \"how am I doing on X\" → **goals_list**. \"What should I focus on today\" / a daily review → **daily_review**. The operator reports doing something tied to a goal (\"I ran 3 miles\", \"did 20 min of Italian\") → **goal_checkin** (resolves the goal by id or fuzzy title). A new or changed goal (\"I want to hit $500K ARR\", pause/retire a goal) → **goal_upsert**. Goals are a structured store, separate from brain docs — don't answer these from brain_search/brain_read alone.",
 };
 
 /**
@@ -433,9 +511,99 @@ export async function executeLaneTool(
     case "reminder_create":
     case "calendar_create":
       return executePimTool(name, args);
+    case "goals_list":
+      return executeGoalsList(args);
+    case "goal_upsert":
+      return executeGoalUpsert(args);
+    case "goal_checkin":
+      return executeGoalCheckin(args);
+    case "daily_review":
+      return executeDailyReview();
     default:
       return `Error: Unknown lane tool "${name}"`;
   }
+}
+
+// ── Goals lane (@/lib/goals/store) ─────────────────────────────────────────
+//
+// Local SQLite only — no cloud calls, so like brain/PIM these ride the
+// "brain" capability and stay available offline. Every executor dynamic-
+// imports the store, mirroring brain_read/brain_search above.
+
+function formatGoalLine(g: { title: string; category: string | null; cadence: string; status: string; target: string | null; lastCheckinDate: string | null; latestCheckin: { note: string | null } | null; dueToday: boolean }): string {
+  const cat = g.category ? ` [${g.category}]` : "";
+  const target = g.target ? ` — target: ${g.target}` : "";
+  const due = g.dueToday ? " (due today)" : "";
+  const lastNote = g.latestCheckin?.note ? `: "${g.latestCheckin.note}"` : "";
+  const last = g.lastCheckinDate ? `last check-in ${g.lastCheckinDate}${lastNote}` : "no check-ins yet";
+  return `- ${g.title}${cat} (${g.cadence}, ${g.status})${target}${due} — ${last}`;
+}
+
+async function executeGoalsList(args: Record<string, unknown>): Promise<string> {
+  const status = typeof args.status === "string" ? args.status.trim() : "";
+  const { listGoals, goalsWithStatus } = await import("@/lib/goals/store");
+
+  if (status && status !== "active") {
+    const goals = listGoals({ status: status as "paused" | "done" });
+    if (goals.length === 0) return `No goals with status "${status}".`;
+    return goals.map((g) => `- ${g.title}${g.category ? ` [${g.category}]` : ""} (${g.cadence}, ${g.status})`).join("\n");
+  }
+
+  const goals = goalsWithStatus();
+  if (goals.length === 0) return "No active goals yet. Use goal_upsert to add one, or ask to import goals from GOALS.md.";
+  return goals.map(formatGoalLine).join("\n");
+}
+
+async function executeGoalUpsert(args: Record<string, unknown>): Promise<string> {
+  const title = typeof args.title === "string" ? args.title.trim() : "";
+  if (!title) return "Error: 'title' is required for goal_upsert.";
+  const { upsertGoal } = await import("@/lib/goals/store");
+
+  const cadence = typeof args.cadence === "string" && ["daily", "weekly", "milestone"].includes(args.cadence)
+    ? (args.cadence as "daily" | "weekly" | "milestone")
+    : undefined;
+  const status = typeof args.status === "string" && ["active", "paused", "done"].includes(args.status)
+    ? (args.status as "active" | "paused" | "done")
+    : undefined;
+
+  const goal = upsertGoal({
+    id: typeof args.id === "string" && args.id.trim() ? args.id.trim() : undefined,
+    title,
+    category: typeof args.category === "string" ? args.category.trim() : undefined,
+    description: typeof args.description === "string" ? args.description : undefined,
+    cadence,
+    target: typeof args.target === "string" ? args.target.trim() : undefined,
+    metricUnit: typeof args.metricUnit === "string" ? args.metricUnit.trim() : undefined,
+    status,
+  });
+  const verb = args.id ? "Updated" : "Created";
+  return `${verb} goal "${goal.title}" (${goal.cadence}${goal.category ? `, ${goal.category}` : ""}${goal.target ? `, target: ${goal.target}` : ""}). id: ${goal.id}`;
+}
+
+async function executeGoalCheckin(args: Record<string, unknown>): Promise<string> {
+  const goalArg = typeof args.goal === "string" ? args.goal.trim() : "";
+  if (!goalArg) return "Error: 'goal' (an id or title) is required for goal_checkin.";
+  const { getGoal, findGoalByTitle, addCheckin } = await import("@/lib/goals/store");
+
+  const resolved = getGoal(goalArg) ?? findGoalByTitle(goalArg);
+  if (!resolved) {
+    return `Error: no goal matching "${goalArg}" was found. Use goals_list to see what's tracked, or goal_upsert to create it.`;
+  }
+
+  const note = typeof args.note === "string" ? args.note.trim() : undefined;
+  const value = typeof args.value === "number" ? args.value : undefined;
+  const date = typeof args.date === "string" ? args.date.trim() : undefined;
+  const checkin = addCheckin({ goalId: resolved.id, note, value, date });
+  const valueStr = value !== undefined ? ` (${value}${resolved.metricUnit ? ` ${resolved.metricUnit}` : ""})` : "";
+  return `Logged progress on "${resolved.title}" for ${checkin.date}${valueStr}${note ? `: ${note}` : ""}.`;
+}
+
+async function executeDailyReview(): Promise<string> {
+  const { goalsDueToday } = await import("@/lib/goals/store");
+  const due = goalsDueToday();
+  if (due.length === 0) return "Nothing due today — every active goal is caught up.";
+  const lines = due.map(formatGoalLine);
+  return `Due today (${due.length}):\n${lines.join("\n")}`;
 }
 
 // ── COO dispatch (router) ─────────────────────────────────────────────────────

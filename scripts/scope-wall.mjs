@@ -22,8 +22,12 @@ const RULES = [
     label: 'Ideation surface (removed from Hive 2)',
   },
   {
-    pattern: '\\bGoalsBee\\b|personal.*Goals|Goals.*personal|isPersonal.*goal|goal.*surface',
-    label: 'Personal Goals surface (removed from Hive 2)',
+    // NOTE: the "Personal Goals surface" ban was LIFTED 2026-07-12 at explicit
+    // operator request — the native goals layer (goals/goal_checkins tables, the
+    // goals_* chat tools, and the 🎯 Goals panel) is now sanctioned. See
+    // DECISIONS.md. Only the retired GoalsBee *brand* stays forbidden.
+    pattern: '\\bGoalsBee\\b',
+    label: 'GoalsBee brand (retired — the goals layer is now the sanctioned surface)',
   },
   {
     pattern: "PersonalDivider|'personal'.*divider|divider.*personal",

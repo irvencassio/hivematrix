@@ -1751,6 +1751,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <button class="ov-nav oc-nav" id="brainNav" onclick="showBrain()">🧠 Brain</button>
     <button class="ov-nav oc-nav" id="rolesNav" onclick="showRoles()">👥 Roles</button>
     <button class="ov-nav oc-nav" id="toolsNav" onclick="showTools()">🛠️ Tools</button>
+    <button class="ov-nav oc-nav" id="goalsNav" onclick="showGoals()">🎯 Goals</button>
     <div class="form" id="taskForm">
       <input id="t_title" type="hidden" value="" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
@@ -2013,7 +2014,7 @@ async function toggleThemeQuick() {
 // Center overview — at-a-glance board state when no task is selected, instead of
 // leaving the widest column empty.
 function renderOverview() {
-  if (state.selected || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen || _brainState.panelOpen || _rolesState.panelOpen || _toolsState.panelOpen || _obsState.panelOpen) return;
+  if (state.selected || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen || _brainState.panelOpen || _rolesState.panelOpen || _toolsState.panelOpen || _obsState.panelOpen || _goalsState.panelOpen) return;
   setFlashSessionMode(false);
   const el = document.getElementById("session");
   if (!el) return;
@@ -2048,6 +2049,7 @@ function showOverview() {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
   _obsState.panelOpen = false;
+  _goalsState.panelOpen = false;
   setFlashSessionMode(false);
   renderBoard();
   renderSkillList();
@@ -2062,13 +2064,14 @@ function focusBoardLane(key) {
 }
 function updateOverviewNav() {
   const nav = document.getElementById("overviewNav");
-  const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !_flashState.panelOpen && !_brainState.panelOpen && !_rolesState.panelOpen && !_toolsState.panelOpen && !_obsState.panelOpen;
+  const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !_flashState.panelOpen && !_brainState.panelOpen && !_rolesState.panelOpen && !_toolsState.panelOpen && !_obsState.panelOpen && !_goalsState.panelOpen;
   if (nav) nav.classList.toggle("active", overviewActive);
   const newTaskNav = document.getElementById("newTaskNav");
   if (newTaskNav) newTaskNav.classList.toggle("active", _taskFormInSession);
   updateFlashNav();
   updateBrainNav();
   updateToolsNav();
+  updateGoalsNav();
 }
 function isEditableTarget(el) {
   if (!el) return false;
@@ -2462,6 +2465,7 @@ async function selectTask(id) {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
   _obsState.panelOpen = false;
+  _goalsState.panelOpen = false;
   setFlashSessionMode(false);
   if (_taskFormInSession) _closeNewTaskPanel();
   // Switching tasks clears half-composed retry/reply state; staying on the same
@@ -3052,6 +3056,7 @@ function showObs() {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
   _obsState.panelOpen = false;
+  _goalsState.panelOpen = false;
   _obsState.panelOpen = true;
   renderBoard();
   renderSkillList();
@@ -3060,6 +3065,7 @@ function showObs() {
   updateBrainNav();
   updateRolesNav();
   updateToolsNav();
+  updateGoalsNav();
 }
 
 function obsPanelToggles() {
@@ -3088,6 +3094,140 @@ function renderObsPanel() {
 }
 
 function updateObsNav() { /* obs has no left-nav button; opened from the right rail */ }
+
+// ── Goals panel (accountability layer) ─────────────────────────────────
+let _goalsState = { panelOpen: false, goals: null, error: false };
+
+function showGoals() {
+  state.selected = null;
+  state.selectedSkillOrCommand = null;
+  _skSel = '';
+  _ctxTask = null;
+  if (_taskFormInSession) _closeNewTaskPanel();
+  _flashState.panelOpen = false;
+  _brainState.panelOpen = false;
+  _rolesState.panelOpen = false;
+  _toolsState.panelOpen = false;
+  _obsState.panelOpen = false;
+  _goalsState.panelOpen = true;
+  renderBoard();
+  renderSkillList();
+  renderGoalsPanel();
+  updateFlashNav();
+  updateBrainNav();
+  updateRolesNav();
+  updateToolsNav();
+  updateGoalsNav();
+  loadGoals();
+}
+
+function updateGoalsNav() {
+  const nav = document.getElementById('goalsNav');
+  if (nav) nav.classList.toggle('active', _goalsState.panelOpen);
+}
+
+async function loadGoals() {
+  _goalsState.error = false;
+  try {
+    const r = await api('/goals');
+    _goalsState.goals = (r && r.goals) || [];
+  } catch (e) {
+    _goalsState.error = true;
+    _goalsState.goals = null;
+  }
+  renderGoalsPanel();
+}
+
+const GOALS_CAT_META = {
+  business: { icon: '💼', label: 'Solo Founder / Business' },
+  health: { icon: '🏋️', label: 'Health & Fitness' },
+  faith: { icon: '✝️', label: 'Faith' },
+  language: { icon: '🗣️', label: 'Language' },
+  personal: { icon: '🌱', label: 'Personal' }
+};
+function goalsCatMeta(cat) { return GOALS_CAT_META[cat] || { icon: '🎯', label: cat || 'Other' }; }
+
+function goalRowHtml(g) {
+  const due = g.dueToday
+    ? '<span class="tools-kind" style="border-color:#e0a458;color:#e0a458">due today</span>'
+    : '';
+  const paused = g.status === 'paused' ? '<span class="tools-kind">paused</span>' : (g.status === 'done' ? '<span class="tools-kind" style="color:var(--ok)">done ✓</span>' : '');
+  const last = g.latestCheckin
+    ? 'last: ' + esc(g.latestCheckin.date) + (g.latestCheckin.note ? ' — ' + esc(g.latestCheckin.note) : '')
+    : 'no check-ins yet';
+  const count = (g.checkinCount != null ? g.checkinCount : 0);
+  return '<div class="tools-row" style="cursor:default">'
+    + '<div class="tools-row-top">'
+    + '<span class="tools-name" style="font-family:inherit;font-size:13.5px">' + esc(g.title) + '</span>'
+    + '<span class="tools-kind">' + esc(g.cadence || 'weekly') + '</span>' + due + paused
+    + '<span class="tools-caret" style="margin-left:auto"><button class="oc-mic-btn" style="padding:3px 10px;font-size:11px" onclick="goalCheckin(\'' + attrEnc(g.id) + '\',\'' + attrEnc(g.title) + '\')">＋ Log</button></span>'
+    + '</div>'
+    + '<div class="tools-desc">' + esc(last) + ' · ' + count + ' check-in' + (count === 1 ? '' : 's')
+    + (g.description ? ' · ' + esc(g.description) : '') + '</div>'
+    + '</div>';
+}
+
+function renderGoalsPanel() {
+  if (!_goalsState.panelOpen) return;
+  const session = document.getElementById('session');
+  if (!session) return;
+  setFlashSessionMode(true);
+  let body;
+  if (_goalsState.error) {
+    body = '<div class="muted" style="padding:18px">Could not load goals. <a href="#" onclick="event.preventDefault();loadGoals()">Retry</a></div>';
+  } else if (!_goalsState.goals) {
+    body = '<div class="muted" style="padding:18px">Loading goals…</div>';
+  } else if (!_goalsState.goals.length) {
+    body = '<div class="muted" style="padding:18px">No goals yet. Add one below, or ask the assistant in chat to "import my goals from GOALS.md".</div>';
+  } else {
+    const goals = _goalsState.goals;
+    const due = goals.filter(function (g) { return g.dueToday && g.status === 'active'; });
+    body = '';
+    if (due.length) {
+      body += '<div class="tools-group"><div class="tools-group-h">Due today <span class="count">' + due.length + '</span></div>'
+        + '<div class="tools-group-sub">what to move on today</div>'
+        + due.map(goalRowHtml).join('') + '</div>';
+    }
+    // group the rest by category
+    const cats = {};
+    goals.forEach(function (g) { (cats[g.category || 'personal'] = cats[g.category || 'personal'] || []).push(g); });
+    Object.keys(cats).forEach(function (cat) {
+      const meta = goalsCatMeta(cat);
+      body += '<div class="tools-group"><div class="tools-group-h">' + meta.icon + ' ' + esc(meta.label)
+        + ' <span class="count">' + cats[cat].length + '</span></div>'
+        + cats[cat].map(goalRowHtml).join('') + '</div>';
+    });
+  }
+  session.innerHTML = '<div class="oc-center-pane">'
+    + '<div class="oc-panel-head"><div><div class="oc-panel-title"><span>🎯 Goals</span></div>'
+    + '<div class="oc-panel-sub">Long-horizon goals &amp; daily accountability — check in to track progress</div></div>'
+    + '<span class="oc-panel-head-spacer"></span>'
+    + '<button class="oc-mic-btn" style="margin-right:8px" onclick="goalAdd()">＋ Add goal</button>'
+    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></div>'
+    + '<div class="tools-pane">' + body + '</div></div>';
+}
+
+async function goalCheckin(id, title) {
+  const note = await hmPrompt('Check-in for "' + (title || 'goal') + '" — what did you do?', '');
+  if (note === null) return;
+  try {
+    await api('/goals/' + encodeURIComponent(id) + '/checkin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: note }) });
+    hmToast('Logged ✓', 'ok');
+    loadGoals();
+  } catch (e) { hmToast('Could not log check-in', 'err'); }
+}
+
+async function goalAdd() {
+  const title = await hmPrompt('New goal — what do you want to track?', '');
+  if (!title) return;
+  const category = await hmPrompt('Category (business / health / faith / language / personal):', 'personal');
+  const cadence = await hmPrompt('Cadence (daily / weekly / milestone):', 'weekly');
+  try {
+    await api('/goals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: title, category: category || 'personal', cadence: cadence || 'weekly' }) });
+    hmToast('Goal added ✓', 'ok');
+    loadGoals();
+  } catch (e) { hmToast('Could not add goal', 'err'); }
+}
 function obsKpi(v, l) { return '<div class="obs-kpi"><div class="v">' + esc(String(v)) + '</div><div class="l">' + esc(l) + '</div></div>'; }
 
 // Compact number for axes/tooltips (12.3k, 4.1M).
@@ -3526,6 +3666,7 @@ function showSkillPanel(key) {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
   _obsState.panelOpen = false;
+  _goalsState.panelOpen = false;
   setFlashSessionMode(false);
   if (_taskFormInSession) _closeNewTaskPanel();
   renderBoard();
@@ -3543,6 +3684,7 @@ function _closeSkillPanel() {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
   _obsState.panelOpen = false;
+  _goalsState.panelOpen = false;
   setFlashSessionMode(false);
   renderSkillList();
   renderSkillDetail();
@@ -5700,6 +5842,7 @@ function showNewTaskPanel() {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
   _obsState.panelOpen = false;
+  _goalsState.panelOpen = false;
   setFlashSessionMode(false);
   _ctxTask = null;
   _taskFormInSession = true;
@@ -6753,6 +6896,7 @@ function showFlashPanel() {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
   _obsState.panelOpen = false;
+  _goalsState.panelOpen = false;
   renderBoard();
   renderSkillList();
   renderFlashPanel();
@@ -6760,6 +6904,7 @@ function showFlashPanel() {
   updateBrainNav();
   updateRolesNav();
   updateToolsNav();
+  updateGoalsNav();
   hydrateFlashThread(); // pull the unified operator thread (incl. voice/task-completion posts)
 }
 
@@ -6884,6 +7029,7 @@ function showBrain() {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
   _obsState.panelOpen = false;
+  _goalsState.panelOpen = false;
   renderBoard();
   renderSkillList();
   renderBrainPanel();
@@ -6891,6 +7037,7 @@ function showBrain() {
   updateBrainNav();
   updateRolesNav();
   updateToolsNav();
+  updateGoalsNav();
   loadBrainProjects();
 }
 
@@ -7405,6 +7552,7 @@ function showRoles() {
   _rolesState.panelOpen = true;
   _toolsState.panelOpen = false;
   _obsState.panelOpen = false;
+  _goalsState.panelOpen = false;
   renderBoard();
   renderSkillList();
   renderRolesPanel();
@@ -7412,6 +7560,7 @@ function showRoles() {
   updateBrainNav();
   updateRolesNav();
   updateToolsNav();
+  updateGoalsNav();
   loadRolesRoster();
 }
 
@@ -7437,6 +7586,7 @@ function showTools() {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = true;
   _obsState.panelOpen = false;
+  _goalsState.panelOpen = false;
   renderBoard();
   renderSkillList();
   renderToolsPanel();
@@ -7444,6 +7594,7 @@ function showTools() {
   updateBrainNav();
   updateRolesNav();
   updateToolsNav();
+  updateGoalsNav();
   loadCapabilities();
 }
 

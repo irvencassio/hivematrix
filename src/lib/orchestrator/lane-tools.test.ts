@@ -97,7 +97,7 @@ test("executeLaneTool dispatches a legacy bee alias to its real handler", async 
 });
 
 test("all bee tools are defined with required schemas", () => {
-  assert.equal(LANE_TOOL_DEFINITIONS.length, 18); // 13 lanes (incl. brain_read) + 5 PIM tools
+  assert.equal(LANE_TOOL_DEFINITIONS.length, 22); // 13 lanes (incl. brain_read) + 5 PIM tools + 4 goals tools
   for (const t of LANE_TOOL_DEFINITIONS) {
     assert.equal(t.type, "function");
     assert.ok(t.function.name.length > 0);
@@ -128,10 +128,12 @@ test("lane tools advertise lane-native names and descriptions, not bee brands", 
 
 // PIM tools ride the "brain" capability — local osascript, present in every mode.
 const PIM_NAMES = ["calendar_create", "calendar_today", "contacts_lookup", "reminder_create", "reminders_list"];
+// Goals tools ride the "brain" capability too — local SQLite, present in every mode.
+const GOALS_NAMES = ["goals_list", "goal_upsert", "goal_checkin", "daily_review"];
 
-test("cloud-ok advertises every lane (web, browser, desktop, mail, message, brain, skill, digest, pim)", () => {
+test("cloud-ok advertises every lane (web, browser, desktop, mail, message, brain, skill, digest, pim, goals)", () => {
   assert.deepEqual(names(availableLaneTools(cloud())),
-    ["brain_search", "brain_read", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "digest_url", "hivematrix_browser", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
+    ["brain_search", "brain_read", ...PIM_NAMES, ...GOALS_NAMES, "code_graph", "coo_dispatch", "desktop_action", "digest_url", "hivematrix_browser", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
 });
 
 test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
@@ -139,14 +141,14 @@ test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
   assert.ok(!names(availableLaneTools(local())).includes("digest_url"));
 });
 
-test("local-only drops web lanes but keeps Desktop Lane + outbound channels + brain/skill/codegraph/pim + COO routing", () => {
+test("local-only drops web lanes but keeps Desktop Lane + outbound channels + brain/skill/codegraph/pim/goals + COO routing", () => {
   assert.deepEqual(names(availableLaneTools(local())),
-    ["brain_search", "brain_read", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
+    ["brain_search", "brain_read", ...PIM_NAMES, ...GOALS_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
 });
 
-test("offline keeps the offline workhorses + outbound channels + brain/skill/codegraph/pim + COO routing (all local)", () => {
+test("offline keeps the offline workhorses + outbound channels + brain/skill/codegraph/pim/goals + COO routing (all local)", () => {
   assert.deepEqual(names(availableLaneTools(offline())),
-    ["brain_search", "brain_read", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
+    ["brain_search", "brain_read", ...PIM_NAMES, ...GOALS_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
 });
 
 test("capabilityRoutingGuide lists email/message/brain lanes in cloud, drops web lanes offline", () => {
@@ -186,6 +188,46 @@ test("executeLaneTool: brain_read rejects a `..` escape from the brain root", as
 test("executeLaneTool: brain_read requires a path", async () => {
   const out = await executeLaneTool("brain_read", {}, ctx());
   assert.match(out, /'path' is required for brain_read/);
+});
+
+test("isLaneTool recognizes all four goals tools", () => {
+  assert.equal(isLaneTool("goals_list"), true);
+  assert.equal(isLaneTool("goal_upsert"), true);
+  assert.equal(isLaneTool("goal_checkin"), true);
+  assert.equal(isLaneTool("daily_review"), true);
+});
+
+test("executeLaneTool: goals_list reports no active goals in a fresh store", async () => {
+  const out = await executeLaneTool("goals_list", {}, ctx());
+  assert.match(out, /No active goals yet/);
+});
+
+test("executeLaneTool: goal_upsert creates a goal, then goals_list shows it", async () => {
+  const created = await executeLaneTool("goal_upsert", { title: "Run 5k", category: "health", cadence: "weekly" }, ctx());
+  assert.match(created, /Created goal "Run 5k"/);
+
+  const listed = await executeLaneTool("goals_list", {}, ctx());
+  assert.match(listed, /Run 5k/);
+  assert.match(listed, /health/);
+});
+
+test("executeLaneTool: goal_checkin resolves by fuzzy title and records progress", async () => {
+  await executeLaneTool("goal_upsert", { title: "Italian practice", cadence: "daily" }, ctx());
+  const out = await executeLaneTool("goal_checkin", { goal: "italian", note: "20 minutes on Duolingo" }, ctx());
+  assert.match(out, /Logged progress on "Italian practice"/);
+  assert.match(out, /20 minutes on Duolingo/);
+});
+
+test("executeLaneTool: goal_checkin reports no match instead of guessing", async () => {
+  const out = await executeLaneTool("goal_checkin", { goal: "a goal that does not exist anywhere" }, ctx());
+  assert.match(out, /no goal matching/);
+  assert.match(out, /goals_list/);
+});
+
+test("executeLaneTool: daily_review reflects a freshly upserted, never-checked-in goal as due", async () => {
+  await executeLaneTool("goal_upsert", { title: "Daily review target goal", cadence: "daily" }, ctx());
+  const out = await executeLaneTool("daily_review", {}, ctx());
+  assert.match(out, /Daily review target goal/);
 });
 
 test("executeLaneTool rejects removed BrowserBee/WebBee aliases", async () => {

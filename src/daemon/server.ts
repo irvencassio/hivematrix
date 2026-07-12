@@ -23,6 +23,10 @@
  *   GET  /onboarding/birth-ritual    — persona state (new|existing + name/emoji)
  *   POST /onboarding/birth-ritual    — run birth ritual as SSE stream
  *   GET  /capabilities               — unified tool inventory (native/flash/skill-tool/skill-library)
+ *   GET  /goals                      — active goals + latest check-in + dueToday
+ *   POST /goals                      — create/update a goal
+ *   POST /goals/:id/checkin          — record a check-in against a goal
+ *   GET  /goals/review               — goals due today + full active-goal status
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
@@ -2042,6 +2046,60 @@ export function createDaemonServer() {
         });
         broadcast("tasks:created", { taskId: task._id });
         json(res, 201, { task, docPath });
+        return;
+      }
+
+      // GET /goals — active goals enriched with latest check-in + dueToday
+      // (the same shape the goals_list/daily_review lane tools read).
+      if (req.method === "GET" && urlPath === "/goals") {
+        const { goalsWithStatus } = await import("@/lib/goals/store");
+        json(res, 200, { goals: goalsWithStatus() });
+        return;
+      }
+
+      // POST /goals — create or update a goal (id present = update).
+      if (req.method === "POST" && urlPath === "/goals") {
+        const { upsertGoal } = await import("@/lib/goals/store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const title = typeof body.title === "string" ? body.title.trim() : "";
+        if (!title) { json(res, 400, { error: "title is required" }); return; }
+        const goal = upsertGoal({
+          id: typeof body.id === "string" ? body.id : undefined,
+          title,
+          category: typeof body.category === "string" ? body.category : undefined,
+          description: typeof body.description === "string" ? body.description : undefined,
+          cadence: typeof body.cadence === "string" ? body.cadence as "daily" | "weekly" | "milestone" : undefined,
+          target: typeof body.target === "string" ? body.target : undefined,
+          metricUnit: typeof body.metricUnit === "string" ? body.metricUnit : undefined,
+          status: typeof body.status === "string" ? body.status as "active" | "paused" | "done" : undefined,
+          sortOrder: typeof body.sortOrder === "number" ? body.sortOrder : undefined,
+        });
+        json(res, 200, { goal });
+        return;
+      }
+
+      // POST /goals/:id/checkin — record progress against a goal.
+      const goalCheckinMatch = urlPath.match(/^\/goals\/([^/]+)\/checkin$/);
+      if (req.method === "POST" && goalCheckinMatch) {
+        const { getGoal, addCheckin } = await import("@/lib/goals/store");
+        const id = goalCheckinMatch[1];
+        if (!getGoal(id)) { json(res, 404, { error: "goal not found" }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        const checkin = addCheckin({
+          goalId: id,
+          note: typeof body.note === "string" ? body.note : undefined,
+          value: typeof body.value === "number" ? body.value : undefined,
+          date: typeof body.date === "string" ? body.date : undefined,
+        });
+        json(res, 200, { checkin });
+        return;
+      }
+
+      // GET /goals/review — "what should I do today": goals due per their
+      // cadence, plus the full active-goal status list.
+      if (req.method === "GET" && urlPath === "/goals/review") {
+        const { goalsDueToday, goalsWithStatus } = await import("@/lib/goals/store");
+        json(res, 200, { dueToday: goalsDueToday(), all: goalsWithStatus() });
         return;
       }
 

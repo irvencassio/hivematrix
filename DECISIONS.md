@@ -998,8 +998,15 @@ local-model or deterministic; autonomy-dial aware):
 2. **Goal ledger** (`distill.ts` → `persona/GOALS.md`) — distillation extracts
    stated operator goals/deadlines (distinct from facts) into GOALS.md, injected
    into every flash turn + the morning brief so proactive output anchors to real
-   goals. Brain/persona doc ONLY — the scope wall forbids a personal Goals
-   product surface; the Chief-of-Staff pack is the future sanctioned home.
+   goals. This remains the passive ledger read by `brain_read`.
+   **REVERSED 2026-07-12 (operator request):** the "no personal Goals product
+   surface" restriction is lifted. A native goals layer is now sanctioned —
+   `goals`/`goal_checkins` tables (db v35, `src/lib/goals/store.ts`), the
+   `goals_list`/`goal_upsert`/`goal_checkin`/`daily_review` chat tools, and the
+   🎯 Goals left-nav panel — for structured tracking + a daily "what should I do
+   today" review, complementing (not replacing) the GOALS.md ledger. The
+   scope-wall ban was removed accordingly; only the retired GoalsBee brand stays
+   forbidden.
 3. **Pattern detection** (`src/lib/feedback/pattern-detection.ts`, daily via the
    learning loop) — clusters the recurring open backlog and files ONE deduped
    enhancement proposal per chronic pattern ("this keeps happening — root-cause it
