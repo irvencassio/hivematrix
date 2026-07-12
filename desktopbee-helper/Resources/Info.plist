@@ -26,5 +26,13 @@
   <!-- TCC usage descriptions (shown in the permission prompts). -->
   <key>NSAppleEventsUsageDescription</key>
   <string>HiveMatrix Desktop Lane controls scriptable apps on your behalf, with your approval.</string>
+  <!-- EventKit (calendar subcommand, P0.1): reads/creates calendar events via
+       EKEventStore.requestFullAccessToEvents. This is a clean EventKit TCC
+       grant attributed to this helper binary — it does NOT go through
+       AppleScript/"tell application Calendar" and does not launch
+       Calendar.app. No sandbox/entitlement is needed beyond this usage
+       string on a non-sandboxed, hardened-runtime Developer ID build. -->
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>HiveMatrix reads and creates your calendar events on your behalf, with your approval.</string>
 </dict>
 </plist>

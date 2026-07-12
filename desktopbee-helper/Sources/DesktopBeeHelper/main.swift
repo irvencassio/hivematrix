@@ -303,6 +303,15 @@ final class LoopbackServer {
 
 // MARK: - Entry
 
+// CLI subcommand mode: `DesktopBeeHelper calendar today|create ...` runs the
+// subcommand (Calendar.swift, EventKit-backed) and exits directly — it must
+// never start the HTTP daemon below. Any other invocation, including no
+// args at all, preserves the existing daemon behavior exactly.
+let cliArgs = Array(CommandLine.arguments.dropFirst())
+if cliArgs.first == "calendar" {
+    CalendarCLI.run(Array(cliArgs.dropFirst()))
+}
+
 let port = ProcessInfo.processInfo.environment["DESKTOPBEE_PORT"].flatMap { UInt16($0) } ?? DEFAULT_PORT
 do {
     let server = try LoopbackServer(port: port)
