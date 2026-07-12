@@ -62,9 +62,13 @@ async function runDistillPass(nowMs = Date.now()): Promise<void> {
     markSlowPassRan("lastPatternRunAt", nowMs);
     runPatternDetection();
     // Capability self-assessment: surface missing-capability gaps as labeled
-    // proposals (self-serviceable skills vs. gated lane/pack acquisition). Never
-    // acquires anything — acquisition stays a separate, gated operator action.
-    runCapabilityGapDetection();
+    // proposals (self-serviceable skills vs. gated lane/pack acquisition). Under
+    // autonomy "autonomous", a skill-remedy gap is sent straight to the P2
+    // acquisition pipeline; lane/pack remedies always stay proposal-only
+    // (ClawHavoc line — see capability-gaps.ts).
+    await runCapabilityGapDetection().catch((e) =>
+      console.warn("[flash:learning-loop] capability gap detection error:", e),
+    );
     // Pipeline self-audit: the accountability layer inspects its OWN machinery
     // (scoreboard, route scorecard, loop-health) and files any regression as feedback
     // — the COO filing its own bug reports, deduped so it never spams a row.

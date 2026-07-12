@@ -7,26 +7,45 @@
  * wanted), classifies the likely remedy, and files ONE deduped, operator-visible
  * capability proposal per gap — with an honest safety label.
  *
- * THE CLAWHAVOC LINE (non-negotiable, W8/W3): proposing is free; ACQUIRING is
- * gated. This module never installs a pack, enables a credentialed lane, or
- * grants itself a tool. It only:
+ * THE CLAWHAVOC LINE (non-negotiable, W8/W3): proposing is free; ACQUIRING a
+ * lane or pack is gated FOREVER, at every autonomy level. This module never
+ * installs a pack, enables a credentialed lane, or grants itself a tool for a
+ * lane/pack remedy — self-installing external capability is exactly how
+ * OpenClaw's aliveness became ClawHavoc. It only:
  *   - detects the gap,
  *   - classifies the remedy (skill | lane | pack | unknown),
- *   - marks whether that remedy is self-serviceable (skills: the learning loop
- *     can distill/refine one — first-party, sandboxed-until-trusted) or requires
- *     operator approval (lanes touch credentials; packs must be signed).
+ *   - marks whether that remedy is self-serviceable (skills: first-party,
+ *     sandboxed-until-trusted) or requires operator approval (lanes touch
+ *     credentials; packs must be signed).
  *
- * Even under fully-autonomous, lane/pack acquisition stays a gated approval —
- * self-installing external capability is exactly how OpenClaw's aliveness became
- * ClawHavoc. The only capability that flows automatically is a first-party skill,
- * and that already happens through distillation; here we just make the gap and
- * its remedy visible.
+ * P4: a "skill" remedy is the ONE exception to "proposing is free; acquiring is
+ * gated" — because a skill is first-party and sandboxed-until-trusted, when
+ * autonomy is "autonomous" this module calls straight into the P2 acquisition
+ * pipeline (`acquireSkill`) instead of only filing a proposal. That pipeline
+ * has its own daily cap and already-have short-circuit, so this stays bounded,
+ * and a failed acquisition already files its own capability-gap proposal — so
+ * this module does not double-file for a gap it attempted to acquire. Under
+ * standard/manual, a skill-remedy gap still just gets a proposal, now marked
+ * as one-tap learnable (the same pipeline runs when the operator accepts it).
+ * Lane/pack remedies are UNCHANGED by autonomy level — always proposed, never
+ * acquired.
  *
  * Pure classification; the runner is best-effort and never throws.
  */
 
+import { getAutonomyLevel, type AutonomyLevel } from "@/lib/config/autonomy";
+import type { AcquireOptions, AcquireResult } from "@/lib/skills/acquire";
 import { listFeedback, recordFeedbackDedup } from "./feedback";
 import { clusterFeedback, type FeedbackCluster } from "./pattern-detection";
+
+/** Marks a filed proposal as a candidate for a one-tap "learn it" action in the
+ * UI — the same P2 acquisition pipeline runs when the operator accepts it.
+ * `CapabilityProposal`/`RecordFeedbackInput` have no structured flag for this,
+ * so it's a parseable suffix on `detail` (kept minimal on purpose). */
+const LEARNABLE_MARKER = " [learnable]";
+
+/** Test seam type: same shape as `acquireSkill` from `@/lib/skills/acquire`. */
+export type AcquireFn = (opts: AcquireOptions) => Promise<AcquireResult>;
 
 export const CAPABILITY_PROPOSAL_SOURCE = "capability-gap";
 
@@ -111,28 +130,75 @@ export interface CapabilityGapResult {
   proposalsFiled: number;
   gated: number;        // proposals whose remedy needs operator approval
   selfServiceable: number;
+  acquired: number;      // skill-remedy gaps sent straight to acquisition (autonomous only)
 }
 
+export interface RunCapabilityGapDetectionOptions {
+  /** Override the autonomy level (tests). Default: the real operator dial. */
+  autonomyLevel?: AutonomyLevel;
+  /** Test seam; default dynamically imports the real P2 `acquireSkill` (dynamic
+   * to avoid any import-cycle risk between feedback/ and skills/). */
+  acquire?: AcquireFn;
+}
+
+const defaultAcquire: AcquireFn = async (opts) => (await import("@/lib/skills/acquire")).acquireSkill(opts);
+
 /**
- * Read the backlog, find capability-gap clusters, and file one deduped proposal
- * each. Best-effort — never throws. Files a proposal for BOTH self-serviceable
- * and gated remedies (so the operator sees the full picture); it NEVER acquires
- * anything — acquisition remains a separate, gated, operator action.
+ * Read the backlog, find capability-gap clusters, and either send a skill-remedy
+ * gap straight to acquisition (autonomous) or file one deduped proposal each
+ * (otherwise / for lane|pack|unknown remedies, which ALWAYS just get a
+ * proposal). Best-effort — never throws.
  */
-export function runCapabilityGapDetection(minCount = 2): CapabilityGapResult {
-  const empty: CapabilityGapResult = { gaps: 0, proposalsFiled: 0, gated: 0, selfServiceable: 0 };
+export async function runCapabilityGapDetection(
+  minCount = 2,
+  opts: RunCapabilityGapDetectionOptions = {},
+): Promise<CapabilityGapResult> {
+  const empty: CapabilityGapResult = { gaps: 0, proposalsFiled: 0, gated: 0, selfServiceable: 0, acquired: 0 };
   try {
     const gaps = clusterFeedback(listFeedback(), minCount)
       .filter((c) => !c.exemplarTitle.startsWith("Capability gap:") && isCapabilityGap(c));
     let proposalsFiled = 0;
     let gated = 0;
     let selfServiceable = 0;
+    let acquired = 0;
+    const autonomy = opts.autonomyLevel ?? getAutonomyLevel();
+    const acquire = opts.acquire ?? defaultAcquire;
+
     for (const cluster of gaps) {
+      const remedy = classifyRemedy(cluster);
+
+      // P4: ONLY a skill remedy may ever auto-acquire, and only under
+      // "autonomous" — lane/pack remedies fall through to the proposal path
+      // below UNCONDITIONALLY, at every autonomy level (the ClawHavoc line:
+      // credentialed lanes and signed packs are gated forever).
+      if (remedy === "skill" && autonomy === "autonomous") {
+        acquired++;
+        selfServiceable++;
+        try {
+          const result = await acquire({
+            goal: cluster.exemplarTitle,
+            whyNeeded: `recurring capability gap (came up ${cluster.count} times)`,
+          });
+          // A failed acquisition (draft-failed/error/capped) already files its
+          // own capability-gap proposal via acquire.ts's fileProposal — so we
+          // deliberately do NOT also file one here (no double-surfacing).
+          console.log(`[capability-gaps] acquisition attempt for "${cluster.exemplarTitle}": ${result.outcome}`);
+        } catch (e) {
+          // Best-effort: acquisition must never break the detection pass.
+          console.warn(`[capability-gaps] acquire threw for "${cluster.exemplarTitle}": ${e instanceof Error ? e.message : e}`);
+        }
+        continue; // never also file a proposal for a gap we attempted to acquire
+      }
+
       const proposal = proposalFromGap(cluster);
+      // Skill-remedy proposals filed in non-autonomous mode are marked
+      // one-tap learnable for the UI (see LEARNABLE_MARKER above). Lane/pack/
+      // unknown proposals are unchanged.
+      const detail = proposal.remedy === "skill" ? `${proposal.detail}${LEARNABLE_MARKER}` : proposal.detail;
       const { created } = recordFeedbackDedup({
         kind: proposal.kind,
         title: proposal.title,
-        detail: proposal.detail,
+        detail,
         source: proposal.source,
       });
       if (created) {
@@ -141,10 +207,10 @@ export function runCapabilityGapDetection(minCount = 2): CapabilityGapResult {
         else selfServiceable++;
       }
     }
-    if (proposalsFiled > 0) {
-      console.log(`[capability-gaps] ${gaps.length} gap(s), +${proposalsFiled} proposal(s) (${gated} gated, ${selfServiceable} self-serviceable)`);
+    if (proposalsFiled > 0 || acquired > 0) {
+      console.log(`[capability-gaps] ${gaps.length} gap(s), +${proposalsFiled} proposal(s) (${gated} gated, ${selfServiceable} self-serviceable), ${acquired} sent to acquisition`);
     }
-    return { gaps: gaps.length, proposalsFiled, gated, selfServiceable };
+    return { gaps: gaps.length, proposalsFiled, gated, selfServiceable, acquired };
   } catch (e) {
     console.warn(`[capability-gaps] pass failed: ${e instanceof Error ? e.message : e}`);
     return empty;
