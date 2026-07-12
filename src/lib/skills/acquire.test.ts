@@ -13,7 +13,7 @@ writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory:
 const origHome = process.env.HOME;
 process.env.HOME = HOME;
 
-const { acquireSkill, defaultMint } = await import("./acquire");
+const { acquireSkill, defaultMint, defaultCritic } = await import("./acquire");
 const { readSkill } = await import("./store");
 const { renderSkillFile, parseSkillFile } = await import("./contracts");
 const { _setExecFileForTests } = await import("@/lib/models/chat-client");
@@ -217,12 +217,6 @@ test("already-have: a second identical goal reuses the registered skill without 
   assert.equal(mintCallCount, 1, "mint must not be called again once we already have the skill");
 });
 
-test("no mint/critic configured: returns an honest error, never throws", async () => {
-  const result = await acquireSkill({ goal: uniqueGoal("no injection"), whyNeeded: "x" });
-  assert.equal(result.outcome, "error");
-  assert.match(result.reason, /mint\/critic not configured/);
-});
-
 test("mint throws: treated as a mint failure, no draft archived, ledger + proposal filed", async () => {
   const goal = uniqueGoal("mint throws");
   const mint: MintFn = async () => { throw new Error("mint blew up"); };
@@ -321,6 +315,97 @@ test("defaultMint reflexion: on retry, the prompt sent to the model includes the
   }));
 
   assert.match(capturedPrompt, /THE SPECIFIC PRIOR FAILURE TEXT/);
+});
+
+// ---------------------------------------------------------------------------
+// defaultCritic (P2.3) — the real Haiku critic via `haikuChatComplete`, tested
+// against a fake `claude` binary through the same `_setExecFileForTests` DI
+// seam used above for defaultMint.
+// ---------------------------------------------------------------------------
+
+test("defaultCritic: a PASS verdict with a reason line parses to {pass:true, reason}", async () => {
+  _setExecFileForTests((async () => ({ stdout: "PASS\nThe skill correctly counts files.", stderr: "" })) as unknown as Parameters<typeof _setExecFileForTests>[0]);
+
+  const verdict = await defaultCritic({ goal: "count files", skillFile: "---\nname: x\n---\nbody", evalTranscripts: "" });
+
+  assert.equal(verdict.pass, true);
+  assert.equal(verdict.reason, "The skill correctly counts files.");
+});
+
+test("defaultCritic: a FAIL verdict with a reason line parses to {pass:false, reason}", async () => {
+  _setExecFileForTests((async () => ({ stdout: "FAIL\nIt never reads $SKILL_INPUT.", stderr: "" })) as unknown as Parameters<typeof _setExecFileForTests>[0]);
+
+  const verdict = await defaultCritic({ goal: "count files", skillFile: "---\nname: x\n---\nbody", evalTranscripts: "" });
+
+  assert.equal(verdict.pass, false);
+  assert.equal(verdict.reason, "It never reads $SKILL_INPUT.");
+});
+
+test("defaultCritic: ambiguous/unparseable output fails closed", async () => {
+  _setExecFileForTests((async () => ({ stdout: "I'm not entirely sure about this one.", stderr: "" })) as unknown as Parameters<typeof _setExecFileForTests>[0]);
+
+  const verdict = await defaultCritic({ goal: "count files", skillFile: "---\nname: x\n---\nbody", evalTranscripts: "" });
+
+  assert.equal(verdict.pass, false);
+  assert.match(verdict.reason, /unclear/i);
+});
+
+test("defaultCritic: sends model=haiku in the CLI args", async () => {
+  let capturedArgs: string[] = [];
+  _setExecFileForTests((async (_file: string, args: string[]) => {
+    capturedArgs = args;
+    return { stdout: "PASS\nfine", stderr: "" };
+  }) as unknown as Parameters<typeof _setExecFileForTests>[0]);
+
+  await defaultCritic({ goal: "count files", skillFile: "---\nname: x\n---\nbody", evalTranscripts: "some transcript" });
+
+  const modelIdx = capturedArgs.indexOf("--model");
+  assert.ok(modelIdx >= 0);
+  assert.equal(capturedArgs[modelIdx + 1], "haiku");
+});
+
+test("integration: acquireSkill with NEITHER mint NOR critic supplied (both defaults wired) → registered", async () => {
+  const goal = uniqueGoal("integration both defaults goal");
+  const skillFile = renderSkillFile(baseSkill({ name: "Both Defaults Skill", description: "handles it", kind: "instruction" }));
+  _setExecFileForTests((async (_file: string, args: string[]) => {
+    if (args.includes("sonnet")) {
+      return { stdout: twoBlockResponse(skillFile, "[]"), stderr: "" };
+    }
+    if (args.includes("haiku")) {
+      return { stdout: "PASS\nThe skill genuinely and safely accomplishes the goal.", stderr: "" };
+    }
+    throw new Error(`unexpected model in args: ${args.join(" ")}`);
+  }) as unknown as Parameters<typeof _setExecFileForTests>[0]);
+
+  const result = await acquireSkill({ goal, whyNeeded: "integration test, zero injected functions", dailyCap: 1000 });
+
+  assert.equal(result.outcome, "registered");
+  assert.equal(result.skillName, "Both Defaults Skill");
+  const onDisk = await readSkill("Both Defaults Skill");
+  assert.ok(onDisk);
+});
+
+test("integration: acquireSkill with NEITHER mint NOR critic, critic FAILs → draft-failed at critic stage, not registered", async () => {
+  const goal = uniqueGoal("integration both defaults critic-fail goal");
+  const skillFile = renderSkillFile(baseSkill({ name: "Both Defaults Rejected Skill", description: "handles it", kind: "instruction" }));
+  _setExecFileForTests((async (_file: string, args: string[]) => {
+    if (args.includes("sonnet")) {
+      return { stdout: twoBlockResponse(skillFile, "[]"), stderr: "" };
+    }
+    if (args.includes("haiku")) {
+      return { stdout: "FAIL\nIt does not actually solve the stated goal.", stderr: "" };
+    }
+    throw new Error(`unexpected model in args: ${args.join(" ")}`);
+  }) as unknown as Parameters<typeof _setExecFileForTests>[0]);
+
+  const before = draftFiles().length;
+  const result = await acquireSkill({ goal, whyNeeded: "integration test, zero injected functions", dailyCap: 1000 });
+
+  assert.equal(result.outcome, "draft-failed");
+  assert.equal(result.stage, "critic");
+  assert.match(result.reason, /does not actually solve the stated goal/);
+  assert.equal(draftFiles().length, before + 1);
+  assert.equal(await readSkill("Both Defaults Rejected Skill"), null, "never registered");
 });
 
 // Run last: this test drives the shared ledger's today-count up to (or past) an
