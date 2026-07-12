@@ -47,6 +47,12 @@ Rule: after each phase all three gates must be green with NO NEW failures vs thi
 | P2 | ✓ 0 | ✓ 2618 pass / 1 skip / 0 fail | ✓ 0 |
 | P3 | ✓ 0 | ✓ 2629 pass / 1 skip / 0 fail | ✓ 0 |
 | P4 | ✓ 0 | ✓ 2646 pass / 1 skip / 0 fail | ✓ 0 |
+| F.1 (final) | ✓ 0 | ✓ 2646 pass / 1 skip / 0 fail | ✓ 0 |
+
+**Final verification (F.1):** typecheck 0 · scope-wall 0 · npm test 2646 pass / 1 skip (gated
+`HIVE_TEST_EVENTKIT`) / 0 fail. All four phase provers green (12/12):
+calendar-read-prover, skill-run-prover, acquire-prover, self-improve-prover. `swift build` +
+`swift test` (3/3) green in desktopbee-helper. NOT released (operator releases).
 
 ## F.1 — final integration
 
