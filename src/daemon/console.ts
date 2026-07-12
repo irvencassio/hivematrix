@@ -5463,6 +5463,9 @@ async function resolveApprovalItem(idx, decision, btn) {
   refresh();
 }
 
+// Whether the last HTTP poll succeeded — the reliable reachability signal over
+// tunnels (unlike the SSE stream). Gates the "reconnecting" indicator.
+let _httpHealthy = false;
 async function refresh() {
   try {
     const [tasks, directives, conn, metrics, onboarding, appr, packCards] = await Promise.all([
@@ -5475,9 +5478,19 @@ async function refresh() {
     // Center column: drive it right after the board so a later panel error can't
     // leave it stale. selectTask re-fetches the open task; otherwise show overview.
     if (state.selected) selectTask(state.selected); else renderOverview();
+    // A successful HTTP poll proves the daemon is reachable — so clear any
+    // SSE-only "reconnecting" state before renderConn paints. The SSE
+    // EventSource flaps over tunnels/proxies (Cloudflare buffers/idle-times-out
+    // SSE) while HTTP polling stays healthy; without this, one dropped stream
+    // pins the indicator to "● reconnecting" forever even though the app is
+    // fully functional (the exact iPad-over-tunnel symptom). HTTP reachability
+    // is the source of truth for the indicator; SSE is just the push bonus.
+    _httpHealthy = true;
+    const liveEl = document.getElementById("live");
+    if (liveEl) liveEl.classList.remove("stale");
     renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
     renderApprovals(); renderSkillCatalog(); renderMcp(); renderObservability();
-  } catch (e) { /* transient */ }
+  } catch (e) { _httpHealthy = false; /* transient */ }
   // Check for updates on every tick (cheap — daemon caches ~60s). Tied to
   // refresh so it fires on SSE activity too, not just a slow background timer
   // the webview may throttle when unfocused.
@@ -9682,7 +9695,13 @@ function connectSSE() {
     es.addEventListener("connectivity:change", refresh);
     es.addEventListener("brain:changed", onBrainChanged);
     es.addEventListener("flash:appended", onFlashAppended);
-    es.onerror = () => { live.className = "live stale"; live.textContent = "● reconnecting"; };
+    // The SSE stream flaps over tunnels/proxies even when the daemon is fully
+    // reachable via HTTP. Only surface "reconnecting" when HTTP polling is ALSO
+    // down (a real disconnect); otherwise stay quiet — the poll keeps the app
+    // live and the browser's EventSource retries on its own.
+    es.onerror = () => {
+      if (!_httpHealthy) { live.className = "live stale"; live.textContent = "● reconnecting"; }
+    };
   } catch (e) { /* polling covers it */ }
 }
 
