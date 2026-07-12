@@ -33,6 +33,7 @@ import { writeFileSync, readFileSync, mkdirSync, existsSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
+import { loadHiveConfig } from "@/lib/central/config";
 import { availableLaneTools, type LaneToolContext } from "@/lib/orchestrator/lane-tools";
 import type { ChatTool } from "@/lib/orchestrator/tool-bridge";
 import { broadcastEvent } from "@/lib/ws/broadcaster";
@@ -125,6 +126,13 @@ export const FLASH_ONLY_TOOL_DEFS: ChatTool[] = [
           title: { type: "string", description: "Short title for the task" },
           description: { type: "string", description: "Full description of what needs to be done" },
           projectPath: { type: "string", description: "Absolute path to the project (optional)" },
+          kind: {
+            type: "string",
+            enum: ["self-improvement"],
+            description:
+              "Set to 'self-improvement' when the task is about improving HiveMatrix's own code/features — " +
+              "it will be routed to the HiveMatrix repo with the Superpowers workflow.",
+          },
         },
         required: ["title", "description"],
       },
@@ -218,14 +226,93 @@ async function handleDeepThink(args: Record<string, unknown>): Promise<string> {
   );
 }
 
+/** Prefix stamped on a self-improvement task's description — AGENTS.md already
+ *  enforces the Superpowers pipeline in-repo; this just makes sure the task
+ *  says so up front, since the escalating model doesn't necessarily know. */
+const SELF_IMPROVEMENT_PREFIX =
+  "[Self-improvement task — follow the Superpowers pipeline in AGENTS.md: brainstorm → plan → " +
+  "subagent-driven TDD → finish. Do NOT release; the operator releases.]\n\n";
+
+export interface ResolveEscalationTargetOpts {
+  title: string;
+  description: string;
+  /** Raw `kind` arg off the tool call, if any (e.g. "self-improvement"). */
+  kind?: string;
+  /** `projectPath` arg off the tool call, if any — used when NOT self-improvement. */
+  argProjectPath?: string;
+  /** The resolved HiveMatrix repo path — injected so this helper stays pure/testable
+   *  (see `selfImproveRepoPath()` for how the real dispatch site resolves it). */
+  repoPath: string;
+}
+
+export interface EscalationTarget {
+  projectPath: string;
+  description: string;
+  isSelfImprove: boolean;
+}
+
+/**
+ * Pure decision helper for `handleEscalateToTask`: does this escalation target
+ * HiveMatrix's own repo, and if so, route it there with the Superpowers
+ * pipeline requirement prefixed onto the description. Self-improvement is
+ * detected either explicitly (`kind: "self-improvement"`) or implicitly (the
+ * title/description names HiveMatrix) — per the design doc, escalating models
+ * won't always remember to set `kind`.
+ */
+export function resolveEscalationTarget(opts: ResolveEscalationTargetOpts): EscalationTarget {
+  const { title, description, kind, argProjectPath, repoPath } = opts;
+  const isSelfImprove = kind === "self-improvement" || /\bhive\s?matrix\b/i.test(`${title} ${description}`);
+
+  if (isSelfImprove) {
+    return {
+      projectPath: repoPath,
+      description: SELF_IMPROVEMENT_PREFIX + description,
+      isSelfImprove: true,
+    };
+  }
+  return {
+    projectPath: argProjectPath ?? homedir(),
+    description,
+    isSelfImprove: false,
+  };
+}
+
+/**
+ * Resolves the HiveMatrix repo path for self-improvement escalations — reads
+ * the operator-configurable `selfImprove.repoPath` config key (this task's
+ * "settings surface": config.ts itself stays a pure untyped load/save blob,
+ * per its existing style — see `learningLoop`/`memory.brainRootDir` for the
+ * same ad-hoc-nested-read convention elsewhere in this codebase — so this
+ * reader lives here rather than in config.ts).
+ *
+ * Falls back to `process.cwd()` when unset. In DEV that IS this repo
+ * checkout, so it works with zero configuration. In the PACKAGED app, cwd is
+ * the bundle root, not a git checkout of hivematrix — the operator MUST set
+ * `selfImprove.repoPath` in ~/.hivematrix/config.json for self-improvement
+ * escalations to land in the right place there.
+ */
+export function selfImproveRepoPath(): string {
+  const cfg = loadHiveConfig().selfImprove as { repoPath?: unknown } | undefined;
+  const configured = typeof cfg?.repoPath === "string" ? cfg.repoPath.trim() : "";
+  return configured || process.cwd();
+}
+
 async function handleEscalateToTask(args: Record<string, unknown>, sessionId: string): Promise<string> {
   const { Task, generateId } = await import("@/lib/db");
   const { getSession } = await import("./store");
   const { markVoiceOrigin } = await import("@/lib/voice/loop-closer");
 
   const title = String(args.title ?? "Task");
-  const description = String(args.description ?? "");
-  const projectPath = String(args.projectPath ?? homedir());
+  const kind = String(args.kind ?? "");
+  const argProjectPath = typeof args.projectPath === "string" ? args.projectPath : undefined;
+
+  const { projectPath, description } = resolveEscalationTarget({
+    title,
+    description: String(args.description ?? ""),
+    kind,
+    argProjectPath,
+    repoPath: selfImproveRepoPath(),
+  });
 
   // A task escalated from a voice-channel flash session gets the same
   // voice-origin marker the /voice/session route uses, so the loop-closer
@@ -235,7 +322,9 @@ async function handleEscalateToTask(args: Record<string, unknown>, sessionId: st
 
   // Broad multi-step work dispatches as a SINGLE task that self-plans via
   // Superpowers: workflow:"work" triggers the "/workflows:work" skill prefix so
-  // the frontier coding harness plans and executes its own subtasks.
+  // the frontier coding harness plans and executes its own subtasks. Self-improvement
+  // tasks are normal tasks in every other respect — they flow through the same
+  // approval queue and directive machinery.
   const task = await Task.create({
     _id: generateId(),
     title,

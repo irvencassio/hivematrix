@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 
 import {
   FLASH_MCP_SERVER_NAME,
@@ -14,6 +15,8 @@ import {
   ensureFlashMcpServer,
   prepareFlashMcp,
   deliverLearnSkillReply,
+  resolveEscalationTarget,
+  selfImproveRepoPath,
 } from "./flash-mcp";
 import type { LaneToolContext } from "@/lib/orchestrator/lane-tools";
 import type { AcquireResult } from "@/lib/skills/acquire";
@@ -44,6 +47,21 @@ test("FLASH_ONLY_TOOL_DEFS: learn_skill requires goal and why_needed, accepts an
   assert.ok(params.properties.why_needed);
   assert.deepEqual(params.required.slice().sort(), ["goal", "why_needed"]);
   assert.deepEqual(params.properties.suggested_kind?.enum, ["instruction", "script"]);
+});
+
+test("FLASH_ONLY_TOOL_DEFS: escalate_to_task accepts an optional kind enum [\"self-improvement\"]", () => {
+  const def = FLASH_ONLY_TOOL_DEFS.find((t) => t.function.name === "escalate_to_task");
+  assert.ok(def, "escalate_to_task def must exist");
+  const params = def!.function.parameters as {
+    properties: Record<string, { type: string; enum?: string[] }>;
+    required: string[];
+  };
+  assert.ok(params.properties.title);
+  assert.ok(params.properties.description);
+  assert.ok(params.properties.projectPath);
+  assert.deepEqual(params.properties.kind?.enum, ["self-improvement"]);
+  // kind must stay optional — required list is unchanged from before this task.
+  assert.deepEqual(params.required.slice().sort(), ["description", "title"]);
 });
 
 test("dispatchFlashOnlyTool refuses an unknown tool name", async () => {
@@ -326,4 +344,85 @@ test("deliverLearnSkillReply: a throwing acquire still delivers an honest failur
   assert.equal(events.length, 1);
   assert.equal(events[0].data.ok, false);
   assert.match(String(events[0].data.text), /mint backend unreachable/);
+});
+
+// ------------------------------------------------------------------
+// escalate_to_task self-improvement kind (P3.2) — resolveEscalationTarget is
+// the pure decision helper factored out of handleEscalateToTask so this logic
+// is unit-testable without spinning up Task.create's real db. The repo path
+// is injected (not read from config inside the helper) to keep it pure;
+// selfImproveRepoPath() is the separate (also exported) config reader that
+// handleEscalateToTask wires in at the real dispatch site.
+// ------------------------------------------------------------------
+
+test("resolveEscalationTarget: kind 'self-improvement' routes to the repo path and prefixes the Superpowers requirement", () => {
+  const result = resolveEscalationTarget({
+    title: "Add a new lane tool",
+    description: "Wire up a new tool for X.",
+    kind: "self-improvement",
+    argProjectPath: "/some/other/project",
+    repoPath: "/Users/irvcassio/hivematrix",
+  });
+  assert.equal(result.isSelfImprove, true);
+  assert.equal(result.projectPath, "/Users/irvcassio/hivematrix");
+  assert.match(result.description, /Superpowers pipeline/);
+  assert.match(result.description, /AGENTS\.md/);
+  assert.match(result.description, /Do NOT release/);
+  assert.match(result.description, /Wire up a new tool for X\.$/);
+});
+
+test("resolveEscalationTarget: description naming HiveMatrix (no kind) is also treated as self-improvement", () => {
+  const result = resolveEscalationTarget({
+    title: "Fix a bug",
+    description: "There's a bug in HiveMatrix's voice loop-closer.",
+    argProjectPath: undefined,
+    repoPath: "/Users/irvcassio/hivematrix",
+  });
+  assert.equal(result.isSelfImprove, true);
+  assert.equal(result.projectPath, "/Users/irvcassio/hivematrix");
+  assert.match(result.description, /Superpowers pipeline/);
+});
+
+test("resolveEscalationTarget: title naming Hive Matrix (spaced, no kind) is also treated as self-improvement", () => {
+  const result = resolveEscalationTarget({
+    title: "Improve the Hive Matrix onboarding flow",
+    description: "Make onboarding smoother.",
+    argProjectPath: undefined,
+    repoPath: "/repo/path",
+  });
+  assert.equal(result.isSelfImprove, true);
+  assert.equal(result.projectPath, "/repo/path");
+});
+
+test("resolveEscalationTarget: neither kind nor HiveMatrix mention — projectPath falls back to arg or homedir, no prefix", () => {
+  const withArg = resolveEscalationTarget({
+    title: "Clean my inbox",
+    description: "Archive old newsletters.",
+    argProjectPath: "/some/project",
+    repoPath: "/Users/irvcassio/hivematrix",
+  });
+  assert.equal(withArg.isSelfImprove, false);
+  assert.equal(withArg.projectPath, "/some/project");
+  assert.equal(withArg.description, "Archive old newsletters.");
+
+  const withoutArg = resolveEscalationTarget({
+    title: "Clean my inbox",
+    description: "Archive old newsletters.",
+    argProjectPath: undefined,
+    repoPath: "/Users/irvcassio/hivematrix",
+  });
+  assert.equal(withoutArg.isSelfImprove, false);
+  assert.equal(withoutArg.projectPath, homedir());
+  assert.equal(withoutArg.description, "Archive old newsletters.");
+});
+
+test("selfImproveRepoPath: falls back to process.cwd() when selfImprove.repoPath is unset", () => {
+  // No config fixture is injected here (config.ts has no test seam) — this
+  // exercises the real loadHiveConfig() against whatever ~/.hivematrix/config.json
+  // exists on the test machine. Absent a selfImprove.repoPath key there, the
+  // fallback is process.cwd(); if a key IS present, this just asserts it's a
+  // non-empty string, since we can't control that file's contents from here.
+  const result = selfImproveRepoPath();
+  assert.equal(typeof result, "string");
+  assert.ok(result.length > 0);
 });
