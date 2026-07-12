@@ -1,15 +1,41 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { ConnectivityPolicy } from "@/lib/connectivity/policy";
 import {
   isLaneTool, availableLaneTools, executeLaneTool, LANE_TOOL_DEFINITIONS, resolveLaneToolName,
   capabilityRoutingGuide, executeMailBeeSend, executeMailBeeDraft, executeMessageBeeSend,
-  type MailBeeSendIO, type MessageBeeSendIO,
+  type MailBeeSendIO, type MessageBeeSendIO, type LaneToolContext,
 } from "./lane-tools";
 
 function cloud() { return new ConnectivityPolicy(); }
 function local() { const p = new ConnectivityPolicy(); p.setManualOverride("local-only"); return p; }
 function offline() { const p = new ConnectivityPolicy(); p.setManualOverride("offline"); return p; }
+
+// Point the brain root at a temp dir (skill_run reads/writes real skill files
+// on disk via the skills store — same trick as skills/store.test.ts: a fake
+// HOME + ~/.hivematrix/config.json, since configuredBrainRootDir() reads that
+// file fresh on every call).
+const SKILL_TMP = mkdtempSync(join(tmpdir(), "hm-lane-skills-"));
+const SKILL_HOME = join(SKILL_TMP, "home");
+const SKILL_BRAIN = join(SKILL_TMP, "brain");
+mkdirSync(join(SKILL_HOME, ".hivematrix"), { recursive: true });
+writeFileSync(join(SKILL_HOME, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: SKILL_BRAIN } }));
+const origHome = process.env.HOME;
+process.env.HOME = SKILL_HOME;
+
+const { upsertSkill, readSkill } = await import("@/lib/skills/store");
+
+test.after(() => {
+  process.env.HOME = origHome;
+  rmSync(SKILL_TMP, { recursive: true, force: true });
+});
+
+function ctx(): LaneToolContext {
+  return { projectPath: "/tmp", project: "ops", requestedBy: "test" };
+}
 
 const names = (tools: { function: { name: string } }[]) => tools.map((t) => t.function.name).sort();
 
@@ -23,6 +49,7 @@ test("isLaneTool recognizes active lane tools and rejects removed browser aliase
   assert.equal(isLaneTool("messagebee_send"), true);
   assert.equal(isLaneTool("brain_search"), true);
   assert.equal(isLaneTool("skill_used"), true);
+  assert.equal(isLaneTool("skill_run"), true);
   assert.equal(isLaneTool("digest_url"), true);
   assert.equal(isLaneTool("code_graph"), true);
   assert.equal(isLaneTool("bash"), false);
@@ -64,7 +91,7 @@ test("executeLaneTool dispatches a legacy bee alias to its real handler", async 
 });
 
 test("all bee tools are defined with required schemas", () => {
-  assert.equal(LANE_TOOL_DEFINITIONS.length, 16); // 11 lanes + 5 PIM tools
+  assert.equal(LANE_TOOL_DEFINITIONS.length, 17); // 12 lanes + 5 PIM tools
   for (const t of LANE_TOOL_DEFINITIONS) {
     assert.equal(t.type, "function");
     assert.ok(t.function.name.length > 0);
@@ -98,7 +125,7 @@ const PIM_NAMES = ["calendar_create", "calendar_today", "contacts_lookup", "remi
 
 test("cloud-ok advertises every lane (web, browser, desktop, mail, message, brain, skill, digest, pim)", () => {
   assert.deepEqual(names(availableLaneTools(cloud())),
-    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "digest_url", "hivematrix_browser", "mail_draft", "mail_send", "message_send", "skill_used", "workflow_inbox"].sort());
+    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "digest_url", "hivematrix_browser", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
 });
 
 test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
@@ -108,12 +135,12 @@ test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
 
 test("local-only drops web lanes but keeps Desktop Lane + outbound channels + brain/skill/codegraph/pim + COO routing", () => {
   assert.deepEqual(names(availableLaneTools(local())),
-    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "workflow_inbox"].sort());
+    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
 });
 
 test("offline keeps the offline workhorses + outbound channels + brain/skill/codegraph/pim + COO routing (all local)", () => {
   assert.deepEqual(names(availableLaneTools(offline())),
-    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "workflow_inbox"].sort());
+    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
 });
 
 test("capabilityRoutingGuide lists email/message/brain lanes in cloud, drops web lanes offline", () => {
@@ -300,4 +327,72 @@ test("messagebee_send requires either text or an attachment", async () => {
   const out = await executeMessageBeeSend({ to: "+14155551234" }, io);
   assert.deepEqual(calls, []);
   assert.match(out, /required/);
+});
+
+// ── skill_run: run a skill from the library live, in this turn ───────────────
+
+test("skill_run requires a name", async () => {
+  const out = await executeLaneTool("skill_run", {}, ctx());
+  assert.match(out, /'name'.*required/);
+});
+
+test("skill_run errors on an unknown skill name", async () => {
+  const out = await executeLaneTool("skill_run", { name: "Totally Made Up Skill" }, ctx());
+  assert.match(out, /no skill named "Totally Made Up Skill"/);
+});
+
+test("skill_run: instruction skill returns the body (params substituted) and records a use", async () => {
+  await upsertSkill({ name: "Greet Someone", description: "d", body: "Say hello to {{who}}.", source: "test" });
+  const out = await executeLaneTool("skill_run", { name: "Greet Someone", params: { who: "Ada" } }, ctx());
+  assert.match(out, /Greet Someone/);
+  assert.match(out, /Say hello to Ada\./);
+  const s = await readSkill("Greet Someone");
+  assert.equal(s?.useCount, 1);
+});
+
+test("skill_run: trusted script skill runs in the sandbox and returns stdout; records a use", async () => {
+  await upsertSkill({ name: "Echo Hello", description: "d", body: "echo hello", source: "test", kind: "script", trusted: true });
+  const out = await executeLaneTool("skill_run", { name: "Echo Hello" }, ctx());
+  assert.match(out, /hello/);
+  const s = await readSkill("Echo Hello");
+  assert.equal(s?.useCount, 1);
+  assert.equal(s?.failures, 0);
+});
+
+test("skill_run: untrusted, non-probation script skill is refused and NOT run", async () => {
+  await upsertSkill({ name: "Untrusted Script", description: "d", body: "echo should-not-run", source: "test", kind: "script", trusted: false });
+  const out = await executeLaneTool("skill_run", { name: "Untrusted Script" }, ctx());
+  assert.match(out, /untrusted script/i);
+  assert.match(out, /Trust it in the Skills view|probation/i);
+  const s = await readSkill("Untrusted Script");
+  assert.equal(s?.useCount, 0);
+  assert.equal(s?.failures, 0);
+});
+
+test("skill_run: probationary script skill runs AND the reply is prefixed with the learned-recently announcement", async () => {
+  await upsertSkill({ name: "Probation Script", description: "d", body: "echo probationary-output", source: "test", kind: "script", trusted: false, probation: true });
+  const out = await executeLaneTool("skill_run", { name: "Probation Script" }, ctx());
+  assert.match(out, /\(using a skill I learned recently\)/);
+  assert.match(out, /probationary-output/);
+  const s = await readSkill("Probation Script");
+  assert.equal(s?.useCount, 1);
+});
+
+test("skill_run: scanVerdict block refuses a script skill without running it", async () => {
+  await upsertSkill({ name: "Blocked Script", description: "d", body: "echo nope", source: "test", kind: "script", trusted: true, scanVerdict: "block" });
+  const out = await executeLaneTool("skill_run", { name: "Blocked Script" }, ctx());
+  assert.match(out, /blocked by the content scanner/);
+  const s = await readSkill("Blocked Script");
+  assert.equal(s?.useCount, 0);
+  assert.equal(s?.failures, 0);
+});
+
+test("skill_run: a failing script gets an honest failure reply and increments failures", async () => {
+  await upsertSkill({ name: "Failing Script", description: "d", body: "exit 3", source: "test", kind: "script", trusted: true });
+  const out = await executeLaneTool("skill_run", { name: "Failing Script" }, ctx());
+  assert.match(out, /fail/i);
+  assert.match(out, /3/);
+  const s = await readSkill("Failing Script");
+  assert.equal(s?.useCount, 0);
+  assert.equal(s?.failures, 1);
 });

@@ -32,6 +32,7 @@ const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
   message_send: "messagebee",
   brain_search: "brain",
   skill_used: "brain",
+  skill_run: "brain",
   digest_url: "webbee",
   code_graph: "codegraph",
   // PIM tools are local osascript against this Mac's Contacts/Calendar/Reminders —
@@ -248,6 +249,23 @@ export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
   {
     type: "function",
     function: {
+      name: "skill_run",
+      description:
+        "Skill library: RUN a skill from the library live, in this turn — not just record that you used one you already read (that's skill_used). An instruction skill returns its recipe (with any {{param}} placeholders filled in from `params`, and {{input}} filled from `input`) for you to follow right now. A script skill executes deterministically inside the sandbox (timeout, scratch cwd, secrets scrubbed) and returns its stdout — but ONLY if it is trusted or on probation and hasn't been blocked by the content scanner; an untrusted script is refused with the approval path named (trust it, or let it earn probation) rather than run. Every run is recorded automatically (no need to also call skill_used for it).",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "The skill name, as shown in the skill library index" },
+          params: { type: "object", description: "Optional key/value substitutions for {{placeholders}} in the skill body" },
+          input: { type: "string", description: "Optional free-text input for a skill's {{input}} slot" },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "digest_url",
       description:
         "Digest a web link for later review: spawns a task that fetches the page, summarizes it, and saves a markdown brain doc with the summary + source link. Use when you encounter a link worth saving to the knowledge base (e.g. an article in an email).",
@@ -374,6 +392,8 @@ export async function executeLaneTool(
       return executeBrainSearch(args);
     case "skill_used":
       return executeSkillUsed(args);
+    case "skill_run":
+      return executeSkillRun(args);
     case "digest_url":
       return executeDigestUrl(args);
     case "code_graph":
@@ -556,6 +576,72 @@ async function executeSkillUsed(args: Record<string, unknown>): Promise<string> 
   const r = await markSkillUsed(name, { refinement });
   if (!r.ok) return `Error: no skill named "${name}" in the library (nothing recorded).`;
   return `Recorded use of "${name}" (used ${r.useCount}×)${r.refined ? " and folded in your refinement." : "."}`;
+}
+
+/** Coerce a tool-arg `params` object into a plain string map (non-objects/arrays ignored). */
+function readSkillParamsArg(value: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = typeof v === "string" ? v : String(v);
+    }
+  }
+  return out;
+}
+
+/**
+ * skill_run: run a skill live, in this turn. Instruction skills carry no
+ * execution risk — the body is just handed back for the model to follow, so
+ * only the library-membership check applies. Script skills are the risky
+ * path: they execute inside runSkillSandboxed (P1.1) ONLY IF trusted or on
+ * probation and not scanner-blocked; every other script is refused with the
+ * approval path named, never silently run. Both paths record the outcome via
+ * recordSkillOutcome (P1.2) so useCount/failures — and promotion/demotion —
+ * stay accurate without a separate skill_used call.
+ */
+async function executeSkillRun(args: Record<string, unknown>): Promise<string> {
+  const name = typeof args.name === "string" ? args.name.trim() : "";
+  if (!name) return "Error: 'name' (the skill name) is required for skill_run.";
+  const params = readSkillParamsArg(args.params);
+  const input = typeof args.input === "string" ? args.input : undefined;
+
+  const { readSkill, recordSkillOutcome } = await import("@/lib/skills/store");
+  const skill = await readSkill(name);
+  if (!skill) return `Error: no skill named "${name}" in the library.`;
+
+  if (skill.kind === "instruction") {
+    const { applySkillParams, applySkillInput } = await import("@/lib/skills/contracts");
+    let body = applySkillParams(skill.body, params);
+    if (input) body = applySkillInput(body, input);
+    await recordSkillOutcome(name, true);
+    return `Skill "${name}" (follow these steps now):\n\n${body}`;
+  }
+
+  // kind === "script": the risky path. Refuse upstream of the sandbox — never
+  // run a blocked or untrusted/non-probationary script.
+  if (skill.scanVerdict === "block") {
+    return `Error: skill "${name}" is blocked by the content scanner and cannot run.`;
+  }
+  if (!(skill.trusted || skill.probation)) {
+    return `Error: skill "${name}" is an untrusted script and won't run. Approve it (Trust it in the Skills view, or let it earn probation) before it can execute.`;
+  }
+
+  const { runSkillSandboxed } = await import("@/lib/skills/sandbox");
+  const r = await runSkillSandboxed(skill, { params, input });
+  await recordSkillOutcome(name, r.ok);
+
+  // Probationary scripts are still being trusted with real trust — announce
+  // every run so the operator sees when a recently-learned script is in play.
+  const prefix = skill.probation ? "(using a skill I learned recently) " : "";
+  if (r.ok) {
+    const out = r.stdout.trim();
+    return `${prefix}Skill "${name}" ran successfully.${out ? ` Output:\n${out}` : " It produced no output."}`;
+  }
+  const why = r.timedOut
+    ? `timed out after ${Math.round(r.durationMs / 1000)}s`
+    : `exited with code ${r.exitCode ?? "unknown"}`;
+  const stderrTail = r.stderr.trim().slice(-500);
+  return `${prefix}Skill "${name}" failed (${why})${stderrTail ? ` — stderr: ${stderrTail}` : ""}.`;
 }
 
 // ── Outbound channel lanes (Mail Lane / Message Lane) ─────────────────────────
