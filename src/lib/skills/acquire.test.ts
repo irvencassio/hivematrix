@@ -13,12 +13,13 @@ writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory:
 const origHome = process.env.HOME;
 process.env.HOME = HOME;
 
-const { acquireSkill } = await import("./acquire");
+const { acquireSkill, defaultMint } = await import("./acquire");
 const { readSkill } = await import("./store");
-const { renderSkillFile } = await import("./contracts");
+const { renderSkillFile, parseSkillFile } = await import("./contracts");
+const { _setExecFileForTests } = await import("@/lib/models/chat-client");
 import type { Skill } from "./contracts";
 import type { AuditEntry } from "@/lib/audit/audit";
-import type { MintFn, CriticFn } from "./acquire";
+import type { MintFn, CriticFn, MintContext } from "./acquire";
 
 test.after(() => {
   process.env.HOME = origHome;
@@ -235,6 +236,91 @@ test("mint throws: treated as a mint failure, no draft archived, ledger + propos
 
   const lines = ledgerLines();
   assert.ok(lines.some((l) => l.includes("outcome=mint-failed")));
+});
+
+// ---------------------------------------------------------------------------
+// defaultMint (P2.2) — the real Sonnet mint via `haikuChatComplete`, tested
+// against a fake `claude` binary through the `_setExecFileForTests` DI seam
+// (same convention as chat-client.test.ts; loop.test.ts's fake-spawn is the
+// streaming-process equivalent, not needed here since this is one-shot).
+// ---------------------------------------------------------------------------
+
+test.afterEach(() => { _setExecFileForTests(null); });
+
+function baseMintCtx(over: Partial<MintContext> = {}): MintContext {
+  return { goal: "count widgets", whyNeeded: "a user asked for a widget count", attempt: 1, ...over };
+}
+
+function twoBlockResponse(skillFile: string, evalsJson: string): string {
+  return `\`\`\`skill\n${skillFile}\n\`\`\`\n\`\`\`evals\n${evalsJson}\n\`\`\`\n`;
+}
+
+test("defaultMint: parses a well-formed two-block response into {file, evals}", async () => {
+  const skillFile = renderSkillFile(baseSkill({ name: "Widget Counter", description: "counts widgets", kind: "instruction" }));
+  const evalsJson = JSON.stringify([{ name: "basic", input: "abc", expectContains: "3" }]);
+  _setExecFileForTests((async () => ({ stdout: twoBlockResponse(skillFile, evalsJson), stderr: "" })) as unknown as Parameters<typeof _setExecFileForTests>[0]);
+
+  const minted = await defaultMint(baseMintCtx());
+
+  const parsed = parseSkillFile(minted.file);
+  assert.ok(parsed, "minted.file must round-trip through parseSkillFile");
+  assert.equal(parsed?.name, "Widget Counter");
+  assert.equal(parsed?.kind, "instruction");
+  assert.equal(minted.evals.length, 1);
+  assert.equal(minted.evals[0].name, "basic");
+  assert.equal(minted.evals[0].expectContains, "3");
+});
+
+test("defaultMint: a response missing the ```skill block throws", async () => {
+  _setExecFileForTests((async () => ({ stdout: "```evals\n[]\n```\n", stderr: "" })) as unknown as Parameters<typeof _setExecFileForTests>[0]);
+
+  await assert.rejects(() => defaultMint(baseMintCtx()));
+});
+
+test("defaultMint: an absent evals block yields evals: [] (no throw)", async () => {
+  const skillFile = renderSkillFile(baseSkill({ name: "No Evals Skill", kind: "instruction" }));
+  _setExecFileForTests((async () => ({ stdout: `\`\`\`skill\n${skillFile}\n\`\`\`\n`, stderr: "" })) as unknown as Parameters<typeof _setExecFileForTests>[0]);
+
+  const minted = await defaultMint(baseMintCtx());
+  assert.deepEqual(minted.evals, []);
+});
+
+test("defaultMint: a blank evals block yields evals: [] (no throw)", async () => {
+  const skillFile = renderSkillFile(baseSkill({ name: "Blank Evals Skill", kind: "instruction" }));
+  _setExecFileForTests((async () => ({ stdout: twoBlockResponse(skillFile, "   "), stderr: "" })) as unknown as Parameters<typeof _setExecFileForTests>[0]);
+
+  const minted = await defaultMint(baseMintCtx());
+  assert.deepEqual(minted.evals, []);
+});
+
+test("defaultMint integration: acquireSkill with NO mint (default wired in) + fake claude + stub critic → registered", async () => {
+  const goal = uniqueGoal("integration default mint goal");
+  const skillFile = renderSkillFile(baseSkill({ name: "Integration Mint Skill", description: "handles the integration goal", kind: "instruction" }));
+  _setExecFileForTests((async () => ({ stdout: twoBlockResponse(skillFile, "[]"), stderr: "" })) as unknown as Parameters<typeof _setExecFileForTests>[0]);
+
+  const result = await acquireSkill({ goal, whyNeeded: "integration test", critic: passingCritic() });
+
+  assert.equal(result.outcome, "registered");
+  assert.equal(result.skillName, "Integration Mint Skill");
+  const onDisk = await readSkill("Integration Mint Skill");
+  assert.ok(onDisk);
+});
+
+test("defaultMint reflexion: on retry, the prompt sent to the model includes the prior failure reason", async () => {
+  const skillFile = renderSkillFile(baseSkill({ name: "Retry Skill", kind: "instruction" }));
+  let capturedPrompt = "";
+  _setExecFileForTests((async (_file: string, args: string[]) => {
+    capturedPrompt = args.join("\n");
+    return { stdout: twoBlockResponse(skillFile, "[]"), stderr: "" };
+  }) as unknown as Parameters<typeof _setExecFileForTests>[0]);
+
+  await defaultMint(baseMintCtx({
+    attempt: 2,
+    priorDraft: "--- (some earlier draft frontmatter) ---",
+    priorFailure: "it didn't pass its own tests: THE SPECIFIC PRIOR FAILURE TEXT",
+  }));
+
+  assert.match(capturedPrompt, /THE SPECIFIC PRIOR FAILURE TEXT/);
 });
 
 // Run last: this test drives the shared ledger's today-count up to (or past) an

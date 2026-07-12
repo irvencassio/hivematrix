@@ -27,11 +27,12 @@ import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { loadHiveConfig } from "@/lib/central/config";
 import { recordAudit, type AuditEntry } from "@/lib/audit/audit";
 import { recordFeedbackDedup } from "@/lib/feedback/feedback";
-import { upsertSkill, readSkill } from "./store";
+import { haikuChatComplete } from "@/lib/models/chat-client";
+import { upsertSkill, readSkill, listSkills } from "./store";
 import { fanOutSkills } from "./fanout";
 import { runSkillSandboxed } from "./sandbox";
 import { scanSkill } from "./scan";
-import { parseSkillFile, skillSlug, type Skill, type SkillKind } from "./contracts";
+import { parseSkillFile, skillSlug, formatSkillIndex, type Skill, type SkillKind } from "./contracts";
 
 export interface EvalCase {
   name?: string;
@@ -62,6 +63,172 @@ export interface MintContext {
 }
 
 export type MintFn = (ctx: MintContext) => Promise<MintedSkill>;
+
+// ---------------------------------------------------------------------------
+// defaultMint (P2.2) — the real mint: a "code"-tier (Sonnet) call through the
+// subscription-OAuth `claude` CLI via haikuChatComplete({ model: "sonnet" }).
+// Composes the tool catalog + skill index (Voyager-style retrieval — the
+// model is told to reuse/extend what exists, not duplicate it) and, on
+// retry, the archived prior draft + honest failure reason (Reflexion).
+// Output must be EXACTLY two fenced blocks (```skill, ```evals) — see
+// buildMintSystemPrompt below for the exact contract given to the model.
+// ---------------------------------------------------------------------------
+
+const MINT_TIMEOUT_MS = 180_000;
+
+/** Tool catalog line format: "- <name>: <description>". Dynamic import of
+ * lane-tools (an orchestrator/ module) avoids any static import-cycle risk
+ * between skills/ and orchestrator/ (orchestrator/lane-tools.ts already
+ * reaches back into skills/ via its own dynamic imports for skill_run etc). */
+async function buildToolCatalogText(): Promise<string> {
+  const { availableLaneTools } = await import("@/lib/orchestrator/lane-tools");
+  const tools = availableLaneTools();
+  if (tools.length === 0) return "(no lane tools currently available in this connectivity mode)";
+  return tools.map((t) => `- ${t.function.name}: ${t.function.description}`).join("\n");
+}
+
+async function buildSkillIndexText(): Promise<string> {
+  const entries = await listSkills();
+  const text = formatSkillIndex(entries, { showParams: true });
+  return text || "(the skill library is currently empty)";
+}
+
+function buildMintSystemPrompt(toolCatalog: string, skillIndex: string): string {
+  return [
+    "You are the skill-minting model for HiveMatrix's live capability acquisition pipeline.",
+    "When a live chat/voice turn hits something the system doesn't yet know how to do, you author ONE new skill that teaches it how. Your response is parsed by CODE, not read by a person — follow the format below EXACTLY.",
+    "",
+    "--- SKILL.md FORMAT CONTRACT ---",
+    "A skill file is frontmatter (key: value lines between --- markers), a blank line, then a markdown body.",
+    "Frontmatter keys the parser reads:",
+    "  name: <short, specific skill name>",
+    "  description: <one line — what it does and when to use it>",
+    "  tags: <comma-separated keywords>",
+    "  kind: instruction | script",
+    "  interpreter: bash | sh | node | python3 | python   (only meaningful when kind: script)",
+    "Any other frontmatter key is ignored on mint; do not invent extra ones.",
+    "Body:",
+    "  - kind: instruction — markdown steps an agent reads and follows manually. No code execution.",
+    "  - kind: script — the LITERAL, COMPLETE, runnable script source the named interpreter executes verbatim (no markdown formatting, no explanation, no fences inside the body itself).",
+    "",
+    "Minimal example a parser accepts (illustrative only — this is not what you output, see OUTPUT CONTRACT below):",
+    "---",
+    "name: Example Skill",
+    "description: One-line description of what this does and when to use it.",
+    "tags: example",
+    "kind: instruction",
+    "interpreter: bash",
+    "---",
+    "",
+    "Step-by-step instructions the agent follows when this skill applies.",
+    "",
+    "--- SANDBOX CONSTRAINTS (script skills only) ---",
+    "A script skill runs sandboxed and synchronously inside a live turn, so it must be self-contained and deterministic:",
+    "  - NO network access — network is denied at the OS sandbox level.",
+    "  - A fresh scratch cwd/HOME per run — nothing persists between runs; do not assume any file exists unless you wrote it this run.",
+    "  - A minimal env: only PATH, HOME (= the scratch dir), TMPDIR (= the scratch dir), and SKILL_INPUT are set — no operator secrets, no API keys, nothing else from the environment.",
+    "  - Read any free-text input from the $SKILL_INPUT environment variable (never from stdin/argv).",
+    "  - The timeout is at most 120 seconds — do not write anything that can run long or block.",
+    "  - stdout is captured and capped — print ONLY the result, short and exact, so it can be asserted against.",
+    "",
+    "--- TOOL CATALOG (compose with these — do not reimplement one of them as a script) ---",
+    toolCatalog,
+    "",
+    "--- EXISTING SKILL LIBRARY (Voyager-style retrieval: compose with/extend one of these if it's close; do not duplicate a skill that already covers this goal) ---",
+    skillIndex,
+    "",
+    "--- evals.json FORMAT ---",
+    "A JSON array of 2-4 test cases the skill must pass (skill-creator-style assertion grading on stdout):",
+    '  [{ "name": "...", "params": { "key": "value" }, "input": "...", "expectContains": "<substring the stdout must contain>" }]',
+    "For kind: instruction skills (nothing to execute), evals may be an empty array: []",
+    "",
+    "--- OUTPUT CONTRACT (follow EXACTLY — parsed by code) ---",
+    "Output EXACTLY two fenced blocks and NOTHING else before, between, or after them:",
+    "```skill",
+    "<the full SKILL.md file: frontmatter + body>",
+    "```",
+    "```evals",
+    "<the JSON array of eval cases, or [] for instruction skills>",
+    "```",
+    "No prose, no explanation, no extra commentary outside those two fenced blocks.",
+  ].join("\n");
+}
+
+function buildMintUserPrompt(ctx: MintContext): string {
+  const lines: string[] = [`Goal: ${ctx.goal}`, `Why needed: ${ctx.whyNeeded}`];
+  if (ctx.suggestedKind) {
+    lines.push(`Suggested kind: ${ctx.suggestedKind} (prefer this kind unless the goal clearly needs the other).`);
+  }
+  if (ctx.attempt > 1 && (ctx.priorDraft || ctx.priorFailure)) {
+    lines.push("");
+    lines.push(`--- RETRY (attempt ${ctx.attempt}) ---`);
+    lines.push("A previous attempt at this goal failed verification. Fix the SPECIFIC problem below — do not just resubmit the same draft.");
+    if (ctx.priorFailure) lines.push(`Failure reason: ${ctx.priorFailure}`);
+    if (ctx.priorDraft) {
+      lines.push("Previous draft (for reference — fix its problem, don't just repeat it verbatim):");
+      lines.push(ctx.priorDraft);
+    }
+  }
+  lines.push("");
+  lines.push("Author the skill now, following the OUTPUT CONTRACT exactly.");
+  return lines.join("\n");
+}
+
+/** Extract the first fenced block whose opening fence names one of `tags` (case-insensitive). */
+function extractFencedBlock(raw: string, tags: string[]): string | null {
+  for (const tag of tags) {
+    const re = new RegExp("```\\s*" + tag + "\\s*\\r?\\n([\\s\\S]*?)```", "i");
+    const m = raw.match(re);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/** Fallback for a bare (untagged) fenced block whose content looks like SKILL.md frontmatter. */
+function extractBareSkillBlock(raw: string): string | null {
+  const m = raw.match(/```\s*\r?\n(---[\s\S]*?)```/);
+  return m ? m[1] : null;
+}
+
+/** Parse a mint response into `{file, evals}`. Throws if no skill block is found. */
+export function parseMintResponse(raw: string): MintedSkill {
+  const skillBlock = extractFencedBlock(raw, ["skill", "md", "markdown"]) ?? extractBareSkillBlock(raw);
+  if (!skillBlock || !skillBlock.trim()) {
+    throw new Error("mint response did not include a ```skill fenced block");
+  }
+  const evalsBlock = extractFencedBlock(raw, ["evals", "eval", "json"]);
+  let evals: EvalCase[] = [];
+  if (evalsBlock && evalsBlock.trim()) {
+    try {
+      const parsed = JSON.parse(evalsBlock);
+      if (Array.isArray(parsed)) evals = parsed as EvalCase[];
+    } catch {
+      evals = []; // tolerate malformed evals rather than failing the whole mint
+    }
+  }
+  return { file: skillBlock.trim(), evals };
+}
+
+/**
+ * The default mint: one "code"-tier (Sonnet, via the subscription-OAuth
+ * `claude` CLI) completion authoring a candidate skill for `ctx.goal`.
+ */
+export async function defaultMint(ctx: MintContext): Promise<MintedSkill> {
+  const [toolCatalog, skillIndex] = await Promise.all([
+    ctx.toolCatalog ?? buildToolCatalogText(),
+    ctx.skillIndex ?? buildSkillIndexText(),
+  ]);
+  const system = buildMintSystemPrompt(toolCatalog, skillIndex);
+  const user = buildMintUserPrompt(ctx);
+  const raw = await haikuChatComplete(
+    [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    { model: "sonnet", timeoutMs: MINT_TIMEOUT_MS },
+  );
+  return parseMintResponse(raw);
+}
 
 export type CriticFn = (input: {
   goal: string;
@@ -275,9 +442,10 @@ export async function acquireSkill(opts: AcquireOptions): Promise<AcquireResult>
     }
 
     // 3. MINT
-    if (!opts.mint || !opts.critic) {
+    if (!opts.critic) {
       return { outcome: "error", reason: "mint/critic not configured" };
     }
+    const mint = opts.mint ?? defaultMint;
 
     const mintCtx: MintContext = {
       goal,
@@ -290,7 +458,7 @@ export async function acquireSkill(opts: AcquireOptions): Promise<AcquireResult>
 
     let minted: MintedSkill;
     try {
-      minted = await opts.mint(mintCtx);
+      minted = await mint(mintCtx);
     } catch (err) {
       const reason = "I tried to write the skill but the attempt failed.";
       audit({
