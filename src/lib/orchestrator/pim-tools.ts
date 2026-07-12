@@ -19,8 +19,11 @@
  */
 
 import { execFile } from "child_process";
+import { existsSync } from "fs";
+import { join } from "path";
 import type { ChatTool } from "./tool-bridge";
 import { isPermissionError, permissionNeeded } from "./pim-preconditions";
+import { getAppBundleRoot } from "@/lib/onboarding/app-bundle";
 
 // Remediation sentences — one spoken sentence each, said by Flash in place of
 // a dead-end generic failure. See pim-preconditions.ts for the wire format.
@@ -41,6 +44,46 @@ function osascript(script: string, timeoutMs = 12_000): Promise<{ ok: boolean; o
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// DesktopBeeHelper (EventKit) runner — the P0.1 helper binary that reads/writes
+// Calendars via EventKit instead of AppleScript, so it never launches
+// Calendar.app and gets its own clean TCC prompt. Injectable so calendar_today
+// and calendar_create are unit-testable without a real bundled binary; falls
+// back to the existing osascript path when the binary isn't available (dev
+// runs, or a build without the bundled helper).
+
+export interface CalendarHelperIO {
+  /** Resolve the helper binary path, or null if unavailable (dev / not bundled / file missing). */
+  resolveBinary(): string | null;
+  /** Run the helper with args; resolves with exit code + stdout + stderr. */
+  run(binary: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }>;
+}
+
+function resolveDesktopBeeHelperBinary(execPath: string = process.execPath): string | null {
+  const appRoot = getAppBundleRoot(execPath);
+  if (!appRoot) return null; // dev run (tsx) — no packaged bundle to look inside
+  const bin = join(appRoot, "Contents", "Resources", "DesktopBeeHelper.app", "Contents", "MacOS", "DesktopBeeHelper");
+  return existsSync(bin) ? bin : null;
+}
+
+function runDesktopBeeHelper(binary: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    execFile(binary, args, { timeout: 15_000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      let code = 0;
+      if (err) {
+        const errCode = (err as NodeJS.ErrnoException).code;
+        code = typeof errCode === "number" ? errCode : 1;
+      }
+      resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? (err ? err.message : "")) });
+    });
+  });
+}
+
+export const defaultCalendarHelperIO: CalendarHelperIO = {
+  resolveBinary: () => resolveDesktopBeeHelperBinary(),
+  run: runDesktopBeeHelper,
+};
 
 const clamp = (v: unknown, def: number, lo: number, hi: number): number => {
   const n = typeof v === "number" ? v : parseInt(String(v ?? ""), 10);
@@ -233,7 +276,7 @@ async function executeContactsLookup(args: Record<string, unknown>): Promise<str
   return out || `No contact found matching ${q}.`;
 }
 
-async function executeCalendarToday(args: Record<string, unknown>): Promise<string> {
+async function executeCalendarTodayOsascript(args: Record<string, unknown>): Promise<string> {
   const limit = clamp(args.limit, 8, 1, 20);
   const script = [
     "set d0 to (current date)",
@@ -262,6 +305,46 @@ async function executeCalendarToday(args: Record<string, unknown>): Promise<stri
     return `Could not read the calendar: ${out}`;
   }
   return out || "Nothing on the calendar today.";
+}
+
+interface CalendarEventDTO {
+  title: string;
+  start: string;
+  end: string;
+  calendar: string;
+  allDay: boolean;
+}
+
+/**
+ * calendar_today — reads via the DesktopBeeHelper EventKit binary when it's
+ * available (no Calendar.app launch, its own TCC prompt); falls back to the
+ * osascript path (preserved verbatim as executeCalendarTodayOsascript) in dev
+ * runs or builds without the bundled helper. `osascriptFallback` is an
+ * additional test seam only — the dispatcher always calls the two-arg form.
+ */
+export async function executeCalendarToday(
+  args: Record<string, unknown>,
+  io: CalendarHelperIO = defaultCalendarHelperIO,
+  osascriptFallback: (a: Record<string, unknown>) => Promise<string> = executeCalendarTodayOsascript,
+): Promise<string> {
+  const limit = clamp(args.limit, 8, 1, 20);
+  const binary = io.resolveBinary();
+  if (!binary) return osascriptFallback(args);
+
+  const { code, stdout, stderr } = await io.run(binary, ["calendar", "today", "--limit", String(limit)]);
+  if (code === 77) return permissionNeeded("Calendars", REMEDIATION.Calendars);
+  if (code !== 0) return `Could not read the calendar: ${(stderr || stdout || "unknown error").trim()}`;
+
+  try {
+    const events = JSON.parse(stdout) as unknown;
+    if (!Array.isArray(events)) throw new Error("expected a JSON array of events");
+    if (events.length === 0) return "Nothing on the calendar today.";
+    return (events as CalendarEventDTO[])
+      .map((e) => `${e.title} — ${new Date(e.start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`)
+      .join("\n");
+  } catch (e) {
+    return `Could not read the calendar: ${e instanceof Error ? e.message : String(e)}`;
+  }
 }
 
 /**
@@ -360,7 +443,10 @@ async function executeReminderCreate(args: Record<string, unknown>): Promise<str
 // are unit-testable without touching a live Calendar.app.
 
 export interface CalendarCreateIO {
-  runOsascript(script: string): Promise<{ ok: boolean; out: string }>;
+  runOsascript?(script: string): Promise<{ ok: boolean; out: string }>;
+  /** Optional DesktopBeeHelper seam — defaults to defaultCalendarHelperIO's when omitted. */
+  resolveBinary?(): string | null;
+  run?(binary: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }>;
 }
 
 /**
@@ -417,7 +503,16 @@ export function buildCalendarCreateScript(title: string, start: Date, end: Date)
   ].join("\n");
 }
 
-export async function executeCalendarCreate(args: Record<string, unknown>, io: CalendarCreateIO = { runOsascript: osascript }): Promise<string> {
+/**
+ * calendar_create — creates via the DesktopBeeHelper EventKit binary when
+ * available, falling back to the osascript path (buildCalendarCreateScript +
+ * runOsascript) in dev runs or builds without the bundled helper. `io` keeps
+ * backward compatibility with the pre-P0.3 `{ runOsascript }`-only shape:
+ * every field is optional and defaults independently, so old callers/tests
+ * that only supply `runOsascript` still work (resolveBinary then falls back
+ * to the real resolver, which returns null outside a packaged bundle).
+ */
+export async function executeCalendarCreate(args: Record<string, unknown>, io: CalendarCreateIO = {}): Promise<string> {
   const title = String(args.title ?? "").replace(/["\\]/g, "").trim().slice(0, 120);
   if (!title) return "No event title was given.";
   const start = parseDuePhrase(String(args.when ?? ""));
@@ -426,10 +521,34 @@ export async function executeCalendarCreate(args: Record<string, unknown>, io: C
   }
   const durationMinutes = clamp(args.durationMinutes, 60, 5, 24 * 60);
   const end = new Date(start.getTime() + durationMinutes * 60_000);
-  const script = buildCalendarCreateScript(title, start, end);
-  const { ok, out } = await io.runOsascript(script);
-  if (!ok || out.startsWith("ERROR")) return `Could not create the event: ${out || "unknown error"}`;
   const when = start.toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+  const resolveBinary = io.resolveBinary ?? defaultCalendarHelperIO.resolveBinary;
+  const run = io.run ?? defaultCalendarHelperIO.run;
+  const binary = resolveBinary();
+  if (binary) {
+    const { code, stdout, stderr } = await run(binary, [
+      "calendar", "create",
+      "--title", title,
+      "--start", start.toISOString(),
+      "--end", end.toISOString(),
+    ]);
+    if (code === 77) return permissionNeeded("Calendars", REMEDIATION.Calendars);
+    if (code === 0) {
+      try {
+        const parsed = JSON.parse(stdout) as { ok?: boolean; id?: string };
+        if (parsed && parsed.ok) return `Event created: "${title}" ${when} (${durationMinutes} min).`;
+      } catch {
+        // fall through to the generic failure below — never crash on malformed JSON
+      }
+    }
+    return `Could not create the event: ${(stderr || stdout || "unknown error").trim()}`;
+  }
+
+  const runOsascript = io.runOsascript ?? osascript;
+  const script = buildCalendarCreateScript(title, start, end);
+  const { ok, out } = await runOsascript(script);
+  if (!ok || out.startsWith("ERROR")) return `Could not create the event: ${out || "unknown error"}`;
   return `Event created: "${title}" ${when} (${durationMinutes} min).`;
 }
 

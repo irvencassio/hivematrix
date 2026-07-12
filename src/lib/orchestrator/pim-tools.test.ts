@@ -1,6 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseDuePhrase, extractPimActions, executeCalendarCreate, buildCalendarCreateScript } from "./pim-tools";
+import {
+  parseDuePhrase,
+  extractPimActions,
+  executeCalendarCreate,
+  executeCalendarToday,
+  buildCalendarCreateScript,
+  defaultCalendarHelperIO,
+  type CalendarHelperIO,
+} from "./pim-tools";
 import { isPermissionError, permissionNeeded, parsePermissionNeeded } from "./pim-preconditions";
 
 // Fixed reference: Friday July 10 2026, 2:00 PM local.
@@ -173,4 +181,107 @@ test("isPermissionError: false for unrelated errors", () => {
   assert.equal(isPermissionError("Nothing on the calendar today."), false);
   assert.equal(isPermissionError("syntax error: Expected end of line but found identifier."), false);
   assert.equal(isPermissionError(""), false);
+});
+
+// ---------------------------------------------------------------------------
+// calendar_today / calendar_create via the DesktopBeeHelper binary (P0.3)
+
+function fakeHelperIO(opts: {
+  binary?: string | null;
+  run?: (binary: string, args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
+}): CalendarHelperIO {
+  return {
+    resolveBinary: () => (opts.binary === undefined ? "/fake/DesktopBeeHelper" : opts.binary),
+    run: opts.run ?? (async () => ({ code: 0, stdout: "[]", stderr: "" })),
+  };
+}
+
+test("calendar_today: happy path via helper — reply contains both event titles", async () => {
+  const events = [
+    { title: "Standup", start: "2026-07-10T13:30:00.000Z", end: "2026-07-10T14:00:00.000Z", calendar: "Work", allDay: false },
+    { title: "Dentist", start: "2026-07-10T18:00:00.000Z", end: "2026-07-10T18:30:00.000Z", calendar: "Home", allDay: false },
+  ];
+  const io = fakeHelperIO({ run: async () => ({ code: 0, stdout: JSON.stringify(events), stderr: "" }) });
+  const out = await executeCalendarToday({}, io);
+  assert.match(out, /Standup/);
+  assert.match(out, /Dentist/);
+});
+
+test("calendar_today: permission denied (exit 77) returns permissionNeeded('Calendars', ...)", async () => {
+  const io = fakeHelperIO({ run: async () => ({ code: 77, stdout: '{"error":"permission"}', stderr: "" }) });
+  const out = await executeCalendarToday({}, io);
+  const parsed = parsePermissionNeeded(out);
+  assert.ok(parsed, `expected a permissionNeeded reply, got: ${out}`);
+  assert.equal(parsed!.grant, "Calendars");
+});
+
+test("calendar_today: empty array -> 'Nothing on the calendar today.'", async () => {
+  const io = fakeHelperIO({ run: async () => ({ code: 0, stdout: "[]", stderr: "" }) });
+  const out = await executeCalendarToday({}, io);
+  assert.equal(out, "Nothing on the calendar today.");
+});
+
+test("calendar_today: other nonzero exit is a generic failure, never misclassified as permission", async () => {
+  const io = fakeHelperIO({ run: async () => ({ code: 1, stdout: '{"error":"boom"}', stderr: "boom" }) });
+  const out = await executeCalendarToday({}, io);
+  assert.equal(parsePermissionNeeded(out), null);
+  assert.match(out, /Could not read the calendar/);
+});
+
+test("calendar_today: malformed JSON never crashes, returns a generic failure", async () => {
+  const io = fakeHelperIO({ run: async () => ({ code: 0, stdout: "not json", stderr: "" }) });
+  const out = await executeCalendarToday({}, io);
+  assert.equal(parsePermissionNeeded(out), null);
+  assert.match(out, /Could not read the calendar/);
+});
+
+test("calendar_today: binary absent falls back to the osascript path (never calls run)", async () => {
+  let ranHelper = false;
+  const io = fakeHelperIO({ binary: null, run: async () => { ranHelper = true; return { code: 0, stdout: "[]", stderr: "" }; } });
+  let fellBackTo: unknown = null;
+  const fallback = async (a: Record<string, unknown>) => { fellBackTo = a; return "osascript fallback reply"; };
+  const out = await executeCalendarToday({ limit: 5 }, io, fallback);
+  assert.equal(ranHelper, false);
+  assert.deepEqual(fellBackTo, { limit: 5 });
+  assert.equal(out, "osascript fallback reply");
+});
+
+test("calendar_create: happy path via helper — success reply names title/time/duration", async () => {
+  const io: CalendarHelperIO = {
+    resolveBinary: () => "/fake/DesktopBeeHelper",
+    run: async () => ({ code: 0, stdout: JSON.stringify({ ok: true, id: "abc123" }), stderr: "" }),
+  };
+  const out = await executeCalendarCreate({ title: "Lunch with Sam", when: "friday at noon", durationMinutes: 30 }, io);
+  assert.match(out, /Event created: "Lunch with Sam"/);
+  assert.match(out, /30 min/);
+});
+
+test("calendar_create: permission denied (exit 77) via helper returns permissionNeeded('Calendars', ...)", async () => {
+  const io: CalendarHelperIO = {
+    resolveBinary: () => "/fake/DesktopBeeHelper",
+    run: async () => ({ code: 77, stdout: '{"error":"permission"}', stderr: "" }),
+  };
+  const out = await executeCalendarCreate({ title: "Dentist", when: "tomorrow at 2pm" }, io);
+  const parsed = parsePermissionNeeded(out);
+  assert.ok(parsed, `expected a permissionNeeded reply, got: ${out}`);
+  assert.equal(parsed!.grant, "Calendars");
+});
+
+test("calendar_create: still supports the old osascript-only IO shape (backward compatibility)", async () => {
+  const out = await executeCalendarCreate(
+    { title: "Lunch with Sam", when: "friday at noon", durationMinutes: 30 },
+    { runOsascript: async () => ({ ok: true, out: "OK" }) },
+  );
+  assert.match(out, /Event created: "Lunch with Sam"/);
+});
+
+test("gated real-run: DesktopBeeHelper against the real binary (HIVE_TEST_EVENTKIT=1 only)", async (t) => {
+  if (process.env.HIVE_TEST_EVENTKIT !== "1") {
+    t.skip("set HIVE_TEST_EVENTKIT=1 to exercise the real DesktopBeeHelper binary");
+    return;
+  }
+  const binary = defaultCalendarHelperIO.resolveBinary();
+  assert.ok(binary, "expected a resolvable DesktopBeeHelper binary when HIVE_TEST_EVENTKIT=1");
+  const out = await executeCalendarToday({ limit: 3 }, defaultCalendarHelperIO);
+  assert.equal(typeof out, "string");
 });
