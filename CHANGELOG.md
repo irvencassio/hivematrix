@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.192 — 2026-07-12
+
+Observability redesigned: the full dashboard now takes over the center like New Task, tokens-by-model shows side-by-side bars so you can see which model you use most, and the scorecard is per-model (Opus/Sonnet/Haiku/Codex) with first-pass rate and cost per task.
+
 ## v0.1.191 — 2026-07-12
 
 New Tools panel shows every capability the assistant has and what backs it; curated skills are now first-class tools; reminders read/create moved to the reliable EventKit helper (needs a one-time Reminders permission grant).
