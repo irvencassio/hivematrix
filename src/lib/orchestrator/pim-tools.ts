@@ -164,9 +164,19 @@ const WEEKDAY_IDX: Record<string, number> = {
 const DAYPART_HOUR: Record<string, number> = {
   morning: 9, noon: 12, afternoon: 15, evening: 18, tonight: 20, night: 20, midnight: 0,
 };
+const MONTH_IDX: Record<string, number> = {
+  january: 0, jan: 0, february: 1, feb: 1, march: 2, mar: 2, april: 3, apr: 3, may: 4,
+  june: 5, jun: 5, july: 6, jul: 6, august: 7, aug: 7, september: 8, sep: 8, sept: 8,
+  october: 9, oct: 9, november: 10, nov: 10, december: 11, dec: 11,
+};
+
+/** Midnight today (local), for "has this date already passed?" comparisons. */
+function startOfDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
 
 export function parseDuePhrase(text: string, now: Date = new Date()): Date | null {
-  const t = (text || "").trim().toLowerCase();
+  let t = (text || "").trim().toLowerCase();
   if (!t) return null;
 
   // "in N minutes/hours/days/weeks" — relative wins outright.
@@ -177,25 +187,68 @@ export function parseDuePhrase(text: string, now: Date = new Date()): Date | nul
     return new Date(now.getTime() + n * ms);
   }
 
-  // Day: today / tonight / tomorrow / a weekday name. Default = today.
   const day = new Date(now);
   let explicitDay = false;
-  if (/\btomorrow\b/.test(t)) {
-    day.setDate(day.getDate() + 1);
-    explicitDay = true;
-  } else {
-    for (const [name, idx] of Object.entries(WEEKDAY_IDX)) {
-      if (new RegExp(`\\b${name}\\b`).test(t)) {
-        const ahead = (idx - now.getDay() + 7) % 7 || 7; // "friday" = the NEXT friday
-        day.setDate(day.getDate() + ahead);
-        explicitDay = true;
-        break;
-      }
+
+  // Explicit calendar date FIRST — and CONSUME it from the text so its day
+  // number ("July 19", "7/19", "the 19th") is never later mistaken for the hour.
+  // A named month wins over a weekday word ("Saturday July 19" → July 19).
+  const md = t.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/);
+  const numeric = t.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+  if (md) {
+    const mon = MONTH_IDX[md[1]];
+    const dom = parseInt(md[2], 10);
+    if (mon != null && dom >= 1 && dom <= 31) {
+      day.setMonth(mon, dom);
+      if (day < startOfDay(now)) day.setFullYear(day.getFullYear() + 1); // already passed → next year
+      explicitDay = true;
+      t = t.replace(md[0], " ");
     }
-    if (!explicitDay && /\btoday\b|\btonight\b|\bthis\b/.test(t)) explicitDay = true;
+  } else if (numeric) {
+    const mon = parseInt(numeric[1], 10) - 1, dom = parseInt(numeric[2], 10);
+    if (mon >= 0 && mon <= 11 && dom >= 1 && dom <= 31) {
+      day.setMonth(mon, dom);
+      if (numeric[3]) day.setFullYear(parseInt(numeric[3].length === 2 ? "20" + numeric[3] : numeric[3], 10));
+      else if (day < startOfDay(now)) day.setFullYear(day.getFullYear() + 1);
+      explicitDay = true;
+      t = t.replace(numeric[0], " ");
+    }
   }
 
-  // Time: "at 5", "5:30 pm", "17:45", noon/midnight/morning/evening…
+  // Relative day words — only if no explicit calendar date was given.
+  if (!explicitDay) {
+    if (/\btomorrow\b/.test(t)) {
+      day.setDate(day.getDate() + 1);
+      explicitDay = true;
+    } else {
+      for (const [name, idx] of Object.entries(WEEKDAY_IDX)) {
+        if (new RegExp(`\\b${name}\\b`).test(t)) {
+          const ahead = (idx - now.getDay() + 7) % 7 || 7; // "friday" = the NEXT friday
+          day.setDate(day.getDate() + ahead);
+          explicitDay = true;
+          break;
+        }
+      }
+      if (!explicitDay && /\btoday\b|\btonight\b|\bthis\b/.test(t)) explicitDay = true;
+    }
+  }
+
+  // "the 19th" — day-of-month with no month word; consume so it isn't read as an hour.
+  if (!explicitDay) {
+    const dom = t.match(/\b(\d{1,2})(?:st|nd|rd|th)\b/);
+    if (dom) {
+      const d = parseInt(dom[1], 10);
+      if (d >= 1 && d <= 31) {
+        day.setDate(d);
+        if (day < startOfDay(now)) day.setMonth(day.getMonth() + 1); // passed → next month
+        explicitDay = true;
+        t = t.replace(dom[0], " ");
+      }
+    }
+  }
+
+  // Time: "at 5", "5:30 pm", "17:45", noon/midnight/morning/evening… (parsed from
+  // the date-stripped text, so a day number can't be grabbed as the hour).
   let hour: number | null = null;
   let minute = 0;
   const tm = t.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\b/);

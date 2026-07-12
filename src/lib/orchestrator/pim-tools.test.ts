@@ -36,6 +36,32 @@ test("parseDuePhrase: bare 'at 5' spoken at 2 PM means 5 PM today", () => {
   assert.deepEqual([d.getDate(), d.getHours()], [10, 17]);
 });
 
+test("parseDuePhrase: explicit month+day — the day number is NOT read as the hour", () => {
+  // Regression: "July 19 at 3 PM" used to grab "19" as the hour (7 PM) on today's
+  // date. It must resolve to July 19 at 3 PM.
+  const d = parseDuePhrase("July 19 at 3 PM", NOW)!;
+  assert.deepEqual([d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()], [6, 19, 15, 0]);
+});
+
+test("parseDuePhrase: a named month+day wins over a weekday word", () => {
+  // "Saturday July 19 at 3pm" → the named date July 19, not "next Saturday".
+  const d = parseDuePhrase("Saturday July 19 at 3pm", NOW)!;
+  assert.deepEqual([d.getMonth(), d.getDate(), d.getHours()], [6, 19, 15]);
+});
+
+test("parseDuePhrase: numeric M/D and 'the Nth' forms", () => {
+  const slash = parseDuePhrase("7/19 at 3pm", NOW)!;
+  assert.deepEqual([slash.getMonth(), slash.getDate(), slash.getHours()], [6, 19, 15]);
+  const nth = parseDuePhrase("the 19th at 3pm", NOW)!;
+  assert.deepEqual([nth.getMonth(), nth.getDate(), nth.getHours()], [6, 19, 15]);
+});
+
+test("parseDuePhrase: a month+day that already passed rolls to next year", () => {
+  // NOW is July 10 2026; "July 5" already passed → July 5 2027.
+  const d = parseDuePhrase("July 5 at 9am", NOW)!;
+  assert.deepEqual([d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()], [2027, 6, 5, 9]);
+});
+
 test("parseDuePhrase: past time with no explicit day rolls to tomorrow", () => {
   const d = parseDuePhrase("at 1pm", NOW)!; // 1 PM already passed at 2 PM
   assert.deepEqual([d.getDate(), d.getHours()], [11, 13]);
