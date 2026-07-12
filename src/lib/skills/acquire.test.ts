@@ -1,0 +1,263 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+// Point the brain root at a temp dir via a temp HOME + config.json, same pattern as store.test.ts.
+const TMP = mkdtempSync(join(tmpdir(), "hm-acquire-"));
+const HOME = join(TMP, "home");
+const BRAIN = join(TMP, "brain");
+mkdirSync(join(HOME, ".hivematrix"), { recursive: true });
+writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: BRAIN } }));
+const origHome = process.env.HOME;
+process.env.HOME = HOME;
+
+const { acquireSkill } = await import("./acquire");
+const { readSkill } = await import("./store");
+const { renderSkillFile } = await import("./contracts");
+import type { Skill } from "./contracts";
+import type { AuditEntry } from "@/lib/audit/audit";
+import type { MintFn, CriticFn } from "./acquire";
+
+test.after(() => {
+  process.env.HOME = origHome;
+  rmSync(TMP, { recursive: true, force: true });
+});
+
+function ledgerPath(): string {
+  return join(BRAIN, "skills", "ACQUISITIONS.md");
+}
+
+function ledgerLines(): string[] {
+  try {
+    return readFileSync(ledgerPath(), "utf-8").split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function draftFiles(): string[] {
+  const dir = join(BRAIN, "skills", "drafts");
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+function baseSkill(over: Partial<Skill> = {}): Skill {
+  return {
+    name: "Test Skill", description: "does a thing", tags: [], body: "do the thing",
+    source: "acquired", createdAt: "", updatedAt: "", revisions: 1, useCount: 0, failures: 0,
+    lastUsedAt: "", compat: ["all"], trusted: true, probation: false, kind: "instruction",
+    interpreter: "bash", roles: [], ...over,
+  };
+}
+
+function passingCritic(): CriticFn {
+  return async () => ({ pass: true, reason: "looks good" });
+}
+
+let counter = 0;
+function uniqueGoal(label: string): string {
+  counter += 1;
+  return `${label} ${counter}`;
+}
+
+test("happy path (instruction): registers trusted, fans out, ledger + audit recorded", async () => {
+  const goal = uniqueGoal("count files in downloads");
+  const skill = baseSkill({ name: "Downloads Counter", description: "counts files in Downloads", kind: "instruction" });
+  const mintCalls: string[] = [];
+  const mint: MintFn = async (ctx) => {
+    mintCalls.push(ctx.goal);
+    return { file: renderSkillFile(skill), evals: [] };
+  };
+  const fanoutCalls: Skill[][] = [];
+  const auditEvents: AuditEntry[] = [];
+
+  const result = await acquireSkill({
+    goal, whyNeeded: "voice turn needs it",
+    mint, critic: passingCritic(),
+    audit: (e) => auditEvents.push(e),
+    fanout: async (skills) => { fanoutCalls.push(skills); return []; },
+  });
+
+  assert.equal(result.outcome, "registered");
+  assert.equal(result.skillName, "Downloads Counter");
+  assert.equal(mintCalls.length, 1);
+
+  const onDisk = await readSkill("Downloads Counter");
+  assert.ok(onDisk);
+  assert.equal(onDisk?.trusted, true);
+  assert.equal(onDisk?.source, "acquired");
+  assert.equal(onDisk?.probation, false);
+
+  assert.equal(fanoutCalls.length, 1);
+  assert.equal(fanoutCalls[0][0].name, "Downloads Counter");
+
+  const lines = ledgerLines();
+  assert.ok(lines.some((l) => l.includes("outcome=registered") && l.includes("name=Downloads Counter")));
+
+  const events = auditEvents.map((e) => e.event);
+  assert.ok(events.includes("skill:acquire:start"));
+  assert.ok(events.includes("skill:acquire:minted"));
+  assert.ok(events.includes("skill:acquire:verified"));
+  assert.ok(events.includes("skill:acquire:registered"));
+  assert.ok(!events.includes("skill:acquire:failed"));
+});
+
+test("happy path (script): registers on PROBATION, NOT fanned out, eval runs for real via sandbox", async () => {
+  const goal = uniqueGoal("echo ok script");
+  const skill = baseSkill({ name: "Echo Ok Script", description: "echoes ok", kind: "script", interpreter: "bash", body: "echo ok" });
+  const mint: MintFn = async () => ({
+    file: renderSkillFile(skill),
+    evals: [{ name: "basic", expectContains: "ok" }],
+  });
+  const fanoutCalls: Skill[][] = [];
+
+  const result = await acquireSkill({
+    goal, whyNeeded: "need a script",
+    mint, critic: passingCritic(),
+    fanout: async (skills) => { fanoutCalls.push(skills); return []; },
+  });
+
+  assert.equal(result.outcome, "probation");
+  assert.equal(result.skillName, "Echo Ok Script");
+  assert.match(result.reason, /probation/i);
+
+  const onDisk = await readSkill("Echo Ok Script");
+  assert.equal(onDisk?.trusted, false);
+  assert.equal(onDisk?.probation, true);
+  assert.equal(onDisk?.source, "acquired");
+
+  assert.equal(fanoutCalls.length, 0, "probationary scripts are never fanned out");
+
+  const lines = ledgerLines();
+  assert.ok(lines.some((l) => l.includes("outcome=probation") && l.includes("name=Echo Ok Script")));
+});
+
+test("parse failure: garbage mint output archives a draft, files a proposal, never registers", async () => {
+  const goal = uniqueGoal("garbage mint output");
+  const mint: MintFn = async () => ({ file: "this is not a skill file at all, no frontmatter", evals: [] });
+
+  const before = draftFiles().length;
+  const result = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic() });
+
+  assert.equal(result.outcome, "draft-failed");
+  assert.equal(result.stage, "parse");
+  assert.match(result.reason, /didn't parse/);
+
+  const after = draftFiles();
+  assert.equal(after.length, before + 1);
+
+  const lines = ledgerLines();
+  assert.ok(lines.some((l) => l.includes("outcome=draft-failed")));
+});
+
+test("scan block: a skill body that trips a fatal scan rule is archived, never registered", async () => {
+  const goal = uniqueGoal("destructive script");
+  const skill = baseSkill({ name: "Nuke Everything", kind: "script", interpreter: "bash", body: "rm -rf /" });
+  const mint: MintFn = async () => ({ file: renderSkillFile(skill), evals: [] });
+
+  const before = draftFiles().length;
+  const result = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic() });
+
+  assert.equal(result.outcome, "draft-failed");
+  assert.equal(result.stage, "scan");
+  assert.match(result.reason, /blocked for safety/);
+
+  assert.equal(draftFiles().length, before + 1);
+  assert.equal(await readSkill("Nuke Everything"), null, "never registered");
+});
+
+test("eval failure: expectContains doesn't match stdout → draft-failed at evals stage", async () => {
+  const goal = uniqueGoal("mismatched eval");
+  const skill = baseSkill({ name: "Wrong Output Script", kind: "script", interpreter: "bash", body: "echo something-else" });
+  const mint: MintFn = async () => ({
+    file: renderSkillFile(skill),
+    evals: [{ name: "basic", expectContains: "ok" }],
+  });
+
+  const result = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic() });
+
+  assert.equal(result.outcome, "draft-failed");
+  assert.equal(result.stage, "evals");
+  assert.equal(await readSkill("Wrong Output Script"), null, "never registered");
+});
+
+test("critic failure: valid skill + passing evals, but critic rejects → draft-failed at critic stage", async () => {
+  const goal = uniqueGoal("critic rejects");
+  const skill = baseSkill({ name: "Critic Rejected Skill", kind: "instruction" });
+  const mint: MintFn = async () => ({ file: renderSkillFile(skill), evals: [] });
+  const critic: CriticFn = async () => ({ pass: false, reason: "doesn't actually solve the goal" });
+
+  const result = await acquireSkill({ goal, whyNeeded: "x", mint, critic });
+
+  assert.equal(result.outcome, "draft-failed");
+  assert.equal(result.stage, "critic");
+  assert.match(result.reason, /doesn't actually solve the goal/);
+  assert.equal(await readSkill("Critic Rejected Skill"), null, "never registered");
+});
+
+test("already-have: a second identical goal reuses the registered skill without minting", async () => {
+  const goal = uniqueGoal("recurring goal");
+  const skill = baseSkill({ name: "Recurring Skill", description: "handles the recurring goal", kind: "instruction" });
+  let mintCallCount = 0;
+  const mint: MintFn = async () => { mintCallCount += 1; return { file: renderSkillFile(skill), evals: [] }; };
+
+  const first = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic() });
+  assert.equal(first.outcome, "registered");
+  assert.equal(mintCallCount, 1);
+
+  const second = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic() });
+  assert.equal(second.outcome, "already-have");
+  assert.equal(second.skillName, "Recurring Skill");
+  assert.equal(mintCallCount, 1, "mint must not be called again once we already have the skill");
+});
+
+test("no mint/critic configured: returns an honest error, never throws", async () => {
+  const result = await acquireSkill({ goal: uniqueGoal("no injection"), whyNeeded: "x" });
+  assert.equal(result.outcome, "error");
+  assert.match(result.reason, /mint\/critic not configured/);
+});
+
+test("mint throws: treated as a mint failure, no draft archived, ledger + proposal filed", async () => {
+  const goal = uniqueGoal("mint throws");
+  const mint: MintFn = async () => { throw new Error("mint blew up"); };
+  const beforeDrafts = draftFiles().length;
+
+  const result = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic() });
+
+  assert.equal(result.outcome, "draft-failed");
+  assert.equal(result.stage, "mint");
+  assert.equal(draftFiles().length, beforeDrafts, "mint failure produces no draft to archive");
+
+  const lines = ledgerLines();
+  assert.ok(lines.some((l) => l.includes("outcome=mint-failed")));
+});
+
+// Run last: this test drives the shared ledger's today-count up to (or past) an
+// artificially low cap, so it must not run before tests that rely on the
+// default cap (10) still having headroom.
+test("daily cap: pre-seeded ledger at/over cap refuses without minting", async () => {
+  const today = new Date().toISOString();
+  const capLines = Array.from({ length: 3 }, (_, i) => `${today}\toutcome=draft-failed\tname=\tgoal=filler ${i}\n`).join("");
+  const realLedger = ledgerPath();
+  const existing = existsSync(realLedger) ? readFileSync(realLedger, "utf-8") : "";
+  mkdirSync(join(BRAIN, "skills"), { recursive: true });
+  writeFileSync(realLedger, existing + capLines);
+  const countBefore = ledgerLines().filter((l) => l.startsWith(today.slice(0, 10))).length;
+
+  let mintCalled = false;
+  const mint: MintFn = async () => { mintCalled = true; return { file: "", evals: [] }; };
+
+  const result = await acquireSkill({
+    goal: uniqueGoal("anything"), whyNeeded: "x", mint, critic: passingCritic(),
+    dailyCap: countBefore,
+  });
+
+  assert.equal(result.outcome, "capped");
+  assert.equal(mintCalled, false, "mint must not be called once the daily cap is hit");
+  assert.match(result.reason, /daily learning limit/);
+});
