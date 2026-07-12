@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.197", date: "2026-07-12", note: "Fixes 'remind me to X in 5 minutes' (and calendar events) failing silently in chat and streaming voice. The reminders/calendar helper was rejecting timestamps that carried milliseconds, so every timed reminder quietly failed and voice fell back to queuing a do-nothing task. Reminders and events with a time now set reliably." },
   { version: "0.1.196", date: "2026-07-12", note: "The assistant can now SEE photos — attach one in chat (📎) or text one over iMessage and it describes/acts on it. HiveMatrix is now proactive by default: morning/evening briefs, an unprompted heartbeat, and weekly reviews; overdue goals surface in the brief; and recurring accountability rituals no longer silently die. Plus the iPad 'reconnecting' indicator is fixed." },
   { version: "0.1.195", date: "2026-07-12", note: "Voice calendar commands now parse dates correctly too (matching the chat-side fix): 'set an event July 19 at 3pm' lands on the right day and time." },
   { version: "0.1.194", date: "2026-07-12", note: "New Goals surface: track long-horizon goals (Solo Founder, fitness, Italian, Bible) with per-cadence check-ins and a 'due today' review — from the 🎯 Goals panel or in chat. Plus a calendar date-parsing fix so 'July 19 at 3 PM' lands on the right day and time." },

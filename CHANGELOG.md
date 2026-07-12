@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.197 — 2026-07-12
+
+Fixes 'remind me to X in 5 minutes' (and calendar events) failing silently in chat and streaming voice. The reminders/calendar helper was rejecting timestamps that carried milliseconds, so every timed reminder quietly failed and voice fell back to queuing a do-nothing task. Reminders and events with a time now set reliably.
+
 ## v0.1.196 — 2026-07-12
 
 The assistant can now SEE photos — attach one in chat (📎) or text one over iMessage and it describes/acts on it. HiveMatrix is now proactive by default: morning/evening briefs, an unprompted heartbeat, and weekly reviews; overdue goals surface in the brief; and recurring accountability rituals no longer silently die. Plus the iPad 'reconnecting' indicator is fixed.
