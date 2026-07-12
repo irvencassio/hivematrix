@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.200 — 2026-07-12
+
+Asking about a long document in chat no longer spins up a background task just to finish reading it — the assistant now pages through the whole document directly and answers.
+
 ## v0.1.199 — 2026-07-12
 
 Voice replies now speak in full — long, multi-paragraph answers (like your solo-founder goals) no longer cut off after the first paragraph, and stay in one consistent voice. Plus: HiveMatrix now texts you when a reminder comes due, so you never miss one even if you don't see the alarm.
