@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.182 — 2026-07-12
+
+Self-learning: calendar reads via EventKit (no more app-launch dead-end), skill_run lets voice/chat execute learned skills in a sandbox, learn_skill acquires+verifies new skills live on capability misses, 'update HiveMatrix to X' routes to the coding pipeline, background gap→skill acquisition under autonomous mode, morning brief reports what it learned.
+
 ## v0.1.181 — 2026-07-12
 
 Cloudflare pairing QR: fix the display overflow (it was overlapping the security note and corrupting the scannable quiet zone) and make the dense QR scannable — constrain the SVG to its box, enlarge it 188→240px, and render at error-correction level L for bigger modules.
