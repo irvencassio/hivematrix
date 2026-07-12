@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.196 — 2026-07-12
+
+The assistant can now SEE photos — attach one in chat (📎) or text one over iMessage and it describes/acts on it. HiveMatrix is now proactive by default: morning/evening briefs, an unprompted heartbeat, and weekly reviews; overdue goals surface in the brief; and recurring accountability rituals no longer silently die. Plus the iPad 'reconnecting' indicator is fixed.
+
 ## v0.1.195 — 2026-07-12
 
 Voice calendar commands now parse dates correctly too (matching the chat-side fix): 'set an event July 19 at 3pm' lands on the right day and time.
