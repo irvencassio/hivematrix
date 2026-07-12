@@ -18,7 +18,7 @@
 import { resolveCommandOptions, type CommandOptionsSpec } from "./options";
 
 export type LocalCommandKind = "command" | "skill";
-export type LocalCommandCompat = "all" | "claude" | "codex" | "qwen";
+export type LocalCommandCompat = "all" | "claude" | "codex";
 
 export interface LocalCommand {
   /** The slash target: "import-all" or subdir-namespaced "ns:name". */
@@ -106,7 +106,6 @@ function compatForModelToken(token: string): LocalCommandCompat | null {
   if (t === "*" || t === "all" || t === "any") return "all";
   if (t === "opus" || t === "sonnet" || t === "haiku" || t.startsWith("claude")) return "claude";
   if (t === "codex" || t === "chatgpt" || t.startsWith("gpt-") || t.startsWith("openai")) return "codex";
-  if (t.startsWith("qwen")) return "qwen";
   return null;
 }
 
@@ -124,11 +123,11 @@ export function inferLocalCommandCompat(model?: string): LocalCommandCompat[] {
 
 /**
  * Provider-eligibility filter: a command survives if its compat includes at
- * least one currently enabled frontier provider, treating "qwen"/local and
- * "all" as always eligible (they aren't gated by the Claude/Codex toggles).
+ * least one currently enabled frontier provider, treating "all" (and an empty
+ * compat) as always eligible (not gated by the Claude/Codex toggles).
  */
 export function commandEnabledByProviders(compat: LocalCommandCompat[], enabledProviders: string[]): boolean {
-  if (compat.length === 0 || compat.includes("all") || compat.includes("qwen")) return true;
+  if (compat.length === 0 || compat.includes("all")) return true;
   return compat.some((c) => enabledProviders.includes(c));
 }
 

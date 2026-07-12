@@ -7,6 +7,7 @@
  */
 
 import { getConnectivityPolicy, type ConnectivityMode } from "./policy";
+import { getLocalModelConfig } from "@/lib/config/constants";
 
 export type Disposition = "works" | "degraded" | "queued";
 export type DispositionAction = "run_now" | "use_local_fallback" | "wait_for_cloud";
@@ -49,11 +50,16 @@ function countsFor(capabilities: CapabilityPosture[]): PostureCounts {
   };
 }
 
-/** Pure: the disposition of every capability under a connectivity mode. */
-export function describeLocalPosture(mode: ConnectivityMode): LocalPostureReport {
+/** Pure: the disposition of every capability under a connectivity mode.
+ * `hasLocalModel` — whether an opt-in bring-your-own local model is configured.
+ * Post-Claude-native cutover there is no built-in local model, so the "Local
+ * model" capability is only surfaced when the operator has configured one. */
+export function describeLocalPosture(mode: ConnectivityMode, hasLocalModel = false): LocalPostureReport {
   const cloud = mode === "cloud-ok";
   const caps: CapabilityPosture[] = [
-    { id: "local", label: "Local model", disposition: "works", action: "run_now", note: "The configured local model runs in every mode." },
+    ...(hasLocalModel
+      ? [{ id: "local", label: "Local model", disposition: "works", action: "run_now", note: "Your configured bring-your-own local model runs in every mode." } as CapabilityPosture]
+      : []),
     { id: "desktopbee", label: "Desktop Lane", disposition: "works", action: "run_now", note: "Native desktop control works offline." },
     {
       id: "coo-router",
@@ -107,15 +113,20 @@ export function describeLocalPosture(mode: ConnectivityMode): LocalPostureReport
   return { mode, capabilities: caps, counts, allHonest: true, summary };
 }
 
-export function describeAllPostures(currentMode: ConnectivityMode): PostureReport {
-  const modes = Object.fromEntries(MODES.map((mode) => [mode, describeLocalPosture(mode)])) as Record<ConnectivityMode, LocalPostureReport>;
+export function describeAllPostures(currentMode: ConnectivityMode, hasLocalModel = false): PostureReport {
+  const modes = Object.fromEntries(MODES.map((mode) => [mode, describeLocalPosture(mode, hasLocalModel)])) as Record<ConnectivityMode, LocalPostureReport>;
   return { current: modes[currentMode], modes };
 }
 
+/** True when the operator has configured an opt-in bring-your-own local model. */
+function localModelConfigured(): boolean {
+  return getLocalModelConfig() !== null;
+}
+
 export function getLocalPostureReport(): LocalPostureReport {
-  return describeLocalPosture(getConnectivityPolicy().mode);
+  return describeLocalPosture(getConnectivityPolicy().mode, localModelConfigured());
 }
 
 export function getPostureReport(): PostureReport {
-  return describeAllPostures(getConnectivityPolicy().mode);
+  return describeAllPostures(getConnectivityPolicy().mode, localModelConfigured());
 }

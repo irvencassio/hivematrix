@@ -15,11 +15,14 @@ test("voice sidecar spoken-turn labels read 'assistant:' not 'bee:'", () => {
   assert.doesNotMatch(live, /print\(f"bee: /);
 });
 
-test("console Talk status text labels the reply 'assistant:' not 'bee:'", () => {
+test("console chat labels the assistant reply with the hexagon, never 'bee:'", () => {
+  // The header push-to-talk "Talk" flow (which rendered an inline 'assistant:'
+  // status line) was removed; the chat transcript labels assistant turns with
+  // the 🌀 hexagon. The scope-wall guard is that no 'bee:' brand label appears.
   const console_ = read("src/daemon/console.ts");
 
-  assert.match(console_, /" {2}· {2}assistant: " \+ res\.reply/);
-  assert.doesNotMatch(console_, /" {2}· {2}bee: " \+ res\.reply/);
+  assert.doesNotMatch(console_, /bee: " \+ res\.reply/);
+  assert.match(console_, /m\.role === 'assistant' \? '🌀'/);
 });
 
 test("user guide documents /lanes first, /bees only as a compatibility alias", () => {

@@ -19,17 +19,26 @@
  * an injectable `LoopCloserDeps` for the impure edges (model call, notify,
  * APNs, persistence) — same shape as `NotifyDeps` in lib/notify/notify.ts.
  *
- * `closeVoiceLoop` is the single entry point the task runner calls at its
+ * `closeVoiceLoop` is one of two entry points the task runner calls at its
  * one terminal-transition hook (src/lib/orchestrator/agent-manager.ts,
  * `handleExit`). It NEVER throws — every failure is caught and logged as a
  * one-line notice, because a notification hiccup must never take down the
  * task runner.
+ *
+ * `closeFlashThread` (below) is a SIBLING concern, called from the same
+ * hook: ANY task escalated off a Flash session — chat or voice, keyed on
+ * `source` starting with "flash:" rather than `output.origin === "voice"` —
+ * gets its result appended back into the originating conversation thread,
+ * idempotently, via `output.threadPostedAt`. It is independent of the
+ * voice-origin OS-notification gate above; a task can satisfy either gate,
+ * both, or neither.
  */
 
 import { notify as defaultNotify } from "@/lib/notify/notify";
 import { sendPush as defaultSendPush } from "@/lib/notify/push";
 import { haikuChatComplete, type ChatComplete } from "@/lib/models/chat-client";
 import { Task } from "@/lib/db";
+import { broadcastEvent } from "@/lib/ws/broadcaster";
 
 export const VOICE_ORIGIN = "voice";
 
@@ -211,5 +220,136 @@ export async function closeVoiceLoop(
     }
   } catch (err) {
     console.error(`[voice-loop-closer] failed for task ${task?._id ?? "?"}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Flash thread close-the-loop — a SIBLING concern to closeVoiceLoop's OS-
+// notification gate above (which requires output.origin === "voice"). Every
+// task escalated off a Flash session (chat OR voice — see flash-mcp.ts's
+// handleEscalateToTask, which stamps `source: flash:${sessionId}` on both
+// paths) must have its result posted back into the originating conversation
+// thread, not just voice ones. This is a separate function with its own gate
+// so it runs for every `flash:` source, never narrowed to voice-only.
+// ---------------------------------------------------------------------------
+
+const FLASH_SOURCE_PREFIX = "flash:";
+
+/** Pure: extract the originating Flash session id from a task's `source`
+ * field (e.g. "flash:abc123" -> "abc123"), or null if this task didn't come
+ * from a Flash session (or the id half is empty/whitespace). */
+export function flashSessionIdFromSource(source?: string | null): string | null {
+  if (!source || !source.startsWith(FLASH_SOURCE_PREFIX)) return null;
+  const id = source.slice(FLASH_SOURCE_PREFIX.length).trim();
+  return id || null;
+}
+
+/** The subset of a Task the thread-poster needs, on top of LoopCloserTask's
+ * fields — just the `source` string that carries the originating session id. */
+export interface FlashThreadTask extends LoopCloserTask {
+  source?: string | null;
+}
+
+/**
+ * True when `task` escalated from a Flash session (chat or voice — any
+ * `source` starting with "flash:"), just reached a terminal state, and
+ * hasn't already been posted back to that thread. Mirrors shouldNotify's
+ * idempotence + terminal-state + waiting_children guards, keyed on
+ * `output.threadPostedAt` instead of `output.loopNotifiedAt` so the two
+ * gates (OS notification vs. thread post) track independently — a task can
+ * satisfy one, both, or neither.
+ */
+export function shouldPostToThread(task: FlashThreadTask | null | undefined): boolean {
+  if (!task) return false;
+  if (!flashSessionIdFromSource(task.source)) return false;
+  const output = task.output ?? {};
+  if (output.threadPostedAt) return false;
+  if (!TERMINAL_STATUSES.has(task.status)) return false;
+  if (task.reviewState === "waiting_children") return false;
+  return true;
+}
+
+/** Append a turn to a Flash session's thread. Injected because voice/ must
+ *  not import flash/ (see flash-mcp.ts's deliverLearnSkillReply comment for
+ *  the mirror rule — flash/ may import voice/, never the reverse) — the
+ *  daemon wires the real `@/lib/flash/store`#appendTurn in at startup via
+ *  `setFlashThreadAppender`, same bridging pattern as
+ *  lib/ws/broadcaster.ts's setBroadcastFn. */
+type FlashAppendTurnFn = (sessionId: string, role: string, content: string) => void;
+
+let _appendFlashTurn: FlashAppendTurnFn | null = null;
+
+/** Daemon-only wiring hook — call once at startup with the real appendTurn. */
+export function setFlashThreadAppender(fn: FlashAppendTurnFn): void {
+  _appendFlashTurn = fn;
+}
+
+function defaultAppendFlashTurn(sessionId: string, role: string, content: string): void {
+  if (!_appendFlashTurn) {
+    console.error("[flash-thread] appendFlashTurn not wired (setFlashThreadAppender) — dropping thread post");
+    return;
+  }
+  _appendFlashTurn(sessionId, role, content);
+}
+
+async function defaultMarkThreadPosted(taskId: string, postedAt: string): Promise<void> {
+  const current = await Task.findById(taskId);
+  const output = { ...((current?.output as Record<string, unknown> | undefined) ?? {}), threadPostedAt: postedAt };
+  await Task.findByIdAndUpdate(taskId, { output });
+}
+
+export interface FlashThreadDeps {
+  chatComplete: ChatComplete;
+  appendTurn: FlashAppendTurnFn;
+  /** SSE fan-out so open clients refresh — emits "flash:appended" {sessionId}. */
+  broadcastEvent: (event: string, data: unknown) => void;
+  /** Persist that this task has been posted. Merges into `output` — never
+   * clobbers the rest of it. */
+  markThreadPosted: (taskId: string, postedAt: string) => Promise<void>;
+  now: () => string;
+}
+
+export const defaultFlashThreadDeps: FlashThreadDeps = {
+  chatComplete: haikuChatComplete,
+  appendTurn: defaultAppendFlashTurn,
+  broadcastEvent,
+  markThreadPosted: defaultMarkThreadPosted,
+  now: () => new Date().toISOString(),
+};
+
+/**
+ * Close the Flash thread loop for one task: idempotent (marks posted before
+ * appending), reuses the same buildLoopMessage template closeVoiceLoop uses
+ * (so a task that is BOTH voice-origin and flash-sourced reads the same way
+ * in the notification and in the thread), fire-and-forget (never throws).
+ *
+ * This is a SIBLING to closeVoiceLoop — callable from the same
+ * terminal-transition hook (agent-manager.ts's handleExit), with its own
+ * independent gate (`shouldPostToThread`) that covers every `flash:` source,
+ * not just voice-origin ones.
+ */
+export async function closeFlashThread(
+  task: FlashThreadTask | null | undefined,
+  deps: FlashThreadDeps = defaultFlashThreadDeps,
+): Promise<void> {
+  try {
+    if (!shouldPostToThread(task)) return;
+    const t = task as FlashThreadTask;
+    const sessionId = flashSessionIdFromSource(t.source) as string;
+
+    const isFailure = FAILURE_STATUSES.has(t.status);
+    const resultText = extractResultText(t);
+    const distilled = isFailure || !resultText ? "" : await distillLoopResult(t.title, resultText, deps.chatComplete);
+    const message = buildLoopMessage(t, distilled);
+
+    // Mark posted BEFORE appending — a slow or failing append must never
+    // cause a duplicate on a later terminal transition, same ordering
+    // rationale as closeVoiceLoop's markNotified-before-send.
+    await deps.markThreadPosted(t._id, deps.now());
+
+    deps.appendTurn(sessionId, "assistant", message);
+    deps.broadcastEvent("flash:appended", { sessionId });
+  } catch (err) {
+    console.error(`[flash-thread] failed for task ${task?._id ?? "?"}: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

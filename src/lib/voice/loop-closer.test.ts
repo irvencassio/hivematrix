@@ -9,12 +9,21 @@ import {
   buildLoopMessage,
   distillLoopResult,
   closeVoiceLoop,
+  flashSessionIdFromSource,
+  shouldPostToThread,
+  closeFlashThread,
   type LoopCloserTask,
   type LoopCloserDeps,
+  type FlashThreadTask,
+  type FlashThreadDeps,
 } from "./loop-closer";
 
 function task(over: Partial<LoopCloserTask> = {}): LoopCloserTask {
   return { _id: "t1", title: "E-bike research", status: "review", output: {}, ...over };
+}
+
+function flashTask(over: Partial<FlashThreadTask> = {}): FlashThreadTask {
+  return { _id: "t1", title: "E-bike research", status: "review", output: {}, source: "flash:sess-1", ...over };
 }
 
 // ---------------------------------------------------------------------------
@@ -242,4 +251,165 @@ test("closeVoiceLoop never throws even when the whole deps object is broken", as
   } as unknown as LoopCloserDeps;
   const t = task({ status: "review", output: { origin: "voice", summary: "hello" } });
   await assert.doesNotReject(closeVoiceLoop(t, brokenDeps));
+});
+
+// ---------------------------------------------------------------------------
+// flashSessionIdFromSource — pure source-string parsing
+// ---------------------------------------------------------------------------
+
+test("flashSessionIdFromSource extracts the session id from a flash: source", () => {
+  assert.equal(flashSessionIdFromSource("flash:sess-123"), "sess-123");
+});
+
+test("flashSessionIdFromSource returns null for non-flash sources and empty ids", () => {
+  assert.equal(flashSessionIdFromSource("dashboard"), null);
+  assert.equal(flashSessionIdFromSource("mission"), null);
+  assert.equal(flashSessionIdFromSource("flash:"), null);
+  assert.equal(flashSessionIdFromSource("flash:   "), null);
+  assert.equal(flashSessionIdFromSource(undefined), null);
+  assert.equal(flashSessionIdFromSource(null), null);
+});
+
+// ---------------------------------------------------------------------------
+// shouldPostToThread — flash: source + idempotence + terminal-state guard
+// (independent of shouldNotify's voice-origin gate)
+// ---------------------------------------------------------------------------
+
+test("shouldPostToThread is true for ANY flash:-sourced task at a terminal state — chat, not just voice", () => {
+  assert.equal(shouldPostToThread(flashTask({ source: "flash:sess-1", output: {}, status: "review" })), true);
+  assert.equal(shouldPostToThread(flashTask({ source: "flash:sess-1", output: {}, status: "done" })), true);
+  assert.equal(shouldPostToThread(flashTask({ source: "flash:sess-1", output: {}, status: "failed" })), true);
+  // Also true when the SAME task is voice-origin (both gates can fire independently).
+  assert.equal(shouldPostToThread(flashTask({ source: "flash:sess-1", output: { origin: "voice" }, status: "review" })), true);
+});
+
+test("shouldPostToThread is false for a non-flash source", () => {
+  assert.equal(shouldPostToThread(flashTask({ source: "dashboard", status: "review" })), false);
+  assert.equal(shouldPostToThread(flashTask({ source: undefined, status: "review" })), false);
+});
+
+test("shouldPostToThread is false once already posted — idempotence guard", () => {
+  assert.equal(
+    shouldPostToThread(flashTask({ output: { threadPostedAt: "2026-07-10T00:00:00Z" }, status: "review" })),
+    false,
+  );
+});
+
+test("shouldPostToThread is false for a task not yet in a terminal state", () => {
+  assert.equal(shouldPostToThread(flashTask({ status: "backlog" })), false);
+  assert.equal(shouldPostToThread(flashTask({ status: "in_progress" })), false);
+});
+
+test("shouldPostToThread is false for a coordinator parked in waiting_children", () => {
+  assert.equal(shouldPostToThread(flashTask({ status: "review", reviewState: "waiting_children" })), false);
+});
+
+test("shouldPostToThread is false for a null/undefined task", () => {
+  assert.equal(shouldPostToThread(null), false);
+  assert.equal(shouldPostToThread(undefined), false);
+});
+
+// ---------------------------------------------------------------------------
+// closeFlashThread — end-to-end orchestration with injected deps
+// ---------------------------------------------------------------------------
+
+function makeThreadDeps(over: Partial<FlashThreadDeps> = {}): { deps: FlashThreadDeps; calls: Record<string, unknown[]> } {
+  const calls: Record<string, unknown[]> = { appendTurn: [], broadcastEvent: [], markThreadPosted: [] };
+  const deps: FlashThreadDeps = {
+    chatComplete: async () => "The Aventon Level.2 is the standout under $2k.",
+    appendTurn: (sessionId: string, role: string, content: string) => { calls.appendTurn.push([sessionId, role, content]); },
+    broadcastEvent: (event: string, data: unknown) => { calls.broadcastEvent.push([event, data]); },
+    markThreadPosted: async (taskId: string, postedAt: string) => { calls.markThreadPosted.push([taskId, postedAt]); },
+    now: () => "2026-07-12T12:00:00Z",
+    ...over,
+  };
+  return { deps, calls };
+}
+
+test("closeFlashThread appends exactly once to the flash: session's thread and emits flash:appended", async () => {
+  const { deps, calls } = makeThreadDeps();
+  const t = flashTask({ source: "flash:sess-1", status: "review", output: { summary: "The Aventon Level.2 wins under $2k." } });
+
+  await closeFlashThread(t, deps);
+
+  assert.equal(calls.appendTurn.length, 1);
+  assert.deepEqual(calls.appendTurn[0], ["sess-1", "assistant", "✅ E-bike research: The Aventon Level.2 is the standout under $2k."]);
+  assert.equal(calls.broadcastEvent.length, 1);
+  assert.deepEqual(calls.broadcastEvent[0], ["flash:appended", { sessionId: "sess-1" }]);
+  assert.deepEqual(calls.markThreadPosted, [["t1", "2026-07-12T12:00:00Z"]]);
+});
+
+test("closeFlashThread also posts back for a CHAT-originated escalation (no voice marker at all) — not voice-only", async () => {
+  const { deps, calls } = makeThreadDeps();
+  // No output.origin === "voice" anywhere — this is a plain chat escalation,
+  // gated purely on source starting with "flash:".
+  const t = flashTask({ source: "flash:chat-sess", status: "done", output: { summary: "Booked the flight." } });
+
+  await closeFlashThread(t, deps);
+
+  assert.equal(calls.appendTurn.length, 1);
+  assert.equal((calls.appendTurn[0] as unknown[])[0], "chat-sess");
+  assert.equal(calls.broadcastEvent.length, 1);
+  assert.deepEqual((calls.broadcastEvent[0] as unknown[])[1], { sessionId: "chat-sess" });
+});
+
+test("closeFlashThread is idempotent: a second terminal transition on the same task never appends twice", async () => {
+  const { deps, calls } = makeThreadDeps();
+  const store: { output: Record<string, unknown> } = { output: { summary: "Done." } };
+  const statefulDeps: FlashThreadDeps = {
+    ...deps,
+    markThreadPosted: async (_taskId, postedAt) => { store.output = { ...store.output, threadPostedAt: postedAt }; },
+  };
+
+  await closeFlashThread(flashTask({ source: "flash:sess-1", output: store.output }), statefulDeps);
+  // Simulate the orchestrator re-fetching the task fresh from the DB on the
+  // next terminal transition — it now reflects the persisted threadPostedAt.
+  await closeFlashThread(flashTask({ source: "flash:sess-1", output: store.output }), statefulDeps);
+
+  assert.equal(calls.appendTurn.length, 1);
+  assert.equal(calls.broadcastEvent.length, 1);
+});
+
+test("closeFlashThread is a no-op for a non-flash source or an already-posted task", async () => {
+  const { deps, calls } = makeThreadDeps();
+  await closeFlashThread(flashTask({ source: "dashboard" }), deps);
+  await closeFlashThread(flashTask({ source: "flash:sess-1", output: { threadPostedAt: "already" } }), deps);
+  assert.deepEqual(calls.appendTurn, []);
+  assert.deepEqual(calls.broadcastEvent, []);
+  assert.deepEqual(calls.markThreadPosted, []);
+});
+
+test("closeFlashThread sends the fixed failure notice (no distillation) for a failed task", async () => {
+  let modelCalled = false;
+  const { deps, calls } = makeThreadDeps({ chatComplete: async () => { modelCalled = true; return "unused"; } });
+  const t = flashTask({ source: "flash:sess-1", status: "failed", output: { summary: "partial trace before the crash" } });
+
+  await closeFlashThread(t, deps);
+
+  assert.equal(modelCalled, false);
+  assert.deepEqual(calls.appendTurn[0], ["sess-1", "assistant", "⚠️ E-bike research didn't finish — it's on the board"]);
+});
+
+test("closeFlashThread never throws even when the whole deps object is broken", async () => {
+  const brokenDeps = {
+    chatComplete: async () => { throw new Error("boom"); },
+    appendTurn: () => { throw new Error("boom"); },
+    broadcastEvent: () => { throw new Error("boom"); },
+    markThreadPosted: async () => { throw new Error("boom"); },
+    now: () => { throw new Error("boom"); },
+  } as unknown as FlashThreadDeps;
+  const t = flashTask({ source: "flash:sess-1", status: "review", output: { summary: "hello" } });
+  await assert.doesNotReject(closeFlashThread(t, brokenDeps));
+});
+
+test("closeFlashThread and closeVoiceLoop are independent gates — a voice+flash task fires both, a chat-only flash task fires only the thread post", async () => {
+  const { deps: threadDeps, calls: threadCalls } = makeThreadDeps();
+  const { deps: voiceDeps, calls: voiceCalls } = makeDeps();
+
+  // Chat-originated: flash: source, but output.origin is NOT "voice".
+  const chatTask = flashTask({ source: "flash:chat-1", status: "review", output: { summary: "Chat result." } });
+  await closeFlashThread(chatTask, threadDeps);
+  await closeVoiceLoop(chatTask, voiceDeps);
+  assert.equal(threadCalls.appendTurn.length, 1, "thread post fires for chat-originated escalation");
+  assert.equal(voiceCalls.notify.length, 0, "OS notification does NOT fire — this task is not voice-origin");
 });

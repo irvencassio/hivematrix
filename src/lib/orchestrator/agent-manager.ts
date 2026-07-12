@@ -19,7 +19,7 @@ import { deliverTrustedMailBeeReply } from "@/lib/mailbee/delivery";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { closeVoiceLoop } from "@/lib/voice/loop-closer";
+import { closeVoiceLoop, closeFlashThread } from "@/lib/voice/loop-closer";
 import {
   notifySuperwhisperSession,
   notifySuperwhisperStreamEvent,
@@ -882,12 +882,18 @@ class AgentManager {
     // state". Every requeue/retry/steer path above returns early and never
     // reaches this line, so landing here always means the run truly stopped
     // (review/done/archived/failed/cancelled). Re-reads the just-persisted
-    // task and, if it originated from voice, texts the operator its outcome.
-    // closeVoiceLoop is idempotent, noise-guarded, and never throws; this call
-    // is deliberately fire-and-forget (not awaited) so a slow model/notify
-    // call can never delay the next agent spawn.
+    // task and: (1) if it originated from voice, texts the operator its
+    // outcome; (2) if it originated from ANY Flash session (chat or voice —
+    // closeFlashThread's own gate, independent of (1)), appends the result
+    // back into that session's thread so reopening chat shows the answer.
+    // Both are idempotent, noise-guarded, and never throw; this call is
+    // deliberately fire-and-forget (not awaited) so a slow model/notify/
+    // append call can never delay the next agent spawn.
     void Task.findById(taskId)
-      .then((finalTask) => closeVoiceLoop(finalTask))
+      .then((finalTask) => {
+        closeVoiceLoop(finalTask);
+        closeFlashThread(finalTask);
+      })
       .catch((err) => console.error(`[voice-loop-closer] lookup failed for task ${taskId}:`, err));
 
     this.broadcaster(taskId, {

@@ -1,7 +1,7 @@
 /**
  * AGENTS.md support — the converged open standard for repo conventions (stack,
  * build/test commands, house style, permission boundaries). Codex/Cursor/Copilot
- * read it natively; Claude Code (reads CLAUDE.md) and the local Qwen agent do NOT,
+ * read it natively; Claude Code (reads CLAUDE.md) does NOT,
  * so HiveMatrix injects it for them so every coding task follows the repo's rules.
  *
  * Per the ETH Zurich finding, the value is in a tight, hand-curated file — we

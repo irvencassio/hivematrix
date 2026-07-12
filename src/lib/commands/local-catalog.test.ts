@@ -73,7 +73,8 @@ test("parseCommandFile infers model compatibility", () => {
   assert.deepEqual(parseCommandFile("---\nmodel: gpt-5\n---\nbody", "c", "/p").compat, ["codex"]);
   assert.deepEqual(parseCommandFile("---\nmodel: chatgpt\n---\nbody", "c", "/p").compat, ["codex"]);
   assert.deepEqual(parseCommandFile("---\nmodel: openai-gpt-5\n---\nbody", "c", "/p").compat, ["codex"]);
-  assert.deepEqual(parseCommandFile("---\nmodel: qwen3\n---\nbody", "c", "/p").compat, ["qwen"]);
+  // qwen is retired — a qwen model hint is now treated as an unknown model → "all".
+  assert.deepEqual(parseCommandFile("---\nmodel: qwen3\n---\nbody", "c", "/p").compat, ["all"]);
   assert.deepEqual(parseCommandFile("---\nmodel: unknown-future-model\n---\nbody", "c", "/p").compat, ["all"]);
   assert.deepEqual(parseCommandFile("---\nmodel: qwen3, unknown-future-model\n---\nbody", "c", "/p").compat, ["all"]);
 });
@@ -129,10 +130,9 @@ test("readManifestBody → null for a missing file", async () => {
   assert.equal(body, null);
 });
 
-test("commandEnabledByProviders: qwen/all/[] always eligible; single-provider gated by enablement", () => {
+test("commandEnabledByProviders: all/[] always eligible; single-provider gated by enablement", () => {
   assert.equal(commandEnabledByProviders([], []), true);
   assert.equal(commandEnabledByProviders(["all"], []), true);
-  assert.equal(commandEnabledByProviders(["qwen"], []), true);
   assert.equal(commandEnabledByProviders(["claude"], ["codex"]), false);
   assert.equal(commandEnabledByProviders(["claude"], ["claude"]), true);
 });

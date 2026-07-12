@@ -96,3 +96,41 @@ test("assembleSystemPrompt omits the skill-library section when the library is e
     rmSync(emptyTmp, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Per-request channel style selection (unified-session follow-on) —
+// store.ts's getOrCreateSession now unifies console+voice into ONE session
+// row for peer "operator" (they share summary/turns), but spoken-vs-text
+// STYLE must still be chosen per REQUEST, not per session: assembleSystemPrompt
+// takes `channel` as an explicit argument, never reads it off a session row,
+// so the exact same prior conversation summary must still get the spoken
+// style for a voice turn and plain style for a console turn.
+// ---------------------------------------------------------------------------
+
+test("assembleSystemPrompt: the SAME session summary still gets spoken style only for a voice-channel request", async () => {
+  const sharedSummary = "The operator asked about e-bikes yesterday.";
+
+  const voicePrompt = await assembleSystemPrompt("what's the weather", sharedSummary, null, "voice");
+  const consolePrompt = await assembleSystemPrompt("what's the weather", sharedSummary, null, "console");
+
+  assert.match(voicePrompt, /reply will be read by text-to-speech/);
+  assert.doesNotMatch(consolePrompt, /reply will be read by text-to-speech/);
+  // Both still carry the shared session summary — proving it's the SAME
+  // unified thread, just rendered with a different per-request style.
+  assert.match(voicePrompt, /The operator asked about e-bikes yesterday\./);
+  assert.match(consolePrompt, /The operator asked about e-bikes yesterday\./);
+});
+
+test("assembleSystemPrompt: watch and glasses are also spoken channels; imessage/mail/android are not", async () => {
+  const watchPrompt = await assembleSystemPrompt("hi", "", null, "watch");
+  const glassesPrompt = await assembleSystemPrompt("hi", "", null, "glasses");
+  const imessagePrompt = await assembleSystemPrompt("hi", "", null, "imessage");
+  const mailPrompt = await assembleSystemPrompt("hi", "", null, "mail");
+  const androidPrompt = await assembleSystemPrompt("hi", "", null, "android");
+
+  assert.match(watchPrompt, /reply will be read by text-to-speech/);
+  assert.match(glassesPrompt, /reply will be read by text-to-speech/);
+  assert.doesNotMatch(imessagePrompt, /reply will be read by text-to-speech/);
+  assert.doesNotMatch(mailPrompt, /reply will be read by text-to-speech/);
+  assert.doesNotMatch(androidPrompt, /reply will be read by text-to-speech/);
+});

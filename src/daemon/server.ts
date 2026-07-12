@@ -17,6 +17,7 @@
  *   GET  /events                     — SSE stream (tasks:*, connectivity:*)
  *   POST /flash/turn                 — Flash Lane: SSE streamed conversational turn
  *   GET  /flash/sessions             — list Flash sessions
+ *   GET  /flash/session/current      — canonical session id for a peer (query: peer)
  *   GET  /flash/sessions/:id/turns   — turns for a Flash session
  *   POST /flash/turns/:id/feedback   — rate a Flash turn (good|bad)
  *   GET  /onboarding/birth-ritual    — persona state (new|existing + name/emoji)
@@ -33,6 +34,8 @@ import type { ConnectivityMode } from "@/lib/connectivity/policy";
 import { setBroadcastFn, setBroadcastEventFn } from "@/lib/ws/broadcaster";
 import { CONSOLE_HTML } from "./console";
 import { getOrCreateToken, tokenEquals, DAEMON_TOKEN_FILE } from "@/lib/auth/token";
+import { appendTurn as appendFlashTurn } from "@/lib/flash/store";
+import { setFlashThreadAppender } from "@/lib/voice/loop-closer";
 
 // SSE client registry
 const sseClients = new Set<ServerResponse>();
@@ -245,6 +248,10 @@ export function createDaemonServer() {
   setBroadcastFn((payload) => broadcast("hive:event", payload));
   // Named-event channel (e.g. voice:result) for in-process modules.
   setBroadcastEventFn((event, data) => broadcast(event, data));
+  // Bridge the Flash thread appender into voice/loop-closer.ts — voice/ must
+  // not import flash/ (only daemon/ may), so closeFlashThread's actual
+  // flash_turns write is injected here, same pattern as the broadcaster above.
+  setFlashThreadAppender(appendFlashTurn);
 
   // Broadcast mode changes over SSE
   policy.on("modeChange", (state) => {
@@ -2254,7 +2261,7 @@ export function createDaemonServer() {
       // in the daemon process, not the MCP server's child stdio process —
       // this route is that bridge. Auth-gated like every other non-public
       // route (the global token check above already covers it). Body:
-      // {args:{...}, brainRoot, sessionId}.
+      // {args:{...}, brainRoot, sessionId, channel}.
       const flashToolMatch = urlPath.match(/^\/flash\/tool\/([a-z_]+)$/);
       if (req.method === "POST" && flashToolMatch) {
         const tool = flashToolMatch[1];
@@ -2266,8 +2273,9 @@ export function createDaemonServer() {
           : {};
         const brainRoot = typeof body.brainRoot === "string" && body.brainRoot ? body.brainRoot : null;
         const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+        const channel = typeof body.channel === "string" && body.channel ? body.channel : undefined;
         try {
-          const result = await dispatchFlashOnlyTool(tool, args, { brainRoot, sessionId });
+          const result = await dispatchFlashOnlyTool(tool, args, { brainRoot, sessionId, channel });
           json(res, result.startsWith("Error") ? 400 : 200, { ok: !result.startsWith("Error"), result });
         } catch (err) {
           json(res, 500, { ok: false, result: `Error: ${err instanceof Error ? err.message : String(err)}` });
@@ -4595,6 +4603,20 @@ export function createDaemonServer() {
       if (req.method === "GET" && urlPath === "/flash/sessions") {
         const { listSessions } = await import("@/lib/flash");
         json(res, 200, { sessions: listSessions(50) });
+        return;
+      }
+
+      // GET /flash/session/current?peer=operator — the canonical session id
+      // for a peer whose sessions are unified across surface channels (see
+      // store.ts's storageChannel — currently just "operator", so desktop
+      // chat and push-to-talk voice share one thread). Lets a client hydrate
+      // the single operator thread on open without guessing which channel
+      // ("console" vs "voice") created it. Response: { sessionId: string | null }.
+      if (req.method === "GET" && urlPath === "/flash/session/current") {
+        const peer = parseQueryString(req.url ?? "").peer || "operator";
+        const { getCurrentSession } = await import("@/lib/flash");
+        const session = getCurrentSession(peer);
+        json(res, 200, { sessionId: session?.id ?? null });
         return;
       }
 

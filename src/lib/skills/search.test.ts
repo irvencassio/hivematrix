@@ -45,7 +45,6 @@ test("no match → empty", () => {
 const mixedLib: SkillIndexEntry[] = [
   e({ name: "claude-only", compat: ["claude"] }),
   e({ name: "codex-only", compat: ["codex"] }),
-  e({ name: "qwen-only", compat: ["qwen"] }),
   e({ name: "claude-and-codex", compat: ["claude", "codex"] }),
   e({ name: "any-harness", compat: ["all"] }),
   e({ name: "empty-compat", compat: [] }),
@@ -59,17 +58,15 @@ test("filterSkillsByHarness: claude sees claude-specific and 'all' skills", () =
   assert.ok(names.includes("any-harness"));
   assert.ok(names.includes("empty-compat")); // empty compat = any
   assert.ok(!names.includes("codex-only"));
-  assert.ok(!names.includes("qwen-only"));
 });
 
-test("filterSkillsByHarness: qwen only sees qwen-specific and 'all' skills", () => {
-  const r = filterSkillsByHarness(mixedLib, "qwen");
+test("filterSkillsByHarness: codex only sees codex-specific and 'all' skills", () => {
+  const r = filterSkillsByHarness(mixedLib, "codex");
   const names = r.map((x) => x.name);
-  assert.ok(names.includes("qwen-only"));
+  assert.ok(names.includes("codex-only"));
+  assert.ok(names.includes("claude-and-codex"));
   assert.ok(names.includes("any-harness"));
   assert.ok(!names.includes("claude-only"));
-  assert.ok(!names.includes("codex-only"));
-  assert.ok(!names.includes("claude-and-codex"));
 });
 
 test("filterSkillsByHarness: empty list stays empty", () => {
@@ -83,7 +80,6 @@ test("getSkillCompatibility returns the entry for a known skill", () => {
   assert.ok(entry !== null, "usageleft must be in the registry");
   assert.equal(entry.claude, true);
   assert.equal(entry.codex, false);
-  assert.equal(entry.qwen, false);
   assert.equal(typeof entry.description, "string");
   assert.ok(entry.description.length > 0);
 });
@@ -93,7 +89,12 @@ test("getSkillCompatibility returns correct flags for a multi-harness skill", ()
   assert.ok(entry !== null);
   assert.equal(entry.claude, true);
   assert.equal(entry.codex, false);
-  assert.equal(entry.qwen, false);
+});
+
+test("getSkillCompatibility registry no longer carries a qwen flag or the retired hive-qwen-readiness skill", () => {
+  const entry = getSkillCompatibility("usageleft")! as unknown as Record<string, unknown>;
+  assert.equal("qwen" in entry, false);
+  assert.equal(getSkillCompatibility("hive-qwen-readiness"), null);
 });
 
 test("getSkillCompatibility returns null for an unknown skill ID", () => {

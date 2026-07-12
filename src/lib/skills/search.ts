@@ -13,7 +13,6 @@ import compatibilityRegistry from "./skill_compatibility.json";
 export interface SkillCompatibilityEntry {
   claude: boolean;
   codex: boolean;
-  qwen: boolean;
   kind: string;
   description: string;
 }

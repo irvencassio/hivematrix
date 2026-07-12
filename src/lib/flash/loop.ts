@@ -69,6 +69,12 @@ export const READ_ONLY_FLASH_TOOLS: ReadonlySet<string> = new Set([
 export interface FlashLoopOptions {
   /** When set, only tools passing the filter are OFFERED to the model. */
   allowedTools?: (name: string) => boolean;
+  /** The real per-surface channel for THIS turn (e.g. "voice", "console") —
+   *  forwarded to the Flash MCP server so tool dispatch (escalate_to_task's
+   *  voice-origin marking, learn_skill's spoken-vs-text ack) can key off the
+   *  actual request surface instead of the session row's (now possibly
+   *  unified) `channel` column. See flash-mcp.ts's FlashMcpOptions.channel. */
+  channel?: string;
   /** Test-only: override the `claude` binary path (e.g. a fake stream-json emitter script). */
   __claudeBinary?: string;
   /** Test-only: override child_process.spawn. */
@@ -529,7 +535,7 @@ export async function runFlashAgentLoop(
   const { configPath, toolNames } = prepareFlashMcp(
     process.env.HIVEMATRIX_PORT ?? "3747",
     process.execPath,
-    { allowedTools: options.allowedTools, brainRoot, ctx, sessionId },
+    { allowedTools: options.allowedTools, brainRoot, ctx, sessionId, channel: options.channel },
   );
 
   const binary = options.__claudeBinary ?? resolveClaudeBinary();

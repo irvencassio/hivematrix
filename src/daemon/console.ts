@@ -1006,9 +1006,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     </span>
     <span class="update-pill" id="updatePill" style="display:none" onclick="applyUpdate()" title="Click to install and restart">⬆ Update</span>
     <span class="hsep"></span>
-    <span class="muted" id="talkStatus" style="display:none;font-size:11px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
-    <button class="gear" id="talkBtn" style="display:none" title="Push to talk" onclick="toggleTalk()">🎤 Talk</button>
-    <button class="gear" id="retryVoiceBtn" style="display:none" title="Voice failed — retry" onclick="retryVoice()">✖</button>
     <button class="gear" id="themeToggle" title="Toggle light / dark theme" onclick="toggleThemeQuick()">🌗</button>
     <button class="gear gear-lg ctx-toggle" id="ctxToggle" title="Hide / show the right panel" onclick="toggleContext()">◨</button>
     <button class="gear gear-lg" title="Settings" onclick="openSettings()">⚙</button>
@@ -1489,7 +1486,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="addShared" style="margin-top:8px;max-height:240px;overflow:auto"></div>
     </div>
     <div class="sk-pane" id="addPane_local" style="display:none">
-      <div class="muted" style="font-size:12px">Bulk-import the folder skills from your local harness profiles (Claude / Codex / Qwen) into the brain library so they can be shared and run as skills.</div>
+      <div class="muted" style="font-size:12px">Bulk-import the folder skills from your local harness profiles (Claude / Codex) into the brain library so they can be shared and run as skills.</div>
       <button class="ok" style="margin-top:10px" onclick="doImportLocal()">Import local folder skills</button>
     </div>
     <div class="muted" id="addStatus" style="font-size:11px;margin-top:10px"></div>
@@ -1875,7 +1872,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="sk-toolbar">
       <input id="skQuery" placeholder="Search skills &amp; commands…" oninput="skQueryInput()" onkeydown="skQueryKeydown(event)" />
       <button class="addbtn" onclick="openAddSkills()" title="Import a skill from a URL, a file, a shared scope, or your local folders">＋ Add</button>
-      <button class="addbtn" onclick="syncSkills()" title="Git-sync all scopes + write skills into the Claude/Codex/Qwen dirs">⇄ Sync</button>
+      <button class="addbtn" onclick="syncSkills()" title="Git-sync all scopes + write skills into the Claude/Codex dirs">⇄ Sync</button>
     </div>
     <div id="skList" class="sk-list"></div>
     <div id="skDetail" class="sk-detail" style="display:none"></div>
@@ -2229,7 +2226,7 @@ function renderBoard() {
               + '<span class="mdl-card-name" style="min-width:0" title="'+esc(t.title||t._id)+'">'+esc(t.title||t._id)+'</span>'
               + '<div style="flex:0 0 auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
               + cardRoleBadge(t)
-              + (t.model?'<span class="badge model">'+esc(t.model)+'</span>':'')
+              + taskModelBadge(t.model)
               + (t.reviewState?'<span class="badge">'+esc(t.reviewState)+'</span>':'')
               + ageBadge(t)+'</div>'
               + '</div>'
@@ -2786,6 +2783,18 @@ function obsModelLabel(model) {
 }
 
 
+// Board card model badge. Claude/Codex ids collapse to a friendly tier/name via
+// obsModelLabel; ids from the retired pre-cutover local stack (qwen / Rapid-MLX)
+// that still linger on old task rows render as a neutral "local (legacy)" chip
+// instead of the raw internal id like "qwen3.6-27b-4bit".
+function taskModelBadge(model) {
+  if (!model) return '';
+  const m = String(model).toLowerCase();
+  if (m.indexOf('qwen') === 0 || m.indexOf('rapid-mlx') >= 0 || m.indexOf('mlx') >= 0 || /\d+b-\d+bit/.test(m)) {
+    return '<span class="badge model" title="' + esc(model) + '">local (legacy)</span>';
+  }
+  return '<span class="badge model">' + esc(obsModelLabel(model)) + '</span>';
+}
 function fmtMs(ms) {
   if (ms == null) return "—";
   if (ms < 1000) return Math.round(ms) + "ms";
@@ -3287,7 +3296,6 @@ function compatValues(it) {
 function compatLabel(value) {
   if (value === 'claude') return 'Claude';
   if (value === 'codex') return 'ChatGPT';
-  if (value === 'qwen') return 'Qwen(local)';
   return 'All';
 }
 function compatSearchText(it) {
@@ -6511,7 +6519,6 @@ function renderVoiceLogicResults(r) {
 }
 
 // ── In-app push-to-talk (Voice feature) ───────────────────────────────
-let _talkRec = null, _talkChunks = [];
 let _dictRec = null, _dictChunks = [];
 let _voiceOn = true; // corrected on first /settings/features fetch; gates the composer mic
 async function initVoiceFeature() {
@@ -6519,8 +6526,6 @@ async function initVoiceFeature() {
     const r = await api("/settings/features");
     const on = ((r && r.features) || []).some(f => f.key === "voice" && f.enabled);
     _voiceOn = on;
-    const btn = document.getElementById("talkBtn");
-    if (btn) btn.style.display = on ? "" : "none";
     const mic = document.getElementById("flashMicBtn");
     if (mic) mic.style.display = on ? "" : "none";
   } catch (e) { /* ignore */ }
@@ -6583,6 +6588,36 @@ function showFlashPanel() {
   updateFlashNav();
   updateBrainNav();
   updateRolesNav();
+  hydrateFlashThread(); // pull the unified operator thread (incl. voice/task-completion posts)
+}
+
+// Load the canonical operator conversation (shared by chat + voice + task
+// close-the-loop posts) from the server and render it. Best-effort; never
+// clobbers an in-flight streaming turn (guarded by _flashState.sending).
+async function hydrateFlashThread() {
+  if (_flashState.sending) return;
+  try {
+    const cur = await api('/flash/session/current?peer=operator');
+    const sid = cur && cur.sessionId;
+    if (!sid) return;
+    _flashState.sessionId = sid;
+    const r = await api('/flash/sessions/' + encodeURIComponent(sid) + '/turns');
+    const turns = (r && r.turns) || [];
+    _flashState.messages = turns
+      .filter(function (t) { return t.role === 'user' || t.role === 'assistant'; })
+      .map(function (t) { return { role: t.role, content: t.content, ts: t.ts ? Date.parse(t.ts) : undefined }; });
+    if (_flashState.panelOpen && !_flashState.sending) flashRenderMessages();
+  } catch (e) { /* best-effort; keep whatever is on screen */ }
+}
+
+// SSE: a task completion (or another surface) appended to the operator thread.
+function onFlashAppended(ev) {
+  if (!_flashState.panelOpen || _flashState.sending) return;
+  try {
+    const data = ev && ev.data ? JSON.parse(ev.data) : null;
+    if (data && data.sessionId && _flashState.sessionId && data.sessionId !== _flashState.sessionId) return;
+  } catch (e) { /* refresh anyway */ }
+  hydrateFlashThread();
 }
 
 function updateFlashNav() {
@@ -7623,69 +7658,12 @@ function flashFocusInput() {
   if (input) input.focus();
 }
 
-function talkStatus(msg, show) {
-  const el = document.getElementById("talkStatus");
-  if (!el) return;
-  el.textContent = msg || "";
-  el.style.display = show ? "" : "none";
-}
 function blobToB64(blob) {
   return new Promise(res => { const fr = new FileReader(); fr.onloadend = () => res(String(fr.result).split(",")[1]); fr.readAsDataURL(blob); });
 }
-async function toggleTalk() {
-  const btn = document.getElementById("talkBtn");
-  if (_talkRec && _talkRec.state === "recording") { _talkRec.stop(); return; }
-  let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-  catch (e) { talkStatus("mic blocked — allow microphone access", true); voiceFallback("Microphone permission denied. Type your message instead."); return; }
-  _talkChunks = [];
-  _talkRec = new MediaRecorder(stream);
-  _talkRec.ondataavailable = e => { if (e.data && e.data.size) _talkChunks.push(e.data); };
-  _talkRec.onerror = () => { voiceFallback("Recording error. Type your message instead."); };
-  _talkRec.onstop = async () => {
-    stream.getTracks().forEach(t => t.stop());
-    btn.textContent = "… thinking"; talkStatus("transcribing…", true);
-    try {
-      const b64 = await blobToB64(new Blob(_talkChunks, { type: "audio/webm" }));
-      const res = await api("/voice/turn", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audioBase64: b64 }) });
-      if (res && res.error) { talkStatus(res.error, true); voiceFallback(res.error + " Type your message instead."); }
-      else {
-        if (res && res.audioBase64) { new Audio("data:audio/mp4;base64," + res.audioBase64).play().catch(e => console.warn("[talk] audio playback failed:", e)); }
-        talkStatus((res && res.transcript ? "you: " + res.transcript : "") + (res && res.reply ? "  ·  assistant: " + res.reply : ""), true);
-      }
-    } catch (e) { talkStatus("voice turn failed", true); voiceFallback("Voice turn failed. Type your message instead."); }
-    btn.textContent = "🎤 Talk";
-  };
-  _talkRec.start();
-  btn.textContent = "■ Stop"; talkStatus("listening… (click Stop when done)", true);
-}
-
-function voiceFallback(fallbackMsg) {
-  showFlashPanel();
-  const input = document.getElementById("flashInput");
-  if (input) {
-    input.value = fallbackMsg + "\n";
-    input.focus();
-    flashInputResize(input);
-  }
-  const retryBtn = document.getElementById("retryVoiceBtn");
-  if (retryBtn) retryBtn.style.display = "";
-  const talkBtn = document.getElementById("talkBtn");
-  if (talkBtn) talkBtn.style.display = "none";
-  talkStatus(fallbackMsg, true);
-}
-
-function retryVoice() {
-  const retryBtn = document.getElementById("retryVoiceBtn");
-  if (retryBtn) retryBtn.style.display = "none";
-  const talkBtn = document.getElementById("talkBtn");
-  if (talkBtn) talkBtn.style.display = "";
-  talkStatus("", false);
-}
-
 // Composer dictation mic (button sits above Send): record → STT-only →
-// drop the transcript into #flashInput for the operator to review and send.
-// Distinct from toggleTalk (header), which runs a full spoken voice turn.
+// transcript → auto-send. This is the only voice input on desktop (the header
+// "Talk" button was removed). /voice/turn still backs watch/glasses/mobile.
 async function flashDictate() {
   const btn = document.getElementById("flashMicBtn");
   const input = document.getElementById("flashInput");
@@ -7707,8 +7685,9 @@ async function flashDictate() {
       else if (res && res.transcript && input) {
         const cur = input.value || "";
         input.value = (cur && !/\s$/.test(cur)) ? cur + " " + res.transcript : cur + res.transcript;
-        input.focus();
         flashInputResize(input); // resizes + enables Send
+        // Auto-send on stop — dictation is speak → stop → sent, no extra click.
+        if (input.value.trim()) flashSend();
       } else { hmToast("Didn't catch that — try again.", ""); }
     } catch (e) { hmToast("Dictation failed — type your message instead.", "err"); }
     if (btn) { btn.textContent = "🎤 Mic"; btn.disabled = false; }
@@ -9249,6 +9228,7 @@ function connectSSE() {
     es.addEventListener("directives:deleted", refresh);
     es.addEventListener("connectivity:change", refresh);
     es.addEventListener("brain:changed", onBrainChanged);
+    es.addEventListener("flash:appended", onFlashAppended);
     es.onerror = () => { live.className = "live stale"; live.textContent = "● reconnecting"; };
   } catch (e) { /* polling covers it */ }
 }

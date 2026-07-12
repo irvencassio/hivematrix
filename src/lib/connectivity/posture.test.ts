@@ -9,12 +9,16 @@ test("cloud-ok: everything works", () => {
   assert.equal(r.allHonest, true);
 });
 
+test("no local model configured (default): the Local model capability is absent", () => {
+  // Post-Claude-native cutover there is no built-in local model, so the row
+  // must not appear (and must never claim "works") unless one is configured.
+  const r = describeLocalPosture("offline");
+  assert.equal(r.capabilities.find((c) => c.id === "local"), undefined);
+});
+
 test("offline: local workhorses work, image degrades, cloud work queues — nothing silent", () => {
   const r = describeLocalPosture("offline");
   const by = (id: string) => r.capabilities.find((c) => c.id === id)!;
-  assert.equal(by("local").disposition, "works");
-  assert.equal(by("local").label, "Local model");
-  assert.doesNotMatch(by("local").note, /qwen/i);
   assert.equal(by("desktopbee").disposition, "works");
   assert.equal(by("desktopbee").label, "Desktop Lane");
   assert.equal(by("image").disposition, "degraded");        // mflux fallback
@@ -27,9 +31,20 @@ test("offline: local workhorses work, image degrades, cloud work queues — noth
   assert.equal(r.allHonest, true);
   assert.match(r.summary, /Nothing silently fails/);
   assert.equal(by("coo-router").disposition, "works"); // routing is local; only execution waits
-  assert.equal(r.counts.works, 3);
+  // No local model configured → works = desktopbee + coo-router.
+  assert.equal(r.counts.works, 2);
   assert.equal(r.counts.degraded, 1);
   assert.equal(r.counts.queued, 4);
+});
+
+test("offline WITH an opt-in local model: the Local model capability appears and works", () => {
+  const r = describeLocalPosture("offline", true);
+  const local = r.capabilities.find((c) => c.id === "local")!;
+  assert.ok(local, "local capability should be present when a local model is configured");
+  assert.equal(local.disposition, "works");
+  assert.equal(local.label, "Local model");
+  assert.doesNotMatch(local.note, /qwen/i);
+  assert.equal(r.counts.works, 3); // + local
 });
 
 test("local-only mirrors offline for cloud-needing capabilities", () => {

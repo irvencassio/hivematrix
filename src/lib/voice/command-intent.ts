@@ -413,7 +413,7 @@ export function createdTaskReply(title: string): string {
 export function connectivityReply(mode: string): string {
   switch (mode) {
     case "cloud-ok": return "We're online — cloud models are available.";
-    case "local-only": return "Running local-only — on-device models, no cloud.";
+    case "local-only": return "Running local-only — cloud work is queued until you're back online.";
     case "offline": return "We're offline — no network calls.";
     default: return `Connectivity mode is ${mode}.`;
   }

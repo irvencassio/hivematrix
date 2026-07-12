@@ -367,13 +367,18 @@ test("app icon is a single fixed identity (no light/dark toggle)", () => {
   assert.doesNotMatch(js, /saveAppIconChoice/);
 });
 
-test("in-app Talk button is gated by the voice feature flag", () => {
-  assert.match(CONSOLE_HTML, /id="talkBtn" style="display:none"/, "Talk button hidden by default");
+test("voice input is the composer dictation mic (Talk button removed), gated by the voice flag", () => {
+  // The old header "Talk" push-to-talk button was removed; the only desktop
+  // voice input is the dictation mic in the chat composer (above Send), and it
+  // is still gated by the voice feature flag.
+  assert.doesNotMatch(CONSOLE_HTML, /id="talkBtn"/, "header Talk button removed");
   const js = extractScript(CONSOLE_HTML);
+  assert.doesNotMatch(js, /function toggleTalk\(/, "toggleTalk removed");
+  assert.match(CONSOLE_HTML, /id="flashMicBtn"/, "composer dictation mic present");
   assert.match(js, /async function initVoiceFeature\(/);
   assert.match(js, /f\.key === "voice" && f\.enabled/, "shown only when the voice flag is on");
-  assert.match(js, /async function toggleTalk\(/);
-  assert.match(js, /\/voice\/turn/, "posts a turn to the daemon");
+  assert.match(js, /async function flashDictate\(/, "composer dictation handler present");
+  assert.match(js, /\/voice\/transcribe/, "dictation posts audio to the transcribe route");
   assert.match(js, /MediaRecorder/, "captures the mic");
 });
 
@@ -1083,7 +1088,6 @@ test("skills & commands render in one unified, searchable section", () => {
   assert.match(js, /function commandMetaChips\(/, "metadata chips helper present");
   assert.match(js, /function compatLabel\(/, "compatibility label helper present");
   assert.match(js, /function compatChips\(/, "compatibility chips helper present");
-  assert.match(js, /Qwen\(local\)/, "Qwen local compatibility label present");
   assert.match(js, /ChatGPT/, "Codex compatibility is labeled as ChatGPT");
   assert.match(js, /compatSearchText\(it\)/, "compatibility participates in catalog search");
   assert.match(js, /catalog: local profile catalog/, "command inspect copy is provider-neutral");
@@ -1124,11 +1128,11 @@ test("skills compatibility helpers label, search, and render chips behaviorally"
   };
   const helpers = factory();
   assert.equal(helpers.compatLabel("codex"), "ChatGPT");
-  assert.equal(helpers.compatLabel("qwen"), "Qwen(local)");
+  assert.equal(helpers.compatLabel("claude"), "Claude");
   assert.match(helpers.compatSearchText({ raw: { compat: ["codex"] } }), /codex ChatGPT/);
-  const chips = helpers.compatChips({ raw: { compat: ["qwen"] } });
+  const chips = helpers.compatChips({ raw: { compat: ["codex"] } });
   assert.match(chips, /class="compat-chip"/);
-  assert.match(chips, /Qwen\(local\)/);
+  assert.match(chips, /ChatGPT/);
 });
 
 test("header is grouped into zones with a theme toggle; connectivity folds into the single ● live indicator, not a redundant pill", () => {
@@ -2352,13 +2356,6 @@ test("runSelectedCommand success message reports project mismatch when board fil
 
   // When no board filter is active the plain "see the board" fallback is used.
   assert.match(body, /see the board/, "default success message remains available for the no-filter case");
-});
-
-test("talk audio playback handles the async play() rejection (sync try/catch cannot see it)", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // Audio.play() returns a promise; autoplay blocking rejects it AFTER the
-  // sync try/catch has exited, so the rejection must be handled with .catch().
-  assert.match(js, /\.play\(\)\.catch\(/, "Audio playback must attach a .catch to the play() promise");
 });
 
 test("command options picker: panels render options and Run assembles from picks", () => {

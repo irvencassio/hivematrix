@@ -181,9 +181,10 @@ export async function buildSystemPrompt(projectPath: string, agentType: string, 
   if (routingGuide) {
     prompt += `\n\n${routingGuide}`;
   }
-  // Skill library index, filtered to skills compatible with THIS harness (the
-  // local/Qwen agent) — chief-of-staff awareness of skill compatibility. Bounded.
-  const skillIndex = formatSkillIndex((await listSkills()).filter((s) => s.trusted && skillRunsOn(s.compat, "qwen")));
+  // Skill library index, filtered to harness-agnostic skills (this generic/local
+  // agent is not one of the named export harnesses) — chief-of-staff awareness of
+  // skill compatibility. Bounded.
+  const skillIndex = formatSkillIndex((await listSkills()).filter((s) => s.trusted && skillRunsOn(s.compat, "all")));
   if (skillIndex) {
     prompt += `\n\n${skillIndex}`;
   }

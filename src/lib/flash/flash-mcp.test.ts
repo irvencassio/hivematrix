@@ -17,6 +17,7 @@ import {
   deliverLearnSkillReply,
   resolveEscalationTarget,
   selfImproveRepoPath,
+  escalationIsVoice,
 } from "./flash-mcp";
 import type { LaneToolContext } from "@/lib/orchestrator/lane-tools";
 import type { AcquireResult } from "@/lib/skills/acquire";
@@ -414,6 +415,49 @@ test("resolveEscalationTarget: neither kind nor HiveMatrix mention — projectPa
   assert.equal(withoutArg.isSelfImprove, false);
   assert.equal(withoutArg.projectPath, homedir());
   assert.equal(withoutArg.description, "Archive old newsletters.");
+});
+
+// ------------------------------------------------------------------
+// escalationIsVoice (unified-session follow-on) — after store.ts's
+// getOrCreateSession collapses console+voice into one shared "operator"
+// session row, the session row's `channel` column can no longer answer
+// "was THIS turn voice?" (see store.ts's storageChannel). escalate_to_task
+// now keys voice-origin marking off the REQUEST's channel (threaded through
+// loop.ts -> flash-mcp's MCP env -> this pure helper) instead of a
+// getSession(sessionId)?.channel lookup.
+// ------------------------------------------------------------------
+
+test("escalationIsVoice is true only for the literal 'voice' channel", () => {
+  assert.equal(escalationIsVoice("voice"), true);
+  assert.equal(escalationIsVoice("console"), false);
+  assert.equal(escalationIsVoice("watch"), false);
+  assert.equal(escalationIsVoice(""), false);
+  assert.equal(escalationIsVoice(undefined), false);
+});
+
+// ------------------------------------------------------------------
+// prepareFlashMcp channel plumbing — the per-request channel must reach the
+// MCP child (HIVE_FLASH_CHANNEL) so dispatchFlashOnlyTool receives it via
+// the generated server's postJson body, independent of session storage.
+// ------------------------------------------------------------------
+
+test("prepareFlashMcp writes the per-request channel into the MCP config env as HIVE_FLASH_CHANNEL", () => {
+  const ctx: LaneToolContext = { projectPath: "/tmp", project: "hivematrix", requestedBy: "flash:s1" };
+  const { configPath } = prepareFlashMcp("3747", process.execPath, { brainRoot: null, ctx, sessionId: "s1", channel: "voice" });
+  const config = JSON.parse(readFileSync(configPath, "utf-8"));
+  assert.equal(config.mcpServers[FLASH_MCP_SERVER_NAME].env.HIVE_FLASH_CHANNEL, "voice");
+});
+
+test("prepareFlashMcp defaults HIVE_FLASH_CHANNEL to empty string when no channel is given", () => {
+  const ctx: LaneToolContext = { projectPath: "/tmp", project: "hivematrix", requestedBy: "flash:s1" };
+  const { configPath } = prepareFlashMcp("3747", process.execPath, { brainRoot: null, ctx, sessionId: "s1" });
+  const config = JSON.parse(readFileSync(configPath, "utf-8"));
+  assert.equal(config.mcpServers[FLASH_MCP_SERVER_NAME].env.HIVE_FLASH_CHANNEL, "");
+});
+
+test("generated server: the flash-only postJson body forwards CHANNEL alongside sessionId", () => {
+  assert.match(FLASH_MCP_SERVER_JS, /HIVE_FLASH_CHANNEL/);
+  assert.match(FLASH_MCP_SERVER_JS, /channel:\s*CHANNEL/);
 });
 
 test("selfImproveRepoPath: falls back to process.cwd() when selfImprove.repoPath is unset", () => {

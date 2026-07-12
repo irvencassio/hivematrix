@@ -1,236 +1,197 @@
 {
   "version": "1.0.0",
-  "description": "Skill compatibility registry mapping skill IDs to supported AI harnesses. Each skill entry has boolean flags for 'claude', 'codex', and 'qwen' indicating which harnesses can run it.",
-  "knownHarnesses": ["claude", "codex", "qwen"],
+  "description": "Skill compatibility registry mapping skill IDs to supported AI harnesses. Each skill entry has boolean flags for 'claude' and 'codex' indicating which harnesses can run it.",
+  "knownHarnesses": ["claude", "codex"],
   "skills": {
     "android-screenshots": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Pull screenshots from a USB-attached Android device via adb"
     },
     "bible-study": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Study a Bible passage with full text, background, and visual HTML infographic"
     },
     "brain-chat": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Save useful conversation output as a brain document"
     },
     "brain-name": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Generate a file-safe name for a brain document"
     },
     "brain-url": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Fetch a URL and save its content as a brain document"
     },
     "calendar": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Show today's calendar events using EventKit (Exchange/Outlook support)"
     },
     "claude-docs": {
       "claude": true,
       "codex": false,
-      "qwen": false,
       "kind": "instruction",
       "description": "Fetch and cache Claude Code documentation from Anthropic's website"
     },
     "deletemail": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Delete mail matching criteria from Apple Mail accounts"
     },
     "digi": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Switch to the Digital Dashboard (digibot) project directory"
     },
     "enrich-spreadsheet": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Enrich a Knox device spreadsheet with MongoDB store information"
     },
     "hive-desktopbee-proof": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "script",
       "description": "Prove the DesktopBee helper — AX query/act, AppleScript/JXA, capture, approval gate"
-    },
-    "hive-qwen-readiness": {
-      "claude": true,
-      "codex": true,
-      "qwen": true,
-      "kind": "script",
-      "description": "Check the local Qwen model's readiness — serving, tool-calls, think-separation, decode rate"
     },
     "hive-run-all-proofs": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "script",
       "description": "Run every HiveMatrix proof/health check in sequence and report pass/fail"
     },
     "hive-scope-wall": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "script",
       "description": "Run the architecture scope-wall guard against forbidden brands/surfaces"
     },
     "hive-soak": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "script",
       "description": "Run HiveMatrix soak scenarios (usage-exhaustion → local-only degrade → restore)"
     },
     "hive-update-proof": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "script",
       "description": "Prove the update-apply path — backup, migrations, relaunch, self-check, rollback"
     },
     "hive-verify-release": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "script",
       "description": "Prove the live auto-update feed — versions, tag, GitHub release, and latest.json agree"
     },
     "mobile-sync": {
       "claude": true,
       "codex": false,
-      "qwen": false,
       "kind": "instruction",
       "description": "Generate a business-context briefing for use with Claude mobile app"
     },
     "mongo": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Fetch sample documents from a MongoDB collection as schema reference context"
     },
     "mongoq": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Read-only ad-hoc query CLI over the Atlas digibot MongoDB"
     },
     "n-agentic-harnesses": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Design and evaluate agentic harnesses for AI-powered developer tools"
     },
     "present": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Generate a single offline-ready HTML presentation with keyboard navigation"
     },
     "projectref": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Create or update a brain project reference with architecture overview and Mermaid diagrams"
     },
     "pushall": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Commit and push all unpushed git changes across known project directories"
     },
     "release-hivematrix": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "script",
       "description": "Deterministically release HiveMatrix — bump, build signed app+DMG, publish update feed"
     },
     "resume": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Resume a previously suspended session by injecting a saved context file"
     },
     "screenshot": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "View the most recent screenshots from the Drive screenshots folder"
     },
     "storelookup": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Full deep-dive lookup on any EssilorLuxottica retail store"
     },
     "suspend": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Suspend the current session by capturing full context into a resume file"
     },
     "symlinks": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Show all symlinks across Claude Code config profiles"
     },
     "topemail": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Pull most recent emails from key contacts across Apple Mail accounts"
     },
     "usageleft": {
       "claude": true,
       "codex": false,
-      "qwen": false,
       "kind": "instruction",
       "description": "Check Claude usage vs. daily/weekly allotment with visual bar graphs"
     },
     "weekly-ai-roundup": {
       "claude": true,
       "codex": true,
-      "qwen": true,
       "kind": "instruction",
       "description": "Research this week's AI news and generate a newsletter and meeting topic document"
     }

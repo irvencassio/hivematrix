@@ -18,6 +18,18 @@
  * wiring end to end, short only of the LLM itself deciding to emit the tool
  * call — exactly the boundary the earlier provers also draw the line at.
  *
+ * Unified-session follow-on: since store.ts's getOrCreateSession now collapses
+ * console+voice into ONE shared session row for peer "operator" (see
+ * storageChannel), the session row's own `channel` column can no longer answer
+ * "was this turn voice?" for an arbitrary peer/session. escalate_to_task's
+ * voice-origin marking (flash-mcp.ts's `escalationIsVoice`) now keys off the
+ * REQUEST's channel instead — threaded through loop.ts's FlashLoopOptions ->
+ * prepareFlashMcp's HIVE_FLASH_CHANNEL env -> the generated MCP server's
+ * postJson body -> server.ts's `/flash/tool/:name` route -> dispatchFlashOnlyTool.
+ * This test passes `channel` explicitly to `dispatchFlashOnlyTool` to mirror
+ * that real per-turn plumbing (still creating a real "voice" session too, to
+ * prove the rest of the machinery — task creation, repo routing — end to end).
+ *
  * Test 2 closes the loop from the other end (pure, no dispatch): it asserts
  * `detectCommandIntent` hands this exact utterance off as `{ kind: "none" }`,
  * i.e. the P3.3 regex guard does NOT intercept it — which is what lets the
@@ -73,7 +85,7 @@ test("self-improvement escalation lands in the HiveMatrix repo with workflow wor
       description: "update hivematrix so it can read my calendar",
       kind: "self-improvement",
     },
-    { brainRoot: null, sessionId: session.id },
+    { brainRoot: null, sessionId: session.id, channel: "voice" },
   );
 
   const match = result.match(/^Escalated to task (\S+):/);
@@ -114,7 +126,7 @@ test("control: a non-self-improvement escalation from a non-voice session does n
   const result = await dispatchFlashOnlyTool(
     "escalate_to_task",
     { title: "X", description: "book a flight to NYC" },
-    { brainRoot: null, sessionId: session.id },
+    { brainRoot: null, sessionId: session.id, channel: "console" },
   );
 
   const match = result.match(/^Escalated to task (\S+):/);

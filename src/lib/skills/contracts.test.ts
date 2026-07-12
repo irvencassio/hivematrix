@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { skillSlug, skillFilename, renderSkillFile, parseSkillFile, formatSkillIndex, skillRunsOn, skillHasInput, applySkillInput, skillEnabledByProviders, skillAppliesToRole, type Skill } from "./contracts";
+import { SKILL_HARNESSES, skillSlug, skillFilename, renderSkillFile, parseSkillFile, formatSkillIndex, skillRunsOn, skillHasInput, applySkillInput, skillEnabledByProviders, skillAppliesToRole, type Skill } from "./contracts";
+
+test("SKILL_HARNESSES is exactly claude + codex — qwen-code was retired as a skill-export harness", () => {
+  assert.deepEqual(SKILL_HARNESSES, ["claude", "codex"]);
+});
 
 function skill(over: Partial<Skill> = {}): Skill {
   return {
@@ -62,19 +66,18 @@ test("failures + probation are omitted from rendered frontmatter at default valu
 });
 
 test("compat round-trips and skillRunsOn gates by harness", () => {
-  const s = skill({ compat: ["claude", "codex"] });
+  const s = skill({ compat: ["claude"] });
   const parsed = parseSkillFile(renderSkillFile(s))!;
-  assert.deepEqual(parsed.compat, ["claude", "codex"]);
+  assert.deepEqual(parsed.compat, ["claude"]);
   assert.equal(skillRunsOn(parsed.compat, "claude"), true);
-  assert.equal(skillRunsOn(parsed.compat, "qwen"), false);
-  assert.equal(skillRunsOn(["all"], "qwen"), true);
-  assert.equal(skillRunsOn([], "qwen"), true); // empty = any
+  assert.equal(skillRunsOn(parsed.compat, "codex"), false);
+  assert.equal(skillRunsOn(["all"], "codex"), true);
+  assert.equal(skillRunsOn([], "codex"), true); // empty = any
 });
 
-test("skillEnabledByProviders: qwen/all/[] always eligible regardless of enablement", () => {
+test("skillEnabledByProviders: all/[] always eligible regardless of enablement", () => {
   assert.equal(skillEnabledByProviders([], []), true);
   assert.equal(skillEnabledByProviders(["all"], []), true);
-  assert.equal(skillEnabledByProviders(["qwen"], []), true);
 });
 
 test("roles is absent from rendered frontmatter when empty, and parses back to [] — proving backward compat", () => {

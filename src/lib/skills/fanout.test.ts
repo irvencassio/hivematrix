@@ -16,27 +16,34 @@ function skill(p: Partial<Skill>): Skill {
 }
 
 test("planFanout: trust gate + compat gate + removal of dropped slugs", () => {
-  const targets: HarnessTarget[] = [{ id: "claude", dir: "/c" }, { id: "qwen", dir: "/q" }];
+  const targets: HarnessTarget[] = [{ id: "claude", dir: "/c" }, { id: "codex", dir: "/x" }];
   const skills = [
     skill({ name: "shared", compat: ["all"], trusted: true }),
     skill({ name: "claude-only", compat: ["claude"], trusted: true }),
     skill({ name: "untrusted", compat: ["all"], trusted: false }),
   ];
-  const managed = { claude: ["old-gone"], qwen: ["old-gone"] };
+  const managed = { claude: ["old-gone"], codex: ["old-gone"] };
   const plans = planFanout(skills, targets, managed);
   const claude = plans.find((p) => p.id === "claude")!;
-  const qwen = plans.find((p) => p.id === "qwen")!;
+  const codex = plans.find((p) => p.id === "codex")!;
   assert.deepEqual(claude.write.sort(), ["claude-only", "shared"]); // untrusted excluded
-  assert.deepEqual(qwen.write.sort(), ["shared"]);                  // claude-only excluded by compat
+  assert.deepEqual(codex.write.sort(), ["shared"]);                 // claude-only excluded by compat
   assert.deepEqual(claude.remove, ["old-gone"]);                    // previously managed, now gone
 });
 
 test("renderStandardSkillMd emits spec frontmatter (name=slug, metadata) + body", () => {
-  const md = renderStandardSkillMd(skill({ name: "My Skill", description: "does X", kind: "script", compat: ["claude", "qwen"] }));
+  const md = renderStandardSkillMd(skill({ name: "My Skill", description: "does X", kind: "script", compat: ["claude", "codex"] }));
   assert.match(md, /^---\nname: my-skill\n/);
   assert.match(md, /description: does X/);
-  assert.match(md, /metadata:\n {2}kind: script\n {2}compat: claude, qwen/);
+  assert.match(md, /metadata:\n {2}kind: script\n {2}compat: claude, codex/);
   assert.match(md, /\nbody\n/);
+});
+
+test("harnessTargets: only claude and codex — qwen-code was retired as a skill-export harness", () => {
+  const home = "/tmp/fanout-home-test";
+  const targets = harnessTargets(home);
+  assert.deepEqual(targets.map((t) => t.id).sort(), ["claude", "codex"]);
+  assert.ok(!targets.some((t) => t.dir.includes(".qwen")), "fanout must never write to ~/.qwen");
 });
 
 test("fanOutSkills writes <slug>/SKILL.md, prunes removed, and won't clobber unmanaged", async () => {

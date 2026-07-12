@@ -297,9 +297,19 @@ export function selfImproveRepoPath(): string {
   return configured || process.cwd();
 }
 
-async function handleEscalateToTask(args: Record<string, unknown>, sessionId: string): Promise<string> {
+/** Pure: whether an escalation made on this per-request channel should be
+ * marked voice-origin for the loop-closer's OS-notification gate. Reads the
+ * REQUEST's channel (threaded through from loop.ts -> prepareFlashMcp ->
+ * the MCP env -> this dispatch call), NOT the session row's `channel` column
+ * — that column may now be collapsed to a shared "operator" value across
+ * console+voice sessions (see store.ts's storageChannel), so it can no
+ * longer answer "was THIS turn voice?". */
+export function escalationIsVoice(channel?: string): boolean {
+  return channel === "voice";
+}
+
+async function handleEscalateToTask(args: Record<string, unknown>, sessionId: string, channel?: string): Promise<string> {
   const { Task, generateId } = await import("@/lib/db");
-  const { getSession } = await import("./store");
   const { markVoiceOrigin } = await import("@/lib/voice/loop-closer");
 
   const title = String(args.title ?? "Task");
@@ -314,11 +324,11 @@ async function handleEscalateToTask(args: Record<string, unknown>, sessionId: st
     repoPath: selfImproveRepoPath(),
   });
 
-  // A task escalated from a voice-channel flash session gets the same
+  // A task escalated from a voice-channel flash turn gets the same
   // voice-origin marker the /voice/session route uses, so the loop-closer
   // (src/lib/voice/loop-closer.ts) texts the outcome back once this task
   // reaches a terminal state.
-  const isVoice = sessionId ? getSession(sessionId)?.channel === "voice" : false;
+  const isVoice = escalationIsVoice(channel);
 
   // Broad multi-step work dispatches as a SINGLE task that self-plans via
   // Superpowers: workflow:"work" triggers the "/workflows:work" skill prefix so
@@ -359,7 +369,7 @@ type LearnSkillAcquireFn = (opts: {
 
 async function handleLearnSkill(
   args: Record<string, unknown>,
-  opts: { brainRoot: string | null; sessionId: string },
+  opts: { brainRoot: string | null; sessionId: string; channel?: string },
 ): Promise<string> {
   const goal = String(args.goal ?? "").trim();
   if (!goal) return "Error: goal is required";
@@ -368,9 +378,10 @@ async function handleLearnSkill(
   const suggestedKind: "instruction" | "script" | undefined =
     suggestedKindRaw === "instruction" || suggestedKindRaw === "script" ? suggestedKindRaw : undefined;
 
-  const channel = opts.sessionId
-    ? ((await import("./store")).getSession(opts.sessionId)?.channel ?? "chat")
-    : "chat";
+  // The REQUEST's channel (threaded through from loop.ts, same as
+  // escalate_to_task above) — not the session row's, which may now be
+  // collapsed to a shared "operator" value across console+voice sessions.
+  const channel = opts.channel || "chat";
 
   // Acquisition takes minutes — kick it off DETACHED (never awaited here) and
   // return the ack immediately, mirroring deep_think/heartbeat's async
@@ -470,7 +481,7 @@ export async function deliverLearnSkillReply(opts: {
 export async function dispatchFlashOnlyTool(
   name: string,
   args: Record<string, unknown>,
-  opts: { brainRoot: string | null; sessionId: string },
+  opts: { brainRoot: string | null; sessionId: string; channel?: string },
 ): Promise<string> {
   switch (name) {
     case "persona_update":
@@ -480,7 +491,7 @@ export async function dispatchFlashOnlyTool(
     case "deep_think":
       return handleDeepThink(args);
     case "escalate_to_task":
-      return handleEscalateToTask(args, opts.sessionId);
+      return handleEscalateToTask(args, opts.sessionId, opts.channel);
     case "learn_skill":
       return handleLearnSkill(args, opts);
     default:
@@ -508,7 +519,7 @@ export function buildFlashMcpToolCatalog(tools: ChatTool[]): FlashMcpToolDef[] {
 }
 
 // Bump when FLASH_MCP_SERVER_JS changes so the on-disk copy is rewritten.
-export const SERVER_VERSION = "2";
+export const SERVER_VERSION = "3";
 
 // The stdio MCP server (CommonJS, run by the bundled node). Deliberately avoids
 // template literals / ${} so it nests cleanly in this TS array-join string
@@ -526,6 +537,7 @@ export const FLASH_MCP_SERVER_JS = [
   'var PROJECT_PATH = process.env.HIVE_FLASH_PROJECT_PATH || "";',
   'var PROJECT = process.env.HIVE_FLASH_PROJECT || "hivematrix";',
   'var SESSION_ID = process.env.HIVE_FLASH_SESSION_ID || "";',
+  'var CHANNEL = process.env.HIVE_FLASH_CHANNEL || "";',
   'var FLASH_ONLY = { persona_update: 1, generate_avatar: 1, deep_think: 1, escalate_to_task: 1, learn_skill: 1 };',
   "function token() {",
   '  try { return fs.readFileSync(path.join(os.homedir(), ".hivematrix", "auth-token"), "utf8").trim(); }',
@@ -565,7 +577,7 @@ export const FLASH_MCP_SERVER_JS = [
   '    return Promise.resolve("Error: tool " + name + " is not permitted in this pass");',
   "  }",
   "  if (FLASH_ONLY[name]) {",
-  '    return postJson("/flash/tool/" + name, { args: a, brainRoot: BRAIN_ROOT, sessionId: SESSION_ID }).then(extractResult);',
+  '    return postJson("/flash/tool/" + name, { args: a, brainRoot: BRAIN_ROOT, sessionId: SESSION_ID, channel: CHANNEL }).then(extractResult);',
   "  }",
   '  return postJson("/bee/" + name, { args: a, projectPath: PROJECT_PATH, project: PROJECT }).then(extractResult);',
   "}",
@@ -631,6 +643,12 @@ export interface FlashMcpOptions {
   brainRoot: string | null;
   ctx: LaneToolContext;
   sessionId: string;
+  /** The real per-surface channel for THIS turn (e.g. "voice", "console") —
+   *  forwarded to the MCP child as HIVE_FLASH_CHANNEL and posted back on
+   *  every /flash/tool/:name call, so escalate_to_task/learn_skill can key
+   *  off the actual request surface instead of the (possibly unified)
+   *  session row channel. See store.ts's storageChannel. */
+  channel?: string;
 }
 
 /**
@@ -674,6 +692,7 @@ export function prepareFlashMcp(
           HIVE_FLASH_PROJECT_PATH: opts.ctx.projectPath,
           HIVE_FLASH_PROJECT: opts.ctx.project,
           HIVE_FLASH_SESSION_ID: opts.sessionId,
+          HIVE_FLASH_CHANNEL: opts.channel ?? "",
         },
       },
     },

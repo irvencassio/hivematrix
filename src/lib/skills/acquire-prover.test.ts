@@ -12,8 +12,8 @@
  * `<home>/.hivematrix/config.json` pointing `memory.brainRootDir` at a temp
  * brain dir. Because `fanout.ts`'s `harnessTargets()` defaults to `homedir()`,
  * the SAME temp-HOME redirect that seeds the brain root also redirects the
- * fanout output (`<home>/.claude/skills`, `<home>/.agents/skills`,
- * `<home>/.qwen/skills`) into the temp tree — one setup covers both.
+ * fanout output (`<home>/.claude/skills`, `<home>/.agents/skills`)
+ * into the temp tree — one setup covers both.
  */
 
 import test from "node:test";

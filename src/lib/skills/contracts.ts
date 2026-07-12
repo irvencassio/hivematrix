@@ -10,7 +10,7 @@
  */
 
 /** Harnesses a skill can run under. "all" = harness-agnostic instructions. */
-export const SKILL_HARNESSES = ["claude", "codex", "qwen"] as const;
+export const SKILL_HARNESSES = ["claude", "codex"] as const;
 export type SkillHarness = (typeof SKILL_HARNESSES)[number] | "all";
 
 /**
@@ -122,11 +122,11 @@ export function skillAppliesToRole(roles: string[], agentType: string): boolean 
 
 /**
  * Provider-eligibility filter: a skill survives if its compat includes at
- * least one currently enabled frontier provider, treating "qwen"/local and
- * "all" as always eligible (they aren't gated by the Claude/Codex toggles).
+ * least one currently enabled frontier provider, treating "all" as always
+ * eligible (not gated by the Claude/Codex toggles).
  */
 export function skillEnabledByProviders(compat: SkillHarness[], enabledProviders: string[]): boolean {
-  if (compat.length === 0 || compat.includes("all") || compat.includes("qwen")) return true;
+  if (compat.length === 0 || compat.includes("all")) return true;
   return compat.some((c) => enabledProviders.includes(c));
 }
 

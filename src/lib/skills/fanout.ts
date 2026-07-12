@@ -1,6 +1,6 @@
 /**
- * Cross-harness fan-out — render trusted skills into the dirs Claude Code, Codex,
- * and qwen-code each read from. SKILL.md is one open standard,
+ * Cross-harness fan-out — render trusted skills into the dirs Claude Code and
+ * Codex each read from. SKILL.md is one open standard,
  * but every harness looks in a DIFFERENT directory, so portability = writing the
  * canonical skill to each compatible target (`<dir>/<slug>/SKILL.md`).
  *
@@ -23,7 +23,6 @@ export function harnessTargets(home = homedir()): HarnessTarget[] {
   return [
     { id: "claude", dir: join(home, ".claude", "skills") },
     { id: "codex", dir: join(home, ".agents", "skills") }, // Codex ("ChatGPT") uses .agents/skills
-    { id: "qwen", dir: join(home, ".qwen", "skills") },
   ];
 }
 

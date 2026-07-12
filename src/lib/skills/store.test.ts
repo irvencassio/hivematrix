@@ -105,28 +105,24 @@ test("distilled/manual skills default trusted", async () => {
 
 test("listSkillsFor returns only skills compatible with the requested harness", async () => {
   await upsertSkill({ name: "Claude Only Skill", description: "claude only", body: "do this", source: "test", compat: ["claude"] });
-  await upsertSkill({ name: "Qwen Only Skill", description: "qwen only", body: "do that", source: "test", compat: ["qwen"] });
+  await upsertSkill({ name: "Codex Only Skill", description: "codex only", body: "do that", source: "test", compat: ["codex"] });
   await upsertSkill({ name: "Universal Skill", description: "any model", body: "do both", source: "test", compat: ["all"] });
 
   const claudeSkills = await listSkillsFor("claude");
-  const qwenSkills = await listSkillsFor("qwen");
   const codexSkills = await listSkillsFor("codex");
 
   assert.ok(claudeSkills.some((s) => s.name === "Claude Only Skill"), "claude-only appears for claude");
   assert.ok(claudeSkills.some((s) => s.name === "Universal Skill"), "'all' appears for claude");
-  assert.ok(!claudeSkills.some((s) => s.name === "Qwen Only Skill"), "qwen-only excluded from claude");
+  assert.ok(!claudeSkills.some((s) => s.name === "Codex Only Skill"), "codex-only excluded from claude");
 
-  assert.ok(qwenSkills.some((s) => s.name === "Qwen Only Skill"), "qwen-only appears for qwen");
-  assert.ok(!qwenSkills.some((s) => s.name === "Claude Only Skill"), "claude-only excluded from qwen");
-
+  assert.ok(codexSkills.some((s) => s.name === "Codex Only Skill"), "codex-only appears for codex");
   assert.ok(!codexSkills.some((s) => s.name === "Claude Only Skill"), "claude-only excluded from codex");
-  assert.ok(!codexSkills.some((s) => s.name === "Qwen Only Skill"), "qwen-only excluded from codex");
   assert.ok(codexSkills.some((s) => s.name === "Universal Skill"), "'all' appears for codex");
 });
 
 test("listSkills drops single-provider skills when that provider is disabled in config", async () => {
   await upsertSkill({ name: "Codex Gated Skill", description: "codex only", body: "do it", source: "test", compat: ["codex"] });
-  await upsertSkill({ name: "Qwen Gated Skill", description: "qwen only", body: "do it", source: "test", compat: ["qwen"] });
+  await upsertSkill({ name: "Universal Gated Skill", description: "any model", body: "do it", source: "test", compat: ["all"] });
 
   writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({
     memory: { brainRootDir: BRAIN },
@@ -135,7 +131,7 @@ test("listSkills drops single-provider skills when that provider is disabled in 
   try {
     const all = await listSkills();
     assert.ok(!all.some((s) => s.name === "Codex Gated Skill"), "codex-only skill hidden while codex is disabled");
-    assert.ok(all.some((s) => s.name === "Qwen Gated Skill"), "qwen-only skill always survives");
+    assert.ok(all.some((s) => s.name === "Universal Gated Skill"), "'all'-compat skill always survives");
   } finally {
     writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: BRAIN } }));
   }

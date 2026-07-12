@@ -10,12 +10,33 @@
 import { generateId, getDb } from "@/lib/db";
 import type { FlashSessionRow, FlashTurnRow } from "./types";
 
+/**
+ * Peers whose session STORAGE is unified across surface channels — currently
+ * just the operator, so desktop chat ("console") and push-to-talk voice
+ * ("voice") land in the same thread/row instead of two parallel sessions.
+ * This is safe because per-request prompt STYLE (spoken vs text) is chosen
+ * from the `channel` arg passed directly to context.ts's assembleSystemPrompt
+ * on every turn, never read off the session row — see loop.ts/flash-mcp.ts
+ * for how the real per-surface channel is threaded through to tool dispatch
+ * (voice-origin escalation marking, learn_skill spoken-ack selection)
+ * independently of this storage collapse. Widen this set if another surface
+ * ever needs the same treatment; peers NOT in this set keep full
+ * channel+peer scoping (e.g. birth_ritual stays its own session).
+ */
+const UNIFIED_SESSION_PEERS: ReadonlySet<string> = new Set(["operator"]);
+export const UNIFIED_OPERATOR_CHANNEL = "operator";
+
+function storageChannel(channel: string, peer: string): string {
+  return UNIFIED_SESSION_PEERS.has(peer) ? UNIFIED_OPERATOR_CHANNEL : channel;
+}
+
 export function getOrCreateSession(
   channel: string,
   peer: string,
   sessionId?: string,
 ): FlashSessionRow {
   const db = getDb();
+  const storedChannel = storageChannel(channel, peer);
 
   if (sessionId) {
     const row = db.prepare("SELECT * FROM flash_sessions WHERE id = ?").get(sessionId) as FlashSessionRow | undefined;
@@ -25,10 +46,10 @@ export function getOrCreateSession(
     }
   }
 
-  // Resume the most-recent session for this channel+peer
+  // Resume the most-recent session for this (storage) channel+peer
   const existing = db.prepare(
     "SELECT * FROM flash_sessions WHERE channel = ? AND peer = ? ORDER BY lastActiveAt DESC LIMIT 1",
-  ).get(channel, peer) as FlashSessionRow | undefined;
+  ).get(storedChannel, peer) as FlashSessionRow | undefined;
 
   if (existing) {
     db.prepare("UPDATE flash_sessions SET lastActiveAt = datetime('now') WHERE id = ?").run(existing.id);
@@ -39,9 +60,9 @@ export function getOrCreateSession(
   const now = new Date().toISOString();
   db.prepare(
     "INSERT INTO flash_sessions (id, channel, peer, summary, createdAt, lastActiveAt) VALUES (?, ?, ?, '', ?, ?)",
-  ).run(id, channel, peer, now, now);
+  ).run(id, storedChannel, peer, now, now);
 
-  return { id, channel, peer, summary: "", createdAt: now, lastActiveAt: now };
+  return { id, channel: storedChannel, peer, summary: "", createdAt: now, lastActiveAt: now };
 }
 
 /**
@@ -49,16 +70,36 @@ export function getOrCreateSession(
  * recent one. Because its lastActiveAt is now, it also becomes the session that
  * a subsequent getOrCreateSession(channel, peer) call resumes — so both the
  * streamed (/flash/turn) and turn-based (/voice/turn) paths pick up the fresh
- * conversation. Used by the "New conversation" control.
+ * conversation. Used by the "New conversation" control. Subject to the same
+ * storageChannel collapse as getOrCreateSession (see above).
  */
 export function createSession(channel: string, peer: string): FlashSessionRow {
   const db = getDb();
+  const storedChannel = storageChannel(channel, peer);
   const id = generateId();
   const now = new Date().toISOString();
   db.prepare(
     "INSERT INTO flash_sessions (id, channel, peer, summary, createdAt, lastActiveAt) VALUES (?, ?, ?, '', ?, ?)",
-  ).run(id, channel, peer, now, now);
-  return { id, channel, peer, summary: "", createdAt: now, lastActiveAt: now };
+  ).run(id, storedChannel, peer, now, now);
+  return { id, channel: storedChannel, peer, summary: "", createdAt: now, lastActiveAt: now };
+}
+
+/**
+ * The canonical current session id for a peer — the most-recently-active
+ * session at that peer's storage channel (see storageChannel). For a unified
+ * peer like "operator" this is THE single shared thread regardless of which
+ * surface (console/voice) is asking, letting a client hydrate on open without
+ * guessing which channel created it. Returns null if the peer has never had
+ * a session. `channelHint` only matters for non-unified peers (default
+ * "console" — harmless since those peers pass their own real channel via
+ * getOrCreateSession in practice; this is a read-only lookup, not a create).
+ */
+export function getCurrentSession(peer: string, channelHint = "console"): FlashSessionRow | null {
+  const storedChannel = storageChannel(channelHint, peer);
+  const row = getDb()
+    .prepare("SELECT * FROM flash_sessions WHERE channel = ? AND peer = ? ORDER BY lastActiveAt DESC LIMIT 1")
+    .get(storedChannel, peer) as FlashSessionRow | undefined;
+  return row ?? null;
 }
 
 export function appendTurn(

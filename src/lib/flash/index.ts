@@ -15,6 +15,7 @@ import {
   appendFeedbackToTurn,
   appendTurn,
   createSession,
+  getCurrentSession,
   getOrCreateSession,
   getRecentTurns,
   getSession,
@@ -26,7 +27,7 @@ import { runFlashAgentLoop } from "./loop";
 import { extractPimActions } from "@/lib/orchestrator/pim-tools";
 
 // Re-export store helpers for the server routes
-export { appendFeedbackToTurn, createSession, getSession, getTurnsForSession, listSessions };
+export { appendFeedbackToTurn, createSession, getCurrentSession, getSession, getTurnsForSession, listSessions };
 
 /**
  * Run a flash turn and return the reply directly (no SSE).
@@ -64,6 +65,7 @@ export async function runFlashTurnText(opts: {
 
   const fullText = await runFlashAgentLoop(messages, emit, session.id, brainRoot, {
     allowedTools: opts.allowedTools,
+    channel: opts.channel,
   });
   const assistantTurn = appendTurn(session.id, "assistant", fullText);
   return { reply: fullText, sessionId: session.id, turnId: assistantTurn.id, toolRuns };
@@ -128,7 +130,7 @@ export async function handleFlashTurn(
     },
   };
 
-  const fullText = await runFlashAgentLoop(messages, emit, session.id, brainRoot);
+  const fullText = await runFlashAgentLoop(messages, emit, session.id, brainRoot, { channel: input.channel });
 
   // Persist the assistant's full response
   const assistantTurn = appendTurn(session.id, "assistant", fullText);
