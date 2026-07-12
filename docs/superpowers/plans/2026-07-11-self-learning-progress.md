@@ -23,7 +23,12 @@ Rule: after each phase all three gates must be green with NO NEW failures vs thi
 | P1.2 failures/probation counters | Skill.failures/probation (min-churn) + recordSkillOutcome promote/demote; 60/60 | ACCEPT — made fields required; manager fixed 2 out-of-scope construction sites (logic-scenarios.ts, skill-turn.test.ts) | 4b090aef |
 | P1.3 skill_run lane tool | brain-gated; instruction→recipe, script→sandbox w/ block+trust/probation gate; 35/35 | ACCEPT — correct gate order, honest failures | 16bc9b5a |
 | P1.4 skill index in Flash prompt | formatSkillIndex showParams + skill_run guide; verified tool exposure; 17/17 | ACCEPT — backward-compatible opt param | 90fea506 |
-| P1.5 skill_run e2e prover | dispatch layer (real sandbox) + stream layer; 3/3 | ACCEPT — real stdout confirmed, no canned value | (P1.5 commit) |
+| P1.5 skill_run e2e prover | dispatch layer (real sandbox) + stream layer; 3/3 | ACCEPT — real stdout confirmed, no canned value | 86f9352b |
+| P2.1 acquisition pipeline skeleton | acquireSkill: mint→parse→scan→evals→critic→register/probation; drafts archive; ledger; 10/10 | ACCEPT — centerpiece, spec-faithful, never registers on failure | 3df0bc41 |
+| P2.2 real mint (Sonnet) | defaultMint: tool catalog+skill index+sandbox contract+evals+Reflexion; 2-block parse; 16/16 | ACCEPT — dynamic import avoids cycle | 6ec96131 |
+| P2.3 critic (Haiku, fail-closed) | defaultCritic: PASS/FAIL no-tools; ambiguous→fail; both defaults wired; 21/21 | ACCEPT — fail-closed correct | 635963bd |
+| P2.4 learn_skill flash tool + async | flash-only tool, 10-min cap, voice:result/flash:notice; SERVER_VERSION bumped; 19/19 | ACCEPT — worker caught+fixed a timer-leak hang | 1bdfe217 |
+| P2.5 acquisition integration prover | real fanOutSkills + on-disk ledger; script probation not fanned, instruction SKILL.md written, already-have; 3/3 | ACCEPT — real fanout path confirmed | (P2.5 commit) |
 
 ## Phase gate results
 
@@ -32,6 +37,7 @@ Rule: after each phase all three gates must be green with NO NEW failures vs thi
 | baseline | ✓ 0 | ✓ 2528/0 | ✓ 0 |
 | P0 | ✓ 0 | ✓ 2556 pass / 1 skip / 0 fail | ✓ 0 |
 | P1 | ✓ 0 | ✓ 2586 pass / 1 skip / 0 fail | ✓ 0 |
+| P2 | ✓ 0 | ✓ 2618 pass / 1 skip / 0 fail | ✓ 0 |
 
 ## Deviations / notes
 
