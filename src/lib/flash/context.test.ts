@@ -63,6 +63,13 @@ test("assembleSystemPrompt always includes the capability-doctrine escalation la
   assert.match(prompt, /self-improvement/);
   // Honest-failure clause.
   assert.match(prompt, /Never claim something worked unless a tool result shows it did/);
+  // learn_skill must fire on TRIED-AND-FAILED tools too, not only "no tool fits"
+  // (live regression 2026-07-12: Haiku tried desktop_action, hit a block, then
+  // told the operator to count files in Finder by hand instead of learning).
+  assert.match(prompt, /tool(s)? you tried failed/i);
+  assert.match(prompt, /never tell the operator to do by hand/i);
+  // PERMISSION_NEEDED results are the exception: speak the fix, don't re-learn.
+  assert.match(prompt, /PERMISSION_NEEDED/);
 });
 
 test("assembleSystemPrompt omits the skill-library section when the library is empty", async () => {

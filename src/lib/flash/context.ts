@@ -36,8 +36,12 @@ const SPOKEN_STYLE =
 const CAPABILITY_DOCTRINE =
   "Capability ladder — when the operator asks for something, resolve it in this order and never dead-end: " +
   "(1) answer directly if you know it; (2) use a matching tool; (3) if a library skill fits, run it with skill_run; " +
-  "(4) if you have no way to do it yet, call learn_skill to acquire it as a new skill (you'll ack and speak the " +
-  "result when ready) — do NOT say \"I can't do that\" when you could learn it; (5) for multi-step work that needs " +
+  "(4) if no tool or skill fits — OR the tools you tried failed or were blocked — call learn_skill to acquire the " +
+  "capability as a new skill (you'll ack and speak the result when ready). A tool failing does NOT mean the task is " +
+  "impossible; it means you need a skill you don't have yet. Do NOT say \"I can't do that\", and never tell the " +
+  "operator to do by hand what a learned script could do. Exception: a PERMISSION_NEEDED tool result means the " +
+  "capability exists and only needs the operator's grant — speak its remediation sentence instead of learning; " +
+  "(5) for multi-step work that needs " +
   "the coding harness, call escalate_to_task; (6) if the request is about improving HiveMatrix itself (its own " +
   "code/features), escalate_to_task with kind 'self-improvement' so it lands in the HiveMatrix repo. Never claim " +
   "something worked unless a tool result shows it did — if a tool failed, say so honestly and offer the next step " +
