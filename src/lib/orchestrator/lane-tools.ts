@@ -288,7 +288,7 @@ export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
     function: {
       name: "digest_url",
       description:
-        "Digest a web link for later review: spawns a task that fetches the page, summarizes it, and saves a markdown brain doc with the summary + source link. Use when you encounter a link worth saving to the knowledge base (e.g. an article in an email).",
+        "Digest a web link for later review: spawns a task that fetches the page, summarizes it, relates it to the operator's goals, and saves a brain doc. YouTube links get a rich, self-contained HTML doc (clickable link to the video, its thumbnail, a solid detailed summary from the transcript, and a 'how this applies to me' section tied to HiveMatrix/Solo Founder/other goals); other links get a markdown summary. Use for any link worth saving to the knowledge base (an article in an email, a video to study).",
       parameters: {
         type: "object",
         properties: {
