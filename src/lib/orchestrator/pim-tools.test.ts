@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseDuePhrase, extractPimActions, executeCalendarCreate, buildCalendarCreateScript } from "./pim-tools";
+import { isPermissionError, permissionNeeded, parsePermissionNeeded } from "./pim-preconditions";
 
 // Fixed reference: Friday July 10 2026, 2:00 PM local.
 const NOW = new Date(2026, 6, 10, 14, 0, 0);
@@ -131,4 +132,45 @@ test("calendar_create: success reply names the title, time, and duration", async
   const out = await executeCalendarCreate({ title: "Lunch with Sam", when: "friday at noon", durationMinutes: 30 }, io);
   assert.match(out, /Event created: "Lunch with Sam"/);
   assert.match(out, /30 min/);
+});
+
+// ---------------------------------------------------------------------------
+// Structured permission-error convention (P0.2)
+
+test("permissionNeeded: exact format, and parsePermissionNeeded round-trips it", () => {
+  const s = permissionNeeded("Calendars", "I need access to your calendar — open System Settings, Privacy & Security, Calendars, and enable HiveMatrix.");
+  assert.equal(
+    s,
+    "PERMISSION_NEEDED: Calendars — I need access to your calendar — open System Settings, Privacy & Security, Calendars, and enable HiveMatrix.",
+  );
+  const parsed = parsePermissionNeeded(s);
+  assert.deepEqual(parsed, {
+    grant: "Calendars",
+    remediation: "I need access to your calendar — open System Settings, Privacy & Security, Calendars, and enable HiveMatrix.",
+  });
+});
+
+test("permissionNeeded: trims grant and remediation", () => {
+  const s = permissionNeeded("  Contacts  ", "  Open Settings.  ");
+  assert.equal(s, "PERMISSION_NEEDED: Contacts — Open Settings.");
+});
+
+test("parsePermissionNeeded: returns null for a non-matching string", () => {
+  assert.equal(parsePermissionNeeded("Could not read the calendar: some error"), null);
+  assert.equal(parsePermissionNeeded("Nothing on the calendar today."), null);
+  assert.equal(parsePermissionNeeded(""), null);
+});
+
+test("isPermissionError: true for representative TCC/osascript denial stderrs", () => {
+  assert.equal(isPermissionError("execution error: Not authorized to send Apple events to Calendar. (-1743)"), true);
+  assert.equal(isPermissionError("Not authorized to send Apple events to Contacts."), true);
+  assert.equal(isPermissionError("execution error: Application isn't running. (-600)"), true);
+  assert.equal(isPermissionError("osascript is not allowed assistive access."), true);
+  assert.equal(isPermissionError("error: (-1728)"), true);
+});
+
+test("isPermissionError: false for unrelated errors", () => {
+  assert.equal(isPermissionError("Nothing on the calendar today."), false);
+  assert.equal(isPermissionError("syntax error: Expected end of line but found identifier."), false);
+  assert.equal(isPermissionError(""), false);
 });

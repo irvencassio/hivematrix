@@ -20,6 +20,15 @@
 
 import { execFile } from "child_process";
 import type { ChatTool } from "./tool-bridge";
+import { isPermissionError, permissionNeeded } from "./pim-preconditions";
+
+// Remediation sentences — one spoken sentence each, said by Flash in place of
+// a dead-end generic failure. See pim-preconditions.ts for the wire format.
+const REMEDIATION = {
+  Contacts: "I need access to your contacts — open System Settings, Privacy & Security, Contacts, and enable HiveMatrix.",
+  Calendars: "I need access to your calendar — open System Settings, Privacy & Security, Calendars, and enable HiveMatrix.",
+  Reminders: "I need access to your reminders — open System Settings, Privacy & Security, Reminders, and enable HiveMatrix.",
+} as const;
 
 // ---------------------------------------------------------------------------
 // osascript runner — bounded so a slow app launch never stalls a spoken turn.
@@ -217,7 +226,10 @@ async function executeContactsLookup(args: Record<string, unknown>): Promise<str
     "end tell",
   ].join("\n");
   const { ok, out } = await osascript(script);
-  if (!ok) return `Could not look up contacts: ${out}`;
+  if (!ok) {
+    if (isPermissionError(out)) return permissionNeeded("Contacts", REMEDIATION.Contacts);
+    return `Could not look up contacts: ${out}`;
+  }
   return out || `No contact found matching ${q}.`;
 }
 
@@ -245,7 +257,10 @@ async function executeCalendarToday(args: Record<string, unknown>): Promise<stri
     "end tell",
   ].join("\n");
   const { ok, out } = await osascript(script, 15_000);
-  if (!ok) return `Could not read the calendar: ${out}`;
+  if (!ok) {
+    if (isPermissionError(out)) return permissionNeeded("Calendars", REMEDIATION.Calendars);
+    return `Could not read the calendar: ${out}`;
+  }
   return out || "Nothing on the calendar today.";
 }
 
@@ -301,7 +316,10 @@ async function executeRemindersList(args: Record<string, unknown>): Promise<stri
     "end tell",
   ].join("\n");
   const { ok, out } = await osascript(script, 15_000);
-  if (!ok) return `Could not read reminders: ${out}`;
+  if (!ok) {
+    if (isPermissionError(out)) return permissionNeeded("Reminders", REMEDIATION.Reminders);
+    return `Could not read reminders: ${out}`;
+  }
   return out || "No open reminders.";
 }
 
@@ -325,7 +343,10 @@ async function executeReminderCreate(args: Record<string, unknown>): Promise<str
     lines.push(`tell application "Reminders" to make new reminder with properties {name:"${name}"}`);
   }
   const { ok, out } = await osascript(lines.join("\n"));
-  if (!ok) return `Could not set the reminder: ${out}`;
+  if (!ok) {
+    if (isPermissionError(out)) return permissionNeeded("Reminders", REMEDIATION.Reminders);
+    return `Could not set the reminder: ${out}`;
+  }
   if (due) {
     const when = due.toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
     return `Reminder set: "${name}" for ${when}.`;
