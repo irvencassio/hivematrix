@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.187 — 2026-07-12
+
+Learning resilience: a momentary model-call failure no longer cancels skill learning — HiveMatrix retries and finishes the job.
+
 ## v0.1.186 — 2026-07-12
 
 Smarter learning: when a freshly-learned skill fails its own tests, HiveMatrix now retries once with the exact failure in hand, tests are written to pass on any machine, and failure details are kept for the next attempt.
