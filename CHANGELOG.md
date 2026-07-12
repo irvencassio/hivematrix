@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.189 — 2026-07-12
+
+Chat backlog: observability by-model graphs + Flash usage now tracked, chat honors the Autonomy dial, microphone fixed with a dictation mic above Send, MCP servers and Canopy now visible in setup.
+
 ## v0.1.188 — 2026-07-12
 
 Learning pipeline hardened: skills with embedded code no longer get truncated during authoring, and the assistant prefers learning a quick script over driving the GUI for computable tasks.
