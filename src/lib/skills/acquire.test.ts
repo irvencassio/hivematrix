@@ -522,3 +522,55 @@ test("mint system prompt teaches machine-independent evals", async () => {
   assert.match(sys, /any machine/i);
   assert.match(sys, /exact counts|machine-specific/i);
 });
+
+// ---------------------------------------------------------------------------
+// Mint resilience (2026-07-12, second live failure): the retry attempt's mint
+// call died on a transient claude-CLI error and the whole acquisition died
+// with it. A mint throw is now (a) re-tried once immediately (transient CLI
+// hiccup ≠ bad model output), and (b) non-fatal while attempt slots remain.
+
+test("transient mint throw: first call throws, immediate re-call succeeds, acquisition registers", async () => {
+  const goal = uniqueGoal("transient mint hiccup");
+  const skill = baseSkill({ name: "Hiccup Survivor", kind: "instruction" });
+  let calls = 0;
+  const mint: MintFn = async () => {
+    calls += 1;
+    if (calls === 1) throw new Error("claude CLI completion failed: transient");
+    return { file: renderSkillFile(skill), evals: [] };
+  };
+
+  const result = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic(), dailyCap: 1000 });
+
+  assert.equal(calls, 2, "one immediate transient re-call");
+  assert.equal(result.outcome, "registered");
+});
+
+test("mint throw mid-ladder does not kill the acquisition while attempt slots remain", async () => {
+  const goal = uniqueGoal("mint dies on retry");
+  const bad = baseSkill({ name: "Retry Rescue", kind: "script", interpreter: "bash", body: "echo nope" });
+  const good = baseSkill({ name: "Retry Rescue", kind: "script", interpreter: "bash", body: "echo rescued output" });
+  let calls = 0;
+  const mint: MintFn = async () => {
+    calls += 1;
+    if (calls === 1) return { file: renderSkillFile(bad), evals: [{ name: "b", expectContains: "rescued" }] };
+    if (calls === 2) throw new Error("claude CLI completion failed: transient");
+    return { file: renderSkillFile(good), evals: [{ name: "b", expectContains: "rescued" }] };
+  };
+
+  const result = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic(), dailyCap: 1000 });
+
+  assert.equal(calls, 3, "evals fail → attempt 2 mint throws → immediate re-call succeeds");
+  assert.equal(result.outcome, "probation");
+  assert.equal(result.skillName, "Retry Rescue");
+});
+
+test("mint throwing on every call still fails honestly at the mint stage", async () => {
+  const goal = uniqueGoal("mint always dies");
+  const mint: MintFn = async () => { throw new Error("claude CLI completion failed: down hard"); };
+
+  const result = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic(), dailyCap: 1000 });
+
+  assert.equal(result.outcome, "draft-failed");
+  assert.equal(result.stage, "mint");
+  assert.match(result.detail ?? "", /down hard/);
+});

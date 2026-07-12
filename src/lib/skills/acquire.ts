@@ -616,19 +616,37 @@ export async function acquireSkill(opts: AcquireOptions): Promise<AcquireResult>
     for (let attempt = firstAttempt; attempt < firstAttempt + MAX_MINT_ATTEMPTS; attempt++) {
       const isLastAttempt = attempt === firstAttempt + MAX_MINT_ATTEMPTS - 1;
 
+      const mintCtx: MintContext = {
+        goal,
+        whyNeeded: opts.whyNeeded,
+        suggestedKind: opts.suggestedKind,
+        attempt,
+        priorDraft,
+        priorFailure,
+      };
       try {
-        minted = await mint({
-          goal,
-          whyNeeded: opts.whyNeeded,
-          suggestedKind: opts.suggestedKind,
-          attempt,
-          priorDraft,
-          priorFailure,
-        });
+        // A throw here is usually a transient claude-CLI failure, not bad
+        // model output — re-call once immediately before giving up on the
+        // attempt (live failure 2026-07-12: the Reflexion retry's mint died
+        // on a CLI hiccup and took the whole acquisition with it).
+        try {
+          minted = await mint(mintCtx);
+        } catch (firstErr) {
+          audit({
+            ts: "",
+            event: "skill:acquire:mint-retry",
+            summary: `mint threw, re-calling once: ${firstErr instanceof Error ? firstErr.message : String(firstErr)}`.slice(0, 300),
+            status: "mint",
+          });
+          await new Promise((r) => setTimeout(r, 1_000));
+          minted = await mint(mintCtx);
+        }
       } catch (err) {
-        const reason = "I tried to write the skill but the attempt failed.";
         const detail = err instanceof Error ? err.message : String(err);
         audit({ ts: "", event: "skill:acquire:failed", summary: `mint threw: ${detail}`, status: "mint" });
+        // While attempt slots remain, a dead mint is not a dead acquisition.
+        if (!isLastAttempt) continue;
+        const reason = "I tried to write the skill but the attempt failed.";
         fileProposal(goal, reason);
         await appendLedger(brainRoot, { goal, outcome: "mint-failed" }, now);
         return { outcome: "draft-failed", stage: "mint", reason, detail: detail.slice(0, 400) };
