@@ -215,6 +215,25 @@ test("calendar_today: permission denied (exit 77) returns permissionNeeded('Cale
   assert.equal(parsed!.grant, "Calendars");
 });
 
+test("calendar_today: helper timeout (exit 124, first-run TCC prompt pending) returns permissionNeeded('Calendars', ...)", async () => {
+  const io = fakeHelperIO({ run: async () => ({ code: 124, stdout: "", stderr: "helper timed out" }) });
+  const out = await executeCalendarToday({}, io);
+  const parsed = parsePermissionNeeded(out);
+  assert.ok(parsed, `expected a permissionNeeded reply, got: ${out}`);
+  assert.equal(parsed!.grant, "Calendars");
+  assert.match(parsed!.remediation, /permission prompt/i);
+});
+
+test("calendar_create: helper timeout (exit 124) returns permissionNeeded('Calendars', ...)", async () => {
+  const out = await executeCalendarCreate(
+    { title: "Coffee", when: "tomorrow at 9am" },
+    { resolveBinary: () => "/fake/helper", run: async () => ({ code: 124, stdout: "", stderr: "helper timed out" }) },
+  );
+  const parsed = parsePermissionNeeded(out);
+  assert.ok(parsed, `expected a permissionNeeded reply, got: ${out}`);
+  assert.equal(parsed!.grant, "Calendars");
+});
+
 test("calendar_today: empty array -> 'Nothing on the calendar today.'", async () => {
   const io = fakeHelperIO({ run: async () => ({ code: 0, stdout: "[]", stderr: "" }) });
   const out = await executeCalendarToday({}, io);

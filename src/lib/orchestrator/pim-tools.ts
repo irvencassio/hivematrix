@@ -31,7 +31,15 @@ const REMEDIATION = {
   Contacts: "I need access to your contacts — open System Settings, Privacy & Security, Contacts, and enable HiveMatrix.",
   Calendars: "I need access to your calendar — open System Settings, Privacy & Security, Calendars, and enable HiveMatrix.",
   Reminders: "I need access to your reminders — open System Settings, Privacy & Security, Reminders, and enable HiveMatrix.",
+  // First-run case: the helper blocked on macOS's own consent dialog until our
+  // exec timeout killed it — the grant is pending, not denied.
+  CalendarsPromptPending: "I need calendar access — there may be a permission prompt waiting on your Mac's screen; approve it, or enable HiveMatrix under System Settings, Privacy & Security, Calendars, then ask me again.",
 } as const;
+
+/** Exit code we assign when the helper is killed by our exec timeout (the
+ * canonical cause on first run: EventKit's TCC consent dialog blocks the
+ * process past the deadline). Distinct from 77 = explicit denial. */
+const HELPER_TIMEOUT_CODE = 124;
 
 // ---------------------------------------------------------------------------
 // osascript runner — bounded so a slow app launch never stalls a spoken turn.
@@ -73,7 +81,11 @@ function runDesktopBeeHelper(binary: string, args: string[]): Promise<{ code: nu
       let code = 0;
       if (err) {
         const errCode = (err as NodeJS.ErrnoException).code;
-        code = typeof errCode === "number" ? errCode : 1;
+        // killed by our timeout (execFile sets killed + no numeric exit code):
+        // surface the distinct timeout code so callers can say "the permission
+        // prompt is pending" instead of a generic failure.
+        if ((err as unknown as { killed?: boolean }).killed && typeof errCode !== "number") code = HELPER_TIMEOUT_CODE;
+        else code = typeof errCode === "number" ? errCode : 1;
       }
       resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? (err ? err.message : "")) });
     });
@@ -333,6 +345,7 @@ export async function executeCalendarToday(
 
   const { code, stdout, stderr } = await io.run(binary, ["calendar", "today", "--limit", String(limit)]);
   if (code === 77) return permissionNeeded("Calendars", REMEDIATION.Calendars);
+  if (code === HELPER_TIMEOUT_CODE) return permissionNeeded("Calendars", REMEDIATION.CalendarsPromptPending);
   if (code !== 0) return `Could not read the calendar: ${(stderr || stdout || "unknown error").trim()}`;
 
   try {
@@ -534,6 +547,7 @@ export async function executeCalendarCreate(args: Record<string, unknown>, io: C
       "--end", end.toISOString(),
     ]);
     if (code === 77) return permissionNeeded("Calendars", REMEDIATION.Calendars);
+    if (code === HELPER_TIMEOUT_CODE) return permissionNeeded("Calendars", REMEDIATION.CalendarsPromptPending);
     if (code === 0) {
       try {
         const parsed = JSON.parse(stdout) as { ok?: boolean; id?: string };
