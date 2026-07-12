@@ -38,7 +38,7 @@ test("runBriefingNow pushes via APNs and does not fall back when a device receiv
   let notified = false;
   const result = await runBriefingNow({
     composeBriefing: async () => "all clear",
-    sendApnsPush: async () => ({ sent: 1 }),
+    sendPush: async () => ({ sent: 1 }),
     notify: async () => { notified = true; },
   });
   assert.deepEqual({ text: result.text, pushed: result.pushed, fellBack: result.fellBack }, { text: "all clear", pushed: 1, fellBack: false });
@@ -49,7 +49,7 @@ test("runBriefingNow falls back to notify() when no device received the push", a
   let notifiedText = "";
   const result = await runBriefingNow({
     composeBriefing: async () => "2 approvals pending",
-    sendApnsPush: async () => ({ sent: 0 }),
+    sendPush: async () => ({ sent: 0 }),
     notify: async (t) => { notifiedText = t; },
   });
   assert.equal(result.pushed, 0);
@@ -61,7 +61,7 @@ test("runBriefingNow falls back when APNs throws", async () => {
   let notified = false;
   const result = await runBriefingNow({
     composeBriefing: async () => "x",
-    sendApnsPush: async () => { throw new Error("no apns config"); },
+    sendPush: async () => { throw new Error("no apns config"); },
     notify: async () => { notified = true; },
   });
   assert.equal(result.fellBack, true);

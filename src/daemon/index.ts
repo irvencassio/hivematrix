@@ -155,7 +155,7 @@ async function main(): Promise<void> {
   startHeartbeatLoop({
     notify: async (t) => (await import("@/lib/notify/notify")).notify(t),
     composeStatus: async () => (await import("@/lib/voice/command-turn")).composeBriefing(),
-    sendApnsPush: async (o) => (await import("@/lib/notify/apns")).sendApnsPush(o),
+    sendPush: async (o) => (await import("@/lib/notify/push")).sendPush(o),
   });
 
   // Voice result return path: when a voice-escalated task finishes, speak the

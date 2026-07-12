@@ -259,7 +259,7 @@ test("runDailyMomentOnce: APNs success skips notify; failure falls back; operato
     notify: async (t) => { notified.push(t); },
     composeStatus: async () => "2 approvals pending",
     appendOperatorTurn: (t) => { operatorTurns.push(t); },
-    sendApnsPush: async () => ({ sent: 1 }),
+    sendPush: async () => ({ sent: 1 }),
     runTurn: async () => ({ reply: "Good morning — approve the release, then we ship.", sessionId: "s1", turnId: "t4" }),
     now: () => at(8),
   });
@@ -270,7 +270,7 @@ test("runDailyMomentOnce: APNs success skips notify; failure falls back; operato
     notify: async (t) => { notified.push(t); },
     composeStatus: async () => "",
     appendOperatorTurn: (t) => { operatorTurns.push(t); },
-    sendApnsPush: async () => ({ sent: 0 }),
+    sendPush: async () => ({ sent: 0 }),
     runTurn: async () => ({ reply: "<think>day</think>Shipped two fixes today.", sessionId: "s1", turnId: "t5" }),
     now: () => at(21),
   });

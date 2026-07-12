@@ -730,13 +730,13 @@ export function createDaemonServer() {
       if (req.method === "POST" && urlPath === "/heartbeat/run") {
         const { runHeartbeatOnce, runDailyMomentOnce, runDayBriefRitualOnce, runRatchetOnce, runWeaverOnce } = await import("@/lib/flash/heartbeat");
         const { notify } = await import("@/lib/notify/notify");
-        const { sendApnsPush } = await import("@/lib/notify/apns");
+        const { sendPush } = await import("@/lib/notify/push");
         const { composeBriefing } = await import("@/lib/voice/command-turn");
         const body = await parseBody(req).catch(() => ({})) as Record<string, unknown>;
         const deps = {
           notify: (t: string) => notify(t),
           composeStatus: () => composeBriefing(),
-          sendApnsPush: (o: { title: string; body: string; data?: Record<string, unknown> }) => sendApnsPush(o),
+          sendPush: (o: { title: string; body: string; data?: Record<string, unknown> }) => sendPush(o),
         };
         if (body.moment === "morning-brief" || body.moment === "evening-recap") {
           const result = await runDailyMomentOnce(body.moment, deps);
@@ -772,25 +772,37 @@ export function createDaemonServer() {
         return;
       }
 
-      // POST /devices/register — iOS app registers its APNs device token.
+      // POST /devices/register — app registers its push device token, routed
+      // by platform: android/wearos → FCM, everything else (ios/watchos) → APNs.
       if (req.method === "POST" && urlPath === "/devices/register") {
-        const { registerApnsDevice } = await import("@/lib/notify/apns");
         const body = await parseBody(req) as Record<string, unknown>;
         const token = typeof body.token === "string" ? body.token.trim() : "";
         if (!token) { json(res, 400, { error: "token required" }); return; }
+        const platform = typeof body.platform === "string" ? body.platform : "ios";
+        if (platform === "android" || platform === "wearos") {
+          const { registerFcmDevice } = await import("@/lib/notify/fcm");
+          const devices = registerFcmDevice({ token, platform });
+          json(res, 200, { devices: devices.length });
+          return;
+        }
+        const { registerApnsDevice } = await import("@/lib/notify/apns");
         const env = body.env === "production" || body.env === "sandbox" ? body.env : undefined;
-        const devices = registerApnsDevice({ token, env, platform: typeof body.platform === "string" ? body.platform : "ios" });
+        const devices = registerApnsDevice({ token, env, platform });
         json(res, 200, { devices: devices.length });
         return;
       }
       // POST /devices/unregister — drop a device token (logout / token rotation).
+      // The token may live in either registry and the client may not send a
+      // platform, so remove from both and report the combined remaining count.
       if (req.method === "POST" && urlPath === "/devices/unregister") {
-        const { unregisterApnsDevice } = await import("@/lib/notify/apns");
         const body = await parseBody(req) as Record<string, unknown>;
         const token = typeof body.token === "string" ? body.token.trim() : "";
         if (!token) { json(res, 400, { error: "token required" }); return; }
-        const devices = unregisterApnsDevice(token);
-        json(res, 200, { devices: devices.length });
+        const { unregisterApnsDevice } = await import("@/lib/notify/apns");
+        const { unregisterFcmDevice } = await import("@/lib/notify/fcm");
+        const apns = unregisterApnsDevice(token);
+        const fcm = unregisterFcmDevice(token);
+        json(res, 200, { devices: apns.length + fcm.length });
         return;
       }
 

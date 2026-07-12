@@ -163,7 +163,7 @@ function makeDeps(over: Partial<LoopCloserDeps> = {}): { deps: LoopCloserDeps; c
   const deps: LoopCloserDeps = {
     chatComplete: async () => "The Aventon Level.2 is the standout under $2k.",
     notify: (async (text: string) => { calls.notify.push(text); return { telegram: false, imessage: true, email: false, anySent: true }; }) as LoopCloserDeps["notify"],
-    sendApnsPush: (async (opts: unknown) => { calls.apns.push(opts); return { configured: true, sent: 1, results: [] }; }) as LoopCloserDeps["sendApnsPush"],
+    sendPush: (async (opts: unknown) => { calls.apns.push(opts); return { configured: true, sent: 1 }; }) as unknown as LoopCloserDeps["sendPush"],
     markNotified: async (taskId: string, notifiedAt: string) => { calls.markNotified.push([taskId, notifiedAt]); },
     now: () => "2026-07-10T12:00:00Z",
     ...over,
@@ -224,7 +224,7 @@ test("closeVoiceLoop sends the fixed failure notice (no distillation) for a fail
 test("closeVoiceLoop tolerates notify() and APNs both rejecting — never throws, still marks notified once", async () => {
   const { deps, calls } = makeDeps({
     notify: (async () => { throw new Error("imessage down"); }) as LoopCloserDeps["notify"],
-    sendApnsPush: (async () => { throw new Error("apns down"); }) as LoopCloserDeps["sendApnsPush"],
+    sendPush: (async () => { throw new Error("push down"); }) as unknown as LoopCloserDeps["sendPush"],
   });
   const t = task({ status: "done", output: { origin: "voice", summary: "All good." } });
 
@@ -236,7 +236,7 @@ test("closeVoiceLoop never throws even when the whole deps object is broken", as
   const brokenDeps = {
     chatComplete: async () => { throw new Error("boom"); },
     notify: async () => { throw new Error("boom"); },
-    sendApnsPush: async () => { throw new Error("boom"); },
+    sendPush: async () => { throw new Error("boom"); },
     markNotified: async () => { throw new Error("boom"); },
     now: () => { throw new Error("boom"); },
   } as unknown as LoopCloserDeps;

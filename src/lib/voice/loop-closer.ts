@@ -27,7 +27,7 @@
  */
 
 import { notify as defaultNotify } from "@/lib/notify/notify";
-import { sendApnsPush as defaultSendApnsPush } from "@/lib/notify/apns";
+import { sendPush as defaultSendPush } from "@/lib/notify/push";
 import { haikuChatComplete, type ChatComplete } from "@/lib/models/chat-client";
 import { Task } from "@/lib/db";
 
@@ -153,7 +153,7 @@ export async function distillLoopResult(
 export interface LoopCloserDeps {
   chatComplete: ChatComplete;
   notify: typeof defaultNotify;
-  sendApnsPush: typeof defaultSendApnsPush;
+  sendPush: typeof defaultSendPush;
   /** Persist that this task has been notified. Merges into `output` — never
    * clobbers the rest of it. */
   markNotified: (taskId: string, notifiedAt: string) => Promise<void>;
@@ -169,7 +169,7 @@ async function defaultMarkNotified(taskId: string, notifiedAt: string): Promise<
 export const defaultLoopCloserDeps: LoopCloserDeps = {
   chatComplete: haikuChatComplete,
   notify: defaultNotify,
-  sendApnsPush: defaultSendApnsPush,
+  sendPush: defaultSendPush,
   markNotified: defaultMarkNotified,
   now: () => new Date().toISOString(),
 };
@@ -199,15 +199,15 @@ export async function closeVoiceLoop(
     // guaranteed delivery here; delivery itself is best-effort.
     await deps.markNotified(t._id, deps.now());
 
-    const [notifyResult, apnsResult] = await Promise.allSettled([
+    const [notifyResult, pushResult] = await Promise.allSettled([
       deps.notify(message),
-      deps.sendApnsPush({ title: "HiveMatrix", body: message }),
+      deps.sendPush({ title: "HiveMatrix", body: message }),
     ]);
     if (notifyResult.status === "rejected") {
       console.error(`[voice-loop-closer] notify() failed for task ${t._id}: ${String(notifyResult.reason)}`);
     }
-    if (apnsResult.status === "rejected") {
-      console.error(`[voice-loop-closer] APNs push failed for task ${t._id}: ${String(apnsResult.reason)}`);
+    if (pushResult.status === "rejected") {
+      console.error(`[voice-loop-closer] push failed for task ${t._id}: ${String(pushResult.reason)}`);
     }
   } catch (err) {
     console.error(`[voice-loop-closer] failed for task ${task?._id ?? "?"}: ${err instanceof Error ? err.message : String(err)}`);

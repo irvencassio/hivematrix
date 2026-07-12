@@ -63,7 +63,7 @@ export function briefingDue(config: MorningBriefingConfig, now: Date = new Date(
 
 export interface BriefingDeps {
   composeBriefing?: () => Promise<string>;
-  sendApnsPush?: (opts: { title: string; body: string; data?: Record<string, unknown> }) => Promise<{ sent: number }>;
+  sendPush?: (opts: { title: string; body: string; data?: Record<string, unknown> }) => Promise<{ sent: number }>;
   notify?: (text: string) => Promise<unknown>;
   now?: () => Date;
 }
@@ -77,7 +77,7 @@ export async function runBriefingNow(deps: BriefingDeps = {}): Promise<{ text: s
   const compose = deps.composeBriefing ?? (async () => (await import("@/lib/voice/command-turn")).composeBriefing());
   const text = await compose();
 
-  const push = deps.sendApnsPush ?? (async (o) => (await import("@/lib/notify/apns")).sendApnsPush(o));
+  const push = deps.sendPush ?? (async (o) => (await import("@/lib/notify/push")).sendPush(o));
   let pushed = 0;
   try {
     const result = await push({ title: "Morning briefing", body: text, data: { kind: "morning-briefing" } });

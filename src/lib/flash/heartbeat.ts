@@ -462,8 +462,8 @@ export interface HeartbeatDeps {
   composeStatus?: () => Promise<string>;
   /** Surface a report as an assistant turn in the operator console session. */
   appendOperatorTurn?: (text: string) => void;
-  /** APNs push for daily moments — daemon wires notify/apns. */
-  sendApnsPush?: (opts: { title: string; body: string; data?: Record<string, unknown> }) => Promise<{ sent: number }>;
+  /** Push for daily moments — daemon wires notify/push. */
+  sendPush?: (opts: { title: string; body: string; data?: Record<string, unknown> }) => Promise<{ sent: number }>;
   runTurn?: typeof runFlashTurnText;
   /** Day Brief assembly (day-brief.ts) — injectable for tests; defaults to the real one. */
   composeDayBrief?: typeof composeDayBrief;
@@ -592,9 +592,9 @@ export async function runDailyMomentOnce(
 
   const title = moment === "morning-brief" ? "Morning brief" : "Evening recap";
   let pushed = 0;
-  if (deps.sendApnsPush) {
+  if (deps.sendPush) {
     try {
-      pushed = (await deps.sendApnsPush({ title, body: text, data: { kind: moment } })).sent;
+      pushed = (await deps.sendPush({ title, body: text, data: { kind: moment } })).sent;
     } catch { /* fall through to notify */ }
   }
   if (pushed === 0 && deps.notify) {
