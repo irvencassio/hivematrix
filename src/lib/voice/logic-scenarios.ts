@@ -137,9 +137,12 @@ const scenarios: Scenario[] = [
   { name: "mail delete calendar", utterance: "delete the calendar invite from vendor", kind: "command", expected: "command:mailDeleteTask" },
   { name: "create investor task", utterance: "create a task to draft the investor update", kind: "command", expected: "command:createTask" },
   { name: "create invoice task", utterance: "make a task to reconcile invoices", kind: "command", expected: "command:createTask" },
-  { name: "remind school form", utterance: "remind me to submit the school form tomorrow", kind: "command", expected: "command:createTask" },
+  // "remind me …" sets a REAL Apple Reminder (scheduledReminder), never a
+  // do-nothing HiveMatrix task (regression 2026-07-12). "remember to …" (no
+  // "remind me"/"set a reminder" prefix) still routes to createTask.
+  { name: "remind school form", utterance: "remind me to submit the school form tomorrow", kind: "command", expected: "command:scheduledReminder" },
   { name: "remember dentist", utterance: "remember to book the dentist appointment", kind: "command", expected: "command:createTask" },
-  { name: "personal grocery", utterance: "remind me to add milk to the grocery list", kind: "command", expected: "command:createTask" },
+  { name: "personal grocery", utterance: "remind me to add milk to the grocery list", kind: "command", expected: "command:scheduledReminder" },
   { name: "team followup", utterance: "make sure to follow up with Alex about the proposal", kind: "command", expected: "command:createTask" },
   { name: "new task taxes", utterance: "new task for quarterly taxes", kind: "command", expected: "command:createTask" },
   // Self-improvement utterances must fall through to Flash (kind: none), never
@@ -253,6 +256,10 @@ function buildDeps(sideEffects: string[], scenario: Scenario, options: VoiceLogi
       getLocation: () => options.location ?? "Kings Mills, OH",
       fetchWeather,
       createTask,
+      createReminder: async ({ name, due }) => {
+        sideEffects.push(`simulated reminder:create ${name}${due ? ` @ ${due}` : ""}`);
+        return `Reminder set: "${name}"${due ? ` for ${due}` : " (no due time)"}.`;
+      },
     },
   };
 }
