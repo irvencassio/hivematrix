@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.184", date: "2026-07-12", note: "Voice never dead-ends: when a tool fails, HiveMatrix now learns a new skill for the task instead of asking you to do it by hand; permission blocks get spoken remediation." },
   { version: "0.1.183", date: "2026-07-12", note: "Calendar first-run polish: while macOS's calendar-permission prompt is pending, HiveMatrix now says exactly how to grant access instead of a generic failure." },
   { version: "0.1.182", date: "2026-07-12", note: "Self-learning: calendar reads via EventKit (no more app-launch dead-end), skill_run lets voice/chat execute learned skills in a sandbox, learn_skill acquires+verifies new skills live on capability misses, 'update HiveMatrix to X' routes to the coding pipeline, background gap→skill acquisition under autonomous mode, morning brief reports what it learned." },
   { version: "0.1.181", date: "2026-07-12", note: "Cloudflare pairing QR: fix the display overflow (it was overlapping the security note and corrupting the scannable quiet zone) and make the dense QR scannable — constrain the SVG to its box, enlarge it 188→240px, and render at error-correction level L for bigger modules." },
