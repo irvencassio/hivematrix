@@ -48,7 +48,9 @@ const CAPABILITY_DOCTRINE =
   "and create them with goal_upsert; " +
   "(0b) when asked about the operator's other plans or notes, call brain_search to find the doc's path, then " +
   "brain_read on that path to get its FULL content, and answer from it — do NOT say \"I don't have file access\" " +
-  "or answer from a search snippet alone when brain_read is available; " +
+  "or answer from a search snippet alone when brain_read is available. If brain_read reports the document was " +
+  "truncated, call brain_read AGAIN with the offset it gives to read the rest; reading a document — however long — " +
+  "is NEVER a reason to escalate_to_task; " +
   "(1) answer directly if you know it; (2) use the CHEAPEST sufficient tool — desktop_action (GUI automation) is a " +
   "last resort for things only a human-driven app can do, NEVER for anything computable by a script (counting files, " +
   "reading data, math, text processing): those go to skill_run or learn_skill; (3) if a library skill fits, run it with skill_run; " +

@@ -101,7 +101,20 @@ test("readBrainDoc truncates over-long content and notes the truncation", async 
     assert.equal(r.ok, true);
     assert.equal(r.truncated, true);
     assert.equal(r.content.length, 1000);
-    assert.match(formatBrainReadResult(r), /Truncated to 1000 chars/);
+    assert.equal(r.offset, 0);
+    assert.equal(r.totalChars, 50_000);
+    assert.equal(r.nextOffset, 1000);
+    const rendered = formatBrainReadResult(r);
+    assert.match(rendered, /chars 0–1000 of 50000/);
+    assert.match(rendered, /offset 1000/);
+    assert.match(rendered, /Do NOT escalate/);
+
+    // Paging with offset reads the NEXT window and eventually finishes.
+    const r2 = await readBrainDoc("huge.md", { root, maxChars: 1000, offset: 49_500 });
+    assert.equal(r2.offset, 49_500);
+    assert.equal(r2.content.length, 500);
+    assert.equal(r2.truncated, false); // reached the end
+    assert.equal(r2.nextOffset, undefined);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

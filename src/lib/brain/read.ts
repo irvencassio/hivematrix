@@ -27,13 +27,21 @@ export interface BrainReadResult {
   ok: boolean;
   content: string;
   truncated: boolean;
+  /** Char offset this window started at. */
+  offset: number;
+  /** Total length of the document (so a caller knows how much is left). */
+  totalChars: number;
+  /** Where to start the next brain_read to continue, when truncated. */
+  nextOffset?: number;
   reason?: string;
 }
 
 export interface BrainReadOptions {
   root?: string | null;
-  /** Hard cap on returned content length. Default ~20k chars. */
+  /** Hard cap on returned content length per read. Default ~20k chars. */
   maxChars?: number;
+  /** Start reading from this char offset — lets a caller page through a long doc. */
+  offset?: number;
   /** Per-file read timeout — mirrors search.ts's readWithTimeout budget. */
   timeoutMs?: number;
 }
@@ -86,16 +94,16 @@ export async function readBrainDoc(path: string, opts: BrainReadOptions = {}): P
   const requested = String(path ?? "").trim();
 
   if (!root) {
-    return { root: null, path: requested, ok: false, content: "", truncated: false, reason: "brain memory is disabled or no brain root is configured" };
+    return { root: null, path: requested, ok: false, content: "", truncated: false, offset: 0, totalChars: 0, reason: "brain memory is disabled or no brain root is configured" };
   }
   if (!requested) {
-    return { root, path: requested, ok: false, content: "", truncated: false, reason: "'path' is required" };
+    return { root, path: requested, ok: false, content: "", truncated: false, offset: 0, totalChars: 0, reason: "'path' is required" };
   }
 
   const resolved = resolveInRoot(root, requested);
   if (!resolved) {
     return {
-      root, path: requested, ok: false, content: "", truncated: false,
+      root, path: requested, ok: false, content: "", truncated: false, offset: 0, totalChars: 0,
       reason: "path escapes the brain root — only paths inside the brain root may be read (no absolute paths or \"..\" traversal)",
     };
   }
@@ -103,23 +111,34 @@ export async function readBrainDoc(path: string, opts: BrainReadOptions = {}): P
   const outcome = await readWithTimeout(resolved, timeoutMs);
   if (!outcome.ok) {
     return {
-      root, path: requested, ok: false, content: "", truncated: false,
+      root, path: requested, ok: false, content: "", truncated: false, offset: 0, totalChars: 0,
       reason: outcome.reason === "not found"
         ? "no such file under the brain root — try brain_search first to find the exact path"
         : outcome.reason,
     };
   }
 
-  const truncated = outcome.content.length > maxChars;
-  const content = truncated ? outcome.content.slice(0, maxChars) : outcome.content;
-  return { root, path: requested, ok: true, content, truncated };
+  const totalChars = outcome.content.length;
+  const offset = Math.max(0, Math.min(opts.offset ?? 0, totalChars));
+  const window = outcome.content.slice(offset, offset + maxChars);
+  const end = offset + window.length;
+  const truncated = end < totalChars;
+  return {
+    root, path: requested, ok: true, content: window, truncated, offset, totalChars,
+    ...(truncated ? { nextOffset: end } : {}),
+  };
 }
 
 /** Render a read result as the string an agent tool returns. */
 export function formatBrainReadResult(result: BrainReadResult): string {
   if (!result.ok) return `Error: ${result.reason ?? "could not read the file"}.`;
+  // When truncated, tell the model EXACTLY how to keep reading — call brain_read
+  // again with the next offset. This is a plain read, not agent work: never
+  // escalate a task just to finish reading a document.
   const note = result.truncated
-    ? `\n\n(Truncated to ${result.content.length} chars — the document is longer than this cap.)`
+    ? `\n\n(Showing chars ${result.offset}–${result.offset + result.content.length} of ${result.totalChars}. ` +
+      `To read the rest, call brain_read again with path "${result.path}" and offset ${result.nextOffset}. ` +
+      `Do NOT escalate a task to read more — just call brain_read again.)`
     : "";
   return `${result.path}:\n${result.content}${note}`;
 }

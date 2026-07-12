@@ -246,11 +246,14 @@ export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
         "Read the FULL text of a brain document by its path (as returned by brain_search). Use this after " +
         "brain_search to answer questions about the operator's goals, plans, or notes instead of relying on " +
         "snippets — a search hit only gives you a fragment; this gives you the whole document. The path must be " +
-        "one returned by brain_search (or otherwise known to be under the brain root); an out-of-root path is refused.",
+        "one returned by brain_search (or otherwise known to be under the brain root); an out-of-root path is refused. " +
+        "Long documents come back in ~20k-char windows: if the result says it was truncated, call brain_read AGAIN with " +
+        "the same path and the `offset` it tells you to continue reading — do NOT escalate a task just to finish reading.",
       parameters: {
         type: "object",
         properties: {
           path: { type: "string", description: "The brain-root-relative doc path, e.g. as returned in a brain_search hit's `path` field" },
+          offset: { type: "number", description: "Char offset to start reading from (default 0). Use the offset a truncated result reports to read the next window of a long doc." },
         },
         required: ["path"],
       },
@@ -768,8 +771,9 @@ async function executeBrainSearch(args: Record<string, unknown>): Promise<string
 async function executeBrainRead(args: Record<string, unknown>): Promise<string> {
   const path = typeof args.path === "string" ? args.path.trim() : "";
   if (!path) return "Error: 'path' is required for brain_read.";
+  const offset = typeof args.offset === "number" && Number.isFinite(args.offset) ? Math.max(0, Math.floor(args.offset)) : 0;
   const { readBrainDoc, formatBrainReadResult } = await import("@/lib/brain/read");
-  return formatBrainReadResult(await readBrainDoc(path));
+  return formatBrainReadResult(await readBrainDoc(path, { offset }));
 }
 
 async function executeSkillUsed(args: Record<string, unknown>): Promise<string> {
