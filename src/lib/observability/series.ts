@@ -34,6 +34,19 @@ export interface SeriesPoint {
   byProvider: Record<string, ProviderCell>;
 }
 
+/**
+ * The `points`/`byProvider` shape's sibling, grouped by model id instead of
+ * provider — e.g. "claude-opus-4-8" and "claude-haiku-4-5" stay distinct cells
+ * even though both are `anthropic`. Same continuous axis as `points` (one
+ * entry per bucket label, zero-filled for models with no runs in that
+ * bucket), so a consumer can zip the two arrays by index or by `t`.
+ */
+export interface SeriesPointByModel {
+  /** Same bucket label convention as SeriesPoint.t; matches points[i].t index-for-index. */
+  t: string;
+  byModel: Record<string, ProviderCell>;
+}
+
 export interface CacheRow {
   provider: string;
   /** Does this provider report per-run prompt-cache tokens in task_telemetry?
@@ -84,6 +97,10 @@ export interface ObservabilitySeries {
   unit: "minute" | "hour" | "day";
   providers: string[];
   points: SeriesPoint[];
+  /** Same bucketed axis as `points`, grouped by model id instead of provider —
+   * lets the UI render a stacked-by-model-tier chart (e.g. opus vs haiku,
+   * both `anthropic`) alongside the existing stacked-by-provider chart. */
+  pointsByModel: SeriesPointByModel[];
   cache: CacheRow[];
   /** Per-model breakdown, window-scoped, busiest model first. */
   models: SeriesModelTotal[];
@@ -207,6 +224,24 @@ export async function observabilitySeries(window: SeriesWindow = "7d"): Promise<
     )
     .all(cutoffIso) as Array<Record<string, unknown>>;
 
+  // Bucketed (chart) rows, grouped by model id instead of provider — the
+  // `pointsByModel` sibling of the query above. Same shape, same cutoff, same
+  // bucket expression; only the GROUP BY column differs.
+  const modelBucketRows = db
+    .prepare(
+      `SELECT ${spec.bucketExpr} AS bucket, model,
+        COUNT(*) AS runs,
+        COALESCE(SUM(inputTokens),0) AS inputTokens,
+        COALESCE(SUM(outputTokens),0) AS outputTokens,
+        COALESCE(SUM(cacheReadTokens),0) AS cacheReadTokens,
+        COALESCE(SUM(cacheCreationTokens),0) AS cacheCreationTokens,
+        COALESCE(SUM(costUsd),0) AS costUsd
+       FROM task_telemetry
+       WHERE createdAt >= ?
+       GROUP BY bucket, model`,
+    )
+    .all(cutoffIso) as Array<Record<string, unknown>>;
+
   // Per-provider window totals (cache + headline cards). cacheCreate5m/1h use
   // a bare (non-COALESCE'd) SUM: SQLite's SUM ignores individual NULLs but
   // returns NULL only when EVERY row in the group is NULL — exactly "unknown
@@ -266,6 +301,31 @@ export async function observabilitySeries(window: SeriesWindow = "7d"): Promise<
   const points = labels.map((t) => {
     const p = byBucket.get(t)!;
     for (const prov of providers) if (!p.byProvider[prov]) p.byProvider[prov] = emptyCell();
+    return p;
+  });
+
+  // Same continuous-axis assembly as `points` above, grouped by model id.
+  const byBucketModel = new Map<string, SeriesPointByModel>();
+  for (const t of labels) byBucketModel.set(t, { t, byModel: {} });
+  const modelIdsInBuckets = new Set<string>();
+  for (const r of modelBucketRows) {
+    const t = String(r.bucket);
+    const point = byBucketModel.get(t);
+    if (!point) continue; // outside the rendered axis (clock edge) — skip, same as the provider query
+    const model = String(r.model);
+    modelIdsInBuckets.add(model);
+    point.byModel[model] = {
+      runs: num(r.runs),
+      inputTokens: num(r.inputTokens),
+      outputTokens: num(r.outputTokens),
+      cacheReadTokens: num(r.cacheReadTokens),
+      cacheCreationTokens: num(r.cacheCreationTokens),
+      costUsd: num(r.costUsd),
+    };
+  }
+  const pointsByModel = labels.map((t) => {
+    const p = byBucketModel.get(t)!;
+    for (const model of modelIdsInBuckets) if (!p.byModel[model]) p.byModel[model] = emptyCell();
     return p;
   });
 
@@ -340,6 +400,7 @@ export async function observabilitySeries(window: SeriesWindow = "7d"): Promise<
     unit: spec.unit,
     providers: [...providers].sort(),
     points,
+    pointsByModel,
     cache,
     models,
     totals: {

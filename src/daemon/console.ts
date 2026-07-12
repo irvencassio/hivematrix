@@ -873,6 +873,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .oc-input:focus { outline:none; border-color:var(--accent); }
   .oc-panel-composer-actions { display:flex; flex-direction:column; gap:7px; min-width:0; }
   .oc-panel-composer-actions button { width:100%; min-width:0; text-align:center; }
+  .oc-mic-btn { padding:7px 6px; border:1px solid var(--border); border-radius:8px;
+    background:var(--code-bg); color:var(--text); font-size:12px; font-family:inherit;
+    cursor:pointer; white-space:nowrap; }
+  .oc-mic-btn:hover { border-color:var(--accent); }
+  .oc-mic-btn.recording { border-color:#e05b2c; color:#e05b2c; background:rgba(224,91,44,0.08); }
   .oc-warn-panel { display:flex; align-items:flex-start; gap:10px; padding:18px; font-size:13px; }
   .oc-warn-icon { flex-shrink:0; color:var(--warn); font-size:15px; line-height:1.3; }
   .oc-warn-body { flex:1; min-width:0; }
@@ -2718,11 +2723,11 @@ function toggleReply(id) {
 
 // --- Observability (per-task telemetry + totals) ---
 let _obsWindow = "7d";
-// Only the dashboard modal's bottom breakdown table honors this — the time-
-// bucketed "Tokens/Tasks over time" charts stay provider-grouped, since a
-// per-bucket-per-model breakdown would double the query cost and cardinality
-// for a granularity the operator didn't ask for (they asked which MODEL ran,
-// not a per-hour model timeline).
+// The dashboard modal's group toggle ("by provider" / "by model") now drives
+// BOTH the bottom breakdown table AND the time-bucketed "Tokens/Tasks over
+// time" charts: in "by model" mode they stack by Claude tier (Opus/Sonnet/
+// Haiku) / Codex from series.pointsByModel, which is what the operator asked
+// for ("graphs by model usage"). The provider view remains the default.
 let _obsGroup = "provider";
 // Any provider key not listed here falls back to its raw string as a label
 // and to OBS_COLORS.other as a color — see the "|| " fallbacks at every
@@ -3007,14 +3012,28 @@ function obsBucketLabel(t, unit) {
   if (unit === "hour") return (t || "").slice(11, 13) + ":00";
   return (t || "").slice(5); // MM-DD
 }
-function obsLegend(providers) {
-  return '<div class="obs-legend">' + providers.map(function (pr) {
-    return '<span><i style="background:' + (OBS_COLORS[pr] || OBS_COLORS.other) + '"></i>' + esc(OBS_LABELS[pr] || pr) + '</span>';
+// Legend keyed by provider OR model. colorFn/labelFn default to the provider
+// lookups; the "by model" charts pass obsModelColor/obsModelLabel so Opus/
+// Sonnet/Haiku each get their own tier color instead of the shared "Claude".
+function obsLegend(keys, colorFn, labelFn) {
+  const color = colorFn || function (k) { return OBS_COLORS[k] || OBS_COLORS.other; };
+  const label = labelFn || function (k) { return OBS_LABELS[k] || k; };
+  return '<div class="obs-legend">' + keys.map(function (k) {
+    return '<span><i style="background:' + color(k) + '"></i>' + esc(label(k)) + '</span>';
   }).join("") + '</div>';
 }
+// Sort order for the "by model" series: Opus, Sonnet, Haiku, Codex, then other.
+function obsTierOrder(model) {
+  const t = obsModelTier(model);
+  return t === "Opus" ? 0 : t === "Sonnet" ? 1 : t === "Haiku" ? 2 : t === "Codex" ? 3 : 4;
+}
 
-// Dependency-free stacked-bar SVG: one bar per time bucket, stacked by provider.
-function obsStackedBars(points, providers, valueFn, unit) {
+// Dependency-free stacked-bar SVG: one bar per time bucket, stacked by series
+// key (provider or model). colorFn/labelFn default to the provider lookups.
+function obsStackedBars(points, keys, valueFn, unit, colorFn, labelFn) {
+  const color = colorFn || function (k) { return OBS_COLORS[k] || OBS_COLORS.other; };
+  const label = labelFn || function (k) { return OBS_LABELS[k] || k; };
+  const providers = keys;
   const W = 720, H = 150, padL = 44, padR = 10, padT = 10, padB = 22;
   const n = points.length || 1;
   const plotW = W - padL - padR, plotH = H - padT - padB;
@@ -3077,13 +3096,34 @@ async function renderObsDashboard(target) {
     + obsKpi(obsShort(tot.tokens.total), "total tok")
     + '</div>';
 
-  html += '<div class="obs-chart"><h4>Tokens over time</h4><div class="sub">input + output, stacked by provider</div>'
-    + obsStackedBars(s.points, providers, function (p, pr) { const c = p.byProvider[pr]; return c ? c.inputTokens + c.outputTokens : 0; }, s.unit)
-    + obsLegend(providers) + '</div>';
-
-  html += '<div class="obs-chart"><h4>Tasks over time</h4><div class="sub">runs per ' + (s.unit === "minute" ? "5 min" : s.unit === "hour" ? "hour" : "day") + ', stacked by provider</div>'
-    + obsStackedBars(s.points, providers, function (p, pr) { const c = p.byProvider[pr]; return c ? c.runs : 0; }, s.unit)
-    + obsLegend(providers) + '</div>';
+  // The time-bucketed charts honor the by-provider / by-model toggle too (not
+  // just the breakdown table below): in "by model" mode they stack by Claude
+  // tier (Opus/Sonnet/Haiku) / Codex using s.pointsByModel, so the operator can
+  // see which model ran over time — the thing they actually asked for.
+  const groupByModel = _obsGroup === "model";
+  const perStr = s.unit === "minute" ? "5 min" : s.unit === "hour" ? "hour" : "day";
+  if (groupByModel) {
+    const seen = {};
+    (s.pointsByModel || []).forEach(function (p) { Object.keys(p.byModel || {}).forEach(function (k) { seen[k] = 1; }); });
+    const modelKeys = Object.keys(seen).sort(function (a, b) {
+      const d = obsTierOrder(a) - obsTierOrder(b);
+      return d !== 0 ? d : (a < b ? -1 : a > b ? 1 : 0);
+    });
+    const mpts = s.pointsByModel || [];
+    html += '<div class="obs-chart"><h4>Tokens over time</h4><div class="sub">input + output, stacked by model</div>'
+      + obsStackedBars(mpts, modelKeys, function (p, k) { const c = p.byModel[k]; return c ? c.inputTokens + c.outputTokens : 0; }, s.unit, obsModelColor, obsModelLabel)
+      + obsLegend(modelKeys, obsModelColor, obsModelLabel) + '</div>';
+    html += '<div class="obs-chart"><h4>Tasks over time</h4><div class="sub">runs per ' + perStr + ', stacked by model</div>'
+      + obsStackedBars(mpts, modelKeys, function (p, k) { const c = p.byModel[k]; return c ? c.runs : 0; }, s.unit, obsModelColor, obsModelLabel)
+      + obsLegend(modelKeys, obsModelColor, obsModelLabel) + '</div>';
+  } else {
+    html += '<div class="obs-chart"><h4>Tokens over time</h4><div class="sub">input + output, stacked by provider</div>'
+      + obsStackedBars(s.points, providers, function (p, pr) { const c = p.byProvider[pr]; return c ? c.inputTokens + c.outputTokens : 0; }, s.unit)
+      + obsLegend(providers) + '</div>';
+    html += '<div class="obs-chart"><h4>Tasks over time</h4><div class="sub">runs per ' + perStr + ', stacked by provider</div>'
+      + obsStackedBars(s.points, providers, function (p, pr) { const c = p.byProvider[pr]; return c ? c.runs : 0; }, s.unit)
+      + obsLegend(providers) + '</div>';
+  }
 
   html += '<div class="obs-chart"><h4>Prompt cache</h4><div class="sub">cached input reuse — Claude &amp; Codex cache prompts</div>';
   const crows = (s.cache || []).slice().sort(function (a, b) { return (OBS_ORDER[a.provider] ?? 9) - (OBS_ORDER[b.provider] ?? 9); });
@@ -3113,7 +3153,7 @@ async function renderObsDashboard(target) {
   }
   html += '</div>';
 
-  const groupByModel = _obsGroup === "model";
+  // groupByModel already computed above for the time charts.
   const groupRows = groupByModel ? (detail && detail.totals && detail.totals.byModel) : (detail && detail.totals && detail.totals.byProvider);
   if (groupRows && groupRows.length) {
     const heading = groupByModel ? "By model" : "By provider";
@@ -4233,6 +4273,16 @@ async function wizardAction(id) {
       _obRenderStep();
       const detail = document.getElementById('ob_codex_detail');
       if (detail) detail.classList.add('open');
+      return;
+    }
+    if (id === 'canopy') {
+      await hmAlert(
+        'Canopy is the MCP terminal that replaced HiveMatrix\'s Terminal Lane.\n\n' +
+        '• Not installed — install the Canopy app, then reopen this step.\n' +
+        '• Installed but not registered — open Canopy → Settings → About → "Set Up Claude Code Access" to register it.\n\n' +
+        'This card reflects whether Canopy is present in /Applications and registered in ~/.claude.json. One-click registration from HiveMatrix is coming next.',
+        'Canopy (MCP terminal)'
+      );
       return;
     }
     if (id === 'persona') { await runPersonaBirthRitual(); return; }
@@ -6462,12 +6512,17 @@ function renderVoiceLogicResults(r) {
 
 // ── In-app push-to-talk (Voice feature) ───────────────────────────────
 let _talkRec = null, _talkChunks = [];
+let _dictRec = null, _dictChunks = [];
+let _voiceOn = true; // corrected on first /settings/features fetch; gates the composer mic
 async function initVoiceFeature() {
   try {
     const r = await api("/settings/features");
     const on = ((r && r.features) || []).some(f => f.key === "voice" && f.enabled);
+    _voiceOn = on;
     const btn = document.getElementById("talkBtn");
     if (btn) btn.style.display = on ? "" : "none";
+    const mic = document.getElementById("flashMicBtn");
+    if (mic) mic.style.display = on ? "" : "none";
   } catch (e) { /* ignore */ }
 }
 
@@ -6492,6 +6547,7 @@ function flashPanelHtml() {
     + '<div class="oc-panel-composer-shell" onclick="flashFocusInput()">'
     + '<textarea class="oc-input" id="flashInput" placeholder="Message…" rows="3" onkeydown="flashInputKeydown(event)" oninput="flashInputResize(this)"></textarea>'
     + '<div class="oc-panel-composer-actions">'
+    + '<button class="oc-mic-btn" id="flashMicBtn" onclick="event.stopPropagation();flashDictate()" title="Dictate — speak and your words fill the box">🎤 Mic</button>'
     + '<button class="create" id="flashSendBtn" onclick="event.stopPropagation();flashSend()" disabled>Send</button>'
     + '</div></div></div></div>';
 }
@@ -6506,6 +6562,8 @@ function renderFlashPanel() {
   session.innerHTML = flashPanelHtml();
   const input = document.getElementById('flashInput');
   if (input && draft) { input.value = draft; flashInputResize(input); }
+  const mic = document.getElementById('flashMicBtn');
+  if (mic && !_voiceOn) mic.style.display = 'none';
   flashRenderMessages();
   if (active && input) input.focus();
 }
@@ -7623,6 +7681,40 @@ function retryVoice() {
   const talkBtn = document.getElementById("talkBtn");
   if (talkBtn) talkBtn.style.display = "";
   talkStatus("", false);
+}
+
+// Composer dictation mic (button sits above Send): record → STT-only →
+// drop the transcript into #flashInput for the operator to review and send.
+// Distinct from toggleTalk (header), which runs a full spoken voice turn.
+async function flashDictate() {
+  const btn = document.getElementById("flashMicBtn");
+  const input = document.getElementById("flashInput");
+  if (_dictRec && _dictRec.state === "recording") { _dictRec.stop(); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { hmToast("Microphone blocked — allow mic access for this page.", "err"); return; }
+  _dictChunks = [];
+  _dictRec = new MediaRecorder(stream);
+  _dictRec.ondataavailable = e => { if (e.data && e.data.size) _dictChunks.push(e.data); };
+  _dictRec.onerror = () => { if (btn) { btn.classList.remove("recording"); btn.textContent = "🎤 Mic"; } };
+  _dictRec.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+    if (btn) { btn.classList.remove("recording"); btn.textContent = "…"; btn.disabled = true; }
+    try {
+      const b64 = await blobToB64(new Blob(_dictChunks, { type: "audio/webm" }));
+      const res = await api("/voice/transcribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audioBase64: b64 }) });
+      if (res && res.error) { hmToast(res.error, "err"); }
+      else if (res && res.transcript && input) {
+        const cur = input.value || "";
+        input.value = (cur && !/\s$/.test(cur)) ? cur + " " + res.transcript : cur + res.transcript;
+        input.focus();
+        flashInputResize(input); // resizes + enables Send
+      } else { hmToast("Didn't catch that — try again.", ""); }
+    } catch (e) { hmToast("Dictation failed — type your message instead.", "err"); }
+    if (btn) { btn.textContent = "🎤 Mic"; btn.disabled = false; }
+  };
+  _dictRec.start();
+  if (btn) { btn.classList.add("recording"); btn.textContent = "■ Stop"; }
 }
 
 function renderAbout() {

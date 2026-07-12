@@ -5,7 +5,10 @@
  * scoping, SSE-streamed responses, tool execution with budget gating, and a
  * learning loop that distills sessions into reusable skills.
  *
- * Scope rule: flash/ may import from routing/, orchestrator/, brain/, skills/, db/.
+ * Scope rule: flash/ may import from routing/, orchestrator/, brain/, skills/, db/,
+ * observability/, connectivity/ (the latter two for per-turn telemetry — see
+ * loop.ts's recordFlashTelemetry, the Flash-lane counterpart to
+ * agent-manager's captureRunTelemetry for orchestrator tasks).
  * Only daemon/ may import from flash/.
  */
 

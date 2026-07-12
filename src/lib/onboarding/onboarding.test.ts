@@ -133,6 +133,54 @@ test("messagebee still reports channel disabled after readable chat.db", () => {
   assert.match(mb.detail, /channel disabled/);
 });
 
+test("canopy: not installed, not registered => incomplete", () => {
+  const status = withHome(() => {}, () => getOnboardingStatus({ now: "T", canopyInstalled: false }));
+  const canopy = step(status, "canopy");
+  assert.equal(canopy.required, false);
+  assert.equal(canopy.state, "incomplete");
+  assert.equal(canopy.detail, "Canopy not installed");
+  assert.ok(canopy.remediation && /Canopy/.test(canopy.remediation));
+});
+
+test("canopy: installed but not registered in ~/.claude.json => incomplete", () => {
+  const status = withHome(() => {}, () => getOnboardingStatus({ now: "T", canopyInstalled: true }));
+  const canopy = step(status, "canopy");
+  assert.equal(canopy.state, "incomplete");
+  assert.equal(canopy.detail, "Canopy installed but not registered for Claude Code");
+});
+
+test("canopy: installed and registered => done", () => {
+  const status = withHome((home) => {
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({
+      mcpServers: { canopy: { command: "canopy-mcp" } },
+    }));
+  }, () => getOnboardingStatus({ now: "T", canopyInstalled: true }));
+  const canopy = step(status, "canopy");
+  assert.equal(canopy.state, "done");
+  assert.equal(canopy.detail, "installed and registered");
+  assert.equal(canopy.remediation, undefined);
+});
+
+test("canopy: registered in ~/.claude.json but app not installed => still incomplete", () => {
+  const status = withHome((home) => {
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({
+      mcpServers: { canopy: { command: "canopy-mcp" } },
+    }));
+  }, () => getOnboardingStatus({ now: "T", canopyInstalled: false }));
+  const canopy = step(status, "canopy");
+  assert.equal(canopy.state, "incomplete");
+  assert.equal(canopy.detail, "Canopy not installed");
+});
+
+test("canopy: malformed ~/.claude.json is tolerated as unregistered", () => {
+  const status = withHome((home) => {
+    writeFileSync(join(home, ".claude.json"), "{ not valid json");
+  }, () => getOnboardingStatus({ now: "T", canopyInstalled: true }));
+  const canopy = step(status, "canopy");
+  assert.equal(canopy.state, "incomplete");
+  assert.equal(canopy.detail, "Canopy installed but not registered for Claude Code");
+});
+
 test("incomplete steps carry remediation hints", () => {
   const status = withHome(() => {}, () => getOnboardingStatus({ now: "T" }));
   for (const s of status.steps.filter((s) => s.state === "incomplete")) {

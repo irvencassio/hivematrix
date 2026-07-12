@@ -31,9 +31,42 @@ import uuid
 
 from aiohttp import web
 
-from stt import transcribe
+from stt import transcribe as _command_transcribe
 from llm import LocalLLM, extract_actions, resolve_escalation
 from tts import synthesize
+
+# Prefer the warm in-process whisper.cpp backend (same one flash_pipeline.py's
+# realtime pipeline uses) over the command seam, which requires HIVE_STT_COMMAND
+# to be set and otherwise raises on every call. Falls back to the command seam
+# only when pywhispercpp isn't importable — mirrors whisper_stt.WhisperCppSTT's
+# own fallback (see whisper_stt.py run_stt, ~lines 127-134).
+from whisper_stt import _PYWHISPERCPP_AVAILABLE, transcribe_whisper
+
+
+def transcribe(audio_path: str) -> str:
+    """Transcribe `audio_path`, reusing the warm whisper.cpp model (loaded once,
+    cached across turns by whisper_stt._get_model) when available."""
+    if _PYWHISPERCPP_AVAILABLE:
+        return transcribe_whisper(audio_path)
+    return _command_transcribe(audio_path)
+
+
+def _transcribe_only(audio_b64: str) -> dict:
+    """STT only — decode recorded audio and return the transcript, no LLM/TTS.
+    Backs the chat composer's dictation mic (record → text into the input box)."""
+    work = tempfile.mkdtemp(prefix="hm-stt-")
+    try:
+        inp = os.path.join(work, "in.webm")  # extension advisory; ffmpeg sniffs content
+        with open(inp, "wb") as f:
+            f.write(base64.b64decode(audio_b64))
+        return {"transcript": transcribe(inp).strip()}
+    finally:
+        try:
+            for f in os.listdir(work):
+                os.remove(os.path.join(work, f))
+            os.rmdir(work)
+        except OSError:
+            pass
 
 
 def _synth_to_m4a_b64(reply: str, lang: str, work: str) -> str:
@@ -258,13 +291,32 @@ async def handle_synth(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def handle_transcribe(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "expected JSON"}, status=400)
+    audio_b64 = body.get("audioBase64")
+    if not isinstance(audio_b64, str) or not audio_b64:
+        return web.json_response({"error": "audioBase64 is required"}, status=400)
+    try:
+        result = await asyncio.to_thread(_transcribe_only, audio_b64)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"error": (str(e) or "transcribe failed")[-300:]}, status=500)
+    return web.json_response(result)
+
+
 def _warm() -> None:
     """Preload STT + TTS so the first real turn isn't cold."""
     try:
         wav = synthesize("Ready.", lang="en")  # warms Kokoro (live TTS)
-        # Only warm STT when a backend is configured. On-device-STT clients send
-        # text and never touch server STT, so a missing HIVE_STT_COMMAND is normal.
-        if os.environ.get("HIVE_STT_COMMAND", "").strip():
+        # Warm STT too: the in-process whisper.cpp backend loads its model into
+        # whisper_stt._MODELS here so the first real turn isn't cold. Only fall
+        # back to warming the command seam when pywhispercpp is unavailable AND
+        # a command is actually configured — on-device-STT clients send text and
+        # never touch server STT, so a missing HIVE_STT_COMMAND is normal there.
+        if _PYWHISPERCPP_AVAILABLE or os.environ.get("HIVE_STT_COMMAND", "").strip():
             try:
                 transcribe(wav)
             except Exception:
@@ -280,6 +332,7 @@ def _warm() -> None:
 async def run(host: str, port: int) -> None:
     app = web.Application(client_max_size=64 * 1024 * 1024)
     app.router.add_post("/turn", handle_turn)
+    app.router.add_post("/transcribe", handle_transcribe)
     app.router.add_post("/synth", handle_synth)
     app.router.add_post("/email", handle_email)
     app.router.add_get("/health", lambda _r: web.json_response({"ok": True}))

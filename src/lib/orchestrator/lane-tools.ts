@@ -20,6 +20,7 @@ import type { ChatTool } from "./tool-bridge";
 import { readToken } from "@/lib/auth/token";
 import type { CooDispatchResult } from "@/lib/coo/dispatch";
 import { PIM_TOOL_DEFINITIONS, executePimTool } from "./pim-tools";
+import { getAutonomyLevel } from "@/lib/config/autonomy";
 
 /** Tool name → the connectivity capability that gates it. */
 const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
@@ -700,8 +701,15 @@ export async function executeMailBeeSend(args: Record<string, unknown>, io?: Mai
 
   if (!deps.isTrustedRecipient(to)) {
     const drafted = await deps.draftMail(to, subject, body, attachments);
+    // Untrusted recipient is a hard safety floor — it holds regardless of the
+    // autonomy dial. Under "autonomous" the operator has otherwise opted out of
+    // routine approvals, so name the actual blocker (the allowlist, not the
+    // dial) so they know exactly how to unblock future sends to this address.
+    const floorNote = getAutonomyLevel() === "autonomous"
+      ? " Autonomy is set to autonomous, but the Mail Lane allowlist is a hard safety floor that the autonomy dial does not bypass."
+      : "";
     return drafted
-      ? `Recipient ${to} is not on the Mail Lane trusted allowlist, so the email was NOT sent — it was saved to Mail Drafts${att} for your approval. Approve/edit it in Mail.app, or add ${to} (or its domain) to the Mail Lane allowlist to enable autonomous send.`
+      ? `Recipient ${to} is not on the Mail Lane trusted allowlist, so the email was NOT sent — it was saved to Mail Drafts${att} for your approval.${floorNote} Approve/edit it in Mail.app, or add ${to} (or its domain) to the Mail Lane allowlist to enable autonomous send.`
       : `Error: ${to} is not trusted and saving the draft to Mail failed. Is Mail.app running with Automation permission granted?`;
   }
 
@@ -769,7 +777,14 @@ export async function executeMessageBeeSend(args: Record<string, unknown>, io?: 
   }
 
   if (!deps.isAllowed(to)) {
-    return `Error: ${to} is not on the Message Lane allowlist. SMS/iMessage can only be sent to allowlisted handles — add ${to} in Message Lane settings first, then retry.`;
+    // Non-allowlisted recipient is a hard safety floor — it holds regardless of
+    // the autonomy dial. Under "autonomous" the operator has otherwise opted
+    // out of routine approvals, so name the actual blocker (the allowlist, not
+    // the dial) so they know exactly how to unblock future sends to this handle.
+    const floorNote = getAutonomyLevel() === "autonomous"
+      ? " Autonomy is set to autonomous, but the Message Lane allowlist is a hard safety floor that the autonomy dial does not bypass."
+      : "";
+    return `Error: ${to} is not on the Message Lane allowlist. SMS/iMessage can only be sent to allowlisted handles — add ${to} in Message Lane settings first, then retry.${floorNote}`;
   }
 
   const sendAs = deps.getSelfHandles?.()[0] ?? "";

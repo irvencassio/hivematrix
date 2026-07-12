@@ -3225,6 +3225,28 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /voice/transcribe — STT only (no LLM turn, no TTS). Backs the chat
+      // composer's dictation mic: record → transcript into the input box.
+      // Body: { audioBase64, lang? }  Response: { transcript }
+      if (req.method === "POST" && urlPath === "/voice/transcribe") {
+        const { isFeatureEnabled } = await import("@/lib/config/features");
+        if (!isFeatureEnabled("voice")) { json(res, 403, { error: "voice feature is off — enable it in Settings → Features" }); return; }
+        const body = await parseBody(req) as Record<string, unknown>;
+        const lang = typeof body.lang === "string" ? body.lang : "en";
+        const audioB64 = typeof body.audioBase64 === "string" ? body.audioBase64 : "";
+        if (!audioB64) { json(res, 400, { error: "audioBase64 is required" }); return; }
+        const { voiceRuntime } = await import("@/lib/voice/runtime");
+        if (!voiceRuntime()) { json(res, 503, { error: "voice sidecar not available" }); return; }
+        try {
+          const { relayTranscribe } = await import("@/lib/voice/turn-server");
+          const transcript = await relayTranscribe(audioB64, lang);
+          json(res, 200, { transcript });
+        } catch (e) {
+          json(res, 500, { error: `STT failed: ${e instanceof Error ? e.message : String(e)}` });
+        }
+        return;
+      }
+
       // POST /voice/turn — thin alias over Flash Lane for text-mode push-to-talk.
       // Used by watch and glasses clients; no client changes required.
       // Body: { text, lang? } or { audioBase64, lang? } (STT via sidecar when audio).

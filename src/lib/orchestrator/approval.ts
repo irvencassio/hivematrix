@@ -39,9 +39,31 @@ const pendingApprovals = new Map<
  */
 export function generateHookScript(taskId: string): string {
   const scriptPath = join(HOOKS_DIR, `${taskId}.sh`);
+  // The hook runs as a detached shell process with no way to read the
+  // operator's live config — so the autonomy level is resolved once here, on
+  // the Node side, at generation time, and baked into the script as a shell
+  // constant. A later dial flip only takes effect on the next task spawn
+  // (generateHookScript is called fresh per task in generateHookSettings).
+  const autonomyLevel = getAutonomyLevel();
+  // Hard safety floor (never bypassed, even under "autonomous"): an MCP tool
+  // call whose name or input looks like a release/deploy/publish or a
+  // destructive delete/rm/drop still requires approval. `rm` is matched as a
+  // standalone token (non-letter boundaries) so it doesn't fire on ordinary
+  // words like "confirm" or "term".
+  const floorPattern = String.raw`(deploy|release|publish|destroy|delete|drop|[^a-zA-Z]rm[^a-zA-Z])`;
   const script = `#!/bin/bash
 # Hive approval hook for task ${taskId}
 # Reads tool info from stdin, checks if risky, requests approval if needed
+
+# Autonomy level resolved at hook-generation time (Node side, see
+# src/lib/config/autonomy.ts) and baked in as a constant. Only "autonomous"
+# changes behavior below — manual/standard keep today's always-ask-for-MCP
+# behavior unchanged.
+AUTONOMY_LEVEL="${autonomyLevel}"
+# Hard safety floor pattern (see comment above generateHookScript in
+# approval.ts) — matched case-insensitively against the tool name + input. A
+# hit here always requires approval, regardless of AUTONOMY_LEVEL.
+FLOOR_PATTERN='${floorPattern}'
 
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | grep -o '"tool_name":"[^"]*"' | head -1 | cut -d'"' -f4)
@@ -121,13 +143,27 @@ if [ "$TOOL_NAME" = "Bash" ]; then
   fi
 fi
 
-# MCP tools — always require approval
+# MCP tools — require approval, UNLESS autonomy is "autonomous" and this call
+# doesn't hit the hard safety floor (release/deploy/publish/destructive
+# delete-rm-drop). manual/standard always require approval here, unchanged.
 if echo "$TOOL_NAME" | grep -q "^mcp__"; then
+  FLOOR_HIT=0
+  if echo " $TOOL_NAME $TOOL_INPUT " | grep -qiE "$FLOOR_PATTERN"; then
+    FLOOR_HIT=1
+  fi
+  if [ "$AUTONOMY_LEVEL" = "autonomous" ] && [ "$FLOOR_HIT" -eq 0 ]; then
+    exit 0
+  fi
+
   TIMESTAMP=$(date +%s%N)
   REQUEST_FILE="${APPROVALS_DIR}/${taskId}-\${TIMESTAMP}.json"
   DECISION_FILE="${APPROVALS_DIR}/${taskId}-\${TIMESTAMP}.decision"
 
-  write_approval_json "${taskId}" "\${TIMESTAMP}" "$TOOL_NAME" "$TOOL_INPUT" "MCP tool requires approval" "$REQUEST_FILE"
+  MCP_REASON="MCP tool requires approval"
+  if [ "$AUTONOMY_LEVEL" = "autonomous" ] && [ "$FLOOR_HIT" -eq 1 ]; then
+    MCP_REASON="MCP tool requires approval (safety floor: release/deploy/publish/destructive-delete is never auto-approved)"
+  fi
+  write_approval_json "${taskId}" "\${TIMESTAMP}" "$TOOL_NAME" "$TOOL_INPUT" "$MCP_REASON" "$REQUEST_FILE"
 
   WAITED=0
   while [ ! -f "$DECISION_FILE" ] && [ $WAITED -lt 1800 ]; do

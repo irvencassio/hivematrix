@@ -36,7 +36,7 @@ test("approval.ts generateHookScript includes mcp__ccd_session__* allowlist", ()
 
 test("approval.ts CCD allowlist appears before catch-all MCP block", () => {
   const ccdIdx = approval.indexOf("mcp__ccd_session__*");
-  const catchAllIdx = approval.indexOf("# MCP tools — always require approval");
+  const catchAllIdx = approval.indexOf("# MCP tools — require approval");
   assert.ok(ccdIdx > -1, "must contain mcp__ccd_session__* allowlist");
   assert.ok(catchAllIdx > -1, "must still contain catch-all MCP block");
   assert.ok(ccdIdx < catchAllIdx, "CCD allowlist must come before catch-all block");
@@ -52,7 +52,7 @@ test("approval.ts CCD allowlist includes mcp__superpowers__* tools", () => {
 test("generated hook script: CCD/Superpowers auto-allow appears before generic MCP catch-all", () => {
   const script = extractScriptTemplate();
   const ccdIdx = script.indexOf("mcp__ccd_session__*");
-  const catchAllIdx = script.indexOf("# MCP tools — always require approval");
+  const catchAllIdx = script.indexOf("# MCP tools — require approval");
   assert.ok(ccdIdx > -1, "generated script must contain mcp__ccd_session__* case");
   assert.ok(catchAllIdx > -1, "generated script must contain catch-all MCP comment");
   assert.ok(

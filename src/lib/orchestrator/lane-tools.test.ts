@@ -27,6 +27,11 @@ const origHome = process.env.HOME;
 process.env.HOME = SKILL_HOME;
 
 const { upsertSkill, readSkill } = await import("@/lib/skills/store");
+const { setAutonomyLevel } = await import("@/lib/config/autonomy");
+
+test.afterEach(() => {
+  setAutonomyLevel("standard"); // restore the default between tests
+});
 
 test.after(() => {
   process.env.HOME = origHome;
@@ -203,6 +208,20 @@ test("mailbee_send DRAFTS (does not send) for an untrusted recipient", async () 
   assert.match(out, /not on the Mail Lane trusted allowlist/);
   assert.doesNotMatch(out, /MailBee/);
   assert.match(out, /saved to Mail Drafts/);
+  // Default autonomy (standard) shouldn't mention the dial at all.
+  assert.doesNotMatch(out, /autonomy/i);
+});
+
+test("mailbee_send still DRAFTS (does not send) to an untrusted recipient under autonomous autonomy — the allowlist is a hard floor, not the dial", async () => {
+  setAutonomyLevel("autonomous");
+  const { io, calls } = mailIO({ trusted: false });
+  const out = await executeMailBeeSend({ to: "stranger@nope.com", subject: "Hi", body: "yo" }, io);
+  assert.deepEqual(calls, ["draft"]); // crucially NOT "send" — autonomy never bypasses the allowlist floor
+  assert.match(out, /not on the Mail Lane trusted allowlist/);
+  // The message should name the allowlist (not the autonomy dial) as the blocker.
+  assert.match(out, /autonomy is set to autonomous/i);
+  assert.match(out, /hard safety floor/i);
+  assert.match(out, /autonomy dial does not bypass/i);
 });
 
 test("mailbee_send requires to + body", async () => {
@@ -280,6 +299,19 @@ test("messagebee_send refuses a non-allowlisted handle (no send)", async () => {
   assert.deepEqual(calls, []);
   assert.match(out, /not on the Message Lane allowlist/);
   assert.doesNotMatch(out, /MessageBee/);
+  // Default autonomy (standard) shouldn't mention the dial at all.
+  assert.doesNotMatch(out, /autonomy/i);
+});
+
+test("messagebee_send still refuses a non-allowlisted handle under autonomous autonomy — the allowlist is a hard floor, not the dial", async () => {
+  setAutonomyLevel("autonomous");
+  const { io, calls } = msgIO(false);
+  const out = await executeMessageBeeSend({ to: "+19998887777", text: "hi" }, io);
+  assert.deepEqual(calls, []); // crucially no send — autonomy never bypasses the allowlist floor
+  assert.match(out, /not on the Message Lane allowlist/);
+  assert.match(out, /autonomy is set to autonomous/i);
+  assert.match(out, /hard safety floor/i);
+  assert.match(out, /autonomy dial does not bypass/i);
 });
 
 test("messagebee_send refuses while Message Lane is disabled before sending", async () => {

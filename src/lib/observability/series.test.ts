@@ -119,6 +119,51 @@ test("cache rollup: a known 5m/1h split computes a real netBenefitTokens", async
   assert.equal(anthropic.netBenefitTokens, expected);
 });
 
+test("pointsByModel: per-bucket time series keyed by model id, distinct from byProvider", async () => {
+  // Two different Claude *models* sharing the same provider, recorded in the
+  // same hour bucket — pointsByModel must keep them as separate cells. This
+  // is exactly what byProvider can't show: it would merge both under
+  // "anthropic", losing the opus-vs-haiku tier breakdown.
+  recordAt(hoursAgo(3), { taskId: "pbm-1", model: "claude-opus-4-8", inputTokens: 111, outputTokens: 11 });
+  recordAt(hoursAgo(3), { taskId: "pbm-2", model: "claude-haiku-4-5", inputTokens: 222, outputTokens: 22 });
+
+  const s = await observabilitySeries("24h");
+  assert.ok(Array.isArray(s.pointsByModel), "pointsByModel is present on the series result");
+  assert.equal(s.pointsByModel.length, s.points.length, "same continuous axis length as the provider series");
+  assert.deepEqual(s.pointsByModel.map((p) => p.t), s.points.map((p) => p.t), "same bucket labels, same order");
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const d = new Date(Date.now() - 3 * 3600_000);
+  const bucketLabel = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}`;
+
+  const bucket = s.pointsByModel.find((p) => p.t === bucketLabel);
+  assert.ok(bucket, `expected a pointsByModel bucket labeled ${bucketLabel}`);
+  assert.ok(bucket!.byModel["claude-opus-4-8"], "opus is its own model cell");
+  assert.ok(bucket!.byModel["claude-haiku-4-5"], "haiku is its own DISTINCT model cell, not merged into 'anthropic'");
+  assert.equal(bucket!.byModel["claude-opus-4-8"].inputTokens, 111);
+  assert.equal(bucket!.byModel["claude-haiku-4-5"].inputTokens, 222);
+});
+
+test("a flash-role run (Haiku chat/voice turn) is recorded and shows up in the series like any other run", async () => {
+  recordAt(hoursAgo(4), {
+    taskId: "flash-turn-1", model: "claude-haiku-4-5", role: "flash",
+    inputTokens: 50, outputTokens: 30,
+  });
+
+  const s = await observabilitySeries("24h");
+  const byModel = Object.fromEntries(s.models.map((m) => [m.model, m]));
+  assert.ok(byModel["claude-haiku-4-5"], "the flash-role model shows up in the per-model rollup");
+  assert.equal(byModel["claude-haiku-4-5"].provider, "anthropic");
+  assert.ok(byModel["claude-haiku-4-5"].runs >= 1, "the flash-role row is counted, not silently dropped");
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const d = new Date(Date.now() - 4 * 3600_000);
+  const bucketLabel = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}`;
+  const bucket = s.pointsByModel.find((p) => p.t === bucketLabel);
+  assert.ok(bucket, `expected a pointsByModel bucket labeled ${bucketLabel}`);
+  assert.ok(bucket!.byModel["claude-haiku-4-5"], "the flash-role run also lands in the per-bucket-per-model series");
+});
+
 test("7d/30d windows bucket by day with a continuous zero-filled axis", async () => {
   const week = await observabilitySeries("7d");
   assert.equal(week.unit, "day");

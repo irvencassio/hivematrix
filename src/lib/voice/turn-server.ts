@@ -101,6 +101,23 @@ export function relayTurnText(text: string, lang: string): Promise<TurnResult> {
 }
 
 /**
+ * Transcribe recorded audio only — no LLM turn, no TTS. Backs the chat
+ * composer's dictation mic (record → drop the text into the input box for the
+ * operator to review and send). Reuses the same warm whisper.cpp model as /turn.
+ */
+export async function relayTranscribe(audioBase64: string, lang: string): Promise<string> {
+  const port = await ensureTurnServer();
+  const r = await fetch(`http://127.0.0.1:${port}/transcribe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ audioBase64, lang }),
+  });
+  const data = (await r.json()) as { transcript?: string; error?: string };
+  if (!r.ok) throw new Error(data.error || `transcribe worker ${r.status}`);
+  return data.transcript || "";
+}
+
+/**
  * Re-voice a piece of text with the warm worker's live voice (Kokoro) — used to
  * speak deterministic command/skill/briefing replies in the SAME voice as the
  * conversational reply, instead of the cloned persona. Throws on worker failure

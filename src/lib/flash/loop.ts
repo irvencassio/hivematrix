@@ -32,11 +32,14 @@
  */
 
 import { spawn, type ChildProcess } from "child_process";
+import { randomUUID } from "crypto";
 import { homedir } from "os";
 import { resolveClaudeBinary } from "@/lib/orchestrator/subprocess";
 import { StreamParser } from "@/lib/orchestrator/stream-parser";
 import { backendConfigured } from "@/lib/models/backends";
 import type { LaneToolContext } from "@/lib/orchestrator/lane-tools";
+import { getConnectivityPolicy } from "@/lib/connectivity/policy";
+import { recordRun } from "@/lib/observability/store";
 import { prepareFlashMcp } from "./flash-mcp";
 import { clearFlashCliSessionId, getFlashCliSessionId, setFlashCliSessionId } from "./store";
 import type { FlashEmitter, FlashMessage } from "./types";
@@ -182,6 +185,20 @@ export function createFlashStreamState(): FlashStreamState {
 
 const ESCALATED_TASK_RE = /^Escalated to task (\S+):/;
 
+/** Token/cost usage captured from the stream-json `result` event — the shape
+ *  `recordFlashTelemetry` below needs to write one task_telemetry row per turn. */
+export interface FlashUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  cacheCreate5mTokens?: number;
+  cacheCreate1hTokens?: number;
+  reasoningTokens?: number;
+  costUsd: number;
+  turns: number;
+}
+
 /**
  * Consume one stream-json line, driving FlashEmitter calls, and reporting any
  * text/result text it produced. Side-effecting on `emit` only — otherwise
@@ -193,18 +210,26 @@ export function consumeFlashStreamLine(
   parser: StreamParser,
   state: FlashStreamState,
   emit: FlashEmitter,
-): { textDelta?: string; resultText?: string; cliSessionId?: string } {
+): { textDelta?: string; resultText?: string; cliSessionId?: string; model?: string; usage?: FlashUsage } {
   if (!line.trim()) return {};
   const events = parser.parseLine(line);
   let textDelta: string | undefined;
   let resultText: string | undefined;
   let cliSessionId: string | undefined;
+  let model: string | undefined;
+  let usage: FlashUsage | undefined;
 
   for (const event of events) {
     if (event.type === "session") {
       // The CLI's own session id (from system:init) — captured every turn so
       // the caller can persist it for --resume continuity next time.
       cliSessionId = event.sessionId;
+    } else if (event.type === "init") {
+      // The resolved model id (e.g. "claude-haiku-4-5"), also from system:init
+      // — not surfaced to the user, but captured for telemetry (see
+      // recordFlashTelemetry below), same as orchestrator/subprocess.ts's
+      // agent.modelsUsed tracking for coding-task runs.
+      model = event.model;
     } else if (event.type === "text") {
       textDelta = (textDelta ?? "") + event.content;
       emit.token(event.content);
@@ -225,14 +250,27 @@ export function consumeFlashStreamLine(
       }
     } else if (event.type === "result") {
       resultText = event.result;
+      // Token/cost usage for this turn — captured for telemetry, mirroring
+      // agent-manager's agent.lastResult tracking for orchestrator runs.
+      usage = {
+        inputTokens: event.inputTokens,
+        outputTokens: event.outputTokens,
+        cacheReadTokens: event.cacheReadTokens,
+        cacheCreationTokens: event.cacheCreationTokens,
+        cacheCreate5mTokens: event.cacheCreate5mTokens,
+        cacheCreate1hTokens: event.cacheCreate1hTokens,
+        reasoningTokens: event.reasoningTokens,
+        costUsd: event.cost,
+        turns: event.turns,
+      };
     } else if (event.type === "error") {
       const msg = `\n\n[Flash model error: ${event.content}]`;
       textDelta = (textDelta ?? "") + msg;
       emit.token(msg);
     }
-    // "init"/"log"/"question"/"unknown" — not surfaced to Flash.
+    // "log"/"question"/"unknown" — not surfaced to Flash.
   }
-  return { textDelta, resultText, cliSessionId };
+  return { textDelta, resultText, cliSessionId, model, usage };
 }
 
 // ------------------------------------------------------------------
@@ -253,6 +291,10 @@ interface FlashAttemptResult {
   /** Process exit code, or null if the attempt never got a real exit (launch failure / wall-timeout kill). */
   exitCode: number | null;
   stderr: string;
+  /** Resolved model id from this attempt's `system:init` event, if the process got that far. */
+  model: string | null;
+  /** Token/cost usage from this attempt's `result` event, if the process got that far. */
+  usage: FlashUsage | null;
 }
 
 /**
@@ -284,7 +326,7 @@ function runFlashAttempt(
     } catch (err) {
       const msg = `\n\n[Flash model error: failed to launch claude — ${err instanceof Error ? err.message : String(err)}]`;
       if (!suppressTerminalError) emit.token(msg);
-      resolve({ text: msg, terminalError: msg, cliSessionId: null, exitCode: null, stderr: "" });
+      resolve({ text: msg, terminalError: msg, cliSessionId: null, exitCode: null, stderr: "", model: null, usage: null });
       return;
     }
 
@@ -302,13 +344,15 @@ function runFlashAttempt(
     let fullText = "";
     let resultText = "";
     let cliSessionId: string | null = null;
+    let model: string | null = null;
+    let usage: FlashUsage | null = null;
     let settled = false;
 
     const finish = (text: string, exitCode: number | null, terminalError: string | null = null) => {
       if (settled) return;
       settled = true;
       clearTimeout(wallTimer);
-      resolve({ text, terminalError, cliSessionId, exitCode, stderr: stderrBuf });
+      resolve({ text, terminalError, cliSessionId, exitCode, stderr: stderrBuf, model, usage });
     };
 
     const wallTimer = setTimeout(() => {
@@ -325,6 +369,8 @@ function runFlashAttempt(
       if (r.textDelta) fullText += r.textDelta;
       if (r.resultText != null) resultText = r.resultText;
       if (r.cliSessionId) cliSessionId = r.cliSessionId;
+      if (r.model) model = r.model;
+      if (r.usage) usage = r.usage;
     };
 
     proc.stdout?.on("data", (chunk: Buffer) => {
@@ -400,6 +446,67 @@ function guardedText(raw: string, sessionId: string): string {
   return text;
 }
 
+/**
+ * Record one task_telemetry row for a completed Flash turn — the Flash-lane
+ * counterpart to agent-manager's captureRunTelemetry (orchestrator coding
+ * tasks). Without this, Flash chat/voice/skill usage (Haiku) is invisible to
+ * the observability dashboard even though it's the majority of day-to-day
+ * traffic.
+ *
+ * `role: "flash"` distinguishes these rows from orchestrator task runs in the
+ * same table. Called exactly once per completed Flash turn (see the three
+ * call sites in runFlashAgentLoop): NOT for a stale `--resume` attempt that
+ * gets silently retried (nothing user-visible happened on that attempt), and
+ * NOT for an `escalate_to_task` follow-on task — that task records its own
+ * row via captureRunTelemetry when it completes, so recording the flash turn
+ * itself here doesn't double-count it.
+ *
+ * Best-effort by construction: every step is inside the try/catch, and the
+ * call sites below don't await this (recordRun is a synchronous better-sqlite3
+ * write) — a telemetry failure must never break or delay the chat reply.
+ */
+function recordFlashTelemetry(args: {
+  sessionId: string;
+  model: string | null;
+  usage: FlashUsage | null;
+  failed: boolean;
+  startedAtMs: number;
+}): void {
+  try {
+    let connectivity: string | null = null;
+    try {
+      connectivity = getConnectivityPolicy().mode;
+    } catch {
+      /* connectivity optional */
+    }
+    recordRun({
+      // Unique per turn (not per session) so each Flash turn is its own row —
+      // sharing a taskId across a whole conversation would collapse many
+      // turns into what routeScorecard treats as a single "task".
+      taskId: `flash:${args.sessionId}:${randomUUID()}`,
+      runIndex: 0,
+      model: args.model,
+      role: "flash",
+      connectivity,
+      status: args.failed ? "failed" : "done",
+      inputTokens: args.usage?.inputTokens ?? null,
+      outputTokens: args.usage?.outputTokens ?? null,
+      cacheReadTokens: args.usage?.cacheReadTokens ?? null,
+      cacheCreationTokens: args.usage?.cacheCreationTokens ?? null,
+      cacheCreate5mTokens: args.usage?.cacheCreate5mTokens ?? null,
+      cacheCreate1hTokens: args.usage?.cacheCreate1hTokens ?? null,
+      reasoningTokens: args.usage?.reasoningTokens ?? null,
+      costUsd: args.usage?.costUsd ?? null,
+      turns: args.usage?.turns ?? null,
+      startedAtMs: args.startedAtMs,
+      completedAtMs: Date.now(),
+      project: "hivematrix",
+    });
+  } catch {
+    /* observability is non-critical — never break the chat reply */
+  }
+}
+
 export async function runFlashAgentLoop(
   messages: FlashMessage[],
   emit: FlashEmitter,
@@ -427,6 +534,7 @@ export async function runFlashAgentLoop(
 
   const binary = options.__claudeBinary ?? resolveClaudeBinary();
   const spawnImpl = options.__spawn ?? spawn;
+  const startedAtMs = Date.now();
 
   const buildTurn = (resumeId: string | null) => {
     const { systemPrompts, prompt } = buildFlashPrompt(messages, !!resumeId);
@@ -448,6 +556,7 @@ export async function runFlashAgentLoop(
     const { args, prompt } = buildTurn(null);
     const result = await runFlashAttempt(binary, args, prompt, spawnImpl, emit);
     if (result.cliSessionId) setFlashCliSessionId(sessionId, result.cliSessionId);
+    recordFlashTelemetry({ sessionId, model: result.model, usage: result.usage, failed: !!result.terminalError, startedAtMs });
     return guardedText(result.text, sessionId);
   }
 
@@ -472,6 +581,7 @@ export async function runFlashAgentLoop(
     const fallback = buildTurn(null);
     const fallbackResult = await runFlashAttempt(binary, fallback.args, fallback.prompt, spawnImpl, emit);
     if (fallbackResult.cliSessionId) setFlashCliSessionId(sessionId, fallbackResult.cliSessionId);
+    recordFlashTelemetry({ sessionId, model: fallbackResult.model, usage: fallbackResult.usage, failed: !!fallbackResult.terminalError, startedAtMs });
     return guardedText(fallbackResult.text, sessionId);
   }
 
@@ -480,5 +590,9 @@ export async function runFlashAgentLoop(
   // streamed live is already on screen; we only append the error, no re-run).
   if (resumeResult.terminalError) emit.token(resumeResult.terminalError);
   if (resumeResult.cliSessionId) setFlashCliSessionId(sessionId, resumeResult.cliSessionId);
+  // Note: the stale-but-discarded `resumeResult` attempt above (the one that
+  // triggered the `looksStale` retry) is intentionally NOT recorded here —
+  // only the real, user-visible attempt gets a telemetry row.
+  recordFlashTelemetry({ sessionId, model: resumeResult.model, usage: resumeResult.usage, failed: !!resumeResult.terminalError, startedAtMs });
   return guardedText(resumeResult.text, sessionId);
 }

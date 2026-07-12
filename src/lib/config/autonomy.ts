@@ -1,6 +1,8 @@
 /**
- * Autonomy level — a single operator-facing dial for how much approval Flights
- * (Work Packages) require before they run and land. Stored under `autonomy` in
+ * Autonomy level — a single operator-facing dial for how much approval work
+ * requires before it runs and lands. Governs Flights (Work Packages) AND the
+ * per-tool approval a chat-escalated task hits (the PreToolUse hook in
+ * orchestrator/approval.ts consults this level). Stored under `autonomy` in
  * ~/.hivematrix/config.json (same file + merge-preserving pattern as
  * config/features.ts and voice/auto-approval-policy.ts).
  *
@@ -9,14 +11,17 @@
  *   - standard:   operator Starts every Flight; low-risk clean items land on
  *                 their own, medium/high-risk items wait in review. (Default —
  *                 preserves historical behaviour.)
- *   - autonomous: Flights start themselves and low-risk clean items land on
- *                 their own; only the hard safety gates still stop for approval.
+ *   - autonomous: Flights start themselves, low-risk clean items land on their
+ *                 own, and a task's tool calls run without per-tool approval;
+ *                 only the hard safety gates still stop for approval.
  *
- * SAFETY FLOOR — enforced in orchestration at EVERY level, including autonomous:
+ * SAFETY FLOOR — enforced at EVERY level, including autonomous:
  * final-gated items (executionMode "hold" — release / deploy / destructive /
- * credentialed steps) never auto-run, and medium/high-risk items never auto-land.
- * The dial changes how much routine, low-risk work flows without a click; it
- * never removes a hard gate.
+ * credentialed steps) never auto-run, medium/high-risk items never auto-land,
+ * the PreToolUse hook still stops for release/deploy/publish/destructive tool
+ * calls, and the Mail/Message Lane allowlists still gate outbound sends to
+ * non-trusted recipients. The dial changes how much routine, low-risk work
+ * flows without a click; it never removes a hard gate.
  */
 
 import { mkdirSync, readFileSync } from "fs";
@@ -48,7 +53,7 @@ export const AUTONOMY_LEVELS: ReadonlyArray<{
     key: "autonomous",
     label: "Autonomous — run on its own",
     description:
-      "Flights start themselves and low-risk work lands automatically. Release, deploy, destructive, and high-risk steps still stop for your approval.",
+      "Flights start themselves, low-risk work lands automatically, and chat-escalated tasks run their tools without asking. Release, deploy, destructive, and high-risk steps still stop for approval, and Mail/Message sends to non-allowlisted recipients still wait for you.",
   },
 ];
 

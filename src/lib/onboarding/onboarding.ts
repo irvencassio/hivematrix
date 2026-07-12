@@ -55,6 +55,18 @@ function launchdPlistPath(): string {
   return join(homedir(), "Library", "LaunchAgents", "com.hivematrix.daemon.plist");
 }
 
+function claudeJsonPath(): string {
+  return join(homedir(), ".claude.json");
+}
+
+function readClaudeJson(): Record<string, unknown> | null {
+  try {
+    return JSON.parse(readFileSync(claudeJsonPath(), "utf-8")) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Compute onboarding status. `now` is injectable for deterministic timestamps;
  * `helperReachable`/`desktopPermissions` can be injected from a live probe of
@@ -69,6 +81,10 @@ export function getOnboardingStatus(opts: {
   messagebee?: { enabled: boolean; chatDbReadable: boolean; chatDbDetail?: string } | null;
   mailbee?: { enabled: boolean; mailControllable: boolean } | null;
   findBinaryImpl?: typeof findBinary;
+  /** Override the "/Applications/Canopy.app" existsSync check — injectable
+   *  since that path is absolute (not under the test-swappable HOME). Defaults
+   *  to a real filesystem check. */
+  canopyInstalled?: boolean;
 } = {}): OnboardingStatus {
   const cfg = readConfig();
   const steps: OnboardingStep[] = [];
@@ -155,6 +171,30 @@ export function getOnboardingStatus(opts: {
       ? `Optional Codex CLI detected (${codexPath})`
       : "Optional: install only if you want ChatGPT/Codex routing.",
     remediation: codexPath ? undefined : "Install the Codex CLI, then run `codex login` with a ChatGPT Plus/Pro account.",
+  });
+
+  // canopy (optional) — the MCP terminal that replaced the retired Terminal
+  // Lane. "Installed" is the .app bundle; "registered" is a `canopy` entry in
+  // Claude Code's own MCP registry (~/.claude.json). Both are needed for
+  // Claude Code sessions to actually be able to use it.
+  const canopyInstalled = opts.canopyInstalled ?? existsSync("/Applications/Canopy.app");
+  const canopyServers = readClaudeJson()?.mcpServers;
+  const canopyRegistered = !!canopyServers && typeof canopyServers === "object" && "canopy" in canopyServers;
+  const canopyOk = canopyInstalled && canopyRegistered;
+  const canopyDetail = !canopyInstalled
+    ? "Canopy not installed"
+    : !canopyRegistered
+      ? "Canopy installed but not registered for Claude Code"
+      : "installed and registered";
+  steps.push({
+    id: "canopy",
+    title: "Canopy (MCP terminal, optional)",
+    required: false,
+    state: canopyOk ? "done" : "incomplete",
+    detail: canopyDetail,
+    remediation: canopyOk
+      ? undefined
+      : "Optional: install Canopy (replaces the retired Terminal Lane) and register it as an mcpServers entry in ~/.claude.json so Claude Code sessions can use it.",
   });
 
   // desktopbee (optional compatibility id) — Desktop Lane
