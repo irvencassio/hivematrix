@@ -13,6 +13,7 @@ NB: Chatterbox-Turbo was evaluated (2026-06-20) and is BROKEN in this mlx-audio
 build — it ignores the input text and parrots the reference clip. Do not use it.
 """
 import os
+import re
 import subprocess
 import tempfile
 import traceback
@@ -108,17 +109,22 @@ def _kokoro_model():
     return _KOKORO_MODEL
 
 
-def _kokoro_run(text: str, out_path: str, voice: str | None) -> str | None:
-    """One Kokoro pass. Returns out_path, or None if Kokoro emitted no audio."""
+def _kokoro_run(text: str, out_path: str, voice: str | None, speed: float = 1.0) -> str | None:
+    """One Kokoro pass. Returns out_path, or None if Kokoro emitted no audio.
+    `speed` (1.0 = normal) nudges the output length — used to dodge mlx-audio's
+    length-dependent broadcast crash without changing the voice or the words."""
     import glob
     from mlx_audio.tts.generate import generate_audio
     out_dir = os.path.dirname(out_path) or "."
     prefix = os.path.splitext(os.path.basename(out_path))[0]
     # The voice prefix (af_/am_/bf_ …) selects language+speaker; no lang_code needed.
-    generate_audio(
-        text=text, model=_kokoro_model(), voice=voice or KOKORO_VOICE,
-        output_path=out_dir, file_prefix=prefix, audio_format="wav", verbose=False,
-    )
+    try:
+        generate_audio(
+            text=text, model=_kokoro_model(), voice=voice or KOKORO_VOICE, speed=speed,
+            output_path=out_dir, file_prefix=prefix, audio_format="wav", verbose=False,
+        )
+    except Exception:
+        pass  # mlx can raise on its length bug; treat as "no audio", caller retries
     if os.path.exists(out_path):
         return out_path
     # generate_audio chunks long text into {prefix}_000.wav, _001 … Take them in
@@ -138,21 +144,97 @@ def _kokoro_run(text: str, out_path: str, voice: str | None) -> str | None:
     return out_path
 
 
+# Split a reply into ONE sentence per chunk. mlx-audio's generate_audio crashes
+# (broadcast_shapes: the noise buffer is sized for one segment, the sine source
+# for another) whenever a single call produces MORE THAN ONE segment — even two
+# short sentences fail, dropping everything after the first. Since one sentence is
+# one segment, splitting to sentence granularity and synthesizing each separately
+# is the only reliable way to voice a multi-sentence/paragraph reply in full.
+# Splits on sentence enders AND newlines (both create mlx segments).
+_SYNTH_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+|\n+")
+
+
+def _split_for_synth(text: str) -> list[str]:
+    return [p.strip() for p in _SYNTH_SPLIT_RE.split((text or "").strip()) if p.strip()]
+
+
+# Kokoro (mlx-audio) emits 24 kHz mono WAV. The per-sentence `say` fallback below
+# is rendered at the SAME rate so mixed chunks concatenate cleanly.
+_KOKORO_SR = 24000
+
+
+# Small tempo nudges to retry a sentence that hit mlx-audio's length-dependent
+# broadcast crash. A ~3-10% speed change shifts the frame count enough to dodge
+# the bug while keeping the SAME Kokoro voice and the SAME words (only that one
+# sentence is imperceptibly faster). 1.0 is tried first via the normal path.
+_SYNTH_RETRY_SPEEDS = (1.03, 1.06, 1.1)
+
+
+def _kokoro_run_padded(text: str, out_path: str, voice: str | None) -> str | None:
+    """Kokoro at normal speed, then two recovery strategies if it emits nothing:
+    (1) a too-short phrase (Kokoro voices nothing for "Sure.") → retry with terminal
+    punctuation; (2) mlx's length crash → retry at slightly higher speeds. Keeps one
+    voice and the exact words throughout. Returns the path, or None if all fail."""
+    result = _kokoro_run(text, out_path, voice)
+    if result is not None:
+        return result
+    padded = text if text.rstrip().endswith((".", "!", "?", "…", ",")) else text.rstrip() + "."
+    if padded != text:
+        result = _kokoro_run(padded, out_path, voice)
+        if result is not None:
+            return result
+    for spd in _SYNTH_RETRY_SPEEDS:
+        result = _kokoro_run(text, out_path, voice, speed=spd)
+        if result is not None:
+            return result
+    return None
+
+
 def _synthesize_kokoro(text: str, out_path: str, voice: str | None, lang: str = "en") -> str:
     """Fast synthesis (Kokoro-82M). ~0.1s/reply once warm.
 
-    Kokoro silently emits nothing for some very short phrases (e.g. "Sure."). We
-    handle that IN-VOICE: retry once with terminal punctuation so the phonemizer has
-    enough to voice, rather than switching to a different engine. Raises only if
-    Kokoro still produces nothing (then the caller's emergency `say` path runs)."""
-    result = _kokoro_run(text, out_path, voice)
-    if result is None:
-        padded = text if text.rstrip().endswith((".", "!", "?", "…", ",")) else text.rstrip() + "."
-        if padded != text:
-            result = _kokoro_run(padded, out_path, voice)
-    if result is None:
+    Long/multi-paragraph replies are synthesized one sentence-group at a time and
+    concatenated: mlx-audio's generate_audio crashes when it batches multiple
+    segments internally, so we never hand it more than one segment at a time.
+    Kokoro also silently emits nothing for some very short phrases (e.g. "Sure.");
+    we retry each chunk once with terminal punctuation. Raises only if NOTHING was
+    produced (then the caller's emergency `say` path runs)."""
+    chunks = _split_for_synth(text)
+    if len(chunks) <= 1:
+        result = _kokoro_run_padded(text, out_path, voice)
+        if result is None:
+            raise RuntimeError(f"kokoro produced no audio for text={text[:80]!r}")
+        return result
+
+    out_dir = os.path.dirname(out_path) or "."
+    base = os.path.splitext(os.path.basename(out_path))[0]
+    parts: list[str] = []
+    for i, chunk in enumerate(chunks):
+        seg = os.path.join(out_dir, f"{base}__seg{i:03d}.wav")
+        if _kokoro_run_padded(chunk, seg, voice) is not None:
+            parts.append(seg)
+            continue
+        # mlx-audio can still crash (broadcast_shapes) on specific phoneme lengths
+        # even for one sentence. Rather than drop that sentence from the reply,
+        # voice it with the emergency macOS `say` engine at Kokoro's sample rate so
+        # the audio stays complete (only the rare failing sentence changes voice).
+        try:
+            _synthesize_say(chunk, seg, None, _KOKORO_SR)
+            parts.append(seg)
+        except Exception:
+            traceback.print_exc()  # this one sentence is lost; keep the rest
+    if not parts:
         raise RuntimeError(f"kokoro produced no audio for text={text[:80]!r}")
-    return result
+    if len(parts) == 1:
+        os.replace(parts[0], out_path)
+    else:
+        _concat_wavs(parts, out_path)
+        for p in parts:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+    return out_path
 
 
 def _concat_wavs(parts: list[str], out_path: str) -> None:
