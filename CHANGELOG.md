@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.190 — 2026-07-12
+
+Chat now reads your goals/plans (brain_read), unified voice+chat thread with task-completion posted back, dictation mic auto-sends, calendar access fixed (helper rebuilt), Talk button retired, qwen removed.
+
 ## v0.1.189 — 2026-07-12
 
 Chat backlog: observability by-model graphs + Flash usage now tracked, chat honors the Autonomy dial, microphone fixed with a dictation mic above Send, MCP servers and Canopy now visible in setup.
