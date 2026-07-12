@@ -18,6 +18,12 @@ let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let consecutiveErrors = 0;
 const MAX_BACKOFF_MS = 60_000;
 
+// Reminder-due poller (texts the operator when an Apple Reminder crosses its due
+// time). Checked at most every 30s — the scheduler ticks every ~2s, and we don't
+// need finer resolution for a reminder alert.
+const REMINDER_CHECK_INTERVAL_MS = 30_000;
+let _lastReminderCheck = 0;
+
 // --- Scheduler diagnostics (observable state) ---
 export type SchedulerBlockReason =
   | "none"
@@ -367,6 +373,17 @@ async function tick() {
       await scheduledRunnerTick();
     } catch (err) {
       console.error("[scheduler] scheduledRunnerTick error:", err instanceof Error ? err.message : err);
+    }
+
+    // Text the operator when a reminder crosses its due time (throttled).
+    if (Date.now() - _lastReminderCheck >= REMINDER_CHECK_INTERVAL_MS) {
+      _lastReminderCheck = Date.now();
+      try {
+        const { checkDueRemindersAndNotify, defaultReminderNotifyDeps } = await import("./reminder-notify");
+        await checkDueRemindersAndNotify(defaultReminderNotifyDeps());
+      } catch (err) {
+        console.error("[scheduler] reminder-notify error:", err instanceof Error ? err.message : err);
+      }
     }
 
     // Resume coordinator tasks whose delegated children have all settled (or
