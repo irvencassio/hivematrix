@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.191 — 2026-07-12
+
+New Tools panel shows every capability the assistant has and what backs it; curated skills are now first-class tools; reminders read/create moved to the reliable EventKit helper (needs a one-time Reminders permission grant).
+
 ## v0.1.190 — 2026-07-12
 
 Chat now reads your goals/plans (brain_read), unified voice+chat thread with task-completion posted back, dictation mic auto-sends, calendar access fixed (helper rebuilt), Talk button retired, qwen removed.
