@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.195 — 2026-07-12
+
+Voice calendar commands now parse dates correctly too (matching the chat-side fix): 'set an event July 19 at 3pm' lands on the right day and time.
+
 ## v0.1.194 — 2026-07-12
 
 New Goals surface: track long-horizon goals (Solo Founder, fitness, Italian, Bible) with per-cadence check-ins and a 'due today' review — from the 🎯 Goals panel or in chat. Plus a calendar date-parsing fix so 'July 19 at 3 PM' lands on the right day and time.

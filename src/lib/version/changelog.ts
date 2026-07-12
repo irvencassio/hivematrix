@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.195", date: "2026-07-12", note: "Voice calendar commands now parse dates correctly too (matching the chat-side fix): 'set an event July 19 at 3pm' lands on the right day and time." },
   { version: "0.1.194", date: "2026-07-12", note: "New Goals surface: track long-horizon goals (Solo Founder, fitness, Italian, Bible) with per-cadence check-ins and a 'due today' review — from the 🎯 Goals panel or in chat. Plus a calendar date-parsing fix so 'July 19 at 3 PM' lands on the right day and time." },
   { version: "0.1.193", date: "2026-07-12", note: "Drop a YouTube link into chat (digest_url) and get a rich HTML summary saved to your brain: clickable video link, thumbnail, a detailed transcript-based summary, and a 'how this applies to me' section tied to HiveMatrix and your Solo Founder goals." },
   { version: "0.1.192", date: "2026-07-12", note: "Observability redesigned: the full dashboard now takes over the center like New Task, tokens-by-model shows side-by-side bars so you can see which model you use most, and the scorecard is per-model (Opus/Sonnet/Haiku/Codex) with first-pass rate and cost per task." },
