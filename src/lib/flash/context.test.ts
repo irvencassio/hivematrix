@@ -72,6 +72,12 @@ test("assembleSystemPrompt always includes the capability-doctrine escalation la
   assert.match(prompt, /PERMISSION_NEEDED/);
   // Anti-fabrication clause (pairs with loop.ts's guardFabricatedToolCalls).
   assert.match(prompt, /NEVER write tool-call syntax/);
+  // Cheapest-sufficient-tool rule (live regression 2026-07-12: Haiku reached
+  // for Finder + screenshots to count files instead of learning a script).
+  assert.match(prompt, /desktop_action .*last resort/i);
+  assert.match(prompt, /counting files|computed by a script/i);
+  // Never end a reply mid-plan.
+  assert.match(prompt, /never end your reply mid-plan/i);
 });
 
 test("assembleSystemPrompt omits the skill-library section when the library is empty", async () => {

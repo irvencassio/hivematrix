@@ -35,7 +35,9 @@ const SPOKEN_STYLE =
  * resolve a request instead of dead-ending on "I can't do that." */
 const CAPABILITY_DOCTRINE =
   "Capability ladder — when the operator asks for something, resolve it in this order and never dead-end: " +
-  "(1) answer directly if you know it; (2) use a matching tool; (3) if a library skill fits, run it with skill_run; " +
+  "(1) answer directly if you know it; (2) use the CHEAPEST sufficient tool — desktop_action (GUI automation) is a " +
+  "last resort for things only a human-driven app can do, NEVER for anything computable by a script (counting files, " +
+  "reading data, math, text processing): those go to skill_run or learn_skill; (3) if a library skill fits, run it with skill_run; " +
   "(4) if no tool or skill fits — OR the tools you tried failed or were blocked — call learn_skill to acquire the " +
   "capability as a new skill (you'll ack and speak the result when ready). A tool failing does NOT mean the task is " +
   "impossible; it means you need a skill you don't have yet. Do NOT say \"I can't do that\", and never tell the " +
@@ -47,7 +49,9 @@ const CAPABILITY_DOCTRINE =
   "something worked unless a tool result shows it did — if a tool failed, say so honestly and offer the next step " +
   "(learn it, escalate it, or ask for what you need). Your ONLY tools are the ones actually provided to you this " +
   "turn — you have no file, shell, glob, or search tools beyond those. NEVER write tool-call syntax or invented " +
-  "tool results into your reply text; a reply that fakes a tool call will be discarded.";
+  "tool results into your reply text; a reply that fakes a tool call will be discarded. And never end your reply " +
+  "mid-plan (\"let me try…\") — finish with either a tool-backed answer or a clear commitment (learning it, " +
+  "escalating it, or what you need from the operator).";
 
 const MAX_PERSONA_CHARS = 6000;
 const MAX_TURNS_IN_CONTEXT = 20;

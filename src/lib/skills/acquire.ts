@@ -155,6 +155,7 @@ export function buildMintSystemPrompt(toolCatalog: string, skillIndex: string): 
     "<the JSON array of eval cases, or [] for instruction skills>",
     "```",
     "No prose, no explanation, no extra commentary outside those two fenced blocks.",
+    "Inside the skill body, never use triple-backtick code fences (they collide with the outer block) — indent code by 4 spaces instead.",
   ].join("\n");
 }
 
@@ -194,9 +195,30 @@ function extractBareSkillBlock(raw: string): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * Extract the ```skill block STRUCTURALLY: everything from its opening fence
+ * to the fence line that closes it — where "closes it" means the last ``` line
+ * before the ```evals block opens (or before end-of-text when there is no
+ * evals block). A non-greedy regex is wrong here: a skill BODY may legally
+ * contain nested ``` code blocks (live failure 2026-07-12 — an AppleScript
+ * block inside the skill truncated the draft mid-sentence, twice).
+ */
+function extractSkillBlockStructurally(raw: string): string | null {
+  const open = raw.match(/```\s*(?:skill|md|markdown)\s*\r?\n/i);
+  if (!open || open.index === undefined) return null;
+  const start = open.index + open[0].length;
+  const evalsOpen = raw.slice(start).search(/```\s*(?:evals|eval)\s*\r?\n/i);
+  const searchEnd = evalsOpen >= 0 ? start + evalsOpen : raw.length;
+  const inner = raw.slice(start, searchEnd);
+  // Trim back to the last closing fence line within the region (the block's
+  // own terminator); if none, take the whole region (unterminated block).
+  const lastFence = inner.lastIndexOf("```");
+  return lastFence >= 0 ? inner.slice(0, lastFence) : inner;
+}
+
 /** Parse a mint response into `{file, evals}`. Throws if no skill block is found. */
 export function parseMintResponse(raw: string): MintedSkill {
-  const skillBlock = extractFencedBlock(raw, ["skill", "md", "markdown"]) ?? extractBareSkillBlock(raw);
+  const skillBlock = extractSkillBlockStructurally(raw) ?? extractBareSkillBlock(raw);
   if (!skillBlock || !skillBlock.trim()) {
     throw new Error("mint response did not include a ```skill fenced block");
   }

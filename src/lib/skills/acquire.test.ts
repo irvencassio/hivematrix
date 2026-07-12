@@ -13,7 +13,7 @@ writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory:
 const origHome = process.env.HOME;
 process.env.HOME = HOME;
 
-const { acquireSkill, defaultMint, defaultCritic, recentlyAcquiredSkillNames, buildMintSystemPrompt } = await import("./acquire");
+const { acquireSkill, defaultMint, defaultCritic, recentlyAcquiredSkillNames, buildMintSystemPrompt, parseMintResponse } = await import("./acquire");
 const { readSkill } = await import("./store");
 const { renderSkillFile, parseSkillFile } = await import("./contracts");
 const { _setExecFileForTests } = await import("@/lib/models/chat-client");
@@ -573,4 +573,39 @@ test("mint throwing on every call still fails honestly at the mint stage", async
   assert.equal(result.outcome, "draft-failed");
   assert.equal(result.stage, "mint");
   assert.match(result.detail ?? "", /down hard/);
+});
+
+// ---------------------------------------------------------------------------
+// Nested-fence mint parsing (2026-07-12, third live failure): Sonnet minted an
+// instruction skill whose BODY contained a ```applescript code block; the
+// non-greedy outer-fence regex cut the skill at the inner fence, so the critic
+// (correctly) rejected a skill "ending mid-sentence" — twice, deterministically.
+
+test("parseMintResponse: a nested code fence inside the skill block does not truncate the skill", async () => {
+  const raw = [
+    "```skill",
+    "---",
+    "name: nested-fence-skill",
+    "description: counts files via an AppleScript payload",
+    "kind: instruction",
+    "---",
+    "",
+    "Run desktop_action with this exact script as the payload:",
+    "",
+    "```applescript",
+    'do shell script "ls ~/Downloads | wc -l"',
+    "```",
+    "",
+    "Then speak the number.",
+    "```",
+    "```evals",
+    "[]",
+    "```",
+  ].join("\n");
+
+  const minted = parseMintResponse(raw);
+  assert.match(minted.file, /do shell script/, "the nested code block must survive parsing");
+  assert.match(minted.file, /Then speak the number/, "content after the nested block must survive");
+  assert.doesNotMatch(minted.file, /```evals/, "the evals block must not bleed into the skill");
+  assert.deepEqual(minted.evals, []);
 });
