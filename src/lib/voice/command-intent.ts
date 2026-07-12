@@ -213,6 +213,15 @@ export function detectCommandIntent(text: string): CommandIntent {
   if (!t) return { kind: "none" };
   const orig = (text || "").trim();
 
+  // --- Self-improvement / self-teaching requests are handled AGENTICALLY by
+  // Flash (which escalates them to the HiveMatrix repo via escalate_to_task,
+  // P3.2) — never let the generic createTask/reminder regexes (or any other
+  // intent below) swallow them. Placed FIRST, before every other branch, so a
+  // future regex tweak elsewhere can't silently start capturing these. ---
+  if (/\b(update|improve|teach|upgrade)\b[\s\S]*(yourself|hivematrix|hive matrix)/i.test(orig)) {
+    return { kind: "none" };
+  }
+
   const browserLane = detectVoiceBrowserLaneIntent(orig);
   if (browserLane) return { kind: "browserLaneTask", browserLane };
 

@@ -142,6 +142,14 @@ const scenarios: Scenario[] = [
   { name: "personal grocery", utterance: "remind me to add milk to the grocery list", kind: "command", expected: "command:createTask" },
   { name: "team followup", utterance: "make sure to follow up with Alex about the proposal", kind: "command", expected: "command:createTask" },
   { name: "new task taxes", utterance: "new task for quarterly taxes", kind: "command", expected: "command:createTask" },
+  // Self-improvement utterances must fall through to Flash (kind: none), never
+  // be swallowed by createTask or any other generic intent — Flash escalates
+  // these agentically via escalate_to_task (P3.2).
+  { name: "self-improvement update calendar", utterance: "update HiveMatrix so it can read my calendar", kind: "command", expected: "none" },
+  { name: "self-improvement improve yourself podcasts", utterance: "improve yourself to handle podcasts", kind: "command", expected: "none" },
+  { name: "self-improvement teach yourself PDFs", utterance: "teach yourself to summarize PDFs", kind: "command", expected: "none" },
+  { name: "self-improvement upgrade hivematrix emails", utterance: "upgrade hivematrix to send better emails", kind: "command", expected: "none" },
+  { name: "self-improvement improve hive matrix calendar", utterance: "improve hive matrix's calendar support", kind: "command", expected: "none" },
   {
     name: "approval context",
     utterance: "approve it",

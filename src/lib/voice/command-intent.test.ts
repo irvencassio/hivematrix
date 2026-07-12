@@ -313,6 +313,25 @@ test("review regressions: heartbeat is anchored; tasks/reminders keep their verb
   assert.equal(detectCommandIntent("run the pulse now!").kind, "heartbeatNow");
 });
 
+test("self-improvement utterances fall through to Flash (kind: none), never createTask", () => {
+  const positives = [
+    "update HiveMatrix so it can read my calendar",
+    "improve yourself to handle podcasts",
+    "teach yourself to summarize PDFs",
+    "upgrade hivematrix to send better emails",
+    "improve hive matrix's calendar support",
+  ];
+  for (const u of positives) {
+    assert.equal(detectCommandIntent(u).kind, "none", u);
+  }
+  // Negative controls: utterances that use one of the trigger verbs but don't
+  // name "yourself"/"HiveMatrix" must keep their existing intent — the guard
+  // must not over-capture ordinary tasks/reminders.
+  assert.equal(detectCommandIntent("create a task to update the website").kind, "createTask");
+  assert.equal(detectCommandIntent("remind me to update my resume").kind, "createTask");
+  assert.equal(detectCommandIntent("add a task to buy milk").kind, "createTask");
+});
+
 test("review regressions: 'deep thinking...' does not mangle-match; trivial notes fall through", () => {
   const dt = detectCommandIntent("deep thinking about my goals");
   assert.notEqual(dt.thinkText, "ing about my goals");
