@@ -13,7 +13,7 @@ writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory:
 const origHome = process.env.HOME;
 process.env.HOME = HOME;
 
-const { acquireSkill, defaultMint, defaultCritic, recentlyAcquiredSkillNames } = await import("./acquire");
+const { acquireSkill, defaultMint, defaultCritic, recentlyAcquiredSkillNames, buildMintSystemPrompt } = await import("./acquire");
 const { readSkill } = await import("./store");
 const { renderSkillFile, parseSkillFile } = await import("./contracts");
 const { _setExecFileForTests } = await import("@/lib/models/chat-client");
@@ -453,4 +453,72 @@ test("daily cap: pre-seeded ledger at/over cap refuses without minting", async (
   assert.equal(result.outcome, "capped");
   assert.equal(mintCalled, false, "mint must not be called once the daily cap is hit");
   assert.match(result.reason, /daily learning limit/);
+});
+
+// ---------------------------------------------------------------------------
+// Internal Reflexion retry (2026-07-12). Live failure: the first real voice
+// acquisition minted a WORKING script but machine-dependent evals failed, the
+// transcript was discarded ("it didn't pass its own tests"), and no retry ran.
+// The pipeline now: (a) carries the failing eval transcript in result.detail,
+// (b) auto-retries the mint ONCE on an evals/critic failure with the prior
+// draft + detailed failure, (c) never retries a scan block (safety is final).
+
+test("evals failure auto-retries the mint once with the failing transcript; attempt 2 can register", async () => {
+  const goal = uniqueGoal("retry succeeds");
+  const v1 = baseSkill({ name: "Flaky Counter", kind: "script", interpreter: "bash", body: "echo something-else" });
+  const v2 = baseSkill({ name: "Flaky Counter", kind: "script", interpreter: "bash", body: "echo files counted: 3" });
+  const mintCtxs: Array<{ attempt: number; priorFailure?: string; priorDraft?: string }> = [];
+  const mint: MintFn = async (ctx) => {
+    mintCtxs.push({ attempt: ctx.attempt, priorFailure: ctx.priorFailure, priorDraft: ctx.priorDraft });
+    return ctx.attempt === 1
+      ? { file: renderSkillFile(v1), evals: [{ name: "basic", expectContains: "files counted" }] }
+      : { file: renderSkillFile(v2), evals: [{ name: "basic", expectContains: "files counted" }] };
+  };
+
+  const result = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic(), dailyCap: 1000 });
+
+  assert.equal(mintCtxs.length, 2, "one automatic retry after the evals failure");
+  assert.equal(mintCtxs[1].attempt, 2);
+  assert.ok(mintCtxs[1].priorDraft?.includes("something-else"), "retry sees the prior draft");
+  assert.match(mintCtxs[1].priorFailure ?? "", /something-else/, "retry sees the failing eval transcript, not just a generic sentence");
+  assert.equal(result.outcome, "probation", "script skill registers on probation after the fixed attempt");
+  assert.equal(result.skillName, "Flaky Counter");
+});
+
+test("evals failure on both attempts → draft-failed whose detail carries the eval transcript", async () => {
+  const goal = uniqueGoal("retry still fails");
+  const skill = baseSkill({ name: "Always Wrong", kind: "script", interpreter: "bash", body: "echo wrong-output" });
+  let mintCalls = 0;
+  const mint: MintFn = async () => {
+    mintCalls += 1;
+    return { file: renderSkillFile(skill), evals: [{ name: "basic", expectContains: "right-output" }] };
+  };
+
+  const before = draftFiles().length;
+  const result = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic(), dailyCap: 1000 });
+
+  assert.equal(mintCalls, 2);
+  assert.equal(result.outcome, "draft-failed");
+  assert.equal(result.stage, "evals");
+  assert.match(result.detail ?? "", /wrong-output/, "the honest failure carries the transcript for the operator/ledger");
+  assert.ok(draftFiles().length >= before + 1, "failed draft archived");
+});
+
+test("scan block is FINAL — no retry mint after a safety block", async () => {
+  const goal = uniqueGoal("blocked no retry");
+  const skill = baseSkill({ name: "Blocked Script", kind: "script", interpreter: "bash", body: "rm -rf /" });
+  let mintCalls = 0;
+  const mint: MintFn = async () => { mintCalls += 1; return { file: renderSkillFile(skill), evals: [] }; };
+
+  const result = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic(), dailyCap: 1000 });
+
+  assert.equal(result.outcome, "draft-failed");
+  assert.equal(result.stage, "scan");
+  assert.equal(mintCalls, 1, "safety blocks are final — never re-mint around the scanner");
+});
+
+test("mint system prompt teaches machine-independent evals", async () => {
+  const sys = buildMintSystemPrompt("tools", "skills");
+  assert.match(sys, /any machine/i);
+  assert.match(sys, /exact counts|machine-specific/i);
 });

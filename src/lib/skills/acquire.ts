@@ -93,7 +93,7 @@ async function buildSkillIndexText(): Promise<string> {
   return text || "(the skill library is currently empty)";
 }
 
-function buildMintSystemPrompt(toolCatalog: string, skillIndex: string): string {
+export function buildMintSystemPrompt(toolCatalog: string, skillIndex: string): string {
   return [
     "You are the skill-minting model for HiveMatrix's live capability acquisition pipeline.",
     "When a live chat/voice turn hits something the system doesn't yet know how to do, you author ONE new skill that teaches it how. Your response is parsed by CODE, not read by a person — follow the format below EXACTLY.",
@@ -141,6 +141,10 @@ function buildMintSystemPrompt(toolCatalog: string, skillIndex: string): string 
     "A JSON array of 2-4 test cases the skill must pass (skill-creator-style assertion grading on stdout):",
     '  [{ "name": "...", "params": { "key": "value" }, "input": "...", "expectContains": "<substring the stdout must contain>" }]',
     "For kind: instruction skills (nothing to execute), evals may be an empty array: []",
+    "Evals run on ANY machine with unknown state — assertions must be machine-independent:",
+    "  - NEVER assert exact counts, sizes, dates, or contents of real user directories/files (a Downloads folder has a different count on every machine, every minute).",
+    "  - Assert on the STABLE part of the output your script controls (fixed phrasing, labels, units) — e.g. expectContains \"files in\" rather than \"39 files\".",
+    "  - When the skill takes a target (a path, a query), point at least one eval at something the script itself creates in the scratch cwd this run, so the expected output IS knowable exactly.",
     "",
     "--- OUTPUT CONTRACT (follow EXACTLY — parsed by code) ---",
     "Output EXACTLY two fenced blocks and NOTHING else before, between, or after them:",
@@ -345,6 +349,9 @@ export interface AcquireResult {
   skillName?: string;
   reason: string;
   stage?: "parse" | "scan" | "evals" | "critic" | "mint";
+  /** Bounded technical detail (failing eval transcript / critic verdict) — for
+   * the ledger, audits, and the Reflexion retry; the spoken `reason` stays human. */
+  detail?: string;
 }
 
 export interface AcquireOptions {
@@ -576,98 +583,162 @@ export async function acquireSkill(opts: AcquireOptions): Promise<AcquireResult>
       return { outcome: "already-have", skillName: already.name, reason: `I already have a skill for that: "${already.name}".` };
     }
 
-    // 3. MINT
+    // 3. MINT + VERIFICATION LADDER — up to two minted attempts per call
+    // (internal Reflexion retry, 2026-07-12): a parse/evals/critic failure
+    // re-mints ONCE with the prior draft + the DETAILED failure (the live
+    // pipeline's first real acquisition minted a working script whose
+    // machine-dependent evals failed; a generic "didn't pass its own tests"
+    // gave the retry nothing to fix). Scan blocks are FINAL — safety verdicts
+    // are never retried around. Every failed draft is archived (never
+    // deleted); the gap proposal is filed only for the FINAL failure.
     const mint = opts.mint ?? defaultMint;
     const critic = opts.critic ?? defaultCritic;
+    const runSandbox = opts.runSandbox ?? runSkillSandboxed;
+    const MAX_MINT_ATTEMPTS = 2;
 
-    const mintCtx: MintContext = {
-      goal,
-      whyNeeded: opts.whyNeeded,
-      suggestedKind: opts.suggestedKind,
-      attempt: opts.attempt ?? 1,
-      priorDraft: opts.priorDraft,
-      priorFailure: opts.priorFailure,
-    };
+    interface AttemptFail {
+      stage: "parse" | "scan" | "evals" | "critic";
+      reason: string;
+      detail?: string;
+      retryable: boolean;
+      nameHint?: string;
+    }
 
-    let minted: MintedSkill;
-    try {
-      minted = await mint(mintCtx);
-    } catch (err) {
-      const reason = "I tried to write the skill but the attempt failed.";
+    let skill!: Skill;
+    let minted!: MintedSkill;
+    let scanResult!: ReturnType<typeof scanSkill>;
+    let evalTranscripts = "";
+    let priorDraft = opts.priorDraft;
+    let priorFailure = opts.priorFailure;
+    let verified = false;
+
+    const firstAttempt = opts.attempt ?? 1;
+    for (let attempt = firstAttempt; attempt < firstAttempt + MAX_MINT_ATTEMPTS; attempt++) {
+      const isLastAttempt = attempt === firstAttempt + MAX_MINT_ATTEMPTS - 1;
+
+      try {
+        minted = await mint({
+          goal,
+          whyNeeded: opts.whyNeeded,
+          suggestedKind: opts.suggestedKind,
+          attempt,
+          priorDraft,
+          priorFailure,
+        });
+      } catch (err) {
+        const reason = "I tried to write the skill but the attempt failed.";
+        const detail = err instanceof Error ? err.message : String(err);
+        audit({ ts: "", event: "skill:acquire:failed", summary: `mint threw: ${detail}`, status: "mint" });
+        fileProposal(goal, reason);
+        await appendLedger(brainRoot, { goal, outcome: "mint-failed" }, now);
+        return { outcome: "draft-failed", stage: "mint", reason, detail: detail.slice(0, 400) };
+      }
+      audit({ ts: "", event: "skill:acquire:minted", summary: `${goal} (attempt ${attempt})`, status: "ok" });
+
+      const fail = await (async (): Promise<AttemptFail | null> => {
+        // a. PARSE
+        const parsed = parseSkillFile(minted.file);
+        if (!parsed || !parsed.name.trim()) {
+          return { stage: "parse", reason: "the skill I wrote didn't parse", retryable: true };
+        }
+        skill = parsed;
+
+        // b. SCAN — a block is final; never re-mint around the scanner.
+        scanResult = scanSkill(skill);
+        if (scanResult.verdict === "block") {
+          const finding = scanResult.findings[0];
+          return {
+            stage: "scan",
+            reason: `it was blocked for safety${finding ? ` (${finding.rule}: ${finding.detail})` : ""}`,
+            retryable: false,
+            nameHint: skill.name,
+          };
+        }
+
+        // c. EVALS (script skills only — instruction skills have nothing to execute)
+        const transcripts: string[] = [];
+        if (skill.kind === "script") {
+          const evals = minted.evals ?? [];
+          if (evals.length === 0) {
+            transcripts.push("no evals provided");
+          } else {
+            for (const ev of evals) {
+              const r = await runSandbox(skill, { input: ev.input, params: ev.params, audit });
+              const stdoutTail = r.stdout.slice(-500);
+              transcripts.push(
+                `${ev.name ?? "eval"}: params=${JSON.stringify(ev.params ?? {})} ok=${r.ok} stdoutTail=${JSON.stringify(stdoutTail)}`,
+              );
+              const passed = r.ok && (!ev.expectContains || r.stdout.includes(ev.expectContains));
+              if (!passed) {
+                return {
+                  stage: "evals",
+                  reason: "it didn't pass its own tests",
+                  detail: `expected stdout to contain ${JSON.stringify(ev.expectContains ?? "")}; got: ${transcripts[transcripts.length - 1]}`,
+                  retryable: true,
+                  nameHint: skill.name,
+                };
+              }
+            }
+          }
+        }
+        evalTranscripts = transcripts.join("\n");
+
+        // d. CRITIC — independent judge, not the generator
+        let criticResult: { pass: boolean; reason: string };
+        try {
+          criticResult = await critic({ goal, skillFile: minted.file, evalTranscripts });
+        } catch (err) {
+          return {
+            stage: "critic",
+            reason: `the reviewer couldn't verify it (${err instanceof Error ? err.message : String(err)})`,
+            retryable: true,
+            nameHint: skill.name,
+          };
+        }
+        if (!criticResult.pass) {
+          return {
+            stage: "critic",
+            reason: criticResult.reason || "the reviewer flagged an issue",
+            detail: criticResult.reason,
+            retryable: true,
+            nameHint: skill.name,
+          };
+        }
+        return null;
+      })();
+
+      if (!fail) { verified = true; break; }
+
+      // Archive + audit every failed attempt (honest history)…
+      await archiveDraft(brainRoot, minted.file, fail.nameHint, now);
       audit({
         ts: "",
         event: "skill:acquire:failed",
-        summary: `mint threw: ${err instanceof Error ? err.message : String(err)}`,
-        status: "mint",
+        summary: `${fail.reason}${fail.detail ? ` — ${fail.detail.slice(0, 300)}` : ""} (attempt ${attempt})`,
+        status: fail.stage,
       });
-      fileProposal(goal, reason);
-      await appendLedger(brainRoot, { goal, outcome: "mint-failed" }, now);
-      return { outcome: "draft-failed", stage: "mint", reason };
-    }
-    audit({ ts: "", event: "skill:acquire:minted", summary: goal, status: "ok" });
 
-    const ladderFail = async (
-      stage: "parse" | "scan" | "evals" | "critic",
-      reason: string,
-      nameHint?: string,
-    ): Promise<AcquireResult> => {
-      await archiveDraft(brainRoot, minted.file, nameHint, now);
-      fileProposal(goal, reason);
-      audit({ ts: "", event: "skill:acquire:failed", summary: reason, status: stage });
-      await appendLedger(brainRoot, { goal, outcome: "draft-failed" }, now);
-      return { outcome: "draft-failed", stage, reason };
-    };
-
-    // a. PARSE
-    const skill = parseSkillFile(minted.file);
-    if (!skill || !skill.name.trim()) {
-      return await ladderFail("parse", "the skill I wrote didn't parse");
-    }
-
-    // b. SCAN
-    const scanResult = scanSkill(skill);
-    if (scanResult.verdict === "block") {
-      const finding = scanResult.findings[0];
-      const reason = `it was blocked for safety${finding ? ` (${finding.rule}: ${finding.detail})` : ""}`;
-      return await ladderFail("scan", reason, skill.name);
-    }
-
-    // c. EVALS (script skills only — instruction skills have nothing to execute)
-    const runSandbox = opts.runSandbox ?? runSkillSandboxed;
-    const transcripts: string[] = [];
-    if (skill.kind === "script") {
-      const evals = minted.evals ?? [];
-      if (evals.length === 0) {
-        transcripts.push("no evals provided");
-      } else {
-        for (const ev of evals) {
-          const r = await runSandbox(skill, { input: ev.input, params: ev.params, audit });
-          const stdoutTail = r.stdout.slice(-500);
-          transcripts.push(
-            `${ev.name ?? "eval"}: params=${JSON.stringify(ev.params ?? {})} ok=${r.ok} stdoutTail=${JSON.stringify(stdoutTail)}`,
-          );
-          const passed = r.ok && (!ev.expectContains || r.stdout.includes(ev.expectContains));
-          if (!passed) {
-            return await ladderFail("evals", "it didn't pass its own tests", skill.name);
-          }
-        }
+      // …but the ledger gets ONE line per acquisition (the daily cap counts
+      // ledger lines — an internal retry must not consume two slots), and only
+      // the FINAL failure files the gap proposal and returns.
+      if (!fail.retryable || isLastAttempt) {
+        await appendLedger(brainRoot, { goal, outcome: "draft-failed" }, now);
+        fileProposal(goal, fail.reason);
+        return {
+          outcome: "draft-failed",
+          stage: fail.stage,
+          reason: fail.reason,
+          detail: fail.detail?.slice(0, 600),
+        };
       }
+      priorDraft = minted.file;
+      priorFailure = `${fail.reason}${fail.detail ? ` — ${fail.detail}` : ""}`;
     }
-    const evalTranscripts = transcripts.join("\n");
 
-    // d. CRITIC — independent judge, not the generator
-    let criticResult: { pass: boolean; reason: string };
-    try {
-      criticResult = await critic({ goal, skillFile: minted.file, evalTranscripts });
-    } catch (err) {
-      return await ladderFail(
-        "critic",
-        `the reviewer couldn't verify it (${err instanceof Error ? err.message : String(err)})`,
-        skill.name,
-      );
-    }
-    if (!criticResult.pass) {
-      return await ladderFail("critic", criticResult.reason || "the reviewer flagged an issue", skill.name);
+    if (!verified) {
+      // Unreachable by construction (the loop returns on final failure), but
+      // fail honestly rather than fall through to registration.
+      return { outcome: "error", reason: "verification never completed" };
     }
 
     audit({ ts: "", event: "skill:acquire:verified", summary: skill.name, status: "ok" });
