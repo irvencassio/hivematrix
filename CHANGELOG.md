@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.185 — 2026-07-12
+
+Honesty gate: the assistant can no longer fake a tool call and invent results — fabricated replies are discarded and it offers to learn a real skill instead; tool failures now trigger skill learning rather than asking you to do it by hand.
+
 ## v0.1.184 — 2026-07-12
 
 Voice never dead-ends: when a tool fails, HiveMatrix now learns a new skill for the task instead of asking you to do it by hand; permission blocks get spoken remediation.

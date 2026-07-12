@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.185", date: "2026-07-12", note: "Honesty gate: the assistant can no longer fake a tool call and invent results — fabricated replies are discarded and it offers to learn a real skill instead; tool failures now trigger skill learning rather than asking you to do it by hand." },
   { version: "0.1.184", date: "2026-07-12", note: "Voice never dead-ends: when a tool fails, HiveMatrix now learns a new skill for the task instead of asking you to do it by hand; permission blocks get spoken remediation." },
   { version: "0.1.183", date: "2026-07-12", note: "Calendar first-run polish: while macOS's calendar-permission prompt is pending, HiveMatrix now says exactly how to grant access instead of a generic failure." },
   { version: "0.1.182", date: "2026-07-12", note: "Self-learning: calendar reads via EventKit (no more app-launch dead-end), skill_run lets voice/chat execute learned skills in a sandbox, learn_skill acquires+verifies new skills live on capability misses, 'update HiveMatrix to X' routes to the coding pipeline, background gap→skill acquisition under autonomous mode, morning brief reports what it learned." },
