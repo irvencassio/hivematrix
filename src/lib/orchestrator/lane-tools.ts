@@ -32,6 +32,7 @@ const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
   mail_draft: "mailbee",
   message_send: "messagebee",
   brain_search: "brain",
+  brain_read: "brain",
   skill_used: "brain",
   skill_run: "brain",
   digest_url: "webbee",
@@ -234,6 +235,24 @@ export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
   {
     type: "function",
     function: {
+      name: "brain_read",
+      description:
+        "Read the FULL text of a brain document by its path (as returned by brain_search). Use this after " +
+        "brain_search to answer questions about the operator's goals, plans, or notes instead of relying on " +
+        "snippets — a search hit only gives you a fragment; this gives you the whole document. The path must be " +
+        "one returned by brain_search (or otherwise known to be under the brain root); an out-of-root path is refused.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "The brain-root-relative doc path, e.g. as returned in a brain_search hit's `path` field" },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "skill_used",
       description:
         "Skill library: record that you applied a skill from the library to this task, so it earns its keep and improves. Call this AFTER following a skill. If you found a better way or a gotcha, include a one-line 'refinement' and it gets appended to the skill for next time.",
@@ -325,7 +344,7 @@ const CAPABILITY_ROUTING_LINES: Record<string, string> = {
   message_send: "Send an SMS / iMessage → **message_send** (allowlisted recipients only).",
   hivematrix_browser: "Read/search the live web or drive logged-in/multi-step browser workflows → **hivematrix_browser**.",
   desktop_action: "Control a native macOS app → **desktop_action**.",
-  brain_search: "Recall a stored document / brain doc / past decision → **brain_search** (search durable memory before assuming it isn't written down).",
+  brain_search: "Recall a stored document / brain doc / past decision → **brain_search** (search durable memory before assuming it isn't written down), then **brain_read** on the matching path to get the FULL document instead of answering from the snippet alone.",
   code_graph: "Find where a symbol is defined + every place it's used → **code_graph** (exact, deterministic — use it to verify you found ALL usages of anything you changed, not just the obvious ones).",
   contacts_lookup: "A person's phone number or email → **contacts_lookup**. Today's schedule → **calendar_today**. Open to-dos → **reminders_list**. \"Remind me to X\" → **reminder_create** (sets a real Reminder NOW — don't spawn a task for it). \"Put X on my calendar\" / \"schedule X\" → **calendar_create** (creates a real Calendar event NOW; needs a start time, so ask if none was given — don't spawn a task for it).",
 };
@@ -391,6 +410,8 @@ export async function executeLaneTool(
       return executeMessageBeeSend(args);
     case "brain_search":
       return executeBrainSearch(args);
+    case "brain_read":
+      return executeBrainRead(args);
     case "skill_used":
       return executeSkillUsed(args);
     case "skill_run":
@@ -567,6 +588,13 @@ async function executeBrainSearch(args: Record<string, unknown>): Promise<string
   }
   const { searchBrain } = await import("@/lib/brain/search");
   return formatBrainSearchResult(await searchBrain(query, { maxResults }));
+}
+
+async function executeBrainRead(args: Record<string, unknown>): Promise<string> {
+  const path = typeof args.path === "string" ? args.path.trim() : "";
+  if (!path) return "Error: 'path' is required for brain_read.";
+  const { readBrainDoc, formatBrainReadResult } = await import("@/lib/brain/read");
+  return formatBrainReadResult(await readBrainDoc(path));
 }
 
 async function executeSkillUsed(args: Record<string, unknown>): Promise<string> {

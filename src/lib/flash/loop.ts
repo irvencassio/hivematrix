@@ -57,6 +57,7 @@ const MAX_WALL_MS = 3 * 60 * 1000;
  */
 export const READ_ONLY_FLASH_TOOLS: ReadonlySet<string> = new Set([
   "brain_search",
+  "brain_read",
   "workflow_inbox",
   "code_graph",
   // PIM reads — lets the heartbeat / daily brief observe the operator's real

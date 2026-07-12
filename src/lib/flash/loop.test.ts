@@ -286,6 +286,7 @@ test("READ_ONLY_FLASH_TOOLS excludes every write-capable lane tool", () => {
     assert.equal(READ_ONLY_FLASH_TOOLS.has(writeTool), false, `${writeTool} must not be read-only`);
   }
   assert.ok(READ_ONLY_FLASH_TOOLS.has("brain_search"));
+  assert.ok(READ_ONLY_FLASH_TOOLS.has("brain_read"));
 });
 
 // ------------------------------------------------------------------

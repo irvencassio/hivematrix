@@ -35,6 +35,9 @@ const SPOKEN_STYLE =
  * resolve a request instead of dead-ending on "I can't do that." */
 const CAPABILITY_DOCTRINE =
   "Capability ladder — when the operator asks for something, resolve it in this order and never dead-end: " +
+  "(0) when asked about the operator's goals, plans, or notes, call brain_search to find the doc's path, then " +
+  "brain_read on that path to get its FULL content, and answer from it — do NOT say \"I don't have file access\" " +
+  "or answer from a search snippet alone when brain_read is available; " +
   "(1) answer directly if you know it; (2) use the CHEAPEST sufficient tool — desktop_action (GUI automation) is a " +
   "last resort for things only a human-driven app can do, NEVER for anything computable by a script (counting files, " +
   "reading data, math, text processing): those go to skill_run or learn_skill; (3) if a library skill fits, run it with skill_run; " +

@@ -68,6 +68,11 @@ test("assembleSystemPrompt always includes the capability-doctrine escalation la
   // told the operator to count files in Finder by hand instead of learning).
   assert.match(prompt, /tool(s)? you tried failed/i);
   assert.match(prompt, /never tell the operator to do by hand/i);
+  // brain_read step: goals/plans/notes questions must use brain_search -> brain_read
+  // instead of answering off a snippet or claiming no file access (the confirmed gap).
+  assert.match(prompt, /brain_search/);
+  assert.match(prompt, /brain_read/);
+  assert.match(prompt, /don't have file access/i);
   // PERMISSION_NEEDED results are the exception: speak the fix, don't re-learn.
   assert.match(prompt, /PERMISSION_NEEDED/);
   // Anti-fabrication clause (pairs with loop.ts's guardFabricatedToolCalls).

@@ -53,6 +53,7 @@ test("isLaneTool recognizes active lane tools and rejects removed browser aliase
   assert.equal(isLaneTool("mailbee_draft"), true);
   assert.equal(isLaneTool("messagebee_send"), true);
   assert.equal(isLaneTool("brain_search"), true);
+  assert.equal(isLaneTool("brain_read"), true);
   assert.equal(isLaneTool("skill_used"), true);
   assert.equal(isLaneTool("skill_run"), true);
   assert.equal(isLaneTool("digest_url"), true);
@@ -96,7 +97,7 @@ test("executeLaneTool dispatches a legacy bee alias to its real handler", async 
 });
 
 test("all bee tools are defined with required schemas", () => {
-  assert.equal(LANE_TOOL_DEFINITIONS.length, 17); // 12 lanes + 5 PIM tools
+  assert.equal(LANE_TOOL_DEFINITIONS.length, 18); // 13 lanes (incl. brain_read) + 5 PIM tools
   for (const t of LANE_TOOL_DEFINITIONS) {
     assert.equal(t.type, "function");
     assert.ok(t.function.name.length > 0);
@@ -130,7 +131,7 @@ const PIM_NAMES = ["calendar_create", "calendar_today", "contacts_lookup", "remi
 
 test("cloud-ok advertises every lane (web, browser, desktop, mail, message, brain, skill, digest, pim)", () => {
   assert.deepEqual(names(availableLaneTools(cloud())),
-    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "digest_url", "hivematrix_browser", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
+    ["brain_search", "brain_read", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "digest_url", "hivematrix_browser", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
 });
 
 test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
@@ -140,12 +141,12 @@ test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
 
 test("local-only drops web lanes but keeps Desktop Lane + outbound channels + brain/skill/codegraph/pim + COO routing", () => {
   assert.deepEqual(names(availableLaneTools(local())),
-    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
+    ["brain_search", "brain_read", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
 });
 
 test("offline keeps the offline workhorses + outbound channels + brain/skill/codegraph/pim + COO routing (all local)", () => {
   assert.deepEqual(names(availableLaneTools(offline())),
-    ["brain_search", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
+    ["brain_search", "brain_read", ...PIM_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
 });
 
 test("capabilityRoutingGuide lists email/message/brain lanes in cloud, drops web lanes offline", () => {
@@ -153,6 +154,7 @@ test("capabilityRoutingGuide lists email/message/brain lanes in cloud, drops web
   assert.match(cloudGuide, /mail_send/);
   assert.match(cloudGuide, /message_send/);
   assert.match(cloudGuide, /brain_search/);
+  assert.match(cloudGuide, /brain_read/);
   assert.match(cloudGuide, /hivematrix_browser/);
   assert.doesNotMatch(cloudGuide, /webbee_search/);
   assert.doesNotMatch(cloudGuide, /browserbee_run/);
@@ -167,6 +169,23 @@ test("capabilityRoutingGuide lists email/message/brain lanes in cloud, drops web
 test("executeLaneTool refuses an unknown lane tool", async () => {
   const out = await executeLaneTool("nopebee", {}, { projectPath: "/tmp", project: "ops", requestedBy: "test" });
   assert.match(out, /Unknown lane tool/);
+});
+
+test("executeLaneTool: brain_read returns a doc's full content for a valid in-root path", async () => {
+  mkdirSync(SKILL_BRAIN, { recursive: true });
+  writeFileSync(join(SKILL_BRAIN, "goals.md"), "# Goals\nShip the thing.");
+  const out = await executeLaneTool("brain_read", { path: "goals.md" }, ctx());
+  assert.match(out, /Ship the thing/);
+});
+
+test("executeLaneTool: brain_read rejects a `..` escape from the brain root", async () => {
+  const out = await executeLaneTool("brain_read", { path: "../../../../etc/passwd" }, ctx());
+  assert.match(out, /Error:.*escapes the brain root/);
+});
+
+test("executeLaneTool: brain_read requires a path", async () => {
+  const out = await executeLaneTool("brain_read", {}, ctx());
+  assert.match(out, /'path' is required for brain_read/);
 });
 
 test("executeLaneTool rejects removed BrowserBee/WebBee aliases", async () => {
