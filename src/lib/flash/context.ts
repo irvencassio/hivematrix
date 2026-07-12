@@ -15,6 +15,8 @@ import { join } from "path";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { searchBrain } from "@/lib/brain/search";
 import { extractPersonaName } from "@/lib/onboarding/birth-ritual";
+import { listSkills } from "@/lib/skills/store";
+import { formatSkillIndex } from "@/lib/skills/contracts";
 import type { FlashChannel, FlashMessage, FlashTurnRow } from "./types";
 
 const PERSONA_FILES = ["SOUL.md", "IDENTITY.md", "USER.md", "GOALS.md"] as const;
@@ -70,6 +72,26 @@ function loadDailyNote(brainRoot: string): string {
   return "";
 }
 
+/** One-paragraph guide so Haiku knows how to actually invoke a listed skill. */
+const SKILL_RUN_GUIDE =
+  "To RUN a skill live in this turn, call the skill_run tool with the skill's " +
+  "name (and a params object for any {{placeholders}} it lists, and input for " +
+  "its {{input}} slot if it has one). An instruction skill returns its recipe " +
+  "for you to follow now; a script skill executes in a sandbox and returns " +
+  "real output. Prefer a matching skill over improvising. After following an " +
+  "instruction skill you may also record skill_used.";
+
+async function loadSkillSection(): Promise<string> {
+  try {
+    const entries = await listSkills();
+    const index = formatSkillIndex(entries, { showParams: true });
+    if (!index) return "";
+    return `${index}\n\n${SKILL_RUN_GUIDE}`;
+  } catch {
+    return "";
+  }
+}
+
 async function loadBrainHits(text: string, brainRoot: string): Promise<string> {
   if (text.trim().length < 4) return "";
   try {
@@ -117,6 +139,9 @@ export async function assembleSystemPrompt(
 
     const brainHits = await loadBrainHits(userText, root);
     if (brainHits) sections.push(brainHits);
+
+    const skillSection = await loadSkillSection();
+    if (skillSection) sections.push(skillSection);
   }
 
   if (sessionSummary) {

@@ -252,12 +252,28 @@ export function parseSkillFile(content: string): Skill | null {
   };
 }
 
+export interface FormatSkillIndexOptions {
+  /** Append each skill's {{param}} names (and whether it takes {{input}}) so a
+   *  caller that can invoke skill_run (Flash) knows what to pass — task
+   *  prompts (which only read+follow skills manually) omit this by default. */
+  showParams?: boolean;
+}
+
 /** A compact, model-facing index of the skill library. "" when empty. */
-export function formatSkillIndex(entries: SkillIndexEntry[]): string {
+export function formatSkillIndex(entries: SkillIndexEntry[], opts: FormatSkillIndexOptions = {}): string {
   if (entries.length === 0) return "";
   return [
     "--- Skill Library ---",
     "Reusable recipes distilled from past work. Before solving a recurring task, check if a skill applies — read its full text with brain_search or read_file (under the brain root's skills/ folder), then follow it. After you apply one, call skill_used (or POST /skills/<name>/used) so it earns its keep — include a one-line refinement if you improved on it.",
-    ...entries.map((e) => `- ${e.name}${e.kind === "script" ? " [script]" : ""}${e.useCount > 0 ? ` (used ${e.useCount}×)` : ""}: ${e.description}`),
+    ...entries.map((e) => {
+      const paramsSuffix = opts.showParams
+        ? [
+            ...(e.params && e.params.length ? [`params: ${e.params.join(", ")}`] : []),
+            ...(e.hasInput ? ["input"] : []),
+          ]
+        : [];
+      const suffix = paramsSuffix.length ? ` {${paramsSuffix.join("; ")}}` : "";
+      return `- ${e.name}${e.kind === "script" ? " [script]" : ""}${e.useCount > 0 ? ` (used ${e.useCount}×)` : ""}: ${e.description}${suffix}`;
+    }),
   ].join("\n");
 }
