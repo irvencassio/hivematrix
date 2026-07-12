@@ -26,6 +26,8 @@ function skill(p: Partial<Skill>): Skill {
     scope: "personal",
     scanVerdict: "pass",
     roles: [],
+    failures: 0,
+    probation: false,
     ...p,
   };
 }

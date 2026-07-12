@@ -13,9 +13,11 @@ function skill(over: Partial<Skill> = {}): Skill {
     updatedAt: over.updatedAt ?? "2026-06-14T00:00:00.000Z",
     revisions: over.revisions ?? 1,
     useCount: over.useCount ?? 0,
+    failures: over.failures ?? 0,
     lastUsedAt: over.lastUsedAt ?? "",
     compat: over.compat ?? ["all"],
     trusted: over.trusted ?? true,
+    probation: over.probation ?? false,
     kind: over.kind ?? "instruction",
     interpreter: over.interpreter ?? "bash",
     roles: over.roles ?? [],
@@ -39,6 +41,24 @@ test("renderSkillFile → parseSkillFile round-trips (incl. useCount)", () => {
   assert.equal(parsed!.revisions, 2);
   assert.equal(parsed!.useCount, 4);
   assert.equal(parsed!.lastUsedAt, "2026-06-14T01:00:00.000Z");
+});
+
+test("failures + probation round-trip when non-default", () => {
+  const s = skill({ failures: 2, probation: true });
+  const parsed = parseSkillFile(renderSkillFile(s));
+  assert.ok(parsed);
+  assert.equal(parsed!.failures, 2);
+  assert.equal(parsed!.probation, true);
+});
+
+test("failures + probation are omitted from rendered frontmatter at default values, and parse back to 0/false", () => {
+  const s = skill({ failures: 0, probation: false });
+  const rendered = renderSkillFile(s);
+  assert.doesNotMatch(rendered, /^failures:/m);
+  assert.doesNotMatch(rendered, /^probation:/m);
+  const parsed = parseSkillFile(rendered)!;
+  assert.equal(parsed.failures, 0);
+  assert.equal(parsed.probation, false);
 });
 
 test("compat round-trips and skillRunsOn gates by harness", () => {

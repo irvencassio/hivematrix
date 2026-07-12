@@ -51,6 +51,8 @@ export interface Skill {
   revisions: number;
   /** Times an agent reported applying this skill (proves it earns its keep). */
   useCount: number;
+  /** Times an agent reported this skill produced a harmful/wrong outcome. */
+  failures: number;
   lastUsedAt: string;
   /** Which harnesses this skill works with (["all"] = any). */
   compat: SkillHarness[];
@@ -61,6 +63,12 @@ export interface Skill {
    * shared skill can't silently influence agents.
    */
   trusted: boolean;
+  /**
+   * True while a learned script skill (from live acquisition) is still earning
+   * trust: it IS runnable, but is announced/tracked separately until it earns
+   * promotion to trusted (see recordSkillOutcome in store.ts).
+   */
+  probation: boolean;
   /** "instruction" (LLM recipe, default) or "script" (deterministic executable). */
   kind: SkillKind;
   /** For script skills: the interpreter (bash/node/python3). */
@@ -188,9 +196,11 @@ export function renderSkillFile(skill: Skill): string {
     `updated: ${skill.updatedAt}`,
     `revisions: ${skill.revisions}`,
     `uses: ${skill.useCount}`,
+    ...(skill.failures > 0 ? [`failures: ${skill.failures}`] : []),
     `lastUsed: ${skill.lastUsedAt}`,
     `compat: ${fmList(skill.compat.length ? skill.compat : ["all"])}`,
     `trusted: ${skill.trusted}`,
+    ...(skill.probation ? [`probation: true`] : []),
     `kind: ${skill.kind}`,
     `interpreter: ${skill.interpreter}`,
     ...(skill.scope ? [`scope: ${skill.scope}`] : []),
@@ -216,6 +226,7 @@ export function parseSkillFile(content: string): Skill | null {
   if (!fm.name) return null;
   const revisions = parseInt(fm.revisions ?? "1", 10);
   const uses = parseInt(fm.uses ?? "0", 10);
+  const failures = parseInt(fm.failures ?? "0", 10);
   return {
     name: fm.name,
     description: fm.description ?? "",
@@ -226,9 +237,11 @@ export function parseSkillFile(content: string): Skill | null {
     updatedAt: fm.updated ?? "",
     revisions: Number.isFinite(revisions) ? revisions : 1,
     useCount: Number.isFinite(uses) ? uses : 0,
+    failures: Number.isFinite(failures) ? failures : 0,
     lastUsedAt: fm.lastUsed ?? "",
     compat: parseCompat(fm.compat),
     trusted: fm.trusted !== "false", // default true (existing skills) unless explicitly false
+    probation: fm.probation === "true",
     kind: fm.kind === "script" ? "script" : "instruction",
     interpreter: coerceInterpreter(fm.interpreter),
     scope: coerceScope(fm.scope),

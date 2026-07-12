@@ -7,7 +7,7 @@ function skill(p: Partial<Skill>): Skill {
   return {
     name: "s", description: "", tags: [], body: "b", source: "manual",
     createdAt: "", updatedAt: "", revisions: 1, useCount: 0, lastUsedAt: "",
-    compat: ["all"], trusted: true, kind: "instruction", interpreter: "bash", roles: [], ...p,
+    compat: ["all"], trusted: true, failures: 0, probation: false, kind: "instruction", interpreter: "bash", roles: [], ...p,
   };
 }
 

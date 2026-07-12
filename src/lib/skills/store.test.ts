@@ -13,7 +13,7 @@ writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory:
 const origHome = process.env.HOME;
 process.env.HOME = HOME;
 
-const { upsertSkill, listSkills, listSkillsFor, skillsForRole, readSkill, skillsDir, markSkillUsed, setSkillTrusted, deleteSkill } = await import("./store");
+const { upsertSkill, listSkills, listSkillsFor, skillsForRole, readSkill, skillsDir, markSkillUsed, setSkillTrusted, deleteSkill, recordSkillOutcome } = await import("./store");
 
 test.after(() => {
   process.env.HOME = origHome;
@@ -154,4 +154,75 @@ test("skillsForRole: a hand-tagged roles:['qa'] skill appears only under qa", as
   const forFounder = await skillsForRole("founder");
   assert.ok(forQa.some((s) => s.name === "QA Regression Checklist"));
   assert.ok(!forFounder.some((s) => s.name === "QA Regression Checklist"));
+});
+
+test("recordSkillOutcome: success increments useCount, failure increments failures", async () => {
+  await upsertSkill({ name: "Outcome Basic", description: "d", body: "b", source: "test" });
+
+  const r1 = await recordSkillOutcome("Outcome Basic", true);
+  assert.equal(r1.ok, true);
+  assert.equal(r1.useCount, 1);
+  assert.equal(r1.failures, 0);
+
+  const r2 = await recordSkillOutcome("Outcome Basic", false);
+  assert.equal(r2.ok, true);
+  assert.equal(r2.useCount, 1);
+  assert.equal(r2.failures, 1);
+
+  const after = await readSkill("Outcome Basic");
+  assert.equal(after?.useCount, 1);
+  assert.equal(after?.failures, 1);
+});
+
+test("recordSkillOutcome: promotes a probationary skill to trusted after 3 clean successes", async () => {
+  await upsertSkill({ name: "Learned Script", description: "d", body: "b", source: "acquire:test", trusted: false, probation: true });
+  await markSkillUsed("Learned Script");
+  await markSkillUsed("Learned Script");
+  let s = await readSkill("Learned Script");
+  assert.equal(s?.useCount, 2);
+  assert.equal(s?.probation, true);
+  assert.equal(s?.trusted, false);
+
+  const r = await recordSkillOutcome("Learned Script", true);
+  assert.equal(r.useCount, 3);
+  assert.equal(r.promoted, true);
+  assert.equal(r.trusted, true);
+  assert.equal(r.probation, false);
+
+  s = await readSkill("Learned Script");
+  assert.equal(s?.trusted, true);
+  assert.equal(s?.probation, false);
+});
+
+test("recordSkillOutcome: no promotion while the probationary skill has any failures", async () => {
+  await upsertSkill({ name: "Flaky Learned Script", description: "d", body: "b", source: "acquire:test", trusted: false, probation: true });
+  await recordSkillOutcome("Flaky Learned Script", false); // failures: 1
+
+  const r = await recordSkillOutcome("Flaky Learned Script", true); // useCount: 1, failures still 1
+  assert.equal(r.promoted, false);
+  assert.equal(r.probation, true);
+  assert.equal(r.trusted, false);
+});
+
+test("recordSkillOutcome: demotes a trusted skill once failures >= max(3, useCount)", async () => {
+  await upsertSkill({ name: "Overused Skill", description: "d", body: "b", source: "test" });
+  await recordSkillOutcome("Overused Skill", true); // useCount: 1
+  await recordSkillOutcome("Overused Skill", false); // failures: 1
+  const mid = await recordSkillOutcome("Overused Skill", false); // failures: 2
+  assert.equal(mid.demoted, false);
+  assert.equal(mid.trusted, true);
+
+  const r = await recordSkillOutcome("Overused Skill", false); // failures: 3 >= max(3, 1)
+  assert.equal(r.failures, 3);
+  assert.equal(r.demoted, true);
+  assert.equal(r.trusted, false);
+
+  const s = await readSkill("Overused Skill");
+  assert.ok(s, "demoted skill stays on disk, is not deleted");
+  assert.equal(s?.trusted, false);
+});
+
+test("recordSkillOutcome on a missing skill is a clean no-op", async () => {
+  const r = await recordSkillOutcome("does-not-exist-outcome", true);
+  assert.deepEqual(r, { ok: false, useCount: 0, failures: 0, trusted: false, probation: false, promoted: false, demoted: false });
 });

@@ -82,6 +82,8 @@ const skillBody: Skill = {
   scope: "personal",
   scanVerdict: "pass",
   roles: [],
+  failures: 0,
+  probation: false,
 };
 
 const scenarios: Scenario[] = [

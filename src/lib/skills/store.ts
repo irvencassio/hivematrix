@@ -104,6 +104,8 @@ export interface UpsertSkillInput {
   compat?: SkillHarness[];
   /** Imported skills should pass false; distilled/manual default true. */
   trusted?: boolean;
+  /** Learned script skills (live acquisition) start on probation. Create-only. */
+  probation?: boolean;
   kind?: SkillKind;
   interpreter?: SkillInterpreter;
   /** Provenance (set by scoped sync / publish). */
@@ -164,9 +166,11 @@ export async function upsertSkill(input: UpsertSkillInput): Promise<UpsertSkillR
       updatedAt: now,
       revisions: 1,
       useCount: 0,
+      failures: 0,
       lastUsedAt: "",
       compat: input.compat && input.compat.length ? input.compat : ["all"],
       trusted: input.trusted !== false, // default trusted; import passes false
+      probation: input.probation ?? false,
       kind: input.kind === "script" ? "script" : "instruction",
       interpreter: input.interpreter ?? "bash",
       scope: input.scope,
@@ -221,6 +225,68 @@ export async function markSkillUsed(
     return { ok: true, useCount: updated.useCount, refined };
   } catch {
     return { ok: false, useCount: 0, refined: false };
+  }
+}
+
+/**
+ * Record a helpful/harmful outcome for a skill (the ACE-style counter
+ * substrate): success bumps useCount and may PROMOTE a probationary skill to
+ * trusted (3+ consecutive successes, i.e. useCount >= 3 with zero failures
+ * since probation was granted); failure bumps failures and may DEMOTE a
+ * trusted skill to untrusted (failures >= max(3, useCount)) — a demoted skill
+ * stays on disk, it is never deleted here. Never throws.
+ */
+export async function recordSkillOutcome(
+  name: string,
+  ok: boolean,
+  opts: { now?: string } = {},
+): Promise<{
+  ok: boolean;
+  useCount: number;
+  failures: number;
+  trusted: boolean;
+  probation: boolean;
+  promoted: boolean;
+  demoted: boolean;
+}> {
+  const zero = { ok: false, useCount: 0, failures: 0, trusted: false, probation: false, promoted: false, demoted: false };
+  const dir = skillsDir();
+  if (!dir) return zero;
+  const path = join(dir, skillFilename(name));
+  const raw = await readWithTimeout(path);
+  const skill = raw ? parseSkillFile(raw) : null;
+  if (!skill) return zero;
+
+  const now = opts.now ?? new Date().toISOString();
+  let useCount = skill.useCount;
+  let failures = skill.failures;
+  let trusted = skill.trusted;
+  let probation = skill.probation;
+  let promoted = false;
+  let demoted = false;
+
+  if (ok) {
+    useCount += 1;
+    if (probation && failures === 0 && useCount >= 3) {
+      probation = false;
+      trusted = true;
+      promoted = true;
+    }
+  } else {
+    failures += 1;
+    if (trusted && failures >= Math.max(3, useCount)) {
+      trusted = false;
+      demoted = true;
+    }
+  }
+
+  const updated: Skill = { ...skill, useCount, failures, trusted, probation, updatedAt: now };
+
+  try {
+    await fs.writeFile(path, renderSkillFile(updated));
+    return { ok: true, useCount, failures, trusted, probation, promoted, demoted };
+  } catch {
+    return zero;
   }
 }
 
