@@ -51,6 +51,20 @@ test("assembleSystemPrompt injects the skill index with params and skill_run gui
   assert.match(prompt, /skill_run/);
 });
 
+test("assembleSystemPrompt always includes the capability-doctrine escalation ladder, even with no brain root", async () => {
+  const prompt = await assembleSystemPrompt("hi", "", null);
+
+  // The ladder, in order: answer -> tool -> skill_run -> learn_skill -> escalate_to_task -> self-improvement.
+  assert.match(prompt, /never dead-end/);
+  assert.match(prompt, /skill_run/);
+  assert.match(prompt, /learn_skill/);
+  assert.match(prompt, /can't do that/);
+  assert.match(prompt, /escalate_to_task/);
+  assert.match(prompt, /self-improvement/);
+  // Honest-failure clause.
+  assert.match(prompt, /Never claim something worked unless a tool result shows it did/);
+});
+
 test("assembleSystemPrompt omits the skill-library section when the library is empty", async () => {
   const emptyTmp = mkdtempSync(join(tmpdir(), "hm-flash-context-empty-"));
   const emptyHome = join(emptyTmp, "home");

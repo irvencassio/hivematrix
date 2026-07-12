@@ -30,6 +30,19 @@ const SPOKEN_STYLE =
   "You are speaking aloud — your reply will be read by text-to-speech. " +
   "Answer in one or two short, natural spoken sentences, and make the FIRST sentence " +
   "brief so it can be spoken immediately. No markdown, no lists, no code blocks, no emoji.";
+/** Capability doctrine — the escalation ladder. Always-on (not gated on brain
+ * root): even with no persona/skills configured, the model must know how to
+ * resolve a request instead of dead-ending on "I can't do that." */
+const CAPABILITY_DOCTRINE =
+  "Capability ladder — when the operator asks for something, resolve it in this order and never dead-end: " +
+  "(1) answer directly if you know it; (2) use a matching tool; (3) if a library skill fits, run it with skill_run; " +
+  "(4) if you have no way to do it yet, call learn_skill to acquire it as a new skill (you'll ack and speak the " +
+  "result when ready) — do NOT say \"I can't do that\" when you could learn it; (5) for multi-step work that needs " +
+  "the coding harness, call escalate_to_task; (6) if the request is about improving HiveMatrix itself (its own " +
+  "code/features), escalate_to_task with kind 'self-improvement' so it lands in the HiveMatrix repo. Never claim " +
+  "something worked unless a tool result shows it did — if a tool failed, say so honestly and offer the next step " +
+  "(learn it, escalate it, or ask for what you need).";
+
 const MAX_PERSONA_CHARS = 6000;
 const MAX_TURNS_IN_CONTEXT = 20;
 const MAX_BRAIN_RESULTS = 3;
@@ -123,6 +136,7 @@ export async function assembleSystemPrompt(
     identityLine,
     "Respond helpfully and concisely. Use available tools when they would genuinely help.",
     "Do not invent tool results — always call the tool and wait for the response.",
+    CAPABILITY_DOCTRINE,
     // The CLI's built-in web/file/shell tools are disabled here — the model can only act
     // through the HiveMatrix lane tools it is offered. Steer web work to Browser Lane.
     "For anything on the web (fetching a page, current weather, news, live info), use the hivematrix_browser (Browser Lane) tool — you have no other web access.",
