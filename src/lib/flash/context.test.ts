@@ -61,6 +61,11 @@ test("assembleSystemPrompt always includes the capability-doctrine escalation la
   assert.match(prompt, /can't do that/);
   assert.match(prompt, /escalate_to_task/);
   assert.match(prompt, /self-improvement/);
+  // PIM routing (live regression 2026-07-12: streaming voice "remind me to X in 5
+  // minutes" escalated to a do-nothing task instead of calling reminder_create).
+  // The doctrine must route reminders/calendar directly and forbid escalating them.
+  assert.match(prompt, /reminder_create/);
+  assert.match(prompt, /NEVER escalate_to_task and NEVER queue a task for a reminder/);
   // Honest-failure clause.
   assert.match(prompt, /Never claim something worked unless a tool result shows it did/);
   // learn_skill must fire on TRIED-AND-FAILED tools too, not only "no tool fits"

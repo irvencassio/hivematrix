@@ -13,6 +13,7 @@ import {
   boardReply, approvalsReply, resolvedReply, noApprovalToResolveReply,
   directivesReply, createdTaskReply, connectivityReply, setConnectivityReply,
   type CommandIntent,
+  type CommandKind,
 } from "./command-intent";
 import {
   RollingCommandContextStore,
@@ -27,6 +28,7 @@ import { getWeather, weatherReply, weatherNeedsLocationReply, type WeatherWhen, 
 import { synthesizeReplyVoice } from "./turn-server";
 import { buildVoiceBrowserLaneTask } from "./browser-lane-intent";
 import { buildVoiceMailDeleteTask } from "./mail-delete-intent";
+import { parseReminderCommand, executeReminderCreate } from "@/lib/orchestrator/pim-tools";
 import type { ApprovalQueueItem } from "@/lib/approvals/queue";
 import type { DirectiveRow } from "@/lib/orchestrator/directive-store";
 
@@ -59,6 +61,8 @@ export interface CommandTurnDeps {
   listDirectives?: () => Promise<VoiceDirectiveRef[]> | VoiceDirectiveRef[];
   updateDirective?: (id: string, fields: Record<string, unknown>) => Promise<void> | void;
   createTask?: (payload: Record<string, unknown>) => Promise<VoiceTaskRef>;
+  /** Seam for the reminder pre-route — defaults to the real Apple Reminders write. */
+  createReminder?: (args: { name: string; due: string }) => Promise<string>;
   listFailedTasks?: () => Promise<VoiceTaskRef[]> | VoiceTaskRef[];
   retryTask?: (id: string) => Promise<void> | void;
   updateTaskModel?: (id: string, model: string) => Promise<{ title: string } | null>;
@@ -268,20 +272,40 @@ async function getBrowserReadiness(deps: CommandTurnDeps): Promise<BriefingBrows
 
 /** Resolve a detected command to a spoken answer, performing any action. */
 export async function commandTurnOverride(transcript: string, deps: CommandTurnDeps = {}): Promise<CommandTurnOverride | null> {
-  const intent = detectCommandIntent(transcript || "");
-  if (intent.kind === "none") return null;
-
-  let result: { reply: string; taskId?: string; detail?: string } | null;
   const sessionId = deps.sessionId ?? "default";
-  try {
-    result = await runCommand(intent, deps, sessionId);
-  } catch (e) {
-    console.error(`[voice-cmd] ${intent.kind} failed: ${e instanceof Error ? e.message : e}`);
-    return null;
+  let result: { reply: string; taskId?: string; detail?: string } | null;
+  let kind: CommandKind;
+
+  // Deterministic reminder pre-route: an explicit "remind me to X [when]" must
+  // set a REAL Apple Reminder — take it BEFORE detectCommandIntent, whose
+  // createTask/scheduledReminder rules otherwise turn it into a do-nothing
+  // HiveMatrix task and can't parse "in 5 minutes" (live regression 2026-07-12).
+  const reminderCmd = parseReminderCommand(transcript || "");
+  if (reminderCmd) {
+    kind = "scheduledReminder";
+    try {
+      const reply = deps.createReminder
+        ? await deps.createReminder(reminderCmd)
+        : await executeReminderCreate({ name: reminderCmd.name, due: reminderCmd.due });
+      result = { reply, detail: "apple-reminder" };
+    } catch (e) {
+      console.error(`[voice-cmd] reminder failed: ${e instanceof Error ? e.message : e}`);
+      return null;
+    }
+  } else {
+    const intent = detectCommandIntent(transcript || "");
+    if (intent.kind === "none") return null;
+    kind = intent.kind;
+    try {
+      result = await runCommand(intent, deps, sessionId);
+    } catch (e) {
+      console.error(`[voice-cmd] ${intent.kind} failed: ${e instanceof Error ? e.message : e}`);
+      return null;
+    }
   }
   if (result == null) return null;
 
-  contextStore.update(sessionId, (ctx) => rememberTurn(ctx, { kind: intent.kind, text: transcript }));
+  contextStore.update(sessionId, (ctx) => rememberTurn(ctx, { kind, text: transcript }));
 
   let audioBase64 = "";
   try {
@@ -289,7 +313,7 @@ export async function commandTurnOverride(transcript: string, deps: CommandTurnD
     audioBase64 = path ? readFileSync(path).toString("base64") : "";
   } catch { /* speak-less fallback: the client shows the text reply */ }
 
-  return { reply: result.reply, audioBase64, command: { kind: intent.kind, detail: result.detail, taskId: result.taskId } };
+  return { reply: result.reply, audioBase64, command: { kind, detail: result.detail, taskId: result.taskId } };
 }
 
 async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionId: string): Promise<{ reply: string; taskId?: string; detail?: string } | null> {

@@ -35,6 +35,12 @@ const SPOKEN_STYLE =
  * resolve a request instead of dead-ending on "I can't do that." */
 const CAPABILITY_DOCTRINE =
   "Capability ladder — when the operator asks for something, resolve it in this order and never dead-end: " +
+  "(00) when the operator asks to be reminded of something or to put something on their calendar — \"remind me " +
+  "to X\", \"set a reminder\", \"remind me in N minutes/at 5\", \"schedule X\", \"put X on my calendar\" — call " +
+  "reminder_create (or calendar_create) DIRECTLY and immediately; these set a REAL reminder/event on the operator's " +
+  "devices right now. This is NOT multi-step work: NEVER escalate_to_task and NEVER queue a task for a reminder or a " +
+  "simple timed nudge — that would silently drop it. Pass the thing to be reminded of in 'name' and their own words " +
+  "about when in 'due'; " +
   "(0a) when the operator asks about their goals, progress, or \"what should I do today\" — or reports doing " +
   "something (\"I ran 3 miles\", \"did 20 min of Italian\") — use the goals tools (goals_list, daily_review, " +
   "goal_checkin, goal_upsert), NOT brain_search: goals now live in a structured, checkin-tracked store distinct " +

@@ -284,33 +284,46 @@ test("commandTurnOverride broadcasts voice:result timeout message when Vale does
   assert.match(String(data.text), /didn't respond/i);
 });
 
-test("commandTurnOverride creates a delayed HiveMatrix task for time-specific reminders", async () => {
+test("commandTurnOverride sets a REAL Apple Reminder for 'remind me …' — never a do-nothing task", async () => {
+  // Regression 2026-07-12: voice "remind me to X in 5 minutes" was classified as
+  // createTask and queued a HiveMatrix task ("I queued a task: …") that never set
+  // a reminder. Now an explicit reminder pre-routes to a real Apple Reminder and
+  // must NOT create a task.
   const created: Record<string, unknown>[] = [];
-  const now = new Date("2026-06-30T21:29:00.000Z"); // 5:29 PM America/New_York on this machine
-  const expected = new Date(now);
-  expected.setHours(17, 35, 0, 0);
+  const reminderCalls: Array<{ name: string; due: string }> = [];
 
-  const out = await commandTurnOverride("remind me at 5:35 PM to go look up something", {
-    sessionId: "scheduled-reminder",
-    now,
+  const out = await commandTurnOverride("remind me to call the dentist in 5 minutes", {
+    sessionId: "reminder-preroute",
     synthesize: async () => "",
+    createReminder: async (args) => {
+      reminderCalls.push(args);
+      return `Reminder set: "${args.name}" for Sunday, July 12 at 2:19 PM.`;
+    },
     createTask: async (payload) => {
       created.push(payload);
-      return { _id: "task-reminder", title: String(payload.title) };
+      return { _id: "should-not-happen", title: String(payload.title) };
     },
   });
 
   assert.ok(out);
   assert.equal(out?.command.kind, "scheduledReminder");
-  assert.equal(out?.command.taskId, "task-reminder");
-  assert.match(out?.reply ?? "", /Scheduled reminder/i);
-  assert.equal(created.length, 1);
-  assert.equal(created[0]?.title, "Reminder: go look up something");
-  assert.equal(created[0]?.status, "backlog");
-  assert.equal(created[0]?.source, "voice");
-  assert.equal(created[0]?.delayUntil, expected.toISOString());
-  assert.match(String(created[0]?.description), /direct Voice Lane delayed reminder/i);
-  assert.doesNotMatch(String(created[0]?.description), /schedule a reminder|create_trigger|send_later/i);
+  assert.equal(out?.command.detail, "apple-reminder");
+  assert.match(out?.reply ?? "", /Reminder set/i);
+  assert.deepEqual(reminderCalls, [{ name: "call the dentist", due: "in 5 minutes" }]);
+  assert.equal(created.length, 0, "must NOT queue a HiveMatrix task for a reminder");
+});
+
+test("commandTurnOverride: 'remind me at 5:35 PM to X' also sets a real Apple Reminder", async () => {
+  const reminderCalls: Array<{ name: string; due: string }> = [];
+  const out = await commandTurnOverride("remind me at 5:35 PM to go look up something", {
+    sessionId: "reminder-preroute-clock",
+    synthesize: async () => "",
+    createReminder: async (args) => { reminderCalls.push(args); return `Reminder set: "${args.name}".`; },
+    createTask: async () => { throw new Error("must not create a task for a reminder"); },
+  });
+  assert.ok(out);
+  assert.equal(out?.command.kind, "scheduledReminder");
+  assert.deepEqual(reminderCalls, [{ name: "go look up something", due: "at 5:35 PM" }]);
 });
 
 test("commandTurnOverride answers weather inline from the saved personalization location and spawns no task", async () => {

@@ -24,7 +24,7 @@ import {
 } from "./store";
 import { assembleSystemPrompt, buildInitialMessages } from "./context";
 import { runFlashAgentLoop } from "./loop";
-import { extractPimActions } from "@/lib/orchestrator/pim-tools";
+import { extractPimActions, parseReminderCommand } from "@/lib/orchestrator/pim-tools";
 
 // Re-export store helpers for the server routes
 export { appendFeedbackToTurn, createSession, getCurrentSession, getSession, getTurnsForSession, listSessions };
@@ -140,6 +140,22 @@ export async function handleFlashTurn(
       });
     },
   };
+
+  // Deterministic reminder pre-router: an explicit "remind me to X [when]" is a
+  // direct action, not agent work. Handle it in code so it can't be lost to the
+  // small model's coin-flip between reminder_create and escalate_to_task (live
+  // regression: streaming voice "remind me … in 5 minutes" kept queuing a
+  // do-nothing task instead of setting the reminder). Skips the model entirely.
+  const reminderCmd = parseReminderCommand(input.text);
+  if (reminderCmd) {
+    const { executeReminderCreate } = await import("@/lib/orchestrator/pim-tools");
+    const result = await executeReminderCreate({ name: reminderCmd.name, due: reminderCmd.due });
+    emit.toolResult("reminder_create", true, result);
+    emit.token(result);
+    const assistantTurn = appendTurn(session.id, "assistant", result);
+    emit.done(session.id, assistantTurn.id, result);
+    return;
+  }
 
   const fullText = await runFlashAgentLoop(messages, emit, session.id, brainRoot, {
     channel: input.channel,

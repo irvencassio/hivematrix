@@ -288,6 +288,49 @@ export function parseDuePhrase(text: string, now: Date = new Date()): Date | nul
   return due;
 }
 
+/** Leading "remind me to …" / "set a reminder to …" framing we strip to get the body. */
+const REMINDER_PREFIX_RE =
+  /^\s*(?:hey\s+[a-z]+[,\s]+)?(?:please\s+|could you\s+|can you\s+|would you\s+|i(?:'| a)?d like (?:you )?to\s+)?(?:remind me(?:\s+to|\s+that|\s+about)?|set(?:\s+up)?\s+(?:a|an|another)\s+reminder(?:\s+to|\s+for|\s+about)?)\b[\s,:—-]*/i;
+
+/** Earliest "when" marker inside a reminder body — mirrors parseDuePhrase's vocabulary. */
+const DUE_MARKER_RE =
+  /\b(?:in\s+(?:\d+|a|an)\s+(?:minute|min|hour|hr|day|week)s?|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|by\s+\d{1,2}|tomorrow|tonight|today|this\s+(?:morning|afternoon|evening)|next\s+[a-z]+|(?:mon|tues|wednes|thurs|fri|satur|sun)day|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}|\d{1,2}[/-]\d{1,2}|noon|midnight|the\s+\d{1,2}(?:st|nd|rd|th))\b/i;
+
+/**
+ * Deterministically split a spoken "remind me to X [when]" command into
+ * { name, due } — or null when the text isn't clearly a reminder request. Used
+ * as a pre-router so an obvious reminder never depends on the small model's
+ * coin-flip between reminder_create and escalate_to_task (live regression
+ * 2026-07-12: streaming voice "remind me to call the dentist in 5 minutes"
+ * kept queuing a do-nothing task). Conservative: fires only on an explicit
+ * "remind me…"/"set a reminder…" prefix, so it never hijacks other turns.
+ */
+export function parseReminderCommand(text: string): { name: string; due: string } | null {
+  const raw = (text || "").trim();
+  const pfx = REMINDER_PREFIX_RE.exec(raw);
+  if (!pfx) return null;
+  const rest = raw.slice(pfx[0].length).trim().replace(/[.!?]+$/, "").trim();
+  if (!rest) return null;
+
+  const dm = DUE_MARKER_RE.exec(rest);
+  let name = rest;
+  let due = "";
+  if (dm) {
+    if (dm.index > 0) {
+      // "call the dentist in 5 minutes" → name before the marker, due from it on.
+      name = rest.slice(0, dm.index);
+      due = rest.slice(dm.index).trim();
+    } else {
+      // "in 5 minutes to call the dentist" → due is the marker, name follows it.
+      name = rest.slice(dm[0].length).replace(/^\s*to\s+/i, "");
+      due = dm[0].trim();
+    }
+  }
+  name = name.replace(/^\s*to\s+/i, "").replace(/[,:\s—-]+$/, "").trim();
+  if (!name) return null;
+  return { name, due };
+}
+
 // ---------------------------------------------------------------------------
 // Tool definitions (OpenAI function-tool shape, lane-tools conventions).
 

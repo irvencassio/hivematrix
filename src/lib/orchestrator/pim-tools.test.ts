@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   parseDuePhrase,
+  parseReminderCommand,
   extractPimActions,
   executeCalendarCreate,
   executeCalendarToday,
@@ -508,6 +509,45 @@ test("reminder_create: no name given -> refuses without touching any IO", async 
   const out = await executeReminderCreate({ due: "tomorrow at 5pm" }, io);
   assert.match(out, /No reminder text was given/);
   assert.equal(called, false);
+});
+
+// parseReminderCommand — deterministic "remind me to X [when]" pre-router.
+test("parseReminderCommand: 'remind me to X in N minutes' splits name and due", () => {
+  assert.deepEqual(
+    parseReminderCommand("remind me to call the dentist in 5 minutes"),
+    { name: "call the dentist", due: "in 5 minutes" },
+  );
+});
+
+test("parseReminderCommand: 'set a reminder to X at 5pm'", () => {
+  assert.deepEqual(
+    parseReminderCommand("set a reminder to take my meds at 5pm"),
+    { name: "take my meds", due: "at 5pm" },
+  );
+});
+
+test("parseReminderCommand: when-first phrasing 'remind me in 10 minutes to stretch'", () => {
+  assert.deepEqual(
+    parseReminderCommand("remind me in 10 minutes to stretch"),
+    { name: "stretch", due: "in 10 minutes" },
+  );
+});
+
+test("parseReminderCommand: no time given → name only, empty due", () => {
+  assert.deepEqual(parseReminderCommand("remind me to buy milk"), { name: "buy milk", due: "" });
+});
+
+test("parseReminderCommand: weekday/date markers are captured as due", () => {
+  assert.deepEqual(
+    parseReminderCommand("remind me to call Bob tomorrow at 9"),
+    { name: "call Bob", due: "tomorrow at 9" },
+  );
+});
+
+test("parseReminderCommand: non-reminder text returns null (no hijack)", () => {
+  assert.equal(parseReminderCommand("what's the weather in 5 minutes"), null);
+  assert.equal(parseReminderCommand("put a meeting on my calendar at 3"), null);
+  assert.equal(parseReminderCommand(""), null);
 });
 
 test("reminder_create: happy path via helper — passes name/due through, reports success", async () => {
