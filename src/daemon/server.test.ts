@@ -2711,3 +2711,114 @@ test("GET /tunnel/qr/cloudflare: the companion_pairing license gate still runs f
   const body = await res.json() as Record<string, unknown>;
   assert.equal(body.upgradeRequired, true);
 });
+
+// ── GET /capabilities — unified tool inventory (Tools panel data source) ────
+
+interface CapabilitiesResponse {
+  groups: Array<{ kind: string; tools: Array<Record<string, unknown>> }>;
+}
+
+test("GET /capabilities requires auth like every other non-public route", async (t) => {
+  withTempHome(t);
+  const { base } = await startServer(t);
+  const res = await fetch(`${base}/capabilities`);
+  assert.equal(res.status, 401);
+});
+
+test("GET /capabilities returns exactly the four groups (native, flash, skill-tool, skill-library) with a stable shape", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/capabilities`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as CapabilitiesResponse;
+
+  assert.deepEqual(body.groups.map((g) => g.kind), ["native", "flash", "skill-tool", "skill-library"]);
+
+  const native = body.groups.find((g) => g.kind === "native")!;
+  const flash = body.groups.find((g) => g.kind === "flash")!;
+  assert.ok(Array.isArray(native.tools) && native.tools.length > 0);
+  assert.ok(Array.isArray(flash.tools) && flash.tools.length === 5, "the five flash-only tools (incl. learn_skill)");
+
+  // Shape stability on one native entry.
+  const brainSearch = native.tools.find((t) => t.name === "brain_search") as Record<string, unknown>;
+  assert.ok(brainSearch);
+  assert.equal(typeof brainSearch.description, "string");
+  assert.equal(typeof brainSearch.enabled, "boolean");
+  assert.ok(brainSearch.schema);
+  assert.equal(brainSearch.sourceRef, "src/lib/orchestrator/lane-tools.ts");
+
+  // Shape stability on one flash entry.
+  const personaUpdate = flash.tools.find((t) => t.name === "persona_update") as Record<string, unknown>;
+  assert.ok(personaUpdate);
+  assert.equal(personaUpdate.sourceRef, "src/lib/flash/flash-mcp.ts");
+  assert.ok(personaUpdate.schema);
+});
+
+test("GET /capabilities: native includes brain_read + brain_search, both marked enabled (brain capability is always-on)", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/capabilities`, { headers });
+  const body = await res.json() as CapabilitiesResponse;
+  const native = body.groups.find((g) => g.kind === "native")!;
+  const names = native.tools.map((t) => t.name);
+  assert.ok(names.includes("brain_read"));
+  assert.ok(names.includes("brain_search"));
+  const brainRead = native.tools.find((t) => t.name === "brain_read") as Record<string, unknown>;
+  const brainSearch = native.tools.find((t) => t.name === "brain_search") as Record<string, unknown>;
+  assert.equal(brainRead.enabled, true);
+  assert.equal(brainSearch.enabled, true);
+  assert.equal(brainRead.capability, "brain");
+  assert.equal(brainSearch.capability, "brain");
+});
+
+test("GET /capabilities: a skill tagged tool:true appears in skill-tool with the Feature-1 skill_<name> naming, and its origin file in skill-library", async (t) => {
+  withTempHome(t);
+  const { mkdirSync: mkdir, writeFileSync: write } = await import("node:fs");
+  const brainRoot = join(process.env.HOME!, "brain");
+  mkdir(join(brainRoot, "skills"), { recursive: true });
+  mkdir(join(process.env.HOME!, ".hivematrix"), { recursive: true });
+  write(join(process.env.HOME!, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: brainRoot } }));
+  write(
+    join(brainRoot, "skills", "count-downloads.md"),
+    "---\nname: Count Downloads\ndescription: count files in Downloads\ntool: true\n---\n\nCount the files in {{dir}}.\n",
+  );
+  write(
+    join(brainRoot, "skills", "long-tail-recipe.md"),
+    "---\nname: Long Tail Recipe\ndescription: never promoted\n---\n\nDo the rare thing.\n",
+  );
+
+  const { base, headers } = await startServer(t);
+  const res = await fetch(`${base}/capabilities`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as CapabilitiesResponse;
+
+  const skillTool = body.groups.find((g) => g.kind === "skill-tool")!;
+  const curated = skillTool.tools.find((t) => t.skillName === "Count Downloads") as Record<string, unknown>;
+  assert.ok(curated, "the tool:true-tagged skill must be curated as a tool");
+  assert.equal(curated.name, "skill_count_downloads");
+  assert.ok(curated.schema);
+  assert.equal(typeof curated.sourceRef, "string");
+  assert.match(curated.sourceRef as string, /count-downloads\.md$/);
+
+  const skillLibrary = body.groups.find((g) => g.kind === "skill-library")!;
+  const libNames = skillLibrary.tools.map((t) => t.name);
+  assert.ok(libNames.includes("Count Downloads"));
+  assert.ok(libNames.includes("Long Tail Recipe"), "the uncurated long tail is still listed in skill-library");
+  const libEntry = skillLibrary.tools.find((t) => t.name === "Count Downloads") as Record<string, unknown>;
+  assert.equal(libEntry.enabled, false, "skill-library entries are never independently enabled — reachable only via skill_run or a curated skill-tool");
+  assert.match(libEntry.file as string, /count-downloads\.md$/);
+});
+
+test("GET /capabilities: an empty skill library still returns skill-tool and skill-library as empty arrays, never throwing", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const res = await fetch(`${base}/capabilities`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as CapabilitiesResponse;
+  const skillTool = body.groups.find((g) => g.kind === "skill-tool")!;
+  const skillLibrary = body.groups.find((g) => g.kind === "skill-library")!;
+  assert.deepEqual(skillTool.tools, []);
+  assert.deepEqual(skillLibrary.tools, []);
+});

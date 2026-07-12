@@ -40,7 +40,7 @@ import { backendConfigured } from "@/lib/models/backends";
 import type { LaneToolContext } from "@/lib/orchestrator/lane-tools";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { recordRun } from "@/lib/observability/store";
-import { prepareFlashMcp } from "./flash-mcp";
+import { prepareFlashMcp, loadCuratedSkillTools } from "./flash-mcp";
 import { clearFlashCliSessionId, getFlashCliSessionId, setFlashCliSessionId } from "./store";
 import type { FlashEmitter, FlashMessage } from "./types";
 
@@ -533,10 +533,16 @@ export async function runFlashAgentLoop(
     requestedBy: `flash:${sessionId}`,
   };
 
+  // Curated skills-as-tools: fetched once per turn (async skill-library read)
+  // and handed to prepareFlashMcp, which stays synchronous. A failure here
+  // (e.g. brain root unreachable) must never break the turn — fall back to
+  // no curated tools; skill_run still reaches every skill.
+  const curatedSkillTools = await loadCuratedSkillTools().catch(() => []);
+
   const { configPath, toolNames } = prepareFlashMcp(
     process.env.HIVEMATRIX_PORT ?? "3747",
     process.execPath,
-    { allowedTools: options.allowedTools, brainRoot, ctx, sessionId, channel: options.channel },
+    { allowedTools: options.allowedTools, brainRoot, ctx, sessionId, channel: options.channel, curatedSkillTools },
   );
 
   const binary = options.__claudeBinary ?? resolveClaudeBinary();

@@ -897,6 +897,31 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   /* ── Brain / Memory Review pane ─────────────────────────────────────── */
   .brain-pane { flex:1 1 auto; min-height:0; height:calc(100vh - 68px); max-height:calc(100vh - 68px);
     width:100%; display:flex; flex-direction:column; padding:18px 18px 14px; gap:12px; overflow:hidden; }
+  .tools-pane { flex:1 1 auto; min-height:0; overflow-y:auto; padding:4px 4px 24px; }
+  .tools-group { margin:14px 0 4px; }
+  .tools-group-h { font-size:13px; font-weight:700; color:var(--text); padding:0 4px; }
+  .tools-group-h .count { font-size:11px; color:var(--muted); font-weight:600; margin-left:4px; }
+  .tools-group-sub { font-size:11px; color:var(--muted); padding:1px 4px 6px; }
+  .tools-row { border:1px solid var(--border); border-radius:8px; background:var(--panel-2); padding:8px 11px;
+    margin:5px 0; cursor:pointer; }
+  .tools-row:hover { border-color:var(--accent); }
+  .tools-row-top { display:flex; align-items:center; gap:7px; }
+  .tools-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .tools-dot.on { background:var(--ok,#4caf50); }
+  .tools-dot.off { background:var(--muted); }
+  .tools-dot.lib { background:#6b7280; }
+  .tools-name { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; color:var(--text); font-weight:600; }
+  .tools-kind { font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);
+    border:1px solid var(--border); border-radius:4px; padding:1px 5px; }
+  .tools-caret { margin-left:auto; color:var(--muted); font-size:11px; }
+  .tools-desc { font-size:11.5px; color:var(--muted); margin-top:3px; line-height:1.4;
+    overflow:hidden; text-overflow:ellipsis; }
+  .tools-detail { margin-top:7px; padding-top:7px; border-top:1px solid var(--border); font-size:11.5px;
+    color:var(--text); display:flex; flex-direction:column; gap:3px; }
+  .tools-detail .tools-k { display:inline-block; min-width:74px; color:var(--muted); font-size:10.5px;
+    text-transform:uppercase; letter-spacing:.04em; }
+  .tools-detail code { font-family:ui-monospace,Menlo,monospace; font-size:11px; color:var(--accent);
+    word-break:break-all; }
   .brain-shell { flex:1 1 auto; min-height:0; display:grid; grid-template-columns:200px 1fr 1fr;
     border:1px solid var(--border); border-radius:10px; background:var(--panel-2); overflow:hidden; }
   .brain-col { border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0; overflow:hidden; }
@@ -1724,6 +1749,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <button class="ov-nav oc-nav" id="flashNav" onclick="showFlashPanel()">💬 Chat</button>
     <button class="ov-nav oc-nav" id="brainNav" onclick="showBrain()">🧠 Brain</button>
     <button class="ov-nav oc-nav" id="rolesNav" onclick="showRoles()">👥 Roles</button>
+    <button class="ov-nav oc-nav" id="toolsNav" onclick="showTools()">🛠️ Tools</button>
     <div class="form" id="taskForm">
       <input id="t_title" type="hidden" value="" />
       <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
@@ -1986,7 +2012,7 @@ async function toggleThemeQuick() {
 // Center overview — at-a-glance board state when no task is selected, instead of
 // leaving the widest column empty.
 function renderOverview() {
-  if (state.selected || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen || _brainState.panelOpen || _rolesState.panelOpen) return;
+  if (state.selected || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen || _brainState.panelOpen || _rolesState.panelOpen || _toolsState.panelOpen) return;
   setFlashSessionMode(false);
   const el = document.getElementById("session");
   if (!el) return;
@@ -2019,6 +2045,7 @@ function showOverview() {
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
+  _toolsState.panelOpen = false;
   setFlashSessionMode(false);
   renderBoard();
   renderSkillList();
@@ -2033,12 +2060,13 @@ function focusBoardLane(key) {
 }
 function updateOverviewNav() {
   const nav = document.getElementById("overviewNav");
-  const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !_flashState.panelOpen && !_brainState.panelOpen && !_rolesState.panelOpen;
+  const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !_flashState.panelOpen && !_brainState.panelOpen && !_rolesState.panelOpen && !_toolsState.panelOpen;
   if (nav) nav.classList.toggle("active", overviewActive);
   const newTaskNav = document.getElementById("newTaskNav");
   if (newTaskNav) newTaskNav.classList.toggle("active", _taskFormInSession);
   updateFlashNav();
   updateBrainNav();
+  updateToolsNav();
 }
 function isEditableTarget(el) {
   if (!el) return false;
@@ -2430,6 +2458,7 @@ async function selectTask(id) {
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
+  _toolsState.panelOpen = false;
   setFlashSessionMode(false);
   if (_taskFormInSession) _closeNewTaskPanel();
   // Switching tasks clears half-composed retry/reply state; staying on the same
@@ -3361,6 +3390,7 @@ function showSkillPanel(key) {
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
+  _toolsState.panelOpen = false;
   setFlashSessionMode(false);
   if (_taskFormInSession) _closeNewTaskPanel();
   renderBoard();
@@ -3376,6 +3406,7 @@ function _closeSkillPanel() {
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
+  _toolsState.panelOpen = false;
   setFlashSessionMode(false);
   renderSkillList();
   renderSkillDetail();
@@ -5531,6 +5562,7 @@ function showNewTaskPanel() {
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
+  _toolsState.panelOpen = false;
   setFlashSessionMode(false);
   _ctxTask = null;
   _taskFormInSession = true;
@@ -6582,12 +6614,14 @@ function showFlashPanel() {
   _flashState.panelOpen = true;
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
+  _toolsState.panelOpen = false;
   renderBoard();
   renderSkillList();
   renderFlashPanel();
   updateFlashNav();
   updateBrainNav();
   updateRolesNav();
+  updateToolsNav();
   hydrateFlashThread(); // pull the unified operator thread (incl. voice/task-completion posts)
 }
 
@@ -6710,12 +6744,14 @@ function showBrain() {
   _flashState.panelOpen = false;
   _brainState.panelOpen = true;
   _rolesState.panelOpen = false;
+  _toolsState.panelOpen = false;
   renderBoard();
   renderSkillList();
   renderBrainPanel();
   updateFlashNav();
   updateBrainNav();
   updateRolesNav();
+  updateToolsNav();
   loadBrainProjects();
 }
 
@@ -7228,18 +7264,143 @@ function showRoles() {
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
   _rolesState.panelOpen = true;
+  _toolsState.panelOpen = false;
   renderBoard();
   renderSkillList();
   renderRolesPanel();
   updateFlashNav();
   updateBrainNav();
   updateRolesNav();
+  updateToolsNav();
   loadRolesRoster();
 }
 
 function updateRolesNav() {
   const nav = document.getElementById('rolesNav');
   if (nav) nav.classList.toggle('active', _rolesState.panelOpen);
+}
+
+// ── Tools / Capabilities panel ─────────────────────────────────────────
+// Read-only inventory of everything the assistant can do: native lane tools,
+// flash-only tools, curated skills-as-tools, and the full skill library — each
+// with its schema and the file that backs it. Data: GET /capabilities.
+let _toolsState = { panelOpen: false, groups: null, error: false, expanded: {} };
+
+function showTools() {
+  state.selected = null;
+  state.selectedSkillOrCommand = null;
+  _skSel = '';
+  _ctxTask = null;
+  if (_taskFormInSession) _closeNewTaskPanel();
+  _flashState.panelOpen = false;
+  _brainState.panelOpen = false;
+  _rolesState.panelOpen = false;
+  _toolsState.panelOpen = true;
+  renderBoard();
+  renderSkillList();
+  renderToolsPanel();
+  updateFlashNav();
+  updateBrainNav();
+  updateRolesNav();
+  updateToolsNav();
+  loadCapabilities();
+}
+
+function updateToolsNav() {
+  const nav = document.getElementById('toolsNav');
+  if (nav) nav.classList.toggle('active', _toolsState.panelOpen);
+}
+
+async function loadCapabilities() {
+  _toolsState.error = false;
+  try {
+    const r = await api('/capabilities');
+    _toolsState.groups = (r && r.groups) || [];
+  } catch (e) {
+    _toolsState.error = true;
+    _toolsState.groups = null;
+  }
+  renderToolsPanel();
+}
+
+const TOOLS_GROUP_META = {
+  "native": { title: "Native tools", sub: "built-in lane tools the assistant calls directly" },
+  "flash": { title: "Chat tools", sub: "flash-only tools (escalate, learn a skill, deep think…)" },
+  "skill-tool": { title: "Skills as tools", sub: "curated learned skills promoted to first-class tools" },
+  "skill-library": { title: "Skill library", sub: "the full learned-skill catalog (run via skill_run)" }
+};
+
+function toolsSchemaSummary(schema) {
+  if (!schema || typeof schema !== 'object') return '';
+  const props = schema.properties || {};
+  const keys = Object.keys(props);
+  if (!keys.length) return 'no parameters';
+  const req = new Set(schema.required || []);
+  return keys.map(function (k) { return k + (req.has(k) ? '*' : ''); }).join(', ');
+}
+
+function renderToolsPanel() {
+  if (!_toolsState.panelOpen) return;
+  const session = document.getElementById('session');
+  if (!session) return;
+  setFlashSessionMode(true);
+  if (_toolsState.error) {
+    session.innerHTML = '<div class="oc-center-pane"><div class="oc-panel-head"><div><div class="oc-panel-title"><span>🛠️ Tools</span></div><div class="oc-panel-sub">Capabilities inventory</div></div><span class="oc-panel-head-spacer"></span><button class="linklike ov-back" onclick="showOverview()">← Overview</button></div><div class="brain-pane" style="padding:18px"><div class="muted">Could not load capabilities. <a href="#" onclick="event.preventDefault();loadCapabilities()">Retry</a></div></div></div>';
+    return;
+  }
+  const groups = _toolsState.groups;
+  let body;
+  if (!groups) {
+    body = '<div class="muted" style="padding:18px">Loading capabilities…</div>';
+  } else {
+    let total = 0;
+    groups.forEach(function (g) { total += (g.tools || []).length; });
+    body = '<div class="muted" style="padding:6px 18px;font-size:12px">' + total + ' capabilities across ' + groups.length + ' groups</div>';
+    for (const g of groups) {
+      const meta = TOOLS_GROUP_META[g.kind] || { title: g.kind, sub: '' };
+      const tools = g.tools || [];
+      body += '<div class="tools-group"><div class="tools-group-h">' + esc(meta.title)
+        + ' <span class="count">' + tools.length + '</span></div>'
+        + '<div class="tools-group-sub">' + esc(meta.sub) + '</div>';
+      for (const t of tools) {
+        const key = g.kind + ':' + t.name;
+        const open = !!_toolsState.expanded[key];
+        const enabled = g.kind === 'native' ? (t.enabled !== false) : (g.kind === 'skill-library' ? false : true);
+        const dot = g.kind === 'skill-library'
+          ? '<span class="tools-dot lib" title="reachable via skill_run"></span>'
+          : '<span class="tools-dot ' + (enabled ? 'on' : 'off') + '" title="' + (enabled ? 'available' : 'gated off') + '"></span>';
+        const kindChip = '<span class="tools-kind">' + esc(g.kind === 'skill-tool' ? 'skill→tool' : g.kind === 'skill-library' ? 'skill' : g.kind) + '</span>';
+        const file = t.sourceRef || t.file || '';
+        body += '<div class="tools-row" onclick="toggleToolExpand(\'' + attrEnc(key) + '\')">'
+          + '<div class="tools-row-top">' + dot + '<span class="tools-name">' + esc(t.name) + '</span>' + kindChip
+          + '<span class="tools-caret">' + (open ? '▾' : '▸') + '</span></div>'
+          + '<div class="tools-desc">' + esc(t.description || '') + '</div>';
+        if (open) {
+          body += '<div class="tools-detail" onclick="event.stopPropagation()">';
+          if (t.skillName) body += '<div><span class="tools-k">skill</span> ' + esc(t.skillName) + '</div>';
+          const schemaStr = toolsSchemaSummary(t.schema) || (t.params && t.params.length ? t.params.join(', ') : '');
+          if (schemaStr) body += '<div><span class="tools-k">params</span> ' + esc(schemaStr) + '</div>';
+          if (t.capability) body += '<div><span class="tools-k">capability</span> ' + esc(t.capability) + '</div>';
+          if (file) body += '<div><span class="tools-k">file</span> <code>' + esc(file) + '</code></div>';
+          if (t.claudeMirror) body += '<div><span class="tools-k">claude</span> <code>' + esc(t.claudeMirror) + '</code></div>';
+          body += '</div>';
+        }
+        body += '</div>';
+      }
+      body += '</div>';
+    }
+  }
+  session.innerHTML = '<div class="oc-center-pane">'
+    + '<div class="oc-panel-head"><div><div class="oc-panel-title"><span>🛠️ Tools</span></div>'
+    + '<div class="oc-panel-sub">Everything the assistant can do — and what backs it</div></div>'
+    + '<span class="oc-panel-head-spacer"></span>'
+    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></div>'
+    + '<div class="tools-pane">' + body + '</div></div>';
+}
+
+function toggleToolExpand(key) {
+  _toolsState.expanded[key] = !_toolsState.expanded[key];
+  renderToolsPanel();
 }
 
 async function loadRolesRoster() {

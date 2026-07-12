@@ -18,9 +18,33 @@ import {
   resolveEscalationTarget,
   selfImproveRepoPath,
   escalationIsVoice,
+  selectCuratedSkillEntries,
+  sanitizeSkillToolName,
+  buildCuratedSkillToolDefs,
+  reservedFlashToolNames,
+  DEFAULT_CURATED_TOP_N,
+  DEFAULT_CURATED_CAP,
+  type CuratedSkillToolDef,
 } from "./flash-mcp";
 import type { LaneToolContext } from "@/lib/orchestrator/lane-tools";
 import type { AcquireResult } from "@/lib/skills/acquire";
+import type { SkillIndexEntry } from "@/lib/skills/contracts";
+
+function entry(over: Partial<SkillIndexEntry> = {}): SkillIndexEntry {
+  return {
+    name: over.name ?? "some-skill",
+    description: over.description ?? "does a thing",
+    tags: over.tags ?? [],
+    useCount: over.useCount ?? 0,
+    compat: over.compat ?? ["all"],
+    hasInput: over.hasInput ?? false,
+    params: over.params,
+    trusted: over.trusted ?? true,
+    kind: over.kind ?? "instruction",
+    roles: over.roles ?? [],
+    tool: over.tool,
+  };
+}
 
 test("flash-only tool names match the exported definitions 1:1", () => {
   assert.deepEqual(
@@ -469,4 +493,255 @@ test("selfImproveRepoPath: falls back to process.cwd() when selfImprove.repoPath
   const result = selfImproveRepoPath();
   assert.equal(typeof result, "string");
   assert.ok(result.length > 0);
+});
+
+// ------------------------------------------------------------------
+// Curated skills-as-tools — selection, name sanitization, tool synthesis,
+// and dispatch (skill_<name> -> skill_run via /bee/skill_run). See the file
+// header comment above buildCuratedSkillToolDefs for the design rationale.
+// ------------------------------------------------------------------
+
+test("DEFAULT_CURATED_TOP_N / DEFAULT_CURATED_CAP are the documented defaults (8 / 12)", () => {
+  assert.equal(DEFAULT_CURATED_TOP_N, 8);
+  assert.equal(DEFAULT_CURATED_CAP, 12);
+});
+
+test("selectCuratedSkillEntries: tool:true-tagged skills are always selected regardless of useCount", () => {
+  const tagged = entry({ name: "Tagged Low Use", tool: true, useCount: 0 });
+  const untaggedHighUse = entry({ name: "Untagged High Use", useCount: 50 });
+  const { selected } = selectCuratedSkillEntries([tagged, untaggedHighUse]);
+  assert.ok(selected.some((e) => e.name === "Tagged Low Use"));
+  assert.ok(selected.some((e) => e.name === "Untagged High Use"));
+});
+
+test("selectCuratedSkillEntries: fills the remaining slots with the top-N non-tagged skills by useCount", () => {
+  const entries = [
+    entry({ name: "a", useCount: 10 }),
+    entry({ name: "b", useCount: 5 }),
+    entry({ name: "c", useCount: 1 }),
+    entry({ name: "d", useCount: 0 }),
+  ];
+  const { selected } = selectCuratedSkillEntries(entries, { topN: 2, cap: 12 });
+  assert.deepEqual(selected.map((e) => e.name), ["a", "b"]);
+});
+
+test("selectCuratedSkillEntries: ties in useCount break alphabetically for determinism", () => {
+  const entries = [entry({ name: "zebra", useCount: 3 }), entry({ name: "apple", useCount: 3 })];
+  const { selected } = selectCuratedSkillEntries(entries, { topN: 2 });
+  assert.deepEqual(selected.map((e) => e.name), ["apple", "zebra"]);
+});
+
+test("selectCuratedSkillEntries: a tagged skill is never duplicated even if it would also rank in the top-N by usage", () => {
+  const tagged = entry({ name: "both", tool: true, useCount: 999 });
+  const { selected } = selectCuratedSkillEntries([tagged], { topN: 8 });
+  assert.equal(selected.filter((e) => e.name === "both").length, 1);
+});
+
+test("selectCuratedSkillEntries: hard-caps the combined set, reporting the overflow as skipped", () => {
+  const tagged = [entry({ name: "t1", tool: true }), entry({ name: "t2", tool: true }), entry({ name: "t3", tool: true })];
+  const byUsage = [entry({ name: "u1", useCount: 9 }), entry({ name: "u2", useCount: 8 })];
+  const { selected, skipped } = selectCuratedSkillEntries([...tagged, ...byUsage], { topN: 8, cap: 4 });
+  assert.equal(selected.length, 4);
+  assert.equal(skipped.length, 1);
+  // Tagged skills win a slot over usage-ranked ones when the cap bites.
+  assert.deepEqual(selected.map((e) => e.name), ["t1", "t2", "t3", "u1"]);
+  assert.deepEqual(skipped.map((e) => e.name), ["u2"]);
+});
+
+test("sanitizeSkillToolName: lowercases, collapses non-alnum runs to one underscore, trims edges", () => {
+  assert.equal(sanitizeSkillToolName("Triage Inbox"), "skill_triage_inbox");
+  assert.equal(sanitizeSkillToolName("  Weird!!  Name--v2  "), "skill_weird_name_v2");
+  assert.equal(sanitizeSkillToolName("already_snake_case"), "skill_already_snake_case");
+});
+
+test("sanitizeSkillToolName: an empty/symbols-only name still yields a valid tool name", () => {
+  assert.equal(sanitizeSkillToolName("!!!"), "skill_skill");
+});
+
+test("buildCuratedSkillToolDefs: params become required string properties; a hasInput slot adds an optional input property", () => {
+  const e = entry({ name: "Triage Inbox", description: "sort mail", params: ["sender", "priority"], hasInput: true });
+  const { defs, skippedCollisions } = buildCuratedSkillToolDefs([e], new Set());
+  assert.equal(skippedCollisions.length, 0);
+  assert.equal(defs.length, 1);
+  const def = defs[0];
+  assert.equal(def.toolName, "skill_triage_inbox");
+  assert.equal(def.skillName, "Triage Inbox");
+  assert.equal(def.description, "sort mail");
+  const schema = def.inputSchema as { properties: Record<string, { type: string }>; required: string[] };
+  assert.ok(schema.properties.sender);
+  assert.ok(schema.properties.priority);
+  assert.ok(schema.properties.input);
+  assert.deepEqual(schema.required.slice().sort(), ["priority", "sender"]);
+  assert.ok(!schema.required.includes("input"), "input must stay optional");
+});
+
+test("buildCuratedSkillToolDefs: no params/no input yields an empty-but-valid schema", () => {
+  const e = entry({ name: "Simple Ping" });
+  const { defs } = buildCuratedSkillToolDefs([e], new Set());
+  const schema = defs[0].inputSchema as { properties: Record<string, unknown>; required: string[] };
+  assert.deepEqual(schema.properties, {});
+  assert.deepEqual(schema.required, []);
+});
+
+test("buildCuratedSkillToolDefs: a sanitized name colliding with a reserved (native) tool name is skipped, not overwritten", () => {
+  const e = entry({ name: "Run" }); // sanitizes to "skill_run" — collides with the native lane tool
+  const { defs, skippedCollisions } = buildCuratedSkillToolDefs([e], new Set(["skill_run"]));
+  assert.equal(defs.length, 0);
+  assert.deepEqual(skippedCollisions, ["Run"]);
+});
+
+test("buildCuratedSkillToolDefs: two skills that sanitize to the same tool name — the second is skipped as a collision", () => {
+  const e1 = entry({ name: "My Skill" });
+  const e2 = entry({ name: "my_skill" }); // same sanitized name
+  const { defs, skippedCollisions } = buildCuratedSkillToolDefs([e1, e2], new Set());
+  assert.equal(defs.length, 1);
+  assert.deepEqual(skippedCollisions, ["my_skill"]);
+});
+
+test("reservedFlashToolNames: includes native lane tools (brain_search, skill_run) and all four flash-only tools", () => {
+  const reserved = reservedFlashToolNames();
+  assert.ok(reserved.has("brain_search"));
+  assert.ok(reserved.has("skill_run"));
+  assert.ok(reserved.has("skill_used"));
+  assert.ok(reserved.has("persona_update"));
+  assert.ok(reserved.has("escalate_to_task"));
+  assert.ok(reserved.has("learn_skill"));
+});
+
+test("prepareFlashMcp: curated skill tools are added to the offered catalog, namespaced like any other tool", () => {
+  const ctx: LaneToolContext = { projectPath: "/tmp", project: "hivematrix", requestedBy: "flash:s1" };
+  const curatedSkillTools: CuratedSkillToolDef[] = [
+    { toolName: "skill_count_files", skillName: "Count Files", description: "count files", inputSchema: { type: "object", properties: {}, required: [] } },
+  ];
+  const { toolNames } = prepareFlashMcp("3747", process.execPath, {
+    brainRoot: null, ctx, sessionId: "s1", curatedSkillTools,
+  });
+  assert.ok(toolNames.includes("mcp__flash__skill_count_files"));
+  assert.ok(toolNames.includes("mcp__flash__skill_run"), "the generic fallback stays available alongside curated tools");
+});
+
+test("prepareFlashMcp: an allowedTools filter can exclude curated skill tools just like any other tool name", () => {
+  const ctx: LaneToolContext = { projectPath: "/tmp", project: "hivematrix", requestedBy: "flash:s1" };
+  const curatedSkillTools: CuratedSkillToolDef[] = [
+    { toolName: "skill_count_files", skillName: "Count Files", description: "count files", inputSchema: { type: "object", properties: {}, required: [] } },
+  ];
+  const { toolNames } = prepareFlashMcp("3747", process.execPath, {
+    allowedTools: (name) => name === "brain_search",
+    brainRoot: null, ctx, sessionId: "s1", curatedSkillTools,
+  });
+  assert.deepEqual(toolNames, ["mcp__flash__brain_search"]);
+});
+
+test("prepareFlashMcp: writes a toolName -> skillName map file the generated server reads for dispatch translation", () => {
+  const ctx: LaneToolContext = { projectPath: "/tmp", project: "hivematrix", requestedBy: "flash:s1" };
+  const curatedSkillTools: CuratedSkillToolDef[] = [
+    { toolName: "skill_count_files", skillName: "Count Files", description: "count files", inputSchema: { type: "object", properties: {}, required: [] } },
+  ];
+  const { configPath } = prepareFlashMcp("3747", process.execPath, { brainRoot: null, ctx, sessionId: "s1", curatedSkillTools });
+  const config = JSON.parse(readFileSync(configPath, "utf-8"));
+  const mapFile = config.mcpServers[FLASH_MCP_SERVER_NAME].env.HIVE_FLASH_SKILL_TOOL_MAP_FILE;
+  const map = JSON.parse(readFileSync(mapFile, "utf-8"));
+  assert.deepEqual(map, { skill_count_files: "Count Files" });
+});
+
+test("prepareFlashMcp: with no curated skill tools, the skill-tool map file is written empty (never throws)", () => {
+  const ctx: LaneToolContext = { projectPath: "/tmp", project: "hivematrix", requestedBy: "flash:s1" };
+  const { configPath } = prepareFlashMcp("3747", process.execPath, { brainRoot: null, ctx, sessionId: "s1" });
+  const config = JSON.parse(readFileSync(configPath, "utf-8"));
+  const mapFile = config.mcpServers[FLASH_MCP_SERVER_NAME].env.HIVE_FLASH_SKILL_TOOL_MAP_FILE;
+  const map = JSON.parse(readFileSync(mapFile, "utf-8"));
+  assert.deepEqual(map, {});
+});
+
+test("generated server: skill_<name> tool calls are translated to /bee/skill_run via SKILL_TOOL_MAP, not called by their raw name", () => {
+  assert.match(FLASH_MCP_SERVER_JS, /SKILL_TOOL_MAP/);
+  assert.match(FLASH_MCP_SERVER_JS, /callSkillTool/);
+  assert.match(FLASH_MCP_SERVER_JS, /\/bee\/skill_run/);
+});
+
+test("flash MCP server smoke test: a curated skill_<name> tool call is gated exactly like a native tool, and dispatches through /bee/skill_run", async () => {
+  const ctx: LaneToolContext = { projectPath: "/tmp", project: "hivematrix", requestedBy: "flash:smoke2" };
+  const curatedSkillTools: CuratedSkillToolDef[] = [
+    { toolName: "skill_count_files", skillName: "Count Files", description: "count files in a dir", inputSchema: { type: "object", properties: { dir: { type: "string" } }, required: ["dir"] } },
+  ];
+  const { configPath } = prepareFlashMcp("3747", process.execPath, {
+    allowedTools: (name) => name === "skill_count_files", // ONLY the curated tool, not the raw skill_run
+    brainRoot: null,
+    ctx,
+    sessionId: "smoke-session-2",
+    curatedSkillTools,
+  });
+  const serverPath = ensureFlashMcpServer();
+  const config = JSON.parse(readFileSync(configPath, "utf-8"));
+  const env: Record<string, string> = config.mcpServers[FLASH_MCP_SERVER_NAME].env;
+
+  const responses = await runServerConversation(serverPath, env, [
+    { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } },
+    { jsonrpc: "2.0", id: 2, method: "tools/list" },
+    { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "skill_count_files", arguments: { dir: "/tmp" } } },
+    { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "skill_run", arguments: { name: "Count Files" } } },
+  ]);
+
+  // tools/list carries the synthesized curated tool.
+  const list = responses.find((r) => r.id === 2)!;
+  const toolNames = (list.result as { tools: Array<{ name: string }> }).tools.map((t) => t.name);
+  assert.ok(toolNames.includes("skill_count_files"));
+
+  // The curated tool is allowed (gate lets it through to dispatch attempt —
+  // the daemon isn't running in this test, so it fails at the network layer,
+  // not at the permission gate).
+  const curatedCall = responses.find((r) => r.id === 3)!;
+  const curatedResult = curatedCall.result as { content: Array<{ text: string }>; isError?: boolean };
+  assert.equal(curatedResult.isError, undefined);
+  assert.doesNotMatch(curatedResult.content[0].text, /is not permitted in this pass/);
+
+  // skill_run itself was NOT in the allow-list this pass — proving the
+  // curated tool is a genuinely separate, independently-gated name, not an
+  // alias that silently also unlocks the raw fallback.
+  const rawCall = responses.find((r) => r.id === 4)!;
+  const rawResult = rawCall.result as { content: Array<{ text: string }>; isError?: boolean };
+  assert.equal(rawResult.isError, true);
+  assert.match(rawResult.content[0].text, /is not permitted in this pass/);
+});
+
+// ------------------------------------------------------------------
+// loadCuratedSkillTools — end to end against a real (temp) skill library.
+// HOME is swapped only for the duration of this one test and restored in a
+// finally, since every other test in this file relies on the real homedir()
+// (prepareFlashMcp/ensureFlashMcpServer write under ~/.hivematrix/mcp).
+// ------------------------------------------------------------------
+
+test("loadCuratedSkillTools: tags a skill as curated via frontmatter tool:true, promotes by usage, and leaves the long tail for skill_run", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync: writeFileSyncNode, rmSync } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+
+  const TMP = mkdtempSync(joinPath(tmpdir(), "hm-flash-mcp-curated-"));
+  const HOME = joinPath(TMP, "home");
+  const BRAIN = joinPath(TMP, "brain");
+  mkdirSync(joinPath(HOME, ".hivematrix"), { recursive: true });
+  writeFileSyncNode(joinPath(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: BRAIN } }));
+  const origHome = process.env.HOME;
+  process.env.HOME = HOME;
+
+  try {
+    const { upsertSkill } = await import("@/lib/skills/store");
+    await upsertSkill({ name: "Opted In Skill", description: "explicitly curated", body: "do {{thing}}", source: "test", tool: true });
+    await upsertSkill({ name: "Long Tail Skill", description: "never used, not tagged", body: "do the rare thing", source: "test" });
+
+    const { loadCuratedSkillTools } = await import("./flash-mcp");
+    const defs = await loadCuratedSkillTools();
+
+    const curatedNames = defs.map((d) => d.skillName);
+    assert.ok(curatedNames.includes("Opted In Skill"), "tool:true skill must be curated");
+    assert.ok(!curatedNames.includes("Long Tail Skill") || curatedNames.length >= 2, "long-tail skill may ride along under the small-library top-N, but is never REQUIRED to be curated");
+
+    const opted = defs.find((d) => d.skillName === "Opted In Skill")!;
+    assert.equal(opted.toolName, "skill_opted_in_skill");
+    const schema = opted.inputSchema as { required: string[] };
+    assert.ok(schema.required.includes("thing"));
+  } finally {
+    process.env.HOME = origHome;
+    rmSync(TMP, { recursive: true, force: true });
+  }
 });

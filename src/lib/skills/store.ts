@@ -56,7 +56,7 @@ export async function listSkills(): Promise<SkillIndexEntry[]> {
       useCount: skill.useCount, compat: skill.compat, hasInput: skillHasInput(skill.body),
       params: extractSkillParams(skill.body),
       trusted: skill.trusted, kind: skill.kind, scope: skill.scope, signed: !!skill.signature,
-      scan: skill.scanVerdict, roles: skill.roles,
+      scan: skill.scanVerdict, roles: skill.roles, tool: skill.tool, source: skill.source,
     });
   }
   // Most-used first (proven skills surface), then alphabetical.
@@ -115,6 +115,8 @@ export interface UpsertSkillInput {
   scanVerdict?: ScanVerdict;
   /** Agent profile ids to attribute this skill to (empty/omitted = every role). */
   roles?: string[];
+  /** Opt in to being curated as a first-class Flash MCP tool (skill_<name>). */
+  tool?: boolean;
   now?: string;
 }
 
@@ -153,6 +155,7 @@ export async function upsertSkill(input: UpsertSkillInput): Promise<UpsertSkillR
       signature: input.signature ?? existing.signature,
       scanVerdict: input.scanVerdict ?? existing.scanVerdict,
       roles: input.roles ?? existing.roles,
+      tool: input.tool ?? existing.tool,
     };
     result = { created: false, refined: bodyChanged, path };
   } else {
@@ -178,6 +181,7 @@ export async function upsertSkill(input: UpsertSkillInput): Promise<UpsertSkillR
       signature: input.signature,
       scanVerdict: input.scanVerdict,
       roles: input.roles ?? [],
+      tool: input.tool ?? false,
     };
     result = { created: true, refined: false, path };
   }

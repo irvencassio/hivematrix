@@ -22,6 +22,7 @@
  *   POST /flash/turns/:id/feedback   — rate a Flash turn (good|bad)
  *   GET  /onboarding/birth-ritual    — persona state (new|existing + name/emoji)
  *   POST /onboarding/birth-ritual    — run birth ritual as SSE stream
+ *   GET  /capabilities               — unified tool inventory (native/flash/skill-tool/skill-library)
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
@@ -415,6 +416,75 @@ export function createDaemonServer() {
           embeddings: getEmbeddingsConfig(),
           embeddingModelChoices: embeddingModelChoices(),
           telemetryEnabled: getTelemetryConfig().enabled,
+        });
+        return;
+      }
+
+      // GET /capabilities — unified, read-only capability inventory for the
+      // Tools panel: native lane tools (lane-tools.ts), the four Flash-only
+      // tools (flash-mcp.ts), the curated skills-as-tools subset the model
+      // sees directly (flash-mcp.ts's loadCuratedSkillTools — same selection
+      // Flash's MCP catalog uses this turn), and the full skill library (the
+      // long tail only reachable via the generic skill_run tool). Pure read;
+      // no side effects. Auth-gated like every other non-public route (the
+      // global token check above already covers it).
+      if (req.method === "GET" && urlPath === "/capabilities") {
+        const { LANE_TOOL_DEFINITIONS, availableLaneTools, laneToolCapabilityId } = await import("@/lib/orchestrator/lane-tools");
+        const { FLASH_ONLY_TOOL_DEFS, loadCuratedSkillTools } = await import("@/lib/flash/flash-mcp");
+        const { listSkills, skillsDir } = await import("@/lib/skills/store");
+        const { skillFilename, skillSlug } = await import("@/lib/skills/contracts");
+
+        const laneEnabledNames = new Set(availableLaneTools(getConnectivityPolicy()).map((t) => t.function.name));
+        const dir = skillsDir();
+        const skillFilePath = (skillName: string): string | null => (dir ? join(dir, skillFilename(skillName)) : null);
+
+        const native = LANE_TOOL_DEFINITIONS.map((t) => ({
+          name: t.function.name,
+          description: t.function.description,
+          capability: laneToolCapabilityId(t.function.name) ?? null,
+          enabled: laneEnabledNames.has(t.function.name),
+          schema: t.function.parameters,
+          sourceRef: "src/lib/orchestrator/lane-tools.ts",
+        }));
+
+        const flash = FLASH_ONLY_TOOL_DEFS.map((t) => ({
+          name: t.function.name,
+          description: t.function.description,
+          schema: t.function.parameters,
+          sourceRef: "src/lib/flash/flash-mcp.ts",
+        }));
+
+        const curated = await loadCuratedSkillTools();
+        const skillTool = curated.map((c) => ({
+          name: c.toolName,
+          description: c.description,
+          skillName: c.skillName,
+          schema: c.inputSchema,
+          sourceRef: skillFilePath(c.skillName),
+        }));
+
+        const allSkills = await listSkills();
+        const skillLibrary = allSkills.map((s) => ({
+          name: s.name,
+          description: s.description,
+          kind: s.kind,
+          scope: s.scope ?? null,
+          source: s.source ?? null,
+          params: s.params ?? [],
+          enabled: false,
+          file: skillFilePath(s.name),
+          // Mirrored copy the Claude Code CLI itself reads (fanout.ts), noted
+          // for reference — not authoritative; the file above is the source of truth.
+          claudeMirror: join(homedir(), ".claude", "skills", skillSlug(s.name), "SKILL.md"),
+        }));
+
+        json(res, 200, {
+          groups: [
+            { kind: "native", tools: native },
+            { kind: "flash", tools: flash },
+            { kind: "skill-tool", tools: skillTool },
+            { kind: "skill-library", tools: skillLibrary },
+          ],
         });
         return;
       }

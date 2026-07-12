@@ -324,6 +324,13 @@ export function isLaneTool(name: string): boolean {
   return resolveLaneToolName(name) in LANE_TOOL_CAPABILITY;
 }
 
+/** The connectivity capability that gates a lane tool, or undefined if unknown.
+ *  Exposed read-only for callers (e.g. the /capabilities endpoint) that need
+ *  to report a tool's gating capability without duplicating the map. */
+export function laneToolCapabilityId(name: string): CapabilityId | undefined {
+  return LANE_TOOL_CAPABILITY[resolveLaneToolName(name)];
+}
+
 /**
  * The bee tools that are currently available given the connectivity policy.
  * Only available lanes are advertised to the model so it never reaches for a

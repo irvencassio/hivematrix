@@ -87,6 +87,13 @@ export interface Skill {
    * usage gate; it never restricts what an agent may run.
    */
   roles: string[];
+  /**
+   * Opt-in: curate this skill as a first-class MCP tool (Flash's
+   * skill_<name> tools — see flash-mcp.ts's buildCuratedSkillToolDefs)
+   * instead of relying solely on the top-N-by-uses heuristic. Defaults to
+   * false/absent — most skills stay reachable only via skill_run.
+   */
+  tool?: boolean;
 }
 
 /** One line per skill for an index/listing (cheap — frontmatter only). */
@@ -108,6 +115,10 @@ export interface SkillIndexEntry {
   scan?: ScanVerdict;
   /** Agent profile ids this skill is attributed to (empty = every role). */
   roles: string[];
+  /** Opt-in curated-tool tag (frontmatter `tool: true`) — see Skill.tool. */
+  tool?: boolean;
+  /** Provenance string (e.g. "manual", "directive:run9", "import:<url>", "acquire:<goal>"). */
+  source?: string;
 }
 
 /** A skill is harness-agnostic if compat is empty or contains "all". */
@@ -208,6 +219,7 @@ export function renderSkillFile(skill: Skill): string {
     ...(skill.signature ? [`signature: ${skill.signature}`] : []),
     ...(skill.scanVerdict ? [`scanVerdict: ${skill.scanVerdict}`] : []),
     ...(skill.roles.length ? [`roles: ${fmList(skill.roles)}`] : []),
+    ...(skill.tool ? [`tool: true`] : []),
     "---",
   ].join("\n");
   return `${fm}\n\n${skill.body.trim()}\n`;
@@ -249,6 +261,7 @@ export function parseSkillFile(content: string): Skill | null {
     signature: fm.signature || undefined,
     scanVerdict: coerceVerdict(fm.scanVerdict),
     roles: parseRoles(fm.roles),
+    tool: fm.tool === "true",
   };
 }
 

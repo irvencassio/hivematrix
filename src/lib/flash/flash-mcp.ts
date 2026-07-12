@@ -34,10 +34,11 @@ import { homedir } from "os";
 import { join } from "path";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { loadHiveConfig } from "@/lib/central/config";
-import { availableLaneTools, type LaneToolContext } from "@/lib/orchestrator/lane-tools";
+import { availableLaneTools, LANE_TOOL_DEFINITIONS, type LaneToolContext } from "@/lib/orchestrator/lane-tools";
 import type { ChatTool } from "@/lib/orchestrator/tool-bridge";
 import { broadcastEvent } from "@/lib/ws/broadcaster";
 import type { AcquireResult } from "@/lib/skills/acquire";
+import type { SkillIndexEntry } from "@/lib/skills/contracts";
 
 /** MCP server name → Claude namespaces its tools as `mcp__flash__<tool>`. */
 export const FLASH_MCP_SERVER_NAME = "flash";
@@ -500,6 +501,173 @@ export async function dispatchFlashOnlyTool(
 }
 
 // ------------------------------------------------------------------
+// Curated skills-as-tools (Feature: evolve skills into first-class MCP
+// tools). Today the model only sees skills via the text index
+// (flash/context.ts's formatSkillIndex) + the one generic `skill_run` tool.
+// A CURATED subset — skills that opt in via frontmatter `tool: true`, plus
+// the top-N most-used skills — gets synthesized into its own named MCP tool
+// (`skill_<name>`) so the model can select it directly like any native tool,
+// instead of having to first read the text index and then call skill_run
+// with the right `name` string. Every other skill (the long tail) stays
+// reachable only through skill_run — this is deliberately NOT a replacement
+// for skill_run, just a better front door for the skills worth promoting.
+// ------------------------------------------------------------------
+
+/** Default number of NON-tagged skills promoted by usage (most-used first). */
+export const DEFAULT_CURATED_TOP_N = 8;
+/** Hard cap on the total number of curated skill tools offered — keeps the
+ *  model's tool list from bloating no matter how many skills opt in. */
+export const DEFAULT_CURATED_CAP = 12;
+
+export interface CuratedSkillSelectionOptions {
+  /** How many additional skills to promote by useCount (default DEFAULT_CURATED_TOP_N). */
+  topN?: number;
+  /** Hard cap on the combined curated set (default DEFAULT_CURATED_CAP). */
+  cap?: number;
+}
+
+export interface CuratedSkillSelectionResult {
+  /** Tagged (`tool: true`) skills first, then usage-ranked fill, capped. */
+  selected: SkillIndexEntry[];
+  /** Skills that would have qualified but were dropped by the hard cap. */
+  skipped: SkillIndexEntry[];
+}
+
+/**
+ * Pure selection: curated = every `tool: true`-tagged skill, PLUS the top-N
+ * remaining skills by useCount (ties broken alphabetically for determinism),
+ * deduped, then hard-capped — tagged skills always win a slot over
+ * usage-ranked ones when the cap would otherwise exclude them, since opting
+ * in is a stronger signal than incidental usage.
+ */
+export function selectCuratedSkillEntries(
+  entries: SkillIndexEntry[],
+  opts: CuratedSkillSelectionOptions = {},
+): CuratedSkillSelectionResult {
+  const topN = opts.topN ?? DEFAULT_CURATED_TOP_N;
+  const cap = opts.cap ?? DEFAULT_CURATED_CAP;
+
+  const tagged = entries.filter((e) => e.tool === true);
+  const taggedNames = new Set(tagged.map((e) => e.name));
+
+  const byUsage = entries
+    .filter((e) => !taggedNames.has(e.name))
+    .sort((a, b) => b.useCount - a.useCount || a.name.localeCompare(b.name))
+    .slice(0, Math.max(0, topN));
+
+  const combined = [...tagged, ...byUsage];
+  const seen = new Set<string>();
+  const deduped: SkillIndexEntry[] = [];
+  for (const e of combined) {
+    if (seen.has(e.name)) continue;
+    seen.add(e.name);
+    deduped.push(e);
+  }
+
+  return { selected: deduped.slice(0, cap), skipped: deduped.slice(cap) };
+}
+
+/**
+ * `skill_<name>` sanitization: lowercase, non-alphanumerics collapsed to a
+ * single underscore, trimmed, truncated so the prefixed name stays a
+ * reasonable tool-name length. Deterministic and collision-checked by the
+ * caller (buildCuratedSkillToolDefs), not here — this is pure name-shaping.
+ */
+export function sanitizeSkillToolName(skillName: string): string {
+  const slug = skillName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 56);
+  return `skill_${slug || "skill"}`;
+}
+
+export interface CuratedSkillToolDef {
+  /** The synthesized MCP tool name, e.g. "skill_triage_inbox". */
+  toolName: string;
+  /** The original skill name (as stored in the library / passed to skill_run). */
+  skillName: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+/**
+ * Synthesize an MCP tool def per curated skill: each {{param}} becomes a
+ * required string property (an unfilled placeholder would otherwise leak
+ * literally into the skill's output — see contracts.ts's applySkillParams),
+ * plus an optional `input` string property when the skill has a {{input}}
+ * slot. Skips (and reports) any skill whose sanitized name collides with a
+ * reserved tool name (native lane tools, the four flash-only tools, or an
+ * earlier curated skill in the same pass) — collisions are refused, never
+ * silently overwritten.
+ */
+export function buildCuratedSkillToolDefs(
+  entries: SkillIndexEntry[],
+  reservedNames: ReadonlySet<string>,
+): { defs: CuratedSkillToolDef[]; skippedCollisions: string[] } {
+  const defs: CuratedSkillToolDef[] = [];
+  const skippedCollisions: string[] = [];
+  const usedNames = new Set(reservedNames);
+
+  for (const entry of entries) {
+    const toolName = sanitizeSkillToolName(entry.name);
+    if (usedNames.has(toolName)) {
+      skippedCollisions.push(entry.name);
+      console.warn(`[flash-mcp] skipping curated skill tool "${toolName}" for skill "${entry.name}" — name collision`);
+      continue;
+    }
+    usedNames.add(toolName);
+
+    const properties: Record<string, unknown> = {};
+    const required: string[] = [];
+    for (const param of entry.params ?? []) {
+      properties[param] = { type: "string", description: `Value for the skill's {{${param}}} placeholder.` };
+      required.push(param);
+    }
+    if (entry.hasInput) {
+      properties.input = { type: "string", description: "Free-text input for the skill's {{input}} slot." };
+    }
+
+    defs.push({
+      toolName,
+      skillName: entry.name,
+      description: entry.description || `Run the "${entry.name}" skill.`,
+      inputSchema: { type: "object", properties, required },
+    });
+  }
+
+  return { defs, skippedCollisions };
+}
+
+/** Every native tool name (lane + flash-only) — reserved against skill-tool collisions. */
+export function reservedFlashToolNames(): Set<string> {
+  return new Set([
+    ...LANE_TOOL_DEFINITIONS.map((t) => t.function.name),
+    ...FLASH_ONLY_TOOL_NAMES,
+  ]);
+}
+
+/**
+ * Load the library, select the curated set, and synthesize tool defs — the
+ * async entry point real callers (loop.ts) use. Kept separate from
+ * `prepareFlashMcp` (which stays synchronous for its existing test surface)
+ * — callers fetch the curated set once per turn and pass it in.
+ */
+export async function loadCuratedSkillTools(opts: CuratedSkillSelectionOptions = {}): Promise<CuratedSkillToolDef[]> {
+  const { listSkills } = await import("@/lib/skills/store");
+  const entries = await listSkills();
+  const { selected, skipped } = selectCuratedSkillEntries(entries, opts);
+  if (skipped.length) {
+    console.log(`[flash-mcp] curated skill-tool cap reached — skipped ${skipped.length} skill(s): ${skipped.map((e) => e.name).join(", ")}`);
+  }
+  const { defs, skippedCollisions } = buildCuratedSkillToolDefs(selected, reservedFlashToolNames());
+  if (skippedCollisions.length) {
+    console.warn(`[flash-mcp] skipped ${skippedCollisions.length} curated skill tool(s) — name collision: ${skippedCollisions.join(", ")}`);
+  }
+  return defs;
+}
+
+// ------------------------------------------------------------------
 // MCP tool catalog (JSON Schema reuse — the OpenAI function shape's
 // `parameters` object is already valid MCP `inputSchema`).
 // ------------------------------------------------------------------
@@ -519,19 +687,22 @@ export function buildFlashMcpToolCatalog(tools: ChatTool[]): FlashMcpToolDef[] {
 }
 
 // Bump when FLASH_MCP_SERVER_JS changes so the on-disk copy is rewritten.
-export const SERVER_VERSION = "3";
+export const SERVER_VERSION = "4";
 
 // The stdio MCP server (CommonJS, run by the bundled node). Deliberately avoids
 // template literals / ${} so it nests cleanly in this TS array-join string
 // (same convention as outbound-mcp.ts). Speaks newline-delimited JSON-RPC 2.0
-// and proxies tool calls to the daemon's /bee/:tool (lane tools) or
-// /flash/tool/:name (Flash-only tools) endpoints with the daemon auth token.
+// and proxies tool calls to the daemon's /bee/:tool (lane tools), /flash/tool/:name
+// (Flash-only tools), or — for a curated skill_<name> tool — /bee/skill_run with
+// the call's flat arguments repacked into skill_run's {name,params,input} shape
+// (SKILL_TOOL_MAP, keyed by the synthesized tool name), all with the daemon auth token.
 export const FLASH_MCP_SERVER_JS = [
   "// HiveMatrix flash MCP server (stdio) — generated by flash-mcp.ts. Do not edit.",
   '"use strict";',
   'var fs = require("fs"), os = require("os"), path = require("path"), http = require("http");',
   'var PORT = process.env.HIVE_DAEMON_PORT || "3747";',
   'var TOOLS_FILE = process.env.HIVE_FLASH_TOOLS_FILE || "";',
+  'var SKILL_TOOL_MAP_FILE = process.env.HIVE_FLASH_SKILL_TOOL_MAP_FILE || "";',
   'var ALLOWED = (process.env.HIVE_FLASH_ALLOWED || "").split(",").filter(Boolean);',
   'var BRAIN_ROOT = process.env.HIVE_FLASH_BRAIN_ROOT || "";',
   'var PROJECT_PATH = process.env.HIVE_FLASH_PROJECT_PATH || "";',
@@ -547,6 +718,14 @@ export const FLASH_MCP_SERVER_JS = [
   '  try { return JSON.parse(fs.readFileSync(TOOLS_FILE, "utf8")); }',
   "  catch (e) { return []; }",
   "}",
+  // toolName -> original skill name, for curated skill_<name> tools synthesized
+  // by buildCuratedSkillToolDefs. Missing/empty file (no curated skills this
+  // pass, or an older config) just yields no mappings — never throws.
+  "function loadSkillToolMap() {",
+  '  try { return JSON.parse(fs.readFileSync(SKILL_TOOL_MAP_FILE, "utf8")); }',
+  "  catch (e) { return {}; }",
+  "}",
+  "var SKILL_TOOL_MAP = loadSkillToolMap();",
   // HARD dispatch-time gate: a name not present in ALLOWED is refused, no
   // matter what tools/list advertised or what --allowedTools offered the
   // model. An intentionally empty ALLOWED denies everything (fail closed).
@@ -572,9 +751,24 @@ export const FLASH_MCP_SERVER_JS = [
   "    return raw;",
   "  } catch (e) { return raw; }",
   "}",
+  // A curated skill_<name> call arrives with the skill's flattened {{params}}
+  // (+ optional `input`) as top-level call args — repack into skill_run's
+  // real shape ({name, params, input}) and dispatch through the SAME /bee
+  // route + capability gate skill_run itself uses, so a curated tool is never
+  // a back door around skill_run's trust/probation/scanner checks.
+  "function callSkillTool(skillName, a) {",
+  "  var params = {}; var input;",
+  "  for (var k in a) { if (Object.prototype.hasOwnProperty.call(a, k)) { if (k === \"input\") input = a[k]; else params[k] = a[k]; } }",
+  "  var skillArgs = { name: skillName, params: params };",
+  '  if (input !== undefined) skillArgs.input = input;',
+  '  return postJson("/bee/skill_run", { args: skillArgs, projectPath: PROJECT_PATH, project: PROJECT }).then(extractResult);',
+  "}",
   "function callTool(name, a) {",
   "  if (!isAllowed(name)) {",
   '    return Promise.resolve("Error: tool " + name + " is not permitted in this pass");',
+  "  }",
+  "  if (SKILL_TOOL_MAP[name]) {",
+  "    return callSkillTool(SKILL_TOOL_MAP[name], a);",
   "  }",
   "  if (FLASH_ONLY[name]) {",
   '    return postJson("/flash/tool/" + name, { args: a, brainRoot: BRAIN_ROOT, sessionId: SESSION_ID, channel: CHANNEL }).then(extractResult);',
@@ -649,6 +843,11 @@ export interface FlashMcpOptions {
    *  off the actual request surface instead of the (possibly unified)
    *  session row channel. See store.ts's storageChannel. */
   channel?: string;
+  /** Curated skill-as-tool defs for this pass (see loadCuratedSkillTools) —
+   *  pre-computed by the caller since skill listing is async and this
+   *  function stays synchronous. Defaults to none (no curated skill tools
+   *  offered — skill_run remains the only way to reach any skill). */
+  curatedSkillTools?: CuratedSkillToolDef[];
 }
 
 /**
@@ -663,7 +862,12 @@ export function prepareFlashMcp(
   opts: FlashMcpOptions,
 ): { configPath: string; toolNames: string[] } {
   const policy = getConnectivityPolicy();
-  const allTools: ChatTool[] = [...availableLaneTools(policy), ...FLASH_ONLY_TOOL_DEFS];
+  const curated = opts.curatedSkillTools ?? [];
+  const curatedChatTools: ChatTool[] = curated.map((c) => ({
+    type: "function",
+    function: { name: c.toolName, description: c.description, parameters: c.inputSchema },
+  }));
+  const allTools: ChatTool[] = [...availableLaneTools(policy), ...FLASH_ONLY_TOOL_DEFS, ...curatedChatTools];
   const allowedNames = opts.allowedTools
     ? allTools.filter((t) => opts.allowedTools!(t.function.name)).map((t) => t.function.name)
     : allTools.map((t) => t.function.name);
@@ -677,6 +881,14 @@ export function prepareFlashMcp(
   const toolsFilePath = join(dir, "flash-tools.json");
   writeFileSync(toolsFilePath, JSON.stringify(buildFlashMcpToolCatalog(allTools), null, 2), { mode: 0o600 });
 
+  // toolName -> original skill name, consulted by the generated server's
+  // callSkillTool() to repack a curated skill_<name> call into skill_run's
+  // real {name,params,input} shape before proxying to /bee/skill_run.
+  const skillToolMapPath = join(dir, "flash-skill-tool-map.json");
+  const skillToolMap: Record<string, string> = {};
+  for (const c of curated) skillToolMap[c.toolName] = c.skillName;
+  writeFileSync(skillToolMapPath, JSON.stringify(skillToolMap, null, 2), { mode: 0o600 });
+
   const serverPath = ensureFlashMcpServer();
   const configPath = join(dir, "flash-mcp-config.json");
   const config = {
@@ -687,6 +899,7 @@ export function prepareFlashMcp(
         env: {
           HIVE_DAEMON_PORT: port,
           HIVE_FLASH_TOOLS_FILE: toolsFilePath,
+          HIVE_FLASH_SKILL_TOOL_MAP_FILE: skillToolMapPath,
           HIVE_FLASH_ALLOWED: allowedNames.join(","),
           HIVE_FLASH_BRAIN_ROOT: opts.brainRoot ?? "",
           HIVE_FLASH_PROJECT_PATH: opts.ctx.projectPath,

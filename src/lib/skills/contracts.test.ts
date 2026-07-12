@@ -25,6 +25,7 @@ function skill(over: Partial<Skill> = {}): Skill {
     kind: over.kind ?? "instruction",
     interpreter: over.interpreter ?? "bash",
     roles: over.roles ?? [],
+    tool: over.tool,
   };
 }
 
@@ -88,6 +89,22 @@ test("roles is absent from rendered frontmatter when empty, and parses back to [
   assert.deepEqual(parsed.roles, []);
   assert.equal(skillAppliesToRole(parsed.roles, "qa"), true);
   assert.equal(skillAppliesToRole(parsed.roles, "founder"), true);
+});
+
+test("tool is absent from rendered frontmatter when falsy, and parses back to false — proving backward compat", () => {
+  const s = skill(); // no tool set
+  const rendered = renderSkillFile(s);
+  assert.doesNotMatch(rendered, /^tool:/m);
+  const parsed = parseSkillFile(rendered)!;
+  assert.equal(parsed.tool, false);
+});
+
+test("a skill tagged tool: true round-trips through render/parse", () => {
+  const s = skill({ tool: true });
+  const rendered = renderSkillFile(s);
+  assert.match(rendered, /^tool: true$/m);
+  const parsed = parseSkillFile(rendered)!;
+  assert.equal(parsed.tool, true);
 });
 
 test("a hand-tagged roles round-trips and gates skillAppliesToRole to just that role", () => {

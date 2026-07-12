@@ -59,6 +59,17 @@ test("listSkills returns the library index", async () => {
   assert.ok(idx.some((s) => s.name === "Triage Email"));
 });
 
+test("upsertSkill's tool:true opt-in surfaces through listSkills' index entries", async () => {
+  await upsertSkill({ name: "Curated Tool Skill", description: "opted in", body: "do it", source: "test", tool: true });
+  const idx = await listSkills();
+  const found = idx.find((s) => s.name === "Curated Tool Skill");
+  assert.ok(found);
+  assert.equal(found!.tool, true);
+  // A skill that never opted in reports tool: false, not undefined-vs-missing ambiguity.
+  const untagged = idx.find((s) => s.name === "Triage Email");
+  assert.equal(untagged!.tool, false);
+});
+
 test("markSkillUsed bumps useCount; a refinement appends + bumps revisions", async () => {
   const before = (await readSkill("Triage Email"))!;
   assert.equal(before.useCount, 0);
