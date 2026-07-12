@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -13,7 +13,7 @@ writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory:
 const origHome = process.env.HOME;
 process.env.HOME = HOME;
 
-const { upsertSkill, listSkills, listSkillsFor, skillsForRole, readSkill, skillsDir, markSkillUsed, setSkillTrusted, deleteSkill, recordSkillOutcome } = await import("./store");
+const { upsertSkill, listSkills, listSkillsFor, skillsForRole, readSkill, skillsDir, markSkillUsed, setSkillTrusted, deleteSkill, recordSkillOutcome, archiveSkill } = await import("./store");
 
 test.after(() => {
   process.env.HOME = origHome;
@@ -225,4 +225,55 @@ test("recordSkillOutcome: demotes a trusted skill once failures >= max(3, useCou
 test("recordSkillOutcome on a missing skill is a clean no-op", async () => {
   const r = await recordSkillOutcome("does-not-exist-outcome", true);
   assert.deepEqual(r, { ok: false, useCount: 0, failures: 0, trusted: false, probation: false, promoted: false, demoted: false });
+});
+
+// --- archiveSkill (DGM: prune moves aside, never deletes) ---------------
+
+test("archiveSkill moves the file to skills/archive/ with a dated name, same content, and removes the original", async () => {
+  await upsertSkill({ name: "To Archive", description: "d", body: "archive me", source: "test" });
+  const dir = skillsDir()!;
+  const originalPath = join(dir, "to-archive.md");
+  assert.ok(existsSync(originalPath), "sanity: file exists before archiving");
+  const originalContent = readFileSync(originalPath, "utf-8");
+
+  const r = await archiveSkill("To Archive");
+  assert.equal(r.ok, true);
+  assert.ok(r.archivedPath);
+  assert.ok(!existsSync(originalPath), "original file gone from skills/");
+
+  const archiveDir = join(dir, "archive");
+  assert.ok(existsSync(archiveDir), "archive dir created");
+  const archiveFiles = readdirSync(archiveDir).filter((f) => f.startsWith("to-archive."));
+  assert.equal(archiveFiles.length, 1);
+  assert.match(archiveFiles[0], /^to-archive\.\d{4}-\d{2}-\d{2}.*\.md$/);
+  assert.equal(readFileSync(join(archiveDir, archiveFiles[0]), "utf-8"), originalContent);
+  assert.equal(r.archivedPath, join(archiveDir, archiveFiles[0]));
+
+  // no longer discoverable via readSkill
+  assert.equal(await readSkill("To Archive"), null);
+});
+
+test("archiveSkill never overwrites a same-day prior archive of the same name", async () => {
+  await upsertSkill({ name: "Recur Archive", description: "d1", body: "first body", source: "test" });
+  const first = await archiveSkill("Recur Archive");
+  assert.equal(first.ok, true);
+
+  // re-create a skill with the same name (e.g. re-distilled, then archived again same day)
+  await upsertSkill({ name: "Recur Archive", description: "d2", body: "second body", source: "test" });
+  const second = await archiveSkill("Recur Archive");
+  assert.equal(second.ok, true);
+  assert.notEqual(second.archivedPath, first.archivedPath, "second archive gets a distinct path");
+
+  const dir = skillsDir()!;
+  const archiveDir = join(dir, "archive");
+  const archiveFiles = readdirSync(archiveDir).filter((f) => f.startsWith("recur-archive."));
+  assert.equal(archiveFiles.length, 2, "both archives coexist, neither was overwritten");
+  const contents = archiveFiles.map((f) => readFileSync(join(archiveDir, f), "utf-8"));
+  assert.ok(contents.some((c) => c.includes("first body")));
+  assert.ok(contents.some((c) => c.includes("second body")));
+});
+
+test("archiveSkill on a missing skill returns ok:false with no archivedPath", async () => {
+  const r = await archiveSkill("does-not-exist-archive");
+  assert.deepEqual(r, { ok: false, archivedPath: null });
 });

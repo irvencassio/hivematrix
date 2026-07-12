@@ -318,4 +318,63 @@ export async function deleteSkill(name: string): Promise<boolean> {
   }
 }
 
+/**
+ * Archive a skill instead of deleting it (DGM: archive, never delete). Moves
+ * the live file out of skills/ into skills/archive/, named
+ * `<slug>.<YYYY-MM-DD>[.<n>].md` — a dated suffix so a superseded skill can
+ * still be restored/inspected later, per pillar P4's prune design. This is
+ * what prune.ts's stale/demotion candidates should be archived through
+ * instead of `deleteSkill`.
+ *
+ * If a same-day archive of the same slug already exists, a short numeric
+ * uniquifier is appended so this NEVER overwrites a prior archive. Uses
+ * fs.rename (falls back to copy+unlink across devices). Never throws.
+ */
+export async function archiveSkill(name: string): Promise<{ ok: boolean; archivedPath: string | null }> {
+  const dir = skillsDir();
+  if (!dir) return { ok: false, archivedPath: null };
+  const srcPath = join(dir, skillFilename(name));
+
+  try {
+    await fs.access(srcPath);
+  } catch {
+    return { ok: false, archivedPath: null };
+  }
+
+  const archiveDir = join(dir, "archive");
+  try {
+    await fs.mkdir(archiveDir, { recursive: true });
+  } catch {
+    return { ok: false, archivedPath: null };
+  }
+
+  const slug = skillSlug(name);
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  let destPath = join(archiveDir, `${slug}.${dateStamp}.md`);
+  let n = 1;
+  while (true) {
+    try {
+      await fs.access(destPath);
+      // already exists — never overwrite; try the next uniquifier.
+      destPath = join(archiveDir, `${slug}.${dateStamp}.${++n}.md`);
+    } catch {
+      break; // destPath is free
+    }
+  }
+
+  try {
+    await fs.rename(srcPath, destPath);
+  } catch {
+    try {
+      const content = await fs.readFile(srcPath);
+      await fs.writeFile(destPath, content);
+      await fs.unlink(srcPath);
+    } catch {
+      return { ok: false, archivedPath: null };
+    }
+  }
+
+  return { ok: true, archivedPath: destPath };
+}
+
 export { skillSlug };

@@ -58,3 +58,38 @@ export function stalePruneCandidates(skills: Skill[], opts: PruneOptions = {}): 
   }
   return out.sort((a, b) => b.ageDays - a.ageDays || a.name.localeCompare(b.name));
 }
+
+export interface DemotionCandidate {
+  name: string;
+  failures: number;
+  useCount: number;
+  trusted: boolean;
+}
+
+/**
+ * Trusted skills whose failures have outweighed their usage — candidates to
+ * DEMOTE (untrust), not delete. Uses the exact same threshold as P1.2's
+ * recordSkillOutcome demotion (`failures >= Math.max(3, useCount)`), applied
+ * here as a batch sweep so an operator/cron can catch skills that crossed the
+ * line between individual outcome recordings (e.g. after a threshold change,
+ * or a skill imported already past it) rather than only at the moment a
+ * single new failure is recorded.
+ *
+ * This function only IDENTIFIES candidates — it is pure/IO-free, matching
+ * stalePruneCandidates. The caller decides whether to act, via
+ * `setSkillTrusted(name, false)` in store.ts.
+ *
+ * Demotion (untrust, stays on disk) is deliberately softer than archive (move
+ * aside to skills/archive/): a demoted skill keeps living in the library and
+ * can re-earn trust the normal way, via recordSkillOutcome's promotion path
+ * (probation + 3 clean successes) — it is never removed by this sweep.
+ */
+export function demotionCandidates(skills: Skill[]): DemotionCandidate[] {
+  const out: DemotionCandidate[] = [];
+  for (const s of skills) {
+    if (s.trusted && s.failures >= Math.max(3, s.useCount)) {
+      out.push({ name: s.name, failures: s.failures, useCount: s.useCount, trusted: s.trusted });
+    }
+  }
+  return out.sort((a, b) => (b.failures - b.useCount) - (a.failures - a.useCount) || a.name.localeCompare(b.name));
+}
