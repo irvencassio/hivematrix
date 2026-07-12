@@ -7,6 +7,7 @@ import {
   executeCalendarToday,
   buildCalendarCreateScript,
   defaultCalendarHelperIO,
+  looksLikeStaleHelper,
   type CalendarHelperIO,
 } from "./pim-tools";
 import { isPermissionError, permissionNeeded, parsePermissionNeeded } from "./pim-preconditions";
@@ -181,6 +182,16 @@ test("isPermissionError: false for unrelated errors", () => {
   assert.equal(isPermissionError("Nothing on the calendar today."), false);
   assert.equal(isPermissionError("syntax error: Expected end of line but found identifier."), false);
   assert.equal(isPermissionError(""), false);
+});
+
+test("looksLikeStaleHelper: true when stderr shows the helper fell through to its daemon-startup path", () => {
+  assert.equal(looksLikeStaleHelper("[desktopbee-helper] listening on 127.0.0.1:3748\n"), true);
+  assert.equal(looksLikeStaleHelper("noise before\n[desktopbee-helper] listening on 127.0.0.1:9999"), true);
+});
+
+test("looksLikeStaleHelper: false for empty or unrelated stderr", () => {
+  assert.equal(looksLikeStaleHelper(""), false);
+  assert.equal(looksLikeStaleHelper("Not authorized to send Apple events to Calendar. (-1743)"), false);
 });
 
 // ---------------------------------------------------------------------------

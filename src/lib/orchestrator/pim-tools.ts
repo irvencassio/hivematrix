@@ -48,7 +48,7 @@ const HELPER_TIMEOUT_CODE = 124;
  * on a HELPER_TIMEOUT_CODE kill means the installed helper is stale/out of
  * date, not that a TCC consent dialog is pending — see
  * docs/superpowers/specs/2026-07-12-calendar-permission-misdiagnosis-design.md. */
-export const HELPER_DAEMON_MARKER = "[desktopbee-helper] listening on";
+const HELPER_DAEMON_MARKER = "[desktopbee-helper] listening on";
 
 /** True if `stderr` shows the helper fell through to its daemon-startup path
  * instead of running the requested CLI subcommand — i.e. a stale/wrong-mode
@@ -64,6 +64,13 @@ export function looksLikeStaleHelper(stderr: string): boolean {
  * must not be spoken/handled by callers as a permission issue. */
 const STALE_HELPER_MESSAGE =
   "HiveMatrix's calendar helper is out of date and can't read your calendar — reopen HiveMatrix or reinstall it to update it.";
+
+/** Single source of truth for both `executeCalendarToday` and
+ * `executeCalendarCreate`'s HELPER_TIMEOUT_CODE branch, so the stale-helper
+ * vs. pending-consent classification can't drift between the two call sites. */
+function classifyHelperTimeout(stderr: string): string {
+  return looksLikeStaleHelper(stderr) ? STALE_HELPER_MESSAGE : permissionNeeded("Calendars", REMEDIATION.CalendarsPromptPending);
+}
 
 // ---------------------------------------------------------------------------
 // osascript runner — bounded so a slow app launch never stalls a spoken turn.
@@ -369,9 +376,7 @@ export async function executeCalendarToday(
 
   const { code, stdout, stderr } = await io.run(binary, ["calendar", "today", "--limit", String(limit)]);
   if (code === 77) return permissionNeeded("Calendars", REMEDIATION.Calendars);
-  if (code === HELPER_TIMEOUT_CODE) {
-    return looksLikeStaleHelper(stderr) ? STALE_HELPER_MESSAGE : permissionNeeded("Calendars", REMEDIATION.CalendarsPromptPending);
-  }
+  if (code === HELPER_TIMEOUT_CODE) return classifyHelperTimeout(stderr);
   if (code !== 0) return `Could not read the calendar: ${(stderr || stdout || "unknown error").trim()}`;
 
   try {
@@ -573,9 +578,7 @@ export async function executeCalendarCreate(args: Record<string, unknown>, io: C
       "--end", end.toISOString(),
     ]);
     if (code === 77) return permissionNeeded("Calendars", REMEDIATION.Calendars);
-    if (code === HELPER_TIMEOUT_CODE) {
-      return looksLikeStaleHelper(stderr) ? STALE_HELPER_MESSAGE : permissionNeeded("Calendars", REMEDIATION.CalendarsPromptPending);
-    }
+    if (code === HELPER_TIMEOUT_CODE) return classifyHelperTimeout(stderr);
     if (code === 0) {
       try {
         const parsed = JSON.parse(stdout) as { ok?: boolean; id?: string };

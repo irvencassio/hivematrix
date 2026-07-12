@@ -11,7 +11,7 @@ that is explicitly out of scope for this task.
 
 Files: `src/lib/orchestrator/pim-tools.ts`, `src/lib/orchestrator/pim-tools.test.ts`
 
-- [ ] Write a failing test in `pim-tools.test.ts`: call `executeCalendarToday`
+- [x] Write a failing test in `pim-tools.test.ts`: call `executeCalendarToday`
   with a fake `CalendarHelperIO` whose `run()` resolves `{ code:
   HELPER_TIMEOUT_CODE (124), stdout: "", stderr: "[desktopbee-helper]
   listening on 127.0.0.1:3748\n" }` (i.e. the exact marker
@@ -22,10 +22,10 @@ Files: `src/lib/orchestrator/pim-tools.ts`, `src/lib/orchestrator/pim-tools.test
   `/calendar helper/i` and `/out of date|reinstall/i`). Confirm this test
   fails against current code (it currently returns
   `permissionNeeded("Calendars", REMEDIATION.CalendarsPromptPending)`).
-- [ ] Also add/keep a test for the genuine case: timeout with **empty**
+- [x] Also add/keep a test for the genuine case: timeout with **empty**
   stderr still returns the existing `CalendarsPromptPending` permission
   message (regression guard — don't break the real pending-consent path).
-- [ ] Implement: in `pim-tools.ts`, add a small exported const, e.g.
+- [x] Implement: in `pim-tools.ts`, add a small exported const, e.g.
   `HELPER_DAEMON_MARKER = "[desktopbee-helper] listening on"`, and a helper
   `looksLikeStaleHelper(stderr: string): boolean` that checks
   `stderr.includes(HELPER_DAEMON_MARKER)`. In `executeCalendarToday`, when
@@ -38,15 +38,23 @@ Files: `src/lib/orchestrator/pim-tools.ts`, `src/lib/orchestrator/pim-tools.test
   Apply the identical branch in `executeCalendarCreate` (same
   `HELPER_TIMEOUT_CODE` handling exists there — keep both call sites
   consistent, they already share the exit-code convention).
-- [ ] Run `npm test -- --test-name-pattern pim-tools` (or the project's
+- [x] Run `npm test -- --test-name-pattern pim-tools` (or the project's
   equivalent narrow-run invocation) and confirm both new tests pass and no
   existing `pim-tools.test.ts` test regresses.
+- [x] Post-implementation two-stage review (spec compliance, then code
+  quality — both via independent subagents) found the spec fully satisfied,
+  plus four code-quality follow-ups, all applied: extracted the duplicated
+  `code === HELPER_TIMEOUT_CODE` ternary at both call sites into one shared
+  `classifyHelperTimeout(stderr)`; un-exported `HELPER_DAEMON_MARKER` (no
+  external consumer, unlike the still-exported-and-now-directly-tested
+  `looksLikeStaleHelper`); added a dedicated `looksLikeStaleHelper` true/false
+  test block mirroring the existing `isPermissionError` one for parity.
 
 ## Task 2 — Rebuild the Swift helper from source before packaging, so a stale binary can never ship silently
 
-Files: `scripts/build-app.sh`, `scripts/build-app-daemon-rebuild.test.mjs` (new)
+Files: `scripts/build-app.sh`, `scripts/build-app-helper-rebuild.test.mjs` (new)
 
-- [ ] Write a failing test (new file `scripts/build-app-daemon-rebuild.test.mjs`,
+- [x] Write a failing test (new file `scripts/build-app-helper-rebuild.test.mjs`,
   following the exact convention already used in
   `scripts/service-build-lane-copy.test.mjs` — `readFileSync` the script
   source, assert with regex): assert `scripts/build-app.sh` contains a call
@@ -56,7 +64,14 @@ Files: `scripts/build-app.sh`, `scripts/build-app-daemon-rebuild.test.mjs` (new)
   `.indexOf(...)` offsets) — the helper must be freshly built before anything
   signs it. Confirm this fails against the current script (no such call
   exists today).
-- [ ] Implement: in `scripts/build-app.sh`, immediately before the "Pre-signing
+  (Filename changed from the plan's `build-app-daemon-rebuild.test.mjs` to
+  `build-app-helper-rebuild.test.mjs` during code-quality review: "daemon" is
+  already the established name for the unrelated Node.js daemon bundle
+  elsewhere in `scripts/` — e.g. `build-daemon.mjs`,
+  `build-daemon-python-symlinks.test.mjs` — and reusing it for the Swift
+  helper rebuild risked exactly the kind of grep-confusion this whole bug was
+  born from.)
+- [x] Implement: in `scripts/build-app.sh`, immediately before the "Pre-signing
   source resources" step (before the existing `sign-bundled-machos.sh`
   line), add:
   ```bash
@@ -66,22 +81,28 @@ Files: `scripts/build-app.sh`, `scripts/build-app-daemon-rebuild.test.mjs` (new)
   This makes `desktopbee-helper/DesktopBeeHelper.app` always reflect current
   source before `sign-bundled-machos.sh` re-signs it and Tauri bundles it —
   removing the manual step a human could forget.
-- [ ] Update `docs/RELEASE.md`'s description of this step (the paragraph
+- [x] Update `docs/RELEASE.md`'s description of this step (the paragraph
   around the existing "Desktop Lane helper compatibility bundle,
   `DesktopBeeHelper.app`" line) to say it is rebuilt from source at this
   point, not merely re-signed — so the doc matches the script and doesn't
   reintroduce tribal knowledge.
-- [ ] Run the new test and confirm it passes.
+- [x] Run the new test and confirm it passes.
 
 ## Finishing
 
-- [ ] `npm run typecheck` — zero errors.
-- [ ] `npm test` — full suite passes (confirms Task 1 + Task 2 tests integrate
-  cleanly and nothing else regressed).
-- [ ] `node scripts/scope-wall.mjs` — zero violations (no new concept was
-  added: Task 1 extends the existing permission-message convention in-place;
-  Task 2 is a script + doc edit).
-- [ ] Do **not** run `scripts/build-app.sh`, any release/publish script, or
+- [x] `npm run typecheck` — zero errors (whole project).
+- [x] `npm test` — 2713/2716 pass (1 intentionally env-gated skip). The 2
+  failures are pre-existing in `src/daemon/server.test.ts`
+  (a port-default mismatch, 3747 vs 3799) inside unrelated in-flight work
+  already sitting in this working tree before this task started — untouched
+  by, and unrelated in subject matter to, both tasks here. All Task 1 + Task
+  2 tests (39 in `pim-tools.test.ts` + 1 in
+  `build-app-helper-rebuild.test.mjs`) pass.
+- [x] `node scripts/scope-wall.mjs` — 0 violations, 0 warnings (no new
+  concept was added: Task 1 extends the existing permission-message
+  convention in-place; Task 2 is a script + doc edit).
+- [x] Did **not** run `scripts/build-app.sh`, any release/publish script, or
   touch the installed `/Applications/HiveMatrix.app` — out of scope, operator
   releases.
-- [ ] Summarize: root cause, the two fixes, and verification results.
+- [x] Summarize: root cause, the two fixes, and verification results. (See
+  commit message and the operator-facing summary from this run.)
