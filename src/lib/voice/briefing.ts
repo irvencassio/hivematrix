@@ -80,6 +80,8 @@ export interface VoiceBriefingInput {
   workflowInbox?: BriefingWorkflowInbox | null;
   pipelineHealth?: BriefingPipelineHealth | null;
   scoreboard?: BriefingScoreboard | null;
+  /** Names of skills the live acquisition pipeline learned recently (P4.3), from the ACQUISITIONS.md ledger. */
+  learnedSkills?: string[];
 }
 
 /** Lower bound on tasks before a route's first-pass rate is worth comparing. */
@@ -164,6 +166,9 @@ export function buildVoiceBriefing(input: VoiceBriefingInput): string {
   const scoreboardLine = scoreboardReply(input.scoreboard);
   if (scoreboardLine) parts.push(scoreboardLine);
 
+  const learnedSkillsLine = learnedSkillsReply(input.learnedSkills);
+  if (learnedSkillsLine) parts.push(learnedSkillsLine);
+
   const pipelineLine = pipelineHealthReply(input.pipelineHealth);
   if (pipelineLine) parts.push(pipelineLine);
 
@@ -191,6 +196,17 @@ export function scoreboardReply(s: BriefingScoreboard | null | undefined): strin
   }
   const goalNote = s.goalsTracked > 0 ? ` · ${s.goalsTracked} ${s.goalsTracked === 1 ? "goal" : "goals"} tracked` : "";
   return `Scoreboard: ${bits.join(" · ")}${goalNote}.`;
+}
+
+/**
+ * P4.3: "I learned N new skills recently: …" from the live acquisition
+ * ledger (already scoped to a rolling ~24h window by the caller, hence
+ * "recently" rather than a fixed "yesterday"). Returns "" when there's
+ * nothing to report, so the line is simply omitted.
+ */
+export function learnedSkillsReply(names: string[] | undefined): string {
+  if (!names || names.length === 0) return "";
+  return `I learned ${plural(names.length, "new skill")} recently: ${listHead(names)}.`;
 }
 
 /**

@@ -13,7 +13,7 @@ writeFileSync(join(HOME, ".hivematrix", "config.json"), JSON.stringify({ memory:
 const origHome = process.env.HOME;
 process.env.HOME = HOME;
 
-const { acquireSkill, defaultMint, defaultCritic } = await import("./acquire");
+const { acquireSkill, defaultMint, defaultCritic, recentlyAcquiredSkillNames } = await import("./acquire");
 const { readSkill } = await import("./store");
 const { renderSkillFile, parseSkillFile } = await import("./contracts");
 const { _setExecFileForTests } = await import("@/lib/models/chat-client");
@@ -406,6 +406,28 @@ test("integration: acquireSkill with NEITHER mint NOR critic, critic FAILs → d
   assert.match(result.reason, /does not actually solve the stated goal/);
   assert.equal(draftFiles().length, before + 1);
   assert.equal(await readSkill("Both Defaults Rejected Skill"), null, "never registered");
+});
+
+test("recentlyAcquiredSkillNames: only recent registered/probation names within the window, not old ones or failures", async () => {
+  const now = new Date();
+  const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+  const nowIso = now.toISOString();
+  const oldIso = threeDaysAgo.toISOString();
+  const realLedger = ledgerPath();
+  const existing = existsSync(realLedger) ? readFileSync(realLedger, "utf-8") : "";
+  const seedLines = [
+    `${nowIso}\toutcome=registered\tname=Fresh Skill\tgoal=fresh goal\n`,
+    `${oldIso}\toutcome=registered\tname=Old Skill\tgoal=old goal\n`,
+    `${nowIso}\toutcome=draft-failed\tname=\tgoal=failed goal\n`,
+  ].join("");
+  mkdirSync(join(BRAIN, "skills"), { recursive: true });
+  writeFileSync(realLedger, existing + seedLines);
+
+  const names = await recentlyAcquiredSkillNames();
+
+  assert.ok(names.includes("Fresh Skill"), "recent registered skill must be included");
+  assert.ok(!names.includes("Old Skill"), "a 3-day-old skill must be outside the 24h window");
+  assert.ok(!names.includes(""), "a draft-failed line (no name / wrong outcome) must never contribute");
 });
 
 // Run last: this test drives the shared ledger's today-count up to (or past) an

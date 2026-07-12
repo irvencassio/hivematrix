@@ -68,6 +68,8 @@ export interface CommandTurnDeps {
   getWorkflowInbox?: () => Promise<BriefingWorkflowInbox | null> | BriefingWorkflowInbox | null;
   getPipelineHealth?: () => Promise<BriefingPipelineHealth | null> | BriefingPipelineHealth | null;
   getScoreboard?: () => Promise<BriefingScoreboard | null> | BriefingScoreboard | null;
+  /** Names of skills learned recently (P4.3), from the ACQUISITIONS.md ledger. Default reads it directly. */
+  getLearnedSkills?: () => Promise<string[]> | string[];
   askOpenClaw?: (request: OpenClawVoiceRequest) => Promise<OpenClawVoiceResult>;
   /** Poll for the next OpenClaw assistant reply after sentAfter. */
   pollOpenClawReply?: (opts: { gatewayUrl: string; sessionKey: string; sentAfter: string }) => Promise<{ found: boolean; text: string | null; reason: string | null }>;
@@ -132,7 +134,7 @@ function reminderTitle(text: string): string {
  * both read the same data and phrasing.
  */
 export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<string> {
-  const [approvals, directives, failedTasks, usage, browserReadiness, workflowInbox, pipelineHealth, scoreboard] = await Promise.all([
+  const [approvals, directives, failedTasks, usage, browserReadiness, workflowInbox, pipelineHealth, scoreboard, learnedSkills] = await Promise.all([
     approvalQueue(deps),
     listDirectives(deps),
     listFailedTasks(deps),
@@ -141,6 +143,7 @@ export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<strin
     getWorkflowInboxCounts(deps),
     getPipelineHealth(deps),
     getScoreboardForBrief(deps),
+    getLearnedSkills(deps),
   ]);
   return buildVoiceBriefing({
     approvals: approvals.map((item) => ({ title: item.title, kind: item.kind })),
@@ -151,7 +154,23 @@ export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<strin
     workflowInbox,
     pipelineHealth,
     scoreboard,
+    learnedSkills,
   });
+}
+
+/**
+ * P4.3: skills the live acquisition pipeline learned recently, from the
+ * ACQUISITIONS.md ledger — read-only, best-effort, degrades to [] (same
+ * pattern as getScoreboardForBrief) so the briefing simply omits the line.
+ */
+async function getLearnedSkills(deps: CommandTurnDeps): Promise<string[]> {
+  if (deps.getLearnedSkills) return deps.getLearnedSkills();
+  try {
+    const { recentlyAcquiredSkillNames } = await import("@/lib/skills/acquire");
+    return await recentlyAcquiredSkillNames();
+  } catch {
+    return [];
+  }
 }
 
 /**

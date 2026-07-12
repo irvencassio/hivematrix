@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildVoiceBriefing, pipelineConcern, type BriefingPipelineRoute } from "./briefing";
+import { buildVoiceBriefing, pipelineConcern, learnedSkillsReply, type BriefingPipelineRoute } from "./briefing";
 
 test("briefing speaks pending approvals, failed tasks, active directives, and usage", () => {
   const briefing = buildVoiceBriefing({
@@ -164,4 +164,26 @@ test("briefing mentions when readiness is stale and when it was last refreshed",
   });
   assert.match(refreshed, /refreshed|checked|last/i);
   assert.match(refreshed, /HeyGen/);
+});
+
+test("learnedSkillsReply names the skills and counts them; empty/undefined is silent", () => {
+  const line = learnedSkillsReply(["Downloads Counter", "Weather Fetcher"]);
+  assert.match(line, /2 new skills/);
+  assert.match(line, /Downloads Counter/);
+  assert.match(line, /Weather Fetcher/);
+
+  assert.equal(learnedSkillsReply([]), "");
+  assert.equal(learnedSkillsReply(undefined), "");
+});
+
+test("briefing mentions learned skills when present, omits the line when absent", () => {
+  const briefing = buildVoiceBriefing({ learnedSkills: ["Downloads Counter"] });
+  assert.match(briefing, /new skill/);
+  assert.match(briefing, /Downloads Counter/);
+
+  const omittedEmpty = buildVoiceBriefing({ learnedSkills: [] });
+  assert.doesNotMatch(omittedEmpty, /new skill/);
+
+  const omittedAbsent = buildVoiceBriefing({});
+  assert.doesNotMatch(omittedAbsent, /new skill/);
 });

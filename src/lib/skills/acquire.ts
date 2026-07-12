@@ -499,6 +499,39 @@ async function findAlreadyHave(brainRoot: string, goal: string): Promise<{ name:
   return null;
 }
 
+const RECENT_ACQUISITIONS_DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const RECENT_ACQUISITIONS_MAX = 10;
+
+/**
+ * P4.3: names of skills acquired (registered or on probation) within the last
+ * `sinceMs` (default 24h) — read from the same ledger `appendLedger`/`readLedgerLines`
+ * already own, so the morning briefing can say "I learned N new skills". De-duped,
+ * most-recent-first, capped, and NEVER throws — a missing brain root or ledger
+ * degrades to [] so the briefing line is simply omitted.
+ */
+export async function recentlyAcquiredSkillNames(opts?: { sinceMs?: number; now?: () => string }): Promise<string[]> {
+  try {
+    const brainRoot = configuredBrainRootDir();
+    if (!brainRoot) return [];
+    const sinceMs = opts?.sinceMs ?? RECENT_ACQUISITIONS_DEFAULT_WINDOW_MS;
+    const nowFn = opts?.now ?? defaultNow;
+    const cutoff = new Date(nowFn()).getTime() - sinceMs;
+    const lines = await readLedgerLines(brainRoot);
+    const names: string[] = [];
+    for (let i = lines.length - 1; i >= 0 && names.length < RECENT_ACQUISITIONS_MAX; i--) {
+      const l = lines[i];
+      if (l.outcome !== "registered" && l.outcome !== "probation") continue;
+      if (!l.name) continue;
+      const ts = new Date(l.ts).getTime();
+      if (Number.isNaN(ts) || ts < cutoff) continue;
+      if (!names.includes(l.name)) names.push(l.name);
+    }
+    return names;
+  } catch {
+    return [];
+  }
+}
+
 function resolveDailyCap(opts: AcquireOptions): number {
   if (typeof opts.dailyCap === "number" && Number.isFinite(opts.dailyCap)) return opts.dailyCap;
   const config = loadHiveConfig();
