@@ -459,6 +459,8 @@ export function buildDailyMomentPrompt(opts: {
     "1. What you accomplished (from the status, today's daily note, and your own history).",
     "2. Anything you tried that failed or needs their input tomorrow.",
     "3. One thing you noticed that they might not have.",
+    "4. Accountability: check daily_review — if a goal was due today and has no check-in yet,",
+    "   ask (once, warmly) how it went so they can log it. If they kept a streak, acknowledge it.",
     ...shared,
   ].join("\n");
 }

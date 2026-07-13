@@ -256,6 +256,9 @@ test("buildDailyMomentPrompt: morning asks for the one decision; evening asks fo
   const evening = buildDailyMomentPrompt({ moment: "evening-recap", statusSnapshot: "", now: at(21) });
   assert.match(evening, /Evening recap/);
   assert.match(evening, /what you did for them today/i);
+  // Closes the accountability loop: nudge a check-in on a due-but-unlogged goal.
+  assert.match(evening, /daily_review/);
+  assert.match(evening, /has no check-in yet/);
 });
 
 test("runDailyMomentOnce: APNs success skips notify; failure falls back; operator turn always lands", async () => {
