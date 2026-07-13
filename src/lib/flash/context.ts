@@ -17,6 +17,7 @@ import { searchBrain } from "@/lib/brain/search";
 import { extractPersonaName } from "@/lib/onboarding/birth-ritual";
 import { listSkills } from "@/lib/skills/store";
 import { formatSkillIndex } from "@/lib/skills/contracts";
+import { goalsDueToday as defaultGoalsDueToday } from "@/lib/goals/store";
 import type { FlashChannel, FlashMessage, FlashTurnRow } from "./types";
 
 const PERSONA_FILES = ["SOUL.md", "IDENTITY.md", "USER.md", "GOALS.md"] as const;
@@ -111,6 +112,33 @@ function loadDailyNote(brainRoot: string): string {
   return "";
 }
 
+/**
+ * Goals that are due today, folded into the system prompt so ad-hoc chat and
+ * voice are goal-aware without the model having to call a tool first. Best-effort
+ * (empty on any error or when nothing is due), same pattern as the other
+ * sections. Surface + awareness only — it does NOT instruct the model to act;
+ * real work still goes through the capability ladder and its gates.
+ */
+function loadGoalsDueSection(): string {
+  try {
+    const due = defaultGoalsDueToday();
+    if (!due.length) return "";
+    const lines = due.slice(0, 6).map((g) => {
+      const streak = g.streak && g.streak > 1 ? ` · ${g.streak}-day streak` : "";
+      const target = g.target ? ` · target: ${g.target}` : "";
+      const desc = g.description ? ` — ${g.description}` : "";
+      return `- ${g.title}${g.category ? ` [${g.category}]` : ""}${target}${streak}${desc}`;
+    });
+    return "## Goals due today\n"
+      + "These are the operator's active goals due today. If it fits the conversation "
+      + "naturally, you may surface the single most useful next step for one of them — "
+      + "briefly, never nagging. Don't derail the operator's actual request to do it.\n"
+      + lines.join("\n");
+  } catch {
+    return "";
+  }
+}
+
 /** One-paragraph guide so Haiku knows how to actually invoke a listed skill. */
 const SKILL_RUN_GUIDE =
   "To RUN a skill live in this turn, call the skill_run tool with the skill's " +
@@ -179,6 +207,9 @@ export async function assembleSystemPrompt(
 
     const brainHits = await loadBrainHits(userText, root);
     if (brainHits) sections.push(brainHits);
+
+    const goalsSection = loadGoalsDueSection();
+    if (goalsSection) sections.push(goalsSection);
 
     const skillSection = await loadSkillSection();
     if (skillSection) sections.push(skillSection);

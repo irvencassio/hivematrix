@@ -51,6 +51,23 @@ test("assembleSystemPrompt injects the skill index with params and skill_run gui
   assert.match(prompt, /skill_run/);
 });
 
+test("assembleSystemPrompt surfaces goals due today so chat/voice are goal-aware without a tool call", async () => {
+  const { upsertGoal } = await import("@/lib/goals/store");
+  upsertGoal({
+    title: "Pass the annuities exam",
+    category: "income",
+    cadence: "daily",
+    target: "70% on a practice exam",
+    description: "Ohio combined Life + A&H license",
+  });
+  const prompt = await assembleSystemPrompt("what should I focus on", "", BRAIN);
+  assert.match(prompt, /Goals due today/);
+  assert.match(prompt, /Pass the annuities exam/);
+  assert.match(prompt, /Ohio combined Life/, "the description gives the model next-step context");
+  // Awareness only — it must not instruct the model to take action on its own.
+  assert.match(prompt, /never nagging/);
+});
+
 test("assembleSystemPrompt always includes the capability-doctrine escalation ladder, even with no brain root", async () => {
   const prompt = await assembleSystemPrompt("hi", "", null);
 
