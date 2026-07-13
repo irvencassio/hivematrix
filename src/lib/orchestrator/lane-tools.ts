@@ -534,13 +534,19 @@ export async function executeLaneTool(
 // "brain" capability and stay available offline. Every executor dynamic-
 // imports the store, mirroring brain_read/brain_search above.
 
-function formatGoalLine(g: { title: string; category: string | null; cadence: string; status: string; target: string | null; lastCheckinDate: string | null; latestCheckin: { note: string | null } | null; dueToday: boolean }): string {
+function formatGoalLine(g: { title: string; category: string | null; cadence: string; status: string; target: string | null; description?: string | null; streak?: number; lastCheckinDate: string | null; latestCheckin: { note: string | null } | null; dueToday: boolean }): string {
   const cat = g.category ? ` [${g.category}]` : "";
   const target = g.target ? ` — target: ${g.target}` : "";
   const due = g.dueToday ? " (due today)" : "";
+  // Streak is a momentum signal — it lets a proactive nudge say "you're on a
+  // 5-day run, keep it" vs "this one's gone cold" instead of a flat reminder.
+  const streak = g.streak && g.streak > 1 ? ` — ${g.streak}-day streak` : "";
   const lastNote = g.latestCheckin?.note ? `: "${g.latestCheckin.note}"` : "";
   const last = g.lastCheckinDate ? `last check-in ${g.lastCheckinDate}${lastNote}` : "no check-ins yet";
-  return `- ${g.title}${cat} (${g.cadence}, ${g.status})${target}${due} — ${last}`;
+  // The description carries what the goal actually is, so the model can propose
+  // a concrete next step rather than just naming the goal.
+  const desc = g.description ? `\n    ↳ ${g.description}` : "";
+  return `- ${g.title}${cat} (${g.cadence}, ${g.status})${target}${due}${streak} — ${last}${desc}`;
 }
 
 async function executeGoalsList(args: Record<string, unknown>): Promise<string> {

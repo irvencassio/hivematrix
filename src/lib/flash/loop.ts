@@ -65,6 +65,14 @@ export const READ_ONLY_FLASH_TOOLS: ReadonlySet<string> = new Set([
   "contacts_lookup",
   "calendar_today",
   "reminders_list",
+  // Goal reads — the heartbeat checklist and daily briefs are told to check
+  // goal progress; without these in the observe-only set the model was denied
+  // the tools at the DEFAULT (standard) autonomy, so the goal line was
+  // un-actionable unless the operator flipped to autonomous. Pure reads
+  // (goalsWithStatus / goalsDueToday); the writes (goal_upsert/goal_checkin)
+  // stay gated to standard+ / autonomous.
+  "goals_list",
+  "daily_review",
 ]);
 
 export interface FlashLoopOptions {

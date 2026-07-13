@@ -211,6 +211,20 @@ test("executeLaneTool: goal_upsert creates a goal, then goals_list shows it", as
   assert.match(listed, /health/);
 });
 
+test("executeLaneTool: goals_list surfaces description + target so a nudge can propose a next step", async () => {
+  await executeLaneTool("goal_upsert", {
+    title: "Pass the annuities exam",
+    category: "income",
+    cadence: "weekly",
+    target: "70% on a practice exam",
+    description: "Ohio combined Life + A&H license — study 30 min/day, sit a practice exam weekly",
+  }, ctx());
+  const listed = await executeLaneTool("goals_list", {}, ctx());
+  assert.match(listed, /Pass the annuities exam/);
+  assert.match(listed, /target: 70% on a practice exam/, "target is shown so the model knows 'done' looks like what");
+  assert.match(listed, /Ohio combined Life/, "description gives the model enough to propose a concrete next step");
+});
+
 test("executeLaneTool: goal_checkin resolves by fuzzy title and records progress", async () => {
   await executeLaneTool("goal_upsert", { title: "Italian practice", cadence: "daily" }, ctx());
   const out = await executeLaneTool("goal_checkin", { goal: "italian", note: "20 minutes on Duolingo" }, ctx());

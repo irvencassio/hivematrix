@@ -360,11 +360,19 @@ test("consumeFlashStreamLine: blank lines are no-ops", () => {
 // ------------------------------------------------------------------
 
 test("READ_ONLY_FLASH_TOOLS excludes every write-capable lane tool", () => {
-  for (const writeTool of ["mail_send", "message_send", "desktop_action", "persona_update", "escalate_to_task"]) {
+  for (const writeTool of ["mail_send", "message_send", "desktop_action", "persona_update", "escalate_to_task",
+    // Goal WRITES stay gated — the heartbeat may read goals but not mutate them
+    // at the observe-only (manual/standard) autonomy level.
+    "goal_upsert", "goal_checkin"]) {
     assert.equal(READ_ONLY_FLASH_TOOLS.has(writeTool), false, `${writeTool} must not be read-only`);
   }
   assert.ok(READ_ONLY_FLASH_TOOLS.has("brain_search"));
   assert.ok(READ_ONLY_FLASH_TOOLS.has("brain_read"));
+  // Goal READS are observe-only safe — this is what makes the heartbeat's
+  // goal-progress checklist actionable at the DEFAULT autonomy (regression
+  // guard: they were missing, so the goal line was silently denied).
+  assert.ok(READ_ONLY_FLASH_TOOLS.has("goals_list"), "heartbeat can read goals at default autonomy");
+  assert.ok(READ_ONLY_FLASH_TOOLS.has("daily_review"), "heartbeat can review what's due at default autonomy");
 });
 
 // ------------------------------------------------------------------

@@ -350,9 +350,13 @@ edit it as your standing "when idle, care about these" list.
 - Any pending approval sitting unanswered for hours?
 - Anything in today's daily note that needs follow-up?
 - Anything on WISHLIST.md worth an opportunistic check?
-- Any goal due or overdue today (check the goals list / goalsDueToday)?
+- Goals: run daily_review (or goals_list). For a goal that's due/overdue or has
+  gone cold, is there ONE concrete next step the operator could do in under 30
+  minutes? If so, name that single step — not the whole goal. Favour the one with
+  the most momentum to keep (a live streak) or the most at risk of slipping.
 
-Message the operator only when it is genuinely useful. Silence is fine.
+Message the operator only when it is genuinely useful — at most one goal nudge
+per pulse, and don't repeat a nudge the operator already saw today. Silence is fine.
 `;
 
 /** Ensure persona/HEARTBEAT.md exists; seed the default checklist if missing. Returns its content. */
