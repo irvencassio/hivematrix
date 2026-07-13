@@ -21,6 +21,7 @@ import { readToken } from "@/lib/auth/token";
 import type { CooDispatchResult } from "@/lib/coo/dispatch";
 import { PIM_TOOL_DEFINITIONS, executePimTool } from "./pim-tools";
 import { getAutonomyLevel } from "@/lib/config/autonomy";
+import { recordAudit } from "@/lib/audit/audit";
 
 /** Tool name → the connectivity capability that gates it. */
 const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
@@ -1010,19 +1011,26 @@ async function executeBrowserLaneRead(args: Record<string, unknown>, ctx: LaneTo
     ? args.freshness
     : "high") as "low" | "medium" | "high";
 
+  // Compliance/identity audit — Canopy parity: every Browser Lane read is on the
+  // trail with the requesting identity, never the answer text (only the query).
+  const audit = (status: string, target?: string): void =>
+    recordAudit({ ts: "", event: "browser:read", actor: ctx.requestedBy, project: ctx.project, prompt: query, target, status });
+
   const { requestBrowserLaneRead } = await import("@/lib/browser-lane/read-client");
   try {
     const res = await requestBrowserLaneRead({ query, requestedBy: ctx.requestedBy, project: ctx.project, freshness });
-    if (!res.ok) return `Error: Browser Lane returned HTTP ${res.status}`;
+    if (!res.ok) { audit(`http_${res.status}`); return `Error: Browser Lane returned HTTP ${res.status}`; }
     const data = await res.json() as import("@/lib/browser-lane/read-client").BrowserLaneReadResult;
-    if (data.status === "failed") return `Browser Lane failed: ${data.errorCode ?? "unknown error"}`;
+    if (data.status === "failed") { audit("failed"); return `Browser Lane failed: ${data.errorCode ?? "unknown error"}`; }
     const cites = data.citations?.length
       ? "\n\nSources:\n" + data.citations.map((c, i) => `[${i + 1}] ${c.title} — ${c.url}`).join("\n")
       : "";
     const esc = data.escalation?.needed ? `\n\n(Browser Lane suggests a rendered/authenticated workflow: ${data.escalation.reason ?? ""})` : "";
+    audit("ok", data.citations?.[0]?.url);
     return `${data.answer ?? "(no answer)"}${cites}${esc}`;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    audit("unreachable");
     return `Error: Browser Lane read service unreachable — ${msg}. Open the Browser Lane app (it serves reads on http://127.0.0.1:4011/answer) and retry.`;
   }
 }
@@ -1137,6 +1145,14 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: LaneTool
     });
     if (!res.ok) return `Error: failed to create Browser Lane task (HTTP ${res.status})`;
     const task = await res.json() as { _id?: string; title?: string };
+    // Audit the dispatch itself (start URL, login requirement, backing engine,
+    // requesting identity) — not just the eventual task_completed record.
+    recordAudit({
+      ts: "", event: "browser:job_created", actor: ctx.requestedBy, project: payload.project,
+      taskId: task._id, target: payload.startUrl,
+      summary: `${payload.title} — ${laneLabel}${payload.requiresLogin ? " (login required)" : ""}`,
+      status: "created",
+    });
     return `Created Browser Lane task ${task._id ?? "?"}: "${task.title ?? payload.title}" (${laneLabel}). It runs independently; its result appears on the board as that task completes.`;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

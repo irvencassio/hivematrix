@@ -27,6 +27,17 @@ test("recordAudit appends and readAudit returns newest-first, filtered, no secre
   assert.equal(readAudit({ event: "task_completed" }).length, 1);
 });
 
+test("recordAudit persists actor + target for lane identity/target parity (Canopy-style)", () => {
+  recordAudit({ event: "browser:read", ts: "2026-06-14T02:30:00.000Z", actor: "voice", target: "https://example.com", prompt: "who won the game", status: "ok" });
+  recordAudit({ event: "browser:job_created", ts: "2026-06-14T02:31:00.000Z", actor: "cli", target: "https://portal.example/login", taskId: "bl1", status: "created" });
+  const read = readAudit({ event: "browser:read" })[0];
+  assert.equal(read.actor, "voice", "actor identity is recorded");
+  assert.equal(read.target, "https://example.com", "target is recorded");
+  const job = readAudit({ event: "browser:job_created" })[0];
+  assert.equal(job.actor, "cli");
+  assert.equal(job.taskId, "bl1");
+});
+
 test("recordAudit clamps long fields", () => {
   recordAudit({ event: "task_completed", ts: "2026-06-14T03:00:00.000Z", taskId: "big", prompt: "x".repeat(9000) });
   const e = readAudit({ taskId: "big" })[0];

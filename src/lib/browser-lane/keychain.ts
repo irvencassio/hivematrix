@@ -41,6 +41,12 @@ export class BrowserLaneKeychain {
     await this.saveSecret({ account: accountKey(input.siteId, "password"), value: input.password, kind: "password" });
   }
 
+  // NOTE(audit parity): when a real credential_fill adapter is wired (today the
+  // MVP refuses it), the CALLER — which holds the requesting identity — must emit
+  // a `browser:credential_fill` audit event via recordAudit({ actor, target:
+  // siteId }) so credential use is on the compliance trail, matching Canopy's
+  // "every action logged with your identity". Never audit the secret value; this
+  // class deliberately stays context-free and is not the place to emit it.
   async readCredential(input: BrowserLaneCredentialReadInput): Promise<BrowserLaneCredential> {
     validateRef(input.credentialRef);
     const username = await this.readSecret(accountKey(input.siteId, "username"));

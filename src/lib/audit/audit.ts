@@ -24,6 +24,17 @@ export interface AuditEntry {
   filesChanged?: string[];
   diffStat?: string;
   turns?: number;
+  /**
+   * Who triggered this action — the operator/agent identity (e.g. "cli", "hive",
+   * "voice", "operator"). Canopy's "every action logged with your identity"
+   * guarantee; lanes that carry a requestedBy string should stamp it here.
+   */
+  actor?: string;
+  /**
+   * What the action touched — a URL, site id, host, credential ref, or session
+   * id. Never a secret value (scrubbed like every other field).
+   */
+  target?: string;
 }
 
 export interface RecordAuditOptions {
