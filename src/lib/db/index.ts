@@ -756,6 +756,10 @@ const MIGRATIONS: Migration[] = [
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_goal_checkins_goal ON goal_checkins(goalId, date);`),
+  // The explicit "do this next" per goal — the missing link that turns a goal
+  // from displayed to actionable. Nullable; every existing goal degrades to
+  // "no next action set" until one is written.
+  m("v36", `ALTER TABLE goals ADD COLUMN nextAction TEXT;`),
 ];
 
 // ------------------------------------------------------------------

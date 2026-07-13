@@ -225,6 +225,16 @@ test("executeLaneTool: goals_list surfaces description + target so a nudge can p
   assert.match(listed, /Ohio combined Life/, "description gives the model enough to propose a concrete next step");
 });
 
+test("executeLaneTool: goal_upsert stores a next action and goals_list surfaces it as the step to take", async () => {
+  await executeLaneTool("goal_upsert", {
+    title: "Ship the AI-consulting site",
+    category: "income",
+    nextAction: "draft the landing-page hero copy",
+  }, ctx());
+  const listed = await executeLaneTool("goals_list", {}, ctx());
+  assert.match(listed, /→ next: draft the landing-page hero copy/, "the explicit next step is surfaced for a nudge");
+});
+
 test("executeLaneTool: goal_checkin resolves by fuzzy title and records progress", async () => {
   await executeLaneTool("goal_upsert", { title: "Italian practice", cadence: "daily" }, ctx());
   const out = await executeLaneTool("goal_checkin", { goal: "italian", note: "20 minutes on Duolingo" }, ctx());

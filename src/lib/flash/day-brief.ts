@@ -44,6 +44,7 @@ export interface DayBriefGoalDue {
   title: string;
   category?: string | null;
   target?: string | null;
+  nextAction?: string | null;
   streak?: number;
 }
 
@@ -132,7 +133,7 @@ function defaultReadGoalsPersona(): string | null {
 /** Structured goals (goals/store.ts — distinct from the freeform GOALS.md persona
  * above) that are due or overdue today per their cadence rule. */
 function defaultListGoalsDueToday(): DayBriefGoalDue[] {
-  return defaultGoalsDueToday().map((g) => ({ title: g.title, category: g.category, target: g.target, streak: g.streak }));
+  return defaultGoalsDueToday().map((g) => ({ title: g.title, category: g.category, target: g.target, nextAction: g.nextAction, streak: g.streak }));
 }
 
 export const defaultDayBriefDeps: DayBriefDeps = {
@@ -216,7 +217,11 @@ export function goalsDueDetail(dueGoals: DayBriefGoalDue[]): string {
   if (dueGoals.length === 0) return "";
   return dueGoals
     .slice(0, 6)
-    .map((g) => `- ${g.title}${g.category ? ` [${g.category}]` : ""}${g.target ? ` — target: ${g.target}` : ""}${g.streak && g.streak > 1 ? ` (${g.streak}-day streak)` : ""}`)
+    .map((g) => {
+      const meta = `${g.category ? ` [${g.category}]` : ""}${g.target ? ` — target: ${g.target}` : ""}${g.streak && g.streak > 1 ? ` (${g.streak}-day streak)` : ""}`;
+      const next = g.nextAction ? ` → next: ${g.nextAction}` : "";
+      return `- ${g.title}${meta}${next}`;
+    })
     .join("\n");
 }
 

@@ -22,6 +22,8 @@ export interface Goal {
   cadence: GoalCadence;
   target: string | null;
   metricUnit: string | null;
+  /** The explicit "do this next" step — the one concrete action toward this goal. */
+  nextAction: string | null;
   status: GoalStatus;
   sortOrder: number;
   createdAt: string;
@@ -53,6 +55,7 @@ interface GoalRow {
   cadence: string;
   target: string | null;
   metricUnit: string | null;
+  nextAction: string | null;
   status: string;
   sortOrder: number;
   createdAt: string;
@@ -75,6 +78,7 @@ export interface UpsertGoalInput {
   cadence?: GoalCadence;
   target?: string | null;
   metricUnit?: string | null;
+  nextAction?: string | null;
   status?: GoalStatus;
   sortOrder?: number;
 }
@@ -95,16 +99,17 @@ export function upsertGoal(input: UpsertGoalInput): Goal {
         cadence: input.cadence ?? existing.cadence,
         target: input.target !== undefined ? input.target : existing.target,
         metricUnit: input.metricUnit !== undefined ? input.metricUnit : existing.metricUnit,
+        nextAction: input.nextAction !== undefined ? input.nextAction : existing.nextAction,
         status: input.status ?? existing.status,
         sortOrder: input.sortOrder ?? existing.sortOrder,
         updatedAt: now,
       };
       db.prepare(
-        `UPDATE goals SET title = ?, category = ?, description = ?, cadence = ?, target = ?, metricUnit = ?, status = ?, sortOrder = ?, updatedAt = ?
+        `UPDATE goals SET title = ?, category = ?, description = ?, cadence = ?, target = ?, metricUnit = ?, nextAction = ?, status = ?, sortOrder = ?, updatedAt = ?
          WHERE id = ?`,
       ).run(
         merged.title, merged.category, merged.description, merged.cadence, merged.target,
-        merged.metricUnit, merged.status, merged.sortOrder, merged.updatedAt, merged.id,
+        merged.metricUnit, merged.nextAction, merged.status, merged.sortOrder, merged.updatedAt, merged.id,
       );
       return rowToGoal(merged);
     }
@@ -119,17 +124,18 @@ export function upsertGoal(input: UpsertGoalInput): Goal {
     cadence: input.cadence ?? "weekly",
     target: input.target ?? null,
     metricUnit: input.metricUnit ?? null,
+    nextAction: input.nextAction ?? null,
     status: input.status ?? "active",
     sortOrder: input.sortOrder ?? 0,
     createdAt: now,
     updatedAt: now,
   };
   db.prepare(
-    `INSERT INTO goals (id, title, category, description, cadence, target, metricUnit, status, sortOrder, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO goals (id, title, category, description, cadence, target, metricUnit, nextAction, status, sortOrder, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     row.id, row.title, row.category, row.description, row.cadence, row.target,
-    row.metricUnit, row.status, row.sortOrder, row.createdAt, row.updatedAt,
+    row.metricUnit, row.nextAction, row.status, row.sortOrder, row.createdAt, row.updatedAt,
   );
   return rowToGoal(row);
 }

@@ -943,6 +943,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   /* Rightmost column: the full description paragraph, never clamped. */
   .tools-desc { font-size:12px; color:var(--text); line-height:1.5; align-self:start; min-width:0;
     overflow-wrap:break-word; }
+  /* Goal cards are a full-width stack (title row, details, next step), not the
+     two-column capability layout the Tools inventory uses. */
+  .tools-row.goal-row { display:block; }
+  /* Goal card "do this next" step — the actionable hook; click to set/edit. */
+  .goal-next { margin-top:6px; font-size:11.5px; color:var(--accent);
+    cursor:pointer; border-top:1px dashed var(--border); padding-top:6px; }
+  .goal-next:hover { color:var(--accent-2); }
   .tools-detail { grid-column:1 / -1; margin-top:2px; padding-top:8px; border-top:1px solid var(--border);
     font-size:11.5px; color:var(--text); display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
     gap:4px 18px; }
@@ -3182,7 +3189,7 @@ function goalRowHtml(g) {
     ? 'last: ' + esc(g.latestCheckin.date) + (g.latestCheckin.note ? ' — ' + esc(g.latestCheckin.note) : '')
     : 'no check-ins yet';
   const count = (g.checkinCount != null ? g.checkinCount : 0);
-  return '<div class="tools-row" style="cursor:default">'
+  return '<div class="tools-row goal-row" style="cursor:default">'
     + '<div class="tools-row-top">'
     + '<span class="tools-name" style="font-family:inherit;font-size:13.5px">' + esc(g.title) + '</span>'
     + '<span class="tools-kind">' + esc(g.cadence || 'weekly') + '</span>' + due + paused
@@ -3190,6 +3197,10 @@ function goalRowHtml(g) {
     + '</div>'
     + '<div class="tools-desc">' + esc(last) + ' · ' + count + ' check-in' + (count === 1 ? '' : 's')
     + (g.description ? ' · ' + esc(g.description) : '') + '</div>'
+    // The explicit "do this next" step — the actionable hook. Clickable to set/edit.
+    + '<div class="goal-next" onclick="goalSetNext(\'' + attrEnc(g.id) + '\',\'' + attrEnc(g.title) + '\',\'' + attrEnc(g.nextAction || '') + '\')" title="Click to set the next step">'
+    + (g.nextAction ? '→ next: ' + esc(g.nextAction) : '+ set next step')
+    + '</div>'
     + '</div>';
 }
 
@@ -3248,11 +3259,24 @@ async function goalAdd() {
   if (!title) return;
   const category = await hmPrompt('Category (business / health / faith / language / personal):', 'personal');
   const cadence = await hmPrompt('Cadence (daily / weekly / milestone):', 'weekly');
+  const nextAction = await hmPrompt('Next step (one concrete thing to do soon — optional):', '');
   try {
-    await api('/goals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: title, category: category || 'personal', cadence: cadence || 'weekly' }) });
+    await api('/goals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: title, category: category || 'personal', cadence: cadence || 'weekly', nextAction: nextAction || undefined }) });
     hmToast('Goal added ✓', 'ok');
     loadGoals();
   } catch (e) { hmToast('Could not add goal', 'err'); }
+}
+
+// Set/edit a goal's single "do this next" step — the actionable hook the
+// heartbeat, morning brief, and chat surface. Upserts by id.
+async function goalSetNext(id, title, current) {
+  const next = await hmPrompt('Next step for "' + (title || 'goal') + '" — one concrete thing to do soon:', current || '');
+  if (next === null) return;
+  try {
+    await api('/goals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id, title: title, nextAction: next }) });
+    hmToast('Next step set ✓', 'ok');
+    loadGoals();
+  } catch (e) { hmToast('Could not set next step', 'err'); }
 }
 function obsKpi(v, l) { return '<div class="obs-kpi"><div class="v">' + esc(String(v)) + '</div><div class="l">' + esc(l) + '</div></div>'; }
 

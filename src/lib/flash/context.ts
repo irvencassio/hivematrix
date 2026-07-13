@@ -127,7 +127,8 @@ function loadGoalsDueSection(): string {
       const streak = g.streak && g.streak > 1 ? ` · ${g.streak}-day streak` : "";
       const target = g.target ? ` · target: ${g.target}` : "";
       const desc = g.description ? ` — ${g.description}` : "";
-      return `- ${g.title}${g.category ? ` [${g.category}]` : ""}${target}${streak}${desc}`;
+      const next = g.nextAction ? `\n  → next: ${g.nextAction}` : "";
+      return `- ${g.title}${g.category ? ` [${g.category}]` : ""}${target}${streak}${desc}${next}`;
     });
     return "## Goals due today\n"
       + "These are the operator's active goals due today. If it fits the conversation "

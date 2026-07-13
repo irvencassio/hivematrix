@@ -35,6 +35,18 @@ test("upsertGoal: no id generates a new one, defaults cadence to weekly and stat
   assert.ok(g.id);
   assert.equal(g.cadence, "weekly");
   assert.equal(g.status, "active");
+  assert.equal(g.nextAction, null, "next action defaults to null");
+});
+
+test("upsertGoal: nextAction round-trips and is preserved when untouched on update", () => {
+  const g = upsertGoal({ title: "Pass the annuities exam", nextAction: "sit a 30-min practice exam" });
+  assert.equal(g.nextAction, "sit a 30-min practice exam");
+  // Updating another field leaves nextAction intact...
+  const same = upsertGoal({ id: g.id, title: "Pass the annuities exam", status: "active" });
+  assert.equal(same.nextAction, "sit a 30-min practice exam");
+  // ...and it can be advanced as progress is made.
+  const advanced = upsertGoal({ id: g.id, title: "Pass the annuities exam", nextAction: "book the exam slot" });
+  assert.equal(advanced.nextAction, "book the exam slot");
 });
 
 test("listGoals: returns goals ordered by sortOrder then createdAt, filterable by status", () => {

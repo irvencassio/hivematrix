@@ -2388,3 +2388,16 @@ test("command options picker: panels render options and Run assembles from picks
   // Raw box overrides the picks (backward compatible with /commands/run).
   assert.match(js, /if \(raw\) return raw;/);
 });
+
+test("goal card surfaces the next-action hook and an affordance to set it", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const row = fnBody(js, "goalRowHtml");
+  // The '→ next: …' step when set, and a '+ set next step' affordance when not.
+  assert.match(row, /→ next: /, "the concrete next step is rendered");
+  assert.match(row, /\+ set next step/, "empty goals offer a way to set the next step");
+  assert.match(row, /goalSetNext\(/, "clicking routes to goalSetNext");
+  // goalSetNext upserts nextAction by id via POST /goals.
+  const setNext = fnBody(js, "goalSetNext");
+  assert.match(setNext, /nextAction: next/, "it saves the entered next step");
+  assert.match(setNext, /'\/goals'/, "it upserts via the goals endpoint");
+});

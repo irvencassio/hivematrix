@@ -2071,6 +2071,7 @@ export function createDaemonServer() {
           cadence: typeof body.cadence === "string" ? body.cadence as "daily" | "weekly" | "milestone" : undefined,
           target: typeof body.target === "string" ? body.target : undefined,
           metricUnit: typeof body.metricUnit === "string" ? body.metricUnit : undefined,
+          nextAction: typeof body.nextAction === "string" ? body.nextAction : undefined,
           status: typeof body.status === "string" ? body.status as "active" | "paused" | "done" : undefined,
           sortOrder: typeof body.sortOrder === "number" ? body.sortOrder : undefined,
         });

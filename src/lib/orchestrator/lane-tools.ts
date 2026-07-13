@@ -362,6 +362,7 @@ export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
           cadence: { type: "string", enum: ["daily", "weekly", "milestone"], description: "How often it should be checked in on (default weekly)" },
           target: { type: "string", description: "The target/definition of done, e.g. \"$500K ARR\", \"run 5k\"" },
           metricUnit: { type: "string", description: "Unit for numeric check-in values, e.g. \"miles\", \"minutes\", \"USD\"" },
+          nextAction: { type: "string", description: "The single concrete next step toward this goal, doable soon (e.g. \"sit a 30-min practice exam\", \"today's Italian lesson\"). Update it as progress is made." },
           status: { type: "string", enum: ["active", "paused", "done"], description: "Goal status (default active)" },
         },
         required: ["title"],
@@ -534,7 +535,7 @@ export async function executeLaneTool(
 // "brain" capability and stay available offline. Every executor dynamic-
 // imports the store, mirroring brain_read/brain_search above.
 
-function formatGoalLine(g: { title: string; category: string | null; cadence: string; status: string; target: string | null; description?: string | null; streak?: number; lastCheckinDate: string | null; latestCheckin: { note: string | null } | null; dueToday: boolean }): string {
+function formatGoalLine(g: { title: string; category: string | null; cadence: string; status: string; target: string | null; description?: string | null; nextAction?: string | null; streak?: number; lastCheckinDate: string | null; latestCheckin: { note: string | null } | null; dueToday: boolean }): string {
   const cat = g.category ? ` [${g.category}]` : "";
   const target = g.target ? ` — target: ${g.target}` : "";
   const due = g.dueToday ? " (due today)" : "";
@@ -543,10 +544,12 @@ function formatGoalLine(g: { title: string; category: string | null; cadence: st
   const streak = g.streak && g.streak > 1 ? ` — ${g.streak}-day streak` : "";
   const lastNote = g.latestCheckin?.note ? `: "${g.latestCheckin.note}"` : "";
   const last = g.lastCheckinDate ? `last check-in ${g.lastCheckinDate}${lastNote}` : "no check-ins yet";
-  // The description carries what the goal actually is, so the model can propose
-  // a concrete next step rather than just naming the goal.
+  // The description carries what the goal actually is; the next action is THE
+  // step to surface — call it out on its own line so a nudge has something
+  // concrete to say rather than just naming the goal.
   const desc = g.description ? `\n    ↳ ${g.description}` : "";
-  return `- ${g.title}${cat} (${g.cadence}, ${g.status})${target}${due}${streak} — ${last}${desc}`;
+  const next = g.nextAction ? `\n    → next: ${g.nextAction}` : "";
+  return `- ${g.title}${cat} (${g.cadence}, ${g.status})${target}${due}${streak} — ${last}${desc}${next}`;
 }
 
 async function executeGoalsList(args: Record<string, unknown>): Promise<string> {
@@ -584,6 +587,7 @@ async function executeGoalUpsert(args: Record<string, unknown>): Promise<string>
     cadence,
     target: typeof args.target === "string" ? args.target.trim() : undefined,
     metricUnit: typeof args.metricUnit === "string" ? args.metricUnit.trim() : undefined,
+    nextAction: typeof args.nextAction === "string" ? args.nextAction.trim() : undefined,
     status,
   });
   const verb = args.id ? "Updated" : "Created";
