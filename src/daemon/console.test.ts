@@ -834,8 +834,8 @@ test("Brain / Memory Review nav opens a three-pane read-only screen wired to the
   assert.match(js, /function showBrain\(/);
   assert.match(js, /function brainPanelHtml\(/);
   assert.match(js, /function renderBrainPanel\(/);
-  assert.match(js, /brainNav.*classList\.toggle\('active', _brainState\.panelOpen\)/s, "Brain nav active state follows its panel");
-  assert.match(js, /overviewActive = .* !_brainState\.panelOpen/, "Overview is not active while Brain is open");
+  assert.match(fnBody(js, "syncNav"), /brainNav:\s*_brainState\.panelOpen/, "Brain nav active state follows its panel");
+  assert.match(js, /overviewActive = .* !panelOpen/, "Overview is not active while a panel (incl. Brain) is open");
   // Wired to the Phase-1 server endpoints, not mocked data.
   assert.match(js, /api\('\/brain\/projects'\)/);
   assert.match(js, /api\('\/brain\/docs\?project='/);
@@ -918,8 +918,8 @@ test("Roles screen nav opens a three-pane read-only screen wired to the real /ag
   assert.match(js, /function showRoles\(/);
   assert.match(js, /function rolesPanelHtml\(/);
   assert.match(js, /function renderRolesPanel\(/);
-  assert.match(js, /rolesNav.*classList\.toggle\('active', _rolesState\.panelOpen\)/s, "Roles nav active state follows its panel");
-  assert.match(js, /overviewActive = .* !_rolesState\.panelOpen/, "Overview is not active while Roles is open");
+  assert.match(fnBody(js, "syncNav"), /rolesNav:\s*_rolesState\.panelOpen/, "Roles nav active state follows its panel");
+  assert.match(js, /overviewActive = .* !panelOpen/, "Overview is not active while a panel (incl. Roles) is open");
   // Wired to the real Spec2-Phase1 server endpoints, not mocked data.
   assert.match(js, /api\('\/agents\/profiles'\)/);
   assert.match(js, /api\('\/agents\/profiles\/' \+ encodeURIComponent\(id\)\)/);
@@ -2311,9 +2311,17 @@ test("primary left nav uses a single active color convention", () => {
   assert.match(CONSOLE_HTML, /id="newTaskNav"/, "New task has a tracked nav id");
   assert.match(CONSOLE_HTML, /\.addbtn \{[^}]*color:\s*var\(--text\)/, "New task is neutral when inactive");
   assert.match(CONSOLE_HTML, /\.addbtn\.active[^}]*color:\s*var\(--accent\)/, "New task uses accent only when active");
+  // Nav highlight funnels through a single syncNav() so exactly one item is lit.
+  const sync = fnBody(js, "syncNav");
   assert.match(js, /overviewActive = .* !_taskFormInSession/, "Overview is not active while New task is open");
-  assert.match(js, /newTaskNav.*classList\.toggle\("active", _taskFormInSession\)/s, "New task active state follows the center form");
-  assert.match(js, /flashNav.*classList\.toggle\('active', _flashState\.panelOpen\)/s, "Flash active state follows the center panel");
+  assert.match(sync, /newTaskNav:\s*_taskFormInSession/, "New task active state follows the center form");
+  assert.match(sync, /flashNav:\s*_flashState\.panelOpen/, "Flash active state follows the center panel");
+  // Regression guard for the double-highlight bug: Roles must be in the single
+  // sync (it was omitted before), and showOverview must call syncNav so a stale
+  // panel nav can't stay lit after returning to Overview.
+  assert.match(sync, /rolesNav:\s*_rolesState\.panelOpen/, "Roles is included in the single nav sync");
+  assert.match(fnBody(js, "showOverview"), /syncNav\(\)/, "showOverview re-syncs the nav (no stale highlight)");
+  assert.match(fnBody(js, "showOverview"), /if \(_taskFormInSession\) _closeNewTaskPanel\(\)/, "showOverview closes an open New Task form so its nav can't stay lit");
 });
 
 test("runSelectedCommand sends both project and projectPath from the cmd multi-picker state", () => {

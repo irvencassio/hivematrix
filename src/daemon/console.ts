@@ -2075,6 +2075,7 @@ function showOverview() {
   state.selectedSkillOrCommand = null;
   _skSel = '';
   _ctxTask = null;
+  if (_taskFormInSession) _closeNewTaskPanel();
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
@@ -2085,6 +2086,7 @@ function showOverview() {
   renderBoard();
   renderSkillList();
   renderOverview();
+  syncNav();
 }
 function focusBoardLane(key) {
   const allOtherKeys = LANE_DEFS.map(L => L.key).filter(k => k !== key);
@@ -2093,17 +2095,31 @@ function focusBoardLane(key) {
   const board = document.getElementById("board");
   if (board) board.scrollIntoView({ behavior: "smooth", block: "start" });
 }
-function updateOverviewNav() {
-  const nav = document.getElementById("overviewNav");
-  const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !_flashState.panelOpen && !_brainState.panelOpen && !_rolesState.panelOpen && !_toolsState.panelOpen && !_obsState.panelOpen && !_goalsState.panelOpen;
-  if (nav) nav.classList.toggle("active", overviewActive);
-  const newTaskNav = document.getElementById("newTaskNav");
-  if (newTaskNav) newTaskNav.classList.toggle("active", _taskFormInSession);
-  updateFlashNav();
-  updateBrainNav();
-  updateToolsNav();
-  updateGoalsNav();
+// Single source of truth for left-nav highlight. Every show*/panel entry point
+// and the periodic refresh route through this, so exactly one nav item is ever
+// lit. Previously eight functions synced overlapping subsets (Roles was omitted
+// from the overview sync, and showOverview synced nothing) — which left a stale
+// item highlighted alongside the active one ("menus duplicated").
+function syncNav() {
+  const panelOpen = _flashState.panelOpen || _brainState.panelOpen || _rolesState.panelOpen
+    || _toolsState.panelOpen || _obsState.panelOpen || _goalsState.panelOpen;
+  const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !panelOpen;
+  const active = {
+    overviewNav: overviewActive,
+    newTaskNav: _taskFormInSession,
+    flashNav: _flashState.panelOpen,
+    brainNav: _brainState.panelOpen,
+    rolesNav: _rolesState.panelOpen,
+    toolsNav: _toolsState.panelOpen,
+    goalsNav: _goalsState.panelOpen,
+  };
+  for (const id in active) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle("active", !!active[id]);
+  }
 }
+// Kept for existing call sites; all nav sync now funnels through syncNav().
+function updateOverviewNav() { syncNav(); }
 function isEditableTarget(el) {
   if (!el) return false;
   const tag = (el.tagName || "").toLowerCase();
@@ -3152,10 +3168,7 @@ function showGoals() {
   loadGoals();
 }
 
-function updateGoalsNav() {
-  const nav = document.getElementById('goalsNav');
-  if (nav) nav.classList.toggle('active', _goalsState.panelOpen);
-}
+function updateGoalsNav() { syncNav(); }
 
 async function loadGoals() {
   _goalsState.error = false;
@@ -5895,6 +5908,7 @@ function showNewTaskPanel() {
   session.innerHTML = '<div class="new-task-panel"><h2>New task</h2></div>';
   session.querySelector(".new-task-panel").appendChild(form);
   form.classList.add("open");
+  syncNav();
   const desc = document.getElementById("t_desc");
   if (desc) setTimeout(() => desc.focus(), 20);
 }
@@ -5907,6 +5921,7 @@ function _closeNewTaskPanel() {
   }
   _taskFormInSession = false;
   renderOverview();
+  syncNav();
 }
 
 // --- Models / Settings ---
@@ -6988,10 +7003,7 @@ function onFlashAppended(ev) {
   hydrateFlashThread();
 }
 
-function updateFlashNav() {
-  const nav = document.getElementById('flashNav');
-  if (nav) nav.classList.toggle('active', _flashState.panelOpen);
-}
+function updateFlashNav() { syncNav(); }
 
 // ── Brain / Memory Review panel ─────────────────────────────────────────
 // Read-only per-project doc browser (docs/superpowers/specs/2026-07-09-brain-memory-review-console-design.md,
@@ -7092,10 +7104,7 @@ function showBrain() {
   loadBrainProjects();
 }
 
-function updateBrainNav() {
-  const nav = document.getElementById('brainNav');
-  if (nav) nav.classList.toggle('active', _brainState.panelOpen);
-}
+function updateBrainNav() { syncNav(); }
 
 // Live sync (§6): archive/exclude/restore/delete from another surface (or
 // another operator session) reflects here without a manual refresh.
@@ -7615,10 +7624,7 @@ function showRoles() {
   loadRolesRoster();
 }
 
-function updateRolesNav() {
-  const nav = document.getElementById('rolesNav');
-  if (nav) nav.classList.toggle('active', _rolesState.panelOpen);
-}
+function updateRolesNav() { syncNav(); }
 
 // ── Tools / Capabilities panel ─────────────────────────────────────────
 // Read-only inventory of everything the assistant can do: native lane tools,
@@ -7649,10 +7655,7 @@ function showTools() {
   loadCapabilities();
 }
 
-function updateToolsNav() {
-  const nav = document.getElementById('toolsNav');
-  if (nav) nav.classList.toggle('active', _toolsState.panelOpen);
-}
+function updateToolsNav() { syncNav(); }
 
 async function loadCapabilities() {
   _toolsState.error = false;
