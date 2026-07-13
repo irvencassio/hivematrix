@@ -527,12 +527,12 @@ test("inline observability panel nests per-model rows under each provider row", 
   assert.match(renderObservability, /obsModelLabel\(m\.key\)/, "model rows use the display-cleanup helper");
 });
 
-test("dashboard modal offers a provider/model group-by toggle for the breakdown table", () => {
-  assert.match(CONSOLE_HTML, /id="obs_group_modal"/, "group toggle present");
-  assert.match(CONSOLE_HTML, /onclick="setObsGroupModal\('provider'\)"/);
-  assert.match(CONSOLE_HTML, /onclick="setObsGroupModal\('model'\)"/);
+test("dashboard offers a provider/model group-by toggle for the breakdown table", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /function setObsGroupModal\(g\) \{ _obsGroup = g;/);
+  assert.match(js, /id="obs_group_panel"/, "group toggle present in the center panel");
+  assert.match(js, /onclick="setObsGroupPanel\(\\?'provider\\?'\)"/);
+  assert.match(js, /onclick="setObsGroupPanel\(\\?'model\\?'\)"/);
+  assert.match(js, /function setObsGroupPanel\(g\) \{ _obsGroup = g;/);
   const renderObsDashboard = extractBetween(js, "async function renderObsDashboard(target)", "function renderConn()");
   assert.match(renderObsDashboard, /const groupByModel = _obsGroup === "model"/);
   assert.match(renderObsDashboard, /detail\.totals\.byModel/, "model mode reads the same totals payload — no second query");
@@ -557,9 +557,10 @@ test("PROVIDERS section shows installed/not-set-up status with an Install afford
   assert.match(renderProviderStatus, /mdl-card/, "styled like the Backends cards, not a separate toggle-row list");
 });
 
-test("dashboard modal offers a 1h window with 5-minute bucket ticks", () => {
-  assert.match(CONSOLE_HTML, /onclick="setObsWindowModal\('1h'\)"/, "1h window button present");
+test("dashboard offers a 1h window with 5-minute bucket ticks", () => {
   const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /const wins = \["1h",/, "1h window offered in the center panel toggles");
+  assert.match(js, /setObsWindowPanel\(/, "window buttons wire to setObsWindowPanel");
   const obsBucketLabel = extractFunctionBlock(js, "obsBucketLabel");
   assert.match(obsBucketLabel, /if \(unit === "minute"\) return \(t \|\| ""\)\.slice\(11, 16\)/, "minute-unit ticks render HH:MM, not the date");
 });

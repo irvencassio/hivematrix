@@ -1469,27 +1469,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   </div>
 </div>
 
-<!-- Observability full dashboard popup (opens from "Full dashboard" link, separate from Settings). -->
-<div class="overlay" id="obsOverlay">
-  <div class="modal">
-    <h1>Observability <span class="x" onclick="closeObsDashboard()">✕</span></h1>
-    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px">
-      <span class="obs-win" id="obs_win_modal">
-        <button data-w="1h" onclick="setObsWindowModal('1h')">1h</button>
-        <button data-w="24h" onclick="setObsWindowModal('24h')">24h</button>
-        <button data-w="7d" class="on" onclick="setObsWindowModal('7d')">7d</button>
-        <button data-w="30d" onclick="setObsWindowModal('30d')">30d</button>
-      </span>
-      <span class="obs-win" id="obs_group_modal">
-        <button data-g="provider" class="on" onclick="setObsGroupModal('provider')">by provider</button>
-        <button data-g="model" onclick="setObsGroupModal('model')">by model</button>
-      </span>
-      <button class="copybtn" onclick="renderObsDashboard('obsDashModal')">↻ Refresh</button>
-    </div>
-    <div class="muted" style="font-size:11px;margin-bottom:10px">Tokens, tasks, latency and prompt-cache across Claude and Codex (ChatGPT).</div>
-    <div id="obsDashModal"><div class="muted">Loading…</div></div>
-  </div>
-</div>
+<!-- Observability now opens in the center panel (showObs) — the old modal overlay
+     was dead code (nothing added .open) and was removed. -->
 
 <!-- Generic dialog (replaces native alert/confirm/prompt, which don't work in the webview). -->
 <input type="file" id="skillFileInput" accept=".md,text/markdown,.txt" style="display:none" onchange="onSkillFileBrowsed(this)" />
@@ -3078,14 +3059,12 @@ async function renderObservability() {
   el.innerHTML = html;
 }
 
-// --- Observability dashboard (dedicated popup) ------------------------------
-// The full Observability dashboard now takes over the center section (like the
-// New Task / Tools panels) instead of a cramped modal — openObsDashboard routes
-// to showObs. The old overlay functions are kept as harmless no-op-ish fallbacks.
+// --- Observability dashboard ------------------------------------------------
+// The full Observability dashboard takes over the center section (like the
+// New Task / Tools panels); openObsDashboard routes to showObs. The old modal
+// overlay + its setObs*Modal/closeObsDashboard helpers were dead code (nothing
+// ever opened the overlay) and have been removed.
 function openObsDashboard() { showObs(); }
-function closeObsDashboard() { const o = document.getElementById("obsOverlay"); if (o) o.classList.remove("open"); }
-function setObsWindowModal(w) { _obsWindow = w; renderObsDashboard("obsDashModal"); }
-function setObsGroupModal(g) { _obsGroup = g; renderObsDashboard("obsDashModal"); }
 function setObsWindowPanel(w) { _obsWindow = w; renderObsDashboard("obsDashPanel"); }
 function setObsGroupPanel(g) { _obsGroup = g; renderObsDashboard("obsDashPanel"); }
 
@@ -3402,12 +3381,10 @@ async function renderObsDashboard(target) {
   target = target || "obsDash";
   const el = document.getElementById(target);
   if (!el) return;
-  const winSel = target === "obsDashModal" ? "#obs_win_modal button"
-    : target === "obsDashPanel" ? "#obs_win_panel button" : "#obs_win button";
+  const winSel = target === "obsDashPanel" ? "#obs_win_panel button" : "#obs_win button";
   document.querySelectorAll(winSel).forEach(function (b) { b.classList.toggle("on", b.dataset.w === _obsWindow); });
-  if (target === "obsDashModal" || target === "obsDashPanel") {
-    const gsel = target === "obsDashPanel" ? "#obs_group_panel button" : "#obs_group_modal button";
-    document.querySelectorAll(gsel).forEach(function (b) { b.classList.toggle("on", b.dataset.g === _obsGroup); });
+  if (target === "obsDashPanel") {
+    document.querySelectorAll("#obs_group_panel button").forEach(function (b) { b.classList.toggle("on", b.dataset.g === _obsGroup); });
   }
   el.innerHTML = '<div class="muted">Loading…</div>';
   let s, detail;
