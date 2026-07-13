@@ -9,6 +9,7 @@ import {
   reviewAttentionCount,
   loopClosureLine,
   goalsDueLine,
+  goalsDueDetail,
   completedLine,
   openLine,
   queuedLine,
@@ -105,6 +106,25 @@ test("goalsDueLine: null when empty, names the first due goal otherwise", () => 
   assert.equal(goalsDueLine(one), "Goal due today: Read scripture.");
   const two: DayBriefGoalDue[] = [...one, { title: "Log a workout" }];
   assert.equal(goalsDueLine(two), "2 goals due today, incl. Read scripture.");
+});
+
+test("goalsDueLine: calls out a live streak so the nudge is 'keep the run going'", () => {
+  assert.equal(
+    goalsDueLine([{ title: "Italian practice", streak: 5 }]),
+    "Goal due today: Italian practice (keep your 5-day streak).",
+  );
+  // streak of 1 (or absent) adds no cue — nothing to protect yet.
+  assert.equal(goalsDueLine([{ title: "Italian practice", streak: 1 }]), "Goal due today: Italian practice.");
+});
+
+test("goalsDueDetail: compact title/target/streak block for the ONE-thing model, empty when nothing due", () => {
+  assert.equal(goalsDueDetail([]), "");
+  const detail = goalsDueDetail([
+    { title: "Pass the annuities exam", category: "income", target: "70% practice", streak: 3 },
+    { title: "Zone-2 cardio", category: "fitness" },
+  ]);
+  assert.match(detail, /- Pass the annuities exam \[income\] — target: 70% practice \(3-day streak\)/);
+  assert.match(detail, /- Zone-2 cardio \[fitness\]/);
 });
 
 test("completedLine / openLine / queuedLine: empty vs counted", () => {

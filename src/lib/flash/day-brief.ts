@@ -42,6 +42,9 @@ export interface VoiceLoopClosure {
 
 export interface DayBriefGoalDue {
   title: string;
+  category?: string | null;
+  target?: string | null;
+  streak?: number;
 }
 
 const MAX_LINES = 6;
@@ -129,7 +132,7 @@ function defaultReadGoalsPersona(): string | null {
 /** Structured goals (goals/store.ts — distinct from the freeform GOALS.md persona
  * above) that are due or overdue today per their cadence rule. */
 function defaultListGoalsDueToday(): DayBriefGoalDue[] {
-  return defaultGoalsDueToday().map((g) => ({ title: g.title }));
+  return defaultGoalsDueToday().map((g) => ({ title: g.title, category: g.category, target: g.target, streak: g.streak }));
 }
 
 export const defaultDayBriefDeps: DayBriefDeps = {
@@ -199,9 +202,22 @@ export function reviewLine(inbox: WorkflowInbox | null | undefined): string {
 export function goalsDueLine(dueGoals: DayBriefGoalDue[]): string | null {
   if (dueGoals.length === 0) return null;
   const first = dueGoals[0].title;
+  // A live streak is worth protecting — call it out so the nudge lands as "keep
+  // the run going" rather than a flat reminder. Only when streak data is present.
+  const streak = dueGoals[0].streak && dueGoals[0].streak > 1 ? ` (keep your ${dueGoals[0].streak}-day streak)` : "";
   return dueGoals.length === 1
-    ? `Goal due today: ${first}.`
-    : `${dueGoals.length} goals due today, incl. ${first}.`;
+    ? `Goal due today: ${first}${streak}.`
+    : `${dueGoals.length} goals due today, incl. ${first}${streak}.`;
+}
+
+/** Pure: compact "title — target" detail for the due goals, fed to the ONE-thing
+ * model so it can name a concrete goal-tied next step. Empty when nothing's due. */
+export function goalsDueDetail(dueGoals: DayBriefGoalDue[]): string {
+  if (dueGoals.length === 0) return "";
+  return dueGoals
+    .slice(0, 6)
+    .map((g) => `- ${g.title}${g.category ? ` [${g.category}]` : ""}${g.target ? ` — target: ${g.target}` : ""}${g.streak && g.streak > 1 ? ` (${g.streak}-day streak)` : ""}`)
+    .join("\n");
 }
 
 /** Pure: recent voice loop-closure line, or null when there's nothing to say. */
@@ -295,10 +311,13 @@ export async function composeDayBrief(kind: DayBriefKind, deps: DayBriefDeps = d
     const dueGoalsLine = goalsDueLine(dueGoals);
     if (dueGoalsLine) lines.push(dueGoalsLine);
 
-    // dueGoalsLine (when present) is already in `lines` here, so it flows into
-    // the "ONE thing" facts string below along with everything else.
+    // dueGoalsLine (when present) is already in `lines`; additionally feed the
+    // structured due-goal targets to the ONE-thing model so it can name a
+    // concrete goal-tied next step, not just echo the brief.
     const goalsPersona = safeSyncOrNull(deps.readGoalsPersona);
-    const oneThing = await composeOneThingLine(lines.join(" "), goalsPersona, deps.chatComplete);
+    const detail = goalsDueDetail(dueGoals);
+    const oneThingFacts = detail ? `${lines.join(" ")}\n\nGoals due today:\n${detail}` : lines.join(" ");
+    const oneThing = await composeOneThingLine(oneThingFacts, goalsPersona, deps.chatComplete);
     if (oneThing) lines.push(oneThing);
   } else {
     const midnight = new Date(now);
