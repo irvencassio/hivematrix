@@ -922,6 +922,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .tools-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
   .tools-dot.on { background:var(--ok,#4caf50); }
   .tools-dot.off { background:var(--muted); }
+  .tools-dot.err { background:var(--err); }
   .tools-dot.lib { background:#6b7280; }
   .tools-name { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; color:var(--text); font-weight:600;
     overflow:hidden; text-overflow:ellipsis; }
@@ -4304,9 +4305,9 @@ async function renderMcp() {
     const el = document.getElementById('mcp');
     if (!el) return;
     el.innerHTML = servers.length ? servers.map(s => {
-      const dot = s.status === 'reachable' ? 'var(--ok)' : (s.status === 'unreachable' ? 'var(--err)' : 'var(--muted)');
+      const dotCls = s.status === 'reachable' ? 'on' : (s.status === 'unreachable' ? 'err' : 'off');
       return '<div style="display:flex;align-items:center;gap:6px;padding:3px 0">'
-        + '<span style="width:8px;height:8px;border-radius:50%;background:' + dot + ';display:inline-block" title="' + esc(s.detail || s.status) + '"></span>'
+        + '<span class="tools-dot ' + dotCls + '" title="' + esc(s.detail || s.status) + '"></span>'
         + '<span style="flex:1">' + esc(s.name) + ' <span class="muted" style="font-size:11px">(' + esc(s.transport) + ' · ' + esc(s.status) + ')</span></span>'
         + (s.restartable ? '<button class="addbtn" title="Restart" onclick="restartMcp(\'' + esc(s.name) + '\')">↻</button>' : '')
         + '</div>';
