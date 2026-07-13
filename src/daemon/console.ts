@@ -1016,7 +1016,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .brain-toggle-group button.active { background:var(--accent); color:var(--create-btn-text); font-weight:700; }
   .brain-render-body { flex:1 1 auto; min-height:0; overflow-y:auto; padding:18px 22px; }
   .brain-render-body.raw { font:12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre-wrap; color:var(--muted); }
-  .brain-empty-state { color:var(--muted); text-align:center; padding:60px 20px; font-size:12.5px; }
+  /* Shared full-panel empty/error/loading state — the polished centered style,
+     usable by any center panel (was brain-only). .brain-empty-state kept as an
+     alias so existing Brain/Roles markup is unchanged. */
+  .oc-empty, .brain-empty-state { color:var(--muted); text-align:center; padding:60px 20px; font-size:12.5px; }
+  .oc-empty a { color:var(--accent); }
   /* Roles screen center-pane dossier blocks (Identity/Configuration/Insight/Learned) */
   .roles-block { border-bottom:1px solid var(--border); padding:12px 14px; }
   .roles-block:last-child { border-bottom:none; }
@@ -3196,11 +3200,11 @@ function renderGoalsPanel() {
   setFlashSessionMode(true);
   let body;
   if (_goalsState.error) {
-    body = '<div class="muted" style="padding:18px">Could not load goals. <a href="#" onclick="event.preventDefault();loadGoals()">Retry</a></div>';
+    body = '<div class="oc-empty">Could not load goals. <a href="#" onclick="event.preventDefault();loadGoals()">Retry</a></div>';
   } else if (!_goalsState.goals) {
-    body = '<div class="muted" style="padding:18px">Loading goals…</div>';
+    body = '<div class="oc-empty">Loading goals…</div>';
   } else if (!_goalsState.goals.length) {
-    body = '<div class="muted" style="padding:18px">No goals yet. Add one below, or ask the assistant in chat to "import my goals from GOALS.md".</div>';
+    body = '<div class="oc-empty">No goals yet. Add one below, or ask the assistant in chat to "import my goals from GOALS.md".</div>';
   } else {
     const goals = _goalsState.goals;
     const due = goals.filter(function (g) { return g.dueToday && g.status === 'active'; });
@@ -7674,13 +7678,13 @@ function renderToolsPanel() {
   if (!session) return;
   setFlashSessionMode(true);
   if (_toolsState.error) {
-    session.innerHTML = '<div class="oc-center-pane"><div class="oc-panel-head"><div><div class="oc-panel-title"><span>🛠️ Tools</span></div><div class="oc-panel-sub">Capabilities inventory</div></div><span class="oc-panel-head-spacer"></span><button class="linklike ov-back" onclick="showOverview()">← Overview</button></div><div class="brain-pane" style="padding:18px"><div class="muted">Could not load capabilities. <a href="#" onclick="event.preventDefault();loadCapabilities()">Retry</a></div></div></div>';
+    session.innerHTML = '<div class="oc-center-pane"><div class="oc-panel-head"><div><div class="oc-panel-title"><span>🛠️ Tools</span></div><div class="oc-panel-sub">Capabilities inventory</div></div><span class="oc-panel-head-spacer"></span><button class="linklike ov-back" onclick="showOverview()">← Overview</button></div><div class="tools-pane"><div class="oc-empty">Could not load capabilities. <a href="#" onclick="event.preventDefault();loadCapabilities()">Retry</a></div></div></div>';
     return;
   }
   const groups = _toolsState.groups;
   let body;
   if (!groups) {
-    body = '<div class="muted" style="padding:18px">Loading capabilities…</div>';
+    body = '<div class="oc-empty">Loading capabilities…</div>';
   } else {
     let total = 0;
     groups.forEach(function (g) { total += (g.tools || []).length; });
