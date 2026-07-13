@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.201 — 2026-07-13
+
+Developer ID release
+
 ## v0.1.200 — 2026-07-12
 
 Asking about a long document in chat no longer spins up a background task just to finish reading it — the assistant now pages through the whole document directly and answers.
