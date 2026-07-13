@@ -302,8 +302,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .ov-card.ok { border-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
   .ov-card.err { border-color: color-mix(in srgb, var(--err) 50%, var(--border)); }
   .ov-num { font-size: 22px; font-weight: 700; line-height: 1; }
-  .new-task-panel { padding: 24px; background: var(--modal-bg); }
-  .new-task-panel > h2 { margin: 0 0 14px; font-size: 18px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text); }
+  .new-task-panel { padding: 18px 20px 24px; }
   .new-task-panel .form { max-width: none; }
   .sk-param-area { border: 1px dashed var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
   .sk-param-area .flbl { color: var(--accent); margin-top: 0; }
@@ -1853,7 +1852,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <details class="ctx-sec" id="dirSec" open><summary>Scheduled</summary>
     <button class="addbtn" onclick="toggleForm('dirForm')">＋ New scheduled item</button>
     <div class="form" id="dirForm">
-      <input id="d_goal" placeholder="Standing goal" />
+      <input id="d_goal" placeholder="What to run on a schedule — e.g. review my inbox each morning" />
       <label class="flbl">Project</label>
       <div id="d_project_wrapper" class="project-search">
         <input id="d_project_search" type="text" placeholder="Search projects…" autocomplete="off" oninput="mpFilter('d')" onfocus="mpOpen('d')" onkeydown="mpKeydown(event,'d')" />
@@ -1881,7 +1880,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     </div>
     <div class="form" id="dirEditForm">
       <input id="de_id" type="hidden" />
-      <input id="de_goal" placeholder="Standing goal" />
+      <input id="de_goal" placeholder="What to run on a schedule — e.g. review my inbox each morning" />
       <label class="flbl">Project</label>
       <div id="de_project_wrapper" class="project-search">
         <input id="de_project_search" type="text" placeholder="Search projects…" autocomplete="off" oninput="mpFilter('de')" onfocus="mpOpen('de')" onkeydown="mpKeydown(event,'de')" />
@@ -5882,7 +5881,14 @@ function showNewTaskPanel() {
   _taskFormInSession = true;
   _promptWizardHandled = false;
   renderBoard();
-  session.innerHTML = '<div class="new-task-panel"><h2>New task</h2></div>';
+  // Standard center-panel shell (matches Tools/Obs/Brain/Roles) instead of a
+  // bare <h2> — same header, sub, and ← Overview control everywhere.
+  session.innerHTML = '<div class="oc-center-pane">'
+    + '<div class="oc-panel-head"><div><div class="oc-panel-title"><span>＋ New task</span></div>'
+    + '<div class="oc-panel-sub">Describe what you want done — route it to a lane or let it self-plan.</div></div>'
+    + '<span class="oc-panel-head-spacer"></span>'
+    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></div>'
+    + '<div class="new-task-panel"></div></div>';
   session.querySelector(".new-task-panel").appendChild(form);
   form.classList.add("open");
   syncNav();
