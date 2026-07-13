@@ -911,26 +911,49 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .tools-group-h { font-size:13px; font-weight:700; color:var(--text); padding:0 4px; }
   .tools-group-h .count { font-size:11px; color:var(--muted); font-weight:600; margin-left:4px; }
   .tools-group-sub { font-size:11px; color:var(--muted); padding:1px 4px 6px; }
-  .tools-row { border:1px solid var(--border); border-radius:8px; background:var(--panel-2); padding:8px 11px;
-    margin:5px 0; cursor:pointer; }
+  /* Multicolumn tool row: left identity+fields column, right full-description column,
+     expanded detail spans the full width beneath both. Collapses to a single column
+     on narrow panes via container query fallback below. */
+  .tools-row { border:1px solid var(--border); border-radius:8px; background:var(--panel-2); padding:9px 12px;
+    margin:6px 0; cursor:pointer; display:grid; grid-template-columns:minmax(190px,270px) 1fr;
+    column-gap:16px; row-gap:6px; align-items:start; }
   .tools-row:hover { border-color:var(--accent); }
+  .tools-idcol { min-width:0; display:flex; flex-direction:column; gap:5px; }
   .tools-row-top { display:flex; align-items:center; gap:7px; }
   .tools-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
   .tools-dot.on { background:var(--ok,#4caf50); }
   .tools-dot.off { background:var(--muted); }
   .tools-dot.lib { background:#6b7280; }
-  .tools-name { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; color:var(--text); font-weight:600; }
-  .tools-kind { font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);
-    border:1px solid var(--border); border-radius:4px; padding:1px 5px; }
-  .tools-caret { margin-left:auto; color:var(--muted); font-size:11px; }
-  .tools-desc { font-size:11.5px; color:var(--muted); margin-top:3px; line-height:1.4;
+  .tools-name { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; color:var(--text); font-weight:600;
     overflow:hidden; text-overflow:ellipsis; }
-  .tools-detail { margin-top:7px; padding-top:7px; border-top:1px solid var(--border); font-size:11.5px;
-    color:var(--text); display:flex; flex-direction:column; gap:3px; }
+  .tools-kind { font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);
+    border:1px solid var(--border); border-radius:4px; padding:1px 5px; flex-shrink:0; }
+  .tools-caret { margin-left:auto; color:var(--muted); font-size:11px; flex-shrink:0; }
+  /* Structured fields, always visible in the left column — the "more fields" glance. */
+  .tools-fields { display:flex; flex-direction:column; gap:2px; }
+  .tools-field { display:flex; gap:6px; font-size:10.5px; line-height:1.35; min-width:0; }
+  .tools-field .fk { color:var(--muted); text-transform:uppercase; letter-spacing:.04em; font-size:9.5px;
+    min-width:62px; flex-shrink:0; padding-top:1px; }
+  .tools-field .fv { color:var(--text); min-width:0; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; }
+  .tools-field .fv.mono { font-family:ui-monospace,Menlo,monospace; color:var(--accent); }
+  .tools-status { font-size:10px; font-weight:600; }
+  .tools-status.on { color:var(--ok,#4caf50); }
+  .tools-status.off { color:var(--muted); }
+  .tools-status.lib { color:#9aa4b2; }
+  /* Rightmost column: the full description paragraph, never clamped. */
+  .tools-desc { font-size:12px; color:var(--text); line-height:1.5; align-self:start; min-width:0;
+    overflow-wrap:break-word; }
+  .tools-detail { grid-column:1 / -1; margin-top:2px; padding-top:8px; border-top:1px solid var(--border);
+    font-size:11.5px; color:var(--text); display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+    gap:4px 18px; }
   .tools-detail .tools-k { display:inline-block; min-width:74px; color:var(--muted); font-size:10.5px;
     text-transform:uppercase; letter-spacing:.04em; }
   .tools-detail code { font-family:ui-monospace,Menlo,monospace; font-size:11px; color:var(--accent);
     word-break:break-all; }
+  @media (max-width:720px) {
+    .tools-row { grid-template-columns:1fr; }
+  }
   .brain-shell { flex:1 1 auto; min-height:0; display:grid; grid-template-columns:200px 1fr 1fr;
     border:1px solid var(--border); border-radius:10px; background:var(--panel-2); overflow:hidden; }
   .brain-col { border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0; overflow:hidden; }
@@ -7686,23 +7709,39 @@ function renderToolsPanel() {
         const key = g.kind + ':' + t.name;
         const open = !!_toolsState.expanded[key];
         const enabled = g.kind === 'native' ? (t.enabled !== false) : (g.kind === 'skill-library' ? false : true);
-        const dot = g.kind === 'skill-library'
-          ? '<span class="tools-dot lib" title="reachable via skill_run"></span>'
-          : '<span class="tools-dot ' + (enabled ? 'on' : 'off') + '" title="' + (enabled ? 'available' : 'gated off') + '"></span>';
+        const dotCls = g.kind === 'skill-library' ? 'lib' : (enabled ? 'on' : 'off');
+        const dotTitle = g.kind === 'skill-library' ? 'reachable via skill_run' : (enabled ? 'available' : 'gated off');
+        const dot = '<span class="tools-dot ' + dotCls + '" title="' + dotTitle + '"></span>';
         const kindChip = '<span class="tools-kind">' + esc(g.kind === 'skill-tool' ? 'skill→tool' : g.kind === 'skill-library' ? 'skill' : g.kind) + '</span>';
         const file = t.sourceRef || t.file || '';
+        const fileShort = file ? String(file).split('/').pop() : '';
+        const schemaStr = toolsSchemaSummary(t.schema) || (t.params && t.params.length ? t.params.join(', ') : '');
+        const statusLabel = g.kind === 'skill-library' ? 'via skill_run' : (enabled ? 'available' : 'gated off');
+
+        // Left column: identity + the structured fields that used to hide behind the
+        // expander. Right column: the full description paragraph (never clamped).
+        let fields = '<div class="tools-fields">';
+        fields += '<div class="tools-field"><span class="fk">status</span>'
+          + '<span class="fv"><span class="tools-status ' + dotCls + '">' + esc(statusLabel) + '</span></span></div>';
+        if (t.capability) fields += '<div class="tools-field"><span class="fk">capability</span><span class="fv mono">' + esc(t.capability) + '</span></div>';
+        if (g.kind === 'skill-library' && t.kind) fields += '<div class="tools-field"><span class="fk">kind</span><span class="fv">' + esc(t.kind) + '</span></div>';
+        if (t.skillName) fields += '<div class="tools-field"><span class="fk">skill</span><span class="fv">' + esc(t.skillName) + '</span></div>';
+        if (schemaStr) fields += '<div class="tools-field"><span class="fk">params</span><span class="fv mono" title="' + attrEnc(schemaStr) + '">' + esc(schemaStr) + '</span></div>';
+        if (fileShort) fields += '<div class="tools-field"><span class="fk">source</span><span class="fv mono" title="' + attrEnc(file) + '">' + esc(fileShort) + '</span></div>';
+        fields += '</div>';
+
         body += '<div class="tools-row" onclick="toggleToolExpand(\'' + attrEnc(key) + '\')">'
+          + '<div class="tools-idcol">'
           + '<div class="tools-row-top">' + dot + '<span class="tools-name">' + esc(t.name) + '</span>' + kindChip
-          + '<span class="tools-caret">' + (open ? '▾' : '▸') + '</span></div>'
-          + '<div class="tools-desc">' + esc(t.description || '') + '</div>';
+          + '<span class="tools-caret" title="' + (open ? 'collapse' : 'expand full record') + '">' + (open ? '▾' : '▸') + '</span></div>'
+          + fields + '</div>'
+          + '<div class="tools-desc">' + esc(t.description || 'No description provided.') + '</div>';
         if (open) {
           body += '<div class="tools-detail" onclick="event.stopPropagation()">';
-          if (t.skillName) body += '<div><span class="tools-k">skill</span> ' + esc(t.skillName) + '</div>';
-          const schemaStr = toolsSchemaSummary(t.schema) || (t.params && t.params.length ? t.params.join(', ') : '');
-          if (schemaStr) body += '<div><span class="tools-k">params</span> ' + esc(schemaStr) + '</div>';
-          if (t.capability) body += '<div><span class="tools-k">capability</span> ' + esc(t.capability) + '</div>';
           if (file) body += '<div><span class="tools-k">file</span> <code>' + esc(file) + '</code></div>';
           if (t.claudeMirror) body += '<div><span class="tools-k">claude</span> <code>' + esc(t.claudeMirror) + '</code></div>';
+          if (t.scope) body += '<div><span class="tools-k">scope</span> ' + esc(t.scope) + '</div>';
+          if (t.source) body += '<div><span class="tools-k">origin</span> ' + esc(t.source) + '</div>';
           body += '</div>';
         }
         body += '</div>';
