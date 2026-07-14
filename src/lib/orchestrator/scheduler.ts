@@ -10,7 +10,7 @@ import { scheduledRunnerTick } from "./scheduled-runner";
 import { isCodexModel } from "@/lib/models/catalog";
 import type { TaskDelayReason } from "@/lib/types";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
-import { getRoleModels } from "@/lib/models/available";
+import { getRoleModels, CLAUDE_OPUS_ID } from "@/lib/models/available";
 import { isFeatureEnabled } from "@/lib/config/features";
 import { getAgentProfile, resolveLegacyAgentType } from "@/lib/config/agent-profiles";
 
@@ -175,7 +175,14 @@ export function resolveModelForAgentRole(currentModel: string | null | undefined
   }
 
   if (normalizedAgent === "developer" || normalizedAgent === "cto" || normalizedAgent === "qa") {
-    return roleModels.coding.trim() || undefined;
+    // Native-task-execution: the top-level CLI task runs on the thinking tier
+    // (Opus), which plans/reviews and delegates construction to Sonnet subagents
+    // (see the delegation system prompt in subprocess.ts) rather than doing every
+    // edit inline on Sonnet itself. Fall back to the concrete Opus alias when no
+    // thinkModel is configured — the raw config key is empty on preset-based
+    // configs ("mixed"), and an empty string would drop the --model flag and let
+    // the CLI default to Sonnet, silently defeating the Opus-at-the-top design.
+    return roleModels.thinking.trim() || CLAUDE_OPUS_ID;
   }
   if (normalizedAgent === "marketing") {
     return roleModels.writer.trim() || undefined;

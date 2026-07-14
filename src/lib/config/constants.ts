@@ -4,7 +4,12 @@ import { homedir } from "os";
 
 export const MAX_AGENTS = 4;
 export const DEFAULT_TIMEOUT_MINUTES = 60;
-export const DEFAULT_BUDGET_USD = 0;
+// Unattended-runaway backstop: since native-task-execution removed the CLI
+// turn cap (tasks now run to completion like a direct interactive session),
+// every task needs a real default cost ceiling rather than an unbounded one.
+// 0 remains the explicit "uncapped" opt-out (see budget-policy.ts) — this is
+// only the default applied when a task doesn't set its own budget.
+export const DEFAULT_BUDGET_USD = 10;
 export const MAX_TURNS = 50;
 export const SCHEDULER_INTERVAL_MS = 2000;
 export const APPROVAL_TIMEOUT_MINUTES = 30;

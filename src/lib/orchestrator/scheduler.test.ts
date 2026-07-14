@@ -211,16 +211,16 @@ test("non usage-reset delays are not cleared", () => {
   );
 });
 
-test("blank coding agent tasks resolve to the configured coding role model", async () => {
-  await withTempHome({ frontierModel: "qwen3.6-35b-4bit" }, () => {
-    assert.equal(resolveModelForAgentRole(null, "developer"), "qwen3.6-35b-4bit");
-    assert.equal(resolveModelForAgentRole(undefined, "cto"), "qwen3.6-35b-4bit");
-    assert.equal(resolveModelForAgentRole("", "qa"), "qwen3.6-35b-4bit");
+test("blank coding agent tasks resolve to the configured thinking role model (native-task-execution: top-level task runs on Opus)", async () => {
+  await withTempHome({ thinkModel: "claude-opus-4-8" }, () => {
+    assert.equal(resolveModelForAgentRole(null, "developer"), "claude-opus-4-8");
+    assert.equal(resolveModelForAgentRole(undefined, "cto"), "claude-opus-4-8");
+    assert.equal(resolveModelForAgentRole("", "qa"), "claude-opus-4-8");
   });
 });
 
 test("explicit task model remains pinned over role defaults", async () => {
-  await withTempHome({ frontierModel: "qwen3.6-35b-4bit" }, () => {
+  await withTempHome({ thinkModel: "claude-opus-4-8" }, () => {
     assert.equal(resolveModelForAgentRole("claude-sonnet-4-6", "developer"), "claude-sonnet-4-6");
   });
 });
@@ -264,6 +264,20 @@ test("modelRole: profiles with no modelRole and no coarse-map entry stay undefin
 test("modelRole: an empty role-model slot falls through cleanly (no crash, no false positive)", async () => {
   await withTempHome({}, () => {
     assert.equal(resolveModelForAgentRole(null, "founder"), undefined);
+  });
+});
+
+test("a task created without an explicit budget gets the $10 unattended-runaway backstop, not the old $5 default", async () => {
+  await withTempDb(async () => {
+    const task = await mkTask({});
+    assert.equal(task.maxBudgetUsd, 10);
+  });
+});
+
+test("a task can still opt out of the ceiling entirely with an explicit 0", async () => {
+  await withTempDb(async () => {
+    const task = await mkTask({ maxBudgetUsd: 0 });
+    assert.equal(task.maxBudgetUsd, 0);
   });
 });
 

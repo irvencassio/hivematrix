@@ -4,6 +4,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { mkdirSync } from "fs";
 import { normalizeBrainSelection } from "@/lib/brain/selection";
+import { DEFAULT_BUDGET_USD } from "@/lib/config/constants";
 
 // DB path is resolved lazily (from $HOME at open time) so tests can point it
 // at a temp dir via HIVEMATRIX_DB_PATH / HOME before the first getDb() call.
@@ -760,6 +761,24 @@ const MIGRATIONS: Migration[] = [
   // from displayed to actionable. Nullable; every existing goal degrades to
   // "no next action set" until one is written.
   m("v36", `ALTER TABLE goals ADD COLUMN nextAction TEXT;`),
+
+  // v37: message_send_cap — per-run iMessage send cap (idempotent guard against
+  // failed-task re-dispatch, internal retries, and concurrent duplicate processes).
+  m("v37", `CREATE TABLE IF NOT EXISTS message_send_cap (
+      _id TEXT PRIMARY KEY,
+      runId TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      sendId TEXT NOT NULL,
+      sentAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_message_send_cap_runId_recipient
+      ON message_send_cap(runId, recipient);`),
+
+  // v38: Atomic reserve-before-send for message_send_cap.
+  // Adds reservedAt to separate atomic reservation time from send completion time.
+  // For existing records, uses sentAt as reservedAt (conservative backwards compat).
+  m("v38", `ALTER TABLE message_send_cap ADD COLUMN reservedAt TEXT DEFAULT (datetime('now'));
+    UPDATE message_send_cap SET reservedAt = sentAt WHERE reservedAt IS NULL;`),
 ];
 
 // ------------------------------------------------------------------
@@ -1192,7 +1211,11 @@ export const Task = {
       comments: JSON.stringify(data.comments ?? []),
       error: data.error ?? null,
       timeoutMinutes: data.timeoutMinutes ?? 60,
-      maxBudgetUsd: data.maxBudgetUsd ?? 5.0,
+      // Unattended-runaway backstop (see constants.ts) — the schema's own
+      // column default below is a defensive fallback for a bare SQL insert;
+      // this is the one that actually applies to every task created through
+      // Task.create().
+      maxBudgetUsd: data.maxBudgetUsd ?? DEFAULT_BUDGET_USD,
       completedBy: data.completedBy ?? null,
       proverType: data.proverType ?? null,
       completionNote: data.completionNote ?? null,

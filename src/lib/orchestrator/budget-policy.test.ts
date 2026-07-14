@@ -9,6 +9,11 @@ import {
   normalizeBudgetUsd,
   resolveThinkingMode,
 } from "./budget-policy";
+// Distinct from the sentinel above: this is the per-task default ceiling
+// (the unattended-runaway backstop), wired into Task.create() in db/index.ts.
+// An explicit 0 (or missing value) still normalizes to "uncapped" via the
+// sentinel constant tested below — the two constants serve different roles.
+import { DEFAULT_BUDGET_USD as DEFAULT_TASK_BUDGET_CEILING_USD } from "@/lib/config/constants";
 
 test("budget policy treats missing, zero, and negative budgets as uncapped", () => {
   assert.equal(DEFAULT_BUDGET_USD, 0);
@@ -18,6 +23,14 @@ test("budget policy treats missing, zero, and negative budgets as uncapped", () 
   assert.equal(normalizeBudgetUsd(-3), 0);
   assert.equal(hasBudgetCeiling(0), false);
   assert.equal(hasBudgetCeiling(undefined), false);
+});
+
+test("the per-task default budget ceiling is now $10 (unattended-runaway backstop), while 0 stays the explicit uncapped opt-out", () => {
+  assert.equal(DEFAULT_TASK_BUDGET_CEILING_USD, 10);
+  assert.equal(hasBudgetCeiling(DEFAULT_TASK_BUDGET_CEILING_USD), true);
+  assert.equal(normalizeBudgetUsd(DEFAULT_TASK_BUDGET_CEILING_USD), 10);
+  // 0 is still explicitly uncapped, independent of the new default.
+  assert.equal(hasBudgetCeiling(0), false);
 });
 
 test("budget policy preserves positive explicit budgets", () => {

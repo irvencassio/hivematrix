@@ -2,10 +2,9 @@ import { spawn, execSync, spawnSync, type ChildProcess } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { ALLOWED_TOOLS, getOpsAllowedTools, MAX_TURNS, getActiveProfile, getLocalModelConfig } from "@/lib/config/constants";
+import { getActiveProfile, getLocalModelConfig } from "@/lib/config/constants";
 import { resolveProvider } from "@/lib/config/providers";
 import { verificationGatePrompt } from "@/lib/orchestrator/verification-gate";
-import { NO_REPO_LOCK_PROJECTS } from "@/lib/routing/aliases";
 import { getDb } from "@/lib/db";
 import { buildBrainMemoryBundle } from "@/lib/brain/memory-bundle";
 import { brainDocPolicyText } from "@/lib/brain/settings";
@@ -292,6 +291,12 @@ function resolvePromptPrefix(workflowId?: string, stepIndex?: number): string {
 // "ultrathink" is also kept as an in-prompt keyword for Claude-specific behavior.
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
+// Runs the top-level CLI task like a direct interactive session: plan and
+// review on the thinking tier, hand construction work off to Sonnet
+// subagents via the Agent tool instead of doing every edit inline.
+const DELEGATION_SYSTEM_PROMPT =
+  "You are the top-level agent on Opus. Do the planning, decomposition, review, and delegation yourself; delegate construction and implementation work to Sonnet subagents via the Agent tool rather than doing all the coding inline. Spawn subagents liberally for parallelizable or well-scoped build work.";
+
 /** Remove NUL bytes — argv strings passed to child_process.spawn cannot contain them. */
 export function stripNullBytes(s: string): string {
   // eslint-disable-next-line no-control-regex -- NUL is exactly the character being stripped
@@ -300,7 +305,9 @@ export function stripNullBytes(s: string): string {
 
 export function buildClaudeSpawnArgs(input: {
   prompt: string;
-  tools: string[];
+  // No longer used for --allowedTools (see below) — kept so existing call
+  // sites/tests can still pass a tool list without a signature change.
+  tools?: string[];
   maxBudgetUsd?: number | null;
   model?: string | null;
   thinkingMode?: string | null;
@@ -315,14 +322,17 @@ export function buildClaudeSpawnArgs(input: {
     args.push("-p", input.prompt);
   }
 
+  // Run like a direct interactive session: full native tools, no turn cap.
+  // --dangerously-skip-permissions grants every tool; the PreToolUse hook
+  // written by approval.ts is the sole gate and still runs and can veto even
+  // under this flag (autonomy-aware: auto-approves under `autonomous`,
+  // routes to human approval under standard/manual, and always enforces the
+  // release/deploy/destructive safety floor).
   args.push(
     "--output-format",
     "stream-json",
     "--verbose",
-    "--allowedTools",
-    input.tools.join(","),
-    "--max-turns",
-    String(MAX_TURNS),
+    "--dangerously-skip-permissions",
   );
 
   if (hasBudgetCeiling(input.maxBudgetUsd)) {
@@ -476,7 +486,6 @@ export async function spawnAgent(
   // Set up PreToolUse hook for approval interception
   generateHookSettings(taskId, projectPath);
 
-  const isOps = project ? NO_REPO_LOCK_PROJECTS.has(project) : false;
   const { isChannelEnabled: isMailLaneEnabled } = await import("@/lib/mailbee/store");
   const { isChannelEnabled: isMessageLaneEnabled } = await import("@/lib/messagebee/store");
   const mailLaneEnabled = isMailLaneEnabled();
@@ -486,7 +495,6 @@ export async function spawnAgent(
   // claimed "No SMS tool available" and punted). The server proxies the same
   // trust-gated daemon endpoints; auto-approve them since the gate is server-side.
   const outboundMcp = prepareOutboundMcp(process.env.HIVEMATRIX_PORT ?? "3747", process.execPath, { mailLaneEnabled, messageLaneEnabled });
-  const tools = [...(isOps ? getOpsAllowedTools() : ALLOWED_TOOLS), ...outboundMcp.toolNames];
 
   // Prepend workflow skill prefix if applicable
   const prefix = resolvePromptPrefix(workflow, workflowStepIndex).trimEnd();
@@ -514,7 +522,6 @@ export async function spawnAgent(
 
   const args = buildClaudeSpawnArgs({
     prompt,
-    tools,
     maxBudgetUsd,
     model,
     thinkingMode: effectiveThinkingMode,
@@ -523,7 +530,8 @@ export async function spawnAgent(
   });
 
   // Register the outbound MCP server (merges with any user-configured servers —
-  // no --strict-mcp-config). Pairs with the tool names already in `tools`.
+  // no --strict-mcp-config). --dangerously-skip-permissions above already
+  // grants every tool; this just makes the outbound-channel tools reachable.
   args.push("--mcp-config", outboundMcp.configPath);
 
   // Inject the Hive agent guide so agents know how to manage projects
@@ -584,6 +592,13 @@ export async function spawnAgent(
       overheadBytes.agentGuide += Buffer.byteLength(agents);
     }
   } catch { /* non-critical */ }
+
+  // Direct-session parity: the top-level task runs on the thinking tier (see
+  // resolveModelForAgentRole) — tell it to behave like an interactive Opus
+  // session that plans/reviews itself and delegates build work to Sonnet
+  // subagents, rather than doing every edit inline.
+  args.push("--append-system-prompt", DELEGATION_SYSTEM_PROMPT);
+  overheadBytes.agentGuide += Buffer.byteLength(DELEGATION_SYSTEM_PROMPT);
 
   // Inject agent profile system prompt for non-developer types
   if (agentType && agentType !== "developer" && agentType !== "auto") {

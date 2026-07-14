@@ -7,6 +7,34 @@ import { fileURLToPath } from "node:url";
 import { renderAttachmentBlock } from "@/lib/tasks/attachments";
 import { buildClaudeSpawnArgs, isLocalEndpointModel } from "./subprocess";
 
+test("Claude spawn args run like a direct interactive session: no allowlist, no turn cap, permissions skipped", () => {
+  const args = buildClaudeSpawnArgs({
+    prompt: "Do the task",
+    tools: ["Read", "Bash"],
+    thinkingMode: "auto",
+  });
+
+  assert.equal(args.includes("--dangerously-skip-permissions"), true);
+  assert.equal(args.includes("--allowedTools"), false);
+  assert.equal(args.includes("--max-turns"), false);
+  const outputFormatIndex = args.indexOf("--output-format");
+  assert.notEqual(outputFormatIndex, -1);
+  assert.equal(args[outputFormatIndex + 1], "stream-json");
+});
+
+test("Claude spawn args still carry a budget ceiling alongside --dangerously-skip-permissions", () => {
+  const args = buildClaudeSpawnArgs({
+    prompt: "Do the task",
+    maxBudgetUsd: 10,
+    thinkingMode: "auto",
+  });
+
+  assert.equal(args.includes("--dangerously-skip-permissions"), true);
+  const budgetIndex = args.indexOf("--max-budget-usd");
+  assert.notEqual(budgetIndex, -1);
+  assert.equal(args[budgetIndex + 1], "10");
+});
+
 test("the coo agent profile's live-roster injection is wired into the Claude CLI path too, not just generic-agent.ts", () => {
   // spawnAgent shells out to a real Claude CLI process, so this is a
   // source-level regression guard rather than a full spawn-mock test (see
@@ -21,6 +49,17 @@ test("the coo agent profile's live-roster injection is wired into the Claude CLI
   assert.match(region, /agentType === "coo"/, "the CLI path must special-case coo the same way generic-agent.ts does");
   assert.match(region, /getCoreAgentProfiles/, "must build the roster from the live core roster, not a hardcoded string");
   assert.match(region, /--- Available agent types \(create_task\) ---/, "same injected header the local-agent path uses");
+});
+
+test("the top-level CLI task is told to delegate build work to Sonnet subagents", () => {
+  // The delegation prompt is appended inside spawnAgent (not buildClaudeSpawnArgs,
+  // which has no access to agent-type/model context), so this is a source-level
+  // regression guard rather than a spawn-mock test, matching the coo-roster test
+  // above.
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "subprocess.ts"), "utf8");
+  assert.match(src, /You are the top-level agent on Opus\./);
+  assert.match(src, /delegate construction and implementation work to Sonnet subagents via the Agent tool/);
+  assert.match(src, /args\.push\("--append-system-prompt", DELEGATION_SYSTEM_PROMPT\)/);
 });
 
 test("Claude spawn args omit max-budget flag when budget is uncapped", () => {
