@@ -9,7 +9,8 @@ import { tmpdir } from "node:os";
 const TMP = mkdtempSync(join(tmpdir(), "hm-flash-store-test-"));
 process.env.HOME = TMP;
 
-const { createSession, getOrCreateSession, getCurrentSession, getFlashCliSessionId, setFlashCliSessionId, clearFlashCliSessionId } = await import("./store");
+const { createSession, getOrCreateSession, getCurrentSession, getFlashCliSessionId, setFlashCliSessionId, clearFlashCliSessionId, appendTurn, getTurnsForSession } = await import("./store");
+const { getDb } = await import("@/lib/db");
 
 test.after(() => rmSync(TMP, { recursive: true, force: true }));
 
@@ -85,4 +86,48 @@ test("getCurrentSession: returns the canonical operator session id regardless of
 
 test("getCurrentSession: returns null for a peer that has never had a session", () => {
   assert.equal(getCurrentSession("never-seen-peer"), null);
+});
+
+// ---------------------------------------------------------------------------
+// getTurnsForSession: the no-sinceIso page must be the NEWEST `limit` turns,
+// in ascending (chronological) order — not the oldest `limit` turns.
+// ---------------------------------------------------------------------------
+
+test("getTurnsForSession: with no sinceIso, returns the newest `limit` turns in ascending order (not the oldest)", () => {
+  const session = createSession("console", "history-truncation-test");
+  const db = getDb();
+
+  // Insert 105 turns, then force each row's `ts` to a distinct, deterministic,
+  // strictly increasing value — appendTurn's real-clock timestamps aren't
+  // reliably distinct at millisecond resolution in a tight synchronous loop,
+  // so set them explicitly instead of relying on wall-clock timing.
+  const total = 105;
+  for (let i = 0; i < total; i++) {
+    const turn = appendTurn(session.id, "user", `turn-${i}`);
+    const ts = new Date(2026, 0, 1, 0, 0, i).toISOString(); // 2026-01-01T00:00:0i.000Z
+    db.prepare("UPDATE flash_turns SET ts = ? WHERE id = ?").run(ts, turn.id);
+  }
+
+  const page = getTurnsForSession(session.id, 100);
+
+  assert.equal(page.length, 100);
+  // Newest 100 of 105 means turn-5 .. turn-104 survive; turn-0..turn-4 are dropped.
+  assert.equal(page[0].content, "turn-5");
+  assert.equal(page[page.length - 1].content, "turn-104");
+  // Ascending order: every ts strictly increases across the returned page.
+  for (let i = 1; i < page.length; i++) {
+    assert.ok(page[i].ts > page[i - 1].ts, `expected ts to increase at index ${i}`);
+  }
+});
+
+test("getTurnsForSession: with fewer than `limit` turns, returns all of them in ascending order (unchanged behavior)", () => {
+  const session = createSession("console", "history-truncation-small-test");
+  appendTurn(session.id, "user", "first");
+  appendTurn(session.id, "assistant", "second");
+  appendTurn(session.id, "user", "third");
+
+  const page = getTurnsForSession(session.id, 100);
+
+  assert.equal(page.length, 3);
+  assert.deepEqual(page.map((t) => t.content), ["first", "second", "third"]);
 });

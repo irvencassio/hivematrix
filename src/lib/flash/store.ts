@@ -140,8 +140,19 @@ export function getTurnsForSession(sessionId: string, limit = 100, sinceIso?: st
       .prepare("SELECT * FROM flash_turns WHERE sessionId = ? AND ts > ? ORDER BY ts ASC LIMIT ?")
       .all(sessionId, sinceIso, limit) as FlashTurnRow[];
   }
+  // Secondary `rowid` tiebreaker (ASC/DESC matching each half's primary `ts`
+  // direction) makes ordering deterministic when two turns share the same
+  // millisecond-resolution `ts` — e.g. back-to-back appends in a tight loop —
+  // so the newest-page query can't silently reverse tied rows relative to
+  // their true insertion order. `rowid` is selected only inside the derived
+  // table (as `_rid`) purely to sort by; the outer SELECT lists the real
+  // FlashTurnRow columns explicitly so `_rid` never leaks into the result.
   return getDb()
-    .prepare("SELECT * FROM flash_turns WHERE sessionId = ? ORDER BY ts ASC LIMIT ?")
+    .prepare(
+      "SELECT id, sessionId, role, content, toolCallsJson, artifactsJson, ts FROM " +
+        "(SELECT *, rowid AS _rid FROM flash_turns WHERE sessionId = ? ORDER BY ts DESC, rowid DESC LIMIT ?) " +
+        "ORDER BY ts ASC, _rid ASC",
+    )
     .all(sessionId, limit) as FlashTurnRow[];
 }
 
