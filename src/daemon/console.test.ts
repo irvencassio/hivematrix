@@ -474,38 +474,40 @@ test("Mixed-mode role-model defaults use version-agnostic Claude labels", () => 
 
 test("right-panel sections are collapsible <details> with persisted open state", () => {
   // Each context section is a <details class="ctx-sec"> so the long panel can be tidied.
-  for (const id of ["obsSec", "connSec", "dirSec", "skillsSec", "mcpSec"]) {
+  for (const id of ["connSec", "dirSec", "skillsSec", "mcpSec"]) {
     assert.match(CONSOLE_HTML, new RegExp('<details class="ctx-sec" id="' + id + '"'), id + " is a collapsible section");
   }
   // Actionable sections default open; info-heavy ones default collapsed.
   assert.match(CONSOLE_HTML, /id="connSec" open/);
   assert.match(CONSOLE_HTML, /id="skillsSec" open/);
-  assert.doesNotMatch(CONSOLE_HTML, /id="obsSec" open/, "info sections default collapsed");
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /function wireCtxSections\(/);
   assert.match(js, /hm_sec_/, "per-section open state persisted");
   assert.match(js, /wireCtxSections\(\);/, "wired on init");
 });
 
-test("console surfaces observability: per-task strip + totals across providers", () => {
-  assert.match(CONSOLE_HTML, /id="observability"/, "totals mount point");
-  assert.match(CONSOLE_HTML, /<summary>Observability/);
+test("task session view still renders the per-task telemetry strip (unrelated to the Observability dashboard/modal)", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /async function renderObservability\(/);
-  assert.match(js, /function taskTelemetryStrip\(/, "per-task telemetry strip");
-  assert.match(js, /api\("\/observability/, "fetches the observability endpoint");
-  assert.match(js, /renderObservability\(\);/, "rendered on refresh");
-  // The strip honors unavailable-not-zero for Codex.
+  assert.match(js, /function taskTelemetryStrip\(/);
+  assert.match(js, /taskTelemetryStrip\(t, out\)/, "still wired into the task session view");
+  // The strip honors unavailable-not-zero for Codex. This assertion used to live in
+  // the deleted mini-widget test, but the pattern was never actually inside
+  // renderObservability — verified empirically (grep across the whole script) it
+  // only ever appears inside taskTelemetryStrip itself, so its real coverage home
+  // is here, not a "point it at renderObsDashboard" fallback.
   assert.match(js, /prov === "Codex" && !inTok && !outTok/);
 });
 
 test("observability by-provider table uses fmtNum for tok in/out (null Codex tokens render as —)", () => {
   const js = extractScript(CONSOLE_HTML);
-  // Both renders (sidebar summary + full-dashboard modal) must pass inputTokens/outputTokens
-  // through fmtNum so that null values (Codex with unavailable session-log tokens) show
-  // "—" instead of the misleading "0 / 0". Count occurrences of the pattern.
+  // The dashboard/modal table must pass inputTokens/outputTokens through fmtNum so
+  // that null values (Codex with unavailable session-log tokens) show "—" instead of
+  // the misleading "0 / 0". The sidebar mini-widget's own copy of this render was
+  // removed along with renderObservability(), so only the dashboard/modal table
+  // remains — verified by running this test after that deletion (count dropped
+  // from 2 to 1, confirmed empirically rather than assumed).
   const matches = [...js.matchAll(/fmtNum\(p\.inputTokens\)[^;]+fmtNum\(p\.outputTokens\)/g)];
-  assert.ok(matches.length >= 2, "both sidebar and dashboard table renders must use fmtNum for tok in/out");
+  assert.ok(matches.length >= 1, "the dashboard/modal table must use fmtNum for tok in/out");
 });
 
 test("observability model label maps Claude ids to their tier (Opus/Sonnet/Haiku) and strips the internal codex: prefix", () => {
@@ -525,14 +527,6 @@ test("observability model label maps Claude ids to their tier (Opus/Sonnet/Haiku
   assert.equal(obsModelLabel("qwen3.6-35b-4bit"), "qwen3.6-35b-4bit", "unclassified (e.g. historical local) ids pass through unchanged");
 });
 
-test("inline observability panel nests per-model rows under each provider row", () => {
-  const js = extractScript(CONSOLE_HTML);
-  const renderObservability = extractBetween(js, "async function renderObservability()", "// --- Observability dashboard");
-  assert.match(renderObservability, /const byModel = Array\.isArray\(t\.byModel\)/, "reads totals.byModel");
-  assert.match(renderObservability, /byModel\.filter\(m => m\.provider === p\.key\)/, "nests each provider's models by matching provider, not by re-deriving it from the model id");
-  assert.match(renderObservability, /obsModelLabel\(m\.key\)/, "model rows use the display-cleanup helper");
-});
-
 test("dashboard offers a provider/model group-by toggle for the breakdown table", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /id="obs_group_panel"/, "group toggle present in the center panel");
@@ -542,14 +536,51 @@ test("dashboard offers a provider/model group-by toggle for the breakdown table"
   const renderObsDashboard = extractBetween(js, "async function renderObsDashboard(target)", "function renderConn()");
   assert.match(renderObsDashboard, /const groupByModel = _obsGroup === "model"/);
   assert.match(renderObsDashboard, /detail\.totals\.byModel/, "model mode reads the same totals payload — no second query");
+  // by-model draws grouped side-by-side bars so usage is comparable at a glance.
+  assert.match(js, /function obsGroupedBars\(/, "grouped bars for the by-model view");
 });
 
-test("observability sidebar panel drops the 'N local' pill — post-cutover every live run is frontier", () => {
+test("Observability modal: overlay markup, reuses dashboard rendering, click-outside + button close", () => {
+  const html = CONSOLE_HTML;
+  assert.match(html, /<div class="overlay" id="obsOverlay"/, "modal overlay exists");
+  assert.match(html, /id="obsOverlay"[^>]*onclick="if\(event\.target===this\)closeObsModal\(\)"/, "backdrop click closes");
+  assert.match(html, /<span class="x" onclick="closeObsModal\(\)">✕<\/span>/, "explicit close button");
+  // The modal must reuse the existing dashboard renderer/target id, not a new one.
+  assert.match(html, /id="obsDashPanel"/, "reuses the existing dashboard mount point");
+  const js = extractScript(html);
+  assert.match(js, /function openObsModal\(\)/);
+  assert.match(js, /function closeObsModal\(\)/);
+  const openObsModal = fnBody(js, "openObsModal");
+  assert.match(openObsModal, /getElementById\('obsOverlay'\)\.classList\.add\('open'\)/);
+  assert.match(openObsModal, /obsPanelToggles\(\)/, "reuses the existing toggle-row builder, not a new one");
+  assert.match(openObsModal, /renderObsDashboard\('obsDashPanel'\)/, "reuses the existing dashboard renderer, not a new one");
+  const closeObsModal = fnBody(js, "closeObsModal");
+  assert.match(closeObsModal, /getElementById\('obsOverlay'\)\.classList\.remove\('open'\)/);
+});
+
+test("Observability modal opens from the progress-bar visual, not the whole 5h/7d toggle button", () => {
   const js = extractScript(CONSOLE_HTML);
-  const renderObservability = fnBody(js, "renderObservability");
-  assert.match(renderObservability, /t\.split\.frontier/, "frontier count pill stays");
-  assert.doesNotMatch(renderObservability, /t\.split\.local/, "the local count pill is removed");
-  assert.doesNotMatch(renderObservability, /opill local/, "no local-styled pill markup remains");
+  // Both bar wraps must carry a click trigger that stops propagation before it can
+  // reach the button's own onclick (setHeaderUsageWindow) — clicking the bar opens
+  // the modal *instead of* toggling the window; clicking the "5h"/"7d" text still
+  // toggles the window exactly as before this change.
+  const bar5h = extractBetween(CONSOLE_HTML, 'id="usageBtn5h"', '</button>');
+  const bar7d = extractBetween(CONSOLE_HTML, 'id="usageBtn7d"', '</button>');
+  for (const bar of [bar5h, bar7d]) {
+    assert.match(bar, /usage-bar-wrap[^>]*onclick="event\.stopPropagation\(\);openObsModal\(\)"/, "bar span opens the modal and stops propagation");
+  }
+  // Regression guard: the pre-existing window-toggle handler on the outer button
+  // must still be exactly what it was before this change.
+  assert.match(CONSOLE_HTML, /onclick="setHeaderUsageWindow\('5h'\)"/);
+  assert.match(CONSOLE_HTML, /onclick="setHeaderUsageWindow\('7d'\)"/);
+});
+
+test("center-panel Observability takeover is fully removed — the modal replaced it, no orphaned code", () => {
+  const js = extractScript(CONSOLE_HTML);
+  for (const name of ["showObs", "renderObsPanel", "openObsDashboard", "updateObsNav"]) {
+    assert.doesNotMatch(js, new RegExp("function " + name + "\\("), name + " should be deleted, not left dead");
+  }
+  assert.doesNotMatch(js, /_obsState/, "the center-panel panelOpen flag is gone from every sibling panel function too");
 });
 
 test("PROVIDERS section shows installed/not-set-up status with an Install affordance, no on/off toggle", () => {
@@ -592,21 +623,6 @@ test("dashboard modal no longer renders a local-engine cache section (Claude-nat
   assert.doesNotMatch(renderObsDashboard, /s\.localEngineCache/);
   assert.doesNotMatch(renderObsDashboard, /engine offline/);
   assert.doesNotMatch(renderObsDashboard, /pressure evictions/);
-});
-
-test("Full dashboard takes over the center section (obs panel), not Settings", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // The full Observability dashboard now takes over the center (like New Task /
-  // Tools), not a cramped modal — openObsDashboard routes to showObs, and must
-  // never open Settings.
-  assert.doesNotMatch(js, /function openObsDashboard\(\)\s*\{[^}]*openSettings/, "openObsDashboard must not call openSettings");
-  assert.match(js, /function openObsDashboard\(\)\s*\{[^}]*showObs\(\)/, "openObsDashboard opens the center panel via showObs");
-  assert.match(js, /function showObs\(/, "showObs present");
-  assert.match(js, /function renderObsPanel\(/, "renderObsPanel present");
-  assert.match(js, /_obsState\.panelOpen = true/, "showObs opens the obs panel");
-  assert.match(js, /id="obsDashPanel"/, "obs panel renders into obsDashPanel");
-  // by-model draws grouped side-by-side bars so usage is comparable at a glance.
-  assert.match(js, /function obsGroupedBars\(/, "grouped bars for the by-model view");
 });
 
 test("remote access UI is two toggles — Tailscale for iPhone, Cloudflare for Apple Watch — not the throwaway temporary tunnel", () => {

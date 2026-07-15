@@ -1070,8 +1070,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <span class="logo">HiveMatrix</span>
     <span class="live" id="live" style="cursor:pointer" onclick="toggleConnOverride()" title="Daemon + connectivity status — click to override connectivity">● live</span>
     <span class="obs-win usage-win-bars" id="usageWinToggle">
-      <button data-w="5h" class="on" id="usageBtn5h" onclick="setHeaderUsageWindow('5h')">5h<span class="usage-bar-wrap"><span class="usage-bar" id="usageBar5h"><span class="usage-bar-fill" id="usageBar5hFill"></span></span></span></button>
-      <button data-w="7d" id="usageBtn7d" onclick="setHeaderUsageWindow('7d')">7d<span class="usage-bar-wrap"><span class="usage-bar-days" id="usageBar7d"><span class="usage-bar-day" data-day="1"></span><span class="usage-bar-day" data-day="2"></span><span class="usage-bar-day" data-day="3"></span><span class="usage-bar-day" data-day="4"></span><span class="usage-bar-day" data-day="5"></span><span class="usage-bar-day" data-day="6"></span><span class="usage-bar-day" data-day="7"></span></span></span></button>
+      <button data-w="5h" class="on" id="usageBtn5h" onclick="setHeaderUsageWindow('5h')">5h<span class="usage-bar-wrap" onclick="event.stopPropagation();openObsModal()"><span class="usage-bar" id="usageBar5h"><span class="usage-bar-fill" id="usageBar5hFill"></span></span></span></button>
+      <button data-w="7d" id="usageBtn7d" onclick="setHeaderUsageWindow('7d')">7d<span class="usage-bar-wrap" onclick="event.stopPropagation();openObsModal()"><span class="usage-bar-days" id="usageBar7d"><span class="usage-bar-day" data-day="1"></span><span class="usage-bar-day" data-day="2"></span><span class="usage-bar-day" data-day="3"></span><span class="usage-bar-day" data-day="4"></span><span class="usage-bar-day" data-day="5"></span><span class="usage-bar-day" data-day="6"></span><span class="usage-bar-day" data-day="7"></span></span></span></button>
     </span>
     <span class="muted" id="usageWinReadout" style="font-size:11px"></span>
   </div>
@@ -1494,8 +1494,15 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   </div>
 </div>
 
-<!-- Observability now opens in the center panel (showObs) — the old modal overlay
-     was dead code (nothing added .open) and was removed. -->
+<!-- Observability — opened by clicking the 5h/7d usage-bar visual in the header. -->
+<div class="overlay" id="obsOverlay" onclick="if(event.target===this)closeObsModal()">
+  <div class="modal" style="width:820px;max-width:92vw;max-height:88vh;overflow:auto">
+    <h1>📊 Observability<span class="x" onclick="closeObsModal()">✕</span></h1>
+    <div class="oc-panel-sub">Tokens, tasks, latency &amp; prompt-cache across Claude &amp; Codex</div>
+    <div class="obs-panel-toggles" id="obsModalToggles"></div>
+    <div id="obsDashPanel"><div class="muted">Loading…</div></div>
+  </div>
+</div>
 
 <!-- Generic dialog (replaces native alert/confirm/prompt, which don't work in the webview). -->
 <input type="file" id="skillFileInput" accept=".md,text/markdown,.txt" style="display:none" onchange="onSkillFileBrowsed(this)" />
@@ -1870,8 +1877,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="approvals"></div>
     <details class="ctx-sec" id="setupSec" open><summary id="setupSummary">Setup</summary>
     <div id="onboarding"></div></details>
-    <details class="ctx-sec" id="obsSec"><summary>Observability</summary>
-    <div id="observability"><div class="muted">No task telemetry yet.</div></div></details>
     <details class="ctx-sec" id="connSec" open><summary>Connectivity</summary>
     <div id="conn"></div></details>
     <details class="ctx-sec" id="dirSec" open><summary>Scheduled</summary>
@@ -2050,7 +2055,7 @@ async function toggleThemeQuick() {
 // Center overview — at-a-glance board state when no task is selected, instead of
 // leaving the widest column empty.
 function renderOverview() {
-  if (state.selected || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen || _brainState.panelOpen || _rolesState.panelOpen || _toolsState.panelOpen || _obsState.panelOpen || _goalsState.panelOpen) return;
+  if (state.selected || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen || _brainState.panelOpen || _rolesState.panelOpen || _toolsState.panelOpen || _goalsState.panelOpen) return;
   setFlashSessionMode(false);
   const el = document.getElementById("session");
   if (!el) return;
@@ -2085,7 +2090,6 @@ function showOverview() {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
-  _obsState.panelOpen = false;
   _goalsState.panelOpen = false;
   setFlashSessionMode(false);
   renderBoard();
@@ -2107,7 +2111,7 @@ function focusBoardLane(key) {
 // item highlighted alongside the active one ("menus duplicated").
 function syncNav() {
   const panelOpen = _flashState.panelOpen || _brainState.panelOpen || _rolesState.panelOpen
-    || _toolsState.panelOpen || _obsState.panelOpen || _goalsState.panelOpen;
+    || _toolsState.panelOpen || _goalsState.panelOpen;
   const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !panelOpen;
   const active = {
     overviewNav: overviewActive,
@@ -2522,7 +2526,6 @@ async function selectTask(id) {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
-  _obsState.panelOpen = false;
   _goalsState.panelOpen = false;
   setFlashSessionMode(false);
   if (_taskFormInSession) _closeNewTaskPanel();
@@ -3008,121 +3011,11 @@ function taskTelemetryStrip(t, out) {
   return '<details class="task-debug"><summary class="muted" style="font-size:11px;cursor:pointer">Debug info</summary>' + strip + '</details>';
 }
 
-async function renderObservability() {
-  const el = document.getElementById("observability");
-  if (!el) return;
-  let data;
-  try { data = await api("/observability?limit=1"); } catch (e) { return; }
-  if (!data || !data.totals) return;
-  const t = data.totals;
-  if (!t.runs) { el.innerHTML = '<div class="muted">No task telemetry yet. <button class="linklike" onclick="openObsDashboard()">Open dashboard</button></div>'; return; }
-  // Claude-native: every live run is frontier, so the split is just a count —
-  // no "N local" pill (post-cutover the live view never carries a local-*
-  // row; see obsProviderAllowed in server.ts).
-  let html = '<div style="margin-bottom:6px"><button class="linklike" onclick="openObsDashboard()">↗ Full dashboard — graphs &amp; cache</button></div>'
-    + '<div class="obs-split">'
-    + '<span class="opill">' + t.split.frontier + ' frontier</span>'
-    + '<span class="opill">' + fmtNum(t.tokens.total) + ' tok</span>'
-    + '</div>';
-  html += '<table class="obs-tbl"><tr><th>provider</th><th>runs</th><th>tok in/out</th><th>p50</th><th>p95</th></tr>';
-  const byModel = Array.isArray(t.byModel) ? t.byModel : [];
-  for (const p of t.byProvider) {
-    const label = OBS_LABELS[p.key] || p.key;
-    html += '<tr><td>' + esc(label) + '</td><td>' + p.runs + '</td>'
-      + '<td>' + fmtNum(p.inputTokens) + ' / ' + fmtNum(p.outputTokens) + '</td>'
-      + '<td>' + fmtMs(p.latencyP50Ms) + '</td><td>' + fmtMs(p.latencyP95Ms) + '</td>'
-      + '</tr>';
-    // Nested per-model breakdown — the operator's ask: which specific Claude
-    // tier (Opus/Sonnet/Haiku), or which Codex model, actually ran these tasks.
-    const models = byModel.filter(m => m.provider === p.key).sort((a, b) => b.runs - a.runs);
-    for (const m of models) {
-      const dot = '<i style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;background:' + obsModelColor(m.key) + '"></i>';
-      html += '<tr class="obs-modelrow muted" style="font-size:11px"><td style="padding-left:16px">' + dot + esc(obsModelLabel(m.key)) + '</td><td>' + m.runs + '</td>'
-        + '<td>' + fmtNum(m.inputTokens) + ' / ' + fmtNum(m.outputTokens) + '</td>'
-        + '<td>' + fmtMs(m.latencyP50Ms) + '</td><td>' + fmtMs(m.latencyP95Ms) + '</td>'
-        + '</tr>';
-    }
-  }
-  html += '</table>';
-  // Disabled providers with rows in scope are never silently dropped — a
-  // muted footnote says what's hidden and why, so "0 Codex runs" reads as
-  // "disabled" instead of "never used".
-  if (Array.isArray(t.hiddenProviders) && t.hiddenProviders.length) {
-    html += '<div class="muted" style="font-size:11px;margin-top:4px">'
-      + t.hiddenProviders.map(h => esc(OBS_LABELS[h.key] || h.key) + ' — ' + h.runs + ' run' + (h.runs === 1 ? '' : 's') + ' hidden (disabled)').join(' · ')
-      + '</div>';
-  }
-  // Model scorecard — per-tier quality & cost (Opus/Sonnet/Haiku/Codex): first-pass
-  // rate (one-and-done), rework (runs/task), and cost per task. Reframed from the
-  // retired "local vs frontier per route" view post the Claude-native cutover.
-  const scoreRows = (Array.isArray(data.tierScorecard) && data.tierScorecard.length) ? data.tierScorecard : null;
-  if (scoreRows) {
-    const pct = v => (v == null ? '—' : Math.round(v * 100) + '%');
-    const dollars = v => (v == null ? '<span class="muted" title="not reported">—</span>' : '$' + Number(v).toFixed(v < 0.01 ? 4 : 2));
-    html += '<div class="obs-sc-h" style="margin:8px 0 3px;font-size:11px;color:var(--muted)">Model scorecard <span title="How often each model lands a task on the first attempt, its rework, and cost per task.">ⓘ</span></div>';
-    html += '<table class="obs-tbl"><tr><th>model</th><th title="distinct tasks">tasks</th><th title="succeeded on first attempt">1st-pass</th><th title="runs per task — rework signal">runs/task</th><th title="model cost per task">$/task</th></tr>';
-    for (const s of scoreRows) {
-      const dot = '<i style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;background:' + (OBS_TIER_COLORS[s.tier] || OBS_COLORS.other) + '"></i>';
-      html += '<tr><td>' + dot + esc(s.tier) + '</td><td>' + s.tasks + '</td>'
-        + '<td>' + pct(s.firstPassRate) + '</td>'
-        + '<td>' + Number(s.avgRunsPerTask).toFixed(2) + '</td>'
-        + '<td>' + dollars(s.costPerTask) + '</td></tr>';
-    }
-    html += '</table>';
-  }
-  // Bandit: per-class routing suggestions from the same telemetry. Advisory only —
-  // shows confident picks (classes with enough data); the rest defer to default routing.
-  if (Array.isArray(data.routing)) {
-    const confident = data.routing.filter(r => r && r.route);
-    if (confident.length) {
-      html += '<div class="obs-sc-h" style="margin:8px 0 3px;font-size:11px;color:var(--muted)">Suggested routing <span title="What the telemetry says is the best route per task class. Advisory — not auto-applied.">ⓘ</span></div>';
-      html += '<div style="font-size:11px;line-height:1.5">';
-      for (const r of confident) {
-        const routeLabel = OBS_LABELS[r.route] || r.route;
-        html += '<div><b>' + esc(r.taskClass) + '</b> → ' + esc(routeLabel)
-          + (r.explore ? ' <span class="muted">(exploring)</span>' : '')
-          + '</div>';
-      }
-      html += '</div>';
-    }
-  }
-  el.innerHTML = html;
-}
-
-// --- Observability dashboard ------------------------------------------------
-// The full Observability dashboard takes over the center section (like the
-// New Task / Tools panels); openObsDashboard routes to showObs. The old modal
-// overlay + its setObs*Modal/closeObsDashboard helpers were dead code (nothing
-// ever opened the overlay) and have been removed.
-function openObsDashboard() { showObs(); }
+// --- Observability dashboard --------------------------------------------
+// Data helpers (setObsWindowPanel/setObsGroupPanel/obsPanelToggles) plus the
+// obsOverlay modal (openObsModal/closeObsModal) that hosts renderObsDashboard.
 function setObsWindowPanel(w) { _obsWindow = w; renderObsDashboard("obsDashPanel"); }
 function setObsGroupPanel(g) { _obsGroup = g; renderObsDashboard("obsDashPanel"); }
-
-// ── Observability center panel ─────────────────────────────────────────
-let _obsState = { panelOpen: false };
-
-function showObs() {
-  state.selected = null;
-  state.selectedSkillOrCommand = null;
-  _skSel = '';
-  _ctxTask = null;
-  if (_taskFormInSession) _closeNewTaskPanel();
-  _flashState.panelOpen = false;
-  _brainState.panelOpen = false;
-  _rolesState.panelOpen = false;
-  _toolsState.panelOpen = false;
-  _obsState.panelOpen = false;
-  _goalsState.panelOpen = false;
-  _obsState.panelOpen = true;
-  renderBoard();
-  renderSkillList();
-  renderObsPanel();
-  updateFlashNav();
-  updateBrainNav();
-  updateRolesNav();
-  updateToolsNav();
-  updateGoalsNav();
-}
 
 function obsPanelToggles() {
   const wins = ["1h", "24h", "7d", "30d"];
@@ -3134,22 +3027,14 @@ function obsPanelToggles() {
     + '<button class="copybtn" style="margin-left:8px" onclick="renderObsDashboard(\'obsDashPanel\')">↻ Refresh</button>';
 }
 
-function renderObsPanel() {
-  if (!_obsState.panelOpen) return;
-  const session = document.getElementById('session');
-  if (!session) return;
-  setFlashSessionMode(true);
-  session.innerHTML = '<div class="oc-center-pane">'
-    + '<div class="oc-panel-head"><div><div class="oc-panel-title"><span>📊 Observability</span></div>'
-    + '<div class="oc-panel-sub">Tokens, tasks, latency &amp; prompt-cache across Claude &amp; Codex</div></div>'
-    + '<span class="oc-panel-head-spacer"></span>'
-    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></div>'
-    + '<div class="tools-pane" style="padding:8px 4px 24px"><div class="obs-panel-toggles">' + obsPanelToggles() + '</div>'
-    + '<div id="obsDashPanel"><div class="muted">Loading…</div></div></div></div>';
+function openObsModal() {
+  document.getElementById('obsOverlay').classList.add('open');
+  document.getElementById('obsModalToggles').innerHTML = obsPanelToggles();
   renderObsDashboard('obsDashPanel');
 }
-
-function updateObsNav() { /* obs has no left-nav button; opened from the right rail */ }
+function closeObsModal() {
+  document.getElementById('obsOverlay').classList.remove('open');
+}
 
 // ── Goals panel (accountability layer) ─────────────────────────────────
 let _goalsState = { panelOpen: false, goals: null, error: false };
@@ -3164,7 +3049,6 @@ function showGoals() {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
-  _obsState.panelOpen = false;
   _goalsState.panelOpen = true;
   renderBoard();
   renderSkillList();
@@ -3733,7 +3617,6 @@ function showSkillPanel(key) {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
-  _obsState.panelOpen = false;
   _goalsState.panelOpen = false;
   setFlashSessionMode(false);
   if (_taskFormInSession) _closeNewTaskPanel();
@@ -3751,7 +3634,6 @@ function _closeSkillPanel() {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
-  _obsState.panelOpen = false;
   _goalsState.panelOpen = false;
   setFlashSessionMode(false);
   renderSkillList();
@@ -5612,7 +5494,7 @@ async function refresh() {
     const liveEl = document.getElementById("live");
     if (liveEl) liveEl.classList.remove("stale");
     renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
-    renderApprovals(); renderSkillCatalog(); renderMcp(); renderObservability();
+    renderApprovals(); renderSkillCatalog(); renderMcp();
   } catch (e) { _httpHealthy = false; /* transient */ }
   // Check for updates on every tick (cheap — daemon caches ~60s). Tied to
   // refresh so it fires on SSE activity too, not just a slow background timer
@@ -5884,7 +5766,6 @@ function showNewTaskPanel() {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
-  _obsState.panelOpen = false;
   _goalsState.panelOpen = false;
   setFlashSessionMode(false);
   _ctxTask = null;
@@ -6924,7 +6805,6 @@ function showFlashPanel() {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
-  _obsState.panelOpen = false;
   _goalsState.panelOpen = false;
   renderBoard();
   renderSkillList();
@@ -7054,7 +6934,6 @@ function showBrain() {
   _brainState.panelOpen = true;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
-  _obsState.panelOpen = false;
   _goalsState.panelOpen = false;
   renderBoard();
   renderSkillList();
@@ -7574,7 +7453,6 @@ function showRoles() {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = true;
   _toolsState.panelOpen = false;
-  _obsState.panelOpen = false;
   _goalsState.panelOpen = false;
   renderBoard();
   renderSkillList();
@@ -7605,7 +7483,6 @@ function showTools() {
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = true;
-  _obsState.panelOpen = false;
   _goalsState.panelOpen = false;
   renderBoard();
   renderSkillList();
