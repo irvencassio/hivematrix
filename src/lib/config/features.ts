@@ -16,6 +16,7 @@ export const KNOWN_FEATURES = [
   { key: "openclaw.chatDock", label: "OpenClaw Chat", description: "Show OpenClaw chat as a center-pane workspace in the HiveMatrix console. OpenClaw must be installed and its Gateway must be reachable on this Mac." },
   { key: "promptWizardAlways", label: "Always enhance new tasks", description: "Run the New Task prompt wizard automatically before every Create — you still review and accept the rewrite. Off by default; you can still enhance manually with the ✨ button." },
   { key: "agentSpecialization", label: "Specialist agents", description: "Route each task to a specialist role (developer, QA, designer, COO…) instead of always using the developer role. Off = every task runs as developer." },
+  { key: "selfImprovement", label: "Self-improvement loop", description: "Let HiveMatrix autonomously plan and run maintenance/self-improvement tasks from your feedback backlog on a daily schedule. Off by default — turn on only when you want it working on its own." },
 ] as const;
 
 export type FeatureKey = (typeof KNOWN_FEATURES)[number]["key"];

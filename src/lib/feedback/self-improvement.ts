@@ -29,7 +29,7 @@ import {
   type RecordFeedbackInput,
 } from "./feedback";
 import type { DirectiveRetrospective } from "@/lib/orchestrator/directive-autonomy";
-import { createDirective, listDirectives, type CreateDirectiveInput } from "@/lib/orchestrator/directive-store";
+import { createDirective, listDirectives, updateDirective, type CreateDirectiveInput } from "@/lib/orchestrator/directive-store";
 
 /**
  * Derive feedback inputs from a retrospective: "what didn't work" → bugs,
@@ -127,6 +127,26 @@ export function installSelfImprovementDirectiveIfMissing(
   if (existing) return { installed: false, directiveId: existing._id };
   const created = createDirective(buildSelfImprovementDirective(opts));
   return { installed: true, directiveId: created._id };
+}
+
+/**
+ * Block every ACTIVE self-improvement directive. Called on boot when the
+ * `selfImprovement` feature is off, so a directive installed by an earlier
+ * (feature-on) boot can't keep dispatching. Returns the count blocked.
+ * "blocked" (not "retired") is deliberate: only a NON-retired directive stops
+ * installSelfImprovementDirectiveIfMissing from re-creating one, and the
+ * scheduler dispatches only `active` directives — so `blocked` is dormant AND
+ * durable across restarts.
+ */
+export function disableActiveSelfImprovementDirectives(): number {
+  let blocked = 0;
+  for (const d of listDirectives()) {
+    if (isSelfImprovementDirective(d.goal) && d.status === "active") {
+      updateDirective(d._id, { status: "blocked", nextRunAt: null, retiredReason: "self-improvement feature disabled" });
+      blocked++;
+    }
+  }
+  return blocked;
 }
 
 /** Render the open backlog as a prompt fragment a planner can include. "" when empty. */

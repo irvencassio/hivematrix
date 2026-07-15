@@ -4,7 +4,7 @@ import { parseAdoConfig, buildAdoMcpServer } from "./mcp";
 import { parseFeatures, featureCapability } from "@/lib/config/features";
 
 test("parseFeatures defaults flags off; reads true only for explicit true", () => {
-  const base = { ado: false, voice: false, "openclaw.chatDock": false, promptWizardAlways: false, agentSpecialization: false };
+  const base = { ado: false, voice: false, "openclaw.chatDock": false, promptWizardAlways: false, agentSpecialization: false, selfImprovement: false };
   assert.deepEqual(parseFeatures({}), base);
   assert.deepEqual(parseFeatures({ features: { ado: true } }), { ...base, ado: true });
   assert.deepEqual(parseFeatures({ features: { ado: "yes" } }), base);

@@ -139,19 +139,28 @@ async function main(): Promise<void> {
     if (revived.length) console.log(`[directives] revived ${revived.length} stale recurring directive(s): ${revived.join(", ")}`);
   } catch (e) { console.error("[directives] rearm-on-boot failed:", e instanceof Error ? e.message : e); }
 
-  // Install the standing self-improvement/maintenance directive if one isn't
-  // already active — without this the feedback→planning loop never fires on
-  // its own. Idempotent: restarts happen routinely (auto-update), so this
-  // must not create a duplicate directive each boot.
+  // Install the standing self-improvement/maintenance directive when the
+  // `selfImprovement` feature is ON — without it the feedback→planning loop
+  // never fires on its own. Idempotent (restarts happen routinely via
+  // auto-update, so it must not create a duplicate each boot). When the feature
+  // is OFF (default), block any directive a prior feature-on boot installed, so
+  // the autonomous loop can never resurrect itself across an update.
   try {
-    const { installSelfImprovementDirectiveIfMissing } = await import("@/lib/feedback/self-improvement");
-    const { installed, directiveId } = installSelfImprovementDirectiveIfMissing();
-    console.log(
-      installed
-        ? `[directives] installed self-improvement directive (${directiveId})`
-        : `[directives] self-improvement directive already active (${directiveId})`
-    );
-  } catch (e) { console.error("[directives] self-improvement install-on-boot failed:", e instanceof Error ? e.message : e); }
+    const { isFeatureEnabled } = await import("@/lib/config/features");
+    if (isFeatureEnabled("selfImprovement")) {
+      const { installSelfImprovementDirectiveIfMissing } = await import("@/lib/feedback/self-improvement");
+      const { installed, directiveId } = installSelfImprovementDirectiveIfMissing();
+      console.log(
+        installed
+          ? `[directives] installed self-improvement directive (${directiveId})`
+          : `[directives] self-improvement directive already active (${directiveId})`
+      );
+    } else {
+      const { disableActiveSelfImprovementDirectives } = await import("@/lib/feedback/self-improvement");
+      const blocked = disableActiveSelfImprovementDirectives();
+      console.log(`[directives] self-improvement feature off — blocked ${blocked} active directive(s)`);
+    }
+  } catch (e) { console.error("[directives] self-improvement boot gate failed:", e instanceof Error ? e.message : e); }
 
   // Flash dispatch: shared callback for both inbound channel pollers. Wraps
   // runFlashTurnText so messagebee/mailbee (lib/) never import from flash/ directly.

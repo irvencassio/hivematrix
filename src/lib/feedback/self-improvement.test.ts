@@ -21,6 +21,7 @@ const {
   buildSelfImprovementDirective,
   isSelfImprovementDirective,
   installSelfImprovementDirectiveIfMissing,
+  disableActiveSelfImprovementDirectives,
 } = await import("./self-improvement");
 const { getFeedback } = await import("./feedback");
 const { listDirectives } = await import("@/lib/orchestrator/directive-store");
@@ -147,6 +148,26 @@ test("installSelfImprovementDirectiveIfMissing installs once on boot, then no-op
 
   const matches = listDirectives().filter((d) => isSelfImprovementDirective(d.goal));
   assert.equal(matches.length, 1, "repeated boots must not create duplicate self-improvement directives");
+});
+
+test("disableActiveSelfImprovementDirectives blocks active loops and stops re-install (feature-off boot)", () => {
+  const { directiveId } = installSelfImprovementDirectiveIfMissing({ project: "hivematrix" });
+  const active = listDirectives().find((d) => d._id === directiveId);
+  assert.equal(active?.status, "active", "installed directive starts active");
+
+  const blocked = disableActiveSelfImprovementDirectives();
+  assert.equal(blocked, 1, "the active self-improvement directive is blocked");
+  const after = listDirectives().find((d) => d._id === directiveId);
+  assert.equal(after?.status, "blocked");
+  assert.equal(after?.nextRunAt, null, "high-water/next-run cleared so the scheduler won't fire it");
+
+  // A subsequent feature-on boot must NOT create a second one — the blocked
+  // directive (status !== "retired") makes the installer no-op, so the loop
+  // cannot resurrect itself across restarts.
+  const reinstall = installSelfImprovementDirectiveIfMissing({ project: "hivematrix" });
+  assert.equal(reinstall.installed, false, "blocked directive prevents re-creation");
+  assert.equal(reinstall.directiveId, directiveId);
+  assert.equal(disableActiveSelfImprovementDirectives(), 0, "idempotent: nothing active left to block");
 });
 
 test("the planning fragment now leads each line with the feedbackId (so the planner can link)", () => {
