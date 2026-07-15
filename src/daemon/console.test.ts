@@ -694,6 +694,47 @@ test("renderMessageBeeState renders a skipped chat.db probe as neutral, distinct
   assert.equal(granted["mb_fda_mark"].className, "mb-mark ok");
 });
 
+test("renderMailBeeState leaves the automation mark untouched when a passive poll skips the probe, but still updates channel/identity marks", () => {
+  // Regression (Bug A, 2026-07-15 lane-setup-modal-permission-staleness): while
+  // Mail Lane's modal is open, pollMl() re-renders from a passive GET
+  // /mailbee every 3s forever, and while the channel is off that passive
+  // fetch always comes back mailProbeSkipped: true (no probe ran). The active
+  // mlRetryAutomationProbe() loop stops itself the moment a probe succeeds,
+  // so the very next passive tick — carrying skip data, not a denial — used
+  // to clobber a correctly-green automation mark back to red, and nothing
+  // was left running to flip it back. Mirrors renderMessageBeeState's
+  // fdaSkipped handling above: a skip is neither granted nor denied and must
+  // not overwrite a real result.
+  const js = extractScript(CONSOLE_HTML);
+  const src = extractFunctionBlock(js, "renderMailBeeState");
+  const esc = js.match(/function esc\(s\)\{[^\n]+\}/);
+  assert.ok(esc, "console script must define esc");
+  const factory = new Function(
+    "document",
+    `${esc![0]}\n${src}\nreturn renderMailBeeState;`,
+  ) as (doc: unknown) => (data: unknown) => void;
+
+  const els: Record<string, { textContent: unknown; className: unknown; innerHTML: unknown }> = {};
+  const doc = { getElementById: (id: string) => (els[id] ||= { textContent: "", className: "", innerHTML: "" }) };
+  const render = factory(doc);
+
+  // A genuine successful probe: automation granted, channel still off.
+  render({ mailControllable: true, enabled: false, identities: [] });
+  assert.equal(els["ml_auto_mark"].className, "mb-mark ok", "granted probe marks automation ok");
+
+  // The next passive tick: channel got enabled and a trusted sender showed
+  // up, but this fetch was a skip (no probe ran) — it must not downgrade the
+  // automation mark already proven true, while the channel/identity marks
+  // (the actual purpose of the passive poll) must still update normally.
+  render({
+    mailControllable: false, mailProbeSkipped: true, mailProbeReason: "channel_disabled",
+    enabled: true, identities: [{ address: "a@b.com", status: "allowed" }],
+  });
+  assert.equal(els["ml_auto_mark"].className, "mb-mark ok", "skip must not downgrade a previously granted automation mark");
+  assert.equal(els["ml_chan_mark"].className, "mb-mark ok", "channel mark must still update on a passive tick");
+  assert.match(String(els["ml_identities"].innerHTML), /a@b\.com/, "identity chips must still update on a passive tick");
+});
+
 test("Message Lane setup offers real FDA remediation: reveal the daemon binary and restart it", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(CONSOLE_HTML, /onclick="revealMessageBeeDaemon\(\)"/);
@@ -702,6 +743,39 @@ test("Message Lane setup offers real FDA remediation: reveal the daemon binary a
   assert.match(js, /api\('\/messagebee\/reveal-daemon'/);
   assert.match(js, /async function restartMessageBeeDaemon\(\)/);
   assert.match(js, /api\('\/messagebee\/restart-daemon'/);
+});
+
+test("restart daemon action re-probes and re-renders the Message Lane setup modal after the daemon comes back up, not just the board", () => {
+  // Regression (Bug B, 2026-07-15 lane-setup-modal-permission-staleness):
+  // restartMessageBeeDaemon() exists specifically for "grant FDA to the
+  // daemon binary, then restart it so the grant takes effect." Only calling
+  // refresh() afterward re-renders the board/onboarding/etc — refresh()
+  // never touches mb_fda_mark or renderMessageBeeState, and the setup modal
+  // has no poll loop of its own, so the modal's own mark stayed frozen at
+  // its pre-restart value even when the restart genuinely fixed access.
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "restartMessageBeeDaemon");
+  // Scope to the successful-restart branch (after the "re-checking access…"
+  // status text is set) so a probe/render call added to some other branch
+  // (e.g. the error paths) would not satisfy this.
+  const successBranchStart = body.indexOf("re-checking access");
+  assert.notEqual(successBranchStart, -1, "restart daemon still sets the re-checking-access status text");
+  const successBranch = body.slice(successBranchStart);
+  assert.match(
+    successBranch,
+    /api\('\/messagebee\/probe',\s*\{\s*method:\s*'POST'\s*\}\)/,
+    "restartMessageBeeDaemon must re-probe Message Lane once the daemon is back up, the same probe openMessageBeeSetup() uses"
+  );
+  assert.match(
+    successBranch,
+    /renderMessageBeeState\(/,
+    "restartMessageBeeDaemon must re-render the setup modal's own marks with the fresh probe result, not rely on setTimeout(refresh, 3000) alone"
+  );
+  assert.match(
+    successBranch,
+    /refresh\(\)/,
+    "refresh() must still run so the rest of the UI (board/onboarding/etc.) keeps working"
+  );
 });
 
 test("MessageBee modal fetches structured status before reporting readability", () => {

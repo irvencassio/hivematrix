@@ -5206,7 +5206,20 @@ async function restartMessageBeeDaemon() {
       return;
     }
     if (status) status.textContent = 'Daemon restarting — re-checking access…';
-    setTimeout(refresh, 3000);
+    // Give launchctl kickstart -k time to bring the daemon back up, then
+    // re-probe and re-render this modal directly — the same probe+render
+    // pair openMessageBeeSetup() uses — so a grant made via the reveal/
+    // restart flow above is reflected here without requiring the operator
+    // to close and reopen the modal. refresh() alone is not enough: it
+    // re-renders the board/onboarding/etc but never touches mb_fda_mark.
+    setTimeout(async () => {
+      refresh();
+      try {
+        const p = await api('/messagebee/probe', { method: 'POST' });
+        if (p) renderMessageBeeState(p);
+      } catch (e) { /* transient — mark stays at its last known state */ }
+      if (status) status.textContent = '';
+    }, 3000);
   } catch (e) { if (status) status.textContent = ''; await hmAlert('Could not restart the daemon: ' + e, 'Restart Daemon'); }
 }
 function parseMessageBeeSelfHandles() {
@@ -5482,24 +5495,32 @@ function renderMailBeeState(data) {
   const mark = (id, ok) => { const el = document.getElementById(id); el.textContent = ok ? '✓' : '○'; el.className = 'mb-mark ' + (ok ? 'ok' : 'no'); };
   const controllable = data ? !!data.mailControllable : false;
   const enabled = data ? !!data.enabled : false;
-  mark('ml_auto_mark', controllable);
-  mark('ml_chan_mark', enabled);
-  const detailEl = document.getElementById('ml_auto_detail');
-  if (detailEl) {
-    if (controllable) {
-      detailEl.textContent = 'Granted — HiveMatrix can control Apple Mail.';
-    } else if (data && data.mailProbeKind === 'not_authorized') {
-      detailEl.textContent = data.mailProbeDetail || 'Not authorized yet — approve the "HiveMatrix wants to control Mail" prompt, or turn it on in Automation settings.';
-    } else if (data && data.mailProbeKind === 'not_running') {
-      detailEl.textContent = 'Mail.app is not running. Click "Grant Mail Automation" to launch it and ask for permission.';
-    } else if (data && data.mailProbeKind === 'timeout') {
-      detailEl.textContent = 'Mail did not respond in time. Click "Grant Mail Automation" to try again.';
-    } else if (data && data.mailProbeDetail) {
-      detailEl.textContent = data.mailProbeDetail;
-    } else {
-      detailEl.textContent = 'HiveMatrix needs permission to control Mail (read inbox + draft/send). Click "Grant Mail Automation" to ask.';
+  // "Skipped" (no probe ran, e.g. the passive poll fired while the channel is
+  // still disabled) is neither granted nor denied — it must not overwrite a
+  // real result. Without this guard, the passive pollMl() loop (which never
+  // stops while the modal is open) clobbers a mark the active probe loop just
+  // turned green back to red, and nothing is left running to flip it back.
+  // Mirrors renderMessageBeeState's fdaSkipped handling for Message Lane.
+  if (!(data && data.mailProbeSkipped)) {
+    mark('ml_auto_mark', controllable);
+    const detailEl = document.getElementById('ml_auto_detail');
+    if (detailEl) {
+      if (controllable) {
+        detailEl.textContent = 'Granted — HiveMatrix can control Apple Mail.';
+      } else if (data && data.mailProbeKind === 'not_authorized') {
+        detailEl.textContent = data.mailProbeDetail || 'Not authorized yet — approve the "HiveMatrix wants to control Mail" prompt, or turn it on in Automation settings.';
+      } else if (data && data.mailProbeKind === 'not_running') {
+        detailEl.textContent = 'Mail.app is not running. Click "Grant Mail Automation" to launch it and ask for permission.';
+      } else if (data && data.mailProbeKind === 'timeout') {
+        detailEl.textContent = 'Mail did not respond in time. Click "Grant Mail Automation" to try again.';
+      } else if (data && data.mailProbeDetail) {
+        detailEl.textContent = data.mailProbeDetail;
+      } else {
+        detailEl.textContent = 'HiveMatrix needs permission to control Mail (read inbox + draft/send). Click "Grant Mail Automation" to ask.';
+      }
     }
   }
+  mark('ml_chan_mark', enabled);
   if (data && data.identities) {
     const trusted = data.identities.filter(i => i.status === 'allowed' || i.status === 'paired');
     mark('ml_trust_mark', trusted.length > 0);
