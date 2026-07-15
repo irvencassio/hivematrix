@@ -12,6 +12,7 @@ import {
   detectCommandIntent,
   boardReply, approvalsReply, resolvedReply, noApprovalToResolveReply,
   directivesReply, createdTaskReply, connectivityReply, setConnectivityReply,
+  parseOrdinal, extractApprovalMatchText,
   type CommandIntent,
   type CommandKind,
 } from "./command-intent";
@@ -21,6 +22,9 @@ import {
   rememberLastTask,
   rememberTurn,
   resolveApprovalReference,
+  rememberPendingApprovalDecision,
+  clearPendingApprovalDecision,
+  resolvePendingApprovalFollowUp,
   type ContextApproval,
 } from "./command-context";
 import { buildVoiceBriefing, usageReply, pipelineConcern, type BriefingUsage, type BriefingBrowserReadiness, type BriefingWorkflowInbox, type BriefingPipelineHealth, type BriefingScoreboard } from "./briefing";
@@ -294,18 +298,40 @@ export async function commandTurnOverride(transcript: string, deps: CommandTurnD
     }
   } else {
     const intent = detectCommandIntent(transcript || "");
-    if (intent.kind === "none") return null;
-    kind = intent.kind;
-    try {
-      result = await runCommand(intent, deps, sessionId);
-    } catch (e) {
-      console.error(`[voice-cmd] ${intent.kind} failed: ${e instanceof Error ? e.message : e}`);
-      return null;
+    if (intent.kind === "none") {
+      // No verb in THIS utterance — but if the prior turn left a pending
+      // approve/deny disambiguation, a bare "the second one" is answering
+      // WHICH one, not asking a fresh question. Resolve it with the verb
+      // already spoken last turn; never guess a verb from nothing.
+      let followUp: { kind: "approve" | "deny"; result: { reply: string; taskId?: string; detail?: string } } | null;
+      try {
+        followUp = await resolvePendingApprovalTurn(transcript || "", deps, sessionId);
+      } catch (e) {
+        console.error(`[voice-cmd] pending-approval follow-up failed: ${e instanceof Error ? e.message : e}`);
+        return null;
+      }
+      if (!followUp) return null;
+      kind = followUp.kind;
+      result = followUp.result;
+    } else {
+      kind = intent.kind;
+      try {
+        result = await runCommand(intent, deps, sessionId);
+      } catch (e) {
+        console.error(`[voice-cmd] ${intent.kind} failed: ${e instanceof Error ? e.message : e}`);
+        return null;
+      }
     }
   }
   if (result == null) return null;
 
-  contextStore.update(sessionId, (ctx) => rememberTurn(ctx, { kind, text: transcript }));
+  contextStore.update(sessionId, (ctx) => {
+    const withTurn = rememberTurn(ctx, { kind, text: transcript });
+    // Any command that isn't itself continuing an approve/deny exchange
+    // closes out a pending disambiguation — otherwise a much later, unrelated
+    // "the second one" could hijack a stale choice list from turns ago.
+    return kind === "approve" || kind === "deny" ? withTurn : clearPendingApprovalDecision(withTurn);
+  });
 
   let audioBase64 = "";
   try {
@@ -330,13 +356,23 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
     }
     case "approve":
     case "deny": {
+      const verb: "approve" | "deny" = intent.kind === "approve" ? "approve" : "deny";
       const items = await approvalQueue(deps);
       const resolution = resolveApprovalReference(intent, contextStore.get(sessionId), toContextApprovals(items));
-      if (resolution.status === "none") return r(noApprovalToResolveReply());
-      if (resolution.status === "ambiguous") return r(disambiguationReply(resolution.choices));
-      const decision = intent.kind === "approve" ? "approve" : "denied";
-      await resolveApproval(deps, resolution.item.taskId, resolution.item.timestamp, decision);
-      return r(resolvedReply(intent.kind === "approve" ? "approve" : "deny", resolution.item.title));
+      if (resolution.status === "none") {
+        contextStore.update(sessionId, (ctx) => clearPendingApprovalDecision(ctx));
+        return r(noApprovalToResolveReply());
+      }
+      if (resolution.status === "ambiguous") {
+        // Remember the verb the operator already gave + the exact numbered
+        // list we're about to read back, so a bare "the second one" next
+        // turn can finish this without re-asking for approve/deny.
+        contextStore.update(sessionId, (ctx) => rememberPendingApprovalDecision(ctx, verb, resolution.choices));
+        return r(disambiguationReply(resolution.choices));
+      }
+      contextStore.update(sessionId, (ctx) => clearPendingApprovalDecision(ctx));
+      await resolveApproval(deps, resolution.item.taskId, resolution.item.timestamp, verb === "approve" ? "approve" : "denied");
+      return r(resolvedReply(verb, resolution.item.title));
     }
     case "directives": {
       const directives = await listDirectives(deps);
@@ -545,6 +581,42 @@ async function runCommand(intent: CommandIntent, deps: CommandTurnDeps, sessionI
     default:
       return null;
   }
+}
+
+/**
+ * A prior turn may have asked "which approval?" after an ambiguous
+ * approve/deny. This utterance carries no verb of its own (detectCommandIntent
+ * returned "none") — if it's a bare ordinal/description that identifies
+ * exactly one of the remembered choices, complete that pending decision using
+ * the verb the operator already gave last turn. Returns null (leaving any
+ * pending state untouched) when there's nothing pending, or when this
+ * utterance doesn't clearly pick one of the remembered choices — never guess.
+ */
+async function resolvePendingApprovalTurn(
+  transcript: string,
+  deps: CommandTurnDeps,
+  sessionId: string,
+): Promise<{ kind: "approve" | "deny"; result: { reply: string; taskId?: string; detail?: string } } | null> {
+  const context = contextStore.get(sessionId);
+  const t = transcript.toLowerCase().trim();
+  const target = resolvePendingApprovalFollowUp(context, {
+    ordinal: parseOrdinal(t),
+    matchText: extractApprovalMatchText(t),
+  });
+  if (!target) return null;
+
+  // Re-check against the live queue — never act on a choice that was already
+  // resolved through another channel (UI, another voice session) between turns.
+  const items = await approvalQueue(deps);
+  const live = toContextApprovals(items).find(
+    (item) => item.kind !== "stuck" && item.taskId === target.item.taskId && item.timestamp === target.item.timestamp,
+  );
+  contextStore.update(sessionId, (ctx) => clearPendingApprovalDecision(ctx));
+  if (!live) return { kind: target.kind, result: { reply: noApprovalToResolveReply() } };
+
+  const decision = target.kind === "approve" ? "approve" : "denied";
+  await resolveApproval(deps, live.taskId, live.timestamp, decision);
+  return { kind: target.kind, result: { reply: resolvedReply(target.kind, live.title) } };
 }
 
 /** Operator location from HiveMatrix settings (Personalization) — never agent memory. */

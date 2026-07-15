@@ -19,11 +19,25 @@ export interface CommandContextTurn {
   text: string;
 }
 
+/**
+ * A remembered approve/deny disambiguation: the verb the operator already
+ * spoke plus the exact numbered list they were read back. Lets a bare
+ * follow-up ("the second one", "the one to Ann") complete the decision
+ * without re-stating the verb. Cleared as soon as it's resolved, or the
+ * instant a different command runs, so a stale disambiguation from turns
+ * ago can never hijack an unrelated ordinal-sounding phrase.
+ */
+export interface PendingApprovalDecision {
+  kind: "approve" | "deny";
+  choices: ContextApproval[];
+}
+
 export interface CommandContext {
   turns: CommandContextTurn[];
   approvals: ContextApproval[];
   focusedApproval: ApprovalPointer | null;
   lastTaskId: string | null;
+  pendingApprovalDecision: PendingApprovalDecision | null;
 }
 
 export type ApprovalResolution =
@@ -40,6 +54,7 @@ export function emptyCommandContext(): CommandContext {
     approvals: [],
     focusedApproval: null,
     lastTaskId: null,
+    pendingApprovalDecision: null,
   };
 }
 
@@ -69,6 +84,18 @@ export function rememberApprovalList(context: CommandContext, approvals: Context
 
 export function rememberLastTask(context: CommandContext, taskId: string | null): CommandContext {
   return { ...context, lastTaskId: taskId };
+}
+
+export function rememberPendingApprovalDecision(
+  context: CommandContext,
+  kind: "approve" | "deny",
+  choices: ContextApproval[],
+): CommandContext {
+  return { ...context, pendingApprovalDecision: { kind, choices } };
+}
+
+export function clearPendingApprovalDecision(context: CommandContext): CommandContext {
+  return context.pendingApprovalDecision ? { ...context, pendingApprovalDecision: null } : context;
 }
 
 function findFocusedApproval(context: CommandContext, candidates: ContextApproval[]): ContextApproval | null {
@@ -144,6 +171,37 @@ export function resolveApprovalReference(
   if (focused) return { status: "resolved", item: focused };
   if (candidates.length === 1) return { status: "resolved", item: candidates[0] };
   return { status: "ambiguous", choices: candidates };
+}
+
+/**
+ * Complete a pending approve/deny disambiguation from a verb-less follow-up
+ * ("the second one", "the one to Ann"). Resolves ordinals/text against the
+ * REMEMBERED choices list (the exact items just read back to the operator),
+ * not the live queue — "first/second/third" only means anything relative to
+ * what was just spoken. Only resolves when the follow-up identifies EXACTLY
+ * one remembered choice; unlike resolveApprovalReference it never falls back
+ * to "focused" or "only one left", since there's no fresh verb here to
+ * justify acting on a weak match.
+ */
+export function resolvePendingApprovalFollowUp(
+  context: CommandContext,
+  followUp: { ordinal?: number; matchText?: string },
+): { kind: "approve" | "deny"; item: ContextApproval } | null {
+  const pending = context.pendingApprovalDecision;
+  if (!pending) return null;
+
+  if (followUp.ordinal !== undefined) {
+    const item = pending.choices[followUp.ordinal - 1];
+    return item ? { kind: pending.kind, item } : null;
+  }
+
+  const matchText = followUp.matchText?.trim();
+  if (matchText) {
+    const matches = matchByText(matchText, pending.choices);
+    if (matches.length === 1) return { kind: pending.kind, item: matches[0] };
+  }
+
+  return null;
 }
 
 export class RollingCommandContextStore {

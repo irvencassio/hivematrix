@@ -6,6 +6,9 @@ import {
   rememberApprovalList,
   rememberTurn,
   resolveApprovalReference,
+  rememberPendingApprovalDecision,
+  clearPendingApprovalDecision,
+  resolvePendingApprovalFollowUp,
 } from "./command-context";
 
 const approvals = [
@@ -132,4 +135,56 @@ test("matcher: stuck items are excluded from approve/deny targets", () => {
     status: "resolved",
     item: mixed[1],
   });
+});
+
+// ---------------------------------------------------------------------------
+// Pending approve/deny disambiguation: a verb-less follow-up ("the second
+// one") completes a decision the prior turn already flagged as ambiguous,
+// using the verb that was already spoken. Pure logic only — no live queue.
+
+const mailChoices = [
+  { kind: "tool" as const, taskId: "task-a", timestamp: "1", title: "mail_send: draft to Bob" },
+  { kind: "tool" as const, taskId: "task-b", timestamp: "2", title: "mail_send: draft to Ann" },
+];
+
+test("pending decision: an ordinal resolves against the REMEMBERED choices, not the live list", () => {
+  const context = rememberPendingApprovalDecision(emptyCommandContext(), "approve", mailChoices);
+  assert.deepEqual(resolvePendingApprovalFollowUp(context, { ordinal: 2 }), {
+    kind: "approve",
+    item: mailChoices[1],
+  });
+});
+
+test("pending decision: descriptive text resolves when it identifies exactly one remembered choice", () => {
+  const context = rememberPendingApprovalDecision(emptyCommandContext(), "deny", mailChoices);
+  assert.deepEqual(resolvePendingApprovalFollowUp(context, { matchText: "to ann" }), {
+    kind: "deny",
+    item: mailChoices[1],
+  });
+});
+
+test("pending decision: no ordinal and no matchText never resolves — must not guess", () => {
+  const context = rememberPendingApprovalDecision(emptyCommandContext(), "approve", mailChoices);
+  assert.equal(resolvePendingApprovalFollowUp(context, {}), null);
+});
+
+test("pending decision: an ordinal past the end of the remembered list never resolves", () => {
+  const context = rememberPendingApprovalDecision(emptyCommandContext(), "approve", mailChoices);
+  assert.equal(resolvePendingApprovalFollowUp(context, { ordinal: 5 }), null);
+});
+
+test("pending decision: descriptive text matching zero remembered choices never resolves", () => {
+  const context = rememberPendingApprovalDecision(emptyCommandContext(), "approve", mailChoices);
+  assert.equal(resolvePendingApprovalFollowUp(context, { matchText: "the deploy script" }), null);
+});
+
+test("pending decision: nothing pending never resolves, even with a clean ordinal — no context to hijack", () => {
+  assert.equal(resolvePendingApprovalFollowUp(emptyCommandContext(), { ordinal: 1 }), null);
+});
+
+test("pending decision: clearing removes it so a later ordinal cannot resolve against it", () => {
+  const context = rememberPendingApprovalDecision(emptyCommandContext(), "approve", mailChoices);
+  const cleared = clearPendingApprovalDecision(context);
+  assert.equal(cleared.pendingApprovalDecision, null);
+  assert.equal(resolvePendingApprovalFollowUp(cleared, { ordinal: 1 }), null);
 });

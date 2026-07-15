@@ -78,6 +78,135 @@ test("commandTurnOverride resolves an approval by kind keyword or a unique title
   ]);
 });
 
+// ---------------------------------------------------------------------------
+// Pending approve/deny disambiguation follow-through: "approve the mail
+// draft" matches two pending items -> disambiguation reply -> the operator's
+// natural next utterance answers WHICH one with no verb ("the second one").
+// The verb was already given the turn before; command-turn must complete the
+// decision instead of dead-ending into the conversational fallback.
+
+const mailApprovals: ApprovalQueueItem[] = [
+  { kind: "tool", taskId: "mail-1", timestamp: "1", title: "mail_send: draft to Bob", detail: "", options: ["approve", "deny"] },
+  { kind: "tool", taskId: "mail-2", timestamp: "2", title: "mail_send: draft to Ann", detail: "", options: ["approve", "deny"] },
+];
+
+test("commandTurnOverride: a verb-less ordinal follow-up completes a pending APPROVE disambiguation", async () => {
+  const resolved: Array<{ taskId: string; timestamp: string; decision: string }> = [];
+  const deps = {
+    sessionId: "pending-approve-followup",
+    buildApprovalQueue: async () => mailApprovals,
+    resolveApproval: async (taskId: string, timestamp: string, decision: "approve" | "done" | "denied") => {
+      resolved.push({ taskId, timestamp, decision });
+    },
+    synthesize: async () => "",
+  };
+
+  const first = await commandTurnOverride("approve the mail draft", deps);
+  assert.ok(first);
+  assert.match(first!.reply, /Which approval/);
+
+  const second = await commandTurnOverride("the second one", deps);
+  assert.ok(second, "the verb-less follow-up must resolve, not fall through to null");
+  assert.match(second!.reply, /Approved: mail_send: draft to Ann/);
+  assert.deepEqual(resolved, [{ taskId: "mail-2", timestamp: "2", decision: "approve" }]);
+});
+
+test("commandTurnOverride: a verb-less ordinal follow-up completes a pending DENY disambiguation", async () => {
+  const resolved: Array<{ taskId: string; timestamp: string; decision: string }> = [];
+  const deps = {
+    sessionId: "pending-deny-followup",
+    buildApprovalQueue: async () => mailApprovals,
+    resolveApproval: async (taskId: string, timestamp: string, decision: "approve" | "done" | "denied") => {
+      resolved.push({ taskId, timestamp, decision });
+    },
+    synthesize: async () => "",
+  };
+
+  const first = await commandTurnOverride("deny the mail draft", deps);
+  assert.ok(first);
+  assert.match(first!.reply, /Which approval/);
+
+  const second = await commandTurnOverride("the first one", deps);
+  assert.ok(second);
+  assert.match(second!.reply, /Denied: mail_send: draft to Bob/);
+  assert.deepEqual(resolved, [{ taskId: "mail-1", timestamp: "1", decision: "denied" }]);
+});
+
+test("commandTurnOverride: a descriptive (non-ordinal) follow-up also completes a pending disambiguation", async () => {
+  const resolved: Array<{ taskId: string; timestamp: string; decision: string }> = [];
+  const deps = {
+    sessionId: "pending-followup-by-text",
+    buildApprovalQueue: async () => mailApprovals,
+    resolveApproval: async (taskId: string, timestamp: string, decision: "approve" | "done" | "denied") => {
+      resolved.push({ taskId, timestamp, decision });
+    },
+    synthesize: async () => "",
+  };
+
+  await commandTurnOverride("approve the mail draft", deps);
+  const out = await commandTurnOverride("the one to Ann", deps);
+  assert.ok(out);
+  assert.match(out!.reply, /Approved: mail_send: draft to Ann/);
+  assert.deepEqual(resolved, [{ taskId: "mail-2", timestamp: "2", decision: "approve" }]);
+});
+
+test("commandTurnOverride: a bare ordinal with NO prior pending disambiguation is not misinterpreted — behaves exactly as today", async () => {
+  let queueCalled = false;
+  const out = await commandTurnOverride("the second one", {
+    sessionId: "no-pending-followup",
+    buildApprovalQueue: async () => { queueCalled = true; return mailApprovals; },
+    resolveApproval: async () => { throw new Error("must not resolve anything without a pending disambiguation"); },
+    synthesize: async () => "",
+  });
+
+  assert.equal(out, null, "must fall through exactly like today — no command matched");
+  assert.equal(queueCalled, false, "must not even query the approval queue without a pending disambiguation");
+});
+
+test("commandTurnOverride: an unrelated command in between clears the pending disambiguation — a later ordinal is not hijacked", async () => {
+  const resolved: unknown[] = [];
+  const deps = {
+    sessionId: "pending-cleared-by-other-command",
+    buildApprovalQueue: async () => mailApprovals,
+    resolveApproval: async (taskId: string, timestamp: string, decision: string) => { resolved.push({ taskId, timestamp, decision }); },
+    getBoardCounts: () => ({ backlog: 1 }),
+    synthesize: async () => "",
+  };
+
+  const ambiguous = await commandTurnOverride("approve the mail draft", deps);
+  assert.match(ambiguous!.reply, /Which approval/);
+
+  const unrelated = await commandTurnOverride("what's on my board", deps);
+  assert.ok(unrelated);
+
+  const stale = await commandTurnOverride("the second one", deps);
+  assert.equal(stale, null, "the disambiguation is stale after an unrelated command — must not resolve");
+  assert.equal(resolved.length, 0);
+});
+
+test("commandTurnOverride: a pending choice already resolved through another channel is not re-resolved", async () => {
+  const resolved: unknown[] = [];
+  let queueState = mailApprovals;
+  const deps = {
+    sessionId: "pending-stale-item",
+    buildApprovalQueue: async () => queueState,
+    resolveApproval: async (taskId: string, timestamp: string, decision: string) => { resolved.push({ taskId, timestamp, decision }); },
+    synthesize: async () => "",
+  };
+
+  const ambiguous = await commandTurnOverride("approve the mail draft", deps);
+  assert.match(ambiguous!.reply, /Which approval/);
+
+  // Simulate the operator resolving mail-2 through another channel (e.g. the
+  // UI) between voice turns.
+  queueState = mailApprovals.filter((a) => a.taskId !== "mail-2");
+
+  const out = await commandTurnOverride("the second one", deps);
+  assert.ok(out);
+  assert.match(out!.reply, /nothing waiting for approval/i);
+  assert.equal(resolved.length, 0);
+});
+
 test("commandTurnOverride returns briefing and usage summaries", async () => {
   const out = await commandTurnOverride("good morning", {
     sessionId: "briefing",
