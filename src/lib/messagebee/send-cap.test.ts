@@ -1,7 +1,26 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { getDb } from "@/lib/db";
-import { attemptReserve, markSent, pruneSendCap, alreadySent, getSentInRun } from "./send-cap";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+// Isolate the DB to a fresh temp file so this suite never touches the live
+// hivematrix.db — its cleanup() deletes from message_send_cap, which would
+// corrupt the real per-run send ledger and could re-enable a duplicate send.
+const TMP = mkdtempSync(join(tmpdir(), "hm-sendcap-test-"));
+process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
+
+const { getDb, _resetDbForTests } = await import("@/lib/db");
+const { attemptReserve, markSent, pruneSendCap, alreadySent, getSentInRun } = await import("./send-cap");
+
+_resetDbForTests();
+getDb();
+
+test.after(() => {
+  _resetDbForTests();
+  delete process.env.HIVEMATRIX_DB_PATH;
+  rmSync(TMP, { recursive: true, force: true });
+});
 
 const cleanup = () => {
   // Clear the table before each test.

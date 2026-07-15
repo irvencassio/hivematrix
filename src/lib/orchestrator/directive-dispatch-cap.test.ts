@@ -1,7 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getDb } from "@/lib/db";
-import { attemptReserveRun, isRunClaimed, markRunCreated, getCreatedRunId } from "./directive-dispatch-cap";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+// Isolate the DB to a fresh temp file so this suite never touches the live
+// hivematrix.db — its cleanup() deletes from directive_dispatch_cap, which
+// would corrupt the real single-flight ledger for directive dispatch.
+const TMP = mkdtempSync(join(tmpdir(), "hm-dispatchcap-test-"));
+process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
+
+const { getDb, _resetDbForTests } = await import("@/lib/db");
+const { attemptReserveRun, isRunClaimed, markRunCreated, getCreatedRunId } = await import("./directive-dispatch-cap");
+
+_resetDbForTests();
+getDb();
+
+test.after(() => {
+  _resetDbForTests();
+  delete process.env.HIVEMATRIX_DB_PATH;
+  rmSync(TMP, { recursive: true, force: true });
+});
 
 const cleanup = () => {
   try {
