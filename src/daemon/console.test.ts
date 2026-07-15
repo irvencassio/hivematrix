@@ -2748,3 +2748,109 @@ test("goal card surfaces the next-action hook and an affordance to set it", () =
   assert.match(setNext, /nextAction: next/, "it saves the entered next step");
   assert.match(setNext, /'\/goals'/, "it upserts via the goals endpoint");
 });
+
+// ─── Window state restoration: active sidebar view (2026-07-15) ─────────────
+// See docs/superpowers/specs/2026-07-15-window-state-restoration-design.md
+// and docs/superpowers/plans/2026-07-15-window-state-restoration.md, Task 2.
+
+test("getStoredView / setStoredView round-trip through localStorage, with a valid-view fallback", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const validViewsSrc = js.match(/var HM_VALID_VIEWS = \[[^\]]*\];/);
+  assert.ok(validViewsSrc, "console script must define HM_VALID_VIEWS");
+  const getSrc = extractFunctionBlock(js, "getStoredView");
+  const setSrc = extractFunctionBlock(js, "setStoredView");
+
+  function makeStore() {
+    const backing: Record<string, string> = {};
+    return {
+      localStorage: {
+        getItem: (k: string) => (k in backing ? backing[k] : null),
+        setItem: (k: string, v: string) => { backing[k] = v; },
+      },
+      backing,
+    };
+  }
+
+  const factory = new Function(
+    "localStorage",
+    `${validViewsSrc![0]}\n${getSrc}\n${setSrc}\nreturn { getStoredView, setStoredView };`,
+  ) as (ls: unknown) => { getStoredView: () => string; setStoredView: (v: string) => void };
+
+  const { localStorage: ls, backing } = makeStore();
+  const { getStoredView, setStoredView } = factory(ls);
+
+  assert.equal(getStoredView(), "overview", "no stored value yet -> defaults to overview");
+  setStoredView("roles");
+  assert.equal(backing["hm_last_view"], "roles");
+  assert.equal(getStoredView(), "roles");
+
+  backing["hm_last_view"] = "not-a-real-view";
+  assert.equal(getStoredView(), "overview", "garbage stored value falls back to overview");
+});
+
+test("every view-switching function records itself as the last-active view", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const cases: [string, string][] = [
+    ["showOverview", "overview"],
+    ["showFlashPanel", "flash"],
+    ["showBrain", "brain"],
+    ["showRoles", "roles"],
+    ["showTools", "tools"],
+    ["showGoals", "goals"],
+  ];
+  for (const [fn, view] of cases) {
+    const src = extractFunctionBlock(js, fn);
+    assert.match(
+      src,
+      new RegExp(`setStoredView\\(['"]${view}['"]\\)`),
+      `${fn} must call setStoredView('${view}')`,
+    );
+  }
+});
+
+test("restoreLastView dispatches to the show function matching the stored view", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const getStoredViewSrc = extractFunctionBlock(js, "getStoredView");
+  const validViewsSrc = js.match(/var HM_VALID_VIEWS = \[[^\]]*\];/);
+  assert.ok(validViewsSrc);
+  const restoreSrc = extractFunctionBlock(js, "restoreLastView");
+
+  function run(storedView: string) {
+    const calls: string[] = [];
+    const factory = new Function(
+      "localStorage",
+      "showFlashPanel", "showBrain", "showRoles", "showTools", "showGoals",
+      `${validViewsSrc![0]}\n${getStoredViewSrc}\n${restoreSrc}\nreturn restoreLastView;`,
+    ) as (
+      ls: unknown, f: () => void, b: () => void, r: () => void, t: () => void, g: () => void,
+    ) => () => void;
+    const ls = { getItem: () => storedView };
+    const restoreLastView = factory(
+      ls,
+      () => calls.push("flash"), () => calls.push("brain"), () => calls.push("roles"),
+      () => calls.push("tools"), () => calls.push("goals"),
+    );
+    restoreLastView();
+    return calls;
+  }
+
+  assert.deepEqual(run("flash"), ["flash"]);
+  assert.deepEqual(run("brain"), ["brain"]);
+  assert.deepEqual(run("roles"), ["roles"]);
+  assert.deepEqual(run("tools"), ["tools"]);
+  assert.deepEqual(run("goals"), ["goals"]);
+  assert.deepEqual(run("overview"), [], "overview is already the default render — no show* call needed");
+  assert.deepEqual(run("garbage-value"), [], "unknown stored values fall back to overview (no-op)");
+});
+
+test("boot sequence restores the last-active view after refresh()", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const bootIx = js.indexOf("if (requireToken()) {");
+  assert.notEqual(bootIx, -1, "boot gate must exist");
+  const bootBlock = js.slice(bootIx);
+  const refreshIx = bootBlock.indexOf("refresh();");
+  const restoreIx = bootBlock.indexOf("restoreLastView();");
+  assert.notEqual(refreshIx, -1);
+  assert.notEqual(restoreIx, -1, "boot sequence must call restoreLastView()");
+  assert.ok(restoreIx > refreshIx, "restoreLastView() must run after refresh() so board/task state is loaded first");
+});

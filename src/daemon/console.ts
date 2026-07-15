@@ -2091,6 +2091,7 @@ function showOverview() {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
   _goalsState.panelOpen = false;
+  setStoredView('overview');
   setFlashSessionMode(false);
   renderBoard();
   renderSkillList();
@@ -2269,6 +2270,22 @@ function reviewStateMeta(rs) {
   if (rs === "ready_for_review") return { label: "Ready for Review", tone: "review" };
   if (rs === "needs_parent_decision") return { label: "Needs parent decision", tone: "review" };
   return null;
+}
+
+// Active view persistence — restores the last-open sidebar view on launch.
+var HM_VALID_VIEWS = ["overview", "flash", "brain", "roles", "tools", "goals"];
+var _currentView = "overview";
+
+function getStoredView() {
+  try {
+    var v = localStorage.getItem("hm_last_view");
+    return HM_VALID_VIEWS.indexOf(v) !== -1 ? v : "overview";
+  } catch (e) { return "overview"; }
+}
+
+function setStoredView(view) {
+  _currentView = view;
+  try { localStorage.setItem("hm_last_view", view); } catch (e) { /* ignore */ }
 }
 
 // Collapsed board lanes persist in localStorage and survive the periodic board
@@ -3050,6 +3067,7 @@ function showGoals() {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
   _goalsState.panelOpen = true;
+  setStoredView('goals');
   renderBoard();
   renderSkillList();
   renderGoalsPanel();
@@ -3059,6 +3077,16 @@ function showGoals() {
   updateToolsNav();
   updateGoalsNav();
   loadGoals();
+}
+
+function restoreLastView() {
+  var view = getStoredView();
+  if (view === 'flash') showFlashPanel();
+  else if (view === 'brain') showBrain();
+  else if (view === 'roles') showRoles();
+  else if (view === 'tools') showTools();
+  else if (view === 'goals') showGoals();
+  // 'overview' is already the default rendered state on boot — nothing to do.
 }
 
 function updateGoalsNav() { syncNav(); }
@@ -6806,6 +6834,7 @@ function showFlashPanel() {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
   _goalsState.panelOpen = false;
+  setStoredView('flash');
   renderBoard();
   renderSkillList();
   renderFlashPanel();
@@ -6935,6 +6964,7 @@ function showBrain() {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
   _goalsState.panelOpen = false;
+  setStoredView('brain');
   renderBoard();
   renderSkillList();
   renderBrainPanel();
@@ -7454,6 +7484,7 @@ function showRoles() {
   _rolesState.panelOpen = true;
   _toolsState.panelOpen = false;
   _goalsState.panelOpen = false;
+  setStoredView('roles');
   renderBoard();
   renderSkillList();
   renderRolesPanel();
@@ -7484,6 +7515,7 @@ function showTools() {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = true;
   _goalsState.panelOpen = false;
+  setStoredView('tools');
   renderBoard();
   renderSkillList();
   renderToolsPanel();
@@ -9726,6 +9758,7 @@ if (requireToken()) {
   mpRegister('coo', 'coo_project_path');
   loadProjects();
   refresh();
+  restoreLastView();
   connectSSE();
   initVoiceFeature();
   setInterval(refresh, 5000);
