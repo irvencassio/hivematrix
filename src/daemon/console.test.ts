@@ -1652,9 +1652,11 @@ test("new task and task selection remain intact", () => {
   assert.match(js, /onclick="selectTask\(/, "task cards remain selectable in renderBoard");
 });
 
-test("header Usage section is removed; a 5h/7d toggle now sits in the header's live/toggle zone", () => {
-  // The sidebar Usage <details> section was replaced by a compact header
-  // toggle — see docs/superpowers/specs/2026-07-15-console-header-cleanup-design.md item 3.
+test("header Usage section is removed; both 5h and 7d toggle buttons render visual progress bars", () => {
+  // The sidebar Usage <details> section was replaced by a compact header toggle —
+  // see docs/superpowers/specs/2026-07-15-console-header-cleanup-design.md item 3.
+  // The toggle then grew inline progress bars — see
+  // docs/superpowers/specs/2026-07-15-usage-toggle-progress-bars-design.md.
   assert.doesNotMatch(CONSOLE_HTML, /id="usageSec"/, "standalone Usage section is gone");
   assert.doesNotMatch(CONSOLE_HTML, /id="usageDetailsSec"/, "per-window details disclosure is gone");
 
@@ -1662,18 +1664,153 @@ test("header Usage section is removed; a 5h/7d toggle now sits in the header's l
   const hzoneEnd = CONSOLE_HTML.indexOf("</div>", headerStart);
   const headerZone = CONSOLE_HTML.slice(headerStart, hzoneEnd);
   assert.match(headerZone, /id="live"/, "live indicator stays in the header's first zone");
-  assert.match(headerZone, /class="obs-win" id="usageWinToggle"/, "reuses the existing .obs-win segmented toggle, no new CSS");
-  assert.match(headerZone, />5 hour</, "5-hour toggle button present");
-  assert.match(headerZone, />7 day</, "7-day toggle button present");
-  assert.match(headerZone, /data-w="5h" class="on"/, "5-hour is active by default");
+  assert.match(headerZone, /class="obs-win usage-win-bars" id="usageWinToggle"/, "reuses the existing .obs-win segmented toggle, no new toggle component");
+  assert.match(headerZone, /data-w="5h" class="on" id="usageBtn5h"/, "5-hour is active by default");
+  assert.match(headerZone, />5h</, "5-hour button label present");
+  assert.match(headerZone, /id="usageBar5h"/, "5-hour bar track mount present");
+  assert.match(headerZone, /id="usageBar5hFill"/, "5-hour bar fill mount present");
+  assert.match(headerZone, /data-w="7d" id="usageBtn7d"/, "7-day button identifiable for tooltip/tick wiring");
+  assert.match(headerZone, />7d</, "7-day button label present (shortened from '7 day' to make room for its tick bar)");
+  assert.match(headerZone, /id="usageBar7d"/, "7-day tick track mount present");
+  const dayTickCount = (headerZone.match(/class="usage-bar-day"/g) || []).length;
+  assert.equal(dayTickCount, 7, "exactly 7 day ticks are pre-rendered in markup");
   assert.match(headerZone, /id="usageWinReadout"/, "readout text mount present");
 
-  // Regression guard for the same class of top-level-throw risk as the
-  // projectSel removal: checkUsage()'s now-deleted #usageSummary/#usage/
-  // #usageStatusDot lookups were all null-guarded (verified by reading
-  // checkUsage() directly), so the script must still parse cleanly.
+  const toggleMarkup = CONSOLE_HTML.slice(CONSOLE_HTML.indexOf('id="usageWinToggle"'), CONSOLE_HTML.indexOf("</span>", CONSOLE_HTML.indexOf("usageWinReadout")));
+  assert.doesNotMatch(toggleMarkup, /<div/, "toggle internals use span, not div, so the header's first </div> stays .hzone's own close");
+
   const js = extractScript(CONSOLE_HTML);
   assert.doesNotThrow(() => new Function(js), SyntaxError, "console script still parses as valid JS");
+});
+
+function consoleUsageBars() {
+  const js = extractScript(CONSOLE_HTML);
+  const usageBarClassSrc = js.match(/function usageBarClass\([\s\S]*?\n\}/)?.[0] ?? "";
+  const cycleDaySrc = js.match(/function sevenDayCycleDay\([\s\S]*?\n\}/)?.[0] ?? "";
+  const fmtResetsSrc = js.match(/function fmtResets\([\s\S]*?\n\}/)?.[0] ?? "";
+  const winState = js.match(/let _headerUsageWin[^\n]+/)?.[0] ?? "";
+  const cacheState = js.match(/let _lastClaudeWins[^\n]+/)?.[0] ?? "";
+  const findWinSrc = js.match(/function findUsageWin\([\s\S]*?\n\}/)?.[0] ?? "";
+  const setSrc = js.match(/function setHeaderUsageWindow\([^\n]+/)?.[0] ?? "";
+  const render5hSrc = js.match(/function renderUsage5hBar\(\)[\s\S]*?\n\}/)?.[0] ?? "";
+  const render7dSrc = js.match(/function renderUsage7dBar\(\)[\s\S]*?\n\}/)?.[0] ?? "";
+  const renderSrc = js.match(/function renderHeaderUsageWindow\(\)[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(
+    usageBarClassSrc.length > 50 && cycleDaySrc.length > 30 && fmtResetsSrc.length > 30
+      && winState.length > 10 && cacheState.length > 10 && findWinSrc.length > 20
+      && setSrc.length > 20 && render5hSrc.length > 30 && render7dSrc.length > 30 && renderSrc.length > 50,
+    "usage bar state + functions extracted",
+  );
+
+  const combined = [usageBarClassSrc, cycleDaySrc, fmtResetsSrc, winState, cacheState, findWinSrc, setSrc, render5hSrc, render7dSrc, renderSrc].join("\n");
+  const factory = new Function(
+    "document",
+    `${combined}\nreturn { setHeaderUsageWindow, renderHeaderUsageWindow, seed: function (w) { _lastClaudeWins = w; } };`,
+  ) as (doc: unknown) => {
+    setHeaderUsageWindow: (w: string) => void;
+    renderHeaderUsageWindow: () => void;
+    seed: (wins: unknown) => void;
+  };
+
+  function makeToggleBtn(w: string) {
+    const classList = { on: false, toggle: (_cls: string, v: boolean) => { classList.on = v; } };
+    return { dataset: { w }, classList };
+  }
+  function makeTick(day: number) {
+    return { dataset: { day: String(day) }, className: "usage-bar-day" };
+  }
+  const toggleButtons = [makeToggleBtn("5h"), makeToggleBtn("7d")];
+  const ticks = Array.from({ length: 7 }, (_, i) => makeTick(i + 1));
+  const els: Record<string, any> = {
+    usageWinReadout: { textContent: "", className: "muted" },
+    usageBar5hFill: { style: { width: "" }, className: "" },
+    usageBtn5h: { title: "" },
+    usageBtn7d: { title: "" },
+    usageBar7d: { querySelectorAll: (sel: string) => (sel === ".usage-bar-day" ? ticks : []) },
+  };
+  const doc = {
+    getElementById: (id: string) => els[id],
+    querySelectorAll: (sel: string) => (sel.indexOf("usageWinToggle") >= 0 ? toggleButtons : []),
+  };
+  const control = factory(doc);
+  return { ...control, toggleButtons, ticks, els };
+}
+
+test("5-hour toggle button renders a visual progress bar (fill width + status color), independent of which window is active", () => {
+  const ub = consoleUsageBars();
+  const now = Date.UTC(2026, 6, 1, 12, 0, 0);
+  const original = Date.now;
+  Date.now = () => now;
+  try {
+    ub.seed([
+      { label: "5-hour", remaining: 10, utilization: 90, resetsAt: new Date(now + 3600000).toISOString(), durationMs: 18000000 },
+      { label: "7-day", remaining: 90, utilization: 10, resetsAt: new Date(now + 3 * 86400000).toISOString(), durationMs: 604800000 },
+    ]);
+    ub.setHeaderUsageWindow("7d");
+    assert.equal(ub.els.usageBar5hFill.style.width, "90%", "fill width tracks 5-hour utilization");
+    assert.equal(ub.els.usageBar5hFill.className, "usage-bar-fill hi", "90% utilization on a 5h window is the hi status color");
+    assert.equal(ub.els.usageBtn5h.title, "10% left · resets in 1h 0m", "tooltip carries the exact detail regardless of active state");
+  } finally {
+    Date.now = original;
+  }
+});
+
+test("5-hour bar resets to empty when there is no 5-hour window in the cached data", () => {
+  const ub = consoleUsageBars();
+  ub.seed([{ label: "7-day", remaining: 90, utilization: 10, resetsAt: new Date(Date.now() + 86400000).toISOString(), durationMs: 604800000 }]);
+  ub.renderHeaderUsageWindow();
+  assert.equal(ub.els.usageBar5hFill.style.width, "0%");
+  assert.equal(ub.els.usageBar5hFill.className, "usage-bar-fill");
+  assert.equal(ub.els.usageBtn5h.title, "");
+});
+
+test("7-day toggle button fills ticks up to the current cycle day, green when within the day-paced allowance", () => {
+  const ub = consoleUsageBars();
+  const now = Date.UTC(2026, 6, 1, 12, 0, 0);
+  const hour = 60 * 60 * 1000;
+  const day = 24 * hour;
+  const original = Date.now;
+  Date.now = () => now;
+  try {
+    ub.seed([
+      { label: "7-day", remaining: 72, utilization: 28, resetsAt: new Date(now + 5 * day + 5 * hour).toISOString(), durationMs: 604800000 },
+    ]);
+    ub.renderHeaderUsageWindow();
+    const filled = ub.ticks.filter((t: { className: string }) => t.className.indexOf("filled") >= 0);
+    assert.equal(filled.length, 2, "day 2 of 7 (reset in 5d 5h) fills exactly 2 ticks");
+    assert.ok(filled.every((t: { className: string }) => t.className.indexOf(" ok") >= 0), "28% used on day 2 (allowance 28.6%) is within pace — filled ticks are ok/green");
+    assert.equal(ub.els.usageBtn7d.title, "Day 2 of 7 · 72% left · resets in 5d 5h", "tooltip states day progress + exact time");
+  } finally {
+    Date.now = original;
+  }
+});
+
+test("7-day ticks turn red when utilization exceeds the current day's allowance, tick count unchanged", () => {
+  const ub = consoleUsageBars();
+  const now = Date.UTC(2026, 6, 1, 12, 0, 0);
+  const hour = 60 * 60 * 1000;
+  const day = 24 * hour;
+  const original = Date.now;
+  Date.now = () => now;
+  try {
+    ub.seed([
+      { label: "7-day", remaining: 71, utilization: 29, resetsAt: new Date(now + 5 * day + 5 * hour).toISOString(), durationMs: 604800000 },
+    ]);
+    ub.renderHeaderUsageWindow();
+    const filled = ub.ticks.filter((t: { className: string }) => t.className.indexOf("filled") >= 0);
+    assert.equal(filled.length, 2, "still day 2 — tick count reflects elapsed days, not usage");
+    assert.ok(filled.every((t: { className: string }) => t.className.indexOf(" hi") >= 0), "29% used on day 2 exceeds the 28.6% allowance — filled ticks turn hi/red");
+  } finally {
+    Date.now = original;
+  }
+});
+
+test("7-day ticks clear when there is no 7-day window in the cached data", () => {
+  const ub = consoleUsageBars();
+  ub.seed([{ label: "5-hour", remaining: 50, utilization: 50, resetsAt: new Date(Date.now() + 3600000).toISOString(), durationMs: 18000000 }]);
+  ub.renderHeaderUsageWindow();
+  assert.ok(ub.ticks.every((t: { className: string }) => t.className === "usage-bar-day"), "no filled ticks without 7-day data");
+  assert.equal(ub.els.usageBtn7d.title, "");
 });
 
 test("the sidebar Models panel (embeddings-only after Phase 4) is removed entirely — redundant with Settings > Models routing summary", () => {
@@ -1730,9 +1867,11 @@ type UsageBarClass = (util: number, resetsAt: string, durationMs: number) => "ok
 
 function consoleUsageBarClass(): UsageBarClass {
   const js = extractScript(CONSOLE_HTML);
+  const cycleDaySrc = js.match(/function sevenDayCycleDay\([\s\S]*?\n\}/)?.[0] ?? "";
   const body = js.match(/function usageBarClass\([\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(cycleDaySrc.length > 30, "sevenDayCycleDay body extracted");
   assert.ok(body.length > 100, "usageBarClass body extracted");
-  return new Function(body + "\nreturn usageBarClass;")() as UsageBarClass;
+  return new Function(cycleDaySrc + "\n" + body + "\nreturn usageBarClass;")() as UsageBarClass;
 }
 
 function withFrozenNow<T>(nowMs: number, run: () => T): T {
@@ -1787,70 +1926,56 @@ test("5-hour usage bars can still use the warning color", () => {
   });
 });
 
-function consoleHeaderUsageToggle() {
+type SevenDayCycleDay = (resetsAt: string) => number | null;
+
+function consoleSevenDayCycleDay(): SevenDayCycleDay {
   const js = extractScript(CONSOLE_HTML);
-  const usageBarClassSrc = js.match(/function usageBarClass\([\s\S]*?\n\}/)?.[0] ?? "";
-  const fmtResetsSrc = js.match(/function fmtResets\([\s\S]*?\n\}/)?.[0] ?? "";
-  const winState = js.match(/let _headerUsageWin[^\n]+/)?.[0] ?? "";
-  const cacheState = js.match(/let _lastClaudeWins[^\n]+/)?.[0] ?? "";
-  const setSrc = js.match(/function setHeaderUsageWindow\([^\n]+/)?.[0] ?? "";
-  const renderSrc = js.match(/function renderHeaderUsageWindow\(\)[\s\S]*?\n\}/)?.[0] ?? "";
-  assert.ok(
-    usageBarClassSrc.length > 50 && fmtResetsSrc.length > 50 && winState.length > 10
-      && cacheState.length > 10 && setSrc.length > 20 && renderSrc.length > 50,
-    "header usage toggle state + functions extracted",
-  );
-
-  const combined = [usageBarClassSrc, fmtResetsSrc, winState, cacheState, setSrc, renderSrc].join("\n");
-  const factory = new Function(
-    "document",
-    `${combined}\nreturn { setHeaderUsageWindow, renderHeaderUsageWindow, seed: function (w) { _lastClaudeWins = w; } };`,
-  ) as (doc: unknown) => {
-    setHeaderUsageWindow: (w: string) => void;
-    renderHeaderUsageWindow: () => void;
-    seed: (wins: unknown) => void;
-  };
-
-  function makeBtn(w: string) {
-    const classList: { on: boolean; toggle: (cls: string, v: boolean) => void } = {
-      on: false,
-      toggle: (_cls: string, v: boolean) => { classList.on = v; },
-    };
-    return { dataset: { w }, classList };
-  }
-  const buttons = [makeBtn("5h"), makeBtn("7d")];
-  const els: Record<string, { textContent: string; className: string }> = {
-    usageWinReadout: { textContent: "", className: "muted" },
-  };
-  const doc = {
-    getElementById: (id: string) => els[id],
-    querySelectorAll: (sel: string) => (sel.indexOf("usageWinToggle") >= 0 ? buttons : []),
-  };
-  const control = factory(doc);
-  return { ...control, buttons, els };
+  const body = js.match(/function sevenDayCycleDay\([\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(body.length > 30, "sevenDayCycleDay body extracted");
+  return new Function(body + "\nreturn sevenDayCycleDay;")() as SevenDayCycleDay;
 }
 
+test("sevenDayCycleDay returns the 1-7 day-of-cycle usageBarClass keys its day-pacing off of", () => {
+  const cycleDay = consoleSevenDayCycleDay();
+  const now = Date.UTC(2026, 6, 1, 12, 0, 0);
+  const hour = 60 * 60 * 1000;
+  const day = 24 * hour;
+  withFrozenNow(now, () => {
+    assert.equal(cycleDay(resetIn(now, 6 * day + 5 * hour)), 1, "6d+ left => day 1");
+    assert.equal(cycleDay(resetIn(now, 5 * day + 5 * hour)), 2, "5d+ left => day 2");
+    assert.equal(cycleDay(resetIn(now, (18 * 60 + 29) * 60 * 1000)), 7, "under 1d left => day 7");
+    assert.equal(cycleDay(resetIn(now, -hour)), null, "already-expired reset => null");
+    assert.equal(cycleDay(""), null, "no reset timestamp => null");
+  });
+});
+
 test("renderHeaderUsageWindow shows remaining% + reset time colored via the real usage-status-dot ok/warn/hi classes", () => {
-  const toggle = consoleHeaderUsageToggle();
+  // Uses the consoleUsageBars() harness (above) rather than a dedicated toggle harness —
+  // renderHeaderUsageWindow's dependency list grows every time a new bar is added
+  // (Task A: sevenDayCycleDay, Task B: findUsageWin/renderUsage5hBar, Task C:
+  // renderUsage7dBar), and consoleUsageBars() already tracks all of them, so this test
+  // reuses that shared scaffolding instead of hand-maintaining a second, parallel
+  // new Function(...) harness that needs the same fix every time.
+  const ub = consoleUsageBars();
   const now = Date.UTC(2026, 6, 1, 12, 0, 0);
   const original = Date.now;
   Date.now = () => now;
   try {
-    toggle.seed([
+    ub.seed([
       { label: "5-hour", remaining: 40, utilization: 60, resetsAt: new Date(now + 2 * 3600000).toISOString(), durationMs: 18000000 },
       { label: "7-day", remaining: 90, utilization: 10, resetsAt: new Date(now + 3 * 86400000).toISOString(), durationMs: 604800000 },
     ]);
-    toggle.renderHeaderUsageWindow();
-    assert.equal(toggle.els.usageWinReadout.textContent, "40% left · resets in 2h 0m", "5-hour window is the default");
-    assert.equal(toggle.els.usageWinReadout.className, "usage-status-dot warn", "reuses the real usage-status-dot + warn class, not an invented one");
-    assert.equal(toggle.buttons[0].classList.on, true, "5-hour button marked active");
-    assert.equal(toggle.buttons[1].classList.on, false, "7-day button not active");
+    ub.renderHeaderUsageWindow();
+    assert.equal(ub.els.usageWinReadout.textContent, "40% left · resets in 2h 0m", "5-hour window is the default");
+    assert.equal(ub.els.usageWinReadout.className, "usage-status-dot warn", "reuses the real usage-status-dot + warn class, not an invented one");
+    assert.equal(ub.toggleButtons[0].classList.on, true, "5-hour button marked active");
+    assert.equal(ub.toggleButtons[1].classList.on, false, "7-day button not active");
 
-    toggle.setHeaderUsageWindow("7d");
-    assert.equal(toggle.els.usageWinReadout.textContent, "90% left · resets in 3d 0h", "switching windows re-renders instantly from cached data");
-    assert.equal(toggle.els.usageWinReadout.className, "usage-status-dot ok");
-    assert.equal(toggle.buttons[0].classList.on, false, "5-hour button loses active state");
-    assert.equal(toggle.buttons[1].classList.on, true, "7-day button gains active state");
+    ub.setHeaderUsageWindow("7d");
+    assert.equal(ub.els.usageWinReadout.textContent, "90% left · resets in 3d 0h", "switching windows re-renders instantly from cached data");
+    assert.equal(ub.els.usageWinReadout.className, "usage-status-dot ok");
+    assert.equal(ub.toggleButtons[0].classList.on, false, "5-hour button loses active state");
+    assert.equal(ub.toggleButtons[1].classList.on, true, "7-day button gains active state");
   } finally {
     Date.now = original;
   }

@@ -326,8 +326,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-breakdown .urow .um { color: var(--muted); }
   .usage-breakdown .usep { border-top: 1px solid var(--border); margin: 5px 0 3px; }
   .usage-bar-wrap { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; }
-  .usage-bar { position: relative; height: 6px; border-radius: 3px; background: var(--border); flex: 1; overflow: hidden; }
-  .usage-bar-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+  .usage-bar { display: inline-block; position: relative; height: 6px; border-radius: 3px; background: var(--border); flex: 1; overflow: hidden; }
+  .usage-bar-fill { display: block; height: 100%; border-radius: 3px; transition: width .3s; }
   .usage-bar-fill.ok  { background: var(--ok,  #4caf50); }
   .usage-bar-fill.warn { background: #f0a500; }
   .usage-bar-fill.hi  { background: #e05b2c; }
@@ -339,6 +339,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-status-dot.ok   { color: var(--ok, #4caf50); }
   .usage-status-dot.warn { color: #f0a500; }
   .usage-status-dot.hi   { color: #e05b2c; }
+  .usage-win-bars button { display: inline-flex; align-items: center; gap: 4px; }
+  .usage-win-bars .usage-bar-wrap { margin: 0; }
+  .usage-win-bars .usage-bar { width: 26px; flex: none; }
+  .usage-bar-days { display: inline-flex; align-items: center; }
+  .usage-bar-day { display: inline-block; width: 3px; height: 6px; border-radius: 1px; background: var(--border); margin-right: 1px; }
+  .usage-bar-day:last-child { margin-right: 0; }
+  .usage-bar-day.filled.ok { background: var(--ok, #4caf50); }
+  .usage-bar-day.filled.hi { background: #e05b2c; }
   /* Compact at-a-glance provider cards for the Usage section. */
   .usage-cards { display: flex; flex-direction: column; gap: 6px; }
   .usage-card { border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; background: var(--panel-2); }
@@ -1061,9 +1069,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   <div class="hzone">
     <span class="logo">HiveMatrix</span>
     <span class="live" id="live" style="cursor:pointer" onclick="toggleConnOverride()" title="Daemon + connectivity status — click to override connectivity">● live</span>
-    <span class="obs-win" id="usageWinToggle">
-      <button data-w="5h" class="on" onclick="setHeaderUsageWindow('5h')">5 hour</button>
-      <button data-w="7d" onclick="setHeaderUsageWindow('7d')">7 day</button>
+    <span class="obs-win usage-win-bars" id="usageWinToggle">
+      <button data-w="5h" class="on" id="usageBtn5h" onclick="setHeaderUsageWindow('5h')">5h<span class="usage-bar-wrap"><span class="usage-bar" id="usageBar5h"><span class="usage-bar-fill" id="usageBar5hFill"></span></span></span></button>
+      <button data-w="7d" id="usageBtn7d" onclick="setHeaderUsageWindow('7d')">7d<span class="usage-bar-wrap"><span class="usage-bar-days" id="usageBar7d"><span class="usage-bar-day" data-day="1"></span><span class="usage-bar-day" data-day="2"></span><span class="usage-bar-day" data-day="3"></span><span class="usage-bar-day" data-day="4"></span><span class="usage-bar-day" data-day="5"></span><span class="usage-bar-day" data-day="6"></span><span class="usage-bar-day" data-day="7"></span></span></span></button>
     </span>
     <span class="muted" id="usageWinReadout" style="font-size:11px"></span>
   </div>
@@ -5625,6 +5633,19 @@ function fmtResets(iso) {
   return "in " + h + "h " + m + "m";
 }
 
+// Which day (1-7) of a live 7-day subscription window's cycle "now" falls on, per
+// docs/superpowers/specs/2026-07-01-usage-7-day-green-red-design.md. Shared by
+// usageBarClass (day-paced ok/hi color) and the header 7-day tick bar (fill count)
+// so the two can't disagree about what day it is. Null for an expired/invalid reset.
+function sevenDayCycleDay(resetsAt) {
+  if (!resetsAt) return null;
+  const timeUntilResetMs = new Date(resetsAt).getTime() - Date.now();
+  if (timeUntilResetMs <= 0) return null;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const wholeDaysLeft = Math.min(7, Math.max(1, Math.ceil(timeUntilResetMs / dayMs)));
+  return 8 - wholeDaysLeft;
+}
+
 function usageBarClass(util, resetsAt, durationMs) {
   if (resetsAt && durationMs > 0) {
     const now = Date.now();
@@ -5632,9 +5653,7 @@ function usageBarClass(util, resetsAt, durationMs) {
     if (timeUntilResetMs > 0) {
       const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
       if (Math.abs(durationMs - sevenDaysMs) < 1000) {
-        const dayMs = 24 * 60 * 60 * 1000;
-        const wholeDaysLeft = Math.min(7, Math.max(1, Math.ceil(timeUntilResetMs / dayMs)));
-        const cycleDay = 8 - wholeDaysLeft;
+        const cycleDay = sevenDayCycleDay(resetsAt);
         const allowedDays = Math.min(cycleDay, 6);
         const redFloorUsedPct = Math.round((allowedDays / 7) * 1000) / 10;
         return util <= redFloorUsedPct ? "ok" : "hi";
@@ -5673,12 +5692,50 @@ function setHeaderUsageWindow(w) { _headerUsageWin = w; renderHeaderUsageWindow(
 
 // _lastClaudeWins is cached by checkUsage() below so a toggle click repaints
 // instantly instead of waiting on the next poll.
+function findUsageWin(label) { return (_lastClaudeWins || []).find(function (w) { return w.label === label; }); }
+
+function renderUsage5hBar() {
+  const fill = document.getElementById("usageBar5hFill");
+  const btn = document.getElementById("usageBtn5h");
+  const win = findUsageWin("5-hour");
+  if (!win) {
+    if (fill) { fill.style.width = "0%"; fill.className = "usage-bar-fill"; }
+    if (btn) btn.title = "";
+    return;
+  }
+  const used = Math.max(0, Math.min(100, win.utilization));
+  const cls = usageBarClass(win.utilization, win.resetsAt, win.durationMs || 0);
+  if (fill) { fill.style.width = used + "%"; fill.className = "usage-bar-fill " + cls; }
+  if (btn) btn.title = Math.max(0, Math.min(100, win.remaining)).toFixed(0) + "% left · resets " + fmtResets(win.resetsAt);
+}
+
+function renderUsage7dBar() {
+  const track = document.getElementById("usageBar7d");
+  const btn = document.getElementById("usageBtn7d");
+  const win = findUsageWin("7-day");
+  const ticks = track ? track.querySelectorAll(".usage-bar-day") : [];
+  if (!win) {
+    ticks.forEach(function (t) { t.className = "usage-bar-day"; });
+    if (btn) btn.title = "";
+    return;
+  }
+  const cycleDay = sevenDayCycleDay(win.resetsAt) || 7;
+  const cls = usageBarClass(win.utilization, win.resetsAt, win.durationMs || 0);
+  ticks.forEach(function (t) {
+    const day = Number(t.dataset.day);
+    t.className = "usage-bar-day" + (day <= cycleDay ? " filled " + cls : "");
+  });
+  if (btn) btn.title = "Day " + cycleDay + " of 7 · " + Math.max(0, Math.min(100, win.remaining)).toFixed(0) + "% left · resets " + fmtResets(win.resetsAt);
+}
+
 function renderHeaderUsageWindow() {
   document.querySelectorAll("#usageWinToggle button").forEach(function (b) { b.classList.toggle("on", b.dataset.w === _headerUsageWin); });
+  renderUsage5hBar();
+  renderUsage7dBar();
   const el = document.getElementById("usageWinReadout");
   if (!el) return;
   const label = _headerUsageWin === "5h" ? "5-hour" : "7-day";
-  const win = (_lastClaudeWins || []).find(function (w) { return w.label === label; });
+  const win = findUsageWin(label);
   if (!win) { el.textContent = ""; return; }
   const remaining = Math.max(0, Math.min(100, win.remaining));
   const cls = usageBarClass(win.utilization, win.resetsAt, win.durationMs || 0);
