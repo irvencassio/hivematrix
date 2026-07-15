@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.207", date: "2026-07-15", note: "Flash can now inspect its own tasks: ask it 'why did this task fail?' and it reads the task's error + activity log itself (get_task), or 'what's failed/running?' for the board (list_tasks) — no more asking you to screenshot the error." },
   { version: "0.1.206", date: "2026-07-15", note: "Flash chat: paste (Cmd+V) or drag-and-drop an image into the message box — previously only the file picker worked, so pasted screenshots were silently dropped and the assistant couldn't see them." },
   { version: "0.1.205", date: "2026-07-15", note: "Self-improvement loop is now opt-in (default off, toggle in Settings → Features) — it can no longer reinstall or resurrect itself across app updates." },
   { version: "0.1.204", date: "2026-07-15", note: "Message Lane setup fix: the FDA step now shows access you've already granted (it was checking passively and hiding it); restore the allowlist after an update with a backlog-replay guard; home banner for degraded features; voice reads full failed-task errors." },
