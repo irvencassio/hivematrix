@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.205 — 2026-07-15
+
+Self-improvement loop is now opt-in (default off, toggle in Settings → Features) — it can no longer reinstall or resurrect itself across app updates.
+
 ## v0.1.204 — 2026-07-15
 
 Message Lane setup fix: the FDA step now shows access you've already granted (it was checking passively and hiding it); restore the allowlist after an update with a backlog-replay guard; home banner for degraded features; voice reads full failed-task errors.
