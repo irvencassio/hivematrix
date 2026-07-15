@@ -1573,6 +1573,18 @@ test("POST /voice/turn runs saved-location voice commands before the Flash model
   );
 });
 
+test("POST /voice/turn audio branch transcribes via relayTranscribe, not the dead full-turn relayTurn RPC", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "server.ts"), "utf8");
+  const route = src.slice(src.indexOf('urlPath === "/voice/turn"'), src.indexOf("// POST /voice/provision"));
+  const sttBranch = route.slice(route.indexOf("STT path:"), route.indexOf("if (!text)"));
+  assert.match(sttBranch, /relayTranscribe/, "audio branch must use the STT-only relay");
+  assert.doesNotMatch(
+    sttBranch,
+    /relayTurn\(/,
+    "audio branch must not call relayTurn — it relays a full turn (STT+LLM) through the removed local-Qwen sidecar LLM path (voice-sidecar/llm.py, cut over 2026-07-11)",
+  );
+});
+
 test("Flash realtime voice pipeline emits VAD frames before segmented STT", () => {
   const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
   const src = readFileSync(join(root, "voice-sidecar", "flash_pipeline.py"), "utf8");
@@ -2821,4 +2833,26 @@ test("GET /capabilities: an empty skill library still returns skill-tool and ski
   const skillLibrary = body.groups.find((g) => g.kind === "skill-library")!;
   assert.deepEqual(skillTool.tools, []);
   assert.deepEqual(skillLibrary.tools, []);
+});
+
+test("POST /messagebee/reveal-daemon fails safely (no shell-out) when not running from a bundle", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const res = await fetch(`${base}/messagebee/reveal-daemon`, { method: "POST", headers });
+  // Test runs from a dev node, not a packaged .app → refuse, don't shell out.
+  assert.equal(res.status, 500);
+  const body = await res.json() as { ok: boolean; error?: string };
+  assert.equal(body.ok, false);
+  assert.match(body.error ?? "", /bundle/i);
+});
+
+test("POST /messagebee/restart-daemon refuses to kickstart launchd when not running from a bundle", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const res = await fetch(`${base}/messagebee/restart-daemon`, { method: "POST", headers });
+  // Critical safety property: a dev run must never attempt a real daemon restart.
+  assert.equal(res.status, 412);
+  const body = await res.json() as { ok: boolean; error?: string };
+  assert.equal(body.ok, false);
+  assert.match(body.error ?? "", /dev run/i);
 });

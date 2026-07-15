@@ -6,6 +6,8 @@ import {
   getBundledDaemonPaths,
   isTranslocated,
   getBundleInstallReadiness,
+  revealDaemonBinaryInFinder,
+  _setExecFileForTests,
 } from "./app-bundle";
 
 const INSTALLED = "/Applications/HiveMatrix.app/Contents/Resources/daemon/bin/node";
@@ -46,4 +48,45 @@ test("getBundleInstallReadiness only OKs an /Applications install", () => {
   assert.equal(getBundleInstallReadiness(DOWNLOADS).state, "outside_applications");
   assert.equal(getBundleInstallReadiness(DOWNLOADS).ok, false);
   assert.equal(getBundleInstallReadiness(DEV).state, "dev");
+});
+
+test("revealDaemonBinaryInFinder shells out to `open -R` with the bundled node path", async () => {
+  const calls: { file: string; args: string[] }[] = [];
+  _setExecFileForTests(async (file, args) => {
+    calls.push({ file, args });
+    return { stdout: "", stderr: "" };
+  });
+  try {
+    const result = await revealDaemonBinaryInFinder(INSTALLED);
+    assert.equal(result.ok, true);
+    assert.equal(result.path, "/Applications/HiveMatrix.app/Contents/Resources/daemon/bin/node");
+    assert.deepEqual(calls, [
+      { file: "open", args: ["-R", "/Applications/HiveMatrix.app/Contents/Resources/daemon/bin/node"] },
+    ]);
+  } finally {
+    _setExecFileForTests(null);
+  }
+});
+
+test("revealDaemonBinaryInFinder fails without shelling out when not running from a bundle (dev run)", async () => {
+  const calls: unknown[] = [];
+  _setExecFileForTests(async (...args) => { calls.push(args); return { stdout: "", stderr: "" }; });
+  try {
+    const result = await revealDaemonBinaryInFinder(DEV);
+    assert.equal(result.ok, false);
+    assert.equal(calls.length, 0);
+  } finally {
+    _setExecFileForTests(null);
+  }
+});
+
+test("revealDaemonBinaryInFinder surfaces the execFile error instead of throwing", async () => {
+  _setExecFileForTests(async () => { throw new Error("open: command not found"); });
+  try {
+    const result = await revealDaemonBinaryInFinder(INSTALLED);
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? "", /open: command not found/);
+  } finally {
+    _setExecFileForTests(null);
+  }
 });

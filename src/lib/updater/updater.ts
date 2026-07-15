@@ -35,7 +35,7 @@ function dbPath(): string {
   return process.env.HIVEMATRIX_DB_PATH || join(hivematrixDir(), "hivematrix.db");
 }
 
-function backupsDir(): string {
+export function backupsDir(): string {
   const dir = join(hivematrixDir(), "backups");
   mkdirSync(dir, { recursive: true });
   return dir;

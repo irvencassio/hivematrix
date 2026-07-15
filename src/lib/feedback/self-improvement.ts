@@ -29,7 +29,7 @@ import {
   type RecordFeedbackInput,
 } from "./feedback";
 import type { DirectiveRetrospective } from "@/lib/orchestrator/directive-autonomy";
-import type { CreateDirectiveInput } from "@/lib/orchestrator/directive-store";
+import { createDirective, listDirectives, type CreateDirectiveInput } from "@/lib/orchestrator/directive-store";
 
 /**
  * Derive feedback inputs from a retrospective: "what didn't work" → bugs,
@@ -113,6 +113,20 @@ export function buildSelfImprovementDirective(opts: SelfImprovementDirectiveOpti
     brainSelection: { task: [], mission: [], session: [] },
     status: "active",
   };
+}
+
+/**
+ * Ensure the standing self-improvement directive exists — idempotent, so it's
+ * safe to call on every daemon boot (restarts are routine via auto-update; a
+ * non-idempotent version would spam duplicate directives).
+ */
+export function installSelfImprovementDirectiveIfMissing(
+  opts: SelfImprovementDirectiveOptions = {},
+): { installed: boolean; directiveId: string } {
+  const existing = listDirectives().find((d) => isSelfImprovementDirective(d.goal) && d.status !== "retired");
+  if (existing) return { installed: false, directiveId: existing._id };
+  const created = createDirective(buildSelfImprovementDirective(opts));
+  return { installed: true, directiveId: created._id };
 }
 
 /** Render the open backlog as a prompt fragment a planner can include. "" when empty. */

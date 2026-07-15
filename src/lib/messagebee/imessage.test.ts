@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -147,6 +147,27 @@ test("probeChatDbAccess distinguishes schema failures from permission failures",
     assert.equal(canReadChatDb(path), false);
   } finally {
     rmSync(join(path, ".."), { recursive: true, force: true });
+  }
+});
+
+test("probeChatDbAccess open_failed detail names the daemon, not a HiveMatrix app restart", () => {
+  // A directory can't be opened as a sqlite file — better-sqlite3 throws
+  // synchronously in the constructor, which is exactly the open_failed path
+  // (as opposed to schema_failed, which fails later at the query step).
+  const dir = mkdtempSync(join(tmpdir(), "mb-open-failed-"));
+  const path = join(dir, "chat.db");
+  mkdirSync(path);
+  try {
+    const probe = probeChatDbAccess(path);
+    assert.equal(probe.ok, false);
+    assert.equal(probe.reason, "open_failed");
+    // Names the actual daemon binary and explains the HiveMatrix app FDA
+    // toggle doesn't cover it (root cause: separately-signed launchd process).
+    assert.match(probe.detail, /daemon/i);
+    assert.match(probe.detail, /Full Disk Access to "HiveMatrix".*does not cover/i);
+    assert.doesNotMatch(probe.detail, /restart HiveMatrix/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

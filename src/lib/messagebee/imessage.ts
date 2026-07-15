@@ -108,7 +108,7 @@ export function probeChatDbAccess(path = chatDbPath()): ChatDbAccessProbe {
     return {
       ok: false,
       reason: "open_failed",
-      detail: `Cannot open Messages database; grant Full Disk Access to the running HiveMatrix app/daemon, then restart HiveMatrix: ${errorDetail(error)}`,
+      detail: `Cannot open Messages database. The daemon that reads chat.db (Contents/Resources/daemon/bin/node) runs as its own separately-signed process, independent of the HiveMatrix app — granting Full Disk Access to "HiveMatrix" in System Settings does not cover it. Reveal the daemon binary in Finder and add it to Full Disk Access directly, then restart the daemon: ${errorDetail(error)}`,
     };
   }
 

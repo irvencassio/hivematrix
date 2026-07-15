@@ -20,8 +20,10 @@ const {
   resolveFeedbackForCompletedTask,
   buildSelfImprovementDirective,
   isSelfImprovementDirective,
+  installSelfImprovementDirectiveIfMissing,
 } = await import("./self-improvement");
 const { getFeedback } = await import("./feedback");
+const { listDirectives } = await import("@/lib/orchestrator/directive-store");
 
 _resetDbForTests();
 getDb();
@@ -133,6 +135,18 @@ test("buildSelfImprovementDirective is marked + detectable; ordinary goals are n
   assert.equal(d.status, "active");
   assert.equal(d.profile, "coo");
   assert.ok(!isSelfImprovementDirective("Ship the LinkedIn ritual"), "ordinary directive isn't self-improvement");
+});
+
+test("installSelfImprovementDirectiveIfMissing installs once on boot, then no-ops on repeat boots (idempotent)", () => {
+  const first = installSelfImprovementDirectiveIfMissing({ project: "hivematrix" });
+  assert.equal(first.installed, true);
+
+  const second = installSelfImprovementDirectiveIfMissing({ project: "hivematrix" });
+  assert.equal(second.installed, false);
+  assert.equal(second.directiveId, first.directiveId);
+
+  const matches = listDirectives().filter((d) => isSelfImprovementDirective(d.goal));
+  assert.equal(matches.length, 1, "repeated boots must not create duplicate self-improvement directives");
 });
 
 test("the planning fragment now leads each line with the feedbackId (so the planner can link)", () => {

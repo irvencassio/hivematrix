@@ -59,6 +59,22 @@ async function main(): Promise<void> {
   }
   console.log(`[hivematrix] Database ready`);
 
+  // Self-heal silently-emptied user data. A migration (or a stray process
+  // pointed at the real DB) can wipe a table without throwing, so the
+  // throw-based rollback above never fires — this restores empty high-value
+  // tables (goals, Message Lane allowlist) from the newest backup that has rows.
+  // Additive-only and conservative; see db/self-heal.ts. Never fatal.
+  try {
+    const { healEmptiedTables } = await import("@/lib/db/self-heal");
+    const { backupsDir } = await import("@/lib/updater/updater");
+    const healed = healEmptiedTables({ db, backupsDir: backupsDir() });
+    for (const h of healed) {
+      console.warn(`[self-heal] restored ${h.restored} row(s) into ${h.table} from ${h.from}`);
+    }
+  } catch (e) {
+    console.error("[self-heal] failed:", e instanceof Error ? e.message : e);
+  }
+
   // Initialize connectivity policy (singleton)
   const policy = getConnectivityPolicy();
   console.log(`[hivematrix] Connectivity policy: ${policy.mode}`);
@@ -111,6 +127,20 @@ async function main(): Promise<void> {
     const revived = rearmStaleRecurringDirectives();
     if (revived.length) console.log(`[directives] revived ${revived.length} stale recurring directive(s): ${revived.join(", ")}`);
   } catch (e) { console.error("[directives] rearm-on-boot failed:", e instanceof Error ? e.message : e); }
+
+  // Install the standing self-improvement/maintenance directive if one isn't
+  // already active — without this the feedback→planning loop never fires on
+  // its own. Idempotent: restarts happen routinely (auto-update), so this
+  // must not create a duplicate directive each boot.
+  try {
+    const { installSelfImprovementDirectiveIfMissing } = await import("@/lib/feedback/self-improvement");
+    const { installed, directiveId } = installSelfImprovementDirectiveIfMissing();
+    console.log(
+      installed
+        ? `[directives] installed self-improvement directive (${directiveId})`
+        : `[directives] self-improvement directive already active (${directiveId})`
+    );
+  } catch (e) { console.error("[directives] self-improvement install-on-boot failed:", e instanceof Error ? e.message : e); }
 
   // Flash dispatch: shared callback for both inbound channel pollers. Wraps
   // runFlashTurnText so messagebee/mailbee (lib/) never import from flash/ directly.

@@ -18,6 +18,8 @@
  */
 
 import { sep } from "path";
+import { execFile as execFileCb } from "child_process";
+import { promisify } from "util";
 
 const RESOURCES_DAEMON_BIN = ["Contents", "Resources", "daemon", "bin", "node"];
 
@@ -96,4 +98,43 @@ export function getBundleInstallReadiness(execPath: string = process.execPath): 
     };
   }
   return { ok: true, state: "ok", appRoot };
+}
+
+// execFile is injectable so revealDaemonBinaryInFinder is unit-testable without
+// actually spawning `open`.
+type ExecFileFn = (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
+const defaultExecFile: ExecFileFn = promisify(execFileCb);
+let execFileForReveal: ExecFileFn = defaultExecFile;
+
+export function _setExecFileForTests(fn: ExecFileFn | null): void {
+  execFileForReveal = fn ?? defaultExecFile;
+}
+
+export interface RevealDaemonBinaryResult {
+  ok: boolean;
+  /** The daemon node binary that was revealed (present on success). */
+  path?: string;
+  error?: string;
+}
+
+/**
+ * Reveal the bundled daemon node binary in Finder (`open -R`) so the user can drag
+ * *that exact binary* into System Settings → Full Disk Access. The daemon that
+ * reads Messages' chat.db is this separately-signed process, not the app bundle the
+ * user usually grants FDA to — so pointing them at the app is a dead end. Refuses
+ * (without shelling out) on a dev run where there is no bundled binary to reveal.
+ */
+export async function revealDaemonBinaryInFinder(
+  execPath: string = process.execPath,
+): Promise<RevealDaemonBinaryResult> {
+  const paths = getBundledDaemonPaths(execPath);
+  if (!paths) {
+    return { ok: false, error: "Not running from a packaged app bundle — no daemon binary to reveal (dev run)." };
+  }
+  try {
+    await execFileForReveal("open", ["-R", paths.nodeBin]);
+    return { ok: true, path: paths.nodeBin };
+  } catch (e) {
+    return { ok: false, path: paths.nodeBin, error: e instanceof Error ? e.message : String(e) };
+  }
 }

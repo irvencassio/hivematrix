@@ -1362,6 +1362,37 @@ export function createDaemonServer() {
         json(res, 200, { ok: true, selfHandles: getSelfHandles() });
         return;
       }
+      // POST /messagebee/reveal-daemon — open Finder to the bundled daemon node
+      // binary. The daemon that reads chat.db is a separately-signed process, so
+      // FDA must be granted to *this* binary, not the app. See app-bundle.ts.
+      if (req.method === "POST" && urlPath === "/messagebee/reveal-daemon") {
+        const { revealDaemonBinaryInFinder } = await import("@/lib/onboarding/app-bundle");
+        const result = await revealDaemonBinaryInFinder();
+        json(res, result.ok ? 200 : 500, result);
+        return;
+      }
+      // POST /messagebee/restart-daemon — kickstart the launchd daemon so a
+      // freshly granted Full Disk Access entry takes effect. Responds first, then
+      // restarts (kickstart -k SIGKILLs this very process).
+      if (req.method === "POST" && urlPath === "/messagebee/restart-daemon") {
+        const { getBundledDaemonPaths } = await import("@/lib/onboarding/app-bundle");
+        if (!getBundledDaemonPaths()) {
+          json(res, 412, { ok: false, error: "Not running from a packaged app bundle — no launchd daemon to restart (dev run)." });
+          return;
+        }
+        json(res, 200, { ok: true, restarting: true });
+        setTimeout(() => {
+          void (async () => {
+            try {
+              const { restartViaLaunchd } = await import("@/lib/updater/daemon-update");
+              await restartViaLaunchd();
+            } catch (e) {
+              console.error("[messagebee] restart-daemon failed:", e instanceof Error ? e.message : e);
+            }
+          })();
+        }, 250);
+        return;
+      }
       // POST /system/open-pane — open a macOS privacy pane natively (webview window.open can't)
       if (req.method === "POST" && urlPath === "/system/open-pane") {
         const body = await parseBody(req) as { pane?: string };
@@ -3403,9 +3434,8 @@ export function createDaemonServer() {
           const { voiceRuntime } = await import("@/lib/voice/runtime");
           if (!voiceRuntime()) { json(res, 503, { error: "voice sidecar not available" }); return; }
           try {
-            const { relayTurn } = await import("@/lib/voice/turn-server");
-            const r = await relayTurn(audioB64, lang);
-            text = r.transcript ?? "";
+            const { relayTranscribe } = await import("@/lib/voice/turn-server");
+            text = await relayTranscribe(audioB64, lang);
           } catch (e) {
             json(res, 500, { error: `STT failed: ${e instanceof Error ? e.message : String(e)}` });
             return;
