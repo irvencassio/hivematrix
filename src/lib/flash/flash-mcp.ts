@@ -48,7 +48,7 @@ export const FLASH_MCP_SERVER_NAME = "flash";
 // real imports/logic, unlike the lane tools which just proxy to /bee/:tool).
 // ------------------------------------------------------------------
 
-export const FLASH_ONLY_TOOL_NAMES = ["persona_update", "generate_avatar", "deep_think", "escalate_to_task", "learn_skill"] as const;
+export const FLASH_ONLY_TOOL_NAMES = ["persona_update", "generate_avatar", "deep_think", "escalate_to_task", "learn_skill", "list_tasks", "get_task"] as const;
 export type FlashOnlyToolName = (typeof FLASH_ONLY_TOOL_NAMES)[number];
 
 export function isFlashOnlyTool(name: string): name is FlashOnlyToolName {
@@ -155,6 +155,39 @@ export const FLASH_ONLY_TOOL_DEFS: ChatTool[] = [
           suggested_kind: { type: "string", enum: ["instruction", "script"], description: "Optional hint at the skill shape." },
         },
         required: ["goal", "why_needed"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_tasks",
+      description:
+        "List HiveMatrix's own tasks (the task board). Use to answer \"what's running / failed / in review?\" or to " +
+        "find a task before looking it up with get_task. Read-only.",
+      parameters: {
+        type: "object",
+        properties: {
+          status: { type: "string", description: "Optional filter: failed, review, in_progress, done, backlog, cancelled, archived." },
+          limit: { type: "number", description: "Max tasks to return (default 15, max 50)." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_task",
+      description:
+        "Look up ONE HiveMatrix task by id (full or short) or a title fragment, and return its status, error, " +
+        "result, and recent activity log. Use this to DIAGNOSE a task yourself — e.g. when the operator asks \"why " +
+        "did this task fail?\" read the task's error and log tail instead of asking them to screenshot it. Read-only.",
+      parameters: {
+        type: "object",
+        properties: {
+          task: { type: "string", description: "Task id (full or first several chars) or a distinctive part of its title." },
+        },
+        required: ["task"],
       },
     },
   },
@@ -495,6 +528,17 @@ export async function dispatchFlashOnlyTool(
       return handleEscalateToTask(args, opts.sessionId, opts.channel);
     case "learn_skill":
       return handleLearnSkill(args, opts);
+    case "list_tasks": {
+      const { listTasksText } = await import("./task-lookup");
+      return listTasksText({
+        status: typeof args.status === "string" ? args.status : undefined,
+        limit: typeof args.limit === "number" ? args.limit : undefined,
+      });
+    }
+    case "get_task": {
+      const { getTaskDetailText } = await import("./task-lookup");
+      return getTaskDetailText(String(args.task ?? ""));
+    }
     default:
       return `Error: Unknown flash-only tool "${name}"`;
   }

@@ -2750,7 +2750,9 @@ test("GET /capabilities returns exactly the four groups (native, flash, skill-to
   const native = body.groups.find((g) => g.kind === "native")!;
   const flash = body.groups.find((g) => g.kind === "flash")!;
   assert.ok(Array.isArray(native.tools) && native.tools.length > 0);
-  assert.ok(Array.isArray(flash.tools) && flash.tools.length === 5, "the five flash-only tools (incl. learn_skill)");
+  assert.ok(Array.isArray(flash.tools) && flash.tools.length === 7, "the seven flash-only tools (incl. learn_skill, list_tasks, get_task)");
+  const flashNames = flash.tools.map((t) => (t as { name: string }).name);
+  assert.ok(flashNames.includes("get_task") && flashNames.includes("list_tasks"), "task read tools are exposed to Flash");
 
   // Shape stability on one native entry.
   const brainSearch = native.tools.find((t) => t.name === "brain_search") as Record<string, unknown>;
