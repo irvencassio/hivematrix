@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.206", date: "2026-07-15", note: "Flash chat: paste (Cmd+V) or drag-and-drop an image into the message box — previously only the file picker worked, so pasted screenshots were silently dropped and the assistant couldn't see them." },
   { version: "0.1.205", date: "2026-07-15", note: "Self-improvement loop is now opt-in (default off, toggle in Settings → Features) — it can no longer reinstall or resurrect itself across app updates." },
   { version: "0.1.204", date: "2026-07-15", note: "Message Lane setup fix: the FDA step now shows access you've already granted (it was checking passively and hiding it); restore the allowlist after an update with a backlog-replay guard; home banner for degraded features; voice reads full failed-task errors." },
   { version: "0.1.203", date: "2026-07-15", note: "Message Lane: reveal/restart the real chat.db daemon for Full Disk Access + honest denied copy; DB self-heal restores goals wiped by an update; board status colors (needs-input amber / ready-for-review green); voice approve/deny verb-less follow-up." },
