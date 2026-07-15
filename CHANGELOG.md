@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.202 — 2026-07-15
+
+Fix duplicate iMessage sends: one delivery per recipient per run (heals the 2026-07-14 daily-audit double-send); native task execution runs the CLI like a direct Claude Code session (Opus plans, Sonnet builds).
+
 ## v0.1.201 — 2026-07-13
 
 Developer ID release

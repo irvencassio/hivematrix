@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.202", date: "2026-07-15", note: "Fix duplicate iMessage sends: one delivery per recipient per run (heals the 2026-07-14 daily-audit double-send); native task execution runs the CLI like a direct Claude Code session (Opus plans, Sonnet builds)." },
   { version: "0.1.201", date: "2026-07-13", note: "Developer ID release" },
   { version: "0.1.200", date: "2026-07-12", note: "Asking about a long document in chat no longer spins up a background task just to finish reading it — the assistant now pages through the whole document directly and answers." },
   { version: "0.1.199", date: "2026-07-12", note: "Voice replies now speak in full — long, multi-paragraph answers (like your solo-founder goals) no longer cut off after the first paragraph, and stay in one consistent voice. Plus: HiveMatrix now texts you when a reminder comes due, so you never miss one even if you don't see the alarm." },
