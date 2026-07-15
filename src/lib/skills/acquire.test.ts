@@ -47,6 +47,17 @@ function draftFiles(): string[] {
   }
 }
 
+// A retryable failure (parse/critic) re-mints once, and EVERY failed attempt is
+// archived (acquire.ts, "Archive every failed attempt"). Draft filenames are
+// `<slug>.<second-granularity timestamp>.md`, so two attempts land in one file
+// when they share a wall-clock second but TWO files when they straddle a second
+// boundary — which, under a loaded parallel suite, made the `before + 1` draft
+// assertions flaky (~1/3). Pinning `now` makes both attempts write the same
+// filename (deterministic single draft) without weakening the count assertion.
+// The fixed date is intentionally NOT the real run date, so countTodayAttempts'
+// daily-cap window can't pick up other tests' real-time ledger lines.
+const FIXED_ACQUIRE_NOW = () => "2026-06-01T09:00:00.000Z";
+
 function baseSkill(over: Partial<Skill> = {}): Skill {
   return {
     name: "Test Skill", description: "does a thing", tags: [], body: "do the thing",
@@ -143,7 +154,7 @@ test("parse failure: garbage mint output archives a draft, files a proposal, nev
   const mint: MintFn = async () => ({ file: "this is not a skill file at all, no frontmatter", evals: [] });
 
   const before = draftFiles().length;
-  const result = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic() });
+  const result = await acquireSkill({ goal, whyNeeded: "x", mint, critic: passingCritic(), now: FIXED_ACQUIRE_NOW });
 
   assert.equal(result.outcome, "draft-failed");
   assert.equal(result.stage, "parse");
@@ -399,7 +410,7 @@ test("integration: acquireSkill with NEITHER mint NOR critic, critic FAILs → d
   }) as unknown as Parameters<typeof _setExecFileForTests>[0]);
 
   const before = draftFiles().length;
-  const result = await acquireSkill({ goal, whyNeeded: "integration test, zero injected functions", dailyCap: 1000 });
+  const result = await acquireSkill({ goal, whyNeeded: "integration test, zero injected functions", dailyCap: 1000, now: FIXED_ACQUIRE_NOW });
 
   assert.equal(result.outcome, "draft-failed");
   assert.equal(result.stage, "critic");
