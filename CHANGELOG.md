@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.204 — 2026-07-15
+
+Message Lane setup fix: the FDA step now shows access you've already granted (it was checking passively and hiding it); restore the allowlist after an update with a backlog-replay guard; home banner for degraded features; voice reads full failed-task errors.
+
 ## v0.1.203 — 2026-07-15
 
 Message Lane: reveal/restart the real chat.db daemon for Full Disk Access + honest denied copy; DB self-heal restores goals wiped by an update; board status colors (needs-input amber / ready-for-review green); voice approve/deny verb-less follow-up.
