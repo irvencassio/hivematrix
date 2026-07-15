@@ -138,8 +138,6 @@ test("main screen usage shows no dollar amounts (counts/tokens only)", () => {
   assert.doesNotMatch(js, /HiveMatrix spend/, "no spend tooltip");
   assert.doesNotMatch(js, /No frontier spend/, "no spend placeholder");
   assert.doesNotMatch(js, /\bspent\b/, "no 'spent' labels");
-  // Usage status is now shown via the usageStatusDot in the sidebar section header.
-  assert.match(CONSOLE_HTML, /id="usageStatusDot"/, "usage status dot is present in the sidebar");
 });
 
 test("observability does not surface cost (Claude-only, removed)", () => {
@@ -354,10 +352,20 @@ test("daemon runtime diagnostics use lane names", () => {
 });
 
 test("project selectors expose a visible re-scan action", () => {
-  assert.match(CONSOLE_HTML, /id="projectRescanBtn"[^>]*onclick="refreshProjects\(\)"/, "header project rescan button present");
   assert.match(CONSOLE_HTML, /id="t_project_rescan"[^>]*onclick="refreshProjects\(\)"/, "empty dropdown rescan button present");
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /async function refreshProjects\(\)[\s\S]*loadProjects\(true\)/, "refresh bypasses the project cache");
+});
+
+test("header project-filter dropdown is removed", () => {
+  // The top nav's "(all projects)" board-filter dropdown was removed — see
+  // docs/superpowers/specs/2026-07-15-console-header-cleanup-design.md item 2.
+  assert.doesNotMatch(CONSOLE_HTML, /id="projectSel"/, "project-filter select is gone from the header");
+  assert.doesNotMatch(CONSOLE_HTML, /\(all projects\)/, "the '(all projects)' option text is gone");
+  // Regression guard for the top-level-addEventListener-on-a-missing-element
+  // crash risk called out in the design doc: the script must still parse.
+  const js = extractScript(CONSOLE_HTML);
+  assert.doesNotThrow(() => new Function(js), SyntaxError, "console script still parses as valid JS");
 });
 
 test("app icon is a single fixed identity (no light/dark toggle)", () => {
@@ -466,7 +474,7 @@ test("Mixed-mode role-model defaults use version-agnostic Claude labels", () => 
 
 test("right-panel sections are collapsible <details> with persisted open state", () => {
   // Each context section is a <details class="ctx-sec"> so the long panel can be tidied.
-  for (const id of ["usageSec", "obsSec", "connSec", "dirSec", "skillsSec", "mcpSec"]) {
+  for (const id of ["obsSec", "connSec", "dirSec", "skillsSec", "mcpSec"]) {
     assert.match(CONSOLE_HTML, new RegExp('<details class="ctx-sec" id="' + id + '"'), id + " is a collapsible section");
   }
   // Actionable sections default open; info-heavy ones default collapsed.
@@ -477,8 +485,6 @@ test("right-panel sections are collapsible <details> with persisted open state",
   assert.match(js, /function wireCtxSections\(/);
   assert.match(js, /hm_sec_/, "per-section open state persisted");
   assert.match(js, /wireCtxSections\(\);/, "wired on init");
-  // In-summary controls don't toggle the section.
-  assert.match(CONSOLE_HTML, /event\.stopPropagation\(\);refreshUsageNow\(\)/);
 });
 
 test("console surfaces observability: per-task strip + totals across providers", () => {
@@ -938,21 +944,6 @@ test("console can clear failed optional attachment uploads", () => {
   assert.match(js, /function clearAttachError\(\)/);
   assert.match(js, /function clearCtxAttachError\(ctx\)/);
   assert.match(js, /Continue without failed file/);
-});
-
-test("frontier usage panel renders a separate Codex usage section", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /codexSubscription/);
-  assert.match(js, /Codex subscription/);
-  assert.match(js, /renderCodexBar/);
-});
-
-test("usage panel has a manual refresh that bypasses cached auth state", () => {
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(CONSOLE_HTML, /usageRefresh/);
-  assert.match(js, /function refreshUsageNow/);
-  assert.match(js, /checkUsage\(true\)/);
-  assert.match(js, /\/usage\?refresh=1/);
 });
 
 test("frontier usage panel exposes Claude auth login action", () => {
@@ -1438,6 +1429,19 @@ test("board task cards have stable width and height constraints across screen si
   assert.match(CONSOLE_HTML, /@media \(max-width: 760px\)[\s\S]*grid-template-columns:\s*1fr/, "narrow viewport stacks to single column");
 });
 
+test("Flash composer accepts images via paste and drag-drop, not just the file picker", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // The three attach paths share one File→pendingImages helper.
+  assert.match(js, /function flashAddImageFile\(f\)/, "shared image-file reader exists");
+  assert.match(js, /function flashPaste\(e\)/, "paste handler exists");
+  assert.match(js, /function flashDrop\(e\)/, "drop handler exists");
+  // Paste pulls image blobs off the clipboard and adds them.
+  assert.match(js, /flashPaste[\s\S]*clipboardData[\s\S]*getAsFile\(\)[\s\S]*flashAddImageFile/, "paste reads clipboard image files");
+  // The composer wires onpaste on the input and ondrop on the shell.
+  assert.match(CONSOLE_HTML, /id="flashInput"[^>]*onpaste="flashPaste\(event\)"/, "textarea has onpaste");
+  assert.match(CONSOLE_HTML, /oc-panel-composer-shell[^>]*ondrop="flashDrop\(event\)"/, "composer shell has ondrop");
+});
+
 test("setup permissions step actively probes Full Disk Access (silent gate) so an already-granted daemon isn't shown as 'not checked'", () => {
   const js = extractScript(CONSOLE_HTML);
   // The permissions-step poll must force the chat.db probe, not the passive GET
@@ -1648,32 +1652,28 @@ test("new task and task selection remain intact", () => {
   assert.match(js, /onclick="selectTask\(/, "task cards remain selectable in renderBoard");
 });
 
-test("frontier usage has its own Usage section above Observability", () => {
-  assert.match(CONSOLE_HTML, /id="usageSec"/, "standalone Usage section present");
-  assert.match(CONSOLE_HTML, /<details class="ctx-sec" id="usageSec" open>/, "Usage is a collapsible ctx-sec, open by default");
-  assert.ok(
-    CONSOLE_HTML.indexOf('id="usageSec"') < CONSOLE_HTML.indexOf('id="obsSec"'),
-    "Usage section sits above the Observability section",
-  );
-});
+test("header Usage section is removed; a 5h/7d toggle now sits in the header's live/toggle zone", () => {
+  // The sidebar Usage <details> section was replaced by a compact header
+  // toggle — see docs/superpowers/specs/2026-07-15-console-header-cleanup-design.md item 3.
+  assert.doesNotMatch(CONSOLE_HTML, /id="usageSec"/, "standalone Usage section is gone");
+  assert.doesNotMatch(CONSOLE_HTML, /id="usageDetailsSec"/, "per-window details disclosure is gone");
 
-test("Usage section renders Claude and Codex provider cards", () => {
-  assert.match(CONSOLE_HTML, /id="usageSummary"/, "at-a-glance summary mount present");
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /getElementById\("usageSummary"\)/, "checkUsage fills the summary");
-  assert.match(js, /usageProviderCard\("Claude"/, "Claude card rendered");
-  assert.match(js, /usageProviderCard\("Codex"/, "Codex card rendered");
-  assert.match(js, /function usageProviderCard\(/, "compact provider card renderer present");
-});
+  const headerStart = CONSOLE_HTML.indexOf("<header>");
+  const hzoneEnd = CONSOLE_HTML.indexOf("</div>", headerStart);
+  const headerZone = CONSOLE_HTML.slice(headerStart, hzoneEnd);
+  assert.match(headerZone, /id="live"/, "live indicator stays in the header's first zone");
+  assert.match(headerZone, /class="obs-win" id="usageWinToggle"/, "reuses the existing .obs-win segmented toggle, no new CSS");
+  assert.match(headerZone, />5 hour</, "5-hour toggle button present");
+  assert.match(headerZone, />7 day</, "7-day toggle button present");
+  assert.match(headerZone, /data-w="5h" class="on"/, "5-hour is active by default");
+  assert.match(headerZone, /id="usageWinReadout"/, "readout text mount present");
 
-test("per-window usage details remain available but secondary", () => {
-  assert.match(CONSOLE_HTML, /id="usageDetailsSec"/, "per-window details disclosure present");
-  const usageSec = CONSOLE_HTML.indexOf('id="usageSec"');
-  const usage = CONSOLE_HTML.indexOf('id="usage"');
-  const obsSec = CONSOLE_HTML.indexOf('id="obsSec"');
-  assert.ok(usageSec >= 0 && usage > usageSec && usage < obsSec, "#usage detail lives inside the Usage section, not spilling into the next section");
+  // Regression guard for the same class of top-level-throw risk as the
+  // projectSel removal: checkUsage()'s now-deleted #usageSummary/#usage/
+  // #usageStatusDot lookups were all null-guarded (verified by reading
+  // checkUsage() directly), so the script must still parse cleanly.
   const js = extractScript(CONSOLE_HTML);
-  assert.doesNotMatch(js, /Frontier · cloud/, "usage no longer buried under a Models 'Frontier · cloud' header");
+  assert.doesNotThrow(() => new Function(js), SyntaxError, "console script still parses as valid JS");
 });
 
 test("the sidebar Models panel (embeddings-only after Phase 4) is removed entirely — redundant with Settings > Models routing summary", () => {
@@ -1718,21 +1718,12 @@ test("console generic local-model copy does not hardcode Qwen", () => {
 });
 
 
-test("usage section header has status dot, not a header pill", () => {
-  // The old usagePill (⚡) in the header was removed; usage state is now shown
-  // via the usageStatusDot coloured ● inside the Usage section summary.
-  assert.doesNotMatch(CONSOLE_HTML, /id="usagePill"/, "header usage pill removed");
-  assert.match(CONSOLE_HTML, /id="usageStatusDot"/, "usage status dot present in section summary");
-  const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /function fmtResetsCompact\(/, "compact reset formatter present");
-});
-
 test("Usage UI introduces no dollar/cost copy", () => {
   const js = extractScript(CONSOLE_HTML);
   const checkUsage = js.match(/async function checkUsage\([\s\S]*?\n\}/)?.[0] ?? "";
-  const card = js.match(/function usageProviderCard\([\s\S]*?\n\}/)?.[0] ?? "";
-  assert.ok(checkUsage.length > 100 && card.length > 50, "usage function bodies extracted");
-  assert.doesNotMatch(checkUsage + card, /\$\d|\bcost\b/i, "no dollar amounts or cost copy in the Usage UI");
+  const render = js.match(/function renderHeaderUsageWindow\(\)[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(checkUsage.length > 100 && render.length > 50, "usage function bodies extracted");
+  assert.doesNotMatch(checkUsage + render, /\$\d|\bcost\b/i, "no dollar amounts or cost copy in the Usage UI");
 });
 
 type UsageBarClass = (util: number, resetsAt: string, durationMs: number) => "ok" | "warn" | "hi";
@@ -1796,38 +1787,96 @@ test("5-hour usage bars can still use the warning color", () => {
   });
 });
 
-function consoleDayTicksHtml(): (durationMs: number) => string {
+function consoleHeaderUsageToggle() {
   const js = extractScript(CONSOLE_HTML);
-  const constant = js.match(/const SEVEN_DAY_MS = [^;]+;/)?.[0] ?? "";
-  const body = js.match(/function dayTicksHtml\([\s\S]*?\n\}/)?.[0] ?? "";
-  assert.ok(constant.length > 10 && body.length > 20, "SEVEN_DAY_MS + dayTicksHtml body extracted");
-  return new Function(constant + "\n" + body + "\nreturn dayTicksHtml;")() as (durationMs: number) => string;
+  const usageBarClassSrc = js.match(/function usageBarClass\([\s\S]*?\n\}/)?.[0] ?? "";
+  const fmtResetsSrc = js.match(/function fmtResets\([\s\S]*?\n\}/)?.[0] ?? "";
+  const winState = js.match(/let _headerUsageWin[^\n]+/)?.[0] ?? "";
+  const cacheState = js.match(/let _lastClaudeWins[^\n]+/)?.[0] ?? "";
+  const setSrc = js.match(/function setHeaderUsageWindow\([^\n]+/)?.[0] ?? "";
+  const renderSrc = js.match(/function renderHeaderUsageWindow\(\)[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(
+    usageBarClassSrc.length > 50 && fmtResetsSrc.length > 50 && winState.length > 10
+      && cacheState.length > 10 && setSrc.length > 20 && renderSrc.length > 50,
+    "header usage toggle state + functions extracted",
+  );
+
+  const combined = [usageBarClassSrc, fmtResetsSrc, winState, cacheState, setSrc, renderSrc].join("\n");
+  const factory = new Function(
+    "document",
+    `${combined}\nreturn { setHeaderUsageWindow, renderHeaderUsageWindow, seed: function (w) { _lastClaudeWins = w; } };`,
+  ) as (doc: unknown) => {
+    setHeaderUsageWindow: (w: string) => void;
+    renderHeaderUsageWindow: () => void;
+    seed: (wins: unknown) => void;
+  };
+
+  function makeBtn(w: string) {
+    const classList: { on: boolean; toggle: (cls: string, v: boolean) => void } = {
+      on: false,
+      toggle: (_cls: string, v: boolean) => { classList.on = v; },
+    };
+    return { dataset: { w }, classList };
+  }
+  const buttons = [makeBtn("5h"), makeBtn("7d")];
+  const els: Record<string, { textContent: string; className: string }> = {
+    usageWinReadout: { textContent: "", className: "muted" },
+  };
+  const doc = {
+    getElementById: (id: string) => els[id],
+    querySelectorAll: (sel: string) => (sel.indexOf("usageWinToggle") >= 0 ? buttons : []),
+  };
+  const control = factory(doc);
+  return { ...control, buttons, els };
 }
 
-test("dayTicksHtml renders 6 day-boundary ticks at 1/7..6/7 for a 7-day window", () => {
-  const dayTicksHtml = consoleDayTicksHtml();
-  const html = dayTicksHtml(604800000);
-  const matches = [...html.matchAll(/usage-bar-tick" style="left:([\d.]+)%"/g)].map((m) => Number(m[1]));
-  assert.equal(matches.length, 6, "one tick per interior day boundary");
-  assert.deepEqual(
-    matches.map((n) => Math.round(n * 100) / 100),
-    [1, 2, 3, 4, 5, 6].map((d) => Math.round((d / 7) * 100 * 100) / 100)
-  );
+test("renderHeaderUsageWindow shows remaining% + reset time colored via the real usage-status-dot ok/warn/hi classes", () => {
+  const toggle = consoleHeaderUsageToggle();
+  const now = Date.UTC(2026, 6, 1, 12, 0, 0);
+  const original = Date.now;
+  Date.now = () => now;
+  try {
+    toggle.seed([
+      { label: "5-hour", remaining: 40, utilization: 60, resetsAt: new Date(now + 2 * 3600000).toISOString(), durationMs: 18000000 },
+      { label: "7-day", remaining: 90, utilization: 10, resetsAt: new Date(now + 3 * 86400000).toISOString(), durationMs: 604800000 },
+    ]);
+    toggle.renderHeaderUsageWindow();
+    assert.equal(toggle.els.usageWinReadout.textContent, "40% left · resets in 2h 0m", "5-hour window is the default");
+    assert.equal(toggle.els.usageWinReadout.className, "usage-status-dot warn", "reuses the real usage-status-dot + warn class, not an invented one");
+    assert.equal(toggle.buttons[0].classList.on, true, "5-hour button marked active");
+    assert.equal(toggle.buttons[1].classList.on, false, "7-day button not active");
+
+    toggle.setHeaderUsageWindow("7d");
+    assert.equal(toggle.els.usageWinReadout.textContent, "90% left · resets in 3d 0h", "switching windows re-renders instantly from cached data");
+    assert.equal(toggle.els.usageWinReadout.className, "usage-status-dot ok");
+    assert.equal(toggle.buttons[0].classList.on, false, "5-hour button loses active state");
+    assert.equal(toggle.buttons[1].classList.on, true, "7-day button gains active state");
+  } finally {
+    Date.now = original;
+  }
 });
 
-test("dayTicksHtml renders nothing for the 5-hour window", () => {
-  const dayTicksHtml = consoleDayTicksHtml();
-  assert.equal(dayTicksHtml(18000000), "", "no day ticks on a sub-day window");
-});
-
-test("7-day usage bars (breakdown, codex, and summary cards) embed day ticks", () => {
+test("checkUsage caches claudeWins for the header toggle and repaints it on every poll, without the old sidebar-only DOM writes", () => {
   const js = extractScript(CONSOLE_HTML);
-  const subBar = js.match(/function renderSubBar\([\s\S]*?\n\}/)?.[0] ?? "";
-  const codexBar = js.match(/function renderCodexBar\([\s\S]*?\n\}/)?.[0] ?? "";
-  const card = js.match(/function usageProviderCard\([\s\S]*?\n\}/)?.[0] ?? "";
-  assert.match(subBar, /dayTicksHtml\(durationMs\)/, "7-day breakdown bar embeds day ticks");
-  assert.match(codexBar, /dayTicksHtml\(durationMs\)/, "Codex 7-day bar embeds day ticks");
-  assert.match(card, /dayTicksHtml\(win\.durationMs\)/, "summary card embeds day ticks when its window is 7-day");
+  const body = js.match(/async function checkUsage\([\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(body.length > 50, "checkUsage body extracted");
+  assert.match(body, /_lastClaudeWins\s*=\s*claudeWins/, "caches claudeWins so the toggle can re-render without re-fetching");
+  assert.match(body, /renderHeaderUsageWindow\(\)/, "repaints the header readout on every poll, not just on click");
+  assert.doesNotMatch(body, /getElementById\("usageStatusDot"\)/, "sidebar status-dot write is gone");
+  assert.doesNotMatch(body, /getElementById\("usageSummary"\)/, "sidebar summary write is gone");
+  assert.doesNotMatch(body, /getElementById\("usage"\)/, "sidebar per-window breakdown write is gone");
+});
+
+test("Usage sidebar cleanup leaves no dangling references to the removed section or its renderers", () => {
+  for (const deadId of ["usageSec", "usageStatusDot", "usageSummary", "usageDetailsSec", "usageRefresh"]) {
+    assert.doesNotMatch(CONSOLE_HTML, new RegExp('id="' + deadId + '"'), deadId + " markup is gone");
+  }
+  const js = extractScript(CONSOLE_HTML);
+  for (const deadFn of ["refreshUsageNow", "usageProviderCard", "renderSubBar", "renderCodexBar", "dayTicksHtml", "usagePlanLabel"]) {
+    assert.doesNotMatch(js, new RegExp("\\b" + deadFn + "\\b"), deadFn + " has no remaining references");
+  }
+  // usageBarClass stays — it's the color logic the header readout reuses.
+  assert.match(js, /function usageBarClass\(/, "usageBarClass is kept for the header readout's other caller");
 });
 
 function consoleTaskProvenancePills(): (t: unknown, out: unknown, logs: unknown, childTasks?: unknown) => string {
@@ -2508,30 +2557,19 @@ test("runSelectedCommand sends both project and projectPath from the cmd multi-p
   assert.match(body, /\/commands\/run/, "payload is posted to /commands/run");
 });
 
-test("runSelectedCommand success message reports project mismatch when board filter differs from task project", () => {
-  // Regression guard: after a successful command launch the operator must see
-  // a clear message when the newly-created task lands in a project that is
-  // different from the currently active board filter.  Without this guard the
-  // board appears empty and the operator has no hint about where the task went.
+test("runSelectedCommand success message is the plain unconditional form now that the board filter is gone", () => {
+  // The project board-filter dropdown (and state.selectedProject as a board
+  // filter) was removed — see
+  // docs/superpowers/specs/2026-07-15-console-header-cleanup-design.md item 2.
+  // The old mismatch-message branching here depended entirely on
+  // state.selectedProject, which can now never be set, so it was dead code
+  // and has been deleted; only the plain success message remains.
   const js = extractScript(CONSOLE_HTML);
   const body = fnBody(js, "runSelectedCommand");
 
-  // The function must read the active board filter from state.selectedProject.
-  assert.match(body, /state\.selectedProject/, "board filter is read from state.selectedProject");
-
-  // It must also read the project from the returned task object.
-  assert.match(body, /d\.task\.project/, "task project is read from the API response");
-
-  // When the filter is set and differs from the task project the message must
-  // mention the task project ("in <project>") so the operator knows where to look.
-  assert.match(body, /in '\s*\+.*taskProject|'in '\s*\+\s*taskProject|in " \+ taskProject|"in " \+ taskProject|in\s+'\s*\+\s*taskProject|in.*taskProject.*board filter|in.*taskProject/, "mismatch message includes the task project");
-
-  // The mismatch message must also name the active board filter so the operator
-  // can reconcile which view they are looking at.
-  assert.match(body, /current board filter is\s*'\s*\+\s*boardFilter|current board filter is\s*"\s*\+\s*boardFilter|boardFilter.*current board filter|board filter.*boardFilter/, "mismatch message includes the board filter name");
-
-  // When no board filter is active the plain "see the board" fallback is used.
-  assert.match(body, /see the board/, "default success message remains available for the no-filter case");
+  assert.match(body, /see the board/, "plain success message is shown on launch");
+  assert.doesNotMatch(body, /state\.selectedProject/, "no longer reads the removed board filter");
+  assert.doesNotMatch(body, /boardFilter/, "board-filter mismatch branching is gone");
 });
 
 test("command options picker: panels render options and Run assembles from picks", () => {

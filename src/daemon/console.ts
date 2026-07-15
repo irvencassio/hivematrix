@@ -872,6 +872,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .oc-panel-composer-shell { flex:0 0 auto; min-height:96px; display:grid; grid-template-columns:minmax(0, 1fr) 88px;
     align-items:end; gap:8px; width:100%; min-width:0;
     padding:12px; border-top:1px solid var(--border); background:var(--panel); cursor:text; }
+  .oc-panel-composer-shell.oc-drag { background:color-mix(in srgb, var(--accent) 8%, var(--panel)); outline:2px dashed var(--accent); outline-offset:-4px; }
   .oc-input { width:100%; min-width:0; min-height:64px; max-height:180px; padding:9px 11px;
     border:1px solid var(--border); border-radius:8px; background:var(--code-bg);
     color:var(--text); font-size:13px; resize:none; font-family:inherit; line-height:1.45; }
@@ -1060,13 +1061,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   <div class="hzone">
     <span class="logo">HiveMatrix</span>
     <span class="live" id="live" style="cursor:pointer" onclick="toggleConnOverride()" title="Daemon + connectivity status — click to override connectivity">● live</span>
-  </div>
-  <div class="hzone">
-    <span class="muted hlabel">project</span>
-    <select id="projectSel" style="max-width:200px">
-      <option value="">(all projects)</option>
-    </select>
-    <button class="gear" id="projectRescanBtn" title="Re-scan projects" onclick="refreshProjects()">↻</button>
+    <span class="obs-win" id="usageWinToggle">
+      <button data-w="5h" class="on" onclick="setHeaderUsageWindow('5h')">5 hour</button>
+      <button data-w="7d" onclick="setHeaderUsageWindow('7d')">7 day</button>
+    </span>
+    <span class="muted" id="usageWinReadout" style="font-size:11px"></span>
   </div>
   <div class="hzone mode" style="margin-left:auto">
     <span class="hgroup" title="Connectivity — auto by default; the ● live indicator shows the current effective mode. Click it to override.">
@@ -1863,10 +1862,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="approvals"></div>
     <details class="ctx-sec" id="setupSec" open><summary id="setupSummary">Setup</summary>
     <div id="onboarding"></div></details>
-    <details class="ctx-sec" id="usageSec" open><summary><span id="usageStatusDot" class="usage-status-dot" style="display:none">●</span>Usage <button id="usageRefresh" class="usage-refresh" title="Refresh frontier usage" onclick="event.stopPropagation();refreshUsageNow()">↻</button></summary>
-    <div id="usageSummary"><div class="muted">No frontier usage yet.</div></div>
-    <details class="usage-details" id="usageDetailsSec"><summary>Per-window details</summary>
-    <div id="usage"></div></details></details>
     <details class="ctx-sec" id="obsSec"><summary>Observability</summary>
     <div id="observability"><div class="muted">No task telemetry yet.</div></div></details>
     <details class="ctx-sec" id="connSec" open><summary>Connectivity</summary>
@@ -2053,13 +2048,13 @@ function renderOverview() {
   if (!el) return;
   const statusToLane = {}; LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
   const counts = {}; LANE_DEFS.forEach(L => counts[L.key] = 0);
-  const filtered = state.selectedProject ? state.tasks.filter(t => t.project === state.selectedProject) : state.tasks;
+  const filtered = state.tasks;
   for (const t of filtered) { const k = statusToLane[t.status]; if (k) counts[k]++; }
   const dirActive = (state.directives || []).filter(d => d.status === "active").length;
   const appr = (state.approvals || []).length;
   const card = (label, val, cls, numColor, action) => '<div class="ov-card ' + (cls || "") + '"' + (action ? ' onclick="' + action + '"' : '') + '><div class="ov-num"' + (numColor ? ' style="color:' + numColor + '"' : '') + '>' + val + '</div><div class="ov-lbl">' + esc(label) + '</div></div>';
   el.innerHTML = '<div class="overview">'
-    + '<div class="ov-head">Overview' + (state.selectedProject ? " · " + esc(state.selectedProject) : "") + '</div>'
+    + '<div class="ov-head">Overview</div>'
     + '<div class="ov-grid">' + LANE_DEFS.map(L => card(L.label, counts[L.key], "", laneColor[L.key] || "", "focusBoardLane('" + L.key + "')")).join("") + '</div>'
     + '<div class="ov-grid" style="margin-top:8px">'
     + card("scheduled", dirActive)
@@ -2289,10 +2284,7 @@ function renderBoard() {
   const statusToLane = {};
   LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
   const byLane = {}; LANE_DEFS.forEach(L => byLane[L.key] = []);
-  // Filter by selected project if one is chosen
-  const filtered = state.selectedProject
-    ? state.tasks.filter(t => t.project === state.selectedProject)
-    : state.tasks;
+  const filtered = state.tasks;
   for (const t of filtered) { const k = statusToLane[t.status]; if (k) byLane[k].push(t); }
   const el = document.getElementById("board");
   const collapsedLanes = getCollapsedLanes();
@@ -4179,13 +4171,7 @@ async function runSelectedCommand() {
     const d = await api('/commands/run',
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     if (d && d.task) {
-      const taskProject = (d.task.project || 'ops');
-      const boardFilter = state.selectedProject || '';
-      let msg = 'Launched /' + c.invokeName + ' — see the board.';
-      if (boardFilter && boardFilter !== taskProject) {
-        msg = 'Launched /' + c.invokeName + ' in ' + taskProject + ' — current board filter is ' + boardFilter + '.';
-      }
-      if (res) res.textContent = msg;
+      if (res) res.textContent = 'Launched /' + c.invokeName + ' — see the board.';
       refresh();
     } else if (res) { res.textContent = (d && d.error) || 'Launched.'; }
   } catch (e) { if (res) res.textContent = 'Error launching command.'; }
@@ -5680,65 +5666,24 @@ function lowestWindow(wins) {
   return live.reduce((a, b) => (b.remaining < a.remaining ? b : a));
 }
 
-// One compact, scan-friendly card per frontier provider. Shows remaining % +
-// the binding window's reset; the bar fills with used% and reuses usageBarClass
-// so a low remaining reads amber/red. No dollar amounts, no secrets.
-function usageProviderCard(name, win, statusNote) {
-  if (!win) {
-    return '<div class="usage-card"><div class="uc-top"><span class="uc-name">' + esc(name) + '</span>'
-      + '<span class="uc-pct um">' + esc(statusNote || "—") + '</span></div></div>';
-  }
-  const remaining = Math.min(100, Math.max(0, win.remaining));
-  const used = 100 - remaining;
-  const util = win.utilization != null ? win.utilization : used;
-  const cls = usageBarClass(util, win.resetsAt, win.durationMs || 0);
-  const low = remaining <= 20 ? " low" : "";
-  return '<div class="usage-card' + low + '">'
-    + '<div class="uc-top"><span class="uc-name">' + esc(name) + '</span>'
-    + '<span class="uc-pct">' + remaining.toFixed(0) + '% left</span></div>'
-    + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + used + '%"></div>' + dayTicksHtml(win.durationMs) + '</div></div>'
-    + '<div class="uc-reset um">' + esc(win.label) + ' · resets ' + esc(fmtResets(win.resetsAt)) + '</div>'
-    + '</div>';
-}
+let _headerUsageWin = "5h";
+let _lastClaudeWins = null;
 
-// Fixed day-boundary markers (1/7, 2/7, ... 6/7) for a 7-day window, so a
-// glance at the fill vs. the ticks answers "have I used 3 days' worth of
-// budget when only 1 day/session has actually elapsed?" — independent of how
-// much time has actually passed. Not shown on the 5-hour window.
-const SEVEN_DAY_MS = 604800000;
-function dayTicksHtml(durationMs) {
-  if (Math.abs((durationMs || 0) - SEVEN_DAY_MS) > 1000) return "";
-  let html = "";
-  for (let day = 1; day < 7; day++) {
-    html += '<div class="usage-bar-tick" style="left:' + ((day / 7) * 100) + '%"></div>';
-  }
-  return html;
-}
+function setHeaderUsageWindow(w) { _headerUsageWin = w; renderHeaderUsageWindow(); }
 
-function renderSubBar(label, win, durationMs) {
-  if (!win) return "";
-  const pct = Math.min(100, Math.max(0, win.utilization));
-  const cls = usageBarClass(pct, win.resetsAt, durationMs || 0);
-  return '<div class="urow"><span>' + esc(label) + '</span>'
-    + '<span class="um">' + win.remaining.toFixed(1) + '% left · ' + esc(fmtResets(win.resetsAt)) + '</span></div>'
-    + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + pct + '%"></div>' + dayTicksHtml(durationMs) + '</div></div>';
-}
-
-function renderCodexBar(label, win, durationMs) {
-  if (!win) return "";
-  const pct = Math.min(100, Math.max(0, win.utilization || 0));
-  const remaining = Math.max(0, 100 - pct);
-  const cls = usageBarClass(pct, win.resetsAt, durationMs || 0);
-  return '<div class="urow"><span>' + esc(label) + '</span>'
-    + '<span class="um">' + remaining.toFixed(1) + '% left · ' + esc(fmtResets(win.resetsAt)) + '</span></div>'
-    + '<div class="usage-bar-wrap"><div class="usage-bar"><div class="usage-bar-fill ' + cls + '" style="width:' + pct + '%"></div>' + dayTicksHtml(durationMs) + '</div></div>';
-}
-
-function usagePlanLabel(status) {
-  if (!status) return "usage";
-  if (status.subscriptionType === "max" && status.rateLimitTier === "default_claude_max_5x") return "Max 5x";
-  if (status.subscriptionType) return String(status.subscriptionType).charAt(0).toUpperCase() + String(status.subscriptionType).slice(1);
-  return "usage";
+// _lastClaudeWins is cached by checkUsage() below so a toggle click repaints
+// instantly instead of waiting on the next poll.
+function renderHeaderUsageWindow() {
+  document.querySelectorAll("#usageWinToggle button").forEach(function (b) { b.classList.toggle("on", b.dataset.w === _headerUsageWin); });
+  const el = document.getElementById("usageWinReadout");
+  if (!el) return;
+  const label = _headerUsageWin === "5h" ? "5-hour" : "7-day";
+  const win = (_lastClaudeWins || []).find(function (w) { return w.label === label; });
+  if (!win) { el.textContent = ""; return; }
+  const remaining = Math.max(0, Math.min(100, win.remaining));
+  const cls = usageBarClass(win.utilization, win.resetsAt, win.durationMs || 0);
+  el.textContent = remaining.toFixed(0) + "% left · resets " + fmtResets(win.resetsAt);
+  el.className = "usage-status-dot " + cls;
 }
 
 async function checkUsage(forceRefresh) {
@@ -5772,110 +5717,9 @@ async function checkUsage(forceRefresh) {
     }
     const allWins = claudeWins.concat(codexWins);
 
-
-    // Status dot: worst-case color across all active windows.
-    const statusDot = document.getElementById("usageStatusDot");
-    if (statusDot) {
-      if (allWins.length) {
-        let worstCls = "ok";
-        for (const w of allWins) {
-          const cls = usageBarClass(w.utilization, w.resetsAt, w.durationMs || 0);
-          if (cls === "hi") { worstCls = "hi"; break; }
-          if (cls === "warn") worstCls = "warn";
-        }
-        statusDot.className = "usage-status-dot " + worstCls;
-        statusDot.style.display = "";
-      } else {
-        statusDot.style.display = "none";
-      }
-    }
-
-    // At-a-glance summary: one compact card per active frontier provider.
-    const summaryEl = document.getElementById("usageSummary");
-    if (summaryEl) {
-      let cards = "";
-      if (claudeWins.length) {
-        cards += usageProviderCard("Claude", lowestWindow(claudeWins));
-      } else if (subStatus && subStatus.state !== "missing_credentials") {
-        cards += usageProviderCard("Claude", null, usagePlanLabel(subStatus));
-      }
-      if (codexSubscription) {
-        if (codexWins.length) {
-          cards += usageProviderCard("Codex", lowestWindow(codexWins));
-        } else {
-          cards += usageProviderCard("Codex", null, codexSubscription.error ? "unavailable" : (codexSubscription.planType || "subscription"));
-        }
-      }
-      summaryEl.innerHTML = cards
-        ? '<div class="usage-cards">' + cards + '</div>'
-        : noFrontierEnabled
-          ? '<div class="muted">No frontier provider enabled — enable Claude or Codex in Settings → Models to run tasks.</div>'
-          : '<div class="muted">No frontier usage yet.</div>';
-    }
-
-    const el = document.getElementById("usage");
-    if (!el) return;
-
-    if (noFrontierEnabled) {
-      el.innerHTML = '<div class="usage-breakdown"><div class="muted">No frontier provider enabled — enable Claude or Codex in Settings → Models to run tasks.</div></div>';
-      return;
-    }
-
-    let html = '<div class="usage-breakdown">';
-
-    // Subscription remaining rows (Code + Claude share same subscription).
-    if (sub && (sub.fiveHour || sub.sevenDay || sub.sevenDayOpus || sub.sevenDaySonnet)) {
-      html += '<div class="urow"><span><b>Claude subscription</b></span><span class="um">remaining allotment</span></div>';
-      html += renderSubBar("5-hour rolling", sub.fiveHour, 18000000);
-      html += renderSubBar("7-day overall", sub.sevenDay, 604800000);
-      html += renderSubBar("7-day Opus", sub.sevenDayOpus, 604800000);
-      html += renderSubBar("7-day Sonnet", sub.sevenDaySonnet, 604800000);
-    } else if (subStatus && subStatus.state !== "missing_credentials") {
-      html += '<div class="urow"><span><b>Claude subscription</b></span><span class="um">' + esc(usagePlanLabel(subStatus)) + '</span></div>'
-        + '<div class="muted" style="font-size:11px">' + esc(subStatus.message || "Usage left unavailable.") + '</div>'
-        + (String(subStatus.message || "").includes("claude auth login")
-          ? '<button id="claudeAuthLogin" class="usage-action" onclick="runClaudeAuthLogin()">Run Claude login</button>'
-          : '');
-    }
-
-    if (codexSubscription) {
-      if ((sub && (sub.fiveHour || sub.sevenDay || sub.sevenDayOpus || sub.sevenDaySonnet)) || (subStatus && subStatus.state !== "missing_credentials")) {
-        html += '<div class="usep"></div>';
-      }
-      const codexPlan = codexSubscription.planType ? String(codexSubscription.planType) : "subscription";
-      html += '<div class="urow"><span><b>Codex subscription</b></span><span class="um">' + esc(codexPlan) + '</span></div>';
-      if (codexSubscription.fiveHour || codexSubscription.sevenDay) {
-        html += renderCodexBar("5-hour rolling", codexSubscription.fiveHour, 18000000);
-        html += renderCodexBar("7-day overall", codexSubscription.sevenDay, 604800000);
-      } else {
-        html += '<div class="muted" style="font-size:11px">' + esc(codexSubscription.error || "Usage unavailable.") + '</div>';
-      }
-    }
-
-    // HiveMatrix task usage (counts + tokens; no dollar amounts).
-    if (u.byModel && u.byModel.length) {
-      if ((sub && (sub.fiveHour || sub.sevenDay)) || (subStatus && subStatus.state !== "missing_credentials") || codexSubscription) html += '<div class="usep"></div>';
-      html += '<div class="urow"><span><b>' + u.taskCount + '</b> task' + (u.taskCount===1?'':'s') + '</span>'
-        + '<span class="um">' + fmtTokens(u.inputTokens) + ' in / ' + fmtTokens(u.outputTokens) + ' out</span></div>'
-        + u.byModel.map(m => '<div class="urow"><span>' + esc(m.label) + '</span>'
-          + '<span class="um">' + m.tasks + ' task' + (m.tasks===1?'':'s') + '</span></div>').join("");
-    } else if (!sub || (!sub.fiveHour && !sub.sevenDay)) {
-      html += '<div class="muted">No frontier usage yet.</div>';
-    }
-
-    html += '</div>';
-    el.innerHTML = html;
+    _lastClaudeWins = claudeWins;
+    renderHeaderUsageWindow();
   } catch (e) { /* transient */ }
-}
-
-async function refreshUsageNow() {
-  const btn = document.getElementById("usageRefresh");
-  if (btn) { btn.disabled = true; btn.textContent = "…"; }
-  try {
-    await checkUsage(true);                       // bypass cached auth/usage state
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "↻"; }
-  }
 }
 
 async function runClaudeAuthLogin() {
@@ -6539,18 +6383,6 @@ async function loadProjects(fresh) {
     const data = await api("/projects" + (fresh ? "?fresh=1" : ""));
     if (!data || !Array.isArray(data.projects)) return;
     state.projects = data.projects;
-    // Populate header project selector
-    const sel = document.getElementById("projectSel");
-    const prev = sel.value;
-    sel.innerHTML = '<option value="">(all projects)</option>'
-      + data.projects.map(p => '<option value="'+esc(p.name)+'" data-path="'+esc(p.path)+'">'+esc(p.name)+(p.preSelect?' ★':'')+'</option>').join("");
-    // Restore only an explicit user choice — never auto-select on startup.
-    // The ★ project still pre-fills New Task path but never filters the board.
-    const saved = localStorage.getItem("hm_project");
-    if (saved && sel.querySelector('option[value="'+CSS.escape(saved)+'"]')) {
-      sel.value = saved;
-      state.selectedProject = saved;
-    }
     // Always include the built-in Inbox project (for general non-project work) unless it's a real discovered project.
     const inboxEntry = { name: "inbox", path: "~", preSelect: false, lastModified: "" };
     const discoveredItems = data.projects.map(p => ({
@@ -6590,24 +6422,6 @@ async function loadProjects(fresh) {
     renderSelectedProject();
     mpSyncAll();
   } catch (e) { /* transient */ }
-}
-
-document.getElementById("projectSel").addEventListener("change", async (e) => {
-  state.selectedProject = e.target.value;
-  localStorage.setItem("hm_project", e.target.value);
-  renderBoard();
-  // Changing the board filter to a real project also points New Task at it —
-  // name+path together via the single writer, so they can't desync. "(all
-  // projects)" leaves the New Task selection untouched.
-  const opt = e.target.options[e.target.selectedIndex];
-  if (e.target.value && opt && opt.dataset.path) {
-    setTaskProject(e.target.value, opt.dataset.path, false);
-    syncCommandProject(e.target.value, opt.dataset.path);
-  }
-});
-
-function onProjectSelect() {
-  // Legacy hook — no-op now that we use the search dropdown
 }
 
 let _attachments = [];
@@ -7014,8 +6828,8 @@ function flashPanelHtml() {
     + '<div class="oc-panel-body">'
     + '<div class="oc-transcript" id="flashTranscript"></div>'
     + '<div id="flashImgPreview" class="oc-img-preview"></div>'
-    + '<div class="oc-panel-composer-shell" onclick="flashFocusInput()">'
-    + '<textarea class="oc-input" id="flashInput" placeholder="Message…" rows="3" onkeydown="flashInputKeydown(event)" oninput="flashInputResize(this)"></textarea>'
+    + '<div class="oc-panel-composer-shell" onclick="flashFocusInput()" ondragover="event.preventDefault();this.classList.add(\'oc-drag\')" ondragleave="this.classList.remove(\'oc-drag\')" ondrop="flashDrop(event)">'
+    + '<textarea class="oc-input" id="flashInput" placeholder="Message…  (paste or drop an image to attach)" rows="3" onkeydown="flashInputKeydown(event)" oninput="flashInputResize(this)" onpaste="flashPaste(event)"></textarea>'
     + '<div class="oc-panel-composer-actions">'
     + '<input type="file" id="flashPhotoInput" accept="image/*" multiple style="display:none" onchange="flashPhotoSelected(this)">'
     + '<button class="oc-mic-btn" id="flashPhotoBtn" onclick="event.stopPropagation();document.getElementById(\'flashPhotoInput\').click()" title="Attach a photo — the assistant can see it">📎 Photo</button>'
@@ -8165,21 +7979,42 @@ function flashRenderMessages() {
 
 // Attach photos to the next chat turn — the assistant can SEE them (sent as
 // imagesBase64 data URLs; the daemon decodes + lets the model Read them).
+// Read ONE image File into a pending attachment. Shared by all three ways to
+// attach: the 📎 file picker, paste (Cmd+V a screenshot), and drag-and-drop.
+function flashAddImageFile(f) {
+  if (!f || !/^image\//.test(f.type)) return false;
+  if (_flashState.pendingImages.length >= 6) return false;
+  const fr = new FileReader();
+  fr.onload = function () {
+    _flashState.pendingImages.push({ dataUrl: String(fr.result), name: f.name || 'pasted-image' });
+    renderFlashImgPreview();
+    const sendBtn = document.getElementById('flashSendBtn');
+    if (sendBtn) sendBtn.disabled = false;
+  };
+  fr.readAsDataURL(f);
+  return true;
+}
 function flashPhotoSelected(inputEl) {
-  const files = Array.from(inputEl.files || []);
-  let remaining = files.length;
-  files.slice(0, 6).forEach(function (f) {
-    if (!/^image\//.test(f.type)) { remaining--; return; }
-    const fr = new FileReader();
-    fr.onload = function () {
-      _flashState.pendingImages.push({ dataUrl: String(fr.result), name: f.name });
-      renderFlashImgPreview();
-      const sendBtn = document.getElementById('flashSendBtn');
-      if (sendBtn) sendBtn.disabled = false;
-    };
-    fr.readAsDataURL(f);
-  });
+  Array.from(inputEl.files || []).slice(0, 6).forEach(flashAddImageFile);
   inputEl.value = ''; // allow re-selecting the same file
+}
+// Cmd+V an image (e.g. a Claude Code screenshot) straight into the composer.
+// Without this, a pasted image is silently dropped and the turn goes out blind.
+function flashPaste(e) {
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  let added = false;
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].kind === 'file' && /^image\//.test(items[i].type || '')) {
+      if (flashAddImageFile(items[i].getAsFile())) added = true;
+    }
+  }
+  if (added) e.preventDefault(); // don't also paste the blank/filename as text
+}
+// Drag an image file onto the composer.
+function flashDrop(e) {
+  e.preventDefault();
+  if (e.currentTarget && e.currentTarget.classList) e.currentTarget.classList.remove('oc-drag');
+  Array.from((e.dataTransfer && e.dataTransfer.files) || []).slice(0, 6).forEach(flashAddImageFile);
 }
 
 function renderFlashImgPreview() {
@@ -9367,20 +9202,12 @@ function renderSettingsProjects() {
   countEl.textContent = state.projects.length;
   el.innerHTML = state.projects.map(p => {
     const sourceLabels = p.sources.map(s => s === "claude-code" ? "Claude" : s === "vscode" ? "VS Code" : "Git").join(", ");
-    return '<div class="card" style="cursor:default" onclick="selectProjectFromSettings(\''+esc(p.name)+'\')">'
+    return '<div class="card" style="cursor:default">'
       + '<div class="t">'+esc(p.name)+(p.preSelect?' <span class="badge" style="color:var(--ok)">★ active</span>':'')+'</div>'
       + '<div class="m"><span class="badge">'+esc(p.path)+'</span>'
       + (p.hasManifest?'<span class="badge" style="color:var(--accent-2)">manifest</span>':'')
       + '<span class="badge">'+sourceLabels+'</span></div></div>';
   }).join("");
-}
-
-function selectProjectFromSettings(name) {
-  const sel = document.getElementById("projectSel");
-  sel.value = name;
-  state.selectedProject = name;
-  localStorage.setItem("hm_project", name);
-  renderBoard();
 }
 
 function saveDefaultProject() {
