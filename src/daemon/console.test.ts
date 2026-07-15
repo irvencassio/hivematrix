@@ -647,6 +647,63 @@ test("settings expose per-role Claude models for thinking, coding, and operation
   assert.doesNotMatch(js, /mixedAvailable/);
 });
 
+test("renderMessageBeeState renders a skipped chat.db probe as neutral, distinct from a genuine denial", () => {
+  // Regression: a probe result of "skipped" (channel not yet enabled, so no
+  // probe ran) rendered identically to a genuine open_failed denial (red
+  // mark) — both just showed the FDA mark as "no". Skipped must be a
+  // distinct neutral state, mirroring setup-status.ts's buildFullDiskAccess()
+  // treatment of chatDbProbeSkipped.
+  const js = extractScript(CONSOLE_HTML);
+  const src = extractFunctionBlock(js, "renderMessageBeeState");
+  const factory = new Function(
+    "document",
+    "mbStep",
+    "renderBlockedMessageBeeIdentities",
+    "renderMessageBeeSelfHandles",
+    `${src}\nreturn renderMessageBeeState;`,
+  ) as (
+    doc: unknown,
+    mbStep: () => null,
+    renderBlockedMessageBeeIdentities: (ids: unknown) => void,
+    renderMessageBeeSelfHandles: (handles: unknown) => void,
+  ) => (data: unknown) => void;
+
+  const run = (data: unknown) => {
+    const els: Record<string, { textContent: unknown; className: unknown }> = {};
+    const doc = { getElementById: (id: string) => (els[id] ||= { textContent: "", className: "" }) };
+    factory(doc, () => null, () => {}, () => {})(data);
+    return els;
+  };
+
+  const skipped = run({
+    chatDbReadable: false, chatDbProbeSkipped: true, chatDbDetail: "Message Lane disabled",
+    enabled: false, identities: [], selfHandles: [],
+  });
+  assert.equal(skipped["mb_fda_mark"].className, "mb-mark skip");
+
+  const denied = run({
+    chatDbReadable: false, chatDbProbeSkipped: false, chatDbDetail: "Cannot open Messages database...",
+    enabled: false, identities: [], selfHandles: [],
+  });
+  assert.equal(denied["mb_fda_mark"].className, "mb-mark no");
+
+  const granted = run({
+    chatDbReadable: true, chatDbProbeSkipped: false, chatDbDetail: "Messages database readable",
+    enabled: true, identities: [], selfHandles: [],
+  });
+  assert.equal(granted["mb_fda_mark"].className, "mb-mark ok");
+});
+
+test("Message Lane setup offers real FDA remediation: reveal the daemon binary and restart it", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(CONSOLE_HTML, /onclick="revealMessageBeeDaemon\(\)"/);
+  assert.match(CONSOLE_HTML, /onclick="restartMessageBeeDaemon\(\)"/);
+  assert.match(js, /async function revealMessageBeeDaemon\(\)/);
+  assert.match(js, /api\('\/messagebee\/reveal-daemon'/);
+  assert.match(js, /async function restartMessageBeeDaemon\(\)/);
+  assert.match(js, /api\('\/messagebee\/restart-daemon'/);
+});
+
 test("MessageBee modal fetches structured status before reporting readability", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /const r = await api\('\/messagebee'\)/);
@@ -1302,6 +1359,22 @@ test("board task cards have stable width and height constraints across screen si
   // Responsive breakpoints narrow the board column at medium and small viewports.
   assert.match(CONSOLE_HTML, /@media \(min-width: 761px\) and \(max-width: 1080px\)/, "medium viewport narrows board rail");
   assert.match(CONSOLE_HTML, /@media \(max-width: 760px\)[\s\S]*grid-template-columns:\s*1fr/, "narrow viewport stacks to single column");
+});
+
+test("board status colors: review-state drives a persistent card tone, selection is a separate ring", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // needs_input → amber "attention"; ready_for_review / needs_parent_decision → green "review".
+  assert.match(js, /needs_input[\s\S]*tone:\s*"attention"/, "needs_input maps to attention tone");
+  assert.match(js, /ready_for_review[\s\S]*tone:\s*"review"/, "ready_for_review maps to review tone");
+  assert.match(js, /needs_parent_decision[\s\S]*tone:\s*"review"/, "needs_parent_decision groups with review");
+  // Card gets tone-<tone> class from reviewStateMeta, on EVERY such card (not just selected).
+  assert.match(js, /reviewStateMeta\(t\.reviewState\)/, "card build calls reviewStateMeta");
+  assert.match(js, /' tone-'\+rsm\.tone/, "card class includes tone-<tone> when a review state is present");
+  // Tone tokens exist and selection is a ring, not a border-color (avoids the theme collision).
+  assert.match(CONSOLE_HTML, /\.card\.tone-attention\s*\{[^}]*border-color:\s*var\(--warn\)/, "attention tone borders with --warn");
+  assert.match(CONSOLE_HTML, /\.card\.tone-review\s*\{[^}]*border-color:\s*var\(--ok\)/, "review tone borders with --ok");
+  assert.match(CONSOLE_HTML, /\.card\.sel\s*\{[^}]*box-shadow:\s*0 0 0 2px var\(--accent\)/, "selection is an additive ring, not border-color");
+  assert.doesNotMatch(CONSOLE_HTML, /\.card\.sel\s*\{[^}]*border-color/, "selection no longer overrides border-color (would collide with status)");
 });
 
 test("settings lanes sections have distinct, non-duplicate labels", () => {

@@ -311,8 +311,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .attach-drop.drag-over { border: 1px dashed var(--accent) !important; background: color-mix(in srgb, var(--accent) 8%, var(--panel-2)); border-radius: 6px; }
   .ov-lbl { font-size: 11px; color: var(--muted); margin-top: 4px; }
   .ov-hint { color: var(--muted); font-size: 12px; text-align: center; margin-top: 20px; }
-  .badge.ok { color: var(--ok); }
-  .badge.warn { color: var(--warn); }
+  .badge.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, var(--badge-bg)); }
+  .badge.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, var(--badge-bg)); }
   .badge.err { color: var(--err); }
   .stuck-banner { background: color-mix(in srgb, var(--warn) 10%, var(--panel-2)); border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border)); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
   .stuck-banner-head { font-weight: 600; color: var(--warn); font-size: 12px; margin-bottom: 4px; }
@@ -476,7 +476,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   /* Message Lane guided setup */
   .mb-step { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
   .mb-step .mb-mark { font-size: 13px; line-height: 1.4; }
-  .mb-step .mb-mark.ok { color: var(--ok); } .mb-step .mb-mark.no { color: var(--err); }
+  .mb-step .mb-mark.ok { color: var(--ok); } .mb-step .mb-mark.no { color: var(--err); } .mb-step .mb-mark.skip { color: var(--muted); }
   .mb-step .mb-body { flex: 1; }
   .mb-step .mb-body .t { font-weight: 600; margin-bottom: 2px; }
   .mb-step button { margin-top: 5px; font-size: 11px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
@@ -574,7 +574,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     padding: 8px 10px; margin-bottom: 6px; cursor: pointer; transition: border-color .1s; position: relative;
     box-shadow: var(--card-shadow); width: 100%; box-sizing: border-box; min-height: 52px; }
   .card:hover { border-color: var(--accent-2); }
-  .card.sel { border-color: var(--accent); }
+  /* Board status colors: needs_input → amber (operator action), ready_for_review
+     → green (waiting on team). Status owns border+tint; selection is an additive
+     ring (box-shadow) so the two signals never collide on themes where --accent
+     equals --warn/--ok. See docs/superpowers/specs/2026-07-15-board-status-colors-design.md */
+  .card.tone-attention { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--panel-2)); }
+  .card.tone-review    { border-color: var(--ok);   background: color-mix(in srgb, var(--ok) 8%, var(--panel-2)); }
+  .card.sel { box-shadow: 0 0 0 2px var(--accent); }
   .card.in-progress { animation: taskCardPulse 2.6s ease-in-out infinite; box-shadow: 0 0 0 0 rgba(249, 193, 75, 0.24); }
   .card.in-progress:hover { animation-duration: 1.6s; }
   .card .t { font-weight: 600; margin-bottom: 2px; padding-right: 58px; }
@@ -1553,6 +1559,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <div class="t">Full Disk Access</div>
         <div class="muted" id="mb_fda_detail">HiveMatrix needs Full Disk Access to read Messages (chat.db).</div>
         <button onclick="openFullDiskAccess()">Open Full Disk Access settings</button>
+        <button onclick="revealMessageBeeDaemon()">Reveal daemon in Finder</button>
+        <button onclick="restartMessageBeeDaemon()">Restart daemon</button>
+        <div class="muted" style="font-size:11px;margin-top:3px">The daemon that reads Messages runs as its own process — HiveMatrix's own Full Disk Access entry above doesn't cover it. Reveal it, add it to Full Disk Access, then restart the daemon to pick up the change.</div>
       </div>
     </div>
     <div class="mb-step">
@@ -2244,6 +2253,15 @@ function ageBadge(t) {
   var label = timeAgo(raw, Date.now());
   return label ? '<span class="badge age" title="'+esc(raw)+'">'+esc(label)+'</span>' : "";
 }
+// Board review-state → {label, tone}. Mirrors getReviewStateMeta (review-state.ts);
+// duplicated here because the console script has no module loader to import it.
+// tone "attention" (amber) = operator must act; "review" (green) = waiting on team.
+function reviewStateMeta(rs) {
+  if (rs === "needs_input") return { label: "Needs Input", tone: "attention" };
+  if (rs === "ready_for_review") return { label: "Ready for Review", tone: "review" };
+  if (rs === "needs_parent_decision") return { label: "Needs parent decision", tone: "review" };
+  return null;
+}
 
 // Collapsed board lanes persist in localStorage and survive the periodic board
 // re-render (renderBoard rebuilds innerHTML, so collapse state can't live in the
@@ -2292,14 +2310,14 @@ function renderBoard() {
       + '<span class="status-card-count">'+items.length+'</span>'
       + '</div>'
       + (isCollapsed ? '' : '<div class="status-card-body">'
-          + items.map(t => { return '<div class="card'+(state.selected===t._id?' sel':'')+(L.key === "in_progress" ? " in-progress" : "")+'" onclick="selectTask(\''+t._id+'\')">'
+          + items.map(t => { const rsm = reviewStateMeta(t.reviewState); return '<div class="card'+(state.selected===t._id?' sel':'')+(rsm?' tone-'+rsm.tone:'')+(L.key === "in_progress" ? " in-progress" : "")+'" onclick="selectTask(\''+t._id+'\')">'
               + '<button class="card-archive" title="Archive task" onclick="event.stopPropagation();cardArchive(\''+t._id+'\')">Archive</button>'
               + '<div class="mdl-card-head" style="padding-right:58px;align-items:flex-start">'
               + '<span class="mdl-card-name" style="min-width:0" title="'+esc(t.title||t._id)+'">'+esc(t.title||t._id)+'</span>'
               + '<div style="flex:0 0 auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
               + cardRoleBadge(t)
               + taskModelBadge(t.model)
-              + (t.reviewState?'<span class="badge">'+esc(t.reviewState)+'</span>':'')
+              + (rsm?'<span class="badge '+(rsm.tone==="attention"?"warn":"ok")+'">'+esc(rsm.label)+'</span>':'')
               + ageBadge(t)+'</div>'
               + '</div>'
               + '</div>'; }).join("")
@@ -5155,6 +5173,35 @@ async function openSystemPane(pane) {
   } catch (e) { await hmAlert('Could not open System Settings: ' + e, 'Open System Settings'); return false; }
 }
 async function openFullDiskAccess() { await openSystemPane('fullDiskAccess'); }
+// The daemon that reads chat.db is a separate, separately-signed launchd
+// process from the HiveMatrix app — toggling HiveMatrix's own Full Disk
+// Access entry does not cover it. These two actions close that gap: reveal
+// the daemon's real binary so it can be dragged into the FDA "+" picker, and
+// restart the daemon so a freshly granted entry takes effect.
+async function revealMessageBeeDaemon() {
+  try {
+    const r = await api('/messagebee/reveal-daemon', { method: 'POST' });
+    if (!r || r.ok === false) {
+      await hmAlert('Could not reveal the daemon binary: ' + ((r && r.error) || 'unknown error'), 'Reveal Daemon Binary');
+      return;
+    }
+    await hmAlert('Finder opened to the daemon binary (' + r.path + '). Drag it into System Settings → Privacy & Security → Full Disk Access, then click "Restart daemon".', 'Reveal Daemon Binary');
+  } catch (e) { await hmAlert('Could not reveal the daemon binary: ' + e, 'Reveal Daemon Binary'); }
+}
+async function restartMessageBeeDaemon() {
+  const status = document.getElementById('mb_status');
+  if (status) status.textContent = 'Restarting daemon…';
+  try {
+    const r = await api('/messagebee/restart-daemon', { method: 'POST' });
+    if (!r || r.ok === false) {
+      if (status) status.textContent = '';
+      await hmAlert('Could not restart the daemon: ' + ((r && r.error) || 'unknown error'), 'Restart Daemon');
+      return;
+    }
+    if (status) status.textContent = 'Daemon restarting — re-checking access…';
+    setTimeout(refresh, 3000);
+  } catch (e) { if (status) status.textContent = ''; await hmAlert('Could not restart the daemon: ' + e, 'Restart Daemon'); }
+}
 function parseMessageBeeSelfHandles() {
   const input = document.getElementById('mb_self_input');
   const raw = input ? input.value.trim() : '';
@@ -5277,11 +5324,16 @@ async function renderBlockedMessageBeeIdentities(ids) {
 function renderMessageBeeState(data) {
   const fallbackDetail = ((mbStep() || {}).detail || '');
   const fdaReadable = data ? !!data.chatDbReadable : /\b(chat\.db readable|enabled; reading|Messages database readable)\b/i.test(fallbackDetail);
+  // "Skipped" (no probe ran, e.g. channel not yet enabled) is neither granted
+  // nor denied — it must not render as a red mark like a genuine open_failed
+  // denial. Mirrors setup-status.ts's buildFullDiskAccess() chatDbProbeSkipped handling.
+  const fdaSkipped = data ? !!data.chatDbProbeSkipped : false;
   const enabled = data ? !!data.enabled : ((mbStep() || {}).state === 'done');
   const ids = data ? (data.identities || []) : null;
   const detail = data ? (data.chatDbDetail || '') : fallbackDetail;
   const mark = (el, ok) => { el.textContent = ok ? '✓' : '○'; el.className = 'mb-mark ' + (ok ? 'ok' : 'no'); };
-  mark(document.getElementById('mb_fda_mark'), fdaReadable);
+  const markFda = (el, ok, skipped) => { el.textContent = ok ? '✓' : '○'; el.className = 'mb-mark ' + (ok ? 'ok' : (skipped ? 'skip' : 'no')); };
+  markFda(document.getElementById('mb_fda_mark'), fdaReadable, fdaSkipped);
   mark(document.getElementById('mb_chan_mark'), enabled);
   document.getElementById('mb_fda_detail').textContent = fdaReadable
     ? 'Granted — HiveMatrix can read Messages.'
