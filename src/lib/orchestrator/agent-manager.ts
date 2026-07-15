@@ -8,6 +8,7 @@ import {
   type AgentProcess,
 } from "./subprocess";
 import { registerPid, unregisterPid } from "./pid-registry";
+import { taskWorktreesEnabled, createTaskWorktree, removeTaskWorktree } from "./worktree";
 import { captureRunTelemetry } from "@/lib/observability/capture";
 import type { StreamEvent } from "./stream-parser";
 import { TurnBuilder } from "./turn-builder";
@@ -289,6 +290,30 @@ class AgentManager {
       startedAt: new Date().toISOString(),
     });
 
+    // Task-worktree isolation (flag-gated, default OFF via taskWorktreesEnabled()).
+    // When on, this task's run happens inside its own `.hive-worktrees/<taskId>`
+    // git worktree + `hive/task-<taskId>` branch instead of the shared repo
+    // working tree — so it doesn't commit directly to the checked-out branch
+    // (usually main) or trample file state other tasks are touching. When off
+    // (the default), taskWorktreeDir stays null, createTaskWorktree is never
+    // called, and cwdOverride below is undefined — so spawnProcess resolves
+    // cwd to `projectPath` exactly as it did before this feature existed.
+    //
+    // We skip this when `worktreeName` is already set (currently always null,
+    // reserved for a possible future caller) because that field drives the
+    // claude CLI's OWN `-w <worktreeName>` flag (see subprocess.ts) — the CLI
+    // would then try to create/expect its own worktree on top of the one we
+    // already pointed cwd at. Deliberately do NOT set `worktreeName` from our
+    // path for the same reason: it must stay exactly what the DB gave us, so
+    // the existing `-w` forwarding is completely untouched by this feature.
+    let taskWorktreeDir: string | null = null;
+    if (taskWorktreesEnabled() && !worktreeName) {
+      const wt = createTaskWorktree(projectPath, taskId);
+      // wt === null (not a git repo, or worktree creation failed) leaves
+      // taskWorktreeDir null — same effective behavior as the flag being off.
+      if (wt) taskWorktreeDir = wt.dir;
+    }
+
     const agent = await spawnProcess(
       taskId,
       description,
@@ -306,7 +331,9 @@ class AgentManager {
       agentType,
       thinkingMode,
       fastMode,
+      taskWorktreeDir ?? undefined,
     );
+    if (taskWorktreeDir) agent.taskWorktreeDir = taskWorktreeDir;
 
     this.agents.set(agent.pid, agent);
     registerPid(taskId, agent.pid, projectPath);
@@ -892,6 +919,19 @@ class AgentManager {
       }
     } catch (err) {
       console.error("Failed to update task on agent exit:", err);
+    }
+
+    // Task-worktree cleanup — mirrors the isolation setup in spawnAgent.
+    // agent.taskWorktreeDir is set only when we created a worktree for this
+    // run (flag-gated, default OFF), so this is a no-op with the flag off.
+    // Placed after the terminal Task update above and NOT reachable from any
+    // requeue/retry/steer early-return higher up in this function — a
+    // transient-retry requeue leaves the worktree in place so its next spawn
+    // can reuse it. Best-effort: never throws, never affects task status
+    // (already finalized above). The branch (`hive/task-<id>`) is
+    // intentionally left behind — only the checkout directory is removed.
+    if (agent.taskWorktreeDir) {
+      removeTaskWorktree(agent.projectPath, agent.taskWorktreeDir);
     }
 
     // Voice Loop-Closer — the ONE hook for "a task just reached a terminal

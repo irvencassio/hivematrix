@@ -222,6 +222,14 @@ export interface AgentProcess {
   taskId: string;
   projectPath: string;
   worktreeName?: string | null;
+  /**
+   * Set only when task-worktree isolation (agent-manager.ts, flag-gated,
+   * default OFF) created a `.hive-worktrees/<taskId>` worktree for this run
+   * and pointed cwd at it — lets handleExit clean it up on exit. Distinct
+   * from `worktreeName`: that field drives the claude CLI's own `-w` flag
+   * (see the `-w` push below) and is untouched by this feature.
+   */
+  taskWorktreeDir?: string | null;
   startedAt: Date;
   /** When the first token/text arrived — for time-to-first-token (TTFT). */
   firstTokenAt?: Date;
@@ -385,6 +393,20 @@ export async function spawnAgent(
   agentType?: string,
   thinkingMode?: string,
   fastMode?: boolean,
+  /**
+   * Task-worktree isolation (agent-manager.ts, flag-gated, default OFF):
+   * when set, the spawned process's cwd is this directory instead of
+   * `projectPath`. Everything else (CLAUDE.md/MEMORY.md overhead reads,
+   * agent-guide loading, the `-w` flag below, DB bookkeeping keyed by
+   * `projectPath`) is untouched and keeps reading from the original
+   * `projectPath` — only the child process's actual working directory
+   * changes. Undefined by default, so omitting it (every caller today
+   * except the worktree-isolation path) reproduces today's behavior
+   * exactly: `cwd: projectPath`. Only wired into the primary `claude -p`
+   * CLI path below — the codex/generic/image-agent branches above are
+   * unaffected.
+   */
+  cwdOverride?: string,
 ): Promise<AgentProcess> {
   // Defense in depth: an empty/blank projectPath (a project-less "operations"
   // task, or any legacy caller that forgot to set one) must never reach
@@ -722,8 +744,11 @@ export async function spawnAgent(
   // source is covered, not just one file.
   const spawnArgs = [...extraArgs, ...args].map(stripNullBytes);
   const launchCommand = [claudeBinary, ...spawnArgs].join(" ");
+  // cwdOverride is only set by the task-worktree-isolation path (flag-gated,
+  // default OFF) — see the parameter doc above. Every other caller leaves it
+  // undefined, so `cwd` resolves to `projectPath` exactly as before.
   const proc = spawn(claudeBinary, spawnArgs, {
-    cwd: projectPath,
+    cwd: cwdOverride || projectPath,
     env: env as NodeJS.ProcessEnv,
     stdio: ["ignore", "pipe", "pipe"] as const,
   });

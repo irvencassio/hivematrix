@@ -17,6 +17,7 @@ export const KNOWN_FEATURES = [
   { key: "promptWizardAlways", label: "Always enhance new tasks", description: "Run the New Task prompt wizard automatically before every Create — you still review and accept the rewrite. Off by default; you can still enhance manually with the ✨ button." },
   { key: "agentSpecialization", label: "Specialist agents", description: "Route each task to a specialist role (developer, QA, designer, COO…) instead of always using the developer role. Off = every task runs as developer." },
   { key: "selfImprovement", label: "Self-improvement loop", description: "Let HiveMatrix autonomously plan and run maintenance/self-improvement tasks from your feedback backlog on a daily schedule. Off by default — turn on only when you want it working on its own." },
+  { key: "taskWorktrees", label: "Per-task git worktrees", description: "Run each task in its own git worktree + branch instead of the shared repo working tree, so it doesn't commit directly to the checked-out branch. Off by default." },
 ] as const;
 
 export type FeatureKey = (typeof KNOWN_FEATURES)[number]["key"];
