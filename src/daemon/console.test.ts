@@ -387,7 +387,7 @@ test("onboarding wizard polls setup status instead of legacy onboarding details"
   const pollPerms = extractBetween(js, "async function _obPollPerms()", "// ── Step 1: model backends");
   const renderPerms = extractBetween(js, "function _obRenderSetupPerms(setup)", "async function obProbeFullDiskAccess()");
 
-  assert.match(pollPerms, /api\('\/onboarding\/setup'\)/, "permission polling uses the setup status endpoint");
+  assert.match(pollPerms, /\/onboarding\/setup\/full-disk-access\/probe/, "permission polling forces the FDA probe (silent gate) so already-granted access isn't shown as unchecked");
   assert.doesNotMatch(pollPerms, /api\('\/onboarding'\)/, "permission polling no longer derives state from legacy onboarding steps");
   assert.match(renderPerms, /fullDiskAccess/, "full disk access is read from setup permission items");
   assert.match(renderPerms, /desktopControl/, "desktop control is read from setup permission items");
@@ -706,7 +706,10 @@ test("Message Lane setup offers real FDA remediation: reveal the daemon binary a
 
 test("MessageBee modal fetches structured status before reporting readability", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /const r = await api\('\/messagebee'\)/);
+  // Uses the probe endpoint (forces a chat.db read) rather than the passive GET
+  // that skips the probe while the channel is disabled — otherwise an
+  // already-granted FDA shows as "not readable" on the setup screen.
+  assert.match(js, /const r = await api\('\/messagebee\/probe', \{ method: 'POST' \}\)/);
   assert.doesNotMatch(js, /!\s*\/Full Disk Access\/i\.test/);
 });
 
@@ -1359,6 +1362,15 @@ test("board task cards have stable width and height constraints across screen si
   // Responsive breakpoints narrow the board column at medium and small viewports.
   assert.match(CONSOLE_HTML, /@media \(min-width: 761px\) and \(max-width: 1080px\)/, "medium viewport narrows board rail");
   assert.match(CONSOLE_HTML, /@media \(max-width: 760px\)[\s\S]*grid-template-columns:\s*1fr/, "narrow viewport stacks to single column");
+});
+
+test("setup permissions step actively probes Full Disk Access (silent gate) so an already-granted daemon isn't shown as 'not checked'", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // The permissions-step poll must force the chat.db probe, not the passive GET
+  // that skips it while Message Lane is disabled.
+  const poll = js.slice(js.indexOf("async function _obPollPerms"), js.indexOf("async function _obPollPerms") + 900);
+  assert.match(poll, /\/onboarding\/setup\/full-disk-access\/probe/, "_obPollPerms forces the FDA probe");
+  assert.doesNotMatch(poll, /api\('\/onboarding\/setup'\)/, "_obPollPerms no longer uses the passive setup GET that hides granted FDA");
 });
 
 test("board status colors: review-state drives a persistent card tone, selection is a separate ring", () => {

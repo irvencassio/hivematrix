@@ -1289,6 +1289,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div id="s_features"></div>
     </div>
     <div id="settingsAbout">
+      <div id="home_readiness_banner" style="display:none;margin-bottom:14px"></div>
       <h2 style="margin-top:4px">HiveMatrix</h2>
       <div class="muted" style="font-size:12px;margin-bottom:12px">The autonomous business operator.</div>
       <div class="kv">
@@ -4869,7 +4870,13 @@ function _obSetPermMark(id, ok) {
 
 async function _obPollPerms() {
   try {
-    const setup = await api('/onboarding/setup');
+    // Probe chat.db (Full Disk Access) actively while the user is on the
+    // permissions step. FDA is a SILENT gate — a read-only chat.db open never
+    // triggers a TCC prompt (unlike Mail's AppleEvents) — so the passive GET's
+    // "no chat.db probe while Message Lane is disabled" rule left users who had
+    // ALREADY granted access stuck on a perpetual "not checked". This endpoint
+    // forces only the chat.db probe; Mail stays passive (no Mail.app launch).
+    const setup = await api('/onboarding/setup/full-disk-access/probe', { method: 'POST' });
     _obRenderSetupPerms(setup);
   } catch(e) { /* polling — ignore transient errors */ }
 }
@@ -5114,7 +5121,7 @@ async function openMessageBeeSetup() {
   document.getElementById('mbOverlay').classList.add('open');
   setTimeout(() => document.getElementById('mb_phone').focus(), 30);
   try {
-    const r = await api('/messagebee');
+    const r = await api('/messagebee/probe', { method: 'POST' });
     if (r) renderMessageBeeState(r);
   } catch (e) { /* modal can still show onboarding-derived fallback */ }
 }
@@ -5152,7 +5159,7 @@ async function blockIgnored(address) {
       body: JSON.stringify({ address, status: 'blocked' }),
     });
     await renderIgnoredSenders();
-    const r = await api('/messagebee');
+    const r = await api('/messagebee/probe', { method: 'POST' });
     if (r) renderMessageBeeState(r);
     document.getElementById('mb_status').textContent = 'Disallowed ' + address + ' — future texts from it will stay hidden.';
     await refresh();
@@ -5247,7 +5254,7 @@ async function removeMessageBeeIdentity(address) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ address, status: 'pending' }),
     });
-    const r = await api('/messagebee');
+    const r = await api('/messagebee/probe', { method: 'POST' });
     if (r) renderMessageBeeState(r);
     if (status) status.textContent = 'Removed ' + address + ' from allowed senders.';
     await refresh();
@@ -5264,7 +5271,7 @@ async function allowBlockedMessageBeeIdentity(address) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ address, status: 'allowed' }),
     });
-    const r = await api('/messagebee');
+    const r = await api('/messagebee/probe', { method: 'POST' });
     if (r) renderMessageBeeState(r);
     await renderIgnoredSenders();
     if (status) status.textContent = 'Allowed ' + address + '.';
@@ -5282,7 +5289,7 @@ async function unblockMessageBeeIdentity(address) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ address, status: 'pending' }),
     });
-    const r = await api('/messagebee');
+    const r = await api('/messagebee/probe', { method: 'POST' });
     if (r) renderMessageBeeState(r);
     if (status) status.textContent = 'Unblocked ' + address + '. It can prompt again if it texts HiveMatrix.';
     await refresh();
@@ -8334,6 +8341,41 @@ function renderAbout() {
   set("ab_version", "v" + (v.version || "?"));
   set("ab_build", String(v.build || "?"));
   set("ab_date", v.date || "?");
+  renderHomeReadinessBanner();
+}
+
+async function renderHomeReadinessBanner() {
+  const banner = document.getElementById("home_readiness_banner");
+  if (!banner) return;
+  const r = await api("/system/readiness");
+  const report = (r && r.report) || r;
+  if (!report || !report.checks || report.ok) {
+    banner.style.display = "none";
+    return;
+  }
+  const critical = report.checks.filter((c) => c.severity === "critical");
+  const warns = report.checks.filter((c) => c.severity === "warn");
+  const issues = critical.length > 0 ? critical : warns;
+  if (!issues.length) {
+    banner.style.display = "none";
+    return;
+  }
+  const borderColor = critical.length > 0 ? "var(--err)" : "var(--warn)";
+  const bgColor = critical.length > 0 ? "rgba(229, 83, 75, .1)" : "rgba(249, 174, 66, .1)";
+  const titleColor = critical.length > 0 ? "var(--err)" : "var(--warn)";
+  const icon = critical.length > 0 ? "⚠" : "⚡";
+  const topIssue = issues[0];
+  const issueLabel = topIssue.label || topIssue.id;
+  const summary = issues.length === 1 ? issueLabel : issueLabel + " + " + (issues.length - 1) + " more";
+  banner.innerHTML = '<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:6px;background:' + bgColor + ';border:1px solid ' + borderColor + '">'
+    + '<span style="font-size:16px;flex-shrink:0">' + icon + '</span>'
+    + '<div style="flex:1;min-width:0">'
+    + '<div style="color:' + titleColor + ';font-weight:600;font-size:12px">' + esc(summary) + '</div>'
+    + '<div style="color:var(--text);font-size:11px;margin-top:2px">' + esc((topIssue.summary || "")) + '</div>'
+    + '</div>'
+    + '<button class="copybtn" onclick="switchSettingsTab(\'lanes\')" title="Open Lanes settings to review and repair">View</button>'
+    + '</div>';
+  banner.style.display = "block";
 }
 
 async function renderLicense() {
