@@ -44,15 +44,20 @@ function taskHandle(task: TaskDoc | null): string | null {
 
 /** Send, but never to one of the agent's own handles. Texting self on a shared
  *  Apple ID echoes back as inbound and loops; refuse and log instead. Returns
- *  false without sending when the target is a self-handle. */
-async function sendGuarded(handle: string, text: string, attachments: string[] = []): Promise<boolean> {
+ *  false without sending when the target is a self-handle.
+ *
+ *  When taskId is provided, enforces per-task send cap to prevent duplicate
+ *  notifications if the task retry/reprocessing occurs.
+ */
+async function sendGuarded(handle: string, text: string, attachments: string[] = [], taskId?: string): Promise<boolean> {
   if (isSelf(handle)) {
     recordError(`refused to text self-handle ${handle} (would loop); set a distinct agent identity for two-way texting`);
     return false;
   }
   // Pin the sending account to the agent's own identity so a multi-account box
   // (dedicated agent Apple ID + personal) sends as the right one, not "1st account".
-  return sendIMessage(handle, text, attachments, getSelfHandles()[0] ?? "");
+  // Pass taskId as runId to enforce per-task send cap.
+  return sendIMessage(handle, text, attachments, getSelfHandles()[0] ?? "", 30_000, taskId);
 }
 
 /** Pending needs_input requests for Message Lane tasks owned by a given sender. */
@@ -106,6 +111,9 @@ async function handleInbound(msg: { rowid: number; handle: string; text: string;
   try {
     const reply = await flashDispatch(text, route.peer, route.imagePaths.length ? route.imagePaths : undefined);
     if (reply.trim()) {
+      // A conversational reply is a live turn, not a directive run — there's no
+      // runId to cap on, and each inbound produces exactly one reply, so the
+      // per-run send cap doesn't apply here.
       const sent = await sendGuarded(route.peer, reply);
       if (sent) recordOutbound();
     }
@@ -144,7 +152,7 @@ async function notifyCompletedResults(): Promise<void> {
       }
     }
 
-    const sent = await sendGuarded(handle, body, attachments);
+    const sent = await sendGuarded(handle, body, attachments, task._id);
     if (sent) { recordOutbound(); markDoneNotified(key); }
   }
 }
@@ -159,7 +167,7 @@ async function notifyPendingInputs(): Promise<void> {
     const handle = taskHandle(task);
     if (!handle) continue;
     const question = stuck.reason?.trim() || "HiveMatrix needs your input on a task. Reply to continue.";
-    const sent = await sendGuarded(handle, question);
+    const sent = await sendGuarded(handle, question, [], stuck.taskId);
     if (sent) { recordOutbound(); markStuckNotified(key); }
   }
 }

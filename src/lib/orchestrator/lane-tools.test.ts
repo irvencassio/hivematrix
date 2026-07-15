@@ -513,3 +513,198 @@ test("skill_run: a failing script gets an honest failure reply and increments fa
   assert.equal(s?.useCount, 0);
   assert.equal(s?.failures, 1);
 });
+
+test("executeMessageBeeSend: concurrent sends against cap of 1 — exactly one delivery", async () => {
+  // Clear the message_send_cap table for this test
+  const db = await import("@/lib/db").then((m) => m.getDb());
+  const sendCap = await import("@/lib/messagebee/send-cap");
+
+  try {
+    db.prepare("DELETE FROM message_send_cap").run();
+  } catch (err) {
+    // Table might not exist; that's ok
+  }
+
+  const runId = "concurrent-send-test-123";
+  const recipient = "+15136595163";
+  let sendCount = 0;
+  let reserveAttempts = 0;
+
+  // Mock MessageBeeSendIO. The real implementation has atomic reserve-before-send
+  // enforced at BOTH the dispatch layer (executeMessageBeeSend) AND the send layer
+  // (sendIMessage). This tests both layers.
+  const mockIO: MessageBeeSendIO = {
+    isChannelEnabled: () => true,
+    isAllowed: () => true,
+    getSelfHandles: () => ["test@icloud.com"],
+    // Dispatch layer reserves before calling this
+    attemptReserve: (rid: string, to: string) => {
+      reserveAttempts++;
+      return sendCap.attemptReserve(rid, to);
+    },
+    markSent: sendCap.markSent,
+    // Send layer (fallback for direct calls)
+    sendIMessage: async (_to, _text, _attachments, _sendAs, _timeoutMs, rid) => {
+      // In the real code, sendIMessage also checks alreadySent() and isSlotClaimed()
+      // For the mock, we just verify it was called and increment sendCount
+      sendCount++;
+      if (rid) {
+        sendCap.markSent(rid, _to);
+      }
+      return true;
+    },
+    recordOutbound: () => {
+      /* no-op */
+    },
+  };
+
+  // Concurrently invoke two sends with the same runId and recipient.
+  // The atomic cap at the dispatch layer should allow exactly one through.
+  const results = await Promise.all([
+    executeMessageBeeSend(
+      { to: recipient, text: "Test message 1" },
+      mockIO,
+      runId
+    ),
+    executeMessageBeeSend(
+      { to: recipient, text: "Test message 2" },
+      mockIO,
+      runId
+    ),
+  ]);
+
+  // Verify the dispatch layer attempted to reserve twice (both calls reached it)
+  assert.equal(
+    reserveAttempts,
+    2,
+    `Expected 2 reserve attempts at dispatch layer, got ${reserveAttempts}`
+  );
+
+  // Verify exactly one succeeded and one failed at the dispatch layer
+  const successCount = results.filter((r) => r.includes("sent to") && r.includes("via Messages")).length;
+  const failureCount = results.filter((r) => r.includes("already sent") || r.startsWith("Error:")).length;
+
+  assert.equal(
+    successCount,
+    1,
+    `Expected 1 successful send at dispatch level, got ${successCount}: ${JSON.stringify(results)}`
+  );
+  assert.equal(
+    failureCount,
+    1,
+    `Expected 1 failed send at dispatch level, got ${failureCount}: ${JSON.stringify(results)}`
+  );
+
+  // Verify exactly one send was attempted (proving the cap blocked one before osascript)
+  assert.equal(
+    sendCount,
+    1,
+    `Expected exactly 1 osascript send attempt, got ${sendCount}. This proves the dispatch-layer atomic cap prevented double-send (the 2026-07-14 incident).`
+  );
+
+  // Verify the database reflects exactly one reservation (atomic UNIQUE constraint)
+  const records = db.prepare(
+    "SELECT COUNT(*) as cnt FROM message_send_cap WHERE runId = ? AND recipient = ?"
+  ).get(runId, recipient) as { cnt: number };
+  assert.equal(records.cnt, 1, "Exactly one cap record should exist");
+});
+
+test("executeMessageBeeSend: concurrent dispatch racing daemon restart — exactly one delivery", async () => {
+  // REGRESSION TEST for the 2026-07-14 incident.
+  // Scenario: Two concurrent daemon processes (simulating a daemon restart race)
+  // both try to execute the same directive (weaver-daily-audit) with the same runId.
+  // The atomic cap at the dispatch layer should ensure exactly one delivery.
+  const db = await import("@/lib/db").then((m) => m.getDb());
+  const sendCap = await import("@/lib/messagebee/send-cap");
+
+  try {
+    db.prepare("DELETE FROM message_send_cap").run();
+  } catch (err) {
+    // Table might not exist
+  }
+
+  const runId = "weaver-daily-audit-daemon-restart-2026-07-14";
+  const recipient = "+15136595163";
+  const deliveries: { processId: number; delivered: boolean }[] = [];
+
+  const mockIO: MessageBeeSendIO = {
+    isChannelEnabled: () => true,
+    isAllowed: () => true,
+    getSelfHandles: () => ["test@icloud.com"],
+    attemptReserve: sendCap.attemptReserve,
+    markSent: sendCap.markSent,
+    // Simulate osascript send (fast operation)
+    sendIMessage: async (_to, _text, _attachments, _sendAs, _timeoutMs, rid) => {
+      if (rid) {
+        sendCap.markSent(rid, _to);
+      }
+      return true;
+    },
+    recordOutbound: () => {
+      /* no-op */
+    },
+  };
+
+  // Simulate two concurrent daemon processes (e.g., process 1 sends while process 2 starts up)
+  // Each has its own async context and both try to execute executeMessageBeeSend
+  const processResults = await Promise.all([
+    // Process 1: First daemon instance
+    (async () => {
+      const result = await executeMessageBeeSend(
+        { to: recipient, text: "Audit report for 2026-07-14" },
+        mockIO,
+        runId
+      );
+      const delivered = result.includes("sent to") && result.includes("via Messages");
+      deliveries.push({ processId: 1, delivered });
+      return { processId: 1, result, delivered };
+    })(),
+    // Process 2: Second daemon instance (restart race)
+    (async () => {
+      const result = await executeMessageBeeSend(
+        { to: recipient, text: "Audit report for 2026-07-14" },
+        mockIO,
+        runId
+      );
+      const delivered = result.includes("sent to") && result.includes("via Messages");
+      deliveries.push({ processId: 2, delivered });
+      return { processId: 2, result, delivered };
+    })(),
+  ]);
+
+  // Verify exactly one process succeeded in delivering
+  const successfulDeliveries = deliveries.filter((d) => d.delivered).length;
+  assert.equal(
+    successfulDeliveries,
+    1,
+    `REGRESSION FAILURE: Expected 1 delivery in daemon-restart scenario, got ${successfulDeliveries} (2026-07-14 incident was 8 deliveries). Results: ${JSON.stringify(processResults)}`
+  );
+
+  // Verify exactly one process failed (cap rejected its dispatch)
+  const failedDeliveries = deliveries.filter((d) => !d.delivered).length;
+  assert.equal(
+    failedDeliveries,
+    1,
+    `Expected 1 failed delivery attempt, got ${failedDeliveries}`
+  );
+
+  // Verify the cap table reflects exactly one reservation
+  const capRecords = db.prepare(
+    "SELECT COUNT(*) as cnt FROM message_send_cap WHERE runId = ? AND recipient = ?"
+  ).get(runId, recipient) as { cnt: number };
+  assert.equal(
+    capRecords.cnt,
+    1,
+    "Exactly one cap record should exist; concurrent dispatch attempts are atomic at the UNIQUE constraint"
+  );
+
+  // Verify the record is marked as sent
+  const sentRecords = db.prepare(
+    "SELECT sentAt FROM message_send_cap WHERE runId = ? AND recipient = ? AND sentAt IS NOT NULL"
+  ).all(runId, recipient) as Array<{ sentAt: string }>;
+  assert.equal(
+    sentRecords.length,
+    1,
+    "Exactly one record should be marked as sent"
+  );
+});

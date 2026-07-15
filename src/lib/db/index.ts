@@ -764,21 +764,54 @@ const MIGRATIONS: Migration[] = [
 
   // v37: message_send_cap — per-run iMessage send cap (idempotent guard against
   // failed-task re-dispatch, internal retries, and concurrent duplicate processes).
+  // Atomic reserve-before-send: INSERT with UNIQUE constraint on (runId, recipient).
+  // Defaults are handled in application code (send-cap.ts), not in schema.
   m("v37", `CREATE TABLE IF NOT EXISTS message_send_cap (
       _id TEXT PRIMARY KEY,
       runId TEXT NOT NULL,
       recipient TEXT NOT NULL,
       sendId TEXT NOT NULL,
-      sentAt TEXT NOT NULL DEFAULT (datetime('now'))
+      reservedAt TEXT NOT NULL,
+      sentAt TEXT
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_message_send_cap_runId_recipient
       ON message_send_cap(runId, recipient);`),
 
-  // v38: Atomic reserve-before-send for message_send_cap.
-  // Adds reservedAt to separate atomic reservation time from send completion time.
-  // For existing records, uses sentAt as reservedAt (conservative backwards compat).
-  m("v38", `ALTER TABLE message_send_cap ADD COLUMN reservedAt TEXT DEFAULT (datetime('now'));
-    UPDATE message_send_cap SET reservedAt = sentAt WHERE reservedAt IS NULL;`),
+  // v38: No-op; reservedAt already present in v37 schema.
+  m("v38", `SELECT 1;`),
+
+  // v39: Single-flight guard for directive dispatch — prevents concurrent daemon processes
+  // from both running the same directive at the same time (daemon restart race). Uses the
+  // same atomic UNIQUE constraint pattern as message_send_cap.
+  m("v39", `CREATE TABLE IF NOT EXISTS directive_dispatch_cap (
+      _id TEXT PRIMARY KEY,
+      directiveId TEXT NOT NULL,
+      runStartedAt TEXT NOT NULL,
+      reservedAt TEXT NOT NULL,
+      createdRunId TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_directive_dispatch_cap_directiveId_runStartedAt
+      ON directive_dispatch_cap(directiveId, runStartedAt);`),
+
+  // v40: Enhanced single-delivery guard for iMessage: keyed by (runId, day) to prevent
+  // duplicate sends across a full day regardless of recipient or retry path.
+  // Adds `day` column (YYYY-MM-DD format) to enable per-day per-run idempotency.
+  // Survives failed-task re-dispatch, internal retries, and concurrent daemon processes.
+  // The (runId, day) UNIQUE constraint ensures exactly one send per directive per calendar day.
+  m("v40", `ALTER TABLE message_send_cap ADD COLUMN day TEXT;
+    UPDATE message_send_cap SET day = date(datetime(reservedAt))
+      WHERE day IS NULL AND reservedAt IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_message_send_cap_runId_day
+      ON message_send_cap(runId, day);`),
+
+  // v41: Corrective — revert v40's (runId, day) idempotency key back to the
+  // intended (runId, recipient). The send cap allows one delivery per person
+  // per run; (runId, day) wrongly collapsed a run's whole day to a single send,
+  // silently dropping messages to every recipient after the first. Dropping the
+  // day index leaves v37's UNIQUE(runId, recipient) as the sole key. The now-
+  // vestigial `day` column is left in place (harmless, nullable) to avoid a
+  // table rebuild; nothing reads or writes it.
+  m("v41", `DROP INDEX IF EXISTS idx_message_send_cap_runId_day;`),
 ];
 
 // ------------------------------------------------------------------

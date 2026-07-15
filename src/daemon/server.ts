@@ -2378,6 +2378,7 @@ export function createDaemonServer() {
           projectPath: typeof body.projectPath === "string" ? body.projectPath : process.cwd(),
           project: typeof body.project === "string" ? body.project : "ops",
           requestedBy: "cli",
+          runId: typeof body.runId === "string" ? body.runId : undefined,
         });
         json(res, result.startsWith("Error") ? 400 : 200, { ok: !result.startsWith("Error"), result });
         return;
@@ -2424,6 +2425,7 @@ export function createDaemonServer() {
           projectPath: typeof body.projectPath === "string" ? body.projectPath : process.cwd(),
           project: typeof body.project === "string" ? body.project : "ops",
           requestedBy: "cli",
+          runId: typeof body.runId === "string" ? body.runId : undefined,
         });
         json(res, result.startsWith("Error") ? 400 : 200, { ok: !result.startsWith("Error"), result });
         return;

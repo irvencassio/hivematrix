@@ -228,6 +228,8 @@ export interface ToolContext {
    * the write/edit tools so the verification gate can smoke-run exactly what changed.
    */
   touchedFiles?: Set<string>;
+  /** Optional directive run ID for idempotent message/send guards. */
+  runId?: string;
 }
 
 /**
@@ -281,6 +283,7 @@ export async function executeTool(
             projectPath,
             project: context?.parentProject ?? "ops",
             requestedBy: context?.parentTaskId ? `task:${context.parentTaskId}` : "hive",
+            runId: context?.runId,
           });
         }
         return `Error: Unknown tool "${name}"`;

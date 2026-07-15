@@ -465,6 +465,8 @@ export interface LaneToolContext {
   projectPath: string;
   project: string;
   requestedBy: string;
+  /** Optional run/directive ID for idempotent send guards. */
+  runId?: string;
 }
 
 /** Dispatch a bee tool call. Always enforces the capability gate first. */
@@ -497,7 +499,7 @@ export async function executeLaneTool(
     case "mail_draft":
       return executeMailBeeDraft(args);
     case "message_send":
-      return executeMessageBeeSend(args);
+      return executeMessageBeeSend(args, undefined, ctx.runId);
     case "brain_search":
       return executeBrainSearch(args);
     case "brain_read":
@@ -960,13 +962,18 @@ export interface MessageBeeSendIO {
   isAllowed(handle: string): boolean;
   /** The agent's own handles; the first pins the sending account (see SEND_SCRIPT). */
   getSelfHandles?(): string[];
-  sendIMessage(handle: string, text: string, attachments?: string[], sendAs?: string): Promise<boolean>;
+  sendIMessage(handle: string, text: string, attachments?: string[], sendAs?: string, timeoutMs?: number, runId?: string): Promise<boolean>;
   recordOutbound(): void;
+  /** Atomically reserve the daily send slot for this run+recipient. Returns true on success. */
+  attemptReserve?(runId: string, recipient: string): boolean;
+  /** Mark a reservation as sent (idempotent). */
+  markSent?(runId: string, recipient: string): void;
 }
 
 async function defaultMessageBeeIO(): Promise<MessageBeeSendIO> {
   const store = await import("@/lib/messagebee/store");
   const im = await import("@/lib/messagebee/imessage");
+  const sendCap = await import("@/lib/messagebee/send-cap");
   return {
     isChannelEnabled: store.isChannelEnabled,
     isSelf: store.isSelf,
@@ -974,13 +981,23 @@ async function defaultMessageBeeIO(): Promise<MessageBeeSendIO> {
     getSelfHandles: store.getSelfHandles,
     sendIMessage: im.sendIMessage,
     recordOutbound: store.recordOutbound,
+    attemptReserve: sendCap.attemptReserve,
+    markSent: sendCap.markSent,
   };
 }
 
-export async function executeMessageBeeSend(args: Record<string, unknown>, io?: MessageBeeSendIO): Promise<string> {
+export async function executeMessageBeeSend(args: Record<string, unknown>, io?: MessageBeeSendIO, runId?: string): Promise<string> {
   const to = typeof args.to === "string" ? args.to.trim() : "";
-  const text = typeof args.text === "string" ? args.text.trim() : "";
+  let text = typeof args.text === "string" ? args.text.trim() : "";
   const attachments = readAttachments(args);
+
+  // Filter internal harness status strings before sending to end users
+  const { isInternalStatusOnly, stripInternalStatus } = await import("@/lib/messagebee/status-filter");
+  if (isInternalStatusOnly(text)) {
+    return `Error: Message contains only internal harness status strings and cannot be sent to ${to}. Message was: "${text}"`;
+  }
+  text = stripInternalStatus(text);
+
   if (!to || (!text && attachments.length === 0)) {
     return "Error: 'to' and either 'text' or an attachment are required to send a message.";
   }
@@ -1005,9 +1022,30 @@ export async function executeMessageBeeSend(args: Record<string, unknown>, io?: 
     return `Error: ${to} is not on the Message Lane allowlist. SMS/iMessage can only be sent to allowlisted handles — add ${to} in Message Lane settings first, then retry.${floorNote}`;
   }
 
+  // ATOMIC DISPATCH-LAYER CAP: Enforce the per-run send cap at the dispatch layer
+  // BEFORE calling sendIMessage. This is defense-in-depth: it closes the sub-cap race
+  // where concurrent dispatchesto the same (runId, recipient) pair might both reach
+  // sendIMessage before either has completed. By checking here, we ensure:
+  // - Concurrent duplicate processes racing each other (daemon restarts)
+  // - Failed-task re-dispatch re-entering this function
+  // - Internal retries calling executeMessageBeeSend again
+  // All are atomically guarded by the UNIQUE constraint at this layer.
+  if (runId) {
+    const reserved = deps.attemptReserve?.(runId, to);
+    if (!reserved) {
+      return `Message already sent to ${to} in this run (cap enforced atomically at dispatch layer). Duplicate send rejected.`;
+    }
+  }
+
   const sendAs = deps.getSelfHandles?.()[0] ?? "";
-  const sent = await deps.sendIMessage(to, text, attachments, sendAs);
-  if (sent) deps.recordOutbound();
+  const sent = await deps.sendIMessage(to, text, attachments, sendAs, 30_000, runId);
+  if (sent) {
+    deps.recordOutbound();
+    // Mark the reservation as sent (idempotent, in case sendIMessage also marks it)
+    if (runId) {
+      deps.markSent?.(runId, to);
+    }
+  }
   const what = attachments.length ? `Message (with ${attachments.length} attachment(s))` : "Message";
   return sent
     ? `${what} sent to ${to} via Messages.`

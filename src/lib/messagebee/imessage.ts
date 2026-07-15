@@ -18,6 +18,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { existsSync } from "fs";
 import { type InboundMessage } from "./contracts";
+import { attemptReserve, markSent, alreadySent, isSlotClaimed } from "./send-cap";
 
 const APPLE_EPOCH_UNIX_SECONDS = 978_307_200; // 2001-01-01T00:00:00Z
 
@@ -257,7 +258,59 @@ end run`;
  * attachments are being sent. `sendAs` optionally pins the sending account (see
  * SEND_SCRIPT); "" uses the first iMessage account.
  */
-export function sendIMessage(handle: string, text: string, attachments: string[] = [], sendAs = "", timeoutMs = 30_000): Promise<boolean> {
+/**
+ * Send an iMessage to the specified handle.
+ *
+ * CRITICAL: When runId is provided, enforces atomic per-run send cap. At most one send
+ * per (runId, handle) pair can succeed. Subsequent attempts within the same run are
+ * rejected immediately, blocking all retry paths (failed-task re-dispatch, internal
+ * retries, daemon restarts, concurrent processes).
+ *
+ * @param handle The recipient handle (e.g. "+15136595163", "cassio.irv@gmail.com")
+ * @param text The message text
+ * @param attachments Optional attachment file paths
+ * @param sendAs Optional iMessage account selector (defaults to first account)
+ * @param timeoutMs Execution timeout in milliseconds
+ * @param runId Optional run ID for enforcing per-run send cap (used by directive/audit runs, etc)
+ * @returns true if send succeeded, false otherwise. If runId is provided and slot is
+ *          already claimed, returns false without attempting to send.
+ */
+export function sendIMessage(
+  handle: string,
+  text: string,
+  attachments: string[] = [],
+  sendAs = "",
+  timeoutMs = 30_000,
+  runId?: string,
+): Promise<boolean> {
+  // Per-run send cap enforcement (defense-in-depth, atomic at two layers):
+  // Layer 1: Dispatch layer (executeMessageBeeSend) enforces the cap via attemptReserve.
+  // Layer 2: Direct callers (notify, poller) also check here as a fallback.
+  //
+  // Key: Only reserve if not already reserved. If already sent, reject the duplicate.
+  if (runId) {
+    // Check current state: reserved? sent?
+    const isSentAlready = alreadySent(runId, handle);
+    if (isSentAlready) {
+      // Already sent in this run. Reject duplicate.
+      console.warn(`[messagebee] send to ${handle} in run ${runId} rejected: already sent`);
+      return Promise.resolve(false);
+    }
+
+    const isReservedAlready = isSlotClaimed(runId, handle);
+    if (!isReservedAlready) {
+      // Slot is free; reserve it. This fails if another process claimed it.
+      const reserved = attemptReserve(runId, handle);
+      if (!reserved) {
+        // Another process claimed the slot (concurrent race). Reject.
+        console.warn(`[messagebee] send to ${handle} in run ${runId} rejected: slot claimed by concurrent process`);
+        return Promise.resolve(false);
+      }
+    }
+    // At this point, slot is reserved (either by us or by the dispatch layer);
+    // we're clear to proceed with the send.
+  }
+
   return new Promise((resolve) => {
     execFile(
       "osascript",
@@ -267,8 +320,14 @@ export function sendIMessage(handle: string, text: string, attachments: string[]
         if (err) {
           // Surface WHY in the daemon log instead of swallowing it silently.
           console.error(`[messagebee] send to ${handle} failed: ${(stderr || err.message || "").trim()}`);
+          resolve(false);
+        } else {
+          // Mark the send as successful (idempotent).
+          if (runId) {
+            markSent(runId, handle);
+          }
+          resolve(true);
         }
-        resolve(!err);
       },
     );
   });

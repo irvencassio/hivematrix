@@ -46,6 +46,7 @@ import {
   listDirectives,
   reopenCriteria,
 } from "./directive-store";
+import { attemptReserveRun, markRunCreated, getCreatedRunId } from "./directive-dispatch-cap";
 import { computeNextRunAt, parseTriggerPolicy, type TriggerPolicy } from "@/lib/scheduling/trigger-policy";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { routeByRole } from "@/lib/routing/router";
@@ -1330,10 +1331,31 @@ export async function directiveTick(now: Date = new Date(), options: DirectiveTi
   }
 
   // 2. Open runs for due directives without an active run.
+  // ATOMIC DISPATCH-LAYER CAP: Enforce single-flight guard to prevent concurrent daemon
+  // processes (e.g., during daemon restart) from both creating runs for the same
+  // directive at the same time. Uses UNIQUE constraint on (directiveId, runStartedAt).
   for (const directive of getDueDirectives(nowIso)) {
     if (directivesWithActiveRun.has(directive._id)) continue;
+
+    // Try to atomically reserve the run slot. Returns false if already claimed
+    // (another process, a prior attempt, or a daemon restart).
+    const reserved = attemptReserveRun(directive._id, nowIso);
+    if (!reserved) {
+      // Slot already claimed by another process. Check if a run was already created.
+      const existingRunId = getCreatedRunId(directive._id, nowIso);
+      if (existingRunId) {
+        // Run was already created by the other process; update lastRunId and lastRunAt.
+        updateDirective(directive._id, { lastRunId: existingRunId, lastRunAt: nowIso });
+      }
+      continue;
+    }
+
+    // Slot reserved successfully; create the run.
     const run = createRun(directive._id);
     journal(run._id, directive._id, "run_started", { goal: directive.goal });
     updateDirective(directive._id, { lastRunId: run._id, lastRunAt: nowIso });
+
+    // Mark the run as created in the cap table (idempotent, for crash recovery).
+    markRunCreated(directive._id, nowIso, run._id);
   }
 }
