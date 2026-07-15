@@ -65,6 +65,15 @@ test("console script has no obvious TS-only syntax", () => {
   assert.doesNotMatch(js, /\bas\s+(HTML[A-Za-z]+|string|number|boolean|any)\b/, "found a TS `as Type` cast");
 });
 
+test("window title does not redundantly repeat the in-page HiveMatrix logo", () => {
+  assert.doesNotMatch(
+    CONSOLE_HTML,
+    /<title>HiveMatrix<\/title>/,
+    "tab title should not literally duplicate the page header's HiveMatrix logo",
+  );
+  assert.match(CONSOLE_HTML, /<title>Console<\/title>/);
+});
+
 test("result markdown renders pipe tables as real tables", () => {
   const mdToHtml = extractMdToHtml(CONSOLE_HTML);
   const html = mdToHtml(`Here are the **6 open Demo Lite tickets**:

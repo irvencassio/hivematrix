@@ -13,7 +13,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>HiveMatrix</title>
+<title>Console</title>
 <script defer src="/assets/mermaid.min.js"></script>
 <style>
   :root {
