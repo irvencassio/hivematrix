@@ -29,6 +29,40 @@ test("briefing speaks pending approvals, failed tasks, active directives, and us
   assert.match(briefing, /42%/);
 });
 
+test("briefing includes full error message for failed tasks without truncation", () => {
+  const longError = "Connection timeout: failed to reach the database server after 30 seconds. The server may be down or unreachable. Please check network connectivity and verify the database is running.";
+  const briefing = buildVoiceBriefing({
+    failedTasks: [
+      { title: "Sync user data", error: longError },
+    ],
+  });
+
+  assert.match(briefing, /1 failed task/);
+  assert.match(briefing, /Sync user data/);
+  assert.match(briefing, /Connection timeout/);
+  assert.match(briefing, /failed to reach the database server/);
+  // Verify the full error is included, not truncated with ellipsis
+  assert.match(briefing, /network connectivity/);
+  assert.match(briefing, /database is running/);
+  // Ensure no lossy truncation like "…" appears in the error part
+  assert.ok(briefing.includes(longError), "Full error message must appear in briefing");
+});
+
+test("briefing format: multiple failed tasks with errors separated by semicolon", () => {
+  const briefing = buildVoiceBriefing({
+    failedTasks: [
+      { title: "Build Docker image", error: "Out of disk space on build agent" },
+      { title: "Deploy to staging", error: "Connection refused: staging server unavailable" },
+    ],
+  });
+
+  assert.match(briefing, /2 failed tasks/);
+  assert.match(briefing, /Build Docker image.*Out of disk space/);
+  assert.match(briefing, /Deploy to staging.*Connection refused/);
+  // Multiple errors should be separated clearly
+  assert.match(briefing, /;\s/); // Semicolon separator between tasks
+});
+
 test("briefing speaks a compact Workflow Inbox line (reviews, ready actions, blocked/failed)", () => {
   const briefing = buildVoiceBriefing({
     workflowInbox: { needsReview: 2, ready: 1, blocked: 1, attention: 0 },

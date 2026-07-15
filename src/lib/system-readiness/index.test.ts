@@ -148,3 +148,84 @@ test("seed_coo_rules repair is explicit, idempotent, and refreshes the report", 
   const after = repaired.report.checks.find((c) => c.id === "coo-routing-rules");
   assert.equal(after?.severity, "ok");
 });
+
+test("reports Message Lane degraded/blocked state when chatDbReadable is false", async () => {
+  const report = await getSystemReadinessReport({
+    ...baseDeps(),
+    getMessagebeeStatus: () => ({
+      enabled: true,
+      chatDbReadable: false,
+      chatDbDetail: "Cannot open Messages database. The daemon that reads chat.db (Contents/Resources/daemon/bin/node) runs as its own separately-signed process — add it to Full Disk Access.",
+      chatDbProbeSkipped: false,
+      identities: [],
+      selfHandles: [],
+    }),
+  });
+  const msg = report.checks.find((c) => c.id === "message-lane-access");
+  assert.equal(msg?.severity, "warn");
+  assert.match(msg?.summary ?? "", /not accessible/i);
+  assert.match(msg?.nextAction ?? "", /Full Disk Access/i);
+});
+
+test("reports Message Lane critical when chatDbReadable is false with different error", async () => {
+  const report = await getSystemReadinessReport({
+    ...baseDeps(),
+    getMessagebeeStatus: () => ({
+      enabled: true,
+      chatDbReadable: false,
+      chatDbDetail: "Messages database not found: /Users/test/Library/Messages/chat.db",
+      chatDbProbeSkipped: false,
+      identities: [],
+      selfHandles: [],
+    }),
+  });
+  const msg = report.checks.find((c) => c.id === "message-lane-access");
+  assert.equal(msg?.severity, "critical");
+});
+
+test("skips Message Lane check when disabled or probe skipped", async () => {
+  const report1 = await getSystemReadinessReport({
+    ...baseDeps(),
+    getMessagebeeStatus: () => ({
+      enabled: false,
+      chatDbReadable: false,
+      chatDbDetail: "Message Lane disabled",
+      chatDbProbeSkipped: true,
+      chatDbProbeReason: "channel_disabled",
+      identities: [],
+      selfHandles: [],
+    }),
+  });
+  const msg1 = report1.checks.find((c) => c.id === "message-lane-access");
+  assert.equal(msg1, undefined);
+
+  const report2 = await getSystemReadinessReport({
+    ...baseDeps(),
+    getMessagebeeStatus: () => ({
+      enabled: true,
+      chatDbReadable: false,
+      chatDbDetail: "...",
+      chatDbProbeSkipped: true,
+      identities: [],
+      selfHandles: [],
+    }),
+  });
+  const msg2 = report2.checks.find((c) => c.id === "message-lane-access");
+  assert.equal(msg2, undefined);
+});
+
+test("reports Message Lane ok when chatDbReadable is true", async () => {
+  const report = await getSystemReadinessReport({
+    ...baseDeps(),
+    getMessagebeeStatus: () => ({
+      enabled: true,
+      chatDbReadable: true,
+      chatDbDetail: "Messages database readable",
+      chatDbProbeSkipped: false,
+      identities: [],
+      selfHandles: [],
+    }),
+  });
+  const msg = report.checks.find((c) => c.id === "message-lane-access");
+  assert.equal(msg?.severity, "ok");
+});

@@ -36,7 +36,7 @@ import { parseReminderCommand, executeReminderCreate } from "@/lib/orchestrator/
 import type { ApprovalQueueItem } from "@/lib/approvals/queue";
 import type { DirectiveRow } from "@/lib/orchestrator/directive-store";
 
-interface VoiceTaskRef { _id: string; title: string }
+interface VoiceTaskRef { _id: string; title: string; error?: string | null }
 interface VoiceDirectiveRef { _id?: string; goal: string; status: string }
 interface OpenClawVoiceRequest { assistant: "vale" | "openclaw"; prompt: string; sessionKey: string }
 interface OpenClawVoiceResult {
@@ -155,7 +155,7 @@ export async function composeBriefing(deps: CommandTurnDeps = {}): Promise<strin
   ]);
   return buildVoiceBriefing({
     approvals: approvals.map((item) => ({ title: item.title, kind: item.kind })),
-    failedTasks: failedTasks.map((task) => ({ title: task.title })),
+    failedTasks: failedTasks.map((task) => ({ title: task.title, error: task.error })),
     directives: directives.map((d) => ({ goal: d.goal, status: d.status })),
     usage,
     browserReadiness,
@@ -929,7 +929,7 @@ async function createTask(deps: CommandTurnDeps, payload: Record<string, unknown
 async function listFailedTasks(deps: CommandTurnDeps): Promise<VoiceTaskRef[]> {
   if (deps.listFailedTasks) return await deps.listFailedTasks();
   const { Task } = await import("@/lib/db");
-  return (await Task.find({ status: "failed" }).sort({ updatedAt: -1 }).limit(5)).map((t) => ({ _id: t._id, title: t.title }));
+  return (await Task.find({ status: "failed" }).sort({ updatedAt: -1 }).limit(5)).map((t) => ({ _id: t._id, title: t.title, error: t.error }));
 }
 
 async function retryTask(deps: CommandTurnDeps, id: string): Promise<void> {

@@ -5,6 +5,7 @@ export interface BriefingApproval {
 
 export interface BriefingTask {
   title: string;
+  error?: string | null;
 }
 
 export interface BriefingDirective {
@@ -146,7 +147,11 @@ export function buildVoiceBriefing(input: VoiceBriefingInput): string {
   }
 
   if (failedTasks.length > 0) {
-    parts.push(`${plural(failedTasks.length, "failed task")}: ${listHead(failedTasks.map((task) => task.title))}.`);
+    const taskLines = failedTasks.map((task) => {
+      if (task.error) return `${task.title} — ${task.error}`;
+      return task.title;
+    });
+    parts.push(`${plural(failedTasks.length, "failed task")}: ${taskLines.join("; ")}.`);
   } else {
     parts.push("No failed tasks.");
   }

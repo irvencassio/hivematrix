@@ -6,6 +6,7 @@ import { getWorkflowInbox, type WorkflowInbox } from "@/lib/workflows/inbox";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { getBundledVersion } from "@/lib/version/bundle-version";
 import { seedDefaultCooRoutingRules } from "@/lib/coo/store";
+import { getMessagebeeStatus, type MessagebeeStatus } from "@/lib/messagebee/status";
 
 export type SystemReadinessSeverity = "ok" | "info" | "warn" | "critical";
 
@@ -76,6 +77,7 @@ export interface SystemReadinessDeps {
   getBrowserDashboard?: () => MinimalBrowserDashboard;
   getLaneApps?: () => Promise<MinimalLaneAppState[]> | MinimalLaneAppState[];
   getWorkflowInbox?: () => WorkflowInbox;
+  getMessagebeeStatus?: () => MessagebeeStatus;
 }
 
 const SEVERITIES: SystemReadinessSeverity[] = ["critical", "warn", "info", "ok"];
@@ -220,6 +222,27 @@ function workflowInboxCheck(inbox: WorkflowInbox): SystemReadinessCheck {
   return check("workflow-inbox", "Workflow inbox", "ok", "Workflow inbox is empty.", undefined, { counts: c });
 }
 
+function messageLaneCheck(status: MessagebeeStatus): SystemReadinessCheck | null {
+  if (!status.enabled) {
+    return null;
+  }
+  if (status.chatDbProbeSkipped) {
+    return null;
+  }
+  if (!status.chatDbReadable) {
+    const severity = status.chatDbDetail.includes("daemon") && status.chatDbDetail.includes("separately-signed") ? "warn" : "critical";
+    return check(
+      "message-lane-access",
+      "Message Lane access",
+      severity,
+      `Message database not accessible: ${status.chatDbDetail}`,
+      `Add the daemon binary to System Settings → Privacy & Security → Full Disk Access, then restart the daemon.`,
+      { detail: status.chatDbDetail },
+    );
+  }
+  return check("message-lane-access", "Message Lane access", "ok", "Message database is readable.", undefined, { detail: status.chatDbDetail });
+}
+
 function recentFailedTasksCheck(): SystemReadinessCheck {
   const rows = getDb().prepare(`
     SELECT _id, title, source, error, updatedAt
@@ -274,6 +297,7 @@ export async function getSystemReadinessReport(deps: SystemReadinessDeps = {}): 
     ?? (() => getBrowserLaneReadinessDashboard({ staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours }) as unknown as MinimalBrowserDashboard);
   const getLaneApps = deps.getLaneApps ?? (() => getAllLaneAppStates());
   const getInbox = deps.getWorkflowInbox ?? (() => getWorkflowInbox({ limit: 50 }));
+  const getMessageStatus = deps.getMessagebeeStatus ?? (() => getMessagebeeStatus());
 
   const checks: SystemReadinessCheck[] = [
     daemonCheck({ version, connectivity }),
@@ -283,6 +307,10 @@ export async function getSystemReadinessReport(deps: SystemReadinessDeps = {}): 
     workflowInboxCheck(getInbox()),
     recentFailedTasksCheck(),
   ];
+  const messageCheck = messageLaneCheck(getMessageStatus());
+  if (messageCheck) {
+    checks.push(messageCheck);
+  }
   checks.sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) || a.label.localeCompare(b.label));
   const counts = countSeverities(checks);
   return {
