@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.203 — 2026-07-15
+
+Message Lane: reveal/restart the real chat.db daemon for Full Disk Access + honest denied copy; DB self-heal restores goals wiped by an update; board status colors (needs-input amber / ready-for-review green); voice approve/deny verb-less follow-up.
+
 ## v0.1.202 — 2026-07-15
 
 Fix duplicate iMessage sends: one delivery per recipient per run (heals the 2026-07-14 daily-audit double-send); native task execution runs the CLI like a direct Claude Code session (Opus plans, Sonnet builds).

@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.203", date: "2026-07-15", note: "Message Lane: reveal/restart the real chat.db daemon for Full Disk Access + honest denied copy; DB self-heal restores goals wiped by an update; board status colors (needs-input amber / ready-for-review green); voice approve/deny verb-less follow-up." },
   { version: "0.1.202", date: "2026-07-15", note: "Fix duplicate iMessage sends: one delivery per recipient per run (heals the 2026-07-14 daily-audit double-send); native task execution runs the CLI like a direct Claude Code session (Opus plans, Sonnet builds)." },
   { version: "0.1.201", date: "2026-07-13", note: "Developer ID release" },
   { version: "0.1.200", date: "2026-07-12", note: "Asking about a long document in chat no longer spins up a background task just to finish reading it — the assistant now pages through the whole document directly and answers." },
