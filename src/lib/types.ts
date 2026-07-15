@@ -87,6 +87,10 @@ export interface HiveTask {
   parentTaskId: string | null;
   centralTaskId: string | null;
   directiveId?: string | null;
+  /** Shared grouping key for tasks created together (chat/directive fan-out, or a coordinator's subtasks). */
+  batchId?: string | null;
+  /** Verification-gate result, when a real signal is available (e.g. the generic/local-model smoke runner). Never fabricated — null when no gate ran (e.g. the `claude -p` path). */
+  verification?: { verdict: "passed" | "failed" | "uncertain"; report?: string; ranAt?: string } | null;
   dependsOn?: string[];
   brainSelection?: BrainSelectionState;
   output: TaskOutput | null;

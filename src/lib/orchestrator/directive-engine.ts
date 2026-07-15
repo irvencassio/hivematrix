@@ -285,6 +285,7 @@ async function createPhaseTask(
     status: "backlog",
     source: "directive",
     executor: "agent",
+    batchId: run._id,
     output: {
       runId: run._id,
       directivePhase: phase,
@@ -688,6 +689,7 @@ async function planRun(directive: DirectiveRow, run: RunRow): Promise<void> {
       directiveId: directive._id,
       status: "backlog",
       executor: "agent",
+      batchId: run._id,
       // Tag the originating run so verify can find this run's tasks.
       output: { runId: run._id, routedTier: route.tier },
     });
@@ -717,6 +719,7 @@ async function createAutonomyPlanTasks(directive: DirectiveRow, run: RunRow, pla
       directiveId: directive._id,
       status: "backlog",
       executor: "agent",
+      batchId: run._id,
       output: {
         runId: run._id,
         routedTier: route.tier,
@@ -758,6 +761,7 @@ async function createReplanTasks(directive: DirectiveRow, run: RunRow, plan: Dir
       directiveId: directive._id,
       status: "backlog",
       executor: "agent",
+      batchId: run._id,
       output: {
         runId: run._id,
         routedTier: route.tier,
@@ -1041,6 +1045,7 @@ async function createCorrectiveTasks(directive: DirectiveRow, run: RunRow, corre
       directiveId: directive._id,
       status: "backlog",
       executor: "agent",
+      batchId: run._id,
       output: {
         runId: run._id,
         routedTier: route.tier,

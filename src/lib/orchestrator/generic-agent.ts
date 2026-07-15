@@ -603,7 +603,7 @@ async function runAgentLoop(
   agentType: string,
   toolContext?: ToolContext,
   thinkingMode?: string | null
-): Promise<{ code: number; result: string; turns: number; totalTokens: number; inputTokens: number; outputTokens: number; smokeReport?: string }> {
+): Promise<{ code: number; result: string; turns: number; totalTokens: number; inputTokens: number; outputTokens: number; smokeReport?: string; smokeRan?: boolean; smokeOk?: boolean }> {
   const messages = await buildMessages(description, projectPath, agentType, thinkingMode);
   const profileTools = getProfileTools(agentType);
 
@@ -624,6 +624,12 @@ async function runAgentLoop(
   // "done" back for a crashing smoke run, and whether the last run was clean.
   let smokeRetries = 0;
   let smokeReport = "";
+  // Whether the smoke gate ever actually ran, and its most recent verdict —
+  // surfaced to the caller so handleExit can record a real (non-fabricated)
+  // verification result. smokeRan stays false when there was nothing runnable
+  // to check or the harness was unavailable.
+  let smokeRan = false;
+  let smokeOk = true;
 
   while (turns < MAX_TURNS) {
     if (controller.signal.aborted) {
@@ -843,6 +849,8 @@ async function runAgentLoop(
       const touched = toolContext?.touchedFiles ? [...toolContext.touchedFiles] : [];
       if (shouldRunCompletionSmokeGate(touched, forceTextOnlyTurn)) {
         const smoke = await runCodeSmoke(projectPath, touched);
+        smokeRan = smoke.ran;
+        smokeOk = smoke.ok;
         if (smoke.ran && !smoke.ok) {
           smokeReport = smoke.report; // remember the crash for the final summary
           if (smokeRetries < MAX_SMOKE_RETRIES) {
@@ -880,6 +888,11 @@ async function runAgentLoop(
     // Non-empty only when the code still failed verification after all local
     // retries — the caller escalates it to the frontier as a fix task.
     smokeReport: finalResult.code === 1 && smokeReport ? smokeReport : undefined,
+    // Whether the deterministic smoke gate actually ran, and its last verdict —
+    // lets the caller record a real verification result without fabricating one
+    // for tasks that never touched a runnable file.
+    smokeRan,
+    smokeOk,
   };
 }
 
@@ -940,7 +953,7 @@ export function spawnGenericAgent(
     toolContext,
     thinkingMode
   )
-    .then(({ code, result, turns, totalTokens, inputTokens, outputTokens, smokeReport }) => {
+    .then(({ code, result, turns, totalTokens, inputTokens, outputTokens, smokeReport, smokeRan, smokeOk }) => {
       // Local coding failed verification after all retries → escalate the draft +
       // diagnostics up the cheap-first ladder (other local model, then frontier).
       // Fire and forget: escalation must never affect this task's own exit.
@@ -962,6 +975,9 @@ export function spawnGenericAgent(
         cacheReadTokens: 0,
         cacheCreationTokens: 0,
         contextWindow: 0,
+        smokeRan,
+        smokeOk,
+        smokeReport,
       };
       // Emit result event
       onEvent(taskId, {

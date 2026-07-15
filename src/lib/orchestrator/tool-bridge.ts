@@ -511,6 +511,9 @@ async function executeCreateTask(args: Record<string, unknown>, context?: ToolCo
   const authArg = `-H "Authorization: Bearer ${token}"`;
 
   let siblings: Array<{ _id: string; dependsOn: string[] }> = [];
+  // Inherited from the parent task below (coordinator subtasks share their
+  // parent's batchId so the console can roll a delegation up as one unit).
+  let parentBatchId: string | null = null;
 
   if (parentTaskId) {
     // Safety: check subtask depth (max 2 levels). Fails CLOSED — if the
@@ -529,6 +532,9 @@ async function executeCreateTask(args: Record<string, unknown>, context?: ToolCo
       if (parentTask.parentTaskId) {
         // Parent already has a parent → this would be depth 3 — reject
         return "Error: Maximum subtask depth (2 levels) reached. A subtask cannot create subtasks.";
+      }
+      if (typeof parentTask.batchId === "string" && parentTask.batchId) {
+        parentBatchId = parentTask.batchId;
       }
     } catch {
       return "Error: Could not verify subtask depth — refusing to create a subtask.";
@@ -587,6 +593,7 @@ async function executeCreateTask(args: Record<string, unknown>, context?: ToolCo
       source,
       parentTaskId,
       ...(dependsOn.length > 0 ? { dependsOn } : {}),
+      ...(parentBatchId ? { batchId: parentBatchId } : {}),
     });
     const { stdout } = await execAsync(
       `curl -s -X POST ${authArg} ${base}/tasks -H "Content-Type: application/json" -d '${body.replace(/'/g, "'\\''")}'`,

@@ -812,6 +812,19 @@ const MIGRATIONS: Migration[] = [
   // vestigial `day` column is left in place (harmless, nullable) to avoid a
   // table rebuild; nothing reads or writes it.
   m("v41", `DROP INDEX IF EXISTS idx_message_send_cap_runId_day;`),
+
+  // v42: batchId groups tasks fanned out together (chat/directive fan-out, or a
+  // coordinator's subtasks) so the console can show/filter/roll them up as one
+  // unit. Nullable — most tasks are still created singly.
+  m("v42", `ALTER TABLE tasks ADD COLUMN batchId TEXT DEFAULT NULL;
+    CREATE INDEX IF NOT EXISTS idx_tasks_batchId ON tasks(batchId);`),
+
+  // v43: verification stores the verification-gate result (deterministic code
+  // smoke-run outcome) as JSON: {"verdict","report","ranAt"}. Populated only
+  // when a real gate signal exists (e.g. the generic/local-model smoke runner);
+  // left null on paths with no such signal (e.g. `claude -p`) rather than
+  // fabricated.
+  m("v43", `ALTER TABLE tasks ADD COLUMN verification TEXT DEFAULT NULL;`),
 ];
 
 // ------------------------------------------------------------------
@@ -939,6 +952,8 @@ interface TaskRow {
   parentTaskId: string | null;
   centralTaskId: string | null;
   directiveId: string | null;
+  batchId: string | null;
+  verification: string | null;
   delayUntil: string | null;
   delayReason: string | null;
   worktreeName: string | null;
@@ -965,7 +980,13 @@ interface TaskRow {
   updatedAt: string;
 }
 
-export type TaskDoc = Omit<TaskRow, "output" | "logs" | "turns" | "approvals" | "comments" | "dependsOn" | "brainSelection"> & {
+export interface TaskVerification {
+  verdict: "passed" | "failed" | "uncertain";
+  report?: string;
+  ranAt: string;
+}
+
+export type TaskDoc = Omit<TaskRow, "output" | "logs" | "turns" | "approvals" | "comments" | "dependsOn" | "brainSelection" | "verification"> & {
   output: Record<string, unknown>;
   logs: Array<Record<string, unknown>>;
   turns: Array<Record<string, unknown>>;
@@ -973,8 +994,20 @@ export type TaskDoc = Omit<TaskRow, "output" | "logs" | "turns" | "approvals" | 
   comments: Array<Record<string, unknown>>;
   dependsOn: string[];
   brainSelection: ReturnType<typeof normalizeBrainSelection>;
+  verification: TaskVerification | null;
   [key: string]: unknown;
 };
+
+/** Null-safe parse of the `verification` column — malformed JSON never throws. */
+function parseVerification(raw: string | null): TaskVerification | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as TaskVerification) : null;
+  } catch {
+    return null;
+  }
+}
 
 function rowToTask(row: TaskRow): TaskDoc {
   return {
@@ -986,6 +1019,7 @@ function rowToTask(row: TaskRow): TaskDoc {
     comments: JSON.parse(row.comments || "[]"),
     dependsOn: JSON.parse(row.dependsOn || "[]"),
     brainSelection: normalizeBrainSelection(JSON.parse(row.brainSelection || "{}")),
+    verification: parseVerification(row.verification),
   };
 }
 
@@ -1181,6 +1215,9 @@ export const Task = {
       if (clean.brainSelection && typeof clean.brainSelection === "object") {
         clean.brainSelection = JSON.stringify(normalizeBrainSelection(clean.brainSelection));
       }
+      if (clean.verification && typeof clean.verification === "object") {
+        clean.verification = JSON.stringify(clean.verification);
+      }
 
       const setClauses = [...Object.keys(clean).map((k) => `${k} = ?`), "updatedAt = datetime('now')"];
       db.prepare(`UPDATE tasks SET ${setClauses.join(", ")} WHERE _id = ?`).run(...Object.values(clean), id);
@@ -1229,6 +1266,10 @@ export const Task = {
       parentTaskId: data.parentTaskId ?? null,
       centralTaskId: data.centralTaskId ?? null,
       directiveId: data.directiveId ?? null,
+      batchId: data.batchId ?? null,
+      verification: data.verification && typeof data.verification === "object"
+        ? JSON.stringify(data.verification)
+        : null,
       delayUntil: data.delayUntil ?? null,
       delayReason: data.delayReason ?? null,
       worktreeName: data.worktreeName ?? null,
@@ -1298,6 +1339,9 @@ export const Task = {
     if (clean.output && typeof clean.output === "object") clean.output = JSON.stringify(clean.output);
     if (clean.brainSelection && typeof clean.brainSelection === "object") {
       clean.brainSelection = JSON.stringify(normalizeBrainSelection(clean.brainSelection));
+    }
+    if (clean.verification && typeof clean.verification === "object") {
+      clean.verification = JSON.stringify(clean.verification);
     }
     const setClauses = [...Object.keys(clean).map((k) => `${k} = ?`), "updatedAt = datetime('now')"];
     const result = db.prepare(`UPDATE tasks SET ${setClauses.join(", ")}${where}`).run(...Object.values(clean), ...params);

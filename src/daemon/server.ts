@@ -4321,6 +4321,10 @@ export function createDaemonServer() {
         const description = typeof body.description === "string" ? body.description : "";
         body.description = appendAttachmentBlock(description, attachments);
         delete body.attachments;
+        // Optional caller-supplied grouping key (e.g. a coordinator inheriting its
+        // parent's batchId). Reject anything that isn't a plain string so a bad
+        // client can't hand SQLite a bind value it will choke on.
+        if (body.batchId !== undefined && typeof body.batchId !== "string") delete body.batchId;
         // An explicit (non-"auto") agentType on creation means the operator (or the
         // prompt wizard) picked the role — record that provenance now, before any
         // routing branch below spreads `body` into Task.create, so the console's role

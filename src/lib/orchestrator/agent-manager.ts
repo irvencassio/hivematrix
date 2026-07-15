@@ -526,6 +526,20 @@ class AgentManager {
         // Don't block completion if task read fails
       }
 
+      // Verification-gate result, when a real signal is available. Only the
+      // generic/local-model agent path (generic-agent.ts) sets smokeRan on
+      // agent.lastResult — the `claude -p` path (Claude Code CLI) has no such
+      // gate, so result?.smokeRan stays undefined there and this is correctly
+      // left null rather than a fabricated verdict.
+      const verification: { verdict: "passed" | "failed" | "uncertain"; report?: string; ranAt: string } | null =
+        result?.smokeRan
+          ? {
+              verdict: result.smokeOk ? "passed" : "failed",
+              report: result.smokeReport ? result.smokeReport.slice(0, 4000) : undefined,
+              ranAt: new Date().toISOString(),
+            }
+          : null;
+
       // Accumulate token usage across runs — runs for ALL exit paths (success,
       // failure, transient retry) so that no spend data is silently discarded.
       const prev = (task?.output ?? {}) as Record<string, unknown>;
@@ -789,6 +803,7 @@ class AgentManager {
           completedAt,
           sessionId: result?.sessionId ?? null,
           output,
+          verification,
         };
         if (agentReportedFailure && currentError) {
           update.error = currentError;
@@ -839,6 +854,7 @@ class AgentManager {
           completedAt,
           error,
           output: { ...accumulatedOutput, summary },
+          verification,
         });
         captureRunTelemetry({ taskId, task: task as Record<string, unknown> | null, agent, result, status: "failed", completedAt, runIndex: prevRunCount });
         if (task?.missionId) {

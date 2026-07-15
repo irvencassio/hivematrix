@@ -229,7 +229,20 @@ export interface AgentProcess {
   modelsUsed: string[];
   launchCommand?: string;
   sessionId?: string;
-  lastResult?: { cost: number; result: string; sessionId: string; turns: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; cacheCreate5mTokens?: number; cacheCreate1hTokens?: number; contextWindow: number; reasoningTokens?: number };
+  lastResult?: {
+    cost: number; result: string; sessionId: string; turns: number; inputTokens: number; outputTokens: number;
+    cacheReadTokens: number; cacheCreationTokens: number; cacheCreate5mTokens?: number; cacheCreate1hTokens?: number;
+    contextWindow: number; reasoningTokens?: number;
+    /**
+     * Deterministic code-smoke verification-gate signal (generic/local-model agent
+     * path only — the `claude -p` path has no such gate and never sets these).
+     * smokeRan=false means the gate never fired (no runnable files touched, or the
+     * harness was unavailable) — handleExit must not fabricate a verdict in that case.
+     */
+    smokeRan?: boolean;
+    smokeOk?: boolean;
+    smokeReport?: string;
+  };
 }
 
 export type AgentEventHandler = (taskId: string, event: StreamEvent) => void;
