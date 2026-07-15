@@ -166,6 +166,43 @@ test("probeChatDbAccess open_failed detail names the daemon, not a HiveMatrix ap
     assert.match(probe.detail, /daemon/i);
     assert.match(probe.detail, /Full Disk Access to "HiveMatrix".*does not cover/i);
     assert.doesNotMatch(probe.detail, /restart HiveMatrix/i);
+    // Names the exact daemon binary path for the user to grant FDA to.
+    assert.match(probe.detail, /Contents\/Resources\/daemon\/bin\/node/i);
+    // Instructs to restart the daemon after granting FDA.
+    assert.match(probe.detail, /restart the daemon/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("probeChatDbAccess transitions from failed to readable without cache persistence", () => {
+  // Regression: FDA granted to daemon binary + daemon restart should flip
+  // status to readable without the caller having to bust any cache. Each call
+  // to probeChatDbAccess should re-probe live, not return a cached stale result.
+  const dir = mkdtempSync(join(tmpdir(), "mb-state-change-"));
+  const path = join(dir, "chat.db");
+  try {
+    // Initially inaccessible (directory, not a valid DB file).
+    mkdirSync(path);
+    let probe = probeChatDbAccess(path);
+    assert.equal(probe.ok, false);
+    assert.equal(probe.reason, "open_failed");
+
+    // User grants FDA to daemon binary + daemon restarts.
+    // (Simulate this by replacing the inaccessible file with a valid one.)
+    rmSync(path, { recursive: true, force: true });
+    const db = new Database(path);
+    db.exec(`
+      CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, is_from_me INTEGER, date INTEGER);
+      INSERT INTO message (ROWID, text, is_from_me, date) VALUES (1, 'test', 0, 631152000000000000);
+    `);
+    db.close();
+
+    // Probe again — should succeed without any cache busting needed.
+    probe = probeChatDbAccess(path);
+    assert.equal(probe.ok, true, "probe should succeed after valid DB is in place");
+    assert.match(probe.detail, /readable/i);
+    assert.equal(canReadChatDb(path), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -8,6 +8,7 @@
 import { getDb, generateId } from "@/lib/db";
 import { handlesMatch, normalizeHandle } from "./contracts";
 import { isFeaturePermitted } from "@/lib/license/gates";
+import { currentMaxRowid } from "./imessage";
 
 const CHANNEL = "imessage";
 
@@ -242,4 +243,16 @@ export function upsertIdentity(address: string, status: IdentityStatus, displayN
        VALUES (?, ?, ?, ?, ?, CASE WHEN ? IN ('allowed','paired') THEN datetime('now') ELSE NULL END)`,
     ).run(generateId(), CHANNEL, norm, displayName ?? null, status, status);
   }
+}
+
+/** Reset the Message Lane high-water mark. Called after restoring message_identities
+ * from backup to prevent replaying old messages (backlog-replay safeguard). Sets to
+ * currentMaxRowid() so the poller treats only messages arriving AFTER the heal as new.
+ * `chatDbPathOverride` is a test seam (currentMaxRowid already accepts a path); prod
+ * callers pass nothing and read the real Messages database. */
+export function resetLastRowid(chatDbPathOverride?: string): void {
+  ensureChannel();
+  const meta = readMeta(getRow());
+  meta.lastRowid = chatDbPathOverride === undefined ? currentMaxRowid() : currentMaxRowid(chatDbPathOverride);
+  writeMeta(meta);
 }

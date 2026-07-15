@@ -109,3 +109,45 @@ test("frontier model access is required and reflects the onboarding step (Claude
   assert.equal(item(status.memory, "persona").state, "needs_action");
   assert.match(item(status.memory, "persona").detail, /birth ritual/i);
 });
+
+test("full disk access FDA-denied detail names the daemon binary path", () => {
+  // When chat.db is inaccessible due to FDA denial, the detail should clearly
+  // name the daemon binary path so the user knows exactly what to grant FDA to.
+  const status = buildFirstRunSetupStatus({
+    fullDiskAccessProbe: {
+      enabled: false,
+      chatDbReadable: false,
+      chatDbDetail: "Cannot open Messages database. The daemon that reads chat.db (Contents/Resources/daemon/bin/node) runs as its own separately-signed process, independent of the HiveMatrix app — granting Full Disk Access to \"HiveMatrix\" in System Settings does not cover it. Reveal the daemon binary in Finder and add it to Full Disk Access directly, then restart the daemon: operation not permitted",
+      chatDbProbeSkipped: false,
+      identities: [],
+      selfHandles: [],
+    },
+  });
+
+  const fullDiskAccess = item(status.permissions, "fullDiskAccess");
+  assert.equal(fullDiskAccess.state, "needs_action");
+  // The detail should pass through the daemon binary path and remediation steps.
+  assert.match(fullDiskAccess.detail, /Contents\/Resources\/daemon\/bin\/node/i);
+  assert.match(fullDiskAccess.detail, /Full Disk Access.*does not cover/i);
+  assert.match(fullDiskAccess.detail, /restart the daemon/i);
+});
+
+test("full disk access transitions to granted after daemon FDA is granted and restarted", () => {
+  // Regression: after the user grants FDA to the daemon binary and restarts it,
+  // the status should flip to 'granted' without any manual cache busting.
+  const status = buildFirstRunSetupStatus({
+    fullDiskAccessProbe: {
+      enabled: false,
+      chatDbReadable: true, // FDA granted to daemon + daemon restarted = readable
+      chatDbDetail: "Messages database readable",
+      chatDbProbeSkipped: false,
+      identities: [],
+      selfHandles: [],
+    },
+  });
+
+  const fullDiskAccess = item(status.permissions, "fullDiskAccess");
+  assert.equal(fullDiskAccess.state, "granted");
+  assert.match(fullDiskAccess.detail, /readable/i);
+  assert.equal(fullDiskAccess.action, undefined, "granted state should have no action");
+});

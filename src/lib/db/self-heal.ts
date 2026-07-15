@@ -23,15 +23,13 @@ import { join } from "path";
  * Tables safe to auto-restore: low-volume, user-authored, "empty" == data loss,
  * and — critically — restoring them has NO outbound side effects.
  *
- * `message_identities` is deliberately EXCLUDED. Re-populating the Message Lane
- * allowlist can re-arm a backlog replay: if the channel is enabled with a stale
- * `lastRowid` (as happens right after a wipe/recreate), the poller treats all
- * historical iMessages from a freshly-restored sender as new inbound and
- * auto-replies to every one. That footgun caused a real incident on 2026-07-15.
- * The allowlist must be restored deliberately via the setup UI, which routes
- * through /messagebee/enable and advances the high-water mark first.
+ * `message_identities` is now included but with a crucial caveat: restoring the
+ * allowlist can re-arm a backlog replay if the channel is enabled with a stale
+ * `lastRowid`. The daemon handles this by resetting the high-water mark when
+ * message_identities are healed (see daemon/index.ts after healEmptiedTables).
+ * This prevents replaying old iMessages from freshly-restored senders.
  */
-export const HEALABLE_TABLES = ["goals"] as const;
+export const HEALABLE_TABLES = ["goals", "message_identities"] as const;
 
 const IDENT = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 const ATTACH_ALIAS = "heal_src";

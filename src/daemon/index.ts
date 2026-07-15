@@ -70,6 +70,17 @@ async function main(): Promise<void> {
     const healed = healEmptiedTables({ db, backupsDir: backupsDir() });
     for (const h of healed) {
       console.warn(`[self-heal] restored ${h.restored} row(s) into ${h.table} from ${h.from}`);
+      // When message_identities are restored, reset the high-water mark to prevent
+      // replaying old iMessages from freshly-restored senders (backlog-replay guard).
+      if (h.table === "message_identities") {
+        try {
+          const { resetLastRowid } = await import("@/lib/messagebee/store");
+          resetLastRowid();
+          console.warn("[self-heal] Message Lane identities restored; reset high-water mark to prevent backlog replay");
+        } catch (err) {
+          console.error("[self-heal] failed to reset Message Lane high-water mark:", err instanceof Error ? err.message : err);
+        }
+      }
     }
   } catch (e) {
     console.error("[self-heal] failed:", e instanceof Error ? e.message : e);

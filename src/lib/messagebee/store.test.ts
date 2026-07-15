@@ -70,3 +70,94 @@ test("blocked identities match the blocklist without becoming allowlisted", () =
   assert.equal(store.isBlocked("4083967431"), false, "status changes remove block behavior");
   assert.equal(store.isAllowed("4083967431"), true, "same identity can be allowed later");
 });
+
+test("resetLastRowid: resets high-water mark to currentMaxRowid to guard against backlog replay after restore", async () => {
+  const { currentMaxRowid } = await import("./imessage");
+
+  // Simulate pre-update state: identities are allowed and lastRowid is tracked.
+  store.upsertIdentity("+15551234567", "allowed", "Alice");
+  store.setLastRowid(12345);
+  assert.equal(store.getLastRowid(), 12345, "lastRowid set to 12345");
+  assert.equal(store.isAllowed("+15551234567"), true, "identity is allowed");
+
+  // Simulate post-restore: identities have been healed but we need to reset the
+  // high-water mark to prevent replaying old messages from freshly-restored senders.
+  // The high-water mark should be set to currentMaxRowid() so the poller (readInboundSince
+  // with WHERE m.ROWID > since) treats only messages arriving AFTER the heal as new.
+  store.resetLastRowid();
+  const expected = currentMaxRowid();
+  assert.equal(store.getLastRowid(), expected, `high-water mark reset to currentMaxRowid (${expected})`);
+  assert.equal(store.isAllowed("+15551234567"), true, "identities still present and allowed");
+});
+
+test("self-handles persist in ChannelMeta across message_channels table state changes", () => {
+  // Set up self-handles in the channel metadata.
+  store.setSelfHandles(["+15136595163", "cassio@example.com"]);
+  let handles = store.getSelfHandles();
+  assert.equal(handles.length, 2, "self-handles set");
+
+  // Simulate message_channels table being recreated (e.g., by a migration).
+  // The metadata should still contain the self-handles.
+  const db = getDb();
+  const channelRow = db.prepare("SELECT _id, metadata FROM message_channels WHERE channel = 'imessage'").get() as
+    | { _id: string; metadata: string }
+    | undefined;
+  assert(channelRow, "channel row exists");
+  const meta = JSON.parse(channelRow.metadata) as { selfHandles?: string[] };
+  assert.deepEqual(meta.selfHandles, handles, "self-handles persisted in metadata JSON");
+
+  // Verify the handles are still readable via the API.
+  handles = store.getSelfHandles();
+  assert.equal(handles.length, 2);
+  assert.equal(store.isSelf("+15136595163"), true);
+  assert.equal(store.isSelf("cassio@example.com"), true);
+});
+
+test("poller-level regression: no historical messages routed after message_identities self-heal", async () => {
+  const { readInboundSince, currentMaxRowid: getMaxRowid } = await import("./imessage");
+  const Database = (await import("better-sqlite3")).default;
+  const { mkdtempSync, mkdirSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+
+  // Create a temporary chat.db with test messages.
+  const dir = mkdtempSync(join(tmpdir(), "mb-heal-test-"));
+  const chatPath = join(dir, "chat.db");
+  try {
+    const db = new Database(chatPath);
+    db.exec(`
+      CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
+      CREATE TABLE message (
+        ROWID INTEGER PRIMARY KEY, text TEXT, is_from_me INTEGER,
+        date INTEGER, handle_id INTEGER, service TEXT
+      );
+      CREATE TABLE attachment (ROWID INTEGER PRIMARY KEY, filename TEXT);
+      CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
+      INSERT INTO handle (ROWID, id) VALUES (1, '+15551234567');
+      INSERT INTO message (ROWID, text, is_from_me, date, handle_id, service) VALUES
+        (10, 'old message before heal', 0, 631152000000000000, 1, 'iMessage'),
+        (20, 'new message after heal', 0, 631152010000000000, 1, 'iMessage');
+    `);
+    db.close();
+
+    // Before heal: lastRowid is old (e.g., from a prior session)
+    store.setLastRowid(5);
+    assert.equal(store.getLastRowid(), 5, "lastRowid set to old value (5)");
+
+    // Simulate heal: identities restored, reset the high-water mark.
+    // Point resetLastRowid at the temp chat.db (prod reads the real Messages DB).
+    store.resetLastRowid(chatPath);
+    const afterHealRowid = store.getLastRowid();
+    const maxRowid = getMaxRowid(chatPath);
+    assert.equal(afterHealRowid, maxRowid, `after heal, lastRowid equals currentMaxRowid (${maxRowid})`);
+
+    // Poller uses lastRowid as the cutoff: readInboundSince(lastRowid)
+    // should NOT return historical messages (ROWID <= maxRowid at heal time).
+    // Since maxRowid is 20 after heal, readInboundSince(20) should return only
+    // messages with ROWID > 20, i.e., nothing (the heal happened at max, so no new arrivals yet).
+    const { messages } = readInboundSince(afterHealRowid, 50, chatPath);
+    assert.deepEqual(messages, [], "poller returns no historical messages after heal (afterHealRowid = maxRowid)");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
