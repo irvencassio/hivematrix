@@ -429,6 +429,13 @@ test("POST /onboarding/setup/mail-automation/probe checks Apple Mail Automation 
 });
 
 test("POST /onboarding/setup/desktop-permissions/request asks helper to prompt for permissions", async (t) => {
+  // buildFirstRunSetupResponse() (invoked by this route) unconditionally calls
+  // getMessagebeeStatus()/getMailbeeStatus(), which reach isChannelEnabled() ->
+  // getDb() regardless of which opts flag triggered the route — same isolation
+  // this file's mail-automation/probe and full-disk-access/probe tests already
+  // use. See docs/superpowers/specs/2026-07-15-goals-data-loss-design.md §2.1.
+  withTempHome(t);
+
   const originalFetch = globalThis.fetch;
   const helperRequests: unknown[] = [];
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {

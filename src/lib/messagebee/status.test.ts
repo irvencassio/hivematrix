@@ -1,7 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { getMessagebeeStatus, _setMessagebeeStatusDepsForTests } from "./status";
 import type { ChatDbAccessProbe } from "./imessage";
+
+// getMessagebeeStatus() -> isChannelEnabled() reaches getDb(); isolate before
+// the test calls it — see docs/superpowers/specs/2026-07-15-goals-data-loss-design.md
+// §2.1 (this file was a transitive-caller gap the prod-DB guard surfaced).
+const TMP = mkdtempSync(join(tmpdir(), "hm-mbstatus-test-"));
+process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
+
+test.after(async () => {
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  delete process.env.HIVEMATRIX_DB_PATH;
+  rmSync(TMP, { recursive: true, force: true });
+});
 
 test("getMessagebeeStatus re-probes on each call (no caching)", () => {
   // Regression: ensure that getMessagebeeStatus doesn't cache a stale
