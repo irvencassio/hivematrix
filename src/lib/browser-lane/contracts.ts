@@ -25,6 +25,7 @@ export interface BrowserSite {
   profileRef: string | null;
   authStrategy: "manual_session" | "keychain_password" | "google_sso" | "microsoft_sso";
   providerAccount: string | null;
+  accessMode: "readwrite" | "readonly";
   notes: string;
   createdAt: string | null;
   updatedAt: string | null;
@@ -140,6 +141,7 @@ export function normalizeBrowserSite(input: unknown): BrowserSite {
     profileRef: readString(record, "profileRef", { required: false }),
     authStrategy: normalizeEnum(record.authStrategy, ["manual_session", "keychain_password", "google_sso", "microsoft_sso"] as const, "manual_session", "authStrategy"),
     providerAccount: readString(record, "providerAccount", { required: false }),
+    accessMode: normalizeEnum(record.accessMode, ["readwrite", "readonly"] as const, "readwrite", "accessMode"),
     notes: readString(record, "notes", { required: false, allowEmpty: true }) ?? "",
     createdAt: readString(record, "createdAt", { required: false }),
     updatedAt: readString(record, "updatedAt", { required: false }),

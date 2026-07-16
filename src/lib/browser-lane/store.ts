@@ -20,6 +20,7 @@ interface BrowserSiteRow {
   profileRef: string | null;
   authStrategy: BrowserSite["authStrategy"];
   providerAccount: string | null;
+  accessMode: string;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -85,6 +86,7 @@ export interface BrowserSiteSummary {
   credentialRef: string | null;
   authStrategy: BrowserSite["authStrategy"];
   providerAccount: string | null;
+  accessMode: BrowserSite["accessMode"];
   status: string;
   probeCount: number;
   createdAt: string | null;
@@ -121,8 +123,8 @@ export function upsertBrowserSite(input: unknown): BrowserSite {
   const db = getDb();
   const isFirstSite = (db.prepare(`SELECT COUNT(*) AS count FROM browser_sites`).get() as { count: number }).count === 0;
   db.prepare(`
-    INSERT INTO browser_sites (_id, displayName, homeUrl, loginUrl, allowedDomains, profileRef, authStrategy, providerAccount, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO browser_sites (_id, displayName, homeUrl, loginUrl, allowedDomains, profileRef, authStrategy, providerAccount, accessMode, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(_id) DO UPDATE SET
       displayName = excluded.displayName,
       homeUrl = excluded.homeUrl,
@@ -131,6 +133,7 @@ export function upsertBrowserSite(input: unknown): BrowserSite {
       profileRef = excluded.profileRef,
       authStrategy = excluded.authStrategy,
       providerAccount = excluded.providerAccount,
+      accessMode = excluded.accessMode,
       notes = excluded.notes,
       updatedAt = datetime('now')
   `).run(
@@ -142,6 +145,7 @@ export function upsertBrowserSite(input: unknown): BrowserSite {
     site.profileRef,
     site.authStrategy,
     site.providerAccount,
+    site.accessMode,
     site.notes,
   );
 
@@ -223,6 +227,7 @@ export function listBrowserSiteSummaries(filter: { siteId?: string | null } = {}
       credentialRef: site.credentialRef,
       authStrategy: site.authStrategy,
       providerAccount: site.providerAccount,
+      accessMode: site.accessMode,
       status: row.status,
       probeCount: Number(row.probeCount ?? 0),
       createdAt: site.createdAt,
@@ -613,6 +618,7 @@ function rowToSite(row: BrowserSiteRow): BrowserSite {
     profileRef: row.profileRef,
     authStrategy: row.authStrategy,
     providerAccount: row.providerAccount ?? null,
+    accessMode: row.accessMode,
     notes: row.notes,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

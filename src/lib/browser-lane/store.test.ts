@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, before } from "node:test";
 
+import { ContractValidationError } from "@/lib/central/contracts";
+
 const TMP = mkdtempSync(join(tmpdir(), "hivematrix-browser-lane-store-"));
 process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
@@ -19,6 +21,7 @@ const {
   recordBrowserReadinessRun,
   upsertBrowserReadinessProbe,
   upsertBrowserSite,
+  getBrowserSite,
   listBrowserSiteSummaries,
   getBrowserLaneReadinessDashboard,
   matchBrowserSiteReadiness,
@@ -293,4 +296,57 @@ test("recordManualReadiness writes an honest operator-asserted run", () => {
   assert.equal(metadata.note, "session expired");
 
   assert.throws(() => recordManualReadiness({ siteId: "heygen-sso", state: "totally-bogus" as never }), /state/i);
+});
+
+// ── accessMode (Canopy-parity read/write permission — 2026-07-16) ───────────
+//
+// browser_sites.accessMode mirrors terminal_profiles.accessMode (v32) verbatim:
+// TEXT NOT NULL DEFAULT 'readwrite', values readwrite|readonly. Not implemented
+// yet — see docs/superpowers/specs/2026-07-16-browser-lane-canopy-parity-design.md.
+
+test("upsertBrowserSite round-trips accessMode through getBrowserSite and listBrowserSiteSummaries", () => {
+  upsertBrowserSite({
+    id: "readonly-site",
+    displayName: "Readonly Site",
+    homeUrl: "https://readonly-site.example.com/home",
+    allowedDomains: ["readonly-site.example.com"],
+    accessMode: "readonly",
+  } as never);
+
+  const site = getBrowserSite("readonly-site");
+  assert.ok(site);
+  assert.equal(site!.accessMode, "readonly");
+
+  const summary = listBrowserSiteSummaries({ siteId: "readonly-site" })[0];
+  assert.ok(summary);
+  assert.equal(summary.accessMode, "readonly");
+});
+
+test("upsertBrowserSite defaults accessMode to readwrite when omitted", () => {
+  upsertBrowserSite({
+    id: "default-access-site",
+    displayName: "Default Access Site",
+    homeUrl: "https://default-access.example.com/home",
+    allowedDomains: ["default-access.example.com"],
+  });
+
+  const site = getBrowserSite("default-access-site");
+  assert.ok(site);
+  assert.equal(site!.accessMode, "readwrite");
+
+  const summary = listBrowserSiteSummaries({ siteId: "default-access-site" })[0];
+  assert.equal(summary.accessMode, "readwrite");
+});
+
+test("upsertBrowserSite rejects an invalid accessMode value", () => {
+  assert.throws(
+    () => upsertBrowserSite({
+      id: "bad-access-site",
+      displayName: "Bad Access Site",
+      homeUrl: "https://bad-access.example.com/home",
+      allowedDomains: ["bad-access.example.com"],
+      accessMode: "super-admin",
+    } as never),
+    ContractValidationError,
+  );
 });

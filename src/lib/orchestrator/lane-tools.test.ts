@@ -1,9 +1,9 @@
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ConnectivityPolicy } from "@/lib/connectivity/policy";
+import { ConnectivityPolicy, getConnectivityPolicy } from "@/lib/connectivity/policy";
 import {
   isLaneTool, availableLaneTools, executeLaneTool, LANE_TOOL_DEFINITIONS, resolveLaneToolName,
   capabilityRoutingGuide, executeMailBeeSend, executeMailBeeDraft, executeMessageBeeSend,
@@ -23,11 +23,21 @@ const SKILL_HOME = join(SKILL_TMP, "home");
 const SKILL_BRAIN = join(SKILL_TMP, "brain");
 mkdirSync(join(SKILL_HOME, ".hivematrix"), { recursive: true });
 writeFileSync(join(SKILL_HOME, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: SKILL_BRAIN } }));
+// A fake Codex api-key auth file so resolveBrowserBeeBacking() (called inside
+// executeBrowserBeeRun) picks the codex_computer_use backing in the Browser
+// Lane accessMode-gating tests below, without depending on this machine's
+// real ~/.codex/auth.json state. See resolveBrowserBeeBacking in
+// browser-lane/jobs.ts: api-key auth short-circuits straight to that backing
+// — the minimal path to a live (stubbed-network) dispatch.
+mkdirSync(join(SKILL_HOME, ".codex"), { recursive: true });
+writeFileSync(join(SKILL_HOME, ".codex", "auth.json"), JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: "sk-test-browser-lane-gating", tokens: {} }));
 const origHome = process.env.HOME;
 process.env.HOME = SKILL_HOME;
 
 const { upsertSkill, readSkill } = await import("@/lib/skills/store");
 const { setAutonomyLevel } = await import("@/lib/config/autonomy");
+const { upsertBrowserSite } = await import("@/lib/browser-lane/store");
+const { readAudit } = await import("@/lib/audit/audit");
 
 test.afterEach(() => {
   setAutonomyLevel("standard"); // restore the default between tests
@@ -263,6 +273,146 @@ test("executeLaneTool rejects removed BrowserBee/WebBee aliases", async () => {
     await executeLaneTool("browserbee_run", { objective: "x" }, { projectPath: "/tmp", project: "ops", requestedBy: "test" }),
     /Unknown lane tool/,
   );
+});
+
+// ── Browser Lane accessMode gating + actorKind stamping (Canopy parity,
+//    2026-07-16) ─────────────────────────────────────────────────────────────
+//
+// Not implemented yet — see
+// docs/superpowers/specs/2026-07-16-browser-lane-canopy-parity-design.md.
+// executeBrowserBeeRun/executeBrowserLaneRead are not exported, so these tests
+// go through the public executeLaneTool("hivematrix_browser", ...) entry
+// point exactly like every other lane in this file. The outer capability gate
+// (LANE_TOOL_CAPABILITY.hivematrix_browser === "browserbee") is only
+// available in cloud-ok connectivity mode, so each test forces that via the
+// getConnectivityPolicy() singleton and restores it afterward.
+
+function browserCtx(actorKind: "agent" | "human" = "agent", requestedBy = "browser-lane-test"): LaneToolContext {
+  // actorKind does not exist on LaneToolContext yet (Task 4) — cast forward to
+  // the intended future shape rather than widening the real interface here.
+  return { projectPath: "/tmp", project: "ops", requestedBy, actorKind } as LaneToolContext;
+}
+
+/**
+ * Stubs the daemon loopback POST /tasks (Browser Lane job creation) and the
+ * Browser Lane read service's POST /answer, so these tests never depend on a
+ * real daemon or a real Browser Lane app running on this machine. Mirrors the
+ * globalThis.fetch stubbing idiom in src/daemon/server.test.ts.
+ */
+function installBrowserLaneFetchStub(t: TestContext, taskId = "task-stub"): { dispatched: string[] } {
+  const dispatched: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const url = String(input);
+    if (url.endsWith("/tasks") && init?.method === "POST") {
+      dispatched.push(taskId);
+      return new Response(JSON.stringify({ _id: taskId, title: "Browser Lane stub task" }), { status: 200 });
+    }
+    if (url.endsWith("/answer") && init?.method === "POST") {
+      return new Response(JSON.stringify({
+        status: "failed", answer: null, citations: [], confidence: 0, freshnessVerifiedAt: null,
+        escalation: { needed: false, reason: null }, artifacts: [], errorCode: "stubbed_no_read_service",
+      }), { status: 200 });
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  return { dispatched };
+}
+
+test("executeBrowserBeeRun blocks form_fill against a readonly-access site and never dispatches", async (t) => {
+  getConnectivityPolicy().setManualOverride("cloud-ok");
+  t.after(() => getConnectivityPolicy().setManualOverride(null));
+  const { dispatched } = installBrowserLaneFetchStub(t, "task-should-not-exist");
+
+  upsertBrowserSite({
+    id: "readonly-crm-a",
+    displayName: "Readonly CRM A",
+    homeUrl: "https://readonly-crm-a.example.com/home",
+    allowedDomains: ["readonly-crm-a.example.com"],
+    accessMode: "readonly",
+  } as never);
+
+  const out = await executeLaneTool("hivematrix_browser", {
+    mode: "workflow",
+    objective: "Fill out the lead intake form",
+    startUrl: "https://readonly-crm-a.example.com/leads/new",
+    jobType: "form_fill",
+  }, browserCtx());
+
+  assert.match(out, /Error/, "a write-shaped job against a read-only site must be refused");
+  assert.match(out, /read-only/i, "the refusal must name the reason as read-only access");
+  assert.match(out, /Readonly CRM A/, "the refusal must name the site");
+  assert.equal(dispatched.length, 0, "a read-only site must never reach task dispatch for a write-shaped job");
+});
+
+test("executeBrowserBeeRun allows authenticated_research against a readonly-access site and stamps actorKind", async (t) => {
+  getConnectivityPolicy().setManualOverride("cloud-ok");
+  t.after(() => getConnectivityPolicy().setManualOverride(null));
+  const { dispatched } = installBrowserLaneFetchStub(t, "task-readonly-research-1");
+
+  upsertBrowserSite({
+    id: "readonly-crm-b",
+    displayName: "Readonly CRM B",
+    homeUrl: "https://readonly-crm-b.example.com/home",
+    allowedDomains: ["readonly-crm-b.example.com"],
+    accessMode: "readonly",
+  } as never);
+
+  const out = await executeLaneTool("hivematrix_browser", {
+    mode: "workflow",
+    objective: "Research the account history",
+    startUrl: "https://readonly-crm-b.example.com/accounts/42",
+    jobType: "authenticated_research",
+  }, browserCtx("agent"));
+
+  assert.match(out, /Created Browser Lane task/, "a read-shaped job must still be allowed on a read-only site");
+  assert.equal(dispatched.length, 1);
+
+  const entry = readAudit({ event: "browser:job_created" }).find((e) => e.taskId === "task-readonly-research-1");
+  assert.ok(entry, "the dispatch must be audited");
+  assert.equal(entry!.actorKind, "agent");
+});
+
+test("executeBrowserBeeRun allows form_fill against a readwrite-access site and stamps actorKind", async (t) => {
+  getConnectivityPolicy().setManualOverride("cloud-ok");
+  t.after(() => getConnectivityPolicy().setManualOverride(null));
+  const { dispatched } = installBrowserLaneFetchStub(t, "task-readwrite-formfill-1");
+
+  upsertBrowserSite({
+    id: "readwrite-crm-c",
+    displayName: "Readwrite CRM C",
+    homeUrl: "https://readwrite-crm-c.example.com/home",
+    allowedDomains: ["readwrite-crm-c.example.com"],
+    accessMode: "readwrite",
+  } as never);
+
+  const out = await executeLaneTool("hivematrix_browser", {
+    mode: "workflow",
+    objective: "Fill out the lead intake form",
+    startUrl: "https://readwrite-crm-c.example.com/leads/new",
+    jobType: "form_fill",
+  }, browserCtx("agent"));
+
+  assert.match(out, /Created Browser Lane task/, "a write-shaped job on a readwrite site must be allowed");
+  assert.equal(dispatched.length, 1);
+
+  const entry = readAudit({ event: "browser:job_created" }).find((e) => e.taskId === "task-readwrite-formfill-1");
+  assert.ok(entry, "the dispatch must be audited");
+  assert.equal(entry!.actorKind, "agent");
+});
+
+test("executeBrowserLaneRead stamps actorKind onto its browser:read audit entry", async (t) => {
+  getConnectivityPolicy().setManualOverride("cloud-ok");
+  t.after(() => getConnectivityPolicy().setManualOverride(null));
+  installBrowserLaneFetchStub(t);
+
+  const marker = "actorKind-read-probe unique marker";
+  await executeLaneTool("hivematrix_browser", { mode: "read", query: marker }, browserCtx("human", "browser-lane-read-test"));
+
+  const entry = readAudit({ event: "browser:read" }).find((e) => e.prompt === marker);
+  assert.ok(entry, "the read must be audited");
+  assert.equal(entry!.actorKind, "human");
 });
 
 // ── Outbound safety: the trust/allowlist gate lives inside the tool ───────────

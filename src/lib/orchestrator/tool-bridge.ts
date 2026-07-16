@@ -284,6 +284,10 @@ export async function executeTool(
             project: context?.parentProject ?? "ops",
             requestedBy: context?.parentTaskId ? `task:${context.parentTaskId}` : "hive",
             runId: context?.runId,
+            // This bridge runs inside the unattended task-execution agent loop
+            // (generic-agent.ts) — always autonomous dispatch, never a live
+            // human turn.
+            actorKind: "agent",
           });
         }
         return `Error: Unknown tool "${name}"`;

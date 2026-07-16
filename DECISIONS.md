@@ -1407,3 +1407,49 @@ agent-code self-rewriting.
 voice-origin). Full pipeline unit-tested with stubbed mint/critic (fake claude via
 `_setExecFileForTests`). Design + plan: `docs/superpowers/specs/2026-07-11-self-learning-design.md`,
 `docs/superpowers/plans/2026-07-11-self-learning.md`.
+
+## Q20 — Browser Lane read/write permission + Canopy-parity activity log filters (2026-07-16)
+
+**Decision.** Browser Lane sites gain a real read/write permission gate, and the
+existing audit trail gains the filters a Canopy-parity History Panel needs.
+`browser_sites.accessMode` (`readwrite` default | `readonly`) mirrors
+`terminal_profiles.accessMode` (v32) verbatim — same column name, same values,
+same default. `executeBrowserBeeRun()` now enforces it: a `readonly` site
+refuses write-shaped `jobType` values (`form_fill`, `site_ops`) before any
+dispatch, while read-shaped jobs (`authenticated_research`, `capture`,
+`triage`) stay always-allowed; the lower-level `credential_fill` action type
+was already unconditionally refused by the read-only `agent_browser` adapter
+(`adapters/agent-browser.ts`) and is untouched here. `AuditEntry` gains an
+explicit `actorKind: "agent" | "human"` field — set at each
+`LaneToolContext`-construction call site rather than inferred from the
+free-text `requestedBy` string, which is fragile — and `readAudit()` gains
+`actorKind`/`target` (substring)/`eventPrefix`/`since`/`until` filters, purely
+additive to `ReadAuditOptions`. A new `GET /browser-lane/history` route scopes
+`readAudit` to `browser:*` events for the native app's History Panel; `GET
+/audit` grows the same query params. Design:
+`docs/superpowers/specs/2026-07-16-browser-lane-canopy-parity-design.md`.
+
+**Code.** `src/lib/db/index.ts` (migration v44); `src/lib/browser-lane/contracts.ts`
+(`BrowserSite.accessMode`, `normalizeBrowserSite`); `src/lib/browser-lane/store.ts`
+(`upsertBrowserSite`, `rowToSite`, `listBrowserSiteSummaries`, `BrowserSiteRow`/
+`BrowserSiteSummary`); `src/lib/audit/audit.ts` (`AuditEntry.actorKind`,
+`ReadAuditOptions`, `readAudit` filters); `src/daemon/server.ts` (`GET /audit`
+params, new `GET /browser-lane/history`); `src/lib/orchestrator/lane-tools.ts`
+(`jobType` forwarded into `parseBrowserBeeJobCreate`, the access-mode gate in
+`executeBrowserBeeRun`, `LaneToolContext.actorKind`, `actorKind` threaded into
+both Browser Lane `recordAudit` calls, and every `LaneToolContext` construction
+site classified: `daemon/server.ts`'s `/bee/:tool` and `/lane/browser` routes
+and `orchestrator/tool-bridge.ts`'s `executeTool` — all autonomous
+task-execution paths — as `"agent"`; `flash/loop.ts`'s live conversational
+turn as `"human"`).
+
+**Complexity accounting (Q14 budget).** New product concepts: **0**. New
+persistent stores: **0** — one `ALTER TABLE browser_sites` inside the
+sanctioned `db/index.ts`, mirroring `terminal_profiles.accessMode` (v32)
+verbatim. New modules: **0** — every change is an edit to an existing file.
+Reused rather than rebuilt: `audit.ts`'s existing `actor` field and JSONL log
+(this only adds `actorKind` alongside it), the existing `POST
+/browser-lane/readiness/mark` endpoint (untouched — still the logout/mark-reauth
+primitive), the `browser_sites` table (one additive column), and
+`matchBrowserSiteReadiness()` (the access-mode gate resolves the target site
+through the existing domain matcher plus `getBrowserSite()`, not a new lookup).

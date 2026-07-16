@@ -840,6 +840,12 @@ const MIGRATIONS: Migration[] = [
   // left null on paths with no such signal (e.g. `claude -p`) rather than
   // fabricated.
   m("v43", `ALTER TABLE tasks ADD COLUMN verification TEXT DEFAULT NULL;`),
+
+  // v44: Browser Lane per-site access mode (readwrite default | readonly),
+  // mirroring terminal_profiles.accessMode (v32) verbatim. Enforced in
+  // executeBrowserBeeRun() (lane-tools.ts): readonly sites refuse write-shaped
+  // jobType values (form_fill, site_ops) while read-shaped jobs stay allowed.
+  m("v44", `ALTER TABLE browser_sites ADD COLUMN accessMode TEXT NOT NULL DEFAULT 'readwrite';`),
 ];
 
 // ------------------------------------------------------------------

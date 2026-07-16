@@ -467,6 +467,8 @@ export interface LaneToolContext {
   requestedBy: string;
   /** Optional run/directive ID for idempotent send guards. */
   runId?: string;
+  /** Whether an autonomous agent or a human triggered this dispatch — stamped onto audit entries. */
+  actorKind?: "agent" | "human";
 }
 
 /** Dispatch a bee tool call. Always enforces the capability gate first. */
@@ -1062,7 +1064,7 @@ async function executeBrowserLaneRead(args: Record<string, unknown>, ctx: LaneTo
   // Compliance/identity audit — Canopy parity: every Browser Lane read is on the
   // trail with the requesting identity, never the answer text (only the query).
   const audit = (status: string, target?: string): void =>
-    recordAudit({ ts: "", event: "browser:read", actor: ctx.requestedBy, project: ctx.project, prompt: query, target, status });
+    recordAudit({ ts: "", event: "browser:read", actor: ctx.requestedBy, actorKind: ctx.actorKind, project: ctx.project, prompt: query, target, status });
 
   const { requestBrowserLaneRead } = await import("@/lib/browser-lane/read-client");
   try {
@@ -1130,10 +1132,26 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: LaneTool
       requestedBy: ctx.requestedBy,
       requiresLogin: args.requiresLogin,
       steps: args.steps,
+      jobType: args.jobType,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return `Error: invalid Browser Lane request — ${msg}`;
+  }
+
+  // Access-mode gate: a readonly-access site (browser_sites.accessMode, set via
+  // the site picker) refuses write-shaped jobs — form_fill, site_ops — before
+  // any dispatch/task-creation happens below. Read-shaped jobs
+  // (authenticated_research, capture, triage) stay always-allowed. Reuses the
+  // existing domain-to-site matcher rather than a new lookup algorithm.
+  // See DECISIONS.md Q20.
+  if (payload.jobType === "form_fill" || payload.jobType === "site_ops") {
+    const { matchBrowserSiteReadiness, getBrowserSite } = await import("@/lib/browser-lane/store");
+    const match = matchBrowserSiteReadiness(payload.allowedDomains);
+    const site = match.matched && match.siteId ? getBrowserSite(match.siteId) : null;
+    if (site?.accessMode === "readonly") {
+      return `Error: ${site.displayName} is configured read-only — the ${payload.jobType} job type would write to the site, which is refused. Switch its access mode to read-write in Browser Lane settings if this action is intended.`;
+    }
   }
 
   // Decide which engine drives the browser. Codex Computer Use is preferred;
@@ -1196,7 +1214,7 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: LaneTool
     // Audit the dispatch itself (start URL, login requirement, backing engine,
     // requesting identity) — not just the eventual task_completed record.
     recordAudit({
-      ts: "", event: "browser:job_created", actor: ctx.requestedBy, project: payload.project,
+      ts: "", event: "browser:job_created", actor: ctx.requestedBy, actorKind: ctx.actorKind, project: payload.project,
       taskId: task._id, target: payload.startUrl,
       summary: `${payload.title} — ${laneLabel}${payload.requiresLogin ? " (login required)" : ""}`,
       status: "created",

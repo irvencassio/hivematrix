@@ -35,6 +35,8 @@ export interface AuditEntry {
    * id. Never a secret value (scrubbed like every other field).
    */
   target?: string;
+  /** Whether an autonomous agent or a human triggered this action — drives the History Panel's Agent/Human filter. */
+  actorKind?: "agent" | "human";
 }
 
 export interface RecordAuditOptions {
@@ -79,6 +81,11 @@ export interface ReadAuditOptions {
   taskId?: string;
   status?: string;
   event?: string;
+  actorKind?: "agent" | "human";
+  target?: string;
+  eventPrefix?: string;
+  since?: string;
+  until?: string;
 }
 
 /** Read recent audit entries (newest first) across daily files, filtered. */
@@ -100,6 +107,11 @@ export function readAudit(opts: ReadAuditOptions = {}): AuditEntry[] {
         if (opts.taskId && e.taskId !== opts.taskId) continue;
         if (opts.status && e.status !== opts.status) continue;
         if (opts.event && e.event !== opts.event) continue;
+        if (opts.actorKind && e.actorKind !== opts.actorKind) continue;
+        if (opts.target && !e.target?.toLowerCase().includes(opts.target.toLowerCase())) continue;
+        if (opts.eventPrefix && !e.event.startsWith(opts.eventPrefix)) continue;
+        if (opts.since && e.ts < opts.since) continue;
+        if (opts.until && e.ts > opts.until) continue;
         out.push(e);
       } catch { /* skip malformed line */ }
     }

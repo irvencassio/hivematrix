@@ -2422,6 +2422,9 @@ export function createDaemonServer() {
           project: typeof body.project === "string" ? body.project : "ops",
           requestedBy: "cli",
           runId: typeof body.runId === "string" ? body.runId : undefined,
+          // Reached by CLI task executors (Claude Code/Codex) running an
+          // unattended background task, not a literal human terminal session.
+          actorKind: "agent",
         });
         json(res, result.startsWith("Error") ? 400 : 200, { ok: !result.startsWith("Error"), result });
         return;
@@ -2469,6 +2472,9 @@ export function createDaemonServer() {
           project: typeof body.project === "string" ? body.project : "ops",
           requestedBy: "cli",
           runId: typeof body.runId === "string" ? body.runId : undefined,
+          // Reached by CLI task executors (Claude Code/Codex) running an
+          // unattended background task, not a literal human terminal session.
+          actorKind: "agent",
         });
         json(res, result.startsWith("Error") ? 400 : 200, { ok: !result.startsWith("Error"), result });
         return;
@@ -2667,6 +2673,26 @@ export function createDaemonServer() {
         const q = new URLSearchParams((req.url ?? "").split("?")[1] ?? "");
         const dashboard = getBrowserLaneReadinessDashboard({ siteId: q.get("siteId"), staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours });
         json(res, 200, { ok: true, ...dashboard });
+        return;
+      }
+
+      // GET /browser-lane/history — Canopy-parity activity log for the native
+      // app's History Panel: audit entries scoped to browser:* events, newest
+      // first, filterable by ?actorKind=&target=&since=&until=&limit= (mirrors
+      // GET /audit's limit-parsing pattern). Never returns secrets.
+      if (req.method === "GET" && urlPath === "/browser-lane/history") {
+        const { readAudit } = await import("@/lib/audit/audit");
+        const q = parseQueryString(req.url ?? "");
+        const limit = parseInt(q.limit ?? "", 10);
+        const entries = readAudit({
+          eventPrefix: "browser:",
+          actorKind: q.actorKind === "agent" || q.actorKind === "human" ? q.actorKind : undefined,
+          target: q.target || undefined,
+          since: q.since || undefined,
+          until: q.until || undefined,
+          limit: Number.isFinite(limit) && limit > 0 ? Math.min(limit, 5000) : undefined,
+        });
+        json(res, 200, { ok: true, entries });
         return;
       }
 
@@ -3582,7 +3608,8 @@ export function createDaemonServer() {
       }
 
       // GET /audit — compliance trail (prompt + outcome + diff), newest first,
-      // filterable by ?taskId=&status=&event=&limit=. Never returns secrets.
+      // filterable by ?taskId=&status=&event=&actorKind=&target=&eventPrefix=&since=&until=&limit=.
+      // Never returns secrets.
       if (req.method === "GET" && urlPath === "/audit") {
         const { readAudit } = await import("@/lib/audit/audit");
         const q = parseQueryString(req.url ?? "");
@@ -3592,6 +3619,11 @@ export function createDaemonServer() {
             taskId: q.taskId || undefined,
             status: q.status || undefined,
             event: q.event || undefined,
+            actorKind: q.actorKind === "agent" || q.actorKind === "human" ? q.actorKind : undefined,
+            target: q.target || undefined,
+            eventPrefix: q.eventPrefix || undefined,
+            since: q.since || undefined,
+            until: q.until || undefined,
             limit: Number.isFinite(limit) && limit > 0 ? Math.min(limit, 5000) : undefined,
           }),
         });

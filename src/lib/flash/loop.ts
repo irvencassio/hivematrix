@@ -575,6 +575,9 @@ export async function runFlashAgentLoop(
     projectPath: brainRoot ?? homedir(),
     project: "hivematrix",
     requestedBy: `flash:${sessionId}`,
+    // Flash is HiveMatrix's live conversational voice/chat turn handler —
+    // interactive-origin dispatch.
+    actorKind: "human",
   };
 
   // Curated skills-as-tools: fetched once per turn (async skill-library read)

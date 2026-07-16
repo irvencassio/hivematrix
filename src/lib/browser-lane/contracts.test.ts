@@ -65,6 +65,51 @@ test("browser site rejects inline secret-looking values", () => {
   );
 });
 
+// ── accessMode (Canopy-parity read/write permission — 2026-07-16) ───────────
+//
+// Not implemented yet — see
+// docs/superpowers/specs/2026-07-16-browser-lane-canopy-parity-design.md.
+// Mirrors terminal_profiles.accessMode: readwrite|readonly, default readwrite.
+
+test("browser site accepts and defaults accessMode, rejecting invalid values via normalizeEnum", () => {
+  const readonlySite = normalizeBrowserSite({
+    id: "readonly-site",
+    displayName: "Readonly Site",
+    homeUrl: "https://readonly-site.example.com/home",
+    allowedDomains: ["readonly-site.example.com"],
+    accessMode: "readonly",
+  });
+  assert.equal(readonlySite.accessMode, "readonly");
+
+  const readwriteSite = normalizeBrowserSite({
+    id: "readwrite-site",
+    displayName: "Readwrite Site",
+    homeUrl: "https://readwrite-site.example.com/home",
+    allowedDomains: ["readwrite-site.example.com"],
+    accessMode: "readwrite",
+  });
+  assert.equal(readwriteSite.accessMode, "readwrite");
+
+  const defaultSite = normalizeBrowserSite({
+    id: "default-site",
+    displayName: "Default Site",
+    homeUrl: "https://default-site.example.com/home",
+    allowedDomains: ["default-site.example.com"],
+  });
+  assert.equal(defaultSite.accessMode, "readwrite");
+
+  assert.throws(
+    () => normalizeBrowserSite({
+      id: "bad-site",
+      displayName: "Bad Site",
+      homeUrl: "https://bad-site.example.com/home",
+      allowedDomains: ["bad-site.example.com"],
+      accessMode: "super-admin",
+    }),
+    /accessMode/i,
+  );
+});
+
 test("readiness probe normalizes assertions", () => {
   const probe = normalizeReadinessProbe({
     id: "heygen-dashboard",
