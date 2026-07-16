@@ -2907,6 +2907,44 @@ test("Tools panel search box sits in its own left-aligned row below the heading,
   );
 });
 
+// ─── Tools panel: search box keeps DOM focus while typing (2026-07-16) ───────
+// See docs/superpowers/specs/2026-07-16-tools-search-focus-loss-design.md and
+// docs/superpowers/plans/2026-07-16-tools-search-focus-loss.md, Task 1.
+
+test("Tools panel re-renders the results pane in place once mounted, instead of replacing the whole panel (which would recreate #toolsQuery and drop focus on every keystroke)", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const panel = fnBody(js, "renderToolsPanel");
+
+  // Guard: before falling back to a full replace, check whether the shell
+  // (search input + results pane) is already mounted.
+  assert.match(panel, /getElementById\('toolsQuery'\)/, "checks whether the search input already exists in the live DOM");
+  assert.match(panel, /querySelector\('\.tools-pane'\)/, "locates the existing results pane to reuse");
+
+  // When the shell already exists, only the pane's innerHTML is replaced — the
+  // input node itself is never touched, so the browser never has a reason to
+  // drop focus/selection on it.
+  assert.match(panel, /existingPane\.innerHTML\s*=\s*body/, "the newly computed body is written directly into the existing pane");
+
+  // The guard must actually gate the full replace — i.e. come before it in
+  // source order, with a return in between — otherwise both branches would run
+  // every time and the fix would be a no-op.
+  const guardIdx = panel.indexOf("querySelector('.tools-pane')");
+  const fullReplaceIdx = panel.lastIndexOf('session.innerHTML = \'<div class="oc-center-pane">\'');
+  assert.ok(guardIdx > -1, "guard block is present");
+  assert.ok(fullReplaceIdx > -1, "full-replace fallback is still present");
+  assert.ok(guardIdx < fullReplaceIdx, "the guard (and its return) must run before the full-replace fallback, or it can never actually skip it");
+
+  // Regression guard: the first-ever render (no prior shell) must still work —
+  // the fallback keeps emitting the same input, unchanged.
+  assert.match(panel, /id="toolsQuery"/, "search input still present in the fallback render");
+  assert.match(panel, /oninput="toolsQueryInput\(\)"/, "still wired to the real-time handler");
+  assert.match(
+    panel,
+    /id="toolsQuery"[\s\S]{0,200}attrEnc\(_toolsQuery\)/,
+    "input value still reflects the persisted query in the fallback render",
+  );
+});
+
 test("goal card surfaces the next-action hook and an affordance to set it", () => {
   const js = extractScript(CONSOLE_HTML);
   const row = fnBody(js, "goalRowHtml");

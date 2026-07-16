@@ -7787,6 +7787,18 @@ function renderToolsPanel() {
       body += '</div>';
     }
   }
+  // Once the shell is mounted, update only the results pane in place. The
+  // fallback full replace below recreates every node in #session — including
+  // the live #toolsQuery input — which would silently drop keyboard focus on
+  // every keystroke (toolsQueryInput calls this on every oninput) and on the
+  // initial loadCapabilities() resolution if it lands mid-type.
+  const existingInput = document.getElementById('toolsQuery');
+  const existingPane = existingInput && session.querySelector('.tools-pane');
+  if (existingPane) {
+    existingPane.innerHTML = body;
+    return;
+  }
+
   session.innerHTML = '<div class="oc-center-pane">'
     + '<div class="oc-panel-head"><div><div class="oc-panel-title"><span>🛠️ Tools</span></div>'
     + '<div class="oc-panel-sub">Everything the assistant can do — and what backs it</div></div>'
