@@ -3018,6 +3018,93 @@ test("getStoredView / setStoredView round-trip through localStorage, with a vali
   assert.equal(getStoredView(), "overview", "garbage stored value falls back to overview");
 });
 
+test("toggleBoardSection / applyBoardSectionState round-trip through localStorage['hm_board_collapsed']", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const toggleSrc = extractFunctionBlock(js, "toggleBoardSection");
+  const applySrc = extractFunctionBlock(js, "applyBoardSectionState");
+
+  // Confirm this doesn't reuse/touch the unrelated right-panel mechanism.
+  assert.doesNotMatch(toggleSrc, /ctx-collapsed|querySelector\('main'\)/, "must not touch the <main> ctx-collapsed grid logic");
+
+  function makeStore() {
+    const backing: Record<string, string> = {};
+    return {
+      localStorage: {
+        getItem: (k: string) => (k in backing ? backing[k] : null),
+        setItem: (k: string, v: string) => { backing[k] = v; },
+      },
+      backing,
+    };
+  }
+
+  function makeSecAndBtn() {
+    const classes = new Set<string>();
+    const sec = {
+      classList: {
+        toggle: (name: string) => { if (classes.has(name)) { classes.delete(name); return false; } classes.add(name); return true; },
+        add: (name: string) => { classes.add(name); },
+        contains: (name: string) => classes.has(name),
+      },
+    };
+    const btn = { textContent: "▾", title: "Collapse Board" };
+    return { sec, btn, classes };
+  }
+
+  function run(sec: unknown, btn: unknown, ls: unknown) {
+    const factory = new Function(
+      "localStorage", "__sec", "__btn",
+      `const document = { getElementById: (id) => id === 'boardSec' ? __sec : (id === 'boardToggle' ? __btn : null) };\n`
+        + `${toggleSrc}\n${applySrc}\nreturn { toggleBoardSection, applyBoardSectionState };`,
+    ) as (ls: unknown, sec: unknown, btn: unknown) => { toggleBoardSection: () => void; applyBoardSectionState: () => void };
+    return factory(ls, sec, btn);
+  }
+
+  // No stored preference yet: restoring must be a no-op (stays expanded, default glyph).
+  const { localStorage: ls1, backing: backing1 } = makeStore();
+  const { sec: sec1, btn: btn1 } = makeSecAndBtn();
+  const { applyBoardSectionState: apply1 } = run(sec1, btn1, ls1);
+  apply1();
+  assert.equal(sec1.classList.contains("collapsed"), false, "nothing stored -> stays expanded");
+  assert.equal(btn1.textContent, "▾", "nothing stored -> caret stays at its default glyph");
+
+  // Toggle collapses, flips the caret, and persists "1".
+  const { toggleBoardSection: toggle1 } = run(sec1, btn1, ls1);
+  toggle1();
+  assert.equal(sec1.classList.contains("collapsed"), true);
+  assert.equal(btn1.textContent, "▸");
+  assert.equal(backing1["hm_board_collapsed"], "1");
+
+  // Toggle again expands, flips back, and persists "0".
+  const { toggleBoardSection: toggle2 } = run(sec1, btn1, ls1);
+  toggle2();
+  assert.equal(sec1.classList.contains("collapsed"), false);
+  assert.equal(btn1.textContent, "▾");
+  assert.equal(backing1["hm_board_collapsed"], "0");
+
+  // Fresh "reload" with "1" already persisted: a brand-new (default, expanded)
+  // element must come up collapsed without any click.
+  const { localStorage: ls2 } = makeStore();
+  (ls2 as { setItem: (k: string, v: string) => void }).setItem("hm_board_collapsed", "1");
+  const { sec: sec2, btn: btn2 } = makeSecAndBtn();
+  const { applyBoardSectionState: apply2 } = run(sec2, btn2, ls2);
+  apply2();
+  assert.equal(sec2.classList.contains("collapsed"), true, "persisted collapsed state restores on load");
+  assert.equal(btn2.textContent, "▸");
+});
+
+test("Board section collapse: toggle markup in board-sec-header, default expanded glyph, and the CSS rule that hides #board", () => {
+  const html = CONSOLE_HTML;
+  assert.match(
+    html,
+    /<div class="board-sec-header">Board <span id="boardToggle" class="board-toggle" onclick="toggleBoardSection\(\)"[^>]*>▾<\/span>/,
+    "toggle span sits in the header, next to the heading text, defaulting to the expanded glyph",
+  );
+  const archiveIx = html.indexOf('id="archiveBtn"');
+  const toggleIx = html.indexOf('id="boardToggle"');
+  assert.ok(toggleIx !== -1 && archiveIx !== -1 && toggleIx < archiveIx, "toggle appears before the archive link, both inside the header row");
+  assert.match(html, /\.board-sec\.collapsed #board \{ display: none; \}/, "collapsed class on #boardSec hides the lane container");
+});
+
 test("every view-switching function records itself as the last-active view", () => {
   const js = extractScript(CONSOLE_HTML);
   const cases: [string, string][] = [

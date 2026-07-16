@@ -690,6 +690,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .archive-link:hover { text-decoration: underline; }
   .board-sec { margin: 0; }
   .board-sec-header { font-size: 14px; font-weight: 600; margin: 20px 0 6px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+  .board-toggle { cursor: pointer; color: var(--muted); font-size: 11px; user-select: none; }
+  .board-sec.collapsed #board { display: none; }
   /* Standardized task-detail action row. One set of tokens for every reply/review/
      retry/steer control so heights, radius, padding, and min-width match. */
   .action-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
@@ -1880,7 +1882,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="err" id="t_err"></div>
     </div>
     <div id="boardSec" class="board-sec">
-      <div class="board-sec-header">Board <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></div>
+      <div class="board-sec-header">Board <span id="boardToggle" class="board-toggle" onclick="toggleBoardSection()" title="Collapse Board">▾</span> <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></div>
       <div id="board"></div>
     </div>
   </section>
@@ -2359,6 +2361,36 @@ function toggleBoardLane(key) {
   try { localStorage.setItem("hm_lanes_collapsed", JSON.stringify(Array.from(c))); } catch (e) { /* ignore */ }
   renderBoard();
 }
+
+// The Board section itself (the whole lane container, not an individual lane) can
+// be collapsed to reclaim sidebar space. #boardSec/#boardToggle are static markup
+// (unlike #board's renderBoard()-generated innerHTML), so a class on #boardSec
+// survives every periodic re-render undisturbed — mirrors hm_ctx_collapsed's
+// toggleContext()/applyCtxState() pattern, but scoped to this section instead of
+// <main>'s grid-column layout.
+function toggleBoardSection() {
+  const sec = document.getElementById('boardSec');
+  if (!sec) return;
+  const collapsed = sec.classList.toggle('collapsed');
+  const btn = document.getElementById('boardToggle');
+  if (btn) { btn.textContent = collapsed ? '▸' : '▾'; btn.title = collapsed ? 'Expand Board' : 'Collapse Board'; }
+  try { localStorage.setItem('hm_board_collapsed', collapsed ? '1' : '0'); } catch (e) { /* ignore */ }
+}
+
+// Restore the persisted collapse state on load. Deliberately a named function +
+// explicit call (not a bare IIFE like applyCtxState) so it's unit-testable the
+// same way toggleBoardSection is — a style deviation, not a behavior difference.
+function applyBoardSectionState() {
+  try {
+    if (localStorage.getItem('hm_board_collapsed') === '1') {
+      const sec = document.getElementById('boardSec');
+      if (sec) sec.classList.add('collapsed');
+      const btn = document.getElementById('boardToggle');
+      if (btn) { btn.textContent = '▸'; btn.title = 'Expand Board'; }
+    }
+  } catch (e) { /* ignore */ }
+}
+applyBoardSectionState();
 /*__REVIEW_SORT_COMPARATOR_START__*/
 function reviewSortComparator(a, b) {
   const ta = Date.parse(a.updatedAt || a.createdAt || "") || 0;
