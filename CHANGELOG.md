@@ -2,10 +2,6 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
-## v0.1.210 — 2026-07-16
-
-Left sidebar consolidation (lanes/agents setup + monitoring, Board collapse, Brain renamed Memory, Overview removed); console: taller composer + prompt snippets, Tools search fixes, gold active usage toggle; Browser Lane: read/write permission gating + Canopy-parity audit filters, and the Desktop fallback is now driven by Claude instead of a dead local-model gate; tasks: resolve project by name instead of a homedir guess, and the runaway budget backstop raised $10 to $25
-
 ## v0.1.209 — 2026-07-16
 
 Browser Lane auto-enables desktop fallback on first authenticated site; Goals auto-seed from persona/GOALS.md; voice fix (no say-voiced chunk on Kokoro failure); console scroll-position restoration for Chat/Tools/Goals

@@ -12,8 +12,6 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
-  { version: "0.1.210", date: "2026-07-16", note: "Left sidebar consolidation (lanes/agents setup + monitoring, Board collapse, Brain renamed Memory, Overview removed); console: taller composer + prompt snippets, Tools search fixes, gold active usage toggle; Browser Lane: read/write permission gating + Canopy-parity audit filters, and the Desktop fallback is now driven by Claude instead of a dead local-model gate; tasks: resolve project by name instead of a homedir guess, and the runaway budget backstop raised export const CHANGELOG: ReleaseNote[] = [
-0 to $25" },
   { version: "0.1.209", date: "2026-07-16", note: "Browser Lane auto-enables desktop fallback on first authenticated site; Goals auto-seed from persona/GOALS.md; voice fix (no say-voiced chunk on Kokoro failure); console scroll-position restoration for Chat/Tools/Goals" },
   { version: "0.1.208", date: "2026-07-16", note: "Task board: batch grouping + verification-verdict badges; opt-in per-task git worktree isolation (off by default); Tools window search + parameter discovery + run" },
   { version: "0.1.207", date: "2026-07-15", note: "Flash can now inspect its own tasks: ask it 'why did this task fail?' and it reads the task's error + activity log itself (get_task), or 'what's failed/running?' for the board (list_tasks) — no more asking you to screenshot the error." },
