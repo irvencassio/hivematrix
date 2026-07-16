@@ -86,6 +86,21 @@ async function main(): Promise<void> {
     console.error("[self-heal] failed:", e instanceof Error ? e.message : e);
   }
 
+  // Last-resort fallback: healEmptiedTables() above may still leave `goals`
+  // empty (fresh machine's first run, or every backup also hollowed out).
+  // If so, seed it from the operator's persona/GOALS.md — additive-only,
+  // one-shot (only ever acts on a genuinely empty table, same contract as
+  // the self-heal block above), never fatal. See lib/goals/persona-seed.ts.
+  try {
+    const { seedGoalsFromPersonaIfEmpty } = await import("@/lib/goals/persona-seed");
+    const { seeded } = seedGoalsFromPersonaIfEmpty();
+    if (seeded > 0) {
+      console.warn(`[goals:persona-seed] seeded ${seeded} goal(s) from persona/GOALS.md (goals table was empty)`);
+    }
+  } catch (e) {
+    console.error("[goals:persona-seed] failed:", e instanceof Error ? e.message : e);
+  }
+
   // Initialize connectivity policy (singleton)
   const policy = getConnectivityPolicy();
   console.log(`[hivematrix] Connectivity policy: ${policy.mode}`);
