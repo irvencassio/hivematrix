@@ -979,6 +979,14 @@ test("frontier usage panel exposes Claude auth login action", () => {
   assert.match(js, /Run Claude login/);
 });
 
+test("sidebar nav button for the Brain/Memory panel is labeled Memory, not Brain", () => {
+  assert.match(
+    CONSOLE_HTML,
+    /id="brainNav"[^>]*onclick="showBrain\(\)">🧠 Memory<\/button>/,
+    "sidebar nav button text should read 'Memory', not 'Brain'",
+  );
+});
+
 test("Brain / Memory Review nav opens a three-pane read-only screen wired to the Phase-1 endpoints", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(CONSOLE_HTML, /id="brainNav"[^>]*onclick="showBrain\(\)"/, "nav button present");

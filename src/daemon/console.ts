@@ -1809,7 +1809,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
     <button class="addbtn" id="newTaskNav" onclick="showNewTaskPanel()">＋ New task</button>
     <button class="ov-nav oc-nav" id="flashNav" onclick="showFlashPanel()">💬 Chat</button>
-    <button class="ov-nav oc-nav" id="brainNav" onclick="showBrain()">🧠 Brain</button>
+    <button class="ov-nav oc-nav" id="brainNav" onclick="showBrain()">🧠 Memory</button>
     <button class="ov-nav oc-nav" id="rolesNav" onclick="showRoles()">👥 Roles</button>
     <button class="ov-nav oc-nav" id="toolsNav" onclick="showTools()">🛠️ Tools</button>
     <button class="ov-nav oc-nav" id="goalsNav" onclick="showGoals()">🎯 Goals</button>
