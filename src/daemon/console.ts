@@ -578,6 +578,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .status-card-caret { font-size: 9px; color: var(--muted); flex: 0 0 auto; }
   .status-card-count { font-size: 11px; color: var(--accent); font-weight: 600; }
   .status-card-body { padding: 6px 8px 8px; }
+  /* Review-lane batch grouping (display-only rollup — see groupReviewBatches
+     in the board script). Cards keep their own styling inside the group. */
+  .batch-group { border: 1px dashed var(--border); border-radius: 8px; padding: 6px 6px 0; margin-bottom: 8px; }
+  .batch-group-head { font-size: 10.5px; font-weight: 600; color: var(--muted); padding: 0 2px 6px; }
   .card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
     padding: 8px 10px; margin-bottom: 6px; cursor: pointer; transition: border-color .1s; position: relative;
     box-shadow: var(--card-shadow); width: 100%; box-sizing: border-box; min-height: 52px; }
@@ -2272,6 +2276,24 @@ function reviewStateMeta(rs) {
   return null;
 }
 
+// task.verification → badge {label, cls}. verification is null for most
+// claude -p tasks (no verification gate ran) — that's the common, correct
+// case, so callers must render NOTHING when this returns null, not a
+// placeholder. The GET /tasks row comes straight from SQLite (no rowToTask
+// parsing on that endpoint — see server.ts), so verification may arrive as
+// a raw JSON string instead of an already-parsed object; handle both.
+function verificationMeta(v) {
+  if (!v) return null;
+  if (typeof v === "string") {
+    try { v = JSON.parse(v); } catch (e) { return null; }
+  }
+  if (!v || typeof v !== "object") return null;
+  if (v.verdict === "passed") return { label: "✓ verified", cls: "ok" };
+  if (v.verdict === "failed") return { label: "✗ failed", cls: "err" };
+  if (v.verdict === "uncertain") return { label: "? unverified", cls: "" };
+  return null;
+}
+
 // Active view persistence — restores the last-open sidebar view on launch.
 var HM_VALID_VIEWS = ["overview", "flash", "brain", "roles", "tools", "goals"];
 var _currentView = "overview";
@@ -2309,6 +2331,73 @@ function reviewSortComparator(a, b) {
   return tb - ta;
 }
 /*__REVIEW_SORT_COMPARATOR_END__*/
+
+// Single task-card renderer — shared by every lane's plain body and the
+// review lane's batch groups, so the verified/failed/unverified badge (and
+// every other card affordance) lives in one place instead of two drifting
+// copies of the same markup.
+function taskCardHtml(t, laneKey) {
+  const rsm = reviewStateMeta(t.reviewState);
+  const vm = verificationMeta(t.verification);
+  return '<div class="card'+(state.selected===t._id?' sel':'')+(rsm?' tone-'+rsm.tone:'')+(laneKey === "in_progress" ? " in-progress" : "")+'" onclick="selectTask(\''+t._id+'\')">'
+    + '<button class="card-archive" title="Archive task" onclick="event.stopPropagation();cardArchive(\''+t._id+'\')">Archive</button>'
+    + '<div class="mdl-card-head" style="padding-right:58px;align-items:flex-start">'
+    + '<span class="mdl-card-name" style="min-width:0" title="'+esc(t.title||t._id)+'">'+esc(t.title||t._id)+'</span>'
+    + '<div style="flex:0 0 auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
+    + cardRoleBadge(t)
+    + taskModelBadge(t.model)
+    + (rsm?'<span class="badge '+(rsm.tone==="attention"?"warn":"ok")+'">'+esc(rsm.label)+'</span>':'')
+    + (vm?'<span class="badge'+(vm.cls?' '+vm.cls:'')+'" title="Verification result">'+esc(vm.label)+'</span>':'')
+    + ageBadge(t)+'</div>'
+    + '</div>'
+    + '</div>';
+}
+
+// Groups review-lane cards that share a batchId under one aggregate rollup
+// header (display-only — no merge/bulk-delete). A task with no batchId
+// (most tasks — batches only come from chat/directive fan-out) is its own
+// standalone group of one and renders exactly as it did before grouping
+// existed. The rollup counts every task with that batchId across ALL lanes,
+// not just the review-lane subset passed in as items, so the header keeps
+// reflecting true batch progress after some siblings leave review (done/
+// failed) while others are still awaiting review.
+function groupReviewBatches(items, allTasks) {
+  const laneOf = {};
+  LANE_DEFS.forEach(L => L.statuses.forEach(s => { laneOf[s] = L.key; }));
+  const seen = new Set();
+  const groups = [];
+  for (const t of items) {
+    const bid = t.batchId;
+    if (!bid) { groups.push({ batchId: null, items: [t] }); continue; }
+    if (seen.has(bid)) continue;
+    seen.add(bid);
+    const groupItems = items.filter(x => x.batchId === bid);
+    const batchTasks = (allTasks || []).filter(x => x.batchId === bid);
+    const counts = {};
+    for (const bt of batchTasks) {
+      const key = laneOf[bt.status] || bt.status || "unknown";
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    const breakdown = LANE_DEFS.filter(L => counts[L.key]).map(L => counts[L.key] + " " + L.label).join(" · ");
+    groups.push({ batchId: bid, items: groupItems, total: batchTasks.length, breakdown: breakdown });
+  }
+  return groups;
+}
+
+// Review lane's body: batch-grouped cards interleaved with standalone ones,
+// in the same (already-sorted) order groupReviewBatches was handed.
+function renderReviewLaneBody(items) {
+  const groups = groupReviewBatches(items, state.tasks);
+  return groups.map(g => {
+    const cards = g.items.map(t => taskCardHtml(t, "review")).join("");
+    if (!g.batchId) return cards;
+    return '<div class="batch-group">'
+      + '<div class="batch-group-head">Batch · ' + g.total + ' task' + (g.total === 1 ? '' : 's') + (g.breakdown ? ' — ' + esc(g.breakdown) : '') + '</div>'
+      + cards
+      + '</div>';
+  }).join("");
+}
+
 function renderBoard() {
   const statusToLane = {};
   LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
@@ -2332,17 +2421,7 @@ function renderBoard() {
       + '<span class="status-card-count">'+items.length+'</span>'
       + '</div>'
       + (isCollapsed ? '' : '<div class="status-card-body">'
-          + items.map(t => { const rsm = reviewStateMeta(t.reviewState); return '<div class="card'+(state.selected===t._id?' sel':'')+(rsm?' tone-'+rsm.tone:'')+(L.key === "in_progress" ? " in-progress" : "")+'" onclick="selectTask(\''+t._id+'\')">'
-              + '<button class="card-archive" title="Archive task" onclick="event.stopPropagation();cardArchive(\''+t._id+'\')">Archive</button>'
-              + '<div class="mdl-card-head" style="padding-right:58px;align-items:flex-start">'
-              + '<span class="mdl-card-name" style="min-width:0" title="'+esc(t.title||t._id)+'">'+esc(t.title||t._id)+'</span>'
-              + '<div style="flex:0 0 auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
-              + cardRoleBadge(t)
-              + taskModelBadge(t.model)
-              + (rsm?'<span class="badge '+(rsm.tone==="attention"?"warn":"ok")+'">'+esc(rsm.label)+'</span>':'')
-              + ageBadge(t)+'</div>'
-              + '</div>'
-              + '</div>'; }).join("")
+          + (L.key === "review" ? renderReviewLaneBody(items) : items.map(t => taskCardHtml(t, L.key)).join(""))
           + '</div>')
       + '</div>';
   }).join("") || '<div class="muted">No tasks.</div>';
@@ -2587,6 +2666,7 @@ async function selectTask(id) {
     + taskActionsHtml(t)
     + (t.projectPath ? '<div class="kv"><span class="k">project path</span><span>'+esc(t.projectPath)+'</span></div>' : '')
     + taskTelemetryStrip(t, out)
+    + taskVerificationSection(t)
     + '<h2>Description</h2><div class="desc md">'+mdToHtml(t.description||"")+'</div>'
     + (t.error?'<h2>Error</h2><div class="errbox">'+esc(t.error)+'</div>':'')
     + (out.summary?'<h2>Result <button class="linklike" onclick="copyEditSource()" title="Copy this text">⧉ Copy</button></h2><div class="desc md">'+mdToHtml(out.summary)+'</div>':'')
@@ -3026,6 +3106,22 @@ function taskTelemetryStrip(t, out) {
   const strip = '<div class="obs-strip">' + cells.map(c =>
     '<span class="obs-cell"><b>' + esc(String(c[1])) + '</b>' + esc(c[0]) + '</span>').join("") + '</div>';
   return '<details class="task-debug"><summary class="muted" style="font-size:11px;cursor:pointer">Debug info</summary>' + strip + '</details>';
+}
+
+// Verification-gate report for the detail panel: a collapsible <pre> (escaped
+// via esc, same as every other rendered task field) with the verdict badge in
+// its summary line. Renders nothing when there's no report to show — most
+// claude -p tasks never ran the gate, and a verdict with no report text
+// (e.g. "uncertain" from a gate that produced no narrative) has nothing to
+// disclose beyond the board-card badge already showing the verdict.
+function taskVerificationSection(t) {
+  let v = t && t.verification;
+  if (typeof v === "string") { try { v = JSON.parse(v); } catch (e) { v = null; } }
+  if (!v || typeof v !== "object" || typeof v.report !== "string" || !v.report) return "";
+  const vm = verificationMeta(v);
+  return '<h2>Verification' + (vm ? ' <span class="badge' + (vm.cls ? ' ' + vm.cls : '') + '">' + esc(vm.label) + '</span>' : '') + '</h2>'
+    + '<details class="task-debug"><summary class="muted" style="font-size:11px;cursor:pointer">Verification report</summary>'
+    + '<pre class="desc" style="white-space:pre-wrap;word-break:break-word;margin-top:6px">' + esc(v.report) + '</pre></details>';
 }
 
 // --- Observability dashboard --------------------------------------------

@@ -2316,8 +2316,11 @@ test("Use another folder is an explicit advanced disclosure", () => {
 });
 
 test("board card title has a native tooltip so a truncated title stays readable on hover", () => {
+  // Card markup now lives in taskCardHtml (shared by every lane's plain body
+  // and the review lane's batch groups — see renderBoard/renderReviewLaneBody),
+  // not inlined in renderBoard itself.
   const js = extractScript(CONSOLE_HTML);
-  const body = fnBody(js, "renderBoard");
+  const body = fnBody(js, "taskCardHtml");
   assert.match(body, /<span class="mdl-card-name" style="min-width:0" title="'\+esc\(t\.title\|\|t\._id\)\+'">/,
     "card title span carries a title= tooltip with the full (untruncated) task name");
 });
@@ -2853,4 +2856,159 @@ test("boot sequence restores the last-active view after refresh()", () => {
   assert.notEqual(refreshIx, -1);
   assert.notEqual(restoreIx, -1, "boot sequence must call restoreLastView()");
   assert.ok(restoreIx > refreshIx, "restoreLastView() must run after refresh() so board/task state is loaded first");
+});
+
+// --- P2: verification verdict badge + P0: review-lane batch grouping -------
+
+function consoleVerificationMeta(): (v: unknown) => { label: string; cls: string } | null {
+  const js = extractScript(CONSOLE_HTML);
+  const body = extractFunctionBlock(js, "verificationMeta");
+  return new Function(`${body}\nreturn verificationMeta;`)() as (v: unknown) => { label: string; cls: string } | null;
+}
+
+test("verificationMeta maps verdicts to a badge label/tone and returns null for the no-verdict cases", () => {
+  const meta = consoleVerificationMeta();
+  assert.deepEqual(meta({ verdict: "passed" }), { label: "✓ verified", cls: "ok" });
+  assert.deepEqual(meta({ verdict: "failed" }), { label: "✗ failed", cls: "err" });
+  assert.deepEqual(meta({ verdict: "uncertain" }), { label: "? unverified", cls: "" });
+  assert.equal(meta(null), null, "null verification (most claude -p tasks never ran the gate) renders no badge");
+  assert.equal(meta(undefined), null);
+  assert.equal(meta({}), null, "an unrecognized verdict shape renders nothing rather than guessing");
+  // GET /tasks (and GET /tasks/:id) return raw SQLite rows — no rowToTask
+  // parsing on those endpoints (see server.ts) — so verification can arrive
+  // as a raw JSON string instead of an already-parsed object.
+  assert.deepEqual(meta(JSON.stringify({ verdict: "passed" })), { label: "✓ verified", cls: "ok" }, "handles a raw JSON-string column value");
+  assert.equal(meta("not json"), null, "malformed JSON string never throws — just renders nothing");
+});
+
+function consoleTaskCardHtml(): (t: Record<string, unknown>, laneKey?: string) => string {
+  const js = extractScript(CONSOLE_HTML);
+  const esc = js.match(/function esc\(s\)\{[^\n]+\}/)?.[0] ?? "";
+  const vmBody = extractFunctionBlock(js, "verificationMeta");
+  const cardBody = extractFunctionBlock(js, "taskCardHtml");
+  assert.ok(esc.length > 10 && vmBody.length > 10 && cardBody.length > 20, "esc + verificationMeta + taskCardHtml bodies extracted");
+  // reviewStateMeta/cardRoleBadge/taskModelBadge/ageBadge are stubbed out —
+  // this harness is only exercising the verification badge, and those other
+  // badges already have their own direct tests elsewhere in this file.
+  const stubs = [
+    "function reviewStateMeta(rs) { return null; }",
+    "function cardRoleBadge(t) { return ''; }",
+    "function taskModelBadge(m) { return ''; }",
+    "function ageBadge(t) { return ''; }",
+    "var state = { selected: null };",
+  ].join("\n");
+  return new Function(`${esc}\n${stubs}\n${vmBody}\n${cardBody}\nreturn taskCardHtml;`)() as (
+    t: Record<string, unknown>,
+    laneKey?: string,
+  ) => string;
+}
+
+test("taskCardHtml renders the verified badge for a passed verdict, and renders no badge at all when verification is null", () => {
+  const card = consoleTaskCardHtml();
+
+  const passed = card({ _id: "t1", title: "Task 1", verification: { verdict: "passed" } }, "review");
+  assert.match(passed, /<span class="badge ok" title="Verification result">✓ verified<\/span>/, "passed verdict renders the green verified badge");
+
+  const noVerdict = card({ _id: "t2", title: "Task 2", verification: null }, "review");
+  assert.doesNotMatch(noVerdict, /verified|unverified|✗ failed/i, "no verification (the common case) renders no badge and no placeholder");
+
+  const failed = card({ _id: "t3", title: "Task 3", verification: { verdict: "failed" } }, "review");
+  assert.match(failed, /<span class="badge err" title="Verification result">✗ failed<\/span>/);
+
+  const uncertain = card({ _id: "t4", title: "Task 4", verification: { verdict: "uncertain" } }, "review");
+  assert.match(uncertain, /<span class="badge" title="Verification result">\? unverified<\/span>/, "uncertain verdict uses the plain (grey) badge class, no ok/err modifier");
+});
+
+test("renderBoard batch-groups only the review lane; every other lane keeps rendering cards directly via taskCardHtml", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "renderBoard");
+  assert.match(
+    body,
+    /L\.key === "review" \? renderReviewLaneBody\(items\) : items\.map\(t => taskCardHtml\(t, L\.key\)\)\.join\(""\)/,
+    "review lane renders via renderReviewLaneBody; every other lane still maps items straight through taskCardHtml",
+  );
+});
+
+function consoleGroupReviewBatches(): (
+  items: Array<Record<string, unknown>>,
+  allTasks: Array<Record<string, unknown>>,
+) => Array<{ batchId: string | null; items: Array<Record<string, unknown>>; total?: number; breakdown?: string }> {
+  const js = extractScript(CONSOLE_HTML);
+  const laneDefs = js.match(/const LANE_DEFS = \[[\s\S]*?\];/)?.[0] ?? "";
+  const body = extractFunctionBlock(js, "groupReviewBatches");
+  assert.ok(laneDefs.length > 20 && body.length > 20, "LANE_DEFS + groupReviewBatches bodies extracted");
+  return new Function(`${laneDefs}\n${body}\nreturn groupReviewBatches;`)() as (
+    items: Array<Record<string, unknown>>,
+    allTasks: Array<Record<string, unknown>>,
+  ) => Array<{ batchId: string | null; items: Array<Record<string, unknown>>; total?: number; breakdown?: string }>;
+}
+
+test("groupReviewBatches groups review cards sharing a batchId under one rollup; a null-batchId task stays its own standalone group", () => {
+  const group = consoleGroupReviewBatches();
+  const reviewItems = [
+    { _id: "a", batchId: "b1", status: "review" },
+    { _id: "b", batchId: "b1", status: "review" },
+    { _id: "c", batchId: null, status: "review" },
+  ];
+  // The full task universe includes batch siblings that already left review —
+  // the rollup must count those too, not just what's currently in this lane.
+  const allTasks = [
+    ...reviewItems,
+    { _id: "d", batchId: "b1", status: "done" },
+    { _id: "e", batchId: "b1", status: "failed" },
+  ];
+  const groups = group(reviewItems, allTasks);
+  assert.equal(groups.length, 2, "one group for the shared batchId, one standalone entry for the null-batchId task");
+
+  const batchGroup = groups.find((g) => g.batchId === "b1");
+  assert.ok(batchGroup, "b1 batch group present");
+  assert.deepEqual((batchGroup!.items as Array<{ _id: string }>).map((t) => t._id), ["a", "b"], "only this batch's review-lane cards, in the given order");
+  assert.equal(batchGroup!.total, 4, "rollup counts every task with this batchId across ALL lanes, not just review");
+  assert.equal(batchGroup!.breakdown, "2 review · 1 done · 1 failed", "breakdown follows the lane pipeline order (LANE_DEFS)");
+
+  const standalone = groups.find((g) => g.batchId === null);
+  assert.ok(standalone, "the null-batchId task gets its own group");
+  assert.deepEqual((standalone!.items as Array<{ _id: string }>).map((t) => t._id), ["c"], "a null batchId is not a group — it renders alone");
+});
+
+function consoleRenderReviewLaneBody(allTasks: Array<Record<string, unknown>>): (items: Array<Record<string, unknown>>) => string {
+  const js = extractScript(CONSOLE_HTML);
+  const esc = js.match(/function esc\(s\)\{[^\n]+\}/)?.[0] ?? "";
+  const laneDefs = js.match(/const LANE_DEFS = \[[\s\S]*?\];/)?.[0] ?? "";
+  const groupBody = extractFunctionBlock(js, "groupReviewBatches");
+  const vmBody = extractFunctionBlock(js, "verificationMeta");
+  const cardBody = extractFunctionBlock(js, "taskCardHtml");
+  const laneBodyFn = extractFunctionBlock(js, "renderReviewLaneBody");
+  const stubs = [
+    "function reviewStateMeta(rs) { return null; }",
+    "function cardRoleBadge(t) { return ''; }",
+    "function taskModelBadge(m) { return ''; }",
+    "function ageBadge(t) { return ''; }",
+    `var state = { selected: null, tasks: ${JSON.stringify(allTasks)} };`,
+  ].join("\n");
+  return new Function(
+    `${esc}\n${laneDefs}\n${stubs}\n${vmBody}\n${cardBody}\n${groupBody}\n${laneBodyFn}\nreturn renderReviewLaneBody;`,
+  )() as (items: Array<Record<string, unknown>>) => string;
+}
+
+test("renderReviewLaneBody wraps batched cards in a batch-group header; a null-batchId card renders standalone, unwrapped", () => {
+  const allTasks = [
+    { _id: "a", batchId: "b1", status: "review", title: "A" },
+    { _id: "b", batchId: "b1", status: "review", title: "B" },
+    { _id: "c", batchId: null, status: "review", title: "C" },
+  ];
+  const render = consoleRenderReviewLaneBody(allTasks);
+  const html = render(allTasks);
+
+  const groupCount = (html.match(/class="batch-group"/g) || []).length;
+  assert.equal(groupCount, 1, "exactly one batch-group wrapper — for the shared batchId only");
+  assert.match(html, /class="batch-group-head">Batch · 2 tasks — 2 review<\/div>/, "header shows the aggregate task count and status breakdown");
+
+  const groupOpenIx = html.indexOf('<div class="batch-group">');
+  const headIx = html.indexOf("batch-group-head");
+  const aIx = html.indexOf("selectTask('a')");
+  const bIx = html.indexOf("selectTask('b')");
+  const cIx = html.indexOf("selectTask('c')");
+  assert.ok(groupOpenIx !== -1 && groupOpenIx < headIx && headIx < aIx && aIx < bIx, "the batch header precedes its grouped cards, which stay in sort order");
+  assert.ok(bIx < cIx, "the standalone (null-batchId) card renders after the batch group, not inside it");
 });
