@@ -29,7 +29,7 @@ export type BrowserBeeTracePolicy = (typeof BROWSERBEE_TRACE_POLICIES)[number];
  * Which engine actually drives the browser for a Browser Lane job.
  *   codex_computer_use — the default: Codex Computer Use (frontier) drives the
  *     browser. Requires Codex subscription/API auth and network.
- *   desktop_fallback   — opt-in: the local model drives a desktop browser via
+ *   desktop_fallback   — opt-in: Claude drives a desktop browser via
  *     Desktop Lane (AppleScript → Accessibility → click/type). Engaged only when
  *     Codex auth is unavailable and the operator has enabled the fallback. Lower
  *     reliability, but keeps authenticated browser work running with no Codex
@@ -374,7 +374,7 @@ export function buildBrowserBeeTaskDescription(
 
 /**
  * Description for the opt-in Desktop fallback: the same job, but driven by
- * the local model through Desktop Lane instead of Codex Computer Use. Used only
+ * Claude through Desktop Lane instead of Codex Computer Use. Used only
  * when Codex auth is unavailable and the operator has enabled the fallback.
  */
 export function buildBrowserBeeDesktopFallbackDescription(
@@ -394,7 +394,7 @@ export function buildBrowserBeeDesktopFallbackDescription(
     "Output expectations:",
     "- Summarize what happened on the site.",
     "- Call out any approvals, login prompts, or blockers encountered.",
-    "- Note that this ran on the Desktop Lane fallback (local model), and mention any screen captures taken.",
+    "- Note that this ran on the Desktop Lane fallback (Claude), and mention any screen captures taken.",
   ];
 
   return sections.join("\n");
@@ -469,7 +469,7 @@ export function resolveBrowserBeeBacking(input: {
       backing: null,
       reason:
         `${why} Enable the Desktop fallback (set browserLane.desktopFallback=true in ` +
-        "~/.hivematrix/config.json) to drive a real desktop browser with the local model instead.",
+        "~/.hivematrix/config.json) to drive a real desktop browser with Claude instead.",
     };
   }
   if (!input.desktopBeeAvailable) {
@@ -480,7 +480,7 @@ export function resolveBrowserBeeBacking(input: {
   }
   return {
     backing: "desktop_fallback",
-    reason: `${why} Using the Desktop Lane fallback (local model drives a desktop browser).`,
+    reason: `${why} Using the Desktop Lane fallback (Claude drives a desktop browser).`,
   };
 }
 

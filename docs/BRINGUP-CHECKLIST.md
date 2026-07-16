@@ -43,7 +43,7 @@ each section gates the next. Items marked **(live)** require the physical Mac.
 ## 7. Capability config (optional per posture)
 - [ ] **Content** (W5.2): set `config.content.{endpoint,model,apiKeyEnv}` for rendition generation (degrades honestly if absent).
 - [ ] **Image** (W5.1): nanai endpoint/key for cloud, or install the `mflux` CLI for local.
-- [ ] **Browser Lane**: Codex Computer Use auth for the frontier backend, or enable the Desktop Lane fallback for local-only.
+- [ ] **Browser Lane**: Codex Computer Use auth for the frontier backend, or enable the Desktop Lane fallback (runs on Claude, opt-in, lower reliability than Codex Computer Use).
 
 ## 8. Licensing (W7.3)
 - [ ] Install the signed license (`POST /license`) and set the issuer public key (`config.license.publicKeyPem` or `HIVEMATRIX_LICENSE_PUBKEY`).

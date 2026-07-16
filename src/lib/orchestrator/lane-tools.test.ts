@@ -1,6 +1,6 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ConnectivityPolicy, getConnectivityPolicy } from "@/lib/connectivity/policy";
@@ -400,6 +400,60 @@ test("executeBrowserBeeRun allows form_fill against a readwrite-access site and 
   const entry = readAudit({ event: "browser:job_created" }).find((e) => e.taskId === "task-readwrite-formfill-1");
   assert.ok(entry, "the dispatch must be audited");
   assert.equal(entry!.actorKind, "agent");
+});
+
+test("executeBrowserBeeRun resolves the Desktop fallback to a Claude model, not a local model", async (t) => {
+  getConnectivityPolicy().setManualOverride("cloud-ok");
+  t.after(() => getConnectivityPolicy().setManualOverride(null));
+
+  // Force Codex into subscription (non-api-key) mode so resolveBrowserBeeBacking
+  // cannot pick codex_computer_use — see src/lib/usage/codex.ts normalizeAuthMode:
+  // auth_mode "chatgpt" + no OPENAI_API_KEY yields authMode "subscription".
+  const codexAuthPath = join(SKILL_HOME, ".codex", "auth.json");
+  const originalCodexAuth = readFileSync(codexAuthPath, "utf-8");
+  writeFileSync(codexAuthPath, JSON.stringify({ auth_mode: "chatgpt", tokens: {} }));
+  t.after(() => writeFileSync(codexAuthPath, originalCodexAuth));
+
+  // Opt into the Desktop fallback for this test only.
+  const configPath = join(SKILL_HOME, ".hivematrix", "config.json");
+  const originalConfig = readFileSync(configPath, "utf-8");
+  writeFileSync(configPath, JSON.stringify({ ...JSON.parse(originalConfig), browserLane: { desktopFallback: true } }));
+  t.after(() => writeFileSync(configPath, originalConfig));
+
+  let capturedBody: Record<string, unknown> | null = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const url = String(input);
+    if (url.endsWith("/tasks") && init?.method === "POST") {
+      capturedBody = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ _id: "task-desktop-fallback-1", title: "stub" }), { status: 200 });
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  upsertBrowserSite({
+    id: "fallback-site-a",
+    displayName: "Fallback Site A",
+    homeUrl: "https://fallback-site-a.example.com/home",
+    allowedDomains: ["fallback-site-a.example.com"],
+    accessMode: "readwrite",
+  } as never);
+
+  const out = await executeLaneTool("hivematrix_browser", {
+    mode: "workflow",
+    objective: "Log in and capture the account summary",
+    startUrl: "https://fallback-site-a.example.com/login",
+    jobType: "authenticated_research",
+    requiresLogin: true,
+  }, browserCtx());
+
+  assert.match(out, /Created Browser Lane task/, "the Desktop fallback must dispatch, not error");
+  assert.doesNotMatch(out, /configured local model/i, "must never require a local model");
+  // TS can't see the closure assignment above; re-read through a cast local.
+  const body = capturedBody as Record<string, unknown> | null;
+  assert.ok(body, "the /tasks POST must have been captured");
+  assert.match(String(body.model), /^(sonnet|opus|haiku)$/, "the fallback must run on a Claude model id");
 });
 
 test("executeBrowserLaneRead stamps actorKind onto its browser:read audit entry", async (t) => {

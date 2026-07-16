@@ -1155,8 +1155,8 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: LaneTool
   }
 
   // Decide which engine drives the browser. Codex Computer Use is preferred;
-  // the local Desktop Lane path is used only when Codex auth is missing AND the
-  // operator opted into the fallback AND Desktop Lane is available.
+  // the Desktop Lane fallback (driven by Claude) is used only when Codex auth is
+  // missing AND the operator opted into the fallback AND Desktop Lane is available.
   const desktopBeeAvailable = getConnectivityPolicy().getCapability("desktopbee").available;
   const decision = resolveBrowserBeeBacking({
     codexAuthMode: readCodexAuthState().authMode,
@@ -1168,12 +1168,8 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: LaneTool
   let model: string;
   let description: string;
   if (decision.backing === "desktop_fallback") {
-    const { getLocalModelConfig } = await import("@/lib/config/constants");
-    const local = getLocalModelConfig();
-    if (!local?.modelName) {
-      return "Error: the Desktop Lane fallback needs a configured local model (config localModel.modelName), but none is set.";
-    }
-    model = local.modelName;
+    const { getRoleModels, CLAUDE_SONNET_ID } = await import("@/lib/models/available");
+    model = getRoleModels().coding.trim() || CLAUDE_SONNET_ID;
     description = buildBrowserBeeDesktopFallbackDescription(payload, { requestedProjectPath: ctx.projectPath });
   } else {
     model = CODEX_COMPUTER_USE_MODEL_ID;
@@ -1184,11 +1180,11 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: LaneTool
     backing: decision.backing,
     backingModel: model,
   });
-  const laneLabel = decision.backing === "desktop_fallback" ? "Desktop fallback — local model" : "Codex Computer Use";
+  const laneLabel = decision.backing === "desktop_fallback" ? "Desktop fallback — Claude" : "Codex Computer Use";
 
   // Create the job through the daemon's task API (loopback, shared-secret auth).
   // The task's model selects the executor: Codex Computer Use for the default
-  // path, or the local model (which carries the desktop_action tool) for the
+  // path, or Claude (which carries the desktop_action tool) for the
   // fallback path.
   const base = `http://127.0.0.1:${process.env.HIVEMATRIX_PORT ?? "3747"}`;
   const token = readToken("auth-token") ?? "";

@@ -170,9 +170,22 @@ test("buildBrowserBeeDesktopFallbackDescription drives the browser via Desktop L
   assert.match(description, /no Codex Computer Use engine/);
   assert.match(description, /Desktop Lane fallback/);
   assert.doesNotMatch(description, /DesktopBee/);
+  assert.match(description, /Claude/, "the fallback description must name Claude");
+  assert.doesNotMatch(description, /local model/i, "the fallback description must not call this a local-model path");
   // shared body is still present
   assert.match(description, /Allowed domains: app\.example\.com/);
   assert.match(description, /Objective:/);
+});
+
+test("resolveBrowserBeeBacking's opt-in-suggestion reason names Claude, not a local model", () => {
+  const decision = resolveBrowserBeeBacking({
+    codexAuthMode: "subscription",
+    desktopFallbackEnabled: false,
+    desktopBeeAvailable: true,
+  });
+  assert.equal(decision.backing, null);
+  assert.match(decision.reason, /Claude/);
+  assert.doesNotMatch(decision.reason, /local model/i);
 });
 
 test("buildBrowserBeeTaskRequestEnvelope records the chosen backing", () => {
