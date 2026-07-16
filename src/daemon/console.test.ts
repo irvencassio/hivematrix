@@ -2739,6 +2739,82 @@ test("command options picker: panels render options and Run assembles from picks
   assert.match(js, /if \(raw\) return raw;/);
 });
 
+test("_cmdOptionsHtml renders optional positionals as toggle pills, required ones as plain inputs", () => {
+  // Regression/feature guard: today ALL positionals render identically as a plain
+  // <input class="opt-pos">, regardless of CommandOption.required — only the
+  // placeholder text differs ("(required)" suffix). The ticket wants required
+  // positionals to stay a plain mandatory input, but optional positionals to
+  // render as a toggle-pill consistent with the flag/value/choice opt-chip visual
+  // language (see docs/superpowers/specs/2026-07-15-tools-window-search-and-run-design.md).
+  const js = extractScript(CONSOLE_HTML);
+  const body = fnBody(js, "_cmdOptionsHtml");
+
+  // Required positionals are unchanged: a plain, always-visible, mandatory input.
+  assert.match(body, /p\.required/, "positionals branch on p.required");
+  assert.match(body, /class="opt-pos"/, "required positionals still render a plain opt-pos input");
+
+  // Optional positionals instead render a toggle pill reusing the opt-chip visual
+  // language (a distinct class so it doesn't collide with the flags/values/choices
+  // assembly loop, which is scoped to #cmdOptions and positionals live outside it).
+  assert.match(body, /opt-chip opt-pos-toggle/, "optional positionals render a toggle pill reusing the opt-chip visual language");
+  assert.match(body, /_optToggle\(this\)/, "the positional pill toggles the same way other chips do");
+  // It reveals a companion text input on activation, mirroring how kind==='value'
+  // chips reveal a sibling .opt-val input today.
+  assert.match(body, /opt-pos-val/, "the optional positional pill has a companion input revealed on activation");
+
+  // _optSetActive is extended (not duplicated) to know how to reveal the new
+  // optional-positional companion input, alongside its existing value/choice cases.
+  const setActive = fnBody(js, "_optSetActive");
+  assert.match(setActive, /opt-pos-val/, "_optSetActive reveals the optional-positional's companion input");
+
+  // _assembleCmdArgs reads required positionals unconditionally (unchanged) and
+  // only includes an optional positional's value when its pill has been toggled on.
+  const assemble = fnBody(js, "_assembleCmdArgs");
+  assert.match(assemble, /querySelectorAll\('\.opt-pos'\)/, "required positionals are still read unconditionally, as before");
+  assert.match(assemble, /opt-pos-toggle\.active/, "optional-positional values are only assembled when their pill is active");
+});
+
+// ─── Tools window: real-time search box (2026-07-15) ────────────────────────
+// See docs/superpowers/specs/2026-07-15-tools-window-search-and-run-design.md
+// and docs/superpowers/plans/2026-07-15-tools-window-search-and-run.md, Task 3.
+
+test("Tools panel has a real-time search box that filters groups by name/description/kind", () => {
+  const js = extractScript(CONSOLE_HTML);
+
+  // The query is persisted state, not read fresh from the DOM inside the
+  // render function — only toolsQueryInput() may update it, so unrelated
+  // re-renders (e.g. toggleToolExpand) don't clear what the operator typed.
+  assert.match(js, /let _toolsQuery = '';/, "_toolsQuery is declared as persisted state near _toolsState");
+
+  // The search input lives in the panel head, wired to a real-time handler,
+  // and reflects the persisted query back as its value so a fresh render
+  // (which replaces the whole #session subtree) doesn't blank the box.
+  const panel = fnBody(js, "renderToolsPanel");
+  assert.match(panel, /id="toolsQuery"/, "renderToolsPanel emits a #toolsQuery search input");
+  assert.match(panel, /oninput="toolsQueryInput\(\)"/, "the input is wired to a real-time handler");
+  assert.match(panel, /id="toolsQuery"[\s\S]{0,200}attrEnc\(_toolsQuery\)/, "the input's value reflects the persisted query on every render");
+  assert.doesNotMatch(panel, /_toolsQuery\s*=(?!=)/, "renderToolsPanel must never assign _toolsQuery — only toolsQueryInput() may");
+
+  // toolsQueryInput() is the sole updater: read the live box, store it, re-render.
+  const handler = fnBody(js, "toolsQueryInput");
+  assert.match(handler, /getElementById\('toolsQuery'\)/, "reads the live input value");
+  assert.match(handler, /_toolsQuery\s*=/, "stores it into the persisted query state");
+  assert.match(handler, /renderToolsPanel\(\);/, "re-renders the panel after updating the query");
+
+  // Filtering predicate mirrors renderSkillList's shape (console.ts ~3598-3603):
+  // lowercase, split into terms, AND-match every term as a substring of the
+  // combined name+description+kind haystack.
+  assert.match(panel, /toLowerCase\(\)/, "query comparison is case-insensitive");
+  assert.match(panel, /split\(\/\\s\+\/\)/, "query is split into whitespace-separated terms, same as the sidebar filter");
+  assert.match(panel, /\.every\(/, "every term must match (AND), same as the sidebar filter");
+  assert.match(panel, /\.includes\(/, "term match is substring containment, same as the sidebar filter");
+  assert.match(panel, /t\.name[\s\S]{0,40}t\.description[\s\S]{0,40}g\.kind/, "haystack combines tool name, description, and group kind");
+
+  // A group with zero matches after filtering is skipped entirely — no empty
+  // header renders when a search excludes every tool in that group.
+  assert.match(panel, /!terms\.length \|\| g\.tools\.length > 0/, "groups with zero matches are dropped once a search is active");
+});
+
 test("goal card surfaces the next-action hook and an affordance to set it", () => {
   const js = extractScript(CONSOLE_HTML);
   const row = fnBody(js, "goalRowHtml");

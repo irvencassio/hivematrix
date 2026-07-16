@@ -4135,7 +4135,20 @@ function _cmdOptionsHtml(spec){
   h += '</div>';
   if ((spec.positionals||[]).length){
     h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">';
-    spec.positionals.forEach(function(p){ h += '<input class="opt-pos" data-pos="' + _ea(p.name) + '" placeholder="' + _ea(p.name + (p.required ? ' (required)' : '')) + '"' + (p.description ? ' title="' + _ea(p.description) + '"' : '') + ' style="flex:1;min-width:130px;font-size:12px" />'; });
+    spec.positionals.forEach(function(p){
+      const title = p.description ? ' title="' + _ea(p.description) + '"' : '';
+      if (p.required) {
+        // Required stays a plain, always-visible, mandatory input — can't be missed.
+        h += '<input class="opt-pos" data-pos="' + _ea(p.name) + '" placeholder="' + _ea(p.name + ' (required)') + '"' + title + ' style="flex:1;min-width:130px;font-size:12px" />';
+      } else {
+        // Optional renders as a toggle pill (same visual language as flag/value/
+        // choice opt-chips) that reveals its companion input only once activated.
+        h += '<span class="opt-wrap" style="display:inline-flex;align-items:center">'
+          + '<button type="button" class="opt-chip opt-pos-toggle" data-pos="' + _ea(p.name) + '" data-kind="pos"' + title + ' onclick="_optToggle(this)" style="padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:inherit;cursor:pointer;font-size:12px">' + esc(p.name) + '</button>'
+          + '<input class="opt-pos-val" data-pos="' + _ea(p.name) + '" placeholder="' + _ea(p.name) + '" style="display:none;width:130px;font-size:12px;margin-left:3px" />'
+          + '</span>';
+      }
+    });
     h += '</div>';
   }
   return h;
@@ -4145,8 +4158,8 @@ function _optSetActive(el, on){
   el.style.background = on ? 'var(--accent)' : 'var(--panel)';
   el.style.color = on ? '#fff' : 'inherit';
   const kind = el.getAttribute('data-kind');
-  if (kind === 'value' || kind === 'choice'){
-    const sib = el.parentNode.querySelector(kind === 'value' ? '.opt-val' : '.opt-choice');
+  if (kind === 'value' || kind === 'choice' || kind === 'pos'){
+    const sib = el.parentNode.querySelector(kind === 'value' ? '.opt-val' : kind === 'choice' ? '.opt-choice' : '.opt-pos-val');
     if (sib){ sib.style.display = on ? '' : 'none'; if (on) { try { sib.focus(); } catch(e){} } }
   }
 }
@@ -4161,6 +4174,7 @@ function _assembleCmdArgs(){
   if (raw) return raw;
   const parts = [];
   document.querySelectorAll('.opt-pos').forEach(function(inp){ const v = (inp.value||'').trim(); if (v) parts.push(_q(v)); });
+  document.querySelectorAll('.opt-pos-toggle.active').forEach(function(chip){ const sib = chip.parentNode.querySelector('.opt-pos-val'); const v = sib && sib.value ? sib.value.trim() : ''; if (v) parts.push(_q(v)); });
   const box = document.getElementById('cmdOptions');
   if (box) box.querySelectorAll('.opt-chip.active').forEach(function(chip){
     const flag = chip.getAttribute('data-flag'); const kind = chip.getAttribute('data-kind');
@@ -7599,6 +7613,10 @@ function updateRolesNav() { syncNav(); }
 // flash-only tools, curated skills-as-tools, and the full skill library — each
 // with its schema and the file that backs it. Data: GET /capabilities.
 let _toolsState = { panelOpen: false, groups: null, error: false, expanded: {} };
+// Search box query text, persisted across re-renders. Only toolsQueryInput()
+// updates this — renderToolsPanel() must not reset it, so unrelated re-renders
+// (e.g. toggleToolExpand) don't clear what the operator typed.
+let _toolsQuery = '';
 
 function showTools() {
   state.selected = null;
@@ -7667,12 +7685,31 @@ function renderToolsPanel() {
   if (!groups) {
     body = '<div class="oc-empty">Loading capabilities…</div>';
   } else {
+    // Real-time search: same predicate shape as renderSkillList's sidebar
+    // filter (console.ts ~3598-3603) — lowercase, split into terms, AND-match
+    // every term as a substring of the combined name+description+kind text.
+    const q = _toolsQuery.toLowerCase().trim();
+    const terms = q ? q.split(/\s+/).filter(Boolean) : [];
+    const visibleGroups = groups.map(function (g) {
+      let tools = g.tools || [];
+      if (terms.length) {
+        tools = tools.filter(function (t) {
+          const hay = (t.name + ' ' + (t.description || '') + ' ' + (g.kind || '')).toLowerCase();
+          return terms.every(function (term) { return hay.includes(term); });
+        });
+      }
+      return { kind: g.kind, tools: tools };
+    }).filter(function (g) { return !terms.length || g.tools.length > 0; }); // skip empty groups only while actively searching
+
     let total = 0;
-    groups.forEach(function (g) { total += (g.tools || []).length; });
-    body = '<div class="muted" style="padding:6px 18px;font-size:12px">' + total + ' capabilities across ' + groups.length + ' groups</div>';
-    for (const g of groups) {
+    visibleGroups.forEach(function (g) { total += g.tools.length; });
+    body = '<div class="muted" style="padding:6px 18px;font-size:12px">' + total + ' capabilities across ' + visibleGroups.length + ' groups</div>';
+    if (terms.length && !visibleGroups.length) {
+      body += '<div class="oc-empty">No tools match your search.</div>';
+    }
+    for (const g of visibleGroups) {
       const meta = TOOLS_GROUP_META[g.kind] || { title: g.kind, sub: '' };
-      const tools = g.tools || [];
+      const tools = g.tools;
       body += '<div class="tools-group"><div class="tools-group-h">' + esc(meta.title)
         + ' <span class="count">' + tools.length + '</span></div>'
         + '<div class="tools-group-sub">' + esc(meta.sub) + '</div>';
@@ -7723,9 +7760,17 @@ function renderToolsPanel() {
   session.innerHTML = '<div class="oc-center-pane">'
     + '<div class="oc-panel-head"><div><div class="oc-panel-title"><span>🛠️ Tools</span></div>'
     + '<div class="oc-panel-sub">Everything the assistant can do — and what backs it</div></div>'
+    + '<div class="sk-toolbar" style="flex:1 1 200px;margin-bottom:0">'
+    + '<input id="toolsQuery" placeholder="Search tools…" oninput="toolsQueryInput()" value="' + attrEnc(_toolsQuery) + '" />'
+    + '</div>'
     + '<span class="oc-panel-head-spacer"></span>'
     + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></div>'
     + '<div class="tools-pane">' + body + '</div></div>';
+}
+
+function toolsQueryInput() {
+  _toolsQuery = (document.getElementById('toolsQuery') || {}).value || '';
+  renderToolsPanel();
 }
 
 function toggleToolExpand(key) {
