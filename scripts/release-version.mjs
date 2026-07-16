@@ -69,7 +69,12 @@ export function applyVersionTs(text, { version, buildNumber, date }) {
 export function prependChangelogTs(text, { version, date, note }) {
   const noteEsc = String(note).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const entry = `  { version: "${version}", date: "${date}", note: "${noteEsc}" },\n`;
-  const out = text.replace(/(export const CHANGELOG: ReleaseNote\[\] = \[\n)/, `$1${entry}`);
+  // Replacer FUNCTION, not a replacement string: a string replacement would
+  // interpret $-patterns coming from `note` ($1, $&, $') as capture references.
+  // A note reading "raised $10 to $25" spliced capture group 1 (this file's own
+  // CHANGELOG header) into the string literal and broke the build — see the
+  // 0.1.210 release abort, 2026-07-16. Note text must always be literal.
+  const out = text.replace(/(export const CHANGELOG: ReleaseNote\[\] = \[\n)/, (m) => m + entry);
   if (out === text) throw new Error("could not prepend to changelog.ts (anchor not found)");
   return out;
 }

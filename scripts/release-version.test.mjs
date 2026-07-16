@@ -79,3 +79,22 @@ test("prependChangelogTs inserts the new release as the first entry", () => {
   assert.ok(firstEntry !== -1 && firstEntry < prevEntry, "new entry precedes the previous one");
   assert.match(out, /note: "has \\"quotes\\" and \\\\ backslash"/, "escapes quotes and backslashes");
 });
+
+test("prependChangelogTs keeps $-patterns in the note literal (regression: the 0.1.210 abort)", () => {
+  const src = [
+    "export const CHANGELOG: ReleaseNote[] = [",
+    '  { version: "0.1.209", date: "2026-07-16", note: "prev" },',
+    "];",
+  ].join("\n") + "\n";
+  // A string replacement would expand these as capture references: $1 spliced
+  // the CHANGELOG header itself into the literal and broke the build.
+  const note = "budget backstop raised $10 to $25; also $& and $' and $`";
+  const out = prependChangelogTs(src, { version: "0.1.210", date: "2026-07-16", note });
+  assert.ok(out.includes(`note: "${note}"`), "note survives verbatim, no $-expansion");
+  assert.ok(!out.includes("note: \"budget backstop raised export const"), "header must not be spliced in");
+  // The anchor still appears exactly once — nothing duplicated or eaten.
+  assert.equal(out.split("export const CHANGELOG: ReleaseNote[] = [").length - 1, 1);
+  const firstEntry = out.indexOf('version: "0.1.210"');
+  const prevEntry = out.indexOf('version: "0.1.209"');
+  assert.ok(firstEntry !== -1 && firstEntry < prevEntry, "new entry still precedes the previous one");
+});
