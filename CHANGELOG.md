@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.208 — 2026-07-16
+
+Task board: batch grouping + verification-verdict badges; opt-in per-task git worktree isolation (off by default); Tools window search + parameter discovery + run
+
 ## v0.1.207 — 2026-07-15
 
 Flash can now inspect its own tasks: ask it 'why did this task fail?' and it reads the task's error + activity log itself (get_task), or 'what's failed/running?' for the board (list_tasks) — no more asking you to screenshot the error.

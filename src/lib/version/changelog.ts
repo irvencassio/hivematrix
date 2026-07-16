@@ -12,6 +12,7 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  { version: "0.1.208", date: "2026-07-16", note: "Task board: batch grouping + verification-verdict badges; opt-in per-task git worktree isolation (off by default); Tools window search + parameter discovery + run" },
   { version: "0.1.207", date: "2026-07-15", note: "Flash can now inspect its own tasks: ask it 'why did this task fail?' and it reads the task's error + activity log itself (get_task), or 'what's failed/running?' for the board (list_tasks) — no more asking you to screenshot the error." },
   { version: "0.1.206", date: "2026-07-15", note: "Flash chat: paste (Cmd+V) or drag-and-drop an image into the message box — previously only the file picker worked, so pasted screenshots were silently dropped and the assistant couldn't see them." },
   { version: "0.1.205", date: "2026-07-15", note: "Self-improvement loop is now opt-in (default off, toggle in Settings → Features) — it can no longer reinstall or resurrect itself across app updates." },
