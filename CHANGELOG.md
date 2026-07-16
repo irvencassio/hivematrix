@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.209 — 2026-07-16
+
+Browser Lane auto-enables desktop fallback on first authenticated site; Goals auto-seed from persona/GOALS.md; voice fix (no say-voiced chunk on Kokoro failure); console scroll-position restoration for Chat/Tools/Goals
+
 ## v0.1.208 — 2026-07-16
 
 Task board: batch grouping + verification-verdict badges; opt-in per-task git worktree isolation (off by default); Tools window search + parameter discovery + run
