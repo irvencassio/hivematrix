@@ -428,15 +428,18 @@ export function createDaemonServer() {
       // Tools panel: native lane tools (lane-tools.ts), the four Flash-only
       // tools (flash-mcp.ts), the curated skills-as-tools subset the model
       // sees directly (flash-mcp.ts's loadCuratedSkillTools — same selection
-      // Flash's MCP catalog uses this turn), and the full skill library (the
-      // long tail only reachable via the generic skill_run tool). Pure read;
-      // no side effects. Auth-gated like every other non-public route (the
-      // global token check above already covers it).
+      // Flash's MCP catalog uses this turn), the full skill library (the
+      // long tail only reachable via the generic skill_run tool), and the
+      // local slash-command catalog (local-catalog.ts's scanLocalCommands —
+      // the same source the /commands route uses). Pure read; no side
+      // effects. Auth-gated like every other non-public route (the global
+      // token check above already covers it).
       if (req.method === "GET" && urlPath === "/capabilities") {
         const { LANE_TOOL_DEFINITIONS, availableLaneTools, laneToolCapabilityId } = await import("@/lib/orchestrator/lane-tools");
         const { FLASH_ONLY_TOOL_DEFS, loadCuratedSkillTools } = await import("@/lib/flash/flash-mcp");
         const { listSkills, skillsDir } = await import("@/lib/skills/store");
         const { skillFilename, skillSlug } = await import("@/lib/skills/contracts");
+        const { scanLocalCommands } = await import("@/lib/commands/local-catalog");
 
         const laneEnabledNames = new Set(availableLaneTools(getConnectivityPolicy()).map((t) => t.function.name));
         const dir = skillsDir();
@@ -482,12 +485,21 @@ export function createDaemonServer() {
           claudeMirror: join(homedir(), ".claude", "skills", skillSlug(s.name), "SKILL.md"),
         }));
 
+        const localCommands = (await scanLocalCommands()).map((c) => ({
+          name: c.invokeName,
+          description: c.description,
+          options: c.options,
+          argumentHint: c.argumentHint,
+          sourceRef: c.sourcePath,
+        }));
+
         json(res, 200, {
           groups: [
             { kind: "native", tools: native },
             { kind: "flash", tools: flash },
             { kind: "skill-tool", tools: skillTool },
             { kind: "skill-library", tools: skillLibrary },
+            { kind: "local-command", tools: localCommands },
           ],
         });
         return;

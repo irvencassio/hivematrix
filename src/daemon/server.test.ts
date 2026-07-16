@@ -2737,7 +2737,7 @@ test("GET /capabilities requires auth like every other non-public route", async 
   assert.equal(res.status, 401);
 });
 
-test("GET /capabilities returns exactly the four groups (native, flash, skill-tool, skill-library) with a stable shape", async (t) => {
+test("GET /capabilities returns exactly the five groups (native, flash, skill-tool, skill-library, local-command) with a stable shape", async (t) => {
   withTempHome(t);
   const { base, headers } = await startServer(t);
 
@@ -2745,7 +2745,7 @@ test("GET /capabilities returns exactly the four groups (native, flash, skill-to
   assert.equal(res.status, 200);
   const body = await res.json() as CapabilitiesResponse;
 
-  assert.deepEqual(body.groups.map((g) => g.kind), ["native", "flash", "skill-tool", "skill-library"]);
+  assert.deepEqual(body.groups.map((g) => g.kind), ["native", "flash", "skill-tool", "skill-library", "local-command"]);
 
   const native = body.groups.find((g) => g.kind === "native")!;
   const flash = body.groups.find((g) => g.kind === "flash")!;
@@ -2767,6 +2767,28 @@ test("GET /capabilities returns exactly the four groups (native, flash, skill-to
   assert.ok(personaUpdate);
   assert.equal(personaUpdate.sourceRef, "src/lib/flash/flash-mcp.ts");
   assert.ok(personaUpdate.schema);
+});
+
+test("GET /capabilities: local-command group mirrors scanLocalCommands, one entry per slash command", async (t) => {
+  withTempHome(t);
+  // Plant a local command so scanLocalCommands finds it under the temp HOME
+  // (withTempHome starts empty — no ambient .claude/commands, matching the
+  // convention already used by the /commands/run project-identity test above).
+  const cmdDir = join(process.env.HOME!, ".claude", "commands");
+  mkdirSync(cmdDir, { recursive: true });
+  writeFileSync(join(cmdDir, "import-all.md"), "---\ndescription: Import everything\n---\nDo the import");
+
+  const { base, headers } = await startServer(t);
+  const res = await fetch(`${base}/capabilities`, { headers });
+  const body = await res.json() as CapabilitiesResponse;
+  const localCmd = body.groups.find((g) => g.kind === "local-command")!;
+  assert.ok(Array.isArray(localCmd.tools));
+  assert.ok(localCmd.tools.length > 0);
+  const entry = localCmd.tools[0] as Record<string, unknown>;
+  assert.equal(typeof entry.name, "string");       // invokeName
+  assert.equal(typeof entry.description, "string");
+  assert.ok(entry.options && typeof entry.options === "object"); // CommandOptionsSpec
+  assert.equal(typeof entry.sourceRef, "string");   // sourcePath
 });
 
 test("GET /capabilities: native includes brain_read + brain_search, both marked enabled (brain capability is always-on)", async (t) => {
