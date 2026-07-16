@@ -55,7 +55,7 @@ export function planFanout(
 
 const MANIFEST = ".hivematrix-managed.json";
 
-async function readManifest(dir: string): Promise<string[]> {
+export async function readManifest(dir: string): Promise<string[]> {
   try {
     const raw = await fs.readFile(join(dir, MANIFEST), "utf-8");
     const parsed = JSON.parse(raw) as { slugs?: unknown };

@@ -3313,3 +3313,24 @@ test("renderReviewLaneBody wraps batched cards in a batch-group header; a null-b
   assert.ok(groupOpenIx !== -1 && groupOpenIx < headIx && headIx < aIx && aIx < bIx, "the batch header precedes its grouped cards, which stay in sort order");
   assert.ok(bIx < cIx, "the standalone (null-batchId) card renders after the batch group, not inside it");
 });
+
+// ─── Skills & Commands: dedupe HiveMatrix-managed local mirrors (2026-07-16) ─
+// See docs/superpowers/specs/2026-07-16-skills-catalog-dedup-design.md and
+// docs/superpowers/plans/2026-07-16-skills-catalog-dedup.md, Task 4.
+
+test("skCatalog: drops a managed local skill row when a same-named lib skill is present", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const fn = fnBody(js, "skCatalog");
+
+  // The filter runs on _commands before the loc map, keyed off c.managed and
+  // a lib-name lookup — not a slug reimplementation, not touching _skills'
+  // own mapping at all.
+  assert.match(fn, /libNames\s*=\s*new Set\(_skills\.map\(s => s\.name\.toLowerCase\(\)\)\)/,
+    "builds a lowercase lib-name lookup from _skills");
+  assert.match(fn, /_commands\s*\n?\s*\.filter\(/, "filters _commands before mapping to loc rows");
+  assert.match(fn, /c\.kind === 'skill' && c\.managed && libNames\.has/,
+    "only a managed folder-skill entry shadowed by a present lib name is dropped");
+
+  // lib mapping itself is untouched by this change.
+  assert.match(fn, /const lib = _skills\.map\(s => \(\{/, "lib mapping unchanged");
+});

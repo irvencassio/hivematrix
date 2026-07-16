@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { planFanout, fanOutSkills, harnessTargets, type HarnessTarget } from "./fanout";
+import { planFanout, fanOutSkills, harnessTargets, readManifest, type HarnessTarget } from "./fanout";
 import { renderStandardSkillMd } from "./standard";
 import type { Skill } from "./contracts";
 
@@ -66,4 +66,13 @@ test("fanOutSkills writes <slug>/SKILL.md, prunes removed, and won't clobber unm
   assert.equal(readFileSync(join(targets[0].dir, "mine", "SKILL.md"), "utf-8"), "user's own", "unmanaged skill untouched");
   assert.equal(res[0].written, 1);
   assert.equal(res[0].removed, 1);
+});
+
+test("readManifest: missing manifest -> [], present manifest -> its slugs", async () => {
+  const home = mkdtempSync(join(tmpdir(), "fanout-manifest-"));
+  const dir = join(home, ".claude", "skills");
+  mkdirSync(dir, { recursive: true });
+  assert.deepEqual(await readManifest(dir), [], "no manifest file yet");
+  writeFileSync(join(dir, ".hivematrix-managed.json"), JSON.stringify({ slugs: ["alpha", "beta"] }));
+  assert.deepEqual(await readManifest(dir), ["alpha", "beta"]);
 });

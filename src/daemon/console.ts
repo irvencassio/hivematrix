@@ -3664,10 +3664,13 @@ function skCatalog() {
     kind: s.kind, scope: s.scope, signed: s.signed, trusted: s.trusted, scan: s.scan,
     compat: s.compat, hasInput: s.hasInput, useCount: s.useCount || 0, raw: s,
   }));
-  const loc = _commands.map(c => ({
-    source: 'local', key: 'local:' + c.invokeName, name: c.displayName || c.invokeName,
-    description: c.description || '', kind: c.kind, invokeName: c.invokeName, compat: c.compat, useCount: 0, raw: c,
-  }));
+  const libNames = new Set(_skills.map(s => s.name.toLowerCase()));
+  const loc = _commands
+    .filter(c => !(c.kind === 'skill' && c.managed && libNames.has((c.displayName || c.invokeName).toLowerCase())))
+    .map(c => ({
+      source: 'local', key: 'local:' + c.invokeName, name: c.displayName || c.invokeName,
+      description: c.description || '', kind: c.kind, invokeName: c.invokeName, compat: c.compat, useCount: 0, raw: c,
+    }));
   return lib.concat(loc);
 }
 function skBadges(it) {

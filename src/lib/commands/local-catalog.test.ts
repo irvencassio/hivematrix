@@ -30,6 +30,10 @@ writeFileSync(
   join(CFG, "skills", "quietskill", "SKILL.md"),
   "---\nname: quietskill\ndescription: not invocable\nuser-invocable: false\n---\nhidden",
 );
+writeFileSync(
+  join(CFG, "skills", ".hivematrix-managed.json"),
+  JSON.stringify({ slugs: ["puller"], updatedAt: "2026-07-16T00:00:00.000Z" }),
+);
 
 const { scanLocalCommands, readManifestBody } = await import("./local-catalog");
 const { parseCommandFile, parseSkillManifest, splitFrontmatter, commandEnabledByProviders } = await import("./contracts");
@@ -80,12 +84,25 @@ test("parseCommandFile infers model compatibility", () => {
 });
 
 test("parseSkillManifest reads name + bundled flag", () => {
-  const s = parseSkillManifest("---\nname: puller\ndescription: d\n---\nbody", "puller", "/p/SKILL.md", 1);
+  const s = parseSkillManifest("---\nname: puller\ndescription: d\n---\nbody", "puller", "/p/SKILL.md", 1, false);
   assert.equal(s.kind, "skill");
   assert.equal(s.invokeName, "puller");
   assert.equal(s.hasBundledFiles, true);
   assert.equal(s.bundledFileCount, 1);
   assert.deepEqual(s.compat, ["all"]);
+});
+
+test("parseSkillManifest: threads the managed flag through verbatim", () => {
+  const content = "---\nname: foo\ndescription: d\n---\nbody";
+  const managedCmd = parseSkillManifest(content, "foo", "/p/foo/SKILL.md", 0, true);
+  assert.equal(managedCmd.managed, true);
+  const unmanagedCmd = parseSkillManifest(content, "foo", "/p/foo/SKILL.md", 0, false);
+  assert.equal(unmanagedCmd.managed, false);
+});
+
+test("parseCommandFile: always managed:false (fan-out never targets flat commands)", () => {
+  const c = parseCommandFile("---\ndescription: x\n---\nbody", "ns:sub", "/p");
+  assert.equal(c.managed, false);
 });
 
 test("scanLocalCommands discovers both sources, namespacing, bundled detection", async () => {
@@ -105,6 +122,16 @@ test("scanLocalCommands discovers both sources, namespacing, bundled detection",
 test("scanLocalCommands excludes user-invocable:false skills", async () => {
   const all = await scanLocalCommands();
   assert.ok(!all.some((c) => c.invokeName === "quietskill"), "quietskill is filtered out");
+});
+
+test("scanLocalCommands: managed is true only for slugs in .hivematrix-managed.json", async () => {
+  const all = await scanLocalCommands();
+  const puller = all.find((c) => c.invokeName === "puller");
+  assert.equal(puller?.managed, true, "puller is listed in the fixture manifest");
+  // quietskill is filtered out earlier by user-invocable:false, so it can't be
+  // asserted here directly — covered instead by the always-false command case:
+  const cmd = all.find((c) => c.kind === "command");
+  assert.equal(cmd?.managed, false, "flat commands are never fan-out targets");
 });
 
 test("scanLocalCommands sorts commands before skills", async () => {

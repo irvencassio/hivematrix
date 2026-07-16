@@ -15,6 +15,7 @@ import { join, relative, sep } from "path";
 import { homedir } from "os";
 import { getActiveProfile } from "@/lib/config/constants";
 import { getEnabledProviders } from "@/lib/config/frontier-providers";
+import { readManifest } from "@/lib/skills/fanout";
 import {
   parseCommandFile, parseSkillManifest, skillIsUserInvocable, skillManifestBody, commandEnabledByProviders,
   type LocalCommand,
@@ -74,6 +75,7 @@ async function scanSkills(root: string, out: LocalCommand[]): Promise<void> {
   let dirs: Dirent[];
   try { dirs = await fs.readdir(root, { withFileTypes: true }); }
   catch { return; } // missing dir → skip
+  const managedSlugs = new Set(await readManifest(root));
   for (const d of dirs) {
     if (out.length >= MAX_COMMANDS) break;
     if (!d.isDirectory()) continue;
@@ -87,7 +89,7 @@ async function scanSkills(root: string, out: LocalCommand[]): Promise<void> {
       const inner = await fs.readdir(skillDir);
       bundledFileCount = inner.filter((f) => f !== "SKILL.md").length;
     } catch { /* leave 0 */ }
-    out.push(parseSkillManifest(raw, d.name, manifest, bundledFileCount));
+    out.push(parseSkillManifest(raw, d.name, manifest, bundledFileCount, managedSlugs.has(d.name)));
   }
 }
 

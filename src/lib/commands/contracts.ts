@@ -48,6 +48,10 @@ export interface LocalCommand {
   /** A skill folder bundles files beyond SKILL.md (scripts etc.). */
   hasBundledFiles: boolean;
   bundledFileCount: number;
+  /** True when this folder skill's SKILL.md is HiveMatrix-owned (written by
+   *  fanOutSkills, tracked in that dir's .hivematrix-managed.json) — a mirror
+   *  of a brain-library skill, not an independently authored local asset. */
+  managed: boolean;
 }
 
 /**
@@ -150,6 +154,7 @@ export function parseCommandFile(content: string, invokeName: string, sourcePath
     sourcePath,
     hasBundledFiles: false,
     bundledFileCount: 0,
+    managed: false,
   };
 }
 
@@ -160,6 +165,7 @@ export function parseSkillManifest(
   dirName: string,
   sourcePath: string,
   bundledFileCount: number,
+  managed: boolean,
 ): LocalCommand {
   const { fm } = splitFrontmatter(content);
   const name = unquote(fm["name"] || dirName);
@@ -176,6 +182,7 @@ export function parseSkillManifest(
     sourcePath,
     hasBundledFiles: bundledFileCount > 0,
     bundledFileCount,
+    managed,
   };
 }
 
