@@ -2850,6 +2850,63 @@ test("Tools panel has a real-time search box that filters groups by name/descrip
   assert.match(panel, /!terms\.length \|\| g\.tools\.length > 0/, "groups with zero matches are dropped once a search is active");
 });
 
+// ─── Tools panel: search box alignment (2026-07-16) ──────────────────────────
+// See docs/superpowers/specs/2026-07-16-tools-search-alignment-design.md and
+// docs/superpowers/plans/2026-07-16-tools-search-alignment.md, Task 1.
+
+test("Tools panel search box sits in its own left-aligned row below the heading, not inline in the panel head", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const panel = fnBody(js, "renderToolsPanel");
+
+  // Lowercase "overview" — matches the actual button text
+  // (title="Back to overview (Esc)"); the visible "Overview" that's captured too
+  // is capitalized only in the link text after it, not before "(Esc)".
+  const headCloseIdx = panel.indexOf('overview (Esc)">← Overview</button></div>');
+  const toolbarIdx = panel.indexOf('<div class="sk-toolbar"');
+  // lastIndexOf, not indexOf: the error-state branch earlier in this same
+  // function renders its own unrelated, untouched `<div class="tools-pane">`
+  // (for the "could not load capabilities" empty state). The one that matters
+  // for this assertion is the real results pane at the end of the function.
+  const paneIdx = panel.lastIndexOf('<div class="tools-pane">');
+
+  assert.ok(headCloseIdx > -1, "oc-panel-head's closing button/div is present");
+  assert.ok(toolbarIdx > -1, "sk-toolbar wrapper is present");
+  assert.ok(paneIdx > -1, "tools-pane is present");
+
+  assert.ok(
+    toolbarIdx > headCloseIdx,
+    "the search toolbar must come after oc-panel-head closes, not nested inside its flex row",
+  );
+  assert.ok(
+    paneIdx > toolbarIdx,
+    "the search toolbar must come before tools-pane — its own row between the heading and the results",
+  );
+
+  // The old placement forced .sk-toolbar to act as a flex-item sized against the
+  // title row (flex:1 1 200px). In its own block row it needs no such override —
+  // spacing comes for free from .oc-center-pane's own gap:12px between children.
+  assert.doesNotMatch(
+    panel,
+    /class="sk-toolbar" style="flex:1 1 200px/,
+    "toolbar must not force flex-item sizing meant for oc-panel-head's row",
+  );
+  assert.match(
+    panel,
+    /class="sk-toolbar" style="margin-bottom:0"/,
+    "toolbar keeps a flat margin so spacing comes from oc-center-pane's gap, not a doubled-up margin",
+  );
+
+  // Regression guard: existing search-box behavior (id, live handler, persisted
+  // value) must survive the reorder unchanged.
+  assert.match(panel, /id="toolsQuery"/, "search input still present");
+  assert.match(panel, /oninput="toolsQueryInput\(\)"/, "still wired to the real-time handler");
+  assert.match(
+    panel,
+    /id="toolsQuery"[\s\S]{0,200}attrEnc\(_toolsQuery\)/,
+    "input value still reflects the persisted query",
+  );
+});
+
 test("goal card surfaces the next-action hook and an affordance to set it", () => {
   const js = extractScript(CONSOLE_HTML);
   const row = fnBody(js, "goalRowHtml");

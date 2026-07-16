@@ -7790,11 +7790,11 @@ function renderToolsPanel() {
   session.innerHTML = '<div class="oc-center-pane">'
     + '<div class="oc-panel-head"><div><div class="oc-panel-title"><span>🛠️ Tools</span></div>'
     + '<div class="oc-panel-sub">Everything the assistant can do — and what backs it</div></div>'
-    + '<div class="sk-toolbar" style="flex:1 1 200px;margin-bottom:0">'
-    + '<input id="toolsQuery" placeholder="Search tools…" oninput="toolsQueryInput()" value="' + attrEnc(_toolsQuery) + '" />'
-    + '</div>'
     + '<span class="oc-panel-head-spacer"></span>'
     + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></div>'
+    + '<div class="sk-toolbar" style="margin-bottom:0">'
+    + '<input id="toolsQuery" placeholder="Search tools…" oninput="toolsQueryInput()" value="' + attrEnc(_toolsQuery) + '" />'
+    + '</div>'
     + '<div class="tools-pane">' + body + '</div></div>';
 }
 
