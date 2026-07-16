@@ -483,16 +483,40 @@ test("Mixed-mode role-model defaults use version-agnostic Claude labels", () => 
 
 test("right-panel sections are collapsible <details> with persisted open state", () => {
   // Each context section is a <details class="ctx-sec"> so the long panel can be tidied.
-  for (const id of ["connSec", "dirSec", "skillsSec", "mcpSec"]) {
+  // Connectivity (connSec) and MCP Servers (mcpSec) used to live here too, but were
+  // consolidated into the left-sidebar Agents section — see the dedicated
+  // "consolidated into the left-sidebar Agents section" test below for their coverage.
+  for (const id of ["dirSec", "skillsSec"]) {
     assert.match(CONSOLE_HTML, new RegExp('<details class="ctx-sec" id="' + id + '"'), id + " is a collapsible section");
   }
   // Actionable sections default open; info-heavy ones default collapsed.
-  assert.match(CONSOLE_HTML, /id="connSec" open/);
   assert.match(CONSOLE_HTML, /id="skillsSec" open/);
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /function wireCtxSections\(/);
   assert.match(js, /hm_sec_/, "per-section open state persisted");
   assert.match(js, /wireCtxSections\(\);/, "wired on init");
+});
+
+test("Connectivity and MCP Servers right-sidebar sections were consolidated into the left-sidebar Agents section", () => {
+  const html = CONSOLE_HTML;
+  assert.doesNotMatch(html, /id="connSec"/, "the old right-sidebar Connectivity wrapper is gone");
+  assert.doesNotMatch(html, /id="mcpSec"/, "the old right-sidebar MCP Servers wrapper is gone");
+  assert.doesNotMatch(html, /id="mcp"/, "renderMcp()'s old #mcp DOM target is gone (superseded by the MCP rows in #agents)");
+
+  // renderConn()'s existing detail is not deleted, just relocated: #conn now lives
+  // nested inside #agentsSec as a collapsible sub-block, not as its own top-level
+  // right-panel ctx-sec.
+  assert.match(html, /id="conn"/, "the #conn container renderConn() targets still exists");
+  const agentsSecIx = html.indexOf('id="agentsSec"');
+  const connIx = html.indexOf('id="conn"');
+  assert.ok(agentsSecIx !== -1 && connIx !== -1 && connIx > agentsSecIx, "#conn now sits inside #agentsSec, after its opening tag");
+
+  // renderMcp()/restartMcp() had no remaining DOM target or caller after the
+  // removal above (confirmed by grep before deleting them), so both are gone —
+  // superseded by the MCP rows renderAgents() now renders directly.
+  const js = extractScript(html);
+  assert.doesNotMatch(js, /function renderMcp\(/, "renderMcp() was removed — superseded by renderAgents()'s MCP rows");
+  assert.doesNotMatch(js, /function restartMcp\(/, "restartMcp() was removed — its only caller was renderMcp()'s deleted markup");
 });
 
 test("task session view still renders the per-task telemetry strip (unrelated to the Observability dashboard/modal)", () => {
@@ -3018,6 +3042,24 @@ test("getStoredView / setStoredView round-trip through localStorage, with a vali
   assert.equal(getStoredView(), "overview", "garbage stored value falls back to overview");
 });
 
+test("laneGlanceStatus maps lane running/healthy/runtimeMode to the shared color/label pair (single source reused by renderSettingsLanes and renderAgents)", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const src = extractFunctionBlock(js, "laneGlanceStatus");
+  const factory = new Function(`${src}\nreturn laneGlanceStatus;`) as () => (lane: unknown) => { color: string; label: string };
+  const laneGlanceStatus = factory();
+
+  const cases: [Record<string, unknown>, { color: string; label: string }][] = [
+    [{ running: true, healthy: true, runtimeMode: "embedded" }, { color: "var(--ok)", label: "running" }],
+    [{ running: true, healthy: false, runtimeMode: "embedded" }, { color: "var(--accent-2)", label: "running (unhealthy)" }],
+    [{ running: false, healthy: null, runtimeMode: "embedded" }, { color: "var(--muted)", label: "stopped" }],
+    [{ running: false, healthy: null, runtimeMode: "planned" }, { color: "var(--muted)", label: "planned" }],
+    [{ running: true, healthy: true, runtimeMode: "planned" }, { color: "var(--ok)", label: "planned" }],
+  ];
+  for (const [lane, expected] of cases) {
+    assert.deepEqual(laneGlanceStatus(lane), expected, `lane=${JSON.stringify(lane)}`);
+  }
+});
+
 test("toggleBoardSection / applyBoardSectionState round-trip through localStorage['hm_board_collapsed']", () => {
   const js = extractScript(CONSOLE_HTML);
   const toggleSrc = extractFunctionBlock(js, "toggleBoardSection");
@@ -3103,6 +3145,142 @@ test("Board section collapse: toggle markup in board-sec-header, default expande
   const toggleIx = html.indexOf('id="boardToggle"');
   assert.ok(toggleIx !== -1 && archiveIx !== -1 && toggleIx < archiveIx, "toggle appears before the archive link, both inside the header row");
   assert.match(html, /\.board-sec\.collapsed #board \{ display: none; \}/, "collapsed class on #boardSec hides the lane container");
+});
+
+test("toggleAgentsSection / applyAgentsSectionState round-trip through localStorage['hm_agents_collapsed']", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const toggleSrc = extractFunctionBlock(js, "toggleAgentsSection");
+  const applySrc = extractFunctionBlock(js, "applyAgentsSectionState");
+
+  // Confirm this doesn't reuse/touch the unrelated right-panel mechanism.
+  assert.doesNotMatch(toggleSrc, /ctx-collapsed|querySelector\('main'\)/, "must not touch the <main> ctx-collapsed grid logic");
+
+  function makeStore() {
+    const backing: Record<string, string> = {};
+    return {
+      localStorage: {
+        getItem: (k: string) => (k in backing ? backing[k] : null),
+        setItem: (k: string, v: string) => { backing[k] = v; },
+      },
+      backing,
+    };
+  }
+
+  function makeSecAndBtn() {
+    const classes = new Set<string>();
+    const sec = {
+      classList: {
+        toggle: (name: string) => { if (classes.has(name)) { classes.delete(name); return false; } classes.add(name); return true; },
+        add: (name: string) => { classes.add(name); },
+        contains: (name: string) => classes.has(name),
+      },
+    };
+    const btn = { textContent: "▾", title: "Collapse Agents" };
+    return { sec, btn, classes };
+  }
+
+  function run(sec: unknown, btn: unknown, ls: unknown) {
+    const factory = new Function(
+      "localStorage", "__sec", "__btn",
+      `const document = { getElementById: (id) => id === 'agentsSec' ? __sec : (id === 'agentsToggle' ? __btn : null) };\n`
+        + `${toggleSrc}\n${applySrc}\nreturn { toggleAgentsSection, applyAgentsSectionState };`,
+    ) as (ls: unknown, sec: unknown, btn: unknown) => { toggleAgentsSection: () => void; applyAgentsSectionState: () => void };
+    return factory(ls, sec, btn);
+  }
+
+  // No stored preference yet: restoring must be a no-op (stays expanded, default glyph).
+  const { localStorage: ls1, backing: backing1 } = makeStore();
+  const { sec: sec1, btn: btn1 } = makeSecAndBtn();
+  const { applyAgentsSectionState: apply1 } = run(sec1, btn1, ls1);
+  apply1();
+  assert.equal(sec1.classList.contains("collapsed"), false, "nothing stored -> stays expanded");
+  assert.equal(btn1.textContent, "▾", "nothing stored -> caret stays at its default glyph");
+
+  // Toggle collapses, flips the caret, and persists "1".
+  const { toggleAgentsSection: toggle1 } = run(sec1, btn1, ls1);
+  toggle1();
+  assert.equal(sec1.classList.contains("collapsed"), true);
+  assert.equal(btn1.textContent, "▸");
+  assert.equal(backing1["hm_agents_collapsed"], "1");
+
+  // Toggle again expands, flips back, and persists "0".
+  const { toggleAgentsSection: toggle2 } = run(sec1, btn1, ls1);
+  toggle2();
+  assert.equal(sec1.classList.contains("collapsed"), false);
+  assert.equal(btn1.textContent, "▾");
+  assert.equal(backing1["hm_agents_collapsed"], "0");
+
+  // Fresh "reload" with "1" already persisted: a brand-new (default, expanded)
+  // element must come up collapsed without any click.
+  const { localStorage: ls2 } = makeStore();
+  (ls2 as { setItem: (k: string, v: string) => void }).setItem("hm_agents_collapsed", "1");
+  const { sec: sec2, btn: btn2 } = makeSecAndBtn();
+  const { applyAgentsSectionState: apply2 } = run(sec2, btn2, ls2);
+  apply2();
+  assert.equal(sec2.classList.contains("collapsed"), true, "persisted collapsed state restores on load");
+  assert.equal(btn2.textContent, "▸");
+});
+
+test("Agents section collapse: toggle markup in agents-sec-header, default expanded glyph, CSS rule that hides #agents, and placement right after #boardSec", () => {
+  const html = CONSOLE_HTML;
+  assert.match(
+    html,
+    /<div class="agents-sec-header">Agents <span id="agentsToggle" class="agents-toggle" onclick="toggleAgentsSection\(\)"[^>]*>▾<\/span>/,
+    "toggle span sits in the header, next to the heading text, defaulting to the expanded glyph",
+  );
+  assert.match(html, /\.agents-sec\.collapsed #agents \{ display: none; \}/, "collapsed class on #agentsSec hides the agents container");
+
+  const boardSecIx = html.indexOf('id="boardSec"');
+  const agentsSecIx = html.indexOf('id="agentsSec"');
+  assert.ok(boardSecIx !== -1 && agentsSecIx !== -1 && boardSecIx < agentsSecIx, "#agentsSec follows #boardSec in the left sidebar");
+  const colBoardOpenIx = html.lastIndexOf('<section class="col board">', agentsSecIx);
+  const colBoardCloseIx = html.indexOf('</section>', agentsSecIx);
+  assert.ok(
+    colBoardOpenIx !== -1 && colBoardOpenIx < agentsSecIx && agentsSecIx < colBoardCloseIx,
+    '#agentsSec lives inside <section class="col board">, not a new top-level section',
+  );
+});
+
+test("renderAgents renders lane rows (dot color + Setup-now affordance) and MCP rows (tools-dot on/err) from state.lanes/state.mcp", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const escSrc = extractFunctionBlock(js, "esc");
+  const laneGlanceStatusSrc = extractFunctionBlock(js, "laneGlanceStatus");
+  const renderAgentsSrc = extractFunctionBlock(js, "renderAgents");
+
+  const state = {
+    lanes: [
+      { kind: "desktop", name: "Desktop Lane", running: true, healthy: true, runtimeMode: "embedded", statusDetail: null },
+      { kind: "message", name: "Message Lane", running: false, healthy: null, runtimeMode: "embedded", statusDetail: "not configured" },
+    ],
+    mcp: {
+      servers: [
+        { name: "Canopy", status: "reachable", detail: "ok" },
+        { name: "Flash", status: "unreachable", detail: "down" },
+      ],
+    },
+  };
+
+  let html = "";
+  const el = {
+    set innerHTML(v: string) { html = v; },
+    get innerHTML() { return html; },
+  };
+  const factory = new Function(
+    "state", "document",
+    `${escSrc}\n${laneGlanceStatusSrc}\n${renderAgentsSrc}\nreturn renderAgents;`,
+  ) as (state: unknown, document: unknown) => () => void;
+  const fakeDocument = { getElementById: (id: string) => (id === "agents" ? el : null) };
+  const renderAgents = factory(state, fakeDocument);
+  renderAgents();
+
+  assert.match(html, /background:var\(--ok\)/, "running+healthy lane gets the ok dot color");
+  assert.match(html, /background:var\(--muted\)/, "stopped lane gets the muted dot color");
+  const setupNowMatches = html.match(/Setup now/g) || [];
+  assert.equal(setupNowMatches.length, 1, "only the stopped mail/message lane shows the Setup now affordance");
+  assert.match(html, /tools-dot on/, "reachable MCP server gets tools-dot on");
+  assert.match(html, /tools-dot err/, "unreachable MCP server gets tools-dot err");
+  assert.match(html, />Canopy \(MCP\)</);
+  assert.match(html, />Flash \(MCP\)</);
 });
 
 test("every view-switching function records itself as the last-active view", () => {

@@ -692,6 +692,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .board-sec-header { font-size: 14px; font-weight: 600; margin: 20px 0 6px; color: var(--text); display: flex; align-items: center; gap: 8px; }
   .board-toggle { cursor: pointer; color: var(--muted); font-size: 11px; user-select: none; }
   .board-sec.collapsed #board { display: none; }
+  .agents-sec { margin: 0; }
+  .agents-sec-header { font-size: 14px; font-weight: 600; margin: 20px 0 6px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+  .agents-toggle { cursor: pointer; color: var(--muted); font-size: 11px; user-select: none; }
+  .agents-sec.collapsed #agents { display: none; }
+  .agent-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; cursor: pointer; }
+  .agent-row:hover { opacity: 0.8; }
+  .agent-row .name { flex: 1; }
+  .agent-row .setup-btn { font-size: 10px; }
   /* Standardized task-detail action row. One set of tokens for every reply/review/
      retry/steer control so heights, radius, padding, and min-width match. */
   .action-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
@@ -1885,6 +1893,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="board-sec-header">Board <span id="boardToggle" class="board-toggle" onclick="toggleBoardSection()" title="Collapse Board">▾</span> <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></div>
       <div id="board"></div>
     </div>
+    <div id="agentsSec" class="agents-sec">
+      <div class="agents-sec-header">Agents <span id="agentsToggle" class="agents-toggle" onclick="toggleAgentsSection()" title="Collapse Agents">▾</span></div>
+      <div id="agents"></div>
+      <details class="ctx-sec" id="agentsConnDetail"><summary>Connectivity detail</summary>
+      <div id="conn"></div></details>
+    </div>
   </section>
   <section class="col session">
     <div id="session"><div class="session-empty">Select a task to inspect its session.</div></div>
@@ -1893,8 +1907,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="approvals"></div>
     <details class="ctx-sec" id="setupSec" open><summary id="setupSummary">Setup</summary>
     <div id="onboarding"></div></details>
-    <details class="ctx-sec" id="connSec" open><summary>Connectivity</summary>
-    <div id="conn"></div></details>
     <details class="ctx-sec" id="dirSec" open><summary>Scheduled</summary>
     <button class="addbtn" onclick="toggleForm('dirForm')">＋ New scheduled item</button>
     <div class="form" id="dirForm">
@@ -1965,8 +1977,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="skPrune" style="font-size:11px;margin-top:4px"></div>
     <div style="margin-top:6px"><button class="linklike" onclick="loadSkillPrune()">Find unused skills…</button></div>
     </details>
-    <details class="ctx-sec" id="mcpSec"><summary>MCP Servers</summary>
-    <div id="mcp"></div></details>
   </section>
 </main>
 <script>
@@ -1998,7 +2008,7 @@ function requireToken() {
     + '<div style="color:var(--muted,#8b949e);font-size:11px;max-width:340px;text-align:center">Find this token in the local HiveMatrix console under Settings → Remote access.</div></div>';
   return false;
 }
-let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedSkillOrCommand: null, projects: [], selectedProject: "", packCards: [], schedView: 'timeline', tlWindow: 24 };
+let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedSkillOrCommand: null, projects: [], selectedProject: "", packCards: [], schedView: 'timeline', tlWindow: 24, lanes: [], mcp: null };
 let _taskFormInSession = false;
 // Tracks whether the prompt wizard has already run (accepted or dismissed) for the
 // current New Task open, so "Always enhance" only auto-triggers once per open.
@@ -2391,6 +2401,30 @@ function applyBoardSectionState() {
   } catch (e) { /* ignore */ }
 }
 applyBoardSectionState();
+
+// Same collapse pattern as #boardSec, applied to the new left-sidebar Agents
+// section (#agentsSec/#agentsToggle are static markup, unaffected by
+// renderAgents()'s periodic innerHTML overwrite of #agents).
+function toggleAgentsSection() {
+  const sec = document.getElementById('agentsSec');
+  if (!sec) return;
+  const collapsed = sec.classList.toggle('collapsed');
+  const btn = document.getElementById('agentsToggle');
+  if (btn) { btn.textContent = collapsed ? '▸' : '▾'; btn.title = collapsed ? 'Expand Agents' : 'Collapse Agents'; }
+  try { localStorage.setItem('hm_agents_collapsed', collapsed ? '1' : '0'); } catch (e) { /* ignore */ }
+}
+
+function applyAgentsSectionState() {
+  try {
+    if (localStorage.getItem('hm_agents_collapsed') === '1') {
+      const sec = document.getElementById('agentsSec');
+      if (sec) sec.classList.add('collapsed');
+      const btn = document.getElementById('agentsToggle');
+      if (btn) { btn.textContent = '▸'; btn.title = 'Expand Agents'; }
+    }
+  } catch (e) { /* ignore */ }
+}
+applyAgentsSectionState();
 /*__REVIEW_SORT_COMPARATOR_START__*/
 function reviewSortComparator(a, b) {
   const ta = Date.parse(a.updatedAt || a.createdAt || "") || 0;
@@ -4401,27 +4435,39 @@ async function doImportLocal() {
   } catch (e) { if (st) st.textContent = 'Import failed.'; }
 }
 
-// --- MCP servers (status + restart) -----------------------------------------
-async function renderMcp() {
-  try {
-    const d = await api('/mcp');
-    const servers = (d && d.servers) || [];
-    const el = document.getElementById('mcp');
-    if (!el) return;
-    el.innerHTML = servers.length ? servers.map(s => {
-      const dotCls = s.status === 'reachable' ? 'on' : (s.status === 'unreachable' ? 'err' : 'off');
-      return '<div style="display:flex;align-items:center;gap:6px;padding:3px 0">'
-        + '<span class="tools-dot ' + dotCls + '" title="' + esc(s.detail || s.status) + '"></span>'
-        + '<span style="flex:1">' + esc(s.name) + ' <span class="muted" style="font-size:11px">(' + esc(s.transport) + ' · ' + esc(s.status) + ')</span></span>'
-        + (s.restartable ? '<button class="addbtn" title="Restart" onclick="restartMcp(\'' + esc(s.name) + '\')">↻</button>' : '')
-        + '</div>';
-    }).join('') : '<div class="muted" style="font-size:12px">No MCP servers configured. Add them under config.mcpServers, or enable the Azure DevOps feature.</div>';
-  } catch (e) { /* transient */ }
+// --- Agents section (left sidebar): glance status for every lane + MCP server,
+// click-through to the right setup surface. Reuses state.lanes/state.mcp (both
+// populated by the periodic refresh() poll) instead of fetching independently,
+// and laneGlanceStatus() instead of a second inline copy of the dot mapping.
+function openLaneFromAgents(lane) {
+  if (lane.kind === 'mail') { openMailBeeSetup(); return; }
+  if (lane.kind === 'message') { openMessageBeeSetup(); return; }
+  openSettings(); switchSettingsTab('lanes');
 }
-async function restartMcp(name) {
-  try { await api('/mcp/' + encodeURIComponent(name) + '/restart', { method: 'POST' }); }
-  catch (e) { /* ignore */ }
-  renderMcp();
+
+function renderAgents() {
+  const el = document.getElementById('agents');
+  if (!el) return;
+  const lanes = state.lanes || [];
+  const mcpServers = (state.mcp && state.mcp.servers) || [];
+  const laneRows = lanes.map((lane, i) => {
+    const { color, label } = laneGlanceStatus(lane);
+    const needsSetup = !lane.running && (lane.kind === 'mail' || lane.kind === 'message');
+    return '<div class="agent-row" onclick="openLaneFromAgents(state.lanes['+i+'])" title="'+esc(lane.statusDetail || label)+'">'
+      + '<span class="dot" style="background:'+color+'"></span>'
+      + '<span class="name">'+esc(lane.name)+'</span>'
+      + (needsSetup ? '<span class="setup-btn muted">Setup now</span>' : '<span class="muted setup-btn">'+esc(label)+'</span>')
+      + '</div>';
+  }).join('');
+  const mcpRows = mcpServers.map(s => {
+    const dotCls = s.status === 'reachable' ? 'on' : (s.status === 'unreachable' ? 'err' : 'off');
+    return '<div class="agent-row" onclick="openSettings()" title="'+esc(s.detail || s.status)+'">'
+      + '<span class="tools-dot '+dotCls+'"></span>'
+      + '<span class="name">'+esc(s.name)+' (MCP)</span>'
+      + '</div>';
+  }).join('');
+  const healthRow = '<div class="agent-row" onclick="openSettings(); switchSettingsTab(\'lanes\')"><span class="name muted">System Health</span><span class="muted setup-btn">View status →</span></div>';
+  el.innerHTML = laneRows + mcpRows + healthRow;
 }
 
 function renderSchedTimeline(sorted) {
@@ -5682,12 +5728,14 @@ async function resolveApprovalItem(idx, decision, btn) {
 let _httpHealthy = false;
 async function refresh() {
   try {
-    const [tasks, directives, conn, metrics, onboarding, appr, packCards] = await Promise.all([
-      api("/tasks"), api("/directives"), api("/connectivity"), api("/metrics"), api("/onboarding"), api("/approvals/pending"), api("/packs/dashboard-cards"),
+    const [tasks, directives, conn, metrics, onboarding, appr, packCards, lanes, mcp] = await Promise.all([
+      api("/tasks"), api("/directives"), api("/connectivity"), api("/metrics"), api("/onboarding"), api("/approvals/pending"), api("/packs/dashboard-cards"), api("/lanes"), api("/mcp"),
     ]);
     state.tasks = tasks; state.directives = directives; state.conn = conn; state.metrics = metrics; state.onboarding = onboarding;
     state.approvals = (appr && appr.approvals) || [];
     state.packCards = (packCards && packCards.cards) || [];
+    state.lanes = (lanes && lanes.lanes) || [];
+    state.mcp = mcp || null;
     renderBoard();
     // Center column: drive it right after the board so a later panel error can't
     // leave it stale. selectTask re-fetches the open task; otherwise show overview.
@@ -5703,7 +5751,7 @@ async function refresh() {
     const liveEl = document.getElementById("live");
     if (liveEl) liveEl.classList.remove("stale");
     renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
-    renderApprovals(); renderSkillCatalog(); renderMcp();
+    renderApprovals(); renderSkillCatalog(); renderAgents();
     saveScrollPosition(_currentView);
   } catch (e) { _httpHealthy = false; /* transient */ }
   // Check for updates on every tick (cheap — daemon caches ~60s). Tied to
@@ -8781,6 +8829,17 @@ async function laneAppAction(id, action) {
   if (action !== 'reveal') renderLaneSetup();
 }
 
+// Single source for the running/healthy -> glance status mapping. Previously
+// inline only in renderSettingsLanes(); reused by renderAgents() so the two
+// views can't silently disagree about what "healthy" means.
+function laneGlanceStatus(lane) {
+  const color = lane.running ? (lane.healthy === false ? "var(--accent-2)" : "var(--ok)") : "var(--muted)";
+  const label = lane.runtimeMode === "planned" ? "planned"
+    : lane.running ? (lane.healthy === false ? "running (unhealthy)" : "running")
+    : "stopped";
+  return { color, label };
+}
+
 async function renderSettingsLanes() {
   const el = document.getElementById("s_lanes");
   el.innerHTML = '<div class="muted">Loading…</div>';
@@ -8788,10 +8847,7 @@ async function renderSettingsLanes() {
   const lanes = (r && r.lanes) || [];
   if (!lanes.length) { el.innerHTML = '<div class="muted">No lanes registered.</div>'; return; }
   el.innerHTML = lanes.map(lane => {
-    const dotColor = lane.running ? (lane.healthy === false ? "var(--accent-2)" : "var(--ok)") : "var(--muted)";
-    const stateTxt = lane.runtimeMode === "planned" ? "planned"
-      : lane.running ? (lane.healthy === false ? "running (unhealthy)" : "running")
-      : "stopped";
+    const { color: dotColor, label: stateTxt } = laneGlanceStatus(lane);
     const modeBadge = '<span class="badge">'+esc(lane.runtimeMode)+'</span>';
     const healthBadge = lane.healthy === true ? '<span class="badge" style="color:var(--ok)">healthy</span>'
       : lane.healthy === false ? '<span class="badge" style="color:var(--accent-2)">unhealthy</span>' : '';
