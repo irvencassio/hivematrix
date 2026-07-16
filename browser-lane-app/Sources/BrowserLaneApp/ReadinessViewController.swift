@@ -10,6 +10,9 @@ final class ReadinessViewController: NSViewController {
     private let scrollView = NSScrollView()
     private let stack = NSStackView()
     private let statusLine = NSTextField(labelWithString: "Loading readiness…")
+    /// The last-loaded site list, kept so button handlers (e.g. the saved-credential
+    /// sign-in handoff) can look up a site's loginUrl/displayName by id.
+    private var currentSites: [BrowserLaneDashboardSite] = []
 
     override func loadView() {
         view = NSView()
@@ -60,6 +63,7 @@ final class ReadinessViewController: NSViewController {
     }
 
     private func renderHeader(sites: [BrowserLaneDashboardSite]?, message: String?) {
+        currentSites = sites ?? []
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         let title = NSTextField(labelWithString: "Readiness")
@@ -104,7 +108,7 @@ final class ReadinessViewController: NSViewController {
         box.translatesAutoresizingMaskIntoConstraints = false
 
         let info = NSTextField(labelWithString: [
-            "Strategy: \(site.authStrategy)",
+            "\(capabilityGlyph(for: site)) Strategy: \(site.authStrategy)",
             site.providerAccount.flatMap { $0.isEmpty ? nil : "Account: \($0)" } ?? "Account: —",
             "Last checked: \(lastChecked(site))",
             "Next action: \(nextAction(for: site))",
@@ -120,6 +124,9 @@ final class ReadinessViewController: NSViewController {
         buttons.spacing = 8
         buttons.translatesAutoresizingMaskIntoConstraints = false
         buttons.addArrangedSubview(actionButton("Open auth flow", site: site, action: #selector(openAuthFlow(_:))))
+        if site.authStrategy == "keychain_password" {
+            buttons.addArrangedSubview(actionButton("🔑 Sign in with saved credential", site: site, action: #selector(signInWithSavedCredential(_:))))
+        }
         buttons.addArrangedSubview(actionButton("Run readiness", site: site, action: #selector(runReadiness(_:))))
         buttons.addArrangedSubview(actionButton("Mark needs reauth", site: site, action: #selector(markNeedsReauth(_:))))
         buttons.addArrangedSubview(actionButton("Refresh", site: site, action: #selector(reload)))
@@ -172,6 +179,47 @@ final class ReadinessViewController: NSViewController {
         }
     }
 
+    // Native Keychain read + clipboard handoff — the plaintext credential value
+    // never leaves this process; only the site id crosses to the daemon, and only
+    // for an audit record (see BrowserLaneDaemonClient.recordCredentialUse).
+    @objc private func signInWithSavedCredential(_ sender: NSButton) {
+        let id = siteId(sender)
+        guard let site = currentSites.first(where: { $0.id == id }) else { return }
+        do {
+            let (username, secretValue) = try BrowserLaneKeychain.shared.readCredential(siteId: id)
+            if let loginUrl = site.loginUrl, let url = URL(string: loginUrl), url.scheme?.hasPrefix("http") == true {
+                BrowserLaneNavigator.shared.openInBrowser(url)
+            }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(secretValue, forType: .string)
+            scheduleClipboardClear(expected: secretValue)
+            daemon.recordCredentialUse(siteId: id) { _ in }
+
+            let alert = NSAlert()
+            alert.messageText = "Ready to sign in to \(site.displayName)"
+            alert.informativeText = "Username: \(username)\nThe saved sign-in was copied to the clipboard (clears in 45s).\n\nPaste it into the sign-in form, finish any 2FA if asked, then click Run Readiness to confirm."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Can't sign in to \(site.displayName) automatically"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+
+    private func scheduleClipboardClear(expected: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 45) {
+            let pasteboard = NSPasteboard.general
+            if pasteboard.string(forType: .string) == expected {
+                pasteboard.clearContents()
+            }
+        }
+    }
+
     // MARK: - Presentation helpers
 
     private func dot(for color: String) -> String {
@@ -182,6 +230,13 @@ final class ReadinessViewController: NSViewController {
         case "red":    return "🔴"
         default:       return "⚪️"
         }
+    }
+
+    /// Per-site capability glyph: green when this site can retrieve a saved
+    /// sign-in natively (one click), yellow otherwise (SSO/manual — no
+    /// stored credential to retrieve).
+    private func capabilityGlyph(for site: BrowserLaneDashboardSite) -> String {
+        site.authStrategy == "keychain_password" ? "🟢" : "🟡"
     }
 
     private func lastChecked(_ site: BrowserLaneDashboardSite) -> String {

@@ -587,6 +587,59 @@ test("POST /messagebee/self-handles stores normalized loop-guard identities", as
   assert.deepEqual(status.selfHandles, ["+15550001111", "me@icloud.com"]);
 });
 
+test("POST /browser-lane/sites/:id/credential-used records a human audit entry, never a secret", async (t) => {
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-browser-credential-used-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+  t.after(() => {
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const { upsertBrowserSite } = await import("@/lib/browser-lane/store");
+  upsertBrowserSite({
+    id: "example",
+    displayName: "Example",
+    homeUrl: "https://example.com",
+    loginUrl: "https://example.com/login",
+    authStrategy: "keychain_password",
+    credentialRef: "hivematrix.browser.example.primary",
+  });
+
+  const token = getOrCreateToken(DAEMON_TOKEN_FILE);
+  const server = createDaemonServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const { port } = server.address() as AddressInfo;
+
+  const res = await fetch(`http://127.0.0.1:${port}/browser-lane/sites/example/credential-used`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  assert.equal(res.status, 200);
+
+  const { readAudit } = await import("@/lib/audit/audit");
+  const entries = readAudit({ event: "browser:credential_fill", target: "example" });
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].actorKind, "human");
+  assert.equal(JSON.stringify(entries[0]).includes("password"), false);
+
+  const missing = await fetch(`http://127.0.0.1:${port}/browser-lane/sites/does-not-exist/credential-used`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  assert.equal(missing.status, 404);
+});
+
 test("command project paths resolve from the current user home", () => {
   assert.equal(
     normalizeHomeProjectPath("~/hivematrix", "/Users/example"),

@@ -172,6 +172,7 @@ test("buildBrowserBeeDesktopFallbackDescription drives the browser via Desktop L
   assert.doesNotMatch(description, /DesktopBee/);
   assert.match(description, /Claude/, "the fallback description must name Claude");
   assert.doesNotMatch(description, /local model/i, "the fallback description must not call this a local-model path");
+  assert.match(description, /Sign in with saved credential/, "should point the operator at the one-click credential retrieval button");
   // shared body is still present
   assert.match(description, /Allowed domains: app\.example\.com/);
   assert.match(description, /Objective:/);

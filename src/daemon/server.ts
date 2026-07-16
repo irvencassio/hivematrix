@@ -2736,6 +2736,23 @@ export function createDaemonServer() {
         return;
       }
 
+      // POST /browser-lane/sites/:id/credential-used — audit-only: the native app
+      // retrieved a stored credential from the local macOS Keychain for manual
+      // sign-in. The secret itself never crosses this boundary (see keychain.ts's
+      // NOTE(audit parity)) — this exists solely so the retrieval lands on the
+      // audit trail. Always actorKind "human": nothing but that button calls it.
+      const credentialUsedMatch = urlPath.match(/^\/browser-lane\/sites\/([^/]+)\/credential-used$/);
+      if (req.method === "POST" && credentialUsedMatch) {
+        const siteId = decodeURIComponent(credentialUsedMatch[1]);
+        const { getBrowserSite } = await import("@/lib/browser-lane/store");
+        const site = getBrowserSite(siteId);
+        if (!site) { json(res, 404, { ok: false, lane: "browser", error: `unknown site: ${siteId}` }); return; }
+        const { recordAudit } = await import("@/lib/audit/audit");
+        recordAudit({ ts: "", event: "browser:credential_fill", actor: "operator", actorKind: "human", target: siteId, status: "retrieved" });
+        json(res, 200, { ok: true, lane: "browser" });
+        return;
+      }
+
       if (req.method === "POST" && urlPath === "/browser-lane/probes") {
         const body = await parseBody(req) as Record<string, unknown>;
         try {

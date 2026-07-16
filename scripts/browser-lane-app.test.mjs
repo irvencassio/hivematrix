@@ -422,3 +422,42 @@ test("Browser Lane Sites list is editable and deletable with confirmation", () =
   assert.match(keychain, /deleteCredential/);
   assert.match(keychain, /SecItemDelete/);
 });
+
+test("BrowserLaneKeychain can read back a saved credential without a daemon round-trip", () => {
+  const keychain = readFileSync(
+    join(root, "browser-lane-app/Sources/BrowserLaneApp/BrowserLaneKeychain.swift"),
+    "utf8",
+  );
+  assert.match(keychain, /func readCredential\(siteId: String\) throws -> \(username: String, password: String\)/);
+  assert.match(keychain, /kSecReturnData as String: true/);
+  assert.match(keychain, /case notFound/);
+  assert.match(keychain, /errSecItemNotFound/);
+});
+
+test("BrowserLaneDaemonClient can record a credential-use audit signal", () => {
+  const client = readFileSync(
+    join(root, "browser-lane-app/Sources/BrowserLaneApp/BrowserLaneDaemonClient.swift"),
+    "utf8",
+  );
+  assert.match(client, /func recordCredentialUse\(siteId: String/);
+  // Path literal is "/browser-lane/sites/\(siteId)/credential-used" — note the "/"
+  // before the string-interpolation escape, which the plan draft's regex omitted.
+  assert.match(client, /\/browser-lane\/sites\/\\\(siteId\)\/credential-used/);
+});
+
+// Note: the existing "Browser Lane has a Readiness dashboard with per-site status
+// and actions" test above already asserts
+// `doesNotMatch(readiness, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i)` for this
+// same file, so that invariant isn't re-checked here — only the four new
+// assertions for this feature. Button copy says "saved credential", not "saved
+// password", specifically so this addition keeps passing that existing guard.
+test("Readiness view offers one-click sign-in with saved credentials for keychain_password sites", () => {
+  const readiness = readFileSync(
+    join(root, "browser-lane-app/Sources/BrowserLaneApp/ReadinessViewController.swift"),
+    "utf8",
+  );
+  assert.match(readiness, /Sign in with saved credential/);
+  assert.match(readiness, /signInWithSavedCredential/);
+  assert.match(readiness, /NSPasteboard/);
+  assert.match(readiness, /scheduleClipboardClear|asyncAfter\(deadline: \.now\(\) \+ 45\)/);
+});

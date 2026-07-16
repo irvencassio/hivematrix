@@ -95,6 +95,12 @@ final class BrowserLaneDaemonClient {
         post(path: "/browser-lane/readiness/mark", body: body, completion: completion)
     }
 
+    /// POST /browser-lane/sites/:id/credential-used — audit-only signal that a
+    /// saved credential was retrieved for manual sign-in. Never carries the secret.
+    func recordCredentialUse(siteId: String, completion: @escaping (Result<String, Error>) -> Void = { _ in }) {
+        post(path: "/browser-lane/sites/\(siteId)/credential-used", body: [:], completion: completion)
+    }
+
     /// GET /browser-lane/traces — list recent trace runs as daemon-redacted JSON.
     func fetchTraces(completion: @escaping (Result<String, Error>) -> Void) {
         getText(path: "/browser-lane/traces", completion: completion)

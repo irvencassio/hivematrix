@@ -1453,3 +1453,66 @@ Reused rather than rebuilt: `audit.ts`'s existing `actor` field and JSONL log
 primitive), the `browser_sites` table (one additive column), and
 `matchBrowserSiteReadiness()` (the access-mode gate resolves the target site
 through the existing domain matcher plus `getBrowserSite()`, not a new lookup).
+
+## Q21 — Browser Lane: one-click sign-in with a saved Keychain credential (2026-07-16)
+
+**Context.** The operator's ask was framed as "auto-refresh" — retrieve a
+stored credential and silently re-establish a dead session, including for
+autonomous/unattended workflows. Mid-task the operator corrected that framing
+with one line: "surface the need to click." Taken together with Q19 (*"lanes
+(credentials)... stay operator-gated forever; nothing auto-enables"*) and Q20
+(reconfirmed the same day: `credential_fill` is unconditionally refused on the
+agent-dispatched path), the standing architecture and the live steer point the
+same direction — this could not become silent, autonomous credential use.
+
+**Decision.** Ship the part of the ask that's actually safe to automate: a
+native, human-clicked-only "🔑 Sign in with saved credential" action in the
+Readiness view, for `keychain_password` sites only. It reads the credential
+back from the macOS Keychain **in-process** (no daemon round-trip — the
+plaintext never crosses a network call, a Task description, a model's
+context, or a log line), opens the site's own `loginUrl`, copies the password
+to `NSPasteboard` with a 45-second auto-clear, and leaves the human to paste,
+finish any 2FA, and confirm via the existing "Run Readiness" button. A
+`browser:credential_fill` audit event (`actorKind: "human"`) is recorded via a
+new, narrowly-scoped daemon route that takes only a `siteId` — never a
+secret — matching the audit-parity NOTE already written into `keychain.ts`
+for this exact eventuality. The agent-dispatched path is completely
+untouched: `adapters/agent-browser.ts`'s `credential_fill` refusal (Q20)
+stands as-is, and nothing about this feature is reachable from
+`LaneToolContext`, `skill_run`, or task dispatch — it is an AppKit button, not
+a lane tool. The Claude-driven Desktop-fallback prompt (`jobs.ts`) gains one
+clause naming the button, so a stalled autonomous task can tell the operator
+what to click next instead of dead-ending silently.
+
+Full auto-submit (driving the login form end-to-end with no click once
+triggered) was considered and rejected for this pass — see "Approaches
+considered" in the design doc. It would require either reopening Q20's
+`credential_fill` refusal on the agent path, or solving "how does a form-fill
+engine use a plaintext secret without a model ever seeing it" as new,
+security-sensitive scope. Flagged as a possible future V2 with its own
+decision entry, not an extension of this one.
+
+**Code.** `browser-lane-app/Sources/BrowserLaneApp/BrowserLaneKeychain.swift`
+(`readCredential`, native `SecItemCopyMatching`, `.notFound` error case — no
+entitlement change, same service/account scheme `saveCredential` already
+uses); `BrowserLaneDaemonClient.swift` (`recordCredentialUse`, reuses the
+existing `post()` helper); `ReadinessViewController.swift` (`currentSites`
+storage, the 🟢/🟡 capability glyph on the existing Strategy line, the
+"Sign in with saved credential" button gated on `authStrategy ==
+"keychain_password"`, `signInWithSavedCredential`,
+`scheduleClipboardClear`); `src/daemon/server.ts` (`POST
+/browser-lane/sites/:id/credential-used`, audit-only, 404s on an unknown
+site); `src/lib/browser-lane/jobs.ts` (one clause added to
+`buildBrowserBeeDesktopFallbackDescription`). Design:
+`docs/superpowers/specs/2026-07-16-browser-lane-credential-refresh-design.md`.
+
+**Complexity accounting (Q14 budget).** New product concepts: **0**. New
+persistent stores: **0**. New modules: **0** — every change is an edit to an
+existing file. New routes: **1**, audit-only, no secret ever in the request
+or response body. Explicitly deferred, each for its own reason: automatic
+DOM/AX form-fill (new automation + secret-exposure surface); TOTP/recovery-code
+storage for 2FA (a materially larger security surface than a
+username/password pair); wiring `AuthBeeSessionRecord` for real
+`expiresAt`-based expiry (still deferred, per the 2026-07-16 Canopy-parity
+design doc's own Approach B rejection — this feature reuses the existing
+staleness/manual-mark signal unchanged).
