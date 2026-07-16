@@ -158,11 +158,6 @@ def _split_for_synth(text: str) -> list[str]:
     return [p.strip() for p in _SYNTH_SPLIT_RE.split((text or "").strip()) if p.strip()]
 
 
-# Kokoro (mlx-audio) emits 24 kHz mono WAV. The per-sentence `say` fallback below
-# is rendered at the SAME rate so mixed chunks concatenate cleanly.
-_KOKORO_SR = 24000
-
-
 # Small tempo nudges to retry a sentence that hit mlx-audio's length-dependent
 # broadcast crash. A ~3-10% speed change shifts the frame count enough to dodge
 # the bug while keeping the SAME Kokoro voice and the SAME words (only that one
@@ -211,18 +206,21 @@ def _synthesize_kokoro(text: str, out_path: str, voice: str | None, lang: str = 
     parts: list[str] = []
     for i, chunk in enumerate(chunks):
         seg = os.path.join(out_dir, f"{base}__seg{i:03d}.wav")
-        if _kokoro_run_padded(chunk, seg, voice) is not None:
-            parts.append(seg)
-            continue
-        # mlx-audio can still crash (broadcast_shapes) on specific phoneme lengths
-        # even for one sentence. Rather than drop that sentence from the reply,
-        # voice it with the emergency macOS `say` engine at Kokoro's sample rate so
-        # the audio stays complete (only the rare failing sentence changes voice).
-        try:
-            _synthesize_say(chunk, seg, None, _KOKORO_SR)
-            parts.append(seg)
-        except Exception:
-            traceback.print_exc()  # this one sentence is lost; keep the rest
+        result = _kokoro_run_padded(chunk, seg, voice)
+        if result is None:
+            # mlx-audio can crash (broadcast_shapes) on specific phoneme lengths
+            # for one sentence even after retries. Don't patch a different
+            # engine's chunk in here — that produces one reply audibly split
+            # across two voices. Raise so the caller's whole-reply `say`
+            # fallback (synthesize()'s try/except) re-voices the ENTIRE text
+            # in one consistent voice instead.
+            for p in parts:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+            raise RuntimeError(f"kokoro produced no audio for chunk {i}: {chunk[:80]!r}")
+        parts.append(seg)
     if not parts:
         raise RuntimeError(f"kokoro produced no audio for text={text[:80]!r}")
     if len(parts) == 1:
