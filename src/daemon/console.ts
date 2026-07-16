@@ -884,10 +884,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .oc-msg-system .oc-msg-text { color:var(--muted); font-style:italic; word-break:break-word; }
   .oc-msg-meta { font-size:10px; color:var(--muted); margin-bottom:3px; }
   .oc-panel-composer-shell { flex:0 0 auto; min-height:96px; display:grid; grid-template-columns:minmax(0, 1fr) 88px;
-    align-items:end; gap:8px; width:100%; min-width:0;
+    align-items:stretch; gap:8px; width:100%; min-width:0;
     padding:12px; border-top:1px solid var(--border); background:var(--panel); cursor:text; }
   .oc-panel-composer-shell.oc-drag { background:color-mix(in srgb, var(--accent) 8%, var(--panel)); outline:2px dashed var(--accent); outline-offset:-4px; }
-  .oc-input { width:100%; min-width:0; min-height:64px; max-height:180px; padding:9px 11px;
+  .oc-input { width:100%; min-width:0; min-height:88px; max-height:180px; padding:9px 11px;
     border:1px solid var(--border); border-radius:8px; background:var(--code-bg);
     color:var(--text); font-size:13px; resize:none; font-family:inherit; line-height:1.45; }
   .oc-input:focus { outline:none; border-color:var(--accent); }
@@ -1507,6 +1507,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div class="oc-panel-sub">Tokens, tasks, latency &amp; prompt-cache across Claude &amp; Codex</div>
     <div class="obs-panel-toggles" id="obsModalToggles"></div>
     <div id="obsDashPanel"><div class="muted">Loading…</div></div>
+  </div>
+</div>
+
+<!-- Prompt Snippets — reusable composer text, inserted at the cursor in the message box. -->
+<div class="overlay" id="snippetsOverlay" onclick="if(event.target===this)closeSnippetsModal()">
+  <div class="modal" style="width:480px">
+    <h1>{} Snippets<span class="x" onclick="closeSnippetsModal()">✕</span></h1>
+    <div id="snippetsListBody"></div>
   </div>
 </div>
 
@@ -6942,6 +6950,7 @@ function flashPanelHtml() {
     + '<input type="file" id="flashPhotoInput" accept="image/*" multiple style="display:none" onchange="flashPhotoSelected(this)">'
     + '<button class="oc-mic-btn" id="flashPhotoBtn" onclick="event.stopPropagation();document.getElementById(\'flashPhotoInput\').click()" title="Attach a photo — the assistant can see it">📎 Photo</button>'
     + '<button class="oc-mic-btn" id="flashMicBtn" onclick="event.stopPropagation();flashDictate()" title="Dictate — speak and your words fill the box">🎤 Mic</button>'
+    + '<button class="oc-mic-btn" id="flashSnippetsBtn" onclick="event.stopPropagation();openSnippetsModal()" title="Insert a saved prompt snippet">{} Snippets</button>'
     + '<button class="create" id="flashSendBtn" onclick="event.stopPropagation();flashSend()" disabled>Send</button>'
     + '</div></div></div></div>';
 }
@@ -8304,6 +8313,75 @@ function flashInputResize(el) {
 function flashFocusInput() {
   const input = document.getElementById('flashInput');
   if (input) input.focus();
+}
+
+// ── Prompt Snippets ──────────────────────────────────────────────────────
+// Reusable composer text, stored locally only (matches hm_lanes_collapsed's
+// hm_-prefixed localStorage + try/catch pattern — no server persistence).
+// Array order is the display/insert(/future reorder) order. This is the
+// list-view + insert-at-cursor slice only; Create/Edit/Delete/drag-reorder
+// are layered on top of this same #snippetsListBody / snippetRowHtml markup
+// by a follow-up change. See
+// docs/superpowers/specs/2026-07-16-message-composer-snippets-design.md.
+const DEFAULT_SNIPPETS = [
+  { id: 'seed-1', name: 'Check status', text: 'Check status' },
+  { id: 'seed-2', name: 'Summarize findings', text: 'Summarize findings' },
+  { id: 'seed-3', name: "What's the next step?", text: "What's the next step?" },
+  { id: 'seed-4', name: 'Can you break this down?', text: 'Can you break this down?' },
+];
+
+function loadSnippets() {
+  try {
+    const raw = localStorage.getItem('hm_snippets');
+    if (raw == null) return DEFAULT_SNIPPETS;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : DEFAULT_SNIPPETS;
+  } catch (e) { return DEFAULT_SNIPPETS; }
+}
+
+function saveSnippets(list) {
+  try { localStorage.setItem('hm_snippets', JSON.stringify(list)); } catch (e) { /* ignore */ }
+}
+
+function snippetPreview(text) {
+  return text.length > 60 ? esc(text.slice(0, 60)) + '…' : esc(text);
+}
+
+function snippetRowHtml(s) {
+  return '<div class="card" draggable="true" data-snip-id="' + s.id + '" onclick="insertSnippet(\'' + s.id + '\')">'
+    + '<div class="mdl-card-name">' + esc(s.name) + '</div>'
+    + '<div class="muted" style="font-size:11px;margin-top:4px">' + snippetPreview(s.text) + '</div>'
+    + '</div>';
+}
+
+function renderSnippetsList() {
+  const body = document.getElementById('snippetsListBody');
+  if (!body) return;
+  body.innerHTML = loadSnippets().map(snippetRowHtml).join('');
+}
+
+function openSnippetsModal() {
+  document.getElementById('snippetsOverlay').classList.add('open');
+  renderSnippetsList();
+}
+function closeSnippetsModal() {
+  document.getElementById('snippetsOverlay').classList.remove('open');
+}
+
+function insertSnippet(id) {
+  const list = loadSnippets();
+  const s = list.find(function (x) { return x.id === id; });
+  if (!s) return;
+  const input = document.getElementById('flashInput');
+  if (!input) return;
+  const start = input.selectionStart;
+  const end = input.selectionEnd;
+  input.value = input.value.slice(0, start) + s.text + input.value.slice(end);
+  closeSnippetsModal();
+  input.focus();
+  const pos = start + s.text.length;
+  input.selectionStart = input.selectionEnd = pos;
+  flashInputResize(input);
 }
 
 function blobToB64(blob) {

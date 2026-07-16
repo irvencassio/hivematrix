@@ -2673,6 +2673,19 @@ test("Flash center pane reserves bottom composer space while transcript scrolls"
   assert.match(CONSOLE_HTML, /\.oc-input[^}]*min-width:\s*0/, "textarea can fit the grid without collapsing into vertical text");
 });
 
+test("composer textarea stretches to match the button stack's height", () => {
+  // NOTE: uses extractBetween (not the [^}]* CONSOLE_HTML regex idiom used
+  // above) deliberately — .oc-panel-composer-shell is re-declared inside the
+  // @media (max-width:760px) block below with align-items:stretch already
+  // set for the mobile layout, so a plain regex against the whole
+  // CONSOLE_HTML string would backtrack past the (failing) base rule and
+  // false-positive-match that unrelated mobile override instead.
+  const shellCss = extractBetween(CONSOLE_HTML, ".oc-panel-composer-shell {", "}");
+  assert.match(shellCss, /align-items:\s*stretch/, "shell must stretch children, not bottom-align them");
+  const inputCss = extractBetween(CONSOLE_HTML, ".oc-input {", "}");
+  assert.match(inputCss, /min-height:\s*88px/, "textarea floor height raised to better match the 4-button stack");
+});
+
 test("Flash send posts to /flash/turn and streams SSE events", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /async function flashSend\(\)/, "flashSend function defined");
@@ -3333,4 +3346,114 @@ test("skCatalog: drops a managed local skill row when a same-named lib skill is 
 
   // lib mapping itself is untouched by this change.
   assert.match(fn, /const lib = _skills\.map\(s => \(\{/, "lib mapping unchanged");
+});
+
+// ─── Prompt Snippets: reusable composer text, inserted at cursor (2026-07-16) ─
+// See docs/superpowers/specs/2026-07-16-message-composer-snippets-design.md and
+// docs/superpowers/plans/2026-07-16-message-composer-snippets.md, Task Group B.
+
+test("Snippets: DEFAULT_SNIPPETS seed array has the four spec strings with stable, non-random ids", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const block = extractBetween(js, "const DEFAULT_SNIPPETS = [", "];");
+  for (const name of ["Check status", "Summarize findings", "What's the next step?", "Can you break this down?"]) {
+    assert.ok(block.includes(name), `seed snippet "${name}" present in DEFAULT_SNIPPETS`);
+  }
+  // Seed ids must be stable across reloads (so a drag-reorder persists the
+  // right item), not generated fresh on every load.
+  assert.doesNotMatch(block, /Math\.random\(\)|Date\.now\(\)/, "seed ids must be stable, not freshly generated");
+  assert.match(block, /id:\s*['"]seed-1['"]/, "seed ids are stable string literals (e.g. seed-1)");
+});
+
+test("Snippets: loadSnippets/saveSnippets read+write localStorage['hm_snippets'] as JSON, wrapped in try/catch", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const load = fnBody(js, "loadSnippets");
+  assert.match(load, /localStorage\.getItem\(['"]hm_snippets['"]\)/, "reads the hm_snippets key");
+  assert.match(load, /JSON\.parse/, "parses stored JSON");
+  assert.match(load, /try\s*\{[\s\S]*\}\s*catch/, "wrapped in try/catch, matching the hm_lanes_collapsed pattern");
+  assert.match(load, /DEFAULT_SNIPPETS/, "falls back to the seed defaults when absent or on parse failure");
+
+  const save = fnBody(js, "saveSnippets");
+  assert.match(save, /localStorage\.setItem\(['"]hm_snippets['"]/, "writes the hm_snippets key");
+  assert.match(save, /JSON\.stringify/, "serializes to JSON");
+  assert.match(save, /try\s*\{[\s\S]*catch/, "wrapped in try/catch, matching the existing defensive pattern");
+});
+
+test("Snippets button: composer-actions row, oc-mic-btn styling, opens the modal", () => {
+  assert.match(
+    CONSOLE_HTML,
+    /<button class="oc-mic-btn" id="flashSnippetsBtn" onclick="event\.stopPropagation\(\);openSnippetsModal\(\)"[^>]*>\{\} Snippets<\/button>/,
+    "Snippets button: oc-mic-btn styling, stops propagation like Photo/Mic, opens the modal",
+  );
+  const photoIx = CONSOLE_HTML.indexOf('id="flashPhotoBtn"');
+  const micIx = CONSOLE_HTML.indexOf('id="flashMicBtn"');
+  const snipIx = CONSOLE_HTML.indexOf('id="flashSnippetsBtn"');
+  const sendIx = CONSOLE_HTML.indexOf('id="flashSendBtn"');
+  assert.ok(photoIx !== -1 && micIx !== -1 && snipIx !== -1 && sendIx !== -1, "all four composer-action buttons present");
+  assert.ok(photoIx < micIx && micIx < snipIx && snipIx < sendIx, "Photo, Mic, Snippets, Send — Send stays last as the primary action");
+});
+
+test("Snippets modal: overlay markup mirrors the Observability modal's shape (backdrop-close + explicit x)", () => {
+  const html = CONSOLE_HTML;
+  assert.match(html, /<div class="overlay" id="snippetsOverlay"/, "modal overlay exists");
+  assert.match(html, /id="snippetsOverlay"[^>]*onclick="if\(event\.target===this\)closeSnippetsModal\(\)"/, "backdrop click closes");
+  assert.match(html, /<span class="x" onclick="closeSnippetsModal\(\)">✕<\/span>/, "explicit close button");
+  assert.match(html, /id="snippetsListBody"/, "list view mount point exists");
+
+  const js = extractScript(html);
+  assert.match(js, /function openSnippetsModal\(\)/);
+  assert.match(js, /function closeSnippetsModal\(\)/);
+  const openSnippetsModal = fnBody(js, "openSnippetsModal");
+  assert.match(openSnippetsModal, /getElementById\('snippetsOverlay'\)\.classList\.add\('open'\)/);
+  assert.match(openSnippetsModal, /renderSnippetsList\(\)/, "renders current storage state fresh every time the modal opens, not stale DOM from a previous open");
+  const closeSnippetsModal = fnBody(js, "closeSnippetsModal");
+  assert.match(closeSnippetsModal, /getElementById\('snippetsOverlay'\)\.classList\.remove\('open'\)/);
+});
+
+function consoleSnippetRowHtml(): (s: { id: string; name: string; text: string }) => string {
+  const js = extractScript(CONSOLE_HTML);
+  const esc = js.match(/function esc\(s\)\{[^\n]+\}/)?.[0] ?? "";
+  const previewBody = extractFunctionBlock(js, "snippetPreview");
+  const rowBody = extractFunctionBlock(js, "snippetRowHtml");
+  assert.ok(esc.length > 10 && previewBody.length > 10 && rowBody.length > 10, "esc + snippetPreview + snippetRowHtml bodies extracted");
+  return new Function(`${esc}\n${previewBody}\n${rowBody}\nreturn snippetRowHtml;`)() as (s: {
+    id: string;
+    name: string;
+    text: string;
+  }) => string;
+}
+
+test("Snippets list row: esc()-escapes the name, truncates+esc()-escapes a long preview, keeps a short one intact, and is drag-ready", () => {
+  const rowHtml = consoleSnippetRowHtml();
+
+  const long = "x".repeat(80);
+  const longRow = rowHtml({ id: "s1", name: "<b>hostile</b>", text: long });
+  assert.match(longRow, /&lt;b&gt;hostile&lt;\/b&gt;/, "name is esc()-escaped — a snippet name is user-authored text");
+  assert.match(longRow, new RegExp("x".repeat(60) + "…"), "text truncates at 60 chars with a trailing ellipsis when longer");
+  assert.doesNotMatch(longRow, new RegExp("x".repeat(61)), "the 61st char must not leak into the preview");
+  assert.match(longRow, /draggable="true"/, "row is drag-ready for the follow-up reorder feature");
+  assert.match(longRow, /data-snip-id="s1"/, "row carries the snippet's stable id for click/drag dispatch");
+
+  const short = "short body";
+  const shortRow = rowHtml({ id: "s2", name: "ok", text: short });
+  assert.ok(shortRow.includes("short body"), "a short string renders in full, un-ellipsized");
+  assert.doesNotMatch(shortRow, /…/, "no ellipsis at all when the text is under the truncation threshold");
+
+  const hostileText = rowHtml({ id: "s3", name: "n", text: "<script>alert(1)</script>" });
+  assert.doesNotMatch(hostileText, /<script>alert/, "preview text is esc()-escaped too — it's user-authored, same as name");
+});
+
+test("insertSnippet: splices the snippet's text at the cursor, closes the modal, refocuses, and resizes", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /function insertSnippet\(id\)/);
+  const fn = fnBody(js, "insertSnippet");
+  assert.match(fn, /getElementById\('flashInput'\)/, "targets the message textarea");
+  assert.match(fn, /start\s*=\s*input\.selectionStart/, "reads the cursor/selection start");
+  assert.match(fn, /end\s*=\s*input\.selectionEnd/, "reads the cursor/selection end (so an active selection is replaced, not just inserted)");
+  assert.match(fn, /input\.value\.slice\(0,\s*start\)/, "keeps everything before the cursor");
+  assert.match(fn, /input\.value\.slice\(end\)/, "keeps everything after the cursor/selection, dropping any selected text in between");
+  assert.match(fn, /closeSnippetsModal\(\)/, "closes the modal after inserting");
+  assert.match(fn, /input\.focus\(\)/, "refocuses the textarea so typing can continue immediately");
+  assert.match(fn, /input\.selectionStart\s*=\s*input\.selectionEnd\s*=/, "cursor collapses to a single point after insertion, not left as a range selection");
+  assert.match(fn, /start\s*\+\s*s\.text\.length/, "cursor lands immediately after the inserted text, not before it or at the old position");
+  assert.match(fn, /flashInputResize\(input\)/, "resizes the box in case the inserted text is long, matching oninput's existing behavior");
 });
