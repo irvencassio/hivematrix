@@ -1,5 +1,6 @@
 import { generateId, getDb } from "@/lib/db";
 import { laneDisplayName } from "@/lib/lanes/contracts";
+import { autoEnableDesktopFallbackOnFirstSite } from "./desktop-fallback-auto-enable";
 import {
   normalizeBrowserReadinessState,
   normalizeBrowserSite,
@@ -118,6 +119,7 @@ export interface BrowserTraceRunDetail extends BrowserTraceRunSummary {
 export function upsertBrowserSite(input: unknown): BrowserSite {
   const site = normalizeBrowserSite(input);
   const db = getDb();
+  const isFirstSite = (db.prepare(`SELECT COUNT(*) AS count FROM browser_sites`).get() as { count: number }).count === 0;
   db.prepare(`
     INSERT INTO browser_sites (_id, displayName, homeUrl, loginUrl, allowedDomains, profileRef, authStrategy, providerAccount, notes)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -155,6 +157,14 @@ export function upsertBrowserSite(input: unknown): BrowserSite {
         allowedDomains = excluded.allowedDomains,
         updatedAt = datetime('now')
     `).run(generateId(), site.id, site.credentialRef, JSON.stringify(site.allowedDomains));
+  }
+
+  // Every browser_sites row is inherently an authenticated site (authStrategy
+  // has no anonymous/public value) — so "first authenticated site added" is
+  // exactly "table had zero rows immediately before this call." See
+  // desktop-fallback-auto-enable.ts for the must-not-override guard.
+  if (isFirstSite) {
+    autoEnableDesktopFallbackOnFirstSite();
   }
 
   return getBrowserSite(site.id)!;
