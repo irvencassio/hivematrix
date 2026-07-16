@@ -2934,6 +2934,101 @@ test("boot sequence restores the last-active view after refresh()", () => {
   assert.ok(restoreIx > refreshIx, "restoreLastView() must run after refresh() so board/task state is loaded first");
 });
 
+// ─── Window state restoration: scroll position (2026-07-15, Task 3) ─────────
+// See docs/superpowers/specs/2026-07-15-window-state-restoration-design.md
+// and docs/superpowers/plans/2026-07-15-window-state-restoration.md, Task 3.
+
+test("saveScrollPosition / restoreScrollPosition read and write scrollTop for known views, no-op for unmapped ones", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const targetsSrc = js.match(/var SCROLL_TARGETS = \{[^}]*\};/);
+  assert.ok(targetsSrc, "console script must define SCROLL_TARGETS");
+  const keySrc = extractFunctionBlock(js, "scrollStorageKey");
+  const saveSrc = extractFunctionBlock(js, "saveScrollPosition");
+  const restoreSrc = extractFunctionBlock(js, "restoreScrollPosition");
+
+  function makeEnv(scrollTop: number) {
+    const backing: Record<string, string> = {};
+    const el = { scrollTop };
+    return {
+      document: { querySelector: (sel: string) => (sel === "#flashTranscript" ? el : null) },
+      localStorage: {
+        getItem: (k: string) => (k in backing ? backing[k] : null),
+        setItem: (k: string, v: string) => { backing[k] = v; },
+      },
+      backing,
+      el,
+    };
+  }
+
+  const factory = new Function(
+    "document", "localStorage",
+    `${targetsSrc![0]}\n${keySrc}\n${saveSrc}\n${restoreSrc}\nreturn { saveScrollPosition, restoreScrollPosition };`,
+  ) as (doc: unknown, ls: unknown) => { saveScrollPosition: (v: string) => void; restoreScrollPosition: (v: string) => void };
+
+  const env = makeEnv(240);
+  const { saveScrollPosition, restoreScrollPosition } = factory(env.document, env.localStorage);
+
+  saveScrollPosition("flash");
+  assert.equal(env.backing["hm_scroll_flash"], "240");
+
+  saveScrollPosition("overview"); // not in SCROLL_TARGETS — no-op, must not throw
+  assert.equal(env.backing["hm_scroll_overview"], undefined);
+
+  env.el.scrollTop = 0;
+  restoreScrollPosition("flash");
+  assert.equal(env.el.scrollTop, 240, "restore should apply the previously saved value");
+
+  restoreScrollPosition("roles"); // no target element registered for roles — no-op, must not throw
+});
+
+test("restoreLastView marks a pending scroll restore only for scroll-tracked views", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const validViewsSrc = js.match(/var HM_VALID_VIEWS = \[[^\]]*\];/);
+  const getStoredViewSrc = extractFunctionBlock(js, "getStoredView");
+  const restoreSrc = extractFunctionBlock(js, "restoreLastView");
+
+  function run(storedView: string) {
+    const factory = new Function(
+      "localStorage",
+      "showFlashPanel", "showBrain", "showRoles", "showTools", "showGoals",
+      `var _pendingScrollRestore = null;\n${validViewsSrc![0]}\n${getStoredViewSrc}\n${restoreSrc}\nreturn { restoreLastView: restoreLastView, getPending: function () { return _pendingScrollRestore; } };`,
+    ) as (
+      ls: unknown, f: () => void, b: () => void, r: () => void, t: () => void, g: () => void,
+    ) => { restoreLastView: () => void; getPending: () => string | null };
+    const api = factory({ getItem: () => storedView }, () => {}, () => {}, () => {}, () => {}, () => {});
+    api.restoreLastView();
+    return api.getPending();
+  }
+
+  assert.equal(run("flash"), "flash");
+  assert.equal(run("tools"), "tools");
+  assert.equal(run("goals"), "goals");
+  assert.equal(run("brain"), null, "brain has no scroll target — must not be marked pending");
+  assert.equal(run("roles"), null, "roles has no scroll target — must not be marked pending");
+  assert.equal(run("overview"), null);
+});
+
+test("Chat/Tools/Goals consume the pending scroll restore exactly once real content is rendered", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const flashSrc = extractFunctionBlock(js, "flashRenderMessages");
+  assert.match(flashSrc, /_pendingScrollRestore === 'flash'/, "flashRenderMessages must consume a pending 'flash' scroll restore");
+  assert.match(flashSrc, /restoreScrollPosition\('flash'\)/);
+
+  const loadCapsSrc = extractFunctionBlock(js, "loadCapabilities");
+  assert.match(loadCapsSrc, /_pendingScrollRestore === 'tools'/, "loadCapabilities (not renderToolsPanel) must consume a pending 'tools' scroll restore — it's the single call site reached exactly once with real data, in both success and error paths");
+  assert.match(loadCapsSrc, /restoreScrollPosition\('tools'\)/);
+
+  const loadGoalsSrc = extractFunctionBlock(js, "loadGoals");
+  assert.match(loadGoalsSrc, /_pendingScrollRestore === 'goals'/, "loadGoals (not renderGoalsPanel) must consume a pending 'goals' scroll restore");
+  assert.match(loadGoalsSrc, /restoreScrollPosition\('goals'\)/);
+});
+
+test("refresh() saves the current view's scroll position on every tick", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const refreshSrc = extractFunctionBlock(js, "refresh");
+  assert.match(refreshSrc, /saveScrollPosition\(_currentView\)/, "refresh() must piggyback a scroll-position save on its existing 5s poll cadence, not add a new timer");
+});
+
 // --- P2: verification verdict badge + P0: review-lane batch grouping -------
 
 function consoleVerificationMeta(): (v: unknown) => { label: string; cls: string } | null {

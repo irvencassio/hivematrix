@@ -2310,6 +2310,31 @@ function setStoredView(view) {
   try { localStorage.setItem("hm_last_view", view); } catch (e) { /* ignore */ }
 }
 
+// Scroll position persistence — only for views with one unambiguous
+// scrollable content container (see design doc decision #3).
+var SCROLL_TARGETS = { flash: '#flashTranscript', tools: '.tools-pane', goals: '.tools-pane' };
+var _pendingScrollRestore = null;
+
+function scrollStorageKey(view) { return 'hm_scroll_' + view; }
+
+function saveScrollPosition(view) {
+  var sel = SCROLL_TARGETS[view];
+  if (!sel) return;
+  var el = document.querySelector(sel);
+  if (!el) return;
+  try { localStorage.setItem(scrollStorageKey(view), String(el.scrollTop)); } catch (e) { /* ignore */ }
+}
+
+function restoreScrollPosition(view) {
+  var sel = SCROLL_TARGETS[view];
+  if (!sel) return;
+  var el = document.querySelector(sel);
+  if (!el) return;
+  var saved = 0;
+  try { saved = parseInt(localStorage.getItem(scrollStorageKey(view)) || '0', 10) || 0; } catch (e) { /* ignore */ }
+  el.scrollTop = saved;
+}
+
 // Collapsed board lanes persist in localStorage and survive the periodic board
 // re-render (renderBoard rebuilds innerHTML, so collapse state can't live in the
 // DOM). Lets the operator fold a tall lane (e.g. "review") so failed / in-progress
@@ -3177,11 +3202,11 @@ function showGoals() {
 
 function restoreLastView() {
   var view = getStoredView();
-  if (view === 'flash') showFlashPanel();
+  if (view === 'flash') { _pendingScrollRestore = 'flash'; showFlashPanel(); }
   else if (view === 'brain') showBrain();
   else if (view === 'roles') showRoles();
-  else if (view === 'tools') showTools();
-  else if (view === 'goals') showGoals();
+  else if (view === 'tools') { _pendingScrollRestore = 'tools'; showTools(); }
+  else if (view === 'goals') { _pendingScrollRestore = 'goals'; showGoals(); }
   // 'overview' is already the default rendered state on boot — nothing to do.
 }
 
@@ -3197,6 +3222,7 @@ async function loadGoals() {
     _goalsState.goals = null;
   }
   renderGoalsPanel();
+  if (_pendingScrollRestore === 'goals') { _pendingScrollRestore = null; restoreScrollPosition('goals'); }
 }
 
 const GOALS_CAT_META = {
@@ -5633,6 +5659,7 @@ async function refresh() {
     if (liveEl) liveEl.classList.remove("stale");
     renderConn(); renderDirectives(); renderMetrics(); renderOnboarding();
     renderApprovals(); renderSkillCatalog(); renderMcp();
+    saveScrollPosition(_currentView);
   } catch (e) { _httpHealthy = false; /* transient */ }
   // Check for updates on every tick (cheap — daemon caches ~60s). Tied to
   // refresh so it fires on SSE activity too, not just a slow background timer
@@ -7653,6 +7680,7 @@ async function loadCapabilities() {
     _toolsState.groups = null;
   }
   renderToolsPanel();
+  if (_pendingScrollRestore === 'tools') { _pendingScrollRestore = null; restoreScrollPosition('tools'); }
 }
 
 const TOOLS_GROUP_META = {
@@ -8082,6 +8110,7 @@ function flashRenderMessages() {
       + '</div>';
   }).join('');
   el.scrollTop = el.scrollHeight;
+  if (_pendingScrollRestore === 'flash') { _pendingScrollRestore = null; restoreScrollPosition('flash'); }
 }
 
 // Attach photos to the next chat turn — the assistant can SEE them (sent as
