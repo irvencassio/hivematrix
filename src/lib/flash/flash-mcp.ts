@@ -31,9 +31,10 @@
 
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { basename, join } from "path";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { loadHiveConfig } from "@/lib/central/config";
+import { resolveProjectByName } from "@/lib/routing/aliases";
 import { availableLaneTools, LANE_TOOL_DEFINITIONS, type LaneToolContext } from "@/lib/orchestrator/lane-tools";
 import type { ChatTool } from "@/lib/orchestrator/tool-bridge";
 import { broadcastEvent } from "@/lib/ws/broadcaster";
@@ -126,7 +127,17 @@ export const FLASH_ONLY_TOOL_DEFS: ChatTool[] = [
         properties: {
           title: { type: "string", description: "Short title for the task" },
           description: { type: "string", description: "Full description of what needs to be done" },
-          projectPath: { type: "string", description: "Absolute path to the project (optional)" },
+          project: {
+            type: "string",
+            description:
+              "Name of the target project/repo, e.g. \"hivematrix-watch\" or \"ohio-life-ace\" — resolved " +
+              "automatically against known projects. Prefer this over projectPath when you know the project " +
+              "by name but not its exact path. Omit only for tasks with no specific project (e.g. \"book a flight\").",
+          },
+          projectPath: {
+            type: "string",
+            description: "Absolute path to the project (optional) — only use this if you already know the exact path; prefer `project` otherwise.",
+          },
           kind: {
             type: "string",
             enum: ["self-improvement"],
@@ -272,7 +283,12 @@ export interface ResolveEscalationTargetOpts {
   description: string;
   /** Raw `kind` arg off the tool call, if any (e.g. "self-improvement"). */
   kind?: string;
-  /** `projectPath` arg off the tool call, if any — used when NOT self-improvement. */
+  /** `project` name arg off the tool call, if any (e.g. "hivematrix-watch") —
+   *  resolved via resolveProjectByName. Takes priority over argProjectPath
+   *  when both are given: a name is more robust than a guessed path. */
+  argProject?: string;
+  /** `projectPath` arg off the tool call, if any — used when NOT
+   *  self-improvement and no (resolvable) argProject was given. */
   argProjectPath?: string;
   /** The resolved HiveMatrix repo path — injected so this helper stays pure/testable
    *  (see `selfImproveRepoPath()` for how the real dispatch site resolves it). */
@@ -280,9 +296,15 @@ export interface ResolveEscalationTargetOpts {
 }
 
 export interface EscalationTarget {
+  project: string;
   projectPath: string;
   description: string;
   isSelfImprove: boolean;
+  /** Set only when an explicit `project` name was given but couldn't be
+   *  resolved — callers must surface this instead of creating a task (never
+   *  silently fall back to homedir() for a name that was given but wrong).
+   *  project/projectPath are "" in this case. */
+  error?: string;
 }
 
 /**
@@ -294,21 +316,38 @@ export interface EscalationTarget {
  * won't always remember to set `kind`.
  */
 export function resolveEscalationTarget(opts: ResolveEscalationTargetOpts): EscalationTarget {
-  const { title, description, kind, argProjectPath, repoPath } = opts;
-  const isSelfImprove = kind === "self-improvement" || /\bhive\s?matrix\b/i.test(`${title} ${description}`);
+  const { title, description, kind, argProject, argProjectPath, repoPath } = opts;
+  const isSelfImprove = kind === "self-improvement" || /\bhive\s?matrix\b(?!-)/i.test(`${title} ${description}`);
 
   if (isSelfImprove) {
     return {
+      project: "hivematrix",
       projectPath: repoPath,
       description: SELF_IMPROVEMENT_PREFIX + description,
       isSelfImprove: true,
     };
   }
-  return {
-    projectPath: argProjectPath ?? homedir(),
-    description,
-    isSelfImprove: false,
-  };
+
+  const projectName = argProject?.trim();
+  if (projectName) {
+    const resolved = resolveProjectByName(projectName);
+    if (!resolved) {
+      return {
+        project: "",
+        projectPath: "",
+        description,
+        isSelfImprove: false,
+        error: `Cannot find project "${projectName}" — it isn't a known alias or a discovered git repo. Check ~/.hivematrix/discovered-projects.json, or pass an explicit projectPath instead.`,
+      };
+    }
+    return { project: resolved.name, projectPath: resolved.path, description, isSelfImprove: false };
+  }
+
+  if (argProjectPath) {
+    return { project: basename(argProjectPath), projectPath: argProjectPath, description, isSelfImprove: false };
+  }
+
+  return { project: "hivematrix", projectPath: homedir(), description, isSelfImprove: false };
 }
 
 /**
@@ -324,11 +363,22 @@ export function resolveEscalationTarget(opts: ResolveEscalationTargetOpts): Esca
  * the bundle root, not a git checkout of hivematrix — the operator MUST set
  * `selfImprove.repoPath` in ~/.hivematrix/config.json for self-improvement
  * escalations to land in the right place there.
+ *
+ * Falls back further to an auto-discovered "hivematrix" repo (via
+ * resolveProjectByName) before finally giving up and using cwd — this
+ * makes the unconfigured packaged-app case land in the real checkout
+ * instead of the LaunchAgent's homedir() working directory, without
+ * removing the "operator should configure this" contract above.
  */
 export function selfImproveRepoPath(): string {
   const cfg = loadHiveConfig().selfImprove as { repoPath?: unknown } | undefined;
   const configured = typeof cfg?.repoPath === "string" ? cfg.repoPath.trim() : "";
-  return configured || process.cwd();
+  if (configured) return configured;
+  // In the packaged app, process.cwd() is the LaunchAgent's WorkingDirectory
+  // (homedir() — see onboarding/actions.ts's plist), never a git checkout,
+  // so try the auto-discovered "hivematrix" repo before falling back to cwd.
+  const discovered = resolveProjectByName("hivematrix");
+  return discovered?.path || process.cwd();
 }
 
 /** Pure: whether an escalation made on this per-request channel should be
@@ -348,15 +398,21 @@ async function handleEscalateToTask(args: Record<string, unknown>, sessionId: st
 
   const title = String(args.title ?? "Task");
   const kind = String(args.kind ?? "");
+  const argProject = typeof args.project === "string" ? args.project : undefined;
   const argProjectPath = typeof args.projectPath === "string" ? args.projectPath : undefined;
 
-  const { projectPath, description } = resolveEscalationTarget({
+  const target = resolveEscalationTarget({
     title,
     description: String(args.description ?? ""),
     kind,
+    argProject,
     argProjectPath,
     repoPath: selfImproveRepoPath(),
   });
+
+  if (target.error) return `Error: ${target.error}`;
+
+  const { project, projectPath, description } = target;
 
   // A task escalated from a voice-channel flash turn gets the same
   // voice-origin marker the /voice/session route uses, so the loop-closer
@@ -373,7 +429,7 @@ async function handleEscalateToTask(args: Record<string, unknown>, sessionId: st
     _id: generateId(),
     title,
     description,
-    project: "hivematrix",
+    project,
     projectPath,
     executor: "agent",
     model: "mixed",

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, realpathSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -917,6 +917,56 @@ test("POST /tasks creates an operations task with no project — 201, and a real
   assert.ok(stored.projectPath, "a project-less task still gets a real working directory");
   assert.notEqual(stored.projectPath, "", "projectPath is never persisted as an empty string");
   assert.equal(stored.projectPath, process.env.HOME, "defaults to the home directory");
+});
+
+// Regression coverage for the 2026-07-16 Flash-task incident (task
+// e238b04578fb48a39af66016): an explicit project NAME with no projectPath
+// must resolve to the real repo path, never silently fall back to homedir()
+// — a mismatched name+homedir() pairing is exactly what broke per-repo
+// scheduler locking for Flash-originated tasks.
+test("POST /tasks resolves a project NAME to its real path when projectPath is omitted", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  // realpathSync: on macOS, os.tmpdir() (what withTempHome's mkdtempSync uses)
+  // returns a path under the /var/folders symlink, but project-discovery.ts's
+  // scanGitRepos() canonicalizes discovered paths via realpathSync (resolving
+  // to /private/var/folders/...) — canonicalize here too so the exact-path
+  // assertion below compares like with like (same fix as aliases.test.ts).
+  const home = realpathSync(process.env.HOME!);
+  mkdirSync(join(home, "some-real-repo", ".git"), { recursive: true });
+  writeFileSync(join(home, "some-real-repo", ".git", "HEAD"), "ref: refs/heads/main");
+  writeFileSync(join(home, "some-real-repo", "package.json"), JSON.stringify({ name: "some-real-repo" }));
+  const { discoverProjectsFresh } = await import("@/lib/routing/project-discovery");
+  discoverProjectsFresh();
+
+  const { base, headers } = await startServer(t);
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "Fix a bug.", project: "some-real-repo" }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json() as Record<string, unknown>;
+  const stored = getDb().prepare("SELECT project, projectPath FROM tasks WHERE _id = ?").get(body._id as string) as { project: string; projectPath: string };
+  assert.equal(stored.project, "some-real-repo");
+  assert.equal(stored.projectPath, join(home, "some-real-repo"));
+});
+
+test("POST /tasks rejects an unresolvable project name instead of guessing homedir()", async (t) => {
+  withTempHome(t);
+  const { _resetDbForTests, getDb } = await import("@/lib/db");
+  _resetDbForTests();
+  const { base, headers } = await startServer(t);
+
+  const res = await fetch(`${base}/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ description: "Fix a bug.", project: "no-such-project-anywhere" }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json() as Record<string, unknown>;
+  assert.match(String(body.error), /Cannot find project "no-such-project-anywhere"/);
+  const rows = getDb().prepare("SELECT COUNT(*) AS n FROM tasks").get() as { n: number };
+  assert.equal(rows.n, 0, "no task row was created");
 });
 
 test("POST /tasks routes an explicit Browser Lane request to the lane (parity with voice)", async (t) => {

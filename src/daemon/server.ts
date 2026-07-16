@@ -4449,14 +4449,32 @@ export function createDaemonServer() {
         // Title is optional — derive it from the instructions when absent/blank.
         const title = typeof body.title === "string" ? body.title.trim() : "";
         body.title = title || deriveTaskTitle(description);
-        if (typeof body.project !== "string" || !body.project.trim()) body.project = "hivematrix";
+        const explicitProjectName = typeof body.project === "string" ? body.project.trim() : "";
         if (typeof body.projectPath !== "string" || !body.projectPath.trim()) {
-          // No project/directory given (an "operations" task, e.g. a skill run
-          // with nothing to check out) — fall back to the home dir rather than
-          // an empty string, which crashes child_process.spawn's cwd option
-          // (ENOENT) once the scheduler tries to spawn the agent.
-          body.projectPath = homedir();
+          if (explicitProjectName) {
+            // A project NAME was given but no path — resolve it (alias/custom/
+            // system registry, then auto-discovered git repos) instead of
+            // silently guessing homedir(): a mismatched name+homedir() pairing
+            // here is exactly what broke per-repo scheduler locking for
+            // Flash-originated tasks (2026-07-16, see known-issues.md).
+            const { resolveProjectByName } = await import("@/lib/routing/aliases");
+            const resolved = resolveProjectByName(explicitProjectName);
+            if (!resolved) {
+              json(res, 400, { error: `Cannot find project "${explicitProjectName}" — it isn't a known alias or a discovered git repo. Check ~/.hivematrix/discovered-projects.json, or pass an explicit projectPath.` });
+              return;
+            }
+            body.project = resolved.name;
+            body.projectPath = resolved.path;
+          } else {
+            // No project/directory given at all (an "operations" task, e.g. a
+            // skill run with nothing to check out) — fall back to the home dir
+            // rather than an empty string, which crashes child_process.spawn's
+            // cwd option (ENOENT) once the scheduler tries to spawn the agent.
+            body.project = "hivematrix";
+            body.projectPath = homedir();
+          }
         } else {
+          if (!explicitProjectName) body.project = "hivematrix";
           // Expand a leading "~" (the built-in Inbox project's path) so it's a real
           // absolute directory by the time the agent spawns — otherwise
           // join(projectPath, ".claude") produces a literal "~/.claude" that mkdir

@@ -83,6 +83,7 @@ test("FLASH_ONLY_TOOL_DEFS: escalate_to_task accepts an optional kind enum [\"se
   };
   assert.ok(params.properties.title);
   assert.ok(params.properties.description);
+  assert.ok(params.properties.project);
   assert.ok(params.properties.projectPath);
   assert.deepEqual(params.properties.kind?.enum, ["self-improvement"]);
   // kind must stay optional — required list is unchanged from before this task.
@@ -419,6 +420,25 @@ test("resolveEscalationTarget: title naming Hive Matrix (spaced, no kind) is als
   assert.equal(result.projectPath, "/repo/path");
 });
 
+test("resolveEscalationTarget: a hyphenated sibling repo name is NOT treated as core-repo self-improvement", () => {
+  const watch = resolveEscalationTarget({
+    title: "HiveMatrix-watch UX overhaul",
+    description: "Improve voice dictation on the watch app.",
+    argProjectPath: undefined,
+    repoPath: "/Users/irvcassio/hivematrix",
+  });
+  assert.equal(watch.isSelfImprove, false, "hivematrix-watch is a different repo, not core self-improvement");
+  assert.doesNotMatch(watch.description, /Superpowers pipeline/);
+
+  const ios = resolveEscalationTarget({
+    title: "fix a bug",
+    description: "there's a crash in hivematrix-ios's onboarding flow",
+    argProjectPath: undefined,
+    repoPath: "/Users/irvcassio/hivematrix",
+  });
+  assert.equal(ios.isSelfImprove, false);
+});
+
 test("resolveEscalationTarget: neither kind nor HiveMatrix mention — projectPath falls back to arg or homedir, no prefix", () => {
   const withArg = resolveEscalationTarget({
     title: "Clean my inbox",
@@ -427,6 +447,7 @@ test("resolveEscalationTarget: neither kind nor HiveMatrix mention — projectPa
     repoPath: "/Users/irvcassio/hivematrix",
   });
   assert.equal(withArg.isSelfImprove, false);
+  assert.equal(withArg.project, "project"); // basename("/some/project")
   assert.equal(withArg.projectPath, "/some/project");
   assert.equal(withArg.description, "Archive old newsletters.");
 
@@ -437,8 +458,47 @@ test("resolveEscalationTarget: neither kind nor HiveMatrix mention — projectPa
     repoPath: "/Users/irvcassio/hivematrix",
   });
   assert.equal(withoutArg.isSelfImprove, false);
+  assert.equal(withoutArg.project, "hivematrix");
   assert.equal(withoutArg.projectPath, homedir());
   assert.equal(withoutArg.description, "Archive old newsletters.");
+});
+
+test("resolveEscalationTarget: explicit resolvable project name wins, with the resolved (not hardcoded) name", () => {
+  const result = resolveEscalationTarget({
+    title: "Fix a UI bug",
+    description: "The share sheet is misaligned.",
+    argProject: "ops",
+    argProjectPath: undefined,
+    repoPath: "/Users/irvcassio/hivematrix",
+  });
+  assert.equal(result.isSelfImprove, false);
+  assert.equal(result.project, "ops");
+  assert.equal(result.projectPath, homedir());
+  assert.equal(result.error, undefined);
+});
+
+test("resolveEscalationTarget: unresolvable project name errors instead of guessing homedir()", () => {
+  const result = resolveEscalationTarget({
+    title: "Fix a UI bug",
+    description: "The share sheet is misaligned.",
+    argProject: "totally-made-up-project-xyz",
+    argProjectPath: undefined,
+    repoPath: "/Users/irvcassio/hivematrix",
+  });
+  assert.match(result.error ?? "", /Cannot find project "totally-made-up-project-xyz"/);
+  assert.equal(result.projectPath, "");
+  assert.notEqual(result.projectPath, homedir(), "must not silently fall back to homedir()");
+});
+
+test("resolveEscalationTarget: explicit projectPath with no project name derives a real name, not the hardcoded 'hivematrix'", () => {
+  const result = resolveEscalationTarget({
+    title: "Fix a UI bug",
+    description: "The share sheet is misaligned.",
+    argProjectPath: "/Users/irvcassio/ohio-life-ace",
+    repoPath: "/Users/irvcassio/hivematrix",
+  });
+  assert.equal(result.project, "ohio-life-ace");
+  assert.equal(result.projectPath, "/Users/irvcassio/ohio-life-ace");
 });
 
 // ------------------------------------------------------------------
@@ -488,11 +548,48 @@ test("selfImproveRepoPath: falls back to process.cwd() when selfImprove.repoPath
   // No config fixture is injected here (config.ts has no test seam) — this
   // exercises the real loadHiveConfig() against whatever ~/.hivematrix/config.json
   // exists on the test machine. Absent a selfImprove.repoPath key there, the
-  // fallback is process.cwd(); if a key IS present, this just asserts it's a
+  // fallback chain is a discovered "hivematrix" repo, then process.cwd() (see
+  // the discovery-fallback test below) — either way this just asserts a
   // non-empty string, since we can't control that file's contents from here.
   const result = selfImproveRepoPath();
   assert.equal(typeof result, "string");
   assert.ok(result.length > 0);
+});
+
+test("selfImproveRepoPath: prefers a discovered 'hivematrix' repo over raw cwd when unconfigured", async (t) => {
+  // Can't isolate this the way aliases.test.ts / self-improve-prover.test.ts
+  // do (swap $HOME, then discoverProjectsFresh()): this file's own top-level
+  // static import of flash-mcp.ts already pulled in aliases.ts ->
+  // project-discovery.ts before any test body runs, and project-discovery.ts
+  // freezes its on-disk cache path (a module-level const built from
+  // homedir()) at THAT import time — swapping process.env.HOME inside a test
+  // body here would be too late to affect it, and calling
+  // discoverProjectsFresh() would overwrite THIS machine's real
+  // ~/.hivematrix/discovered-projects.json with fixture data instead of an
+  // isolated temp one. So this proves the priority ordering (a discovered
+  // repo wins over raw cwd) against the real, unmodified environment instead
+  // — same environment-dependent style the test above already accepts for
+  // this same function, for the same underlying reason (no HOME-injection
+  // seam reaches this function's dependencies from inside this file).
+  const { resolveProjectByName } = await import("@/lib/routing/aliases");
+  const { discoverProjectsFresh } = await import("@/lib/routing/project-discovery");
+  discoverProjectsFresh();
+  const discovered = resolveProjectByName("hivematrix");
+  if (!discovered) {
+    t.skip("no discoverable 'hivematrix' repo under $HOME on this machine");
+    return;
+  }
+
+  const { tmpdir } = await import("node:os");
+  const elsewhere = tmpdir();
+  const originalCwd = process.cwd();
+  process.chdir(elsewhere);
+  try {
+    assert.equal(selfImproveRepoPath(), discovered.path, "must prefer the discovered repo over raw cwd");
+    assert.notEqual(selfImproveRepoPath(), elsewhere);
+  } finally {
+    process.chdir(originalCwd);
+  }
 });
 
 // ------------------------------------------------------------------

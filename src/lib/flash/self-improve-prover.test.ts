@@ -38,7 +38,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 
@@ -53,6 +53,22 @@ writeFileSync(
   JSON.stringify({ selfImprove: { repoPath: TEMP_REPO } }),
 );
 
+// project-discovery.ts's scanGitRepos() canonicalizes discovered paths via
+// realpathSync (on macOS, os.tmpdir() sits under a /var/folders symlink that
+// resolves to /private/var/folders/...) — canonicalize TEMP_HOME once up
+// front so the sibling-repo regression test's exact-path assertion compares
+// like with like (same fix aliases.test.ts's resolveProjectByName coverage
+// already needed, for the same reason).
+const TEMP_HOME_REAL = realpathSync(TEMP_HOME);
+
+// A discoverable sibling repo (NOT the core "hivematrix" repo) for the
+// e238b04578fb48a39af66016 regression test below — proves an explicit
+// project name resolves to the SIBLING repo, not the core repo or homedir().
+const TEMP_SIBLING_REPO_NAME = "hivematrix-watch";
+mkdirSync(join(TEMP_HOME, TEMP_SIBLING_REPO_NAME, ".git"), { recursive: true });
+writeFileSync(join(TEMP_HOME, TEMP_SIBLING_REPO_NAME, ".git", "HEAD"), "ref: refs/heads/main");
+writeFileSync(join(TEMP_HOME, TEMP_SIBLING_REPO_NAME, "package.json"), JSON.stringify({ name: TEMP_SIBLING_REPO_NAME }));
+
 process.env.HOME = TEMP_HOME;
 process.env.HIVEMATRIX_DB_PATH = join(TEMP_HOME, "test.db");
 
@@ -63,6 +79,8 @@ const { dispatchFlashOnlyTool } = await import("./flash-mcp");
 const { createSession } = await import("./store");
 const { detectCommandIntent } = await import("@/lib/voice/command-intent");
 const { VOICE_ORIGIN, markVoiceOrigin } = await import("@/lib/voice/loop-closer");
+const { discoverProjectsFresh } = await import("@/lib/routing/project-discovery");
+discoverProjectsFresh(); // populate the (TEMP_HOME-scoped) cache resolveProjectByName's fallback reads
 
 test.after(() => {
   _resetDbForTests();
@@ -140,4 +158,43 @@ test("control: a non-self-improvement escalation from a non-voice session does n
   assert.equal(task!.projectPath, homedir());
   assert.doesNotMatch(task!.description, /Superpowers/);
   assert.equal(task!.output.origin, undefined);
+});
+
+test("escalate_to_task with an explicit sibling-repo project name resolves to that repo, not homedir() or the core repo (regression: e238b04578fb48a39af66016)", async () => {
+  const session = createSession("chat", "prover-peer-3");
+
+  const result = await dispatchFlashOnlyTool(
+    "escalate_to_task",
+    {
+      title: "HiveMatrix-watch UX overhaul",
+      description: "Improve voice dictation on the watch app.",
+      project: "hivematrix-watch",
+    },
+    { brainRoot: null, sessionId: session.id, channel: "console" },
+  );
+
+  const match = result.match(/^Escalated to task (\S+):/);
+  assert.ok(match, `expected "Escalated to task <id>:" prefix, got: ${result}`);
+  const task = await Task.findById(match![1]);
+  assert.ok(task);
+
+  assert.equal(task!.project, "hivematrix-watch");
+  assert.equal(task!.projectPath, join(TEMP_HOME_REAL, "hivematrix-watch"));
+  assert.notEqual(task!.projectPath, homedir());
+  assert.notEqual(task!.projectPath, TEMP_REPO, "must not land in the core hivematrix repo either");
+});
+
+test("escalate_to_task with an unresolvable project name returns an error and creates no task", async () => {
+  const session = createSession("chat", "prover-peer-4");
+  const before = (await Task.find({})).length;
+
+  const result = await dispatchFlashOnlyTool(
+    "escalate_to_task",
+    { title: "X", description: "Y", project: "no-such-project-xyz" },
+    { brainRoot: null, sessionId: session.id, channel: "console" },
+  );
+
+  assert.match(result, /^Error: Cannot find project "no-such-project-xyz"/);
+  const after = (await Task.find({})).length;
+  assert.equal(after, before, "no task row was created");
 });
