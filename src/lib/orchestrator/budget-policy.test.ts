@@ -25,10 +25,13 @@ test("budget policy treats missing, zero, and negative budgets as uncapped", () 
   assert.equal(hasBudgetCeiling(undefined), false);
 });
 
-test("the per-task default budget ceiling is now $10 (unattended-runaway backstop), while 0 stays the explicit uncapped opt-out", () => {
-  assert.equal(DEFAULT_TASK_BUDGET_CEILING_USD, 10);
+test("the per-task default budget ceiling is $25 (unattended-runaway backstop), while 0 stays the explicit uncapped opt-out", () => {
+  // Raised from $10 on 2026-07-16: the $10 ceiling killed three near-complete
+  // tasks at $10.35–$10.68. Still a real ceiling — just one that clears the
+  // largest observed genuine task.
+  assert.equal(DEFAULT_TASK_BUDGET_CEILING_USD, 25);
   assert.equal(hasBudgetCeiling(DEFAULT_TASK_BUDGET_CEILING_USD), true);
-  assert.equal(normalizeBudgetUsd(DEFAULT_TASK_BUDGET_CEILING_USD), 10);
+  assert.equal(normalizeBudgetUsd(DEFAULT_TASK_BUDGET_CEILING_USD), 25);
   // 0 is still explicitly uncapped, independent of the new default.
   assert.equal(hasBudgetCeiling(0), false);
 });

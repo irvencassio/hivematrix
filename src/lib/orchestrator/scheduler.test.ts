@@ -267,10 +267,12 @@ test("modelRole: an empty role-model slot falls through cleanly (no crash, no fa
   });
 });
 
-test("a task created without an explicit budget gets the $10 unattended-runaway backstop, not the old $5 default", async () => {
+test("a task created without an explicit budget gets the $25 unattended-runaway backstop, not the old $5 default", async () => {
   await withTempDb(async () => {
     const task = await mkTask({});
-    assert.equal(task.maxBudgetUsd, 10);
+    // Raised from $10 on 2026-07-16 after it killed three near-complete tasks
+    // at $10.35–$10.68. Still a ceiling, just one that clears real work.
+    assert.equal(task.maxBudgetUsd, 25);
   });
 });
 

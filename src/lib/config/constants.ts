@@ -9,7 +9,12 @@ export const DEFAULT_TIMEOUT_MINUTES = 60;
 // every task needs a real default cost ceiling rather than an unbounded one.
 // 0 remains the explicit "uncapped" opt-out (see budget-policy.ts) — this is
 // only the default applied when a task doesn't set its own budget.
-export const DEFAULT_BUDGET_USD = 10;
+//
+// Calibrated 2026-07-16 from observed spend: a typical task costs ~$3, but the
+// previous $10 ceiling killed three near-complete tasks at $10.35–$10.68 (each
+// ~95% done, mid-write-up). $25 clears the largest observed real task with
+// headroom while still bounding a runaway loop.
+export const DEFAULT_BUDGET_USD = 25;
 export const MAX_TURNS = 50;
 export const SCHEDULER_INTERVAL_MS = 2000;
 export const APPROVAL_TIMEOUT_MINUTES = 30;
