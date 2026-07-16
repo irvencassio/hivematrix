@@ -1708,6 +1708,41 @@ test("header Usage section is removed; both 5h and 7d toggle buttons render visu
   assert.doesNotThrow(() => new Function(js), SyntaxError, "console script still parses as valid JS");
 });
 
+test("5h/7d header toggle marks its active button with the sidebar's yellow-border pattern, not a blue background", () => {
+  // Reference pattern this must match: .ov-nav.active (left sidebar, e.g. #flashNav).
+  assert.match(
+    CONSOLE_HTML,
+    /\.ov-nav\.active\s*\{\s*border-color:\s*var\(--accent\);\s*color:\s*var\(--accent\);\s*\}/,
+    "sidebar reference pattern still present with this exact shape",
+  );
+
+  // The header toggle must override the shared blue .on style with the same
+  // token/technique, scoped to #usageWinToggle only.
+  assert.match(
+    CONSOLE_HTML,
+    /#usageWinToggle button \{[^}]*border:\s*1px solid transparent;?[^}]*\}/,
+    "toggle buttons reserve a constant-width transparent border so activating one is a color fade, not a layout jump",
+  );
+  assert.match(
+    CONSOLE_HTML,
+    /#usageWinToggle button\.on \{[^}]*border-color:\s*var\(--accent\)[^}]*\}/,
+    "active toggle button gets the same gold/yellow border-color token as the sidebar's active nav item",
+  );
+  assert.doesNotMatch(
+    CONSOLE_HTML,
+    /#usageWinToggle button\.on \{[^}]*background:\s*var\(--accent-2\)[^}]*\}/,
+    "active toggle button must not keep the old blue background",
+  );
+
+  // Regression guard: the shared .obs-win rule (used elsewhere, e.g. the
+  // Observability modal's window/group pickers) must be untouched.
+  assert.match(
+    CONSOLE_HTML,
+    /\.obs-win button\.on \{ background:var\(--accent-2\); color:#fff; \}/,
+    "shared .obs-win active style must stay exactly as-is for non-header pickers (e.g. Observability modal)",
+  );
+});
+
 function consoleUsageBars() {
   const js = extractScript(CONSOLE_HTML);
   const usageBarClassSrc = js.match(/function usageBarClass\([\s\S]*?\n\}/)?.[0] ?? "";

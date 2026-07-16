@@ -347,6 +347,8 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-bar-day:last-child { margin-right: 0; }
   .usage-bar-day.filled.ok { background: var(--ok, #4caf50); }
   .usage-bar-day.filled.hi { background: #e05b2c; }
+  #usageWinToggle button { border: 1px solid transparent; }
+  #usageWinToggle button.on { background: var(--panel-2); color: var(--accent); border-color: var(--accent); }
   /* Compact at-a-glance provider cards for the Usage section. */
   .usage-cards { display: flex; flex-direction: column; gap: 6px; }
   .usage-card { border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; background: var(--panel-2); }
