@@ -227,7 +227,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     font-size: 12px; font-weight: 600; margin-bottom: 10px; transition: border-color .15s ease, color .15s ease; }
   .addbtn:hover { border-color: var(--accent); color: var(--accent); }
   .addbtn.active { border-color: var(--accent); color: var(--accent); }
-  /* Overview nav — explicit return target at the top of the board column. */
+  /* .ov-nav / .ov-back — shared nav-button and back-link styles for every sidebar
+     panel (Chat/Memory/Roles/Tools/Goals) and their back-links. Class names are a
+     holdover from the removed Overview feature; the styling itself is shared, not
+     Overview-specific. */
   .ov-nav { width: 100%; text-align: left; background: var(--panel-2); color: var(--text);
     border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; cursor: pointer;
     font-size: 12px; font-weight: 600; margin-bottom: 8px; transition: border-color .15s ease, color .15s ease; }
@@ -291,17 +294,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .toast { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; padding: 7px 14px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.25); opacity: 0; transform: translateY(8px); transition: opacity .18s, transform .18s; }
   .toast.show { opacity: 1; transform: translateY(0); }
   .toast.ok { border-left-color: var(--ok); } .toast.err { border-left-color: var(--err); }
-  /* Center overview — shown when no task is selected (replaces the bare empty state) */
-  .overview { max-width: 540px; margin: 28px auto 0; padding: 0 12px; }
-  .ov-head { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; }
-  .ov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px; }
-  .ov-card { border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); padding: 12px 8px; text-align: center; }
-  .ov-card[onclick] { cursor: pointer; transition: border-color .15s ease, background .15s ease; }
-  .ov-card[onclick]:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel-2)); }
-  .ov-card.warn { border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); }
-  .ov-card.ok { border-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
-  .ov-card.err { border-color: color-mix(in srgb, var(--err) 50%, var(--border)); }
-  .ov-num { font-size: 22px; font-weight: 700; line-height: 1; }
   .new-task-panel { padding: 18px 20px 24px; }
   .new-task-panel .form { max-width: none; }
   .sk-param-area { border: 1px dashed var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
@@ -309,8 +301,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .sk-param-area input + .flbl { margin-top: 8px; }
   .sk-param-area input { margin-bottom: 6px; }
   .attach-drop.drag-over { border: 1px dashed var(--accent) !important; background: color-mix(in srgb, var(--accent) 8%, var(--panel-2)); border-radius: 6px; }
-  .ov-lbl { font-size: 11px; color: var(--muted); margin-top: 4px; }
-  .ov-hint { color: var(--muted); font-size: 12px; text-align: center; margin-top: 20px; }
   .badge.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, var(--badge-bg)); }
   .badge.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, var(--badge-bg)); }
   .badge.err { color: var(--err); }
@@ -1816,7 +1806,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   <div class="col-resizer" id="resizeLeft" title="Drag to resize the left panel"></div>
   <div class="col-resizer" id="resizeRight" title="Drag to resize the right panel"></div>
   <section class="col board">
-    <button class="ov-nav" id="overviewNav" onclick="showOverview()">⌂ Overview</button>
     <button class="addbtn" id="newTaskNav" onclick="showNewTaskPanel()">＋ New task</button>
     <button class="ov-nav oc-nav" id="flashNav" onclick="showFlashPanel()">💬 Chat</button>
     <button class="ov-nav oc-nav" id="brainNav" onclick="showBrain()">🧠 Memory</button>
@@ -2008,7 +1997,7 @@ function requireToken() {
     + '<div style="color:var(--muted,#8b949e);font-size:11px;max-width:340px;text-align:center">Find this token in the local HiveMatrix console under Settings → Remote access.</div></div>';
   return false;
 }
-let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedSkillOrCommand: null, projects: [], selectedProject: "", packCards: [], schedView: 'timeline', tlWindow: 24, lanes: [], mcp: null };
+let state = { tasks: [], directives: [], conn: null, metrics: null, onboarding: null, selected: null, selectedSkillOrCommand: null, projects: [], selectedProject: "", schedView: 'timeline', tlWindow: 24, lanes: [], mcp: null };
 let _taskFormInSession = false;
 // Tracks whether the prompt wizard has already run (accepted or dismissed) for the
 // current New Task open, so "Always enhance" only auto-triggers once per open.
@@ -2044,30 +2033,6 @@ function hmToast(message, kind) {
   requestAnimationFrame(() => t.classList.add("show"));
   setTimeout(() => { t.classList.remove("show"); setTimeout(() => t.remove(), 220); }, 1800);
 }
-function packMetricLabel(metric) {
-  if (typeof metric === "string") return metric;
-  if (!metric || typeof metric !== "object") return "";
-  const label = metric.label || metric.name || "";
-  const value = metric.value == null ? "" : String(metric.value);
-  const unit = metric.unit ? " " + metric.unit : "";
-  return (label ? label + ": " : "") + value + unit;
-}
-function renderPackDashboardCards() {
-  const cards = state.packCards || [];
-  if (!cards.length) return "";
-  return '<div class="ov-head" style="margin-top:18px">Packs</div>'
-    + '<div class="ov-grid">'
-    + cards.map(card => {
-      const metrics = (card.metrics || []).map(packMetricLabel).filter(Boolean).slice(0, 3).join(" · ");
-      const cta = typeof card.cta === "string" ? card.cta : (card.cta && (card.cta.label || card.cta.text)) || "";
-      return '<div class="ov-card">'
-        + '<div class="ov-num" style="font-size:14px;line-height:1.2">' + esc(card.title || card.packName || "Pack") + '</div>'
-        + '<div class="ov-lbl">' + esc(metrics || card.packName || "") + '</div>'
-        + (cta ? '<div class="ov-lbl" style="margin-top:4px;color:var(--accent)">' + esc(cta) + '</div>' : '')
-        + '</div>';
-    }).join("")
-    + '</div>';
-}
 // Header quick theme toggle — flips light/dark and persists (matrix/system stay in Settings).
 async function toggleThemeQuick() {
   const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
@@ -2078,35 +2043,19 @@ async function toggleThemeQuick() {
     hmToast("Theme: " + next, "ok");
   } catch (e) { hmToast("Couldn't change theme", "err"); }
 }
-// Center overview — at-a-glance board state when no task is selected, instead of
-// leaving the widest column empty.
-function renderOverview() {
+// Center pane at rest — shown when nothing is selected and no panel is open.
+// Reuses the same placeholder markup the static pre-hydration shell already
+// ships (console.ts:1890) so there's exactly one "idle" visual, not two.
+function renderSessionEmpty() {
   if (state.selected || state.selectedSkillOrCommand || _taskFormInSession || _flashState.panelOpen || _brainState.panelOpen || _rolesState.panelOpen || _toolsState.panelOpen || _goalsState.panelOpen) return;
   setFlashSessionMode(false);
   const el = document.getElementById("session");
   if (!el) return;
-  const statusToLane = {}; LANE_DEFS.forEach(L => L.statuses.forEach(s => statusToLane[s] = L.key));
-  const counts = {}; LANE_DEFS.forEach(L => counts[L.key] = 0);
-  const filtered = state.tasks;
-  for (const t of filtered) { const k = statusToLane[t.status]; if (k) counts[k]++; }
-  const dirActive = (state.directives || []).filter(d => d.status === "active").length;
-  const appr = (state.approvals || []).length;
-  const card = (label, val, cls, numColor, action) => '<div class="ov-card ' + (cls || "") + '"' + (action ? ' onclick="' + action + '"' : '') + '><div class="ov-num"' + (numColor ? ' style="color:' + numColor + '"' : '') + '>' + val + '</div><div class="ov-lbl">' + esc(label) + '</div></div>';
-  el.innerHTML = '<div class="overview">'
-    + '<div class="ov-head">Overview</div>'
-    + '<div class="ov-grid">' + LANE_DEFS.map(L => card(L.label, counts[L.key], "", laneColor[L.key] || "", "focusBoardLane('" + L.key + "')")).join("") + '</div>'
-    + '<div class="ov-grid" style="margin-top:8px">'
-    + card("scheduled", dirActive)
-    + card("pending approvals", appr, appr ? "warn" : "")
-    + '</div>'
-    + renderPackDashboardCards()
-    + '<div class="ov-hint">Select a task to inspect progress — or ＋ New task to start one.</div>'
-    + '</div>';
+  el.innerHTML = '<div class="session-empty">Select a task to inspect its session.</div>';
 }
-
-// Explicit return-to-overview navigation. Clears the open task (same fields
-// delete/archive already null) and re-renders; the project filter is untouched.
-function showOverview() {
+// Closes whatever's open (task, skill/command detail, New Task form, any of the
+// 5 panels) and returns the center pane to its idle state.
+function closeSession() {
   state.selected = null;
   state.selectedSkillOrCommand = null;
   _skSel = '';
@@ -2117,31 +2066,20 @@ function showOverview() {
   _rolesState.panelOpen = false;
   _toolsState.panelOpen = false;
   _goalsState.panelOpen = false;
-  setStoredView('overview');
+  setStoredView('');
   setFlashSessionMode(false);
   renderBoard();
   renderSkillList();
-  renderOverview();
+  renderSessionEmpty();
   syncNav();
-}
-function focusBoardLane(key) {
-  const allOtherKeys = LANE_DEFS.map(L => L.key).filter(k => k !== key);
-  try { localStorage.setItem("hm_lanes_collapsed", JSON.stringify(allOtherKeys)); } catch (e) { /* ignore */ }
-  renderBoard();
-  const board = document.getElementById("board");
-  if (board) board.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 // Single source of truth for left-nav highlight. Every show*/panel entry point
 // and the periodic refresh route through this, so exactly one nav item is ever
 // lit. Previously eight functions synced overlapping subsets (Roles was omitted
-// from the overview sync, and showOverview synced nothing) — which left a stale
-// item highlighted alongside the active one ("menus duplicated").
+// from the sync) — which left a stale item highlighted alongside the active one
+// ("menus duplicated").
 function syncNav() {
-  const panelOpen = _flashState.panelOpen || _brainState.panelOpen || _rolesState.panelOpen
-    || _toolsState.panelOpen || _goalsState.panelOpen;
-  const overviewActive = !state.selected && !state.selectedSkillOrCommand && !_taskFormInSession && !panelOpen;
   const active = {
-    overviewNav: overviewActive,
     newTaskNav: _taskFormInSession,
     flashNav: _flashState.panelOpen,
     brainNav: _brainState.panelOpen,
@@ -2154,8 +2092,6 @@ function syncNav() {
     if (el) el.classList.toggle("active", !!active[id]);
   }
 }
-// Kept for existing call sites; all nav sync now funnels through syncNav().
-function updateOverviewNav() { syncNav(); }
 function isEditableTarget(el) {
   if (!el) return false;
   const tag = (el.tagName || "").toLowerCase();
@@ -2317,14 +2253,14 @@ function verificationMeta(v) {
 }
 
 // Active view persistence — restores the last-open sidebar view on launch.
-var HM_VALID_VIEWS = ["overview", "flash", "brain", "roles", "tools", "goals"];
-var _currentView = "overview";
+var HM_VALID_VIEWS = ["flash", "brain", "roles", "tools", "goals"];
+var _currentView = "";
 
 function getStoredView() {
   try {
     var v = localStorage.getItem("hm_last_view");
-    return HM_VALID_VIEWS.indexOf(v) !== -1 ? v : "overview";
-  } catch (e) { return "overview"; }
+    return HM_VALID_VIEWS.indexOf(v) !== -1 ? v : "";
+  } catch (e) { return ""; }
 }
 
 function setStoredView(view) {
@@ -2529,7 +2465,7 @@ function renderBoard() {
   const archivable = state.tasks.filter(t => ["review","done","failed","cancelled"].includes(t.status)).length;
   const ab = document.getElementById("archiveBtn");
   if (ab) ab.textContent = archivable ? "· archive completed (" + archivable + ")" : "";
-  updateOverviewNav();
+  syncNav();
 }
 
 /*__MARKDOWN_RENDERER_START__*/
@@ -2761,7 +2697,7 @@ async function selectTask(id) {
   const prevColScroll = (colEl && !live) ? colEl.scrollTop : 0;
   const prevScrollTop = live ? null : (el.querySelector(".transcript")?.scrollTop ?? null);
   el.innerHTML = '<div class="session"><h1>'+esc(t.title||t._id)+(live?'<span class="streaming">● running</span>':'')
-    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></h1>'
+    + '<button class="linklike ov-back" onclick="closeSession()" title="Back (Esc)">← Back</button></h1>'
     + '<div class="sub">'+esc(t.project||"")+' · '+esc(t.status)+(t.reviewState?' · '+esc(t.reviewState):'')+'</div>'
     + taskProvenancePills(t, out, logs, children)
     + taskActionsHtml(t)
@@ -2791,7 +2727,7 @@ async function taskAction(id, action) {
 }
 async function deleteTask(id) {
   await api("/tasks/"+id, { method: "DELETE" });
-  if (state.selected === id) { state.selected = null; renderOverview(); }
+  if (state.selected === id) { state.selected = null; renderSessionEmpty(); }
   refresh();
 }
 async function archiveCompleted() {
@@ -3283,7 +3219,10 @@ function restoreLastView() {
   else if (view === 'roles') showRoles();
   else if (view === 'tools') { _pendingScrollRestore = 'tools'; showTools(); }
   else if (view === 'goals') { _pendingScrollRestore = 'goals'; showGoals(); }
-  // 'overview' is already the default rendered state on boot — nothing to do.
+  // An empty/unrecognized stored view — including a legacy "overview" string left
+  // over in a returning user's localStorage from before this change, which
+  // HM_VALID_VIEWS.indexOf() above already turns into "" on its own — is the
+  // no-op idle default rendered on boot. Nothing to do.
 }
 
 function updateGoalsNav() { syncNav(); }
@@ -3370,7 +3309,7 @@ function renderGoalsPanel() {
     + '<div class="oc-panel-sub">Long-horizon goals &amp; daily accountability — check in to track progress</div></div>'
     + '<span class="oc-panel-head-spacer"></span>'
     + '<button class="oc-mic-btn" style="margin-right:8px" onclick="goalAdd()">＋ Add goal</button>'
-    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></div>'
+    + '<button class="linklike ov-back" onclick="closeSession()" title="Back (Esc)">← Back</button></div>'
     + '<div class="tools-pane">' + body + '</div></div>';
 }
 
@@ -3867,7 +3806,7 @@ function _closeSkillPanel() {
   setFlashSessionMode(false);
   renderSkillList();
   renderSkillDetail();
-  renderOverview();
+  renderSessionEmpty();
 }
 
 function _libSkillPanelHtml(it) {
@@ -3886,7 +3825,7 @@ function _libSkillPanelHtml(it) {
     ? '<div style="color:var(--err);font-size:12px;margin-bottom:8px">⛔ Scan blocked — do not run this skill.</div>'
     : s.scan === 'warn' ? '<div style="color:var(--warn);font-size:12px;margin-bottom:8px">⚠ Scan: review before running.</div>' : '';
   return '<div class="new-task-panel">'
-    + '<button class="linklike ov-back" onclick="_closeSkillPanel()" title="Back to overview (Esc)">← Overview</button>'
+    + '<button class="linklike ov-back" onclick="_closeSkillPanel()" title="Back (Esc)">← Back</button>'
     + '<h2>' + skIcon(it) + ' ' + esc(it.name) + '</h2>'
     + (it.description ? '<div class="sub">' + esc(it.description) + '</div>' : '')
     + '<div style="font-size:11px;color:var(--muted);margin:0 0 12px">' + libMetaLine(s) + '</div>'
@@ -3918,7 +3857,7 @@ function _libSkillPanelHtml(it) {
 function _localCmdPanelHtml(it) {
   const c = it.raw;
   return '<div class="new-task-panel">'
-    + '<button class="linklike ov-back" onclick="_closeSkillPanel()" title="Back to overview (Esc)">← Overview</button>'
+    + '<button class="linklike ov-back" onclick="_closeSkillPanel()" title="Back (Esc)">← Back</button>'
     + '<h2>' + skIcon(it) + ' ' + esc(it.name) + '</h2>'
     + (it.description ? '<div class="sub">' + esc(it.description) + '</div>' : '')
     + '<div style="font-size:11px;color:var(--muted);margin:0 0 12px">' + commandMetaChips(c) + '</div>'
@@ -5728,18 +5667,17 @@ async function resolveApprovalItem(idx, decision, btn) {
 let _httpHealthy = false;
 async function refresh() {
   try {
-    const [tasks, directives, conn, metrics, onboarding, appr, packCards, lanes, mcp] = await Promise.all([
-      api("/tasks"), api("/directives"), api("/connectivity"), api("/metrics"), api("/onboarding"), api("/approvals/pending"), api("/packs/dashboard-cards"), api("/lanes"), api("/mcp"),
+    const [tasks, directives, conn, metrics, onboarding, appr, lanes, mcp] = await Promise.all([
+      api("/tasks"), api("/directives"), api("/connectivity"), api("/metrics"), api("/onboarding"), api("/approvals/pending"), api("/lanes"), api("/mcp"),
     ]);
     state.tasks = tasks; state.directives = directives; state.conn = conn; state.metrics = metrics; state.onboarding = onboarding;
     state.approvals = (appr && appr.approvals) || [];
-    state.packCards = (packCards && packCards.cards) || [];
     state.lanes = (lanes && lanes.lanes) || [];
     state.mcp = mcp || null;
     renderBoard();
     // Center column: drive it right after the board so a later panel error can't
-    // leave it stale. selectTask re-fetches the open task; otherwise show overview.
-    if (state.selected) selectTask(state.selected); else renderOverview();
+    // leave it stale. selectTask re-fetches the open task; otherwise show the idle placeholder.
+    if (state.selected) selectTask(state.selected); else renderSessionEmpty();
     // A successful HTTP poll proves the daemon is reachable — so clear any
     // SSE-only "reconnecting" state before renderConn paints. The SSE
     // EventSource flaps over tunnels/proxies (Cloudflare buffers/idle-times-out
@@ -6031,12 +5969,12 @@ function showNewTaskPanel() {
   _promptWizardHandled = false;
   renderBoard();
   // Standard center-panel shell (matches Tools/Obs/Brain/Roles) instead of a
-  // bare <h2> — same header, sub, and ← Overview control everywhere.
+  // bare <h2> — same header, sub, and ← Back control everywhere.
   session.innerHTML = '<div class="oc-center-pane">'
     + '<div class="oc-panel-head"><div><div class="oc-panel-title"><span>＋ New task</span></div>'
     + '<div class="oc-panel-sub">Describe what you want done — route it to a lane or let it self-plan.</div></div>'
     + '<span class="oc-panel-head-spacer"></span>'
-    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></div>'
+    + '<button class="linklike ov-back" onclick="closeSession()" title="Back (Esc)">← Back</button></div>'
     + '<div class="new-task-panel"></div></div>';
   session.querySelector(".new-task-panel").appendChild(form);
   form.classList.add("open");
@@ -6052,7 +5990,7 @@ function _closeNewTaskPanel() {
     board.parentElement.insertBefore(form, board);
   }
   _taskFormInSession = false;
-  renderOverview();
+  renderSessionEmpty();
   syncNav();
 }
 
@@ -6564,14 +6502,14 @@ function mpUseCustomFolder(pfx) {
   if (box) box.style.display = "none";
 }
 
-// Escape returns to the Overview — but never while typing in a field or with a
+// Escape closes the open task/panel — but never while typing in a field or with a
 // modal open (those own Escape themselves).
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (!state.selected && !state.selectedSkillOrCommand) return;
   if (isEditableTarget(document.activeElement)) return;
   if (document.querySelector(".overlay.open")) return;
-  showOverview();
+  closeSession();
 });
 
 async function loadProjects(fresh) {
@@ -7019,7 +6957,7 @@ function flashPanelHtml() {
     + '<div><div class="oc-panel-title"><span class="oc-avail-dot ok"></span><span>Chat</span></div>'
     + '<div class="oc-panel-sub">Native HiveMatrix agent loop</div></div>'
     + '<span class="oc-panel-head-spacer"></span>'
-    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button>'
+    + '<button class="linklike ov-back" onclick="closeSession()" title="Back (Esc)">← Back</button>'
     + '</div>'
     + '<div class="oc-panel-body">'
     + '<div class="oc-transcript" id="flashTranscript"></div>'
@@ -7137,7 +7075,7 @@ function brainPanelHtml() {
     + '<div><div class="oc-panel-title"><span>🧠</span><span>Brain / Memory Review</span></div>'
     + '<div class="oc-panel-sub">Which brain docs actually reach a task\'s prompt, per project</div></div>'
     + '<span class="oc-panel-head-spacer"></span>'
-    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button>'
+    + '<button class="linklike ov-back" onclick="closeSession()" title="Back (Esc)">← Back</button>'
     + '</div>'
     + '<div class="brain-pane" style="padding:0;height:auto;max-height:none">'
     + '<div class="brain-shell">'
@@ -7662,7 +7600,7 @@ function rolesPanelHtml() {
     + '<div><div class="oc-panel-title"><span>👥</span><span>Roles</span></div>'
     + '<div class="oc-panel-sub">What each agent role actually is — prompt, tools, model, and real usage</div></div>'
     + '<span class="oc-panel-head-spacer"></span>'
-    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button>'
+    + '<button class="linklike ov-back" onclick="closeSession()" title="Back (Esc)">← Back</button>'
     + '</div>'
     + '<div class="brain-pane" style="padding:0;height:auto;max-height:none">'
     + '<div class="brain-shell">'
@@ -7799,7 +7737,7 @@ function renderToolsPanel() {
   if (!session) return;
   setFlashSessionMode(true);
   if (_toolsState.error) {
-    session.innerHTML = '<div class="oc-center-pane"><div class="oc-panel-head"><div><div class="oc-panel-title"><span>🛠️ Tools</span></div><div class="oc-panel-sub">Capabilities inventory</div></div><span class="oc-panel-head-spacer"></span><button class="linklike ov-back" onclick="showOverview()">← Overview</button></div><div class="tools-pane"><div class="oc-empty">Could not load capabilities. <a href="#" onclick="event.preventDefault();loadCapabilities()">Retry</a></div></div></div>';
+    session.innerHTML = '<div class="oc-center-pane"><div class="oc-panel-head"><div><div class="oc-panel-title"><span>🛠️ Tools</span></div><div class="oc-panel-sub">Capabilities inventory</div></div><span class="oc-panel-head-spacer"></span><button class="linklike ov-back" onclick="closeSession()">← Back</button></div><div class="tools-pane"><div class="oc-empty">Could not load capabilities. <a href="#" onclick="event.preventDefault();loadCapabilities()">Retry</a></div></div></div>';
     return;
   }
   const groups = _toolsState.groups;
@@ -7895,7 +7833,7 @@ function renderToolsPanel() {
     + '<div class="oc-panel-head"><div><div class="oc-panel-title"><span>🛠️ Tools</span></div>'
     + '<div class="oc-panel-sub">Everything the assistant can do — and what backs it</div></div>'
     + '<span class="oc-panel-head-spacer"></span>'
-    + '<button class="linklike ov-back" onclick="showOverview()" title="Back to overview (Esc)">← Overview</button></div>'
+    + '<button class="linklike ov-back" onclick="closeSession()" title="Back (Esc)">← Back</button></div>'
     + '<div class="sk-toolbar" style="margin-bottom:0">'
     + '<input id="toolsQuery" placeholder="Search tools…" oninput="toolsQueryInput()" value="' + attrEnc(_toolsQuery) + '" />'
     + '</div>'

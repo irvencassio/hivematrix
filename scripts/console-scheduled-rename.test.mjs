@@ -28,17 +28,6 @@ test("create button says Schedule not Create directive", () => {
   );
 });
 
-test("overview card label is scheduled not active directives", () => {
-  assert.ok(
-    !console_ts.includes('"active directives"'),
-    "overview card must not say 'active directives'"
-  );
-  assert.ok(
-    console_ts.includes('"scheduled"') || console_ts.includes("'scheduled'"),
-    "overview card must use 'scheduled' label"
-  );
-});
-
 test("new task form opens in session column", () => {
   assert.ok(
     console_ts.includes("showNewTaskPanel"),

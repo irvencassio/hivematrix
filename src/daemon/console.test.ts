@@ -1018,7 +1018,6 @@ test("Brain / Memory Review nav opens a three-pane read-only screen wired to the
   assert.match(js, /function brainPanelHtml\(/);
   assert.match(js, /function renderBrainPanel\(/);
   assert.match(fnBody(js, "syncNav"), /brainNav:\s*_brainState\.panelOpen/, "Brain nav active state follows its panel");
-  assert.match(js, /overviewActive = .* !panelOpen/, "Overview is not active while a panel (incl. Brain) is open");
   // Wired to the Phase-1 server endpoints, not mocked data.
   assert.match(js, /api\('\/brain\/projects'\)/);
   assert.match(js, /api\('\/brain\/docs\?project='/);
@@ -1102,13 +1101,12 @@ test("Roles screen nav opens a three-pane read-only screen wired to the real /ag
   assert.match(js, /function rolesPanelHtml\(/);
   assert.match(js, /function renderRolesPanel\(/);
   assert.match(fnBody(js, "syncNav"), /rolesNav:\s*_rolesState\.panelOpen/, "Roles nav active state follows its panel");
-  assert.match(js, /overviewActive = .* !panelOpen/, "Overview is not active while a panel (incl. Roles) is open");
   // Wired to the real Spec2-Phase1 server endpoints, not mocked data.
   assert.match(js, /api\('\/agents\/profiles'\)/);
   assert.match(js, /api\('\/agents\/profiles\/' \+ encodeURIComponent\(id\)\)/);
   assert.match(js, /api\('\/agents\/profiles\/' \+ encodeURIComponent\(id\) \+ '\/stats'\)/);
   // Mutual exclusivity with every other center-pane surface.
-  for (const fn of ["selectTask", "_closeSkillPanel", "showSkillPanel", "showNewTaskPanel", "showOverview", "showFlashPanel", "showBrain"]) {
+  for (const fn of ["selectTask", "_closeSkillPanel", "showSkillPanel", "showNewTaskPanel", "showFlashPanel", "showBrain"]) {
     const body = fnBody(js, fn);
     assert.match(body, /_rolesState\.panelOpen = false/, `${fn} must close the Roles panel`);
   }
@@ -1352,19 +1350,145 @@ test("settings auto-save with toast feedback and open on About", () => {
   assert.match(js, /function openSettings\(\)[\s\S]*switchSettingsTab\("about"\)/, "settings lands on About by default");
 });
 
-test("center column shows an overview when no task is selected", () => {
+test("center column shows the plain idle placeholder when no task is selected, and no longer fetches pack dashboard cards", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /function renderOverview\(/, "overview renderer present");
-  assert.match(js, /else renderOverview\(\)/, "refresh shows the overview when nothing is selected");
+  assert.match(js, /function renderSessionEmpty\(/, "idle renderer present");
+  assert.match(js, /else renderSessionEmpty\(\)/, "refresh shows the idle placeholder when nothing is selected");
+  assert.doesNotMatch(CONSOLE_HTML, /class="overview"/, "old .overview wrapper markup is gone");
+  assert.doesNotMatch(CONSOLE_HTML, /\.ov-grid\s*\{/, "old .ov-grid CSS rule is gone");
+  assert.doesNotMatch(js, /packCards/, "state no longer tracks pack dashboard cards");
+  assert.doesNotMatch(js, /api\("\/packs\/dashboard-cards"\)/, "refresh no longer fetches pack dashboard cards");
+  assert.doesNotMatch(js, /function renderPackDashboardCards\(/, "generic pack card renderer is gone");
+  assert.doesNotMatch(js, /function packMetricLabel/, "pack metric label helper is gone");
 });
 
-test("overview renders server-driven pack dashboard cards", () => {
+// ─── renderSessionEmpty() / closeSession() (2026-07-16, Task 1 of the Overview
+// removal) — additive-only: these replace renderOverview()/showOverview() in
+// Task 2, but for now both old and new functions exist side by side. ─────────
+
+test("renderSessionEmpty() shows the plain idle placeholder when nothing is selected and no panel is open; leaves #session untouched otherwise", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(js, /packCards:\s*\[\]/, "state tracks pack dashboard cards");
-  assert.match(js, /api\("\/packs\/dashboard-cards"\)/, "refresh fetches pack dashboard cards");
-  assert.match(js, /function renderPackDashboardCards\(/, "generic pack card renderer exists");
-  assert.match(js, /renderPackDashboardCards\(\)/, "overview includes pack cards");
-  assert.match(js, /packMetricLabel/, "pack metrics render without pack-specific code");
+  const src = extractFunctionBlock(js, "renderSessionEmpty");
+
+  function run(
+    flags: {
+      selected?: unknown;
+      selectedSkillOrCommand?: unknown;
+      taskFormInSession?: boolean;
+      flashOpen?: boolean;
+      brainOpen?: boolean;
+      rolesOpen?: boolean;
+      toolsOpen?: boolean;
+      goalsOpen?: boolean;
+    },
+    el: { innerHTML: string } | null,
+  ) {
+    const calls: unknown[] = [];
+    const factory = new Function(
+      "state", "_taskFormInSession", "_flashState", "_brainState", "_rolesState", "_toolsState", "_goalsState",
+      "setFlashSessionMode", "__el",
+      `const document = { getElementById: (id) => id === "session" ? __el : null };\n${src}\nreturn renderSessionEmpty;`,
+    ) as (...args: unknown[]) => () => void;
+    const renderSessionEmptyFn = factory(
+      { selected: flags.selected ?? null, selectedSkillOrCommand: flags.selectedSkillOrCommand ?? null },
+      !!flags.taskFormInSession,
+      { panelOpen: !!flags.flashOpen },
+      { panelOpen: !!flags.brainOpen },
+      { panelOpen: !!flags.rolesOpen },
+      { panelOpen: !!flags.toolsOpen },
+      { panelOpen: !!flags.goalsOpen },
+      (v: boolean) => calls.push(v),
+      el,
+    );
+    renderSessionEmptyFn();
+    return calls;
+  }
+
+  const el = { innerHTML: "stale" };
+  const calls = run({}, el);
+  assert.equal(
+    el.innerHTML,
+    '<div class="session-empty">Select a task to inspect its session.</div>',
+    "renders the same placeholder markup the pre-hydration shell ships (console.ts:1904)",
+  );
+  assert.deepEqual(calls, [false], "calls setFlashSessionMode(false) before rendering, same guard as renderOverview");
+
+  const guardCases: Array<[string, Record<string, unknown>]> = [
+    ["state.selected", { selected: { id: 1 } }],
+    ["state.selectedSkillOrCommand", { selectedSkillOrCommand: "local:foo" }],
+    ["_taskFormInSession", { taskFormInSession: true }],
+    ["_flashState.panelOpen", { flashOpen: true }],
+    ["_brainState.panelOpen", { brainOpen: true }],
+    ["_rolesState.panelOpen", { rolesOpen: true }],
+    ["_toolsState.panelOpen", { toolsOpen: true }],
+    ["_goalsState.panelOpen", { goalsOpen: true }],
+  ];
+  for (const [label, flags] of guardCases) {
+    const guardEl = { innerHTML: "untouched" };
+    const guardCalls = run(flags, guardEl);
+    assert.equal(guardEl.innerHTML, "untouched", `${label} truthy must leave #session untouched`);
+    assert.deepEqual(guardCalls, [], `${label} truthy must return before calling setFlashSessionMode`);
+  }
+});
+
+test("closeSession() resets selection/panel state, clears skill-catalog and reply-context selections, and drives the idle re-render call graph", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const src = extractFunctionBlock(js, "closeSession");
+
+  function run(opts: { taskFormInSession?: boolean }) {
+    const calls: string[] = [];
+    const state = { selected: { id: 42 }, selectedSkillOrCommand: "local:foo" };
+    const flashState = { panelOpen: true };
+    const brainState = { panelOpen: false };
+    const rolesState = { panelOpen: false };
+    const toolsState = { panelOpen: false };
+    const goalsState = { panelOpen: false };
+    const factory = new Function(
+      "state", "_taskFormInSession", "_flashState", "_brainState", "_rolesState", "_toolsState", "_goalsState",
+      "_skSel", "_ctxTask", "_closeNewTaskPanel", "setStoredView", "setFlashSessionMode",
+      "renderBoard", "renderSkillList", "renderSessionEmpty", "syncNav",
+      `${src}\nreturn { closeSession, getSkSel: () => _skSel, getCtxTask: () => _ctxTask };`,
+    ) as (...args: unknown[]) => { closeSession: () => void; getSkSel: () => string; getCtxTask: () => unknown };
+    const sandbox = factory(
+      state, !!opts.taskFormInSession, flashState, brainState, rolesState, toolsState, goalsState,
+      "sk:preset", 99,
+      () => calls.push("_closeNewTaskPanel"),
+      (v: string) => calls.push("setStoredView:" + v),
+      (v: boolean) => calls.push("setFlashSessionMode:" + v),
+      () => calls.push("renderBoard"),
+      () => calls.push("renderSkillList"),
+      () => calls.push("renderSessionEmpty"),
+      () => calls.push("syncNav"),
+    );
+    sandbox.closeSession();
+    return {
+      state, flashState, brainState, rolesState, toolsState, goalsState, calls,
+      skSel: sandbox.getSkSel(), ctxTask: sandbox.getCtxTask(),
+    };
+  }
+
+  const r1 = run({ taskFormInSession: false });
+  assert.equal(r1.state.selected, null, "clears selected task");
+  assert.equal(r1.state.selectedSkillOrCommand, null, "clears selected skill/command");
+  assert.equal(r1.skSel, "", "_skSel reset to ''");
+  assert.equal(r1.ctxTask, null, "_ctxTask reset to null");
+  assert.equal(r1.flashState.panelOpen, false, "flash panel closed");
+  assert.equal(r1.brainState.panelOpen, false, "memory panel closed");
+  assert.equal(r1.rolesState.panelOpen, false, "roles panel closed");
+  assert.equal(r1.toolsState.panelOpen, false, "tools panel closed");
+  assert.equal(r1.goalsState.panelOpen, false, "goals panel closed");
+  assert.deepEqual(
+    r1.calls,
+    ["setStoredView:", "setFlashSessionMode:false", "renderBoard", "renderSkillList", "renderSessionEmpty", "syncNav"],
+    "drives the idle re-render call graph (setStoredView(''), then board/skill-list/session/nav re-renders)",
+  );
+
+  const r2 = run({ taskFormInSession: true });
+  assert.deepEqual(
+    r2.calls,
+    ["_closeNewTaskPanel", "setStoredView:", "setFlashSessionMode:false", "renderBoard", "renderSkillList", "renderSessionEmpty", "syncNav"],
+    "closes an open New Task form first when one is in session",
+  );
 });
 
 test("task detail does not render an execution provenance panel", () => {
@@ -1664,41 +1788,37 @@ test("showFlashPanel renders Flash in the center column", () => {
   assert.match(body, /updateFlashNav\(\)/, "updates Flash nav state");
 });
 
-test("board column has an Overview nav above + New task", () => {
-  assert.match(CONSOLE_HTML, /id="overviewNav"/, "Overview nav control present");
-  assert.match(CONSOLE_HTML, /class="ov-nav"[^>]*id="overviewNav"|id="overviewNav"[^>]*class="ov-nav"/, "uses the compact ov-nav style");
-  assert.ok(
-    CONSOLE_HTML.indexOf('id="overviewNav"') < CONSOLE_HTML.indexOf("＋ New task"),
-    "Overview sits above the + New task button",
-  );
-  assert.match(CONSOLE_HTML, /id="overviewNav"[^>]*onclick="showOverview\(\)"/, "clicking it returns to overview");
+test("board column's Overview nav is gone; + New task is the first button", () => {
+  assert.doesNotMatch(CONSOLE_HTML, /id="overviewNav"/, "Overview nav control is removed");
+  const boardStart = CONSOLE_HTML.indexOf('<section class="col board">');
+  assert.ok(boardStart >= 0, "board column present");
+  const firstButtonIdx = CONSOLE_HTML.indexOf("<button", boardStart);
+  const firstButtonTag = CONSOLE_HTML.slice(firstButtonIdx, CONSOLE_HTML.indexOf(">", firstButtonIdx) + 1);
+  assert.match(firstButtonTag, /onclick="showNewTaskPanel\(\)"/, "+ New task is the first button in the board column");
 });
 
-test("showOverview clears the selected task and renders the overview", () => {
-  const js = extractScript(CONSOLE_HTML);
-  const body = js.match(/function showOverview\(\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
-  assert.ok(body.length > 20, "showOverview defined");
-  assert.match(body, /state\.selected = null/, "clears the selected task");
-  assert.match(body, /renderOverview\(\)/, "renders the overview state");
-  // Active-state sync lives in renderBoard via updateOverviewNav.
-  assert.match(js, /function updateOverviewNav\(/, "active-state helper present");
-});
-
-test("task detail renders a Back to overview action", () => {
+test("task detail renders a Back action wired to closeSession", () => {
   const js = extractScript(CONSOLE_HTML);
   const selectTask = js.match(/async function selectTask\(id\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
   assert.ok(selectTask.length > 100, "selectTask body extracted");
-  assert.match(selectTask, /ov-back/, "detail header has a back-to-overview control");
-  assert.match(selectTask, /showOverview\(\)/, "the back control calls showOverview");
+  assert.match(selectTask, /ov-back/, "detail header has a back control");
+  assert.match(selectTask, /closeSession\(\)/, "the back control calls closeSession");
+  assert.doesNotMatch(selectTask, /showOverview\(\)/, "no remaining call to the deleted showOverview");
+  assert.doesNotMatch(selectTask, /← Overview/, "back-link text no longer says Overview");
+  assert.match(selectTask, /← Back/, "back-link text says Back");
 });
 
-test("Escape returns to Overview only outside editable fields", () => {
+test("Escape closes the open task/panel (via closeSession) only outside editable fields", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /function isEditableTarget\(/, "editable-focus guard present");
   assert.match(js, /isContentEditable/, "guards contenteditable focus");
   assert.match(js, /e\.key !== "Escape"/, "only acts on the Escape key");
   assert.match(js, /\.overlay\.open/, "does not steal Escape from open modals");
   assert.match(js, /addEventListener\("keydown"/, "a keydown listener is registered");
+  const handler = js.match(/addEventListener\("keydown",[\s\S]*?\}\);/)?.[0] ?? "";
+  assert.ok(handler.length > 20, "keydown handler body extracted");
+  assert.match(handler, /closeSession\(\);/, "Escape calls closeSession(), not the deleted showOverview()");
+  assert.doesNotMatch(handler, /showOverview\(\)/, "no remaining call to the deleted showOverview");
 });
 
 test("new task and task selection remain intact", () => {
@@ -2755,15 +2875,14 @@ test("primary left nav uses a single active color convention", () => {
   assert.match(CONSOLE_HTML, /\.addbtn\.active[^}]*color:\s*var\(--accent\)/, "New task uses accent only when active");
   // Nav highlight funnels through a single syncNav() so exactly one item is lit.
   const sync = fnBody(js, "syncNav");
-  assert.match(js, /overviewActive = .* !_taskFormInSession/, "Overview is not active while New task is open");
   assert.match(sync, /newTaskNav:\s*_taskFormInSession/, "New task active state follows the center form");
   assert.match(sync, /flashNav:\s*_flashState\.panelOpen/, "Flash active state follows the center panel");
   // Regression guard for the double-highlight bug: Roles must be in the single
-  // sync (it was omitted before), and showOverview must call syncNav so a stale
-  // panel nav can't stay lit after returning to Overview.
+  // sync (it was omitted before), and closeSession must call syncNav so a stale
+  // panel nav can't stay lit after closing back to idle.
   assert.match(sync, /rolesNav:\s*_rolesState\.panelOpen/, "Roles is included in the single nav sync");
-  assert.match(fnBody(js, "showOverview"), /syncNav\(\)/, "showOverview re-syncs the nav (no stale highlight)");
-  assert.match(fnBody(js, "showOverview"), /if \(_taskFormInSession\) _closeNewTaskPanel\(\)/, "showOverview closes an open New Task form so its nav can't stay lit");
+  assert.match(fnBody(js, "closeSession"), /syncNav\(\)/, "closeSession re-syncs the nav (no stale highlight)");
+  assert.match(fnBody(js, "closeSession"), /if \(_taskFormInSession\) _closeNewTaskPanel\(\)/, "closeSession closes an open New Task form so its nav can't stay lit");
 });
 
 test("runSelectedCommand sends both project and projectPath from the cmd multi-picker state", () => {
@@ -2903,10 +3022,9 @@ test("Tools panel search box sits in its own left-aligned row below the heading,
   const js = extractScript(CONSOLE_HTML);
   const panel = fnBody(js, "renderToolsPanel");
 
-  // Lowercase "overview" — matches the actual button text
-  // (title="Back to overview (Esc)"); the visible "Overview" that's captured too
-  // is capitalized only in the link text after it, not before "(Esc)".
-  const headCloseIdx = panel.indexOf('overview (Esc)">← Overview</button></div>');
+  // Matches the actual button text (title="Back (Esc)"); anchors on the
+  // panel head's back-control button immediately before it closes.
+  const headCloseIdx = panel.indexOf('Back (Esc)">← Back</button></div>');
   const toolbarIdx = panel.indexOf('<div class="sk-toolbar"');
   // lastIndexOf, not indexOf: the error-state branch earlier in this same
   // function renders its own unrelated, untouched `<div class="tools-pane">`
@@ -3033,13 +3151,13 @@ test("getStoredView / setStoredView round-trip through localStorage, with a vali
   const { localStorage: ls, backing } = makeStore();
   const { getStoredView, setStoredView } = factory(ls);
 
-  assert.equal(getStoredView(), "overview", "no stored value yet -> defaults to overview");
+  assert.equal(getStoredView(), "", "no stored value yet -> defaults to the idle no-op view");
   setStoredView("roles");
   assert.equal(backing["hm_last_view"], "roles");
   assert.equal(getStoredView(), "roles");
 
   backing["hm_last_view"] = "not-a-real-view";
-  assert.equal(getStoredView(), "overview", "garbage stored value falls back to overview");
+  assert.equal(getStoredView(), "", "garbage stored value falls back to the idle no-op view");
 });
 
 test("laneGlanceStatus maps lane running/healthy/runtimeMode to the shared color/label pair (single source reused by renderSettingsLanes and renderAgents)", () => {
@@ -3286,7 +3404,6 @@ test("renderAgents renders lane rows (dot color + Setup-now affordance) and MCP 
 test("every view-switching function records itself as the last-active view", () => {
   const js = extractScript(CONSOLE_HTML);
   const cases: [string, string][] = [
-    ["showOverview", "overview"],
     ["showFlashPanel", "flash"],
     ["showBrain", "brain"],
     ["showRoles", "roles"],
@@ -3334,8 +3451,8 @@ test("restoreLastView dispatches to the show function matching the stored view",
   assert.deepEqual(run("roles"), ["roles"]);
   assert.deepEqual(run("tools"), ["tools"]);
   assert.deepEqual(run("goals"), ["goals"]);
-  assert.deepEqual(run("overview"), [], "overview is already the default render — no show* call needed");
-  assert.deepEqual(run("garbage-value"), [], "unknown stored values fall back to overview (no-op)");
+  assert.deepEqual(run(""), [], "'' is the default idle render — no show* call needed");
+  assert.deepEqual(run("garbage-value"), [], "unknown stored values (including a legacy 'overview' value from before this change) fall back to the idle no-op");
 });
 
 test("boot sequence restores the last-active view after refresh()", () => {
@@ -3387,8 +3504,8 @@ test("saveScrollPosition / restoreScrollPosition read and write scrollTop for kn
   saveScrollPosition("flash");
   assert.equal(env.backing["hm_scroll_flash"], "240");
 
-  saveScrollPosition("overview"); // not in SCROLL_TARGETS — no-op, must not throw
-  assert.equal(env.backing["hm_scroll_overview"], undefined);
+  saveScrollPosition(""); // not in SCROLL_TARGETS — no-op, must not throw
+  assert.equal(env.backing["hm_scroll_"], undefined);
 
   env.el.scrollTop = 0;
   restoreScrollPosition("flash");
@@ -3421,7 +3538,7 @@ test("restoreLastView marks a pending scroll restore only for scroll-tracked vie
   assert.equal(run("goals"), "goals");
   assert.equal(run("brain"), null, "brain has no scroll target — must not be marked pending");
   assert.equal(run("roles"), null, "roles has no scroll target — must not be marked pending");
-  assert.equal(run("overview"), null);
+  assert.equal(run(""), null);
 });
 
 test("Chat/Tools/Goals consume the pending scroll restore exactly once real content is rendered", () => {

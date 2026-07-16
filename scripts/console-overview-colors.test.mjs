@@ -22,11 +22,6 @@ test("overview uses --ok color for review lane number", () => {
   assert.match(console_ts, /laneColor.*review.*var\(--ok\)/s);
 });
 
-test("card() passes numColor to ov-num element", () => {
-  // The card function must render inline color for non-empty numColor
-  assert.match(console_ts, /ov-num.*numColor|numColor.*ov-num/s);
-});
-
 test("wallpaper translucency uses --mat-wp-blur CSS variable", () => {
   assert.ok(
     console_ts.includes("blur(var(--mat-wp-blur)"),
