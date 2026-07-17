@@ -25,7 +25,7 @@ final class ReadinessViewController: NSViewController {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
-        let documentView = NSView()
+        let documentView = FlippedView()
         documentView.translatesAutoresizingMaskIntoConstraints = false
         documentView.addSubview(stack)
         scrollView.documentView = documentView
@@ -182,46 +182,16 @@ final class ReadinessViewController: NSViewController {
     // Native Keychain read + clipboard handoff — the plaintext credential value
     // never leaves this process; only the site id crosses to the daemon, and only
     // for an audit record (see BrowserLaneDaemonClient.recordCredentialUse).
+    /// Delegates to the shared sign-in path — the same one the sidebar's context
+    /// menu uses. The dashboard row is display data; the sign-in needs the local
+    /// site record (allowed domains, login steps), so look that up by id.
     @objc private func signInWithSavedCredential(_ sender: NSButton) {
         let id = siteId(sender)
-        guard let site = currentSites.first(where: { $0.id == id }) else { return }
-        do {
-            let (username, secretValue) = try BrowserLaneKeychain.shared.readCredential(siteId: id)
-            if let loginUrl = site.loginUrl, let url = URL(string: loginUrl), url.scheme?.hasPrefix("http") == true {
-                BrowserLaneNavigator.shared.openInBrowser(url)
-            }
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(secretValue, forType: .string)
-            scheduleClipboardClear(expected: secretValue)
-            daemon.recordCredentialUse(siteId: id) { _ in }
-
-            let alert = NSAlert()
-            alert.messageText = "Ready to sign in to \(site.displayName)"
-            alert.informativeText = "Username: \(username)\nThe saved sign-in was copied to the clipboard (clears in 45s).\n\nPaste it into the sign-in form, finish any 2FA if asked, then click Run Readiness to confirm."
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = "Can't sign in to \(site.displayName) automatically"
-            alert.informativeText = error.localizedDescription
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
-        }
-    }
-
-    private func scheduleClipboardClear(expected: String) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 45) {
-            let pasteboard = NSPasteboard.general
-            if pasteboard.string(forType: .string) == expected {
-                pasteboard.clearContents()
-            }
-        }
+        guard let site = BrowserLaneSiteStore.shared.listSites().first(where: { $0.id == id }) else { return }
+        BrowserLaneSignIn.start(site: site)
     }
 
     // MARK: - Presentation helpers
-
     private func dot(for color: String) -> String {
         switch color {
         case "green":  return "🟢"

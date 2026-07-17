@@ -9,6 +9,9 @@ struct BrowserLaneDashboardSite {
     let providerAccount: String?
     let loginUrl: String?
     let credentialRef: String?
+    /// nil when an older daemon omits it — the caller then falls back to its own
+    /// copy rather than silently reporting read-write.
+    let accessMode: String?
     let color: String
     let statusLabel: String
     let summary: String
@@ -45,6 +48,7 @@ final class BrowserLaneDaemonClient {
                 "credentialRef": site.credentialRef,
                 "authStrategy": site.authStrategy,
                 "providerAccount": site.providerAccount ?? "",
+                "accessMode": site.access.rawValue,
                 "notes": site.notes,
             ],
         ])
@@ -101,16 +105,6 @@ final class BrowserLaneDaemonClient {
         post(path: "/browser-lane/sites/\(siteId)/credential-used", body: [:], completion: completion)
     }
 
-    /// GET /browser-lane/traces — list recent trace runs as daemon-redacted JSON.
-    func fetchTraces(completion: @escaping (Result<String, Error>) -> Void) {
-        getText(path: "/browser-lane/traces", completion: completion)
-    }
-
-    /// GET /browser-lane/traces/latest — latest trace run detail as daemon-redacted JSON.
-    func fetchLatestTrace(completion: @escaping (Result<String, Error>) -> Void) {
-        getText(path: "/browser-lane/traces/latest", completion: completion)
-    }
-
     private func post(path: String, body: [String: Any], completion: @escaping (Result<String, Error>) -> Void) {
         guard let token = readAuthToken() else {
             completion(.failure(NSError(domain: "BrowserLane", code: 401, userInfo: [NSLocalizedDescriptionKey: "Daemon auth token not found."])))
@@ -152,6 +146,56 @@ final class BrowserLaneDaemonClient {
         }.resume()
     }
 
+    /// GET /browser-lane/history — `browser:*` audit entries for the Command Log,
+    /// newest first. Filtering is done daemon-side so the app never holds more
+    /// history than it shows.
+    /// Actor/status filtering is done in the panel (one fetch, instant chips), so
+    /// only the site scope and limit are pushed down to the daemon.
+    func fetchHistory(
+        target: String? = nil,
+        limit: Int = 200,
+        completion: @escaping (Result<[BrowserLaneHistoryEntry], Error>) -> Void
+    ) {
+        guard let token = readAuthToken() else {
+            completion(.failure(NSError(domain: "BrowserLane", code: 401, userInfo: [NSLocalizedDescriptionKey: "Daemon auth token not found at ~/.hivematrix/auth-token."])))
+            return
+        }
+        var items = [URLQueryItem(name: "limit", value: String(limit))]
+        if let target, !target.isEmpty { items.append(URLQueryItem(name: "target", value: target)) }
+        guard let endpoint = url(path: "/browser-lane/history", query: items) else {
+            completion(.failure(NSError(domain: "BrowserLane", code: 400, userInfo: [NSLocalizedDescriptionKey: "Could not build history URL."])))
+            return
+        }
+        var request = URLRequest(url: endpoint)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error { completion(.failure(error)); return }
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(code), let data else {
+                let detail = data.flatMap { String(data: $0, encoding: .utf8) } ?? "HTTP \(code)"
+                completion(.failure(NSError(domain: "BrowserLane", code: code, userInfo: [NSLocalizedDescriptionKey: detail])))
+                return
+            }
+            do { completion(.success(try Self.parseHistory(data))) } catch { completion(.failure(error)) }
+        }.resume()
+    }
+
+    private static func parseHistory(_ data: Data) throws -> [BrowserLaneHistoryEntry] {
+        let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let entries = (root?["entries"] as? [[String: Any]]) ?? []
+        return entries.map { entry in
+            BrowserLaneHistoryEntry(
+                ts: entry["ts"] as? String ?? "",
+                event: entry["event"] as? String ?? "",
+                actor: entry["actor"] as? String ?? "unknown",
+                actorKind: entry["actorKind"] as? String ?? "",
+                target: entry["target"] as? String ?? "",
+                status: entry["status"] as? String ?? "",
+                summary: entry["summary"] as? String ?? ""
+            )
+        }
+    }
+
     private static func parseDashboard(_ data: Data) throws -> [BrowserLaneDashboardSite] {
         let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let sites = (root?["sites"] as? [[String: Any]]) ?? []
@@ -164,6 +208,7 @@ final class BrowserLaneDaemonClient {
                 providerAccount: entry["providerAccount"] as? String,
                 loginUrl: entry["loginUrl"] as? String,
                 credentialRef: entry["credentialRef"] as? String,
+                accessMode: entry["accessMode"] as? String,
                 color: readiness["color"] as? String ?? "gray",
                 statusLabel: readiness["label"] as? String ?? "Unknown",
                 summary: readiness["summary"] as? String ?? "",
@@ -183,6 +228,14 @@ final class BrowserLaneDaemonClient {
 
     private func url(path: String) -> URL {
         baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+    }
+
+    /// Query-string variant. `appendingPathComponent` would percent-encode a "?..."
+    /// suffix into the path, so anything with query items must build via URLComponents.
+    private func url(path: String, query: [URLQueryItem]) -> URL? {
+        var components = URLComponents(url: url(path: path), resolvingAgainstBaseURL: false)
+        components?.queryItems = query.isEmpty ? nil : query
+        return components?.url
     }
 
     private func readAuthToken() -> String? {

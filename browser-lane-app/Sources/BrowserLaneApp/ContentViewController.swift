@@ -3,6 +3,11 @@ import AppKit
 final class ContentViewController: NSViewController {
     private var currentChild: NSViewController?
 
+    /// Which screen is showing. The toolbar reads this to light the matching icon
+    /// and to decide whether a second click should return to the browser.
+    private(set) var currentScreen: Screen = .browser
+    var onScreenChanged: (() -> Void)?
+
     override func loadView() {
         view = NSView()
         // Any screen can hand a URL to the persistent in-app browser (SSO handoff).
@@ -29,16 +34,12 @@ final class ContentViewController: NSViewController {
         let vc: NSViewController = switch screen {
         case .browser:
             BrowserViewController()
-        case .sites:
-            SitesViewController()
         case .addSite:
             AddSiteViewController()
         case .readiness:
             ReadinessViewController()
         case .settings:
             SettingsViewController()
-        case .traces:
-            TracesViewController()
         }
         addChild(vc)
         vc.view.translatesAutoresizingMaskIntoConstraints = false
@@ -50,6 +51,8 @@ final class ContentViewController: NSViewController {
             vc.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         currentChild = vc
+        currentScreen = screen
+        onScreenChanged?()
     }
 }
 

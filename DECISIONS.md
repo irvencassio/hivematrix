@@ -1516,3 +1516,65 @@ username/password pair); wiring `AuthBeeSessionRecord` for real
 `expiresAt`-based expiry (still deferred, per the 2026-07-16 Canopy-parity
 design doc's own Approach B rejection — this feature reuses the existing
 staleness/manual-mark signal unchanged).
+
+---
+
+## Q22 — Per-site login recipes (Approach A/V2 of the credential-refresh design) (2026-07-17)
+
+**Context.** Q19/Q20 and the 2026-07-16 credential-refresh design landed a
+*clipboard handoff*: "Sign in with saved credential" reads the Keychain natively,
+opens the login URL, copies the value, and the operator pastes it. That design
+explicitly **considered and rejected** full form-driving ("Approach A — full
+auto-submit"), recording it as *"a possible V2 if a future pass wants it, with its
+own DECISIONS.md entry."* This is that pass, at explicit operator request
+(2026-07-17). Sites like Samsung Knox have a multi-step sign-in (home → `www2` →
+`signin.` subdomain, account-ID page → password page) where a clipboard paste
+still leaves most of the work manual.
+
+**Decision — a declarative recipe, not a script.** Each site may carry an optional
+`loginSteps` recipe: an ordered list over a fixed five-verb vocabulary
+(`click`, `clickText`, `waitFor`, `fill`, `submit`). It is **not** a script.
+Arbitrary JS in a context that holds the operator's sign-in could read the value
+and post it anywhere; a fixed vocabulary structurally cannot express exfiltration,
+and stays reviewable by eye. `clickText` exists because real sign-in pages (React
+SPAs) routinely give buttons no id/name/type — Knox's "Next" is identifiable only
+by its label, and CSS cannot match on text.
+
+**What this reverses, and what it does not.** It reverses "clipboard handoff, not
+auto-submit" for sites that have a recipe (operator's call — they chose fill *and*
+submit). It does **not** touch the human-click rule: a recipe runs only from the
+Sign-in button's action. Nothing schedules it, no lane tool or daemon endpoint
+reaches it, and Q20's agent-side `credential_fill` refusal is untouched.
+Sites without a recipe keep the clipboard handoff unchanged.
+
+**Invariants (each pinned by a test in `scripts/browser-lane-app.test.mjs`).**
+1. **Recipes hold placeholders, never secrets.** `$username`/`$password` are
+   substituted natively at run time, Keychain → Swift → WebView. The value never
+   enters the recipe, the daemon, a log, a Task, or a model's context — the
+   constraint the 2026-07-16 design set for any V2.
+2. **`loginSteps` is local-only**, deliberately excluded from the daemon sync
+   payload. The agent side has nothing to drive a login *with* — structural, not
+   policy.
+3. **Origin-checked before every credential-carrying step**, re-checked per step
+   (a login flow redirects between steps). Match is exact-or-subdomain
+   (`host == d || host.hasSuffix("." + d)`), never `contains` — "evil-knox.com"
+   contains "knox.com".
+4. **Values are JSON-encoded into JS source**, never concatenated raw.
+5. **Steps run in an isolated content world**, so page scripts cannot shim them.
+
+**Complexity accounting (Q14 budget).** New product concepts: 0 — a recipe is an
+adapter detail of the existing Browser Lane site, not a kernel concept. New
+persistent stores: 0 — one optional field on the app's existing local
+`sites.json`; **no schema change, no migration, no daemon column**. New modules: 2
+(`BrowserLaneLoginRecipe.swift`, `BrowserLaneLoginRunner.swift`), both native-app
+only. Reused: `BrowserLaneKeychain`, the existing Sign-in button, the existing
+`browser:credential_fill` audit event.
+
+**Deferred.** Record mode (capture selectors by clicking through a login once) —
+recipes are authored from the live DOM and hand-editable under Advanced for now.
+
+**Code:** `browser-lane-app/Sources/BrowserLaneApp/BrowserLaneLoginRecipe.swift`,
+`BrowserLaneLoginRunner.swift`, `ReadinessViewController.swift`,
+`AddSiteViewController.swift`, `BrowserViewController.swift`, `BrowserLaneModels.swift`.
+**Provers:** `scripts/browser-lane-app.test.mjs` — "login recipes cannot carry or
+leak a stored sign-in", "login recipes run only from an explicit operator click".

@@ -213,6 +213,7 @@ final class BrowserViewController: NSViewController {
 
         // Become the read driver so the loopback /answer server can drive this view.
         BrowserReadService.shared.driver = self
+        BrowserLaneLoginService.shared.driver = self
     }
 
     private func showPopup(_ popup: WKWebView, initialURL: URL?) {
@@ -386,6 +387,24 @@ extension BrowserViewController: WKUIDelegate {
 }
 
 // MARK: - Agent reads (POST /answer)
+
+extension BrowserViewController: BrowserLaneLoginDriver {
+    func currentHost() -> String? { webView.url?.host }
+
+    /// Runs in an isolated content world so the page's own scripts cannot observe
+    /// or shim what a login step does (a page can redefine
+    /// HTMLInputElement.prototype.value in its own world).
+    func runScript(_ js: String, completion: @escaping (Result<String, Error>) -> Void) {
+        webView.evaluateJavaScript(js, in: nil, in: .defaultClient) { result in
+            switch result {
+            case .success(let value):
+                completion(.success((value as? String) ?? "missing"))
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
+    }
+}
 
 extension BrowserViewController: BrowserReadDriver {
     /// Serialized so each read owns the visible view for its duration. Called on

@@ -359,8 +359,8 @@ export function createDaemonServer() {
 
       // POST /system/readiness/repair — explicit, allow-listed repair actions.
       // There is intentionally no "repair all"; every mutation is one operator
-      // click and the implementation owns the action allowlist:
-      // seed_coo_rules, seed_heygen_browser_site, refresh_legacy_video_reviews.
+      // click and the implementation owns the action allowlist
+      // (SYSTEM_READINESS_REPAIR_ACTIONS in @/lib/system-readiness).
       if (req.method === "POST" && urlPath === "/system/readiness/repair") {
         const body = await parseBody(req) as Record<string, unknown>;
         try {

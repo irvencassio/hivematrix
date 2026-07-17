@@ -28,6 +28,7 @@ final class AddSiteViewController: NSViewController {
     private let nameField = NSTextField()
     private let websiteField = NSTextField()
     private let strategyPicker = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let accessPicker = NSPopUpButton(frame: .zero, pullsDown: false)
     private let accountEmailField = NSTextField()
     private let usernameField = NSTextField()
     private let passwordField = NSSecureTextField()
@@ -37,9 +38,15 @@ final class AddSiteViewController: NSViewController {
     private let domainsField = NSTextField()
     private let loginOverrideField = NSTextField()
     private let credentialRefField = NSTextField()
+
+    /// Multi-line, monospaced: login steps are one-per-line and selectors are code.
+    private let loginStepsView = NSTextView()
+    private let loginStepsScroll = NSScrollView()
+    private let loginStepsHelp = NSTextField(labelWithString: "")
     private let credentialRefLabel = NSTextField(labelWithString: "Session label")
 
     private let strategyHelp = NSTextField(labelWithString: "")
+    private let accessHelp = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
     private let titleLabel = NSTextField(labelWithString: "New Site")
     private let advancedToggle = NSButton()
@@ -56,6 +63,10 @@ final class AddSiteViewController: NSViewController {
 
     private var selectedStrategy: BrowserLaneAuthStrategy {
         BrowserLaneAuthStrategy.displayOrder[max(0, strategyPicker.indexOfSelectedItem)]
+    }
+
+    private var selectedAccessMode: BrowserLaneAccessMode {
+        BrowserLaneAccessMode.displayOrder[max(0, accessPicker.indexOfSelectedItem)]
     }
 
     override func loadView() {
@@ -84,18 +95,29 @@ final class AddSiteViewController: NSViewController {
         strategyPicker.action = #selector(strategyChanged)
         strategyPicker.translatesAutoresizingMaskIntoConstraints = false
 
+        accessPicker.addItems(withTitles: BrowserLaneAccessMode.displayOrder.map { $0.pickerTitle })
+        accessPicker.target = self
+        accessPicker.action = #selector(accessModeChanged)
+        accessPicker.translatesAutoresizingMaskIntoConstraints = false
+
         strategyHelp.textColor = .secondaryLabelColor
         strategyHelp.font = .systemFont(ofSize: 12)
         strategyHelp.lineBreakMode = .byWordWrapping
         strategyHelp.maximumNumberOfLines = 3
         strategyHelp.preferredMaxLayoutWidth = 520
 
+        accessHelp.textColor = .secondaryLabelColor
+        accessHelp.font = .systemFont(ofSize: 12)
+        accessHelp.lineBreakMode = .byWordWrapping
+        accessHelp.maximumNumberOfLines = 3
+        accessHelp.preferredMaxLayoutWidth = 520
+
         for field in [nameField, websiteField, accountEmailField, usernameField, passwordField, idField, domainsField, loginOverrideField, credentialRefField] {
             field.translatesAutoresizingMaskIntoConstraints = false
             field.widthAnchor.constraint(equalToConstant: 360).isActive = true
         }
-        nameField.placeholderString = "HeyGen Studio"
-        websiteField.placeholderString = "app.heygen.com"
+        nameField.placeholderString = "Site name"
+        websiteField.placeholderString = "example.com"
         accountEmailField.placeholderString = "you@example.com (optional)"
         idField.placeholderString = "auto-generated from the name"
         domainsField.placeholderString = "auto-derived from the website"
@@ -118,6 +140,7 @@ final class AddSiteViewController: NSViewController {
             labeledRow("Website", websiteField),
             labeledRow("Sign-in method", strategyPicker),
             labeledRow("Account email", accountEmailField),
+            labeledRow("Agent access", accessPicker),
             usernameRow,
             passwordRow,
         ])
@@ -130,11 +153,58 @@ final class AddSiteViewController: NSViewController {
         advancedToggle.target = self
         advancedToggle.action = #selector(toggleAdvanced)
 
+        // A bare NSTextView used as a documentView has no usable frame or text
+        // container, so it renders but never takes focus — clicks fall through and
+        // typing lands in whatever field had focus last. It has to be sized and
+        // told to track its container explicitly.
+        let stepsSize = NSSize(width: 360, height: 104)
+        loginStepsView.frame = NSRect(origin: .zero, size: stepsSize)
+        loginStepsView.minSize = NSSize(width: 0, height: stepsSize.height)
+        loginStepsView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        loginStepsView.isVerticallyResizable = true
+        loginStepsView.isHorizontallyResizable = false
+        loginStepsView.autoresizingMask = [.width]
+        loginStepsView.textContainer?.containerSize = NSSize(width: stepsSize.width, height: CGFloat.greatestFiniteMagnitude)
+        loginStepsView.textContainer?.widthTracksTextView = true
+        loginStepsView.isEditable = true
+        loginStepsView.isSelectable = true
+        loginStepsView.isRichText = false
+        loginStepsView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        loginStepsView.isAutomaticQuoteSubstitutionEnabled = false // smart quotes break CSS selectors
+        loginStepsView.isAutomaticDashSubstitutionEnabled = false
+        loginStepsView.isAutomaticSpellingCorrectionEnabled = false
+        loginStepsScroll.documentView = loginStepsView
+        loginStepsScroll.hasVerticalScroller = true
+        loginStepsScroll.borderType = .bezelBorder
+        loginStepsScroll.translatesAutoresizingMaskIntoConstraints = false
+        loginStepsScroll.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        loginStepsScroll.heightAnchor.constraint(equalToConstant: 104).isActive = true
+
+        loginStepsHelp.stringValue = """
+            Optional. One step per line, run when you click “Sign in with saved credential”. \
+            Use $username / $password as placeholders — real values are filled in locally and never stored here.
+              click <css>                 — click the first match
+              clickText <css> <label>     — click the match with this label (waits until it's enabled)
+              waitFor <css> [seconds]     — wait for a match to appear (default 15)
+              wait <seconds>              — pause; use when the next screen reuses the same selector
+              fill <css> $username        — type into a field
+              submit <css>                — submit the field's form (or press Enter)
+            """
+        loginStepsHelp.textColor = .secondaryLabelColor
+        loginStepsHelp.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        loginStepsHelp.lineBreakMode = .byWordWrapping
+        // Unlimited: the verb list wraps, so any line cap silently truncates the
+        // last verbs off the bottom — which is how `submit` went missing.
+        loginStepsHelp.maximumNumberOfLines = 0
+        loginStepsHelp.preferredMaxLayoutWidth = 520
+
         advancedStack = NSStackView(views: [
             labeledRow("Site ID", idField),
             labeledRow("Allowed domains", domainsField),
             labeledRow("Login URL override", loginOverrideField),
             labeledRow(credentialRefLabel, credentialRefField),
+            labeledRow("Login steps", loginStepsScroll),
+            loginStepsHelp,
         ])
         advancedStack.orientation = .vertical
         advancedStack.alignment = .leading
@@ -145,9 +215,7 @@ final class AddSiteViewController: NSViewController {
         saveButton.keyEquivalent = "\r"
         let openButton = NSButton(title: "Open Sign-in", target: self, action: #selector(openAuthFlow))
         openButton.bezelStyle = .rounded
-        let presetButton = NSButton(title: "Use HeyGen preset", target: self, action: #selector(useHeyGenDefaults))
-        presetButton.bezelStyle = .rounded
-        let buttons = NSStackView(views: [saveButton, openButton, presetButton])
+        let buttons = NSStackView(views: [saveButton, openButton])
         buttons.orientation = .horizontal
         buttons.spacing = 10
 
@@ -159,6 +227,7 @@ final class AddSiteViewController: NSViewController {
         outer.addArrangedSubview(header)
         outer.addArrangedSubview(formStack)
         outer.addArrangedSubview(strategyHelp)
+        outer.addArrangedSubview(accessHelp)
         outer.addArrangedSubview(advancedToggle)
         outer.addArrangedSubview(advancedStack)
         outer.addArrangedSubview(buttons)
@@ -178,6 +247,13 @@ final class AddSiteViewController: NSViewController {
         } else {
             startEmpty()
         }
+    }
+
+    /// Start on the first field so the form is typeable (and tabbable) on arrival
+    /// instead of needing a click to enter the key loop at all.
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        view.window?.makeFirstResponder(nameField)
     }
 
     /// One label + field row, kept as an NSStackView so we can hide it by reference.
@@ -265,6 +341,10 @@ final class AddSiteViewController: NSViewController {
         return derived
     }
 
+    @objc private func accessModeChanged() {
+        accessHelp.stringValue = selectedAccessMode.explanation
+    }
+
     @objc private func strategyChanged() {
         let strategy = selectedStrategy
         let usesKeychain = strategy.usesKeychainPassword
@@ -280,7 +360,7 @@ final class AddSiteViewController: NSViewController {
         }
     }
 
-    // MARK: - Presets / edit / empty
+    // MARK: - Edit / empty
 
     private func startEmpty() {
         editingSite = nil
@@ -295,28 +375,12 @@ final class AddSiteViewController: NSViewController {
         domainsField.stringValue = ""
         loginOverrideField.stringValue = ""
         credentialRefField.stringValue = ""
+        loginStepsView.string = ""
         strategyPicker.selectItem(at: 0) // Manual session
+        accessPicker.selectItem(at: 0) // Read-write — the daemon's own default
         strategyChanged()
+        accessModeChanged()
         setStatus("Enter a name and website, then choose how it signs in.", error: false)
-    }
-
-    @objc private func useHeyGenDefaults() {
-        editingSite = nil
-        idManuallyEdited = true
-        titleLabel.stringValue = "New Site"
-        let site = BrowserLaneSite.heyGen
-        nameField.stringValue = site.displayName
-        websiteField.stringValue = site.homeUrl
-        accountEmailField.stringValue = site.providerAccount ?? ""
-        idField.stringValue = site.id
-        domainsField.stringValue = site.allowedDomains.joined(separator: ", ")
-        loginOverrideField.stringValue = site.loginUrl
-        credentialRefField.stringValue = site.credentialRef
-        usernameField.stringValue = ""
-        passwordField.stringValue = ""
-        selectStrategy(site.strategy)
-        strategyChanged()
-        setStatus("HeyGen preset loaded (Google sign-in). Use Open Sign-in to sign in, then Save.", error: false)
     }
 
     private func loadForEdit(_ site: BrowserLaneSite) {
@@ -331,10 +395,13 @@ final class AddSiteViewController: NSViewController {
         // Only surface the login override when it actually differs from the website.
         loginOverrideField.stringValue = (site.loginUrl == site.homeUrl) ? "" : site.loginUrl
         credentialRefField.stringValue = site.credentialRef
+        loginStepsView.string = site.loginSteps ?? ""
         usernameField.stringValue = ""
         passwordField.stringValue = "" // secrets are never read back from Keychain into the form
         selectStrategy(site.strategy)
+        accessPicker.selectItem(at: BrowserLaneAccessMode.displayOrder.firstIndex(of: site.access) ?? 0)
         strategyChanged()
+        accessModeChanged()
         setStatus("Editing “\(site.displayName)”. Leave the password blank to keep the saved sign-in.", error: false)
     }
 
@@ -411,6 +478,20 @@ final class AddSiteViewController: NSViewController {
             throw FieldError(idField, "Site ID may contain lowercase letters, numbers, dot, underscore, colon, or dash.")
         }
 
+        // Adding a second site whose id collides would silently REPLACE the first
+        // (upsert matches on id) and overwrite its Keychain entry, which is keyed
+        // by site id. Ids are auto-slugged from the name, so "Knox prdna" and
+        // "Knox - prdna" both land on "knox-prdna" — easy to hit when one site has
+        // several accounts. Refuse instead of quietly destroying a saved sign-in.
+        if editingSite == nil, let clash = store.listSites().first(where: { $0.id == id }) {
+            advancedShown = true
+            applyAdvancedVisibility()
+            throw FieldError(
+                idField,
+                "“\(clash.displayName)” already uses the Site ID “\(id)”. Saving would replace it and its saved sign-in. Give this site a different name, or set a unique Site ID here."
+            )
+        }
+
         let override = loginOverrideField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let login: String
         if override.isEmpty {
@@ -438,6 +519,20 @@ final class AddSiteViewController: NSViewController {
             }
         }
 
+        // Parse before saving: a recipe that only fails when you click Sign in is
+        // found at the worst possible moment. The parse result is discarded — this
+        // is a validation gate, the stored form stays the editable text.
+        let loginStepsText = loginStepsView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !loginStepsText.isEmpty {
+            do {
+                _ = try BrowserLaneLoginRecipe.parse(loginStepsText)
+            } catch {
+                advancedShown = true
+                applyAdvancedVisibility()
+                throw FieldError(loginStepsView, error.localizedDescription)
+            }
+        }
+
         let providerAccount = accountEmailField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let now = BrowserLaneSite.nowString()
         let existing = editingSite ?? store.listSites().first(where: { $0.id == id })
@@ -450,6 +545,8 @@ final class AddSiteViewController: NSViewController {
             credentialRef: credentialRef,
             authStrategy: strategy.rawValue,
             providerAccount: providerAccount.isEmpty ? nil : providerAccount,
+            accessMode: selectedAccessMode.rawValue,
+            loginSteps: loginStepsText.isEmpty ? nil : loginStepsText,
             notes: "Managed by Browser Lane app.",
             lastSyncStatus: existing?.lastSyncStatus ?? "not synced",
             createdAt: existing?.createdAt ?? now,
@@ -463,14 +560,16 @@ final class AddSiteViewController: NSViewController {
     }
 
     /// Field-specific error: focus the offending field and show a red message.
-    private func failField(_ field: NSControl, _ message: String) {
+    /// Takes NSView, not NSControl, because the login-steps editor is an NSTextView
+    /// (an NSText, not a control) and it needs the same treatment as every other field.
+    private func failField(_ field: NSView, _ message: String) {
         setStatus(message, error: true)
         view.window?.makeFirstResponder(field)
     }
 
     private struct FieldError: Error {
-        let field: NSControl
+        let field: NSView
         let message: String
-        init(_ field: NSControl, _ message: String) { self.field = field; self.message = message }
+        init(_ field: NSView, _ message: String) { self.field = field; self.message = message }
     }
 }

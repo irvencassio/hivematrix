@@ -1150,6 +1150,14 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: LaneTool
     const match = matchBrowserSiteReadiness(payload.allowedDomains);
     const site = match.matched && match.siteId ? getBrowserSite(match.siteId) : null;
     if (site?.accessMode === "readonly") {
+      // A refusal is an event the operator must be able to see. Without this the
+      // gate is silent: the job never runs and nothing explains why. Feeds the
+      // Command Log's Blocked filter.
+      recordAudit({
+        ts: "", event: "browser:blocked", actor: ctx.requestedBy, actorKind: ctx.actorKind,
+        project: ctx.project, target: site.id, status: "blocked",
+        summary: `${payload.jobType} refused — site is read-only`,
+      });
       return `Error: ${site.displayName} is configured read-only — the ${payload.jobType} job type would write to the site, which is refused. Switch its access mode to read-write in Browser Lane settings if this action is intended.`;
     }
   }

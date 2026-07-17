@@ -160,6 +160,10 @@ test("readiness dashboard aggregates latest run, credential ref, and color rollu
   assert.equal(heygen.readiness.traceRunId, "trace-9");
   assert.equal(heygen.credentialRef, "hivematrix.browser.heygen.primary");
   assert.equal(heygen.probeCount, 1);
+  // The dashboard must carry accessMode: it is the value the dispatch gate
+  // actually enforces, and the native app's read-only badge reads it from here
+  // rather than trusting its own local copy (which can diverge on a failed sync).
+  assert.equal(heygen.accessMode, "readwrite");
   // Never leak secret material into the dashboard.
   assert.equal("password" in heygen, false);
   assert.equal("secret" in heygen, false);

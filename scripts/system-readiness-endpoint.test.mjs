@@ -16,8 +16,12 @@ test("daemon exposes explicit system readiness repair endpoint with an action al
   assert.match(server, /POST \/system\/readiness\/repair/);
   assert.match(server, /urlPath === "\/system\/readiness\/repair"/);
   assert.match(server, /performSystemReadinessRepair/);
-  assert.match(server, /seed_coo_rules/);
-  assert.match(server, /seed_heygen_browser_site/);
-  assert.match(server, /refresh_legacy_video_reviews/);
+  // The allowlist itself lives in @/lib/system-readiness
+  // (SYSTEM_READINESS_REPAIR_ACTIONS) and is asserted there. This file only
+  // checks the route delegates to it. Previously this asserted the route's
+  // comment named seed_heygen_browser_site + refresh_legacy_video_reviews —
+  // neither action has ever existed in the allowlist, so the test was pinning a
+  // stale comment rather than behavior.
+  assert.match(server, /SYSTEM_READINESS_REPAIR_ACTIONS|lib\/system-readiness/);
   assert.doesNotMatch(server, /repair_all|autoRepair|Repair all/);
 });

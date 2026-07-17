@@ -32,6 +32,7 @@ final class BrowserLaneSiteStore {
         sites.sort { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
         let data = try encoder.encode(sites)
         try data.write(to: fileURL, options: [.atomic])
+        announceChange()
     }
 
     func delete(id: String) throws {
@@ -39,5 +40,14 @@ final class BrowserLaneSiteStore {
         sites.removeAll { $0.id == id }
         let data = try encoder.encode(sites)
         try data.write(to: fileURL, options: [.atomic])
+        announceChange()
+    }
+
+    /// Only fires after the write succeeds — observers never re-read a list that
+    /// failed to persist.
+    private func announceChange() {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .browserLaneSitesChanged, object: nil)
+        }
     }
 }

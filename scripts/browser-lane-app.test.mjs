@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = process.cwd();
@@ -133,7 +133,9 @@ test("Browser Lane has a Settings screen for appearance, web defaults, daemon, s
 
   assert.ok(existsSync(settingsPath), "SettingsViewController should exist");
   assert.ok(existsSync(prefsPath), "BrowserLaneSettings should exist");
-  assert.match(screens, /case browser, sites, addSite, readiness, traces, settings/);
+  // Sites live in the sidebar and the log lives in the right panel, so neither is
+  // a content screen; what remains here is what the toolbar and "+" open.
+  assert.match(screens, /case browser, addSite, readiness, settings/);
   assert.match(screens, /Settings/);
   assert.match(content, /SettingsViewController/);
 
@@ -191,7 +193,6 @@ test("Browser Lane Add Site is wired to metadata, daemon sync, and Keychain-only
   assert.doesNotMatch(models, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
 
   assert.match(content, /AddSiteViewController/);
-  assert.match(content, /SitesViewController/);
   assert.doesNotMatch(screens, /not wired yet/i);
 });
 
@@ -229,14 +230,11 @@ test("Browser Lane Add Site has an auth strategy picker that gates password capt
 test("Browser Lane has a Readiness dashboard with per-site status and actions", () => {
   const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
   const readinessPath = join(sourceDir, "ReadinessViewController.swift");
-  const tracesPath = join(sourceDir, "TracesViewController.swift");
   const content = readFileSync(join(sourceDir, "ContentViewController.swift"), "utf8");
   const daemonClient = readFileSync(join(sourceDir, "BrowserLaneDaemonClient.swift"), "utf8");
 
   assert.ok(existsSync(readinessPath), "ReadinessViewController should exist");
-  assert.ok(existsSync(tracesPath), "TracesViewController should exist");
   const readiness = readFileSync(readinessPath, "utf8");
-  const traces = readFileSync(tracesPath, "utf8");
 
   // Status colors green/orange/yellow/red are represented.
   assert.match(readiness, /green/);
@@ -256,15 +254,7 @@ test("Browser Lane has a Readiness dashboard with per-site status and actions", 
   // Wired into navigation and backed by the daemon dashboard endpoint.
   assert.match(content, /ReadinessViewController/);
   assert.match(daemonClient, /browser-lane\/dashboard/);
-  assert.match(content, /TracesViewController/);
-  assert.match(daemonClient, /browser-lane\/traces/);
-  assert.match(daemonClient, /browser-lane\/traces\/latest/);
-  assert.match(traces, /Latest trace/);
-  assert.match(traces, /Refresh traces/);
-  assert.match(traces, /fetchLatestTrace/);
-  assert.match(traces, /fetchTraces/);
   assert.doesNotMatch(readiness, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
-  assert.doesNotMatch(traces, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
 });
 
 test("Browser Lane WebKit view persists the session and supports OAuth popups", () => {
@@ -307,15 +297,294 @@ test("Browser Lane Google auth pages expose a visible recovery path instead of w
   assert.match(browser, /customUserAgent/);
 });
 
-test("Browser Lane Sites view shows the friendly sign-in label and account, no jargon", () => {
+// The sites list is the sidebar now (it replaced SitesViewController), so the
+// no-jargon / no-secrets invariants follow it there.
+test("Browser Lane sidebar shows the account, no jargon, no secrets", () => {
   const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
-  const sites = readFileSync(join(sourceDir, "SitesViewController.swift"), "utf8");
-  // Friendly presentation label (pickerTitle), not the raw enum/authStrategy string.
-  assert.match(sites, /pickerTitle/);
-  assert.match(sites, /providerAccount/);
-  assert.doesNotMatch(sites, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
+  const sidebar = readFileSync(join(sourceDir, "SidebarViewController.swift"), "utf8");
+  assert.match(sidebar, /providerAccount/);
+  assert.doesNotMatch(sidebar, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
   // No leftover 1980s-admin "metadata" wording.
-  assert.doesNotMatch(sites, /metadata/i);
+  assert.doesNotMatch(sidebar, /metadata/i);
+});
+
+// The sidebar badge is display-only; the daemon enforces accessMode at dispatch.
+// Without a control in the form the badge would show a state the operator can
+// see but never change, and the picker would be decorative if buildSite() dropped it.
+// Site ids are auto-slugged from the name, so "Knox prdna" and "Knox - prdna"
+// both become "knox-prdna". upsert matches on id and the Keychain is keyed by id,
+// so a second site with a colliding id would silently replace the first AND
+// overwrite its saved sign-in. Real risk: one service with several accounts.
+test("Browser Lane refuses a new site whose id would replace an existing one", () => {
+  const addSite = readFileSync(
+    join(root, "browser-lane-app/Sources/BrowserLaneApp/AddSiteViewController.swift"),
+    "utf8",
+  );
+  // Only on the add path — editing a site must still save over itself.
+  assert.match(addSite, /if editingSite == nil, let clash = store\.listSites\(\)\.first\(where: \{ \$0\.id == id \}\)/);
+  assert.match(addSite, /already uses the Site ID/);
+});
+
+// A single-page sign-in can ask for the same field across two screens (Knox asks
+// for the account id twice). Both screens reuse input[type="text"], so waitFor
+// matches the screen just left and there is nothing new to wait for.
+test("Browser Lane login recipes can pause between screens", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const recipe = readFileSync(join(sourceDir, "BrowserLaneLoginRecipe.swift"), "utf8");
+  const runner = readFileSync(join(sourceDir, "BrowserLaneLoginRunner.swift"), "utf8");
+  const addSite = readFileSync(join(sourceDir, "AddSiteViewController.swift"), "utf8");
+
+  assert.match(recipe, /case wait\(seconds: TimeInterval\)/);
+  assert.match(recipe, /case "wait":/);
+  assert.match(runner, /case \.wait\(let seconds\)/);
+
+  // The editor's help must list every verb, or the field is unusable by hand.
+  for (const verb of ["click <css>", "clickText <css> <label>", "waitFor <css>", "wait <seconds>", "fill <css>", "submit <css>"]) {
+    assert.ok(addSite.includes(verb), `login-steps help documents ${verb}`);
+  }
+});
+
+test("Browser Lane Add Site can set agent access mode, and saves it", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const addSite = readFileSync(join(sourceDir, "AddSiteViewController.swift"), "utf8");
+  const client = readFileSync(join(sourceDir, "BrowserLaneDaemonClient.swift"), "utf8");
+
+  assert.match(addSite, /accessPicker/);
+  assert.match(addSite, /BrowserLaneAccessMode/);
+  assert.match(addSite, /"Agent access"/);
+  // Chosen value reaches the saved site and the daemon, not just the form.
+  assert.match(addSite, /accessMode: selectedAccessMode\.rawValue/);
+  assert.match(client, /"accessMode": site\.access\.rawValue/);
+  // Editing an existing site prefills its current mode rather than resetting it.
+  assert.match(addSite, /accessPicker\.selectItem\(at: BrowserLaneAccessMode\.displayOrder\.firstIndex/);
+
+  // The daemon enforces the gate, so the badge must read its value and only fall
+  // back to the local copy — a local-only badge can claim read-only while the
+  // daemon still permits writes (sync() tolerates "saved locally; sync failed").
+  const sidebar = readFileSync(join(sourceDir, "SidebarViewController.swift"), "utf8");
+  assert.match(sidebar, /daemonAccessMode/);
+  assert.match(sidebar, /daemonAccessMode\.flatMap\(BrowserLaneAccessMode\.init\(rawValue:\)\) \?\? site\.access/);
+  assert.match(client, /accessMode: entry\["accessMode"\] as\? String,/);
+});
+
+// Per-site login recipes drive a multi-step sign-in from an explicit operator
+// click. These assertions pin the security properties of that path — none of them
+// would fail a build, and each one is load-bearing.
+test("Browser Lane login recipes cannot carry or leak a stored sign-in", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const recipe = readFileSync(join(sourceDir, "BrowserLaneLoginRecipe.swift"), "utf8");
+  const runner = readFileSync(join(sourceDir, "BrowserLaneLoginRunner.swift"), "utf8");
+  const models = readFileSync(join(sourceDir, "BrowserLaneModels.swift"), "utf8");
+  const client = readFileSync(join(sourceDir, "BrowserLaneDaemonClient.swift"), "utf8");
+
+  // A fixed verb set, not a script: arbitrary JS in a context holding the
+  // operator's sign-in could read the value and post it anywhere.
+  assert.match(recipe, /case click\(selector: String\)/);
+  assert.match(recipe, /case fill\(selector: String, value: BrowserLaneLoginValue\)/);
+  // Recipes hold placeholders; real values are substituted natively at run time.
+  assert.match(recipe, /case username/);
+  assert.match(recipe, /return "\$username"/);
+  assert.match(recipe, /return "\$password"/);
+
+  // Origin check before any step that types a stored sign-in. Suffix-with-dot,
+  // never `contains` — "evil-linkedin.com" contains "linkedin.com".
+  assert.match(runner, /func hostIsAllowed/);
+  assert.match(runner, /host == domain \|\| host\.hasSuffix\("\." \+ domain\)/);
+  assert.doesNotMatch(runner, /\.contains\(host\)/);
+  assert.match(runner, /if current\.carriesCredential/);
+  assert.match(runner, /completion\(\.originRefused/);
+
+  // Values are JSON-encoded into JS source, never string-concatenated raw.
+  assert.match(runner, /JSONSerialization\.data\(withJSONObject: \[value\]/);
+
+  // The recipe is local-only: it must never be in the daemon sync payload, or an
+  // agent-side path could drive a login with it.
+  assert.match(models, /var loginSteps: String\?/);
+  assert.doesNotMatch(client, /loginSteps/);
+});
+
+test("Browser Lane login recipes run only from an explicit operator click", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const signIn = readFileSync(join(sourceDir, "BrowserLaneSignIn.swift"), "utf8");
+  const readiness = readFileSync(join(sourceDir, "ReadinessViewController.swift"), "utf8");
+  const sidebar = readFileSync(join(sourceDir, "SidebarViewController.swift"), "utf8");
+
+  // Exactly one implementation of the credential flow. Both surfaces call it —
+  // a second copy is a second place for the origin check, the audit call, or the
+  // clipboard timer to drift.
+  assert.match(signIn, /enum BrowserLaneSignIn/);
+  assert.match(signIn, /static func start\(site incoming: BrowserLaneSite\)/);
+  assert.match(readiness, /BrowserLaneSignIn\.start\(site: site\)/);
+  assert.match(sidebar, /BrowserLaneSignIn\.start\(site: site\)/);
+  // The flow must not be re-implemented in either view.
+  assert.doesNotMatch(readiness, /NSPasteboard/);
+  assert.doesNotMatch(sidebar, /NSPasteboard/);
+
+  // Both entry points are user actions. Nothing schedules a sign-in.
+  assert.match(readiness, /func signInWithSavedCredential/);
+  assert.match(sidebar, /@objc private func menuSignIn/);
+  assert.doesNotMatch(signIn, /Timer\.scheduledTimer/);
+
+  // The origin check must read the CURRENT allowed domains. The sidebar hands
+  // over a row cached since its last reload, so trusting the caller's copy can
+  // check a stale allowlist — it refused a domain the operator had already added.
+  assert.match(signIn, /static func start\(site incoming: BrowserLaneSite\)/);
+  assert.match(signIn, /BrowserLaneSiteStore\.shared\.listSites\(\)\s*\n?\s*\.first\(where: \{ \$0\.id == incoming\.id \}\) \?\? incoming/);
+
+  // Offered only where a stored sign-in exists; SSO/manual sites grey it out.
+  assert.match(signIn, /static func isAvailable\(for site: BrowserLaneSite\)/);
+  assert.match(sidebar, /func validateMenuItem/);
+  assert.match(sidebar, /BrowserLaneSignIn\.isAvailable\(for: site\)/);
+
+  // No recipe → the original clipboard handoff, never a guess at which field is which.
+  assert.match(signIn, /handOffViaClipboard/);
+  assert.match(signIn, /NSPasteboard/);
+
+  // Success is silent — the signed-in page is the result, and a modal saying so
+  // is a click you must dismiss to see it. Only outcomes you cannot see for
+  // yourself (stalled / refused / failed) get an alert.
+  const completedCase = signIn.match(/case \.completed:[\s\S]*?case \.stalled/)?.[0] ?? "";
+  assert.doesNotMatch(completedCase, /alert\(/);
+  // ...and readiness is kicked automatically, which is what the alert used to ask for.
+  assert.match(completedCase, /runReadiness\(siteId: site\.id\)/);
+  for (const failure of ["case .stalled", "case .originRefused", "case .failed"]) {
+    assert.ok(signIn.includes(failure), `${failure} still reported`);
+  }
+});
+
+test("Browser Lane sidebar is the site list, with a session dot and + add", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const sidebar = readFileSync(join(sourceDir, "SidebarViewController.swift"), "utf8");
+  const status = readFileSync(join(sourceDir, "BrowserLaneStatus.swift"), "utf8");
+
+  // The sidebar lists configured sites, not app screens.
+  assert.match(sidebar, /BrowserLaneSiteStore\.shared\.listSites/);
+  assert.match(sidebar, /"Sites"/);
+  assert.match(sidebar, /systemSymbolName: "plus"/);
+  assert.match(sidebar, /StatusDotView/);
+  // Readiness enriches the list; it must not gate rendering it.
+  assert.match(sidebar, /fetchDashboard/);
+
+  // A green dot means ready AND fresh — a stale probe is not a live session.
+  assert.match(status, /func sessionEstablished/);
+  assert.match(status, /color == "green" && !stale/);
+});
+
+test("Browser Lane has a Canopy-style Command Log panel scoped to a site", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const panelPath = join(sourceDir, "HistoryPanelViewController.swift");
+  assert.ok(existsSync(panelPath), "HistoryPanelViewController should exist");
+  const panel = readFileSync(panelPath, "utf8");
+  const client = readFileSync(join(sourceDir, "BrowserLaneDaemonClient.swift"), "utf8");
+  const split = readFileSync(join(sourceDir, "RootSplitViewController.swift"), "utf8");
+
+  assert.match(panel, /Command Log/);
+  assert.match(panel, /fetchHistory/);
+  assert.match(panel, /NSSearchField/);
+  assert.match(client, /browser-lane\/history/);
+
+  // Every chip must map to a signal Browser Lane actually emits, or it would
+  // always render empty. Canopy's "Warned" has no analog here and is absent.
+  for (const chip of ["Human", "Agent", "Blocked", "Failed", "Security"]) {
+    assert.match(panel, new RegExp(`case \\w+ = "${chip}"`), `${chip} chip wired`);
+  }
+  assert.doesNotMatch(panel, /case \w+ = "Warned"/);
+
+  // The daemon stamps audit ts via JS toISOString() — always with milliseconds.
+  // ISO8601DateFormatter rejects fractional seconds unless opted in, so without
+  // this every log row silently renders "—" instead of a time.
+  const models = readFileSync(join(sourceDir, "BrowserLaneModels.swift"), "utf8");
+  assert.match(models, /withFractionalSeconds/);
+
+  // Right pane, collapsed until asked for.
+  assert.match(split, /HistoryPanelViewController/);
+  assert.match(split, /isCollapsed = true/);
+  assert.doesNotMatch(panel, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
+});
+
+test("Browser Lane chrome lives in toolbar icons, not sidebar rows", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const appDelegate = readFileSync(join(sourceDir, "AppDelegate.swift"), "utf8");
+
+  assert.match(appDelegate, /NSToolbar/);
+  assert.match(appDelegate, /displayMode = \.iconOnly/);
+  for (const symbol of ["sidebar.left", "checkmark.shield", "list.bullet.rectangle", "gearshape"]) {
+    assert.match(appDelegate, new RegExp(symbol.replace(/\./g, "\\.")), `${symbol} toolbar item`);
+  }
+});
+
+// The active icon must be blue while its pane is showing (Canopy parity). This
+// broke twice in ways a build can't catch: contentTintColor is silently ignored
+// for toolbar images, and the first tint pass runs before the split view loads.
+test("Browser Lane toolbar tints the icon of whichever pane is showing", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const appDelegate = readFileSync(join(sourceDir, "AppDelegate.swift"), "utf8");
+  const split = readFileSync(join(sourceDir, "RootSplitViewController.swift"), "utf8");
+
+  // Color must ride on the symbol: the toolbar ignores a button's contentTintColor.
+  assert.match(appDelegate, /SymbolConfiguration\(paletteColors:/);
+  assert.match(appDelegate, /controlAccentColor/);
+  // Comments stripped — the code documents why contentTintColor is the wrong tool.
+  const appDelegateCode = appDelegate
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("///"))
+    .join("\n");
+  assert.doesNotMatch(appDelegateCode, /contentTintColor/);
+
+  // Re-tinted after the window is up, because the toolbar builds its items
+  // before viewDidLoad and would otherwise read "no panes visible" forever.
+  assert.match(appDelegate, /makeKeyAndOrderFront[\s\S]{0,400}refreshActiveStates/);
+
+  // Tracks real pane state, including a collapse via the split divider.
+  assert.match(split, /var isSidebarVisible: Bool \{ isViewLoaded/);
+  assert.match(split, /var isHistoryVisible: Bool \{ isViewLoaded/);
+  assert.match(split, /onPaneStateChanged/);
+  assert.match(split, /override func splitViewDidResizeSubviews/);
+
+  // The screen icons light too, so "where am I" is always answerable.
+  assert.match(appDelegate, /ItemID\.readiness, active: split\.currentScreen == \.readiness/);
+  assert.match(appDelegate, /ItemID\.settings, active: split\.currentScreen == \.settings/);
+});
+
+// The sidebar is sites-only, so there is no nav row to click back with: a toolbar
+// screen that only pushed would strand you with no way home (hit on Readiness).
+test("Browser Lane toolbar screens toggle back to the browser", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const split = readFileSync(join(sourceDir, "RootSplitViewController.swift"), "utf8");
+  const content = readFileSync(join(sourceDir, "ContentViewController.swift"), "utf8");
+
+  assert.match(split, /@objc func showReadiness\(\) \{ toggleScreen\(\.readiness\) \}/);
+  assert.match(split, /@objc func showSettings\(\) \{ toggleScreen\(\.settings\) \}/);
+  assert.match(split, /content\.show\(content\.currentScreen == screen \? \.browser : screen\)/);
+  assert.match(content, /private\(set\) var currentScreen: Screen/);
+  assert.match(content, /onScreenChanged/);
+});
+
+// AppKit's clip view is not flipped, so hand-built scrolling content shorter than
+// the pane lays out from the bottom — the whole Readiness screen sat at the
+// bottom of a tall window until its document view was flipped.
+test("Browser Lane hand-built scroll content lays out from the top", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const status = readFileSync(join(sourceDir, "BrowserLaneStatus.swift"), "utf8");
+  const readiness = readFileSync(join(sourceDir, "ReadinessViewController.swift"), "utf8");
+
+  assert.match(status, /final class FlippedView: NSView/);
+  assert.match(status, /override var isFlipped: Bool \{ true \}/);
+  assert.match(readiness, /let documentView = FlippedView\(\)/);
+});
+
+// A window built in code has no key view loop unless asked for one, so Tab did
+// nothing between form fields — every field was an island. Nib-loaded windows get
+// the loop from the nib; ours are all code, so AppKit must derive it from geometry.
+test("Browser Lane windows have a key view loop so Tab moves between fields", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const appDelegate = readFileSync(join(sourceDir, "AppDelegate.swift"), "utf8");
+  const addSite = readFileSync(join(sourceDir, "AddSiteViewController.swift"), "utf8");
+
+  assert.match(appDelegate, /window\.autorecalculatesKeyViewLoop = true/);
+  // The form arrives focused, so Tab has a starting point without a click first.
+  assert.match(addSite, /override func viewDidAppear/);
+  assert.match(addSite, /makeFirstResponder\(nameField\)/);
 });
 
 test("Browser Lane installs a standard Edit menu so Cmd-C/V/X/A work in text fields", () => {
@@ -332,7 +601,7 @@ test("Browser Lane Add Site auto-generates ids, hides technical fields, edits, a
   const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
   const addSite = readFileSync(join(sourceDir, "AddSiteViewController.swift"), "utf8");
   const models = readFileSync(join(sourceDir, "BrowserLaneModels.swift"), "utf8");
-  const sites = readFileSync(join(sourceDir, "SitesViewController.swift"), "utf8");
+  const sidebar = readFileSync(join(sourceDir, "SidebarViewController.swift"), "utf8");
 
   // Technical Site id + Credential ref are tucked under an Advanced disclosure.
   assert.match(addSite, /Advanced/);
@@ -352,25 +621,42 @@ test("Browser Lane Add Site auto-generates ids, hides technical fields, edits, a
   // Field-specific errors focus the offending field.
   assert.match(addSite, /makeFirstResponder/);
 
-  // The Sites screen offers an Edit affordance per site.
-  assert.match(sites, /editSite|"Edit"/);
+  // The sidebar offers an Edit affordance per site.
+  assert.match(sidebar, /"Edit…"/);
 
   // Still reference-only: the daemon payload never carries a password value.
   const daemonClient = readFileSync(join(sourceDir, "BrowserLaneDaemonClient.swift"), "utf8");
   assert.doesNotMatch(daemonClient, /password/i);
 });
 
-test("Browser Lane Add Site starts empty, derives from one Website field, and HeyGen is an opt-in preset", () => {
+// Browser Lane is a site-agnostic surface: every site is user-defined via Add
+// Site. A hardcoded vendor (BrowserLaneSite.heyGen + a "Use HeyGen preset"
+// button) shipped until 2026-07-17 and made one tenant's site read as a product
+// concept. This guard keeps any single site from being designed around again.
+// Test fixtures elsewhere may still *name* real sites — that's data, not design.
+test("Browser Lane app code is site-agnostic — no vendor is hardcoded as a preset", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const sources = readdirSync(sourceDir).filter((f) => f.endsWith(".swift"));
+  assert.ok(sources.length > 0, "expected Swift sources to scan");
+
+  for (const file of sources) {
+    const src = readFileSync(join(sourceDir, file), "utf8");
+    // Strip comments: the models file documents the removal by name on purpose.
+    const code = src
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("///"))
+      .join("\n");
+    assert.doesNotMatch(code, /heygen/i, `${file} should not hardcode a specific vendor site`);
+  }
+});
+
+test("Browser Lane Add Site starts empty and derives from one Website field", () => {
   const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
   const addSite = readFileSync(join(sourceDir, "AddSiteViewController.swift"), "utf8");
   const screens = readFileSync(join(sourceDir, "Screens.swift"), "utf8");
 
-  // Empty by default: an explicit empty-state helper runs instead of auto-loading HeyGen.
+  // Empty by default: an explicit empty-state helper, no auto-loaded vendor.
   assert.match(addSite, /startEmpty/);
-  assert.doesNotMatch(addSite, /else\s*\{\s*useHeyGenDefaults/);
-  // HeyGen survives only as an opt-in preset button; no "defaults loaded" auto-status.
-  assert.match(addSite, /Use HeyGen preset/);
-  assert.match(addSite, /useHeyGenDefaults/);
   assert.doesNotMatch(addSite, /defaults loaded/i);
 
   // Friendly, view-layer sign-in labels (not in the model).
@@ -404,20 +690,25 @@ test("Browser Lane Add Site starts empty, derives from one Website field, and He
   assert.doesNotMatch(screens, /metadata/i);
 });
 
-test("Browser Lane Sites list is editable and deletable with confirmation", () => {
+test("Browser Lane sidebar sites are editable and deletable from a context menu", () => {
   const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
-  const sites = readFileSync(join(sourceDir, "SitesViewController.swift"), "utf8");
+  const sidebar = readFileSync(join(sourceDir, "SidebarViewController.swift"), "utf8");
   const store = readFileSync(join(sourceDir, "BrowserLaneSiteStore.swift"), "utf8");
   const keychain = readFileSync(join(sourceDir, "BrowserLaneKeychain.swift"), "utf8");
 
-  // A site row is click-to-edit AND has explicit Edit/Delete buttons + a New Site entry.
-  assert.match(sites, /NSClickGestureRecognizer/);
-  assert.match(sites, /"Edit"/);
-  assert.match(sites, /"Delete"/);
-  assert.match(sites, /New Site/);
+  // Canopy-style right-click menu on a site row.
+  assert.match(sidebar, /NSMenu/);
+  assert.match(sidebar, /"Edit…"/);
+  assert.match(sidebar, /"Delete"/);
+  assert.match(sidebar, /"Duplicate"/);
+  assert.match(sidebar, /"View Command Log"/);
 
-  // Delete is confirmed (never silent) and removes the local record + Keychain secret.
-  assert.match(sites, /NSAlert/);
+  // A context-menu action must act on the right-clicked row, not the selection —
+  // otherwise right-clicking an unselected site deletes a different one.
+  assert.match(sidebar, /clickedRow/);
+
+  // Delete is confirmed (never silent) and removes the local record + Keychain entry.
+  assert.match(sidebar, /NSAlert/);
   assert.match(store, /func delete/);
   assert.match(keychain, /deleteCredential/);
   assert.match(keychain, /SecItemDelete/);
@@ -451,13 +742,36 @@ test("BrowserLaneDaemonClient can record a credential-use audit signal", () => {
 // same file, so that invariant isn't re-checked here — only the four new
 // assertions for this feature. Button copy says "saved credential", not "saved
 // password", specifically so this addition keeps passing that existing guard.
-test("Readiness view offers one-click sign-in with saved credentials for keychain_password sites", () => {
-  const readiness = readFileSync(
-    join(root, "browser-lane-app/Sources/BrowserLaneApp/ReadinessViewController.swift"),
-    "utf8",
-  );
+// The clipboard handoff moved into the shared BrowserLaneSignIn path when the
+// sidebar gained the same action; the Readiness card keeps the affordance and
+// delegates. The behaviour is asserted where it now lives.
+test("One-click sign-in with saved credentials is offered for keychain_password sites", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const readiness = readFileSync(join(sourceDir, "ReadinessViewController.swift"), "utf8");
+  const sidebar = readFileSync(join(sourceDir, "SidebarViewController.swift"), "utf8");
+  const signIn = readFileSync(join(sourceDir, "BrowserLaneSignIn.swift"), "utf8");
+
+  // Both surfaces offer it.
   assert.match(readiness, /Sign in with saved credential/);
   assert.match(readiness, /signInWithSavedCredential/);
-  assert.match(readiness, /NSPasteboard/);
-  assert.match(readiness, /scheduleClipboardClear|asyncAfter\(deadline: \.now\(\) \+ 45\)/);
+  assert.match(sidebar, /"Sign in with saved credential"/);
+
+  // The clipboard fallback (and its auto-clear) live in the shared path.
+  assert.match(signIn, /NSPasteboard/);
+  assert.match(signIn, /scheduleClipboardClear|asyncAfter\(deadline: \.now\(\) \+ 45\)/);
+});
+
+// run() returns immediately — every step is an async JS callback — so a caller's
+// local `let runner` dies the moment it returns, and the runner's own [weak self]
+// callbacks then find nil and end the run silently: no click, no error, no alert.
+// Reproduced with a fake driver: 1 step executed, then nothing.
+test("Browser Lane login runner outlives the call that started it", () => {
+  const runner = readFileSync(
+    join(root, "browser-lane-app/Sources/BrowserLaneApp/BrowserLaneLoginRunner.swift"),
+    "utf8",
+  );
+  assert.match(runner, /private var activeRun: BrowserLaneLoginRunner\?/);
+  assert.match(runner, /activeRun = self/);
+  // ...and released when the run ends, so the self-reference stays scoped.
+  assert.match(runner, /self\?\.activeRun = nil/);
 });

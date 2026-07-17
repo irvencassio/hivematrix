@@ -403,6 +403,10 @@ export interface BrowserLaneDashboardSite {
   allowedDomains: string[];
   authStrategy: BrowserSite["authStrategy"];
   providerAccount: string | null;
+  /** The enforcing side's value — this is what `executeBrowserBeeRun` actually
+   * gates on, so a client showing a read-only badge should read it from here
+   * rather than trust its own local copy, which can diverge if a sync failed. */
+  accessMode: BrowserSite["accessMode"];
   credentialRef: string | null;
   credentialStatus: string | null;
   credentialLastVerifiedAt: string | null;
@@ -514,6 +518,7 @@ export function getBrowserLaneReadinessDashboard(filter: BrowserLaneReadinessQue
       allowedDomains: site.allowedDomains,
       authStrategy: site.authStrategy,
       providerAccount: site.providerAccount,
+      accessMode: site.accessMode,
       credentialRef: site.credentialRef,
       credentialStatus: row.credentialStatus ?? null,
       credentialLastVerifiedAt: row.credentialLastVerifiedAt ?? null,
