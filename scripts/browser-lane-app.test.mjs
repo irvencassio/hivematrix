@@ -257,6 +257,29 @@ test("Browser Lane has a Readiness dashboard with per-site status and actions", 
   assert.doesNotMatch(readiness, /\bpassword\b|\btoken\b|\bcookie\b|\bsecret\b/i);
 });
 
+// Rebuilding the browser on every site switch tore down the WKWebView, dropping
+// sessionStorage / in-memory auth / un-flushed cookies — so a login didn't
+// survive switching sites (hit on App Store Connect). One browser instance must
+// be reused, and re-showing it must not reload the current page.
+test("Browser Lane keeps one browser instance across site switches", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const content = readFileSync(join(sourceDir, "ContentViewController.swift"), "utf8");
+  const browser = readFileSync(join(sourceDir, "BrowserViewController.swift"), "utf8");
+
+  // A single persistent browser, not a fresh one per show().
+  assert.match(content, /private lazy var browser = BrowserViewController\(\)/);
+  assert.match(content, /case \.browser:\s+browser/);
+  // The old code built one every time — that exact shape must be gone.
+  assert.doesNotMatch(content, /case \.browser:\s*\n\s*BrowserViewController\(\)/);
+  // The persistent browser is not detached on switch-away, so its session lives.
+  assert.match(content, /old !== browser \{ old\.removeFromParent\(\) \}/);
+
+  // A reused browser still honors a site handoff, and no-ops (keeps the page)
+  // when there's nothing pending.
+  assert.match(browser, /func consumePendingNavigation\(\) -> Bool/);
+  assert.match(content, /browser\.consumePendingNavigation\(\)/);
+});
+
 test("Browser Lane WebKit view persists the session and supports OAuth popups", () => {
   const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
   const browser = readFileSync(join(sourceDir, "BrowserViewController.swift"), "utf8");

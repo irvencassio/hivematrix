@@ -204,10 +204,7 @@ final class BrowserViewController: NSViewController {
         ])
 
         // A pending handoff URL (from Add Site / Readiness) wins over the default.
-        if let pending = BrowserLaneNavigator.shared.pendingURL {
-            BrowserLaneNavigator.shared.pendingURL = nil
-            load(pending.absoluteString)
-        } else {
+        if !consumePendingNavigation() {
             load(BrowserLaneSettings.shared.defaultURL)
         }
 
@@ -246,6 +243,21 @@ final class BrowserViewController: NSViewController {
 
     @objc private func loadAddress() {
         load(addressField.stringValue)
+    }
+
+    /// Navigate the live web view to a pending handoff URL, if any. Returns whether
+    /// it navigated. Called both at first load and every time the browser screen is
+    /// re-shown — since the browser is now a single persistent instance, a site
+    /// click has to reach the existing web view, not a freshly-built one.
+    ///
+    /// With no pending URL it does nothing: switching back to the browser keeps the
+    /// page (and session) you were on rather than reloading it out from under you.
+    @discardableResult
+    func consumePendingNavigation() -> Bool {
+        guard isViewLoaded, let pending = BrowserLaneNavigator.shared.pendingURL else { return false }
+        BrowserLaneNavigator.shared.pendingURL = nil
+        load(pending.absoluteString)
+        return true
     }
 
     private func load(_ value: String) {

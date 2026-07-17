@@ -3,6 +3,15 @@ import AppKit
 final class ContentViewController: NSViewController {
     private var currentChild: NSViewController?
 
+    /// One browser, alive for the app's lifetime. Rebuilding it on every site
+    /// switch tore down the WKWebView, and a persistent cookie store does not save
+    /// you there: sessionStorage, in-memory auth tokens, and any Set-Cookie not yet
+    /// flushed to disk all die with the view. That is why signing into one site and
+    /// switching to another logged you out — and why Apple ID / App Store Connect,
+    /// which lean on that in-memory state, would not stay signed in. The web view
+    /// itself has to survive, so it is created once and reused.
+    private lazy var browser = BrowserViewController()
+
     /// Which screen is showing. The toolbar reads this to light the matching icon
     /// and to decide whether a second click should return to the browser.
     private(set) var currentScreen: Screen = .browser
@@ -28,29 +37,35 @@ final class ContentViewController: NSViewController {
     }
 
     func show(_ screen: Screen) {
-        currentChild?.view.removeFromSuperview()
-        currentChild?.removeFromParent()
-
         let vc: NSViewController = switch screen {
-        case .browser:
-            BrowserViewController()
-        case .addSite:
-            AddSiteViewController()
-        case .readiness:
-            ReadinessViewController()
-        case .settings:
-            SettingsViewController()
+        case .browser:   browser
+        case .addSite:   AddSiteViewController()
+        case .readiness: ReadinessViewController()
+        case .settings:  SettingsViewController()
         }
-        addChild(vc)
-        vc.view.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(vc.view)
-        NSLayoutConstraint.activate([
-            vc.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            vc.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            vc.view.topAnchor.constraint(equalTo: view.topAnchor),
-            vc.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
-        currentChild = vc
+
+        if currentChild !== vc {
+            currentChild?.view.removeFromSuperview()
+            // Detach transient screens so they deallocate; keep the browser parented
+            // so its web view — and the live session — survives being off-screen.
+            if let old = currentChild, old !== browser { old.removeFromParent() }
+
+            if vc.parent !== self { addChild(vc) }
+            vc.view.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(vc.view)
+            NSLayoutConstraint.activate([
+                vc.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                vc.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                vc.view.topAnchor.constraint(equalTo: view.topAnchor),
+                vc.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            ])
+            currentChild = vc
+        }
+
+        // A reused browser still has to honor a site handoff; without a pending URL
+        // this no-ops and the current page stays put.
+        if screen == .browser { browser.consumePendingNavigation() }
+
         currentScreen = screen
         onScreenChanged?()
     }
