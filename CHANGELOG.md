@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.212 — 2026-07-17
+
+Keep one browser alive so sessions survive site switches — signing into a site (Apple ID / App Store Connect especially) no longer logs you out when you switch to another site. Switching sites previously rebuilt the WebKit view and dropped in-memory session cookies and auth state; the browser is now a single persistent instance.
+
 ## v0.1.211 — 2026-07-17
 
 Browser Lane rebuilt around Canopy's layout: the left sidebar is now the site list itself (session dot, agent-access badge, + add, and a right-click menu for Open / Sign in / Readiness / Edit / Duplicate / Command Log / Delete), a Command Log right panel replaces the Traces screen with per-site audit history and Human/Agent/Blocked/Failed/Security filters, and the remaining chrome moved to toolbar icons that light blue for whichever pane is showing. Multi-step sign-ins now work end to end: an optional per-site login recipe (a fixed click/clickText/waitFor/wait/fill/submit vocabulary, never a script) can drive an OAuth handoff like Samsung Knox, with username/password placeholders substituted natively from the Keychain, an origin check before every credential step, and no reachability from the agent side. HeyGen is no longer hardcoded anywhere — every site is user-defined. Also fixes: a Codable change that would have wiped saved sites, a login runner that deallocated mid-run, stale allowlist checks, unlit toolbar icons, a bottom-anchored Readiness screen, Tab not moving between form fields, and silent read-only refusals that now appear in the log.
