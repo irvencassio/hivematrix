@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.211 — 2026-07-17
+
+Browser Lane rebuilt around Canopy's layout: the left sidebar is now the site list itself (session dot, agent-access badge, + add, and a right-click menu for Open / Sign in / Readiness / Edit / Duplicate / Command Log / Delete), a Command Log right panel replaces the Traces screen with per-site audit history and Human/Agent/Blocked/Failed/Security filters, and the remaining chrome moved to toolbar icons that light blue for whichever pane is showing. Multi-step sign-ins now work end to end: an optional per-site login recipe (a fixed click/clickText/waitFor/wait/fill/submit vocabulary, never a script) can drive an OAuth handoff like Samsung Knox, with username/password placeholders substituted natively from the Keychain, an origin check before every credential step, and no reachability from the agent side. HeyGen is no longer hardcoded anywhere — every site is user-defined. Also fixes: a Codable change that would have wiped saved sites, a login runner that deallocated mid-run, stale allowlist checks, unlit toolbar icons, a bottom-anchored Readiness screen, Tab not moving between form fields, and silent read-only refusals that now appear in the log.
+
 ## v0.1.210 — 2026-07-16
 
 Left sidebar consolidation (lanes/agents setup + monitoring, Board collapse, Brain renamed Memory, Overview removed); console: taller composer + prompt snippets, Tools search fixes, gold active usage toggle; Browser Lane: read/write permission gating + Canopy-parity audit filters, and the Desktop fallback is now driven by Claude instead of a dead local-model gate; tasks: resolve project by name instead of a homedir guess, and the runaway budget backstop raised $10 to $25
