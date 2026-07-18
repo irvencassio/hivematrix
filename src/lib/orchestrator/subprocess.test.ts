@@ -57,8 +57,18 @@ test("the delegation directive is scoped to self-planning (broad) work only", ()
   // regression guard rather than a spawn-mock test, matching the coo-roster test
   // above.
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "subprocess.ts"), "utf8");
-  assert.match(src, /You are the top-level agent on Opus\./);
-  assert.match(src, /delegate construction and implementation work to Sonnet subagents via the Agent tool/);
+  assert.match(src, /You are the top-level agent for this task\./);
+  assert.match(src, /delegate construction and implementation work to subagents via the Agent tool/);
+  // Must stay model-agnostic: the router picks the top-level model, so a live
+  // run was seen on `--model sonnet` while this prompt claimed to be Opus
+  // delegating to "Sonnet subagents" — telling Sonnet to hand work to itself.
+  // Scoped to the constant's VALUE: the surrounding comment names those tiers
+  // deliberately (to record the bug), so a whole-file check would match itself.
+  const promptStart = src.indexOf("const DELEGATION_SYSTEM_PROMPT =");
+  assert.ok(promptStart !== -1, "delegation prompt constant should be locatable");
+  const promptValue = src.slice(promptStart, src.indexOf(";", promptStart));
+  assert.doesNotMatch(promptValue, /Opus/, "prompt must not name a model tier");
+  assert.doesNotMatch(promptValue, /Sonnet/, "prompt must not name the subagent tier");
   // Regression: this used to be appended unconditionally, so a NARROW task was
   // also pushed to spawn subagents for work it could just do — extra round-trips
   // and indirection versus a direct `claude` session. It must now be gated on the
@@ -169,4 +179,25 @@ test("Claude prompt args preserve formatted attachment paths", () => {
   assert.ok(args[promptIndex + 1].includes(attachmentBlock));
   assert.match(args[promptIndex + 1], /path: \/Users\/me\/\.hivematrix\/uploads\/id-shot\.png/);
   assert.match(args[promptIndex + 1], /Use the absolute path above/);
+});
+
+test("spawnAgent passes the RAW thinkingMode to the effort flag, not the resolved one", () => {
+  // Regression caught in production 2026-07-18: buildClaudeSpawnArgs correctly
+  // omits --effort for "auto", but spawnAgent was handing it
+  // `effectiveThinkingMode` — resolveThinkingMode's output, which collapses
+  // "auto" to "max". So a task stored with thinkingMode="auto" still launched
+  // with `--effort max`, silently defeating the adaptive default at the ONLY
+  // call site that matters. The unit tests above passed the whole time because
+  // they call buildClaudeSpawnArgs directly.
+  //
+  // effectiveThinkingMode remains correct for the ultrathink PREFIX decision;
+  // it is wrong for the effort FLAG.
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "subprocess.ts"), "utf8");
+  const start = src.indexOf("const args = buildClaudeSpawnArgs({");
+  assert.ok(start !== -1, "spawn args construction should be locatable");
+  const call = src.slice(start, start + 600);
+  assert.doesNotMatch(call, /thinkingMode:\s*effectiveThinkingMode/, "must not pass the auto->max resolved value");
+  assert.match(call, /^\s*thinkingMode,\s*$/m, "must pass the raw thinkingMode through");
+  // The ultrathink prefix still uses the resolved value.
+  assert.match(src, /effectiveThinkingMode === "ultrathink"/);
 });

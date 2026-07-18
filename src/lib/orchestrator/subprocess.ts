@@ -318,8 +318,14 @@ const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 // Runs the top-level CLI task like a direct interactive session: plan and
 // review on the thinking tier, hand construction work off to Sonnet
 // subagents via the Agent tool instead of doing every edit inline.
+// Model-agnostic on purpose: the top-level model is chosen by the router
+// (routeByRole/resolveModelId), so it is frequently NOT Opus — a live run was
+// observed on `--model sonnet` while this prompt insisted it was "the top-level
+// agent on Opus" delegating to "Sonnet subagents", i.e. telling Sonnet it was
+// Opus and to hand work to itself. Naming tiers here can only ever drift from
+// what the router actually picked.
 const DELEGATION_SYSTEM_PROMPT =
-  "You are the top-level agent on Opus. Do the planning, decomposition, review, and delegation yourself; delegate construction and implementation work to Sonnet subagents via the Agent tool rather than doing all the coding inline. Spawn subagents liberally for parallelizable or well-scoped build work.";
+  "You are the top-level agent for this task. Do the planning, decomposition, review, and delegation yourself; delegate construction and implementation work to subagents via the Agent tool rather than doing all the coding inline. Spawn subagents liberally for parallelizable or well-scoped build work.";
 
 /** Remove NUL bytes — argv strings passed to child_process.spawn cannot contain them. */
 export function stripNullBytes(s: string): string {
@@ -562,7 +568,13 @@ export async function spawnAgent(
     prompt,
     maxBudgetUsd,
     model,
-    thinkingMode: effectiveThinkingMode,
+    // RAW, not effectiveThinkingMode. resolveThinkingMode collapses "auto" to
+    // "max", so passing the resolved value here meant claudeEffortMode never saw
+    // "auto" and always pinned --effort max — silently defeating the adaptive
+    // default at the only call site that matters. effectiveThinkingMode is still
+    // the right thing for the ultrathink PREFIX decision above; it is the wrong
+    // thing for the effort FLAG.
+    thinkingMode,
     fastMode,
     resumeSessionId,
   });
