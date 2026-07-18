@@ -295,7 +295,11 @@ async function handleDeepThink(args: Record<string, unknown>): Promise<string> {
  *  says so up front, since the escalating model doesn't necessarily know. */
 const SELF_IMPROVEMENT_PREFIX =
   "[Self-improvement task — follow the Superpowers pipeline in AGENTS.md: brainstorm → plan → " +
-  "subagent-driven TDD → finish. Do NOT release; the operator releases.]\n\n";
+  "subagent-driven TDD → finish. Do NOT release; the operator releases. " +
+  "Git hygiene (AGENTS.md): the working tree is SHARED — stage the files you actually touched by " +
+  "name, never `git add -A`, and COMMIT your work before finishing so it can't be swept into " +
+  "someone else's commit. Never merge to main and never resolve a conflict; that is the " +
+  "operator's call.]\n\n";
 
 export interface ResolveEscalationTargetOpts {
   title: string;

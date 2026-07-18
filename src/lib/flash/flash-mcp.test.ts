@@ -881,3 +881,24 @@ test("escalate_to_task's project parameter pins the operator's named repo and dr
   assert.doesNotMatch(desc, /hivematrix-watch/, "must not suggest the deprecated watch repo");
   assert.match(desc, /hivematrix-ios/);
 });
+
+test("self-improvement tasks carry the shared-working-tree git hygiene contract", () => {
+  // Regression (2026-07-18): a `git add -A` in this shared checkout swept ~900
+  // lines of an unrelated agent's finished-but-uncommitted feature into a commit
+  // about harness fixes. It would have shipped inside an unrelated release had
+  // the release script not refused to build off a non-main branch. The contract
+  // has to reach the agent, not just live in AGENTS.md.
+  const target = resolveEscalationTarget({
+    title: "improve something",
+    description: "do the thing",
+    kind: "self-improvement",
+    repoPath: "/tmp/hivematrix",
+  });
+  assert.match(target.description, /working tree is SHARED/);
+  assert.match(target.description, /never `git add -A`/);
+  assert.match(target.description, /COMMIT your work before finishing/);
+  // Merges stay with the operator — a model only authored one side of them.
+  assert.match(target.description, /Never merge to main and never resolve a conflict/);
+  // The original request must still be there, not replaced by boilerplate.
+  assert.match(target.description, /do the thing/);
+});

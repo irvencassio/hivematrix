@@ -91,3 +91,30 @@ everything else is an adapter over them (see DECISIONS.md Q14, the Subtraction P
 
 When a change adds a concept, say in the commit what it deletes. When the same outcome
 can come from extending an existing primitive instead of adding one, extend.
+
+## Git hygiene — the working tree is SHARED
+
+Agents, the operator, and other agents all act on the same checkout. Two rules
+follow from that, and both were learned the hard way on 2026-07-18.
+
+1. **Stage explicit paths. Never `git add -A` or `git add .`.**
+   Another task's finished-but-uncommitted work is routinely sitting in the tree
+   waiting for operator review. `git add -A` sweeps it into *your* commit under
+   *your* message. This happened: a harness fix swallowed ~900 lines of an
+   unrelated feature (its plan, specs, console, server and orchestrator changes)
+   and would have shipped it inside an unrelated release had the release script
+   not refused to build off a non-main branch. Stage the files you actually
+   touched, by name.
+
+2. **Commit your own work before you finish. Never leave it loose in the tree.**
+   Uncommitted work is the unit that gets clobbered. Commit to the branch you
+   were started on, or to `hive/task-<taskId>` if you created one. A task that
+   reaches review with its changes committed cannot be swept by anyone, and the
+   operator gets a reviewable diff instead of a pile of modified files.
+
+3. **Never merge to main, and never resolve a merge conflict.**
+   The operator integrates and releases. A merge requires knowing the intent of
+   *both* sides, and you only authored one — which is precisely why model-driven
+   merges go wrong. If integration is genuinely needed, it must be fast-forward
+   only (`scripts/integrate-task-branch.sh`), which either succeeds cleanly or
+   stops for a human. A conflict is an escalation, not a puzzle to solve.
