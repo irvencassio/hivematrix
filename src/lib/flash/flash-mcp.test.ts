@@ -842,3 +842,24 @@ test("loadCuratedSkillTools: tags a skill as curated via frontmatter tool:true, 
     rmSync(TMP, { recursive: true, force: true });
   }
 });
+
+test("escalate_to_task's description parameter forbids inventing scope", () => {
+  // Regression (2026-07-16): Flash escalated a Browser Lane request into a task
+  // whose spec invented test targets ("banking portal", "Gmail"), re-proposed
+  // Keychain storage that had ALREADY shipped that day, and specified silent
+  // credential auto-refresh — contradicting the standing human-click-only rule.
+  // The worker then asked the operator about a bank integration that does not
+  // exist. The tool's guidance was simply "Full description of what needs to be
+  // done", which did nothing to prevent any of that.
+  const def = FLASH_ONLY_TOOL_DEFS.find((d) => d.function.name === "escalate_to_task");
+  assert.ok(def, "escalate_to_task must be defined");
+  const desc = String(
+    (def!.function.parameters as { properties?: Record<string, { description?: string }> })
+      .properties?.description?.description ?? "",
+  );
+  assert.match(desc, /OPERATOR'S OWN TERMS/i, "must anchor the spec to what was actually asked");
+  assert.match(desc, /Do NOT invent scope/i);
+  assert.match(desc, /test targets/i, "made-up test targets are the specific failure seen");
+  assert.match(desc, /already ship/i, "must not re-propose shipped capabilities");
+  assert.match(desc, /standing operator rule/i, "must not contradict a standing rule");
+});

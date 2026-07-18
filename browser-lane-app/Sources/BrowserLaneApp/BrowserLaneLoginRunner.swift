@@ -262,15 +262,24 @@ final class BrowserLaneLoginRunner {
     /// Sets the value through the native setter and fires input/change, so
     /// React/Angular-controlled inputs actually register it — assigning .value
     /// directly is silently ignored by their state and the form submits empty.
+    ///
+    /// focus/blur are part of the contract, not decoration: a validation-gated
+    /// form (Apple ID is the case that surfaced this) keeps its submit button
+    /// DISABLED until the field has been focused and then blurred, so a fill
+    /// that only dispatches input/change leaves the credential visibly typed
+    /// next to a dead "Continue" button.
     static func fillJS(_ selector: String, _ value: String) -> String {
         """
         (function(){var e=document.querySelector(\(jsString(selector)));
         if(!e)return "missing";
+        try{e.focus();}catch(_){}
         var p=Object.getPrototypeOf(e);
         var d=Object.getOwnPropertyDescriptor(p,"value");
         if(d&&d.set){d.set.call(e,\(jsString(value)));}else{e.value=\(jsString(value));}
         e.dispatchEvent(new Event("input",{bubbles:true}));
         e.dispatchEvent(new Event("change",{bubbles:true}));
+        e.dispatchEvent(new Event("blur",{bubbles:true}));
+        try{e.blur();}catch(_){}
         return "ok";})()
         """
     }

@@ -126,7 +126,19 @@ export const FLASH_ONLY_TOOL_DEFS: ChatTool[] = [
         type: "object",
         properties: {
           title: { type: "string", description: "Short title for the task" },
-          description: { type: "string", description: "Full description of what needs to be done" },
+          description: {
+            type: "string",
+            description:
+              "What needs to be done, in the OPERATOR'S OWN TERMS. Include what they actually asked for plus " +
+              "context you directly observed — nothing else. Do NOT invent scope: no made-up test targets, " +
+              "example sites, acceptance criteria, deployment steps, or multi-part solution designs the operator " +
+              "never mentioned. A fabricated detail becomes real work and real risk downstream (a spec that " +
+              "listed a 'banking portal' to test credential auto-fill against sent a worker asking about a bank " +
+              "integration that does not exist). If you are proposing an approach rather than relaying a request, " +
+              "say so explicitly and keep it to a sentence or two — the coding harness plans the solution, not you. " +
+              "Do not re-propose capabilities that already ship today, and never propose something that " +
+              "contradicts a standing operator rule (e.g. credential use always requires an explicit human click).",
+          },
           project: {
             type: "string",
             description:
