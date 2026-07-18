@@ -134,3 +134,34 @@ test("applyUpdateViaRelaunch refuses to relaunch when already current", async ()
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a failed update check expires fast instead of pinning the indicator dark", async () => {
+  // Regression 2026-07-18: 0.1.220 was live on the feed but the console showed
+  // no update. A transient fetch timeout had been cached exactly like a success,
+  // so `updateAvailable:false` persisted for the full 60s TTL on every poll.
+  let calls = 0;
+  const failing: typeof fetch = async () => { calls += 1; throw new Error("The operation was aborted due to timeout"); };
+  const ok: typeof fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ version: "99.0.0" }), { status: 200 });
+  };
+
+  // Anchor past the real clock: this module caches at module scope, so earlier
+  // tests in this file have already populated it with Date.now()-based stamps.
+  const t0 = Date.now() + 10_000_000;
+  const bad = await getUpdateStatus({ fetchImpl: failing, nowMs: t0, force: true });
+  assert.equal(bad.updateAvailable, false);
+  assert.ok(bad.error, "first check failed");
+  const callsAfterFail = calls;
+
+  // Still inside the ERROR ttl: served from cache, no refetch.
+  await getUpdateStatus({ fetchImpl: ok, nowMs: t0 + 2_000 });
+  assert.equal(calls, callsAfterFail, "within error-ttl the cached failure is reused");
+
+  // Past the SHORT error ttl but well inside the 60s success ttl: must refetch,
+  // and the real update must surface.
+  const good = await getUpdateStatus({ fetchImpl: ok, nowMs: t0 + 10_000 });
+  assert.equal(calls, callsAfterFail + 1, "a stale failure must be retried, not held for the full TTL");
+  assert.equal(good.latest, "99.0.0");
+  assert.equal(good.updateAvailable, true);
+});

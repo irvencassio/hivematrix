@@ -25,6 +25,8 @@ export const UPDATE_IN_PROGRESS_FLAG = join(homedir(), ".hivematrix", ".update-i
 const FEED_URL =
   "https://github.com/irvencassio/hivematrix/releases/latest/download/hivematrix-core.json";
 const TTL_MS = 60 * 1000;
+/** Failed checks expire fast — see the ttl selection in getUpdateStatus. */
+const ERROR_TTL_MS = 5 * 1000;
 const APPLYING_TTL_MS = 5 * 60 * 1000;
 const APP_PROCESS_MATCH = "HiveMatrix.app/Contents/MacOS/app";
 
@@ -77,7 +79,13 @@ export function compareVersions(a: string, b: string): number {
 export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeof fetch; updateInProgressPath?: string; forceFlagPath?: string; nowMs?: number } = {}): Promise<UpdateStatus> {
   const current = getBundledVersion();
   const now = opts.nowMs ?? Date.now();
-  if (!opts.force && cache && now - cache.at < TTL_MS) return cache.status;
+  // A FAILED check must not be cached as long as a successful one. A single
+  // transient fetch timeout otherwise pins `updateAvailable:false` for the full
+  // TTL, so the console's update indicator stays dark while an update really is
+  // published — which is exactly how 0.1.220 looked "not staged" despite being
+  // live on the feed. Errors expire fast so the next poll re-checks.
+  const ttl = cache?.status.error ? ERROR_TTL_MS : TTL_MS;
+  if (!opts.force && cache && now - cache.at < ttl) return cache.status;
   const fetchImpl = opts.fetchImpl ?? fetch;
   let status: UpdateStatus;
   try {
