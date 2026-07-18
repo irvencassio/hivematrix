@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.218 — 2026-07-18
+
+Tasks you escalate from chat now land in the repo you actually named. A request that explicitly said 'in hivematrix-ios' was filed against the daemon repo instead, which means the coding agent opens the wrong checkout, cannot find the files it was asked to change, and either fails or edits the wrong project — silently wasting the run. Flash must now pass exactly the repo you name and cannot substitute a similarly-named one. Also drops a stale example that pointed at the deprecated standalone watch repo, which can no longer ship; the watch app lives inside the iOS app.
+
 ## v0.1.217 — 2026-07-18
 
 Approvals are now actionable from the lock screen and the wrist. The daemon tags approval pushes with an actionable category, which is what makes iOS render Approve/Deny directly on the notification instead of plain text you have to unlock and chase. Paired with HiveMatrix iOS build 62 (uploaded to TestFlight): the phone app previously had no notification delegate at all, so a push arriving while the app was open was silently dropped and tapping one did nothing — now taps deep-link straight to the approval queue and the Approve/Deny buttons resolve without opening the app. The Watch gains an approvals screen (its API had been wired but unreachable) and a complication that shows how many approvals are waiting, so the watch face itself tells you when the loop is blocked on you.
