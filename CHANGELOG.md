@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.219 — 2026-07-18
+
+Two harness fixes found by inspecting a live run rather than trusting the tests. The adaptive effort default shipped two releases ago was never actually reaching the CLI: the spawn path handed it an already-resolved thinking mode, which collapses 'auto' to maximum reasoning, so every task still launched pinned at max — the exact slowness that change was meant to remove. Confirmed against a running agent started seconds after the previous release, which still carried the max flag. The unit tests had passed throughout because they exercised the argument builder directly and nothing covered the real call site; there is now a guard on the call site itself. Separately, the delegation instruction hardcoded specific model tiers, telling a Sonnet-routed agent that it was Opus and should hand work to Sonnet subagents — i.e. to itself. It is now model-agnostic, since the router chooses the tier and any hardcoded name can only drift from reality.
+
 ## v0.1.218 — 2026-07-18
 
 Tasks you escalate from chat now land in the repo you actually named. A request that explicitly said 'in hivematrix-ios' was filed against the daemon repo instead, which means the coding agent opens the wrong checkout, cannot find the files it was asked to change, and either fails or edits the wrong project — silently wasting the run. Flash must now pass exactly the repo you name and cannot substitute a similarly-named one. Also drops a stale example that pointed at the deprecated standalone watch repo, which can no longer ship; the watch app lives inside the iOS app.
