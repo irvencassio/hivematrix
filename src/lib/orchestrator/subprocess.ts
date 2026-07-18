@@ -631,12 +631,19 @@ export async function spawnAgent(
     }
   } catch { /* non-critical */ }
 
-  // Direct-session parity: the top-level task runs on the thinking tier (see
-  // resolveModelForAgentRole) — tell it to behave like an interactive Opus
-  // session that plans/reviews itself and delegates build work to Sonnet
-  // subagents, rather than doing every edit inline.
-  args.push("--append-system-prompt", DELEGATION_SYSTEM_PROMPT);
-  overheadBytes.agentGuide += Buffer.byteLength(DELEGATION_SYSTEM_PROMPT);
+  // Direct-session parity: tell the top-level (thinking-tier) model to plan and
+  // review itself and hand construction to Sonnet subagents.
+  //
+  // Scoped to SELF-PLANNING work only (workflow "work" — the broad-prompt path,
+  // see LEGACY_PREFIXES). A narrow task previously got this too, which pushed
+  // Opus to spawn subagents for work it could just do, adding round-trips and
+  // indirection for no gain — a real part of why Hive-run generation felt more
+  // roundabout than running `claude` directly. Broad work still benefits from
+  // decomposition, so it keeps the directive.
+  if (workflow === "work") {
+    args.push("--append-system-prompt", DELEGATION_SYSTEM_PROMPT);
+    overheadBytes.agentGuide += Buffer.byteLength(DELEGATION_SYSTEM_PROMPT);
+  }
 
   // Inject agent profile system prompt for non-developer types
   if (agentType && agentType !== "developer" && agentType !== "auto") {

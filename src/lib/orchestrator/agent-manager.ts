@@ -587,8 +587,19 @@ class AgentManager {
       // Merge models: keep unique list across all runs
       const allModels = [...new Set([...prevModels, ...agent.modelsUsed])];
 
+      // Time-to-first-token / wall-clock for this run. Every agent path already
+      // stamps firstTokenAt, but it was never persisted — so the number needed to
+      // judge prompt-overhead changes (does trimming the injected system prompts
+      // actually speed up first output?) was measured and thrown away. Recorded
+      // per run alongside promptOverhead, which subprocess.ts already stores.
+      const ttftMs = agent.firstTokenAt
+        ? agent.firstTokenAt.getTime() - agent.startedAt.getTime()
+        : null;
+
       const accumulatedOutput = {
         ...(task?.output ?? {}),
+        lastRunTtftMs: ttftMs,
+        lastRunDurationMs: Date.now() - agent.startedAt.getTime(),
         cost: prevCost + runCost,
         turns: prevTurns + runTurns,
         inputTokens: prevInput + runInput,

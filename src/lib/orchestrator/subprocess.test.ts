@@ -51,7 +51,7 @@ test("the coo agent profile's live-roster injection is wired into the Claude CLI
   assert.match(region, /--- Available agent types \(create_task\) ---/, "same injected header the local-agent path uses");
 });
 
-test("the top-level CLI task is told to delegate build work to Sonnet subagents", () => {
+test("the delegation directive is scoped to self-planning (broad) work only", () => {
   // The delegation prompt is appended inside spawnAgent (not buildClaudeSpawnArgs,
   // which has no access to agent-type/model context), so this is a source-level
   // regression guard rather than a spawn-mock test, matching the coo-roster test
@@ -59,7 +59,16 @@ test("the top-level CLI task is told to delegate build work to Sonnet subagents"
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "subprocess.ts"), "utf8");
   assert.match(src, /You are the top-level agent on Opus\./);
   assert.match(src, /delegate construction and implementation work to Sonnet subagents via the Agent tool/);
-  assert.match(src, /args\.push\("--append-system-prompt", DELEGATION_SYSTEM_PROMPT\)/);
+  // Regression: this used to be appended unconditionally, so a NARROW task was
+  // also pushed to spawn subagents for work it could just do — extra round-trips
+  // and indirection versus a direct `claude` session. It must now be gated on the
+  // broad/self-planning path.
+  const start = src.indexOf("Direct-session parity");
+  const end = src.indexOf("Inject agent profile system prompt");
+  assert.ok(start !== -1 && end > start, "delegation region should be locatable");
+  const region = src.slice(start, end);
+  assert.match(region, /if \(workflow === "work"\)/, "delegation must be gated on the self-planning workflow");
+  assert.match(region, /args\.push\("--append-system-prompt", DELEGATION_SYSTEM_PROMPT\)/);
 });
 
 test("Claude spawn args omit max-budget flag when budget is uncapped", () => {
