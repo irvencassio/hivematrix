@@ -191,6 +191,12 @@ export function getPendingStuck(): StuckRequest[] {
   }
 }
 
+/** Most-recent-first tiebreak for a task's pending stuck requests, or null if none. */
+export function selectLatestPendingStuck(pending: StuckRequest[]): StuckRequest | null {
+  if (!pending.length) return null;
+  return [...pending].sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
+}
+
 // ----- helpers -----
 
 function sleep(ms: number): Promise<void> {

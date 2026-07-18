@@ -13,7 +13,7 @@ import { taskWorktreesEnabled, createTaskWorktree, removeTaskWorktree } from "./
 import { captureRunTelemetry } from "@/lib/observability/capture";
 import type { StreamEvent } from "./stream-parser";
 import { TurnBuilder } from "./turn-builder";
-import type { Turn, WorkflowPhase } from "./turn-types";
+import type { Turn, WorkflowPhase, OutputView } from "./turn-types";
 import { deriveOutput } from "./derive-output";
 import { raiseStuck } from "./stuck";
 import { deriveReviewStateFromTurns } from "@/lib/tasks/review-state";
@@ -702,13 +702,20 @@ class AgentManager {
       // legacy log-walking heuristic when turns[] is empty (old tasks,
       // dual-write gap, or builder failure).
       let summary = "";
+      // Hoisted out of the try block below (and out from under the `if
+      // (turns.length > 0)` guard) so it's still in scope at the success- and
+      // failure-path output construction further down — both need it to gate
+      // `pendingOptions`. Stays `undefined` when there are no turns or
+      // deriveOutput throws, which the pendingOptions gate below treats as
+      // "no options to surface," same as today's absence of any headline.
+      let view: OutputView | undefined;
       const turns = (task as unknown as { turns?: Array<Record<string, unknown>> })?.turns ?? [];
       if (Array.isArray(turns) && turns.length > 0) {
         try {
           const workflow = task?.workflow && task.workflow !== "standalone"
             ? { workflow: task.workflow as string, stepIndex: (task.workflowStepIndex as number) ?? 0 }
             : undefined;
-          const view = deriveOutput(turns as unknown as Turn[], { workflow });
+          view = deriveOutput(turns as unknown as Turn[], { workflow });
           if (view.awaiting && view.headline) {
             summary = `❓ Awaiting your reply:\n\n${view.headline.text}`;
           } else if (view.headline?.text) {
@@ -767,6 +774,18 @@ class AgentManager {
         }
       }
 
+      // Gated on view.awaiting, not just view.headline?.options — a stale/
+      // answered question can still leave options on the headline in edge
+      // cases, but view.awaiting is the same signal reviewState below keys
+      // off (via the "❓ Awaiting your reply:" summary prefix), so
+      // pendingOptions and needs_input can never disagree about whether this
+      // task is genuinely waiting on the operator right now. Computed once
+      // and reused (as an object-literal shorthand key) at every exit site
+      // below rather than re-inlined, so success/failure and the DB-write/
+      // broadcast copies of `output` can't drift apart from each other.
+      const pendingOptions: string[] | null =
+        view?.awaiting && view.headline?.options?.length ? view.headline.options : null;
+
       if (code === 0) {
         // Re-read in case the agent PATCHed status (e.g. self-reported failure)
         // immediately before exiting.
@@ -787,6 +806,7 @@ class AgentManager {
           summary,
           filesChanged: [],
           transientRetries: 0, // reset on success
+          pendingOptions,
         };
         let nextStatus = agentReportedFailure ? "failed" : "review";
         let reviewState: string | null = agentReportedFailure
@@ -908,7 +928,7 @@ class AgentManager {
           agentPid: null,
           completedAt,
           error,
-          output: { ...accumulatedOutput, summary },
+          output: { ...accumulatedOutput, summary, pendingOptions },
           verification,
         });
         captureRunTelemetry({ taskId, task: task as Record<string, unknown> | null, agent, result, status: "failed", completedAt, runIndex: prevRunCount });
@@ -920,7 +940,7 @@ class AgentManager {
           agentPid: null,
           completedAt,
           error,
-          output: { ...accumulatedOutput, summary },
+          output: { ...accumulatedOutput, summary, pendingOptions },
           turns,
         });
         notifySuperwhisperTaskStop({

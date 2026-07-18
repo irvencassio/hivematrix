@@ -4269,11 +4269,12 @@ export function createDaemonServer() {
         if (!row) { json(res, 404, { error: "Not found" }); return; }
         // Attach pending stuck request so the UI can surface the question.
         if (row.reviewState === "needs_input") {
-          const { getPendingStuck } = await import("@/lib/orchestrator/stuck");
+          const { getPendingStuck, selectLatestPendingStuck } = await import("@/lib/orchestrator/stuck");
           const pending = getPendingStuck().filter(r => r.taskId === taskMatch[1]);
-          if (pending.length) {
-            const latest = pending.sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
+          const latest = selectLatestPendingStuck(pending);
+          if (latest) {
             (row as Record<string, unknown>).pendingQuestion = latest.reason;
+            (row as Record<string, unknown>).pendingOptions = latest.options?.length ? latest.options : null;
           }
         }
         json(res, 200, row);
