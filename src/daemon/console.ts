@@ -1814,7 +1814,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <button class="ov-nav oc-nav" id="goalsNav" onclick="showGoals()">🎯 Goals</button>
     <div class="form" id="taskForm">
       <input id="t_title" type="hidden" value="" />
-      <textarea id="t_desc" placeholder="What should the agent do? (be specific)"></textarea>
+      <textarea id="t_desc" placeholder="What should the agent do? (be specific)" onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();createTask();}"></textarea>
       <div id="t_enhanced_preview" class="t-enhanced-box" style="display:none">
         <div class="t-enhanced-label">✨ Enhanced prompt</div>
         <input type="text" id="t_enhanced_title" placeholder="Task name" maxlength="60" />
@@ -1867,6 +1867,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
           <option value="normal">Direct — one plain task</option>
         </select>
         <div class="muted" style="font-size:11px;margin-top:2px">Auto routes browsing work to the right lane and otherwise dispatches a single task — the coding harness plans its own steps. Pick Direct to force one plain task.</div>
+        <label class="flbl">Effort</label>
+        <select id="t_effort">
+          <option value="auto" selected>Auto — deepest reasoning (default)</option>
+          <option value="high">High</option>
+          <option value="medium">Medium — faster</option>
+          <option value="low">Low — fastest</option>
+        </select>
+        <div class="muted" style="font-size:11px;margin-top:2px">Lower effort = faster, cheaper turns for simple/mechanical tasks. Auto uses maximum reasoning — best for hard work, slowest to first output.</div>
       </details>
       <label class="flbl">Attachments</label>
       <div class="attach-row attach-drop" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onAttachDrop(event)">
@@ -9913,14 +9921,16 @@ async function createTask() {
     // Title optional — omit when blank so the daemon derives it from the instructions.
     const route = (document.getElementById("t_route") || {}).value || "auto";
     const agentType = (document.getElementById("t_role") || {}).value || "auto";
+    const thinkingMode = (document.getElementById("t_effort") || {}).value || "auto";
     const t = await api("/tasks", { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: projectName, model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent", route, agentType }) });
+      body: JSON.stringify({ title: title || undefined, description, attachments, projectPath, project: projectName, model: sel.modelId || null, fastMode: sel.fast, status: "backlog", executor: "agent", route, agentType, thinkingMode }) });
     // POST /tasks may return a normal task ({_id}) or a special route
     // ({routed,taskId} for workflow / browser-lane). All of these are success.
     const ok = t && (t._id || t.taskId || t.routed);
     if (!ok) { err.textContent = (t && t.error) ? String(t.error) : "Create failed."; return; }
     document.getElementById("t_title").value = ""; document.getElementById("t_desc").value = "";
     const roleSel = document.getElementById("t_role"); if (roleSel) roleSel.value = "auto";
+    const effortSel = document.getElementById("t_effort"); if (effortSel) effortSel.value = "auto";
     dismissEnhancedPrompt();
     _attachments = []; _attachError = ""; _attachUploading = 0; renderAttachChips();
     if (_taskFormInSession) _closeNewTaskPanel(); else toggleForm("taskForm");

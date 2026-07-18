@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readdirSync, unlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readdirSync, unlinkSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,7 +10,7 @@ const TMP = mkdtempSync(join(tmpdir(), "hm-approval-test-"));
 process.env.HOME = TMP;
 process.env.HIVEMATRIX_DB_PATH = join(TMP, "test.db");
 
-const { requestCheckpointApproval, readCheckpointDecision, getPendingApprovals, resolveApproval, generateHookScript } =
+const { requestCheckpointApproval, readCheckpointDecision, getPendingApprovals, resolveApproval, generateHookScript, generateHookSettings } =
   await import("./approval");
 const { setAutoApprovalPolicy } = await import("@/lib/voice/auto-approval-policy");
 const { setAutonomyLevel } = await import("@/lib/config/autonomy");
@@ -70,13 +70,13 @@ test("checkpoint auto-approval resolves only non-content checkpoints", () => {
 
 // ── generateHookScript: the PreToolUse hook consults the autonomy dial ────────
 //
-// The autonomy level is resolved once, Node-side, at generation time and baked
-// into the generated shell script as a constant (the hook itself has no way to
-// read live config). These tests actually execute the generated hook with a
-// synthetic tool_name/tool_input on stdin and observe whether it (a) exits 0
-// immediately with no approval request written, or (b) writes an approval
-// request file and blocks polling for a decision — which is what "still
-// requires approval" looks like from the outside.
+// The autonomy level is resolved Node-side at generation time as a baked-in
+// FALLBACK, but the MCP branch re-reads it live from config.json at run time so
+// a dial flip reaches an already-running task. These tests actually execute the
+// generated hook with a synthetic tool_name/tool_input on stdin and observe
+// whether it (a) exits 0 immediately with no approval request written, or (b)
+// writes an approval request file and blocks polling for a decision — which is
+// what "still requires approval" looks like from the outside.
 
 const APPROVALS_DIR_TEST = join(TMP, ".hivematrix", "approvals");
 
@@ -142,4 +142,44 @@ test("generateHookScript: manual mode requires approval for MCP tools, unchanged
   const scriptPath = generateHookScript("hook_manual_plain");
   const { requestedApproval } = runHook(scriptPath, "mcp__weather__get_forecast");
   assert.equal(requestedApproval, true, "manual mode must keep asking for every MCP tool call");
+});
+
+test("generateHookScript: a live dial flip (standard→autonomous) reaches an already-generated hook", () => {
+  // Generate the hook while the config says "standard" — its baked fallback is
+  // "standard", which would require approval for a plain MCP tool.
+  setAutonomyLevel("standard");
+  const scriptPath = generateHookScript("hook_live_flip");
+  assert.equal(
+    runHook(scriptPath, "mcp__weather__get_forecast").requestedApproval,
+    true,
+    "with config=standard the hook must still ask",
+  );
+  // Now flip the live config to autonomous WITHOUT regenerating the hook.
+  setAutonomyLevel("autonomous");
+  assert.equal(
+    runHook(scriptPath, "mcp__weather__get_forecast").requestedApproval,
+    false,
+    "the same hook script must honor the live autonomous dial and auto-approve",
+  );
+  // The hard safety floor is still enforced against the live level.
+  assert.equal(
+    runHook(scriptPath, "mcp__deploy__run_release").requestedApproval,
+    true,
+    "the safety floor must hold even after a live flip to autonomous",
+  );
+});
+
+test("generateHookSettings: PreToolUse matcher only targets Bash + MCP tools", () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "hm-hook-settings-"));
+  const settingsPath = generateHookSettings("hook_matcher_task", projectDir);
+  const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+  const matcher = settings.hooks.PreToolUse[0].matcher;
+  assert.equal(matcher, "Bash|mcp__.*", "matcher must be narrowed to gateable tools only");
+  // Sanity: the narrowed regex matches what needs gating and skips safe tools,
+  // so the hook never spawns for Read/Edit/Grep/etc.
+  assert.ok(/^(Bash|mcp__.*)$/.test("Bash"));
+  assert.ok(/^(Bash|mcp__.*)$/.test("mcp__weather__get_forecast"));
+  assert.ok(!/^(Bash|mcp__.*)$/.test("Edit"));
+  assert.ok(!/^(Bash|mcp__.*)$/.test("Read"));
+  rmSync(projectDir, { recursive: true, force: true });
 });

@@ -4382,6 +4382,15 @@ export function createDaemonServer() {
         const description = typeof body.description === "string" ? body.description : "";
         body.description = appendAttachmentBlock(description, attachments);
         delete body.attachments;
+        // Effort/reasoning tier (New Task "Effort" selector). Keep only a known
+        // value so it threads through the ...body spread into Task.create and on
+        // to spawnAgent; drop anything unrecognized so a bad client can't poison
+        // the stored thinkingMode (the DB default 'auto' then applies).
+        if (body.thinkingMode !== undefined &&
+            !(typeof body.thinkingMode === "string" &&
+              ["auto", "off", "low", "medium", "high", "xhigh", "max", "ultrathink"].includes(body.thinkingMode))) {
+          delete body.thinkingMode;
+        }
         // Optional caller-supplied grouping key (e.g. a coordinator inheriting its
         // parent's batchId). Reject anything that isn't a plain string so a bad
         // client can't hand SQLite a bind value it will choke on.

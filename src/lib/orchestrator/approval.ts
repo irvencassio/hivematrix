@@ -44,6 +44,9 @@ export function generateHookScript(taskId: string): string {
   // the Node side, at generation time, and baked into the script as a shell
   // constant. A later dial flip only takes effect on the next task spawn
   // (generateHookScript is called fresh per task in generateHookSettings).
+  // Resolved here as the fallback default baked into the script; the MCP branch
+  // below re-reads it live from config.json so a dial flip reaches a running
+  // task on its next tool call.
   const autonomyLevel = getAutonomyLevel();
   // Hard safety floor (never bypassed, even under "autonomous"): an MCP tool
   // call whose name or input looks like a release/deploy/publish or a
@@ -84,14 +87,16 @@ case "$TOOL_NAME" in
     ;;
 esac
 
-# Read-only SSH MCP tools — auto-approve when sshDiagnostics is enabled
-if grep -q '"sshDiagnostics".*true' "$HOME/.hivematrix/config.json" 2>/dev/null; then
-  case "$TOOL_NAME" in
-    mcp__ssh__list_hosts|mcp__ssh__exec|mcp__ssh__read_file|mcp__ssh__compare_files|mcp__ssh__list_crontabs|mcp__ssh__check_cron_output)
+# Read-only SSH MCP tools — auto-approve when sshDiagnostics is enabled.
+# The config grep only runs for these specific tool names, so no other gated
+# call pays for a config.json read here.
+case "$TOOL_NAME" in
+  mcp__ssh__list_hosts|mcp__ssh__exec|mcp__ssh__read_file|mcp__ssh__compare_files|mcp__ssh__list_crontabs|mcp__ssh__check_cron_output)
+    if grep -q '"sshDiagnostics".*true' "$HOME/.hivematrix/config.json" 2>/dev/null; then
       exit 0
-      ;;
-  esac
-fi
+    fi
+    ;;
+esac
 
 # Superpowers / CCD session tools — approved by repository policy
 case "$TOOL_NAME" in
@@ -118,10 +123,11 @@ if [ "$TOOL_NAME" = "Bash" ]; then
     # Write approval request (python3 handles JSON escaping)
     write_approval_json "${taskId}" "\${TIMESTAMP}" "$TOOL_NAME" "$COMMAND" "Risky Bash command detected" "$REQUEST_FILE"
 
-    # Poll for decision (max 30 min = 1800 seconds)
+    # Poll for decision (0.2s granularity so the agent resumes near-instantly
+    # after the operator approves; 9000 * 0.2s = 1800s = 30 min total timeout).
     WAITED=0
-    while [ ! -f "$DECISION_FILE" ] && [ $WAITED -lt 1800 ]; do
-      sleep 1
+    while [ ! -f "$DECISION_FILE" ] && [ $WAITED -lt 9000 ]; do
+      sleep 0.2
       WAITED=$((WAITED + 1))
     done
 
@@ -147,6 +153,14 @@ fi
 # doesn't hit the hard safety floor (release/deploy/publish/destructive
 # delete-rm-drop). manual/standard always require approval here, unchanged.
 if echo "$TOOL_NAME" | grep -q "^mcp__"; then
+  # Live-read the autonomy dial so flipping it (e.g. to "autonomous" to unblock a
+  # long-running agent) takes effect on the NEXT tool call of an already-running
+  # task, not only on the next task spawn. Falls back to the generation-time
+  # baked value when the config is unreadable/absent, so behavior is unchanged
+  # in that case.
+  LIVE_AUTONOMY=$(grep -oE '"autonomy"[[:space:]]*:[[:space:]]*"[a-z]+"' "$HOME/.hivematrix/config.json" 2>/dev/null | head -1 | sed -E 's/.*"([a-z]+)"$/\\1/')
+  if [ -n "$LIVE_AUTONOMY" ]; then AUTONOMY_LEVEL="$LIVE_AUTONOMY"; fi
+
   FLOOR_HIT=0
   if echo " $TOOL_NAME $TOOL_INPUT " | grep -qiE "$FLOOR_PATTERN"; then
     FLOOR_HIT=1
@@ -165,9 +179,10 @@ if echo "$TOOL_NAME" | grep -q "^mcp__"; then
   fi
   write_approval_json "${taskId}" "\${TIMESTAMP}" "$TOOL_NAME" "$TOOL_INPUT" "$MCP_REASON" "$REQUEST_FILE"
 
+  # 0.2s poll granularity (see the Bash poll loop above); 9000 * 0.2s = 30 min.
   WAITED=0
-  while [ ! -f "$DECISION_FILE" ] && [ $WAITED -lt 1800 ]; do
-    sleep 1
+  while [ ! -f "$DECISION_FILE" ] && [ $WAITED -lt 9000 ]; do
+    sleep 0.2
     WAITED=$((WAITED + 1))
   done
 
@@ -205,11 +220,19 @@ export function generateHookSettings(taskId: string, projectPath: string): strin
 
   if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
 
+  // Only gate the tools that can actually require approval: Bash (risky
+  // commands) and MCP tools. Read/Glob/Grep/Agent/Edit/Write/Skill/TodoWrite/
+  // NotebookEdit/WebFetch/WebSearch/ToolSearch are unconditionally allowed by
+  // the hook script anyway, so matching them here only spawned a bash process
+  // per call for a guaranteed `exit 0` — pure latency on the dominant tool
+  // calls. Narrowing the matcher skips the hook entirely for those (they still
+  // run, since --dangerously-skip-permissions grants them). The generated
+  // script keeps its own safe-tool short-circuit as defense in depth.
   const settings = {
     hooks: {
       PreToolUse: [
         {
-          matcher: ".*",
+          matcher: "Bash|mcp__.*",
           hooks: [
             {
               type: "command",

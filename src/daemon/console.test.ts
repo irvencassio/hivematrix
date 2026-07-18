@@ -65,6 +65,25 @@ test("console script has no obvious TS-only syntax", () => {
   assert.doesNotMatch(js, /\bas\s+(HTML[A-Za-z]+|string|number|boolean|any)\b/, "found a TS `as Type` cast");
 });
 
+test("New Task exposes a per-task Effort selector wired into the create payload", () => {
+  // The backend supports a per-task thinkingMode, but the UI previously hid it,
+  // forcing every task through the global max-effort default. Surface it so
+  // simple tasks can run fast.
+  assert.match(CONSOLE_HTML, /id="t_effort"/, "an Effort selector must exist in New Task");
+  const js = extractScript(CONSOLE_HTML);
+  // createTask reads the selector and sends it as thinkingMode.
+  assert.match(js, /getElementById\("t_effort"\)/, "createTask must read the Effort selector");
+  assert.match(js, /thinkingMode/, "createTask must send thinkingMode in the POST body");
+});
+
+test("New Task description submits on Cmd/Ctrl+Enter", () => {
+  // Match the textarea and its keydown handler regardless of attribute spacing.
+  const m = CONSOLE_HTML.match(/id="t_desc"[^>]*onkeydown="([^"]+)"/);
+  assert.ok(m, "t_desc textarea must have an onkeydown handler");
+  assert.match(m[1], /metaKey|ctrlKey/, "handler checks for the Cmd/Ctrl modifier");
+  assert.match(m[1], /createTask\(\)/, "handler submits the task");
+});
+
 test("window title does not redundantly repeat the in-page HiveMatrix logo", () => {
   assert.doesNotMatch(
     CONSOLE_HTML,

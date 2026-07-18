@@ -161,3 +161,36 @@ test("assembleSystemPrompt: watch and glasses are also spoken channels; imessage
   assert.doesNotMatch(mailPrompt, /reply will be read by text-to-speech/);
   assert.doesNotMatch(androidPrompt, /reply will be read by text-to-speech/);
 });
+
+test("assembleSystemPrompt: an always-on voice doctrine sets a warm, non-robotic tone on every surface", async () => {
+  // Tone guidance must be present even with no brain root / no persona files —
+  // that is exactly when a blank SOUL.md would otherwise leave a generic voice.
+  for (const channel of ["console", "voice", "imessage", "mail"] as const) {
+    const prompt = await assembleSystemPrompt("hi", "", null, channel);
+    assert.match(prompt, /How to sound/, `${channel} must carry the voice doctrine`);
+    assert.match(prompt, /not a generic chatbot/, `${channel} voice doctrine body`);
+    assert.match(prompt, /Address the operator by name/);
+    // It must explicitly defer to a defined persona so a rich SOUL.md wins.
+    assert.match(prompt, /let it refine this voice/);
+  }
+});
+
+test("assembleSystemPrompt: iMessage gets plain-text texting style, mail gets email style, console gets neither", async () => {
+  const imessagePrompt = await assembleSystemPrompt("hi", "", null, "imessage");
+  const mailPrompt = await assembleSystemPrompt("hi", "", null, "mail");
+  const consolePrompt = await assembleSystemPrompt("hi", "", null, "console");
+
+  // iMessage: short, plain-text, markdown explicitly banned (it leaks as literal
+  // # / * / - characters into a text bubble).
+  assert.match(imessagePrompt, /replying in a text message/i);
+  assert.match(imessagePrompt, /literal #, \*, and - characters/);
+  assert.doesNotMatch(imessagePrompt, /drafting an email/);
+
+  // Mail: plain prose, no markdown, but distinct from the terse texting register.
+  assert.match(mailPrompt, /drafting an email/);
+  assert.doesNotMatch(mailPrompt, /replying in a text message/i);
+
+  // Console renders markdown fine, so it gets no surface-format override.
+  assert.doesNotMatch(consolePrompt, /replying in a text message/i);
+  assert.doesNotMatch(consolePrompt, /drafting an email/);
+});

@@ -89,7 +89,7 @@ function buildTranscript(turns: FlashTurnRow[]): string {
 // Prompt + model call (non-streaming; cheap distillation pass)
 // ------------------------------------------------------------------
 
-function buildDistillPrompt(channel: string, peer: string, transcript: string): string {
+export function buildDistillPrompt(channel: string, peer: string, transcript: string): string {
   return `You are analyzing a Flash Lane conversation to extract reusable learnings.
 
 ## Session (channel: ${channel}, peer: ${peer})
@@ -126,8 +126,12 @@ Rules:
 - failures: "bug" = something broke or errored; "enhancement" = friction/unmet need/capability gap. 0–5 items.
 - notable_events: Decisions, completed actions, context worth recalling later. 0–3 items.
 - operator_facts: Durable facts about the OPERATOR as a person — their name, stated preferences,
-  working rhythm, recurring frustrations. NOT task details, NOT goals. Only what is stated
-  or clearly evidenced in the transcript; never guess. 0–3 items.
+  working rhythm, recurring frustrations, AND how they like to be communicated with (preferred
+  brevity, formality, humor, how they want to be addressed, when to nudge vs. stay quiet, phrasing
+  they pushed back on). Communication-style preferences are first-class here: they let you adapt
+  your voice to this specific person over time. NOT task details, NOT goals. Only what is stated
+  or clearly evidenced in the transcript — including an explicit correction of your tone; never
+  guess. 0–3 items.
 - operator_goals: Concrete objectives or deadlines the operator is working toward (e.g. "ship X by
   August", "grow revenue to Y"). Only ones the operator actually stated. NOT one-off task requests. 0–3 items.
 - If nothing worth extracting, return {"skills":[],"failures":[],"notable_events":[],"operator_facts":[],"operator_goals":[]}.
