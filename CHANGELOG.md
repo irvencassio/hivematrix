@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.213 — 2026-07-18
+
+Browser Lane can now fill logins that live in a cross-origin iframe (App Store Connect / Apple Developer, which sign in through Apple ID on idmsa.apple.com) — the credential is origin-checked against the iframe's real WebKit origin before anything is typed, so it only fills where you allow-listed. Also adds real browser navigation: back / forward / reload-stop with keyboard shortcuts, a load progress bar, copy-URL, open-in-default-browser, and trackpad swipe-to-navigate + pinch-to-zoom.
+
 ## v0.1.212 — 2026-07-17
 
 Keep one browser alive so sessions survive site switches — signing into a site (Apple ID / App Store Connect especially) no longer logs you out when you switch to another site. Switching sites previously rebuilt the WebKit view and dropped in-memory session cookies and auth state; the browser is now a single persistent instance.
