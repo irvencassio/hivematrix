@@ -142,9 +142,16 @@ export const FLASH_ONLY_TOOL_DEFS: ChatTool[] = [
           project: {
             type: "string",
             description:
-              "Name of the target project/repo, e.g. \"hivematrix-watch\" or \"ohio-life-ace\" — resolved " +
+              "Name of the target project/repo, e.g. \"hivematrix-ios\" or \"ohio-life-ace\" — resolved " +
               "automatically against known projects. Prefer this over projectPath when you know the project " +
-              "by name but not its exact path. Omit only for tasks with no specific project (e.g. \"book a flight\").",
+              "by name but not its exact path. " +
+              "If the operator NAMES a repo in their request (\"in hivematrix-ios, ...\"), pass exactly that " +
+              "name — never substitute a similarly-named one. Picking the wrong repo is silently expensive: " +
+              "the coding agent opens that checkout, cannot find the files it was asked to change, and may " +
+              "edit the wrong project (a request to restructure hivematrix-ios navigation was filed against " +
+              "hivematrix and would have run in the daemon repo). The iOS app and its embedded WATCH app both " +
+              "live in \"hivematrix-ios\" — there is no separate shippable watch repo. " +
+              "Omit only for tasks with no specific project (e.g. \"book a flight\").",
           },
           projectPath: {
             type: "string",

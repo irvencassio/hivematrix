@@ -863,3 +863,21 @@ test("escalate_to_task's description parameter forbids inventing scope", () => {
   assert.match(desc, /already ship/i, "must not re-propose shipped capabilities");
   assert.match(desc, /standing operator rule/i, "must not contradict a standing rule");
 });
+
+test("escalate_to_task's project parameter pins the operator's named repo and drops the dead watch example", () => {
+  // Regression (2026-07-18): "in hivematrix-ios, remove the Documents tab..." was
+  // filed with project=hivematrix / projectPath=/Users/irvcassio/hivematrix, so
+  // the coding agent would have opened the DAEMON repo, found no RootView.swift,
+  // and either failed or edited the wrong project.
+  const def = FLASH_ONLY_TOOL_DEFS.find((d) => d.function.name === "escalate_to_task");
+  const desc = String(
+    (def!.function.parameters as { properties?: Record<string, { description?: string }> })
+      .properties?.project?.description ?? "",
+  );
+  assert.match(desc, /NAMES a repo/i, "must pin the repo the operator actually named");
+  assert.match(desc, /never substitute a similarly-named one/i);
+  // The old example pointed at the deprecated standalone watch repo, which
+  // cannot ship — the watch app lives inside hivematrix-ios.
+  assert.doesNotMatch(desc, /hivematrix-watch/, "must not suggest the deprecated watch repo");
+  assert.match(desc, /hivematrix-ios/);
+});
