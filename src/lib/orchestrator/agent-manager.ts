@@ -1,4 +1,5 @@
 import { Task } from "@/lib/db";
+import { broadcastEvent } from "@/lib/ws/broadcaster";
 import { MAX_AGENTS } from "@/lib/config/constants";
 import { NO_REPO_LOCK_PROJECTS } from "@/lib/routing/aliases";
 import {
@@ -406,6 +407,22 @@ class AgentManager {
       });
     } catch {
       // Don't crash on log write failure
+    }
+
+    // Tell the console new output exists. Without this the live transcript has NO
+    // push path at all: setBroadcaster() is never called by anything, so the
+    // per-delta this.broadcaster(...) calls above go to a no-op, and the console's
+    // only way to discover agent output is its 5s backstop poll — which is exactly
+    // why generation appeared to arrive in 5-second chunks regardless of how fast
+    // the model actually streamed.
+    //
+    // Emitted on the FLUSH (already debounced to 500ms), never per token: the
+    // console's handler for this event re-polls, so a per-token emit would be a
+    // refresh storm. 500ms is a 10x latency win at <=2 refreshes/sec.
+    try {
+      broadcastEvent("tasks:updated", { taskId });
+    } catch {
+      // Broadcasting is a UI nicety — never let it break the run.
     }
   }
 
