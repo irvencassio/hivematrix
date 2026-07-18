@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.214 — 2026-07-18
+
+Faster, less-blocking Claude Code generation and a warmer, more reachable assistant. The coding harness no longer runs its approval hook on read-only tools (Read/Edit/Grep/etc. skip it entirely — verified against the Claude CLI; Bash and MCP tools are still gated exactly as before), reads the autonomy dial live so flipping to Autonomous unblocks an already-running agent on its next tool call, and polls approvals 5x faster. Flash now carries an always-on warm, direct voice (deferring to your SOUL/IDENTITY persona) and writes plain text to iMessage/Mail instead of leaking markdown into text bubbles, and it learns how you like to be talked to over time. Approvals and stuck tasks now push to your phone and watch over APNs/FCM even when the app is closed. The heartbeat now sees your live console/voice conversation so it stops nagging about things you already handled. New Task gains a per-task Effort selector (run simple tasks fast without touching the global default) and Cmd/Ctrl+Enter to submit.
+
 ## v0.1.213 — 2026-07-18
 
 Browser Lane can now fill logins that live in a cross-origin iframe (App Store Connect / Apple Developer, which sign in through Apple ID on idmsa.apple.com) — the credential is origin-checked against the iframe's real WebKit origin before anything is typed, so it only fills where you allow-listed. Also adds real browser navigation: back / forward / reload-stop with keyboard shortcuts, a load progress bar, copy-URL, open-in-default-browser, and trackpad swipe-to-navigate + pinch-to-zoom.
