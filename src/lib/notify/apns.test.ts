@@ -101,3 +101,29 @@ test("device registry persists through HiveMatrix config", () => {
   unregisterApnsDevice("tok1");
   assert.deepEqual(listApnsDevices().map((d) => d.token), ["tok2"]);
 });
+
+test("buildApnsPayload tags approval pushes with the actionable category", () => {
+  // Without aps.category iOS renders the push as plain text — no Approve/Deny
+  // buttons — so the operator must unlock, open the app and find the queue,
+  // which defeats the point of pushing approvals to the phone at all.
+  const approval = JSON.parse(buildApnsPayload({
+    title: "Approval needed",
+    body: "mcp__mail__send — Email Carolin",
+    data: { kind: "approval", taskId: "t_1", timestamp: "ts_1" },
+  }));
+  assert.equal(approval.aps.category, "HM_APPROVAL");
+  // The delegate resolves straight from these without opening the app.
+  assert.equal(approval.taskId, "t_1");
+  assert.equal(approval.timestamp, "ts_1");
+  assert.equal(approval.aps.alert.title, "Approval needed");
+
+  // Non-approval pushes (morning brief, voice loop-closure) stay plain: they
+  // have no actions to offer, and a stray category would render dead buttons.
+  const brief = JSON.parse(buildApnsPayload({
+    title: "Morning brief", body: "two events today", data: { kind: "morning-brief" },
+  }));
+  assert.equal(brief.aps.category, undefined);
+
+  const bare = JSON.parse(buildApnsPayload({ title: "x", body: "y" }));
+  assert.equal(bare.aps.category, undefined);
+});

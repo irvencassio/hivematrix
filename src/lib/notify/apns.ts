@@ -205,11 +205,29 @@ export function groupDevicesByHost(devices: ApnsDevice[], config: ApnsConfig): M
   return groups;
 }
 
-/** Pure: the JSON payload body APNs expects for a simple alert push. */
+/**
+ * Pure: the JSON payload body APNs expects for a simple alert push.
+ *
+ * `data.kind === "approval"` also sets the aps `category`, which is what makes
+ * iOS render the Approve/Deny buttons on the notification (the app registers a
+ * matching UNNotificationCategory with that id). Without the category the push
+ * still arrives, but it is just text — the operator has to unlock, open the app
+ * and find the queue, which defeats the point of pushing approvals at all.
+ * data.taskId/timestamp ride along as top-level keys, which is where the app's
+ * notification delegate reads them from to resolve without opening.
+ */
+export const APNS_APPROVAL_CATEGORY = "HM_APPROVAL";
+
 export function buildApnsPayload(opts: Pick<ApnsPushOptions, "title" | "body" | "data">): string {
+  const data = opts.data ?? {};
+  const isApproval = data.kind === "approval";
   return JSON.stringify({
-    aps: { alert: { title: opts.title, body: opts.body }, sound: "default" },
-    ...(opts.data ?? {}),
+    aps: {
+      alert: { title: opts.title, body: opts.body },
+      sound: "default",
+      ...(isApproval ? { category: APNS_APPROVAL_CATEGORY } : {}),
+    },
+    ...data,
   });
 }
 
