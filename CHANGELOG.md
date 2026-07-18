@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.221 — 2026-07-18
+
+Fixes the update indicator going dark while an update really was published. The version check cached a failed fetch exactly like a successful one, so a single transient network timeout pinned 'no update available' for a full minute and every poll in that window re-served the stale failure — which is why 0.1.220 looked like it was never staged even though it was live on the feed the whole time. Failed checks now expire in seconds so the next poll retries, while successful checks keep their normal cache. Also records the outstanding work from this run in docs/open-items-2026-07-18.md, including three debugging facts that each cost real time: the exact launch arguments of a run are stored on the task itself rather than inferred from the process list, browser sign-in recipes live under a differently-named field than you would guess, and building the iOS app for the simulator fails on the embedded watch target.
+
 ## v0.1.220 — 2026-07-18
 
 Agents no longer clobber each other's work. Everything here runs against one shared checkout — you, and every task agent — and finished-but-unreviewed work routinely sits uncommitted in it. A blanket 'git add -A' therefore sweeps someone else's feature into an unrelated commit under an unrelated message, which is exactly what happened: roughly 900 lines of a finished console feature were absorbed into a harness fix and would have shipped inside an unrelated release, caught only because the release script refuses to build off a non-main branch. Agents are now told, in the file every coding agent reads and again in the task itself, to stage only the files they touched, to commit their own work before finishing so it cannot be swept, and never to merge or resolve conflicts. Integration is now a mechanical fast-forward-only step that refuses on a dirty tree or a diverged branch and hands the decision back to you, because a merge needs the intent of both sides and an agent only ever authored one.
