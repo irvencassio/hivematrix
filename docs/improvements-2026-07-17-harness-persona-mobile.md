@@ -69,7 +69,55 @@ corrections. Makes the always-on voice doctrine (#2) adapt to you over time.
 Reuses the existing primitive rather than adding a new store/section (complexity
 budget).
 
-## Recommendations (operator-decision or needs Swift/live verification)
+## Round 2 (2026-07-18) — operator reviewed the held items; decisions applied
+
+Shipped after review (all verified, full suite green):
+
+- **Message Lane repaired** (`messagebee/imessage.ts`). Two failures hid behind one
+  opaque string. 2026-07-15: ~20 sends failed `-1719` ("Can't get account 1 whose
+  service type = iMessage") — the account list intermittently enumerates EMPTY
+  while iMessage is signed in and sending fine; added a chat-id recovery path
+  (`any;-;+1555…`, the macOS 26 service-agnostic prefix, verified against
+  chat.db), keeping account/participant PRIMARY since it is proven and also
+  covers brand-new recipients. 2026-07-18: sends TIMED OUT with empty stderr
+  after the 0.1.214 update re-triggered the Automation (TCC) consent prompt,
+  unanswered overnight. `formatSendFailure()` now separates timeout from script
+  error and keeps stderr/stdout/exit code. Verified end-to-end: AppleScript
+  compiles (`osacompile`), and a real message was delivered.
+- **Effort default is adaptive** (`config/budget-policy.ts`). "auto" no longer
+  collapses to "max"; `--effort` is omitted so the CLI picks depth per turn, as
+  in a direct session. Explicit tiers still honored; junk stays conservative.
+- **One morning voice** (`flash/heartbeat.ts`). The persona moment folds
+  `composeDayBrief`'s facts into its snapshot; the deterministic ritual
+  suppresses its own send when a moment covers that part of day (runtime check,
+  so an existing config can't double-send).
+- **Harness prompt trimmed + measured** (`orchestrator/`). The delegation
+  directive is gated on `workflow === "work"` so narrow tasks stop being pushed
+  into subagent round-trips; `lastRunTtftMs`/`lastRunDurationMs` are now
+  persisted so prompt-overhead work can actually be judged.
+- **`git push` left auto-allowed** by operator decision (gating it would deadlock
+  unattended overnight runs).
+
+### Still open (operator approved, not yet built)
+
+1. **Console token streaming** — approved approach: build it and verify against an
+   ISOLATED throwaway daemon (temp HOME/DB, alt port), never the live one.
+   Touches `daemon/server.ts` `/events` (carry transcript deltas in the payload)
+   and `daemon/console.ts` (`refresh`/`selectTask` → append-only rendering
+   instead of full `innerHTML` rebuild). Large change to a 10k-line inline
+   script; `console.test.ts` parses the whole script for syntax, which is the
+   safety net.
+2. **iOS + Watch** — approved to build AND release (operator confirmed no manual
+   step needed; the Watch app lives INSIDE `hivematrix-ios`, not the deprecated
+   standalone repo). iOS: `UNUserNotificationCenterDelegate` (`willPresent` +
+   `didReceive`) to deep-link into Approvals, plus Approve/Deny notification
+   actions calling the existing `resolveApproval`. Watch: an approvals list
+   (`APIClient.swift` already exposes `pendingApprovals`/`resolveApproval`,
+   unused) and a live complication showing pending count. Ships via App Store
+   Connect (`release-hivematrix-ios` skill); note the build-number drift
+   gotcha — bump above ASC's highest.
+
+## Original recommendations (superseded above where applied)
 
 Ranked by impact:
 
