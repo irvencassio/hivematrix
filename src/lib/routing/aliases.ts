@@ -91,14 +91,33 @@ export interface ResolvedProject {
  * nothing matches — callers must not silently default to homedir() for a
  * name they were given but couldn't resolve.
  */
+/** Fold a project name to its comparable core: case, hyphens, underscores and
+ *  spaces all dropped. "IronSixty" / "ironsixty" / "Iron Sixty" / "iron_sixty"
+ *  all reduce to "ironsixty" and match the `iron-sixty` checkout. */
+function foldProjectName(s: string): string {
+  return s.toLowerCase().replace(/[\s_-]+/g, "");
+}
+
 export function resolveProjectByName(name: string): ResolvedProject | null {
   const trimmed = name.trim();
   if (!trimmed) return null;
   const aliasPath = resolveProject(trimmed);
   if (aliasPath) return { name: trimmed, path: aliasPath };
   const lower = trimmed.toLowerCase();
-  const discovered = discoverProjects().find((p) => p.name.toLowerCase() === lower);
-  return discovered ? { name: discovered.name, path: discovered.path } : null;
+  const projects = discoverProjects();
+  const exact = projects.find((p) => p.name.toLowerCase() === lower);
+  if (exact) return { name: exact.name, path: exact.path };
+
+  // Punctuation-insensitive fallback. A repo directory is hyphenated
+  // (`iron-sixty`) while the product — and therefore what the operator types and
+  // what the app calls itself in Xcode — is not (`IronSixty`, "ironsixty").
+  // Requiring the exact directory spelling meant a request that clearly named
+  // its project silently fell back to `hivematrix` + $HOME, and the agent then
+  // ran in the wrong checkout. Observed twice on 2026-07-18.
+  const folded = foldProjectName(trimmed);
+  if (!folded) return null;
+  const loose = projects.find((p) => foldProjectName(p.name) === folded);
+  return loose ? { name: loose.name, path: loose.path } : null;
 }
 
 export function parseProjectFromMessage(message: string): {

@@ -43,3 +43,20 @@ test("resolveProjectByName returns null when nothing matches", () => {
 test("resolveProjectByName returns null for blank input", () => {
   assert.equal(resolveProjectByName("   "), null);
 });
+
+test("resolveProjectByName tolerates hyphen/case/space variants of a real checkout", () => {
+  // Regression 2026-07-18 (twice): "we should have ironsixty pull health data…"
+  // was filed against `hivematrix` because only the exact directory spelling
+  // `iron-sixty` resolved. The repo dir is hyphenated while the product — and
+  // what the operator types, and what the app calls itself in Xcode — is not.
+  // The agent then ran in the wrong checkout and the task failed.
+  const canonical = resolveProjectByName("iron-sixty");
+  if (!canonical) return; // checkout not present in this environment; nothing to assert against
+  for (const variant of ["ironsixty", "IronSixty", "Iron Sixty", "iron_sixty", "IRON-SIXTY"]) {
+    const r = resolveProjectByName(variant);
+    assert.ok(r, `${variant} should resolve`);
+    assert.equal(r!.path, canonical.path, `${variant} must resolve to the same checkout`);
+  }
+  // Folding must not invent matches for projects that don't exist.
+  assert.equal(resolveProjectByName("totally-not-a-repo-xyz"), null);
+});
