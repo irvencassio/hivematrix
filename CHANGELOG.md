@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.222 — 2026-07-18
+
+Tasks you escalate from chat now reach the right repo even when you don't spell it exactly like the folder. Asking for work 'in ironsixty' was filed against HiveMatrix itself with no project directory, so the coding agent opened the wrong checkout, could not find the files it was asked to change, and the task failed outright — the second time in a day. The cause was that only the literal hyphenated directory name resolved: the folder is iron-sixty while the product, and what you actually type, is IronSixty. Project names now match regardless of hyphens, underscores, spaces or capitalisation, so ironsixty, IronSixty and Iron Sixty all reach the same checkout, while a genuinely unknown name still fails cleanly rather than being force-matched to something close.
+
 ## v0.1.221 — 2026-07-18
 
 Fixes the update indicator going dark while an update really was published. The version check cached a failed fetch exactly like a successful one, so a single transient network timeout pinned 'no update available' for a full minute and every poll in that window re-served the stale failure — which is why 0.1.220 looked like it was never staged even though it was live on the feed the whole time. Failed checks now expire in seconds so the next poll retries, while successful checks keep their normal cache. Also records the outstanding work from this run in docs/open-items-2026-07-18.md, including three debugging facts that each cost real time: the exact launch arguments of a run are stored on the task itself rather than inferred from the process list, browser sign-in recipes live under a differently-named field than you would guess, and building the iOS app for the simulator fails on the embedded watch target.
