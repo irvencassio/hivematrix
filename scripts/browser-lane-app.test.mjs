@@ -261,6 +261,33 @@ test("Browser Lane has a Readiness dashboard with per-site status and actions", 
 // sessionStorage / in-memory auth / un-flushed cookies — so a login didn't
 // survive switching sites (hit on App Store Connect). One browser instance must
 // be reused, and re-showing it must not reload the current page.
+test("Browser Lane has standard browser navigation controls", () => {
+  const browser = readFileSync(
+    join(root, "browser-lane-app/Sources/BrowserLaneApp/BrowserViewController.swift"),
+    "utf8",
+  );
+  // Back / forward / reload, wired to the web view.
+  assert.match(browser, /webView\.goBack\(\)/);
+  assert.match(browser, /webView\.goForward\(\)/);
+  assert.match(browser, /webView\.stopLoading\(\)/);
+  assert.match(browser, /webView\.reload\(\)/);
+  // Keyboard shortcuts (⌘[ ⌘] ⌘R).
+  assert.match(browser, /keyEquivalent = key/);
+  assert.match(browser, /symbol: "chevron.backward"[\s\S]{0,120}key: "\["/);
+  assert.match(browser, /symbol: "chevron.forward"[\s\S]{0,120}key: "\]"/);
+  // Enable/disable back & forward + drive progress from live state, not guesses.
+  assert.match(browser, /observe\(\\.canGoBack/);
+  assert.match(browser, /observe\(\\.canGoForward/);
+  assert.match(browser, /observe\(\\.estimatedProgress/);
+  assert.match(browser, /observe\(\\.isLoading/);
+  // Swipe-to-navigate and pinch-zoom, like any Mac browser.
+  assert.match(browser, /allowsBackForwardNavigationGestures = true/);
+  assert.match(browser, /allowsMagnification = true/);
+  // Copy URL + open in the default browser.
+  assert.match(browser, /NSPasteboard\.general\.setString\(url/);
+  assert.match(browser, /NSWorkspace\.shared\.open\(url\)/);
+});
+
 test("Browser Lane keeps one browser instance across site switches", () => {
   const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
   const content = readFileSync(join(sourceDir, "ContentViewController.swift"), "utf8");
@@ -409,21 +436,54 @@ test("Browser Lane login recipes cannot carry or leak a stored sign-in", () => {
   assert.match(recipe, /return "\$username"/);
   assert.match(recipe, /return "\$password"/);
 
-  // Origin check before any step that types a stored sign-in. Suffix-with-dot,
+  // Origin check on any step that types a stored sign-in. Suffix-with-dot,
   // never `contains` — "evil-linkedin.com" contains "linkedin.com".
   assert.match(runner, /func hostIsAllowed/);
   assert.match(runner, /host == domain \|\| host\.hasSuffix\("\." \+ domain\)/);
   assert.doesNotMatch(runner, /\.contains\(host\)/);
-  assert.match(runner, /if current\.carriesCredential/);
-  assert.match(runner, /completion\(\.originRefused/);
+  // A secret fill goes through the atomic fillCredential, which origin-checks
+  // the frame it lands in before typing; the runner surfaces a refusal.
+  assert.match(runner, /if value\.isSecret/);
+  assert.match(runner, /driver\.fillCredential\(selector: selector, value: text, allowedHosts: allowedHosts\)/);
+  assert.match(runner, /case \.originRefused\(let host\): completion\(\.originRefused\(host: host\)\)/);
 
   // Values are JSON-encoded into JS source, never string-concatenated raw.
   assert.match(runner, /JSONSerialization\.data\(withJSONObject: \[value\]/);
+
+  // The credential fill is origin-checked against the frame's authoritative
+  // WebKit origin, so a cross-origin iframe login (Apple ID) is validated where
+  // the password actually goes — not the top page, a different origin entirely.
+  const browser = readFileSync(join(sourceDir, "BrowserViewController.swift"), "utf8");
+  assert.match(browser, /func fillCredential\(/);
+  assert.match(browser, /frame\.securityOrigin\.host/);
+  assert.match(browser, /BrowserLaneLoginRunner\.hostIsAllowed\(host, allowed: allowedHosts\)/);
+  // locateFrame never falls back to the un-nameable main frame for a credential.
+  assert.match(browser, /func locateFrame\(/);
 
   // The recipe is local-only: it must never be in the daemon sync payload, or an
   // agent-side path could drive a login with it.
   assert.match(models, /var loginSteps: String\?/);
   assert.doesNotMatch(client, /loginSteps/);
+});
+
+// A credential form is often in a cross-origin iframe (Apple ID): the top page
+// has no fields, so a login step must be able to run inside a child frame.
+test("Browser Lane login steps can reach a cross-origin login iframe", () => {
+  const sourceDir = join(root, "browser-lane-app/Sources/BrowserLaneApp");
+  const browser = readFileSync(join(sourceDir, "BrowserViewController.swift"), "utf8");
+  const runner = readFileSync(join(sourceDir, "BrowserLaneLoginRunner.swift"), "utf8");
+
+  // Steps run across frames, not just the main document.
+  assert.match(runner, /func runInFrames\(/);
+  assert.match(browser, /func runInFrames\(/);
+  // Frames are tracked via an all-frames probe (forMainFrameOnly:false).
+  assert.match(browser, /forMainFrameOnly: false/);
+  assert.match(browser, /WKScriptMessageHandler/);
+  // Stale frames are dropped when the main frame navigates.
+  assert.match(browser, /didStartProvisionalNavigation/);
+  assert.match(browser, /loginFrames\.removeAll\(\)/);
+  // Popup frames don't pollute the registry.
+  assert.match(browser, /message\.webView === webView/);
 });
 
 test("Browser Lane login recipes run only from an explicit operator click", () => {

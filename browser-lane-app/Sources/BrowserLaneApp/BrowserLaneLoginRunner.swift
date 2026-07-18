@@ -1,13 +1,40 @@
 import Foundation
 
+/// The outcome of typing a credential into a page.
+enum BrowserLaneCredentialFill: Equatable {
+    case filled
+    /// The selector wasn't present in any frame.
+    case noFrame
+    /// The frame that has the field is not on an allowed origin. `host` is that
+    /// frame's WebKit security-origin host — the authoritative origin, not a
+    /// JS-reported value.
+    case originRefused(host: String)
+}
+
 /// What the WebView must be able to do for a recipe to run. Implemented by
 /// BrowserViewController (it owns the WKWebView); a protocol so the step engine
 /// stays testable and the runner cannot reach anything else.
+///
+/// Frame-aware because real sign-ins (Apple ID, much enterprise SSO) put the
+/// credential form in a cross-origin iframe: the top page has no fields at all,
+/// and JS run only in the main frame can't see them.
 protocol BrowserLaneLoginDriver: AnyObject {
-    /// Host of the page currently loaded, or nil if there isn't one.
-    func currentHost() -> String?
-    /// Run JS in an isolated content world and return its string result.
-    func runScript(_ js: String, completion: @escaping (Result<String, Error>) -> Void)
+    /// Run `js` in the first frame (main frame, then each child frame) where it
+    /// returns something other than "missing". For non-credential steps —
+    /// click/clickText/waitFor/submit/non-secret fill.
+    func runInFrames(_ js: String, completion: @escaping (Result<String, Error>) -> Void)
+
+    /// Type a credential into the frame containing `selector`, but ONLY if that
+    /// frame's origin host is in `allowedHosts`. Atomic on purpose: the frame is
+    /// located and origin-checked natively — against WKFrameInfo.securityOrigin,
+    /// which JS in the page cannot spoof — before anything is typed. There is no
+    /// separate "which host?" call the runner could act on with a stale answer.
+    func fillCredential(
+        selector: String,
+        value: String,
+        allowedHosts: [String],
+        completion: @escaping (BrowserLaneCredentialFill) -> Void
+    )
 }
 
 /// Holds the live browser so the Readiness screen's sign-in button can drive it.
@@ -92,16 +119,6 @@ final class BrowserLaneLoginRunner {
         guard index < steps.count else { completion(.completed); return }
         let current = steps[index]
 
-        // Re-checked per step, not once up front: a login flow redirects between
-        // steps, so an origin verified before step 1 says nothing about step 5.
-        if current.carriesCredential {
-            let host = driver.currentHost() ?? ""
-            guard Self.hostIsAllowed(host, allowed: allowedHosts) else {
-                completion(.originRefused(host: host.isEmpty ? "unknown" : host))
-                return
-            }
-        }
-
         let advance: (Result<String, Error>) -> Void = { [weak self] result in
             guard let self else { return }
             switch result {
@@ -113,12 +130,15 @@ final class BrowserLaneLoginRunner {
                 completion(.stalled(step: index + 1, selector: current.selector))
             }
         }
+        let next = { [weak self] in
+            self?.step(steps, index: index + 1, username: username, secretValue: secretValue, completion: completion)
+        }
 
         switch current {
         case .click(let selector):
-            driver.runScript(Self.clickJS(selector), completion: advance)
+            driver.runInFrames(Self.clickJS(selector), completion: advance)
         case .submit(let selector):
-            driver.runScript(Self.submitJS(selector), completion: advance)
+            driver.runInFrames(Self.submitJS(selector), completion: advance)
         case .wait(let seconds):
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { advance(.success("ok")) }
         case .waitFor(let selector, let timeout):
@@ -137,7 +157,20 @@ final class BrowserLaneLoginRunner {
             case .secret: secretValue
             case .literal(let raw): raw
             }
-            driver.runScript(Self.fillJS(selector, text), completion: advance)
+            if value.isSecret {
+                // The origin check lives inside fillCredential, checked per-frame
+                // against the frame the credential actually lands in — not the top
+                // page, which for an iframe login is a different origin entirely.
+                driver.fillCredential(selector: selector, value: text, allowedHosts: allowedHosts) { outcome in
+                    switch outcome {
+                    case .filled: next()
+                    case .noFrame: completion(.stalled(step: index + 1, selector: selector))
+                    case .originRefused(let host): completion(.originRefused(host: host))
+                    }
+                }
+            } else {
+                driver.runInFrames(Self.fillJS(selector, text), completion: advance)
+            }
         }
     }
 
@@ -152,7 +185,7 @@ final class BrowserLaneLoginRunner {
         deadline: Date,
         completion: @escaping (Result<String, Error>) -> Void
     ) {
-        driver.runScript(js) { [weak self] result in
+        driver.runInFrames(js) { [weak self] result in
             guard let self else { return }
             if case .success("ok") = result { completion(.success("ok")); return }
             if case .failure(let error) = result { completion(.failure(error)); return }

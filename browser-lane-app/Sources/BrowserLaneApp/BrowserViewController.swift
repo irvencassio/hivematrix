@@ -35,6 +35,16 @@ final class BrowserViewController: NSViewController {
     private let addressField = NSSearchField()
     private let goButton = NSButton(title: "Go", target: nil, action: nil)
     private let statusLabel = NSTextField(labelWithString: "Ready")
+
+    // Standard browser navigation chrome.
+    private let backButton = NSButton()
+    private let forwardButton = NSButton()
+    private let reloadButton = NSButton()
+    private let copyURLButton = NSButton()
+    private let openExternalButton = NSButton()
+    private let progressBar = NSProgressIndicator()
+    /// KVO tokens for the web view's navigation state; held so the observers live.
+    private var navObservers: [NSKeyValueObservation] = []
     private let authRecoveryView = NSStackView()
     private let authRecoveryLabel = NSTextField(labelWithString: "Google sign-in can block embedded browser flows. If this page stays blank, reload auth or open the same URL in Chrome/Safari.")
     private let reloadAuthButton = NSButton(title: "Reload auth", target: nil, action: nil)
@@ -45,6 +55,15 @@ final class BrowserViewController: NSViewController {
     private let popupTitleLabel = NSTextField(labelWithString: "Sign-in popup")
     private let popupCloseButton = NSButton(title: "Close popup", target: nil, action: nil)
     private var popupWebView: WKWebView?
+
+    // --- Login-driver frame tracking ---
+    // Live frames of the main webView (main frame + any child iframes), captured
+    // as they announce themselves via a user script. A credential form is often
+    // in a cross-origin iframe (Apple ID), so a login step has to be able to run
+    // in a child frame, not just the top document. Latest kept per origin host;
+    // cleared whenever the main frame navigates, since old frames go stale.
+    private var loginFrames: [WKFrameInfo] = []
+    static let frameProbeMessageName = "blLoginFrames"
 
     // --- Agent read state (POST /answer from the loopback server) ---
     // One read at a time drives the visible webView so the operator can watch;
@@ -63,6 +82,16 @@ final class BrowserViewController: NSViewController {
         config.websiteDataStore = WKWebsiteDataStore.default()
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         config.defaultWebpagePreferences.allowsContentJavaScript = true
+        // Every frame (main and child, hence forMainFrameOnly:false) pings us on
+        // load so we hold a live WKFrameInfo for it — the only way to reach a
+        // cross-origin login iframe. Optional-chained so it's a harmless no-op in
+        // any webView that never registers the handler (e.g. OAuth popups).
+        let probe = WKUserScript(
+            source: "window.webkit?.messageHandlers?.\(frameProbeMessageName)?.postMessage(1)",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+        config.userContentController.addUserScript(probe)
         return config
     }()
 
@@ -94,8 +123,37 @@ final class BrowserViewController: NSViewController {
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.font = .systemFont(ofSize: 12)
 
+        // Navigation controls. Back/Forward/Reload also get the usual key
+        // equivalents (⌘[ ⌘] ⌘R) so the browser feels like a browser.
+        configureNavButton(backButton, symbol: "chevron.backward", help: "Back (⌘[)",
+                           action: #selector(goBack), key: "[")
+        configureNavButton(forwardButton, symbol: "chevron.forward", help: "Forward (⌘])",
+                           action: #selector(goForward), key: "]")
+        configureNavButton(reloadButton, symbol: "arrow.clockwise", help: "Reload (⌘R)",
+                           action: #selector(reloadOrStop), key: "r")
+        configureNavButton(copyURLButton, symbol: "doc.on.doc", help: "Copy page URL",
+                           action: #selector(copyURL))
+        configureNavButton(openExternalButton, symbol: "safari", help: "Open this page in your default browser",
+                           action: #selector(openExternal))
+        backButton.isEnabled = false
+        forwardButton.isEnabled = false
+
+        progressBar.style = .bar
+        progressBar.isIndeterminate = false
+        progressBar.minValue = 0
+        progressBar.maxValue = 1
+        progressBar.doubleValue = 0
+        progressBar.isHidden = true
+        progressBar.controlSize = .small
+        progressBar.translatesAutoresizingMaskIntoConstraints = false
+
+        toolbar.addArrangedSubview(backButton)
+        toolbar.addArrangedSubview(forwardButton)
+        toolbar.addArrangedSubview(reloadButton)
         toolbar.addArrangedSubview(addressField)
         toolbar.addArrangedSubview(goButton)
+        toolbar.addArrangedSubview(copyURLButton)
+        toolbar.addArrangedSubview(openExternalButton)
         toolbar.addArrangedSubview(statusLabel)
 
         authRecoveryView.orientation = .horizontal
@@ -163,9 +221,15 @@ final class BrowserViewController: NSViewController {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.translatesAutoresizingMaskIntoConstraints = false
+        // Two-finger swipe to go back/forward and pinch-to-zoom — the gestures a
+        // human expects from any Mac browser.
+        webView.allowsBackForwardNavigationGestures = true
+        webView.allowsMagnification = true
+        observeNavigationState()
 
         view.addSubview(toolbar)
         view.addSubview(authRecoveryView)
+        view.addSubview(progressBar)
         view.addSubview(webView)
         view.addSubview(popupContainer)
 
@@ -173,6 +237,10 @@ final class BrowserViewController: NSViewController {
             toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             toolbar.topAnchor.constraint(equalTo: view.topAnchor, constant: 20),
+
+            progressBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            progressBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            progressBar.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 6),
 
             addressField.widthAnchor.constraint(greaterThanOrEqualToConstant: 360),
 
@@ -211,6 +279,10 @@ final class BrowserViewController: NSViewController {
         // Become the read driver so the loopback /answer server can drive this view.
         BrowserReadService.shared.driver = self
         BrowserLaneLoginService.shared.driver = self
+
+        // Receive the per-frame pings from the injected probe script. The browser
+        // is a single long-lived instance, so this registers exactly once.
+        webView.configuration.userContentController.add(self, name: Self.frameProbeMessageName)
     }
 
     private func showPopup(_ popup: WKWebView, initialURL: URL?) {
@@ -239,6 +311,70 @@ final class BrowserViewController: NSViewController {
         popupWebView?.removeFromSuperview()
         popupWebView = nil
         popupContainer.isHidden = true
+    }
+
+    private func configureNavButton(
+        _ button: NSButton, symbol: String, help: String, action: Selector, key: String = ""
+    ) {
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: help)
+        button.bezelStyle = .texturedRounded
+        button.imageScaling = .scaleProportionallyDown
+        button.target = self
+        button.action = action
+        button.toolTip = help
+        button.setAccessibilityLabel(help)
+        if !key.isEmpty {
+            button.keyEquivalent = key
+            button.keyEquivalentModifierMask = .command
+        }
+    }
+
+    /// Mirror the web view's live navigation state onto the chrome: enable/disable
+    /// back & forward, drive the progress bar, and flip reload↔stop while loading.
+    private func observeNavigationState() {
+        navObservers = [
+            webView.observe(\.canGoBack, options: [.initial, .new]) { [weak self] web, _ in
+                self?.backButton.isEnabled = web.canGoBack
+            },
+            webView.observe(\.canGoForward, options: [.initial, .new]) { [weak self] web, _ in
+                self?.forwardButton.isEnabled = web.canGoForward
+            },
+            webView.observe(\.estimatedProgress, options: [.new]) { [weak self] web, _ in
+                self?.progressBar.doubleValue = web.estimatedProgress
+            },
+            webView.observe(\.isLoading, options: [.initial, .new]) { [weak self] web, _ in
+                self?.updateLoadingChrome(isLoading: web.isLoading)
+            },
+        ]
+    }
+
+    private func updateLoadingChrome(isLoading: Bool) {
+        progressBar.isHidden = !isLoading
+        if !isLoading { progressBar.doubleValue = 0 }
+        reloadButton.image = NSImage(
+            systemSymbolName: isLoading ? "xmark" : "arrow.clockwise",
+            accessibilityDescription: isLoading ? "Stop" : "Reload"
+        )
+        reloadButton.toolTip = isLoading ? "Stop loading (⌘R)" : "Reload (⌘R)"
+    }
+
+    @objc private func goBack() { webView.goBack() }
+    @objc private func goForward() { webView.goForward() }
+
+    @objc private func reloadOrStop() {
+        if webView.isLoading { webView.stopLoading() } else { webView.reload() }
+    }
+
+    @objc private func copyURL() {
+        guard let url = webView.url?.absoluteString else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url, forType: .string)
+        statusLabel.stringValue = "Copied URL"
+    }
+
+    @objc private func openExternal() {
+        guard let url = webView.url else { return }
+        NSWorkspace.shared.open(url)
     }
 
     @objc private func loadAddress() {
@@ -334,6 +470,15 @@ extension BrowserViewController: WKNavigationDelegate {
         decisionHandler(.allow)
     }
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        // A top-level navigation invalidates every child frame we were tracking;
+        // they re-announce as the new page loads. Only the main webView's main
+        // frame counts — popup navigations and sub-frame loads must not wipe it.
+        if webView === self.webView, webView.url != nil {
+            loginFrames.removeAll()
+        }
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if webView === popupWebView {
             popupTitleLabel.stringValue = webView.url?.host ?? "Sign-in popup"
@@ -400,20 +545,96 @@ extension BrowserViewController: WKUIDelegate {
 
 // MARK: - Agent reads (POST /answer)
 
-extension BrowserViewController: BrowserLaneLoginDriver {
-    func currentHost() -> String? { webView.url?.host }
+extension BrowserViewController: WKScriptMessageHandler {
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard
+            message.name == Self.frameProbeMessageName,
+            message.webView === webView // ignore OAuth-popup frames
+        else { return }
+        let frame = message.frameInfo
+        // Replace any prior frame from the same origin, and keep the main frame
+        // first so a selector present in the top document isn't shadowed by a child.
+        let host = frame.securityOrigin.host
+        loginFrames.removeAll { $0.securityOrigin.host == host && $0.isMainFrame == frame.isMainFrame }
+        if frame.isMainFrame { loginFrames.insert(frame, at: 0) } else { loginFrames.append(frame) }
+    }
+}
 
-    /// Runs in an isolated content world so the page's own scripts cannot observe
-    /// or shim what a login step does (a page can redefine
-    /// HTMLInputElement.prototype.value in its own world).
-    func runScript(_ js: String, completion: @escaping (Result<String, Error>) -> Void) {
-        webView.evaluateJavaScript(js, in: nil, in: .defaultClient) { result in
+extension BrowserViewController: BrowserLaneLoginDriver {
+    /// The frames to search, main first. Falls back to the main frame (nil) when
+    /// the probe hasn't reported yet, so a same-page login still works immediately.
+    private var searchFrames: [WKFrameInfo?] {
+        loginFrames.isEmpty ? [nil] : loginFrames.map { $0 }
+    }
+
+    /// Runs `js` in each frame until one returns non-"missing". Isolated content
+    /// world so the page's own scripts can't observe or shim a login step.
+    func runInFrames(_ js: String, completion: @escaping (Result<String, Error>) -> Void) {
+        evaluate(js, frames: searchFrames, index: 0, completion: completion)
+    }
+
+    private func evaluate(
+        _ js: String,
+        frames: [WKFrameInfo?],
+        index: Int,
+        completion: @escaping (Result<String, Error>) -> Void
+    ) {
+        guard index < frames.count else { completion(.success("missing")); return }
+        webView.evaluateJavaScript(js, in: frames[index], in: .defaultClient) { [weak self] result in
             switch result {
             case .success(let value):
-                completion(.success((value as? String) ?? "missing"))
-            case .failure(let error):
-                completion(.failure(error))
+                let string = (value as? String) ?? "missing"
+                if string != "missing" { completion(.success(string)); return }
+            case .failure:
+                break // stale/detached frame — try the next
             }
+            self?.evaluate(js, frames: frames, index: index + 1, completion: completion)
+        }
+    }
+
+    /// Locates the frame containing `selector`, checks THAT frame's WebKit security
+    /// origin against the allow-list, and only then types. The origin comes from
+    /// WKFrameInfo.securityOrigin — the browser's authoritative origin for the
+    /// frame — so a page cannot lie about where the credential is going.
+    func fillCredential(
+        selector: String,
+        value: String,
+        allowedHosts: [String],
+        completion: @escaping (BrowserLaneCredentialFill) -> Void
+    ) {
+        locateFrame(containing: selector, frames: loginFrames, index: 0) { [weak self] frame in
+            guard let self else { return }
+            guard let frame else { completion(.noFrame); return }
+            let host = frame.securityOrigin.host
+            guard BrowserLaneLoginRunner.hostIsAllowed(host, allowed: allowedHosts) else {
+                completion(.originRefused(host: host.isEmpty ? "unknown" : host))
+                return
+            }
+            self.webView.evaluateJavaScript(
+                BrowserLaneLoginRunner.fillJS(selector, value), in: frame, in: .defaultClient
+            ) { _ in completion(.filled) }
+        }
+    }
+
+    /// A credential must go to a frame whose origin we can check, so this searches
+    /// only reported frames — never the nil "main frame" fallback, whose origin we
+    /// couldn't name. If nothing has reported yet, that's `.noFrame` (a stall), not
+    /// a fill into an unverifiable origin.
+    private func locateFrame(
+        containing selector: String,
+        frames: [WKFrameInfo],
+        index: Int,
+        completion: @escaping (WKFrameInfo?) -> Void
+    ) {
+        guard index < frames.count else { completion(nil); return }
+        let frame = frames[index]
+        webView.evaluateJavaScript(
+            BrowserLaneLoginRunner.existsJS(selector), in: frame, in: .defaultClient
+        ) { [weak self] result in
+            if case .success(let value) = result, (value as? String) == "ok" {
+                completion(frame); return
+            }
+            self?.locateFrame(containing: selector, frames: frames, index: index + 1, completion: completion)
         }
     }
 }
