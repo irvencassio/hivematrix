@@ -221,36 +221,125 @@ export function currentMaxRowid(path = chatDbPath()): number {
 // iMessage account signed in (e.g. the dedicated agent identity alongside a
 // personal one): "1st account" is otherwise nondeterministic and could send as
 // the wrong identity — including texting a shared number as a self-send.
+/**
+ * Send an iMessage/SMS from Messages.app.
+ *
+ * Strategy order is deliberate:
+ *
+ *  1. account -> participant. The proven path; works for BOTH established and
+ *     brand-new recipients, and verified working on macOS 26.5 (account lookup
+ *     resolves in ~0.1s, 6 accounts present).
+ *  2. chat id fallback. On 2026-07-15 this Mac logged ~20 consecutive failures
+ *     with "Can't get account 1 whose service type = iMessage. Invalid index.
+ *     (-1719)" — Messages' account list intermittently enumerates EMPTY while
+ *     iMessage is signed in and sending fine. When that happens, addressing the
+ *     existing conversation by its canonical id still works. macOS 26 uses a
+ *     service-agnostic `any;-;+15551234567` prefix (verified against chat.db),
+ *     with the older per-service prefixes kept for previous systems.
+ *
+ * Enumerating `chats` wholesale is deliberately avoided: on a busy Mac that walk
+ * is slow enough to blow the execution timeout, which surfaces as an opaque hang.
+ */
 export const SEND_SCRIPT = `on run argv
   set targetHandle to item 1 of argv
   set targetMessage to item 2 of argv
   set sendAs to item 3 of argv
-  with timeout of 30 seconds
+  set diag to ""
+  with timeout of 20 seconds
     tell application "Messages"
+      set targetRecipient to missing value
+
+      -- Strategy 1 (primary): resolve a participant through an account.
       set targetAccount to missing value
       if sendAs is not "" then
-        repeat with acct in (every account whose service type = iMessage)
-          if (id of acct) contains sendAs then
-            set targetAccount to acct
-            exit repeat
-          end if
-        end repeat
+        try
+          repeat with acct in accounts
+            if (id of acct) contains sendAs then
+              set targetAccount to acct
+              exit repeat
+            end if
+          end repeat
+        on error errMsg
+          set diag to diag & " sendAs:" & errMsg
+        end try
       end if
       if targetAccount is missing value then
-        set targetAccount to 1st account whose service type = iMessage
+        try
+          set targetAccount to 1st account whose service type = iMessage
+        on error errMsg
+          set diag to diag & " imsgAccount:" & errMsg
+        end try
       end if
-      set targetParticipant to participant targetHandle of targetAccount
-      if targetMessage is not "" then send targetMessage to targetParticipant
+      if targetAccount is missing value then
+        try
+          set targetAccount to 1st account whose enabled is true
+        on error errMsg
+          set diag to diag & " enabledAccount:" & errMsg
+        end try
+      end if
+      if targetAccount is not missing value then
+        try
+          set targetRecipient to participant targetHandle of targetAccount
+        on error errMsg
+          set diag to diag & " participant:" & errMsg
+        end try
+      end if
+
+      -- Strategy 2 (recovery): when the account list enumerates empty (-1719),
+      -- address the existing conversation by canonical chat id instead. "any"
+      -- is the macOS 26 service-agnostic prefix; the rest cover older systems.
+      repeat with svc in {"any", "iMessage", "SMS", "RCS"}
+        if targetRecipient is missing value then
+          try
+            set targetRecipient to chat id (svc & ";-;" & targetHandle)
+          on error errMsg
+            set diag to diag & " chatid/" & svc & ":" & errMsg
+          end try
+        end if
+      end repeat
+
+      if targetRecipient is missing value then
+        error "Message Lane could not address " & targetHandle & " in Messages." & diag number -1719
+      end if
+
+      if targetMessage is not "" then send targetMessage to targetRecipient
       if (count of argv) > 3 then
         repeat with i from 4 to (count of argv)
           try
-            send (POSIX file (item i of argv)) to targetParticipant
+            send (POSIX file (item i of argv)) to targetRecipient
           end try
         end repeat
       end if
     end tell
   end timeout
 end run`;
+
+/**
+ * Pure: render a send failure into a line that actually says what went wrong.
+ *
+ * The previous handler collapsed everything to `stderr || err.message`, so a
+ * timeout surfaced as a bare "Command failed: osascript -e on run argv" with no
+ * stderr — indistinguishable from a real AppleScript error. That opacity caused
+ * a live misdiagnosis (a self-send theory that was flatly wrong while the actual
+ * cause was -1719 account enumeration). Keep every signal.
+ */
+export function formatSendFailure(
+  handle: string,
+  timeoutMs: number,
+  err: (Error & { killed?: boolean; signal?: string | null; code?: number | string | null }) | null,
+  stdout: string,
+  stderr: string,
+): string {
+  const timedOut = Boolean(err && (err.killed === true || err.signal === "SIGTERM" || err.signal === "SIGKILL"));
+  const parts = [
+    timedOut ? `TIMEOUT after ${timeoutMs}ms — Messages never answered the AppleScript` : "",
+    (stderr || "").trim(),
+    (stdout || "").trim(),
+    err && err.code !== undefined && err.code !== null ? `exit=${err.code}` : "",
+    err?.message ? err.message.trim() : "",
+  ].filter(Boolean);
+  return `[messagebee] send to ${handle} failed: ${parts.join(" | ") || "unknown failure"}`;
+}
 
 /**
  * Send an iMessage to a handle, optionally with file attachments (e.g. a voice
@@ -316,10 +405,11 @@ export function sendIMessage(
       "osascript",
       ["-e", SEND_SCRIPT, handle, text, sendAs, ...attachments],
       { timeout: timeoutMs },
-      (err, _stdout, stderr) => {
+      (err, stdout, stderr) => {
         if (err) {
-          // Surface WHY in the daemon log instead of swallowing it silently.
-          console.error(`[messagebee] send to ${handle} failed: ${(stderr || err.message || "").trim()}`);
+          // Surface WHY in the daemon log instead of swallowing it silently —
+          // including the timeout-vs-error distinction (see formatSendFailure).
+          console.error(formatSendFailure(handle, timeoutMs, err, String(stdout ?? ""), String(stderr ?? "")));
           resolve(false);
         } else {
           // Mark the send as successful (idempotent).

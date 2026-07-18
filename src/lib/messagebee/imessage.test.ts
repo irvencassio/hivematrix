@@ -14,13 +14,57 @@ import {
   SEND_SCRIPT,
 } from "./imessage";
 
-test("send script uses the modern account/participant API, not the timing-out buddy/service one", () => {
-  // Regression: `buddy … of service` hangs on recent macOS (AppleEvent -1712),
-  // so Message Lane replies silently never delivered.
-  assert.match(SEND_SCRIPT, /account whose service type = iMessage/);
+test("send script keeps account/participant primary and adds a chat-id recovery path", () => {
+  // Three failure modes bracket this script:
+  //  - `buddy … of service` HANGS on recent macOS (AppleEvent -1712).
+  //  - `1st account whose service type = iMessage` intermittently matches
+  //    NOTHING ("Invalid index. -1719") — ~20 consecutive failures on
+  //    2026-07-15 — while iMessage was signed in and sending fine.
+  //  - An unanswered Automation (TCC) consent prompt makes osascript TIME OUT
+  //    with empty stderr, which must not look like an AppleScript error.
+  // Account/participant stays primary (proven, and works for brand-new
+  // recipients with no prior thread); chat id is the recovery for -1719.
+  assert.match(SEND_SCRIPT, /account whose service type = iMessage/, "primary path retained");
   assert.match(SEND_SCRIPT, /participant targetHandle of targetAccount/);
+  assert.match(SEND_SCRIPT, /chat id \(svc & ";-;" & targetHandle\)/, "chat-id recovery path");
+  assert.match(SEND_SCRIPT, /\{"any", "iMessage", "SMS", "RCS"\}/, "macOS 26 'any' prefix covered");
+  // Ordering: the account lookup must appear before the chat-id fallback.
+  assert.ok(
+    SEND_SCRIPT.indexOf("participant targetHandle of targetAccount") < SEND_SCRIPT.indexOf("chat id (svc"),
+    "account/participant must be tried before the chat-id fallback",
+  );
   assert.doesNotMatch(SEND_SCRIPT, /buddy .* of targetService/);
   assert.match(SEND_SCRIPT, /with timeout of \d+ seconds/, "send is bounded");
+  // Never enumerate every chat: that walk is slow enough on a busy Mac to blow
+  // the timeout, which surfaces as an opaque hang.
+  assert.doesNotMatch(SEND_SCRIPT, /repeat with c in chats/, "no wholesale chat enumeration");
+});
+
+test("formatSendFailure distinguishes a timeout from an AppleScript error and never goes opaque", async () => {
+  const { formatSendFailure } = await import("./imessage");
+
+  // A killed/timed-out osascript has empty stderr — previously indistinguishable
+  // from a real error, which caused a live misdiagnosis.
+  const timedOut = formatSendFailure(
+    "+15551234567", 30_000,
+    Object.assign(new Error("Command failed: osascript -e on run argv"), { killed: true, signal: "SIGTERM" }),
+    "", "",
+  );
+  assert.match(timedOut, /TIMEOUT after 30000ms/);
+  assert.match(timedOut, /Messages never answered/);
+
+  // A real AppleScript error keeps its stderr detail (the -1719 signature).
+  const scriptErr = formatSendFailure(
+    "+15551234567", 30_000,
+    Object.assign(new Error("Command failed"), { code: 1 }),
+    "", "execution error: Messages got an error: Invalid index. (-1719)",
+  );
+  assert.match(scriptErr, /-1719/);
+  assert.match(scriptErr, /exit=1/);
+  assert.doesNotMatch(scriptErr, /TIMEOUT/);
+
+  // Even with nothing to go on it still says something actionable.
+  assert.match(formatSendFailure("+1555", 1000, null, "", ""), /unknown failure/);
 });
 
 test("send script pins the sending account to sendAs, falling back to the 1st account", () => {
