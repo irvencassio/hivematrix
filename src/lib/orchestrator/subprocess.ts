@@ -307,9 +307,12 @@ function resolvePromptPrefix(workflowId?: string, stepIndex?: number): string {
   return LEGACY_PREFIXES[workflowId] ?? "";
 }
 
-// Effort levels Claude Code accepts via --effort. Hive resolves "auto" to
-// "max" before launch so default tasks do not run with a reasoning ceiling.
-// "ultrathink" is also kept as an in-prompt keyword for Claude-specific behavior.
+// Effort levels Claude Code accepts via --effort. "auto" is deliberately NOT in
+// this set: claudeEffortMode returns "auto" for an unset/auto thinking mode, so
+// the flag is omitted and the CLI picks its own effort per turn — the same
+// adaptive behavior as a direct `claude` session. An explicit tier is passed
+// through. "ultrathink" is kept as an in-prompt keyword for Claude-specific
+// behavior.
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
 // Runs the top-level CLI task like a direct interactive session: plan and

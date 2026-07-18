@@ -192,6 +192,38 @@ test("buildHeartbeatPrompt folds in operator activity and forbids re-surfacing h
   assert.doesNotMatch(noActivity, /already engaged with/);
 });
 
+test("runDailyMomentOnce folds the Day Brief's deterministic facts into ONE persona-voice message", async () => {
+  mkdirSync(join(TMP, ".hivematrix"), { recursive: true });
+  let seenPrompt = "";
+  const { text } = await runDailyMomentOnce("morning-brief", {
+    composeStatus: async () => "2 tasks running",
+    // The deterministic contract that previously shipped as a SECOND message.
+    composeDayBrief: (async (kind: string) => `Calendar: 2 events. Reminders: 3 due. Kind=${kind}`) as never,
+    runTurn: async ({ text: p }) => { seenPrompt = p; return { reply: "Morning Irv — two events today.", sessionId: "s1", turnId: "t1" }; },
+    now: () => at(7),
+  });
+
+  // The warm message is what goes out...
+  assert.match(text, /Morning Irv/);
+  // ...but it was written with the real numbers in hand.
+  assert.match(seenPrompt, /Calendar: 2 events/, "day-brief facts reach the prompt");
+  assert.match(seenPrompt, /Reminders: 3 due/);
+  assert.match(seenPrompt, /Kind=morning/, "morning-brief maps to the morning contract");
+  // The regular status snapshot is preserved alongside it.
+  assert.match(seenPrompt, /2 tasks running/);
+});
+
+test("runDailyMomentOnce survives a failing Day Brief — the moment still goes out", async () => {
+  mkdirSync(join(TMP, ".hivematrix"), { recursive: true });
+  const { text } = await runDailyMomentOnce("evening-recap", {
+    composeStatus: async () => "all quiet",
+    composeDayBrief: (async () => { throw new Error("pim tool down"); }) as never,
+    runTurn: async () => ({ reply: "Quiet evening.", sessionId: "s1", turnId: "t1" }),
+    now: () => at(20),
+  });
+  assert.match(text, /Quiet evening/, "the brief is an enrichment, never a hard dependency");
+});
+
 test("runHeartbeatOnce threads the operator-activity digest into the pulse prompt", async () => {
   mkdirSync(join(TMP, ".hivematrix"), { recursive: true });
   let seenPrompt = "";

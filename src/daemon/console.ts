@@ -1869,12 +1869,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <div class="muted" style="font-size:11px;margin-top:2px">Auto routes browsing work to the right lane and otherwise dispatches a single task — the coding harness plans its own steps. Pick Direct to force one plain task.</div>
         <label class="flbl">Effort</label>
         <select id="t_effort">
-          <option value="auto" selected>Auto — deepest reasoning (default)</option>
+          <option value="auto" selected>Auto — Claude Code decides (default)</option>
+          <option value="max">Max — deepest reasoning</option>
+          <option value="xhigh">Extra high</option>
           <option value="high">High</option>
-          <option value="medium">Medium — faster</option>
+          <option value="medium">Medium</option>
           <option value="low">Low — fastest</option>
         </select>
-        <div class="muted" style="font-size:11px;margin-top:2px">Lower effort = faster, cheaper turns for simple/mechanical tasks. Auto uses maximum reasoning — best for hard work, slowest to first output.</div>
+        <div class="muted" style="font-size:11px;margin-top:2px">Auto lets Claude Code pick its own reasoning depth per turn, the same as a direct session — usually the fastest to first output. Pin a tier to force it; Max is deepest but slowest.</div>
       </details>
       <label class="flbl">Attachments</label>
       <div class="attach-row attach-drop" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="onAttachDrop(event)">

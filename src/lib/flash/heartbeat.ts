@@ -642,6 +642,21 @@ export async function runDailyMomentOnce(
     statusSnapshot = deps.composeStatus ? await deps.composeStatus() : "";
   } catch { /* snapshot is best-effort */ }
 
+  // One voice, real numbers: fold the Day Brief's deterministic facts (calendar,
+  // reminders, review inbox, goals due, loop closures) into this moment's status
+  // snapshot instead of shipping them as a SECOND, differently-toned message the
+  // same morning. tickDayBriefRitual suppresses its own send when this moment
+  // covers the same part of day — see the suppression note there.
+  try {
+    const composeBrief = deps.composeDayBrief ?? composeDayBrief;
+    const facts = await composeBrief(moment === "morning-brief" ? "morning" : "evening");
+    if (facts && facts.trim()) {
+      statusSnapshot = statusSnapshot.trim()
+        ? `${facts.trim()}\n\n${statusSnapshot.trim()}`
+        : facts.trim();
+    }
+  } catch { /* the brief is an enrichment, never a hard dependency */ }
+
   const prompt = buildDailyMomentPrompt({ moment, statusSnapshot, now });
   const runTurn = deps.runTurn ?? runFlashTurnText;
   const result = await runTurn({
@@ -757,7 +772,16 @@ export async function runWeaverOnce(deps: HeartbeatDeps = {}): Promise<{ text: s
 async function tickDayBriefRitual(config: HeartbeatConfig, now: Date, deps: HeartbeatDeps): Promise<void> {
   if (!config.dayBriefEnabled) return;
 
-  if (dayBriefMomentDue(config.dayBriefMorningHour, config.dayBriefMorningMinute, config.lastDayBriefMorningSentDay, now)) {
+  // Suppression: when the persona-voice daily moment is enabled for this part of
+  // day, IT delivers the Day Brief's facts (runDailyMomentOnce folds them into
+  // its status snapshot). Sending the deterministic contract too would mean two
+  // differently-toned messages the same morning. Checked at runtime rather than
+  // by flipping a stored default, so an existing config can't double-send.
+  const morningCoveredByMoment = config.enabled && config.morningBriefHour !== null;
+  const eveningCoveredByMoment = config.enabled && config.eveningRecapHour !== null;
+
+  if (!morningCoveredByMoment
+    && dayBriefMomentDue(config.dayBriefMorningHour, config.dayBriefMorningMinute, config.lastDayBriefMorningSentDay, now)) {
     setHeartbeatConfig({ lastDayBriefMorningSentDay: localDateString(now) });
     try {
       await runDayBriefRitualOnce("morning", deps);
@@ -767,7 +791,8 @@ async function tickDayBriefRitual(config: HeartbeatConfig, now: Date, deps: Hear
     }
     return;
   }
-  if (dayBriefMomentDue(config.dayBriefEveningHour, config.dayBriefEveningMinute, config.lastDayBriefEveningSentDay, now)) {
+  if (!eveningCoveredByMoment
+    && dayBriefMomentDue(config.dayBriefEveningHour, config.dayBriefEveningMinute, config.lastDayBriefEveningSentDay, now)) {
     setHeartbeatConfig({ lastDayBriefEveningSentDay: localDateString(now) });
     try {
       await runDayBriefRitualOnce("evening", deps);

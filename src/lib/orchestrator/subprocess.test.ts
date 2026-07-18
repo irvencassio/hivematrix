@@ -72,9 +72,30 @@ test("Claude spawn args omit max-budget flag when budget is uncapped", () => {
 
   assert.equal(args.includes("--max-budget-usd"), false);
   assert.equal(args.includes("0"), false);
-  const effortIndex = args.indexOf("--effort");
-  assert.notEqual(effortIndex, -1);
-  assert.equal(args[effortIndex + 1], "max");
+});
+
+test("Claude spawn args OMIT --effort under 'auto' so the CLI picks its own depth", () => {
+  // Regression: "auto" used to collapse to "max", so every task — including
+  // trivial ones — ran at maximum reasoning. Omitting the flag reproduces a
+  // direct `claude` session, which is the behavior that felt fast.
+  for (const mode of ["auto", "", undefined]) {
+    const args = buildClaudeSpawnArgs({
+      prompt: "Do the task",
+      maxBudgetUsd: 0,
+      thinkingMode: mode,
+    });
+    assert.equal(args.includes("--effort"), false, `thinkingMode=${JSON.stringify(mode)} must not pin effort`);
+    assert.equal(args.includes("auto"), false, "'auto' must never be passed as a CLI effort value");
+  }
+});
+
+test("Claude spawn args still pin an explicitly chosen effort tier", () => {
+  for (const tier of ["low", "medium", "high", "xhigh", "max"]) {
+    const args = buildClaudeSpawnArgs({ prompt: "Do it", maxBudgetUsd: 0, thinkingMode: tier });
+    const i = args.indexOf("--effort");
+    assert.notEqual(i, -1, `${tier} should pass --effort`);
+    assert.equal(args[i + 1], tier);
+  }
 });
 
 test("Claude spawn args preserve positive explicit budget ceilings", () => {
