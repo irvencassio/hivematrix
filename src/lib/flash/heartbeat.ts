@@ -65,7 +65,8 @@ import { loadHiveConfig, saveHiveConfig } from "@/lib/central/config";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { getAutonomyLevel, type AutonomyLevel } from "@/lib/config/autonomy";
 import { broadcastEvent } from "@/lib/ws/broadcaster";
-import { appendTurn, getOrCreateSession } from "./store";
+import { appendTurn, getOrCreateSession, getCurrentSession, getRecentTurns } from "./store";
+import type { FlashTurnRow } from "./types";
 import { READ_ONLY_FLASH_TOOLS } from "./loop";
 import { runFlashTurnText } from "./index";
 import { startPollLoop } from "@/lib/lanes/poll-loop";
@@ -388,14 +389,39 @@ const AUTONOMY_GUIDANCE: Record<AutonomyLevel, string> = {
     "friction on top of them. Report what you did rather than what you plan.",
 };
 
+/**
+ * Pure: render the operator's recent live conversation into a compact digest so
+ * the heartbeat knows what they are ALREADY engaged with. The pulse runs in its
+ * own `peer:"heartbeat"` session and would otherwise only see its own past
+ * reports — blind to the operator having already discussed or resolved a thing
+ * in the console/voice thread, which is the fastest way to nag and feel
+ * un-partnerlike. Newest-last, one line per turn, tightly truncated.
+ */
+export function formatOperatorActivity(turns: FlashTurnRow[], maxTurns = 8): string {
+  const convo = turns
+    .filter((t) => t.role === "user" || t.role === "assistant")
+    .slice(-maxTurns);
+  if (!convo.length) return "";
+  return convo
+    .map((t) => {
+      const who = t.role === "user" ? "Operator" : "You";
+      const text = t.content.replace(/\s+/g, " ").trim().slice(0, 200);
+      return `- ${who}: ${text}`;
+    })
+    .join("\n");
+}
+
 /** Pure: build the heartbeat prompt for one pass. */
 export function buildHeartbeatPrompt(opts: {
   checklist: string;
   statusSnapshot: string;
   autonomy: AutonomyLevel;
+  /** Digest of the operator's recent live console/voice turns (formatOperatorActivity). */
+  operatorActivity?: string;
   now?: Date;
 }): string {
   const ts = (opts.now ?? new Date()).toISOString();
+  const activity = opts.operatorActivity?.trim();
   return [
     `[Heartbeat ${ts}] This is your scheduled unprompted pass — no one sent a message.`,
     `Work through your checklist against the current status. ${AUTONOMY_GUIDANCE[opts.autonomy]}`,
@@ -405,6 +431,14 @@ export function buildHeartbeatPrompt(opts: {
     "",
     "## Current status snapshot",
     opts.statusSnapshot.trim() || "(no status available)",
+    ...(activity
+      ? [
+          "",
+          "## What the operator is already engaged with (recent live conversation)",
+          activity,
+          "Do NOT surface anything the operator has already discussed, handled, or been told about here — that is not news.",
+        ]
+      : []),
     "",
     "## Reporting rule",
     "Check the conversation history first: do not repeat a report you already made — only changes are news.",
@@ -476,6 +510,9 @@ export interface HeartbeatDeps {
   composeStatus?: () => Promise<string>;
   /** Surface a report as an assistant turn in the operator console session. */
   appendOperatorTurn?: (text: string) => void;
+  /** Digest of the operator's recent live turns, so the pulse won't nag about
+   *  things they're already handling. Defaults to reading the operator session. */
+  getOperatorActivity?: () => string;
   /** Push for daily moments — daemon wires notify/push. */
   sendPush?: (opts: { title: string; body: string; data?: Record<string, unknown> }) => Promise<{ sent: number }>;
   runTurn?: typeof runFlashTurnText;
@@ -491,6 +528,17 @@ export interface HeartbeatDeps {
 function defaultAppendOperatorTurn(text: string): void {
   const operatorSession = getOrCreateSession("console", "operator");
   appendTurn(operatorSession.id, "assistant", text);
+}
+
+/** Read the operator's live console/voice thread into a heartbeat digest. */
+function defaultOperatorActivity(): string {
+  try {
+    const session = getCurrentSession("operator", "console");
+    if (!session) return "";
+    return formatOperatorActivity(getRecentTurns(session.id, 12));
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -530,10 +578,15 @@ export async function runHeartbeatOnce(deps: HeartbeatDeps = {}): Promise<Heartb
   } catch { /* snapshot is best-effort */ }
 
   const autonomy = getAutonomyLevel();
+  let operatorActivity = "";
+  try {
+    operatorActivity = (deps.getOperatorActivity ?? defaultOperatorActivity)();
+  } catch { /* best-effort awareness — never block the pulse */ }
   const prompt = buildHeartbeatPrompt({
     checklist,
     statusSnapshot,
     autonomy,
+    operatorActivity,
     now,
   });
 

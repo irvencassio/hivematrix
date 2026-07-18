@@ -31,6 +31,32 @@ const SPOKEN_STYLE =
   "You are speaking aloud — your reply will be read by text-to-speech. " +
   "Answer in one or two short, natural spoken sentences, and make the FIRST sentence " +
   "brief so it can be spoken immediately. No markdown, no lists, no code blocks, no emoji.";
+
+/** Channels that render in a plain-text bubble (no markdown), keyed for style. */
+const TEXTING_STYLE =
+  "You are replying in a text message (iMessage). Keep it short and conversational — " +
+  "a sentence or two, the way a person actually texts. Plain text only: no markdown, " +
+  "headers, bullet lists, or code blocks — they show up as literal #, *, and - " +
+  "characters in a text bubble. Skip emoji unless the operator used them first.";
+
+const MAIL_STYLE =
+  "You are drafting an email. Write plain, well-formed prose in short paragraphs — a " +
+  "brief greeting, the substance, a short sign-off. No markdown syntax (#, *, backticks, " +
+  "or - bullets); it renders as literal characters in email. Be concise and get to the point.";
+
+/** Always-on voice doctrine: HOW to sound, distinct from the capability ladder
+ * (what to DO). Kept short and deliberately deferential to the self-authored
+ * SOUL/IDENTITY persona files, which refine this baseline when present — so a
+ * rich persona overrides, and a blank one still gets a warm, human default
+ * instead of generic assistant-speak. */
+const VOICE_DOCTRINE =
+  "How to sound — you are the operator's partner, not a generic chatbot. Address the " +
+  "operator by name when you know it (their name is in the persona/USER section below). " +
+  "Be warm but direct: lead with the useful thing, and cut corporate filler — no \"I'd be " +
+  "happy to\", \"Certainly!\", \"As an AI\", or throat-clearing. Acknowledge briefly, then " +
+  "act; don't narrate at length what you're about to do. When you're unsure, say so plainly " +
+  "and give your best read rather than hedging or over-apologizing. Match the operator's " +
+  "brevity and tone. If a persona (SOUL/IDENTITY) is defined below, let it refine this voice.";
 /** Capability doctrine — the escalation ladder. Always-on (not gated on brain
  * root): even with no persona/skills configured, the model must know how to
  * resolve a request instead of dead-ending on "I can't do that." */
@@ -191,13 +217,19 @@ export async function assembleSystemPrompt(
     identityLine,
     "Respond helpfully and concisely. Use available tools when they would genuinely help.",
     "Do not invent tool results — always call the tool and wait for the response.",
+    VOICE_DOCTRINE,
     CAPABILITY_DOCTRINE,
     // The CLI's built-in web/file/shell tools are disabled here — the model can only act
     // through the HiveMatrix lane tools it is offered. Steer web work to Browser Lane.
     "For anything on the web (fetching a page, current weather, news, live info), use the hivematrix_browser (Browser Lane) tool — you have no other web access.",
   ];
 
+  // Per-request surface style: spoken (TTS), texting (iMessage), or email. Chosen
+  // from the live channel arg, never a stored session row, so a unified
+  // console+voice thread still renders each turn in the right register.
   if (channel && SPOKEN_CHANNELS.has(channel)) sections.push(SPOKEN_STYLE);
+  else if (channel === "imessage") sections.push(TEXTING_STYLE);
+  else if (channel === "mail") sections.push(MAIL_STYLE);
 
   if (root) {
     const persona = loadPersonaSection(root);

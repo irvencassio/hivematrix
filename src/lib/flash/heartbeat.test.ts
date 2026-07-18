@@ -12,6 +12,7 @@ const {
   HEARTBEAT_STAND_DOWN,
   buildDailyMomentPrompt,
   buildHeartbeatPrompt,
+  formatOperatorActivity,
   dailyMomentDue,
   dayBriefMomentDue,
   ensureHeartbeatChecklist,
@@ -157,6 +158,51 @@ test("buildHeartbeatPrompt embeds checklist, snapshot, autonomy guidance, and th
   assert.match(prompt, new RegExp(HEARTBEAT_STAND_DOWN));
   const manual = buildHeartbeatPrompt({ checklist: "x", statusSnapshot: "", autonomy: "manual", now: at(9) });
   assert.match(manual, /MANUAL: observe and report only/);
+});
+
+test("formatOperatorActivity renders recent user/assistant turns compactly, dropping tool turns", () => {
+  const turns = [
+    { id: "1", sessionId: "s", role: "user", content: "how's the annuities studying going", toolCallsJson: null, artifactsJson: null, ts: "t1" },
+    { id: "2", sessionId: "s", role: "tool", content: "{giant json}", toolCallsJson: null, artifactsJson: null, ts: "t2" },
+    { id: "3", sessionId: "s", role: "assistant", content: "You're on a 4-day streak.", toolCallsJson: null, artifactsJson: null, ts: "t3" },
+  ];
+  const out = formatOperatorActivity(turns);
+  assert.match(out, /Operator: how's the annuities studying going/);
+  assert.match(out, /You: You're on a 4-day streak\./);
+  assert.doesNotMatch(out, /giant json/, "tool turns are excluded from the digest");
+  assert.equal(formatOperatorActivity([]), "", "no turns → empty digest");
+});
+
+test("buildHeartbeatPrompt folds in operator activity and forbids re-surfacing handled items", () => {
+  const withActivity = buildHeartbeatPrompt({
+    checklist: "- check approvals",
+    statusSnapshot: "1 approval pending",
+    autonomy: "standard",
+    operatorActivity: "- Operator: I already approved the mail send",
+    now: at(9),
+  });
+  assert.match(withActivity, /already engaged with/);
+  assert.match(withActivity, /I already approved the mail send/);
+  assert.match(withActivity, /Do NOT surface anything the operator has already discussed/);
+
+  // No activity → the section is omitted entirely (no empty header).
+  const noActivity = buildHeartbeatPrompt({
+    checklist: "x", statusSnapshot: "", autonomy: "standard", now: at(9),
+  });
+  assert.doesNotMatch(noActivity, /already engaged with/);
+});
+
+test("runHeartbeatOnce threads the operator-activity digest into the pulse prompt", async () => {
+  mkdirSync(join(TMP, ".hivematrix"), { recursive: true });
+  let seenPrompt = "";
+  await runHeartbeatOnce({
+    composeStatus: async () => "all quiet",
+    getOperatorActivity: () => "- Operator: shipping the release now, don't interrupt",
+    runTurn: async ({ text }) => { seenPrompt = text; return { reply: HEARTBEAT_STAND_DOWN, sessionId: "s1", turnId: "t1" }; },
+    now: () => at(9),
+  });
+  assert.match(seenPrompt, /shipping the release now, don't interrupt/, "the pulse sees what the operator is doing");
+  assert.match(seenPrompt, /already engaged with/);
 });
 
 test("runHeartbeatOnce: stand-down produces no notify and no operator turn", async () => {

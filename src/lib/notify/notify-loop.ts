@@ -2,7 +2,11 @@
  * Notification loop: pushes escalations out and reads button taps back.
  *
  *  - escalation tick: any new pending stuck task or approval is pushed to the
- *    founder via notify() — Telegram gets inline action buttons.
+ *    founder via notify() — Telegram gets inline action buttons — AND fanned out
+ *    to native devices via sendPush() (APNs/FCM), so an approval reaches the
+ *    phone/watch even when the app is killed (the console/Telegram surfaces only
+ *    help when the operator is already looking). Both use the same in-memory
+ *    dedup, so each pending item pings exactly once.
  *  - telegram tick: long-polls getUpdates; an allowlisted button tap resolves
  *    the stuck/approval the same way the console would.
  *
@@ -18,6 +22,30 @@ import {
   getTelegramConfig, getUpdates, isAuthorizedUpdate, parseCallbackData,
   answerCallback, editMessageText, stuckKeyboard, approvalKeyboard,
 } from "./telegram";
+
+/** Native push payload (APNs/FCM) — see notify/push.ts sendPush(). */
+type PushFn = (o: { title: string; body: string; data?: Record<string, unknown> }) => Promise<unknown>;
+
+/**
+ * Injectable seams for escalationTick. Defaults are the real implementations;
+ * sendPush is lazily imported so the apns/fcm transports aren't loaded until a
+ * push is actually sent (mirrors the daemon's own lazy sendPush wiring).
+ */
+export interface EscalationDeps {
+  getPendingStuck: typeof getPendingStuck;
+  getPendingApprovals: typeof getPendingApprovals;
+  notify: typeof notify;
+  sendPush: PushFn;
+  notifyFailures: () => Promise<void>;
+}
+
+const defaultEscalationDeps: EscalationDeps = {
+  getPendingStuck,
+  getPendingApprovals,
+  notify,
+  sendPush: async (o) => (await import("./push")).sendPush(o),
+  notifyFailures,
+};
 
 const ESCALATION_INTERVAL_MS = 5_000;
 const notified = new Set<string>();
@@ -57,20 +85,35 @@ async function notifyFailures(): Promise<void> {
 }
 
 /** Push any new pending stuck/approval/failure out to the founder's channels. */
-export async function escalationTick(): Promise<void> {
-  for (const s of getPendingStuck()) {
+export async function escalationTick(deps: Partial<EscalationDeps> = {}): Promise<void> {
+  const d = { ...defaultEscalationDeps, ...deps };
+  for (const s of d.getPendingStuck()) {
     const key = `stuck:${s.taskId}:${s.timestamp}`;
     if (!mark(key)) continue;
     const text = `⚠️ Task needs input\n${s.reason || "(no detail)"}\n\nReply or tap an action.`;
-    await notify(text, { telegramMarkup: stuckKeyboard(s.taskId, s.timestamp) });
+    await d.notify(text, { telegramMarkup: stuckKeyboard(s.taskId, s.timestamp) });
+    // Native push is a bonus surface — never let a transport error break the
+    // Telegram/iMessage/email escalation that already went out above.
+    await d.sendPush({
+      title: "Task needs input",
+      body: (s.reason || "A task is waiting on you.").slice(0, 180),
+      data: { kind: "stuck", taskId: s.taskId, timestamp: s.timestamp },
+    }).catch(() => {});
   }
-  for (const a of getPendingApprovals()) {
+  for (const a of d.getPendingApprovals()) {
     const key = `approval:${a.taskId}:${a.timestamp}`;
     if (!mark(key)) continue;
     const text = `🔐 Approval needed\nTool: ${a.tool}\n${a.command}\n${a.context ?? ""}`.slice(0, 1500);
-    await notify(text, { telegramMarkup: approvalKeyboard(a.taskId, a.timestamp) });
+    await d.notify(text, { telegramMarkup: approvalKeyboard(a.taskId, a.timestamp) });
+    await d.sendPush({
+      title: "Approval needed",
+      body: `${a.tool} — ${a.command}`.slice(0, 180),
+      // data.kind lets the app deep-link to the approval and (with notification
+      // actions) resolve it from the lock screen.
+      data: { kind: "approval", taskId: a.taskId, timestamp: a.timestamp },
+    }).catch(() => {});
   }
-  await notifyFailures();
+  await d.notifyFailures();
 }
 
 let tgOffset = 0;

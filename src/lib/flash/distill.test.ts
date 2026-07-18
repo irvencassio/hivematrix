@@ -1,6 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mergeOperatorFacts, mergeOperatorGoals } from "./distill";
+import { mergeOperatorFacts, mergeOperatorGoals, buildDistillPrompt } from "./distill";
+
+test("buildDistillPrompt asks the distiller to capture the operator's communication-style preferences", () => {
+  const prompt = buildDistillPrompt("console", "operator", "Operator: stop being so wordy. Me: got it.");
+  // Communication-style facts are how the always-on voice doctrine adapts to
+  // this specific operator over time (brevity/formality/how to be addressed,
+  // and explicit tone corrections).
+  assert.match(prompt, /how they like to be communicated with/);
+  assert.match(prompt, /brevity, formality, humor/);
+  assert.match(prompt, /explicit correction of your tone/);
+  // Still scoped to what's evidenced — never guessed.
+  assert.match(prompt, /never\s+guess/);
+});
 
 test("mergeOperatorFacts seeds USER.md with a header + learned section when empty", () => {
   const { content, added } = mergeOperatorFacts("", ["Prefers terse answers"], "2026-07-04");
