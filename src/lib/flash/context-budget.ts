@@ -58,14 +58,24 @@ export function usableContextFor(model: string | null | undefined): number {
 }
 
 /**
- * Total tokens actually occupying the context window for a turn.
+ * Total tokens occupying the context window for a turn.
  *
- * The critical part is that cache reads count. On a `--resume` turn the CLI
- * replays the whole prior conversation from the prompt cache, so it arrives as
- * `cacheReadTokens` and NOT as `inputTokens` — `inputTokens` alone stays small
- * forever and would make the longest, fullest sessions read as the emptiest.
- * That inversion is the whole reason this function exists rather than the
- * call sites reading `usage.inputTokens` directly.
+ * This is just `inputTokens`, because the stream parser ALREADY folds the cache
+ * tokens into it — see orchestrator/stream-parser.ts:
+ *
+ *     const inputTok = baseInput + cacheCreate + cacheRead;
+ *
+ * Adding `cacheReadTokens + cacheCreationTokens` on top double-counts every
+ * cached token. That was the original bug here: on a resumed turn nearly the
+ * whole conversation arrives as a cache read, so the doubling roughly doubled
+ * the reading — a fresh session showed ~50% after a single turn, and one
+ * session recorded 203,648 tokens against a 200,000-token window, which is
+ * impossible for real occupancy (the request would have been rejected).
+ *
+ * The cache tokens still matter conceptually — a `--resume` turn replays the
+ * prior conversation from the prompt cache, so counting only `baseInput` would
+ * report the fullest sessions as the emptiest. The parser already handles that;
+ * this function must not do it a second time.
  *
  * Output tokens are excluded: they are not in the window at request time. They
  * land in the NEXT turn's history, so the gauge trails true occupancy by one
@@ -74,11 +84,9 @@ export function usableContextFor(model: string | null | undefined): number {
  */
 export function computeContextTokens(usage: {
   inputTokens?: number | null;
-  cacheReadTokens?: number | null;
-  cacheCreationTokens?: number | null;
 } | null | undefined): number {
   if (!usage) return 0;
-  return (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheCreationTokens ?? 0);
+  return usage.inputTokens ?? 0;
 }
 
 export type ContextLevel = "ok" | "notice" | "warn" | "critical";

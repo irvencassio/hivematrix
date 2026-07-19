@@ -41,17 +41,36 @@ test("classifyFlashFailure: unrelated failures fall through", () => {
   assert.equal(classifyFlashFailure("", ""), "other");
 });
 
-// The inversion guard: on a resumed turn the replayed history arrives as cache
-// reads, so counting inputTokens alone reports a nearly-full session as nearly
-// empty — the exact opposite of what a warning gauge needs.
-test("computeContextTokens counts cache reads, not just fresh input", () => {
-  assert.equal(computeContextTokens({ inputTokens: 120, cacheReadTokens: 180_000, cacheCreationTokens: 400 }), 180_520);
+// Regression: stream-parser.ts already computes
+//   inputTok = baseInput + cacheCreate + cacheRead
+// so adding the cache fields again double-counts every cached token. The
+// earlier version of this test asserted the DOUBLED value (180_520) and so
+// locked the bug in: a fresh session read ~50% full after one turn, and one
+// real session recorded 203,648 tokens against a 200,000-token window — a
+// figure that cannot describe real occupancy, since such a request would have
+// been rejected outright.
+test("computeContextTokens uses inputTokens, which already includes cache tokens", () => {
+  // A resumed turn: 180k replayed from cache, 120 fresh — the parser reports
+  // 180_520 as inputTokens, and that IS the occupancy.
+  assert.equal(computeContextTokens({ inputTokens: 180_520 }), 180_520);
+});
+
+test("computeContextTokens ignores cache fields if a caller still passes them", () => {
+  const usage = { inputTokens: 90_000, cacheReadTokens: 89_000, cacheCreationTokens: 900 } as { inputTokens: number };
+  assert.equal(computeContextTokens(usage), 90_000);
 });
 
 test("computeContextTokens treats missing fields and null usage as zero", () => {
   assert.equal(computeContextTokens({ inputTokens: 50 }), 50);
   assert.equal(computeContextTokens(null), 0);
   assert.equal(computeContextTokens(undefined), 0);
+});
+
+// A reading can never legitimately exceed the raw window — if it does, the
+// arithmetic is wrong rather than the session being impossibly large.
+test("a plausible full-session reading stays within the raw window", () => {
+  const tokens = computeContextTokens({ inputTokens: 195_000 });
+  assert.ok(tokens <= contextWindowFor("claude-haiku-4-5"), "occupancy must fit the window");
 });
 
 test("context window resolves known models and falls back", () => {
