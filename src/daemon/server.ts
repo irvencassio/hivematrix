@@ -4611,6 +4611,12 @@ export function createDaemonServer() {
             json(res, 404, { error: "This task can't take a reply in its current state" });
             return;
           }
+          // Stamp the outstanding question(s) as answered. Without this the next
+          // run's deriveOutput re-walks the whole accumulated turn log, finds
+          // round 1's question still unanswered, and re-derives needs_input with
+          // the ORIGINAL question as the headline — so a task that finished its
+          // work still reads "Awaiting your reply". See tasks/answer-questions.ts.
+          const { markQuestionsAnswered } = await import("@/lib/tasks/answer-questions");
           await Task.findByIdAndUpdate(tid, {
             description: appendReplyContinuation(String(cur.description ?? ""), text, attachments),
             status: "backlog",
@@ -4619,6 +4625,7 @@ export function createDaemonServer() {
             startedAt: null,
             completedAt: null,
             reviewState: null,
+            turns: markQuestionsAnswered(cur.turns, "operator"),
           });
           broadcast("tasks:updated", { taskId: tid, status: "backlog" });
           json(res, 200, { ok: true, fallback: "requeued" });
@@ -4628,9 +4635,16 @@ export function createDaemonServer() {
         const req2 = pending.sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
         const ok = await resolveStuck(tid, req2.timestamp, "reply", "console", prependAttachmentBlock(text, attachments));
         if (!ok) { json(res, 409, { error: "Already resolved" }); return; }
-        // Clear the needs_input reviewState so the board stops flagging it.
+        // Clear the needs_input reviewState so the board stops flagging it, and
+        // stamp the question answered so a later run can't re-derive it (same
+        // reason as the requeue branch above).
         const { Task } = await import("@/lib/db");
-        await Task.findByIdAndUpdate(tid, { reviewState: null });
+        const { markQuestionsAnswered: markAnswered } = await import("@/lib/tasks/answer-questions");
+        const live = await Task.findById(tid);
+        await Task.findByIdAndUpdate(tid, {
+          reviewState: null,
+          turns: markAnswered(live?.turns, "operator"),
+        });
         json(res, 200, { ok: true }); return;
       }
 
@@ -4669,13 +4683,18 @@ export function createDaemonServer() {
             status: "backlog", error: null, agentPid: null, startedAt: null, completedAt: null, reviewState: null,
             delayUntil: null, delayReason: null,
           };
+          // A retry with steering answers whatever was outstanding just as a
+          // reply does; without stamping it, the rerun re-derives needs_input
+          // from the old question (see tasks/answer-questions.ts).
+          const { markQuestionsAnswered } = await import("@/lib/tasks/answer-questions");
+          const curForRetry = await Task.findById(tid);
+          if (!curForRetry) { json(res, 404, { error: "Not found" }); return; }
+          updates.turns = markQuestionsAnswered(curForRetry.turns, "operator");
           if (steer || attachments.length) {
-            const cur = await Task.findById(tid);
-            if (!cur) { json(res, 404, { error: "Not found" }); return; }
             let block = "\n\n--- Operator guidance (retry) ---";
             if (steer) block += "\n" + steer;
             if (attachments.length) block += "\n" + renderAttachmentBlock(attachments);
-            updates.description = (cur.description ?? "") + block;
+            updates.description = (curForRetry.description ?? "") + block;
           }
           const t = await Task.findByIdAndUpdate(tid, updates);
           if (!t) { json(res, 404, { error: "Not found" }); return; }

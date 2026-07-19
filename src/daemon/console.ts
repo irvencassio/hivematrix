@@ -329,14 +329,30 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-status-dot.ok   { color: var(--ok, #4caf50); }
   .usage-status-dot.warn { color: #f0a500; }
   .usage-status-dot.hi   { color: #e05b2c; }
-  .usage-win-bars button { display: inline-flex; align-items: center; gap: 4px; }
+  /* Header meters (5h / 7d / context) share one size so they read as one family.
+     Sized up from the original 26x6 — at that size the bars were unreadable and
+     an unfilled one looked like a decorative dash rather than a meter. */
+  .usage-win-bars button { display: inline-flex; align-items: center; gap: 5px; }
   .usage-win-bars .usage-bar-wrap { margin: 0; }
-  .usage-win-bars .usage-bar { width: 26px; flex: none; }
+  .usage-win-bars .usage-bar { width: 44px; height: 8px; border-radius: 4px; flex: none; }
+  .usage-win-bars .usage-bar-fill { border-radius: 4px; }
   .usage-bar-days { display: inline-flex; align-items: center; }
-  .usage-bar-day { display: inline-block; width: 3px; height: 6px; border-radius: 1px; background: var(--border); margin-right: 1px; }
+  .usage-bar-day { display: inline-block; width: 5px; height: 8px; border-radius: 1px; background: var(--border); margin-right: 1px; }
   .usage-bar-day:last-child { margin-right: 0; }
   .usage-bar-day.filled.ok { background: var(--ok, #4caf50); }
+  .usage-bar-day.filled.warn { background: #f0a500; }
   .usage-bar-day.filled.hi { background: #e05b2c; }
+  /* Context meter — same component as the usage meters, always on screen. It sits
+     outside #usageWinToggle because it is a readout, not one of the two mutually
+     exclusive windows that toggle the readout text. */
+  .ctx-meter { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); padding: 3px 9px; cursor: pointer; }
+  .ctx-meter .usage-bar { width: 44px; height: 8px; border-radius: 4px; flex: none; }
+  .ctx-meter .usage-bar-fill { border-radius: 4px; }
+  .ctx-meter-fill.ctx-ok { background: var(--muted); }
+  .ctx-meter-fill.ctx-notice { background: #6b7a8f; }
+  .ctx-meter-fill.ctx-warn { background: #d59a2a; }
+  .ctx-meter-fill.ctx-critical { background: #d5502a; }
   #usageWinToggle button { border: 1px solid transparent; }
   #usageWinToggle button.on { background: var(--panel-2); color: var(--accent); border-color: var(--accent); }
   /* Compact at-a-glance provider cards for the Usage section. */
@@ -877,6 +893,12 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .oc-panel-title { display:flex; align-items:center; gap:8px; font-size:18px; font-weight:700; }
   .oc-panel-sub { color:var(--muted); font-size:12px; }
   .oc-panel-head-spacer { flex:1 1 auto; min-width:12px; }
+  /* Panel-head action. Was .linklike — 11px underlined muted text sitting next
+     to an 18px/700 title, which made the one destructive action in the header
+     (New clears the shared thread) the quietest thing on screen. */
+  .oc-head-btn { border:1px solid var(--border); background:var(--panel-2); color:var(--text);
+    border-radius:7px; font-size:12px; font-weight:600; padding:5px 11px; cursor:pointer; white-space:nowrap; }
+  .oc-head-btn:hover { border-color:var(--accent); color:var(--accent); }
   .oc-panel-body { flex:1 1 auto; min-height:0; display:flex; flex-direction:column;
     border:1px solid var(--border); border-radius:10px; background:var(--panel-2); overflow:hidden; }
   .oc-transcript { flex:1 1 auto; min-height:0; overflow-y:auto; padding:16px 18px; font-size:13px; scroll-behavior:smooth; }
@@ -1083,6 +1105,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <button data-w="5h" class="on" id="usageBtn5h" onclick="setHeaderUsageWindow('5h')">5h<span class="usage-bar-wrap" onclick="event.stopPropagation();openObsModal()"><span class="usage-bar" id="usageBar5h"><span class="usage-bar-fill" id="usageBar5hFill"></span></span></span></button>
       <button data-w="7d" id="usageBtn7d" onclick="setHeaderUsageWindow('7d')">7d<span class="usage-bar-wrap" onclick="event.stopPropagation();openObsModal()"><span class="usage-bar-days" id="usageBar7d"><span class="usage-bar-day" data-day="1"></span><span class="usage-bar-day" data-day="2"></span><span class="usage-bar-day" data-day="3"></span><span class="usage-bar-day" data-day="4"></span><span class="usage-bar-day" data-day="5"></span><span class="usage-bar-day" data-day="6"></span><span class="usage-bar-day" data-day="7"></span></span></span></button>
     </span>
+    <span class="ctx-meter" id="ctxMeter" onclick="showFlashPanel()" title="Conversation context — how full the chat thread is">ctx<span class="usage-bar-wrap"><span class="usage-bar"><span class="usage-bar-fill ctx-meter-fill ctx-ok" id="ctxMeterFill"></span></span></span></span>
     <span class="muted" id="usageWinReadout" style="font-size:11px"></span>
   </div>
   <div class="hzone mode" style="margin-left:auto">
@@ -5852,6 +5875,42 @@ function renderUsage7dBar() {
   if (btn) btn.title = "Day " + cycleDay + " of 7 · " + Math.max(0, Math.min(100, win.remaining)).toFixed(0) + "% left · resets " + fmtResets(win.resetsAt);
 }
 
+// Context meter — always rendered, unlike the old in-panel gauge which hid itself
+// below 50% fill. A meter that only appears once you are in trouble gives no
+// calibration: the operator cannot tell "healthy" from "not measured yet".
+// Colour, not presence, carries the urgency.
+function renderHeaderCtxBar() {
+  const fill = document.getElementById("ctxMeterFill");
+  const el = document.getElementById("ctxMeter");
+  if (!fill || !el) return;
+  const ctx = _flashState.context;
+  if (!ctx || ctx.fill == null) {
+    fill.style.width = "0%";
+    fill.className = "usage-bar-fill ctx-meter-fill ctx-ok";
+    el.title = "Conversation context: not measured yet (no turn completed in this thread).";
+    return;
+  }
+  const pct = Math.max(0, Math.min(100, Math.round(ctx.fill * 100)));
+  const level = ctx.level || "ok";
+  fill.style.width = pct + "%";
+  fill.className = "usage-bar-fill ctx-meter-fill ctx-" + level;
+  el.title = "Conversation context: " + pct + "% full ("
+    + (ctx.tokens || 0).toLocaleString() + " of " + (ctx.limit || 0).toLocaleString() + " tokens). "
+    + (level === "critical"
+        ? "Compacting automatically; start a new conversation for a clean slate."
+        : "Older turns are folded into a summary automatically past 75%.");
+}
+
+// Poll the context fill on the header's own cadence so the meter is live even
+// when the Chat panel is closed (the in-panel gauge only updated while open).
+async function refreshHeaderContext() {
+  try {
+    const cur = await api("/flash/session/current?peer=operator");
+    _flashState.context = (cur && cur.context) || null;
+  } catch (e) { /* best-effort — the meter is advisory */ }
+  renderHeaderCtxBar();
+}
+
 function renderHeaderUsageWindow() {
   document.querySelectorAll("#usageWinToggle button").forEach(function (b) { b.classList.toggle("on", b.dataset.w === _headerUsageWin); });
   renderUsage5hBar();
@@ -7000,27 +7059,9 @@ let _flashState = {
   context: null
 };
 
-// Context gauge colors by level. "ok" never renders — a gauge that is always on
-// screen becomes furniture the operator stops reading, which defeats having one.
-var FLASH_CTX_COLORS = { notice: '#6b7a8f', warn: '#d59a2a', critical: '#d5502a' };
-
-function flashContextGaugeHtml() {
-  const ctx = _flashState.context;
-  if (!ctx || ctx.fill == null || ctx.level === 'ok') return '';
-  const pct = Math.round(ctx.fill * 100);
-  const color = FLASH_CTX_COLORS[ctx.level] || FLASH_CTX_COLORS.notice;
-  const showPct = ctx.level === 'warn' || ctx.level === 'critical';
-  const title = 'Conversation context: ' + pct + '% full ('
-    + (ctx.tokens || 0).toLocaleString() + ' of ' + (ctx.limit || 0).toLocaleString() + ' tokens). '
-    + (ctx.level === 'critical'
-        ? 'Compacting automatically; start a new conversation for a clean slate.'
-        : 'Older turns are folded into a summary automatically past 75%.');
-  return '<span class="oc-ctx-gauge" title="' + esc(title) + '" style="display:inline-flex;align-items:center;gap:6px;margin-right:10px;">'
-    + '<span style="width:54px;height:5px;border-radius:3px;background:rgba(255,255,255,.14);overflow:hidden;display:inline-block;">'
-    + '<span style="display:block;height:100%;width:' + pct + '%;background:' + color + ';"></span></span>'
-    + (showPct ? '<span style="font-size:11px;color:' + color + ';">' + pct + '%</span>' : '')
-    + '</span>';
-}
+// The context gauge moved out of this panel head and into the title bar's meter
+// row (#ctxMeter / renderHeaderCtxBar), so it sits beside the 5h and 7d meters as
+// one family and stays visible while the Chat panel is closed.
 
 function flashPanelHtml() {
   return '<div class="oc-center-pane">'
@@ -7028,9 +7069,7 @@ function flashPanelHtml() {
     + '<div><div class="oc-panel-title"><span class="oc-avail-dot ok"></span><span>Chat</span></div>'
     + '<div class="oc-panel-sub">Native HiveMatrix agent loop</div></div>'
     + '<span class="oc-panel-head-spacer"></span>'
-    + flashContextGaugeHtml()
-    + '<button class="linklike" onclick="flashNewConversation()" title="Start a fresh conversation — clears the shared operator thread on desktop, phone and watch">✎ New</button>'
-    + '<button class="linklike ov-back" onclick="closeSession()" title="Back (Esc)">← Back</button>'
+    + '<button class="oc-head-btn" onclick="flashNewConversation()" title="Start a fresh conversation — clears the shared operator thread on desktop, phone and watch">✎ New conversation</button>'
     + '</div>'
     + '<div class="oc-panel-body">'
     + '<div class="oc-transcript" id="flashTranscript"></div>'
@@ -7128,6 +7167,7 @@ async function refreshFlashContext() {
   try {
     const cur = await api('/flash/session/current?peer=operator');
     _flashState.context = (cur && cur.context) || null;
+    renderHeaderCtxBar();
     if (_flashState.panelOpen && !_flashState.sending) renderFlashPanel();
   } catch (e) { /* best-effort — the gauge is advisory */ }
 }
@@ -7137,6 +7177,7 @@ async function hydrateFlashThread() {
   try {
     const cur = await api('/flash/session/current?peer=operator');
     _flashState.context = (cur && cur.context) || null;
+    renderHeaderCtxBar();
     const sid = cur && cur.sessionId;
     if (!sid) return;
     _flashState.sessionId = sid;
@@ -10181,8 +10222,10 @@ if (requireToken()) {
   checkUpdate();
   setInterval(checkUpdate, 5 * 60 * 1000);
   checkUsage();
+  refreshHeaderContext();
   checkDaemonVersionReload();
   setInterval(checkUsage, 30 * 1000);
+  setInterval(refreshHeaderContext, 30 * 1000);
   setInterval(checkDaemonVersionReload, 20 * 1000);
 }
 </script>
