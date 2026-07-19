@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.230 — 2026-07-19
+
+Chat can now finish the work you give it. It could not write files at all — so 'research this and make me a brain doc' was impossible, and it told you 'tool limitations' — and it ran on one budget sized for a watch reply: three minutes and twelve steps, for every surface. Typed chat now runs on a stronger model with fifteen minutes and forty steps, while voice and watch keep the fast model and a short clock so spoken replies stay quick. Chat can write brain docs directly, and it now hands multi-step or code work to a background task immediately instead of burning the clock and losing everything. The '+ New task' button is gone; Chat is the one way to start work. Also fixes the updater telling you that you were up to date for about twenty-five minutes after every release.
+
 ## v0.1.229 — 2026-07-19
 
 Fixes Chat failing to use its own tools. The assistant was being told to call tools by one name while it was actually given another, so calls came back as 'No such tool available' and it fell back to describing the work instead of doing it — asking it to change something in HiveMatrix, look something up in your brain docs, or set a reminder could quietly go nowhere. Also fixes escalations to a background task not reporting the task they created, so Chat could not tell you which task it had opened.
