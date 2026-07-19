@@ -41,7 +41,14 @@ import type { LaneToolContext } from "@/lib/orchestrator/lane-tools";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { recordRun } from "@/lib/observability/store";
 import { prepareFlashMcp, loadCuratedSkillTools } from "./flash-mcp";
-import { clearFlashCliSessionId, getFlashCliSessionId, setFlashCliSessionId } from "./store";
+import { clearFlashCliSessionId, getFlashCliSessionId, setFlashCliSessionId, setSessionContextTokens } from "./store";
+import {
+  COMPACT_THRESHOLD,
+  classifyFlashFailure,
+  computeContextTokens,
+  contextFill,
+} from "./context-budget";
+import { compactFlashSession } from "./compact";
 import type { FlashEmitter, FlashMessage } from "./types";
 
 const MAX_TOOL_CALLS = 12;
@@ -460,13 +467,12 @@ function runFlashAttempt(
   });
 }
 
-// A --resume attempt that fails this way looks like a stale/expired CLI
-// session (daemon restart, session pruned by the CLI, etc.) rather than a
-// real turn failure — worth a silent retry rather than surfacing raw CLI
-// plumbing to the user. A stale --resume fails at session lookup BEFORE any
-// content streams, so live streaming loses nothing by suppressing only the
-// terminal error until we've classified it.
-const STALE_RESUME_RE = /\bsession\b|\bresume\b/i;
+// Failure classification for a --resume attempt lives in context-budget.ts
+// (classifyFlashFailure), which distinguishes a stale/expired CLI session —
+// worth a silent retry rather than surfacing raw CLI plumbing — from context
+// exhaustion, which needs compaction instead. Both fail before any content
+// streams, so live streaming loses nothing by suppressing only the terminal
+// error until we've classified it.
 
 // ---------------------------------------------------------------------------
 // Fabricated-tool-call guard. A weak model under the "never dead-end" doctrine
@@ -558,6 +564,51 @@ function recordFlashTelemetry(args: {
   }
 }
 
+/**
+ * Keep every system message plus only the newest `keep` conversational
+ * messages. Used for the post-compaction retry: the caller assembled
+ * `messages` from the session BEFORE compaction ran, so replaying it verbatim
+ * would re-send the very payload that just overflowed. Compaction has already
+ * written the summary to the DB for subsequent turns; this retry only has to
+ * fit inside the window.
+ */
+export function trimMessagesForRetry(messages: FlashMessage[], keep: number): FlashMessage[] {
+  const system = messages.filter((m) => m.role === "system");
+  const rest = messages.filter((m) => m.role !== "system");
+  return [...system, ...rest.slice(-keep)];
+}
+
+/** Conversational messages retained on a post-overflow retry. */
+const RETRY_KEEP_MESSAGES = 6;
+
+/**
+ * Record the context-window occupancy this turn reported, and compact the
+ * session when it crosses the threshold.
+ *
+ * Runs after the reply is already complete, and never throws: this is
+ * housekeeping, and a bookkeeping failure must not surface as a chat failure.
+ * The compaction is intentionally NOT awaited by the caller — it takes effect
+ * on the next turn, so making the operator wait for it would add latency to a
+ * reply that is already finished.
+ */
+function recordContextAndMaybeCompact(sessionId: string, model: string | null, usage: FlashUsage | null): void {
+  try {
+    const tokens = computeContextTokens(usage);
+    if (tokens <= 0) return;
+    setSessionContextTokens(sessionId, tokens, model);
+    const fill = contextFill(tokens, model);
+    if (fill < COMPACT_THRESHOLD) return;
+    console.log(
+      `[flash:context] session ${sessionId} at ${Math.round(fill * 100)}% of usable context (${tokens} tokens) — compacting`,
+    );
+    void compactFlashSession(sessionId, "threshold").catch((err) => {
+      console.warn(`[flash:compact] threshold compaction failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  } catch {
+    /* context accounting is non-critical — never break the chat reply */
+  }
+}
+
 export async function runFlashAgentLoop(
   messages: FlashMessage[],
   emit: FlashEmitter,
@@ -620,6 +671,7 @@ export async function runFlashAgentLoop(
     const result = await runFlashAttempt(binary, args, prompt, spawnImpl, emit);
     if (result.cliSessionId) setFlashCliSessionId(sessionId, result.cliSessionId);
     recordFlashTelemetry({ sessionId, model: result.model, usage: result.usage, failed: !!result.terminalError, startedAtMs });
+    recordContextAndMaybeCompact(sessionId, result.model, result.usage);
     return guardedText(result.text, sessionId);
   }
 
@@ -630,12 +682,52 @@ export async function runFlashAgentLoop(
   const { args, prompt } = buildTurn(storedCliSessionId);
   const resumeResult = await runFlashAttempt(binary, args, prompt, spawnImpl, emit, true);
 
-  const looksStale =
-    resumeResult.exitCode !== null &&
-    resumeResult.exitCode !== 0 &&
-    STALE_RESUME_RE.test(`${resumeResult.stderr} ${resumeResult.text}`);
+  const failed = resumeResult.exitCode !== null && resumeResult.exitCode !== 0;
+  const failureKind = failed ? classifyFlashFailure(resumeResult.stderr, resumeResult.text) : "other";
 
-  if (looksStale) {
+  if (failureKind === "context-overflow") {
+    // The conversation outgrew the model's context window. Compacting first is
+    // what makes the retry meaningful — it folds the old turns into the session
+    // summary, prunes them, and drops the resume id, so this session stops
+    // carrying an unbounded CLI-side conversation forward.
+    //
+    // This is awaited (unlike the threshold path) because the retry below
+    // depends on it having happened.
+    console.warn(`[flash:context] session ${sessionId} overflowed the context window — compacting and retrying`);
+    try {
+      await compactFlashSession(sessionId, "overflow");
+    } catch (err) {
+      // Compaction failing must not swallow the turn — fall through and retry
+      // with a trimmed payload anyway, which is the part that lets it fit.
+      console.warn(`[flash:compact] overflow compaction failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      clearFlashCliSessionId(sessionId);
+    }
+    // `messages` was assembled before compaction ran, so it still holds the
+    // oversized history — retry from a trimmed view of it rather than
+    // re-sending what just overflowed.
+    const { systemPrompts, prompt } = buildFlashPrompt(trimMessagesForRetry(messages, RETRY_KEEP_MESSAGES), false);
+    const retryArgs = buildFlashSpawnArgs({
+      systemPrompts,
+      mcpConfigPath: configPath,
+      toolNames,
+      maxTurns: MAX_TOOL_CALLS,
+      resumeSessionId: null,
+      hasImages,
+    });
+    const retryResult = await runFlashAttempt(
+      binary,
+      retryArgs,
+      withImageNote(prompt, options.imagePaths),
+      spawnImpl,
+      emit,
+    );
+    if (retryResult.cliSessionId) setFlashCliSessionId(sessionId, retryResult.cliSessionId);
+    recordFlashTelemetry({ sessionId, model: retryResult.model, usage: retryResult.usage, failed: !!retryResult.terminalError, startedAtMs });
+    recordContextAndMaybeCompact(sessionId, retryResult.model, retryResult.usage);
+    return guardedText(retryResult.text, sessionId);
+  }
+
+  if (failureKind === "stale-resume") {
     // Stale/expired session — drop it and retry the SAME turn once, for real
     // this time: no --resume, full-history serialization, live streaming, and
     // terminal errors surfaced normally. (Stale produced no content, so there
@@ -645,6 +737,7 @@ export async function runFlashAgentLoop(
     const fallbackResult = await runFlashAttempt(binary, fallback.args, fallback.prompt, spawnImpl, emit);
     if (fallbackResult.cliSessionId) setFlashCliSessionId(sessionId, fallbackResult.cliSessionId);
     recordFlashTelemetry({ sessionId, model: fallbackResult.model, usage: fallbackResult.usage, failed: !!fallbackResult.terminalError, startedAtMs });
+    recordContextAndMaybeCompact(sessionId, fallbackResult.model, fallbackResult.usage);
     return guardedText(fallbackResult.text, sessionId);
   }
 
@@ -657,5 +750,6 @@ export async function runFlashAgentLoop(
   // triggered the `looksStale` retry) is intentionally NOT recorded here —
   // only the real, user-visible attempt gets a telemetry row.
   recordFlashTelemetry({ sessionId, model: resumeResult.model, usage: resumeResult.usage, failed: !!resumeResult.terminalError, startedAtMs });
+  recordContextAndMaybeCompact(sessionId, resumeResult.model, resumeResult.usage);
   return guardedText(resumeResult.text, sessionId);
 }

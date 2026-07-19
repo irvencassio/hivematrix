@@ -10,7 +10,8 @@
 import type { ServerResponse } from "http";
 import { configuredBrainRootDir } from "@/lib/brain/settings";
 import { generateId } from "@/lib/db";
-import type { FlashEmitter, FlashTurnInput } from "./types";
+import type { FlashEmitter, FlashSessionRow, FlashTurnInput } from "./types";
+import { type ContextLevel, contextFill, contextLevel, usableContextFor } from "./context-budget";
 import {
   appendFeedbackToTurn,
   appendTurn,
@@ -28,6 +29,28 @@ import { extractPimActions, parseReminderCommand } from "@/lib/orchestrator/pim-
 
 // Re-export store helpers for the server routes
 export { appendFeedbackToTurn, createSession, getCurrentSession, getSession, getTurnsForSession, listSessions };
+
+/**
+ * Context-window occupancy for a session, shaped for the clients' fill gauge.
+ *
+ * `tokens` is null when the session has not completed a turn since the reading
+ * was introduced — the clients render that as unknown rather than as empty,
+ * because showing an empty gauge for a session that may be nearly full is the
+ * one failure mode a warning indicator must not have.
+ */
+export function describeSessionContext(session: FlashSessionRow | null): {
+  tokens: number | null;
+  limit: number;
+  fill: number | null;
+  level: ContextLevel | null;
+} {
+  const model = session?.contextModel ?? null;
+  const limit = usableContextFor(model);
+  const tokens = session?.contextTokens ?? null;
+  if (tokens == null) return { tokens: null, limit, fill: null, level: null };
+  const fill = contextFill(tokens, model);
+  return { tokens, limit, fill, level: contextLevel(fill) };
+}
 
 /**
  * Run a flash turn and return the reply directly (no SSE).

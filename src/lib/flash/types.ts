@@ -38,6 +38,14 @@ export interface FlashSessionRow {
    *  the first turn's stream-json `session` event is captured, and cleared
    *  whenever a `--resume` attempt turns out to be stale. */
   cliSessionId?: string | null;
+  /** Context-window occupancy measured on this session's last completed turn
+   *  (see context-budget.ts's computeContextTokens). Null when no turn has
+   *  completed since the reading was introduced — "unknown", not "empty". */
+  contextTokens?: number | null;
+  /** The resolved model id that `contextTokens` was measured against, so the
+   *  fill fraction is computed with the right window even if the lane's model
+   *  changes between turns. */
+  contextModel?: string | null;
 }
 
 export interface FlashTurnRow {
