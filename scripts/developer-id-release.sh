@@ -236,6 +236,27 @@ for a in "${ART[@]}"; do [[ -f "$a" ]] && cp -f "$a" "$OUT_DIR/" || true; done
 echo "✓ metadata: $META"
 echo "✓ artifacts + hashes under: $OUT_DIR"
 
+# ── Prune old build artifacts (keep last 6) ────────────────────────────────────
+# build/developer-id/ accumulates ~270MB per release. Keep only the last 6 to
+# avoid unbounded growth while retaining recent artifacts for debugging/rollback.
+if [[ "$MODE" == "release" && -d "$OUT_ROOT" ]]; then
+  step "Prune old build artifacts"
+  # List directories sorted newest-first, skip the first 6 (keep), delete the rest
+  dirs_to_prune="$(ls -1dt "$OUT_ROOT"/*-b[0-9]* 2>/dev/null | tail -n +7)"
+  if [[ -n "$dirs_to_prune" ]]; then
+    count=0
+    while IFS= read -r dir; do
+      if [[ -d "$dir" ]]; then
+        rm -rf "$dir"
+        ((count++))
+      fi
+    done <<< "$dirs_to_prune"
+    echo "✓ pruned $count old release directories (kept last 6)"
+  else
+    echo "✓ no old directories to prune (≤6 releases present)"
+  fi
+fi
+
 step "Done"
 case "$MODE" in
   build)   echo "✓ Built $PRODUCT $TARGET_VERSION (b$BUILD_NUMBER)${SKIP_LABEL:+, un-notarized dry run}. Not published." ;;
