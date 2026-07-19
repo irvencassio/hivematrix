@@ -227,6 +227,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     font-size: 12px; font-weight: 600; margin-bottom: 10px; transition: border-color .15s ease, color .15s ease; }
   .addbtn:hover { border-color: var(--accent); color: var(--accent); }
   .addbtn.active { border-color: var(--accent); color: var(--accent); }
+  .new-task-hint { padding: 7px 2px 10px; font-size: 11.5px; color: var(--muted); }
   /* .ov-nav / .ov-back — shared nav-button and back-link styles for every sidebar
      panel (Chat/Memory/Roles/Tools/Goals) and their back-links. Class names are a
      holdover from the removed Overview feature; the styling itself is shared, not
@@ -1904,7 +1905,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   <div class="col-resizer" id="resizeLeft" title="Drag to resize the left panel"></div>
   <div class="col-resizer" id="resizeRight" title="Drag to resize the right panel"></div>
   <section class="col board">
-    <button class="addbtn" id="newTaskNav" onclick="showNewTaskPanel()">＋ New task</button>
+    <div class="new-task-hint">Create tasks via Chat escalation</div>
     <button class="ov-nav oc-nav" id="flashNav" onclick="showFlashPanel()">💬 Chat</button>
     <button class="ov-nav oc-nav" id="brainNav" onclick="showBrain()">🧠 Memory</button>
     <button class="ov-nav oc-nav" id="rolesNav" onclick="showRoles()">👥 Roles</button>
@@ -2188,7 +2189,6 @@ function closeSession() {
 // ("menus duplicated").
 function syncNav() {
   const active = {
-    newTaskNav: _taskFormInSession,
     flashNav: _flashState.panelOpen,
     brainNav: _brainState.panelOpen,
     rolesNav: _rolesState.panelOpen,

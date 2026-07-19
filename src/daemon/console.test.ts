@@ -1818,21 +1818,19 @@ test("board no longer renders the hardcoded AI-news video shortcut", () => {
   assert.doesNotMatch(js, /draftVideoNow/, "no board shortcut wiring or unused draftVideoNow function");
 });
 
-test("+ New task and task creation remain after removing the shortcut", () => {
-  assert.match(CONSOLE_HTML, /＋ New task/, "+ New task button kept");
-  assert.match(CONSOLE_HTML, /showNewTaskPanel\(\)/, "+ New task opens the center-column panel");
+test("task creation functions remain after removing the sidebar shortcut", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /function createTask\(/, "task creation flow preserved");
   assert.match(js, /function showNewTaskPanel\(/, "center-column task panel flow preserved");
 });
 
-test("board column has Flash nav directly under New task", () => {
+test("board column's Flash nav is the first button", () => {
   assert.match(CONSOLE_HTML, /id="flashNav"/, "Flash nav control present");
   assert.match(CONSOLE_HTML, /id="flashNav"[^>]*onclick="showFlashPanel\(\)"/, "Flash nav opens center pane");
-  const newTaskIdx = CONSOLE_HTML.indexOf("＋ New task");
+  const boardStart = CONSOLE_HTML.indexOf('<section class="col board">');
   const flashIdx = CONSOLE_HTML.indexOf('id="flashNav"');
   const taskFormIdx = CONSOLE_HTML.indexOf('id="taskForm"');
-  assert.ok(newTaskIdx >= 0 && flashIdx > newTaskIdx, "Flash sits below New task");
+  assert.ok(boardStart >= 0 && flashIdx > boardStart, "Flash nav is inside the board column");
   assert.ok(taskFormIdx >= 0 && flashIdx < taskFormIdx, "Flash sits above the task form");
 });
 
@@ -1845,13 +1843,13 @@ test("showFlashPanel renders Flash in the center column", () => {
   assert.match(body, /updateFlashNav\(\)/, "updates Flash nav state");
 });
 
-test("board column's Overview nav is gone; + New task is the first button", () => {
+test("board column's Overview nav is gone; Flash nav is the first button", () => {
   assert.doesNotMatch(CONSOLE_HTML, /id="overviewNav"/, "Overview nav control is removed");
   const boardStart = CONSOLE_HTML.indexOf('<section class="col board">');
   assert.ok(boardStart >= 0, "board column present");
   const firstButtonIdx = CONSOLE_HTML.indexOf("<button", boardStart);
   const firstButtonTag = CONSOLE_HTML.slice(firstButtonIdx, CONSOLE_HTML.indexOf(">", firstButtonIdx) + 1);
-  assert.match(firstButtonTag, /onclick="showNewTaskPanel\(\)"/, "+ New task is the first button in the board column");
+  assert.match(firstButtonTag, /onclick="showFlashPanel\(\)"/, "Flash nav is the first button in the board column");
 });
 
 test("task detail renders a Back action wired to closeSession", () => {
@@ -1879,7 +1877,6 @@ test("Escape closes the open task/panel (via closeSession) only outside editable
 });
 
 test("new task and task selection remain intact", () => {
-  assert.match(CONSOLE_HTML, /onclick="showNewTaskPanel\(\)"/, "+ New task opens the task form");
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /function createTask\(/, "createTask flow preserved");
   assert.match(js, /function _closeNewTaskPanel\(/, "task form can return to the board column");
@@ -2927,12 +2924,10 @@ test("Flash chat has no thumbs-down button; assistant is labeled with the cyclon
 
 test("primary left nav uses a single active color convention", () => {
   const js = extractScript(CONSOLE_HTML);
-  assert.match(CONSOLE_HTML, /id="newTaskNav"/, "New task has a tracked nav id");
-  assert.match(CONSOLE_HTML, /\.addbtn \{[^}]*color:\s*var\(--text\)/, "New task is neutral when inactive");
-  assert.match(CONSOLE_HTML, /\.addbtn\.active[^}]*color:\s*var\(--accent\)/, "New task uses accent only when active");
+  assert.match(CONSOLE_HTML, /\.addbtn \{[^}]*color:\s*var\(--text\)/, "shared addbtn convention is neutral when inactive");
+  assert.match(CONSOLE_HTML, /\.addbtn\.active[^}]*color:\s*var\(--accent\)/, "shared addbtn convention uses accent only when active");
   // Nav highlight funnels through a single syncNav() so exactly one item is lit.
   const sync = fnBody(js, "syncNav");
-  assert.match(sync, /newTaskNav:\s*_taskFormInSession/, "New task active state follows the center form");
   assert.match(sync, /flashNav:\s*_flashState\.panelOpen/, "Flash active state follows the center panel");
   // Regression guard for the double-highlight bug: Roles must be in the single
   // sync (it was omitted before), and closeSession must call syncNav so a stale
@@ -2940,6 +2935,16 @@ test("primary left nav uses a single active color convention", () => {
   assert.match(sync, /rolesNav:\s*_rolesState\.panelOpen/, "Roles is included in the single nav sync");
   assert.match(fnBody(js, "closeSession"), /syncNav\(\)/, "closeSession re-syncs the nav (no stale highlight)");
   assert.match(fnBody(js, "closeSession"), /if \(_taskFormInSession\) _closeNewTaskPanel\(\)/, "closeSession closes an open New Task form so its nav can't stay lit");
+});
+
+test("+ New task button is removed; a hint points at Chat instead", () => {
+  assert.doesNotMatch(CONSOLE_HTML, /＋ New task<\/button>/, "+ New task button markup is gone");
+  assert.doesNotMatch(CONSOLE_HTML, /id="newTaskNav"/, "newTaskNav id is gone");
+  assert.match(CONSOLE_HTML, /Create tasks via Chat escalation/, "hint tells users where to create tasks");
+  const boardStart = CONSOLE_HTML.indexOf('<section class="col board">');
+  const hintIdx = CONSOLE_HTML.indexOf("Create tasks via Chat escalation");
+  const flashIdx = CONSOLE_HTML.indexOf('id="flashNav"');
+  assert.ok(boardStart >= 0 && hintIdx > boardStart && hintIdx < flashIdx, "hint sits at the top of the board column, where the button used to be");
 });
 
 test("runSelectedCommand sends both project and projectPath from the cmd multi-picker state", () => {
