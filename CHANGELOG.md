@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.223 — 2026-07-19
+
+Chat no longer runs out of room without warning. Flash conversations never expired and the desktop, phone and watch all share one thread, so it grew until the assistant announced mid-reply that it was 'at session end' — and the console had no way to start a fresh conversation at all. Chat now shows how full the conversation is once it passes the halfway mark, folds older turns into a running summary automatically past 75% so the thread keeps working instead of failing, and offers a New button to start clean. A context overflow is also now recognised for what it is: it was previously misread as an expired session, silently retried, and logged as the wrong cause, which is why this was hard to see coming. Also removes a dead /update/check route that was breaking the build.
+
 ## v0.1.222 — 2026-07-18
 
 Tasks you escalate from chat now reach the right repo even when you don't spell it exactly like the folder. Asking for work 'in ironsixty' was filed against HiveMatrix itself with no project directory, so the coding agent opened the wrong checkout, could not find the files it was asked to change, and the task failed outright — the second time in a day. The cause was that only the literal hyphenated directory name resolved: the folder is iron-sixty while the product, and what you actually type, is IronSixty. Project names now match regardless of hyphens, underscores, spaces or capitalisation, so ironsixty, IronSixty and Iron Sixty all reach the same checkout, while a genuinely unknown name still fails cleanly rather than being force-matched to something close.
