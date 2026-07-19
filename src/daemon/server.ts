@@ -1074,12 +1074,6 @@ export function createDaemonServer() {
         return;
       }
 
-      // GET /update/check — query the configured release channel for an update
-      if (req.method === "GET" && urlPath === "/update/check") {
-        const { checkUpdateStatus } = await import("@/lib/updater/daemon-update");
-        json(res, 200, await checkUpdateStatus());
-        return;
-      }
       // GET /usage — frontier model spend aggregated from task outputs
       if (req.method === "GET" && urlPath === "/usage") {
         const { getFrontierUsage } = await import("@/lib/usage/frontier-usage");
