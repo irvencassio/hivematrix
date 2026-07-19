@@ -24,15 +24,22 @@ function initTempRepo(): string {
 
 test("taskWorktreesEnabled defaults to false with no env override and no config flag set", () => {
   const prev = process.env.HIVEMATRIX_TASK_WORKTREES;
+  const prevHome = process.env.HOME;
   delete process.env.HIVEMATRIX_TASK_WORKTREES;
+  // Isolate HOME so this reads an EMPTY config dir rather than the developer's
+  // real ~/.hivematrix/config.json. It used to read the real one, on the
+  // assumption that "no machine in the wild has ever set features.taskWorktrees"
+  // — which stopped being true the moment the flag was legitimately turned on,
+  // and then failed on the operator's own machine for doing the intended thing.
+  // A default-value test must not depend on local state it does not control.
+  const tmpHome = mkdtempSync(join(tmpdir(), "hive-wt-home-"));
+  process.env.HOME = tmpHome;
   try {
-    // No machine in the wild has ever set features.taskWorktrees (brand new
-    // flag) so this reads the real ~/.hivematrix/config.json the same way
-    // isFeatureEnabled("selfImprovement") etc. do, and it should come back
-    // false unless someone explicitly opted in.
     assert.equal(taskWorktreesEnabled(), false);
   } finally {
     if (prev !== undefined) process.env.HIVEMATRIX_TASK_WORKTREES = prev;
+    if (prevHome !== undefined) process.env.HOME = prevHome;
+    rmSync(tmpHome, { recursive: true, force: true });
   }
 });
 
@@ -49,10 +56,18 @@ test("taskWorktreesEnabled reads the env var override", () => {
 
 test("taskWorktreesEnabled never throws even with a garbage env value", () => {
   const prev = process.env.HIVEMATRIX_TASK_WORKTREES;
+  const prevHome = process.env.HOME;
   process.env.HIVEMATRIX_TASK_WORKTREES = "yes-please"; // not the literal "1"
+  // Isolated for the same reason as the default test above: a non-"1" env value
+  // falls through to the config file, so without this the assertion is really
+  // about the developer's own config rather than the garbage-value handling.
+  const tmpHome = mkdtempSync(join(tmpdir(), "hive-wt-home-"));
+  process.env.HOME = tmpHome;
   try {
     assert.equal(taskWorktreesEnabled(), false);
   } finally {
+    if (prevHome !== undefined) process.env.HOME = prevHome;
+    rmSync(tmpHome, { recursive: true, force: true });
     if (prev === undefined) delete process.env.HIVEMATRIX_TASK_WORKTREES;
     else process.env.HIVEMATRIX_TASK_WORKTREES = prev;
   }

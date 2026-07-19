@@ -2998,3 +2998,39 @@ test("POST /messagebee/restart-daemon refuses to kickstart launchd when not runn
   assert.equal(body.ok, false);
   assert.match(body.error ?? "", /dev run/i);
 });
+
+test("POST /system/restart-daemon refuses to kickstart launchd when not running from a bundle", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const res = await fetch(`${base}/system/restart-daemon`, { method: "POST", headers });
+  // Same safety property as the Message Lane route: a dev run must never
+  // attempt a real restart, and the bundle guard must run BEFORE the busy check
+  // (otherwise a dev run with queued tasks reports the wrong reason).
+  assert.equal(res.status, 412);
+  const body = await res.json() as { ok: boolean; error?: string };
+  assert.equal(body.ok, false);
+  assert.match(body.error ?? "", /dev run/i);
+});
+
+test("POST /system/restart-daemon requires auth like every other non-public route", async (t) => {
+  withTempHome(t);
+  const { base } = await startServer(t);
+  const res = await fetch(`${base}/system/restart-daemon`, { method: "POST" });
+  assert.equal(res.status, 401);
+});
+
+test("GET /health reports the RUNNING daemon version separately from the on-disk bundle", async (t) => {
+  withTempHome(t);
+  const { base } = await startServer(t);
+  const res = await fetch(`${base}/health`);
+  assert.equal(res.status, 200);
+  const body = await res.json() as { runningVersion?: string; version?: string; staleDaemon?: boolean; pid?: number };
+  // The whole point of the field: `version` reads Info.plist off disk and so
+  // flips as soon as a new bundle lands, while the process keeps running the old
+  // code. Without runningVersion there is no way to tell a finished update from
+  // a pending one — which is exactly the state a restart button exists to fix.
+  assert.equal(typeof body.runningVersion, "string");
+  assert.ok(body.runningVersion, "runningVersion must be non-empty");
+  assert.equal(typeof body.staleDaemon, "boolean");
+  assert.equal(typeof body.pid, "number");
+});

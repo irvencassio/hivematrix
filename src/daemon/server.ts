@@ -335,12 +335,24 @@ export function createDaemonServer() {
         const { getBundledVersion } = await import("@/lib/version/bundle-version");
         const { getLicenseStatus } = await import("@/lib/license/license");
         const { isFeatureEnabled } = await import("@/lib/config/features");
+        const { versionInfo } = await import("@/lib/version");
+        // `version` reads the on-disk Info.plist, so after a bundle swap it
+        // reports the NEW version while this process is still running the OLD
+        // code — which is exactly when someone is trying to work out whether a
+        // restart is needed, and exactly when that number misleads them.
+        // `runningVersion` is compiled into this process and cannot lie.
+        // staleDaemon true => the bundle moved on and this process has not.
+        const onDisk = getBundledVersion();
+        const running = versionInfo().version;
         json(res, 200, {
           status: "ok",
-          version: getBundledVersion(),
+          version: onDisk,
+          runningVersion: running,
+          staleDaemon: Boolean(onDisk && running && onDisk !== running),
           connectivity: policy.mode,
           activeTasks: taskCount,
           uptime: process.uptime(),
+          pid: process.pid,
           license: getLicenseStatus().state,
           voice: { liveEnabled: isFeatureEnabled("voice") },
         });
@@ -1390,9 +1402,51 @@ export function createDaemonServer() {
         json(res, result.ok ? 200 : 500, result);
         return;
       }
+      // POST /system/restart-daemon — restart the launchd daemon.
+      //
+      // The daemon is a launchd agent with KeepAlive=true, so it is independent
+      // of the Tauri app: quitting and reopening the app does NOT restart it,
+      // and reloading the console certainly does not. Without this there was no
+      // way to pick up a new bundle short of the full update flow, and the only
+      // restart button in the product was buried in the Message Lane setup modal.
+      //
+      // Guarded on in-flight work: `kickstart -k` SIGKILLs, so a running task
+      // dies mid-write. Refuses with 409 and a count unless {force:true}.
+      if (req.method === "POST" && urlPath === "/system/restart-daemon") {
+        const { getBundledDaemonPaths } = await import("@/lib/onboarding/app-bundle");
+        if (!getBundledDaemonPaths()) {
+          json(res, 412, { ok: false, error: "Not running from a packaged app bundle — no launchd daemon to restart (dev run)." });
+          return;
+        }
+        const body = await parseBody(req).catch(() => ({})) as { force?: boolean };
+        const db2 = getDb();
+        const busy = (db2.prepare("SELECT COUNT(*) as n FROM tasks WHERE status IN ('assigned','in_progress')").get() as { n: number }).n;
+        if (busy > 0 && body?.force !== true) {
+          json(res, 409, {
+            ok: false,
+            activeTasks: busy,
+            error: `${busy} task(s) are still running. Restarting kills them mid-write. Cancel them first, or restart anyway.`,
+          });
+          return;
+        }
+        json(res, 200, { ok: true, restarting: true });
+        setTimeout(() => {
+          void (async () => {
+            try {
+              const { restartViaLaunchd } = await import("@/lib/updater/daemon-update");
+              await restartViaLaunchd();
+            } catch (e) {
+              console.error("[system] restart-daemon failed:", e instanceof Error ? e.message : e);
+            }
+          })();
+        }, 250);
+        return;
+      }
       // POST /messagebee/restart-daemon — kickstart the launchd daemon so a
       // freshly granted Full Disk Access entry takes effect. Responds first, then
-      // restarts (kickstart -k SIGKILLs this very process).
+      // restarts (kickstart -k SIGKILLs this very process). Kept as its own route
+      // because the Message Lane setup modal links to it by name; the general
+      // control is POST /system/restart-daemon above.
       if (req.method === "POST" && urlPath === "/messagebee/restart-daemon") {
         const { getBundledDaemonPaths } = await import("@/lib/onboarding/app-bundle");
         if (!getBundledDaemonPaths()) {

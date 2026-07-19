@@ -1400,6 +1400,20 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <button class="sm" id="ab_update_btn" style="display:none" onclick="applyUpdate()">⬆ Install update</button>
         <button class="sm" onclick="openReleases()">📝 Release notes</button>
       </div>
+
+      <label class="flbl" style="margin-top:18px">Background daemon</label>
+      <div class="muted" style="font-size:11px;margin-bottom:6px">The daemon runs under launchd and keeps running when you quit the app — quitting and reopening does not restart it, and reloading this window does not either.</div>
+      <div class="kv">
+        <span class="k">running code</span><span id="ab_dv_running">…</span>
+        <span class="k">installed bundle</span><span id="ab_dv_disk">…</span>
+        <span class="k">uptime</span><span id="ab_dv_uptime">…</span>
+        <span class="k">active tasks</span><span id="ab_dv_tasks">…</span>
+      </div>
+      <div id="ab_dv_stale" class="errbox" style="display:none;margin-top:6px"></div>
+      <div class="row" style="margin-top:8px;gap:6px">
+        <button class="sm" onclick="restartDaemon()">↻ Restart daemon</button>
+        <button class="sm" onclick="loadDaemonHealth()">Refresh</button>
+      </div>
       <div class="vinfo" id="s_version">…</div>
       <label class="flbl" style="margin-top:18px">Setup</label>
       <div id="ab_setup" class="muted" style="font-size:12px">…</div>
@@ -6091,6 +6105,12 @@ async function checkUpdate(force) {
     const has = !!(s && s.updateAvailable && s.latest);
     const applying = !!(s && s.applying && s.applyingVersion);
     const needsDaemonRestart = !!(s && s.needsDaemonRestart);
+    // Both "Finish update" affordances call applyUpdate(); in this state the
+    // bundle is ALREADY installed and only the daemon is stale, so applyUpdate
+    // finds no update, clears the flags and reports "up to date" — leaving the
+    // operator stuck with no way to finish. Remember the state so applyUpdate
+    // can hand off to the restart instead.
+    _needsDaemonRestart = needsDaemonRestart;
     if (pill) {
       if (needsDaemonRestart) {
         pill.textContent = "↻ Finish update " + (s.applyingVersion || s.latest);
@@ -6127,7 +6147,12 @@ async function checkUpdate(force) {
     if (abStatus) abStatus.textContent = "couldn't check (offline?)";
   }
 }
+let _needsDaemonRestart = false;
 async function applyUpdate() {
+  // The bundle is already installed and only the daemon is behind — installing
+  // again is a no-op that clears the flags and strands the operator. Restart is
+  // the actual remaining step.
+  if (_needsDaemonRestart) { await restartDaemon(); return; }
   const pill = document.getElementById("updatePill");
   const latest = (pill && pill.dataset.latest) || "the latest version";
   if (!await hmConfirm("Install HiveMatrix " + latest + " now? The app will restart to apply it.", { okLabel: "Install & restart" })) return;
@@ -6837,6 +6862,7 @@ async function openSettings() {
   loadTunnel();
   loadAutonomy();
   loadHeartbeat();
+  loadDaemonHealth();
 }
 
 const PROVIDER_LABELS = { claude: "Claude (Claude Code)", codex: "Codex (OpenAI)" };
@@ -10340,21 +10366,87 @@ function connectSSE() {
 // Auto-reload when the daemon version changes out from under this page. After an
 // in-place app update the daemon restarts into the new build but the webview keeps
 // showing the page it already loaded (stale UI — e.g. removed sections lingering).
-// Poll /health; when the version differs from the one this page booted with, reload
-// so the fresh console is fetched. The first successful poll just records the baseline.
+// Poll /health; when the RUNNING daemon's version differs from the one this page
+// booted with, reload so the fresh console is fetched.
+//
+// Keyed on runningVersion, not version: the version field is read from the
+// on-disk Info.plist and flips the moment a new bundle is installed, while this process
+// is still serving the old console. Reloading then just re-fetches the old page
+// and makes it look like the update did nothing. runningVersion is compiled into
+// the daemon, so it changes only when the daemon has genuinely restarted.
 let HM_BOOT_DAEMON_VERSION = null;
 async function checkDaemonVersionReload() {
   try {
     const r = await fetch("/health", { cache: "no-store" });
     if (!r.ok) return;
     const j = await r.json();
-    if (!j || !j.version) return;
-    if (HM_BOOT_DAEMON_VERSION && j.version !== HM_BOOT_DAEMON_VERSION) {
+    const v = j && (j.runningVersion || j.version);
+    if (!v) return;
+    if (HM_BOOT_DAEMON_VERSION && v !== HM_BOOT_DAEMON_VERSION) {
       location.reload();
       return;
     }
-    HM_BOOT_DAEMON_VERSION = j.version;
+    HM_BOOT_DAEMON_VERSION = v;
   } catch { /* offline / transient — try again next tick */ }
+}
+
+function fmtUptime(sec) {
+  if (typeof sec !== "number" || !isFinite(sec)) return "—";
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  if (d) return d + "d " + h + "h";
+  if (h) return h + "h " + m + "m";
+  return m + "m";
+}
+
+// Settings → About → Background daemon. Shows what the daemon is ACTUALLY
+// running next to what is installed on disk, because those diverge exactly when
+// a restart is needed and that is the moment the operator has to decide.
+async function loadDaemonHealth() {
+  const set = function (id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
+  const stale = document.getElementById("ab_dv_stale");
+  try {
+    const r = await fetch("/health", { cache: "no-store" });
+    const j = await r.json();
+    set("ab_dv_running", j.runningVersion || "unknown");
+    set("ab_dv_disk", j.version || "unknown");
+    set("ab_dv_uptime", fmtUptime(j.uptime) + (j.pid ? " · pid " + j.pid : ""));
+    set("ab_dv_tasks", String(j.activeTasks != null ? j.activeTasks : "—"));
+    if (stale) {
+      if (j.staleDaemon) {
+        stale.style.display = "";
+        stale.textContent = "The installed app is " + j.version + " but the daemon is still running "
+          + j.runningVersion + ". Restart it to finish picking up the update.";
+      } else {
+        stale.style.display = "none";
+      }
+    }
+  } catch (e) {
+    set("ab_dv_running", "unreachable");
+    set("ab_dv_disk", "—"); set("ab_dv_uptime", "—"); set("ab_dv_tasks", "—");
+  }
+}
+
+async function restartDaemon(force) {
+  if (!force) {
+    const ok = await hmConfirm(
+      "Restart the background daemon? The console will reconnect on its own in a few seconds.",
+      { okLabel: "Restart" }
+    );
+    if (!ok) return;
+  }
+  const r = await api("/system/restart-daemon", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force: force === true }),
+  });
+  // 409: work is in flight. Restarting SIGKILLs it mid-write, so make the
+  // operator opt in to losing it rather than doing it quietly.
+  if (r && r.activeTasks) {
+    const ok = await hmConfirm(r.error + "\n\nRestart anyway and lose that work?", { okLabel: "Restart anyway" });
+    if (ok) await restartDaemon(true);
+    return;
+  }
+  if (r && r.error) { hmToast(r.error, "err"); return; }
+  hmToast("Restarting the daemon — this page will reconnect shortly.", "ok");
 }
 
 if (requireToken()) {
