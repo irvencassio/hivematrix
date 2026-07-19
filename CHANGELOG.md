@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.229 — 2026-07-19
+
+Fixes Chat failing to use its own tools. The assistant was being told to call tools by one name while it was actually given another, so calls came back as 'No such tool available' and it fell back to describing the work instead of doing it — asking it to change something in HiveMatrix, look something up in your brain docs, or set a reminder could quietly go nowhere. Also fixes escalations to a background task not reporting the task they created, so Chat could not tell you which task it had opened.
+
 ## v0.1.228 — 2026-07-19
 
 Adds a Restart daemon button in Settings → About, with the daemon's real running version next to the installed one. The background daemon runs under launchd and keeps running when you quit the app, so quitting and reopening never restarted it and neither did reloading the window — and the version shown was read from the installed app on disk rather than the code actually running, so it reported the new version while the old one was still live. There was no honest way to tell whether an update had finished. The Finish update button also did nothing in the one situation it was offered: the app was already installed and only the daemon was behind, but the button re-ran the installer, found nothing to do and reported everything was up to date. It now restarts the daemon. Restarting warns first if tasks are still running, since it kills them.
