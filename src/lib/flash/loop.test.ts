@@ -752,3 +752,15 @@ test("flashBudgetFor: every surface keeps SOME wall clock — it is the only thi
     assert.ok(b.maxToolCalls > 0 && Number.isFinite(b.maxToolCalls), `${ch} must have a finite tool budget`);
   }
 });
+
+test("flashBudgetFor: the phone's TYPED chat gets the text budget, not the spoken one", () => {
+  // Regression 2026-07-19: the iOS Chat tab declared channel "voice" for typed
+  // turns, so the surface where the longest requests are actually made ran on
+  // haiku with a 90s clock. Typed and spoken on the same device want opposite
+  // things and must not share a channel name.
+  const typed = flashBudgetFor("mobile");
+  const spoken = flashBudgetFor("voice");
+  assert.equal(typed.model, "sonnet");
+  assert.ok(typed.maxWallMs > spoken.maxWallMs, "typed phone chat must outlast a spoken turn");
+  assert.ok(typed.maxToolCalls > spoken.maxToolCalls);
+});

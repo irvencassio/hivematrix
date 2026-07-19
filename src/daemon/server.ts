@@ -3578,9 +3578,17 @@ export function createDaemonServer() {
         }
 
         const { runFlashTurnText } = await import("@/lib/flash");
+        const { isFlashChannel } = await import("@/lib/flash/types");
         const { reply, sessionId: flashSessionId, toolRuns } = await runFlashTurnText({
           text,
-          channel: "voice",
+          // The surface, not the endpoint. The iOS Chat tab posts TYPED text
+          // here (same route the watch uses for dictation), so hardcoding
+          // "voice" gave phone chat the spoken-surface budget — haiku, 10 tool
+          // calls, 90s — on the one mobile surface where real work gets asked
+          // for. Clients that know they are typed send channel:"mobile";
+          // everything else keeps the spoken default, so the watch and live
+          // voice are unaffected.
+          channel: isFlashChannel(body.channel) ? body.channel : "voice",
           peer: "operator",
         });
 

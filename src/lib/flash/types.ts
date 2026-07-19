@@ -12,7 +12,16 @@
  * Only daemon/ may import from flash/.
  */
 
-export type FlashChannel = "console" | "voice" | "imessage" | "mail" | "watch" | "glasses" | "android";
+// "mobile" = the phone's TYPED chat. Distinct from "voice" (spoken turns on the
+// same device) because the two want opposite things: spoken replies must be fast,
+// typed ones must be able to finish. See flashBudgetFor in flash/loop.ts.
+export type FlashChannel = "console" | "voice" | "imessage" | "mail" | "watch" | "glasses" | "android" | "mobile";
+
+/** Runtime guard for a channel arriving from a client request body. */
+export const FLASH_CHANNELS: readonly FlashChannel[] = ["console", "voice", "imessage", "mail", "watch", "glasses", "android", "mobile"];
+export function isFlashChannel(v: unknown): v is FlashChannel {
+  return typeof v === "string" && (FLASH_CHANNELS as readonly string[]).includes(v);
+}
 
 export interface FlashTurnInput {
   sessionId?: string;
