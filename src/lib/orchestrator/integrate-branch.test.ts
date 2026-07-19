@@ -35,6 +35,9 @@ function fakeDeps(over: {
       calls.push(args);
       if (gitThrowsOn && args[0] === gitThrowsOn) throw new Error(`git ${gitThrowsOn} exploded`);
       if (args[0] === "rev-parse") {
+        // `rev-parse HEAD` captures the pre-merge commit for rollback; the
+        // other form is the branch-exists probe.
+        if (args[1] === "HEAD") return "PRIOR_MAIN_SHA";
         if (!branchExists) throw new Error("unknown revision");
         return "abc123";
       }
@@ -97,21 +100,30 @@ test("nothing_to_integrate: a branch with no new commits is not merged", async (
   assert.equal(ran(calls, "merge"), false);
 });
 
-test("verify_failed: a branch that does not typecheck never reaches main", async () => {
+test("verify_failed: a branch that does not typecheck is rolled back out of main", async () => {
   const { deps, calls } = fakeDeps({ verifyOk: false, verifyOutput: "error TS2345: nope" });
   const r = await integrateTaskBranch(REPO, "hive/task-1", deps);
   assert.equal(r.status, "verify_failed");
   assert.match(r.detail ?? "", /TS2345/);
-  assert.equal(ran(calls, "checkout"), false, "must not touch main when verification fails");
-  assert.equal(ran(calls, "merge"), false);
+  const reset = calls.find((c) => c[0] === "reset");
+  assert.ok(reset, "a failed verification must reset main");
+  assert.deepEqual(reset, ["reset", "--hard", "PRIOR_MAIN_SHA"], "must reset to the exact pre-merge commit");
 });
 
-test("verify runs BEFORE checkout, so a failing branch cannot leave main checked out", async () => {
+/**
+ * Regression: verification must observe the BRANCH's tree, not main's.
+ *
+ * The natural ordering — verify, then merge — silently passes broken branches,
+ * because before the merge the working tree is still main's, so the typecheck
+ * examines the wrong code entirely. Found by running this against a real repo;
+ * a faked verify reports whatever it is told and cannot catch it.
+ */
+test("verify runs AFTER the fast-forward, so it inspects the branch's tree and not main's", async () => {
   const order: string[] = [];
   const deps: IntegrateDeps = {
     git: async (_r, args) => {
       order.push("git:" + args[0]);
-      if (args[0] === "rev-parse") return "abc";
+      if (args[0] === "rev-parse") return args[1] === "HEAD" ? "PRIOR" : "abc";
       if (args[0] === "status") return "";
       if (args[0] === "rev-list") return args[2].includes("main..") ? "1" : "0";
       return "";
@@ -119,7 +131,16 @@ test("verify runs BEFORE checkout, so a failing branch cannot leave main checked
     verify: async () => { order.push("verify"); return { ok: true, output: "" }; },
   };
   await integrateTaskBranch(REPO, "hive/task-1", deps);
-  assert.ok(order.indexOf("verify") < order.indexOf("git:checkout"), "verify must precede checkout");
+  assert.ok(order.indexOf("git:merge") < order.indexOf("verify"), "merge must precede verify");
+  assert.ok(order.indexOf("verify") > -1, "verify must actually run");
+});
+
+test("error: a failed ROLLBACK is reported as such — main may hold code that does not compile", async () => {
+  const { deps } = fakeDeps({ verifyOk: false, gitThrowsOn: "reset" });
+  const r = await integrateTaskBranch(REPO, "hive/task-1", deps);
+  assert.equal(r.status, "error");
+  assert.match(r.detail ?? "", /could not be rolled back/);
+  assert.match(r.detail ?? "", /PRIOR_MAIN_SHA/, "must name the commit to reset to by hand");
 });
 
 test("error: a git failure is returned, never thrown — the caller must not 500", async () => {
@@ -134,7 +155,10 @@ test("serialized: concurrent integrations in one repo never interleave", async (
   const events: string[] = [];
   const mkDeps = (id: string): IntegrateDeps => ({
     git: async (_r, args) => {
-      if (args[0] === "rev-parse") { events.push("enter" + id); return "abc"; }
+      // Only the branch-exists probe marks entry; `rev-parse HEAD` is the
+      // separate pre-merge rollback capture and would double-count.
+      if (args[0] === "rev-parse" && args[1] !== "HEAD") { events.push("enter" + id); return "abc"; }
+      if (args[0] === "rev-parse") return "PRIOR";
       if (args[0] === "status") { await new Promise((r) => setTimeout(r, 10)); return ""; }
       if (args[0] === "rev-list") return args[2].includes("main..") ? "1" : "0";
       if (args[0] === "merge") events.push("exit" + id);

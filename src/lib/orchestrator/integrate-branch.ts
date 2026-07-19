@@ -163,20 +163,49 @@ async function runIntegration(
       };
     }
 
-    // Typecheck BEFORE touching main, so a failing branch never lands.
+    // Fast-forward FIRST, then verify, then roll back if it fails.
+    //
+    // The obvious order — verify, then merge — is wrong and silently so: the
+    // verifier runs against the repo's working tree, and before the merge that
+    // tree is still main's. It therefore typechecks the wrong code and passes a
+    // branch that does not compile. (Caught only by running this against a real
+    // repo; a faked `verify` cannot expose it.)
+    //
+    // Verifying a temporary worktree of the branch is no good either — it has no
+    // node_modules, so the typecheck fails for the wrong reason. So: land it,
+    // check it, and undo if it is bad. Safe precisely because the merge is
+    // fast-forward only, which makes the pre-merge commit an exact ancestor and
+    // `reset --hard` an exact inverse. Nothing else can be running concurrently
+    // in this repo (see the queue above), so the window is not observable.
+    await deps.git(repoPath, ["checkout", "main"]);
+    const priorMain = await deps.git(repoPath, ["rev-parse", "HEAD"]);
+    await deps.git(repoPath, ["merge", "--ff-only", branch]);
+
     const verified = await deps.verify(repoPath);
     if (!verified.ok) {
+      try {
+        await deps.git(repoPath, ["reset", "--hard", priorMain]);
+      } catch (e) {
+        // A failed rollback is the one genuinely dangerous state here: main is
+        // left holding code that does not compile. Say so explicitly rather
+        // than reporting a plain verification failure.
+        return {
+          status: "error",
+          branch,
+          ahead,
+          behind,
+          detail: `${branch} failed typecheck AND could not be rolled back — main may be left at the merged commit. Reset it manually to ${priorMain}. Rollback error: ${e instanceof Error ? e.message : e}`,
+        };
+      }
       return {
         status: "verify_failed",
         branch,
         ahead,
         behind,
-        detail: `Typecheck failed, so ${branch} was not merged:\n${verified.output.slice(-2000)}`,
+        detail: `Typecheck failed, so ${branch} was not merged (main rolled back to ${priorMain.slice(0, 8)}):\n${verified.output.slice(-2000)}`,
       };
     }
 
-    await deps.git(repoPath, ["checkout", "main"]);
-    await deps.git(repoPath, ["merge", "--ff-only", branch]);
     return { status: "integrated", branch, ahead, behind, detail: `Fast-forwarded main by ${ahead} commit(s) from ${branch}.` };
   } catch (e) {
     return { status: "error", branch, detail: e instanceof Error ? e.message : String(e) };
