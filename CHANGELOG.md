@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.224 — 2026-07-19
+
+Two fixes that were finished but never shipped. Tasks that ask you a multiple-choice question now show the answers as buttons in the reply panel — before, a task could ask 'which of these?' and give you nowhere to click, which is why some tasks looked stuck when they were simply waiting. And if the goals list is ever empty, HiveMatrix now rebuilds it from your GOALS.md at startup instead of showing an empty Goals panel and quietly skipping the daily accountability check, which is what happened after a goals wipe earlier this month.
+
 ## v0.1.223 — 2026-07-19
 
 Chat no longer runs out of room without warning. Flash conversations never expired and the desktop, phone and watch all share one thread, so it grew until the assistant announced mid-reply that it was 'at session end' — and the console had no way to start a fresh conversation at all. Chat now shows how full the conversation is once it passes the halfway mark, folds older turns into a running summary automatically past 75% so the thread keeps working instead of failing, and offers a New button to start clean. A context overflow is also now recognised for what it is: it was previously misread as an expired session, silently retried, and logged as the wrong cause, which is why this was hard to see coming. Also removes a dead /update/check route that was breaking the build.
