@@ -41,6 +41,7 @@ import type { LaneToolContext } from "@/lib/orchestrator/lane-tools";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { recordRun } from "@/lib/observability/store";
 import { prepareFlashMcp, loadCuratedSkillTools } from "./flash-mcp";
+import { isFlashTool } from "./tool-names";
 import { clearFlashCliSessionId, getFlashCliSessionId, setFlashCliSessionId, setSessionContextTokens } from "./store";
 import {
   COMPACT_THRESHOLD,
@@ -302,7 +303,13 @@ export function consumeFlashStreamLine(
       // handler (flash-mcp.ts:handleEscalateToTask) can't call emit directly
       // (it runs in a bridged HTTP request, not this turn's own scope), so it
       // returns a recognizable string and we parse the taskId back out here.
-      if (ok && name === "escalate_to_task") {
+      // Compare on the BARE name: `name` came from the CLI stream, which always
+      // carries the MCP namespace (`mcp__flash__escalate_to_task`). This read
+      // `name === "escalate_to_task"`, which cannot be true on a real stream —
+      // so emit.escalated() never fired in production and the console never
+      // learned the task id. It looked covered because loop.test.ts hand-wrote
+      // a fixture using the bare name, a stream the CLI never produces.
+      if (ok && isFlashTool(name, "escalate_to_task")) {
         const m = event.content.match(ESCALATED_TASK_RE);
         if (m) emit.escalated(m[1]);
       }

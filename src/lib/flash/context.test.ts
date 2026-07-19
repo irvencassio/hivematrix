@@ -82,7 +82,11 @@ test("assembleSystemPrompt always includes the capability-doctrine escalation la
   // minutes" escalated to a do-nothing task instead of calling reminder_create).
   // The doctrine must route reminders/calendar directly and forbid escalating them.
   assert.match(prompt, /reminder_create/);
-  assert.match(prompt, /NEVER escalate_to_task and NEVER queue a task for a reminder/);
+  // Namespace-tolerant: the doctrine now spells tools the way the model is
+  // actually offered them (mcp__flash__escalate_to_task). Assert the RULE —
+  // reminders must never be escalated — not the spelling, so this test keeps
+  // testing behaviour if the namespace ever changes again.
+  assert.match(prompt, /NEVER (?:mcp__flash__)?escalate_to_task and NEVER queue a task for a reminder/);
   // Honest-failure clause.
   assert.match(prompt, /Never claim something worked unless a tool result shows it did/);
   // learn_skill must fire on TRIED-AND-FAILED tools too, not only "no tool fits"

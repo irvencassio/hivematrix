@@ -270,6 +270,15 @@ export interface FormatSkillIndexOptions {
    *  caller that can invoke skill_run (Flash) knows what to pass — task
    *  prompts (which only read+follow skills manually) omit this by default. */
   showParams?: boolean;
+  /** Map a bare tool name to the spelling THIS caller's model is offered.
+   *  Flash passes flashToolName (mcp__flash__<tool>); the Task lane omits it and
+   *  keeps bare names, which is correct for its OpenAI-style tool schema. */
+  toolName?: (bare: string) => string;
+}
+
+/** Spell a tool the way the calling lane's model will actually see it. */
+function nameTool(opts: FormatSkillIndexOptions, bare: string): string {
+  return opts.toolName ? opts.toolName(bare) : bare;
 }
 
 /** A compact, model-facing index of the skill library. "" when empty. */
@@ -277,7 +286,12 @@ export function formatSkillIndex(entries: SkillIndexEntry[], opts: FormatSkillIn
   if (entries.length === 0) return "";
   return [
     "--- Skill Library ---",
-    "Reusable recipes distilled from past work. Before solving a recurring task, check if a skill applies — read its full text with brain_search or read_file (under the brain root's skills/ folder), then follow it. After you apply one, call skill_used (or POST /skills/<name>/used) so it earns its keep — include a one-line refinement if you improved on it.",
+    // Tool names go through opts.toolName because this blurb is shared by two
+    // lanes that spell tools differently: the Task lane offers bare names, while
+    // Flash offers them MCP-namespaced (mcp__flash__brain_search). Hardcoding
+    // the bare form here put un-callable names in the Flash prompt, which is
+    // exactly how "No such tool available" reached a live session on 2026-07-19.
+    `Reusable recipes distilled from past work. Before solving a recurring task, check if a skill applies — read its full text with ${nameTool(opts, "brain_search")} or ${nameTool(opts, "read_file")} (under the brain root's skills/ folder), then follow it. After you apply one, call ${nameTool(opts, "skill_used")} (or POST /skills/<name>/used) so it earns its keep — include a one-line refinement if you improved on it.`,
     ...entries.map((e) => {
       const paramsSuffix = opts.showParams
         ? [

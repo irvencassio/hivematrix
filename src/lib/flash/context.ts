@@ -18,6 +18,7 @@ import { extractPersonaName } from "@/lib/onboarding/birth-ritual";
 import { listSkills } from "@/lib/skills/store";
 import { formatSkillIndex } from "@/lib/skills/contracts";
 import { goalsDueToday as defaultGoalsDueToday } from "@/lib/goals/store";
+import { flashToolName } from "./tool-names";
 import type { FlashChannel, FlashMessage, FlashTurnRow } from "./types";
 
 const PERSONA_FILES = ["SOUL.md", "IDENTITY.md", "USER.md", "GOALS.md"] as const;
@@ -57,38 +58,51 @@ const VOICE_DOCTRINE =
   "act; don't narrate at length what you're about to do. When you're unsure, say so plainly " +
   "and give your best read rather than hedging or over-apologizing. Match the operator's " +
   "brevity and tone. If a persona (SOUL/IDENTITY) is defined below, let it refine this voice.";
+/**
+ * Every tool named in the doctrine below goes through this, so the prose says
+ * exactly what the schema offers.
+ *
+ * The doctrine used to spell these bare — "call brain_search", "NEVER
+ * escalate_to_task" — but Claude namespaces MCP tools, so what the model is
+ * actually given is `mcp__flash__brain_search`. It followed the prompt, emitted
+ * the bare name, and the CLI answered "No such tool available" before any
+ * HiveMatrix code ran, so nothing could map it back. Observed live on
+ * 2026-07-19 for brain_search and escalate_to_task; the model then generalised
+ * the bare-name convention to code_graph, a tool the doctrine never mentions.
+ */
+const T = flashToolName;
+
 /** Capability doctrine — the escalation ladder. Always-on (not gated on brain
  * root): even with no persona/skills configured, the model must know how to
  * resolve a request instead of dead-ending on "I can't do that." */
 const CAPABILITY_DOCTRINE =
   "Capability ladder — when the operator asks for something, resolve it in this order and never dead-end: " +
   "(00) when the operator asks to be reminded of something or to put something on their calendar — \"remind me " +
-  "to X\", \"set a reminder\", \"remind me in N minutes/at 5\", \"schedule X\", \"put X on my calendar\" — call " +
-  "reminder_create (or calendar_create) DIRECTLY and immediately; these set a REAL reminder/event on the operator's " +
-  "devices right now. This is NOT multi-step work: NEVER escalate_to_task and NEVER queue a task for a reminder or a " +
+  "to X\", \"set a reminder\", \"remind me in N minutes/at 5\", \"schedule X\", \"put X on my calendar\" — call " + T("reminder_create") + " (or " + T("calendar_create") + ") DIRECTLY and immediately; these set a REAL reminder/event on the operator's " +
+  "devices right now. This is NOT multi-step work: NEVER " + T("escalate_to_task") + " and NEVER queue a task for a reminder or a " +
   "simple timed nudge — that would silently drop it. Pass the thing to be reminded of in 'name' and their own words " +
   "about when in 'due'; " +
   "(0a) when the operator asks about their goals, progress, or \"what should I do today\" — or reports doing " +
-  "something (\"I ran 3 miles\", \"did 20 min of Italian\") — use the goals tools (goals_list, daily_review, " +
-  "goal_checkin, goal_upsert), NOT brain_search: goals now live in a structured, checkin-tracked store distinct " +
-  "from brain docs. If asked to \"import my goals\", read GOALS.md / the Solo Founder OS via brain_search+brain_read " +
-  "and create them with goal_upsert; " +
-  "(0b) when asked about the operator's other plans or notes, call brain_search to find the doc's path, then " +
-  "brain_read on that path to get its FULL content, and answer from it — do NOT say \"I don't have file access\" " +
-  "or answer from a search snippet alone when brain_read is available. If brain_read reports the document was " +
-  "truncated, call brain_read AGAIN with the offset it gives to read the rest; reading a document — however long — " +
-  "is NEVER a reason to escalate_to_task; " +
-  "(1) answer directly if you know it; (2) use the CHEAPEST sufficient tool — desktop_action (GUI automation) is a " +
+  "something (\"I ran 3 miles\", \"did 20 min of Italian\") — use the goals tools (" + T("goals_list") + ", " + T("daily_review") + ", " +
+  T("goal_checkin") + ", " + T("goal_upsert") + "), NOT " + T("brain_search") + ": goals now live in a structured, checkin-tracked store distinct " +
+  "from brain docs. If asked to \"import my goals\", read GOALS.md / the Solo Founder OS via " + T("brain_search") + "+" + T("brain_read") + " " +
+  "and create them with " + T("goal_upsert") + "; " +
+  "(0b) when asked about the operator's other plans or notes, call " + T("brain_search") + " to find the doc's path, then " +
+  T("brain_read") + " on that path to get its FULL content, and answer from it — do NOT say \"I don't have file access\" " +
+  "or answer from a search snippet alone when " + T("brain_read") + " is available. If " + T("brain_read") + " reports the document was " +
+  "truncated, call " + T("brain_read") + " AGAIN with the offset it gives to read the rest; reading a document — however long — " +
+  "is NEVER a reason to " + T("escalate_to_task") + "; " +
+  "(1) answer directly if you know it; (2) use the CHEAPEST sufficient tool — " + T("desktop_action") + " (GUI automation) is a " +
   "last resort for things only a human-driven app can do, NEVER for anything computable by a script (counting files, " +
-  "reading data, math, text processing): those go to skill_run or learn_skill; (3) if a library skill fits, run it with skill_run; " +
-  "(4) if no tool or skill fits — OR the tools you tried failed or were blocked — call learn_skill to acquire the " +
+  "reading data, math, text processing): those go to " + T("skill_run") + " or " + T("learn_skill") + "; (3) if a library skill fits, run it with " + T("skill_run") + "; " +
+  "(4) if no tool or skill fits — OR the tools you tried failed or were blocked — call " + T("learn_skill") + " to acquire the " +
   "capability as a new skill (you'll ack and speak the result when ready). A tool failing does NOT mean the task is " +
   "impossible; it means you need a skill you don't have yet. Do NOT say \"I can't do that\", and never tell the " +
   "operator to do by hand what a learned script could do. Exception: a PERMISSION_NEEDED tool result means the " +
   "capability exists and only needs the operator's grant — speak its remediation sentence instead of learning; " +
   "(5) for multi-step work that needs " +
-  "the coding harness, call escalate_to_task; (6) if the request is about improving HiveMatrix itself (its own " +
-  "code/features), escalate_to_task with kind 'self-improvement' so it lands in the HiveMatrix repo. Never claim " +
+  "the coding harness, call " + T("escalate_to_task") + "; (6) if the request is about improving HiveMatrix itself (its own " +
+  "code/features), " + T("escalate_to_task") + " with kind 'self-improvement' so it lands in the HiveMatrix repo. Never claim " +
   "something worked unless a tool result shows it did — if a tool failed, say so honestly and offer the next step " +
   "(learn it, escalate it, or ask for what you need). Your ONLY tools are the ones actually provided to you this " +
   "turn — you have no file, shell, glob, or search tools beyond those. NEVER write tool-call syntax or invented " +
@@ -168,17 +182,17 @@ function loadGoalsDueSection(): string {
 
 /** One-paragraph guide so Haiku knows how to actually invoke a listed skill. */
 const SKILL_RUN_GUIDE =
-  "To RUN a skill live in this turn, call the skill_run tool with the skill's " +
+  "To RUN a skill live in this turn, call the " + T("skill_run") + " tool with the skill's " +
   "name (and a params object for any {{placeholders}} it lists, and input for " +
   "its {{input}} slot if it has one). An instruction skill returns its recipe " +
   "for you to follow now; a script skill executes in a sandbox and returns " +
   "real output. Prefer a matching skill over improvising. After following an " +
-  "instruction skill you may also record skill_used.";
+  "instruction skill you may also record " + T("skill_used") + ".";
 
 async function loadSkillSection(): Promise<string> {
   try {
     const entries = await listSkills();
-    const index = formatSkillIndex(entries, { showParams: true });
+    const index = formatSkillIndex(entries, { showParams: true, toolName: flashToolName });
     if (!index) return "";
     return `${index}\n\n${SKILL_RUN_GUIDE}`;
   } catch {

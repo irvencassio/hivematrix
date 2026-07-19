@@ -41,8 +41,10 @@ import { broadcastEvent } from "@/lib/ws/broadcaster";
 import type { AcquireResult } from "@/lib/skills/acquire";
 import type { SkillIndexEntry } from "@/lib/skills/contracts";
 
-/** MCP server name → Claude namespaces its tools as `mcp__flash__<tool>`. */
-export const FLASH_MCP_SERVER_NAME = "flash";
+// Re-exported so existing importers keep working; the definition (and the
+// namespacing helpers that must agree with it) now live in tool-names.ts.
+import { FLASH_MCP_SERVER_NAME, flashToolName } from "./tool-names";
+export { FLASH_MCP_SERVER_NAME };
 
 // ------------------------------------------------------------------
 // Flash-only tool definitions + handlers (moved from loop.ts — these need
@@ -1035,5 +1037,5 @@ export function prepareFlashMcp(
   };
   writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
 
-  return { configPath, toolNames: allowedNames.map((n) => `mcp__${FLASH_MCP_SERVER_NAME}__${n}`) };
+  return { configPath, toolNames: allowedNames.map(flashToolName) };
 }

@@ -311,13 +311,19 @@ test("consumeFlashStreamLine: an errored tool_result is reported as not-ok", () 
   assert.equal(emit.toolResults[0].ok, false);
 });
 
+// The tool_use name here MUST carry the mcp__flash__ namespace, because that is
+// what the real CLI emits — StreamParser copies content_block.name verbatim.
+// This fixture used the bare "escalate_to_task", so it exercised a stream the
+// CLI never produces and passed while the production comparison
+// (`name === "escalate_to_task"`) could never match. emit.escalated therefore
+// never fired for a real escalation, and the test said otherwise.
 test("consumeFlashStreamLine: a successful escalate_to_task tool_result triggers emit.escalated", () => {
   const parser = new StreamParser();
   const state = createFlashStreamState();
   const emit = fakeEmitter();
 
   consumeFlashStreamLine(
-    JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "escalate_to_task", input: {} }] } }),
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "mcp__flash__escalate_to_task", input: {} }] } }),
     parser,
     state,
     emit,
