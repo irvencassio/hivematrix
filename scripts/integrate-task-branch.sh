@@ -21,12 +21,18 @@ cd "${HIVEMATRIX_REPO:-$(git rev-parse --show-toplevel)}"
 die() { echo "✗ $*" >&2; exit "${2:-2}"; }
 
 if [ "${1:-}" = "--list" ]; then
+  # Matches hive/* broadly, not just hive/task-*. Agents following AGENTS.md name
+  # their own branches (hive/remove-new-task-button), and the narrower pattern
+  # made the one genuinely stranded branch invisible to the tool whose entire job
+  # is finding stranded branches — its work sat unmerged for a day while the
+  # operator asked for it three times.
   echo "Task branches not yet in main:"
   git for-each-ref --format='%(refname:short)' refs/heads \
-    | grep -E '^(hive/task-|fix/|feat/)' \
+    | grep -E '^(hive/|fix/|feat/)' \
     | while read -r b; do
         n=$(git rev-list --count "main..$b" 2>/dev/null || echo 0)
         [ "$n" -gt 0 ] && printf '  %-45s %s commit(s) ahead\n' "$b" "$n"
+        : # keep the loop body truthy so a clean repo does not exit 1 under set -e
       done
   exit 0
 fi
