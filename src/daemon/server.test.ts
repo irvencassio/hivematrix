@@ -434,6 +434,8 @@ test("POST /onboarding/setup/desktop-permissions/request asks helper to prompt f
   // getDb() regardless of which opts flag triggered the route — same isolation
   // this file's mail-automation/probe and full-disk-access/probe tests already
   // use. See docs/superpowers/specs/2026-07-15-goals-data-loss-design.md §2.1.
+  // Resolved in favour of main's withTempHome(t): same HOME + HIVEMATRIX_DB_PATH
+  // isolation this branch introduced manually, plus automatic teardown.
   withTempHome(t);
 
   const originalFetch = globalThis.fetch;
@@ -456,7 +458,13 @@ test("POST /onboarding/setup/desktop-permissions/request asks helper to prompt f
     }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+
+  // Only the fetch stub needs undoing here — withTempHome(t) above already
+  // registers its own t.after for the DB reset, HOME/HIVEMATRIX_DB_PATH
+  // restore, and temp-dir removal.
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
 
   const token = getOrCreateToken(DAEMON_TOKEN_FILE);
   const server = createDaemonServer();
