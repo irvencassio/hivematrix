@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.231 — 2026-07-19
+
+Fixes typed chat on your phone running on the settings meant for spoken replies. Chat on iPhone was being treated as a voice surface, so it got the fast-but-small model with a ninety-second limit — the same budget as a two-second reply on your watch — even though it is where the longest requests get made. Typed chat now gets the stronger model and a fifteen-minute budget on the phone, exactly like the desktop, while voice and watch keep the quick settings so spoken replies stay snappy.
+
 ## v0.1.230 — 2026-07-19
 
 Chat can now finish the work you give it. It could not write files at all — so 'research this and make me a brain doc' was impossible, and it told you 'tool limitations' — and it ran on one budget sized for a watch reply: three minutes and twelve steps, for every surface. Typed chat now runs on a stronger model with fifteen minutes and forty steps, while voice and watch keep the fast model and a short clock so spoken replies stay quick. Chat can write brain docs directly, and it now hands multi-step or code work to a background task immediately instead of burning the clock and losing everything. The '+ New task' button is gone; Chat is the one way to start work. Also fixes the updater telling you that you were up to date for about twenty-five minutes after every release.
