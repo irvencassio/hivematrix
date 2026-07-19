@@ -7098,7 +7098,16 @@ function showFlashPanel() {
 // rather than surprising the operator with.
 async function flashNewConversation() {
   if (_flashState.sending) { hmToast('Wait for the current reply to finish.', 'err'); return; }
-  if (!confirm('Start a new conversation?\n\nThis clears the shared operator thread on desktop, phone and watch. Past turns stay in the database — they just stop being carried forward.')) return;
+  // hmConfirm, NOT native confirm(): this webview no-ops the native dialogs
+  // (see _openDialog above), so negating a native confirm silently took the
+  // early return and the button did nothing at all.
+  // NB: no backticks in comments here — this whole block lives inside a
+  // TypeScript template literal, so a backtick terminates the string.
+  const ok = await hmConfirm(
+    'Start a new conversation?\n\nThis clears the shared operator thread on desktop, phone and watch. Past turns stay in the database — they just stop being carried forward.',
+    { okLabel: 'Start new' }
+  );
+  if (!ok) return;
   try {
     await api('/flash/session/new', { method: 'POST', body: JSON.stringify({ channel: 'console', peer: 'operator' }) });
     _flashState.sessionId = null;
@@ -9267,7 +9276,9 @@ function cooDuplicateRule(index) {
 }
 async function cooDeleteRule(id) {
   if (!id) return;
-  if (!confirm("Delete COO routing rule "+id+"?")) return;
+  // hmConfirm, not native confirm() — the native dialogs no-op in this webview,
+  // which made this button silently do nothing.
+  if (!await hmConfirm("Delete COO routing rule "+id+"?", { okLabel: "Delete", danger: true })) return;
   const r = await api("/coo/routing-rules/"+encodeURIComponent(id), { method:"DELETE" });
   if (!r || !r.ok) { cooSetRulesResult((r&&r.error)||"Delete failed", true); return; }
   cooSetRulesResult("Deleted "+id+"."); renderCooRoutingRules();
