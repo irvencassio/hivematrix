@@ -48,6 +48,19 @@
  * logic itself lives in its own module, same split as day-brief.ts; this file
  * only owns the due-check + dispatch + notify/mark-sent wiring.
  *
+ * A sixth ritual — Pattern Nudges (2026-07-19 spec) — rides the same tick at
+ * DAY granularity, reusing `dayBriefMomentDue()` verbatim against its own
+ * `lastPatternNudgeCheckedDay` marker (default 09:00). Its detection logic
+ * (overextension, recurring missed goals, low-motivation Mondays) lives in
+ * pattern-nudges.ts's `runPatternDetectionPass`, same split as the other
+ * rituals' sibling modules. Unlike them, a detected pattern can still be
+ * suppressed by `patternNudgeCooldownOk` — the same kind of nudge can't repeat
+ * within 3 days, checked after detection and before delivery. It is also the
+ * one ritual that does NOT default on for fresh installs (`patternNudgeEnabled`
+ * defaults `false`, unlike Day Brief/Ratchet/Weaver): this ritual comments on
+ * the operator's own work rhythm, so it's opt-in after seeing what it says,
+ * enabled the same way as the others (Settings → Heartbeat).
+ *
  * Config (`~/.hivematrix/config.json`):
  *   heartbeat: { enabled, intervalMinutes, quietHours?: {startHour, endHour},
  *                morningBriefHour: number|null, eveningRecapHour: number|null,
@@ -56,7 +69,10 @@
  *                dayBriefEveningHour, dayBriefEveningMinute,
  *                lastDayBriefMorningSentDay?, lastDayBriefEveningSentDay?,
  *                ratchetEnabled, ratchetHour, ratchetMinute, lastRatchetSentWeek?,
- *                weaverEnabled, weaverHour, weaverMinute, lastWeaverSentWeek? }
+ *                weaverEnabled, weaverHour, weaverMinute, lastWeaverSentWeek?,
+ *                patternNudgeEnabled, patternNudgeHour, patternNudgeMinute,
+ *                lastPatternNudgeCheckedDay?, lastPatternNudgeSentDay?,
+ *                lastPatternNudgeKind? }
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
@@ -73,6 +89,7 @@ import { startPollLoop } from "@/lib/lanes/poll-loop";
 import { composeDayBrief, type DayBriefKind } from "./day-brief";
 import { runRatchetPass, type RatchetRunResult } from "./ratchet";
 import { composeWeaverAudit } from "./weaver-audit";
+import { runPatternDetectionPass, patternNudgeCooldownOk, type PatternNudgeKind } from "./pattern-nudges";
 
 export const HEARTBEAT_STAND_DOWN = "HEARTBEAT_STAND_DOWN";
 
@@ -110,6 +127,15 @@ export interface HeartbeatConfig {
   weaverHour: number;   // default 17
   weaverMinute: number; // default 0
   lastWeaverSentWeek?: string; // ISO YYYY-Www
+  /** Pattern Nudges (2026-07-19 spec) — daily, OFF by default even for fresh
+   * installs (unlike Day Brief/Ratchet/Weaver): this ritual comments on the
+   * operator's own work patterns, so it's opt-in after seeing what it says. */
+  patternNudgeEnabled: boolean;
+  patternNudgeHour: number;   // default 9
+  patternNudgeMinute: number; // default 0
+  lastPatternNudgeCheckedDay?: string; // local YYYY-MM-DD — at most one detection pass/day
+  lastPatternNudgeSentDay?: string;    // local YYYY-MM-DD — only set when a nudge actually sent
+  lastPatternNudgeKind?: string;       // for the 3-day same-kind cooldown
 }
 
 const DEFAULT_INTERVAL_MINUTES = 30;
@@ -126,6 +152,8 @@ const DEFAULT_RATCHET_HOUR = 18;
 const DEFAULT_RATCHET_MINUTE = 0;
 const DEFAULT_WEAVER_HOUR = 17;
 const DEFAULT_WEAVER_MINUTE = 0;
+const DEFAULT_PATTERN_NUDGE_HOUR = 9;
+const DEFAULT_PATTERN_NUDGE_MINUTE = 0;
 // JS Date#getDay(): Sunday=0 .. Saturday=6. Fixed per spec — not operator-configurable
 // (only the hour/minute are), matching "(default Sunday 18:00 / Friday 17:00)".
 const RATCHET_DAY_OF_WEEK = 0; // Sunday
@@ -154,6 +182,11 @@ const DEFAULT_CONFIG: HeartbeatConfig = {
   weaverEnabled: true,
   weaverHour: DEFAULT_WEAVER_HOUR,
   weaverMinute: DEFAULT_WEAVER_MINUTE,
+  // Pattern Nudges is the one ritual that does NOT default on — see the field
+  // doc comment on HeartbeatConfig.patternNudgeEnabled for why.
+  patternNudgeEnabled: false,
+  patternNudgeHour: DEFAULT_PATTERN_NUDGE_HOUR,
+  patternNudgeMinute: DEFAULT_PATTERN_NUDGE_MINUTE,
 };
 
 function clampHour(value: unknown): number | null {
@@ -202,6 +235,12 @@ export function parseHeartbeatConfig(input: unknown): HeartbeatConfig {
     weaverHour: clampHour(obj.weaverHour) ?? DEFAULT_WEAVER_HOUR,
     weaverMinute: clampMinute(obj.weaverMinute) ?? DEFAULT_WEAVER_MINUTE,
     lastWeaverSentWeek: typeof obj.lastWeaverSentWeek === "string" ? obj.lastWeaverSentWeek : undefined,
+    patternNudgeEnabled: obj.patternNudgeEnabled === true,
+    patternNudgeHour: clampHour(obj.patternNudgeHour) ?? DEFAULT_PATTERN_NUDGE_HOUR,
+    patternNudgeMinute: clampMinute(obj.patternNudgeMinute) ?? DEFAULT_PATTERN_NUDGE_MINUTE,
+    lastPatternNudgeCheckedDay: typeof obj.lastPatternNudgeCheckedDay === "string" ? obj.lastPatternNudgeCheckedDay : undefined,
+    lastPatternNudgeSentDay: typeof obj.lastPatternNudgeSentDay === "string" ? obj.lastPatternNudgeSentDay : undefined,
+    lastPatternNudgeKind: typeof obj.lastPatternNudgeKind === "string" ? obj.lastPatternNudgeKind : undefined,
   };
   if (obj.quietHours && typeof obj.quietHours === "object") {
     const q = obj.quietHours as Record<string, unknown>;
@@ -259,6 +298,14 @@ export function setHeartbeatConfig(patch: Partial<HeartbeatConfig>): HeartbeatCo
   if (next.weaverEnabled && !current.weaverEnabled) {
     const week = weekKey(new Date());
     if (!("lastWeaverSentWeek" in patch)) next.lastWeaverSentWeek = current.lastWeaverSentWeek ?? week;
+  }
+  // Pattern Nudges: enabling must not immediately run today's detection pass
+  // from a stale/absent marker. Unlike the others, do NOT seed
+  // lastPatternNudgeSentDay — a fresh enable has sent nothing, so the 3-day
+  // cooldown must start clean the first time a nudge actually fires.
+  if (next.patternNudgeEnabled && !current.patternNudgeEnabled) {
+    const today = localDateString(new Date());
+    if (!("lastPatternNudgeCheckedDay" in patch)) next.lastPatternNudgeCheckedDay = current.lastPatternNudgeCheckedDay ?? today;
   }
   config.heartbeat = next;
   saveHiveConfig(config);
@@ -522,6 +569,8 @@ export interface HeartbeatDeps {
   runRatchetPass?: typeof runRatchetPass;
   /** Weaver Audit weekly pass (weaver-audit.ts) — injectable for tests; defaults to the real one. */
   composeWeaverAudit?: typeof composeWeaverAudit;
+  /** Pattern Nudges daily pass (pattern-nudges.ts) — injectable for tests; defaults to the real one. */
+  runPatternDetectionPass?: typeof runPatternDetectionPass;
   now?: () => Date;
 }
 
@@ -839,6 +888,46 @@ async function tickWeaver(config: HeartbeatConfig, now: Date, deps: HeartbeatDep
   }
 }
 
+/**
+ * Pattern Nudges due-check + dispatch — same "own enable flag, folded into
+ * the shared tick" shape as `tickDayBriefRitual`, at day granularity (reuses
+ * `dayBriefMomentDue` verbatim). Unlike the other three rituals, a detected
+ * pattern can still be suppressed by `patternNudgeCooldownOk` (the same
+ * `kind` cannot repeat within 3 days) — checked AFTER the detection pass,
+ * before delivery.
+ *
+ * Exported (unlike `tickDayBriefRitual`/`tickRatchet`/`tickWeaver`) so its
+ * cooldown-suppression behavior — which lives nowhere else in a directly
+ * testable form — can be exercised by heartbeat.test.ts.
+ */
+export async function tickPatternNudge(config: HeartbeatConfig, now: Date, deps: HeartbeatDeps): Promise<void> {
+  if (!config.patternNudgeEnabled) return;
+  if (!dayBriefMomentDue(config.patternNudgeHour, config.patternNudgeMinute, config.lastPatternNudgeCheckedDay, now)) return;
+
+  // Mark BEFORE the pass so a slow pass can't double-fire later today.
+  setHeartbeatConfig({ lastPatternNudgeCheckedDay: localDateString(now) });
+  try {
+    const runPass = deps.runPatternDetectionPass ?? runPatternDetectionPass;
+    const result = await runPass();
+    if (!result) {
+      console.log("[heartbeat] pattern nudge pass: nothing to say");
+      return;
+    }
+    if (!patternNudgeCooldownOk(config.lastPatternNudgeKind, config.lastPatternNudgeSentDay, result.kind, now)) {
+      console.log(`[heartbeat] pattern nudge pass: ${result.kind} suppressed by cooldown`);
+      return;
+    }
+    if (deps.notify) {
+      try { await deps.notify(result.message); } catch { /* channels are best-effort */ }
+    }
+    setHeartbeatConfig({ lastPatternNudgeSentDay: localDateString(now), lastPatternNudgeKind: result.kind });
+    broadcastEvent("flash:pattern-nudge", { kind: result.kind, ts: now.toISOString() });
+    console.log(`[heartbeat] pattern nudge delivered (kind=${result.kind})`);
+  } catch (e) {
+    console.error(`[heartbeat] pattern nudge pass failed: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 let stopFn: (() => void) | null = null;
 
 async function tick(deps: HeartbeatDeps): Promise<void> {
@@ -851,6 +940,9 @@ async function tick(deps: HeartbeatDeps): Promise<void> {
   // independent of the pulse toggle.
   await tickRatchet(config, now, deps);
   await tickWeaver(config, now, deps);
+  // Pattern Nudges — own enable flag (default off), likewise independent of
+  // the pulse toggle.
+  await tickPatternNudge(config, now, deps);
 
   if (!config.enabled) return;
 

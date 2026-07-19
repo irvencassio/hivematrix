@@ -28,6 +28,9 @@ const {
   weeklyMomentDue,
   runRatchetOnce,
   runWeaverOnce,
+  setHeartbeatConfig,
+  getHeartbeatConfig,
+  tickPatternNudge,
 } = await import("./heartbeat");
 
 test.after(() => {
@@ -58,6 +61,11 @@ test("parseHeartbeatConfig defaults + clamping", () => {
     weaverEnabled: true,
     weaverHour: 17,
     weaverMinute: 0,
+    // Pattern Nudges is the one ritual that stays off even for a fresh
+    // install — see the dedicated test below.
+    patternNudgeEnabled: false,
+    patternNudgeHour: 9,
+    patternNudgeMinute: 0,
   });
   assert.equal(parseHeartbeatConfig({ intervalMinutes: 1 }).intervalMinutes, 5); // floor at 5
   assert.equal(parseHeartbeatConfig({ enabled: true }).enabled, true);
@@ -99,6 +107,49 @@ test("parseHeartbeatConfig: Capability Ratchet + Weaver Audit default off with 1
   assert.equal(parseHeartbeatConfig({ lastWeaverSentWeek: "2026-W28" }).lastWeaverSentWeek, "2026-W28");
 });
 
+test("parseHeartbeatConfig: patternNudgeEnabled defaults false even via DEFAULT_CONFIG spread (fresh install stays off)", () => {
+  const config = parseHeartbeatConfig(undefined);
+  assert.equal(config.patternNudgeEnabled, false);
+  assert.equal(config.patternNudgeHour, 9);
+  assert.equal(config.patternNudgeMinute, 0);
+});
+
+test("parseHeartbeatConfig: patternNudgeEnabled true only when explicitly stored true", () => {
+  assert.equal(parseHeartbeatConfig({ patternNudgeEnabled: true }).patternNudgeEnabled, true);
+  assert.equal(parseHeartbeatConfig({ patternNudgeEnabled: false }).patternNudgeEnabled, false);
+  assert.equal(parseHeartbeatConfig({}).patternNudgeEnabled, false);
+});
+
+test("parseHeartbeatConfig: Pattern Nudges default off with 09:00, clamp + passthrough last* markers", () => {
+  assert.equal(parseHeartbeatConfig({}).patternNudgeHour, 9);
+  assert.equal(parseHeartbeatConfig({}).patternNudgeMinute, 0);
+  assert.equal(parseHeartbeatConfig({ patternNudgeHour: 99 }).patternNudgeHour, 23);
+  assert.equal(parseHeartbeatConfig({ patternNudgeHour: "x" }).patternNudgeHour, 9);
+  assert.equal(parseHeartbeatConfig({ patternNudgeMinute: 99 }).patternNudgeMinute, 59);
+  assert.equal(
+    parseHeartbeatConfig({ lastPatternNudgeCheckedDay: "2026-07-18" }).lastPatternNudgeCheckedDay,
+    "2026-07-18",
+  );
+  assert.equal(
+    parseHeartbeatConfig({ lastPatternNudgeSentDay: "2026-07-16" }).lastPatternNudgeSentDay,
+    "2026-07-16",
+  );
+  assert.equal(
+    parseHeartbeatConfig({ lastPatternNudgeKind: "overextension" }).lastPatternNudgeKind,
+    "overextension",
+  );
+});
+
+test("setHeartbeatConfig: enabling Pattern Nudges seeds lastPatternNudgeCheckedDay only — NOT lastPatternNudgeSentDay", () => {
+  mkdirSync(join(TMP, ".hivematrix"), { recursive: true });
+  writeFileSync(join(TMP, ".hivematrix", "config.json"), "{}"); // isolate from other tests' persisted heartbeat config
+  const before = setHeartbeatConfig({ patternNudgeEnabled: false });
+  assert.equal(before.lastPatternNudgeCheckedDay, undefined);
+  const after = setHeartbeatConfig({ patternNudgeEnabled: true });
+  assert.equal(after.lastPatternNudgeCheckedDay, localDateString(new Date()));
+  assert.equal(after.lastPatternNudgeSentDay, undefined, "a fresh enable must not start the send cooldown");
+});
+
 const at = (h: number, m = 0) => new Date(2026, 6, 4, h, m, 0, 0); // local time
 
 test("inQuietHours handles plain and midnight-wrapped windows", () => {
@@ -116,6 +167,7 @@ test("heartbeatDue: disabled/quiet/interval gating", () => {
     dayBriefEnabled: false, dayBriefMorningHour: 7, dayBriefMorningMinute: 30, dayBriefEveningHour: 21, dayBriefEveningMinute: 0,
     ratchetEnabled: false, ratchetHour: 18, ratchetMinute: 0,
     weaverEnabled: false, weaverHour: 17, weaverMinute: 0,
+    patternNudgeEnabled: false, patternNudgeHour: 9, patternNudgeMinute: 0,
   };
   assert.equal(heartbeatDue({ ...cfg, enabled: false }, at(10)), false);
   assert.equal(heartbeatDue(cfg, at(10)), true); // never ran
@@ -444,6 +496,89 @@ test("runWeaverOnce survives a failing notify channel and still returns the audi
     composeWeaverAudit: async () => "some audit text",
   });
   assert.equal(result.text, "some audit text");
+});
+
+// Minimal-valid HeartbeatConfig fixture for the tickPatternNudge tests below —
+// same shape as the `cfg` object literal in the "heartbeatDue" test above,
+// extended with the Pattern Nudges fields at their defaults.
+const BASE_CONFIG = {
+  enabled: false, intervalMinutes: 30, morningBriefHour: null, eveningRecapHour: null,
+  dayBriefEnabled: false, dayBriefMorningHour: 7, dayBriefMorningMinute: 30, dayBriefEveningHour: 21, dayBriefEveningMinute: 0,
+  ratchetEnabled: false, ratchetHour: 18, ratchetMinute: 0,
+  weaverEnabled: false, weaverHour: 17, weaverMinute: 0,
+  patternNudgeEnabled: false, patternNudgeHour: 9, patternNudgeMinute: 0,
+};
+
+test("tickPatternNudge: disabled is a no-op — no due-check, no notify", async () => {
+  let notified = false;
+  await tickPatternNudge(
+    { ...BASE_CONFIG, patternNudgeEnabled: false },
+    at(9),
+    { notify: async () => { notified = true; } },
+  );
+  assert.equal(notified, false);
+});
+
+test("tickPatternNudge: due + a detected pattern + cooldown OK delivers and marks sent", async () => {
+  mkdirSync(join(TMP, ".hivematrix"), { recursive: true });
+  writeFileSync(join(TMP, ".hivematrix", "config.json"), "{}"); // isolate from other tests' persisted heartbeat config
+  let notifiedText: string | null = null;
+  await tickPatternNudge(
+    { ...BASE_CONFIG, patternNudgeEnabled: true, patternNudgeHour: 9, patternNudgeMinute: 0 },
+    at(9),
+    {
+      notify: async (t) => { notifiedText = t; },
+      runPatternDetectionPass: async () => ({ kind: "overextension", message: "flag text" }),
+    },
+  );
+  assert.equal(notifiedText, "flag text");
+  const after = getHeartbeatConfig();
+  assert.equal(after.lastPatternNudgeKind, "overextension");
+  assert.equal(after.lastPatternNudgeSentDay, localDateString(at(9)));
+  assert.equal(after.lastPatternNudgeCheckedDay, localDateString(at(9)));
+});
+
+test("tickPatternNudge: same kind within 3-day cooldown suppresses delivery", async () => {
+  mkdirSync(join(TMP, ".hivematrix"), { recursive: true });
+  let notified = false;
+  await tickPatternNudge(
+    {
+      ...BASE_CONFIG,
+      patternNudgeEnabled: true,
+      lastPatternNudgeKind: "overextension",
+      lastPatternNudgeSentDay: localDateString(at(9)), // "sent today" already, same kind
+    },
+    at(9),
+    {
+      notify: async () => { notified = true; },
+      runPatternDetectionPass: async () => ({ kind: "overextension", message: "flag text" }),
+    },
+  );
+  assert.equal(notified, false);
+});
+
+test("tickPatternNudge: no pattern detected does not notify or mark sent", async () => {
+  mkdirSync(join(TMP, ".hivematrix"), { recursive: true });
+  writeFileSync(join(TMP, ".hivematrix", "config.json"), "{}"); // isolate from other tests' persisted heartbeat config
+  let notified = false;
+  await tickPatternNudge(
+    { ...BASE_CONFIG, patternNudgeEnabled: true },
+    at(9),
+    { notify: async () => { notified = true; }, runPatternDetectionPass: async () => null },
+  );
+  assert.equal(notified, false);
+  assert.equal(getHeartbeatConfig().lastPatternNudgeSentDay, undefined);
+});
+
+test("tickPatternNudge: not yet due (before the target hour) is a no-op", async () => {
+  mkdirSync(join(TMP, ".hivematrix"), { recursive: true });
+  let notified = false;
+  await tickPatternNudge(
+    { ...BASE_CONFIG, patternNudgeEnabled: true, patternNudgeHour: 9, patternNudgeMinute: 0 },
+    at(8, 59),
+    { notify: async () => { notified = true; }, runPatternDetectionPass: async () => ({ kind: "overextension", message: "flag text" }) },
+  );
+  assert.equal(notified, false);
 });
 
 test("runHeartbeatOnce survives a failing notify channel", async () => {

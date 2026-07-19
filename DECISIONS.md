@@ -1578,3 +1578,84 @@ recipes are authored from the live DOM and hand-editable under Advanced for now.
 `AddSiteViewController.swift`, `BrowserViewController.swift`, `BrowserLaneModels.swift`.
 **Provers:** `scripts/browser-lane-app.test.mjs` — "login recipes cannot carry or
 leak a stored sign-in", "login recipes run only from an explicit operator click".
+
+---
+
+## Q23 — Pattern Nudges: a sixth heartbeat ritual (2026-07-19)
+
+**Context.** The operator's ask (2026-07-19) was to learn patterns over time
+and time notifications intelligently — low-motivation Mondays, recurring
+missed goals, overextension/burnout, work/family trade-offs — instead of
+blanket reminders; the operator had run "stories" against the idea and it
+resonated. `heartbeat.ts` already carries three proactive rituals riding one
+`tick()` — Day Brief, Capability Ratchet, Weaver Audit — each its own enable
+flag, its own hour/minute config, its own daily/weekly idempotence marker, its
+own sibling compose module. Pattern Nudges is a fourth instance of that exact
+shape: zero new schedulers, zero new stores, zero new delivery planes.
+`goal_checkins` already has everything needed for miss-pattern detection, and
+`notify()` remains the single reusable delivery choke point; there is no
+existing "should I say this now" scoring function analogous to
+`decidePolicy()`, so the cooldown/priority logic here is that missing piece,
+scoped narrowly to this one ritual rather than built as a generic engine.
+
+**Decision.** What's actually new here is not a mechanism — every primitive
+(ritual-in-tick, config-blob fields, `notify()`/`broadcastEvent` delivery) is
+reused verbatim from Day Brief/Ratchet/Weaver — but a *product concept*:
+proactive commentary that judges the operator's own rhythm (burnout signal via
+a task-timestamp proxy, recurring missed-goal patterns via `goal_checkins`,
+low-motivation Mondays surfaced against a real recent win, never a generic
+one). That's new territory even though it adds no new machinery, which is why
+it gets its own entry despite the accounting below being nearly all zeros.
+Scope is bounded to what the existing data can actually support — no
+mood/energy/family-stress signal exists anywhere in the codebase, so
+"work/family trade-off" and "18-hour days" are served only by the
+overextension detector (a task-timestamp proxy), not a literal hours or
+sentiment log. The one thing this entry changes about the off-by-default
+precedent set 2026-07-12: unlike its three siblings (which now default on),
+Pattern Nudges is **off by default even for fresh installs** — a feature that
+comments on burnout and motivation is something the operator should opt into
+after seeing what it says, not something that starts talking unbidden.
+Enabled the same way as the others, via Settings → Heartbeat.
+
+**Complexity accounting (Q14 budget).** New persistent stores: **0** — six
+fields (`patternNudgeEnabled`, `patternNudgeHour`, `patternNudgeMinute`,
+`lastPatternNudgeCheckedDay`, `lastPatternNudgeSentDay`,
+`lastPatternNudgeKind`) on the existing heartbeat config JSON blob, not a new
+table. New orchestration primitives: **0** — reuses the
+ritual-in-heartbeat-tick shape verbatim (4th instance: Day Brief, Ratchet,
+Weaver, now this). New delivery plane: **0** — `notify()` plus
+`broadcastEvent`, unchanged. New modules: **1** (`pattern-nudges.ts`), the
+same one-module-per-ritual convention as `day-brief.ts`/`ratchet.ts`/
+`weaver-audit.ts`.
+
+**Deferred.** Explicit mood/energy/family-stress signal — no existing data
+source, and adding one means asking the operator to log something new, which
+cuts directly against the point of the feature; if a real signal ever exists
+(e.g. conversational sentiment already extracted elsewhere), a future pass
+could feed it into `composePatternNudge`'s priority order without changing
+the ritual shape. Autonomous mitigation (auto-lightening the task queue,
+auto-snoozing a goal) — v1 only ever offers or reports, matching Day Brief's
+own report-only posture; an autonomy-dial-gated action would be a separate,
+later decision. The specific trailing-window constants (40% late-night/weekend
+share, 12-timestamp floor, 2-of-4 missed-cadence periods, 3-day same-kind
+cooldown) are a best-first-guess, expected to be retuned once the operator has
+lived with it, the same way heartbeat's other thresholds have been retuned in
+the past.
+
+**Code:** `src/lib/flash/pattern-nudges.ts` (new — `detectOverextension`,
+`computeGoalMisses`, `detectMissedGoalPattern`, `detectLowMotivationMonday`,
+`pickRecentWin`, `patternNudgeCooldownOk`, `composePatternNudge`, and the one
+impure entry point `runPatternDetectionPass`); `src/lib/flash/heartbeat.ts`
+(new `HeartbeatConfig` fields, `tickPatternNudge` wired into `tick()`);
+`src/daemon/server.ts` (`POST /settings/heartbeat` patch fields for
+`patternNudgeEnabled`/`patternNudgeHour`/`patternNudgeMinute`).
+
+**Provers:** `src/lib/flash/pattern-nudges.test.ts` — "detectOverextension:
+false below the 12-timestamp floor even if all flagged", "composePatternNudge:
+priority is overextension > missed-goal > low-motivation-Monday",
+"composePatternNudge: low-motivation-Monday with no real win to surface
+suppresses entirely". `src/lib/flash/heartbeat.test.ts` — "parseHeartbeatConfig:
+patternNudgeEnabled defaults false even via DEFAULT_CONFIG spread (fresh
+install stays off)", "tickPatternNudge: same kind within 3-day cooldown
+suppresses delivery", "setHeartbeatConfig: enabling Pattern Nudges seeds
+lastPatternNudgeCheckedDay only — NOT lastPatternNudgeSentDay".

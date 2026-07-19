@@ -801,6 +801,11 @@ export function createDaemonServer() {
         if ("weaverEnabled" in body) patch.weaverEnabled = body.weaverEnabled === true;
         if (typeof body.weaverHour === "number") patch.weaverHour = body.weaverHour;
         if (typeof body.weaverMinute === "number") patch.weaverMinute = body.weaverMinute;
+        // Pattern Nudges (2026-07-19 spec) — own enable flag, daily, off by
+        // default even for fresh installs.
+        if ("patternNudgeEnabled" in body) patch.patternNudgeEnabled = body.patternNudgeEnabled === true;
+        if (typeof body.patternNudgeHour === "number") patch.patternNudgeHour = body.patternNudgeHour;
+        if (typeof body.patternNudgeMinute === "number") patch.patternNudgeMinute = body.patternNudgeMinute;
         json(res, 200, { heartbeat: setHeartbeatConfig(patch) });
         return;
       }
