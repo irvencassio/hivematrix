@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.226 — 2026-07-19
+
+Fixes the conversation-fullness meter, which was reading about double the real figure — a brand-new chat showed half full after a single message, and one conversation reported more tokens than the model's window can physically hold. The cached part of the conversation was being counted twice. Beyond the misleading number, this meant older messages were being summarised away at roughly half the intended point, discarding conversation that still fit comfortably. Existing conversations correct themselves on your next message.
+
 ## v0.1.225 — 2026-07-19
 
 Fixes the New button in Chat, which did nothing at all. Clicking it silently failed — no confirmation, no reset — because it used a system dialog this app's window doesn't support, so the one way to escape a full conversation was dead exactly when the meter read 100%. It now asks for confirmation properly and starts a fresh thread. The Delete button on COO routing rules was broken the same way and is fixed too.
