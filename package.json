@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --import tsx/esm --test 'src/**/*.test.ts' 'scripts/**/*.test.mjs'",
-    "test:watch": "node --import tsx/esm --test --watch 'src/**/*.test.ts' 'scripts/**/*.test.mjs'",
+    "test": "HIVEMATRIX_PROD_DB_GUARD=\"$HOME/.hivematrix/hivematrix.db\" NODE_ENV=test node --import tsx/esm --test 'src/**/*.test.ts' 'scripts/**/*.test.mjs'",
+    "test:watch": "HIVEMATRIX_PROD_DB_GUARD=\"$HOME/.hivematrix/hivematrix.db\" NODE_ENV=test node --import tsx/esm --test --watch 'src/**/*.test.ts' 'scripts/**/*.test.mjs'",
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
     "scope-wall": "node scripts/scope-wall.mjs",

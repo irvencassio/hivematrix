@@ -1,7 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { renderAttachmentBlock } from "@/lib/tasks/attachments";
 import { buildCodexPrompt, buildCodexExecArgs } from "./codex-agent";
+
+// Isolate the DB under a temp HOME before anything calls getDb(). buildCodexPrompt()
+// transitively reaches isChannelEnabled() in the mailbee/messagebee stores (via
+// isMailLaneEnabled/isMessageLaneEnabled), so every test below that calls it needs
+// this in place first — see docs/superpowers/specs/2026-07-15-goals-data-loss-design.md
+// §2.1 (this file was one of the transitive-caller gaps the prod-DB guard surfaced).
+const home = mkdtempSync(join(tmpdir(), "codex-agent-test-"));
+mkdirSync(join(home, ".hivematrix"), { recursive: true });
+process.env.HOME = home;
+
+test.after(() => {
+  rmSync(home, { recursive: true, force: true });
+});
 
 test("buildCodexPrompt prepends the outbound routing block and keeps the task", () => {
   const prompt = buildCodexPrompt("Email Jane the Q3 numbers.", { mailLaneEnabled: true, messageLaneEnabled: true });

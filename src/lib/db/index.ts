@@ -11,8 +11,23 @@ import { DEFAULT_BUDGET_USD } from "@/lib/config/constants";
 function resolveDbPath(): string {
   if (process.env.HIVEMATRIX_DB_PATH) return process.env.HIVEMATRIX_DB_PATH;
   const dir = join(homedir(), ".hivematrix");
+  const path = join(dir, "hivematrix.db");
+  // Fail closed: a test that forgets to isolate its DB (via HIVEMATRIX_DB_PATH
+  // or a temp HOME override) must not silently fall through to the real
+  // database. HIVEMATRIX_PROD_DB_GUARD is set by the "test"/"test:watch" npm
+  // scripts from the invoking shell's real $HOME, captured before node starts
+  // (so a test file overriding process.env.HOME later can't defeat it — an
+  // overridden HOME resolves `path` to a temp dir here, which no longer
+  // matches the guard value, so it's naturally exempt).
+  if (process.env.NODE_ENV === "test" && path === process.env.HIVEMATRIX_PROD_DB_GUARD) {
+    throw new Error(
+      `resolveDbPath() would open the real production database (${path}) from a test. ` +
+      `Set HIVEMATRIX_DB_PATH or override process.env.HOME to a temp dir before the ` +
+      `first getDb() call — see src/lib/messagebee/store.test.ts for the pattern.`,
+    );
+  }
   mkdirSync(dir, { recursive: true });
-  return join(dir, "hivematrix.db");
+  return path;
 }
 
 // Singleton database instance (shared across orchestrator + API routes via globalThis)

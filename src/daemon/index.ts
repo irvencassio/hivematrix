@@ -112,6 +112,18 @@ async function main(): Promise<void> {
     if (revived.length) console.log(`[directives] revived ${revived.length} stale recurring directive(s): ${revived.join(", ")}`);
   } catch (e) { console.error("[directives] rearm-on-boot failed:", e instanceof Error ? e.message : e); }
 
+  // Self-heal: if the structured goals store is empty (e.g. after the
+  // 2026-07-14 test-DB-isolation incident wiped it — see
+  // docs/superpowers/specs/2026-07-15-goals-data-loss-design.md), seed it
+  // from persona/GOALS.md so the Goals panel and the accountability loop
+  // (daily_review/goal_checkin/weaver-daily-audit) never see a silent
+  // "no goals yet" dead end. No-ops once any goal exists.
+  try {
+    const { importGoalsFromPersonaIfEmpty } = await import("@/lib/goals/import-from-persona");
+    const result = importGoalsFromPersonaIfEmpty();
+    if (result) console.log(`[goals] imported ${result.imported} goal(s) from GOALS.md (${result.skipped} already present)`);
+  } catch (e) { console.error("[goals] persona import-on-boot failed:", e instanceof Error ? e.message : e); }
+
   // Flash dispatch: shared callback for both inbound channel pollers. Wraps
   // runFlashTurnText so messagebee/mailbee (lib/) never import from flash/ directly.
   // imagePaths (currently only messagebee sends these, for iMessage photo

@@ -429,6 +429,20 @@ test("POST /onboarding/setup/mail-automation/probe checks Apple Mail Automation 
 });
 
 test("POST /onboarding/setup/desktop-permissions/request asks helper to prompt for permissions", async (t) => {
+  // buildFirstRunSetupResponse() (invoked by this route) unconditionally calls
+  // getMessagebeeStatus()/getMailbeeStatus(), which reach isChannelEnabled() ->
+  // getDb() regardless of which opts flag triggered the route — same isolation
+  // this file's mail-automation/probe and full-disk-access/probe tests already
+  // use. See docs/superpowers/specs/2026-07-15-goals-data-loss-design.md §2.1.
+  const originalHome = process.env.HOME;
+  const originalDbPath = process.env.HIVEMATRIX_DB_PATH;
+  const tmp = mkdtempSync(join(tmpdir(), "hm-server-desktop-permissions-"));
+  process.env.HOME = tmp;
+  process.env.HIVEMATRIX_DB_PATH = join(tmp, "hivematrix.db");
+
+  const { _resetDbForTests } = await import("@/lib/db");
+  _resetDbForTests();
+
   const originalFetch = globalThis.fetch;
   const helperRequests: unknown[] = [];
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
@@ -449,7 +463,14 @@ test("POST /onboarding/setup/desktop-permissions/request asks helper to prompt f
     }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
-  t.after(() => { globalThis.fetch = originalFetch; });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    _resetDbForTests();
+    if (originalHome) process.env.HOME = originalHome; else delete process.env.HOME;
+    if (originalDbPath) process.env.HIVEMATRIX_DB_PATH = originalDbPath; else delete process.env.HIVEMATRIX_DB_PATH;
+    rmSync(tmp, { recursive: true, force: true });
+  });
 
   const token = getOrCreateToken(DAEMON_TOKEN_FILE);
   const server = createDaemonServer();
