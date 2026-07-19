@@ -857,6 +857,23 @@ const MIGRATIONS: Migration[] = [
   // which the UI renders as "unknown" rather than as empty.
   m("v45", `ALTER TABLE flash_sessions ADD COLUMN contextTokens INTEGER;
             ALTER TABLE flash_sessions ADD COLUMN contextModel TEXT;`),
+
+  // v46: the git branch a per-task worktree run committed to.
+  //
+  // createTaskWorktree() has always produced `hive/task-<id>`, but the name only
+  // ever lived on the in-memory agent object and died with the process — and
+  // removeTaskWorktree deliberately keeps the branch. So every worktree run
+  // stranded commits on a branch nothing recorded, findable only by
+  // `git branch --list 'hive/task-*'`. Persisting it is the prerequisite for
+  // integrating a task's work from the board.
+  //
+  // Distinct from the pre-existing `worktreeName` column, which drives the
+  // claude CLI's own `-w` flag and must keep whatever the caller gave it.
+  // `integration` holds the last IntegrationResult (JSON) so a refusal survives
+  // the request that produced it — a diverged branch or failed typecheck has to
+  // stay visible on the card, not vanish with the 409.
+  m("v46", `ALTER TABLE tasks ADD COLUMN worktreeBranch TEXT DEFAULT NULL;
+            ALTER TABLE tasks ADD COLUMN integration TEXT DEFAULT NULL;`),
 ];
 
 // ------------------------------------------------------------------
@@ -989,6 +1006,10 @@ interface TaskRow {
   delayUntil: string | null;
   delayReason: string | null;
   worktreeName: string | null;
+  /** Branch a per-task worktree run committed to (`hive/task-<id>`), or null. */
+  worktreeBranch: string | null;
+  /** Last branch-integration attempt (JSON IntegrationResult), or null. */
+  integration: string | null;
   launchCommand: string | null;
   agentType: string;
   thinkingMode: string;
@@ -1018,7 +1039,7 @@ export interface TaskVerification {
   ranAt: string;
 }
 
-export type TaskDoc = Omit<TaskRow, "output" | "logs" | "turns" | "approvals" | "comments" | "dependsOn" | "brainSelection" | "verification"> & {
+export type TaskDoc = Omit<TaskRow, "output" | "logs" | "turns" | "approvals" | "comments" | "dependsOn" | "brainSelection" | "verification" | "integration"> & {
   output: Record<string, unknown>;
   logs: Array<Record<string, unknown>>;
   turns: Array<Record<string, unknown>>;
@@ -1027,18 +1048,24 @@ export type TaskDoc = Omit<TaskRow, "output" | "logs" | "turns" | "approvals" | 
   dependsOn: string[];
   brainSelection: ReturnType<typeof normalizeBrainSelection>;
   verification: TaskVerification | null;
+  integration: Record<string, unknown> | null;
   [key: string]: unknown;
 };
 
-/** Null-safe parse of the `verification` column — malformed JSON never throws. */
-function parseVerification(raw: string | null): TaskVerification | null {
+/** Null-safe parse of a JSON object column — malformed JSON never throws. */
+function parseJsonObject<T>(raw: string | null): T | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as TaskVerification) : null;
+    return parsed && typeof parsed === "object" ? (parsed as T) : null;
   } catch {
     return null;
   }
+}
+
+/** Null-safe parse of the `verification` column — malformed JSON never throws. */
+function parseVerification(raw: string | null): TaskVerification | null {
+  return parseJsonObject<TaskVerification>(raw);
 }
 
 function rowToTask(row: TaskRow): TaskDoc {
@@ -1052,6 +1079,7 @@ function rowToTask(row: TaskRow): TaskDoc {
     dependsOn: JSON.parse(row.dependsOn || "[]"),
     brainSelection: normalizeBrainSelection(JSON.parse(row.brainSelection || "{}")),
     verification: parseVerification(row.verification),
+    integration: parseJsonObject<Record<string, unknown>>(row.integration),
   };
 }
 
@@ -1250,6 +1278,9 @@ export const Task = {
       if (clean.verification && typeof clean.verification === "object") {
         clean.verification = JSON.stringify(clean.verification);
       }
+      if (clean.integration && typeof clean.integration === "object") {
+        clean.integration = JSON.stringify(clean.integration);
+      }
 
       const setClauses = [...Object.keys(clean).map((k) => `${k} = ?`), "updatedAt = datetime('now')"];
       db.prepare(`UPDATE tasks SET ${setClauses.join(", ")} WHERE _id = ?`).run(...Object.values(clean), id);
@@ -1305,6 +1336,7 @@ export const Task = {
       delayUntil: data.delayUntil ?? null,
       delayReason: data.delayReason ?? null,
       worktreeName: data.worktreeName ?? null,
+      worktreeBranch: data.worktreeBranch ?? null,
       launchCommand: data.launchCommand ?? null,
       agentType: data.agentType ?? "auto",
       thinkingMode: data.thinkingMode ?? "auto",

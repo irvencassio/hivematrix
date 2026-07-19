@@ -2814,6 +2814,7 @@ async function selectTask(id) {
     + taskProvenancePills(t, out, logs, children)
     + taskActionsHtml(t, out)
     + (t.projectPath ? '<div class="kv"><span class="k">project path</span><span>'+esc(t.projectPath)+'</span></div>' : '')
+    + taskIntegrationSection(t)
     + taskTelemetryStrip(t, out)
     + taskVerificationSection(t)
     + '<h2>Description</h2><div class="desc md">'+mdToHtml(t.description||"")+'</div>'
@@ -2833,8 +2834,24 @@ async function selectTask(id) {
   renderMermaidBlocks(el);
 }
 
+// A branch-integration refusal comes back as { error, integration } and leaves
+// the task where it was, on purpose: archiving a task whose commits never landed
+// would hide finished-looking work that is actually stranded on a branch.
+// Surface it loudly rather than letting the card silently not move.
+function reportIntegration(r) {
+  if (r && r.integration && r.error) {
+    hmToast("Not archived — " + String(r.error).slice(0, 220), "err");
+    return false;
+  }
+  if (r && r.integration && r.integration.status === "integrated") {
+    hmToast("✓ " + r.integration.detail, "ok");
+  }
+  return true;
+}
+
 async function taskAction(id, action) {
-  await api("/tasks/"+id+"/"+action, { method: "POST" });
+  const r = await api("/tasks/"+id+"/"+action, { method: "POST" });
+  reportIntegration(r);
   refresh();
 }
 async function deleteTask(id) {
@@ -2848,8 +2865,10 @@ async function archiveCompleted() {
 }
 
 async function cardArchive(id) {
-  await api("/tasks/"+id+"/archive", { method: "POST" });
-  if (state.selected === id) state.selected = null;
+  const r = await api("/tasks/"+id+"/archive", { method: "POST" });
+  // Keep the task selected when integration refused — the operator needs to see
+  // why, and deselecting would bury the reason.
+  if (reportIntegration(r) && state.selected === id) state.selected = null;
   refresh();
 }
 
@@ -3277,6 +3296,33 @@ function taskTelemetryStrip(t, out) {
 // claude -p tasks never ran the gate, and a verdict with no report text
 // (e.g. "uncertain" from a gate that produced no narrative) has nothing to
 // disclose beyond the board-card badge already showing the verdict.
+// Worktree branch + last integration attempt. Shown whenever a task HAS a
+// branch, not just on failure: before this the branch name existed only in the
+// agent process's memory, so an operator had no way to find a task's commits.
+function taskIntegrationSection(t) {
+  if (!t.worktreeBranch) return '';
+  const i = t.integration || null;
+  const rows = '<div class="kv"><span class="k">branch</span><span>'+esc(t.worktreeBranch)+'</span></div>';
+  if (!i || !i.status) {
+    return rows + '<div class="muted" style="font-size:11px">Not yet integrated — archiving this task merges it into main (fast-forward only).</div>';
+  }
+  const tone = i.status === 'integrated' ? 'ok'
+    : (i.status === 'no_branch' || i.status === 'nothing_to_integrate') ? 'muted' : 'err';
+  const label = {
+    integrated: '✓ Integrated into main',
+    not_fast_forward: '✗ Not fast-forwardable',
+    verify_failed: '✗ Typecheck failed — not merged',
+    dirty_tree: '⚠ Working tree dirty — skipped',
+    nothing_to_integrate: 'Nothing to integrate',
+    no_branch: 'No branch',
+    error: '✗ Integration error',
+  }[i.status] || i.status;
+  const body = i.detail ? '<div class="'+(tone === 'err' ? 'errbox' : 'desc md')+'">'+esc(i.detail)+'</div>' : '';
+  return rows
+    + '<div class="kv"><span class="k">integration</span><span class="'+(tone === 'ok' ? 'ok' : tone)+'">'+esc(label)+'</span></div>'
+    + body;
+}
+
 function taskVerificationSection(t) {
   let v = t && t.verification;
   if (typeof v === "string") { try { v = JSON.parse(v); } catch (e) { v = null; } }

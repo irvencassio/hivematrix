@@ -312,7 +312,19 @@ class AgentManager {
       const wt = createTaskWorktree(projectPath, taskId);
       // wt === null (not a git repo, or worktree creation failed) leaves
       // taskWorktreeDir null — same effective behavior as the flag being off.
-      if (wt) taskWorktreeDir = wt.dir;
+      if (wt) {
+        taskWorktreeDir = wt.dir;
+        // Persist the branch on the task row. The dir is removed at exit but the
+        // branch deliberately survives (worktree.ts) — without this the commits
+        // are only findable via `git branch --list 'hive/task-*'`, and nothing
+        // can offer to integrate them. Best-effort: a failed write must not stop
+        // the task from running.
+        try {
+          await Task.findByIdAndUpdate(taskId, { worktreeBranch: wt.branch });
+        } catch (e) {
+          console.error(`[agent-manager] could not record worktree branch for ${taskId}: ${e instanceof Error ? e.message : e}`);
+        }
+      }
     }
 
     const agent = await spawnProcess(

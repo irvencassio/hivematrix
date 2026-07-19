@@ -4720,7 +4720,32 @@ export function createDaemonServer() {
           broadcast("tasks:updated", { taskId: tid, status: "cancelled" });
           json(res, 200, t); return;
         }
-        // archive
+        // archive — and, for a task that ran in its own worktree, integrate its
+        // branch first. Archive IS the operator's approval gesture (there is no
+        // separate approve action), so it is the right trigger: no new gesture
+        // to learn, and a human still gates every merge.
+        //
+        // A refusal (diverged, dirty tree, failed typecheck) does NOT archive.
+        // Archiving anyway would hide the task while its commits sat unmerged on
+        // a branch nothing surfaces — the work would look done and be lost.
+        const cur = await Task.findById(tid);
+        if (!cur) { json(res, 404, { error: "Not found" }); return; }
+
+        if (cur.worktreeBranch) {
+          const { integrateTaskBranch, needsOperatorAttention } = await import("@/lib/orchestrator/integrate-branch");
+          const outcome = await integrateTaskBranch(String(cur.projectPath ?? ""), cur.worktreeBranch);
+          if (needsOperatorAttention(outcome.status)) {
+            await Task.findByIdAndUpdate(tid, { integration: outcome });
+            broadcast("tasks:updated", { taskId: tid, status: String(cur.status) });
+            json(res, 409, { error: outcome.detail, integration: outcome });
+            return;
+          }
+          const archived = await Task.findByIdAndUpdate(tid, { status: "archived", integration: outcome });
+          broadcast("tasks:updated", { taskId: tid, status: "archived" });
+          json(res, 200, { ...archived, integration: outcome });
+          return;
+        }
+
         const t = await Task.findByIdAndUpdate(tid, { status: "archived" });
         if (!t) { json(res, 404, { error: "Not found" }); return; }
         broadcast("tasks:updated", { taskId: tid, status: "archived" });
