@@ -6958,8 +6958,33 @@ let _flashState = {
   sessionId: null,
   sending: false,
   messages: [],
-  pendingImages: [] // [{ dataUrl, name }] — attached photos for the next turn (sent as imagesBase64)
+  pendingImages: [], // [{ dataUrl, name }] — attached photos for the next turn (sent as imagesBase64)
+  // Context-window occupancy from /flash/session/current: {tokens, limit, fill, level}
+  // or null when unknown (no turn completed yet). Drives the fill gauge.
+  context: null
 };
+
+// Context gauge colors by level. "ok" never renders — a gauge that is always on
+// screen becomes furniture the operator stops reading, which defeats having one.
+var FLASH_CTX_COLORS = { notice: '#6b7a8f', warn: '#d59a2a', critical: '#d5502a' };
+
+function flashContextGaugeHtml() {
+  const ctx = _flashState.context;
+  if (!ctx || ctx.fill == null || ctx.level === 'ok') return '';
+  const pct = Math.round(ctx.fill * 100);
+  const color = FLASH_CTX_COLORS[ctx.level] || FLASH_CTX_COLORS.notice;
+  const showPct = ctx.level === 'warn' || ctx.level === 'critical';
+  const title = 'Conversation context: ' + pct + '% full ('
+    + (ctx.tokens || 0).toLocaleString() + ' of ' + (ctx.limit || 0).toLocaleString() + ' tokens). '
+    + (ctx.level === 'critical'
+        ? 'Compacting automatically; start a new conversation for a clean slate.'
+        : 'Older turns are folded into a summary automatically past 75%.');
+  return '<span class="oc-ctx-gauge" title="' + esc(title) + '" style="display:inline-flex;align-items:center;gap:6px;margin-right:10px;">'
+    + '<span style="width:54px;height:5px;border-radius:3px;background:rgba(255,255,255,.14);overflow:hidden;display:inline-block;">'
+    + '<span style="display:block;height:100%;width:' + pct + '%;background:' + color + ';"></span></span>'
+    + (showPct ? '<span style="font-size:11px;color:' + color + ';">' + pct + '%</span>' : '')
+    + '</span>';
+}
 
 function flashPanelHtml() {
   return '<div class="oc-center-pane">'
@@ -6967,6 +6992,8 @@ function flashPanelHtml() {
     + '<div><div class="oc-panel-title"><span class="oc-avail-dot ok"></span><span>Chat</span></div>'
     + '<div class="oc-panel-sub">Native HiveMatrix agent loop</div></div>'
     + '<span class="oc-panel-head-spacer"></span>'
+    + flashContextGaugeHtml()
+    + '<button class="linklike" onclick="flashNewConversation()" title="Start a fresh conversation — clears the shared operator thread on desktop, phone and watch">✎ New</button>'
     + '<button class="linklike ov-back" onclick="closeSession()" title="Back (Esc)">← Back</button>'
     + '</div>'
     + '<div class="oc-panel-body">'
@@ -7028,10 +7055,43 @@ function showFlashPanel() {
 // Load the canonical operator conversation (shared by chat + voice + task
 // close-the-loop posts) from the server and render it. Best-effort; never
 // clobbers an in-flight streaming turn (guarded by _flashState.sending).
+// Start a fresh conversation. Confirmed first because the operator thread is
+// unified across surfaces (flash/store.ts's storageChannel) — resetting it here
+// also ends what the phone and watch are continuing, which is genuinely what
+// "new conversation" means given that architecture, but is worth saying out loud
+// rather than surprising the operator with.
+async function flashNewConversation() {
+  if (_flashState.sending) { hmToast('Wait for the current reply to finish.', 'err'); return; }
+  if (!confirm('Start a new conversation?\n\nThis clears the shared operator thread on desktop, phone and watch. Past turns stay in the database — they just stop being carried forward.')) return;
+  try {
+    await api('/flash/session/new', { method: 'POST', body: JSON.stringify({ channel: 'console', peer: 'operator' }) });
+    _flashState.sessionId = null;
+    _flashState.messages = [];
+    _flashState.context = null;
+    _flashState.pendingImages = [];
+    renderFlashPanel();
+    hmToast('Started a new conversation.', 'ok');
+  } catch (e) {
+    // Surfaced, not swallowed: a failed reset that looks like it worked would
+    // leave the operator typing into the old, full context believing it clear.
+    hmToast('Could not start a new conversation: ' + ((e && e.message) || e), 'err');
+  }
+}
+
+// Refresh just the context gauge (after a turn completes the fill has changed).
+async function refreshFlashContext() {
+  try {
+    const cur = await api('/flash/session/current?peer=operator');
+    _flashState.context = (cur && cur.context) || null;
+    if (_flashState.panelOpen && !_flashState.sending) renderFlashPanel();
+  } catch (e) { /* best-effort — the gauge is advisory */ }
+}
+
 async function hydrateFlashThread() {
   if (_flashState.sending) return;
   try {
     const cur = await api('/flash/session/current?peer=operator');
+    _flashState.context = (cur && cur.context) || null;
     const sid = cur && cur.sessionId;
     if (!sid) return;
     _flashState.sessionId = sid;
@@ -7040,7 +7100,10 @@ async function hydrateFlashThread() {
     _flashState.messages = turns
       .filter(function (t) { return t.role === 'user' || t.role === 'assistant'; })
       .map(function (t) { return { role: t.role, content: t.content, ts: t.ts ? Date.parse(t.ts) : undefined }; });
-    if (_flashState.panelOpen && !_flashState.sending) flashRenderMessages();
+    // Full panel re-render, not just the messages: the context gauge lives in
+    // the panel HEAD, so re-rendering only the transcript would leave the gauge
+    // showing whatever was on screen before the fill was known (i.e. nothing).
+    if (_flashState.panelOpen && !_flashState.sending) renderFlashPanel();
   } catch (e) { /* best-effort; keep whatever is on screen */ }
 }
 
@@ -8324,6 +8387,9 @@ async function flashSend() {
     _flashState.sending = false;
     if (sendBtn) sendBtn.disabled = !(input && input.value.trim());
     updateFlashNav();
+    // The turn just changed how full the window is — refresh the gauge so the
+    // warning appears on the turn it becomes true, not on the next panel open.
+    refreshFlashContext();
   }
 }
 

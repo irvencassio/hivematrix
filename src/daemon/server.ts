@@ -4879,11 +4879,16 @@ export function createDaemonServer() {
       // chat and push-to-talk voice share one thread). Lets a client hydrate
       // the single operator thread on open without guessing which channel
       // ("console" vs "voice") created it. Response: { sessionId: string | null }.
+      // Also returns the session's context-window occupancy (`context`), so a
+      // client can render a fill gauge and warn before a turn fails outright —
+      // Flash sessions are everlasting and the --resume path is unbounded, so
+      // without this the operator's only signal was the model announcing it
+      // had run out of room mid-reply.
       if (req.method === "GET" && urlPath === "/flash/session/current") {
         const peer = parseQueryString(req.url ?? "").peer || "operator";
-        const { getCurrentSession } = await import("@/lib/flash");
+        const { getCurrentSession, describeSessionContext } = await import("@/lib/flash");
         const session = getCurrentSession(peer);
-        json(res, 200, { sessionId: session?.id ?? null });
+        json(res, 200, { sessionId: session?.id ?? null, context: describeSessionContext(session) });
         return;
       }
 

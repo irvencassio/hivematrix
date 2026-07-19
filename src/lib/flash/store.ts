@@ -215,6 +215,20 @@ export function clearFlashCliSessionId(sessionId: string): void {
   getDb().prepare("UPDATE flash_sessions SET cliSessionId = NULL WHERE id = ?").run(sessionId);
 }
 
+/**
+ * Record how full the context window was on this session's last completed turn.
+ *
+ * Deliberately does NOT touch lastActiveAt: this is an observation about a turn
+ * that already happened, and bumping activity here would keep an idle session
+ * looking warm and starve the learning loop's cold-session sweep
+ * (getColdSessions above).
+ */
+export function setSessionContextTokens(sessionId: string, tokens: number, model: string | null): void {
+  getDb()
+    .prepare("UPDATE flash_sessions SET contextTokens = ?, contextModel = ? WHERE id = ?")
+    .run(tokens, model, sessionId);
+}
+
 export function appendFeedbackToTurn(turnId: string, rating: "good" | "bad"): FlashTurnRow {
   const db = getDb();
   const row = db.prepare("SELECT * FROM flash_turns WHERE id = ?").get(turnId) as FlashTurnRow | undefined;

@@ -846,6 +846,17 @@ const MIGRATIONS: Migration[] = [
   // executeBrowserBeeRun() (lane-tools.ts): readonly sites refuse write-shaped
   // jobType values (form_fill, site_ops) while read-shaped jobs stay allowed.
   m("v44", `ALTER TABLE browser_sites ADD COLUMN accessMode TEXT NOT NULL DEFAULT 'readwrite';`),
+
+  // v45: Flash Lane context-fill gauge. Records how full the model's context
+  // window was on the session's last turn, so the console and iOS can warn the
+  // operator before a turn fails outright and so compaction has a trigger.
+  // Written from the turn's own usage totals (flash/context-budget.ts's
+  // computeContextTokens — input + cache reads + cache writes, since a
+  // --resume turn replays history as cache reads). Nullable: a session that
+  // has not completed a turn since this migration simply has no reading yet,
+  // which the UI renders as "unknown" rather than as empty.
+  m("v45", `ALTER TABLE flash_sessions ADD COLUMN contextTokens INTEGER;
+            ALTER TABLE flash_sessions ADD COLUMN contextModel TEXT;`),
 ];
 
 // ------------------------------------------------------------------
