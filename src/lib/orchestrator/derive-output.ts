@@ -149,6 +149,7 @@ export function deriveOutput(turns: Turn[], opts: DeriveOptions = {}): OutputVie
       turnId: latestQuestion.id,
       text: latestQuestion.content.prompt,
       kind: latestQuestion.kind,
+      options: latestQuestion.content.options,
     };
     return view;
   }

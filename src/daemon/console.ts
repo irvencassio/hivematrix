@@ -731,6 +731,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .reply-section.subtle.open { display: block; border-left: 2px solid var(--border); padding: 8px 0 8px 12px; margin: 12px 0; }
   .reply-subhead { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
   .reply-toggle.active { border-color: var(--accent-2) !important; color: var(--accent-2) !important; }
+  .reply-choices { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+  .reply-choice-btn { border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px;
+    background: var(--panel-2); color: var(--text); font-size: 12px; cursor: pointer; }
+  .reply-choice-btn:hover { border-color: var(--accent-2); color: var(--accent-2); }
   .settings-switch { display: inline-flex; align-items: center; gap: 8px; min-width: 112px; justify-content: flex-start;
     border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px 4px 5px; background: var(--panel-2);
     color: var(--muted); font-size: 11px; font-weight: 700; line-height: 1; cursor: pointer; white-space: nowrap; }
@@ -2613,7 +2617,7 @@ function attachPickerHtml(ctx) {
     + '<div class="attach-chips" id="'+ctx+'AttachChips"></div>';
 }
 
-function taskActionsHtml(t) {
+function taskActionsHtml(t, out) {
   const b = [];
   const running = ["backlog","assigned","in_progress"].includes(t.status);
   const retryable = ["failed","review","cancelled"].includes(t.status);
@@ -2649,11 +2653,29 @@ function taskActionsHtml(t) {
   if (!steerable) {
     const isOpen = t.reviewState === "needs_input";
     const q = t.pendingQuestion ? '<div class="reply-question">'+esc(t.pendingQuestion)+'</div>' : '';
+    // Two independent sources carry predefined choices: a stuck/watchdog nudge
+    // (t.pendingOptions, attached to the row) and an agent AskUserQuestion answer
+    // (out.pendingOptions, persisted in task output). Not expected to both be set for
+    // the same task at once — a plain precedence, not a merge, is correct here.
+    const choices = (t.pendingOptions && t.pendingOptions.length) ? t.pendingOptions
+      : ((out && out.pendingOptions && out.pendingOptions.length) ? out.pendingOptions : null);
+    // Rendered by index, never by embedding the label in the onclick attribute —
+    // esc() only escapes &<>, not quotes, and these labels are LLM-authored text that
+    // can contain apostrophes. _replyChoices holds the real strings; the onclick only
+    // ever carries the safe hex t._id plus a plain integer index.
+    let choicesHtml = "";
+    if (choices) {
+      _replyChoices[t._id] = choices;
+      choicesHtml = '<div class="reply-choices">' + choices.map(function (c, idx) {
+        return '<button type="button" class="reply-choice-btn" onclick="submitReplyChoice(\''+t._id+'\','+idx+')">'+esc(c)+'</button>';
+      }).join("") + '</div>';
+    }
     html += '<div id="replySection_'+t._id+'" class="reply-section'+(isOpen?' open needs':' subtle')+'">'
       + (isOpen
           ? '<div class="reply-head">✋ Awaiting your reply</div>'
           : '<div class="reply-subhead">↩ Reply — your message is added and the task re-runs</div>')
       + q
+      + choicesHtml
       + '<textarea id="replyText" class="reply-input" placeholder="'+(isOpen?'Type your reply…':'Reply to this task…')+'" rows="'+(isOpen?'7':'2')+'" oninput="onCtxDraft(\'reply\',this)"></textarea>'
       + attachPickerHtml('reply')
       + '<div class="action-bar">'
@@ -2710,7 +2732,7 @@ async function selectTask(id) {
     + '<button class="linklike ov-back" onclick="closeSession()" title="Back (Esc)">← Back</button></h1>'
     + '<div class="sub">'+esc(t.project||"")+' · '+esc(t.status)+(t.reviewState?' · '+esc(t.reviewState):'')+'</div>'
     + taskProvenancePills(t, out, logs, children)
-    + taskActionsHtml(t)
+    + taskActionsHtml(t, out)
     + (t.projectPath ? '<div class="kv"><span class="k">project path</span><span>'+esc(t.projectPath)+'</span></div>' : '')
     + taskTelemetryStrip(t, out)
     + taskVerificationSection(t)
@@ -2766,6 +2788,11 @@ let _ctxReplyHeight = "";
 // The current task's editable draft text (Result/reviewScript) — "Edit the draft"
 // loads this into the reply box so edits are in-place, not copy-paste.
 let _replyEditSource = "";
+// Per-task predefined choice lists for the reply panel, keyed by task id — set by
+// taskActionsHtml when it renders the buttons, read by submitReplyChoice on click.
+// Holding the real strings here (rather than embedding them in the onclick attribute)
+// is deliberate: see the security note in this file's Task 4 plan.
+let _replyChoices = {};
 // Which toggle-opened sections are open — so a live refresh's re-render doesn't
 // collapse the box mid-typing. (needs_input opens from task state, not this.)
 let _ctxOpen = { retry: false, reply: false };
@@ -2946,6 +2973,15 @@ async function replyTask(id) {
   const r = await api("/tasks/"+id+"/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, attachments }) });
   if (r && r.ok) { _ctxAttach.reply = []; _ctxAttachError.reply = ""; _ctxDraft.reply = ""; if (el) el.value = ""; refresh(); selectTask(id); }
   else { hmAlert(r?.error || "Failed to send reply"); el.disabled = false; }
+}
+
+function submitReplyChoice(id, idx) {
+  const list = _replyChoices[id];
+  const choice = list && list[idx];
+  if (choice == null) return;
+  const el = document.getElementById("replyText");
+  if (el) el.value = choice;
+  replyTask(id);
 }
 
 function toggleReply(id) {

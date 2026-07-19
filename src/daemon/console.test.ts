@@ -208,6 +208,44 @@ test("live steerable tasks do not render Reply controls", () => {
   assert.match(js, /const canReply = !steerable &&/, "Reply toggle is skipped for live steerable runs");
 });
 
+// ─── Task reply panel: predefined choices render as buttons, not just a textarea (2026-07-18) ───
+// See docs/superpowers/specs/2026-07-18-task-choice-buttons-design.md and
+// docs/superpowers/plans/2026-07-18-task-choice-buttons.md, Task 4.
+
+test("taskActionsHtml renders a clickable button per pending choice, sourced from either the stuck-request row field or the task output, without embedding the raw label in an onclick attribute", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const fn = fnBody(js, "taskActionsHtml");
+
+  // Reads choices from both sources this bug traced: the stuck-path runtime-attached
+  // row field, and the AskUserQuestion-path persisted output field.
+  assert.match(fn, /t\.pendingOptions/, "reads the stuck-request choices off the row");
+  assert.match(fn, /out\.pendingOptions/, "reads the AskUserQuestion choices off task output");
+
+  // Renders one button per choice, keyed by index — not by embedding the raw label
+  // into the onclick attribute (LLM-authored labels can contain quotes; only a plain
+  // integer index and the already-safe hex t._id may appear inside the onclick string).
+  assert.match(fn, /class="reply-choice-btn"/, "choice buttons use a dedicated class");
+  assert.match(fn, /onclick="submitReplyChoice\(/, "choice buttons dispatch through submitReplyChoice");
+  assert.doesNotMatch(
+    fn,
+    /submitReplyChoice\([^)]*\+\s*esc\(/,
+    "must not embed the escaped label text inside the onclick attribute — index-only dispatch",
+  );
+
+  // Signature actually takes out (so it can read out.pendingOptions) and the one call
+  // site passes it.
+  assert.match(js, /function taskActionsHtml\(t,\s*out\)/, "signature accepts out");
+  assert.match(js, /taskActionsHtml\(t,\s*out\)/, "call site passes out");
+});
+
+test("submitReplyChoice fills the reply textarea from the stored choice list by index and submits, never trusting attribute-embedded text", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const fn = fnBody(js, "submitReplyChoice");
+  assert.match(fn, /_replyChoices\[id\]/, "looks the real choice text up from module state, not a function argument string");
+  assert.match(fn, /replyText/, "fills the existing reply textarea");
+  assert.match(fn, /replyTask\(id\)/, "submits through the existing reply pipeline — no new endpoint");
+});
+
 test("task-detail action rows use the standardized .action-bar token set", () => {
   // Reusable pattern + role classes are defined once in CSS.
   assert.match(CONSOLE_HTML, /\.action-bar\s*\{/, ".action-bar defined");

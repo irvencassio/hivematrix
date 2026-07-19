@@ -131,7 +131,7 @@ export interface Turn {
 }
 
 export interface OutputView {
-  headline: { turnId: string; text: string; kind: TurnKind } | null;
+  headline: { turnId: string; text: string; kind: TurnKind; options?: string[] } | null;
   awaiting: { kind: "user_response" | "next_step"; step?: string; turnId: string } | null;
   questions: { turnId: string; prompt: string; options?: string[] }[];
   workflowPhase: WorkflowPhase | null;
