@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.227 — 2026-07-19
+
+Tasks that finished after you replied to a question no longer sit in Review still asking for a reply — a question you had already answered was being re-read as unanswered on every later run, so the task looked stuck no matter how much work it had done. The 5-hour, 7-day and conversation-context meters are now one consistent, larger set in the title bar, and the context meter is always visible instead of appearing only once the conversation was already half full. The four proactive rituals — Day Brief, Capability Ratchet, Weaver Audit and Pattern Nudges — finally have real controls in Settings, with a Run-now button each; before this they could only be turned on by hand over the API. Removes a small unlabelled box beside the theme switch that looked like a broken meter and did nothing, and makes the Chat panel's New button readable instead of grey 11px text.
+
 ## v0.1.226 — 2026-07-19
 
 Fixes the conversation-fullness meter, which was reading about double the real figure — a brand-new chat showed half full after a single message, and one conversation reported more tokens than the model's window can physically hold. The cached part of the conversation was being counted twice. Beyond the misleading number, this meant older messages were being summarised away at roughly half the intended point, discarding conversation that still fit comfortably. Existing conversations correct themselves on your next message.
