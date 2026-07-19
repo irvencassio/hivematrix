@@ -2,8 +2,8 @@
  * HiveMatrix version metadata, surfaced in Settings.
  * Bump BUILD_NUMBER + BUILD_DATE when cutting a build.
  */
-export const VERSION = "0.1.227";
-export const BUILD_NUMBER = 772;
+export const VERSION = "0.1.228";
+export const BUILD_NUMBER = 773;
 export const BUILD_DATE = "2026-07-19";
 
 export interface VersionInfo {

@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.228 — 2026-07-19
+
+Adds a Restart daemon button in Settings → About, with the daemon's real running version next to the installed one. The background daemon runs under launchd and keeps running when you quit the app, so quitting and reopening never restarted it and neither did reloading the window — and the version shown was read from the installed app on disk rather than the code actually running, so it reported the new version while the old one was still live. There was no honest way to tell whether an update had finished. The Finish update button also did nothing in the one situation it was offered: the app was already installed and only the daemon was behind, but the button re-ran the installer, found nothing to do and reported everything was up to date. It now restarts the daemon. Restarting warns first if tasks are still running, since it kills them.
+
 ## v0.1.227 — 2026-07-19
 
 Tasks that finished after you replied to a question no longer sit in Review still asking for a reply — a question you had already answered was being re-read as unanswered on every later run, so the task looked stuck no matter how much work it had done. The 5-hour, 7-day and conversation-context meters are now one consistent, larger set in the title bar, and the context meter is always visible instead of appearing only once the conversation was already half full. The four proactive rituals — Day Brief, Capability Ratchet, Weaver Audit and Pattern Nudges — finally have real controls in Settings, with a Run-now button each; before this they could only be turned on by hand over the API. Removes a small unlabelled box beside the theme switch that looked like a broken meter and did nothing, and makes the Chat panel's New button readable instead of grey 11px text.
