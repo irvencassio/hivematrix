@@ -858,6 +858,14 @@ export function createDaemonServer() {
           json(res, 200, { moment: body.moment, ...result });
           return;
         }
+        // Pattern Nudges (2026-07-19 spec) — manual preview; bypasses the
+        // due-check and cooldown so "Run now" always shows what it would say.
+        if (body.moment === "pattern-nudge") {
+          const { runPatternNudgeOnce } = await import("@/lib/flash/heartbeat");
+          const result = await runPatternNudgeOnce(deps);
+          json(res, 200, { moment: body.moment, ...result });
+          return;
+        }
         const result = await runHeartbeatOnce(deps);
         json(res, 200, result);
         return;

@@ -31,6 +31,7 @@ const {
   setHeartbeatConfig,
   getHeartbeatConfig,
   tickPatternNudge,
+  runPatternNudgeOnce,
 } = await import("./heartbeat");
 
 test.after(() => {
@@ -488,6 +489,46 @@ test("runWeaverOnce: a null audit (no signal / model failure) sends NOTHING", as
   });
   assert.equal(result.text, null);
   assert.equal(notified.length, 0);
+});
+
+test("runPatternNudgeOnce: notifies the composed nudge and returns its kind", async () => {
+  const notified: string[] = [];
+  const result = await runPatternNudgeOnce({
+    notify: async (t) => { notified.push(t); },
+    runPatternDetectionPass: async () => ({ kind: "overextension", message: "Most of this week landed after 22:00." }),
+  });
+  assert.equal(result.kind, "overextension");
+  assert.deepEqual(notified, ["Most of this week landed after 22:00."]);
+});
+
+test("runPatternNudgeOnce: no detected pattern sends NOTHING and reports it as such", async () => {
+  const notified: string[] = [];
+  const result = await runPatternNudgeOnce({
+    notify: async (t) => { notified.push(t); },
+    runPatternDetectionPass: async () => null,
+  });
+  assert.deepEqual(result, { kind: null, message: null });
+  assert.equal(notified.length, 0);
+});
+
+test("runPatternNudgeOnce: a manual preview does not consume today's nudge or start the cooldown", async () => {
+  mkdirSync(join(TMP, ".hivematrix"), { recursive: true });
+  writeFileSync(join(TMP, ".hivematrix", "config.json"), "{}");
+  await runPatternNudgeOnce({
+    notify: async () => {},
+    runPatternDetectionPass: async () => ({ kind: "overextension", message: "…" }),
+  });
+  const cfg = parseHeartbeatConfig(JSON.parse(readFileSync(join(TMP, ".hivematrix", "config.json"), "utf-8")).heartbeat);
+  assert.equal(cfg.lastPatternNudgeSentDay, undefined, "run-now must not start the 3-day cooldown");
+  assert.equal(cfg.lastPatternNudgeCheckedDay, undefined, "run-now must not consume today's scheduled nudge");
+});
+
+test("runPatternNudgeOnce survives a failing notify channel", async () => {
+  const result = await runPatternNudgeOnce({
+    notify: async () => { throw new Error("imessage down"); },
+    runPatternDetectionPass: async () => ({ kind: "missed-goal-pattern", message: "Two of the last four weeks." }),
+  });
+  assert.equal(result.kind, "missed-goal-pattern");
 });
 
 test("runWeaverOnce survives a failing notify channel and still returns the audit text", async () => {

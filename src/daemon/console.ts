@@ -1109,7 +1109,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <span class="muted" id="usageWinReadout" style="font-size:11px"></span>
   </div>
   <div class="hzone mode" style="margin-left:auto">
-    <span class="hgroup" title="Connectivity — auto by default; the ● live indicator shows the current effective mode. Click it to override.">
+    <span class="hgroup" id="connGroup" style="display:none" title="Connectivity — auto by default; the ● live indicator shows the current effective mode. Click it to override.">
       <span class="muted hlabel" id="connLabel" style="display:none">override</span>
       <select id="modeSel" style="display:none">
         <option value="">(auto)</option>
@@ -1319,6 +1319,63 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <button class="sm" onclick="runHeartbeatNow('morning-brief')">☀️ Send morning brief</button>
         <button class="sm" onclick="runHeartbeatNow('evening-recap')">🌙 Send evening recap</button>
       </div>
+
+      <label class="flbl" style="margin-top:16px">Proactive rituals</label>
+      <div class="muted" style="font-size:11px;margin-bottom:6px">Each rides the heartbeat tick above on its own schedule. All four were configurable only over the API until now.</div>
+
+      <div class="row" style="align-items:center;gap:8px;margin-top:8px">
+        <input type="checkbox" id="s_hb_daybrief" onchange="saveHeartbeat()" style="width:auto" />
+        <span class="muted">📋 <b>Day Brief</b> — a morning contract and an evening ledger, assembled from what actually shipped</span>
+      </div>
+      <div class="row" style="align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
+        <span class="muted" style="font-size:11px">morning</span>
+        <input type="number" id="s_hb_daybrief_mh" min="0" max="23" style="width:48px" onchange="saveHeartbeat()" />
+        <span class="muted" style="font-size:11px">:</span>
+        <input type="number" id="s_hb_daybrief_mm" min="0" max="59" style="width:48px" onchange="saveHeartbeat()" />
+        <span class="muted" style="font-size:11px">· evening</span>
+        <input type="number" id="s_hb_daybrief_eh" min="0" max="23" style="width:48px" onchange="saveHeartbeat()" />
+        <span class="muted" style="font-size:11px">:</span>
+        <input type="number" id="s_hb_daybrief_em" min="0" max="59" style="width:48px" onchange="saveHeartbeat()" />
+        <button class="sm" onclick="runHeartbeatNow('day-brief-morning')">Run morning</button>
+        <button class="sm" onclick="runHeartbeatNow('day-brief-evening')">Run evening</button>
+      </div>
+
+      <div class="row" style="align-items:center;gap:8px;margin-top:10px">
+        <input type="checkbox" id="s_hb_ratchet" onchange="saveHeartbeat()" style="width:auto" />
+        <span class="muted">🔧 <b>Capability Ratchet</b> — weekly, proposes the next tool to build from what voice had to escalate</span>
+      </div>
+      <div class="row" style="align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
+        <span class="muted" style="font-size:11px">Sundays at</span>
+        <input type="number" id="s_hb_ratchet_h" min="0" max="23" style="width:48px" onchange="saveHeartbeat()" />
+        <span class="muted" style="font-size:11px">:</span>
+        <input type="number" id="s_hb_ratchet_m" min="0" max="59" style="width:48px" onchange="saveHeartbeat()" />
+        <button class="sm" onclick="runHeartbeatNow('ratchet')">Run now</button>
+      </div>
+
+      <div class="row" style="align-items:center;gap:8px;margin-top:10px">
+        <input type="checkbox" id="s_hb_weaver" onchange="saveHeartbeat()" style="width:auto" />
+        <span class="muted">🌀 <b>Weaver Audit</b> — weekly, one uncomfortable question about stated commitments vs. what you actually did</span>
+      </div>
+      <div class="row" style="align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
+        <span class="muted" style="font-size:11px">Fridays at</span>
+        <input type="number" id="s_hb_weaver_h" min="0" max="23" style="width:48px" onchange="saveHeartbeat()" />
+        <span class="muted" style="font-size:11px">:</span>
+        <input type="number" id="s_hb_weaver_m" min="0" max="59" style="width:48px" onchange="saveHeartbeat()" />
+        <button class="sm" onclick="runHeartbeatNow('weaver')">Run now</button>
+      </div>
+
+      <div class="row" style="align-items:center;gap:8px;margin-top:10px">
+        <input type="checkbox" id="s_hb_pattern" onchange="saveHeartbeat()" style="width:auto" />
+        <span class="muted">🔮 <b>Pattern Nudges</b> — daily, names work-rhythm patterns: overextension, recurring missed goals, low-motivation Mondays</span>
+      </div>
+      <div class="row" style="align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
+        <span class="muted" style="font-size:11px">Daily at</span>
+        <input type="number" id="s_hb_pattern_h" min="0" max="23" style="width:48px" onchange="saveHeartbeat()" />
+        <span class="muted" style="font-size:11px">:</span>
+        <input type="number" id="s_hb_pattern_m" min="0" max="59" style="width:48px" onchange="saveHeartbeat()" />
+        <button class="sm" onclick="runHeartbeatNow('pattern-nudge')">Run now</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:4px">At most one nudge a day, and the same kind won't repeat within three days. It only ever offers or reports — it never acts on its own. Run now ignores both the schedule and the cooldown so you can see what it would say.</div>
     </div>
     <div id="settingsFeatures" style="display:none">
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -6047,9 +6104,15 @@ document.getElementById("modeSel").addEventListener("change", async (e) => {
 function toggleConnOverride() {
   const sel = document.getElementById("modeSel");
   const lbl = document.getElementById("connLabel");
+  const grp = document.getElementById("connGroup");
   const show = sel.style.display === "none";
   sel.style.display = show ? "" : "none";
   if (lbl) lbl.style.display = show ? "" : "none";
+  // Hide the WRAPPER too, not just its contents. .hgroup carries its own border,
+  // padding and background, so with both children hidden it collapsed to a 14x6
+  // rounded box next to the theme toggle — an artifact that reads as a decorative
+  // dash or a broken meter, with nothing to click and no visible label.
+  if (grp) grp.style.display = show ? "" : "none";
   if (show) sel.focus();
 }
 
@@ -9858,6 +9921,24 @@ async function loadHeartbeat() {
     document.getElementById("s_hb_quiet_end").value = hb.quietHours ? hb.quietHours.endHour : "";
     document.getElementById("s_hb_morning").value = hb.morningBriefHour === null ? "" : hb.morningBriefHour;
     document.getElementById("s_hb_evening").value = hb.eveningRecapHour === null ? "" : hb.eveningRecapHour;
+    // Proactive rituals. setVal tolerates a missing node so a daemon that
+    // predates any one of these fields still renders the rest of Settings.
+    const setVal = function (id, v) { const el = document.getElementById(id); if (el) el.value = v; };
+    const setChk = function (id, v) { const el = document.getElementById(id); if (el) el.checked = v === true; };
+    setChk("s_hb_daybrief", hb.dayBriefEnabled);
+    setVal("s_hb_daybrief_mh", hb.dayBriefMorningHour);
+    setVal("s_hb_daybrief_mm", hb.dayBriefMorningMinute);
+    setVal("s_hb_daybrief_eh", hb.dayBriefEveningHour);
+    setVal("s_hb_daybrief_em", hb.dayBriefEveningMinute);
+    setChk("s_hb_ratchet", hb.ratchetEnabled);
+    setVal("s_hb_ratchet_h", hb.ratchetHour);
+    setVal("s_hb_ratchet_m", hb.ratchetMinute);
+    setChk("s_hb_weaver", hb.weaverEnabled);
+    setVal("s_hb_weaver_h", hb.weaverHour);
+    setVal("s_hb_weaver_m", hb.weaverMinute);
+    setChk("s_hb_pattern", hb.patternNudgeEnabled);
+    setVal("s_hb_pattern_h", hb.patternNudgeHour);
+    setVal("s_hb_pattern_m", hb.patternNudgeMinute);
   } catch (e) { /* settings can still render without it */ }
 }
 async function saveHeartbeat() {
@@ -9874,6 +9955,28 @@ async function saveHeartbeat() {
   };
   const interval = num("s_hb_interval");
   if (interval !== null) patch.intervalMinutes = interval;
+
+  // Proactive rituals. Each hour/minute is sent only when it parses to a real
+  // number — the server ignores non-numbers, so a blank box must not be read as
+  // "midnight" and silently reschedule a ritual the operator never touched.
+  const chk = function (id) { const el = document.getElementById(id); return el ? el.checked : undefined; };
+  const put = function (key, id) { const v = num(id); if (v !== null && !isNaN(v)) patch[key] = v; };
+  const putChk = function (key, id) { const v = chk(id); if (v !== undefined) patch[key] = v; };
+  putChk("dayBriefEnabled", "s_hb_daybrief");
+  put("dayBriefMorningHour", "s_hb_daybrief_mh");
+  put("dayBriefMorningMinute", "s_hb_daybrief_mm");
+  put("dayBriefEveningHour", "s_hb_daybrief_eh");
+  put("dayBriefEveningMinute", "s_hb_daybrief_em");
+  putChk("ratchetEnabled", "s_hb_ratchet");
+  put("ratchetHour", "s_hb_ratchet_h");
+  put("ratchetMinute", "s_hb_ratchet_m");
+  putChk("weaverEnabled", "s_hb_weaver");
+  put("weaverHour", "s_hb_weaver_h");
+  put("weaverMinute", "s_hb_weaver_m");
+  putChk("patternNudgeEnabled", "s_hb_pattern");
+  put("patternNudgeHour", "s_hb_pattern_h");
+  put("patternNudgeMinute", "s_hb_pattern_m");
+
   const r = await api("/settings/heartbeat", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(patch) });
   if (r && r.heartbeat) {
     hmToast(r.heartbeat.enabled ? "Heartbeat on — every " + r.heartbeat.intervalMinutes + " min" : "Heartbeat off", "ok");
@@ -9884,8 +9987,12 @@ async function runHeartbeatNow(moment) {
   hmToast(moment ? "Composing " + moment.replace("-", " ") + "…" : "Running heartbeat pulse…", "ok");
   const body = moment ? JSON.stringify({ moment }) : "{}";
   const r = await api("/heartbeat/run", { method:"POST", headers:{"Content-Type":"application/json"}, body });
-  if (r && (r.report || r.text)) hmToast((moment ? "Delivered: " : "💓 ") + String(r.report || r.text).slice(0, 120), "ok");
+  const text = r && (r.report || r.text || r.message || r.notifyText);
+  if (text) hmToast((moment ? "Delivered: " : "💓 ") + String(text).slice(0, 160), "ok");
   else if (r && r.stoodDown) hmToast("Heartbeat ran — nothing worth reporting (stood down)", "ok");
+  // A ritual with nothing to say is a real, correct outcome, not a failure —
+  // say so plainly instead of falling through to "run failed".
+  else if (r && !r.error) hmToast("Ran — no pattern worth surfacing right now", "ok");
   else hmToast((r && r.error) || "Heartbeat run failed");
 }
 // Reveal/hide the panel-translucency slider to match the current wallpaper/theme

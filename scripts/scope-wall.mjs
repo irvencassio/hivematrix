@@ -77,6 +77,12 @@ const RULES = [
       // The 0.1.171 release note names the sanctioned Weaver Audit feature.
       'lib/version/changelog.ts',
     ],
+    // The Settings → Proactive rituals row has to name the feature it toggles,
+    // and the operator already sees the brand in its own notify text ("🌀 Weaver
+    // weekly:"). Allowed by CONTENT rather than by adding daemon/console.ts to
+    // allowFiles: that file is ~10k lines, and allowlisting it would silently
+    // re-open the brand across the entire console UI rather than for this one row.
+    allowContent: /<b>Weaver Audit<\/b>/,
   },
   // ── Removed data model ────────────────────────────────────────
   {

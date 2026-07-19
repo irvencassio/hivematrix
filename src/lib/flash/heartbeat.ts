@@ -928,6 +928,33 @@ export async function tickPatternNudge(config: HeartbeatConfig, now: Date, deps:
   }
 }
 
+/**
+ * Run one Pattern Nudges detection pass NOW, ignoring the enable flag, the
+ * daily due-check and the same-kind cooldown — the Settings "Run now" button.
+ * Deliberately bypasses all three gates: the operator is asking to see what the
+ * ritual would say, and a run-now that silently no-ops because it is 08:59 or
+ * because the same kind fired yesterday teaches them the feature is broken.
+ *
+ * For the same reason it does NOT stamp `lastPatternNudge*` — a manual preview
+ * must not consume today's nudge or start the cooldown.
+ */
+export async function runPatternNudgeOnce(
+  deps: HeartbeatDeps = {},
+): Promise<{ kind: string | null; message: string | null }> {
+  try {
+    const runPass = deps.runPatternDetectionPass ?? runPatternDetectionPass;
+    const result = await runPass();
+    if (!result) return { kind: null, message: null };
+    if (deps.notify) {
+      try { await deps.notify(result.message); } catch { /* channels are best-effort */ }
+    }
+    return { kind: result.kind, message: result.message };
+  } catch (e) {
+    console.error(`[heartbeat] pattern nudge run-now failed: ${e instanceof Error ? e.message : e}`);
+    return { kind: null, message: null };
+  }
+}
+
 let stopFn: (() => void) | null = null;
 
 async function tick(deps: HeartbeatDeps): Promise<void> {
