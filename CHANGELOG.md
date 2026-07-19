@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.225 — 2026-07-19
+
+Fixes the New button in Chat, which did nothing at all. Clicking it silently failed — no confirmation, no reset — because it used a system dialog this app's window doesn't support, so the one way to escape a full conversation was dead exactly when the meter read 100%. It now asks for confirmation properly and starts a fresh thread. The Delete button on COO routing rules was broken the same way and is fixed too.
+
 ## v0.1.224 — 2026-07-19
 
 Two fixes that were finished but never shipped. Tasks that ask you a multiple-choice question now show the answers as buttons in the reply panel — before, a task could ask 'which of these?' and give you nowhere to click, which is why some tasks looked stuck when they were simply waiting. And if the goals list is ever empty, HiveMatrix now rebuilds it from your GOALS.md at startup instead of showing an empty Goals panel and quietly skipping the daily accountability check, which is what happened after a goals wipe earlier this month.
