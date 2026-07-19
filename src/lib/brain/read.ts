@@ -75,7 +75,9 @@ async function readWithTimeout(path: string, timeoutMs: number): Promise<ReadOut
  * via an absolute path (path.resolve treats an absolute second argument as
  * the whole answer, which this rejects) or a `..` traversal.
  */
-function resolveInRoot(root: string, relPath: string): string | null {
+/** Exported so the write path enforces the SAME root confinement as reads —
+ *  two copies of this check would be two chances to get it wrong. */
+export function resolveInRoot(root: string, relPath: string): string | null {
   const rootResolved = resolve(root);
   const candidate = resolve(rootResolved, relPath);
   const rootWithSep = rootResolved.endsWith(sep) ? rootResolved : rootResolved + sep;

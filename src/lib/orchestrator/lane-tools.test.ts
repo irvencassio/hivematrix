@@ -107,7 +107,7 @@ test("executeLaneTool dispatches a legacy bee alias to its real handler", async 
 });
 
 test("all bee tools are defined with required schemas", () => {
-  assert.equal(LANE_TOOL_DEFINITIONS.length, 22); // 13 lanes (incl. brain_read) + 5 PIM tools + 4 goals tools
+  assert.equal(LANE_TOOL_DEFINITIONS.length, 23); // 14 lanes (incl. brain_read + brain_write) + 5 PIM tools + 4 goals tools
   for (const t of LANE_TOOL_DEFINITIONS) {
     assert.equal(t.type, "function");
     assert.ok(t.function.name.length > 0);
@@ -143,7 +143,7 @@ const GOALS_NAMES = ["goals_list", "goal_upsert", "goal_checkin", "daily_review"
 
 test("cloud-ok advertises every lane (web, browser, desktop, mail, message, brain, skill, digest, pim, goals)", () => {
   assert.deepEqual(names(availableLaneTools(cloud())),
-    ["brain_search", "brain_read", ...PIM_NAMES, ...GOALS_NAMES, "code_graph", "coo_dispatch", "desktop_action", "digest_url", "hivematrix_browser", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
+    ["brain_search", "brain_read", "brain_write", ...PIM_NAMES, ...GOALS_NAMES, "code_graph", "coo_dispatch", "desktop_action", "digest_url", "hivematrix_browser", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
 });
 
 test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
@@ -153,12 +153,12 @@ test("digest_url is web-gated: absent offline (no internet to fetch)", () => {
 
 test("local-only drops web lanes but keeps Desktop Lane + outbound channels + brain/skill/codegraph/pim/goals + COO routing", () => {
   assert.deepEqual(names(availableLaneTools(local())),
-    ["brain_search", "brain_read", ...PIM_NAMES, ...GOALS_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
+    ["brain_search", "brain_read", "brain_write", ...PIM_NAMES, ...GOALS_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
 });
 
 test("offline keeps the offline workhorses + outbound channels + brain/skill/codegraph/pim/goals + COO routing (all local)", () => {
   assert.deepEqual(names(availableLaneTools(offline())),
-    ["brain_search", "brain_read", ...PIM_NAMES, ...GOALS_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
+    ["brain_search", "brain_read", "brain_write", ...PIM_NAMES, ...GOALS_NAMES, "code_graph", "coo_dispatch", "desktop_action", "mail_draft", "mail_send", "message_send", "skill_used", "skill_run", "workflow_inbox"].sort());
 });
 
 test("capabilityRoutingGuide lists email/message/brain lanes in cloud, drops web lanes offline", () => {

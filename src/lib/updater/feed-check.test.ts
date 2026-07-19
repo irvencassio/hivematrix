@@ -15,6 +15,34 @@ test("compareVersions orders dotted versions numerically", () => {
   assert.ok(compareVersions("0.1.10", "0.1.9") > 0, "numeric, not lexical");
 });
 
+/**
+ * Regression 2026-07-19: minutes after v0.1.229 was published and marked
+ * Latest, the daemon still reported "already up to date" and refused to update.
+ * The tag URL served 0.1.229 while releases/latest/download served 0.1.228 from
+ * a GitHub CDN edge (`x-cache: MISS, HIT`, `age: 1551`). A stale cache reading
+ * as a working updater is the failure mode worth pinning down.
+ */
+test("getUpdateStatus defeats the GitHub CDN edge cache when fetching the feed", async () => {
+  let seenUrl = "";
+  let seenInit: RequestInit | undefined;
+  const fetchImpl = async (url: unknown, init?: unknown) => {
+    seenUrl = String(url);
+    seenInit = init as RequestInit;
+    return { ok: true, json: async () => ({ version: "99.0.0" }) } as unknown as Response;
+  };
+  await getUpdateStatus({
+    force: true,
+    fetchImpl: fetchImpl as unknown as typeof fetch,
+    forceFlagPath: join(tmpdir(), "hm-unused-force"),
+  });
+  // The query string is what actually defeats the edge — verified against the
+  // live CDN, where the un-busted URL returned the previous release and the
+  // busted one returned the new one immediately.
+  assert.match(seenUrl, /hivematrix-core\.json\?t=\d+/, "feed URL must carry a cache-busting query string");
+  const headers = (seenInit?.headers ?? {}) as Record<string, string>;
+  assert.equal(headers["Cache-Control"], "no-cache", "must also ask intermediaries not to serve a cached copy");
+});
+
 test("getUpdateStatus flags an update when the feed is newer", async () => {
   const fetchImpl = async () => ({ ok: true, json: async () => ({ version: "99.0.0" }) }) as unknown as Response;
   const s = await getUpdateStatus({ force: true, fetchImpl, forceFlagPath: join(tmpdir(), "hm-unused-force") });

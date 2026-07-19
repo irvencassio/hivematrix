@@ -89,7 +89,19 @@ export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeo
   const fetchImpl = opts.fetchImpl ?? fetch;
   let status: UpdateStatus;
   try {
-    const res = await fetchImpl(FEED_URL, { signal: AbortSignal.timeout(6000) });
+    // Cache-bust. GitHub's asset CDN serves `releases/latest/download/...` from
+    // an edge that can hold a PREVIOUS release for many minutes even after the
+    // new one is published and marked Latest — observed 2026-07-19: the tag URL
+    // returned 0.1.229 while this path still returned 0.1.228 with
+    // `x-cache: MISS, HIT` and `age: 1551`. Without this the daemon reports
+    // "already up to date" straight after a release and refuses to update,
+    // which reads as a broken updater rather than a stale cache. The query
+    // string is ignored by the origin and defeats the edge key; no-store also
+    // stops any local HTTP cache from repeating the mistake.
+    const res = await fetchImpl(`${FEED_URL}?t=${Date.now()}`, {
+      signal: AbortSignal.timeout(6000),
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const feed = (await res.json()) as { version?: string };
     const latest = typeof feed.version === "string" ? feed.version : null;

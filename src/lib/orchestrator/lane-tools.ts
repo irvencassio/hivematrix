@@ -34,6 +34,9 @@ const LANE_TOOL_CAPABILITY: Record<string, CapabilityId> = {
   message_send: "messagebee",
   brain_search: "brain",
   brain_read: "brain",
+  // Local filesystem write inside the brain root — no cloud call, so it is
+  // available in every connectivity mode exactly like the reads it complements.
+  brain_write: "brain",
   skill_used: "brain",
   skill_run: "brain",
   digest_url: "webbee",
@@ -257,6 +260,28 @@ export const LANE_TOOL_DEFINITIONS: ChatTool[] = [
           offset: { type: "number", description: "Char offset to start reading from (default 0). Use the offset a truncated result reports to read the next window of a long doc." },
         },
         required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "brain_write",
+      description:
+        "Create or replace a document in the operator's brain (knowledge vault). Use this when asked to " +
+        "\"write a brain doc\", \"document this\", \"save this as a note/reference\", or to record research " +
+        "findings. The path is brain-root-relative (e.g. \"2026-07-19-youtube-watch-audio.html\"); only .md, " +
+        ".html and .txt are allowed and the path may not escape the brain root. Writing over an existing doc " +
+        "requires overwrite:true. Pass the FULL finished document in `content` — this is the actual save, not a " +
+        "draft step, so do not promise a doc you have not written.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Brain-root-relative path including extension, e.g. \"2026-07-19-topic.html\"" },
+          content: { type: "string", description: "The complete document text (markdown, HTML, or plain text)" },
+          overwrite: { type: "boolean", description: "Replace an existing doc at that path (default false)" },
+        },
+        required: ["path", "content"],
       },
     },
   },
@@ -506,6 +531,8 @@ export async function executeLaneTool(
       return executeBrainSearch(args);
     case "brain_read":
       return executeBrainRead(args);
+    case "brain_write":
+      return executeBrainWrite(args);
     case "skill_used":
       return executeSkillUsed(args);
     case "skill_run":
@@ -789,6 +816,14 @@ async function executeBrainRead(args: Record<string, unknown>): Promise<string> 
   const offset = typeof args.offset === "number" && Number.isFinite(args.offset) ? Math.max(0, Math.floor(args.offset)) : 0;
   const { readBrainDoc, formatBrainReadResult } = await import("@/lib/brain/read");
   return formatBrainReadResult(await readBrainDoc(path, { offset }));
+}
+
+async function executeBrainWrite(args: Record<string, unknown>): Promise<string> {
+  const path = typeof args.path === "string" ? args.path.trim() : "";
+  const content = typeof args.content === "string" ? args.content : "";
+  const overwrite = args.overwrite === true;
+  const { writeBrainDoc, formatBrainWriteResult } = await import("@/lib/brain/write");
+  return formatBrainWriteResult(writeBrainDoc(path, content, { overwrite }));
 }
 
 async function executeSkillUsed(args: Record<string, unknown>): Promise<string> {

@@ -52,8 +52,37 @@ import {
 import { compactFlashSession } from "./compact";
 import type { FlashEmitter, FlashMessage } from "./types";
 
-const MAX_TOOL_CALLS = 12;
-const MAX_WALL_MS = 3 * 60 * 1000;
+/**
+ * Per-surface model + budget.
+ *
+ * One flat budget (haiku / 12 calls / 180s) served every surface, and it was
+ * sized for the fastest one. On the console — where the operator is sitting at a
+ * keyboard watching — a research-and-write request would reliably die at the
+ * wall clock having produced nothing, and the only signal was
+ * "[Budget reached: 180s wall clock]" after the work was already lost.
+ *
+ * The budget is not removed, deliberately: MAX_WALL_MS is the only thing that
+ * kills a wedged `claude` child, so without it a hung turn hangs the chat
+ * forever with no recovery. It is sized per surface instead. Spoken surfaces
+ * keep haiku and a tight clock because a watch reply that arrives in four
+ * minutes is worthless; text surfaces get a model and a budget that can
+ * actually finish the work.
+ */
+export interface FlashBudget {
+  model: string;
+  maxToolCalls: number;
+  maxWallMs: number;
+}
+
+/** Surfaces where the reply is spoken and latency dominates usefulness. */
+const LATENCY_CRITICAL_CHANNELS: ReadonlySet<string> = new Set(["voice", "watch", "glasses"]);
+
+export function flashBudgetFor(channel?: string | null): FlashBudget {
+  if (channel && LATENCY_CRITICAL_CHANNELS.has(channel)) {
+    return { model: "haiku", maxToolCalls: 10, maxWallMs: 90 * 1000 };
+  }
+  return { model: "sonnet", maxToolCalls: 40, maxWallMs: 15 * 60 * 1000 };
+}
 
 /**
  * Read-only tool names — the set an observe-only pass (manual-autonomy
@@ -171,6 +200,8 @@ export interface FlashSpawnArgsInput {
   mcpConfigPath: string;
   toolNames: string[];
   maxTurns: number;
+  /** Model for this turn — see flashBudgetFor. */
+  model: string;
   /** CLI session id to resume, if this flash session has one on file. */
   resumeSessionId?: string | null;
   /** Set when this turn has image attachments — see buildFlashSpawnArgs. */
@@ -203,7 +234,7 @@ export function buildFlashSpawnArgs(input: FlashSpawnArgsInput): string[] {
   const allowedToolNames = input.hasImages ? [...input.toolNames, "Read"] : input.toolNames;
   args.push(
     "--model",
-    "haiku",
+    input.model,
     "--output-format",
     "stream-json",
     "--verbose",
@@ -382,6 +413,7 @@ function runFlashAttempt(
   prompt: string,
   spawnImpl: typeof spawn,
   emit: FlashEmitter,
+  budget: FlashBudget,
   suppressTerminalError = false,
 ): Promise<FlashAttemptResult> {
   return new Promise<FlashAttemptResult>((resolve) => {
@@ -422,12 +454,12 @@ function runFlashAttempt(
 
     const wallTimer = setTimeout(() => {
       try { proc.kill("SIGTERM"); } catch { /* already dead */ }
-      const elapsedS = Math.round(MAX_WALL_MS / 1000);
+      const elapsedS = Math.round(budget.maxWallMs / 1000);
       const budgetMsg = `\n\n[Budget reached: ${elapsedS}s wall clock. Use "escalate this to a task" for longer tasks.]`;
       // Not a resume-staleness case — always show it, even under suppression.
       emit.token(budgetMsg);
       finish((fullText || resultText) + budgetMsg, null);
-    }, MAX_WALL_MS);
+    }, budget.maxWallMs);
 
     const consumeLine = (line: string) => {
       const r = consumeFlashStreamLine(line, parser, streamState, emit);
@@ -650,6 +682,10 @@ export async function runFlashAgentLoop(
     { allowedTools: options.allowedTools, brainRoot, ctx, sessionId, channel: options.channel, curatedSkillTools },
   );
 
+  // Model + budget follow the surface: a watch reply must be fast, a console
+  // reply must be able to finish. See flashBudgetFor.
+  const budget = flashBudgetFor(options.channel);
+
   const binary = options.__claudeBinary ?? resolveClaudeBinary();
   const spawnImpl = options.__spawn ?? spawn;
   const startedAtMs = Date.now();
@@ -662,7 +698,8 @@ export async function runFlashAgentLoop(
       systemPrompts,
       mcpConfigPath: configPath,
       toolNames,
-      maxTurns: MAX_TOOL_CALLS,
+      maxTurns: budget.maxToolCalls,
+      model: budget.model,
       resumeSessionId: resumeId,
       hasImages,
     });
@@ -675,7 +712,7 @@ export async function runFlashAgentLoop(
     // First turn (or a prior stale-session fallback already cleared the id):
     // full-history serialization, streamed straight through.
     const { args, prompt } = buildTurn(null);
-    const result = await runFlashAttempt(binary, args, prompt, spawnImpl, emit);
+    const result = await runFlashAttempt(binary, args, prompt, spawnImpl, emit, budget);
     if (result.cliSessionId) setFlashCliSessionId(sessionId, result.cliSessionId);
     recordFlashTelemetry({ sessionId, model: result.model, usage: result.usage, failed: !!result.terminalError, startedAtMs });
     recordContextAndMaybeCompact(sessionId, result.model, result.usage);
@@ -687,7 +724,7 @@ export async function runFlashAgentLoop(
   // fails at lookup before any content streams, so the user sees nothing
   // withheld; if it turns out non-stale, we surface the withheld error below.
   const { args, prompt } = buildTurn(storedCliSessionId);
-  const resumeResult = await runFlashAttempt(binary, args, prompt, spawnImpl, emit, true);
+  const resumeResult = await runFlashAttempt(binary, args, prompt, spawnImpl, emit, budget, true);
 
   const failed = resumeResult.exitCode !== null && resumeResult.exitCode !== 0;
   const failureKind = failed ? classifyFlashFailure(resumeResult.stderr, resumeResult.text) : "other";
@@ -717,7 +754,8 @@ export async function runFlashAgentLoop(
       systemPrompts,
       mcpConfigPath: configPath,
       toolNames,
-      maxTurns: MAX_TOOL_CALLS,
+      maxTurns: budget.maxToolCalls,
+      model: budget.model,
       resumeSessionId: null,
       hasImages,
     });
@@ -727,6 +765,7 @@ export async function runFlashAgentLoop(
       withImageNote(prompt, options.imagePaths),
       spawnImpl,
       emit,
+      budget,
     );
     if (retryResult.cliSessionId) setFlashCliSessionId(sessionId, retryResult.cliSessionId);
     recordFlashTelemetry({ sessionId, model: retryResult.model, usage: retryResult.usage, failed: !!retryResult.terminalError, startedAtMs });
@@ -741,7 +780,7 @@ export async function runFlashAgentLoop(
     // is nothing already on screen to conflict with the retry.)
     clearFlashCliSessionId(sessionId);
     const fallback = buildTurn(null);
-    const fallbackResult = await runFlashAttempt(binary, fallback.args, fallback.prompt, spawnImpl, emit);
+    const fallbackResult = await runFlashAttempt(binary, fallback.args, fallback.prompt, spawnImpl, emit, budget);
     if (fallbackResult.cliSessionId) setFlashCliSessionId(sessionId, fallbackResult.cliSessionId);
     recordFlashTelemetry({ sessionId, model: fallbackResult.model, usage: fallbackResult.usage, failed: !!fallbackResult.terminalError, startedAtMs });
     recordContextAndMaybeCompact(sessionId, fallbackResult.model, fallbackResult.usage);

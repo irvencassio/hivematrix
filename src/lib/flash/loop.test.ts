@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
+  flashBudgetFor,
   buildFlashPrompt,
   buildFlashSpawnArgs,
   consumeFlashStreamLine,
@@ -153,14 +154,14 @@ test("buildFlashSpawnArgs: wires model, budgets, mcp config, and allowed tools",
     systemPrompts: ["sys1", "sys2"],
     mcpConfigPath: "/p/flash-mcp-config.json",
     toolNames: ["mcp__flash__brain_search", "mcp__flash__mail_send"],
-    maxTurns: 12,
+    maxTurns: 12, model: "sonnet",
   });
 
   // The prompt is NOT in argv — it goes via stdin (a prompt starting with "--" would
   // otherwise be parsed as an unknown CLI option). `-p` stays as the print flag.
   assert.equal(args[0], "-p");
   assert.ok(!args.includes("hello"));
-  assert.equal(args[args.indexOf("--model") + 1], "haiku");
+  assert.equal(args[args.indexOf("--model") + 1], "sonnet", "the model comes from the turn's budget, not a hardcoded default");
   assert.equal(args[args.indexOf("--output-format") + 1], "stream-json");
   assert.ok(args.includes("--verbose"));
   assert.equal(args[args.indexOf("--max-turns") + 1], "12");
@@ -181,7 +182,7 @@ test("buildFlashSpawnArgs: with no imagePaths (hasImages unset), args are byte-i
     systemPrompts: ["sys1"],
     mcpConfigPath: "/p/flash-mcp-config.json",
     toolNames: ["mcp__flash__brain_search", "mcp__flash__mail_send"],
-    maxTurns: 12,
+    maxTurns: 12, model: "sonnet",
   };
   const withoutHasImages = buildFlashSpawnArgs(input);
   const withHasImagesFalse = buildFlashSpawnArgs({ ...input, hasImages: false });
@@ -200,7 +201,7 @@ test("buildFlashSpawnArgs: hasImages allows ONLY the Read built-in tool, plus Re
     systemPrompts: [],
     mcpConfigPath: "/p/flash-mcp-config.json",
     toolNames: ["mcp__flash__brain_search", "mcp__flash__mail_send"],
-    maxTurns: 12,
+    maxTurns: 12, model: "sonnet",
     hasImages: true,
   });
   // --tools enables Read and nothing else from the built-in set (never "default").
@@ -217,14 +218,14 @@ test("buildFlashSpawnArgs: hasImages=false behaves exactly like hasImages omitte
     systemPrompts: [],
     mcpConfigPath: "/p",
     toolNames: ["mcp__flash__brain_search"],
-    maxTurns: 12,
+    maxTurns: 12, model: "sonnet",
     hasImages: false,
   });
   const b = buildFlashSpawnArgs({
     systemPrompts: [],
     mcpConfigPath: "/p",
     toolNames: ["mcp__flash__brain_search"],
-    maxTurns: 12,
+    maxTurns: 12, model: "sonnet",
   });
   assert.deepEqual(a, b);
 });
@@ -234,7 +235,7 @@ test("buildFlashSpawnArgs: a resumeSessionId adds --resume <id>; omitting it add
     systemPrompts: [],
     mcpConfigPath: "/p/flash-mcp-config.json",
     toolNames: ["mcp__flash__brain_search"],
-    maxTurns: 12,
+    maxTurns: 12, model: "sonnet",
     resumeSessionId: "cli-session-abc",
   });
   assert.equal(withResume[withResume.indexOf("--resume") + 1], "cli-session-abc");
@@ -243,7 +244,7 @@ test("buildFlashSpawnArgs: a resumeSessionId adds --resume <id>; omitting it add
     systemPrompts: [],
     mcpConfigPath: "/p/flash-mcp-config.json",
     toolNames: ["mcp__flash__brain_search"],
-    maxTurns: 12,
+    maxTurns: 12, model: "sonnet",
     resumeSessionId: null,
   });
   assert.ok(!withoutResume.includes("--resume"));
@@ -721,4 +722,33 @@ test("guardFabricatedToolCalls: mentioning a tool by name in prose is NOT fabric
   const r = guardFabricatedToolCalls(clean);
   assert.equal(r.fabricated, false);
   assert.equal(r.text, clean);
+});
+
+// ------------------------------------------------------------------
+// flashBudgetFor — per-surface model + budget
+// ------------------------------------------------------------------
+
+test("flashBudgetFor: spoken surfaces stay on the fast model with a tight clock", () => {
+  for (const ch of ["voice", "watch", "glasses"]) {
+    const b = flashBudgetFor(ch);
+    assert.equal(b.model, "haiku", `${ch} must stay on the low-latency model`);
+    assert.ok(b.maxWallMs <= 90_000, `${ch} must not make the operator wait minutes for a spoken reply`);
+  }
+});
+
+test("flashBudgetFor: text surfaces get a model and a budget that can finish real work", () => {
+  for (const ch of ["console", "imessage", undefined]) {
+    const b = flashBudgetFor(ch);
+    assert.equal(b.model, "sonnet", "typed chat is not latency-bound the way speech is");
+    assert.ok(b.maxWallMs >= 10 * 60_000, "must outlast a research-and-write turn");
+    assert.ok(b.maxToolCalls >= 30, "12 tool calls could not finish a multi-step request");
+  }
+});
+
+test("flashBudgetFor: every surface keeps SOME wall clock — it is the only thing that kills a wedged child", () => {
+  for (const ch of ["voice", "console", undefined, "unknown-surface"]) {
+    const b = flashBudgetFor(ch);
+    assert.ok(b.maxWallMs > 0 && Number.isFinite(b.maxWallMs), `${ch} must have a finite wall clock`);
+    assert.ok(b.maxToolCalls > 0 && Number.isFinite(b.maxToolCalls), `${ch} must have a finite tool budget`);
+  }
 });
