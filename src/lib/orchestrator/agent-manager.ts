@@ -41,6 +41,10 @@ export function detectTransientFailureText(text: string): TransientFailure {
     { match: /not logged in/i, delay: 5, reason: "Auth expired — not logged in" },
     { match: /please run \/login/i, delay: 5, reason: "Auth expired — login required" },
     { match: /token.*expired/i, delay: 5, reason: "OAuth token expired" },
+    // The CLI's actual wording when a session cannot refresh. /token.*expired/
+    // does NOT match it — the word is "session" — so this hard-failed every task
+    // with no retry and no re-auth while Chat kept working (2026-07-20).
+    { match: /oauth session expired|could not be refreshed/i, delay: 5, reason: "Claude sign-in expired — re-authenticate in Settings → Models" },
     { match: /another instance is currently performing an update|performing an update[\s\S]{0,200}please wait and try again later/i, delay: 2, reason: "Claude CLI update in progress" },
     { match: /overloaded/i, delay: 10, reason: "API overloaded" },
   ];

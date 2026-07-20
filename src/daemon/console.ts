@@ -6890,9 +6890,17 @@ async function renderProviderStatus() {
   const providers = (r && r.providers) || [];
   let html = providers.map(p => {
     const needsSetup = !p.installed || !p.authPresent;
-    const setupBtn = needsSetup
-      ? '<div class="mdl-card-foot"><button class="sm" onclick="runProviderSetup(\'' + esc(p.id) + '\')">' + (p.installed ? 'Sign in' : 'Install + sign in') + '</button></div>'
+    // Re-authenticate is ALWAYS offered once installed, not only when the status
+    // chip says something is wrong. The chip reflects whether a config dir and
+    // auth mode exist — not whether the OAuth credential behind them has
+    // expired — so it reads green while every task fails to authenticate
+    // (2026-07-20). Until the chip can prove freshness, the operator needs a way
+    // to repair a sign-in that looks fine and is not.
+    const label = !p.installed ? 'Install + sign in' : (needsSetup ? 'Sign in' : '↻ Re-authenticate');
+    const hint = (p.installed && !needsSetup)
+      ? '<div class="muted" style="font-size:11px;margin-top:4px">Tasks failing with an OAuth error? Re-authenticate here — it refreshes the same sign-in tasks and Chat both use.</div>'
       : '';
+    const setupBtn = '<div class="mdl-card-foot"><button class="sm" onclick="runProviderSetup(\'' + esc(p.id) + '\')">' + label + '</button>' + hint + '</div>';
     return '<div class="mdl-card"><div class="mdl-card-head"><span class="mdl-card-name">' + esc(PROVIDER_LABELS[p.id] || p.id) + '</span>'
       + providerStatusChip(p) + '</div>' + setupBtn + '</div>';
   }).join('');

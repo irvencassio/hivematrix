@@ -111,6 +111,26 @@ export type ResultStatus = (typeof RESULT_STATUSES)[number];
 // Active profile: stored globally, switchable from the dashboard.
 const g = globalThis as unknown as { __hiveActiveProfile?: string };
 
+/**
+ * Claude CLI config dirs the operator has actually configured (config.json's
+ * `profiles` array). Empty by default — the multi-account feature was
+ * transplanted from Hive 1 and never wired up: this array is read in a few
+ * places and written nowhere, so on every real install it is empty.
+ *
+ * That emptiness is the signal to leave CLAUDE_CONFIG_DIR unset entirely and
+ * let the CLI use its own default credential — the same one Chat, the terminal
+ * and the browser all use. See resolveClaudeConfigDir in orchestrator/subprocess.ts.
+ */
+export function configuredClaudeProfiles(): string[] {
+  try {
+    const config = JSON.parse(readFileSync(join(homedir(), ".hivematrix", "config.json"), "utf-8"));
+    const profiles: { configDir?: string }[] = Array.isArray(config.profiles) ? config.profiles : [];
+    return profiles.map((p) => p?.configDir).filter((d): d is string => typeof d === "string" && d.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 export function getActiveProfile(): string {
   if (g.__hiveActiveProfile) return g.__hiveActiveProfile;
   try {

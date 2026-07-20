@@ -73,3 +73,11 @@ test("agent text output emits a push event so the console does not wait for its 
   // The emit must be failure-isolated: a broadcast problem cannot break the run.
   assert.match(flush, /catch\s*\{/, "broadcast must be wrapped so it can never break the run");
 });
+
+test("detectTransientFailureText: the CLI's real OAuth wording is recognised", () => {
+  // Regression 2026-07-20: every task hard-failed on this exact string with no
+  // retry, because /token.*expired/ cannot match it — the CLI says "session".
+  const r = detectTransientFailureText("Failed to authenticate: OAuth session expired and could not be refreshed");
+  assert.equal(r.transient, true, "must be retryable, not a silent hard failure");
+  assert.match(r.reason, /re-authenticate/i, "the reason must tell the operator what to do");
+});

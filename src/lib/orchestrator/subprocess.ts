@@ -2,7 +2,7 @@ import { spawn, execSync, spawnSync, type ChildProcess } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { getActiveProfile, getLocalModelConfig } from "@/lib/config/constants";
+import { getActiveProfile, configuredClaudeProfiles, getLocalModelConfig } from "@/lib/config/constants";
 import { resolveProvider } from "@/lib/config/providers";
 import { verificationGatePrompt } from "@/lib/orchestrator/verification-gate";
 import { getDb } from "@/lib/db";
@@ -80,7 +80,57 @@ function normalizeConfigDir(profile: string): string {
   return profile.startsWith(".") ? profile : `.${profile}`;
 }
 
-/** Build a clean env for running claude CLI under a specific profile. */
+/**
+ * Resolve a Claude CLI config dir for a task, or null to leave the CLI on its
+ * default — which is almost always what we want.
+ *
+ * Two unrelated things were being conflated here, and it broke every task's auth:
+ *
+ *  - `task.profile` is an AGENT PERSONA ("developer", "researcher", "qa", "coo"
+ *    — see config/agent-profiles.ts). It has nothing to do with Claude accounts.
+ *  - CLAUDE_CONFIG_DIR selects a Claude CLI CONFIG DIRECTORY, and the CLI derives
+ *    a SEPARATE keychain credential per directory (hashing the path — the same
+ *    scheme mirrored in usage/claude.ts).
+ *
+ * Passing the persona straight through produced CLAUDE_CONFIG_DIR=$HOME/.developer
+ * etc. The CLI dutifully created those directories and minted a fresh credential
+ * for each; they expired and nothing refreshes them, so every task died with
+ * "OAuth session expired and could not be refreshed" while Flash chat — which
+ * sets no env at all (flash/loop.ts) and therefore uses the default credential —
+ * kept working. Terminal and browser were fine for the same reason.
+ *
+ * Setting the variable to "$HOME/.claude" is ALSO wrong: an explicit path hashes
+ * to a suffixed keychain item, which is a different credential from the
+ * unsuffixed default the CLI uses when the variable is absent. So the only safe
+ * move is to omit it entirely unless a real, configured Claude profile applies.
+ *
+ * The multi-account feature this came from (transplanted from Hive 1, c657d90c)
+ * is honoured but inert: `config.profiles` is read in three places and written
+ * nowhere, so `getActiveProfile()` only ever returns a real profile if someone
+ * populates it by hand. Until then, tasks use the same credential as everything
+ * else on the machine.
+ */
+function resolveClaudeConfigDir(profile?: string): string | null {
+  const configured = configuredClaudeProfiles();
+  if (configured.length === 0) return null;
+
+  // Only a value that names an actual configured Claude profile may select one.
+  // A persona name must never be interpreted as a config dir.
+  if (profile) {
+    const normalized = normalizeConfigDir(profile);
+    if (configured.includes(normalized)) return `${process.env.HOME}/${normalized}`;
+    return null;
+  }
+  const active = getActiveProfile();
+  return configured.includes(active) ? `${process.env.HOME}/${active}` : null;
+}
+
+/** Test seam for buildClaudeEnv — the auth-critical logic needs direct coverage. */
+export function buildClaudeEnvForTests(profile?: string): Record<string, string> {
+  return buildClaudeEnv(profile);
+}
+
+/** Build a clean env for running claude CLI, optionally under a configured profile. */
 function buildClaudeEnv(profile?: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, val] of Object.entries(process.env)) {
@@ -88,8 +138,9 @@ function buildClaudeEnv(profile?: string): Record<string, string> {
       env[key] = val;
     }
   }
-  const configDir = profile ? normalizeConfigDir(profile) : getActiveProfile();
-  env.CLAUDE_CONFIG_DIR = `${process.env.HOME}/${configDir}`;
+  const configDir = resolveClaudeConfigDir(profile);
+  if (configDir) env.CLAUDE_CONFIG_DIR = configDir;
+  else delete env.CLAUDE_CONFIG_DIR; // inherited value must not leak a stale dir in
   return env;
 }
 
