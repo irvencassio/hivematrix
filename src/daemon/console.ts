@@ -7224,7 +7224,7 @@ function flashPanelHtml() {
     + '<button class="oc-mic-btn" id="flashPhotoBtn" onclick="event.stopPropagation();document.getElementById(\'flashPhotoInput\').click()" title="Attach a photo — the assistant can see it">📎 Photo</button>'
     + '<button class="oc-mic-btn" id="flashMicBtn" onclick="event.stopPropagation();flashDictate()" title="Dictate — speak and your words fill the box">🎤 Mic</button>'
     + '<button class="oc-mic-btn" id="flashSnippetsBtn" onclick="event.stopPropagation();openSnippetsModal()" title="Insert a saved prompt snippet">{} Snippets</button>'
-    + '<button class="create" id="flashSendBtn" onclick="event.stopPropagation();flashSend()" disabled>Send</button>'
+    + '<button class="oc-mic-btn" id="flashSendBtn" onclick="event.stopPropagation();flashSend()" disabled>Send</button>'
     + '</div></div></div></div>';
 }
 

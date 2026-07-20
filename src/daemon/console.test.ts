@@ -2892,6 +2892,12 @@ test("composer textarea stretches to match the button stack's height", () => {
   assert.match(inputCss, /min-height:\s*88px/, "textarea floor height raised to better match the 4-button stack");
 });
 
+test("Send button matches Photo/Mic/Snippets pill styling (oc-mic-btn, not the unstyled .form-scoped .create)", () => {
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /<button class="oc-mic-btn" id="flashSendBtn"/, "Send button must share the oc-mic-btn pill styling used by the other three composer buttons");
+  assert.doesNotMatch(js, /<button class="create" id="flashSendBtn"/, "old unstyled .form-scoped class must be gone");
+});
+
 test("Flash send posts to /flash/turn and streams SSE events", () => {
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /async function flashSend\(\)/, "flashSend function defined");
