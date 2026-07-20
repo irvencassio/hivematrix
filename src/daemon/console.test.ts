@@ -3915,3 +3915,241 @@ test("insertSnippet: splices the snippet's text at the cursor, closes the modal,
   assert.match(fn, /start\s*\+\s*s\.text\.length/, "cursor lands immediately after the inserted text, not before it or at the old position");
   assert.match(fn, /flashInputResize\(input\)/, "resizes the box in case the inserted text is long, matching oninput's existing behavior");
 });
+
+// ─── Prompt Snippets: create/edit, delete, drag-reorder (2026-07-20) ─────────
+// See docs/superpowers/specs/2026-07-20-composer-send-button-and-snippet-crud-design.md
+// and docs/superpowers/plans/2026-07-20-composer-send-button-and-snippet-crud.md,
+// Task Group C. Extends the 07-16 view/insert-only Snippets modal above.
+
+function snippetsOverlaySlice(): string {
+  const overlayIx = CONSOLE_HTML.indexOf('id="snippetsOverlay"');
+  assert.notEqual(overlayIx, -1, "snippetsOverlay markup located");
+  const endIx = CONSOLE_HTML.indexOf('<!-- Generic dialog', overlayIx);
+  assert.ok(endIx > overlayIx, "snippetsOverlay markup has a following sibling marker");
+  return CONSOLE_HTML.slice(overlayIx, endIx);
+}
+
+test("Snippet edit view: #snippetsListView/#snippetsEditView split, + Create button, Name/Text .dialog-input fields, Save/Cancel", () => {
+  const overlay = snippetsOverlaySlice();
+
+  assert.match(overlay, /<div id="snippetsListView">/, "list view wrapper exists");
+  assert.match(overlay, /<button class="oc-mic-btn"[^>]*onclick="openSnippetCreate\(\)"[^>]*>\+ Create<\/button>/, "+ Create button wired to openSnippetCreate()");
+  assert.match(overlay, /id="snippetsListBody"/, "list body mount point still present inside the list view");
+
+  assert.match(overlay, /<div id="snippetsEditView" style="display:none">/, "edit view exists, hidden by default");
+  assert.match(overlay, /<input class="dialog-input" id="snippetEditName"/, "Name input reuses .dialog-input");
+  assert.match(overlay, /<textarea class="dialog-input" id="snippetEditText"/, "Text field reuses .dialog-input on a textarea");
+  assert.match(overlay, /class="dialog-actions"/, "Save/Cancel reuse .dialog-actions");
+  assert.match(overlay, /<button class="cancel" onclick="closeSnippetEdit\(\)">Cancel<\/button>/, "Cancel wired to closeSnippetEdit(), reusing .cancel");
+  assert.match(overlay, /<button class="ok" onclick="saveSnippetEdit\(\)">Save<\/button>/, "Save wired to saveSnippetEdit(), reusing .ok");
+});
+
+test("openSnippetCreate/openSnippetEdit/closeSnippetEdit toggle list/edit views and populate the edit fields", () => {
+  const js = extractScript(CONSOLE_HTML);
+
+  const create = fnBody(js, "openSnippetCreate");
+  assert.match(create, /_snippetEditId\s*=\s*null/, "create clears any in-flight edit id — this is a new snippet, not an edit");
+  assert.match(create, /getElementById\('snippetEditName'\)\.value\s*=\s*''/, "name field cleared for a fresh create");
+  assert.match(create, /getElementById\('snippetEditText'\)\.value\s*=\s*''/, "text field cleared for a fresh create");
+  assert.match(create, /getElementById\('snippetsListView'\)\.style\.display\s*=\s*'none'/, "list view hidden");
+  assert.match(create, /getElementById\('snippetsEditView'\)\.style\.display\s*=\s*''/, "edit view shown");
+
+  const edit = fnBody(js, "openSnippetEdit");
+  assert.match(edit, /loadSnippets\(\)\.find\(/, "looks up the snippet being edited by id");
+  assert.match(edit, /_snippetEditId\s*=\s*id/, "records which snippet is in flight, for saveSnippetEdit to update in place");
+  assert.match(edit, /getElementById\('snippetEditName'\)\.value\s*=\s*s\.name/, "prefills the name field from the existing snippet");
+  assert.match(edit, /getElementById\('snippetEditText'\)\.value\s*=\s*s\.text/, "prefills the text field from the existing snippet");
+  assert.match(edit, /getElementById\('snippetsListView'\)\.style\.display\s*=\s*'none'/, "list view hidden");
+  assert.match(edit, /getElementById\('snippetsEditView'\)\.style\.display\s*=\s*''/, "edit view shown");
+
+  const close = fnBody(js, "closeSnippetEdit");
+  assert.match(close, /_snippetEditId\s*=\s*null/, "clears in-flight edit id on cancel");
+  assert.match(close, /getElementById\('snippetsEditView'\)\.style\.display\s*=\s*'none'/, "edit view hidden on cancel");
+  assert.match(close, /getElementById\('snippetsListView'\)\.style\.display\s*=\s*''/, "list view restored on cancel");
+  assert.doesNotMatch(close, /saveSnippets\(/, "Cancel discards in-progress edits without touching storage");
+
+  const open = fnBody(js, "openSnippetsModal");
+  assert.match(open, /closeSnippetEdit\(\)/, "opening the modal always resets to list view, even if it was left mid-edit from a prior open");
+});
+
+// extractFunctionBlock matches on the literal substring "function NAME(" and
+// slices from there — for an `async function NAME(...)` declaration that
+// drops the `async` keyword from the extracted text, which then throws
+// ("await is only valid in async functions") once reassembled standalone.
+// This variant keeps the `async` prefix when present.
+function extractAsyncAwareFunctionBlock(src: string, name: string): string {
+  const asyncStart = src.indexOf(`async function ${name}(`);
+  const start = asyncStart !== -1 ? asyncStart : src.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `missing function ${name}`);
+  const bodyStart = src.indexOf("{", start);
+  assert.notEqual(bodyStart, -1, `missing body for ${name}`);
+  let depth = 0;
+  for (let i = bodyStart; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}") {
+      depth--;
+      if (depth === 0) return src.slice(start, i + 1);
+    }
+  }
+  throw new Error(`unterminated function ${name}`);
+}
+
+function makeSnippetsStore(seed: Array<{ id: string; name: string; text: string }>) {
+  const backing: Record<string, string> = { hm_snippets: JSON.stringify(seed) };
+  return {
+    getItem: (k: string) => (k in backing ? backing[k] : null),
+    setItem: (k: string, v: string) => { backing[k] = v; },
+    backing,
+  };
+}
+
+function makeSnippetEditHarness(seed: Array<{ id: string; name: string; text: string }>) {
+  const js = extractScript(CONSOLE_HTML);
+  const defaultSnippets = extractBetween(js, "const DEFAULT_SNIPPETS = [", "];") + "];";
+  const loadSrc = extractFunctionBlock(js, "loadSnippets");
+  const saveSrc = extractFunctionBlock(js, "saveSnippets");
+  const openCreateSrc = extractFunctionBlock(js, "openSnippetCreate");
+  const openEditSrc = extractFunctionBlock(js, "openSnippetEdit");
+  const closeEditSrc = extractFunctionBlock(js, "closeSnippetEdit");
+  const saveEditSrc = extractAsyncAwareFunctionBlock(js, "saveSnippetEdit");
+
+  const ls = makeSnippetsStore(seed);
+  const fields: Record<string, { value: string }> = {
+    snippetEditName: { value: "" },
+    snippetEditText: { value: "" },
+  };
+  const views: Record<string, { style: { display: string } }> = {
+    snippetsListView: { style: { display: "" } },
+    snippetsEditView: { style: { display: "" } },
+  };
+  const alerts: string[] = [];
+  const renders: number[] = [];
+
+  const factory = new Function(
+    "localStorage", "document", "hmAlert", "renderSnippetsList",
+    `let _snippetEditId = null;\n${defaultSnippets}\n${loadSrc}\n${saveSrc}\n${openCreateSrc}\n${openEditSrc}\n${closeEditSrc}\n${saveEditSrc}\n`
+      + `return { openSnippetCreate, openSnippetEdit, closeSnippetEdit, saveSnippetEdit, getEditId: function(){ return _snippetEditId; } };`,
+  ) as (
+    localStorage: unknown, document: unknown, hmAlert: unknown, renderSnippetsList: unknown,
+  ) => {
+    openSnippetCreate: () => void;
+    openSnippetEdit: (id: string) => void;
+    closeSnippetEdit: () => void;
+    saveSnippetEdit: () => Promise<void>;
+    getEditId: () => string | null;
+  };
+
+  const doc = {
+    getElementById: (id: string) => (fields[id] as unknown) || (views[id] as unknown) || null,
+  };
+  const hmAlert = (msg: string) => { alerts.push(msg); return Promise.resolve(); };
+  const renderSnippetsList = () => { renders.push(1); };
+
+  const api = factory(ls, doc, hmAlert, renderSnippetsList);
+  return { api, ls, fields, views, alerts, renders };
+}
+
+test("saveSnippetEdit: rejects blank name/text without touching storage", async () => {
+  const seed = [{ id: "s1", name: "Existing", text: "Existing text" }];
+  const { api, ls, alerts, renders } = makeSnippetEditHarness(seed);
+  api.openSnippetCreate();
+
+  await api.saveSnippetEdit();
+
+  assert.equal(alerts.length, 1, "hmAlert is shown once for the empty/blank input");
+  assert.deepEqual(JSON.parse(ls.backing.hm_snippets), seed, "storage untouched when validation fails");
+  assert.equal(renders.length, 0, "list is not re-rendered on a validation failure");
+});
+
+test("saveSnippetEdit: with no in-flight edit id, appends a new snippet and returns to the list", async () => {
+  const seed = [{ id: "s1", name: "Existing", text: "Existing text" }];
+  const { api, ls, fields, views, renders } = makeSnippetEditHarness(seed);
+  api.openSnippetCreate();
+  fields.snippetEditName.value = "  New one  ";
+  fields.snippetEditText.value = "  New text  ";
+
+  await api.saveSnippetEdit();
+
+  const saved = JSON.parse(ls.backing.hm_snippets);
+  assert.equal(saved.length, 2, "a new snippet was appended, the existing one untouched");
+  assert.equal(saved[0].id, "s1", "existing snippet unchanged");
+  assert.equal(saved[1].name, "New one", "new snippet name trimmed and saved");
+  assert.equal(saved[1].text, "New text", "new snippet text trimmed and saved");
+  assert.ok(saved[1].id, "new snippet got an id");
+  assert.equal(renders.length, 1, "renderSnippetsList called once after a successful save");
+  assert.equal(views.snippetsEditView.style.display, "none", "edit view hidden after save");
+  assert.equal(views.snippetsListView.style.display, "", "list view restored after save");
+});
+
+test("saveSnippetEdit: with an in-flight edit id, updates that snippet in place by id (order preserved)", async () => {
+  const seed = [
+    { id: "s1", name: "First", text: "First text" },
+    { id: "s2", name: "Second", text: "Second text" },
+  ];
+  const { api, ls, fields, renders } = makeSnippetEditHarness(seed);
+  api.openSnippetEdit("s2");
+  fields.snippetEditName.value = "Second updated";
+  fields.snippetEditText.value = "Second text updated";
+
+  await api.saveSnippetEdit();
+
+  const saved = JSON.parse(ls.backing.hm_snippets);
+  assert.equal(saved.length, 2, "edit updates in place — no new snippet created");
+  assert.equal(saved[0].id, "s1", "untouched sibling stays first (order preserved)");
+  assert.equal(saved[1].id, "s2", "same id retained for the edited snippet");
+  assert.equal(saved[1].name, "Second updated");
+  assert.equal(saved[1].text, "Second text updated");
+  assert.equal(renders.length, 1, "renderSnippetsList called once after a successful save");
+});
+
+test("Snippet row: Edit and Delete controls, both stopping propagation so they don't also trigger insert", () => {
+  const rowHtml = consoleSnippetRowHtml();
+  const row = rowHtml({ id: "s1", name: "Name", text: "Text" });
+  assert.match(row, /event\.stopPropagation\(\);openSnippetEdit\('s1'\)/, "Edit control opens the edit view for this row's id, without also inserting");
+  assert.match(row, /event\.stopPropagation\(\);deleteSnippet\('s1'\)/, "Delete control targets this row's id, without also inserting");
+});
+
+test("deleteSnippet: confirms destructively via hmConfirm(danger:true), only mutates+persists+re-renders on a truthy resolution", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const fn = fnBody(js, "deleteSnippet");
+  assert.match(fn, /await hmConfirm\(/, "destructive — must confirm, not fire-and-forget");
+  assert.match(fn, /okLabel:\s*['"]Delete['"]/, "confirm button reads Delete");
+  assert.match(fn, /danger:\s*true/, "confirm renders as a destructive/danger action");
+  assert.match(fn, /if\s*\(!ok\)\s*return;/, "bails out before mutating anything on a falsy/cancelled resolution");
+
+  // Structural: the mutate+save+render only happen after (textually below) the
+  // early-return guard, matching this file's existing hmConfirm-gated-delete style.
+  const guardIx = fn.indexOf("if (!ok) return;");
+  const filterIx = fn.search(/filter\(/);
+  const saveIx = fn.indexOf("saveSnippets(");
+  const renderIx = fn.indexOf("renderSnippetsList()");
+  assert.ok(guardIx !== -1 && filterIx > guardIx && saveIx > guardIx && renderIx > saveIx,
+    "filter -> saveSnippets -> renderSnippetsList all happen after the confirm guard, in that order");
+});
+
+test("Snippet row: drag-reorder handlers wired (dragstart/dragover/drop), row stays draggable", () => {
+  const rowHtml = consoleSnippetRowHtml();
+  const row = rowHtml({ id: "s1", name: "Name", text: "Text" });
+  assert.match(row, /draggable="true"/, "row remains drag-ready");
+  assert.match(row, /ondragstart="snippetDragStart\(event,\s*'s1'\)"/, "dragstart records this row's id as the drag source");
+  assert.match(row, /ondragover="snippetDragOver\(event\)"/, "dragover wired so drop is allowed");
+  assert.match(row, /ondrop="snippetDrop\(event,\s*'s1'\)"/, "drop targets this row's id");
+});
+
+test("snippetDragOver/snippetDrop: dragover calls preventDefault (required for drop to fire), drop splices the array to the new position and persists", () => {
+  const js = extractScript(CONSOLE_HTML);
+
+  const over = fnBody(js, "snippetDragOver");
+  assert.match(over, /e\.preventDefault\(\)/, "dragover must preventDefault or the browser refuses to allow a drop");
+
+  const start = fnBody(js, "snippetDragStart");
+  assert.match(start, /_snippetDragSrc\s*=\s*id/, "dragstart records the dragged row's id in a closure variable");
+
+  const drop = fnBody(js, "snippetDrop");
+  assert.match(drop, /e\.preventDefault\(\)/, "drop also preventDefaults");
+  assert.match(drop, /if\s*\(_snippetDragSrc\s*==\s*null\s*\|\|\s*_snippetDragSrc\s*===\s*targetId\)\s*return;/, "no-op dragging onto itself or with no recorded source");
+  assert.match(drop, /findIndex\(/, "locates source and target by id, not by a stale index");
+  assert.match(drop, /\.splice\(/, "reorders via splice — array order is the persisted display order, no separate sort field");
+  assert.match(drop, /saveSnippets\(/, "persists the new order immediately, not just an in-memory reorder");
+  assert.match(drop, /renderSnippetsList\(\)/, "re-renders to reflect the new order");
+});

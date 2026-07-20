@@ -1613,7 +1613,20 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
 <div class="overlay" id="snippetsOverlay" onclick="if(event.target===this)closeSnippetsModal()">
   <div class="modal" style="width:480px">
     <h1>{} Snippets<span class="x" onclick="closeSnippetsModal()">✕</span></h1>
-    <div id="snippetsListBody"></div>
+    <div id="snippetsListView">
+      <button class="oc-mic-btn" style="margin-bottom:10px" onclick="openSnippetCreate()">+ Create</button>
+      <div id="snippetsListBody"></div>
+    </div>
+    <div id="snippetsEditView" style="display:none">
+      <label class="flbl">Name</label>
+      <input class="dialog-input" id="snippetEditName" placeholder="Snippet name">
+      <label class="flbl">Text</label>
+      <textarea class="dialog-input" id="snippetEditText" rows="4" placeholder="Snippet text"></textarea>
+      <div class="dialog-actions">
+        <button class="cancel" onclick="closeSnippetEdit()">Cancel</button>
+        <button class="ok" onclick="saveSnippetEdit()">Save</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -8671,9 +8684,14 @@ function snippetPreview(text) {
 }
 
 function snippetRowHtml(s) {
-  return '<div class="card" draggable="true" data-snip-id="' + s.id + '" onclick="insertSnippet(\'' + s.id + '\')">'
+  return '<div class="card" draggable="true" data-snip-id="' + s.id + '" onclick="insertSnippet(\'' + s.id + '\')"'
+    + ' ondragstart="snippetDragStart(event,\'' + s.id + '\')" ondragover="snippetDragOver(event)" ondrop="snippetDrop(event,\'' + s.id + '\')">'
     + '<div class="mdl-card-name">' + esc(s.name) + '</div>'
     + '<div class="muted" style="font-size:11px;margin-top:4px">' + snippetPreview(s.text) + '</div>'
+    + '<div class="dialog-actions" style="margin-top:6px;justify-content:flex-start">'
+    + '<button class="cancel" onclick="event.stopPropagation();openSnippetEdit(\'' + s.id + '\')">Edit</button>'
+    + '<button class="ok danger" onclick="event.stopPropagation();deleteSnippet(\'' + s.id + '\')">Delete</button>'
+    + '</div>'
     + '</div>';
 }
 
@@ -8684,11 +8702,89 @@ function renderSnippetsList() {
 }
 
 function openSnippetsModal() {
+  closeSnippetEdit();
   document.getElementById('snippetsOverlay').classList.add('open');
   renderSnippetsList();
 }
 function closeSnippetsModal() {
   document.getElementById('snippetsOverlay').classList.remove('open');
+}
+
+// Create/Edit view — a second view swapped into the same #snippetsOverlay
+// (no nested overlay). _snippetEditId is null while creating, or the id of
+// the snippet being edited; saveSnippetEdit branches on it to append vs.
+// update-in-place.
+let _snippetEditId = null;
+
+function openSnippetCreate() {
+  _snippetEditId = null;
+  document.getElementById('snippetEditName').value = '';
+  document.getElementById('snippetEditText').value = '';
+  document.getElementById('snippetsListView').style.display = 'none';
+  document.getElementById('snippetsEditView').style.display = '';
+}
+function openSnippetEdit(id) {
+  const s = loadSnippets().find(function (x) { return x.id === id; });
+  if (!s) return;
+  _snippetEditId = id;
+  document.getElementById('snippetEditName').value = s.name;
+  document.getElementById('snippetEditText').value = s.text;
+  document.getElementById('snippetsListView').style.display = 'none';
+  document.getElementById('snippetsEditView').style.display = '';
+}
+function closeSnippetEdit() {
+  _snippetEditId = null;
+  document.getElementById('snippetsEditView').style.display = 'none';
+  document.getElementById('snippetsListView').style.display = '';
+}
+async function saveSnippetEdit() {
+  const name = document.getElementById('snippetEditName').value.trim();
+  const text = document.getElementById('snippetEditText').value.trim();
+  if (!name || !text) { await hmAlert('Name and text are both required.'); return; }
+  const list = loadSnippets();
+  if (_snippetEditId) {
+    const ix = list.findIndex(function (x) { return x.id === _snippetEditId; });
+    if (ix !== -1) list[ix] = Object.assign({}, list[ix], { name: name, text: text });
+  } else {
+    list.push({ id: 'snip-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8), name: name, text: text });
+  }
+  saveSnippets(list);
+  closeSnippetEdit();
+  renderSnippetsList();
+}
+
+// Delete — same hmConfirm(danger:true) pattern used ~10 other places in this
+// file (e.g. deleteSelected() above); only mutates/persists/re-renders on a
+// truthy resolution.
+async function deleteSnippet(id) {
+  const list = loadSnippets();
+  const s = list.find(function (x) { return x.id === id; });
+  if (!s) return;
+  const ok = await hmConfirm('Delete snippet "' + esc(s.name) + '"?', { okLabel: 'Delete', danger: true });
+  if (!ok) return;
+  saveSnippets(list.filter(function (x) { return x.id !== id; }));
+  renderSnippetsList();
+}
+
+// Drag-to-reorder — native HTML5 DnD (same primitive already used for the
+// image-attach drop zone). _snippetDragSrc is a closure-scoped id recording
+// the row being dragged; drop splices the array to the new position and
+// persists immediately (array order IS the display/insert/reorder order).
+let _snippetDragSrc = null;
+function snippetDragStart(e, id) { _snippetDragSrc = id; e.dataTransfer.effectAllowed = 'move'; }
+function snippetDragOver(e) { e.preventDefault(); }
+function snippetDrop(e, targetId) {
+  e.preventDefault();
+  if (_snippetDragSrc == null || _snippetDragSrc === targetId) return;
+  const list = loadSnippets();
+  const fromIx = list.findIndex(function (x) { return x.id === _snippetDragSrc; });
+  const toIx = list.findIndex(function (x) { return x.id === targetId; });
+  if (fromIx === -1 || toIx === -1) return;
+  const moved = list.splice(fromIx, 1)[0];
+  list.splice(toIx, 0, moved);
+  saveSnippets(list);
+  _snippetDragSrc = null;
+  renderSnippetsList();
 }
 
 function insertSnippet(id) {
