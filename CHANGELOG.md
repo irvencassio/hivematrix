@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.232 — 2026-07-20
+
+Fixes tasks failing to sign in to Claude while chat kept working. Each agent role — developer, researcher, QA, COO — was accidentally being given its own separate Claude sign-in, created silently the first time that role ran and never refreshed afterwards. Once those expired, every task failed with an authentication error even though chat, the terminal and the browser were all still signed in, because those use the machine's normal sign-in. Tasks now use that same sign-in. Settings, Models also gains a Re-authenticate button that is always available, since a sign-in can be expired while the status still looks healthy, and failures of this kind now retry and say plainly what to do instead of stopping with an unexplained error.
+
 ## v0.1.231 — 2026-07-19
 
 Fixes typed chat on your phone running on the settings meant for spoken replies. Chat on iPhone was being treated as a voice surface, so it got the fast-but-small model with a ninety-second limit — the same budget as a two-second reply on your watch — even though it is where the longest requests get made. Typed chat now gets the stronger model and a fifteen-minute budget on the phone, exactly like the desktop, while voice and watch keep the quick settings so spoken replies stay snappy.
