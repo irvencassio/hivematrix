@@ -120,6 +120,28 @@ export function normalizeHomeProjectPath(input: unknown, home = homedir()): stri
   return resolved;
 }
 
+/**
+ * Resolve + authorize a repo path for the integrate routes. Empty/absent →
+ * this repo (the daemon's cwd, where hive/task-* branches live). A provided
+ * path must be $HOME-bounded (normalizeHomeProjectPath) AND match a discovered
+ * project's path (or the cwd) — so the console can only inspect/integrate repos
+ * HiveMatrix already knows about, never an arbitrary path passed by a caller.
+ */
+async function resolveIntegrateRepo(input: unknown): Promise<string> {
+  const cwd = resolve(process.cwd());
+  if (input === undefined || input === null || (typeof input === "string" && !input.trim())) {
+    return cwd;
+  }
+  const requested = normalizeHomeProjectPath(input);
+  if (requested === cwd) return requested;
+  const { discoverProjects } = await import("@/lib/routing/project-discovery");
+  const known = new Set(discoverProjects().map((p) => resolve(p.path)));
+  if (!known.has(requested)) {
+    throw new Error("projectPath is not a known project");
+  }
+  return requested;
+}
+
 function mermaidAssetPath(): string | null {
   const argvDir = process.argv[1] ? dirname(resolve(process.argv[1])) : "";
   const candidates = [
@@ -401,6 +423,52 @@ export function createDaemonServer() {
             preSelect: shouldPreSelect(p),
           })),
         });
+        return;
+      }
+
+      // GET /integrate/branches?projectPath=... — read-only list of task
+      // branches (hive/*, fix/*, feat/*) ahead of a repo's default branch, with
+      // ahead/behind counts, for the Tools panel's "Integrate → main" card.
+      // Defaults to this repo (the daemon's cwd, where hive/task-* branches
+      // live). projectPath is validated against the discovered-projects set.
+      if (req.method === "GET" && urlPath === "/integrate/branches") {
+        const { listIntegratableBranches } = await import("@/lib/integrate/branch-integrate");
+        const q = parseQueryString(req.url ?? "");
+        let repoPath: string;
+        try {
+          repoPath = await resolveIntegrateRepo(q.projectPath);
+        } catch (err) {
+          json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+          return;
+        }
+        try {
+          json(res, 200, { repoPath, ...listIntegratableBranches(repoPath) });
+        } catch (err) {
+          json(res, 400, { error: `not a git repo: ${err instanceof Error ? err.message : String(err)}` });
+        }
+        return;
+      }
+
+      // POST /integrate/run — { projectPath?, branch, push? }. Fast-forward a
+      // task branch into the repo's default branch and (default) push to origin.
+      // The guards (clean tree, ff-only, refuse-if-behind) live in
+      // integrateBranch; projectPath is validated like the GET above. This is
+      // the one console action that pushes to main — the UI hard-confirms first.
+      if (req.method === "POST" && urlPath === "/integrate/run") {
+        const { integrateBranch } = await import("@/lib/integrate/branch-integrate");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const branch = typeof body.branch === "string" ? body.branch.trim() : "";
+        const push = body.push !== false; // default true (operator chose integrate + push)
+        if (!branch) { json(res, 400, { error: "branch is required" }); return; }
+        let repoPath: string;
+        try {
+          repoPath = await resolveIntegrateRepo(body.projectPath);
+        } catch (err) {
+          json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+          return;
+        }
+        const result = integrateBranch(repoPath, branch, { push });
+        json(res, result.ok ? 200 : 400, result);
         return;
       }
 

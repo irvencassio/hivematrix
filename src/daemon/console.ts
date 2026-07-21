@@ -8224,7 +8224,124 @@ function renderToolsPanel() {
     + '<div class="sk-toolbar" style="margin-bottom:0">'
     + '<input id="toolsQuery" placeholder="Search tools…" oninput="toolsQueryInput()" value="' + attrEnc(_toolsQuery) + '" />'
     + '</div>'
+    + '<div id="integrateCardWrap"></div>'
     + '<div class="tools-pane">' + body + '</div></div>';
+  // Sits OUTSIDE .tools-pane, which the search path replaces in place — so the
+  // card (and any in-progress dropdown selection) survives every keystroke.
+  initIntegrateCard();
+}
+
+// --- Integrate task branch → main (runnable Tools card) ---------------------
+// The one console action that pushes to main. Picks a known project + a task
+// branch ahead of that repo's default branch, hard-confirms, then fast-forwards
+// and pushes via POST /integrate/run (guards live server-side in
+// integrateBranch). Deliberately a deterministic git action, not an agent task.
+let _integrateBranches = [];
+function integrateCardHtml() {
+  return '<div class="tools-integrate-card" style="margin:10px 18px 4px;border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--panel)">'
+    + '<div style="font-weight:700;font-size:13px">🔀 Integrate task branch → main</div>'
+    + '<div class="muted" style="font-size:11px;margin:2px 0 10px">Fast-forward a finished task branch into its repo\'s main and push to origin. Refuses anything that isn\'t a clean fast-forward.</div>'
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
+    + '<label class="flbl" style="margin:0;min-width:56px">Project</label>'
+    + '<select id="integrateProject" onchange="loadIntegrateBranches()" style="flex:1;min-width:180px;font-size:12px"></select>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    + '<label class="flbl" style="margin:0;min-width:56px">Branch</label>'
+    + '<select id="integrateBranch" style="flex:1;min-width:180px;font-size:12px"></select>'
+    + '<button class="create" id="integrateRunBtn" onclick="runIntegrate()" disabled>Integrate + Push</button>'
+    + '</div>'
+    + '<div id="integrateStatus" class="muted" style="font-size:11px;margin-top:8px"></div>'
+    + '<pre id="integrateOut" class="command-view" style="display:none;margin:8px 0 0"></pre>'
+    + '</div>';
+}
+async function initIntegrateCard() {
+  const wrap = document.getElementById('integrateCardWrap');
+  if (!wrap) return;
+  wrap.innerHTML = integrateCardHtml();
+  const sel = document.getElementById('integrateProject');
+  if (sel) {
+    let opts = '<option value="">HiveMatrix (this repo)</option>';
+    try {
+      const r = await api('/projects');
+      for (const p of ((r && r.projects) || [])) {
+        opts += '<option value="' + _ea(p.path) + '">' + esc(p.name) + '</option>';
+      }
+    } catch (e) { /* fall back to just this repo */ }
+    sel.innerHTML = opts;
+  }
+  loadIntegrateBranches();
+}
+async function loadIntegrateBranches() {
+  const sel = document.getElementById('integrateProject');
+  const bsel = document.getElementById('integrateBranch');
+  const btn = document.getElementById('integrateRunBtn');
+  const status = document.getElementById('integrateStatus');
+  if (!bsel) return;
+  const projectPath = sel ? sel.value : '';
+  bsel.innerHTML = '<option>Loading…</option>';
+  if (btn) btn.disabled = true;
+  _integrateBranches = [];
+  try {
+    const r = await api('/integrate/branches?projectPath=' + encodeURIComponent(projectPath));
+    if (r && r.error) { bsel.innerHTML = '<option value="">—</option>'; if (status) status.textContent = r.error; return; }
+    const base = (r && r.base) || 'main';
+    const branches = (r && r.branches) || [];
+    _integrateBranches = branches;
+    if (!branches.length) {
+      bsel.innerHTML = '<option value="">no task branches ahead of ' + esc(base) + '</option>';
+      if (status) status.textContent = 'Nothing to integrate into ' + base + '.';
+      return;
+    }
+    bsel.innerHTML = branches.map(function (b) {
+      const label = b.branch + ' — ' + b.ahead + ' ahead' + (b.ffOk ? '' : ', ' + b.behind + ' behind · needs rebase (operator)');
+      return '<option value="' + _ea(b.branch) + '">' + esc(label) + '</option>';
+    }).join('');
+    if (btn) btn.disabled = false;
+    if (status) status.textContent = 'Target: ' + base + ' · a clean run pushes to origin/' + base + '.';
+  } catch (e) {
+    bsel.innerHTML = '<option value="">—</option>';
+    if (status) status.textContent = 'Could not load branches.';
+  }
+}
+async function runIntegrate() {
+  const sel = document.getElementById('integrateProject');
+  const bsel = document.getElementById('integrateBranch');
+  const status = document.getElementById('integrateStatus');
+  const out = document.getElementById('integrateOut');
+  if (!bsel || !bsel.value) return;
+  const projectPath = sel ? sel.value : '';
+  const branch = bsel.value;
+  const info = _integrateBranches.find(function (b) { return b.branch === branch; }) || {};
+  const projLabel = (sel && sel.selectedIndex >= 0) ? sel.options[sel.selectedIndex].text : 'this repo';
+  let msg;
+  if (info.ffOk === false) {
+    msg = '"' + branch + '" is ' + info.behind + ' commit(s) behind main and cannot fast-forward. '
+      + 'Rebasing is the operator\'s call, so running this will refuse. Continue anyway?';
+  } else {
+    msg = 'Fast-forward ' + branch + ' (' + (info.ahead != null ? info.ahead : '?') + ' commit(s)) into main and PUSH to origin/main'
+      + ', in ' + projLabel + '?\n\nThis updates remote main and cannot be undone with one click.';
+  }
+  const ok = await hmConfirm(msg, { okLabel: info.ffOk === false ? 'Try anyway' : 'Integrate + Push', danger: true });
+  if (!ok) return;
+  if (status) status.textContent = 'Integrating ' + branch + '…';
+  if (out) { out.style.display = 'none'; out.textContent = ''; }
+  try {
+    const r = await api('/integrate/run', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectPath: projectPath, branch: branch, push: true }) });
+    if (out && (r.output || r.error)) { out.textContent = (r.output || '') + (r.error ? '\n\n✗ ' + r.error : ''); out.style.display = 'block'; }
+    if (r.ok) {
+      // Reload the branch list FIRST (the just-integrated branch is now even
+      // with main and should drop off), THEN write the success line last so
+      // loadIntegrateBranches's own status update doesn't clobber it.
+      await loadIntegrateBranches();
+      if (status) status.textContent = '✓ Integrated ' + branch + ' into ' + r.base
+        + (r.pushed ? ' and pushed to origin/' + r.base + '.' : ' locally (push did not complete).');
+    } else if (status) {
+      status.textContent = '✗ ' + (r.error || 'Integration refused.');
+    }
+  } catch (e) {
+    if (status) status.textContent = '✗ Request failed.';
+  }
 }
 
 function toolsQueryInput() {
