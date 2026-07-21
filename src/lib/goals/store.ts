@@ -24,6 +24,18 @@ export interface Goal {
   metricUnit: string | null;
   /** The explicit "do this next" step — the one concrete action toward this goal. */
   nextAction: string | null;
+  /**
+   * Optional external progress source, as a "provider:metric" key (e.g.
+   * "healthkit:steps"). null = manual (the default): progress comes only from
+   * hand-logged check-ins. A bound source lets a device push check-ins for it.
+   */
+  dataSource: string | null;
+  /**
+   * The numeric goal that `metricUnit` is measured in (e.g. 10000 for a
+   * "healthkit:steps" goal). The freeform `target` stays the human label. When
+   * set, progress = check-in values summed over the cadence window vs this.
+   */
+  targetValue: number | null;
   status: GoalStatus;
   sortOrder: number;
   createdAt: string;
@@ -36,6 +48,8 @@ export interface GoalCheckin {
   date: string;
   note: string | null;
   value: number | null;
+  /** Who wrote this check-in: null = manual, else a provider key (e.g. "healthkit"). */
+  source: string | null;
   createdAt: string;
 }
 
@@ -45,6 +59,14 @@ export interface GoalWithStatus extends Goal {
   dueToday: boolean;
   streak: number;
   checkinCount: number;
+  /**
+   * Summed check-in value over the current cadence window (today for daily,
+   * last 7 days for weekly, all-time for milestone). null for a purely
+   * qualitative goal (no targetValue and no numeric check-ins).
+   */
+  progressValue: number | null;
+  /** progressValue / targetValue clamped to [0,1]; null unless targetValue > 0. */
+  progressPct: number | null;
 }
 
 interface GoalRow {
@@ -56,6 +78,8 @@ interface GoalRow {
   target: string | null;
   metricUnit: string | null;
   nextAction: string | null;
+  dataSource: string | null;
+  targetValue: number | null;
   status: string;
   sortOrder: number;
   createdAt: string;
@@ -79,6 +103,8 @@ export interface UpsertGoalInput {
   target?: string | null;
   metricUnit?: string | null;
   nextAction?: string | null;
+  dataSource?: string | null;
+  targetValue?: number | null;
   status?: GoalStatus;
   sortOrder?: number;
 }
@@ -100,16 +126,19 @@ export function upsertGoal(input: UpsertGoalInput): Goal {
         target: input.target !== undefined ? input.target : existing.target,
         metricUnit: input.metricUnit !== undefined ? input.metricUnit : existing.metricUnit,
         nextAction: input.nextAction !== undefined ? input.nextAction : existing.nextAction,
+        dataSource: input.dataSource !== undefined ? input.dataSource : existing.dataSource,
+        targetValue: input.targetValue !== undefined ? input.targetValue : existing.targetValue,
         status: input.status ?? existing.status,
         sortOrder: input.sortOrder ?? existing.sortOrder,
         updatedAt: now,
       };
       db.prepare(
-        `UPDATE goals SET title = ?, category = ?, description = ?, cadence = ?, target = ?, metricUnit = ?, nextAction = ?, status = ?, sortOrder = ?, updatedAt = ?
+        `UPDATE goals SET title = ?, category = ?, description = ?, cadence = ?, target = ?, metricUnit = ?, nextAction = ?, dataSource = ?, targetValue = ?, status = ?, sortOrder = ?, updatedAt = ?
          WHERE id = ?`,
       ).run(
         merged.title, merged.category, merged.description, merged.cadence, merged.target,
-        merged.metricUnit, merged.nextAction, merged.status, merged.sortOrder, merged.updatedAt, merged.id,
+        merged.metricUnit, merged.nextAction, merged.dataSource, merged.targetValue,
+        merged.status, merged.sortOrder, merged.updatedAt, merged.id,
       );
       return rowToGoal(merged);
     }
@@ -125,17 +154,20 @@ export function upsertGoal(input: UpsertGoalInput): Goal {
     target: input.target ?? null,
     metricUnit: input.metricUnit ?? null,
     nextAction: input.nextAction ?? null,
+    dataSource: input.dataSource ?? null,
+    targetValue: input.targetValue ?? null,
     status: input.status ?? "active",
     sortOrder: input.sortOrder ?? 0,
     createdAt: now,
     updatedAt: now,
   };
   db.prepare(
-    `INSERT INTO goals (id, title, category, description, cadence, target, metricUnit, nextAction, status, sortOrder, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO goals (id, title, category, description, cadence, target, metricUnit, nextAction, dataSource, targetValue, status, sortOrder, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     row.id, row.title, row.category, row.description, row.cadence, row.target,
-    row.metricUnit, row.nextAction, row.status, row.sortOrder, row.createdAt, row.updatedAt,
+    row.metricUnit, row.nextAction, row.dataSource, row.targetValue,
+    row.status, row.sortOrder, row.createdAt, row.updatedAt,
   );
   return rowToGoal(row);
 }
@@ -190,6 +222,8 @@ export interface AddCheckinInput {
   note?: string | null;
   value?: number | null;
   date?: string;
+  /** Provider that produced this check-in (null/omitted = manual). */
+  source?: string | null;
 }
 
 export function addCheckin(input: AddCheckinInput): GoalCheckin {
@@ -199,13 +233,86 @@ export function addCheckin(input: AddCheckinInput): GoalCheckin {
   const date = input.date ?? todayLocal();
   const note = input.note ?? null;
   const value = input.value ?? null;
+  const source = input.source ?? null;
   db.prepare(
-    "INSERT INTO goal_checkins (id, goalId, date, note, value, createdAt) VALUES (?, ?, ?, ?, ?, ?)",
-  ).run(id, input.goalId, date, note, value, now);
+    "INSERT INTO goal_checkins (id, goalId, date, note, value, source, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(id, input.goalId, date, note, value, source, now);
   // A check-in is progress — bump the goal's updatedAt so "recently touched"
   // ordering (e.g. findGoalByTitle's tie-break) reflects it.
   db.prepare("UPDATE goals SET updatedAt = ? WHERE id = ?").run(now, input.goalId);
-  return { id, goalId: input.goalId, date, note, value, createdAt: now };
+  return { id, goalId: input.goalId, date, note, value, source, createdAt: now };
+}
+
+export interface ProviderCheckinInput {
+  goalId: string;
+  value: number;
+  date?: string;
+  source: string;
+  note?: string | null;
+}
+
+/**
+ * Record a provider-sourced check-in idempotently: ONE row per
+ * (goalId, date, source), updated in place on repeat rather than appended. A
+ * device re-posting "today's steps" every few minutes must not accrue dozens of
+ * rows — the latest reading for a day simply overwrites the earlier one. Manual
+ * check-ins (via addCheckin, source null) still append freely.
+ */
+export function upsertProviderCheckin(input: ProviderCheckinInput): GoalCheckin {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const date = input.date ?? todayLocal();
+  const note = input.note ?? null;
+  const existing = db
+    .prepare("SELECT * FROM goal_checkins WHERE goalId = ? AND date = ? AND source = ?")
+    .get(input.goalId, date, input.source) as GoalCheckin | undefined;
+
+  if (existing) {
+    db.prepare("UPDATE goal_checkins SET value = ?, note = COALESCE(?, note) WHERE id = ?")
+      .run(input.value, note, existing.id);
+    db.prepare("UPDATE goals SET updatedAt = ? WHERE id = ?").run(now, input.goalId);
+    return { ...existing, value: input.value, note: note ?? existing.note };
+  }
+
+  const id = generateId();
+  db.prepare(
+    "INSERT INTO goal_checkins (id, goalId, date, note, value, source, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(id, input.goalId, date, note, input.value, input.source, now);
+  db.prepare("UPDATE goals SET updatedAt = ? WHERE id = ?").run(now, input.goalId);
+  return { id, goalId: input.goalId, date, note, value: input.value, source: input.source, createdAt: now };
+}
+
+export interface GoalSample {
+  /** The provider's metric name, e.g. "steps" — combined with provider into the "provider:metric" key. */
+  metric: string;
+  value: number;
+  date?: string;
+}
+
+/**
+ * Route provider samples to whichever ACTIVE goals are bound to that
+ * "provider:metric" via dataSource, upserting one check-in per (goal, date).
+ * A sample whose key no goal is bound to is simply ignored — the daemon knows
+ * nothing about HealthKit specifics; it just matches the dataSource string.
+ * Returns the set of goal ids touched. Bad samples (non-finite value) are skipped.
+ */
+export function ingestGoalSamples(
+  provider: string,
+  samples: GoalSample[],
+): { touched: string[] } {
+  const active = listGoals({ status: "active" });
+  const touched = new Set<string>();
+  for (const s of samples) {
+    if (!s || typeof s.metric !== "string" || !Number.isFinite(s.value)) continue;
+    const key = `${provider}:${s.metric}`;
+    for (const g of active) {
+      if (g.dataSource === key) {
+        upsertProviderCheckin({ goalId: g.id, value: s.value, date: s.date, source: provider });
+        touched.add(g.id);
+      }
+    }
+  }
+  return { touched: [...touched] };
 }
 
 export function checkinsForGoal(goalId: string, limit = 30): GoalCheckin[] {
@@ -261,15 +368,41 @@ function computeStreak(checkins: GoalCheckin[]): number {
 }
 
 /**
+ * Sum of check-in values within a goal's current cadence window:
+ *  - daily: today only (a daily step target resets each day).
+ *  - weekly: the last 7 days (a "3 workouts/week" style target).
+ *  - milestone: all-time cumulative (progress toward a one-time number).
+ * Returns null for a purely qualitative goal — no targetValue AND no numeric
+ * check-ins — so those keep rendering as notes/streaks with no progress bar.
+ */
+function computeProgressValue(goal: Goal, checkins: GoalCheckin[]): number | null {
+  const inWindow = checkins.filter((c) => {
+    if (c.value == null) return false;
+    if (goal.cadence === "daily") return daysSince(c.date) === 0;
+    if (goal.cadence === "weekly") return daysSince(c.date) < 7;
+    return true; // milestone: cumulative
+  });
+  const hasNumeric = goal.targetValue != null || checkins.some((c) => c.value != null);
+  if (!hasNumeric) return null;
+  return inWindow.reduce((sum, c) => sum + (c.value ?? 0), 0);
+}
+
+/**
  * Every active goal enriched with its latest check-in, whether it's due
- * today, and a simple streak/checkinCount. This is the shape the Goals panel
- * and the goals_list/daily_review tools both read from.
+ * today, a simple streak/checkinCount, and (for quantitative goals) progress
+ * over the cadence window. This is the shape the Goals panel and the
+ * goals_list/daily_review tools both read from.
  */
 export function goalsWithStatus(): GoalWithStatus[] {
   const goals = listGoals({ status: "active" });
   return goals.map((goal) => {
     const checkins = checkinsForGoal(goal.id, 60);
     const latest = checkins[0] ?? null;
+    const progressValue = computeProgressValue(goal, checkins);
+    const progressPct =
+      goal.targetValue != null && goal.targetValue > 0 && progressValue != null
+        ? Math.max(0, Math.min(1, progressValue / goal.targetValue))
+        : null;
     return {
       ...goal,
       latestCheckin: latest,
@@ -277,6 +410,8 @@ export function goalsWithStatus(): GoalWithStatus[] {
       dueToday: isDueToday(goal.cadence, latest?.date ?? null),
       streak: computeStreak(checkins),
       checkinCount: checkins.length,
+      progressValue,
+      progressPct,
     };
   });
 }
