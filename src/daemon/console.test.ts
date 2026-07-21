@@ -4231,3 +4231,32 @@ test("renderPostureGroups nests lane capabilities under their lane and separates
   // Cross-lane capabilities are grouped too, so nothing renders ungrouped.
   assert.match(html, /Across all lanes/);
 });
+
+test("the context-sources project picker never defaults from preSelect", () => {
+  // GET /projects returns preSelect:true for EVERY discovered project, so
+  // emitting `selected` from it marked all options and left the browser on
+  // whichever was last — an arbitrary repo instead of the one being worked in.
+  const js = extractScript(CONSOLE_HTML);
+  const fn = js.match(/function renderContextSourceProjects\(\)[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(fn, "renderContextSourceProjects should exist");
+  assert.doesNotMatch(fn, /preSelect/, "preSelect is true for every project — it cannot pick a default");
+  assert.doesNotMatch(fn, /' selected'/, "no option may be marked selected at render time");
+  assert.match(fn, /localStorage\.getItem\('hm_ctxsrc_project'\)|CTXSRC_PROJECT_KEY/, "the operator's own choice is what persists");
+  assert.match(fn, /localeCompare/, "projects are sorted so a repo can be found in the list");
+});
+
+test("a missing context source does not advertise a cap it is not subject to", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const fn = js.match(/async function loadContextSources\(\)[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(fn, /s\.capChars && !missing/, "a not-found file must not render '· cap 7.8 KB' as if it were live");
+  assert.match(fn, /localStorage\.setItem/, "selecting a repository persists it across visits");
+});
+
+test("the context-sources picker says it means a REPOSITORY, not a brain-doc project", () => {
+  // This panel sits on the Brain/Memory Review page, whose left column lists
+  // brain-doc projects (__pinned__, canopy, hive) — a completely different
+  // vocabulary from the discovered repo paths this dropdown holds. Both were
+  // labelled "project", so the two read as one thing.
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(js, /ctxsrc-scope">repository/, "the scope of the picker is stated");
+});

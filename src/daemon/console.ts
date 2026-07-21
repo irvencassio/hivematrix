@@ -1035,7 +1035,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .ctxsrc-shell { border:1px solid var(--border); border-radius:8px; margin:14px; overflow:hidden; }
   .ctxsrc-head { display:flex; align-items:center; justify-content:space-between; gap:10px;
     padding:8px 12px; border-bottom:1px solid var(--border); font-weight:600; }
-  .ctxsrc-head select { max-width:60%; }
+  .ctxsrc-head select { max-width:100%; }
+  .ctxsrc-scope { display:flex; align-items:center; gap:6px; min-width:0; max-width:60%;
+    font-weight:400; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
   .ctxsrc-row { display:flex; align-items:baseline; gap:10px; padding:7px 12px; border-bottom:1px solid var(--border); }
   .ctxsrc-row:last-child { border-bottom:none; }
   .ctxsrc-name { min-width:150px; font-weight:600; }
@@ -7593,7 +7595,7 @@ function brainPanelHtml() {
     + '<div class="ctxsrc-shell">'
     + '<div class="ctxsrc-head">'
     + '<span>Loaded into every task</span>'
-    + '<select id="ctxsrcProject" onchange="loadContextSources()"></select>'
+    + '<span class="ctxsrc-scope">repository<select id="ctxsrcProject" onchange="loadContextSources()"></select></span>'
     + '</div>'
     + '<div id="ctxsrcBody"><div class="muted" style="padding:12px">Loading…</div></div>'
     + '</div>'
@@ -7650,6 +7652,7 @@ async function loadContextSources() {
   const sel = document.getElementById('ctxsrcProject');
   if (!body || !sel) return;
   const project = sel.value || '';
+  try { if (project) localStorage.setItem(CTXSRC_PROJECT_KEY, project); } catch (e) { /* private mode */ }
   const inv = await api('/context-sources' + (project ? '?project=' + encodeURIComponent(project) : ''));
   if (!inv || !Array.isArray(inv.sources)) {
     body.innerHTML = '<div class="muted" style="padding:12px">Could not read context sources.</div>';
@@ -7661,7 +7664,7 @@ async function loadContextSources() {
     const missing = !s.found;
     const size = missing ? '<span class="ctxsrc-warn">not found</span>'
       : ctxsrcBytes(s.bytes) + (s.truncated ? ' <span class="ctxsrc-warn">CUT</span>' : '');
-    const cap = s.capChars ? ' · cap ' + ctxsrcBytes(s.capChars) : '';
+    const cap = (s.capChars && !missing) ? ' · cap ' + ctxsrcBytes(s.capChars) : '';
     return '<div class="ctxsrc-row">'
       + '<span class="ctxsrc-name">' + esc(s.label) + '</span>'
       + '<span class="ctxsrc-size">' + size + '</span>'
@@ -7680,14 +7683,22 @@ async function loadContextSources() {
     + esc(generated.map(g => g.label).join(', ')) + '.</span></div>';
 }
 
+// NOTE: do NOT default from p.preSelect — the discovery route sets it true for
+// EVERY project, so marking each <option selected> just leaves the browser on
+// whichever happened to be last, which is why an arbitrary repo showed instead
+// of the one being worked in. Persist the operator's own choice instead.
+var CTXSRC_PROJECT_KEY = 'hm_ctxsrc_project';
+
 function renderContextSourceProjects() {
   const sel = document.getElementById('ctxsrcProject');
   if (!sel) return;
-  const projects = state.projects || [];
-  const prev = sel.value;
+  const projects = (state.projects || []).slice().sort((a, b) =>
+    String(a.name || '').localeCompare(String(b.name || '')));
+  let want = sel.value;
+  if (!want) { try { want = localStorage.getItem(CTXSRC_PROJECT_KEY) || ''; } catch (e) { want = ''; } }
   sel.innerHTML = projects.map(p =>
-    '<option value="' + esc(p.path) + '"' + (p.preSelect ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('');
-  if (prev) sel.value = prev;
+    '<option value="' + esc(p.path) + '">' + esc(p.name) + '</option>').join('');
+  if (want && projects.some(p => p.path === want)) sel.value = want;
   loadContextSources();
 }
 
