@@ -559,11 +559,14 @@ export async function spawnAgent(
     const { routeByRole } = await import("@/lib/routing/router");
     const { resolveModelId } = await import("@/lib/routing/model-resolver");
     const policy = getConnectivityPolicy();
-    const route = routeByRole("code-critical", policy, { noLocal: true });
+    // Same fix as the "mixed" branch above: this was hardcoded "code-critical",
+    // so a cloud-only task ignored its agent role exactly like a Mixed one did.
+    const routingRole = routingRoleForAgentType(agentType);
+    const route = routeByRole(routingRole, policy, { noLocal: true });
     // noLocalOverrides: a local model configured as a role override must not
     // leak into the cloud-only posture.
     const resolved = resolveModelId(route.tier, { noLocalOverrides: true });
-    onEvent(taskId, { type: "log", content: `[cloud-only] routed code-critical → ${route.tier} → ${resolved ?? "unavailable"}` });
+    onEvent(taskId, { type: "log", content: `[cloud-only] routed ${routingRole} → ${route.tier} → ${resolved ?? "unavailable"}` });
     model = resolved ?? undefined;
     if (!model) {
       onEvent(taskId, { type: "error", content: `[cloud-only] frontier unavailable in ${policy.mode} mode — not falling back to local; retry when cloud-ok is restored` });
