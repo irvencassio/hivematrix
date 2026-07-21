@@ -874,6 +874,20 @@ const MIGRATIONS: Migration[] = [
   // stay visible on the card, not vanish with the 409.
   m("v46", `ALTER TABLE tasks ADD COLUMN worktreeBranch TEXT DEFAULT NULL;
             ALTER TABLE tasks ADD COLUMN integration TEXT DEFAULT NULL;`),
+
+  // v47: Goal data sources — make a goal's progress optionally driven by an
+  // external provider instead of only manual notes. `dataSource` binds a goal to
+  // a "provider:metric" key (e.g. "healthkit:steps"); null = manual, the default.
+  // `targetValue` is the numeric goal (the freeform `target` string stays the
+  // human label), which finally activates the inert `value`/`metricUnit` fields —
+  // progress is check-in values summed over the cadence window vs targetValue.
+  // `goal_checkins.source` tags who wrote a check-in so a provider can UPSERT its
+  // one row per (goal, date, source) instead of appending duplicates, while
+  // manual notes (source NULL) keep appending. All nullable — existing goals and
+  // check-ins degrade to "manual, qualitative" unchanged.
+  m("v47", `ALTER TABLE goals ADD COLUMN dataSource TEXT;
+            ALTER TABLE goals ADD COLUMN targetValue REAL;
+            ALTER TABLE goal_checkins ADD COLUMN source TEXT;`),
 ];
 
 // ------------------------------------------------------------------

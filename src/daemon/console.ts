@@ -3448,11 +3448,39 @@ const GOALS_CAT_META = {
 };
 function goalsCatMeta(cat) { return GOALS_CAT_META[cat] || { icon: '🎯', label: cat || 'Other' }; }
 
+// The metric part of a "provider:metric" data-source key (e.g. "steps"), or ''.
+function goalSourceMetric(ds) { return ds ? String(ds).split(':').slice(1).join(':') || String(ds) : ''; }
+
+// Progress bar for a quantitative goal (progressValue set). Shows value / target
+// with a filled bar when a targetValue exists; just the running number otherwise.
+function goalProgressHtml(g) {
+  if (g.progressValue == null) return '';
+  const unit = g.metricUnit ? ' ' + esc(g.metricUnit) : '';
+  const val = obsShort(g.progressValue);
+  const hasTarget = g.targetValue != null && g.targetValue > 0;
+  const pct = g.progressPct != null ? Math.round(g.progressPct * 100) : null;
+  const label = hasTarget
+    ? val + unit + ' / ' + obsShort(g.targetValue) + unit
+    : val + unit;
+  let h = '<div class="goal-progress" style="margin-top:7px">'
+    + '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted)">'
+    + '<span>' + label + '</span>' + (pct != null ? '<span>' + pct + '%</span>' : '') + '</div>';
+  if (pct != null) {
+    h += '<div style="height:6px;background:var(--border);border-radius:4px;overflow:hidden;margin-top:3px">'
+      + '<div style="height:100%;width:' + pct + '%;background:var(--accent)"></div></div>';
+  }
+  return h + '</div>';
+}
+
 function goalRowHtml(g) {
   const due = g.dueToday
     ? '<span class="tools-kind" style="border-color:#e0a458;color:#e0a458">due today</span>'
     : '';
   const paused = g.status === 'paused' ? '<span class="tools-kind">paused</span>' : (g.status === 'done' ? '<span class="tools-kind" style="color:var(--ok)">done ✓</span>' : '');
+  const metric = goalSourceMetric(g.dataSource);
+  const auto = metric
+    ? '<span class="tools-kind" style="border-color:var(--accent);color:var(--accent)" title="progress auto-synced from ' + attrEnc(g.dataSource) + '">📡 ' + esc(metric) + '</span>'
+    : '';
   const last = g.latestCheckin
     ? 'last: ' + esc(g.latestCheckin.date) + (g.latestCheckin.note ? ' — ' + esc(g.latestCheckin.note) : '')
     : 'no check-ins yet';
@@ -3460,14 +3488,20 @@ function goalRowHtml(g) {
   return '<div class="tools-row goal-row" style="cursor:default">'
     + '<div class="tools-row-top">'
     + '<span class="tools-name" style="font-family:inherit;font-size:13.5px">' + esc(g.title) + '</span>'
-    + '<span class="tools-kind">' + esc(g.cadence || 'weekly') + '</span>' + due + paused
+    + '<span class="tools-kind">' + esc(g.cadence || 'weekly') + '</span>' + due + paused + auto
     + '<span class="tools-caret" style="margin-left:auto"><button class="oc-mic-btn" style="padding:3px 10px;font-size:11px" onclick="goalCheckin(\'' + attrEnc(g.id) + '\',\'' + attrEnc(g.title) + '\')">＋ Log</button></span>'
     + '</div>'
     + '<div class="tools-desc">' + esc(last) + ' · ' + count + ' check-in' + (count === 1 ? '' : 's')
     + (g.description ? ' · ' + esc(g.description) : '') + '</div>'
+    + goalProgressHtml(g)
     // The explicit "do this next" step — the actionable hook. Clickable to set/edit.
     + '<div class="goal-next" onclick="goalSetNext(\'' + attrEnc(g.id) + '\',\'' + attrEnc(g.title) + '\',\'' + attrEnc(g.nextAction || '') + '\')" title="Click to set the next step">'
     + (g.nextAction ? '→ next: ' + esc(g.nextAction) : '+ set next step')
+    + '</div>'
+    // Optional automatic data source. Subtle — most goals stay manual; a
+    // health/quantitative goal binds to e.g. healthkit:steps for auto-progress.
+    + '<div class="goal-next" style="opacity:.75" onclick="goalEditMetric(\'' + attrEnc(g.id) + '\',\'' + attrEnc(g.title) + '\',\'' + attrEnc(g.dataSource || '') + '\',\'' + attrEnc(g.targetValue != null ? g.targetValue : '') + '\',\'' + attrEnc(g.metricUnit || '') + '\')" title="Bind an automatic data source (e.g. Apple Health)">'
+    + (metric ? '⚙ source: ' + esc(g.dataSource) + (g.targetValue != null ? ' · target ' + esc(String(g.targetValue)) + (g.metricUnit ? ' ' + esc(g.metricUnit) : '') : '') : '+ data source')
     + '</div>'
     + '</div>';
 }
@@ -3515,11 +3549,49 @@ function renderGoalsPanel() {
 async function goalCheckin(id, title) {
   const note = await hmPrompt('Check-in for "' + (title || 'goal') + '" — what did you do?', '');
   if (note === null) return;
+  // For a quantitative goal (targetValue set), also collect the numeric value so
+  // manual logging feeds the same progress bar an auto data source would.
+  const g = (_goalsState.goals || []).find(function (x) { return x.id === id; });
+  const payload = { note: note };
+  if (g && g.targetValue != null) {
+    const raw = await hmPrompt('Value' + (g.metricUnit ? ' (' + g.metricUnit + ')' : '') + ' — optional number:', '');
+    if (raw === null) return;
+    const num = parseFloat(raw);
+    if (raw.trim() !== '' && isFinite(num)) payload.value = num;
+  }
   try {
-    await api('/goals/' + encodeURIComponent(id) + '/checkin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: note }) });
+    await api('/goals/' + encodeURIComponent(id) + '/checkin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     hmToast('Logged ✓', 'ok');
     loadGoals();
   } catch (e) { hmToast('Could not log check-in', 'err'); }
+}
+
+// Bind (or clear) a goal's automatic data source + numeric target. General
+// purpose: the source is any "provider:metric" key; Apple Health metrics are
+// offered as hints. Blank source clears back to manual.
+async function goalEditMetric(id, title, curSource, curTarget, curUnit) {
+  const ds = await hmPrompt(
+    'Data source for "' + (title || 'goal') + '" — provider:metric, blank = manual.\n'
+    + 'Apple Health: healthkit:steps · healthkit:activeEnergy · healthkit:exerciseMinutes · healthkit:distanceWalkingRunning · healthkit:workouts',
+    curSource || '');
+  if (ds === null) return;
+  const body = { id: id, title: title, dataSource: ds.trim() };
+  if (ds.trim()) {
+    const t = await hmPrompt('Target value (number) for this goal:', curTarget || '');
+    if (t === null) return;
+    const tn = parseFloat(t);
+    if (t.trim() !== '' && isFinite(tn)) body.targetValue = tn;
+    const unit = await hmPrompt('Unit (e.g. steps, kcal, min, mi):', curUnit || '');
+    if (unit === null) return;
+    if (unit.trim()) body.metricUnit = unit.trim();
+  } else {
+    body.targetValue = null; // clearing the source clears the numeric target too
+  }
+  try {
+    await api('/goals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    hmToast(ds.trim() ? 'Data source set ✓' : 'Reset to manual ✓', 'ok');
+    loadGoals();
+  } catch (e) { hmToast('Could not set data source', 'err'); }
 }
 
 async function goalAdd() {

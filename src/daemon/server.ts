@@ -2176,10 +2176,39 @@ export function createDaemonServer() {
           target: typeof body.target === "string" ? body.target : undefined,
           metricUnit: typeof body.metricUnit === "string" ? body.metricUnit : undefined,
           nextAction: typeof body.nextAction === "string" ? body.nextAction : undefined,
+          dataSource: typeof body.dataSource === "string"
+            ? (body.dataSource.trim() || null)  // "" clears the binding back to manual
+            : (body.dataSource === null ? null : undefined),
+          targetValue: typeof body.targetValue === "number" ? body.targetValue
+            : (body.targetValue === null ? null : undefined),
           status: typeof body.status === "string" ? body.status as "active" | "paused" | "done" : undefined,
           sortOrder: typeof body.sortOrder === "number" ? body.sortOrder : undefined,
         });
         json(res, 200, { goal });
+        return;
+      }
+
+      // POST /goals/ingest — { provider, samples: [{ metric, value, date? }] }.
+      // A device (iOS/watch companion) pushes measured values; the daemon routes
+      // each to whichever active goals are bound to "provider:metric" via
+      // dataSource, upserting one check-in per (goal, date, source). Idempotent:
+      // re-posting today's numbers updates rather than appends. Behind the same
+      // shared-token guard as every other route.
+      if (req.method === "POST" && urlPath === "/goals/ingest") {
+        const { ingestGoalSamples } = await import("@/lib/goals/store");
+        const body = await parseBody(req) as Record<string, unknown>;
+        const provider = typeof body.provider === "string" ? body.provider.trim() : "";
+        if (!provider) { json(res, 400, { error: "provider is required" }); return; }
+        const rawSamples = Array.isArray(body.samples) ? body.samples : [];
+        const samples = rawSamples
+          .filter((s): s is Record<string, unknown> => !!s && typeof s === "object")
+          .map((s) => ({
+            metric: typeof s.metric === "string" ? s.metric : "",
+            value: typeof s.value === "number" ? s.value : NaN,
+            date: typeof s.date === "string" ? s.date : undefined,
+          }));
+        const result = ingestGoalSamples(provider, samples);
+        json(res, 200, { ok: true, ...result });
         return;
       }
 
