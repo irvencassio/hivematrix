@@ -1,21 +1,19 @@
-# HiveMatrix Video Factory
+# HiveMatrix Video Factory (retired)
 
-Script → narrated, captioned how-to video — in your cloned voice, fully local
-(except optional YouTube upload). Phase 4 of the voice/video persona plan.
+> ## ⚠️ STATUS: RETIRED 2026-07-05 — not part of the shipping product
+> The video factory and its HeyGen avatar path were **removed** (DECISIONS.md Q12,
+> Decision B). The daemon-side pieces this README used to describe are gone: there is
+> no `POST /video/news/draft` endpoint and no `src/lib/video/` module. TTS collapsed to
+> the single Kokoro voice — there is no cloned voice. These scripts survive only as
+> standalone, manually-run tooling; nothing in HiveMatrix calls them.
+>
+> **Agents:** do not treat this as a live capability and do not offer to "make a video".
+> If you run these by hand anyway, generate the script and **present the ENTIRE script
+> text to the operator for explicit approval before rendering** — rendering can cost
+> real money, and default to `--privacy unlisted`.
 
-> ## ⚠️ Agents: SCRIPT REVIEW IS MANDATORY AND COMES FIRST
-> If you're an agent asked to "make/create a video" (esp. the AI-news video), do NOT
-> ask about rendering, pipeline, or YouTube privacy up front, and do NOT render.
-> The render costs real money (HeyGen ~$0.05/sec) and rendering before the operator
-> has seen the script is the wrong order. Instead:
-> 1. **Prefer the built-in review flow:** `POST /video/news/draft` (AI-news) drafts the
->    script with the local model and creates a **"Review video script"** task that shows
->    the operator the FULL script and pauses. Use it instead of hand-rolling the pipeline.
-> 2. If you must run the scripts directly: generate the script, then **present the ENTIRE
->    script text to the operator and wait for explicit approval** (approve / edit / rework /
->    cancel). Only AFTER approval, render — and default to `--privacy unlisted`; don't
->    interrogate the operator about privacy/pipeline before the script is approved.
-> The deterministic core is `src/lib/video/review.ts` + `news-review.ts`.
+Script → narrated, captioned how-to video. Originally Phase 4 of the voice/video
+persona plan.
 
 ## Setup
 
@@ -29,7 +27,8 @@ Requires `ffmpeg` on PATH.
 ## The workflow
 
 ```sh
-# 1. (optional) draft a script from a topic with the local LLM, then edit it
+# 1. (optional) draft a script from a topic via whatever OpenAI-compatible endpoint
+#    HIVE_LLM_BASE_URL/HIVE_LLM_MODEL point at (you must supply one), then edit it
 .../voice-sidecar/.venv/bin/python ../voice-sidecar/script_gen.py \
     --topic "how to add a task in HiveMatrix" --lang en --seconds 30 --out script.txt
 
@@ -50,7 +49,7 @@ node publish.mjs out/howto.mp4 --meta out/meta.json --privacy unlisted
 |---|---|
 | `--title "..."` | intro/outro/watermark title |
 | `--screen <file>` | screen-recording footage as the background (how-tos) |
-| `--lang <code>` | narration + captions language (e.g. `it`, `es`, `fr`). Your cloned voice is multilingual. |
+| `--lang <code>` | narration + captions language (e.g. `it`, `es`, `fr`). |
 | `--music <file>` | background music bed (looped, low volume) |
 | `--presenter <file>` | webcam presenter clip as a rounded picture-in-picture (bottom-right, muted, looped). Use a real batch-filmed clip — sparingly. |
 

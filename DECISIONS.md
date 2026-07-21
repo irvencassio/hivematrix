@@ -2,6 +2,20 @@
 
 Date closed: 2026-06-11. All six reset questions are closed.
 
+> ## ⚠️ Reading this log: local inference no longer exists
+> This is an append-only record of decisions **as they were made**. Entries
+> dated before **2026-07-11** that describe a local Qwen / LM Studio / Rapid-MLX
+> model — a "Local" run posture, a `local-primary`/`local-secondary` tier, an
+> on-device "offline floor", or free on-device tokens — record real decisions
+> that have since been **reversed by the Claude-native cutover (0.1.176,
+> 2026-07-11)**. None of them describe the system today.
+>
+> Today: every text role runs on Claude via the `claude` CLI — Thinking → Opus,
+> Coding → Sonnet, Operational + Chat → Haiku, Writer → Sonnet. No local model
+> is installed, served, or required, and no API key is needed (the CLI carries
+> the sign-in). With no frontier reachable, model work is **queued**, not run
+> locally. Current routing: [docs/MODEL-ROUTING.md](docs/MODEL-ROUTING.md).
+
 ## Q1 — Desktop Lane naming
 
 **Decision:** Desktop Lane is the public capability name. ComputerBee is retired.
@@ -10,7 +24,19 @@ Date closed: 2026-06-11. All six reset questions are closed.
 ## Q2 — Local Qwen hardware
 
 **Decision:** M5 Max 128GB unified memory, no LAN GPU box. Primary serving stack: MLX-first (mlx-lm server or Rapid-MLX), llama.cpp/GGUF fallback. vLLM deferred unless a LAN Linux/GPU box appears.
-**Code:** `src/lib/local-model/health.ts` readiness gate extended in Phase 2. See [QWEN-LOCAL-PROFILE.md](QWEN-LOCAL-PROFILE.md).
+**Code (at the time):** a readiness gate under `src/lib/local-model/` — removed in the 2026-07-11 cutover, along with the rest of that directory. The `QWEN-LOCAL-PROFILE.md` companion doc was deleted in the same cleanup.
+
+> **SUPERSEDED 2026-07-11 (Claude-native cutover, 0.1.176):** The local inference
+> plane described here — local Qwen, LM Studio, Rapid-MLX, mlx-lm — was removed
+> entirely. Every role now runs on Claude via the `claude` CLI: Thinking → Opus,
+> Coding → Sonnet, Operational + Chat → Haiku, Writer → Sonnet. No local model is
+> installed, required, or served; `src/lib/local-model/health.ts` and the
+> readiness gate no longer exist. A "Local Model" option survives only as a
+> bring-your-own OpenAI-compatible endpoint (see `src/lib/config/providers.ts`),
+> not as a bundled or expected component. Current routing:
+> [docs/MODEL-ROUTING.md](docs/MODEL-ROUTING.md). The decision text above is kept
+> as a historical record of what was chosen and why; the profile doc it referred
+> to has been deleted rather than maintained as a description of a dead stack.
 
 ## Q3 — Frontier default
 
@@ -39,6 +65,9 @@ Date closed: 2026-06-12.
 **Decision A — Cloud-only posture.** Alongside `Local` (pure Qwen) and `Mixed`
 (router: frontier thinking + local processing), a third selectable macro mode
 **Cloud-only** runs every role on frontier and never spawns the local model.
+*(Post-2026-07-11: the `Local` posture is gone and `Mixed` now routes across
+Claude tiers — Opus/Sonnet/Haiku. Cloud-only survives, promoting the operational
+tier to frontier rather than excluding a local model.)*
 When the cloud is unreachable a cloud-only task is **not** downgraded to local —
 it is left for retry when `cloud-ok` returns (no silent local fallback). This is
 a router preference (`routeByRole(role, policy, { noLocal })`), surfaced as the
@@ -216,8 +245,9 @@ Full review: brain doc `2026-06-13-hivematrix-architecture-review.md`.
   permits. `bee-tools.ts` + `src/lib/orchestrator/generic-agent.ts`.
 - Qwen reliability: `waitForServerReady` + a dispatch-time pre-flight so a task
   dispatched during the server's cold-start/relaunch window **waits** instead of
-  failing with a cryptic connection error. `src/lib/local-model/serving.ts` +
-  `generic-agent.ts`. Routing reference: `docs/MODEL-ROUTING.md`.
+  failing with a cryptic connection error. *(Removed 2026-07-11 with the rest of
+  `src/lib/local-model/` — there is no local server to wait for.)* Routing
+  reference: `docs/MODEL-ROUTING.md`.
 - **Provers:** `src/lib/orchestrator/bee-tools.test.ts` (trust gate sends-vs-drafts,
   allowlist refusal, availability per mode, routing guide), `src/lib/local-model/serving.test.ts`
   (`waitForServerReady`). Full suite 484/484 green; scope-wall + typecheck clean.
@@ -422,8 +452,11 @@ Operator chose **local-first embedding model** + **straight to v2 (full corpus
 index)**. Built `src/lib/embeddings/`:
 - **vector.ts** — pure cosine/topK (no vector DB; brute-force in-memory).
 - **provider.ts** — config-gated OpenAI-compatible `/v1/embeddings` client
-  (local endpoint by default — same mlx/llama.cpp stack as Qwen, so it works
+  (local endpoint by default — an Ollama/mlx-class embedding server, so it works
   offline + no data egress). Self-gates: null when unconfigured → keyword fallback.
+  *Note: embeddings remain genuinely local (`qwen3-embedding:*` via Ollama) — this
+  is unrelated to the retired local **chat** model and was not affected by the
+  2026-07-11 cutover.*
 - **index-store.ts** — sidecar `~/.hivematrix/embeddings-index.json` keyed by
   brain-relative path + content hash; pure `planReindex` (new/changed embed, gone
   prune, model-change reset).
@@ -488,7 +521,8 @@ tested) + `postTweet`/`postThread` via API v2; keys via env
 **operator-triggered only** (`POST /x/post`, `/x/thread`) — no free agent tool,
 honoring "approve before posting". Posting only — never reads DMs/acts.
 
-**Skill management** — skills now carry **`compat`** (claude/codex/qwen/all) +
+**Skill management** — skills now carry **`compat`** (claude/codex/qwen/all; the
+`qwen` value was retired 2026-07-11 — `SKILL_HARNESSES` is now claude/codex) +
 **`hasInput`** ({{input}} slot). `GET /skills` returns both; `POST /skills/:name/run
 {input}` launches a skill with text input (the "dropdown + text box" backend);
 `POST /skills/import {url}` imports a shared/public skill into `<brain>/skills/`.
@@ -632,7 +666,8 @@ orchestration is grounded in `docs/RELEASE.md` and syntax-checked.
 **Ops scripts → script skills (2026-06-14).** Converted the operationally-useful
 diagnostics/proofs/health/guard scripts into trusted bash script skills in
 `<brain>/skills/` (all parse-verified, kind=script): `hive-soak` (soak scenarios),
-`hive-qwen-readiness` (local-model probe), `hive-verify-release` (update-feed proof),
+`hive-qwen-readiness` (local-model probe — retired 2026-07-11 with the local plane),
+`hive-verify-release` (update-feed proof),
 `hive-update-proof` (update-apply gate), `hive-desktopbee-proof` (helper), and
 `hive-scope-wall` (architecture guard) — each wraps `npx tsx scripts/<x>.mts` /
 `npm run <x>`. Now launchable from the skill dropdown or by an agent, and sharable.
@@ -688,8 +723,9 @@ extra" clutter without losing one-click access.
   `⚙ Ops / scripts` (script-kind skills) and `Skills` (instruction skills) optgroups,
   surfacing the deterministic ops scripts as their own group.
 - **One-click "run all proofs."** New script skill `hive-run-all-proofs` (brain/skills,
-  kind:script, trusted) runs scope-wall → release:verify → qwen-readiness →
-  update-apply-proof → desktopbee-proof in sequence, never stops on first failure, and
+  kind:script, trusted) runs scope-wall → release:verify → qwen-readiness *(step
+  dropped 2026-07-11)* → update-apply-proof → desktopbee-proof in sequence, never
+  stops on first failure, and
   exits non-zero if any fail. Appears under the Ops group; launchable from the dropdown.
 
 **Verification.** `tsc --noEmit` clean, scope-wall 0 violations, daemon bundles, 582/582
@@ -714,7 +750,8 @@ things first-class: per-role model selection in Mixed mode, and both Cloudflare 
   is available (local + frontier configured). Each defaults to "Default" (router fallback);
   Claude selectors disable with a note when the frontier provider is Codex (which overrides them).
   Wiring: `getRoleModels`/`setRoleModel` in `models/available.ts`, `operationalModel` honored by
-  `routing/model-resolver.ts` for the local-secondary tier (override → Qwen secondary → primary),
+  `routing/model-resolver.ts` for the local-secondary tier (override → Qwen secondary → primary;
+  that tier is now `operational` → Haiku, the local rungs having been removed 2026-07-11),
   exposed via GET `/models` (`roleModels`) and set via POST `/settings` (`{roleModel:{role,modelId}}`).
 - **Cloudflare: both modes visible.** The named/durable tunnel (hostname URL + Access creds +
   connector token) was hidden inside a collapsed "Advanced" `<details>`. It's now a clearly
@@ -749,7 +786,8 @@ of the context column (`#approvals`):
 **Also: removed dollar amounts from the main screen** (operator request). The Frontier
 Usage pill and breakdown no longer show `$` spend or per-model cost — they show task
 counts + token totals (and subscription % remaining as before). Placeholders reworded
-("No frontier usage yet — local Qwen work runs on-device").
+("No frontier usage yet — local Qwen work runs on-device") *— that placeholder
+wording was retired with the local plane on 2026-07-11*.
 
 **Verification.** tsc clean, scope-wall 0, 590/590 tests (added console coverage for the
 approval queue + a guard that the main screen has no dollar amounts), daemon bundles.
@@ -774,6 +812,7 @@ local-vs-frontier split). `lib/observability/store.ts` persists + rolls up;
 **3-provider solution.**
 - Claude: maps directly from the result event (+ reasoning tokens now extracted in stream-parser).
 - Qwen (local): OpenAI `usage` tokens; cost = null (free, on-device); tokens/sec computed.
+  *(Removed 2026-07-11 — with no local plane, every text runner is a billed Claude/Codex tier.)*
 - Codex: **token recovery** — `usage/codex.ts` now reads `info.total_token_usage` from
   `~/.codex/sessions/*.jsonl` (the file it already parsed for rate-limits), wired into
   `codex-agent`. Before recovery, tokens record as unavailable (null), not 0.
@@ -1230,10 +1269,15 @@ and in Flash's `escalate_to_task` tool (formerly `escalate_to_work_package`, now
 
 DeepSeek V4 Flash ("ds4" / DwarfStar) was removed in full on 2026-07-06 (see
 `docs/superpowers/plans/2026-07-06-qwen-only-local-presets.md`). The local model
-stack is now Qwen-only (Qwen3.6-35B-A3B via Rapid-MLX). Earlier entries in this
+stack was Qwen-only (Qwen3.6-35B-A3B via Rapid-MLX) as of this note. Earlier entries in this
 log that reference DeepSeek/ds4/DwarfStar as the current or primary local model
 (e.g. Q2, the BUILD entries around 2026-07-04) are historical decisions kept
 for record — they predate the removal and no longer reflect the live stack.
+
+> **SUPERSEDED 2026-07-11 (Claude-native cutover, 0.1.176):** local inference was
+> removed in full — there is no Qwen, LM Studio, or Rapid-MLX in the live stack.
+> Every role runs on Claude via the `claude` CLI. This note is retained only to
+> explain the DeepSeek→Qwen step that preceded the cutover.
 
 ## Q16 — Delegation result read-back reinstated (narrow); Q15 decomposition stays dead (2026-07-09)
 

@@ -73,13 +73,13 @@
   <div class="kicker">HiveMatrix · User Guide</div>
   <h1>HiveMatrix — Capabilities &amp; Setup</h1>
   <div class="meta">What it can do, how the pieces fit, and how to set it up — including a full tour of the Settings screen.<br>
-  Updated 2026-06-25 · reflects the Bee→Lane naming (agents call lane-native tools like <code>desktop_action</code>) and the live configuration on this Mac.</div>
+  Updated 2026-07-21 · reflects the Bee→Lane naming (agents call lane-native tools like <code>desktop_action</code>), the Claude-native model stack, and the live configuration on this Mac.</div>
 </header>
 
 <div class="lead">
   <strong>HiveMatrix is a personal AI operations system.</strong> A headless daemon on your Mac runs <em>tasks</em> and
-  long-running <em>directives</em> across a fleet of AI models — frontier (Claude, Codex/ChatGPT), a local model (Qwen),
-  or a router that mixes them — and gives those agents real capabilities through <strong>capability lanes</strong>: web search,
+  long-running <em>directives</em> across a fleet of AI models — Claude (Opus / Sonnet / Haiku), Codex/ChatGPT,
+  or a router that mixes them by role — and gives those agents real capabilities through <strong>capability lanes</strong>: web search,
   browser automation, and desktop control. You drive it from the desktop console or the iPhone app, locally or over a
   Cloudflare tunnel.
 </div>
@@ -113,8 +113,8 @@
   </div>
   <div class="card">
     <h3>Model plane</h3>
-    <p>Three harnesses behind one contract: <strong>Claude Code</strong>, <strong>Codex</strong>, and
-    <strong>Qwen</strong> (local). A role-based router picks which one runs a given piece of work.</p>
+    <p>Two harnesses behind one contract: <strong>Claude Code</strong> and <strong>Codex</strong>. A role-based
+    router picks which model tier runs a given piece of work.</p>
   </div>
   <div class="card">
     <h3>Capability lanes</h3>
@@ -130,32 +130,31 @@ split:</p>
 <table>
   <thead><tr><th>Option</th><th>What runs it</th><th>Use it for</th></tr></thead>
   <tbody>
-    <tr><td><strong>Claude</strong> — Opus 4.8 / Sonnet 4.6</td><td>Claude Code (subscription)</td><td>Highest-quality reasoning, code, planning</td></tr>
+    <tr><td><strong>Claude</strong> — Opus / Sonnet / Haiku</td><td>Claude Code (subscription)</td><td>Highest-quality reasoning, code, planning</td></tr>
     <tr><td><strong>Codex / ChatGPT</strong> — GPT-5.5</td><td>Codex CLI (subscription)</td><td>OpenAI-flavored coding; "fast mode" = lower effort</td></tr>
     <tr><td><strong>Codex Computer Use</strong></td><td>Codex driving the screen</td><td>Mouse/keyboard/screenshot automation (also the Browser Lane backing path)</td></tr>
     <tr><td><strong>Nano Banana</strong></td><td>Cloud image model (mflux local fallback)</td><td>Image generation</td></tr>
-    <tr><td><strong>Local Model</strong></td><td>Qwen 3.6 27B via LM Studio (on this Mac)</td><td>Runs 100% locally; private, no cloud</td></tr>
-    <tr><td><strong>Mixed</strong></td><td>Router: frontier thinking + local bulk work</td><td>Best cost/quality blend when both are available</td></tr>
-    <tr><td><strong>Cloud-only</strong> <span class="tag on">new</span></td><td>Every role on frontier; local never used</td><td>"No local model" posture — and it won't silently fall back to local</td></tr>
+    <tr><td><strong>Local Model</strong> <span class="tag off">optional · bring your own</span></td><td>Any OpenAI-compatible server you run yourself (MLX, llama.cpp, Ollama, LM Studio)</td><td>Nothing is bundled or installed for you; leave it unset unless you already run one</td></tr>
+    <tr><td><strong>Mixed</strong> <span class="tag on">recommended</span></td><td>Router by role: thinking → Opus, coding → Sonnet, bulk/ambient → Haiku</td><td>Best cost/quality blend — every role still lands on Claude, just the right tier</td></tr>
+    <tr><td><strong>Cloud-only</strong></td><td>Every role on frontier; a local endpoint is never used</td><td>"No local model" posture — and it won't silently fall back to local</td></tr>
   </tbody>
 </table>
 <div class="callout info">
-  <strong>How "Mixed" routes.</strong> Thinking and final/critical code go to frontier; bulk execution and cheap web
-  summarizing go to the local Qwen model. <strong>Cloud-only</strong> overrides that and keeps <em>everything</em> on
-  frontier — if the cloud is unreachable, those tasks wait rather than dropping to local. Set any of these as the default
-  in Settings, or pick per-task in the New Task form.
+  <strong>How "Mixed" routes.</strong> Thinking goes to Opus, final/critical code to Sonnet, and bulk execution and cheap
+  web summarizing to Haiku — every role on Claude, just the tier suited to the work. <strong>Cloud-only</strong> keeps
+  <em>everything</em> on frontier and ignores any local endpoint you've configured — if the cloud is unreachable, those
+  tasks wait rather than dropping to local. Set any of these as the default in Settings, or pick per-task in the New Task form.
 </div>
 
 <h2 id="lanes"><span class="n">3</span>Capability lanes</h2>
-<p>Capability lanes are how an agent does more than think. As of now they're wired into the <strong>local (Qwen) agent's tool
-loop</strong> too — so the local model can search the web, drive a browser, or control the desktop, each gated by the
-current connectivity mode.</p>
+<p>Capability lanes are how an agent does more than think. They're wired into every agent's tool loop — so an agent can
+search the web, drive a browser, or control the desktop, each gated by the current connectivity mode.</p>
 <table>
   <thead><tr><th>Lane</th><th>Does</th><th>Agent tool</th><th>Status here</th></tr></thead>
   <tbody>
     <tr>
       <td><strong>Browser Lane</strong></td>
-      <td>One browser/web lane: read-only fresh web retrieval with citations (current facts, news, prices, docs) <em>and</em> authenticated / stateful browser workflows (login, multi-step, forms, screenshots) — the authenticated path runs as a Codex Computer Use task. With no Codex auth, an opt-in <strong>Desktop Lane fallback</strong> (<code>browserLane.desktopFallback</code>) lets the local model drive a desktop browser instead. The COO routes to Browser Lane; the lane picks the backend.</td>
+      <td>One browser/web lane: read-only fresh web retrieval with citations (current facts, news, prices, docs) <em>and</em> authenticated / stateful browser workflows (login, multi-step, forms, screenshots) — the authenticated path runs as a Codex Computer Use task. With no Codex auth, an opt-in <strong>Desktop Lane fallback</strong> (<code>browserLane.desktopFallback</code>) lets Claude drive a real desktop browser instead. The COO routes to Browser Lane; the lane picks the backend.</td>
       <td><code>hivematrix_browser</code></td>
       <td><span class="tag on">embedded · running</span></td>
     </tr>
@@ -184,8 +183,8 @@ current connectivity mode.</p>
   disabled in <em>local-only</em> and <em>offline</em> modes; Desktop Lane works in every mode. An agent is only shown the lanes it can
   actually use right now. <strong>Authenticated browser work without a Codex subscription:</strong> by default the lane refuses (it needs the
   Codex Computer Use backing). Set <code>browserLane.desktopFallback: true</code> in <code>~/.hivematrix/config.json</code> to
-  let it degrade to a local Desktop Lane-driven browser instead — lower reliability, but it keeps authenticated browser work
-  running with no subscription.
+  let it degrade to a Claude-driven Desktop Lane browser instead — lower reliability, but it keeps authenticated browser work
+  running with no Codex subscription.
 </div>
 <div class="callout info">
   <strong>Message Lane (SMS/iMessage).</strong> Two-way. Turn on the iMessage channel (Settings → Message Lane) and grant
@@ -198,8 +197,8 @@ current connectivity mode.</p>
 <p>The daemon always operates in one of three modes (auto-detected, or set manually in Settings → Connectivity):</p>
 <div class="grid3">
   <div class="card"><h3>cloud-ok</h3><p class="meta">Default. Frontier APIs reachable; every capability available.</p></div>
-  <div class="card"><h3>local-only</h3><p class="meta">LAN/loopback only. Frontier + Browser Lane off; Qwen + Desktop Lane on.</p></div>
-  <div class="card"><h3>offline</h3><p class="meta">No network. Only the local model + Desktop Lane on local apps.</p></div>
+  <div class="card"><h3>local-only</h3><p class="meta">LAN/loopback only. Frontier + Browser Lane off; Desktop Lane on.</p></div>
+  <div class="card"><h3>offline</h3><p class="meta">No network. Desktop Lane on local apps only.</p></div>
 </div>
 <p class="meta">Auto-degrades when frontier usage windows are exhausted (→ local-only) or the network is unreachable (→ offline),
 and restores automatically. A manual override always wins.</p>
@@ -298,7 +297,7 @@ tags: [study, reference]
 trusted: true
 ---
 &lt;body: when to apply, and how&gt;</code></pre>
-    <p class="meta"><strong>Samples:</strong> <code>bible-study</code>, <code>calendar</code>, <code>weekly-ai-roundup</code> — each is a body of instructions the agent applies when the description matches the task. Harness-agnostic (<code>compat: all</code>) means Claude, Codex, and local Qwen can all use them; <code>useCount</code> ticks up when the agent calls <code>skill_used</code>, so unused skills surface for pruning.</p>
+    <p class="meta"><strong>Samples:</strong> <code>bible-study</code>, <code>calendar</code>, <code>weekly-ai-roundup</code> — each is a body of instructions the agent applies when the description matches the task. Harness-agnostic (<code>compat: all</code>) means both Claude and Codex can use them; <code>useCount</code> ticks up when the agent calls <code>skill_used</code>, so unused skills surface for pruning.</p>
     <p class="meta"><strong>Reach for it when:</strong> multiple models/harnesses should apply the same judgment, or the recipe should surface itself when relevant (not just when invoked). Fastest path to author one: run a directive, then ask HiveMatrix to distill the retrospective into a skill.</p>
   </div>
   <div class="card">
@@ -315,7 +314,7 @@ trusted: true
 set -uo pipefail
 cd "${HIVEMATRIX_REPO:-$HOME/hivematrix}"
 &lt;body: the exact commands, in the exact order&gt;</code></pre>
-    <p class="meta"><strong>Samples:</strong> <code>hive-run-all-proofs</code>, <code>hive-qwen-readiness</code>, <code>hive-scope-wall</code>, <code>hive-verify-release</code>, <code>release-hivematrix</code> — every one is a bash script you can read line-for-line before running. Nothing gets improvised at run time.</p>
+    <p class="meta"><strong>Samples:</strong> <code>hive-run-all-proofs</code>, <code>hive-update-proof</code>, <code>hive-scope-wall</code>, <code>hive-verify-release</code>, <code>release-hivematrix</code> — every one is a bash script you can read line-for-line before running. Nothing gets improvised at run time.</p>
     <p class="meta"><strong>Trust matters more here.</strong> An instruction skill just tells an agent what to consider; an ops script <em>runs on your machine</em>. Imported ops land <code>trusted: false</code> and are refused by the runner until you approve them in the Run skill panel — read the body first, then flip the switch.</p>
     <p class="meta"><strong>Reach for it when:</strong> you'd be annoyed if the model reinterpreted the steps — you want the exact commands, in the exact order, with a diffable log and a clean exit code you can gate a release on.</p>
   </div>
@@ -338,7 +337,7 @@ cd "${HIVEMATRIX_REPO:-$HOME/hivematrix}"
       <td>A single <code>.md</code> can't bundle files; the folder lets the agent call <code>./pull.sh</code> or read <code>references/api.md</code> by relative path.</td>
     </tr>
     <tr>
-      <td>Every model/harness (Claude, Codex, Qwen) to apply the same judgment</td>
+      <td>Every model/harness (Claude, Codex) to apply the same judgment</td>
       <td><strong>skill</strong></td>
       <td>cmd / folder</td>
       <td><code>cmd</code>/<code>folder</code> live in <code>~/.claude/</code> and are Claude-profile only; a brain <code>skill</code> is harness-agnostic (<code>compat: all</code>).</td>
@@ -393,7 +392,7 @@ cd "${HIVEMATRIX_REPO:-$HOME/hivematrix}"
 <h2 id="setup"><span class="n">9</span>First-time setup</h2>
 <p>Onboarding (right-hand <strong>Setup</strong> panel) tracks these. In order:</p>
 <div class="step"><b>1 · Configuration file</b> <code>~/.hivematrix/config.json</code> holds model + provider settings. Created on first run.</div>
-<div class="step"><b>2 · Local model (Qwen)</b> Install <strong>LM Studio</strong>, load <code>qwen/qwen3.6-27b</code> (MLX 8-bit) and start its server on <code>:1234</code>. HiveMatrix probes readiness (tool-calling, decode rate) before using it. Pin the model with no TTL and set LM Studio to launch at login for always-on.</div>
+<div class="step"><b>2 · Model access — the <code>claude</code> CLI</b> Sign in to the <code>claude</code> CLI; the sign-in it carries is what every role uses, so there is no API key to set. Nothing local is installed or required. (A bring-your-own OpenAI-compatible endpoint can be configured by hand in <code>~/.hivematrix/config.json</code>, but it is off by default and not needed.)</div>
 <div class="step"><b>3 · Background daemon (launchd)</b> Installs <code>~/Library/LaunchAgents/com.hivematrix.daemon.plist</code> so the daemon runs 24×7 and restarts on exit.</div>
 <div class="step"><b>4 · Brain memory plane</b> Canonical memory lives at <code>~/_GD/brain</code>. Agents read/curate it for durable context.</div>
 <div class="step"><b>5 · Frontier model access</b> Sign in to the <code>claude</code> and/or <code>codex</code> CLIs (subscriptions). Detected automatically and shown under Settings → Backends.</div>
@@ -405,8 +404,7 @@ cd "${HIVEMATRIX_REPO:-$HOME/hivematrix}"
 <h3>Models tab</h3>
 <ul>
   <li><strong>Default model</strong> — the model new tasks use unless overridden (set it to <em>Cloud-only</em> for a no-local posture, or <em>Mixed</em> for the blend). <span class="ui">Save default</span>.</li>
-  <li><strong>Backends</strong> — live detection of Local (LM Studio/Qwen), Claude CLI, and Codex CLI, with a ✓ when configured.</li>
-  <li><strong>Local server endpoint</strong> — the OpenAI-compatible URL for the local model (default <code>http://localhost:1234/v1</code>).</li>
+  <li><strong>Backends</strong> — live detection of the Claude CLI and the Codex CLI, with a ✓ when configured, plus a <span class="ui">Re-authenticate</span> action for a stale sign-in.</li>
   <li><strong>Appearance</strong> — theme (System / Light / Dark) and an optional wallpaper (path or upload).</li>
   <li><strong>Remote Access</strong> — tunnel status, Start/Stop, the public URL, pairing QR, the access token, and the Advanced named-tunnel form. (See §8.)</li>
 </ul>
@@ -432,7 +430,8 @@ private (local-only) or to test offline behavior.</p>
 <div class="kvs">
   <div><span class="k">Daemon</span><span><code>127.0.0.1:3747</code> (launchd: <code>com.hivematrix.daemon</code>)</span></div>
   <div><span class="k">Data</span><span><code>~/.hivematrix/hivematrix.db</code> (SQLite, WAL) · config <code>~/.hivematrix/config.json</code></span></div>
-  <div><span class="k">Local model</span><span>LM Studio <code>:1234</code> · <code>qwen/qwen3.6-27b</code></span></div>
+  <div><span class="k">Model roles</span><span>thinking <code>Opus</code> · coding <code>Sonnet</code> · operational/chat <code>Haiku</code> (all via the <code>claude</code> CLI)</span></div>
+  <div><span class="k">Local model</span><span>optional — bring your own OpenAI-compatible endpoint; none installed by default</span></div>
   <div><span class="k">Desktop Lane helper</span><span><code>127.0.0.1:3748</code></span></div>
   <div><span class="k">Capability lane status</span><span><code>GET /lanes</code> · toggle <code>POST /lanes/:kind/autostart</code> <span style="color:var(--muted)">(compatibility aliases: <code>GET /bees</code>, <code>POST /bees/:kind/autostart</code>)</span></span></div>
   <div><span class="k">Models</span><span><code>GET /models</code> (backends + available + default)</span></div>
@@ -442,7 +441,7 @@ private (local-only) or to test offline behavior.</p>
 </div>
 
 <div class="footer">
-  HiveMatrix user guide · refreshed 2026-06-25 for lane-native naming. Models, capability lanes, and the Cloud-only run mode are
+  HiveMatrix user guide · refreshed 2026-07-21 for the Claude-native model stack. Models, capability lanes, and the Cloud-only run mode are
   live; Memory Lane is a toggleable launch-agent lane; Manager Lane is planned. Message Lane is two-way (SMS/iMessage in and out, gated on the channel + Full Disk Access).
 </div>
 

@@ -160,7 +160,9 @@ async function fetchStories({ source = "auto" } = {}) {
   return fetchHackerNewsStories();
 }
 
-// Write the script with the daemon's LOCAL model (Rapid-MLX/Qwen), OpenAI-compatible.
+// Write the script via an OpenAI-compatible endpoint supplied by the caller
+// through HIVE_LLM_BASE_URL / HIVE_LLM_MODEL. HiveMatrix no longer runs a local
+// inference server, so this is unset unless you stand one up yourself.
 // Reads HIVE_LLM_* (fed in by the daemon when it spawns this script — see
 // news-review.ts). Free + keyless; far better than the canned template.
 function resolveLocalLlm() {
@@ -243,7 +245,7 @@ export async function generateNewsScript(options = {}) {
 
   // Writer selection (auto): real LLM first, canned template only as last resort.
   //   anthropic  → raw Anthropic API key (best, costs a little)
-  //   local      → the daemon's local model via HIVE_LLM_* (free, keyless)
+  //   local      → a self-hosted OpenAI-compatible endpoint via HIVE_LLM_* (none by default)
   //   template   → canned filler — fallback ONLY when no model is reachable
   let script;
   const writer = options.writer || "auto";

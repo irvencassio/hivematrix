@@ -56,14 +56,14 @@
 <header>
   <div class="kicker">HiveMatrix brain doc</div>
   <h1>Skills &amp; Commands Sharing</h1>
-  <p class="sub">A practical map for sharing, importing, and browsing reusable skills and slash commands across Claude, ChatGPT, Qwen(local), and DeepSeek(local).</p>
+  <p class="sub">A practical map for sharing, importing, and browsing reusable skills and slash commands across Claude and ChatGPT.</p>
 </header>
 
 <main>
   <section>
     <h2>Non-technical explanation</h2>
     <p>HiveMatrix has two kinds of reusable know-how. A <strong>skill</strong> is a portable recipe agents can read and follow. A <strong>command</strong> is a local slash command or folder skill that a profile runtime already knows how to run.</p>
-    <p>The catalog browser puts both in one searchable place. The important addition is a clear compatibility label, so an operator can tell whether an item is universal or tied to Claude, ChatGPT, Qwen(local), or DeepSeek(local).</p>
+    <p>The catalog browser puts both in one searchable place. The important addition is a clear compatibility label, so an operator can tell whether an item is universal or tied to Claude or ChatGPT.</p>
   </section>
 
   <section>
@@ -72,8 +72,6 @@
       <span class="chip">All</span>
       <span class="chip">Claude</span>
       <span class="chip">ChatGPT</span>
-      <span class="chip">Qwen(local)</span>
-      <span class="chip">DeepSeek(local)</span>
     </div>
     <table>
       <thead><tr><th>Browser label</th><th>Internal value</th><th>Meaning</th></tr></thead>
@@ -81,11 +79,9 @@
         <tr><td>All</td><td><code>all</code></td><td>Harness-agnostic instructions or commands with no model restriction.</td></tr>
         <tr><td>Claude</td><td><code>claude</code></td><td>Best run by Claude Code or Claude-profile assets.</td></tr>
         <tr><td>ChatGPT</td><td><code>codex</code></td><td>ChatGPT/Codex-compatible assets. The internal id remains <code>codex</code> for continuity.</td></tr>
-        <tr><td>Qwen(local)</td><td><code>qwen</code></td><td>Local Qwen-compatible instructions or commands.</td></tr>
-        <tr><td>DeepSeek(local)</td><td><code>deepseek</code></td><td>Local DeepSeek or Dwarf Star compatible instructions or commands.</td></tr>
       </tbody>
     </table>
-    <p class="note">Local command compatibility is inferred from frontmatter such as <code>model: opus</code>, <code>model: gpt-5</code>, <code>model: qwen3</code>, or <code>model: deepseek-v4</code>. Unknown or missing model values fall back to <code>All</code> so old commands remain visible.</p>
+    <p class="note">Command compatibility is inferred from frontmatter such as <code>model: opus</code> or <code>model: gpt-5</code>. Unknown or missing model values fall back to <code>All</code> so old commands remain visible.</p>
   </section>
 
   <section>
