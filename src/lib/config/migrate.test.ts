@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 
 import { migrateConfigObject, migrateConfig } from "./migrate";
 
-test("migrateConfigObject drops qwen/localEngine/localModel (and their nested content)", () => {
+test("migrateConfigObject drops qwen/localEngine and a retired-stack localModel (and their nested content)", () => {
   const cfg = {
     qwen: { location: "local", primary: { modelId: "Qwen3-Coder-Next-80B-A3B", endpoint: "http://localhost:8080" }, sampling: { temperature: 0.6 } },
     localEngine: { engine: "rapid-mlx", tiers: [{ key: "fast", alias: "qwen3.6-35b-4bit" }] },
@@ -16,6 +16,9 @@ test("migrateConfigObject drops qwen/localEngine/localModel (and their nested co
   const { config, result } = migrateConfigObject(cfg);
   assert.equal(result.changed, true);
   assert.deepEqual(result.droppedKeys.sort(), ["localEngine", "localModel", "qwen"]);
+  // ^ this fixture's localModel names qwen3.6-27b, i.e. the retired bundled
+  //   stack, so dropping it is correct. A bring-your-own endpoint is not —
+  //   see the next test.
   assert.equal("qwen" in config, false);
   assert.equal("localEngine" in config, false);
   assert.equal("localModel" in config, false);
@@ -98,4 +101,31 @@ test("migrateConfig: missing config file is a silent no-op", (t) => {
   });
   const result = migrateConfig();
   assert.equal(result.changed, false);
+});
+
+test("migrateConfigObject PRESERVES a bring-your-own localModel endpoint", () => {
+  // Regression: localModel sat in DEAD_KEYS and was deleted wholesale. Because
+  // migrateConfig() runs on every daemon boot, a configured local endpoint was
+  // silently erased on the next restart — providers.ts reads config.localModel
+  // for exactly this feature, and the user guide documents it. Only a value
+  // still naming the retired bundled stack should be purged.
+  const byo = { provider: "ollama", endpoint: "http://localhost:11434/v1", modelName: "llama3.3:70b" };
+  const { config, result } = migrateConfigObject({ localModel: { ...byo } });
+  assert.deepEqual(config.localModel, byo, "the operator's own endpoint must survive migration");
+  assert.equal(result.droppedKeys.includes("localModel"), false);
+  assert.equal(result.changed, false, "a config with only a valid BYO endpoint needs no rewrite");
+
+  // Idempotent across repeated boots — this is the property that actually broke.
+  const again = migrateConfigObject(config as Record<string, unknown>);
+  assert.deepEqual(again.config.localModel, byo);
+});
+
+test("migrateConfigObject still drops a localModel left pointing at the retired stack", () => {
+  for (const modelName of ["qwen3.6-27b", "qwen/qwen3.6-27b", "deepseek-coder", "some-model-35b-8bit"]) {
+    const { config, result } = migrateConfigObject({
+      localModel: { provider: "lmstudio", endpoint: "http://localhost:1234", modelName },
+    });
+    assert.equal("localModel" in config, false, `${modelName} names the retired stack and must be dropped`);
+    assert.equal(result.droppedKeys.includes("localModel"), true);
+  }
 });

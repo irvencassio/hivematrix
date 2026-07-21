@@ -19,7 +19,37 @@ import { isFrontierOverride } from "@/lib/routing/model-resolver";
 /** Whole subtrees dropped wholesale — "and nested" in the spec means their
  * entire nested content (e.g. qwen.sampling, qwen.primary) goes with the
  * parent key, not that there are additional sibling keys to hunt for. */
-const DEAD_KEYS = ["qwen", "localEngine", "localModel"] as const;
+const DEAD_KEYS = ["qwen", "localEngine"] as const;
+
+/** Model ids from the retired bundled local stack (Qwen / Rapid-MLX / DeepSeek,
+ *  plus the "<n>b-<n>bit" quantization shape those ids used). Mirrors the
+ *  obsModelLabel predicate in daemon/console.ts. */
+function isRetiredLocalModelId(id: string): boolean {
+  const m = id.trim().toLowerCase();
+  if (!m) return false;
+  return m.startsWith("qwen") || m.includes("rapid-mlx") || m.includes("deepseek") || /\d+b-\d+bit/.test(m);
+}
+
+/**
+ * `localModel` is NOT a dead key. The bundled local inference plane was removed
+ * in the 0.1.176 cutover, but a bring-your-own OpenAI-compatible endpoint
+ * survived deliberately — providers.ts reads `config.localModel` for exactly
+ * that, and it is a documented option in the user guide.
+ *
+ * It used to sit in DEAD_KEYS, so the migration deleted it wholesale. Since
+ * migrateConfig() runs on EVERY daemon boot (daemon/index.ts), configuring a
+ * local endpoint appeared to work and was then silently erased on the next
+ * restart — the feature could never survive a restart.
+ *
+ * Drop it only when it still names a model from the retired stack, which is the
+ * Qwen-era leftover the migration was actually written to purge. Anything else
+ * is the operator's own endpoint and is preserved.
+ */
+function retiredLocalModelBlock(v: unknown): boolean {
+  if (!v || typeof v !== "object") return false;
+  const name = (v as { modelName?: unknown }).modelName;
+  return typeof name === "string" && isRetiredLocalModelId(name);
+}
 
 /** Role-model override keys — reset to "" (→ Claude default) when the stored
  * value doesn't match isFrontierOverride (i.e. it names a Qwen/local id that
@@ -47,6 +77,12 @@ export function migrateConfigObject(cfg: Record<string, unknown>): { config: Rec
       delete next[key];
       droppedKeys.push(key);
     }
+  }
+
+  // Conditional, not wholesale — see retiredLocalModelBlock above.
+  if ("localModel" in next && retiredLocalModelBlock(next.localModel)) {
+    delete next.localModel;
+    droppedKeys.push("localModel");
   }
 
   const resetRoleModels: string[] = [];
