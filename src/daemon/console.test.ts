@@ -4260,3 +4260,26 @@ test("the context-sources picker says it means a REPOSITORY, not a brain-doc pro
   const js = extractScript(CONSOLE_HTML);
   assert.match(js, /ctxsrc-scope">repository/, "the scope of the picker is stated");
 });
+
+test("the ctx meter renders its fill percentage on screen, not only in a title", () => {
+  // Every other header meter has a visible readout (#usageWinReadout shows
+  // "91% left · resets in 1h 3m"). ctx was the lone exception: how full the
+  // thread is — and that auto-compaction starts at 75% — lived only in a native
+  // title tooltip, which needs ~1-2s of motionless hover, is suppressed while
+  // the window is unfocused, and often will not re-fire once dismissed.
+  const js = extractScript(CONSOLE_HTML);
+  assert.match(CONSOLE_HTML, /id="ctxMeterPct"/, "the ctx meter needs a text readout element");
+
+  const fn = js.match(/function renderHeaderCtxBar\(\)[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(fn, "renderHeaderCtxBar should exist");
+  assert.match(fn, /getElementById\("ctxMeterPct"\)/, "the readout is looked up");
+  assert.match(fn, /pctEl\.textContent = pct \+ "%"/, "the measured fill is written to screen");
+  assert.match(fn, /pctEl\.textContent = "--"/, "an unmeasured thread shows a placeholder, not a stale number");
+
+  // The title stays as supplementary detail — it must not be the only source.
+  assert.match(fn, /el\.title = "Conversation context: "/, "the tooltip keeps the fuller explanation");
+  assert.ok(
+    fn.indexOf('pctEl.textContent = pct + "%"') !== -1 && fn.indexOf("el.title") !== -1,
+    "both the on-screen readout and the tooltip are set",
+  );
+});

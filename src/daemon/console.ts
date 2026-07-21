@@ -349,6 +349,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .ctx-meter { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted);
     border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); padding: 3px 9px; cursor: pointer; }
   .ctx-meter .usage-bar { width: 44px; height: 8px; border-radius: 4px; flex: none; }
+  .ctx-pct { font-variant-numeric: tabular-nums; min-width: 30px; }
   .ctx-meter .usage-bar-fill { border-radius: 4px; }
   .ctx-meter-fill.ctx-ok { background: var(--muted); }
   .ctx-meter-fill.ctx-notice { background: #6b7a8f; }
@@ -1125,7 +1126,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <button data-w="5h" class="on" id="usageBtn5h" onclick="setHeaderUsageWindow('5h')">5h<span class="usage-bar-wrap" onclick="event.stopPropagation();openObsModal()"><span class="usage-bar" id="usageBar5h"><span class="usage-bar-fill" id="usageBar5hFill"></span></span></span></button>
       <button data-w="7d" id="usageBtn7d" onclick="setHeaderUsageWindow('7d')">7d<span class="usage-bar-wrap" onclick="event.stopPropagation();openObsModal()"><span class="usage-bar-days" id="usageBar7d"><span class="usage-bar-day" data-day="1"></span><span class="usage-bar-day" data-day="2"></span><span class="usage-bar-day" data-day="3"></span><span class="usage-bar-day" data-day="4"></span><span class="usage-bar-day" data-day="5"></span><span class="usage-bar-day" data-day="6"></span><span class="usage-bar-day" data-day="7"></span></span></span></button>
     </span>
-    <span class="ctx-meter" id="ctxMeter" onclick="showFlashPanel()" title="Conversation context — how full the chat thread is">ctx<span class="usage-bar-wrap"><span class="usage-bar"><span class="usage-bar-fill ctx-meter-fill ctx-ok" id="ctxMeterFill"></span></span></span></span>
+    <span class="ctx-meter" id="ctxMeter" onclick="showFlashPanel()" title="Conversation context — how full the chat thread is">ctx<span class="usage-bar-wrap"><span class="usage-bar"><span class="usage-bar-fill ctx-meter-fill ctx-ok" id="ctxMeterFill"></span></span></span><span class="ctx-pct" id="ctxMeterPct"></span></span>
     <span class="muted" id="usageWinReadout" style="font-size:11px"></span>
   </div>
   <div class="hzone mode" style="margin-left:auto">
@@ -6168,11 +6169,13 @@ function renderUsage7dBar() {
 function renderHeaderCtxBar() {
   const fill = document.getElementById("ctxMeterFill");
   const el = document.getElementById("ctxMeter");
+  const pctEl = document.getElementById("ctxMeterPct");
   if (!fill || !el) return;
   const ctx = _flashState.context;
   if (!ctx || ctx.fill == null) {
     fill.style.width = "0%";
     fill.className = "usage-bar-fill ctx-meter-fill ctx-ok";
+    if (pctEl) pctEl.textContent = "--";
     el.title = "Conversation context: not measured yet (no turn completed in this thread).";
     return;
   }
@@ -6180,6 +6183,13 @@ function renderHeaderCtxBar() {
   const level = ctx.level || "ok";
   fill.style.width = pct + "%";
   fill.className = "usage-bar-fill ctx-meter-fill ctx-" + level;
+  // The number goes ON SCREEN, not only in a title. Every other header meter
+  // renders its readout as text (#usageWinReadout); ctx was the lone exception,
+  // so the only way to learn how full the thread was — and that auto-compaction
+  // starts at 75% — was a native tooltip. Those need ~1-2s of motionless hover,
+  // are suppressed while the window is unfocused, and frequently will not
+  // re-fire once dismissed: reliably invisible for something this load-bearing.
+  if (pctEl) pctEl.textContent = pct + "%";
   el.title = "Conversation context: " + pct + "% full ("
     + (ctx.tokens || 0).toLocaleString() + " of " + (ctx.limit || 0).toLocaleString() + " tokens). "
     + (level === "critical"
