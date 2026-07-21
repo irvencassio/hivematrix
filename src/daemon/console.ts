@@ -6439,8 +6439,17 @@ function stopMatrixRain() {
 }
 
 async function loadModels() {
-  models = await api("/models");
-  if (!models) return;
+  // Validate BEFORE assigning: an error envelope ({error:"..."}) or a payload
+  // missing "available" used to be written straight to the global models,
+  // and the very next line threw on models.available. Callers swallowed that,
+  // leaving the corrupted object in place — Settings then rendered it as
+  // "(no models configured)" / "Model status unavailable" with every role
+  // dropdown emptied, which reads as settled fact rather than a failed load.
+  const payload = await api("/models");
+  if (!payload || payload.error || !Array.isArray(payload.available)) {
+    throw new Error("models: " + ((payload && payload.error) || "malformed payload"));
+  }
+  models = payload;
   applyTheme(models.theme || "system", !!models.hasWallpaper);
   for (const m of models.available) { if (m.disabled) continue; modelById[m.id] = { modelId: m.modelId, fast: !!m.fast }; }
   // Populate the New Task dropdown, grouped intent-first.
@@ -6940,7 +6949,10 @@ async function openSettings() {
   document.getElementById("settingsOverlay").classList.add("open");
   switchSettingsTab("about"); // open on About by default
   if (!models) {
-    try { await loadModels(); } catch (e) { /* Settings can still show setup/features. */ }
+    // Settings can still show setup/features without models — but say so, or the
+    // Models tab silently renders "(no models configured)" as if that were the
+    // truth rather than a failed fetch.
+    try { await loadModels(); } catch (e) { hmToast("Could not load models: " + (e && e.message || e), "err"); }
   }
   renderSettingsModelControls();
   renderProviderStatus();
@@ -7000,7 +7012,9 @@ async function runProviderSetup(id) {
     await hmAlert("Terminal opened for " + (PROVIDER_LABELS[id] || id) + " setup. Complete it there, then click refresh.");
   }
   await renderProviderStatus();
-  models = await loadModels().catch(() => models);
+  // loadModels() owns the models global and only assigns a validated payload;
+  // never reassign from its return value or a failure blanks the good copy.
+  try { await loadModels(); } catch (e) { hmToast("Could not load models: " + (e && e.message || e), "err"); }
   renderSettingsModelControls();
 }
 

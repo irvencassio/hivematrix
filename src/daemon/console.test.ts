@@ -321,12 +321,38 @@ test("update indicator surfaces stale daemon restart state", () => {
 test("loading models refreshes About version metadata", () => {
   const js = extractScript(CONSOLE_HTML);
   const loadModels = js.match(/async function loadModels\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
-  assert.match(loadModels, /models = await api\("\/models"\)/, "loadModels fetches the version-bearing models payload");
+  assert.match(loadModels, /await api\("\/models"\)/, "loadModels fetches the version-bearing models payload");
   assert.match(loadModels, /renderAbout\(\)/, "About metadata re-renders after models load");
   assert.ok(
-    loadModels.indexOf("renderAbout()") > loadModels.indexOf('models = await api("/models")'),
+    loadModels.indexOf("renderAbout()") > loadModels.indexOf("models = payload"),
     "About should refresh after the models payload is assigned",
   );
+});
+
+test("loadModels validates the payload before assigning the models global", () => {
+  // Regression guard: assigning the response to `models` before checking it
+  // meant an error envelope became the global, callers swallowed the throw on
+  // models.available, and Settings rendered "(no models configured)" /
+  // "Model status unavailable" with every role dropdown emptied — a failed
+  // fetch presented as settled fact.
+  const js = extractScript(CONSOLE_HTML);
+  const loadModels = js.match(/async function loadModels\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(
+    loadModels.indexOf("const payload = await api") < loadModels.indexOf("models = payload"),
+    "the response must land in a local before it is validated",
+  );
+  assert.match(loadModels, /if \(!payload \|\| payload\.error \|\| !Array\.isArray\(payload\.available\)\)/, "rejects error envelopes and payloads without an available[] array");
+  assert.ok(
+    loadModels.indexOf("throw new Error") < loadModels.indexOf("models = payload"),
+    "a malformed payload must throw before the good global is overwritten",
+  );
+
+  // Both Settings entry points must surface the failure, not swallow it.
+  for (const fn of ["openSettings", "runProviderSetup"]) {
+    const body = js.match(new RegExp("async function " + fn + "\\([\\s\\S]*?\\n\\}"))?.[0] ?? "";
+    assert.match(body, /catch \(e\) \{ hmToast\("Could not load models: "/, fn + " reports a failed models load to the operator");
+  }
+  assert.doesNotMatch(js, /models = await loadModels\(\)/, "never reassign the global from loadModels' return value");
 });
 
 test("settings tabs are in a defined order with Setup near the front", () => {
