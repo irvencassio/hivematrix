@@ -3046,3 +3046,49 @@ test("GET /health reports the RUNNING daemon version separately from the on-disk
   assert.equal(typeof body.staleDaemon, "boolean");
   assert.equal(typeof body.pid, "number");
 });
+
+test("GET /context-sources reports what is injected into a task, and flags a truncated AGENTS.md", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const project = mkdtempSync(join(tmpdir(), "hm-ctxroute-"));
+  writeFileSync(join(project, "AGENTS.md"), "x".repeat(8_001)); // one char over the cap
+
+  const res = await fetch(`${base}/context-sources?project=${encodeURIComponent(project)}`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as {
+    projectPath: string;
+    sources: Array<{ label: string; kind: string; path: string | null; truncated: boolean; found: boolean }>;
+    truncated: string[];
+    missing: string[];
+  };
+
+  assert.equal(body.projectPath, project);
+  // The point of the panel: an over-cap AGENTS.md is silently sliced at
+  // injection, and this is the only place that says so.
+  assert.deepEqual(body.truncated, ["AGENTS.md"]);
+  assert.ok(body.missing.includes("CLAUDE.md"), "an absent file is reported absent, not as zero-and-fine");
+
+  const agents = body.sources.find((s) => s.label === "AGENTS.md")!;
+  assert.equal(agents.kind, "file");
+  assert.equal(agents.truncated, true);
+  assert.ok(agents.path?.startsWith(project));
+
+  // Generated blocks are listed but must never claim an editable path.
+  const generated = body.sources.filter((s) => s.kind === "generated");
+  assert.ok(generated.length >= 5);
+  for (const g of generated) assert.equal(g.path, null);
+});
+
+test("GET /context-sources defaults to the home directory when no project is given", async (t) => {
+  withTempHome(t);
+  const { base, headers } = await startServer(t);
+  const res = await fetch(`${base}/context-sources`, { headers });
+  assert.equal(res.status, 200);
+  const body = await res.json() as { projectPath: string; sources: unknown[] };
+  assert.ok(body.projectPath, "always reports which project it measured");
+  assert.ok(Array.isArray(body.sources) && body.sources.length > 0);
+});

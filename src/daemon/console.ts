@@ -1026,6 +1026,17 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .brain-proj-row.pinned.active { background:rgba(88,166,255,.1); border-left:2px solid var(--accent-2); }
   .brain-proj-row.pinned .name { color:var(--accent-2); }
   .brain-proj-row.pinned .sub { font-size:10px; color:var(--muted); font-weight:400; margin-top:2px; }
+  .ctxsrc-shell { border:1px solid var(--border); border-radius:8px; margin:14px; overflow:hidden; }
+  .ctxsrc-head { display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:8px 12px; border-bottom:1px solid var(--border); font-weight:600; }
+  .ctxsrc-head select { max-width:60%; }
+  .ctxsrc-row { display:flex; align-items:baseline; gap:10px; padding:7px 12px; border-bottom:1px solid var(--border); }
+  .ctxsrc-row:last-child { border-bottom:none; }
+  .ctxsrc-name { min-width:150px; font-weight:600; }
+  .ctxsrc-size { min-width:78px; text-align:right; font-variant-numeric:tabular-nums; color:var(--muted); }
+  .ctxsrc-note { flex:1; min-width:0; color:var(--muted); font-size:12px; }
+  .ctxsrc-path { display:block; font-size:11px; color:var(--muted); word-break:break-all; }
+  .ctxsrc-warn { color:var(--err); font-weight:600; }
   .brain-legend { display:flex; flex-wrap:wrap; gap:10px; padding:8px 14px; border-bottom:1px solid var(--border);
     font-size:10.5px; color:var(--muted); flex-shrink:0; background:var(--panel); }
   .brain-legend span { display:flex; align-items:center; gap:4px; white-space:nowrap; }
@@ -7525,6 +7536,13 @@ function brainPanelHtml() {
     + '<div class="brain-render-body" id="brainRenderBody"><div class="brain-empty-state">Click a document on the left to preview it here.</div></div>'
     + '</div>'
     + '</div>'
+    + '<div class="ctxsrc-shell">'
+    + '<div class="ctxsrc-head">'
+    + '<span>Loaded into every task</span>'
+    + '<select id="ctxsrcProject" onchange="loadContextSources()"></select>'
+    + '</div>'
+    + '<div id="ctxsrcBody"><div class="muted" style="padding:12px">Loading…</div></div>'
+    + '</div>'
     + '</div>'
     + '</div>';
 }
@@ -7561,6 +7579,62 @@ function showBrain() {
   updateToolsNav();
   updateGoalsNav();
   loadBrainProjects();
+  renderContextSourceProjects();
+}
+
+function ctxsrcBytes(n) {
+  if (!n) return '—';
+  return n < 1024 ? n + ' B' : (n / 1024).toFixed(1) + ' KB';
+}
+
+// Surface what actually reaches a task's prompt. None of this was visible
+// anywhere, which is how AGENTS.md came to sit ~300 chars under a silent 8000
+// char cap with its git-hygiene rules last in the file, and how a 16.7 KB
+// "agentGuide" figure came to be attributed to a file that does not exist.
+async function loadContextSources() {
+  const body = document.getElementById('ctxsrcBody');
+  const sel = document.getElementById('ctxsrcProject');
+  if (!body || !sel) return;
+  const project = sel.value || '';
+  const inv = await api('/context-sources' + (project ? '?project=' + encodeURIComponent(project) : ''));
+  if (!inv || !Array.isArray(inv.sources)) {
+    body.innerHTML = '<div class="muted" style="padding:12px">Could not read context sources.</div>';
+    return;
+  }
+  const files = inv.sources.filter(s => s.kind === 'file');
+  const generated = inv.sources.filter(s => s.kind === 'generated');
+  const row = s => {
+    const missing = !s.found;
+    const size = missing ? '<span class="ctxsrc-warn">not found</span>'
+      : ctxsrcBytes(s.bytes) + (s.truncated ? ' <span class="ctxsrc-warn">CUT</span>' : '');
+    const cap = s.capChars ? ' · cap ' + ctxsrcBytes(s.capChars) : '';
+    return '<div class="ctxsrc-row">'
+      + '<span class="ctxsrc-name">' + esc(s.label) + '</span>'
+      + '<span class="ctxsrc-size">' + size + '</span>'
+      + '<span class="ctxsrc-note">' + esc(s.note) + cap
+      + (s.path ? '<span class="ctxsrc-path">' + esc(s.path) + '</span>' : '')
+      + '</span></div>';
+  };
+  const warn = inv.truncated && inv.truncated.length
+    ? '<div class="ctxsrc-row"><span class="ctxsrc-warn">⚠ ' + esc(inv.truncated.join(', '))
+      + ' exceeds its cap and is being cut off — content past the cap never reaches the agent.</span></div>'
+    : '';
+  body.innerHTML = warn
+    + files.map(row).join('')
+    + '<div class="ctxsrc-row"><span class="ctxsrc-note">'
+    + 'Plus ' + generated.length + ' generated blocks (not files, cannot be edited): '
+    + esc(generated.map(g => g.label).join(', ')) + '.</span></div>';
+}
+
+function renderContextSourceProjects() {
+  const sel = document.getElementById('ctxsrcProject');
+  if (!sel) return;
+  const projects = state.projects || [];
+  const prev = sel.value;
+  sel.innerHTML = projects.map(p =>
+    '<option value="' + esc(p.path) + '"' + (p.preSelect ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('');
+  if (prev) sel.value = prev;
+  loadContextSources();
 }
 
 function updateBrainNav() { syncNav(); }

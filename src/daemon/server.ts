@@ -2307,6 +2307,17 @@ export function createDaemonServer() {
 
       // GET /brain/links — `[[wikilink]]` graph. ?doc=NAME → forward+backlinks
       // for one doc; otherwise the whole graph (nodes with their links).
+      // GET /context-sources — what actually gets injected into a task's prompt
+      // for a project: which files, from where, how big, and whether any of it
+      // is being silently truncated. ?project=<abs path>, defaults to $HOME.
+      if (req.method === "GET" && urlPath === "/context-sources") {
+        const { contextInventory } = await import("@/lib/orchestrator/context-inventory");
+        const q = parseQueryString(req.url ?? "");
+        const project = (q.project ?? "").trim() || homedir();
+        json(res, 200, contextInventory(project));
+        return;
+      }
+
       if (req.method === "GET" && urlPath === "/brain/links") {
         const { buildLinkGraph, linksForDoc } = await import("@/lib/brain/links");
         const q = parseQueryString(req.url ?? "");
