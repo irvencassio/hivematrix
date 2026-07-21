@@ -2349,13 +2349,17 @@ test("GET /agents/profiles lists the roster without leaking systemPrompt", async
   // Phase 4 (roster reduction) + Spec 3 Phase 4 (coo promoted to core once
   // it can read back its own delegated children's results): the wire shape
   // the New Task role picker's Domain optgroup depends on.
-  assert.equal(body.profiles.length, 9, "14 → 9 after cutting ceo/cto/cfo/analyst/inventor");
-  assert.equal(body.profiles.filter((p) => p.tier === "core").length, 8);
+  assert.equal(body.profiles.length, 10, "14 → 10: ceo/cfo/analyst/inventor stay cut; cto restored 2026-07-21 as a thinking-tier architecture profile");
+  assert.equal(body.profiles.filter((p) => p.tier === "core").length, 9);
   assert.equal(body.profiles.filter((p) => p.tier === "coordinator").length, 0);
   assert.equal(body.profiles.filter((p) => p.tier === "domain").length, 1);
   assert.equal(body.profiles.find((p) => p.id === "coo")?.tier, "core");
   assert.equal(body.profiles.find((p) => p.id === "trader")?.tier, "domain");
-  assert.equal(body.profiles.find((p) => p.id === "cto"), undefined, "cut ids must not appear in the live roster");
+  // cto is a live core profile again; the still-cut ids must stay absent.
+  assert.equal(body.profiles.find((p) => p.id === "cto")?.tier, "core");
+  for (const cut of ["ceo", "cfo", "analyst", "inventor"]) {
+    assert.equal(body.profiles.find((p) => p.id === cut), undefined, `cut id ${cut} must not appear in the live roster`);
+  }
 });
 
 test("GET /agents/profiles/:id returns the full profile INCLUDING systemPrompt (the roles screen's prompt viewer)", async (t) => {
@@ -2372,14 +2376,22 @@ test("GET /agents/profiles/:id returns the full profile INCLUDING systemPrompt (
   assert.equal(body.isCustom, false);
 });
 
-test("GET /agents/profiles/:id resolves a legacy/cut id through its alias (e.g. cto → developer), same as the scheduler", async (t) => {
+test("GET /agents/profiles/:id resolves a legacy/cut id through its alias (e.g. ceo → founder), same as the scheduler", async (t) => {
   withTempHome(t);
   const { base, headers } = await startServer(t);
 
-  const res = await fetch(`${base}/agents/profiles/cto`, { headers });
+  const res = await fetch(`${base}/agents/profiles/ceo`, { headers });
   assert.equal(res.status, 200);
   const body = await res.json() as Record<string, unknown>;
-  assert.equal(body.id, "developer", "cto is cut and aliases to developer — getAgentProfile resolves it, not a 404");
+  assert.equal(body.id, "founder", "ceo is cut and aliases to founder — getAgentProfile resolves it, not a 404");
+
+  // cto is NOT an alias any more: it is a real built-in again, so it must
+  // resolve to ITSELF on the thinking tier rather than collapsing to developer.
+  const ctoRes = await fetch(`${base}/agents/profiles/cto`, { headers });
+  assert.equal(ctoRes.status, 200);
+  const ctoBody = await ctoRes.json() as Record<string, unknown>;
+  assert.equal(ctoBody.id, "cto");
+  assert.equal(ctoBody.modelRole, "thinking");
 });
 
 test("GET /agents/profiles/:id rejects a malformed id (path-injection defense-in-depth ahead of Phase 2's file-writing routes)", async (t) => {

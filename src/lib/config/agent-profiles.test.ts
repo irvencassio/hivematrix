@@ -51,28 +51,32 @@ test("built-in modelRole assignments match the spec's admission-test table (post
   });
 });
 
-test("the roster is exactly 8 core + 0 coordinator + 1 domain (14 → 9)", async () => {
+test("the roster is exactly 9 core + 0 coordinator + 1 domain (14 → 10)", async () => {
   await withTempHome(null, () => {
     const all = getAllAgentProfiles();
-    assert.equal(all.length, 9, "cut ceo/cto/cfo/analyst/inventor — 5 removed from the original 14");
+    // cto was restored 2026-07-21 as a real thinking-tier architecture profile
+    // (it had been cut and aliased to developer, which put design work on the
+    // coding model). ceo/cfo/analyst/inventor remain cut.
+    assert.equal(all.length, 10, "cut ceo/cfo/analyst/inventor — 4 removed from the original 14; cto restored");
     const byTier = { core: 0, coordinator: 0, domain: 0 };
     for (const p of all) byTier[profileTier(p)]++;
     // Spec 3 Phase 4 promotes coo to core-tier now that it can read back its
     // own delegated children's results — see agent-roles-activation §5c.
-    assert.deepEqual(byTier, { core: 8, coordinator: 0, domain: 1 });
+    assert.deepEqual(byTier, { core: 9, coordinator: 0, domain: 1 });
     assert.deepEqual(
       new Set(all.filter((p) => profileTier(p) === "core").map((p) => p.id)),
-      new Set(["general", "developer", "researcher", "marketing", "founder", "qa", "designer", "coo"]),
+      new Set(["general", "developer", "cto", "researcher", "marketing", "founder", "qa", "designer", "coo"]),
     );
     assert.equal(all.find((p) => p.id === "coo")?.tier, "core");
     assert.equal(all.find((p) => p.id === "trader")?.tier, "domain");
   });
 });
 
-test("getCoreAgentProfiles includes coo (promoted Spec 3 Phase 4) but never the domain profile", async () => {
+test("getCoreAgentProfiles includes coo and cto but never the domain profile", async () => {
   await withTempHome(null, () => {
     const coreIds = getCoreAgentProfiles().map((p) => p.id);
-    assert.equal(coreIds.length, 8);
+    assert.equal(coreIds.length, 9);
+    assert.ok(coreIds.includes("cto"), "cto is a real core profile again — the classifier must be able to pick it");
     assert.ok(coreIds.includes("coo"), "coo is now core-tier — classifier-reachable once it can observe outcomes");
     assert.ok(!coreIds.includes("trader"), "trader is domain-tier — must never be classifier-reachable");
   });
@@ -80,7 +84,11 @@ test("getCoreAgentProfiles includes coo (promoted Spec 3 Phase 4) but never the 
 
 test("every cut id resolves through LEGACY_PROFILE_ALIASES to a real, undamaged profile — not the generic developer fallback", async () => {
   await withTempHome(null, () => {
-    assert.equal(getAgentProfile("cto").id, "developer");
+    // cto is NOT an alias any more — it is its own built-in profile, and it
+    // must resolve to itself on the thinking tier, not collapse to developer.
+    assert.equal(getAgentProfile("cto").id, "cto");
+    assert.equal(getAgentProfile("cto").modelRole, "thinking");
+    assert.ok(!("cto" in LEGACY_PROFILE_ALIASES), "an alias would silently collapse cto back to developer in classifyByKeywords");
     assert.equal(getAgentProfile("ceo").id, "founder");
     assert.equal(getAgentProfile("cfo").id, "founder");
     assert.equal(getAgentProfile("analyst").id, "researcher");

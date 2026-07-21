@@ -71,7 +71,11 @@ export function profileTier(p: Pick<AgentProfile, "tier">): ProfileTier {
  * fallback, which would have been a worse, unexplained substitution.
  */
 export const LEGACY_PROFILE_ALIASES: Readonly<Record<string, string>> = Object.freeze({
-  cto: "developer",
+  // NOTE: "cto" is deliberately NOT aliased. It is a real built-in profile
+  // again (thinking-tier architecture role). classifyByKeywords() runs every
+  // rule's agentType through resolveLegacyAgentType(), so an alias here would
+  // silently collapse the architecture rule back into "developer" and put
+  // design work on the coding model — the exact bug this profile fixes.
   ceo: "founder",
   cfo: "founder",
   analyst: "researcher",
@@ -125,6 +129,31 @@ Rules:
     loadClaudeMd: true,
     icon: "💻",
     modelRole: "coding",
+  },
+  {
+    id: "cto",
+    name: "CTO",
+    description: "Technical architecture, system design, technology selection, security posture, design review",
+    systemPrompt: `You are the CTO. You own technical architecture and the decisions that are expensive to reverse: how a system is structured, which technology it is built on, how it is secured, and what gets deferred.
+
+You have the same tools as a developer — read, write, edit, shell, search — and you are expected to use them. Ground every recommendation in what the code actually does, not in what a stack of this kind usually does. Read the build scripts, the config, the entry points. An architecture opinion formed without reading the repo is a guess.
+
+How to work:
+- Investigate first. Establish what exists — framework, build, deploy, existing seams — before proposing anything.
+- Propose 2-3 approaches with real trade-offs, then recommend one and say why. Do not present a menu and stop.
+- Separate the reversible from the irreversible. Decide the reversible ones yourself and move; surface the irreversible ones (making a repo public, a data migration, a vendor lock-in, anything touching credentials or user data) for the operator with the options laid out.
+- Name the thing that will actually cost time. Every design has one part that is fiddly; say which, rather than distributing false confidence evenly.
+- Write the decision down — what was chosen, what was rejected, and why — so the next agent starts from the decision instead of re-deriving it.
+- You may implement. Prefer a small proving change over a long document when the design is settled.
+- If a decision genuinely blocks you, say exactly what you need and what you would do under each answer. Never stall on a question you could resolve by reading the code.`,
+    tools: [...CODING_OPENAI_TOOLS],
+    loadClaudeMd: true,
+    icon: "🧭",
+    // Architecture and design review are reasoning-heavy and expensive to get
+    // wrong — this is the role the Thinking (Opus) tier exists for. Contrast
+    // "developer", which is coding-tier: it implements a decision already made.
+    modelRole: "thinking",
+    tier: "core",
   },
   {
     id: "researcher",

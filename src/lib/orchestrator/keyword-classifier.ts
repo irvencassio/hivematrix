@@ -9,13 +9,23 @@ const KEYWORD_RULES: Array<{ patterns: RegExp[]; agentType: string }> = [
   // General — question words without code/business context
   { patterns: [/^(why|what|how|when|where|who|explain|tell me|describe)\b/i, /\?$/], agentType: "general" },
 
-  // Developer — code/build/git language, plus architecture/security/infra
-  // language that used to route to the now-cut "cto" profile (its alias
-  // target is "developer" — resolveLegacyAgentType below still normalizes
-  // this defensively, but writing the surviving id directly here keeps the
-  // rule legible rather than routing through the alias silently).
+  // Designer — UX/UI, design systems, prototypes. Tested BEFORE the CTO rule:
+  // its vocabulary is unambiguously interface work, and it owns terms the CTO
+  // rule would otherwise swallow ("information architecture", "design review",
+  // "design system"). CTO matches bare "design", so this ordering is what keeps
+  // "design the empty state" out of the architecture role.
+  { patterns: [/\b(ux|ui|user experience|user interface|wireframe|mockup|mock.?up|prototype|design system|design token|figma|sketch|adobe xd|interaction design|visual design|information architecture|ia|user journey|user flow|usability|accessibility|a11y|wcag|affordance|heuristic|design critique|design review|style guide|brand guidelines|color palette|typography|iconography|empty state|loading state|micro.?interaction|hover state|focus state|component library|atomic design|design handoff|responsive design|mobile.?first)\b/i], agentType: "designer" },
+
+  // CTO — architecture/design/security-posture language. MUST be tested before
+  // the developer rule below: a design brief almost always also contains an
+  // implementation verb ("design and implement an auto-update mechanism"), so
+  // with developer first it matched "implement" and architecture work ran on
+  // the coding model. First match wins, so order is the whole behavior here.
+  { patterns: [/\b(architecture|architect|system design|design|design doc|technical design|infrastructure|security audit|security posture|threat model|scalability|performance review|tech stack|technology (?:choice|selection)|database design|microservice|monolith|ci\/cd|devops|monitoring|observability|trade.?offs?)\b/i], agentType: "cto" },
+
+  // Developer — code/build/git language. Implementation of a decision already
+  // made; anything that is still deciding should have matched the CTO rule above.
   { patterns: [/\b(fix|bug|debug|refactor|implement|build|deploy|test|lint|migrate|commit|push|pull|merge|branch|npm|pip|cargo|docker|compile|error|exception|stack trace|endpoint|api|route|component|function|class|module|package|dependency)\b/i], agentType: "developer" },
-  { patterns: [/\b(architecture|infrastructure|security audit|system design|scalability|performance review|tech stack|database design|microservice|monolith|ci\/cd|devops|monitoring|observability)\b/i], agentType: "developer" },
 
   // Researcher — investigation/analysis, plus data/metrics language that
   // used to route to the now-cut "analyst" profile (alias target: researcher).
@@ -36,8 +46,6 @@ const KEYWORD_RULES: Array<{ patterns: RegExp[]; agentType: string }> = [
   // QA — verification/ship readiness
   { patterns: [/\b(qa|quality assurance|verify|verification|ship.?ready|pre.?release|pre.?ship|acceptance test|regression test|smoke test|spec compliance|ready to ship|ready to merge|ready to release|sign.?off|final pass|test plan|test coverage|bug bash|edge case|pen.?test|vulnerability scan|security review|audit)\b/i], agentType: "qa" },
 
-  // Designer — UX/UI, design systems, prototypes
-  { patterns: [/\b(ux|ui|user experience|user interface|wireframe|mockup|mock.?up|prototype|design system|design token|figma|sketch|adobe xd|interaction design|visual design|information architecture|ia|user journey|user flow|usability|accessibility|a11y|wcag|affordance|heuristic|design critique|design review|style guide|brand guidelines|color palette|typography|iconography|empty state|loading state|micro.?interaction|hover state|focus state|component library|atomic design|design handoff|responsive design|mobile.?first)\b/i], agentType: "designer" },
 
   // NOTE: no rule maps to "trader" — it's domain-tier, gated out of
   // auto-routing entirely (see agent-profiles.ts §5c of the activation spec).

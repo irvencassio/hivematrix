@@ -14,8 +14,8 @@ test("classifyByKeywords: unchanged rules still resolve to their surviving core 
 });
 
 test("classifyByKeywords: language that used to route to a cut profile now resolves via its alias target", () => {
-  // cto → developer
-  assert.equal(classifyByKeywords("review the system design and infrastructure scalability"), "developer");
+  // cto is no longer cut — architecture language routes to the real cto profile.
+  assert.equal(classifyByKeywords("review the system design and infrastructure scalability"), "cto");
   // ceo, cfo, inventor → founder
   assert.equal(classifyByKeywords("set the quarterly roadmap and strategic direction"), "founder");
   assert.equal(classifyByKeywords("calculate the burn rate and cash flow, then draft a p&l"), "founder");
@@ -44,4 +44,27 @@ test("classifyByKeywords: return value is always a member of getCoreAgentProfile
     const result = classifyByKeywords(text);
     if (result !== null) assert.ok(coreIds.has(result), `"${text}" resolved to "${result}", which is not in the core roster`);
   }
+});
+
+test("a design brief containing an implementation verb still routes to cto, not developer", () => {
+  // The real failure this fixes: the Canopy auto-update task was titled
+  // "Implement Canopy auto-update" and asked the agent to "design and implement
+  // an equivalent auto-update mechanism". The developer rule matched "implement"
+  // first, so architecture work ran on the coding model. Rule ORDER is the whole
+  // behavior here — first match wins — so these assertions are the guard.
+  assert.equal(classifyByKeywords("design and implement an equivalent auto-update mechanism"), "cto");
+  assert.equal(classifyByKeywords("Implement Canopy auto-update: investigate the tech stack, then design it"), "cto");
+  assert.equal(classifyByKeywords("write a design doc for the release architecture and its trade-offs"), "cto");
+  assert.equal(classifyByKeywords("run a security audit and threat model of the sync endpoint"), "cto");
+
+  // Plain implementation work — no design language — must still be developer.
+  assert.equal(classifyByKeywords("fix the null deref in the parser and add a regression test"), "developer");
+  assert.equal(classifyByKeywords("bump the dependency and rerun npm build"), "developer");
+
+  // The CTO rule matches bare "design", so the designer rule MUST stay ahead of
+  // it — interface work owns "design system", "information architecture" and the
+  // rest of that vocabulary. These guard the ordering from either direction.
+  assert.equal(classifyByKeywords("design the empty state and hover state for the sidebar"), "designer");
+  assert.equal(classifyByKeywords("update the information architecture of the settings panel"), "designer");
+  assert.equal(classifyByKeywords("design system tokens for typography"), "designer");
 });
