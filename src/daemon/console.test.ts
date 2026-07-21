@@ -4193,3 +4193,41 @@ test("snippetDragOver/snippetDrop: dragover calls preventDefault (required for d
   assert.match(drop, /saveSnippets\(/, "persists the new order immediately, not just an in-memory reorder");
   assert.match(drop, /renderSnippetsList\(\)/, "re-renders to reflect the new order");
 });
+
+test("renderPostureGroups nests lane capabilities under their lane and separates policies", () => {
+  // Regression for the "isn't this duplicated?" report: the flat list rendered
+  // "Browser Lane Read" as a peer of "Browser Lane" in the Agents sidebar, and
+  // gave no way to explain why "Frontier review debt" is not an agent.
+  const js = extractScript(CONSOLE_HTML);
+  const escSrc = extractFunctionBlock(js, "esc");
+  const headingSrc = extractFunctionBlock(js, "laneHeading");
+  const partSrc = extractFunctionBlock(js, "posturePartHtml");
+  const groupsSrc = extractFunctionBlock(js, "renderPostureGroups");
+
+  const render = new Function(
+    `${escSrc}\n${headingSrc}\n${partSrc}\n${groupsSrc}\nreturn renderPostureGroups;`,
+  )() as (caps: unknown[]) => string;
+
+  const html = render([
+    { id: "webbee", label: "Browser Lane Read", shortLabel: "Read", lane: "browser", category: "capability", disposition: "works", note: "read" },
+    { id: "browserbee", label: "Browser Lane Workflow", shortLabel: "Workflow", lane: "browser", category: "capability", disposition: "queued", note: "flow" },
+    { id: "frontier", label: "Frontier models", category: "capability", disposition: "works", note: "models" },
+    { id: "code-review-debt", label: "Frontier review debt", category: "policy", disposition: "works", note: "debt" },
+  ]);
+
+  assert.match(html, /Browser Lane<\/div>/, "lane-owned capabilities get a lane heading");
+  assert.match(html, /posture-row nested/, "a capability of a lane renders nested, not as a sibling");
+  assert.match(html, />Read</, "nested rows use the short name");
+  assert.doesNotMatch(html, />Browser Lane Read</, "the lane name must not be repeated on the nested row");
+
+  assert.match(html, /Behavior under degradation/, "policies get their own group");
+  assert.match(html, /rules, not processes/, "and say why they have nothing running");
+
+  // A policy must never be indented under a lane — it belongs to no lane.
+  const policyIdx = html.indexOf("Frontier review debt");
+  const policyGroupIdx = html.indexOf("Behavior under degradation");
+  assert.ok(policyGroupIdx !== -1 && policyIdx > policyGroupIdx, "the policy renders inside the policy group");
+
+  // Cross-lane capabilities are grouped too, so nothing renders ungrouped.
+  assert.match(html, /Across all lanes/);
+});

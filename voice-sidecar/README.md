@@ -40,13 +40,24 @@ live model:
 .venv/bin/python test_turn.py    # stubbed command STT + real TTS, stubbed LLM
 ```
 
-Defaults target the operator's local server (LM Studio, `qwen/qwen3.6-27b` at
-`localhost:1234/v1`); override with `HIVE_LLM_BASE_URL` / `HIVE_LLM_MODEL`.
+> **⚠️ The LLM path described below is RETIRED (0.1.176, 2026-07-11).**
+> This sidecar's **STT (whisper) and TTS (Kokoro) are live and ship in the app** —
+> the daemon spawns `turn_server.py` / `realtime_server.py` for them. What is dead
+> is the *local LLM* leg: voice now routes through the Flash lane end to end, and
+> `src/lib/voice/llm-env.ts` no longer exports `HIVE_LLM_*`. With nothing setting
+> those vars, `llm.py` / `realtime.py` fall back to hardcoded
+> `http://localhost:1234/v1` + `qwen/qwen3.6-27b` — a server that is not running
+> and a model that is not installed. Nothing the daemon calls reaches `LocalLLM`,
+> but it has not been pruned. Everything from here to the end of this section is
+> kept as a historical record of that retired path, not as setup instructions.
 
-**Validated flow:** "capital of France?" → STT → Qwen 3.6 27B → *"The capital
-of France is Paris."* → WAV out.
+Defaults targeted the operator's local server (LM Studio, `qwen/qwen3.6-27b` at
+`localhost:1234/v1`); overridden with `HIVE_LLM_BASE_URL` / `HIVE_LLM_MODEL`.
 
-### Latency (P2.3)
+**Validated flow (historical):** "capital of France?" → STT → Qwen 3.6 27B →
+*"The capital of France is Paris."* → WAV out.
+
+### Latency (P2.3 — historical, retired local-LLM path)
 
 Qwen 3.6 is a reasoning model. With thinking **ON** (LM Studio default) a turn is
 ~13s — non-viable. The `enable_thinking:false` API flag is *not* honored by the

@@ -813,7 +813,13 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .lane-primary[disabled] { opacity: .5; cursor: default; filter: none; }
   .posture { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel-2); }
   .posture-summary { padding: 8px 10px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); }
+  .posture-group { padding: 7px 10px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted); font-weight: 700; border-bottom: 1px solid var(--border); }
+  .posture-group-note { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 6px; opacity: .8; }
   .posture-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); font-size: 11px; }
+  /* A capability of a lane is indented under it — never a sibling of the lane. */
+  .posture-row.nested { padding-left: 22px; }
+  .posture-row.nested .pname::before { content: "└ "; color: var(--muted); }
   .posture-row:last-child { border-bottom: none; }
   .posture-row .pname { font-weight: 600; color: var(--text); }
   .posture-row .pnote { grid-column: 1 / -1; color: var(--muted); line-height: 1.35; }
@@ -2018,7 +2024,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <div id="agentsSec" class="agents-sec">
       <div class="agents-sec-header">Agents <span id="agentsToggle" class="agents-toggle" onclick="toggleAgentsSection()" title="Collapse Agents">▾</span></div>
       <div id="agents"></div>
-      <details class="ctx-sec" id="agentsConnDetail"><summary>Connectivity detail</summary>
+      <details class="ctx-sec" id="agentsConnDetail"><summary>What works right now</summary>
       <div id="conn"></div></details>
     </div>
   </section>
@@ -3915,11 +3921,7 @@ function renderConn() {
   const posture = c.posture && c.posture.current ? c.posture.current : null;
   const postureHtml = posture ? '<div class="posture">'
     + '<div class="posture-summary">'+esc(posture.summary)+' <span class="muted">('+esc(posture.counts.works)+' works, '+esc(posture.counts.degraded)+' degraded, '+esc(posture.counts.queued)+' queued)</span></div>'
-    + posture.capabilities.map(p => '<div class="posture-row">'
-      + '<span class="pname">'+esc(p.label || p.id)+'</span>'
-      + '<span class="disp '+esc(p.disposition)+'">'+esc(p.disposition)+'</span>'
-      + '<span class="pnote">'+esc(p.note)+'</span>'
-      + '</div>').join("")
+    + renderPostureGroups(posture.capabilities)
     + '</div>' : '';
   document.getElementById("conn").innerHTML = '<div class="kv">'
     + '<span class="k">mode</span><span>'+esc(c.mode)+'</span>'
@@ -4672,6 +4674,58 @@ function openLaneFromAgents(lane) {
 function mcpDisplayName(id) {
   const s = String(id || '');
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+// Group the posture list by what each entry IS, so the panel stops reading as a
+// duplicate of the Agents sidebar. Three different kinds were flattened into one
+// flat list: surfaces (Browser Lane), capabilities OF a surface (Browser Lane
+// Read/Workflow), and policies that are not processes at all (Frontier review
+// debt). That is why "Browser Lane Read" looked like a sibling of "Browser Lane"
+// and why there was no way to explain that a policy has nothing to be running.
+function laneHeading(laneId) {
+  const s = String(laneId || '');
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) + ' Lane' : 'System';
+}
+
+function posturePartHtml(p, nested) {
+  const name = nested && p.shortLabel ? p.shortLabel : (p.label || p.id);
+  return '<div class="posture-row' + (nested ? ' nested' : '') + '">'
+    + '<span class="pname">' + esc(name) + '</span>'
+    + '<span class="disp ' + esc(p.disposition) + '">' + esc(p.disposition) + '</span>'
+    + '<span class="pnote">' + esc(p.note) + '</span>'
+    + '</div>';
+}
+
+function renderPostureGroups(caps) {
+  const list = Array.isArray(caps) ? caps : [];
+  const capabilities = list.filter(p => p.category !== 'policy');
+  const policies = list.filter(p => p.category === 'policy');
+
+  // Capabilities that belong to a lane render UNDER that lane, never beside it.
+  const byLane = new Map();
+  const unowned = [];
+  for (const p of capabilities) {
+    if (p.lane) {
+      if (!byLane.has(p.lane)) byLane.set(p.lane, []);
+      byLane.get(p.lane).push(p);
+    } else unowned.push(p);
+  }
+
+  let html = '';
+  for (const [lane, rows] of byLane) {
+    html += '<div class="posture-group">' + esc(laneHeading(lane)) + '</div>'
+      + rows.map(p => posturePartHtml(p, true)).join('');
+  }
+  if (unowned.length) {
+    html += '<div class="posture-group">Across all lanes</div>'
+      + unowned.map(p => posturePartHtml(p, false)).join('');
+  }
+  if (policies.length) {
+    html += '<div class="posture-group">Behavior under degradation'
+      + '<span class="posture-group-note">rules, not processes — nothing here starts or stops</span></div>'
+      + policies.map(p => posturePartHtml(p, false)).join('');
+  }
+  return html;
 }
 
 function renderAgents() {

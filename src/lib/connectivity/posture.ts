@@ -12,9 +12,31 @@ import { getLocalModelConfig } from "@/lib/config/constants";
 export type Disposition = "works" | "degraded" | "queued";
 export type DispositionAction = "run_now" | "use_local_fallback" | "wait_for_cloud";
 
+/**
+ * What KIND of thing an entry is. These were previously all rendered as one
+ * flat list beside the Agents sidebar, which made "Browser Lane Read" look like
+ * a sibling of "Browser Lane" and left no way to explain why "Frontier review
+ * debt" is not an agent.
+ *
+ *   capability — something the system can do, which degrades by mode.
+ *   policy     — a RULE about what happens under degradation. There is no
+ *                process to be up; nothing to start or stop.
+ */
+export type PostureCategory = "capability" | "policy";
+
 export interface CapabilityPosture {
   id: string;
+  /** Full standalone name, e.g. "Browser Lane Read". */
   label: string;
+  /**
+   * Name WITHIN its owning lane, e.g. "Read". Used when rendering nested under
+   * a lane heading so the lane name is not repeated on every row. Absent when
+   * the entry has no owning lane.
+   */
+  shortLabel?: string;
+  /** Owning lane id, when this is a capability OF a specific lane. */
+  lane?: string;
+  category: PostureCategory;
   disposition: Disposition;
   action: DispositionAction;
   note: string;
@@ -58,12 +80,13 @@ export function describeLocalPosture(mode: ConnectivityMode, hasLocalModel = fal
   const cloud = mode === "cloud-ok";
   const caps: CapabilityPosture[] = [
     ...(hasLocalModel
-      ? [{ id: "local", label: "Local model", disposition: "works", action: "run_now", note: "Your configured bring-your-own local model runs in every mode." } as CapabilityPosture]
+      ? [{ id: "local", label: "Local model", category: "capability", disposition: "works", action: "run_now", note: "Your configured bring-your-own local model runs in every mode." } as CapabilityPosture]
       : []),
-    { id: "desktopbee", label: "Desktop Lane", disposition: "works", action: "run_now", note: "Native desktop control works offline." },
+    { id: "desktopbee", label: "Desktop control", shortLabel: "Control", lane: "desktop", category: "capability", disposition: "works", action: "run_now", note: "Native desktop control works offline." },
     {
       id: "coo-router",
       label: "COO routing",
+      category: "capability",
       disposition: "works",
       action: "run_now",
       note: cloud
@@ -73,6 +96,7 @@ export function describeLocalPosture(mode: ConnectivityMode, hasLocalModel = fal
     {
       id: "frontier",
       label: "Frontier models",
+      category: "capability",
       disposition: cloud ? "works" : "queued",
       action: cloud ? "run_now" : "wait_for_cloud",
       note: cloud ? "Frontier models reachable." : "Cloud/frontier work waits for connectivity — no silent local downgrade in cloud-only mode.",
@@ -80,6 +104,9 @@ export function describeLocalPosture(mode: ConnectivityMode, hasLocalModel = fal
     {
       id: "webbee",
       label: "Browser Lane Read",
+      shortLabel: "Read",
+      lane: "browser",
+      category: "capability",
       disposition: cloud ? "works" : "queued",
       action: cloud ? "run_now" : "wait_for_cloud",
       note: cloud ? "Fresh web retrieval available." : "Fresh web retrieval waits for connectivity; dependent work is deferred, not failed.",
@@ -87,6 +114,9 @@ export function describeLocalPosture(mode: ConnectivityMode, hasLocalModel = fal
     {
       id: "browserbee",
       label: "Browser Lane Workflow",
+      shortLabel: "Workflow",
+      lane: "browser",
+      category: "capability",
       disposition: cloud ? "works" : "queued",
       action: cloud ? "run_now" : "wait_for_cloud",
       note: cloud ? "Authenticated browser workflows available." : "Browser workflows wait for connectivity unless the operator has explicitly enabled a local Desktop Lane browser fallback.",
@@ -94,6 +124,7 @@ export function describeLocalPosture(mode: ConnectivityMode, hasLocalModel = fal
     {
       id: "image",
       label: "Image generation",
+      category: "capability",
       disposition: cloud ? "works" : "degraded",
       action: cloud ? "run_now" : "use_local_fallback",
       note: cloud ? "Nano Banana (nanai) image generation." : "Local mflux fallback (draft-grade) — no network needed.",
@@ -101,6 +132,10 @@ export function describeLocalPosture(mode: ConnectivityMode, hasLocalModel = fal
     {
       id: "code-review-debt",
       label: "Frontier review debt",
+      // Not a surface and not a capability: a rule about what happens when the
+      // cloud is unreachable. There is nothing here to be "running", which is
+      // why it never belonged in the Agents list.
+      category: "policy",
       disposition: cloud ? "works" : "queued",
       action: cloud ? "run_now" : "wait_for_cloud",
       note: cloud ? "Code-critical runs on frontier." : "Code-critical runs locally now and is queued for a frontier review when cloud returns.",
