@@ -35,10 +35,14 @@ test("offline: local workhorses work, image degrades, cloud work queues — noth
   assert.equal(r.allHonest, true);
   assert.match(r.summary, /Nothing silently fails/);
   assert.equal(by("coo-router").disposition, "works"); // routing is local; only execution waits
-  // No local model configured → works = desktopbee + coo-router.
-  assert.equal(r.counts.works, 2);
-  assert.equal(r.counts.degraded, 1);
-  assert.equal(r.counts.queued, 4);
+  // Counts are CAPABILITIES only (the policy is excluded — it is a rule, not a
+  // working capability). Offline: works = desktop, coo-router, mail, message,
+  // memory — the four lanes that drive local apps/indexes, plus local routing.
+  assert.equal(r.counts.works, 5);
+  assert.equal(r.counts.degraded, 1);                       // image → mflux fallback
+  assert.equal(r.counts.queued, 4);                         // frontier, browser read+workflow, review
+  assert.equal(r.counts.works + r.counts.degraded + r.counts.queued,
+    r.capabilities.filter((c) => c.category !== "policy").length);
 });
 
 test("offline WITH an opt-in local model: the Local model capability appears and works", () => {
@@ -48,7 +52,7 @@ test("offline WITH an opt-in local model: the Local model capability appears and
   assert.equal(local.disposition, "works");
   assert.equal(local.label, "Local model");
   assert.doesNotMatch(local.note, /qwen/i);
-  assert.equal(r.counts.works, 3); // + local
+  assert.equal(r.counts.works, 6); // the five offline-capable ones + the local model
 });
 
 test("local-only mirrors offline for cloud-needing capabilities", () => {
@@ -103,4 +107,43 @@ test("every declared lane owner is a real lane id", async () => {
     if (!c.lane) continue;
     assert.ok((LANE_IDS as readonly string[]).includes(c.lane), `${c.id} claims lane "${c.lane}", which is not a lane id`);
   }
+});
+
+test("counts describe capabilities only — a policy is not a working capability", () => {
+  // The summary says "All capabilities available … (N works)". Counting the
+  // policy made N one higher than the number of capabilities, so the panel
+  // contradicted its own sentence.
+  for (const mode of ["cloud-ok", "local-only", "offline"] as const) {
+    const r = describeLocalPosture(mode);
+    const caps = r.capabilities.filter((c) => c.category !== "policy");
+    const total = r.counts.works + r.counts.degraded + r.counts.queued;
+    assert.equal(total, caps.length, `${mode}: counts must sum to the capability count, not every entry`);
+    assert.ok(r.capabilities.length > caps.length, "there is at least one policy, so this test is meaningful");
+  }
+});
+
+test("every canonical lane has a posture entry — no running lane is silently undescribed", async () => {
+  // The panel's promise is "nothing silently fails". Four lanes (mail, message,
+  // review, memory) were running with no entry at all, so there was no way to
+  // tell from here whether mail survives going offline.
+  const { LANE_IDS } = await import("@/lib/lanes/contracts");
+  const covered = new Set(
+    describeLocalPosture("cloud-ok").capabilities.map((c) => c.lane).filter(Boolean),
+  );
+  const missing = LANE_IDS.filter((id) => !covered.has(id));
+  assert.deepEqual(missing, [], `lanes with no posture entry: ${missing.join(", ")}`);
+});
+
+test("lanes that run locally keep working offline; only model-dependent work queues", () => {
+  const off = describeLocalPosture("offline");
+  const by = (id: string) => off.capabilities.find((c) => c.id === id)!;
+
+  // These drive local macOS apps / local indexes — no network in their own path.
+  for (const id of ["mailbee", "messagebee", "brainbee", "desktopbee"]) {
+    assert.equal(by(id).disposition, "works", `${id} runs locally and must not claim to need the cloud`);
+  }
+  // Review needs a text model, and after the Claude-native cutover every text
+  // role is unavailable without cloud.
+  assert.equal(by("review").disposition, "queued");
+  assert.equal(by("review").action, "wait_for_cloud");
 });

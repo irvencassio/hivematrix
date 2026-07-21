@@ -64,7 +64,12 @@ export interface PostureReport {
 
 const MODES: ConnectivityMode[] = ["cloud-ok", "local-only", "offline"];
 
-function countsFor(capabilities: CapabilityPosture[]): PostureCounts {
+/** Counts describe CAPABILITIES only. A policy is a rule about what happens
+ *  under degradation — it is not a capability that "works", and counting it as
+ *  one made the summary claim "All capabilities available … (7 works)" when
+ *  only 6 of those 7 entries were capabilities. */
+function countsFor(entries: CapabilityPosture[]): PostureCounts {
+  const capabilities = entries.filter((c) => c.category !== "policy");
   return {
     works: capabilities.filter((c) => c.disposition === "works").length,
     degraded: capabilities.filter((c) => c.disposition === "degraded").length,
@@ -82,6 +87,61 @@ export function describeLocalPosture(mode: ConnectivityMode, hasLocalModel = fal
     ...(hasLocalModel
       ? [{ id: "local", label: "Local model", category: "capability", disposition: "works", action: "run_now", note: "Your configured bring-your-own local model runs in every mode." } as CapabilityPosture]
       : []),
+    {
+      id: "mailbee",
+      label: "Mail Lane",
+      shortLabel: "Read + compose",
+      lane: "mail",
+      category: "capability",
+      // applemail.ts: "self-contained (no IMAP/SMTP, no OAuth)" — osascript
+      // against Mail.app, so the lane itself never touches the network.
+      disposition: "works",
+      action: "run_now",
+      note: cloud
+        ? "Reads and composes through Mail.app — no IMAP/SMTP or OAuth of its own."
+        : "Runs entirely through Mail.app on this machine; queued mail leaves the Outbox when the network returns.",
+    },
+    {
+      id: "messagebee",
+      label: "Message Lane",
+      shortLabel: "Read + send",
+      lane: "message",
+      category: "capability",
+      // imessage.ts: reads chat.db directly, sends via osascript to Messages.app.
+      disposition: "works",
+      action: "run_now",
+      note: cloud
+        ? "Reads chat.db and sends through Messages.app."
+        : "Reads chat.db locally and hands sends to Messages.app, which delivers them when the network returns.",
+    },
+    {
+      id: "brainbee",
+      label: "Memory Lane",
+      shortLabel: "Recall",
+      lane: "memory",
+      category: "capability",
+      // embeddings/provider.ts is local-first and self-gating: it returns null
+      // on any error so callers fall back to keyword retrieval.
+      disposition: "works",
+      action: "run_now",
+      note: cloud
+        ? "Brain retrieval with local-first embeddings — no doc content leaves the box."
+        : "Embeddings are local-first, so recall keeps working; if the embedder is unavailable it falls back to keyword search.",
+    },
+    {
+      id: "review",
+      label: "Review Lane",
+      shortLabel: "Review",
+      lane: "review",
+      category: "capability",
+      // Planning/review need a text model, and after the Claude-native cutover
+      // every text role is "unavailable" without cloud (connectivity/policy.ts).
+      disposition: cloud ? "works" : "queued",
+      action: cloud ? "run_now" : "wait_for_cloud",
+      note: cloud
+        ? "Planning, routing and review run on frontier."
+        : "Routing and diagnostics still resolve locally, but planning and review need a frontier model and wait for connectivity.",
+    },
     { id: "desktopbee", label: "Desktop control", shortLabel: "Control", lane: "desktop", category: "capability", disposition: "works", action: "run_now", note: "Native desktop control works offline." },
     {
       id: "coo-router",
