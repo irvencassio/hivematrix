@@ -3458,6 +3458,7 @@ test("renderAgents renders lane rows (dot color + Setup-now affordance) and MCP 
   const escSrc = extractFunctionBlock(js, "esc");
   const laneGlanceStatusSrc = extractFunctionBlock(js, "laneGlanceStatus");
   const renderAgentsSrc = extractFunctionBlock(js, "renderAgents");
+  const mcpDisplayNameSrc = extractFunctionBlock(js, "mcpDisplayName");
 
   const state = {
     lanes: [
@@ -3465,9 +3466,14 @@ test("renderAgents renders lane rows (dot color + Setup-now affordance) and MCP 
       { kind: "message", name: "Message Lane", running: false, healthy: null, runtimeMode: "embedded", statusDetail: "not configured" },
     ],
     mcp: {
+      // Real-world shape: MCP servers are keyed by their raw lowercase registry
+      // id, and every stdio server reports "configured" (registered, spawned per
+      // session) — never "reachable". The fixture used to pre-capitalize the
+      // names and claim "reachable", which hid both bugs this test now guards.
       servers: [
-        { name: "Canopy", status: "reachable", detail: "ok" },
-        { name: "Flash", status: "unreachable", detail: "down" },
+        { name: "canopy", status: "configured", detail: "Registered for Claude Code" },
+        { name: "flash", status: "configured", detail: "built-in" },
+        { name: "remotebox", status: "unreachable", detail: "down" },
       ],
     },
   };
@@ -3479,7 +3485,7 @@ test("renderAgents renders lane rows (dot color + Setup-now affordance) and MCP 
   };
   const factory = new Function(
     "state", "document",
-    `${escSrc}\n${laneGlanceStatusSrc}\n${renderAgentsSrc}\nreturn renderAgents;`,
+    `${escSrc}\n${laneGlanceStatusSrc}\n${mcpDisplayNameSrc}\n${renderAgentsSrc}\nreturn renderAgents;`,
   ) as (state: unknown, document: unknown) => () => void;
   const fakeDocument = { getElementById: (id: string) => (id === "agents" ? el : null) };
   const renderAgents = factory(state, fakeDocument);
@@ -3489,10 +3495,18 @@ test("renderAgents renders lane rows (dot color + Setup-now affordance) and MCP 
   assert.match(html, /background:var\(--muted\)/, "stopped lane gets the muted dot color");
   const setupNowMatches = html.match(/Setup now/g) || [];
   assert.equal(setupNowMatches.length, 1, "only the stopped mail/message lane shows the Setup now affordance");
-  assert.match(html, /tools-dot on/, "reachable MCP server gets tools-dot on");
   assert.match(html, /tools-dot err/, "unreachable MCP server gets tools-dot err");
-  assert.match(html, />Canopy \(MCP\)</);
+  // A stdio server is registered and healthy — it just has no long-lived process
+  // to probe. It used to share the grey 'off' dot with a dead server and render
+  // no status word at all, so a working canopy registration read as "not running".
+  assert.equal((html.match(/tools-dot on/g) || []).length, 2, "both configured stdio servers get the healthy dot");
+  assert.equal((html.match(/tools-dot off/g) || []).length, 0, "'configured' must never render as the dead-server dot");
+  assert.match(html, /on demand/, "configured stdio servers say why they have no running process");
+  assert.match(html, /unreachable/, "a genuinely down server still says so");
+  // Raw registry ids are lowercase; Lanes render proper names beside them.
+  assert.match(html, />Canopy \(MCP\)</, "raw id 'canopy' is title-cased for display");
   assert.match(html, />Flash \(MCP\)</);
+  assert.doesNotMatch(html, />canopy \(MCP\)</, "must not render the raw lowercase id");
 });
 
 test("every view-switching function records itself as the last-active view", () => {

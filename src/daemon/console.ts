@@ -4655,6 +4655,14 @@ function openLaneFromAgents(lane) {
   openSettings(); switchSettingsTab('lanes');
 }
 
+// MCP servers are keyed by their raw registry id from ~/.claude.json ("canopy",
+// "flash"), so they rendered lowercase next to properly-named Lanes ("Message
+// Lane"). Title-case the id for display; the raw id still drives everything else.
+function mcpDisplayName(id) {
+  const s = String(id || '');
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
 function renderAgents() {
   const el = document.getElementById('agents');
   if (!el) return;
@@ -4670,10 +4678,19 @@ function renderAgents() {
       + '</div>';
   }).join('');
   const mcpRows = mcpServers.map(s => {
-    const dotCls = s.status === 'reachable' ? 'on' : (s.status === 'unreachable' ? 'err' : 'off');
+    // "configured" is the status every stdio MCP server has: it is registered
+    // and the client spawns it per session, so there is no long-lived process
+    // to probe. It used to fall into the same grey 'off' dot as a dead server
+    // and rendered no status word at all, so a correctly-registered server
+    // (e.g. canopy) read as "not running". Healthy-but-on-demand is green.
+    const dotCls = s.status === 'unreachable' ? 'err' : 'on';
+    const label = s.status === 'reachable' ? 'running'
+      : s.status === 'unreachable' ? 'unreachable'
+        : 'on demand';
     return '<div class="agent-row" onclick="openSettings()" title="'+esc(s.detail || s.status)+'">'
       + '<span class="tools-dot '+dotCls+'"></span>'
-      + '<span class="name">'+esc(s.name)+' (MCP)</span>'
+      + '<span class="name">'+esc(mcpDisplayName(s.name))+' (MCP)</span>'
+      + '<span class="muted setup-btn">'+esc(label)+'</span>'
       + '</div>';
   }).join('');
   const healthRow = '<div class="agent-row" onclick="openSettings(); switchSettingsTab(\'lanes\')"><span class="name muted">System Health</span><span class="muted setup-btn">View status →</span></div>';
