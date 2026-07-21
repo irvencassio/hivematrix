@@ -5,7 +5,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { renderAttachmentBlock } from "@/lib/tasks/attachments";
-import { buildClaudeSpawnArgs, isLocalEndpointModel } from "./subprocess";
+import { buildClaudeSpawnArgs, isLocalEndpointModel, routingRoleForAgentType } from "./subprocess";
 
 test("Claude spawn args run like a direct interactive session: no allowlist, no turn cap, permissions skipped", () => {
   const args = buildClaudeSpawnArgs({
@@ -215,4 +215,31 @@ test("injected step prefixes never reference an uninstalled skill", () => {
   for (const step of ["brainstorm", "plan", "work", "review"]) {
     assert.match(block, new RegExp(step + ":"), "keeps a prefix for the " + step + " step");
   }
+});
+
+test("Mixed-mode routing follows the agent's model role, not a hardcoded role", () => {
+  // Regression guard. spawnAgent's `model === "mixed"` branch used to call
+  // routeByRole("code-critical") unconditionally. Mixed is the default model for
+  // every task, so every task routed as final implementation no matter what it
+  // was: the Thinking/Operational/Writer settings could never reach a task, and
+  // a planning/architecture agent silently ran on the coding model.
+  assert.equal(routingRoleForAgentType("founder"), "think", "a thinking-role profile routes to the Opus tier");
+  assert.equal(routingRoleForAgentType("coo"), "think");
+  assert.equal(routingRoleForAgentType("developer"), "code-critical", "coding profiles are unchanged");
+  assert.equal(routingRoleForAgentType("qa"), "code-critical");
+  assert.equal(routingRoleForAgentType("designer"), "code-critical");
+
+  // Unclassified / role-less input must reproduce the historical default.
+  assert.equal(routingRoleForAgentType(undefined), "code-critical");
+  assert.equal(routingRoleForAgentType(""), "code-critical");
+  assert.equal(routingRoleForAgentType("   "), "code-critical");
+  assert.equal(routingRoleForAgentType("no-such-agent-type"), "code-critical");
+});
+
+test("the Mixed branch routes by role rather than a literal code-critical", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "subprocess.ts"), "utf-8");
+  const branch = src.match(/if \(model === "mixed"\)[\s\S]*?const route = routeByRole\([^\n]*\)/)?.[0] ?? "";
+  assert.ok(branch, "the mixed branch should still resolve a route");
+  assert.doesNotMatch(branch, /routeByRole\("code-critical"/, "must not hardcode the routing role");
+  assert.match(branch, /routeByRole\(routingRole/, "routes using the role derived from the agent type");
 });

@@ -4,6 +4,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { getActiveProfile, configuredClaudeProfiles, getLocalModelConfig } from "@/lib/config/constants";
 import { resolveProvider } from "@/lib/config/providers";
+import type { ModelRole } from "@/lib/connectivity/policy";
 import { verificationGatePrompt } from "@/lib/orchestrator/verification-gate";
 import { getDb } from "@/lib/db";
 import { buildBrainMemoryBundle } from "@/lib/brain/memory-bundle";
@@ -18,7 +19,7 @@ import { spawnCodexAgent } from "./codex-agent";
 import { outboundHttpRoutingPrompt, brainSearchRoutingPrompt, beeToolsRoutingPrompt } from "./outbound-routing";
 import { prepareOutboundMcp } from "./outbound-mcp";
 import { spawnImageAgent } from "./image-agent";
-import { getAgentProfile } from "@/lib/config/agent-profiles";
+import { getAgentProfile, type ProfileModelRole } from "@/lib/config/agent-profiles";
 import { isCodexModel, isNanoBananaModel, claudeShortName } from "@/lib/models/catalog";
 import { claudeEffortMode, hasBudgetCeiling, normalizeBudgetUsd, resolveThinkingMode } from "@/lib/config/budget-policy";
 
@@ -334,6 +335,35 @@ const LEGACY_PREFIXES: Record<string, string> = {
     "Review the diff for correctness bugs first, then for reuse and simplification. Report what you verified and what you only inspected. ",
 };
 
+/**
+ * Connectivity-router role for a Mixed-mode task, derived from the agent's own
+ * profile model role. "Mixed" is the default model for every task, so this is
+ * the seam that decides whether the Settings role overrides
+ * (Thinking/Coding/Operational/Writer) ever reach a task at all.
+ *
+ * Unknown or role-less agent types fall back to "code-critical" — the value
+ * that used to be hardcoded here — so unclassified work behaves exactly as before.
+ */
+const ROUTING_ROLE_BY_MODEL_ROLE: Record<ProfileModelRole, ModelRole> = {
+  thinking: "think",
+  coding: "code-critical",
+  operational: "execute",
+  // Writer shows "Default — Sonnet" in Settings; code-critical is the frontier
+  // tier that resolves there. "converse" would silently drop it to Haiku.
+  writer: "code-critical",
+};
+
+export function routingRoleForAgentType(agentType?: string | null): ModelRole {
+  const id = String(agentType ?? "").trim();
+  if (!id) return "code-critical";
+  try {
+    const role = getAgentProfile(id)?.modelRole;
+    return (role && ROUTING_ROLE_BY_MODEL_ROLE[role]) || "code-critical";
+  } catch {
+    return "code-critical";
+  }
+}
+
 function resolvePromptPrefix(workflowId?: string, stepIndex?: number): string {
   if (!workflowId || workflowId === "standalone") return "";
 
@@ -492,7 +522,15 @@ export async function spawnAgent(
     const { getConnectivityPolicy } = await import("@/lib/connectivity/policy");
     const { routeByRole } = await import("@/lib/routing/router");
     const { resolveModelId } = await import("@/lib/routing/model-resolver");
-    const route = routeByRole("code-critical", getConnectivityPolicy());
+    // Route by the agent's own model role. This used to be a hardcoded
+    // "code-critical", so EVERY Mixed task — the default for all tasks — was
+    // routed as final implementation regardless of what it actually was. The
+    // consequence: the Thinking/Operational/Writer settings had no effect on
+    // any task (only Coding did, since code-critical resolves the frontier
+    // tier), and a planning/architecture agent silently ran on the coding
+    // model. Unknown or role-less agent types keep the previous behavior.
+    const routingRole = routingRoleForAgentType(agentType);
+    const route = routeByRole(routingRole, getConnectivityPolicy());
     // Honor role overrides, including local ones — Mixed mode explicitly allows
     // a local model as the Coding choice (see role-model-overrides design).
     const resolved = resolveModelId(route.tier);
