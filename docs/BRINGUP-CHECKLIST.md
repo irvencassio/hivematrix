@@ -5,8 +5,8 @@ each section gates the next. Items marked **(live)** require the physical Mac.
 
 ## 0. Prerequisites
 - [ ] Reference Mac: M-series, 128 GB unified memory, recent macOS. **(live)**
-- [ ] Accounts on hand: the founder's phone number (iMessage), an email account, optional Telegram bot token, optional Codex/Anthropic auth for frontier, optional content/image endpoint + key.
-- [ ] Decide run posture: **100% local** (private/offline), **mixed** (frontier thinking + local execution), or **frontier-only**.
+- [ ] Accounts on hand: the founder's phone number (iMessage), an email account, optional Telegram bot token, a Claude subscription signed in to the `claude` CLI (required for any text inference), optional ChatGPT/Codex CLI auth, optional content/image endpoint + key.
+- [ ] Note: there is no offline/local-model posture since the Claude-native cutover (0.1.176) — text work needs a reachable frontier CLI; the local-only lanes (Desktop / Mail / Message) still run without cloud.
 
 ## 1. Install & first run
 - [ ] Install the notarized DMG (build ≥ 0.1.1 so auto-update works; ≤ 0.1.0 must be installed manually once). **(live)**
@@ -19,10 +19,11 @@ each section gates the next. Items marked **(live)** require the physical Mac.
 - [ ] **Accessibility** + **Screen Recording** — required for Desktop Lane (AX + capture/vision plane).
 - [ ] **Notifications** — for the desktop console and mobile pairing.
 
-## 3. Local model lifecycle (local / mixed posture)  **(live)**
-- [ ] Install the serving stack (`mlx_lm.server` preferred, or `lms`/LM Studio).
-- [ ] In the wizard's local-model step, pin Qwen3.6-27B 8-bit, 128K context.
-- [ ] Confirm `GET /local-model/status` shows the supervisor owns the server (launch → probe → relaunch-on-crash).
+## 3. Model access (required — there is no local inference)
+- [ ] Install the `claude` CLI and sign in on the operator's Claude subscription. Keyless by policy: no `ANTHROPIC_API_KEY`, no SDK.
+- [ ] Optional: install the `codex` CLI + `codex login` to make ChatGPT/Codex selectable per role.
+- [ ] Confirm `GET /onboarding` shows the **frontier** step `done` with the detected CLI path.
+- [ ] Understand the failure mode: with no frontier CLI reachable, every text role is `unavailable` and work **queues** — it is never downgraded to a local model (see `docs/MODEL-ROUTING.md`).
 
 ## 4. Channels (top priority — the control surface)
 - [ ] **Message Lane**: enable the imessage channel; add the founder's handle to the allowlist (`/messagebee/enable`, `/messagebee/identities`). Test-send to the phone. **(live)**

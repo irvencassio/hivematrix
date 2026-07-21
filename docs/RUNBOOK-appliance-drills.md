@@ -19,11 +19,11 @@ The recovery story is **structural**, not best-effort:
    written to `run_journal` (`directive-store.ts`); on restart `getActiveRuns()`
    picks up any run not in a terminal phase and the engine advances it from its
    last recorded step. No run state lives only in memory.
-4. **The local model server is re-supervised.** When Qwen runs on-box, the
-   serving supervisor (`src/lib/local-model/serving.ts`) relaunches it after a
-   crash/reboot — so 100%-local posture comes back without hand-running a server.
+4. **No inference process to re-supervise.** Since the Claude-native cutover
+   (0.1.176) there is no local model server: text work is dispatched to the
+   `claude` CLI per task, so a crash or reboot leaves nothing to relaunch.
 5. **License + connectivity are re-evaluated locally** at boot (no phone-home),
-   so a rebooted appliance is fully operational offline.
+   so a rebooted appliance comes back without operator action.
 
 ## Drill 1 — kill -9 everything mid-directive → resumes
 
@@ -42,8 +42,8 @@ The recovery story is **structural**, not best-effort:
 1. With a scheduled directive armed (e.g. the LinkedIn daily ritual, W5.3),
    `sudo reboot`.
 2. **Expected:** on login, launchd starts the daemon; `GET /health` returns
-   `status: ok` within ~5 minutes; the local model server is back up (local
-   posture); scheduled directives fire at their next due time.
+   `status: ok` within ~5 minutes; scheduled directives fire at their next due
+   time.
 3. **Pass criteria:** `GET /health` ok and `GET /metrics` shows the scheduler
    `running` by 3:05, with no human action.
 
@@ -51,9 +51,11 @@ The recovery story is **structural**, not best-effort:
 
 1. Disconnect networking, then reboot.
 2. **Expected:** daemon boots; connectivity policy resolves to `offline`/`local-only`;
-   `GET /posture` shows local Qwen + Desktop Lane + Terminal Lane `works`, frontier work
-   `queued`; license verifies locally (no phone-home).
-3. **Pass criteria:** the box is usable offline immediately after reboot.
+   `GET /posture` shows Desktop Lane + Terminal Lane `works` and all text-inference
+   work `queued` (there is no local model to fall back to since 0.1.176); license
+   verifies locally (no phone-home).
+3. **Pass criteria:** the box boots clean and degrades honestly — local lanes work,
+   model work queues rather than failing, and it drains when the link returns.
 
 ## Recording results
 

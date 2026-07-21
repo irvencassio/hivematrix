@@ -1,9 +1,16 @@
 # HiveMatrix Model Routing Reference
 
-Date: 2026-06-19
+Date: 2026-06-19 · Revised 2026-07-11 (Claude-native cutover), doc refreshed 2026-07-21
 Status: Canonical reference. Source of truth = `src/lib/connectivity/policy.ts`
 (role→tier tables) + `src/lib/routing/model-resolver.ts` (tier→model id) +
 `src/lib/routing/router.ts` (noLocal / frontier-review-debt).
+
+> **Claude-native since 2026-07-11 (0.1.176).** The local Qwen / LM Studio /
+> Rapid-MLX plane was removed: there is no `src/lib/local-model/`, no local
+> serving supervisor, and no `local-primary`/`local-secondary` tier. Every text
+> role runs on a Claude model invoked through the `claude` CLI on the operator's
+> subscription — no API key and no `@anthropic-ai` SDK. Historical record of the
+> change: `docs/superpowers/plans/2026-07-11-claude-native-cutover.md`.
 
 ## The model is chosen by ROLE, not by task type
 
@@ -13,109 +20,100 @@ concrete model id from config. Roles:
 
 | Role | What it's for |
 |------|---------------|
-| `think` | planning, review, architecture, directive planning |
+| `think` | planning, review, architecture, directive planning, deep-think |
 | `code-critical` | final implementation / UI — the code that ships |
 | `execute` | bulk coding, file ops, extraction — the operational workhorse |
 | `cheap-web` | Browser Lane web summarization |
+| `converse` | Flash Lane chat / voice turns (latency-optimized) |
 | `image` | image generation |
 
-## Mixed mode (the default — frontier reachable, `cloud-ok`)
-
-This is what runs when the cloud is available and you haven't forced Local or
-Cloud-only.
+## Frontier reachable (`cloud-ok` — the normal posture)
 
 | Role | Tier | Concrete model (default) |
 |------|------|--------------------------|
-| **think** (thinking) | frontier-premium | **Claude Opus** (alias `opus` → latest, or `thinkModel` from config) |
-| **code-critical** (final coding) | frontier | **Claude Sonnet** (alias `sonnet` → latest, or `frontierModel` from config) |
-| **execute** (operational tasks) | local-secondary | **local Qwen** (profile `secondary` model, else `primary`) |
-| **cheap-web** | local-secondary | **local Qwen** |
+| **think** | frontier-premium | **Claude Opus** (alias `opus` → latest, or `thinkModel` from config) |
+| **code-critical** | frontier | **Claude Sonnet** (alias `sonnet` → latest, or `frontierModel` from config) |
+| **execute** | operational | **Claude Haiku** (alias `haiku`, or `operationalModel` from config) |
+| **cheap-web** | operational | **Claude Haiku** |
+| **converse** | operational | **Claude Haiku** (the Flash loop escalates to frontier on tool depth > 3) |
 | **image** | nanai | **Nano Banana** (cloud) |
 
 So, answering the common question directly:
-- **Thinking → Claude Opus (frontier).**
-- **Final/critical coding → Claude Sonnet (frontier).**
-- **Operational tasks (bulk coding, file ops, extraction, cheap web) → local Qwen**, even when the cloud is up. This is deliberate: keep the expensive frontier for judgement-heavy work, run the high-volume grind locally.
+- **Thinking → Claude Opus.**
+- **Final/critical coding → Claude Sonnet.**
+- **Operational work (bulk coding, file ops, extraction, cheap web, Flash chat) → Claude Haiku.** This is deliberate: keep the expensive tiers for judgement-heavy work and run the high-volume grind on the cheap tier.
 
-If `frontierProvider: "codex"` is set in config, the default frontier tiers
-resolve to:
+The `opus` / `sonnet` / `haiku` aliases are the CLI's version-agnostic names
+(`src/lib/models/available.ts`), so nothing needs a bump when a new model of a
+tier ships.
+
+If `frontierProvider: "codex"` is set in config (and the `codex` CLI is
+installed), the default tiers resolve to:
 
 - Thinking: `codex:gpt-5.5`
 - Coding: `codex:gpt-5.3-codex-spark`
+- Operational: `codex:gpt-5.3-codex-spark` (Codex-only installs)
 
-The provider is a default-family hint, not a lock. Settings → Models can
-override each Mixed-mode role independently:
+The provider is a default-family hint, not a lock, and resolution is
+backend-aware: a configured model whose CLI is not installed is ignored rather
+than dispatched into a failure (`modelSupportedByBackends`,
+`model-resolver.ts`). Settings → Models can override each role independently:
 
-| Role | Default | Allowed override families |
-|------|---------|---------------------------|
-| Thinking | Opus or GPT-5.5 | Opus, Sonnet, GPT-5.5, Spark |
-| Coding | Sonnet or Spark | Opus, Sonnet, GPT-5.5, Spark, local Qwen |
-| Operational | local Qwen | local Qwen, Spark, Sonnet |
+| Role | Config key | Default |
+|------|-----------|---------|
+| Thinking | `thinkModel` | Opus (or GPT-5.5 under the Codex provider) |
+| Coding | `frontierModel` | Sonnet (or Spark) |
+| Operational | `operationalModel` | Haiku (or Spark) |
 
-Cloud-only still enforces no-local: a local Qwen Coding override is ignored
-there so the posture never silently spawns a local model.
+## Without frontier (`local-only` / `offline`)
 
-## Without frontier (Local or Cloud-unreachable: `local-only` / `offline`)
-
-When no frontier is available, **everything runs on local Qwen** — nothing is
-silently dropped:
+There is no local inference plane, so **both no-cloud modes route every text role
+to `unavailable`** — one shared table in `policy.ts` so the two modes can never
+silently drift apart:
 
 | Role | Tier | Concrete model |
 |------|------|----------------|
-| **think** | local-primary | Qwen **primary** (default `Qwen3-Coder-Next-80B-A3B`) |
-| **code-critical** | local-primary | Qwen **primary** — *plus frontier-review debt queued* |
-| **execute** | local-secondary | Qwen **secondary** (falls back to primary if unset) |
-| **cheap-web** | local-secondary | Qwen secondary/primary |
+| **think** | unavailable | — (queued) |
+| **code-critical** | unavailable | — (queued) |
+| **execute** | unavailable | — (queued) |
+| **cheap-web** | unavailable | — (queued) |
+| **converse** | unavailable | — (Flash gated off; `policy.ts` capability reason: "no cloud connectivity; Claude required") |
 | **image** | unavailable | (mflux local fallback if configured) |
 
-**Frontier-review debt:** code-critical work that had to run locally is recorded
-so it gets a frontier review pass when `cloud-ok` returns
-(`router.ts` → `frontierReviewDebt`, `orchestrator/frontier-debt.ts`). The local
-result is used now; it isn't thrown away when the cloud comes back.
+Work is **queued, never silently downgraded**. `resolveModelId("unavailable")`
+returns `null` and the caller queues or skips.
 
-**primary vs secondary:** if you only configure one local model, set `primary`
-and leave `secondary` null — `local-secondary` automatically falls back to
-`primary` (`model-resolver.ts:55`). Two entries only matter if you want a
-smaller/cheaper model for the `execute`/`cheap-web` grind.
+**Frontier-review debt:** the mechanism that recorded code-critical work executed
+on a weaker tier so it got a frontier review pass later
+(`router.ts` → `frontierReviewDebt`, `orchestrator/frontier-debt.ts`) still
+exists, but with no local tier nothing routes into it in normal operation.
 
 ## Cloud-only mode (`noLocal`)
 
-A third macro posture: every role runs on frontier and the local model is never
-spawned. When the cloud is unreachable a cloud-only task is **left to retry**,
-not downgraded to local (`router.ts` `RouteOptions.noLocal`).
+Every role runs on frontier and no non-frontier override is honored
+(`RouteOptions.noLocal` → `resolveModelId({ noLocalOverrides: true })`, which
+drops any role override that doesn't look like a frontier model id — see
+`isFrontierOverride`). When the cloud is unreachable a cloud-only task is **left
+to retry**.
 
-## Running without frontier — what's guaranteed
+## What still works with no cloud
 
-- The local Qwen server is **owned by the daemon** when `qwen.location: "local"`:
-  it's launched, health-probed, and relaunched on crash
-  (`src/lib/local-model/serving.ts`).
-- Tasks dispatched while the server is briefly down (cold start / relaunch
-  throttle) now **wait for it** instead of failing — see
-  `waitForServerReady` (serving.ts) + the pre-flight in
-  `orchestrator/generic-agent.ts`. Up to ~45s; then a clear actionable error.
-- Lanes that work with no cloud: **Terminal Lane, Desktop Lane, Mail Lane,
-  Message Lane** (all driven by local osascript / shells / chat.db). The
-  **Browser Lane** web/authenticated modes need the internet, so they're
-  disabled offline by the connectivity matrix.
+Inference does not, but the local-only capability lanes do: **Desktop Lane, Mail
+Lane, Message Lane** (osascript / shells / chat.db), plus brain docs and the
+local symbol index. The **Browser Lane** web/authenticated modes need the
+internet, so the connectivity matrix disables them offline.
 
 ## Config knobs (`~/.hivematrix/config.json`)
 
 ```jsonc
 {
   "frontierProvider": "claude",          // or "codex"
-  "thinkModel": "opus",                  // optional override for think tier (alias → latest; full ids like "claude-opus-4-8" still accepted)
-  "frontierModel": "sonnet",             // optional override for code-critical; can be Opus/Sonnet/GPT-5.5/Spark/Qwen in Mixed
-  "operationalModel": "qwen/qwen3.6-27b", // optional override for local-secondary; can be Qwen/Spark/Sonnet
-  "qwen": {
-    "location": "local",                 // local | lan | public
-    "primary":   { "modelId": "...", "endpoint": "http://localhost:8080", "provider": "mlx", "contextLimit": 131072 },
-    "secondary": { "modelId": "...", "endpoint": "http://localhost:8080", "provider": "mlx", "contextLimit": 131072 },
-    "serveCommand": ["mlx_lm.server", "--model", "...", "--port", "8080"]  // optional override
-  }
+  "thinkModel": "opus",                  // optional override for think (alias → latest; full ids like "claude-opus-4-8" still accepted)
+  "frontierModel": "sonnet",             // optional override for code-critical
+  "operationalModel": "haiku"            // optional override for the operational tier
 }
 ```
 
-> ⚠️ Set `contextLimit` to the value the loaded model actually supports. The
-> default (`32768` for a partial config) is conservative; an oversized limit
-> surfaces as intermittent `413`/context-overflow errors on large tasks — one of
-> the "Qwen sometimes fails" causes.
+> The retired `qwen`, `localModel` and `localEngine` blocks are dead keys. Old
+> configs are cleaned up automatically on load by `src/lib/config/migrate.ts`;
+> stale non-frontier role overrides are dropped there too.

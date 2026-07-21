@@ -6,11 +6,22 @@
 **Execution specs (self-contained, one per phase, for non-Fable executors):** `~/_GD/brain/projects/hive/specs/2026-07-02-phase-{1..4}-*.md`
 **Supersedes:** `2026-07-01-openclaw-deployment-roadmap.html` — **rev 2 decision: OpenClaw is removed entirely** (no interim bridge) once Flash Lane passes the parity gate inside Phase 1. Harvest chat history + persona files before decommission.
 
+> **Partially superseded (2026-07-11, release 0.1.176 — Claude-native cutover).**
+> This is a dated planning record; the model posture it assumes has since changed.
+> The local Qwen / LM Studio / MLX plane was **removed**, so there is no offline
+> inference floor: every text role now runs on Claude (Opus / Sonnet / Haiku) via
+> the `claude` CLI, and with no cloud all text roles resolve to `unavailable` and
+> queue. Any acceptance criterion or risk mitigation below that leans on a "local
+> model" or "offline" fallback no longer holds. Current architecture:
+> `docs/MODEL-ROUTING.md`; the change record:
+> `docs/superpowers/plans/2026-07-11-claude-native-cutover.md`. (The Work Packages
+> subsystem referenced in W1 was also removed, 2026-07-06.)
+
 ---
 
 ## 1. Product thesis
 
-HiveMatrix becomes the **trustworthy autonomous operator for one person's business and life**: a signed, notarized Mac app + companion apps that run terminal, browser, mail, message, desktop, and voice sessions for AI agents — with credentials held in the app (never in prompts), keyless multi-model routing (ChatGPT/Codex CLI, Claude Code CLI, local Qwen) including fully offline, and max-autonomy operation with a flight recorder instead of constant approval friction.
+HiveMatrix becomes the **trustworthy autonomous operator for one person's business and life**: a signed, notarized Mac app + companion apps that run terminal, browser, mail, message, desktop, and voice sessions for AI agents — with credentials held in the app (never in prompts), keyless multi-model routing (Claude Code CLI, ChatGPT/Codex CLI), and max-autonomy operation with a flight recorder instead of constant approval friction.
 
 One-line positioning: **"OpenClaw, but trustworthy and finished."**
 
@@ -18,7 +29,7 @@ Target customer (decided): **personal/prosumer, free + paid tiers.** Not teams, 
 
 Autonomy posture (decided): **max autonomy by default, minimal gates**, with a Settings toggle for a supervised/approval mode per user preference, plus non-negotiable safety rails (§ W3) that exist in both modes.
 
-Model posture (decided): **keyless only.** Claude joins via the Claude Code CLI on a Claude subscription — same pattern as the Codex CLI backend. No Anthropic/OpenAI API keys stored or required. Local Qwen (LM Studio/MLX) remains the offline floor.
+Model posture (decided): **keyless only.** Claude joins via the Claude Code CLI on a Claude subscription — same pattern as the Codex CLI backend. No Anthropic/OpenAI API keys stored or required. *(Superseded 2026-07-11: the local Qwen (LM Studio/MLX) offline floor this line originally kept was removed — keyless-only stands, the offline floor does not.)*
 
 ---
 

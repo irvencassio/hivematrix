@@ -25,14 +25,31 @@ brainstorming → writing-plans → subagent-driven-development → finishing-a-
 
 6. **finishing-a-development-branch** — When all tasks complete. Verify tests, merge/PR decision, cleanup.
 
-### Why This Is Especially Critical for the Local Qwen Model
+### The model stack you are working inside
 
-HiveMatrix routes work between a frontier model (Claude) and a local Qwen 3.6 27B model served via LM Studio on this Mac. When the coding agent is working on **local-model features** (anything under `src/lib/local-model/`, `src/lib/config/qwen-profile.ts`, `src/lib/models/backends.ts`, readiness gates, fallback logic, LM Studio integration), Superpowers discipline is **non-negotiable**:
+HiveMatrix is **Claude-native since 2026-07-11** (0.1.176). The local Qwen /
+LM Studio / Rapid-MLX plane was deleted — `src/lib/local-model/` and
+`src/lib/config/qwen-profile.ts` do not exist, and there is no local inference
+fallback. Every text role resolves to a Claude model through the `claude` CLI on
+the operator's subscription — **no API key, no `@anthropic-ai` SDK, ever**:
+`think` → `frontier-premium` → **Opus**; `code-critical` → `frontier` →
+**Sonnet**; `execute`/`cheap-web`/`converse` → `operational` → **Haiku**; `image`
+→ `nanai` → Nano Banana. In `local-only`/`offline` every text role is
+`unavailable` — work queues, it never degrades to a weaker model.
 
-- **Qwen 27B is less capable than Claude** for complex autonomous reasoning. A well-specified plan compensates for weaker model judgment — the plan carries the design intent, not the model's improvisation.
-- **TDD is your safety net.** With a less capable model, subtle regressions are more likely. Watching tests fail before implementation is the only reliable way to verify correctness.
-- **The local model path touches real hardware.** LM Studio, MLX, decode rates, context limits — these are integration surfaces where "it works on my machine" is not a test. The readiness gate (`scripts/qwen-readiness.mts`) must be part of the verification step.
-- **Plan review prevents drift.** When the model is doing the heavy lifting, it can silently introduce scope creep or incorrect assumptions. The two-stage review (spec compliance, then code quality) catches this.
+Source of truth: `src/lib/connectivity/policy.ts` (role→tier),
+`src/lib/routing/model-resolver.ts` (tier→model id), `src/lib/models/available.ts`
+(role slots), `src/lib/models/backends.ts` (CLI detection); prose in
+`docs/MODEL-ROUTING.md`. Superpowers discipline is **non-negotiable when you touch
+routing** — those files, connectivity postures, or the Flash loop:
+
+- **Routing is load-bearing for everything else.** A wrong tier silently sends the
+  system's grind to Opus, or judgement work to Haiku. Regressions are invisible at
+  runtime and surface as cost/quality drift weeks later — watch the test fail first.
+- **Never reintroduce the removed stack.** No local serving supervisor, no local
+  OpenAI-compatible text endpoint, no `ANTHROPIC_API_KEY`, no SDK. Config keys
+  `qwen`/`localModel`/`localEngine` are dead and stripped by
+  `src/lib/config/migrate.ts` — it names them on purpose; leave it alone.
 
 ### Output Paths
 
@@ -56,7 +73,6 @@ Before declaring work complete:
 1. `npm run typecheck` — zero errors
 2. `npm test` — all tests passing
 3. `node scripts/scope-wall.mjs` — zero violations
-4. For local-model changes: `npx tsx scripts/qwen-readiness.mts` — all 6 checks pass
 
 ### Red Flags — Stop and Use Superpowers If You Catch Yourself
 
@@ -65,7 +81,7 @@ Before declaring work complete:
 | "This is a small change, I'll just do it" | Small changes are where assumptions rot. Brainstorm first. |
 | "I know what the code should look like" | Knowing ≠ testing. Write the failing test first. |
 | "The plan is obvious, skip to implementation" | The plan is the artifact. Save it. |
-| "Qwen can handle this without a detailed plan" | The coding agent writes the plan; Qwen executes it. The plan is the constraint that keeps Qwen on track. |
+| "The model can figure this out without a detailed plan" | The plan is the constraint that keeps execution on the design. Without it you get the model's improvisation, not your intent. |
 
 ## Complexity Budget — Fewer Concepts, Not More Tests
 
