@@ -316,12 +316,22 @@ function loadAgentGuide(): string {
   }
 }
 
-// Legacy fallback for tasks created before dynamic workflows
+// Despite the name this is NOT dead code: it is the only live path whenever
+// config.json carries no workflowSteps/workflows (the common case). It used to
+// say "Use the /workflows:<step> skill." for each step — but no such skills are
+// installed, so every task's first action was a Skill call that returned
+// "Unknown skill: workflows:work", after which the agent improvised (one run
+// recovered by scanning the filesystem from /). Describe the step inline
+// instead; never name a skill from here unless it is known to be installed.
 const LEGACY_PREFIXES: Record<string, string> = {
-  brainstorm: "Use the /workflows:brainstorm skill. ",
-  plan: "Use the /workflows:plan skill. ",
-  work: "Use the /workflows:work skill. ",
-  review: "Use the /workflows:review skill. ",
+  brainstorm:
+    "Start in design mode: read the relevant code before proposing anything, lay out 2-3 approaches with their trade-offs, and settle on one before writing code. ",
+  plan:
+    "Break the approved design into small ordered steps, each naming exact file paths and each independently verifiable. Write the failing test before the change it covers. ",
+  work:
+    "Implement the plan step by step, running the tests as you go. Commit your work before you finish so it cannot be swept into another task's commit. ",
+  review:
+    "Review the diff for correctness bugs first, then for reuse and simplification. Report what you verified and what you only inspected. ",
 };
 
 function resolvePromptPrefix(workflowId?: string, stepIndex?: number): string {

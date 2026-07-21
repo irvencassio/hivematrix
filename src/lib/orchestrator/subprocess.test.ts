@@ -201,3 +201,18 @@ test("spawnAgent passes the RAW thinkingMode to the effort flag, not the resolve
   // The ultrathink prefix still uses the resolved value.
   assert.match(src, /effectiveThinkingMode === "ultrathink"/);
 });
+
+test("injected step prefixes never reference an uninstalled skill", () => {
+  // Regression guard. LEGACY_PREFIXES is the only live path when config.json
+  // has no workflowSteps/workflows, and it used to inject
+  // "Use the /workflows:work skill." — a skill that is not installed. Every
+  // task's first action was therefore a failing Skill call.
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "subprocess.ts"), "utf-8");
+  const block = src.match(/const LEGACY_PREFIXES[\s\S]*?\n\};/)?.[0] ?? "";
+  assert.ok(block, "LEGACY_PREFIXES block should exist");
+  assert.doesNotMatch(block, /\/workflows:/, "must not point tasks at /workflows:* skills");
+  assert.doesNotMatch(block, /Use the \/\w+:\w+ skill/, "must not name any slash-skill");
+  for (const step of ["brainstorm", "plan", "work", "review"]) {
+    assert.match(block, new RegExp(step + ":"), "keeps a prefix for the " + step + " step");
+  }
+});
