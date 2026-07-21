@@ -27,21 +27,20 @@ Next.js UI, client of the daemon. Centered shell: board left, session center, co
 
 ## Model plane
 
-- Frontier favorite: user-selectable; shipping default Claude (Q3)
-- Qwen: primary host is this Mac (M5 Max, 128GB unified) via MLX-first serving, llama.cpp/GGUF fallback; LAN/public endpoints configurable (Q2). See QWEN-LOCAL-PROFILE.md.
+- **Claude-native since 2026-07-11 (0.1.176).** The local Qwen / LM Studio / Rapid-MLX plane was removed; there is no local text inference and no `local-primary`/`local-secondary` tier. Every text role runs on a Claude model through the `claude` CLI on the operator's subscription — keyless (no API key, no `@anthropic-ai` SDK). Codex CLI is an optional alternate frontier provider (Q3).
+- Router roles → tiers → models: think → frontier-premium → Opus; code-critical → frontier → Sonnet; execute | cheap-web | converse → operational → Haiku; image → nanai. `src/lib/connectivity/policy.ts` + `src/lib/routing/model-resolver.ts`; prose in `docs/MODEL-ROUTING.md`.
 - Image role: Nano Banana when cloud-ok; local MLX fallback (mflux — FLUX.2 Klein / Qwen-Image class) in local-only/offline (Q5)
-- Router roles: think | execute | code-critical | image | cheap-web
-- Frontier-review-debt queue for work executed locally during exhaustion
-- **Deep Think** (`src/lib/models/deep-think.ts`) — test-time compute scaling on the keyless local model: N temperature-diverse parallel rollouts (thinking ON) → self-consistency agreement signal → list-wise synthesis → critique-revise only on disagreement; calibrated confidence out. Exposed as the flash `deep_think` tool for hard questions. Local-only by construction.
+- In `local-only`/`offline` every text role resolves to `unavailable` — work queues, it is never downgraded. The frontier-review-debt queue (for code-critical work executed on a weaker tier) remains but is unused with no local tier.
+- **Deep Think** (`src/lib/models/deep-think.ts`) — test-time compute scaling on Claude Opus: N temperature-diverse parallel rollouts → self-consistency agreement signal → list-wise synthesis → critique-revise only on disagreement; calibrated confidence out. Exposed as the flash `deep_think` tool for hard questions.
 
 ## Worker contract and harnesses
 
-One worker contract. Four peer harnesses selected by routing policy:
-- Claude Code
-- Codex
-- Qwen Code
+One worker contract. Two peer harnesses selected by routing policy:
+- Claude Code (`claude` CLI — the default)
+- Codex (`codex` CLI — optional alternate provider)
 
-Qwen-Agent: optional compatibility adapter only, never an orchestrator.
+The Qwen Code harness was retired with the local stack (2026-07-11); skill export
+targets exactly these two (`SKILL_HARNESSES`, `src/lib/skills/`).
 
 ## Embedded capability + channel lanes
 
@@ -51,7 +50,7 @@ Qwen-Agent: optional compatibility adapter only, never an orchestrator.
 - Message Lane (`messagebee`; Q8 channel) — SMS/iMessage in/out; reads ~/Library/Messages/chat.db (Full Disk Access) high-water-marked by ROWID, sends via osascript; allowlisted senders only; routes inbound to needs_input replies or new tasks.
 - Mail Lane (`mailbee`; Q9 channel) — email watch + trust-gated drafting via Apple Mail (osascript; no IMAP/SMTP/OAuth). classifyMailTrust gates every inbound (prompt-injection + risky-attachment detection, trusted/external/suspicious); auto-send only for trusted senders, else draft-for-approval.
 - Market Insight Lane (`traderbee`; Q11 lane) — market-data watch + threshold alerts. **Analysis & alerts ONLY — never places trades, never moves money.** Reads quotes from Alpaca's DATA API only (env-var keys `APCA_API_KEY_ID`/`APCA_API_SECRET_KEY`; the trading API is never called); a watchlist + alert rules (above/below/pct-move) evaluated on a poller → notify. Self-gates when keys absent.
-- Voice Lane (`voicebee`; Q12 lane) — live voice ingress/egress on local models (configured STT command → Hive LLM → Kokoro-voice TTS via Pipecat); conversation mode (Mac/iPhone mic) + phone-answer mode (Twilio SIP trunk → local pipeline); voice notes/calls land as task artifacts. Local-first; the only external seam is the phone number. (The video-production factory and its HeyGen avatar path were removed 2026-07-05 — voice is Kokoro-only, no video.)
+- Voice Lane (`voicebee`; Q12 lane) — live voice ingress/egress (configured STT command → Hive LLM → Kokoro-voice TTS via Pipecat); conversation mode (Mac/iPhone mic) + phone-answer mode (Twilio SIP trunk → local pipeline); voice notes/calls land as task artifacts. STT and TTS stay on-device; the LLM turn goes through Flash (Claude) since the Claude-native cutover, so a voice turn needs connectivity. (The video-production factory and its HeyGen avatar path were removed 2026-07-05 — voice is Kokoro-only, no video.)
 - Review Lane (`managerbee`) — control-plane heartbeat, routing/review diagnostics, escalations, approvals, and worker setup visibility.
 - Memory Lane (`brainbee`) — brain index, lane playbooks, memory bundle assembly, and playbook hygiene.
 
@@ -61,12 +60,12 @@ Native ad-hoc conversational agent loop — the replacement for the OpenClaw cha
 
 - **Session store** (`src/lib/flash/store.ts`, tables `flash_sessions` + `flash_turns`) — per-channel-peer session scoping; same iMessage sender resumes their session; console + voice share one operator session when peer is `"operator"`.
 - **Context assembly** (`src/lib/flash/context.ts`) — system prompt built from persona files (`<brainRoot>/persona/`), today's daily note, rolling session summary, and `brain_search` results for the current text.
-- **Agent loop** (`src/lib/flash/loop.ts`) — streams LM Studio (Qwen) via OpenAI-compatible SSE; executes lane tools + flash-only tools (`persona_update`, `generate_avatar`, `deep_think`, `escalate_to_task` — creates a self-planning `workflow:"work"` task; and `learn_skill` — live capability acquisition, see Self-learning below); budget: 12 tool calls / 3 min. The system prompt (`context.ts`) carries the skill index (with per-skill params) + a capability doctrine: answer → tool → `skill_run` → `learn_skill` → `escalate_to_task` (kind `self-improvement` routes to the HiveMatrix repo) — never dead-end, never claim success a tool result doesn't show.
-- **Routing role** — `converse` (resolves to `local-primary` in all connectivity modes).
-- **Capability gate** — `flash` (available in all three connectivity modes; cloud-dependent tools degrade within the loop per their own gates).
+- **Agent loop** (`src/lib/flash/loop.ts`) — runs one turn as a single `claude --model haiku` CLI invocation, streaming its `stream-json` output; lane tools + flash-only tools are exposed to the CLI as a stdio MCP server (`flash-mcp.ts`) and executed there. Flash-only tools: `persona_update`, `generate_avatar`, `deep_think`, `escalate_to_task` (creates a self-planning `workflow:"work"` task) and `learn_skill` (live capability acquisition, see Self-learning below); budget: 12 tool calls / 3 min. The system prompt (`context.ts`) carries the skill index (with per-skill params) + a capability doctrine: answer → tool → `skill_run` → `learn_skill` → `escalate_to_task` (kind `self-improvement` routes to the HiveMatrix repo) — never dead-end, never claim success a tool result doesn't show.
+- **Routing role** — `converse` (resolves to the `operational` tier → Haiku when `cloud-ok`; `unavailable` with no cloud).
+- **Capability gate** — `flash` (available in `cloud-ok` only — it needs the Claude CLI; cloud-dependent tools degrade within the loop per their own gates).
 - **Endpoints** — `POST /flash/turn` (SSE stream: `token`, `tool_start`, `tool_result`, `escalated`, `done`), `GET /flash/sessions`, `GET /flash/sessions/:id/turns`, `POST /flash/turns/:id/feedback`.
 - **Eval** — bad turns auto-appended to `eval/flash-parity/prompts.jsonl` as regression cases.
-- **Learning loop** (`src/lib/flash/distill.ts`, `src/lib/flash/learning-loop.ts`) — polls every 15 min; distills sessions cold for 6h (no activity + not yet distilled). Cheap local-model pass extracts reusable how-tos into skills (`upsertSkill`, dedupe/refine on re-distillation), files failures/friction/gaps into the feedback backlog (`recordFeedbackDedup`), appends notable events to `<brainRoot>/persona/memory/YYYY-MM-DD.md`, and — operator-peer sessions only — merges durable operator facts into `persona/USER.md` and stated goals into `persona/GOALS.md` (dated/deduped/bounded; announced via `flash:persona_updated`). DB column `flash_sessions.distilledAt` prevents re-distillation across daemon restarts. The same loop also runs two slow anticipatory passes: **pattern detection** (`src/lib/feedback/pattern-detection.ts`, daily) clusters the recurring backlog into deduped "fix the root cause" enhancement proposals; **persona evolution** (`src/lib/flash/persona-evolution.ts`, weekly) synthesizes bounded SOUL.md operating notes from chronic friction, applied-and-announced under autonomous / proposed otherwise. Wired in `src/daemon/index.ts`.
+- **Learning loop** (`src/lib/flash/distill.ts`, `src/lib/flash/learning-loop.ts`) — polls every 15 min; distills sessions cold for 6h (no activity + not yet distilled). A cheap operational-tier (Haiku) pass extracts reusable how-tos into skills (`upsertSkill`, dedupe/refine on re-distillation), files failures/friction/gaps into the feedback backlog (`recordFeedbackDedup`), appends notable events to `<brainRoot>/persona/memory/YYYY-MM-DD.md`, and — operator-peer sessions only — merges durable operator facts into `persona/USER.md` and stated goals into `persona/GOALS.md` (dated/deduped/bounded; announced via `flash:persona_updated`). DB column `flash_sessions.distilledAt` prevents re-distillation across daemon restarts. The same loop also runs two slow anticipatory passes: **pattern detection** (`src/lib/feedback/pattern-detection.ts`, daily) clusters the recurring backlog into deduped "fix the root cause" enhancement proposals; **persona evolution** (`src/lib/flash/persona-evolution.ts`, weekly) synthesizes bounded SOUL.md operating notes from chronic friction, applied-and-announced under autonomous / proposed otherwise. Wired in `src/daemon/index.ts`.
 - **Heartbeat** (`src/lib/flash/heartbeat.ts`; W8 presence layer) — config-gated unprompted pulse: every N min (default 30, quiet-hours aware) one flash turn over `persona/HEARTBEAT.md` (seeded on first enable) + a `composeBriefing()` status snapshot; stands down silently (`HEARTBEAT_STAND_DOWN`) unless something warrants attention. Autonomy dial shapes each pass (manual observe-only → autonomous acts inside existing lane gates, no extra approvals). Daily moments ride the same loop: persona-voice morning brief + evening recap (APNs-first, notify fallback) — replaces the retired Morning Briefing brand without resurrecting it. Reports land as replyable operator-session turns. Delivery deps daemon-injected. Endpoints: `GET/POST /settings/heartbeat`, `POST /heartbeat/run`.
 - **Scope** — flash/ may import routing/, orchestrator/, brain/, skills/, db/. Only daemon/ may import flash/.
 
@@ -125,4 +124,4 @@ Installable outcome packs that deliver a job end-to-end.
 
 ## Memory plane
 
-~/_GD/brain is canonical. No harness-side or Qwen-side shadow memory.
+~/_GD/brain is canonical. No harness-side or model-side shadow memory.

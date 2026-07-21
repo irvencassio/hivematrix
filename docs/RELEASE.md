@@ -106,9 +106,10 @@ to `/onboarding/*` (see `src/lib/onboarding/actions.ts`):
 - **config** — write `~/.hivematrix/config.json` + daemon token
 - **brain** — set the canonical `config.memory.brainRootDir` (the one store every
   harness reads); optional `~/brain` shortcut
-- **local-model** — point at an OpenAI-compatible endpoint, or choose cloud-only
 - **daemon** — install + load the launchd agent pointing at the bundled daemon
   (refuses unless the app is in `/Applications` — translocation guard)
-- **frontier** — API keys or detected `claude`/`codex` CLI
+- **frontier** (required) — detected `claude` CLI (or `codex`); keyless, no API
+  keys. There is no local-model step: the local inference plane was removed in
+  0.1.176
 - **desktop** — install the Desktop Lane helper launchd agent + open the Accessibility /
   Screen Recording panes

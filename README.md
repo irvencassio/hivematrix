@@ -2,8 +2,8 @@
 
 An always-on, single-Mac **autonomous operations platform**. A headless daemon
 (launchd-supervised) runs directives — standing objectives that plan, execute,
-verify, reflect, and re-arm 24×7 — routing work between a frontier model and a
-local Qwen model under a connectivity policy, with a native desktop-control
+verify, reflect, and re-arm 24×7 — routing work by role across the Claude model
+tiers under a connectivity policy, with a native desktop-control
 capability (Desktop Lane), a signed/notarized app shell, and a self-update channel.
 
 Greenfield reset of Hive 1. The design is locked by [DECISIONS.md](DECISIONS.md)
@@ -20,15 +20,15 @@ launchd ─▶ Hive daemon (Node, :3747) ──┬─ scheduler + directive run 
    console (SPA, served at / )  ◀───────┘
    Tauri .app shell  ◀── loads the console
    Desktop Lane helper (.app, :3748) ◀── AX / CGEvent / capture / AppleScript, approval-gated
-   Rapid-MLX (:8000 fast · :8001 coding) ◀── Qwen3.6 4-bit tiers (LM Studio/Ollama also work)
+   `claude` CLI (subscription OAuth) ◀── Opus · Sonnet · Haiku by role (no API key, no SDK)
 ```
 
 ## Prerequisites
 
 - macOS 12+ (built/run on Apple Silicon, M-series)
 - Node 22 (`nvm` ok); for the app shell: Rust + `cargo-tauri`, Xcode
-- Local model plane: **Rapid-MLX** (the on-device engine; LM Studio / Ollama are
-  drop-in OpenAI-compatible alternates). The daemon sizes + serves it per machine.
+- Model plane: the **`claude` CLI** signed in on a Claude subscription (the
+  `codex` CLI is an optional alternate frontier provider). No API keys.
 - For signed builds: a Developer ID Application cert + a notarytool keychain
   profile (see [docs/UPDATE-CHANNEL.md](docs/UPDATE-CHANNEL.md))
 
@@ -50,26 +50,23 @@ npx tsx src/daemon/index.ts         # serves http://127.0.0.1:3747
 Open the operator console at **http://127.0.0.1:3747/** (board · session ·
 context/brain, with live soak/health + a setup checklist).
 
-### Local model (Rapid-MLX two-tier)
+### Model plane (Claude-native)
 
-The local plane is **Rapid-MLX** serving two resident Qwen3.6 4-bit tiers —
-`fast` (35B-A3B, :8000, reasoning off) for daily/agentic/voice and `coding`
-(27B-dense, :8001) for hard coding — sized to the machine's RAM. Provision it
-for this Mac (installs the engine + pulls only the tiers that fit, writes
-`~/.hivematrix/config.json` `localEngine`):
+Since 0.1.176 (2026-07-11) every text role runs on Claude through the `claude`
+CLI on the operator's subscription — **no API key, no SDK**, and no local
+inference plane (the Qwen / LM Studio / Rapid-MLX stack was removed):
 
-```bash
-npx tsx scripts/provision-local-engine.mts            # plan (dry run)
-npx tsx scripts/provision-local-engine.mts --apply    # install + pull + configure
-```
+| Role | Model |
+|------|-------|
+| thinking (plan / review / architecture) | Opus |
+| coding (what ships) | Sonnet |
+| operational + Flash chat / voice | Haiku |
+| image | Nano Banana |
 
-Canonical reference: [docs/MODEL-ROUTING.md](docs/MODEL-ROUTING.md). LM Studio /
-Ollama remain valid alternates (`localEngine.engine`). To prove a configured
-local model is ready:
-
-```bash
-npx tsx scripts/qwen-readiness.mts   # 6-check readiness gate + eval suite
-```
+Install the CLI and sign in (`claude`); `GET /onboarding` reports it as the
+required **frontier** step. With no frontier CLI reachable, text roles are
+`unavailable` and work queues rather than degrading. Canonical reference:
+[docs/MODEL-ROUTING.md](docs/MODEL-ROUTING.md).
 
 ### Build the signed app
 
@@ -98,7 +95,7 @@ bash scripts/build-dmg.sh            # notarized drag-to-install .dmg (hdiutil, 
 | [COMPONENT-MAP.md](COMPONENT-MAP.md) | Enforced taxonomy (CI-checked) |
 | [DECISIONS.md](DECISIONS.md) | Closed design decisions |
 | [DIRECTIVE-PRIMITIVE.md](DIRECTIVE-PRIMITIVE.md) | Directive/Run data model |
-| [QWEN-LOCAL-PROFILE.md](QWEN-LOCAL-PROFILE.md) | Local model targets + profile |
+| [docs/MODEL-ROUTING.md](docs/MODEL-ROUTING.md) | Role → tier → model routing |
 | [ONBOARDING.md](ONBOARDING.md) | First-run provisioning |
 | [docs/UPDATE-CHANNEL.md](docs/UPDATE-CHANNEL.md) | Release/update runbook |
 

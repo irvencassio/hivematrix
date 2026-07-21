@@ -8,30 +8,34 @@ Required steps gate a green first run; optional steps unlock extra capability.
 
 ## 1. Configuration file (required)
 
-Create `~/.hivematrix/config.json`. Minimal local-only config:
+Create `~/.hivematrix/config.json`. Model routing needs no config at all — the
+role defaults (Opus / Sonnet / Haiku) resolve from the installed CLI, so a
+minimal config only carries deliberate overrides:
 
 ```json
 {
-  "localModel": { "provider": "lmstudio", "endpoint": "http://localhost:1234/v1", "modelName": "qwen/qwen3.6-27b" },
-  "qwen": {
-    "location": "local",
-    "primary": { "modelId": "qwen/qwen3.6-27b", "endpoint": "http://localhost:1234/v1", "provider": "lmstudio", "contextLimit": 65536 },
-    "thinkingEnabled": true, "minDecodeRate": 15, "probeTimeoutMs": 120000
-  }
+  "frontierProvider": "claude",
+  "memory": { "brainRootDir": "~/_GD/brain" }
 }
 ```
 
-## 2. Local model — Qwen via LM Studio (required)
+Dead keys from the pre-2026-07-11 local stack (`qwen`, `localModel`,
+`localEngine`) are stripped automatically on load — see
+`src/lib/config/migrate.ts`.
 
-1. Install [LM Studio](https://lmstudio.ai); download **Qwen 3.6 27B (MLX 8-bit)**.
-2. Load it with no TTL so it stays resident:
-   `lms load qwen/qwen3.6-27b --context-length 65536 --gpu max -y` (its API
-   server runs on `:1234`; `autoStartOnLaunch` + a Login Item keep it up).
-3. Verify the readiness gate: `npx tsx scripts/qwen-readiness.mts` (6 checks:
-   model listing, streaming, single tool call, multi-step tool chain,
-   reasoning/think separation, decode rate ≥ floor) + the standing eval suite.
+## 2. Model access — the `claude` CLI (required)
 
-See [QWEN-LOCAL-PROFILE.md](QWEN-LOCAL-PROFILE.md) for model/quant rationale.
+HiveMatrix is Claude-native: every text role runs through the `claude` CLI on the
+operator's Claude subscription (OAuth). **No API key, no SDK, and no local model
+server** — the Qwen / LM Studio plane was removed in 0.1.176.
+
+1. Install [Claude Code](https://claude.com/claude-code) and sign in (`claude`).
+2. Optional: install the `codex` CLI and `codex login` if you want ChatGPT/Codex
+   as an alternate frontier provider (`"frontierProvider": "codex"`).
+3. Verify: `curl -s http://127.0.0.1:3747/onboarding` shows the **frontier** step
+   `done` with the detected CLI path.
+
+Role → model mapping and overrides: [docs/MODEL-ROUTING.md](docs/MODEL-ROUTING.md).
 
 ## 3. Background daemon — launchd (required)
 
@@ -51,11 +55,14 @@ Point `config.brainRootDir` at your brain directory (default `~/_GD/brain`) and
 ensure it exists. The daemon reads brain docs **asynchronously with a timeout**,
 so a cloud-backed root (e.g. Google Drive) can't stall it.
 
-## 5. Frontier model access (optional)
+## 5. Alternate model provider (optional)
 
-For `cloud-ok` mode, provide a Claude/OpenAI key (`ANTHROPIC_API_KEY` /
-`OPENAI_API_KEY`, or `config.providers.openai`). Without it HiveMatrix runs
-**local-only** on Qwen — fully functional, just no frontier tier.
+Model access is **keyless by policy**: inference goes through a subscription CLI,
+never an API key. Step 2 covers the required `claude` CLI; installing the `codex`
+CLI in addition makes ChatGPT/Codex selectable per role in Settings → Models.
+There is no local-inference fallback — with no frontier CLI reachable, text roles
+resolve to `unavailable` and work queues (see
+[docs/MODEL-ROUTING.md](docs/MODEL-ROUTING.md)).
 
 ## 6. Desktop Lane — desktop control (optional)
 
@@ -72,7 +79,7 @@ For `cloud-ok` mode, provide a Claude/OpenAI key (`ANTHROPIC_API_KEY` /
    `.app` via the **＋** (point at `…/desktopbee-helper/DesktopBeeHelper.app`).
    Grants attach to the bundle id and persist across rebuilds.
 4. Prove it: `npx tsx scripts/desktopbee-proof.mts` (AX query/act + capture,
-   approval-gated, Qwen-planned).
+   approval-gated).
 
 AppleScript/Automation (`script.run`) needs a *separate* per-app Automation
 grant; the AX-semantic strategy (preferred) needs neither Automation nor vision.

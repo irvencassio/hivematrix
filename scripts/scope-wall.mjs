@@ -108,7 +108,7 @@ const RULES = [
   {
     pattern: "gemini|google-generative|generativeai|'google'.*provider|provider.*'google'",
     label: 'Google model provider (removed; Nano Banana and mflux are allowed by role, not provider)',
-    allowFiles: ['COMPONENT-MAP.md', 'DECISIONS.md', 'QWEN-LOCAL-PROFILE.md', 'models/catalog', 'models/task-model'],
+    allowFiles: ['COMPONENT-MAP.md', 'DECISIONS.md', 'models/catalog', 'models/task-model'],
   },
   // ── Import restriction: packs/ → daemon/ only ─────────────────
   {

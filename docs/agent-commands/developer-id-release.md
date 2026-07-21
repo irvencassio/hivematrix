@@ -1,7 +1,7 @@
 # Command: `developer-id-release.sh`
 
 The **one canonical command** to build/ship the HiveMatrix macOS app. Any worker
-model (Claude, Codex, Qwen/local) can call it. It is deterministic and
+model (Claude, Codex) can call it. It is deterministic and
 non-interactive: **no GUI steps, no Finder/AppleScript, no clicking.**
 
 Distribution: **Developer ID** (public website DMG + external auto-update feed) with
