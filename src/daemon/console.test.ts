@@ -2928,14 +2928,36 @@ test("primary left nav uses a single active color convention", () => {
   assert.match(fnBody(js, "closeSession"), /if \(_taskFormInSession\) _closeNewTaskPanel\(\)/, "closeSession closes an open New Task form so its nav can't stay lit");
 });
 
-test("+ New task button is removed; a hint points at Chat instead", () => {
+test("+ New task button is removed, and no caption stands in for it", () => {
   assert.doesNotMatch(CONSOLE_HTML, /＋ New task<\/button>/, "+ New task button markup is gone");
   assert.doesNotMatch(CONSOLE_HTML, /id="newTaskNav"/, "newTaskNav id is gone");
-  assert.match(CONSOLE_HTML, /Create tasks via Chat escalation/, "hint tells users where to create tasks");
+  // The "Create tasks via Chat escalation" caption is gone too: Chat is the
+  // first entry in the sidebar directly beneath, so a line of prose explaining
+  // where to click was restating what the list already shows.
+  assert.doesNotMatch(CONSOLE_HTML, /Create tasks via Chat escalation/);
+  assert.doesNotMatch(CONSOLE_HTML, /new-task-hint/, "its style went with it — no dead rule left behind");
   const boardStart = CONSOLE_HTML.indexOf('<section class="col board">');
-  const hintIdx = CONSOLE_HTML.indexOf("Create tasks via Chat escalation");
   const flashIdx = CONSOLE_HTML.indexOf('id="flashNav"');
-  assert.ok(boardStart >= 0 && hintIdx > boardStart && hintIdx < flashIdx, "hint sits at the top of the board column, where the button used to be");
+  assert.ok(boardStart >= 0 && flashIdx > boardStart, "Chat still leads the board column where the button used to be");
+});
+
+test("collapsed sidebar sections render as boxed entries, matching the nav buttons", () => {
+  // Board/Agents were plain headings while Chat/Memory/Roles/Tools/Goals were
+  // boxed buttons, so a collapsed sidebar read as two unrelated lists.
+  assert.match(CONSOLE_HTML, /class="sec-icon">\uD83D\uDCCB<\/span>Board/, "Board carries an icon like every nav entry");
+  assert.match(CONSOLE_HTML, /class="sec-icon">\uD83E\uDD16<\/span>Agents/, "Agents carries an icon like every nav entry");
+
+  // Boxed ONLY when collapsed — expanded keeps the plain heading so the box
+  // does not fight the content beneath it.
+  assert.match(CONSOLE_HTML, /\.board-sec\.collapsed \.board-sec-header[\s\S]{0,200}?background: var\(--panel-2\)/);
+  assert.match(CONSOLE_HTML, /\.agents-sec\.collapsed \.agents-sec-header/);
+  assert.match(CONSOLE_HTML, /#agentsConnDetail:not\(\[open\]\) > summary/, "the What-works-right-now summary matches when collapsed too");
+
+  // Reuses the nav's own tokens rather than introducing a second palette.
+  const rule = CONSOLE_HTML.slice(CONSOLE_HTML.indexOf(".board-sec.collapsed .board-sec-header"));
+  assert.match(rule.slice(0, 400), /border: 1px solid var\(--border\)/);
+  assert.match(rule.slice(0, 400), /border-radius: 8px/);
+  assert.match(rule.slice(0, 600), /border-color: var\(--accent\)/, "hover matches .ov-nav:hover");
 });
 
 test("runSelectedCommand sends both project and projectPath from the cmd multi-picker state", () => {
@@ -3309,7 +3331,7 @@ test("Board section collapse: toggle markup in board-sec-header, default expande
   const html = CONSOLE_HTML;
   assert.match(
     html,
-    /<div class="board-sec-header">Board <span id="boardToggle" class="board-toggle" onclick="toggleBoardSection\(\)"[^>]*>▾<\/span>/,
+    /<div class="board-sec-header"><span class="sec-icon">[^<]*<\/span>Board <span id="boardToggle" class="board-toggle" onclick="toggleBoardSection\(\)"[^>]*>▾<\/span>/,
     "toggle span sits in the header, next to the heading text, defaulting to the expanded glyph",
   );
   const archiveIx = html.indexOf('id="archiveBtn"');
@@ -3396,7 +3418,7 @@ test("Agents section collapse: toggle markup in agents-sec-header, default expan
   const html = CONSOLE_HTML;
   assert.match(
     html,
-    /<div class="agents-sec-header">Agents <span id="agentsToggle" class="agents-toggle" onclick="toggleAgentsSection\(\)"[^>]*>▾<\/span>/,
+    /<div class="agents-sec-header"><span class="sec-icon">[^<]*<\/span>Agents <span id="agentsToggle" class="agents-toggle" onclick="toggleAgentsSection\(\)"[^>]*>▾<\/span>/,
     "toggle span sits in the header, next to the heading text, defaulting to the expanded glyph",
   );
   assert.match(html, /\.agents-sec\.collapsed #agents \{ display: none; \}/, "collapsed class on #agentsSec hides the agents container");

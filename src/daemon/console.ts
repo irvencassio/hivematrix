@@ -227,7 +227,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     font-size: 12px; font-weight: 600; margin-bottom: 10px; transition: border-color .15s ease, color .15s ease; }
   .addbtn:hover { border-color: var(--accent); color: var(--accent); }
   .addbtn.active { border-color: var(--accent); color: var(--accent); }
-  .new-task-hint { padding: 7px 2px 10px; font-size: 11.5px; color: var(--muted); }
   /* .ov-nav / .ov-back — shared nav-button and back-link styles for every sidebar
      panel (Chat/Memory/Roles/Tools/Goals) and their back-links. Class names are a
      holdover from the removed Overview feature; the styling itself is shared, not
@@ -695,6 +694,22 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .live.down, .live.stale { color: var(--err); }
   .archive-link { font-size: 11px; color: var(--accent-2); cursor: pointer; font-weight: 400; text-transform: none; letter-spacing: 0; }
   .archive-link:hover { text-decoration: underline; }
+  /* Collapsed sections read as sidebar entries — icon + label in the same box as
+     .ov-nav — so a collapsed Board/Agents sits in the same visual family as
+     Chat/Memory/Roles/Tools/Goals instead of looking like a stray heading.
+     Expanded keeps the plain heading, since the box would fight the content
+     beneath it. Colors come from the same tokens .ov-nav uses; nothing new. */
+  .sec-icon { margin-right: 2px; }
+  .board-sec.collapsed .board-sec-header,
+  .agents-sec.collapsed .agents-sec-header,
+  #agentsConnDetail:not([open]) > summary {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 10px; font-size: 12px; font-weight: 600; margin: 0 0 8px;
+    transition: border-color .15s ease, color .15s ease;
+  }
+  .board-sec.collapsed .board-sec-header:hover,
+  .agents-sec.collapsed .agents-sec-header:hover,
+  #agentsConnDetail:not([open]) > summary:hover { border-color: var(--accent); }
   .board-sec { margin: 0; }
   .board-sec-header { font-size: 14px; font-weight: 600; margin: 20px 0 6px; color: var(--text); display: flex; align-items: center; gap: 8px; }
   .board-toggle { cursor: pointer; color: var(--muted); font-size: 11px; user-select: none; }
@@ -1936,7 +1951,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   <div class="col-resizer" id="resizeLeft" title="Drag to resize the left panel"></div>
   <div class="col-resizer" id="resizeRight" title="Drag to resize the right panel"></div>
   <section class="col board">
-    <div class="new-task-hint">Create tasks via Chat escalation</div>
     <button class="ov-nav oc-nav" id="flashNav" onclick="showFlashPanel()">💬 Chat</button>
     <button class="ov-nav oc-nav" id="brainNav" onclick="showBrain()">🧠 Memory</button>
     <button class="ov-nav oc-nav" id="rolesNav" onclick="showRoles()">👥 Roles</button>
@@ -2019,11 +2033,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="err" id="t_err"></div>
     </div>
     <div id="boardSec" class="board-sec">
-      <div class="board-sec-header">Board <span id="boardToggle" class="board-toggle" onclick="toggleBoardSection()" title="Collapse Board">▾</span> <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></div>
+      <div class="board-sec-header"><span class="sec-icon">📋</span>Board <span id="boardToggle" class="board-toggle" onclick="toggleBoardSection()" title="Collapse Board">▾</span> <span id="archiveBtn" class="archive-link" onclick="archiveCompleted()" title="Archive review/done/failed tasks"></span></div>
       <div id="board"></div>
     </div>
     <div id="agentsSec" class="agents-sec">
-      <div class="agents-sec-header">Agents <span id="agentsToggle" class="agents-toggle" onclick="toggleAgentsSection()" title="Collapse Agents">▾</span></div>
+      <div class="agents-sec-header"><span class="sec-icon">🤖</span>Agents <span id="agentsToggle" class="agents-toggle" onclick="toggleAgentsSection()" title="Collapse Agents">▾</span></div>
       <div id="agents"></div>
       <details class="ctx-sec" id="agentsConnDetail"><summary>What works right now</summary>
       <div id="conn"></div></details>
