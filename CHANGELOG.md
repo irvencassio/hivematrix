@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.241 — 2026-07-22
+
+Fixes tasks failing to run and the repeated 'authorize in browser' prompts. On a normal install the task runner wrongly decided you were signed out — even though you weren't — then tried to fix it by opening the Claude sign-in page in your browser, twice, on a loop that never stopped. Tasks now use the same sign-in everything else does and just run. If a task ever does hit a real auth problem, it fails with a clear message telling you to re-authenticate in Settings, instead of hijacking your browser.
+
 ## v0.1.240 — 2026-07-22
 
 Fixes the skill window's own buttons doing nothing. Opening a tool from Tools gave you the right window, but Run, View, Copy, Publish and Delete inside it were all dead — the window knew which tool it was showing, its buttons did not. Run now launches the task and View shows the skill text.
