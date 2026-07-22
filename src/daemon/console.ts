@@ -8314,11 +8314,22 @@ function updateToolsNav() { syncNav(); }
  * Capability names map 1:1 onto the catalog: a skill-library/skill-tool entry
  * keys as lib:<name>, a local-command as local:<invokeName>.
  */
-function _toolRunKey(groupKind, t) {
+function _toolRunKey(groupKind, t, catalogKeys) {
   if (!t) return '';
-  if (groupKind === 'skill-tool' && t.skillName) return 'lib:' + t.skillName;
-  if (groupKind === 'skill-library' && t.name) return 'lib:' + t.name;
-  if (groupKind === 'local-command' && t.name) return 'local:' + t.name;
+  const keys = catalogKeys || new Set(skCatalog().map(function(i){ return i.key; }));
+  const cands = [];
+  if (groupKind === 'skill-tool' && t.skillName) cands.push('lib:' + t.skillName);
+  else if (groupKind === 'skill-library' && t.name) cands.push('lib:' + t.name);
+  else if (groupKind === 'local-command' && t.name) {
+    // A managed folder-skill that duplicates a brain skill is DEDUPED out of
+    // skCatalog() — only the lib: entry survives. Constructing local:<name>
+    // blindly produced a key for nothing, so showSkillPanel() found no match and
+    // returned silently: the Run button did nothing on 45 of 46 commands.
+    cands.push('lib:' + t.name);
+    cands.push('local:' + t.name);
+  }
+  // Resolve against the real catalog so a button only appears when it can open.
+  for (const k of cands) { if (keys.has(k)) return k; }
   return '';
 }
 

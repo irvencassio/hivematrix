@@ -4391,25 +4391,36 @@ test("the Integrate card names a real repo path, never a phantom 'this repo'", (
   assert.match(fn, /No projects discovered/, "says so plainly when discovery returns nothing");
 });
 
-test("Tools rows offer Run for things an operator can actually run", () => {
-  // The Tools panel was a read-only inventory: the only way to run a skill was
-  // the right-rail catalog. native/flash entries stay unrunnable — those are
-  // agent tools the model reaches, not something to click.
+test("Tools Run keys resolve against the real catalog, including deduped skills", () => {
+  // The Tools panel was read-only; the only way to run a skill was the right-rail
+  // catalog. native/flash entries stay unrunnable — those are agent tools the
+  // model reaches, not something to click.
   const js = extractScript(CONSOLE_HTML);
   const keySrc = extractFunctionBlock(js, "_toolRunKey");
   assert.ok(keySrc, "_toolRunKey should exist");
-  const key = new Function(`${keySrc}\nreturn _toolRunKey;`)() as (k: string, t: unknown) => string;
+  const key = new Function(`${keySrc}\nreturn _toolRunKey;`)() as
+    (k: string, t: unknown, catalogKeys?: Set<string>) => string;
 
-  // Capability names map 1:1 onto the catalog's keys.
-  assert.equal(key("skill-tool", { name: "x", skillName: "brain-chat" }), "lib:brain-chat");
-  assert.equal(key("skill-library", { name: "brain-url" }), "lib:brain-url");
-  assert.equal(key("local-command", { name: "bible-study" }), "local:bible-study");
+  const cat = new Set(["lib:brain-chat", "lib:brain-url", "local:storelookup"]);
 
-  // Not runnable from a click.
-  assert.equal(key("native", { name: "brain_read" }), "");
-  assert.equal(key("flash", { name: "escalate_to_task" }), "");
-  assert.equal(key("skill-library", {}), "", "a row with no name yields no key");
-  assert.equal(key("local-command", null), "");
+  assert.equal(key("skill-tool", { name: "x", skillName: "brain-chat" }, cat), "lib:brain-chat");
+  assert.equal(key("skill-library", { name: "brain-url" }, cat), "lib:brain-url");
+  assert.equal(key("local-command", { name: "storelookup" }, cat), "local:storelookup");
+
+  // THE BUG THIS FIXES: skCatalog() dedupes a managed folder-skill whose name
+  // matches a brain skill — only the lib: entry survives. Building local:<name>
+  // blindly produced a key for nothing, so showSkillPanel() found no match and
+  // returned silently. 45 of 46 command Run buttons did nothing.
+  assert.equal(key("local-command", { name: "brain-chat" }, cat), "lib:brain-chat",
+    "a deduped command must resolve to the lib entry that actually exists");
+
+  // A button must never render for something that cannot open.
+  assert.equal(key("local-command", { name: "not-in-catalog" }, cat), "");
+  assert.equal(key("skill-library", { name: "also-missing" }, cat), "");
+  assert.equal(key("native", { name: "brain_read" }, cat), "");
+  assert.equal(key("flash", { name: "escalate_to_task" }, cat), "");
+  assert.equal(key("skill-library", {}, cat), "");
+  assert.equal(key("local-command", null, cat), "");
 });
 
 test("the Run button stops propagation and survives a cold Tools panel", () => {
