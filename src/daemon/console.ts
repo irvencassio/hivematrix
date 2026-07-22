@@ -7706,6 +7706,17 @@ function renderContextSourceProjects() {
     String(a.name || '').localeCompare(String(b.name || '')));
   let want = sel.value;
   if (!want) { try { want = localStorage.getItem(CTXSRC_PROJECT_KEY) || ''; } catch (e) { want = ''; } }
+  if (!want) {
+    // No stored choice yet. preSelect marks RELEVANT projects (recently touched,
+    // or carrying a manifest) — it is not a single-selection flag, so pick the
+    // most recently modified among them. Falling back to first-alphabetically
+    // was worse than arbitrary: it deterministically surfaced whatever sorted
+    // first, which on this machine was a hidden .history folder.
+    const ranked = projects.slice().sort((a, b) =>
+      (Number(!!b.preSelect) - Number(!!a.preSelect)) ||
+      (Date.parse(b.lastModified || 0) || 0) - (Date.parse(a.lastModified || 0) || 0));
+    if (ranked.length) want = ranked[0].path;
+  }
   sel.innerHTML = projects.map(p =>
     '<option value="' + esc(p.path) + '">' + esc(p.name) + '</option>').join('');
   if (want && projects.some(p => p.path === want)) sel.value = want;

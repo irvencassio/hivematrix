@@ -232,7 +232,19 @@ function projectIdentityKey(path: string): string {
   return path.toLowerCase();
 }
 
+/** Hidden directories are tooling state, never something the operator works in.
+ *  VS Code's Local History extension keeps `<project>/.history`, and it git-inits
+ *  that folder — so the git scan discovered it as a real project and offered it
+ *  alongside actual repos. Anything under a dot-directory is the same class of
+ *  thing (`.git`, `.venv`, `.build`, `.claude/worktrees`), so reject on any
+ *  hidden path SEGMENT, not just the leaf.
+ *  `~/.claude/...` is excluded elsewhere; this is the general rule. */
+function hasHiddenSegment(path: string): boolean {
+  return path.split("/").some((seg) => seg.length > 1 && seg.startsWith("."));
+}
+
 function isDiscoverableProjectPath(path: string): boolean {
+  if (hasHiddenSegment(path)) return false;
   return !isProjectContainerPath(path);
 }
 

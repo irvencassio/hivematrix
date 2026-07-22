@@ -4232,17 +4232,29 @@ test("renderPostureGroups nests lane capabilities under their lane and separates
   assert.match(html, /Across all lanes/);
 });
 
-test("the context-sources project picker never defaults from preSelect", () => {
+test("the context-sources project picker never marks options selected from preSelect", () => {
   // GET /projects returns preSelect:true for EVERY discovered project, so
   // emitting `selected` from it marked all options and left the browser on
   // whichever was last — an arbitrary repo instead of the one being worked in.
   const js = extractScript(CONSOLE_HTML);
   const fn = js.match(/function renderContextSourceProjects\(\)[\s\S]*?\n\}/)?.[0] ?? "";
   assert.ok(fn, "renderContextSourceProjects should exist");
-  assert.doesNotMatch(fn, /preSelect/, "preSelect is true for every project — it cannot pick a default");
+  // preSelect is a RELEVANCE signal (~35 of ~100 projects on this machine), not
+  // "the one active project". Using it for ranking is correct; emitting it as an
+  // HTML `selected` attribute marks many options and leaves the browser on
+  // whichever happens to be last.
   assert.doesNotMatch(fn, /' selected'/, "no option may be marked selected at render time");
+  assert.doesNotMatch(fn, /p\.preSelect \?/, "preSelect must not be branched into option markup");
   assert.match(fn, /localStorage\.getItem\('hm_ctxsrc_project'\)|CTXSRC_PROJECT_KEY/, "the operator's own choice is what persists");
   assert.match(fn, /localeCompare/, "projects are sorted so a repo can be found in the list");
+
+  // With no stored choice, rank by relevance — NOT by first-alphabetically.
+  // Sorting the list made the default deterministic in the worst way: on this
+  // machine a hidden ".history" folder sorted first and became the default,
+  // reporting every context file as "not found" for a folder nobody works in.
+  assert.match(fn, /preSelect/, "the relevance signal is used for the initial pick");
+  assert.match(fn, /lastModified/, "ties break on recency");
+  assert.doesNotMatch(fn, /ranked\[0\]\.name/, "rank by path, not display name");
 });
 
 test("a missing context source does not advertise a cap it is not subject to", () => {
