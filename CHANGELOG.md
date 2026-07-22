@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.242 — 2026-07-22
+
+Tasks that hit a real problem now give up faster. A failing task used to retry 5 times before failing — for the failures that actually happen (a sign-in or config problem), that's just four extra rounds of waiting on an outcome that won't change. Now it retries once, then fails with a clear reason. Genuine rate-limits are unaffected — those still wait for your usage window to reset.
+
 ## v0.1.241 — 2026-07-22
 
 Fixes tasks failing to run and the repeated 'authorize in browser' prompts. On a normal install the task runner wrongly decided you were signed out — even though you weren't — then tried to fix it by opening the Claude sign-in page in your browser, twice, on a loop that never stopped. Tasks now use the same sign-in everything else does and just run. If a task ever does hit a real auth problem, it fails with a clear message telling you to re-authenticate in Settings, instead of hijacking your browser.
