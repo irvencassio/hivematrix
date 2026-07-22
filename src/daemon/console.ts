@@ -3219,6 +3219,11 @@ function obsModelColor(model) {
 // and Spark into one row.
 function obsModelLabel(model) {
   model = String(model || "");
+  // "mixed" is the role-routing choice, not a lesser model: the top-level agent
+  // runs on the thinking tier (Opus by default) and only subagents drop to the
+  // coding tier (Sonnet). The bare word "mixed" read as a downgrade — show the
+  // routing intent instead. (taskModelBadge adds the per-tier tooltip.)
+  if (model.toLowerCase() === "mixed") return "Role-routed";
   const tier = obsModelTier(model);
   if (tier === "Opus" || tier === "Sonnet" || tier === "Haiku") {
     return tier + (/\[1m\]$/.test(model) ? " (1M ctx)" : "");
@@ -3239,6 +3244,11 @@ function taskModelBadge(model) {
   const m = String(model).toLowerCase();
   if (m.indexOf('qwen') === 0 || m.indexOf('rapid-mlx') >= 0 || m.indexOf('mlx') >= 0 || /\d+b-\d+bit/.test(m)) {
     return '<span class="badge model" title="' + esc(model) + '">local (legacy)</span>';
+  }
+  // Role-routed tasks get a tooltip naming the per-tier split so "Role-routed"
+  // isn't mistaken for a single fixed model.
+  if (m === 'mixed') {
+    return '<span class="badge model" title="thinking on Opus · coding on Sonnet · bulk on Haiku">' + esc(obsModelLabel(model)) + '</span>';
   }
   return '<span class="badge model">' + esc(obsModelLabel(model)) + '</span>';
 }

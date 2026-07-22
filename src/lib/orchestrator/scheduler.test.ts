@@ -267,19 +267,19 @@ test("modelRole: an empty role-model slot falls through cleanly (no crash, no fa
   });
 });
 
-test("a task created without an explicit budget gets the $25 unattended-runaway backstop, not the old $5 default", async () => {
+test("a task created without an explicit budget is UNCAPPED (0), matching Claude Code — no dollar ceiling", async () => {
   await withTempDb(async () => {
     const task = await mkTask({});
-    // Raised from $10 on 2026-07-16 after it killed three near-complete tasks
-    // at $10.35–$10.68. Still a ceiling, just one that clears real work.
-    assert.equal(task.maxBudgetUsd, 25);
+    // A dollar cap on usage-window billing is artificial and killed near-complete
+    // tasks; runaways are bounded by the wall-clock timeout + usage_limit delay.
+    assert.equal(task.maxBudgetUsd, 0);
   });
 });
 
-test("a task can still opt out of the ceiling entirely with an explicit 0", async () => {
+test("a task can still opt INTO a ceiling with an explicit positive budget", async () => {
   await withTempDb(async () => {
-    const task = await mkTask({ maxBudgetUsd: 0 });
-    assert.equal(task.maxBudgetUsd, 0);
+    const task = await mkTask({ maxBudgetUsd: 40 });
+    assert.equal(task.maxBudgetUsd, 40);
   });
 });
 

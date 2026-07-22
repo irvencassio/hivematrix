@@ -10,11 +10,16 @@ export const DEFAULT_TIMEOUT_MINUTES = 60;
 // 0 remains the explicit "uncapped" opt-out (see budget-policy.ts) — this is
 // only the default applied when a task doesn't set its own budget.
 //
-// Calibrated 2026-07-16 from observed spend: a typical task costs ~$3, but the
-// previous $10 ceiling killed three near-complete tasks at $10.35–$10.68 (each
-// ~95% done, mid-write-up). $25 clears the largest observed real task with
-// headroom while still bounding a runaway loop.
-export const DEFAULT_BUDGET_USD = 25;
+// Uncapped by default (0 → normalizeBudgetUsd treats it as no ceiling, so no
+// --max-budget-usd flag is passed), matching Claude Code itself: the CLI and web
+// impose no per-task dollar cap and run until the work is done or the account's
+// usage windows (5h/7d) are hit. A dollar ceiling on usage-window billing is
+// artificial and historically killed near-complete tasks (a $10 cap killed three
+// at $10.35–$10.68, ~95% done). Runaways are still bounded by the real limiters:
+// the per-task wall-clock timeout (timeoutMinutes, default 60) and the
+// scheduler's usage_limit delay. A user who wants a hard ceiling can still set an
+// explicit positive maxBudgetUsd per task; only the DEFAULT is uncapped.
+export const DEFAULT_BUDGET_USD = 0;
 export const MAX_TURNS = 50;
 export const SCHEDULER_INTERVAL_MS = 2000;
 export const APPROVAL_TIMEOUT_MINUTES = 30;

@@ -25,15 +25,16 @@ test("budget policy treats missing, zero, and negative budgets as uncapped", () 
   assert.equal(hasBudgetCeiling(undefined), false);
 });
 
-test("the per-task default budget ceiling is $25 (unattended-runaway backstop), while 0 stays the explicit uncapped opt-out", () => {
-  // Raised from $10 on 2026-07-16: the $10 ceiling killed three near-complete
-  // tasks at $10.35–$10.68. Still a real ceiling — just one that clears the
-  // largest observed genuine task.
-  assert.equal(DEFAULT_TASK_BUDGET_CEILING_USD, 25);
-  assert.equal(hasBudgetCeiling(DEFAULT_TASK_BUDGET_CEILING_USD), true);
-  assert.equal(normalizeBudgetUsd(DEFAULT_TASK_BUDGET_CEILING_USD), 25);
-  // 0 is still explicitly uncapped, independent of the new default.
-  assert.equal(hasBudgetCeiling(0), false);
+test("the per-task default budget is UNCAPPED (matches Claude Code), while an explicit positive budget still caps", () => {
+  // Changed from a $25 ceiling: on usage-window billing a dollar cap is
+  // artificial and killed near-complete tasks. Claude Code itself imposes no
+  // per-task dollar cap; runaways are bounded by the wall-clock timeout and the
+  // usage_limit delay instead. A user can still opt INTO a ceiling per task.
+  assert.equal(DEFAULT_TASK_BUDGET_CEILING_USD, 0);
+  assert.equal(hasBudgetCeiling(DEFAULT_TASK_BUDGET_CEILING_USD), false, "the default carries no ceiling");
+  // An explicit positive budget is still honoured — the override path is intact.
+  assert.equal(hasBudgetCeiling(40), true);
+  assert.equal(normalizeBudgetUsd(40), 40);
 });
 
 test("budget policy preserves positive explicit budgets", () => {

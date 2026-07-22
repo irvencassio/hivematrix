@@ -4667,3 +4667,29 @@ test("the local-command panel Run posts the project path picked through the drop
     assert.match(run!.body || "", /storelookup/, "with the command name in the payload");
   } finally { m.close(); }
 });
+
+test("a role-routed task shows 'Role-routed' (with a tier tooltip), never the bare word 'mixed'", () => {
+  // "mixed" is the role-routing choice — top-level on the thinking tier (Opus by
+  // default), subagents on coding (Sonnet). The bare label read as a downgrade;
+  // it must render the routing intent and name the tiers in a tooltip.
+  const js = extractScript(CONSOLE_HTML);
+  const badge = new Function(`
+    ${extractFunctionBlock(js, "esc")}
+    ${extractFunctionBlock(js, "obsModelTier")}
+    ${extractFunctionBlock(js, "obsModelLabel")}
+    ${extractFunctionBlock(js, "taskModelBadge")}
+    return { taskModelBadge, obsModelLabel };
+  `)() as { taskModelBadge: (m: string) => string; obsModelLabel: (m: string) => string };
+
+  const mixed = badge.taskModelBadge("mixed");
+  assert.doesNotMatch(mixed, />mixed</, "the bare word 'mixed' must not reach the badge text");
+  assert.match(mixed, />Role-routed</, "role-routed tasks read as 'Role-routed'");
+  assert.match(mixed, /title="[^"]*Opus[^"]*Sonnet[^"]*Haiku[^"]*"/, "tooltip names the per-tier split");
+  assert.equal(badge.obsModelLabel("mixed"), "Role-routed");
+  assert.equal(badge.obsModelLabel("MIXED"), "Role-routed", "case-insensitive");
+
+  // A real single model is unchanged — still its own tier name, no routing label.
+  assert.match(badge.taskModelBadge("opus"), />Opus</);
+  assert.match(badge.taskModelBadge("claude-sonnet-5"), />Sonnet</);
+  assert.doesNotMatch(badge.taskModelBadge("opus"), /Role-routed/);
+});
