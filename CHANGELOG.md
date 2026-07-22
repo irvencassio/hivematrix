@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.237 — 2026-07-22
+
+Fixes the Run buttons in Tools doing nothing. Clicking Run on almost any command silently failed: the button was built from the command's own name, but the catalog folds a folder-skill into its brain-skill twin when both exist, so the name it looked up was not there and nothing opened. Run now checks what the catalog actually holds before offering the button, so a button that cannot open no longer appears at all.
+
 ## v0.1.236 — 2026-07-22
 
 Tools can now run things. Every skill and command in the Tools list gets a Run button that opens the parameter picker, so you no longer have to go to the right sidebar to run anything. Agent-only tools stay unrunnable on purpose — those are what the model reaches for, not something you click. Also fixes the Integrate card failing with a raw 'not a git repository' error: its project picker offered 'HiveMatrix (this repo)', which resolved to wherever the app happened to be running from rather than the repo — for an installed app that is your home folder, which is not a repository. It now lists real project paths and defaults to HiveMatrix.
