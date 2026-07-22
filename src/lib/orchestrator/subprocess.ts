@@ -168,7 +168,16 @@ export function checkAuth(profile?: string): AuthStatus {
   const env = buildClaudeEnv(profile);
   const configDir = env.CLAUDE_CONFIG_DIR;
   try {
-    if (!existsSync(configDir)) {
+    // buildClaudeEnv OMITS CLAUDE_CONFIG_DIR in the normal case (no configured
+    // profile) so the CLI uses its DEFAULT credential — the same one Chat, the
+    // terminal and the browser share. An undefined configDir is therefore
+    // correct, not missing. The old guard did `existsSync(undefined)` → false
+    // and reported "Config directory not found: undefined", failing auth for
+    // every default-credential task even though the user was signed in. That
+    // false failure drove the whole login cascade (two browser prompts) and,
+    // with the scheduler's uncapped requeue, spammed it every ~2 minutes.
+    // Only a profile that named an EXPLICIT dir can be genuinely missing.
+    if (configDir && !existsSync(configDir)) {
       return { loggedIn: false, error: `Config directory not found: ${configDir}` };
     }
     const result = spawnSync(binary, ["auth", "status"], {
@@ -195,30 +204,30 @@ export function checkAuth(profile?: string): AuthStatus {
   }
 }
 
-/** Attempt to refresh authentication (OAuth token refresh). */
-export function refreshAuth(profile?: string): AuthStatus {
-  const { binary } = resolveClaudeCommand();
-  const env = buildClaudeEnv(profile);
-  try {
-    spawnSync(binary, ["auth", "login"], {
-      env: env as NodeJS.ProcessEnv,
-      encoding: "utf-8",
-      timeout: 15_000,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    return checkAuth(profile);
-  } catch (err) {
-    return { loggedIn: false, error: err instanceof Error ? err.message : "Auth refresh failed" };
-  }
-}
-
 /** Resolve profile to actual email for logging. */
 function profileLabel(profile?: string): string {
   const dir = profile ? normalizeConfigDir(profile) : getActiveProfile();
   return `${dir.replace(/^\.claude-?/, "") || "default"} (${dir})`;
 }
 
-/** Ensure auth is valid for a profile, refreshing if needed. Returns status. */
+/** Human-facing instruction appended to every auth failure a task surfaces. */
+const REAUTH_HINT = "Re-authenticate in Settings → Models (or run `claude auth login` in a terminal).";
+
+/**
+ * Confirm auth is valid for a profile before a task spawns. Returns status only
+ * — it NEVER launches an interactive login.
+ *
+ * It used to, and that was the bug: on a false "not logged in" it ran
+ * `claude auth login` TWICE (a misnamed "refresh" that is really `auth login`,
+ * then an explicit browser login), so a single failing task popped two browser
+ * authorize prompts, on a loop, from a background scheduler the operator wasn't
+ * even looking at. A task runner must never hijack the browser. `auth login`
+ * cannot silently refresh anyway — the CLI already refreshes a live token when
+ * checkAuth() runs `auth status`; an expired *session* needs a human, and the
+ * only correct move is to fail the task with a clear instruction. Interactive
+ * sign-in stays where the operator asks for it: Settings → Models
+ * (/providers/claude/setup), never here.
+ */
 export function ensureAuth(profile?: string): AuthStatus {
   const label = profileLabel(profile);
   const status = checkAuth(profile);
@@ -226,46 +235,8 @@ export function ensureAuth(profile?: string): AuthStatus {
     console.log(`[auth] ${label}: authenticated as ${status.email}`);
     return status;
   }
-
-  console.log(`[auth] ${label}: not logged in (${status.error}), attempting token refresh...`);
-  const refreshed = refreshAuth(profile);
-  if (refreshed.loggedIn) {
-    console.log(`[auth] ${label}: token refreshed successfully (${refreshed.email})`);
-    return refreshed;
-  }
-
-  // Token refresh failed — try opening browser-based login
-  console.log(`[auth] ${label}: token refresh failed, attempting browser login...`);
-  const browserResult = attemptBrowserLogin(profile);
-  if (browserResult.loggedIn) {
-    console.log(`[auth] ${label}: browser login succeeded (${browserResult.email})`);
-    return browserResult;
-  }
-
-  console.error(`[auth] ${label}: all auth methods failed: ${browserResult.error}`);
-  return browserResult;
-}
-
-/** Open browser for OAuth login and poll for completion. */
-function attemptBrowserLogin(profile?: string): AuthStatus {
-  const { binary } = resolveClaudeCommand();
-  const env = buildClaudeEnv(profile);
-  try {
-    // `claude auth login` with inherited stdio can open a browser via the CLI's
-    // built-in flow. We give it 30s to complete the OAuth round-trip.
-    const result = spawnSync(binary, ["auth", "login"], {
-      env: env as NodeJS.ProcessEnv,
-      encoding: "utf-8",
-      timeout: 30_000,
-      stdio: ["inherit", "pipe", "pipe"],
-    });
-    if (result.status === 0) {
-      return checkAuth(profile);
-    }
-    return { loggedIn: false, error: result.stderr?.trim() || `login exited with code ${result.status}` };
-  } catch (err) {
-    return { loggedIn: false, error: err instanceof Error ? err.message : "Browser login failed" };
-  }
+  console.error(`[auth] ${label}: not authenticated (${status.error}). ${REAUTH_HINT}`);
+  return { ...status, error: `${status.error || "not logged in"} — ${REAUTH_HINT}` };
 }
 
 export interface AgentProcess {

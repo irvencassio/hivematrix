@@ -228,6 +228,24 @@ export function shouldClearStaleUsageDelay(
   return getUsageAvailabilityForTask(task, cached, activeProfile).ok;
 }
 
+/**
+ * How many times the scheduler will re-queue a task that throws during spawn
+ * (auth failure, bad config, transient CLI error) before giving up and marking
+ * it failed. Mirrors handleExit()'s MAX_TRANSIENT_RETRIES so both failure paths
+ * are capped the same way. Before this existed the spawn path requeued forever.
+ */
+export const MAX_SPAWN_RETRIES = 5;
+
+/**
+ * Decide what to do with a task whose spawn just threw, given how many times it
+ * has already failed to spawn. Pure so the cap is testable without driving the
+ * whole dispatch loop.
+ */
+export function nextSpawnFailureAction(priorSpawnRetries: number | undefined): { action: "requeue" | "fail"; retries: number } {
+  const retries = (priorSpawnRetries ?? 0) + 1;
+  return { action: retries > MAX_SPAWN_RETRIES ? "fail" : "requeue", retries };
+}
+
 async function clearStaleUsageDelays(
   cached: { profiles: ProfileUsage[] } | null,
   activeProfile: string
@@ -583,9 +601,48 @@ async function tick() {
           (task as Record<string, unknown>).thinkingMode as string | undefined,
           (task as Record<string, unknown>).fastMode === true,
         );
+        // Spawn succeeded — clear any accumulated spawn-failure count so a task
+        // that failed a few times then ran doesn't carry the cap into a future
+        // requeue. Only writes when there's something to clear.
+        const priorOk = (task.output ?? {}) as Record<string, unknown>;
+        if (priorOk.spawnRetries) {
+          const { spawnRetries: _drop, ...rest } = priorOk;
+          await Task.findByIdAndUpdate(task._id.toString(), { output: rest });
+        }
       } catch (spawnErr) {
         const msg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
         const isAuth = msg.includes("Auth failed");
+
+        // CAP the requeue. This path used to requeue EVERY spawn failure forever
+        // with no counter — unlike handleExit(), which caps at 5. A permanent
+        // failure (expired sign-in, bad config) therefore looped every ~2 min
+        // indefinitely; paired with the old auth cascade it re-opened browser
+        // login prompts on every lap. Mirror handleExit's counter so a genuinely
+        // stuck task fails visibly instead of grinding forever.
+        const priorOutput = (task.output ?? {}) as Record<string, unknown>;
+        const { action, retries: nextRetries } = nextSpawnFailureAction(priorOutput.spawnRetries as number | undefined);
+
+        if (action === "fail") {
+          await Task.findByIdAndUpdate(task._id.toString(), {
+            status: "failed",
+            agentPid: null,
+            startedAt: null,
+            completedAt: new Date().toISOString(),
+            error: msg,
+            delayUntil: null,
+            delayReason: null,
+            output: { ...priorOutput, spawnRetries: nextRetries },
+          });
+          broadcast({
+            type: "task:updated",
+            taskId: task._id.toString(),
+            fields: { status: "failed", error: msg },
+          });
+          console.error(`[scheduler] Spawn failed for task ${task._id}: ${msg} — retry cap (${MAX_SPAWN_RETRIES}) exceeded, marking failed`);
+          if (isAuth) break;
+          continue;
+        }
+
         const delayMinutes = isAuth ? 2 : 1;
         const delayUntil = new Date(Date.now() + delayMinutes * 60_000).toISOString();
         await Task.findByIdAndUpdate(task._id.toString(), {
@@ -595,13 +652,14 @@ async function tick() {
           error: msg,
           delayUntil,
           delayReason: "transient_retry",
+          output: { ...priorOutput, spawnRetries: nextRetries },
         });
         broadcast({
           type: "task:updated",
           taskId: task._id.toString(),
           fields: { status: "backlog", error: msg, delayUntil, delayReason: "transient_retry" },
         });
-        console.error(`[scheduler] Spawn failed for task ${task._id}: ${msg} — requeued with ${delayMinutes}m delay`);
+        console.error(`[scheduler] Spawn failed for task ${task._id}: ${msg} — requeued (${nextRetries}/${MAX_SPAWN_RETRIES}) with ${delayMinutes}m delay`);
         if (isAuth) break;
       }
 

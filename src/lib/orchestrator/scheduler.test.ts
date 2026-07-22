@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { getUsageAvailabilityForTask, resolveAutoAgentType, resolveModelForAgentRole, shouldClearStaleUsageDelay, pickNextEligibleTask, reapWaitingChildren } from "./scheduler";
+import { getUsageAvailabilityForTask, resolveAutoAgentType, resolveModelForAgentRole, shouldClearStaleUsageDelay, pickNextEligibleTask, reapWaitingChildren, nextSpawnFailureAction, MAX_SPAWN_RETRIES } from "./scheduler";
 import type { UsageData } from "@/lib/usage/fetcher";
 
 async function withTempDb<T>(run: () => T | Promise<T>): Promise<T> {
@@ -445,4 +445,27 @@ test("reapWaitingChildren: a subtask that succeeded auto-archives (agent-manager
     const resumed = await Task.findById(parent._id.toString());
     assert.equal(resumed!.status, "backlog");
   });
+});
+
+test("nextSpawnFailureAction: a spawn failure is requeued up to the cap, then fails — never loops forever", () => {
+  // Regression 2026-07-22: the scheduler's spawn-failure catch requeued EVERY
+  // failure with no counter (unlike handleExit's cap of 5), so a permanent
+  // failure — e.g. an expired sign-in — looped every ~2 min forever. Paired
+  // with the old auth cascade it re-opened browser login prompts on every lap.
+  // The cap must let a genuinely stuck task fail visibly.
+
+  // First failure through the cap: requeue, with a monotonically rising count.
+  for (let prior = 0; prior < MAX_SPAWN_RETRIES; prior++) {
+    const r = nextSpawnFailureAction(prior);
+    assert.equal(r.action, "requeue", `failure #${prior + 1} of ${MAX_SPAWN_RETRIES} should still retry`);
+    assert.equal(r.retries, prior + 1);
+  }
+
+  // The one past the cap fails instead of requeueing — the loop terminates.
+  const capped = nextSpawnFailureAction(MAX_SPAWN_RETRIES);
+  assert.equal(capped.action, "fail");
+  assert.equal(capped.retries, MAX_SPAWN_RETRIES + 1);
+
+  // A fresh/undefined counter starts at one retry, not a crash.
+  assert.deepEqual(nextSpawnFailureAction(undefined), { action: "requeue", retries: 1 });
 });

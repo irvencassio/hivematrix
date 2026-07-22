@@ -86,3 +86,45 @@ test("a REAL configured Claude profile is still honoured (the multi-account feat
     assert.equal(buildClaudeEnvForTests("developer").CLAUDE_CONFIG_DIR, undefined);
   });
 });
+
+test("checkAuth never reports the default (no-profile) credential as a missing config dir", async () => {
+  // Regression 2026-07-22: buildClaudeEnv correctly OMITS CLAUDE_CONFIG_DIR when
+  // no profile is configured (share the default credential), but checkAuth then
+  // did `existsSync(undefined)` → false and returned "Config directory not
+  // found: undefined", failing auth for every default-credential task even
+  // though the user was signed in (Chat kept working). That false failure drove
+  // the login cascade that spammed browser authorize prompts.
+  //
+  // Whatever the real `claude` binary reports here (logged-in, logged-out, or
+  // absent), the one thing that must never come back is the config-dir error —
+  // an omitted dir is correct, not missing.
+  await withHome(async (home) => {
+    writeConfig(home, {}); // no profiles → default credential → no CLAUDE_CONFIG_DIR
+    const { checkAuth, buildClaudeEnvForTests } = await import("./subprocess");
+    assert.equal(buildClaudeEnvForTests(undefined).CLAUDE_CONFIG_DIR, undefined, "precondition: dir is omitted");
+    const status = checkAuth(undefined);
+    assert.doesNotMatch(
+      String(status.error ?? ""),
+      /Config directory not found/,
+      "an intentionally-omitted config dir must not read as a missing one",
+    );
+  });
+});
+
+test("the daemon never programmatically runs `claude auth login` (no unprompted browser prompts)", async () => {
+  // Regression 2026-07-22: a background task's auth precheck ran `claude auth
+  // login` TWICE on a (false) failure — a misnamed refreshAuth() plus an
+  // explicit attemptBrowserLogin() — so one stuck task popped two browser
+  // authorize prompts, on a loop. A task runner must never launch interactive
+  // sign-in; that belongs only to the operator-clicked Settings → Models route
+  // (/providers/claude/setup), which lives outside this module. Guard it at the
+  // source: subprocess.ts must contain no `auth`,`login` spawn.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const src = readFileSync(fileURLToPath(new URL("./subprocess.ts", import.meta.url)), "utf-8");
+  assert.doesNotMatch(
+    src,
+    /["']auth["']\s*,\s*["']login["']/,
+    "subprocess.ts must not spawn `claude auth login` — that hijacks the browser from a background context",
+  );
+});
