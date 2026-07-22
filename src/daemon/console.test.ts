@@ -4276,3 +4276,66 @@ test("the ctx meter renders its fill percentage on screen, not only in a title",
     "both the on-screen readout and the tooltip are set",
   );
 });
+
+test("brain-skill params render through the same pill picker local commands use", () => {
+  // The Tools area is two catalogs joined only in the UI: local commands
+  // declared rich options and had a pill picker; brain skills carried bare
+  // {{param}} names and rendered plain text inputs. Rather than teach either
+  // side the other's data model, both now map into one view-model.
+  const js = extractScript(CONSOLE_HTML);
+  const escSrc = extractFunctionBlock(js, "esc");
+  const labelSrc = extractFunctionBlock(js, "skParamLabel");
+  const specSrc = extractFunctionBlock(js, "_skillOptionsSpec");
+  assert.ok(specSrc, "_skillOptionsSpec adapter should exist");
+
+  const spec = new Function(`${escSrc}\n${labelSrc}\n${specSrc}\nreturn _skillOptionsSpec;`)()(
+    { params: ["tone", "audience"] },
+  ) as { options: Array<{ name: string; kind: string }>; positionals: unknown[] };
+
+  assert.equal(spec.options.length, 2, "every param becomes a chip");
+  assert.deepEqual(spec.options.map((o) => o.name), ["tone", "audience"], "order is preserved");
+  for (const o of spec.options) {
+    assert.equal(o.kind, "value", "a bare param is a value chip — click to reveal its text box");
+  }
+  assert.deepEqual(spec.positionals, []);
+
+  // A skill with no params yields nothing to render, not an empty chip row.
+  const empty = new Function(`${escSrc}\n${labelSrc}\n${specSrc}\nreturn _skillOptionsSpec;`)()({}) as { options: unknown[] };
+  assert.deepEqual(empty.options, []);
+});
+
+test("the skill panel runs through the pill DOM, not per-param element ids", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const panel = js.match(/function _libSkillPanelHtml\(it\)[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(panel, /_cmdOptionsHtml\(_skillOptionsSpec\(s\)/, "the panel renders the shared picker");
+  assert.doesNotMatch(js, /skParam_/, "the old id-per-param inputs are gone");
+
+  const run = js.match(/async function runSelectedSkill\(\)[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(run, /_readSkillParams\(namedParams\)/, "values are read back out of the pill DOM");
+
+  // libDetailHtml rendered a second copy of the same params into the right-rail
+  // slot that renderSkillDetail() permanently hides — dead, and a duplicate id
+  // source. It is removed.
+  assert.doesNotMatch(js, /function libDetailHtml/, "the dead right-rail detail renderer is gone");
+});
+
+test("_readSkillParams returns every param, blank for the ones left unclicked", () => {
+  const js = extractScript(CONSOLE_HTML);
+  const readSrc = extractFunctionBlock(js, "_readSkillParams");
+  const read = new Function(
+    "document",
+    `${readSrc}\nreturn _readSkillParams;`,
+  ) as (doc: unknown) => (names: string[]) => Record<string, string>;
+
+  // Only "tone" was clicked; "audience" must still come back, empty.
+  const chip = {
+    getAttribute: (a: string) => (a === "data-flag" ? "tone" : null),
+    parentNode: { querySelector: () => ({ value: " warm " }) },
+  };
+  const doc = {
+    getElementById: (id: string) => (id === "cmdOptions" ? { querySelectorAll: () => [chip] } : null),
+  };
+  const out = read(doc)(["tone", "audience"]);
+  assert.equal(out.tone, "warm", "value is trimmed");
+  assert.equal(out.audience, "", "an unclicked param is sent empty, never dropped");
+});

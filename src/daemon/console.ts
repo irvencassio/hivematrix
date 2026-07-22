@@ -4112,10 +4112,10 @@ function _libSkillPanelHtml(it) {
   const s = it.raw;
   const untrusted = s.trusted === false;
   const namedParams = (Array.isArray(s.params) && s.params.length) ? s.params : [];
-  const paramFields = namedParams.map(p =>
-    '<label class="flbl">' + esc(skParamLabel(p)) + '</label>'
-    + '<input id="skParam_' + esc(p) + '" placeholder="' + esc(skParamLabel(p)) + '…" />'
-  ).join('');
+  // Same pill picker local commands use — see _skillOptionsSpec.
+  const paramFields = namedParams.length
+    ? _cmdOptionsHtml(_skillOptionsSpec(s), 'Click a parameter to fill it in. Anything left unclicked is sent empty.')
+    : '';
   const inputField = s.hasInput
     ? '<label class="flbl">Input</label>'
       + '<textarea id="skInput" placeholder="Freeform input for this skill…" style="resize:vertical"></textarea>'
@@ -4236,30 +4236,6 @@ function libMetaLine(s) {
 function skParamLabel(name) {
   return name.replace(/_/g, ' ').replace(/-/g, ' ')
     .replace(/\b\w/g, c => c.toUpperCase());
-}
-function libDetailHtml(it) {
-  const s = it.raw;
-  const untrusted = s.trusted === false;
-  const params = (Array.isArray(s.params) && s.params.length) ? s.params : (s.hasInput ? ['input'] : []);
-  const paramFields = params.map(p =>
-    '<label class="flbl" style="margin:5px 0 2px">' + esc(skParamLabel(p)) + '</label>'
-    + '<input id="skParam_' + esc(p) + '" placeholder="' + esc(skParamLabel(p)) + '…" />'
-  ).join('');
-  return '<div class="sk-dhead"><span class="sk-dhead-icon">' + skIcon(it) + '</span><b>' + esc(it.name) + '</b>' + skBadges(it) + '</div>'
-    + '<div class="sk-dmeta">' + libMetaLine(s) + '</div>'
-    + (paramFields ? '<div class="sk-param-area">' + paramFields + '</div>' : '')
-    + '<div class="sk-run-row">'
-    + '<button class="create" onclick="runSelectedSkill()">Run</button>'
-    + '<button class="addbtn" onclick="viewSkill()" title="View the skill markdown">View</button>'
-    + '</div>'
-    + '<pre id="skViewPane" style="display:none;max-height:200px;overflow:auto;font-size:11px;background:var(--code-bg);color:var(--code-text);padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap"></pre>'
-    + '<div class="sk-more">'
-    + '<button class="addbtn" onclick="copySkill()" title="Copy the shareable skill markdown">Copy</button>'
-    + '<select id="skPubScope" style="width:auto" title="Scope to publish to"><option value="personal">personal</option><option value="team" selected>team</option><option value="org">org</option><option value="public">public</option></select>'
-    + '<button class="addbtn" onclick="publishSelected()" title="Sign &amp; publish to the chosen scope">Publish</button>'
-    + (untrusted ? '<button class="addbtn" onclick="trustSelected()" title="Approve so agents may use it">Trust</button>' : '')
-    + '<button class="addbtn" onclick="deleteSelected()" title="Delete this skill">🗑 Delete</button>'
-    + '</div>';
 }
 function localDetailHtml(it) {
   const c = it.raw;
@@ -4410,11 +4386,7 @@ async function runSelectedSkill() {
   const it = skSelected(); if (!it || it.source !== 'lib') return;
   const namedParams = (it.raw && Array.isArray(it.raw.params)) ? it.raw.params : [];
   const hasInput = !!(it.raw && it.raw.hasInput);
-  const params = {};
-  for (const p of namedParams) {
-    const el = document.getElementById('skParam_' + p);
-    params[p] = el ? el.value : '';
-  }
+  const params = _readSkillParams(namedParams);
   const inputEl = document.getElementById('skInput');
   const payload = {};
   if (namedParams.length) payload.params = params;
@@ -4462,12 +4434,12 @@ function _optChipHtml(o, inGroup){
   else if (o.kind === 'choice') chip += '<select class="opt-choice" data-for="' + _ea(o.name) + '" style="display:none;font-size:12px;margin-left:3px">' + (o.choices||[]).map(function(x){ return '<option value="' + _ea(x) + '">' + esc(x) + '</option>'; }).join('') + '</select>';
   return (o.kind === 'value' || o.kind === 'choice') ? '<span class="opt-wrap" style="display:inline-flex;align-items:center">' + chip + '</span>' : chip;
 }
-function _cmdOptionsHtml(spec){
+function _cmdOptionsHtml(spec, hint){
   if (!_hasOpts(spec)) return '';
   const groups = {}; const indep = [];
   (spec.options||[]).forEach(function(o){ if (o.group) { (groups[o.group] = groups[o.group] || []).push(o); } else indep.push(o); });
   let h = '<label class="flbl">Options</label>'
-    + '<div style="font-size:10px;color:var(--muted);margin:-2px 0 4px">Click to include; segmented sets are pick-one. The Advanced box below overrides.</div>'
+    + '<div style="font-size:10px;color:var(--muted);margin:-2px 0 4px">' + esc(hint || 'Click to include; segmented sets are pick-one. The Advanced box below overrides.') + '</div>'
     + '<div id="cmdOptions" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">';
   Object.keys(groups).forEach(function(g){
     h += '<span class="opt-grp" data-group="' + _ea(g) + '" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden">';
@@ -4496,6 +4468,46 @@ function _cmdOptionsHtml(spec){
   }
   return h;
 }
+/**
+ * Adapter: brain-skill params -> the CommandOptionsSpec shape the pill renderer
+ * already understands.
+ *
+ * The Tools area is two catalogs joined only in the UI. Local commands declare
+ * rich options (flag/value/choice, with choices[] and pick-one groups) and have
+ * had a pill picker for a while; brain skills carry bare {{param}} names with no
+ * declared values and rendered as plain text inputs. Rather than teach one side
+ * the other's data model, map both into one view-model — no migration, and a
+ * skill that later declares real choices upgrades to choice pills for free.
+ *
+ * Every param becomes a value-kind chip: click to include, which reveals its text
+ * box. Brain skills have no required/optional notion, so nothing is forced —
+ * the same as the old plain inputs, which could equally be left blank.
+ */
+function _skillOptionsSpec(s){
+  const names = (s && Array.isArray(s.params)) ? s.params : [];
+  return {
+    options: names.map(function(p){
+      return { name: p, kind: 'value', required: false, valuePlaceholder: skParamLabel(p) };
+    }),
+    positionals: [],
+  };
+}
+
+/** Read {param: value} back out of the pill DOM for a skill run. */
+function _readSkillParams(names){
+  const out = {};
+  (names || []).forEach(function(p){ out[p] = ''; });
+  const box = document.getElementById('cmdOptions');
+  if (!box) return out;
+  box.querySelectorAll('.opt-chip.active').forEach(function(chip){
+    const name = chip.getAttribute('data-flag');
+    if (!(name in out)) return;
+    const inp = chip.parentNode.querySelector('.opt-val');
+    out[name] = inp && inp.value ? inp.value.trim() : '';
+  });
+  return out;
+}
+
 function _optSetActive(el, on){
   el.classList.toggle('active', on);
   el.style.background = on ? 'var(--accent)' : 'var(--panel)';
