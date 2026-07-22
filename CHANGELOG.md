@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.245 — 2026-07-22
+
+Fixes the in-app assistant not being able to see your tasks. When you asked it about a task, it would fail with an 'unknown tool' error behind the scenes and then guess — sometimes wrongly — at what the task was doing. It can now read the board (list your tasks and look one up) correctly. Also an internal test-tooling cleanup so future UI checks are more reliable.
+
 ## v0.1.244 — 2026-07-22
 
 Tasks now run with no dollar budget cap by default, matching Claude Code itself — a task runs until it's done rather than getting cut off mid-work at an arbitrary dollar amount. Your usage limits and a per-task time limit still bound anything that runs away, and you can still set a spending cap on an individual task if you want one. Also: tasks that use smart model routing now read 'Role-routed' (Opus for thinking, Sonnet for coding) instead of the confusing 'mixed', so it's clear the top-level work runs on Opus.
