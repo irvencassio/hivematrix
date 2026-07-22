@@ -37,6 +37,7 @@ import { homedir } from "os";
 import { resolveClaudeBinary } from "@/lib/orchestrator/subprocess";
 import { StreamParser } from "@/lib/orchestrator/stream-parser";
 import { backendConfigured } from "@/lib/models/backends";
+import { getRoleModels } from "@/lib/models/available";
 import type { LaneToolContext } from "@/lib/orchestrator/lane-tools";
 import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { recordRun } from "@/lib/observability/store";
@@ -77,12 +78,37 @@ export interface FlashBudget {
 /** Surfaces where the reply is spoken and latency dominates usefulness. */
 const LATENCY_CRITICAL_CHANNELS: ReadonlySet<string> = new Set(["voice", "watch", "glasses"]);
 
-export function flashBudgetFor(channel?: string | null): FlashBudget {
-  if (channel && LATENCY_CRITICAL_CHANNELS.has(channel)) {
-    return { model: "haiku", maxToolCalls: 10, maxWallMs: 90 * 1000 };
+/**
+ * Budget for a Flash turn. The MODEL honors the operator's "Operational + Chat"
+ * role override when one is set; the tool/wall limits stay per-surface.
+ *
+ * The model used to be a hardcoded "haiku"/"sonnet" literal here, so the
+ * Settings → Models override for this role reached nothing: chat reported
+ * Sonnet while the setting displayed "Default — Haiku", and choosing Opus
+ * changed nothing at all. Same defect as the hardcoded routeByRole() call in
+ * the task path — a literal standing where a configured value belongs.
+ *
+ * Defaults stay surface-specific on purpose: spoken surfaces need a fast model
+ * or the reply lands after the moment has passed. An EXPLICIT override applies
+ * everywhere, because an operator who names a model means it.
+ *
+ * `overrideModel` is injectable for tests — production reads the live config.
+ * A config read that throws falls back to the built-in defaults, never a failed turn.
+ */
+export function flashBudgetFor(channel?: string | null, overrideModel?: string | null): FlashBudget {
+  let override = (overrideModel ?? "").trim();
+  if (overrideModel === undefined) {
+    try {
+      override = (getRoleModels().operational ?? "").trim();
+    } catch { override = ""; }
   }
-  return { model: "sonnet", maxToolCalls: 40, maxWallMs: 15 * 60 * 1000 };
+  const spoken = !!channel && LATENCY_CRITICAL_CHANNELS.has(channel);
+  const model = override || (spoken ? "haiku" : "sonnet");
+  return spoken
+    ? { model, maxToolCalls: 10, maxWallMs: 90 * 1000 }
+    : { model, maxToolCalls: 40, maxWallMs: 15 * 60 * 1000 };
 }
+
 
 /**
  * Read-only tool names — the set an observe-only pass (manual-autonomy

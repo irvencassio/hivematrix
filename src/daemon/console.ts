@@ -7202,7 +7202,12 @@ function renderRoleModels() {
   };
   fill("s_role_thinking", opts.thinking || [], provider === "codex" ? "Default — Codex GPT-5.5" : "Default — Opus", rm.thinking);
   fill("s_role_coding", opts.coding || [], provider === "codex" ? "Default — Codex Spark" : "Default — Sonnet", rm.coding);
-  fill("s_role_operational", opts.operational || [], "Default — Haiku", rm.operational);
+  // Honest default label: this role covers bulk/file ops, voice AND typed chat,
+  // and the default is NOT one model — spoken surfaces get Haiku for latency,
+  // typed chat gets Sonnet so a real request can finish (flash/loop.ts's
+  // flashBudgetFor). Showing a bare "Default — Haiku" is why chat reporting
+  // Sonnet reads as a bug. An explicit choice here applies to all of them.
+  fill("s_role_operational", opts.operational || [], "Default — Haiku · Sonnet for typed chat", rm.operational);
   fill("s_role_writer", opts.writer || [], provider === "codex" ? "Default — Codex GPT-5.5" : "Default — Sonnet", rm.writer);
 }
 

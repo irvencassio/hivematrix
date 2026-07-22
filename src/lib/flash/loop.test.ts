@@ -764,3 +764,31 @@ test("flashBudgetFor: the phone's TYPED chat gets the text budget, not the spoke
   assert.ok(typed.maxWallMs > spoken.maxWallMs, "typed phone chat must outlast a spoken turn");
   assert.ok(typed.maxToolCalls > spoken.maxToolCalls);
 });
+
+test("flashBudgetFor honors the Operational + Chat override, and keeps limits per-surface", () => {
+  // The model was a hardcoded "haiku"/"sonnet" literal, so the Settings override
+  // for this role reached nothing: chat reported Sonnet while the setting read
+  // "Default — Haiku", and choosing Opus changed nothing at all.
+
+  // No override → the documented per-surface defaults are unchanged.
+  assert.equal(flashBudgetFor("console", "").model, "sonnet");
+  assert.equal(flashBudgetFor("voice", "").model, "haiku");
+  assert.equal(flashBudgetFor("watch", "").model, "haiku");
+  assert.equal(flashBudgetFor("glasses", "").model, "haiku");
+  assert.equal(flashBudgetFor(null, "").model, "sonnet", "an unknown surface is treated as typed");
+
+  // An explicit override wins on every surface — an operator naming a model means it.
+  for (const ch of ["console", "voice", "watch", "glasses", null]) {
+    assert.equal(flashBudgetFor(ch, "opus").model, "opus", `override must apply to ${ch}`);
+  }
+
+  // Tool/wall limits stay surface-specific regardless of model: a spoken reply
+  // that arrives after four minutes is worthless, whatever model produced it.
+  assert.equal(flashBudgetFor("voice", "opus").maxWallMs, 90 * 1000);
+  assert.equal(flashBudgetFor("voice", "opus").maxToolCalls, 10);
+  assert.equal(flashBudgetFor("console", "opus").maxWallMs, 15 * 60 * 1000);
+  assert.equal(flashBudgetFor("console", "opus").maxToolCalls, 40);
+
+  // Whitespace is not an override.
+  assert.equal(flashBudgetFor("console", "   ").model, "sonnet");
+});
