@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.247 — 2026-07-22
+
+The header usage meters (5h, 7d, and ctx) are now longer bars with tick marks at each segment boundary — one mark per hour on 5h, per day on 7d, and quarters on ctx — so they're readable at a glance instead of a tiny dash. The 7-day bar now fills by how much of your weekly budget you've actually used (days-worth consumed) rather than by which day of the week it is, and it turns red when you're burning faster than one day's share per day — so a hot week shows up early. (This ships the 0.1.246 usage-bar work, which was committed but never published to the update feed.)
+
 ## v0.1.246 — 2026-07-22
 
 The header usage meters (5h, 7d, and ctx) are now longer bars with tick marks at each segment boundary — one mark per hour on 5h, per day on 7d, and quarters on ctx — so they're readable at a glance instead of a tiny dash. The 7-day bar now fills by how much of your weekly budget you've actually used (days-worth consumed) rather than by which day of the week it is, and it turns red when you're burning faster than one day's share per day — so a hot week shows up early.
