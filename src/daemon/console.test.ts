@@ -4468,6 +4468,38 @@ test("every attrEnc'd onclick argument reaches a handler that decodes it", () =>
   assert.equal(decodeURIComponent(enc("lib:weekly-ai-roundup")), "lib:weekly-ai-roundup");
 });
 
+test("opening a skill panel leaves its own Run/View buttons able to find their subject", () => {
+  // Every control INSIDE the panel — Run, View, Copy, Publish, Trust, Delete, and
+  // the local-command pair — resolves its subject through skSelected(), which
+  // reads the module-level _skSel. selectSkill() (the right-rail path) set it;
+  // showSkillPanel() did not. So opening the panel from the Tools Run button
+  // produced a fully rendered panel on which EVERY button hit `if (!it) return`
+  // and did nothing. Drive the real function and assert the state it must leave.
+  const js = extractScript(CONSOLE_HTML);
+  const sel = new Function(`
+    let _skSel = '';
+    const CAT = [{ key: 'lib:weekly-ai-roundup', name: 'weekly-ai-roundup', source: 'lib', raw: {} }];
+    function skCatalog() { return CAT; }
+    ${extractFunctionBlock(js, "skSelected")}
+    const state = {};
+    const _flashState = {}, _brainState = {}, _rolesState = {}, _toolsState = {}, _goalsState = {};
+    let _taskFormInSession = false;
+    function setFlashSessionMode() {}
+    function _closeNewTaskPanel() {}
+    function renderBoard() {}
+    function _libSkillPanelHtml() { return '<div class="new-task-panel"></div>'; }
+    function _localCmdPanelHtml() { return ''; }
+    function populateCommandProjects() {}
+    const document = { getElementById: function () { return { innerHTML: '' }; } };
+    ${extractFunctionBlock(js, "showSkillPanel")}
+    showSkillPanel('lib:weekly-ai-roundup');
+    return skSelected();
+  `)() as { key: string } | null;
+
+  assert.ok(sel, "skSelected() is null after opening the panel — every button in it would silently return");
+  assert.equal(sel!.key, "lib:weekly-ai-roundup", "the panel's buttons must act on the item the panel is showing");
+});
+
 test("attrEnc never supplies text a human reads", () => {
   // A title=/value= filled by attrEnc renders percent-escapes to the operator:
   // the Tools params tooltip read "text*%2C%20domains" and the source tooltip

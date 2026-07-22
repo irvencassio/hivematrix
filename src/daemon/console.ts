@@ -4100,6 +4100,12 @@ function showSkillPanel(key) {
   if (!it) return;
   state.selected = null;
   state.selectedSkillOrCommand = key;
+  // The panel's OWN buttons (Run/View/Copy/Publish/Delete) all resolve their
+  // subject through skSelected(), which reads _skSel — so whoever opens the
+  // panel must set it. selectSkill() did; every other entry point (the Tools
+  // Run button) did not, leaving a fully rendered panel whose every button
+  // silently returned on its null check. Own it here so no caller can forget.
+  _skSel = key;
   _flashState.panelOpen = false;
   _brainState.panelOpen = false;
   _rolesState.panelOpen = false;
