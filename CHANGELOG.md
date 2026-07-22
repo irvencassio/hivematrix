@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.243 — 2026-07-22
+
+Fixes the last dead spots in the Tools panel. Most importantly, opening Tools 'cold' (right after launch, before things finished loading) showed no Run buttons at all — now they always appear. Also, Copy and Publish in a skill's window were quietly reporting success in a side column you might not be looking at; that feedback now lands right where you clicked. Backed by a new set of automated UI tests that click every control the way you would.
+
 ## v0.1.242 — 2026-07-22
 
 Tasks that hit a real problem now give up faster. A failing task used to retry 5 times before failing — for the failures that actually happen (a sign-in or config problem), that's just four extra rounds of waiting on an outcome that won't change. Now it retries once, then fails with a clear reason. Genuine rate-limits are unaffected — those still wait for your usage window to reset.
