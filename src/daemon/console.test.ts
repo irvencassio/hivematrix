@@ -3066,7 +3066,7 @@ test("Tools panel has a real-time search box that filters groups by name/descrip
   const panel = fnBody(js, "renderToolsPanel");
   assert.match(panel, /id="toolsQuery"/, "renderToolsPanel emits a #toolsQuery search input");
   assert.match(panel, /oninput="toolsQueryInput\(\)"/, "the input is wired to a real-time handler");
-  assert.match(panel, /id="toolsQuery"[\s\S]{0,200}attrEnc\(_toolsQuery\)/, "the input's value reflects the persisted query on every render");
+  assert.match(panel, /id="toolsQuery"[\s\S]{0,200}attrText\(_toolsQuery\)/, "the input's value reflects the persisted query on every render");
   assert.doesNotMatch(panel, /_toolsQuery\s*=(?!=)/, "renderToolsPanel must never assign _toolsQuery — only toolsQueryInput() may");
 
   // toolsQueryInput() is the sole updater: read the live box, store it, re-render.
@@ -3140,7 +3140,7 @@ test("Tools panel search box sits in its own left-aligned row below the heading,
   assert.match(panel, /oninput="toolsQueryInput\(\)"/, "still wired to the real-time handler");
   assert.match(
     panel,
-    /id="toolsQuery"[\s\S]{0,200}attrEnc\(_toolsQuery\)/,
+    /id="toolsQuery"[\s\S]{0,200}attrText\(_toolsQuery\)/,
     "input value still reflects the persisted query",
   );
 });
@@ -3178,7 +3178,7 @@ test("Tools panel re-renders the results pane in place once mounted, instead of 
   assert.match(panel, /oninput="toolsQueryInput\(\)"/, "still wired to the real-time handler");
   assert.match(
     panel,
-    /id="toolsQuery"[\s\S]{0,200}attrEnc\(_toolsQuery\)/,
+    /id="toolsQuery"[\s\S]{0,200}attrText\(_toolsQuery\)/,
     "input value still reflects the persisted query in the fallback render",
   );
 });
@@ -4433,8 +4433,50 @@ test("the Run button stops propagation and survives a cold Tools panel", () => {
   const launcher = extractFunctionBlock(js, "runToolFromCatalog");
   assert.match(launcher, /if \(!skCatalog\(\)\.length\)/, "loads the catalog before opening the panel");
   assert.match(launcher, /renderSkillCatalog\(\)/);
-  assert.match(launcher, /showSkillPanel\(key\)/);
+  assert.match(launcher, /showSkillPanel\(k\)/, "opens the DECODED key — see the attrEnc agreement test");
 
   // Layout: Run absorbs the free space, so the caret must not also claim it.
   assert.match(CONSOLE_HTML, /\.tools-run-btn \+ \.tools-caret \{ margin-left:6px; \}/);
+});
+
+test("every attrEnc'd onclick argument reaches a handler that decodes it", () => {
+  // attrEnc() is encodeURIComponent: it hands the receiver 'lib%3Afoo' where the
+  // catalog holds 'lib:foo'. Handlers that skip decodeURIComponent compare the
+  // encoded string against raw data and silently miss — which is exactly how all
+  // 110 Tools Run buttons rendered live and did nothing (showSkillPanel's
+  // `if (!it) return`), and how no Tools row ever expanded (_toolsState.expanded
+  // written under the encoded key, read under the raw one). Unit-testing the key
+  // builder could not see it: both halves were right, the wiring between was not.
+  const js = extractScript(CONSOLE_HTML);
+
+  // Collect every handler invoked as onclick="…fn('+ attrEnc(…)…".
+  const handlers = new Set<string>();
+  const call = /([A-Za-z_$][\w$]*)\(\\'+\s*\+\s*attrEnc\(/g;
+  for (let m = call.exec(js); m; m = call.exec(js)) handlers.add(m[1]);
+  assert.ok(handlers.size >= 5, `expected several attrEnc'd handlers, found ${handlers.size}`);
+
+  const offenders: string[] = [];
+  for (const name of handlers) {
+    const body = extractFunctionBlock(js, name);
+    if (!/decodeURIComponent\(/.test(body)) offenders.push(name);
+  }
+  assert.deepEqual(offenders, [], `these handlers take attrEnc'd args but never decode: ${offenders.join(", ")}`);
+
+  // The round trip the Run button depends on, end to end.
+  const enc = new Function(`${extractFunctionBlock(js, "attrEnc")}\nreturn attrEnc;`)() as (s: string) => string;
+  assert.equal(enc("lib:weekly-ai-roundup"), "lib%3Aweekly-ai-roundup", "the colon really is encoded");
+  assert.equal(decodeURIComponent(enc("lib:weekly-ai-roundup")), "lib:weekly-ai-roundup");
+});
+
+test("attrEnc never supplies text a human reads", () => {
+  // A title=/value= filled by attrEnc renders percent-escapes to the operator:
+  // the Tools params tooltip read "text*%2C%20domains" and the source tooltip
+  // "src%2Flib%2Forchestrator%2Flane-tools.ts". attrText escapes without mangling.
+  const js = extractScript(CONSOLE_HTML);
+  const display = js.match(/(?:title|value)="[^"]*'\s*\+\s*attrEnc\(/g) || [];
+  assert.deepEqual(display, [], "display attributes must use attrText, not the URL encoder attrEnc");
+
+  const text = new Function(`${extractFunctionBlock(js, "esc")}\n${extractFunctionBlock(js, "attrText")}\nreturn attrText;`)() as (s: string) => string;
+  assert.equal(text("text*, domains, project"), "text*, domains, project", "stays legible");
+  assert.equal(text('say "hi" & <b>'), "say &quot;hi&quot; &amp; &lt;b&gt;", "still safe in an attribute");
 });

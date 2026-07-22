@@ -2181,7 +2181,13 @@ async function api(path, opts) {
 function esc(s){ return (s==null?"":String(s)).replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
 // Encode arbitrary text for safe inlining as a single-quoted JS string argument in
 // an onclick attribute (esc() only handles &<>; this also neutralises quotes).
+// CONTRACT: this is a URL encoder — the receiving handler MUST decodeURIComponent()
+// its argument, or it gets 'lib%3Afoo' where it expected 'lib:foo'. Never use it
+// for text a human reads (a title=…), only for values handed back to JS.
 function attrEnc(s){ return encodeURIComponent(s==null?"":String(s)).replace(/'/g,"%27"); }
+// Human-readable text destined for an HTML attribute (title=…). Unlike attrEnc it
+// leaves the text legible, escaping only markup and the quotes that would break out.
+function attrText(s){ return esc(s).replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 // Lightweight toast — consistent "it saved" feedback for auto-saving settings.
 function hmToast(message, kind) {
   let host = document.getElementById("toastHost");
@@ -3517,7 +3523,7 @@ function goalRowHtml(g) {
   const paused = g.status === 'paused' ? '<span class="tools-kind">paused</span>' : (g.status === 'done' ? '<span class="tools-kind" style="color:var(--ok)">done ✓</span>' : '');
   const metric = goalSourceMetric(g.dataSource);
   const auto = metric
-    ? '<span class="tools-kind" style="border-color:var(--accent);color:var(--accent)" title="progress auto-synced from ' + attrEnc(g.dataSource) + '">📡 ' + esc(metric) + '</span>'
+    ? '<span class="tools-kind" style="border-color:var(--accent);color:var(--accent)" title="progress auto-synced from ' + attrText(g.dataSource) + '">📡 ' + esc(metric) + '</span>'
     : '';
   const last = g.latestCheckin
     ? 'last: ' + esc(g.latestCheckin.date) + (g.latestCheckin.note ? ' — ' + esc(g.latestCheckin.note) : '')
@@ -3585,6 +3591,9 @@ function renderGoalsPanel() {
 }
 
 async function goalCheckin(id, title) {
+  // attrEnc'd by the caller — decode or the id matches no goal and the title
+  // shows up as "Q3%20revenue" in the prompt.
+  id = decodeURIComponent(id || ''); title = decodeURIComponent(title || '');
   const note = await hmPrompt('Check-in for "' + (title || 'goal') + '" — what did you do?', '');
   if (note === null) return;
   // For a quantitative goal (targetValue set), also collect the numeric value so
@@ -3608,6 +3617,9 @@ async function goalCheckin(id, title) {
 // purpose: the source is any "provider:metric" key; Apple Health metrics are
 // offered as hints. Blank source clears back to manual.
 async function goalEditMetric(id, title, curSource, curTarget, curUnit) {
+  id = decodeURIComponent(id || ''); title = decodeURIComponent(title || '');
+  curSource = decodeURIComponent(curSource || ''); curTarget = decodeURIComponent(curTarget || '');
+  curUnit = decodeURIComponent(curUnit || '');
   const ds = await hmPrompt(
     'Data source for "' + (title || 'goal') + '" — provider:metric, blank = manual.\n'
     + 'Apple Health: healthkit:steps · healthkit:activeEnergy · healthkit:exerciseMinutes · healthkit:distanceWalkingRunning · healthkit:workouts',
@@ -3648,6 +3660,8 @@ async function goalAdd() {
 // Set/edit a goal's single "do this next" step — the actionable hook the
 // heartbeat, morning brief, and chat surface. Upserts by id.
 async function goalSetNext(id, title, current) {
+  id = decodeURIComponent(id || ''); title = decodeURIComponent(title || '');
+  current = decodeURIComponent(current || '');
   const next = await hmPrompt('Next step for "' + (title || 'goal') + '" — one concrete thing to do soon:', current || '');
   if (next === null) return;
   try {
@@ -8337,8 +8351,12 @@ function _toolRunKey(groupKind, t, catalogKeys) {
  *  The Tools panel loads /capabilities, not /skills+/commands, so a cold open
  *  would otherwise find skCatalog() empty and silently do nothing. */
 async function runToolFromCatalog(key) {
+  // The onclick argument arrives attrEnc()'d, so 'lib:x' reaches us as 'lib%3Ax'
+  // — decode before matching or showSkillPanel() finds nothing and returns
+  // silently, which is exactly how every Run button looked live and did nothing.
+  const k = decodeURIComponent(key || '');
   if (!skCatalog().length) { try { await renderSkillCatalog(); } catch (e) { /* transient */ } }
-  showSkillPanel(key);
+  showSkillPanel(k);
 }
 
 async function loadCapabilities() {
@@ -8433,8 +8451,8 @@ function renderToolsPanel() {
         if (t.capability) fields += '<div class="tools-field"><span class="fk">capability</span><span class="fv mono">' + esc(t.capability) + '</span></div>';
         if (g.kind === 'skill-library' && t.kind) fields += '<div class="tools-field"><span class="fk">kind</span><span class="fv">' + esc(t.kind) + '</span></div>';
         if (t.skillName) fields += '<div class="tools-field"><span class="fk">skill</span><span class="fv">' + esc(t.skillName) + '</span></div>';
-        if (schemaStr) fields += '<div class="tools-field"><span class="fk">params</span><span class="fv mono" title="' + attrEnc(schemaStr) + '">' + esc(schemaStr) + '</span></div>';
-        if (fileShort) fields += '<div class="tools-field"><span class="fk">source</span><span class="fv mono" title="' + attrEnc(file) + '">' + esc(fileShort) + '</span></div>';
+        if (schemaStr) fields += '<div class="tools-field"><span class="fk">params</span><span class="fv mono" title="' + attrText(schemaStr) + '">' + esc(schemaStr) + '</span></div>';
+        if (fileShort) fields += '<div class="tools-field"><span class="fk">source</span><span class="fv mono" title="' + attrText(file) + '">' + esc(fileShort) + '</span></div>';
         fields += '</div>';
 
         const runKey = _toolRunKey(g.kind, t);
@@ -8480,7 +8498,7 @@ function renderToolsPanel() {
     + '<span class="oc-panel-head-spacer"></span>'
     + '<button class="linklike ov-back" onclick="closeSession()" title="Back (Esc)">← Back</button></div>'
     + '<div class="sk-toolbar" style="margin-bottom:0">'
-    + '<input id="toolsQuery" placeholder="Search tools…" oninput="toolsQueryInput()" value="' + attrEnc(_toolsQuery) + '" />'
+    + '<input id="toolsQuery" placeholder="Search tools…" oninput="toolsQueryInput()" value="' + attrText(_toolsQuery) + '" />'
     + '</div>'
     + '<div id="integrateCardWrap"></div>'
     + '<div class="tools-pane">' + body + '</div></div>';
@@ -8621,7 +8639,10 @@ function toolsQueryInput() {
 }
 
 function toggleToolExpand(key) {
-  _toolsState.expanded[key] = !_toolsState.expanded[key];
+  // Same attrEnc contract as runToolFromCatalog: the click stored the ENCODED
+  // key while the renderer read the raw one, so no row ever expanded.
+  const k = decodeURIComponent(key || '');
+  _toolsState.expanded[k] = !_toolsState.expanded[k];
   renderToolsPanel();
 }
 
