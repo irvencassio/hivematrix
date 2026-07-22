@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.238 — 2026-07-22
+
+Fixes every Run button in Tools doing nothing. The previous release stopped dead buttons from appearing, but the ones that remained still could not open: the button handed the skill's name to the opener in a web-encoded form the opener could not read, so all 110 of them silently failed. Also fixes Tools rows never expanding when clicked, and the params and source tooltips showing encoded gibberish like text%2C%20domains instead of plain text.
+
 ## v0.1.237 — 2026-07-22
 
 Fixes the Run buttons in Tools doing nothing. Clicking Run on almost any command silently failed: the button was built from the command's own name, but the catalog folds a folder-skill into its brain-skill twin when both exist, so the name it looked up was not there and nothing opened. Run now checks what the catalog actually holds before offering the button, so a button that cannot open no longer appears at all.
