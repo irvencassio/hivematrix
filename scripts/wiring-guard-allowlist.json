@@ -1,6 +1,7 @@
 {
   "_comment": "Pre-existing wiring debt. A ratchet, not an amnesty: the guard fails on anything NEW. Remove an entry once the code is wired up or deleted — that is the intended direction. Regenerate with: node scripts/wiring-guard.mjs --update-allowlist",
   "allow": [
+    "dead-module:src/daemon/console-test-harness.ts",
     "dead-export:src/lib/ado/mcp.ts#getAdoConfig",
     "dead-export:src/lib/ado/mcp.ts#parseAdoConfig",
     "dead-export:src/lib/approvals/queue.ts#classifyApproval",

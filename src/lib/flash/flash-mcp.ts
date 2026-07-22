@@ -812,7 +812,7 @@ export function buildFlashMcpToolCatalog(tools: ChatTool[]): FlashMcpToolDef[] {
 }
 
 // Bump when FLASH_MCP_SERVER_JS changes so the on-disk copy is rewritten.
-export const SERVER_VERSION = "4";
+export const SERVER_VERSION = "5";
 
 // The stdio MCP server (CommonJS, run by the bundled node). Deliberately avoids
 // template literals / ${} so it nests cleanly in this TS array-join string
@@ -834,7 +834,13 @@ export const FLASH_MCP_SERVER_JS = [
   'var PROJECT = process.env.HIVE_FLASH_PROJECT || "hivematrix";',
   'var SESSION_ID = process.env.HIVE_FLASH_SESSION_ID || "";',
   'var CHANNEL = process.env.HIVE_FLASH_CHANNEL || "";',
-  'var FLASH_ONLY = { persona_update: 1, generate_avatar: 1, deep_think: 1, escalate_to_task: 1, learn_skill: 1 };',
+  // Derived from FLASH_ONLY_TOOL_NAMES, never hand-listed. This map decides
+  // whether callTool() proxies to /flash/tool/:name (Flash-only) or /bee/:name
+  // (lane tool). It was previously a hardcoded literal that drifted: list_tasks
+  // and get_task were added to FLASH_ONLY_TOOL_NAMES but not here, so they fell
+  // through to /bee/get_task and returned "unknown lane tool" — Flash literally
+  // could not read its own tasks. Deriving it closes that whole drift class.
+  `var FLASH_ONLY = { ${FLASH_ONLY_TOOL_NAMES.map((n) => `${n}: 1`).join(", ")} };`,
   "function token() {",
   '  try { return fs.readFileSync(path.join(os.homedir(), ".hivematrix", "auth-token"), "utf8").trim(); }',
   '  catch (e) { return ""; }',

@@ -53,6 +53,25 @@ test("flash-only tool names match the exported definitions 1:1", () => {
   );
 });
 
+test("the generated server's FLASH_ONLY routing map covers EVERY flash-only tool (no drift)", () => {
+  // Regression: the generated server routes a call to /flash/tool/:name only when
+  // FLASH_ONLY[name] is set; otherwise it proxies to /bee/:name, where the lane
+  // dispatcher rejects it as "unknown lane tool". That map used to be a hardcoded
+  // literal, and list_tasks + get_task were added to FLASH_ONLY_TOOL_NAMES without
+  // it — so Flash's get_task returned "unknown lane tool get_task" and the
+  // assistant could not read its own tasks. The map must be derived, so every
+  // flash-only tool routes to the flash endpoint.
+  // FLASH_MCP_SERVER_JS is the joined server source (a string).
+  const line = FLASH_MCP_SERVER_JS.split("\n").find((l) => l.includes("var FLASH_ONLY ="));
+  assert.ok(line, "generated server declares FLASH_ONLY");
+  for (const name of FLASH_ONLY_TOOL_NAMES) {
+    assert.match(line!, new RegExp(`\\b${name}\\s*:\\s*1`), `FLASH_ONLY must include ${name} so it routes to /flash/tool, not /bee`);
+  }
+  // The two that drifted, called out explicitly.
+  assert.match(line!, /\bget_task\s*:\s*1/);
+  assert.match(line!, /\blist_tasks\s*:\s*1/);
+});
+
 test("isFlashOnlyTool distinguishes flash-only tools from lane tools", () => {
   assert.equal(isFlashOnlyTool("persona_update"), true);
   assert.equal(isFlashOnlyTool("escalate_to_task"), true);
