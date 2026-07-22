@@ -4305,7 +4305,11 @@ async function viewSkill() {
 }
 async function copySkill() {
   const it = skSelected(); if (!it || it.source !== 'lib') return;
-  const res = document.getElementById('skStatus');
+  // Feedback belongs next to the button that was clicked. Copy/Publish live INSIDE
+  // the skill panel (id skRunStatus); skStatus is the right-rail sidebar line —
+  // writing there put "Copied…"/"Published…" in a detached column (and one the
+  // operator may have collapsed). Prefer the panel line, fall back to the rail.
+  const res = document.getElementById('skRunStatus') || document.getElementById('skStatus');
   try {
     const d = await api('/skills/' + encodeURIComponent(it.name));
     const md = (d && d.markdown) || '';
@@ -4341,7 +4345,8 @@ async function deleteSelected() {
 async function publishSelected() {
   const it = skSelected(); if (!it || it.source !== 'lib') return;
   const scope = (document.getElementById('skPubScope') || {}).value || 'team';
-  const res = document.getElementById('skStatus');
+  // Panel line first, sidebar fallback — see copySkill for why.
+  const res = document.getElementById('skRunStatus') || document.getElementById('skStatus');
   const ok = await hmConfirm('Sign and publish "' + it.name + '" to the ' + scope + ' scope? This pushes it to that scope\'s git repo.', { okLabel: 'Publish' });
   if (!ok) return;
   if (res) res.textContent = 'Publishing…';
@@ -8368,7 +8373,18 @@ async function runToolFromCatalog(key) {
 async function loadCapabilities() {
   _toolsState.error = false;
   try {
-    const r = await api('/capabilities');
+    // A row's Run button only renders when _toolRunKey resolves the row against
+    // skCatalog() (i.e. _skills/_commands), but showTools() loads /capabilities
+    // alone and never populates that catalog. So on a cold open — Tools reached
+    // before a background refresh() has run renderSkillCatalog() — skCatalog() is
+    // empty, every runKey comes back "", and NOT ONE Run button renders. And
+    // refresh() never calls renderToolsPanel(), so they don't appear later either.
+    // Load the catalog alongside capabilities here so the button's existence is a
+    // property of this panel, not of whatever else happened to run first.
+    const [r] = await Promise.all([
+      api('/capabilities'),
+      skCatalog().length ? Promise.resolve() : renderSkillCatalog().catch(function () { }),
+    ]);
     _toolsState.groups = (r && r.groups) || [];
   } catch (e) {
     _toolsState.error = true;

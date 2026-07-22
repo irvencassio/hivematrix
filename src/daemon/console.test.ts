@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { JSDOM, VirtualConsole } from "jsdom";
 import { CONSOLE_HTML } from "./console";
 
 /**
@@ -4511,4 +4512,158 @@ test("attrEnc never supplies text a human reads", () => {
   const text = new Function(`${extractFunctionBlock(js, "esc")}\n${extractFunctionBlock(js, "attrText")}\nreturn attrText;`)() as (s: string) => string;
   assert.equal(text("text*, domains, project"), "text*, domains, project", "stays legible");
   assert.equal(text('say "hi" & <b>'), "say &quot;hi&quot; &amp; &lt;b&gt;", "still safe in an attribute");
+});
+
+// --- Effect-based control driver (jsdom) ------------------------------------
+// The four Tools/skill-panel regressions of 0.1.237–0.1.240 shared one shape: a
+// control is rendered from one input, but its handler reads a SEPARATE piece of
+// module state the entry point never populated — so the click hits a silent
+// `if (!x) return` and nothing happens. Source grep can't see that wiring: both
+// halves are individually correct. These tests MOUNT the real console in jsdom,
+// stub only the routes the buttons call, and DRIVE each control the operator's
+// way (a real click on the real .tools-run-btn), asserting an observable effect.
+// No effect = the class is back.
+
+type FetchCall = { method: string; path: string; body: string | null };
+
+function consoleReply(path: string): unknown {
+  if (path.startsWith("/capabilities")) return { groups: [
+    { kind: "skill-library", tools: [{ name: "weekly-ai-roundup", description: "d", kind: "skill" }] },
+    { kind: "skill-tool", tools: [{ name: "roundup", skillName: "weekly-ai-roundup", description: "d" }] },
+    { kind: "local-command", tools: [{ name: "storelookup", description: "d" }] },
+    { kind: "native", tools: [{ name: "brain_read", description: "d", enabled: true }] },
+  ] };
+  if (path === "/skills") return { skills: [{ name: "weekly-ai-roundup", description: "d", kind: "skill", hasInput: true, params: ["topic"], scope: "team", signed: true, trusted: false }] };
+  if (path === "/commands") return { commands: [{ invokeName: "storelookup", displayName: "storelookup", description: "d", kind: "command", options: { source: "hint", options: [{ name: "--json", kind: "flag" }], positionals: [] } }] };
+  if (path === "/projects") return { projects: [{ name: "hivematrix", path: "/repo/hivematrix" }, { name: "other", path: "/repo/other" }] };
+  if (path === "/models") return { available: [], theme: "system", defaultModel: "" };
+  if (path.startsWith("/integrate/branches")) return { base: "main", branches: [{ branch: "hive/task-1", ahead: 2, behind: 0, ffOk: true }] };
+  if (path.startsWith("/skills/") && path.endsWith("/run")) return { task: { _id: "t1" } };
+  if (path.endsWith("/publish")) return { ok: true, pushed: true, signedBy: "me" };
+  if (path.endsWith("/trust")) return { ok: true };
+  if (path.startsWith("/skills/")) return { markdown: "# skill md" };
+  if (path === "/commands/run") return { task: { _id: "t2" } };
+  if (path === "/tasks" || path === "/directives") return [];
+  if (path === "/approvals/pending") return { approvals: [] };
+  if (path === "/lanes") return { lanes: [] };
+  return {};
+}
+
+type Mounted = {
+  window: any; document: any; calls: FetchCall[];
+  tick: (n?: number) => Promise<void>;
+  click: (el: any) => void;
+  acceptDialog: () => boolean;
+  close: () => void;
+};
+
+async function mountConsole(): Promise<Mounted> {
+  const calls: FetchCall[] = [];
+  const vc = new VirtualConsole(); // swallow init-time console noise, not test assertions
+  const dom = new JSDOM(CONSOLE_HTML, {
+    runScripts: "dangerously",
+    url: "https://localhost/",
+    virtualConsole: vc,
+    beforeParse(w: any) {
+      w.fetch = (path: string, opts: any) => {
+        calls.push({ method: (opts && opts.method) || "GET", path: String(path), body: (opts && opts.body) || null });
+        return Promise.resolve({ status: 200, json: () => Promise.resolve(consoleReply(String(path))), text: () => Promise.resolve("") });
+      };
+      w.EventSource = class { close() {} addEventListener() {} };
+      w.scrollTo = () => {};
+      w.setInterval = () => 0;       // no background polling under test
+      w.setTimeout = (_fn: any) => 0; // no deferred re-entrancy
+      Object.defineProperty(w.navigator, "clipboard", {
+        value: { writeText: (t: string) => { calls.push({ method: "CLIP", path: "clipboard", body: t }); return Promise.resolve(); } },
+        configurable: true,
+      });
+    },
+  });
+  const w = dom.window, doc = w.document;
+  const tick = async (n = 6) => { for (let i = 0; i < n; i++) await Promise.resolve(); await new Promise((r) => setImmediate(r)); };
+  const click = (el: any) => el.dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true }));
+  const acceptDialog = () => {
+    const ok = doc.getElementById("dialogOk"), ov = doc.getElementById("dialogOverlay");
+    if (ok && ov && ov.classList.contains("open")) { click(ok); return true; }
+    return false;
+  };
+  await tick(10); // let init (refresh/loadModels/loadProjects) settle
+  return { window: w, document: doc, calls, tick, click, acceptDialog, close: () => w.close() };
+}
+
+test("cold Tools open still renders — and runs — its Run buttons (catalog is the panel's job, not a prior refresh's)", async () => {
+  // FINDING 1. A Run button only renders when _toolRunKey resolves the row
+  // against skCatalog() (i.e. _skills/_commands). showTools()/loadCapabilities()
+  // loaded /capabilities alone and never populated that catalog, so on a cold
+  // open every runKey came back "" and NOT ONE Run button rendered — and
+  // refresh() never re-runs renderToolsPanel(), so they didn't appear later
+  // either. The button that isn't there can't be clicked: the whole class,
+  // one level earlier than the earlier fixes.
+  const m = await mountConsole();
+  try {
+    m.window.showTools();
+    await m.tick(10);
+    const runBtns = m.document.querySelectorAll(".tools-run-btn");
+    assert.ok(runBtns.length > 0, "a cold Tools open must render Run buttons");
+
+    // …and clicking one opens the run panel the operator's way.
+    m.click(runBtns[0]);
+    await m.tick(8);
+    assert.ok(m.document.querySelector(".new-task-panel"), "clicking Run opens the run panel");
+  } finally { m.close(); }
+});
+
+test("Copy/Publish write their status into the skill panel, not the detached right-rail sidebar", async () => {
+  // FINDING 2. Copy and Publish live INSIDE the skill panel (status id
+  // skRunStatus) but wrote to skStatus — the right-rail Skills sidebar line,
+  // a different column the operator may have collapsed. The action fired but its
+  // "Copied…"/"Published…" confirmation landed offscreen from the click.
+  const m = await mountConsole();
+  try {
+    await m.window.renderSkillCatalog();
+    await m.tick(4);
+    m.window.showSkillPanel("lib:weekly-ai-roundup");
+    await m.tick(6);
+
+    const copyBtn = m.document.querySelector('.sk-more button[onclick^="copySkill"]');
+    assert.ok(copyBtn, "the panel has a Copy button");
+    m.click(copyBtn);
+    await m.tick(8);
+    assert.match((m.document.getElementById("skRunStatus") || {}).textContent || "",
+      /Copied/, "Copy feedback shows in the panel, next to the button");
+    assert.equal((m.document.getElementById("skStatus") || {}).textContent || "", "",
+      "and is not stranded in the right-rail sidebar");
+  } finally { m.close(); }
+});
+
+test("the local-command panel Run posts the project path picked through the dropdown (mpRegister('cmd','commandPath'))", async () => {
+  // The picker writes the chosen path into a hidden input whose id must match
+  // _mpS('cmd').pathId, and runSelectedCommand reads it back. Drive the pick and
+  // the run end to end so a future id/registration drift can't silently strand
+  // every command back in $HOME.
+  const m = await mountConsole();
+  try {
+    await m.window.renderSkillCatalog();
+    await m.tick(4);
+    m.window.showSkillPanel("local:storelookup");
+    await m.tick(6);
+
+    const search = m.document.getElementById("cmd_project_search");
+    search.dispatchEvent(new m.window.Event("focus"));
+    await m.tick(4);
+    const item = m.document.querySelector("#cmd_project_list .project-item");
+    assert.ok(item, "the picker lists projects");
+    m.click(item);
+    await m.tick(4);
+    assert.ok((m.document.getElementById("commandPath") || {}).value,
+      "picking a project fills the hidden path the run reads");
+
+    const runBtn = m.document.querySelector('.new-task-panel button[onclick^="runSelectedCommand"]');
+    assert.ok(runBtn, "the panel has a Run button");
+    m.click(runBtn);
+    await m.tick(8);
+    const run = m.calls.find((c) => c.path === "/commands/run");
+    assert.ok(run, "Run posts to /commands/run");
+    assert.match(run!.body || "", /storelookup/, "with the command name in the payload");
+  } finally { m.close(); }
 });
