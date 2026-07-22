@@ -659,7 +659,12 @@ class AgentManager {
       // Token data is accumulated BEFORE requeue so it survives the retry.
       // Cap consecutive transient retries to prevent infinite loops (e.g. bad prompt,
       // persistent auth failure) — after MAX_TRANSIENT_RETRIES, mark as failed.
-      const MAX_TRANSIENT_RETRIES = 5;
+      // Set to 1: a single retry rides out a genuine blip, and a failure that
+      // survives one retry is almost always permanent, so don't grind on it.
+      // NOTE: a genuine rate-limit's primary handling is the scheduler's separate
+      // usage_limit delay (wait-until-reset, uncapped); this text-detected path
+      // is the fallback, and one retry there is enough.
+      const MAX_TRANSIENT_RETRIES = 1;
       if (code !== 0) {
         const transient = this.detectTransientFailure(agent);
         if (transient.transient) {

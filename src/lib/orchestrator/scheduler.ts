@@ -232,9 +232,11 @@ export function shouldClearStaleUsageDelay(
  * How many times the scheduler will re-queue a task that throws during spawn
  * (auth failure, bad config, transient CLI error) before giving up and marking
  * it failed. Mirrors handleExit()'s MAX_TRANSIENT_RETRIES so both failure paths
- * are capped the same way. Before this existed the spawn path requeued forever.
+ * are capped the same way. Before any cap existed the spawn path requeued
+ * forever; set to 1 because these failures (auth, bad config) are almost always
+ * permanent — one retry catches a genuine blip, more just delays the inevitable.
  */
-export const MAX_SPAWN_RETRIES = 5;
+export const MAX_SPAWN_RETRIES = 1;
 
 /**
  * Decide what to do with a task whose spawn just threw, given how many times it
