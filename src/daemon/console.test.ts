@@ -4339,3 +4339,39 @@ test("_readSkillParams returns every param, blank for the ones left unclicked", 
   assert.equal(out.tone, "warm", "value is trimmed");
   assert.equal(out.audience, "", "an unclicked param is sent empty, never dropped");
 });
+
+test("Approvals and Scheduled live in the left column; Setup's rail entry is gone", () => {
+  const main = CONSOLE_HTML.match(/<main>[\s\S]*?<\/main>/)?.[0] ?? "";
+  assert.ok(main, "main should be locatable");
+
+  const left = main.slice(main.indexOf('<section class="col board">'), main.indexOf('<section class="col session">'));
+  const right = main.slice(main.indexOf('<section class="col context">'));
+
+  // Approvals block work, so they sit ABOVE the nav where they cannot be missed,
+  // and render nothing at all when the queue is empty.
+  assert.match(left, /id="approvals"/, "approvals moved to the left column");
+  const apprIdx = left.indexOf('id="approvals"');
+  const navIdx = left.indexOf('id="flashNav"');
+  assert.ok(apprIdx >= 0 && apprIdx < navIdx, "approvals sit above the nav buttons");
+
+  assert.match(left, /id="dirSec"/, "Scheduled moved to the left column");
+  assert.doesNotMatch(right, /id="dirSec"/);
+  assert.doesNotMatch(right, /id="approvals"/);
+
+  // Setup's rail entry was redundant: the wizard auto-opens on first run
+  // (_obMaybeAutoOpen) and the same content lives under Settings → Setup, and
+  // the section hid itself entirely once required setup completed.
+  assert.doesNotMatch(main, /id="setupSec"/, "the Setup rail entry is removed");
+  assert.doesNotMatch(main, /id="setupSummary"/);
+  const js = extractScript(CONSOLE_HTML);
+  assert.doesNotMatch(js, /getElementById\("setupSec"\)/, "no orphaned reference to the removed mount");
+
+  // Its render must be null-safe now that the mount is gone — an unguarded
+  // .innerHTML on a missing element throws and takes the console with it.
+  assert.match(js, /const obEl = document\.getElementById\("onboarding"\);\s*\n\s*if \(obEl\)/,
+    "the onboarding render is guarded");
+
+  // Markup stays well-formed after the move.
+  assert.equal((main.match(/<section\b/g) || []).length, (main.match(/<\/section>/g) || []).length, "sections balanced");
+  assert.equal((main.match(/<details\b/g) || []).length, (main.match(/<\/details>/g) || []).length, "details balanced");
+});

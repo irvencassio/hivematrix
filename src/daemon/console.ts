@@ -1951,6 +1951,7 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   <div class="col-resizer" id="resizeLeft" title="Drag to resize the left panel"></div>
   <div class="col-resizer" id="resizeRight" title="Drag to resize the right panel"></div>
   <section class="col board">
+    <div id="approvals"></div>
     <button class="ov-nav oc-nav" id="flashNav" onclick="showFlashPanel()">💬 Chat</button>
     <button class="ov-nav oc-nav" id="brainNav" onclick="showBrain()">🧠 Memory</button>
     <button class="ov-nav oc-nav" id="rolesNav" onclick="showRoles()">👥 Roles</button>
@@ -2042,14 +2043,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <details class="ctx-sec" id="agentsConnDetail"><summary>What works right now</summary>
       <div id="conn"></div></details>
     </div>
-  </section>
-  <section class="col session">
-    <div id="session"><div class="session-empty">Select a task to inspect its session.</div></div>
-  </section>
-  <section class="col context">
-    <div id="approvals"></div>
-    <details class="ctx-sec" id="setupSec" open><summary id="setupSummary">Setup</summary>
-    <div id="onboarding"></div></details>
     <details class="ctx-sec" id="dirSec" open><summary>Scheduled</summary>
     <button class="addbtn" onclick="toggleForm('dirForm')">＋ New scheduled item</button>
     <div class="form" id="dirForm">
@@ -2108,6 +2101,11 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
       <div class="err" id="de_err"></div>
     </div>
     <div id="directives"></div></details>
+  </section>
+  <section class="col session">
+    <div id="session"><div class="session-empty">Select a task to inspect its session.</div></div>
+  </section>
+  <section class="col context">
     <details class="ctx-sec" id="skillsSec" open><summary>Skills &amp; Commands</summary>
     <div class="sk-toolbar">
       <input id="skQuery" placeholder="Search skills &amp; commands…" oninput="skQueryInput()" onkeydown="skQueryKeydown(event)" />
@@ -4924,18 +4922,15 @@ function renderOnboarding() {
       + '<span style="color:var(--'+cls+')">'+mark+'</span> '+esc(s.title)
       + (s.required?'':' <span class="muted">(optional)</span>')+btn+'</div>';
   }).join("");
-  document.getElementById("onboarding").innerHTML = html
-    + '<div class="muted" style="margin-top:6px">'
-    + (o.requiredComplete ? '✓ Required setup complete.' : 'First-run setup — complete the required steps below.') + '</div>';
-  // Once setup is complete it's just a wall of green checks — collapse it (the
-  // operator can still expand it). Only auto-collapse once, so re-opens stick.
-  const sec = document.getElementById("setupSec");
-  const sum = document.getElementById("setupSummary");
-  if (sec && sum) {
-    sum.textContent = o.requiredComplete ? "Setup ✓" : "Setup";
-    // Once required setup is complete, the wizard is just a wall of green checks —
-    // drop it off the rail entirely. It still lives on under Settings → Setup.
-    sec.style.display = o.requiredComplete ? "none" : "";
+  // The rail mount is gone — setup reaches the operator via the auto-opening
+  // wizard (_obMaybeAutoOpen) and Settings → Setup, both of which already
+  // existed. This render is kept null-safe rather than deleted because the
+  // same onboarding payload drives the Settings copy and the action-bar line.
+  const obEl = document.getElementById("onboarding");
+  if (obEl) {
+    obEl.innerHTML = html
+      + '<div class="muted" style="margin-top:6px">'
+      + (o.requiredComplete ? '✓ Required setup complete.' : 'First-run setup — complete the required steps below.') + '</div>';
   }
   const abSetup = document.getElementById("ab_setup");
   if (abSetup) {
