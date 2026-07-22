@@ -130,7 +130,13 @@ export function normalizeHomeProjectPath(input: unknown, home = homedir()): stri
 async function resolveIntegrateRepo(input: unknown): Promise<string> {
   const cwd = resolve(process.cwd());
   if (input === undefined || input === null || (typeof input === "string" && !input.trim())) {
-    return cwd;
+    // "this repo" is only meaningful when the daemon runs from a checkout. The
+    // INSTALLED app runs with cwd = the operator's home directory, so this
+    // silently resolved to ~ and every branch listing failed with a raw
+    // "fatal: not a git repository" surfaced straight into the Tools card.
+    // Fall back to cwd only when it actually is a repo; otherwise say what to do.
+    if (existsSync(join(cwd, ".git"))) return cwd;
+    throw new Error("no repo selected — choose a project (the daemon is not running from a git checkout)");
   }
   const requested = normalizeHomeProjectPath(input);
   if (requested === cwd) return requested;

@@ -8469,14 +8469,27 @@ async function initIntegrateCard() {
   wrap.innerHTML = integrateCardHtml();
   const sel = document.getElementById('integrateProject');
   if (sel) {
-    let opts = '<option value="">HiveMatrix (this repo)</option>';
+    // The old first option was value="" labelled "HiveMatrix (this repo)", which
+    // let the server fall back to process.cwd(). That is the repo only when the
+    // daemon runs from a checkout — the INSTALLED app runs with cwd = the home
+    // directory, so it resolved to ~ and every listing failed with a raw
+    // "fatal: not a git repository". Name a real path instead, defaulting to
+    // the hivematrix project when discovery found it.
+    let opts = '';
+    let projects = [];
     try {
       const r = await api('/projects');
-      for (const p of ((r && r.projects) || [])) {
-        opts += '<option value="' + _ea(p.path) + '">' + esc(p.name) + '</option>';
-      }
-    } catch (e) { /* fall back to just this repo */ }
+      projects = (r && r.projects) || [];
+    } catch (e) { /* leave the picker empty and say so below */ }
+    if (!projects.length) {
+      sel.innerHTML = '<option value="">No projects discovered</option>';
+      return loadIntegrateBranches();
+    }
+    projects.slice().sort(function(a, b){ return String(a.name||'').localeCompare(String(b.name||'')); })
+      .forEach(function(p){ opts += '<option value="' + _ea(p.path) + '">' + esc(p.name) + '</option>'; });
     sel.innerHTML = opts;
+    const self = projects.find(function(p){ return /(^|\/)hivematrix$/i.test(String(p.path||'')); });
+    if (self) sel.value = self.path;
   }
   loadIntegrateBranches();
 }

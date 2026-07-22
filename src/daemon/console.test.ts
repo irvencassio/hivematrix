@@ -4375,3 +4375,18 @@ test("Approvals and Scheduled live in the left column; Setup's rail entry is gon
   assert.equal((main.match(/<section\b/g) || []).length, (main.match(/<\/section>/g) || []).length, "sections balanced");
   assert.equal((main.match(/<details\b/g) || []).length, (main.match(/<\/details>/g) || []).length, "details balanced");
 });
+
+test("the Integrate card names a real repo path, never a phantom 'this repo'", () => {
+  // The first option used to be value="" labelled "HiveMatrix (this repo)",
+  // which let the server fall back to process.cwd(). That equals the repo only
+  // when the daemon runs from a checkout — the INSTALLED app runs with cwd set
+  // to the operator's home directory, so it resolved to ~ and every branch
+  // listing failed with a raw "fatal: not a git repository" printed into the card.
+  const js = extractScript(CONSOLE_HTML);
+  const fn = js.match(/async function renderIntegrateCard\(\)[\s\S]*?\n\}/)?.[0]
+    ?? js.match(/const sel = document\.getElementById\('integrateProject'\);[\s\S]{0,1400}/)?.[0] ?? "";
+  assert.ok(fn, "the integrate card population should be locatable");
+  assert.doesNotMatch(fn, /value=""[^>]*>HiveMatrix \(this repo\)/, "no phantom empty-value default");
+  assert.match(fn, /hivematrix\$\/i/, "defaults to the discovered hivematrix project by path");
+  assert.match(fn, /No projects discovered/, "says so plainly when discovery returns nothing");
+});
