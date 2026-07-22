@@ -674,21 +674,19 @@ test("Observability modal: overlay markup, reuses dashboard rendering, click-out
   assert.match(closeObsModal, /getElementById\('obsOverlay'\)\.classList\.remove\('open'\)/);
 });
 
-test("Observability modal opens from the progress-bar visual, not the whole 5h/7d toggle button", () => {
-  const js = extractScript(CONSOLE_HTML);
-  // Both bar wraps must carry a click trigger that stops propagation before it can
-  // reach the button's own onclick (setHeaderUsageWindow) — clicking the bar opens
-  // the modal *instead of* toggling the window; clicking the "5h"/"7d" text still
-  // toggles the window exactly as before this change.
-  const bar5h = extractBetween(CONSOLE_HTML, 'id="usageBtn5h"', '</button>');
-  const bar7d = extractBetween(CONSOLE_HTML, 'id="usageBtn7d"', '</button>');
+test("clicking either usage meter opens Observability - the whole control is one target", () => {
+  // Previously the bar opened the modal while the "5h"/"7d" text toggled which
+  // window a green readout described. With the readout and the toggle removed
+  // there is nothing to toggle, so the split target (and its stopPropagation
+  // dance) is gone: the meter does one thing.
+  const bar5h = extractBetween(CONSOLE_HTML, 'id="usageBtn5h"', "</button>");
+  const bar7d = extractBetween(CONSOLE_HTML, 'id="usageBtn7d"', "</button>");
   for (const bar of [bar5h, bar7d]) {
-    assert.match(bar, /usage-bar-wrap[^>]*onclick="event\.stopPropagation\(\);openObsModal\(\)"/, "bar span opens the modal and stops propagation");
+    assert.doesNotMatch(bar, /stopPropagation/, "no split click target remains inside the meter");
   }
-  // Regression guard: the pre-existing window-toggle handler on the outer button
-  // must still be exactly what it was before this change.
-  assert.match(CONSOLE_HTML, /onclick="setHeaderUsageWindow\('5h'\)"/);
-  assert.match(CONSOLE_HTML, /onclick="setHeaderUsageWindow\('7d'\)"/);
+  assert.match(CONSOLE_HTML, /id="usageBtn5h" onclick="openObsModal\(\)"/);
+  assert.match(CONSOLE_HTML, /id="usageBtn7d" onclick="openObsModal\(\)"/);
+  assert.doesNotMatch(CONSOLE_HTML, /setHeaderUsageWindow/, "the toggle handler is gone from markup too");
 });
 
 test("center-panel Observability takeover is fully removed — the modal replaced it, no orphaned code", () => {
@@ -1922,7 +1920,7 @@ test("header Usage section is removed; both 5h and 7d toggle buttons render visu
   const headerZone = CONSOLE_HTML.slice(headerStart, hzoneEnd);
   assert.match(headerZone, /id="live"/, "live indicator stays in the header's first zone");
   assert.match(headerZone, /class="obs-win usage-win-bars" id="usageWinToggle"/, "reuses the existing .obs-win segmented toggle, no new toggle component");
-  assert.match(headerZone, /data-w="5h" class="on" id="usageBtn5h"/, "5-hour is active by default");
+  assert.match(headerZone, /data-w="5h" id="usageBtn5h"/, "5-hour meter identifiable for tooltip/bar wiring — no active state, both meters are always shown");
   assert.match(headerZone, />5h</, "5-hour button label present");
   assert.match(headerZone, /id="usageBar5h"/, "5-hour bar track mount present");
   assert.match(headerZone, /id="usageBar5hFill"/, "5-hour bar fill mount present");
@@ -1931,48 +1929,26 @@ test("header Usage section is removed; both 5h and 7d toggle buttons render visu
   assert.match(headerZone, /id="usageBar7d"/, "7-day tick track mount present");
   const dayTickCount = (headerZone.match(/class="usage-bar-day"/g) || []).length;
   assert.equal(dayTickCount, 7, "exactly 7 day ticks are pre-rendered in markup");
-  assert.match(headerZone, /id="usageWinReadout"/, "readout text mount present");
+  assert.doesNotMatch(headerZone, /id="usageWinReadout"/, "the green readout is removed - detail lives in each meter tooltip");
 
-  const toggleMarkup = CONSOLE_HTML.slice(CONSOLE_HTML.indexOf('id="usageWinToggle"'), CONSOLE_HTML.indexOf("</span>", CONSOLE_HTML.indexOf("usageWinReadout")));
+  const toggleMarkup = CONSOLE_HTML.slice(CONSOLE_HTML.indexOf('id="usageWinToggle"'), CONSOLE_HTML.indexOf('id="ctxMeter"'));
   assert.doesNotMatch(toggleMarkup, /<div/, "toggle internals use span, not div, so the header's first </div> stays .hzone's own close");
 
   const js = extractScript(CONSOLE_HTML);
   assert.doesNotThrow(() => new Function(js), SyntaxError, "console script still parses as valid JS");
 });
 
-test("5h/7d header toggle marks its active button with the sidebar's yellow-border pattern, not a blue background", () => {
-  // Reference pattern this must match: .ov-nav.active (left sidebar, e.g. #flashNav).
-  assert.match(
-    CONSOLE_HTML,
-    /\.ov-nav\.active\s*\{\s*border-color:\s*var\(--accent\);\s*color:\s*var\(--accent\);\s*\}/,
-    "sidebar reference pattern still present with this exact shape",
-  );
-
-  // The header toggle must override the shared blue .on style with the same
-  // token/technique, scoped to #usageWinToggle only.
+test("usage meters keep a constant-width transparent border and never highlight one as active", () => {
+  // The yellow active-border existed only to show which window the green
+  // readout described. Both are removed; the transparent border stays so the
+  // meters keep their metrics and do not shift on hover or focus.
   assert.match(
     CONSOLE_HTML,
     /#usageWinToggle button \{[^}]*border:\s*1px solid transparent;?[^}]*\}/,
-    "toggle buttons reserve a constant-width transparent border so activating one is a color fade, not a layout jump",
+    "constant-width transparent border retained so layout cannot jump",
   );
-  assert.match(
-    CONSOLE_HTML,
-    /#usageWinToggle button\.on \{[^}]*border-color:\s*var\(--accent\)[^}]*\}/,
-    "active toggle button gets the same gold/yellow border-color token as the sidebar's active nav item",
-  );
-  assert.doesNotMatch(
-    CONSOLE_HTML,
-    /#usageWinToggle button\.on \{[^}]*background:\s*var\(--accent-2\)[^}]*\}/,
-    "active toggle button must not keep the old blue background",
-  );
-
-  // Regression guard: the shared .obs-win rule (used elsewhere, e.g. the
-  // Observability modal's window/group pickers) must be untouched.
-  assert.match(
-    CONSOLE_HTML,
-    /\.obs-win button\.on \{ background:var\(--accent-2\); color:#fff; \}/,
-    "shared .obs-win active style must stay exactly as-is for non-header pickers (e.g. Observability modal)",
-  );
+  assert.doesNotMatch(CONSOLE_HTML, /#usageWinToggle button\.on/, "no active-state rule remains");
+  assert.doesNotMatch(CONSOLE_HTML, /class="on" id="usageBtn5h"/, "no button ships pre-marked active");
 });
 
 function consoleUsageBars() {
@@ -1980,26 +1956,23 @@ function consoleUsageBars() {
   const usageBarClassSrc = js.match(/function usageBarClass\([\s\S]*?\n\}/)?.[0] ?? "";
   const cycleDaySrc = js.match(/function sevenDayCycleDay\([\s\S]*?\n\}/)?.[0] ?? "";
   const fmtResetsSrc = js.match(/function fmtResets\([\s\S]*?\n\}/)?.[0] ?? "";
-  const winState = js.match(/let _headerUsageWin[^\n]+/)?.[0] ?? "";
   const cacheState = js.match(/let _lastClaudeWins[^\n]+/)?.[0] ?? "";
   const findWinSrc = js.match(/function findUsageWin\([\s\S]*?\n\}/)?.[0] ?? "";
-  const setSrc = js.match(/function setHeaderUsageWindow\([^\n]+/)?.[0] ?? "";
   const render5hSrc = js.match(/function renderUsage5hBar\(\)[\s\S]*?\n\}/)?.[0] ?? "";
   const render7dSrc = js.match(/function renderUsage7dBar\(\)[\s\S]*?\n\}/)?.[0] ?? "";
   const renderSrc = js.match(/function renderHeaderUsageWindow\(\)[\s\S]*?\n\}/)?.[0] ?? "";
   assert.ok(
     usageBarClassSrc.length > 50 && cycleDaySrc.length > 30 && fmtResetsSrc.length > 30
-      && winState.length > 10 && cacheState.length > 10 && findWinSrc.length > 20
-      && setSrc.length > 20 && render5hSrc.length > 30 && render7dSrc.length > 30 && renderSrc.length > 50,
+      && cacheState.length > 10 && findWinSrc.length > 20
+      && render5hSrc.length > 30 && render7dSrc.length > 30 && renderSrc.length > 50,
     "usage bar state + functions extracted",
   );
 
-  const combined = [usageBarClassSrc, cycleDaySrc, fmtResetsSrc, winState, cacheState, findWinSrc, setSrc, render5hSrc, render7dSrc, renderSrc].join("\n");
+  const combined = [usageBarClassSrc, cycleDaySrc, fmtResetsSrc, cacheState, findWinSrc, render5hSrc, render7dSrc, renderSrc].join("\n");
   const factory = new Function(
     "document",
-    `${combined}\nreturn { setHeaderUsageWindow, renderHeaderUsageWindow, seed: function (w) { _lastClaudeWins = w; } };`,
+    `${combined}\nreturn { renderHeaderUsageWindow, seed: function (w) { _lastClaudeWins = w; } };`,
   ) as (doc: unknown) => {
-    setHeaderUsageWindow: (w: string) => void;
     renderHeaderUsageWindow: () => void;
     seed: (wins: unknown) => void;
   };
@@ -2028,7 +2001,7 @@ function consoleUsageBars() {
   return { ...control, toggleButtons, ticks, els };
 }
 
-test("5-hour toggle button renders a visual progress bar (fill width + status color), independent of which window is active", () => {
+test("5-hour meter renders a visual progress bar (fill width + status color)", () => {
   const ub = consoleUsageBars();
   const now = Date.UTC(2026, 6, 1, 12, 0, 0);
   const original = Date.now;
@@ -2038,10 +2011,10 @@ test("5-hour toggle button renders a visual progress bar (fill width + status co
       { label: "5-hour", remaining: 10, utilization: 90, resetsAt: new Date(now + 3600000).toISOString(), durationMs: 18000000 },
       { label: "7-day", remaining: 90, utilization: 10, resetsAt: new Date(now + 3 * 86400000).toISOString(), durationMs: 604800000 },
     ]);
-    ub.setHeaderUsageWindow("7d");
+    ub.renderHeaderUsageWindow();
     assert.equal(ub.els.usageBar5hFill.style.width, "90%", "fill width tracks 5-hour utilization");
     assert.equal(ub.els.usageBar5hFill.className, "usage-bar-fill hi", "90% utilization on a 5h window is the hi status color");
-    assert.equal(ub.els.usageBtn5h.title, "10% left · resets in 1h 0m", "tooltip carries the exact detail regardless of active state");
+    assert.equal(ub.els.usageBtn5h.title, "10% left · resets in 1h 0m", "the tooltip is now the ONLY place this detail lives — the green readout text is gone");
   } finally {
     Date.now = original;
   }
@@ -2241,36 +2214,22 @@ test("sevenDayCycleDay returns the 1-7 day-of-cycle usageBarClass keys its day-p
   });
 });
 
-test("renderHeaderUsageWindow shows remaining% + reset time colored via the real usage-status-dot ok/warn/hi classes", () => {
-  // Uses the consoleUsageBars() harness (above) rather than a dedicated toggle harness —
-  // renderHeaderUsageWindow's dependency list grows every time a new bar is added
-  // (Task A: sevenDayCycleDay, Task B: findUsageWin/renderUsage5hBar, Task C:
-  // renderUsage7dBar), and consoleUsageBars() already tracks all of them, so this test
-  // reuses that shared scaffolding instead of hand-maintaining a second, parallel
-  // new Function(...) harness that needs the same fix every time.
-  const ub = consoleUsageBars();
-  const now = Date.UTC(2026, 6, 1, 12, 0, 0);
-  const original = Date.now;
-  Date.now = () => now;
-  try {
-    ub.seed([
-      { label: "5-hour", remaining: 40, utilization: 60, resetsAt: new Date(now + 2 * 3600000).toISOString(), durationMs: 18000000 },
-      { label: "7-day", remaining: 90, utilization: 10, resetsAt: new Date(now + 3 * 86400000).toISOString(), durationMs: 604800000 },
-    ]);
-    ub.renderHeaderUsageWindow();
-    assert.equal(ub.els.usageWinReadout.textContent, "40% left · resets in 2h 0m", "5-hour window is the default");
-    assert.equal(ub.els.usageWinReadout.className, "usage-status-dot warn", "reuses the real usage-status-dot + warn class, not an invented one");
-    assert.equal(ub.toggleButtons[0].classList.on, true, "5-hour button marked active");
-    assert.equal(ub.toggleButtons[1].classList.on, false, "7-day button not active");
+test("the header prints no usage readout text — the detail lives in each meter's tooltip", () => {
+  // Three controls existed to surface one number: a 5h/7d toggle with a yellow
+  // active highlight, and a green readout beside it. Worse, that readout sat
+  // next to the ctx percentage while describing something entirely different
+  // (usage window remaining, not conversation fill). Both are gone.
+  assert.doesNotMatch(CONSOLE_HTML, /id="usageWinReadout"/, "the readout element is removed");
+  const js = extractScript(CONSOLE_HTML);
+  assert.doesNotMatch(js, /_headerUsageWin/, "no active-window state remains");
+  assert.doesNotMatch(js, /function setHeaderUsageWindow/, "no toggle handler remains");
+  assert.doesNotMatch(CONSOLE_HTML, /#usageWinToggle button\.on/, "no active-button highlight rule remains");
 
-    ub.setHeaderUsageWindow("7d");
-    assert.equal(ub.els.usageWinReadout.textContent, "90% left · resets in 3d 0h", "switching windows re-renders instantly from cached data");
-    assert.equal(ub.els.usageWinReadout.className, "usage-status-dot ok");
-    assert.equal(ub.toggleButtons[0].classList.on, false, "5-hour button loses active state");
-    assert.equal(ub.toggleButtons[1].classList.on, true, "7-day button gains active state");
-  } finally {
-    Date.now = original;
-  }
+  // The detail must still be reachable — as a tooltip on each meter.
+  const render5h = js.match(/function renderUsage5hBar\(\)[\s\S]*?\n\}/)?.[0] ?? "";
+  const render7d = js.match(/function renderUsage7dBar\(\)[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(render5h, /btn\.title = /, "5h meter still carries its remaining/reset tooltip");
+  assert.match(render7d, /btn\.title = /, "7d meter still carries its remaining/reset tooltip");
 });
 
 test("checkUsage caches claudeWins for the header toggle and repaints it on every poll, without the old sidebar-only DOM writes", () => {

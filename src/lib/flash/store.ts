@@ -229,6 +229,22 @@ export function setSessionContextTokens(sessionId: string, tokens: number, model
     .run(tokens, model, sessionId);
 }
 
+/** Per-conversation model override ("/model opus"). Empty string clears it. */
+export function setSessionModelOverride(sessionId: string, model: string): void {
+  getDb()
+    .prepare("UPDATE flash_sessions SET modelOverride = ? WHERE id = ?")
+    .run(model.trim() || null, sessionId);
+}
+
+/** The pinned model for a conversation, or null when it follows the default. */
+export function getSessionModelOverride(sessionId: string): string | null {
+  const row = getDb()
+    .prepare("SELECT modelOverride FROM flash_sessions WHERE id = ?")
+    .get(sessionId) as { modelOverride?: string | null } | undefined;
+  const v = (row?.modelOverride ?? "").trim();
+  return v ? v : null;
+}
+
 export function appendFeedbackToTurn(turnId: string, rating: "good" | "bad"): FlashTurnRow {
   const db = getDb();
   const row = db.prepare("SELECT * FROM flash_turns WHERE id = ?").get(turnId) as FlashTurnRow | undefined;

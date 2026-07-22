@@ -40,10 +40,25 @@ const DEFAULT_CONTEXT_WINDOW = 200_000;
  */
 const USABLE_FRACTION = 0.9;
 
+/**
+ * Window for a long-context variant. The CLI reports these back with an
+ * explicit "[1m]" marker on the model id (e.g. "claude-opus-4-8[1m]"), which
+ * console.ts and observability/contracts.ts already parse and price separately.
+ * Reading that marker is not guessing — it is a declared capability carried in
+ * the id — so the table's "add entries rather than guess" rule is satisfied.
+ *
+ * Without this the gauge capped every model at 200k regardless of what it could
+ * actually hold, and compaction started folding turns away at ~135k on a
+ * session with five times that available.
+ */
+const LONG_CONTEXT_MARKER = "[1m]";
+const LONG_CONTEXT_WINDOW = 1_000_000;
+
 /** Raw context window for a resolved model id. */
 export function contextWindowFor(model: string | null | undefined): number {
   if (!model) return DEFAULT_CONTEXT_WINDOW;
   const id = model.toLowerCase();
+  if (id.includes(LONG_CONTEXT_MARKER)) return LONG_CONTEXT_WINDOW;
   for (const [pattern, tokens] of CONTEXT_WINDOWS) {
     if (id.includes(pattern)) return tokens;
   }

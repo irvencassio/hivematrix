@@ -356,7 +356,6 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .ctx-meter-fill.ctx-warn { background: #d59a2a; }
   .ctx-meter-fill.ctx-critical { background: #d5502a; }
   #usageWinToggle button { border: 1px solid transparent; }
-  #usageWinToggle button.on { background: var(--panel-2); color: var(--accent); border-color: var(--accent); }
   /* Compact at-a-glance provider cards for the Usage section. */
   .usage-cards { display: flex; flex-direction: column; gap: 6px; }
   .usage-card { border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; background: var(--panel-2); }
@@ -1123,11 +1122,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <span class="logo">HiveMatrix</span>
     <span class="live" id="live" style="cursor:pointer" onclick="toggleConnOverride()" title="Daemon + connectivity status — click to override connectivity">● live</span>
     <span class="obs-win usage-win-bars" id="usageWinToggle">
-      <button data-w="5h" class="on" id="usageBtn5h" onclick="setHeaderUsageWindow('5h')">5h<span class="usage-bar-wrap" onclick="event.stopPropagation();openObsModal()"><span class="usage-bar" id="usageBar5h"><span class="usage-bar-fill" id="usageBar5hFill"></span></span></span></button>
-      <button data-w="7d" id="usageBtn7d" onclick="setHeaderUsageWindow('7d')">7d<span class="usage-bar-wrap" onclick="event.stopPropagation();openObsModal()"><span class="usage-bar-days" id="usageBar7d"><span class="usage-bar-day" data-day="1"></span><span class="usage-bar-day" data-day="2"></span><span class="usage-bar-day" data-day="3"></span><span class="usage-bar-day" data-day="4"></span><span class="usage-bar-day" data-day="5"></span><span class="usage-bar-day" data-day="6"></span><span class="usage-bar-day" data-day="7"></span></span></span></button>
+      <button data-w="5h" id="usageBtn5h" onclick="openObsModal()">5h<span class="usage-bar-wrap"><span class="usage-bar" id="usageBar5h"><span class="usage-bar-fill" id="usageBar5hFill"></span></span></span></button>
+      <button data-w="7d" id="usageBtn7d" onclick="openObsModal()">7d<span class="usage-bar-wrap"><span class="usage-bar-days" id="usageBar7d"><span class="usage-bar-day" data-day="1"></span><span class="usage-bar-day" data-day="2"></span><span class="usage-bar-day" data-day="3"></span><span class="usage-bar-day" data-day="4"></span><span class="usage-bar-day" data-day="5"></span><span class="usage-bar-day" data-day="6"></span><span class="usage-bar-day" data-day="7"></span></span></span></button>
     </span>
     <span class="ctx-meter" id="ctxMeter" onclick="showFlashPanel()" title="Conversation context — how full the chat thread is">ctx<span class="usage-bar-wrap"><span class="usage-bar"><span class="usage-bar-fill ctx-meter-fill ctx-ok" id="ctxMeterFill"></span></span></span><span class="ctx-pct" id="ctxMeterPct"></span></span>
-    <span class="muted" id="usageWinReadout" style="font-size:11px"></span>
   </div>
   <div class="hzone mode" style="margin-left:auto">
     <span class="hgroup" id="connGroup" style="display:none" title="Connectivity — auto by default; the ● live indicator shows the current effective mode. Click it to override.">
@@ -6119,10 +6117,8 @@ function lowestWindow(wins) {
   return live.reduce((a, b) => (b.remaining < a.remaining ? b : a));
 }
 
-let _headerUsageWin = "5h";
 let _lastClaudeWins = null;
 
-function setHeaderUsageWindow(w) { _headerUsageWin = w; renderHeaderUsageWindow(); }
 
 // _lastClaudeWins is cached by checkUsage() below so a toggle click repaints
 // instantly instead of waiting on the next poll.
@@ -6207,19 +6203,15 @@ async function refreshHeaderContext() {
   renderHeaderCtxBar();
 }
 
+// Both meters carry their own remaining/reset detail in a tooltip (see
+// renderUsage5hBar / renderUsage7dBar). The header used to ALSO print one of
+// them as green text beside the ctx meter, with a yellow-highlighted 5h/7d
+// toggle deciding which — three controls to read one number, and the readout
+// sat next to the ctx percentage while describing something entirely different.
+// The toggle is gone with it: clicking either meter opens Observability.
 function renderHeaderUsageWindow() {
-  document.querySelectorAll("#usageWinToggle button").forEach(function (b) { b.classList.toggle("on", b.dataset.w === _headerUsageWin); });
   renderUsage5hBar();
   renderUsage7dBar();
-  const el = document.getElementById("usageWinReadout");
-  if (!el) return;
-  const label = _headerUsageWin === "5h" ? "5-hour" : "7-day";
-  const win = findUsageWin(label);
-  if (!win) { el.textContent = ""; return; }
-  const remaining = Math.max(0, Math.min(100, win.remaining));
-  const cls = usageBarClass(win.utilization, win.resetsAt, win.durationMs || 0);
-  el.textContent = remaining.toFixed(0) + "% left · resets " + fmtResets(win.resetsAt);
-  el.className = "usage-status-dot " + cls;
 }
 
 async function checkUsage(forceRefresh) {

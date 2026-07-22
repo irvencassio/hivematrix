@@ -43,7 +43,7 @@ import { getConnectivityPolicy } from "@/lib/connectivity/policy";
 import { recordRun } from "@/lib/observability/store";
 import { prepareFlashMcp, loadCuratedSkillTools } from "./flash-mcp";
 import { isFlashTool } from "./tool-names";
-import { clearFlashCliSessionId, getFlashCliSessionId, setFlashCliSessionId, setSessionContextTokens } from "./store";
+import { clearFlashCliSessionId, getFlashCliSessionId, getSessionModelOverride, setFlashCliSessionId, setSessionContextTokens } from "./store";
 import {
   COMPACT_THRESHOLD,
   classifyFlashFailure,
@@ -710,7 +710,9 @@ export async function runFlashAgentLoop(
 
   // Model + budget follow the surface: a watch reply must be fast, a console
   // reply must be able to finish. See flashBudgetFor.
-  const budget = flashBudgetFor(options.channel);
+  // A conversation pinned via "/model opus" overrides the surface default.
+  const pinned = sessionId ? getSessionModelOverride(sessionId) : null;
+  const budget = flashBudgetFor(options.channel, pinned ?? undefined);
 
   const binary = options.__claudeBinary ?? resolveClaudeBinary();
   const spawnImpl = options.__spawn ?? spawn;

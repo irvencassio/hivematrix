@@ -888,6 +888,10 @@ const MIGRATIONS: Migration[] = [
   m("v47", `ALTER TABLE goals ADD COLUMN dataSource TEXT;
             ALTER TABLE goals ADD COLUMN targetValue REAL;
             ALTER TABLE goal_checkins ADD COLUMN source TEXT;`),
+  // Per-conversation model override. Chat can pin a model for a thread
+  // ("/model sonnet") without changing the global default — the operator asked
+  // for exactly this: everything on one default, override in chat when needed.
+  m("v48", `ALTER TABLE flash_sessions ADD COLUMN modelOverride TEXT;`),
 ];
 
 // ------------------------------------------------------------------

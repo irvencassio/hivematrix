@@ -22,8 +22,10 @@ import {
   getSession,
   getTurnsForSession,
   listSessions,
+  setSessionModelOverride,
 } from "./store";
 import { assembleSystemPrompt, buildInitialMessages } from "./context";
+import { parseModelDirective } from "./model-directive";
 import { runFlashAgentLoop } from "./loop";
 import { extractPimActions, parseReminderCommand } from "@/lib/orchestrator/pim-tools";
 
@@ -72,12 +74,26 @@ export async function runFlashTurnText(opts: {
   const brainRoot = configuredBrainRootDir();
   const session = getOrCreateSession(opts.channel, opts.peer, opts.sessionId);
 
-  appendTurn(session.id, "user", opts.text);
+  // "/model opus" pins THIS conversation. Model selection collapsed to a single
+  // global default, so the escape hatch lives where the operator is. A directive
+  // with nothing after it is answered directly — there is no turn to run.
+  const directive = parseModelDirective(opts.text);
+  if (directive.model !== null) {
+    setSessionModelOverride(session.id, directive.model);
+  }
+  if (directive.notice && !directive.text) {
+    appendTurn(session.id, "user", opts.text);
+    const turn = appendTurn(session.id, "assistant", directive.notice);
+    return { reply: directive.notice, sessionId: session.id, turnId: turn.id, toolRuns: [] };
+  }
+  const userText = directive.model !== null || directive.notice ? directive.text : opts.text;
+
+  appendTurn(session.id, "user", userText);
 
   const recentTurns = getRecentTurns(session.id, 20);
-  const systemPrompt = await assembleSystemPrompt(opts.text, session.summary, brainRoot, opts.channel);
-  const historyTurns = recentTurns.filter((t) => !(t.role === "user" && t.content === opts.text));
-  const messages = buildInitialMessages(systemPrompt, historyTurns, opts.text);
+  const systemPrompt = await assembleSystemPrompt(userText, session.summary, brainRoot, opts.channel);
+  const historyTurns = recentTurns.filter((t) => !(t.role === "user" && t.content === userText));
+  const messages = buildInitialMessages(systemPrompt, historyTurns, userText);
 
   // Collect successful tool runs so callers (e.g. /voice/turn) can derive
   // structured client actions — a contacts_lookup becomes a tap-to-dial button.

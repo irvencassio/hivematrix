@@ -98,3 +98,23 @@ test("contextLevel stays silent while there is room", () => {
   assert.equal(contextLevel(0.75), "warn");
   assert.equal(contextLevel(0.95), "critical");
 });
+
+test("a [1m] long-context variant is sized from its declared marker, not capped at 200k", () => {
+  // The table capped every model at 200k, so compaction started folding turns
+  // away at ~135k on a session with five times that available. console.ts and
+  // observability/contracts.ts already parse this exact marker and price it
+  // separately — the budget was the one place ignoring it.
+  assert.equal(contextWindowFor("claude-opus-4-8[1m]"), 1_000_000);
+  assert.equal(contextWindowFor("claude-sonnet-5[1m]"), 1_000_000);
+  assert.equal(usableContextFor("claude-opus-4-8[1m]"), 900_000);
+
+  // Standard variants are unchanged — this reads a declared capability, it does
+  // not assume one. A model without the marker keeps its table entry.
+  assert.equal(contextWindowFor("claude-opus-4-8"), 200_000);
+  assert.equal(contextWindowFor("opus"), 200_000);
+  assert.equal(contextWindowFor("haiku"), 200_000);
+  assert.equal(contextWindowFor(null), 200_000, "unknown/absent still falls back, never guesses upward");
+
+  // Compaction must trigger proportionally, not at a fixed token count.
+  assert.ok(usableContextFor("claude-opus-4-8[1m]") > usableContextFor("opus") * 4);
+});
