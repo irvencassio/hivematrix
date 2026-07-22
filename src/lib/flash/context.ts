@@ -113,8 +113,18 @@ const CAPABILITY_DOCTRINE =
 
 const MAX_PERSONA_CHARS = 6000;
 const MAX_TURNS_IN_CONTEXT = 20;
-const MAX_BRAIN_RESULTS = 3;
-const BRAIN_BUDGET_MS = 3000;
+/**
+ * Brain seeding per turn. These were 3 hits / 3s — enough to learn that a doc
+ * exists, not enough to carry context into a fresh conversation, which is the
+ * point of having brain docs at all. Raised now that the context ceiling reads
+ * the model's real window instead of a hardcoded 200k (context-budget.ts).
+ *
+ * Still snippets, deliberately: whole documents come through the brain_read
+ * tool so the model pulls what it actually needs. Injecting full docs every
+ * turn would spend the window on things nobody asked for.
+ */
+const MAX_BRAIN_RESULTS = 8;
+const BRAIN_BUDGET_MS = 6000;
 
 function readSafe(path: string, maxChars = MAX_PERSONA_CHARS): string {
   if (!existsSync(path)) return "";
