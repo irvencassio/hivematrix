@@ -23,7 +23,6 @@ export interface RouterResult {
   tier: ModelTier;
   role: ModelRole;
   /** True when a frontier review should be queued (code-critical ran locally) */
-  frontierReviewDebt: boolean;
   reason: string;
 }
 
@@ -44,10 +43,6 @@ export function routeByRole(role: ModelRole, policy: ConnectivityPolicy, opts: R
     tier = policy.canUseCloud() ? "frontier" : "unavailable";
   }
 
-  // code-critical that did NOT land on frontier accrues frontier-review debt —
-  // except under noLocal, where an unavailable tier means "wait for cloud", not
-  // "ran locally", so there is nothing to review later.
-  const frontierReviewDebt = role === "code-critical" && tier !== "frontier" && tier !== "unavailable";
 
   let reason: string;
   switch (tier) {
@@ -68,7 +63,7 @@ export function routeByRole(role: ModelRole, policy: ConnectivityPolicy, opts: R
       break;
   }
 
-  return { tier, role, frontierReviewDebt, reason };
+  return { tier, role, reason };
 }
 
 /** Convenience: resolve multiple roles at once. */

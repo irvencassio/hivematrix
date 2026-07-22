@@ -1805,13 +1805,6 @@ export function createDaemonServer() {
         return;
       }
 
-      // GET /frontier-debt/status — pending/drained frontier-review-debt counts
-      if (req.method === "GET" && urlPath === "/frontier-debt/status") {
-        const { getDebtStatus } = await import("@/lib/orchestrator/frontier-debt");
-        json(res, 200, getDebtStatus());
-        return;
-      }
-
       // Review Lane — canonical routes (W4.2)
       if (req.method === "GET" && (urlPath === "/review-lane/status" || urlPath === "/api/review-lane/health")) {
         const { getReviewLaneStatus } = await import("@/lib/managerbee/heartbeat");

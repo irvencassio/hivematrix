@@ -18,7 +18,6 @@ const LOOP_FILES = [
   "traderbee/poller.ts",
   "embeddings/indexer.ts",
   "youtube/poller.ts",
-  "orchestrator/frontier-debt.ts",
   "notify/notify-loop.ts",
 ];
 

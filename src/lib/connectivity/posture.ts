@@ -189,17 +189,6 @@ export function describeLocalPosture(mode: ConnectivityMode, hasLocalModel = fal
       action: cloud ? "run_now" : "use_local_fallback",
       note: cloud ? "Nano Banana (nanai) image generation." : "Local mflux fallback (draft-grade) — no network needed.",
     },
-    {
-      id: "code-review-debt",
-      label: "Frontier review debt",
-      // Not a surface and not a capability: a rule about what happens when the
-      // cloud is unreachable. There is nothing here to be "running", which is
-      // why it never belonged in the Agents list.
-      category: "policy",
-      disposition: cloud ? "works" : "queued",
-      action: cloud ? "run_now" : "wait_for_cloud",
-      note: cloud ? "Code-critical runs on frontier." : "Code-critical runs locally now and is queued for a frontier review when cloud returns.",
-    },
   ];
   const counts = countsFor(caps);
   const summary = cloud

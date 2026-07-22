@@ -10,19 +10,16 @@ function offline() { const p = new ConnectivityPolicy(); p.setManualOverride("of
 test("cloud-ok: think → frontier-premium (Opus), no debt", () => {
   const r = routeByRole("think", cloud());
   assert.equal(r.tier, "frontier-premium");
-  assert.equal(r.frontierReviewDebt, false);
 });
 
 test("cloud-ok: execute → operational (always cheap)", () => {
   const r = routeByRole("execute", cloud());
   assert.equal(r.tier, "operational");
-  assert.equal(r.frontierReviewDebt, false);
 });
 
 test("cloud-ok: code-critical → frontier, no debt", () => {
   const r = routeByRole("code-critical", cloud());
   assert.equal(r.tier, "frontier");
-  assert.equal(r.frontierReviewDebt, false);
 });
 
 test("cloud-ok: image → nanai", () => {
@@ -38,7 +35,6 @@ test("local-only: think → unavailable (no local text inference)", () => {
 test("local-only: code-critical → unavailable, no frontier review debt (nothing ran)", () => {
   const r = routeByRole("code-critical", local());
   assert.equal(r.tier, "unavailable");
-  assert.equal(r.frontierReviewDebt, false);
 });
 
 test("local-only: image → unavailable", () => {
@@ -90,7 +86,6 @@ test("noLocal: cloud-ok cheap-web is promoted to frontier", () => {
 test("noLocal: code-critical stays frontier with no debt in cloud-ok", () => {
   const r = routeByRole("code-critical", cloud(), { noLocal: true });
   assert.equal(r.tier, "frontier");
-  assert.equal(r.frontierReviewDebt, false);
 });
 
 test("noLocal: local-only marks would-be-local roles unavailable (no fallback)", () => {
@@ -99,7 +94,6 @@ test("noLocal: local-only marks would-be-local roles unavailable (no fallback)",
   // unavailable means "wait for cloud", not "ran locally" — so no review debt
   const cc = routeByRole("code-critical", local(), { noLocal: true });
   assert.equal(cc.tier, "unavailable");
-  assert.equal(cc.frontierReviewDebt, false);
 });
 
 test("noLocal: offline marks would-be-local roles unavailable", () => {

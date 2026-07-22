@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // Isolate the DB under a temp HOME before anything calls getDb() (matches
-// frontier-debt.test.ts's pattern).
+// the deleted frontier-debt.test.ts's pattern).
 const home = mkdtempSync(join(tmpdir(), "role-stats-test-"));
 mkdirSync(join(home, ".hivematrix"), { recursive: true });
 process.env.HOME = home;

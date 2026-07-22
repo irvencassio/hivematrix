@@ -51,7 +51,6 @@ test("scenario 1: cloud-ok — frontier and all network capabilities available",
   // Work routes to frontier
   const thinkRoute = routeByRole("think", policy);
   assert.equal(thinkRoute.tier, "frontier-premium");
-  assert.equal(thinkRoute.frontierReviewDebt, false);
   assert.equal(routeByRole("code-critical", policy).tier, "frontier");
 });
 
@@ -77,7 +76,6 @@ test("scenario 2: usage exhaustion → local-only — frontier blocked, local av
   // (waits for cloud) rather than running locally, so no review debt accrues.
   const route = routeByRole("code-critical", policy);
   assert.equal(route.tier, "unavailable");
-  assert.equal(route.frontierReviewDebt, false, "nothing ran locally — no debt to review later");
 
   // execute has no local fallback either — unavailable until cloud returns
   assert.equal(routeByRole("execute", policy).tier, "unavailable");
@@ -94,7 +92,6 @@ test("scenario 2b: usage window restored → cloud-ok recovers", () => {
   // All capabilities restored
   assert.equal(policy.getCapability("frontier").available, true);
   assert.equal(policy.getCapability("webbee").available, true);
-  assert.equal(routeByRole("code-critical", policy).frontierReviewDebt, false);
 });
 
 // ---------------------------------------------------------------------------
@@ -136,7 +133,6 @@ test("scenario 4: probe success clears failures and restores connectivity", () =
   assert.equal(policy.mode, "cloud-ok");
   assert.equal(policy.getCapability("frontier").available, true);
   assert.equal(policy.getCapability("webbee").available, true);
-  assert.equal(routeByRole("code-critical", policy).frontierReviewDebt, false);
 });
 
 // ---------------------------------------------------------------------------

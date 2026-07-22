@@ -29,7 +29,6 @@ test("offline: local workhorses work, image degrades, cloud work queues — noth
   assert.equal(by("frontier").disposition, "queued");
   assert.equal(by("webbee").disposition, "queued");
   assert.equal(by("browserbee").disposition, "queued");
-  assert.equal(by("code-review-debt").disposition, "queued");
   // The honesty guarantee: no disposition is a silent failure.
   assert.ok(r.capabilities.every((c) => ["works", "degraded", "queued"].includes(c.disposition)));
   assert.equal(r.allHonest, true);
@@ -94,11 +93,12 @@ test("lane-owned capabilities carry their lane and a short name; policies own ne
   }
   assert.notEqual(by("webbee").shortLabel, by("browserbee").shortLabel);
 
-  // Frontier review debt is a RULE. Nothing to start, nothing to be up — which
-  // is precisely why it never belonged in the Agents list.
-  assert.equal(by("code-review-debt").category, "policy");
-  assert.equal(by("code-review-debt").lane, undefined);
-  assert.equal(by("code-review-debt").shortLabel, undefined);
+  // The one former policy entry ("Frontier review debt") is gone: its trigger
+  // was unreachable by construction and it had never produced a row. The
+  // category itself stays — every entry must still declare what it is, so a
+  // future policy cannot silently render as a capability.
+  assert.equal(caps.filter((c) => c.category === "policy").length, 0,
+    "no policy entries today — if one is added, it must set category:'policy'");
 });
 
 test("every declared lane owner is a real lane id", async () => {
@@ -118,7 +118,11 @@ test("counts describe capabilities only — a policy is not a working capability
     const caps = r.capabilities.filter((c) => c.category !== "policy");
     const total = r.counts.works + r.counts.degraded + r.counts.queued;
     assert.equal(total, caps.length, `${mode}: counts must sum to the capability count, not every entry`);
-    assert.ok(r.capabilities.length > caps.length, "there is at least one policy, so this test is meaningful");
+    // Currently every entry is a capability, so this reduces to "counts cover
+    // everything". It still guards the filter: adding a policy without excluding
+    // it from the counts would make the summary overstate what works.
+    assert.equal(r.capabilities.filter((c) => c.category === "policy").length,
+      r.capabilities.length - caps.length);
   }
 });
 
