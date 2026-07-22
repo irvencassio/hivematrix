@@ -321,8 +321,9 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-bar-fill.ok  { background: var(--ok,  #4caf50); }
   .usage-bar-fill.warn { background: #f0a500; }
   .usage-bar-fill.hi  { background: #e05b2c; }
-  /* Day markers on 7-day windows — a thin page-background notch every 1/7 of the
-     bar, so "3 days of usage in day 1" reads as a mostly-full first segment
+  /* Segment boundaries — a thin page-background notch drawn on the bar at each
+     segment edge (5h: every hour; 7d: every day = 1/7; ctx: quarters). They give
+     the long fill bar a scale so "3 days-worth consumed" reads as 3 lit segments
      instead of a vague overall percentage. */
   .usage-bar-tick { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--bg); z-index: 1; pointer-events: none; }
   .usage-status-dot { font-size: 9px; vertical-align: middle; margin-right: 3px; }
@@ -330,24 +331,18 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
   .usage-status-dot.warn { color: #f0a500; }
   .usage-status-dot.hi   { color: #e05b2c; }
   /* Header meters (5h / 7d / context) share one size so they read as one family.
-     Sized up from the original 26x6 — at that size the bars were unreadable and
-     an unfilled one looked like a decorative dash rather than a meter. */
+     Sized up from the original 26x6 (then 44px) to a longer 76px bar carrying
+     boundary ticks — short bars were unreadable and gave the ticks no room. */
   .usage-win-bars button { display: inline-flex; align-items: center; gap: 5px; }
   .usage-win-bars .usage-bar-wrap { margin: 0; }
-  .usage-win-bars .usage-bar { width: 44px; height: 8px; border-radius: 4px; flex: none; }
+  .usage-win-bars .usage-bar { width: 76px; height: 8px; border-radius: 4px; flex: none; }
   .usage-win-bars .usage-bar-fill { border-radius: 4px; }
-  .usage-bar-days { display: inline-flex; align-items: center; }
-  .usage-bar-day { display: inline-block; width: 5px; height: 8px; border-radius: 1px; background: var(--border); margin-right: 1px; }
-  .usage-bar-day:last-child { margin-right: 0; }
-  .usage-bar-day.filled.ok { background: var(--ok, #4caf50); }
-  .usage-bar-day.filled.warn { background: #f0a500; }
-  .usage-bar-day.filled.hi { background: #e05b2c; }
   /* Context meter — same component as the usage meters, always on screen. It sits
      outside #usageWinToggle because it is a readout, not one of the two mutually
      exclusive windows that toggle the readout text. */
   .ctx-meter { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted);
     border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); padding: 3px 9px; cursor: pointer; }
-  .ctx-meter .usage-bar { width: 44px; height: 8px; border-radius: 4px; flex: none; }
+  .ctx-meter .usage-bar { width: 76px; height: 8px; border-radius: 4px; flex: none; }
   .ctx-pct { font-variant-numeric: tabular-nums; min-width: 30px; }
   .ctx-meter .usage-bar-fill { border-radius: 4px; }
   .ctx-meter-fill.ctx-ok { background: var(--muted); }
@@ -1145,10 +1140,10 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     <span class="logo">HiveMatrix</span>
     <span class="live" id="live" style="cursor:pointer" onclick="toggleConnOverride()" title="Daemon + connectivity status — click to override connectivity">● live</span>
     <span class="obs-win usage-win-bars" id="usageWinToggle">
-      <button data-w="5h" id="usageBtn5h" onclick="openObsModal()">5h<span class="usage-bar-wrap"><span class="usage-bar" id="usageBar5h"><span class="usage-bar-fill" id="usageBar5hFill"></span></span></span></button>
-      <button data-w="7d" id="usageBtn7d" onclick="openObsModal()">7d<span class="usage-bar-wrap"><span class="usage-bar-days" id="usageBar7d"><span class="usage-bar-day" data-day="1"></span><span class="usage-bar-day" data-day="2"></span><span class="usage-bar-day" data-day="3"></span><span class="usage-bar-day" data-day="4"></span><span class="usage-bar-day" data-day="5"></span><span class="usage-bar-day" data-day="6"></span><span class="usage-bar-day" data-day="7"></span></span></span></button>
+      <button data-w="5h" id="usageBtn5h" onclick="openObsModal()">5h<span class="usage-bar-wrap"><span class="usage-bar" id="usageBar5h"><span class="usage-bar-fill" id="usageBar5hFill"></span><span class="usage-bar-tick" style="left:20%"></span><span class="usage-bar-tick" style="left:40%"></span><span class="usage-bar-tick" style="left:60%"></span><span class="usage-bar-tick" style="left:80%"></span></span></span></button>
+      <button data-w="7d" id="usageBtn7d" onclick="openObsModal()">7d<span class="usage-bar-wrap"><span class="usage-bar" id="usageBar7d"><span class="usage-bar-fill" id="usageBar7dFill"></span><span class="usage-bar-tick" style="left:14.29%"></span><span class="usage-bar-tick" style="left:28.57%"></span><span class="usage-bar-tick" style="left:42.86%"></span><span class="usage-bar-tick" style="left:57.14%"></span><span class="usage-bar-tick" style="left:71.43%"></span><span class="usage-bar-tick" style="left:85.71%"></span></span></span></button>
     </span>
-    <span class="ctx-meter" id="ctxMeter" onclick="showFlashPanel()" title="Conversation context — how full the chat thread is">ctx<span class="usage-bar-wrap"><span class="usage-bar"><span class="usage-bar-fill ctx-meter-fill ctx-ok" id="ctxMeterFill"></span></span></span><span class="ctx-pct" id="ctxMeterPct"></span></span>
+    <span class="ctx-meter" id="ctxMeter" onclick="showFlashPanel()" title="Conversation context — how full the chat thread is">ctx<span class="usage-bar-wrap"><span class="usage-bar"><span class="usage-bar-fill ctx-meter-fill ctx-ok" id="ctxMeterFill"></span><span class="usage-bar-tick" style="left:25%"></span><span class="usage-bar-tick" style="left:50%"></span><span class="usage-bar-tick" style="left:75%"></span></span></span><span class="ctx-pct" id="ctxMeterPct"></span></span>
   </div>
   <div class="hzone mode" style="margin-left:auto">
     <span class="hgroup" id="connGroup" style="display:none" title="Connectivity — auto by default; the ● live indicator shows the current effective mode. Click it to override.">
@@ -6204,22 +6199,26 @@ function renderUsage5hBar() {
 }
 
 function renderUsage7dBar() {
-  const track = document.getElementById("usageBar7d");
+  const fill = document.getElementById("usageBar7dFill");
   const btn = document.getElementById("usageBtn7d");
   const win = findUsageWin("7-day");
-  const ticks = track ? track.querySelectorAll(".usage-bar-day") : [];
   if (!win) {
-    ticks.forEach(function (t) { t.className = "usage-bar-day"; });
+    if (fill) { fill.style.width = "0%"; fill.className = "usage-bar-fill"; }
     if (btn) btn.title = "";
     return;
   }
   const cycleDay = sevenDayCycleDay(win.resetsAt) || 7;
   const cls = usageBarClass(win.utilization, win.resetsAt, win.durationMs || 0);
-  ticks.forEach(function (t) {
-    const day = Number(t.dataset.day);
-    t.className = "usage-bar-day" + (day <= cycleDay ? " filled " + cls : "");
-  });
-  if (btn) btn.title = "Day " + cycleDay + " of 7 · " + Math.max(0, Math.min(100, win.remaining)).toFixed(0) + "% left · resets " + fmtResets(win.resetsAt);
+  // Fill counts days-worth CONSUMED, not days elapsed: usedPct = 100 - remaining,
+  // filledBars = round(usedPct / (100/7)), clamped 0..7. The fill snaps to
+  // filledBars/7 so its edge lands on a boundary tick and the bar reads as N whole
+  // day-segments (e.g. 38% used -> round(2.66) -> 3 of 7 lit). Colour stays the
+  // day-paced usageBarClass signal (green on/under pace, red over).
+  const remaining = Math.max(0, Math.min(100, win.remaining));
+  const usedPct = 100 - remaining;
+  const filledBars = Math.max(0, Math.min(7, Math.round(usedPct / (100 / 7))));
+  if (fill) { fill.style.width = (filledBars / 7 * 100).toFixed(2) + "%"; fill.className = "usage-bar-fill " + cls; }
+  if (btn) btn.title = "Day " + cycleDay + " of 7 · " + remaining.toFixed(0) + "% left · resets " + fmtResets(win.resetsAt);
 }
 
 // Context meter — always rendered, unlike the old in-panel gauge which hid itself

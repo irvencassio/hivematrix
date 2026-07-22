@@ -1927,9 +1927,14 @@ test("header Usage section is removed; both 5h and 7d toggle buttons render visu
   assert.match(headerZone, /id="usageBar5hFill"/, "5-hour bar fill mount present");
   assert.match(headerZone, /data-w="7d" id="usageBtn7d"/, "7-day button identifiable for tooltip/tick wiring");
   assert.match(headerZone, />7d</, "7-day button label present (shortened from '7 day' to make room for its tick bar)");
-  assert.match(headerZone, /id="usageBar7d"/, "7-day tick track mount present");
-  const dayTickCount = (headerZone.match(/class="usage-bar-day"/g) || []).length;
-  assert.equal(dayTickCount, 7, "exactly 7 day ticks are pre-rendered in markup");
+  assert.match(headerZone, /id="usageBar7d"/, "7-day bar track mount present");
+  assert.match(headerZone, /id="usageBar7dFill"/, "7-day bar fill mount present (usage-worth fill, not day-boxes)");
+  assert.doesNotMatch(headerZone, /usage-bar-day/, "old 7-box day markup is gone — 7d is now a ticked fill bar");
+  // Each meter is now a longer bar with boundary tick marks: 5h ticked by hour (4
+  // interior ticks), 7d ticked by day (6), ctx quartered (3, the last at the 75%
+  // auto-compaction line).
+  const tickCount = (headerZone.match(/class="usage-bar-tick"/g) || []).length;
+  assert.equal(tickCount, 13, "4 (5h) + 6 (7d) + 3 (ctx) boundary ticks are pre-rendered");
   assert.doesNotMatch(headerZone, /id="usageWinReadout"/, "the green readout is removed - detail lives in each meter tooltip");
 
   const toggleMarkup = CONSOLE_HTML.slice(CONSOLE_HTML.indexOf('id="usageWinToggle"'), CONSOLE_HTML.indexOf('id="ctxMeter"'));
@@ -1982,24 +1987,20 @@ function consoleUsageBars() {
     const classList = { on: false, toggle: (_cls: string, v: boolean) => { classList.on = v; } };
     return { dataset: { w }, classList };
   }
-  function makeTick(day: number) {
-    return { dataset: { day: String(day) }, className: "usage-bar-day" };
-  }
   const toggleButtons = [makeToggleBtn("5h"), makeToggleBtn("7d")];
-  const ticks = Array.from({ length: 7 }, (_, i) => makeTick(i + 1));
   const els: Record<string, any> = {
     usageWinReadout: { textContent: "", className: "muted" },
     usageBar5hFill: { style: { width: "" }, className: "" },
+    usageBar7dFill: { style: { width: "" }, className: "" },
     usageBtn5h: { title: "" },
     usageBtn7d: { title: "" },
-    usageBar7d: { querySelectorAll: (sel: string) => (sel === ".usage-bar-day" ? ticks : []) },
   };
   const doc = {
     getElementById: (id: string) => els[id],
     querySelectorAll: (sel: string) => (sel.indexOf("usageWinToggle") >= 0 ? toggleButtons : []),
   };
   const control = factory(doc);
-  return { ...control, toggleButtons, ticks, els };
+  return { ...control, toggleButtons, els };
 }
 
 test("5-hour meter renders a visual progress bar (fill width + status color)", () => {
@@ -2030,7 +2031,7 @@ test("5-hour bar resets to empty when there is no 5-hour window in the cached da
   assert.equal(ub.els.usageBtn5h.title, "");
 });
 
-test("7-day toggle button fills ticks up to the current cycle day, green when within the day-paced allowance", () => {
+test("7-day bar fills by days-worth CONSUMED (round(used/14.3)), green when within the day-paced allowance", () => {
   const ub = consoleUsageBars();
   const now = Date.UTC(2026, 6, 1, 12, 0, 0);
   const hour = 60 * 60 * 1000;
@@ -2042,16 +2043,15 @@ test("7-day toggle button fills ticks up to the current cycle day, green when wi
       { label: "7-day", remaining: 72, utilization: 28, resetsAt: new Date(now + 5 * day + 5 * hour).toISOString(), durationMs: 604800000 },
     ]);
     ub.renderHeaderUsageWindow();
-    const filled = ub.ticks.filter((t: { className: string }) => t.className.indexOf("filled") >= 0);
-    assert.equal(filled.length, 2, "day 2 of 7 (reset in 5d 5h) fills exactly 2 ticks");
-    assert.ok(filled.every((t: { className: string }) => t.className.indexOf(" ok") >= 0), "28% used on day 2 (allowance 28.6%) is within pace — filled ticks are ok/green");
-    assert.equal(ub.els.usageBtn7d.title, "Day 2 of 7 · 72% left · resets in 5d 5h", "tooltip states day progress + exact time");
+    assert.equal(ub.els.usageBar7dFill.style.width, "28.57%", "28% used = round(28/14.3)=2 days-worth → 2/7 of the bar");
+    assert.equal(ub.els.usageBar7dFill.className, "usage-bar-fill ok", "28% used on day 2 (allowance 28.6%) is within pace — green");
+    assert.equal(ub.els.usageBtn7d.title, "Day 2 of 7 · 72% left · resets in 5d 5h", "tooltip states day progress + exact time (unchanged)");
   } finally {
     Date.now = original;
   }
 });
 
-test("7-day ticks turn red when utilization exceeds the current day's allowance, tick count unchanged", () => {
+test("7-day bar turns red when usage exceeds the current day's allowance, fill count reflects usage not elapsed days", () => {
   const ub = consoleUsageBars();
   const now = Date.UTC(2026, 6, 1, 12, 0, 0);
   const hour = 60 * 60 * 1000;
@@ -2063,19 +2063,39 @@ test("7-day ticks turn red when utilization exceeds the current day's allowance,
       { label: "7-day", remaining: 71, utilization: 29, resetsAt: new Date(now + 5 * day + 5 * hour).toISOString(), durationMs: 604800000 },
     ]);
     ub.renderHeaderUsageWindow();
-    const filled = ub.ticks.filter((t: { className: string }) => t.className.indexOf("filled") >= 0);
-    assert.equal(filled.length, 2, "still day 2 — tick count reflects elapsed days, not usage");
-    assert.ok(filled.every((t: { className: string }) => t.className.indexOf(" hi") >= 0), "29% used on day 2 exceeds the 28.6% allowance — filled ticks turn hi/red");
+    assert.equal(ub.els.usageBar7dFill.style.width, "28.57%", "29% used = round(29/14.3)=2 days-worth → 2/7 of the bar");
+    assert.ok(ub.els.usageBar7dFill.className.indexOf(" hi") >= 0, "29% used on day 2 exceeds the 28.6% allowance — bar turns hi/red");
   } finally {
     Date.now = original;
   }
 });
 
-test("7-day ticks clear when there is no 7-day window in the cached data", () => {
+test("7-day bar shows days-worth CONSUMED, not days ELAPSED — day 7 with 62% left renders 3 green bars", () => {
+  // The operator's correction: the live 'Day 7 of 7 · 62% left' (38% used) was
+  // painting a near-full bar (elapsed days) when only ~3 days-worth is spent.
+  const ub = consoleUsageBars();
+  const now = Date.UTC(2026, 6, 1, 12, 0, 0);
+  const original = Date.now;
+  Date.now = () => now;
+  try {
+    ub.seed([
+      { label: "7-day", remaining: 62, utilization: 38, resetsAt: new Date(now + (18 * 60 + 29) * 60 * 1000).toISOString(), durationMs: 604800000 },
+    ]);
+    ub.renderHeaderUsageWindow();
+    assert.equal(ub.els.usageBar7dFill.style.width, "42.86%", "38% used = round(38/14.3)=3 days-worth → 3/7 of the bar, not 6-7 elapsed-day boxes");
+    assert.ok(ub.els.usageBar7dFill.className.indexOf(" ok") >= 0, "38% used is under the day-7 allowance — green");
+    assert.equal(ub.els.usageBtn7d.title, "Day 7 of 7 · 62% left · resets in 18h 29m", "tooltip preserved verbatim");
+  } finally {
+    Date.now = original;
+  }
+});
+
+test("7-day bar clears when there is no 7-day window in the cached data", () => {
   const ub = consoleUsageBars();
   ub.seed([{ label: "5-hour", remaining: 50, utilization: 50, resetsAt: new Date(Date.now() + 3600000).toISOString(), durationMs: 18000000 }]);
   ub.renderHeaderUsageWindow();
-  assert.ok(ub.ticks.every((t: { className: string }) => t.className === "usage-bar-day"), "no filled ticks without 7-day data");
+  assert.equal(ub.els.usageBar7dFill.style.width, "0%", "no fill without 7-day data");
+  assert.equal(ub.els.usageBar7dFill.className, "usage-bar-fill", "colour class reset to the neutral base");
   assert.equal(ub.els.usageBtn7d.title, "");
 });
 
