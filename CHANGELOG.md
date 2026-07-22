@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.246 — 2026-07-22
+
+The header usage meters (5h, 7d, and ctx) are now longer bars with tick marks at each segment boundary — one mark per hour on 5h, per day on 7d, and quarters on ctx — so they're readable at a glance instead of a tiny dash. The 7-day bar now fills by how much of your weekly budget you've actually used (days-worth consumed) rather than by which day of the week it is, and it turns red when you're burning faster than one day's share per day — so a hot week shows up early.
+
 ## v0.1.245 — 2026-07-22
 
 Fixes the in-app assistant not being able to see your tasks. When you asked it about a task, it would fail with an 'unknown tool' error behind the scenes and then guess — sometimes wrongly — at what the task was doing. It can now read the board (list your tasks and look one up) correctly. Also an internal test-tooling cleanup so future UI checks are more reliable.
