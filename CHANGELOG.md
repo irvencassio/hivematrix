@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.236 — 2026-07-22
+
+Tools can now run things. Every skill and command in the Tools list gets a Run button that opens the parameter picker, so you no longer have to go to the right sidebar to run anything. Agent-only tools stay unrunnable on purpose — those are what the model reaches for, not something you click. Also fixes the Integrate card failing with a raw 'not a git repository' error: its project picker offered 'HiveMatrix (this repo)', which resolved to wherever the app happened to be running from rather than the repo — for an installed app that is your home folder, which is not a repository. It now lists real project paths and defaults to HiveMatrix.
+
 ## v0.1.235 — 2026-07-22
 
 Everything now runs on one model by default. The old routing split work across three tiers that were built for a local model that no longer exists, so fifteen named concepts resolved to two Claude models and the seams between them were where bugs kept appearing. Chat also ignored your Operational and Chat setting entirely — it reported Sonnet while the setting read Haiku, and choosing Opus changed nothing — so that now works, and you can pin a single conversation with '/model opus' and release it with '/model default'. Tools can now run brain skills the same way it runs commands: parameters are clickable pills that reveal a text box, instead of a row of plain inputs on one half of the catalog and pills on the other. The left sidebar now holds Approvals at the top where a blocked task cannot be missed, and Scheduled beneath, and collapsed sections match the nav buttons instead of looking like stray headings. The header drops the green usage readout and the yellow toggle that drove it, since both meters already carry that detail in a tooltip. Also fixes the context gauge capping every model at 200k regardless of what it could actually hold, hidden folders like .history being offered as projects, and removes a frontier-review-debt mechanism whose trigger could never fire.
