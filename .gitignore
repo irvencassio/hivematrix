@@ -13,3 +13,7 @@ build/
 __pycache__/
 *.pyc
 .Codex-resumes/
+# Task-branch worktree container (machine-local scratch created by the task
+# runner inside the repo). Untracked, it makes the tree read "dirty" and blocks
+# the release script's clean-tree gate while any task is in flight.
+.hive-worktrees/
