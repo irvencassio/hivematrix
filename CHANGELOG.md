@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.244 — 2026-07-22
+
+Tasks now run with no dollar budget cap by default, matching Claude Code itself — a task runs until it's done rather than getting cut off mid-work at an arbitrary dollar amount. Your usage limits and a per-task time limit still bound anything that runs away, and you can still set a spending cap on an individual task if you want one. Also: tasks that use smart model routing now read 'Role-routed' (Opus for thinking, Sonnet for coding) instead of the confusing 'mixed', so it's clear the top-level work runs on Opus.
+
 ## v0.1.243 — 2026-07-22
 
 Fixes the last dead spots in the Tools panel. Most importantly, opening Tools 'cold' (right after launch, before things finished loading) showed no Run buttons at all — now they always appear. Also, Copy and Publish in a skill's window were quietly reporting success in a side column you might not be looking at; that feedback now lands right where you clicked. Backed by a new set of automated UI tests that click every control the way you would.
