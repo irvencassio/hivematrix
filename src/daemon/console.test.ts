@@ -4390,3 +4390,40 @@ test("the Integrate card names a real repo path, never a phantom 'this repo'", (
   assert.match(fn, /hivematrix\$\/i/, "defaults to the discovered hivematrix project by path");
   assert.match(fn, /No projects discovered/, "says so plainly when discovery returns nothing");
 });
+
+test("Tools rows offer Run for things an operator can actually run", () => {
+  // The Tools panel was a read-only inventory: the only way to run a skill was
+  // the right-rail catalog. native/flash entries stay unrunnable — those are
+  // agent tools the model reaches, not something to click.
+  const js = extractScript(CONSOLE_HTML);
+  const keySrc = extractFunctionBlock(js, "_toolRunKey");
+  assert.ok(keySrc, "_toolRunKey should exist");
+  const key = new Function(`${keySrc}\nreturn _toolRunKey;`)() as (k: string, t: unknown) => string;
+
+  // Capability names map 1:1 onto the catalog's keys.
+  assert.equal(key("skill-tool", { name: "x", skillName: "brain-chat" }), "lib:brain-chat");
+  assert.equal(key("skill-library", { name: "brain-url" }), "lib:brain-url");
+  assert.equal(key("local-command", { name: "bible-study" }), "local:bible-study");
+
+  // Not runnable from a click.
+  assert.equal(key("native", { name: "brain_read" }), "");
+  assert.equal(key("flash", { name: "escalate_to_task" }), "");
+  assert.equal(key("skill-library", {}), "", "a row with no name yields no key");
+  assert.equal(key("local-command", null), "");
+});
+
+test("the Run button stops propagation and survives a cold Tools panel", () => {
+  const js = extractScript(CONSOLE_HTML);
+  // Running must not double as expanding the record.
+  assert.match(js, /event\.stopPropagation\(\);runToolFromCatalog\(/, "Run does not toggle the row");
+
+  // The Tools panel loads /capabilities, not /skills+/commands — so a cold open
+  // would find skCatalog() empty and the click would silently do nothing.
+  const launcher = extractFunctionBlock(js, "runToolFromCatalog");
+  assert.match(launcher, /if \(!skCatalog\(\)\.length\)/, "loads the catalog before opening the panel");
+  assert.match(launcher, /renderSkillCatalog\(\)/);
+  assert.match(launcher, /showSkillPanel\(key\)/);
+
+  // Layout: Run absorbs the free space, so the caret must not also claim it.
+  assert.match(CONSOLE_HTML, /\.tools-run-btn \+ \.tools-caret \{ margin-left:6px; \}/);
+});

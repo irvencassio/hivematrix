@@ -986,6 +986,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
     margin:6px 0; cursor:pointer; display:grid; grid-template-columns:minmax(190px,270px) 1fr;
     column-gap:16px; row-gap:6px; align-items:start; }
   .tools-row:hover { border-color:var(--accent); }
+  /* Run affordance on a Tools row. Sits before the expand caret and stops
+     propagation so running never doubles as expanding the record. */
+  .tools-run-btn { margin-left:auto; padding:2px 9px; font-size:11px; cursor:pointer;
+    background:var(--panel); color:inherit; border:1px solid var(--border); border-radius:6px; }
+  .tools-run-btn:hover { border-color:var(--accent); color:var(--accent); }
+  /* Run already absorbs the free space; without this the caret's own auto
+     margin would split it and strand Run mid-row instead of beside the caret. */
+  .tools-run-btn + .tools-caret { margin-left:6px; }
   .tools-idcol { min-width:0; display:flex; flex-direction:column; gap:5px; }
   .tools-row-top { display:flex; align-items:center; gap:7px; }
   .tools-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
@@ -8298,6 +8306,30 @@ function showTools() {
 
 function updateToolsNav() { syncNav(); }
 
+/**
+ * Catalog key for a Tools row, or "" when the row is not something an operator
+ * can run. native/flash entries are agent tools reached by the model, not by a
+ * click; skills and local commands both have a runnable panel.
+ *
+ * Capability names map 1:1 onto the catalog: a skill-library/skill-tool entry
+ * keys as lib:<name>, a local-command as local:<invokeName>.
+ */
+function _toolRunKey(groupKind, t) {
+  if (!t) return '';
+  if (groupKind === 'skill-tool' && t.skillName) return 'lib:' + t.skillName;
+  if (groupKind === 'skill-library' && t.name) return 'lib:' + t.name;
+  if (groupKind === 'local-command' && t.name) return 'local:' + t.name;
+  return '';
+}
+
+/** Open the run panel for a Tools row, loading the catalog first if needed.
+ *  The Tools panel loads /capabilities, not /skills+/commands, so a cold open
+ *  would otherwise find skCatalog() empty and silently do nothing. */
+async function runToolFromCatalog(key) {
+  if (!skCatalog().length) { try { await renderSkillCatalog(); } catch (e) { /* transient */ } }
+  showSkillPanel(key);
+}
+
 async function loadCapabilities() {
   _toolsState.error = false;
   try {
@@ -8394,9 +8426,15 @@ function renderToolsPanel() {
         if (fileShort) fields += '<div class="tools-field"><span class="fk">source</span><span class="fv mono" title="' + attrEnc(file) + '">' + esc(fileShort) + '</span></div>';
         fields += '</div>';
 
+        const runKey = _toolRunKey(g.kind, t);
+        const runBtn = runKey
+          ? '<button class="tools-run-btn" title="Run this — opens the parameter picker"'
+            + ' onclick="event.stopPropagation();runToolFromCatalog(\'' + attrEnc(runKey) + '\')">Run</button>'
+          : '';
         body += '<div class="tools-row" onclick="toggleToolExpand(\'' + attrEnc(key) + '\')">'
           + '<div class="tools-idcol">'
           + '<div class="tools-row-top">' + dot + '<span class="tools-name">' + esc(t.name) + '</span>' + kindChip
+          + runBtn
           + '<span class="tools-caret" title="' + (open ? 'collapse' : 'expand full record') + '">' + (open ? '▾' : '▸') + '</span></div>'
           + fields + '</div>'
           + '<div class="tools-desc">' + esc(t.description || 'No description provided.') + '</div>';
