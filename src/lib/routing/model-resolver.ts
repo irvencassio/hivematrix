@@ -18,6 +18,23 @@ import { detectBackends, type BackendStatus } from "@/lib/models/backends";
 
 const NANO_BANANA = "nano-banana";
 
+/**
+ * The one model every text tier falls back to.
+ *
+ * The tier system (frontier-premium / frontier / operational) was built when a
+ * local Qwen model existed and the tiers encoded a real capability-and-cost
+ * cliff worth routing around. Release 0.1.176 deleted the local plane; the
+ * tiers survived it with nothing left to route between — ~15 named concepts
+ * across three role vocabularies resolving to two Claude models, which is where
+ * this session's hardcoded-literal bugs kept coming from.
+ *
+ * Collapsing to a single default: one thing to reason about, one thing to
+ * change. Per-role overrides still win when the operator sets one, and the
+ * latency exception for spoken surfaces lives in flash/loop.ts where it belongs
+ * (it is a latency concern, not a cost tier).
+ */
+const DEFAULT_TEXT_MODEL = CLAUDE_OPUS_ID;
+
 export interface ResolveModelOptions {
   /** Ignore local/non-frontier role overrides, used by Cloud-only posture. */
   noLocalOverrides?: boolean;
@@ -73,7 +90,7 @@ export function resolveModelId(tier: ModelTier, options: ResolveModelOptions = {
       if (m && (!options.noLocalOverrides || isFrontierOverride(m)) && modelSupportedByBackends(m, backends)) return m;
       const provider = availableFrontierProvider(cfg, backends);
       if (provider === "codex") return CODEX_NEWEST_ID;
-      if (provider === "claude") return CLAUDE_OPUS_ID;
+      if (provider === "claude") return DEFAULT_TEXT_MODEL;
       return null;
     }
     case "frontier": {
@@ -83,7 +100,7 @@ export function resolveModelId(tier: ModelTier, options: ResolveModelOptions = {
       if (fav && (!options.noLocalOverrides || isFrontierOverride(fav)) && modelSupportedByBackends(fav, backends)) return fav;
       const provider = availableFrontierProvider(cfg, backends);
       if (provider === "codex") return CODEX_SPARK_ID;
-      if (provider === "claude") return CLAUDE_SONNET_ID;
+      if (provider === "claude") return DEFAULT_TEXT_MODEL;
       return null;
     }
     case "operational": {
@@ -91,7 +108,7 @@ export function resolveModelId(tier: ModelTier, options: ResolveModelOptions = {
       const backends = options.frontierBackends ?? detectBackends();
       const op = (cfg.operationalModel as string | undefined)?.trim();
       if (op && modelSupportedByBackends(op, backends)) return op;
-      if (backendConfigured(backends, "claude")) return CLAUDE_HAIKU_ID;
+      if (backendConfigured(backends, "claude")) return DEFAULT_TEXT_MODEL;
       // Codex-only installs: fall back to the cheap Codex pool rather than null.
       if (backendConfigured(backends, "codex")) return CODEX_SPARK_ID;
       return null;

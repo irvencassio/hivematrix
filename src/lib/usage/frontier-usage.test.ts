@@ -62,9 +62,15 @@ test("getFrontierUsage aggregates cost/tokens and excludes local-only tasks", as
   assert.equal(u.byModel[0].cost, 0.5);
 });
 
-test("resolveModelId maps frontier-premium to Opus", () => {
+test("every Claude text tier resolves to the single default model", () => {
+  // Collapsed 2026-07-22: the tier split encoded a local-vs-frontier cliff that
+  // ceased to exist when the local plane was deleted in 0.1.176.
   assert.equal(resolveModelId("frontier-premium"), "opus");
-  assert.equal(resolveModelId("frontier"), "sonnet");
+  assert.equal(resolveModelId("frontier"), "opus");
+  assert.equal(resolveModelId("operational"), "opus");
+  // Non-text tiers are unaffected — a different modality, not a cost tier.
+  assert.equal(resolveModelId("nanai"), "nano-banana");
+  assert.equal(resolveModelId("unavailable"), null);
 });
 
 test("getFrontierUsage includes Codex subscription windows when available", async () => {

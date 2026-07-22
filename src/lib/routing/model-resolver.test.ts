@@ -37,9 +37,12 @@ test("frontier-premium uses thinkModel override, else Opus default", () => {
   assert.equal(resolveModelId("frontier-premium", { frontierBackends: frontierBackends(true, false) }), "claude-sonnet-4-6");
 });
 
-test("frontier uses frontierModel (coding) override, else Sonnet default", () => {
+test("frontier uses frontierModel (coding) override, else the single text default", () => {
+  // Collapsed 2026-07-22: every Claude text tier falls back to ONE model.
+  // The tiers encoded a local-vs-frontier cliff that stopped existing when the
+  // local plane was deleted in 0.1.176. Overrides still win.
   writeCfg({});
-  assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(true, false) }), "sonnet");
+  assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(true, false) }), "opus");
   writeCfg({ frontierModel: "claude-opus-4-8" });
   assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(true, false) }), "claude-opus-4-8");
 });
@@ -53,7 +56,7 @@ test("codex provider defaults thinking to GPT-5.5 and coding to Spark", () => {
 test("codex provider falls back to Claude when Codex CLI is missing", () => {
   writeCfg({ frontierProvider: "codex" });
   assert.equal(resolveModelId("frontier-premium", { frontierBackends: frontierBackends(true, false) }), "opus");
-  assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(true, false) }), "sonnet");
+  assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(true, false) }), "opus");
 });
 
 test("frontier defaults return null when no frontier backend is configured", () => {
@@ -73,7 +76,7 @@ test("both enabled: primary provider wins, honoring frontierProvider among enabl
 test("one enabled: that provider is forced regardless of frontierProvider", () => {
   writeCfg({ frontierProvider: "codex" }); // primary points at codex, but codex is disabled
   const claudeOnly = frontierBackendsQuadrant({ claudeInstalled: true, claudeEnabled: true, codexInstalled: true, codexEnabled: false });
-  assert.equal(resolveModelId("frontier", { frontierBackends: claudeOnly }), "sonnet", "codex installed-but-disabled must not win");
+  assert.equal(resolveModelId("frontier", { frontierBackends: claudeOnly }), "opus", "codex installed-but-disabled must not win");
 
   writeCfg({ frontierProvider: "claude" }); // primary points at claude, but claude is disabled
   const codexOnly = frontierBackendsQuadrant({ claudeInstalled: true, claudeEnabled: false, codexInstalled: true, codexEnabled: true });
@@ -102,18 +105,19 @@ test("role model overrides win even when frontier provider is Codex", () => {
 test("cloud-only resolution ignores local role overrides", () => {
   writeCfg({ frontierProvider: "claude", frontierModel: "qwen/qwen3.6-27b" });
   assert.equal(resolveModelId("frontier", { frontierBackends: frontierBackends(true, false) }), "qwen/qwen3.6-27b");
-  assert.equal(resolveModelId("frontier", { noLocalOverrides: true, frontierBackends: frontierBackends(true, false) }), "sonnet");
+  assert.equal(resolveModelId("frontier", { noLocalOverrides: true, frontierBackends: frontierBackends(true, false) }), "opus");
 });
 
-test("operational honors operationalModel override, else Haiku, else Codex Spark, else null", () => {
+test("operational honors operationalModel override, else the single text default, else Codex Spark, else null", () => {
   writeCfg({ operationalModel: "haiku" });
-  assert.equal(resolveModelId("operational", { frontierBackends: frontierBackends(true, false) }), "haiku");
-  // override that no configured backend supports is ignored
+  assert.equal(resolveModelId("operational", { frontierBackends: frontierBackends(true, false) }), "haiku",
+    "an explicit override still wins — cheap bulk work can still be pinned to Haiku");
+  // An override no configured backend supports is ignored, falling back to the default.
   writeCfg({ operationalModel: "codex:gpt-5.3-codex-spark" });
-  assert.equal(resolveModelId("operational", { frontierBackends: frontierBackends(true, false) }), "haiku");
-  // no override → Claude configured → Haiku default
+  assert.equal(resolveModelId("operational", { frontierBackends: frontierBackends(true, false) }), "opus");
+  // No override → the single default, not a per-tier one.
   writeCfg({});
-  assert.equal(resolveModelId("operational", { frontierBackends: frontierBackends(true, false) }), "haiku");
+  assert.equal(resolveModelId("operational", { frontierBackends: frontierBackends(true, false) }), "opus");
   // no override, no Claude, Codex only → Spark
   assert.equal(resolveModelId("operational", { frontierBackends: frontierBackends(false, true) }), "codex:gpt-5.3-codex-spark");
   // no backend configured → null
