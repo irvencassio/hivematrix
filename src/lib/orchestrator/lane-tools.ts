@@ -1150,13 +1150,9 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: LaneTool
   const {
     parseBrowserBeeJobCreate,
     buildBrowserBeeTaskDescription,
-    buildBrowserBeeDesktopFallbackDescription,
     buildBrowserBeeTaskRequestEnvelope,
     resolveBrowserBeeBacking,
-    readBrowserBeeDesktopFallbackEnabled,
   } = await import("@/lib/browser-lane/jobs");
-  const { CODEX_COMPUTER_USE_MODEL_ID } = await import("@/lib/models/catalog");
-  const { readCodexAuthState } = await import("@/lib/usage/codex");
 
   let payload;
   try {
@@ -1197,38 +1193,27 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: LaneTool
     }
   }
 
-  // Decide which engine drives the browser. Codex Computer Use is preferred;
-  // the Desktop Lane fallback (driven by Claude) is used only when Codex auth is
-  // missing AND the operator opted into the fallback AND Desktop Lane is available.
+  // One engine: Claude drives a real desktop browser through Desktop Lane. The
+  // Codex Computer Use branch was removed (2026-07-22) — gpt-5.4-computer-use
+  // needs an OpenAI API-key account, so on a ChatGPT-subscription login it could
+  // never run, and its presence made every failure read as a Codex auth problem.
   const desktopBeeAvailable = getConnectivityPolicy().getCapability("desktopbee").available;
-  const decision = resolveBrowserBeeBacking({
-    codexAuthMode: readCodexAuthState().authMode,
-    desktopFallbackEnabled: readBrowserBeeDesktopFallbackEnabled(),
-    desktopBeeAvailable,
-  });
+  const decision = resolveBrowserBeeBacking({ desktopBeeAvailable });
   if (!decision.backing) return `Error: ${decision.reason}`;
 
-  let model: string;
-  let description: string;
-  if (decision.backing === "desktop_fallback") {
-    const { getRoleModels, CLAUDE_SONNET_ID } = await import("@/lib/models/available");
-    model = getRoleModels().coding.trim() || CLAUDE_SONNET_ID;
-    description = buildBrowserBeeDesktopFallbackDescription(payload, { requestedProjectPath: ctx.projectPath });
-  } else {
-    model = CODEX_COMPUTER_USE_MODEL_ID;
-    description = buildBrowserBeeTaskDescription(payload, { requestedProjectPath: ctx.projectPath });
-  }
+  const { getRoleModels, CLAUDE_SONNET_ID } = await import("@/lib/models/available");
+  const model = getRoleModels().coding.trim() || CLAUDE_SONNET_ID;
+  const description = buildBrowserBeeTaskDescription(payload, { requestedProjectPath: ctx.projectPath });
 
   const envelope = buildBrowserBeeTaskRequestEnvelope(payload, ctx.projectPath, {
     backing: decision.backing,
     backingModel: model,
   });
-  const laneLabel = decision.backing === "desktop_fallback" ? "Desktop fallback — Claude" : "Codex Computer Use";
+  const laneLabel = "Claude — desktop browser";
 
   // Create the job through the daemon's task API (loopback, shared-secret auth).
-  // The task's model selects the executor: Codex Computer Use for the default
-  // path, or Claude (which carries the desktop_action tool) for the
-  // fallback path.
+  // The task's model selects the executor: Claude, which carries the
+  // desktop_action tool (wired into task agents in 0.1.250).
   const base = `http://127.0.0.1:${process.env.HIVEMATRIX_PORT ?? "3747"}`;
   const token = readToken("auth-token") ?? "";
   try {

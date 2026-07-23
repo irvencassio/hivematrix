@@ -2667,17 +2667,13 @@ export function createDaemonServer() {
       // Desktop Lane fallback enabled? what backing will actually run?
       if (req.method === "GET" && urlPath === "/browserbee/health") {
         const { buildBrowserBeeHealthSnapshot, readBrowserBeeDesktopFallbackEnabled } = await import("@/lib/browser-lane/jobs");
-        const { readCodexAuthState } = await import("@/lib/usage/codex");
         const { readHiveConfig } = await import("@/lib/brain/settings");
         const { Task } = await import("@/lib/db");
         const tasks = await Task.find({ source: "browserbee" });
-        const auth = readCodexAuthState();
         const ack = (readHiveConfig().browserbee as Record<string, unknown> | undefined)?.acknowledgedComputerUse === true;
         const snapshot = buildBrowserBeeHealthSnapshot({
           tasks: tasks.map((t) => ({ status: t.status as string, createdAt: t.createdAt as string })),
           readiness: {
-            codexConfigured: auth.authMode === "subscription" || auth.authMode === "api-key",
-            codexAuthMode: auth.authMode,
             acknowledgedComputerUse: ack,
             desktopFallbackEnabled: readBrowserBeeDesktopFallbackEnabled(),
             desktopBeeAvailable: policy.getCapability("desktopbee").available,
@@ -2690,19 +2686,15 @@ export function createDaemonServer() {
       // GET /browser-lane/health — public replacement for /browserbee/health.
       if (req.method === "GET" && urlPath === "/browser-lane/health") {
         const { buildBrowserBeeHealthSnapshot, readBrowserBeeDesktopFallbackEnabled } = await import("@/lib/browser-lane/jobs");
-        const { readCodexAuthState } = await import("@/lib/usage/codex");
         const { readHiveConfig } = await import("@/lib/brain/settings");
         const { Task } = await import("@/lib/db");
         const tasks = await Task.find({ source: "browser-lane" });
         const legacyTasks = await Task.find({ source: "browserbee" });
-        const auth = readCodexAuthState();
         const ack = (readHiveConfig().browserLane as Record<string, unknown> | undefined)?.acknowledgedComputerUse === true
           || (readHiveConfig().browserbee as Record<string, unknown> | undefined)?.acknowledgedComputerUse === true;
         const snapshot = buildBrowserBeeHealthSnapshot({
           tasks: [...tasks, ...legacyTasks].map((t) => ({ status: t.status as string, createdAt: t.createdAt as string })),
           readiness: {
-            codexConfigured: auth.authMode === "subscription" || auth.authMode === "api-key",
-            codexAuthMode: auth.authMode,
             acknowledgedComputerUse: ack,
             desktopFallbackEnabled: readBrowserBeeDesktopFallbackEnabled(),
             desktopBeeAvailable: policy.getCapability("desktopbee").available,

@@ -1,6 +1,5 @@
 import type { TaskDoc } from "@/lib/db";
 import { ContractValidationError } from "@/lib/central/contracts";
-import { CODEX_COMPUTER_USE_MODEL_ID } from "@/lib/models/catalog";
 import { buildAuthBeeSessionPlaneSummary, type AuthBeeSessionRecord } from "@/lib/session/contracts";
 import { readHiveConfig } from "@/lib/brain/settings";
 
@@ -26,17 +25,19 @@ export const BROWSERBEE_TRACE_POLICIES = ["none", "timeline", "timeline_and_scre
 export type BrowserBeeTracePolicy = (typeof BROWSERBEE_TRACE_POLICIES)[number];
 
 /**
- * Which engine actually drives the browser for a Browser Lane job.
- *   codex_computer_use — the default: Codex Computer Use (frontier) drives the
- *     browser. Requires Codex subscription/API auth and network.
- *   desktop_fallback   — opt-in: Claude drives a desktop browser via
- *     Desktop Lane (AppleScript → Accessibility → click/type). Engaged only when
- *     Codex auth is unavailable and the operator has enabled the fallback. Lower
- *     reliability, but keeps authenticated browser work running with no Codex
- *     subscription.
+ * Which engine drives the browser for a Browser Lane job.
+ *   desktop_fallback   — THE engine: Claude drives a real desktop browser via
+ *     Desktop Lane (AppleScript → Accessibility → click/type). The name is
+ *     historical; it is no longer a fallback to anything.
+ *   codex_computer_use — LEGACY, never selected. Retained only so envelopes
+ *     written before the Claude-native cutover (2026-07-22) still parse. Nothing
+ *     produces it; resolveBrowserBeeBacking cannot return it.
  */
 export const BROWSERBEE_BACKINGS = ["codex_computer_use", "desktop_fallback"] as const;
 export type BrowserBeeBacking = (typeof BROWSERBEE_BACKINGS)[number];
+
+/** What actually drives the browser, for status surfaces. */
+export const BROWSER_LANE_ENGINE_LABEL = "claude-desktop-browser";
 
 export interface BrowserBeeJobCreatePayload {
   title: string;
@@ -92,8 +93,6 @@ export interface BrowserBeeHealthSnapshot {
   bee: "browserbee";
   backingModel: string;
   readiness: {
-    codexConfigured: boolean;
-    codexAuthMode: string;
     acknowledgedComputerUse: boolean;
     consentRequired: boolean;
     desktopFallbackEnabled: boolean;
@@ -247,8 +246,8 @@ function readBrowserBeeEnvelope(task: BrowserBeeTaskWithOutput): BrowserBeeTaskR
     sessionLabel: readString(record, "sessionLabel", "browserbeeRequest.sessionLabel", { required: false }),
     notes: readString(record, "notes", "browserbeeRequest.notes", { required: false, allowEmpty: true }) ?? "",
     requestedProjectPath: readString(record, "requestedProjectPath", "browserbeeRequest.requestedProjectPath", { required: false }) ?? "",
-    backing: normalizeEnum(record.backing, BROWSERBEE_BACKINGS, "codex_computer_use", "browserbeeRequest.backing"),
-    backingModel: readString(record, "backingModel", "browserbeeRequest.backingModel", { required: false }) ?? CODEX_COMPUTER_USE_MODEL_ID,
+    backing: normalizeEnum(record.backing, BROWSERBEE_BACKINGS, "desktop_fallback", "browserbeeRequest.backing"),
+    backingModel: readString(record, "backingModel", "browserbeeRequest.backingModel", { required: false }) ?? BROWSER_LANE_ENGINE_LABEL,
     createdVia: readString(record, "createdVia", "browserbeeRequest.createdVia", { required: false }) ?? "browserbee",
   };
 }
@@ -351,21 +350,28 @@ function buildBrowserBeeJobBodySections(
   return sections;
 }
 
+/**
+ * The Browser Lane job prompt. ONE builder — Claude driving a desktop browser is
+ * the only engine (see resolveBrowserBeeBacking). There used to be a second,
+ * near-identical Codex variant; the pair drifted, and the Codex one described a
+ * backing that could never run.
+ */
 export function buildBrowserBeeTaskDescription(
   payload: BrowserBeeJobCreatePayload,
   options: { requestedProjectPath: string },
 ): string {
   const sections = [
-    "This task came from Browser Lane.",
+    "This task came from Browser Lane. Claude drives a real desktop browser here — there is no Codex Computer Use engine, and nothing is waiting on OpenAI auth.",
     "Treat it as a stateful browser workflow, not a generic fresh-public-web research request.",
     "If the work can be completed by Browser Lane read/search mode without login state, multi-step browser control, or rendered interaction, stop and note that the request should be rerouted.",
-    "Use the Browser Lane backing path via Codex Computer Use only within the approved domains and stated workflow scope.",
+    "Drive the browser with the desktop_action tool. Prefer the most reliable strategy first: desktop.script.run (AppleScript) to open/navigate a browser → desktop.ax.query/desktop.ax.act on the browser's Accessibility tree → desktop.click/desktop.type by coordinate only as a last resort. Use desktop.capture to verify state.",
+    "Stay within the approved domains and the stated workflow scope. Reuse an already-signed-in browser session rather than re-entering credentials; if login is required and no session exists, stop and report that human login is needed — for keychain_password sites, mention that the operator can use Browser Lane's 'Sign in with saved credential' button to retrieve it without retyping it.",
     "",
     ...buildBrowserBeeJobBodySections(payload, options),
     "",
     "Output expectations:",
     "- Summarize what happened on the site.",
-    "- Call out any approvals or blockers encountered.",
+    "- Call out any approvals, login prompts, or blockers encountered.",
     "- Mention screenshots, traces, or HTML captures created while executing the workflow.",
   ];
 
@@ -377,27 +383,15 @@ export function buildBrowserBeeTaskDescription(
  * Claude through Desktop Lane instead of Codex Computer Use. Used only
  * when Codex auth is unavailable and the operator has enabled the fallback.
  */
+/**
+ * @deprecated Browser Lane has one engine now; this is buildBrowserBeeTaskDescription.
+ * Kept as a thin alias so any caller still importing the old name keeps working.
+ */
 export function buildBrowserBeeDesktopFallbackDescription(
   payload: BrowserBeeJobCreatePayload,
   options: { requestedProjectPath: string },
 ): string {
-  const sections = [
-    "This task came from Browser Lane, running on the Desktop fallback backing (no usable Codex auth).",
-    "Treat it as a stateful browser workflow, not a generic fresh-public-web research request.",
-    "If the work can be completed by Browser Lane read/search mode without login state, multi-step browser control, or rendered interaction, stop and note that the request should be rerouted.",
-    "Drive the browser yourself with the desktop_action tool — there is no Codex Computer Use engine on this path.",
-    "Prefer the most reliable strategy first: desktop.script.run (AppleScript) to open/navigate a browser → desktop.ax.query/desktop.ax.act on the browser's Accessibility tree → desktop.click/desktop.type by coordinate only as a last resort. Use desktop.capture to verify state.",
-    "Stay within the approved domains and the stated workflow scope. Reuse an already-signed-in browser session rather than re-entering credentials; if login is required and no session exists, stop and report that human login is needed — for keychain_password sites, mention that the operator can use Browser Lane's 'Sign in with saved credential' button to retrieve it without retyping it.",
-    "",
-    ...buildBrowserBeeJobBodySections(payload, options),
-    "",
-    "Output expectations:",
-    "- Summarize what happened on the site.",
-    "- Call out any approvals, login prompts, or blockers encountered.",
-    "- Note that this ran on the Desktop Lane fallback (Claude), and mention any screen captures taken.",
-  ];
-
-  return sections.join("\n");
+  return buildBrowserBeeTaskDescription(payload, options);
 }
 
 export function buildBrowserBeeTaskRequestEnvelope(
@@ -405,12 +399,12 @@ export function buildBrowserBeeTaskRequestEnvelope(
   requestedProjectPath: string,
   options: { backing?: BrowserBeeBacking; backingModel?: string } = {},
 ): BrowserBeeTaskRequestEnvelope {
-  const backing = options.backing ?? "codex_computer_use";
+  const backing = options.backing ?? "desktop_fallback";
   return {
     ...payload,
     requestedProjectPath,
     backing,
-    backingModel: options.backingModel ?? (backing === "desktop_fallback" ? "desktopbee" : CODEX_COMPUTER_USE_MODEL_ID),
+    backingModel: options.backingModel ?? BROWSER_LANE_ENGINE_LABEL,
     createdVia: "browser-lane.jobs",
   };
 }
@@ -440,47 +434,36 @@ export interface BrowserBeeBackingDecision {
 }
 
 /**
- * Decide which backing path a Browser Lane job should run on.
+ * Decide whether a Browser Lane job can be dispatched.
  *
- * The Codex Computer Use model (gpt-5.4-computer-use) is ONLY available with an
- * OpenAI API-key Codex account — it returns HTTP 400 "not supported when using
- * Codex with a ChatGPT account" on a subscription login. So only `api-key` auth
- * qualifies for that backing. Otherwise (subscription or logged-out) the job
- * runs on the Desktop Lane fallback when the operator enabled it AND Desktop Lane is
- * available; else it is refused with an actionable reason instead of creating a
- * task that will 400 and fail silently.
+ * Browser Lane is CLAUDE-NATIVE (2026-07-22). It used to prefer an OpenAI Codex
+ * Computer Use backing and treat Claude-driving-the-desktop as a fallback, but
+ * that backing was unreachable in practice: gpt-5.4-computer-use requires an
+ * OpenAI API-key account and returns HTTP 400 "not supported when using Codex
+ * with a ChatGPT account" on a subscription login — which is what this machine
+ * has. So the Codex branch never ran, while its existence made every failure
+ * read as an auth problem and sent people looking for `codex login`.
+ *
+ * There is now one engine: Claude drives a real desktop browser through Desktop
+ * Lane (task agents carry the desktop_action tool as of 0.1.250). The only real
+ * precondition left is that Desktop Lane is actually up, so that is the only
+ * thing this checks. Do not reintroduce a Codex branch — see
+ * docs/browser-lane-claude-native.md.
  */
 export function resolveBrowserBeeBacking(input: {
-  codexAuthMode: string;
-  desktopFallbackEnabled: boolean;
   desktopBeeAvailable: boolean;
 }): BrowserBeeBackingDecision {
-  // Subscription (ChatGPT) accounts cannot run the computer-use model.
-  const codexUsable = input.codexAuthMode === "api-key";
-  if (codexUsable) {
-    return { backing: "codex_computer_use", reason: `Codex ${input.codexAuthMode} auth available` };
-  }
-  const why =
-    input.codexAuthMode === "subscription"
-      ? "The Codex Computer Use model (gpt-5.4-computer-use) isn't available on a ChatGPT-subscription Codex account — it needs an OpenAI API key."
-      : "No usable Codex auth was found (run `codex login`).";
-  if (!input.desktopFallbackEnabled) {
-    return {
-      backing: null,
-      reason:
-        `${why} Enable the Desktop fallback (set browserLane.desktopFallback=true in ` +
-        "~/.hivematrix/config.json) to drive a real desktop browser with Claude instead.",
-    };
-  }
   if (!input.desktopBeeAvailable) {
     return {
       backing: null,
-      reason: "Desktop Lane fallback is enabled but Desktop Lane is unavailable (the Swift helper is not running).",
+      reason:
+        "Desktop Lane is unavailable (the Swift helper is not running), so there is no engine to drive the browser. "
+        + "Start Desktop Lane and retry.",
     };
   }
   return {
     backing: "desktop_fallback",
-    reason: `${why} Using the Desktop Lane fallback (Claude drives a desktop browser).`,
+    reason: "Claude drives a real desktop browser through Desktop Lane.",
   };
 }
 
@@ -513,8 +496,6 @@ export function buildBrowserBeeJobSnapshot(task: BrowserBeeTaskWithOutput): Brow
 export function buildBrowserBeeHealthSnapshot(args: {
   tasks: Array<Pick<TaskDoc, "status" | "createdAt">>;
   readiness: {
-    codexConfigured: boolean;
-    codexAuthMode: string;
     acknowledgedComputerUse: boolean;
     desktopFallbackEnabled?: boolean;
     desktopBeeAvailable?: boolean;
@@ -571,18 +552,14 @@ export function buildBrowserBeeHealthSnapshot(args: {
 
   const desktopFallbackEnabled = args.readiness.desktopFallbackEnabled === true;
   const backingDecision = resolveBrowserBeeBacking({
-    codexAuthMode: args.readiness.codexAuthMode,
-    desktopFallbackEnabled,
     desktopBeeAvailable: args.readiness.desktopBeeAvailable !== false,
   });
 
   return {
     ok: true,
     bee: "browserbee",
-    backingModel: CODEX_COMPUTER_USE_MODEL_ID,
+    backingModel: BROWSER_LANE_ENGINE_LABEL,
     readiness: {
-      codexConfigured: args.readiness.codexConfigured,
-      codexAuthMode: args.readiness.codexAuthMode,
       acknowledgedComputerUse: args.readiness.acknowledgedComputerUse,
       consentRequired: args.readiness.acknowledgedComputerUse !== true,
       desktopFallbackEnabled,

@@ -85,67 +85,41 @@ test("buildBrowserBeeJobSnapshot reads task-backed request metadata", () => {
   assert.equal(snapshot.sessionLabel, "crm-daily");
 });
 
-test("resolveBrowserBeeBacking uses Codex Computer Use ONLY with an API-key account", () => {
-  // api-key: the computer-use model is available → Codex backing.
-  const apiKey = resolveBrowserBeeBacking({
-    codexAuthMode: "api-key",
-    desktopFallbackEnabled: false,
-    desktopBeeAvailable: true,
-  });
-  assert.equal(apiKey.backing, "codex_computer_use");
-});
-
-test("resolveBrowserBeeBacking does NOT use Codex on a ChatGPT-subscription account (model 400s)", () => {
-  // Regression: gpt-5.4-computer-use is unsupported on subscription accounts, so
-  // it must NOT create a doomed Codex task. With no fallback → refuse clearly.
-  const refuse = resolveBrowserBeeBacking({
-    codexAuthMode: "subscription",
-    desktopFallbackEnabled: false,
-    desktopBeeAvailable: true,
-  });
-  assert.equal(refuse.backing, null);
-  assert.match(refuse.reason, /ChatGPT-subscription/);
-  assert.match(refuse.reason, /desktopFallback=true/);
-  // With the fallback enabled, route to Desktop Lane instead of Codex.
-  const fallback = resolveBrowserBeeBacking({
-    codexAuthMode: "subscription",
-    desktopFallbackEnabled: true,
-    desktopBeeAvailable: true,
-  });
-  assert.equal(fallback.backing, "desktop_fallback");
-});
-
-test("resolveBrowserBeeBacking refuses when Codex auth is missing and fallback is off", () => {
-  const decision = resolveBrowserBeeBacking({
-    codexAuthMode: "logged-out",
-    desktopFallbackEnabled: false,
-    desktopBeeAvailable: true,
-  });
-  assert.equal(decision.backing, null);
-  assert.match(decision.reason, /desktopFallback=true/);
-});
-
-test("resolveBrowserBeeBacking uses the Desktop Lane fallback when enabled and available", () => {
-  const decision = resolveBrowserBeeBacking({
-    codexAuthMode: "logged-out",
-    desktopFallbackEnabled: true,
-    desktopBeeAvailable: true,
-  });
+test("Browser Lane runs on Claude and never asks about Codex", () => {
+  // Cutover 2026-07-22. The Codex Computer Use backing was removed: it required
+  // an OpenAI API-key account (gpt-5.4-computer-use 400s on a ChatGPT
+  // subscription login), so on this machine it could never run — yet its
+  // presence made every Browser Lane failure read as a Codex auth problem and
+  // sent people chasing `codex login`. Claude driving a desktop browser is now
+  // the one engine, and the decision must not consult Codex at all.
+  const decision = resolveBrowserBeeBacking({ desktopBeeAvailable: true });
   assert.equal(decision.backing, "desktop_fallback");
+  assert.match(decision.reason, /Claude/);
+  assert.doesNotMatch(decision.reason, /codex/i, "the reason must never mention Codex");
+  assert.doesNotMatch(decision.reason, /api[- ]key/i);
 });
 
-test("resolveBrowserBeeBacking refuses the fallback when Desktop Lane is unavailable", () => {
-  const decision = resolveBrowserBeeBacking({
-    codexAuthMode: "logged-out",
-    desktopFallbackEnabled: true,
-    desktopBeeAvailable: false,
-  });
+test("Browser Lane no longer refuses work for lack of Codex auth, or for a fallback opt-in", () => {
+  // Previously: subscription auth + fallback off => refused, telling the operator
+  // to set browserLane.desktopFallback=true. There is no primary to fall back
+  // FROM now, so gating the only engine behind an opt-in would just make Browser
+  // Lane silently dead.
+  const decision = resolveBrowserBeeBacking({ desktopBeeAvailable: true });
+  assert.equal(decision.backing, "desktop_fallback", "must dispatch without any opt-in flag");
+  assert.doesNotMatch(decision.reason, /desktopFallback=true/);
+});
+
+test("resolveBrowserBeeBacking refuses only when Desktop Lane itself is down", () => {
+  // The one real precondition left: something has to drive the browser.
+  const decision = resolveBrowserBeeBacking({ desktopBeeAvailable: false });
   assert.equal(decision.backing, null);
   assert.match(decision.reason, /Desktop Lane is unavailable/);
+  assert.doesNotMatch(decision.reason, /codex/i);
   assert.doesNotMatch(decision.reason, /DesktopBee/);
 });
 
 test("readBrowserBeeDesktopFallbackEnabled reads the opt-in flag, default off", () => {
+  // Retained for status surfaces; it no longer gates dispatch.
   assert.equal(readBrowserBeeDesktopFallbackEnabled({}), false);
   assert.equal(readBrowserBeeDesktopFallbackEnabled({ browserbee: {} }), false);
   assert.equal(readBrowserBeeDesktopFallbackEnabled({ browserbee: { desktopFallback: true } }), true);
@@ -153,7 +127,7 @@ test("readBrowserBeeDesktopFallbackEnabled reads the opt-in flag, default off", 
   assert.equal(readBrowserBeeDesktopFallbackEnabled({ browserbee: { desktopFallback: false } }), false);
 });
 
-test("buildBrowserBeeDesktopFallbackDescription drives the browser via Desktop Lane", () => {
+test("the job prompt tells the agent to drive the browser with desktop_action, and never mentions Codex", () => {
   const payload = parseBrowserBeeJobCreate({
     project: "hive",
     startUrl: "https://app.example.com/inbox",
@@ -161,32 +135,34 @@ test("buildBrowserBeeDesktopFallbackDescription drives the browser via Desktop L
     requiresLogin: true,
   });
 
-  const description = buildBrowserBeeDesktopFallbackDescription(payload, {
+  const description = buildBrowserBeeTaskDescription(payload, {
     requestedProjectPath: "/Users/irvencassio/Hive",
   });
 
-  assert.match(description, /Desktop fallback backing/);
   assert.match(description, /desktop_action tool/);
-  assert.match(description, /no Codex Computer Use engine/);
-  assert.match(description, /Desktop Lane fallback/);
+  assert.match(description, /Claude drives a real desktop browser/);
+  assert.doesNotMatch(description, /Codex Computer Use engine on this path/);
+  assert.doesNotMatch(description, /no usable Codex auth/i);
   assert.doesNotMatch(description, /DesktopBee/);
-  assert.match(description, /Claude/, "the fallback description must name Claude");
-  assert.doesNotMatch(description, /local model/i, "the fallback description must not call this a local-model path");
-  assert.match(description, /Sign in with saved credential/, "should point the operator at the one-click credential retrieval button");
+  assert.doesNotMatch(description, /local model/i);
+  assert.match(description, /Sign in with saved credential/, "points at one-click credential retrieval");
   // shared body is still present
   assert.match(description, /Allowed domains: app\.example\.com/);
   assert.match(description, /Objective:/);
 });
 
-test("resolveBrowserBeeBacking's opt-in-suggestion reason names Claude, not a local model", () => {
-  const decision = resolveBrowserBeeBacking({
-    codexAuthMode: "subscription",
-    desktopFallbackEnabled: false,
-    desktopBeeAvailable: true,
+test("the deprecated fallback-description alias returns the same single prompt", () => {
+  const payload = parseBrowserBeeJobCreate({
+    project: "hive",
+    startUrl: "https://app.example.com/inbox",
+    objective: "Check the inbox.",
   });
-  assert.equal(decision.backing, null);
-  assert.match(decision.reason, /Claude/);
-  assert.doesNotMatch(decision.reason, /local model/i);
+  const opts = { requestedProjectPath: "/Users/irvencassio/Hive" };
+  assert.equal(
+    buildBrowserBeeDesktopFallbackDescription(payload, opts),
+    buildBrowserBeeTaskDescription(payload, opts),
+    "one engine means one prompt — the two must not drift again",
+  );
 });
 
 test("buildBrowserBeeTaskRequestEnvelope records the chosen backing", () => {
@@ -196,49 +172,40 @@ test("buildBrowserBeeTaskRequestEnvelope records the chosen backing", () => {
     objective: "Check the inbox.",
   });
 
-  const codex = buildBrowserBeeTaskRequestEnvelope(payload, "/Users/irvencassio/Hive");
-  assert.equal(codex.backing, "codex_computer_use");
-  assert.equal(codex.backingModel, "codex:gpt-5.4-computer-use");
+  // The default is the Claude desktop engine — it used to default to Codex.
+  const dflt = buildBrowserBeeTaskRequestEnvelope(payload, "/Users/irvencassio/Hive");
+  assert.equal(dflt.backing, "desktop_fallback");
+  assert.doesNotMatch(dflt.backingModel, /codex/i);
 
-  const fallback = buildBrowserBeeTaskRequestEnvelope(payload, "/Users/irvencassio/Hive", {
+  const explicit = buildBrowserBeeTaskRequestEnvelope(payload, "/Users/irvencassio/Hive", {
     backing: "desktop_fallback",
-    backingModel: "qwen3-coder",
+    backingModel: "claude-sonnet-5",
   });
-  assert.equal(fallback.backing, "desktop_fallback");
-  assert.equal(fallback.backingModel, "qwen3-coder");
+  assert.equal(explicit.backing, "desktop_fallback");
+  assert.equal(explicit.backingModel, "claude-sonnet-5");
 });
 
 test("buildBrowserBeeHealthSnapshot surfaces the fallback decision", () => {
-  const offline = buildBrowserBeeHealthSnapshot({
-    readiness: {
-      codexConfigured: false,
-      codexAuthMode: "logged-out",
-      acknowledgedComputerUse: true,
-      desktopFallbackEnabled: false,
-    },
+  // Health now turns on ONE thing: is Desktop Lane up? No Codex fields at all.
+  const down = buildBrowserBeeHealthSnapshot({
+    readiness: { acknowledgedComputerUse: true, desktopBeeAvailable: false },
     tasks: [],
   });
-  assert.equal(offline.readiness.effectiveBacking, "unavailable");
-  assert.equal(offline.readiness.desktopFallbackEnabled, false);
+  assert.equal(down.readiness.effectiveBacking, "unavailable");
+  assert.equal("codexAuthMode" in down.readiness, false, "Codex must not reappear in the health surface");
+  assert.equal("codexConfigured" in down.readiness, false);
+  assert.doesNotMatch(down.backingModel, /codex/i);
 
-  const fallbackOn = buildBrowserBeeHealthSnapshot({
-    readiness: {
-      codexConfigured: false,
-      codexAuthMode: "logged-out",
-      acknowledgedComputerUse: true,
-      desktopFallbackEnabled: true,
-      desktopBeeAvailable: true,
-    },
+  const up = buildBrowserBeeHealthSnapshot({
+    readiness: { acknowledgedComputerUse: true, desktopBeeAvailable: true },
     tasks: [],
   });
-  assert.equal(fallbackOn.readiness.effectiveBacking, "desktop_fallback");
+  assert.equal(up.readiness.effectiveBacking, "desktop_fallback");
 });
 
 test("buildBrowserBeeHealthSnapshot counts queue states", () => {
   const health = buildBrowserBeeHealthSnapshot({
     readiness: {
-      codexConfigured: true,
-      codexAuthMode: "subscription",
       acknowledgedComputerUse: false,
     },
     tasks: [
