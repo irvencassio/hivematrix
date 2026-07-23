@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.252 — 2026-07-23
+
+Browser Lane no longer depends on Codex at all. It used to prefer an OpenAI 'Computer Use' engine and fall back to Claude — but that engine needs a paid OpenAI API key and simply cannot run on a ChatGPT subscription, so it never actually ran. Worse, every Browser Lane problem was reported as 'no usable Codex auth — run codex login', sending you after a sign-in issue that did not exist. Claude driving a real browser is now the one and only engine, with nothing to sign into and no OpenAI account involved. The only thing Browser Lane checks now is whether Desktop Lane is running.
+
 ## v0.1.251 — 2026-07-23
 
 Fixes Browser Lane refusing jobs on the wrong site's behalf. A plain Google search was blocked with 'LinkedIn is configured read-only' — because sites that sign in through Google list Google's domains so the login redirect works, and Browser Lane was treating that as though LinkedIn owned Google. Any site that signs in with Google (LinkedIn, YouTube) could block unrelated work the same way. A site is now only considered the owner of a domain when it's actually that site's own address. Read-only protection is unchanged — it still applies, just to the right site.
