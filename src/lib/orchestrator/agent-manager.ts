@@ -910,6 +910,38 @@ class AgentManager {
           ...update,
           turns,
         });
+
+        // Auto-integrate (flag: autoIntegrate). A worktree task otherwise ends
+        // "committed on hive/task-… , waiting for you to Archive" — its work sits
+        // on a branch nothing surfaces. With the flag on, a task that finished
+        // cleanly fast-forwards into main and pushes by itself.
+        //
+        // Deliberately narrow: only a genuinely finished run. A task still
+        // holding a question (needs_input) or parked on subtasks
+        // (waiting_children) has not produced a final answer, and `failed` work
+        // must never land. integrateTaskBranch keeps every existing guard —
+        // fast-forward only, typecheck after the merge with rollback on failure,
+        // serialized per repo — so this changes WHO triggers it, not how safe it is.
+        const finishedCleanly = !agentReportedFailure
+          && reviewState !== "needs_input"
+          && reviewState !== "waiting_children";
+        const branchToLand = (task as Record<string, unknown> | null)?.worktreeBranch as string | null | undefined;
+        if (finishedCleanly && branchToLand) {
+          try {
+            const { isFeatureEnabled } = await import("@/lib/config/features");
+            if (isFeatureEnabled("autoIntegrate")) {
+              const { integrateTaskBranch } = await import("@/lib/orchestrator/integrate-branch");
+              const outcome = await integrateTaskBranch(String(task?.projectPath ?? agent.projectPath ?? ""), branchToLand);
+              await Task.findByIdAndUpdate(taskId, { integration: outcome });
+              this.taskUpdateBroadcaster(taskId, { integration: outcome });
+              console.log(`[auto-integrate] task ${taskId} ${branchToLand}: ${outcome.status}${outcome.detail ? " — " + outcome.detail : ""}`);
+            }
+          } catch (e) {
+            // Never let integration failure corrupt the task's own outcome — the
+            // run itself succeeded and is already saved above.
+            console.error(`[auto-integrate] task ${taskId} failed:`, e instanceof Error ? e.message : e);
+          }
+        }
         if (task?.missionId) {
           // directive progress is tracked via run_journal in db, not a progress doc
         }

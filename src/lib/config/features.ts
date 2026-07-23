@@ -18,6 +18,7 @@ export const KNOWN_FEATURES = [
   { key: "agentSpecialization", label: "Specialist agents", description: "Route each task to a specialist role (developer, QA, designer, COO…) instead of always using the developer role. Off = every task runs as developer." },
   { key: "selfImprovement", label: "Self-improvement loop", description: "Let HiveMatrix autonomously plan and run maintenance/self-improvement tasks from your feedback backlog on a daily schedule. Off by default — turn on only when you want it working on its own." },
   { key: "taskWorktrees", label: "Per-task git worktrees", description: "Run each task in its own git worktree + branch instead of the shared repo working tree, so it doesn't commit directly to the checked-out branch. Off by default." },
+  { key: "autoIntegrate", label: "Auto-merge finished tasks to main", description: "When a task finishes successfully, fast-forward its branch into main and push, without waiting for you to Archive it. Still refuses anything that isn't a clean fast-forward, and rolls the merge back if typecheck fails. Off by default — turn on when you want task work to land on main by itself." },
 ] as const;
 
 export type FeatureKey = (typeof KNOWN_FEATURES)[number]["key"];

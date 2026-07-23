@@ -299,9 +299,11 @@ const SELF_IMPROVEMENT_PREFIX =
   "[Self-improvement task — follow the Superpowers pipeline in AGENTS.md: brainstorm → plan → " +
   "subagent-driven TDD → finish. Do NOT release; the operator releases. " +
   "Git hygiene (AGENTS.md): the working tree is SHARED — stage the files you actually touched by " +
-  "name, never `git add -A`, and COMMIT your work before finishing so it can't be swept into " +
-  "someone else's commit. Never merge to main and never resolve a conflict; that is the " +
-  "operator's call.]\n\n";
+  "name, never `git add -A`, and COMMIT your work before finishing — your commit is what gets " +
+  "landed, so anything uncommitted is lost. Your branch is fast-forwarded into main and pushed " +
+  "for you once the run finishes and typecheck passes, so leave main alone yourself: do not " +
+  "merge, rebase, or resolve conflicts by hand — if your branch can't fast-forward, stop and say " +
+  "so rather than rewriting history.]\n\n";
 
 export interface ResolveEscalationTargetOpts {
   title: string;

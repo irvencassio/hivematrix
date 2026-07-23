@@ -916,8 +916,13 @@ test("self-improvement tasks carry the shared-working-tree git hygiene contract"
   assert.match(target.description, /working tree is SHARED/);
   assert.match(target.description, /never `git add -A`/);
   assert.match(target.description, /COMMIT your work before finishing/);
-  // Merges stay with the operator — a model only authored one side of them.
-  assert.match(target.description, /Never merge to main and never resolve a conflict/);
+  // The branch is now fast-forwarded into main and pushed automatically once the
+  // run finishes and typecheck passes (features.autoIntegrate), so the agent has
+  // to know its commit is what actually lands…
+  assert.match(target.description, /fast-forwarded into main and pushed/);
+  // …but hand-merging still stays out of the model's hands: it only authored one
+  // side of any conflict, and a rewrite of main is unrecoverable.
+  assert.match(target.description, /do not\s+merge, rebase, or resolve conflicts by hand/);
   // The original request must still be there, not replaced by boilerplate.
   assert.match(target.description, /do the thing/);
 });

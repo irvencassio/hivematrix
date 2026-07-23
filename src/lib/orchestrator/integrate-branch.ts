@@ -206,7 +206,25 @@ async function runIntegration(
       };
     }
 
-    return { status: "integrated", branch, ahead, behind, detail: `Fast-forwarded main by ${ahead} commit(s) from ${branch}.` };
+    // Land it on the remote too. A branch that "merged to main" but only locally
+    // is a trap: the work reads as shipped while existing on exactly one disk.
+    // The merge already passed typecheck, so a FAILED PUSH IS NOT A REASON TO
+    // ROLL BACK — main is legitimately ahead; we just say so loudly instead of
+    // reporting success and leaving the operator to discover it later.
+    let pushNote = "";
+    try {
+      const remotes = (await deps.git(repoPath, ["remote"])).trim();
+      if (remotes) {
+        await deps.git(repoPath, ["push", "origin", "main"]);
+        pushNote = " Pushed to origin/main.";
+      } else {
+        pushNote = " No git remote is configured, so nothing was pushed.";
+      }
+    } catch (e) {
+      pushNote = ` NOTE: merged into main locally but the PUSH FAILED — main is ahead of origin and the work is not on the remote yet. Push it manually. (${e instanceof Error ? e.message : e})`;
+    }
+
+    return { status: "integrated", branch, ahead, behind, detail: `Fast-forwarded main by ${ahead} commit(s) from ${branch}.${pushNote}` };
   } catch (e) {
     return { status: "error", branch, detail: e instanceof Error ? e.message : String(e) };
   }

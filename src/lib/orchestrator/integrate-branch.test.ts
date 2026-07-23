@@ -23,11 +23,16 @@ function fakeDeps(over: {
   verifyOk?: boolean;
   verifyOutput?: string;
   gitThrowsOn?: string;
+  /** `git remote` output — "" models a repo with no remote configured. */
+  remotes?: string;
+  /** Make `git push` fail, to prove a verified merge is NOT rolled back. */
+  pushThrows?: boolean;
 } = {}): { deps: IntegrateDeps; calls: string[][] } {
   const calls: string[][] = [];
   const {
     ahead = 2, behind = 0, dirty = "", branchExists = true,
     verifyOk = true, verifyOutput = "", gitThrowsOn,
+    remotes = "origin", pushThrows = false,
   } = over;
 
   const deps: IntegrateDeps = {
@@ -43,6 +48,8 @@ function fakeDeps(over: {
       }
       if (args[0] === "status") return dirty;
       if (args[0] === "rev-list") return String(args[2].includes("main..") ? ahead : behind);
+      if (args[0] === "remote") return remotes;
+      if (args[0] === "push") { if (pushThrows) throw new Error("push rejected by remote"); return ""; }
       return "";
     },
     verify: async () => ({ ok: verifyOk, output: verifyOutput }),
@@ -207,4 +214,48 @@ test("needsOperatorAttention: only the outcomes with a decision left to make", (
   assert.equal(needsOperatorAttention("integrated"), false);
   assert.equal(needsOperatorAttention("no_branch"), false);
   assert.equal(needsOperatorAttention("nothing_to_integrate"), false);
+});
+
+test("integrated: a verified merge is pushed to origin/main, not just landed locally", async () => {
+  // A branch that "merged to main" but only locally is a trap — the work reads
+  // as shipped while living on exactly one disk. Auto-integration has to push.
+  const { deps, calls } = fakeDeps({ ahead: 2 });
+  const r = await integrateTaskBranch(REPO, "hive/task-1", deps);
+  assert.equal(r.status, "integrated");
+  assert.ok(calls.some((c) => c[0] === "push" && c[1] === "origin" && c[2] === "main"), "must push origin main");
+  assert.match(r.detail ?? "", /Pushed to origin\/main/);
+  // Order matters: never push something that hasn't merged.
+  const mergeAt = calls.findIndex((c) => c[0] === "merge");
+  const pushAt = calls.findIndex((c) => c[0] === "push");
+  assert.ok(mergeAt !== -1 && pushAt > mergeAt, "push must come after the fast-forward");
+});
+
+test("a FAILED push does not roll back an already-verified merge — it reports main is unpushed", async () => {
+  // The merge passed typecheck; the network did not. Rolling main back here
+  // would throw away good, verified work for a transient failure. Report loudly
+  // instead, so the operator knows main is ahead of origin.
+  const { deps, calls } = fakeDeps({ ahead: 2, pushThrows: true });
+  const r = await integrateTaskBranch(REPO, "hive/task-1", deps);
+  assert.equal(r.status, "integrated", "still integrated — the merge itself was good");
+  assert.match(r.detail ?? "", /PUSH FAILED/);
+  assert.match(r.detail ?? "", /not on the remote/);
+  assert.ok(!calls.some((c) => c[0] === "reset"), "must NOT roll the verified merge back");
+});
+
+test("a repo with no remote integrates and says nothing was pushed, rather than erroring", async () => {
+  const { deps, calls } = fakeDeps({ ahead: 1, remotes: "" });
+  const r = await integrateTaskBranch(REPO, "hive/task-1", deps);
+  assert.equal(r.status, "integrated");
+  assert.ok(!calls.some((c) => c[0] === "push"), "nothing to push to");
+  assert.match(r.detail ?? "", /No git remote/);
+});
+
+test("a failed typecheck still rolls back and never pushes", async () => {
+  // Guard the interaction: the push must sit behind the verify gate, so broken
+  // code can never reach origin.
+  const { deps, calls } = fakeDeps({ ahead: 2, verifyOk: false, verifyOutput: "TS1005" });
+  const r = await integrateTaskBranch(REPO, "hive/task-1", deps);
+  assert.equal(r.status, "verify_failed");
+  assert.ok(calls.some((c) => c[0] === "reset"), "rolls main back");
+  assert.ok(!calls.some((c) => c[0] === "push"), "must never push unverified code");
 });

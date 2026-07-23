@@ -1,11 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseAdoConfig, buildAdoMcpServer } from "./mcp";
-import { parseFeatures, featureCapability } from "@/lib/config/features";
+import { parseFeatures, featureCapability, KNOWN_FEATURES } from "@/lib/config/features";
 
 test("parseFeatures defaults flags off; reads true only for explicit true", () => {
-  const base = { ado: false, voice: false, "openclaw.chatDock": false, promptWizardAlways: false, agentSpecialization: false, selfImprovement: false, taskWorktrees: false };
+  // Derived from KNOWN_FEATURES, not hand-listed: a hardcoded copy of the flag
+  // set breaks this test every time a flag is added, which teaches you to edit
+  // the literal rather than to check the behaviour it is guarding.
+  const base = Object.fromEntries(KNOWN_FEATURES.map((f) => [f.key, false]));
   assert.deepEqual(parseFeatures({}), base);
+  assert.ok(Object.keys(base).length >= 8, "sanity: the flag set is non-trivial");
   assert.deepEqual(parseFeatures({ features: { ado: true } }), { ...base, ado: true });
   assert.deepEqual(parseFeatures({ features: { ado: "yes" } }), base);
   assert.deepEqual(parseFeatures({ features: { voice: true } }), { ...base, voice: true });
