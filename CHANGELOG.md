@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.249 — 2026-07-23
+
+Developer ID release
+
 ## v0.1.248 — 2026-07-23
 
 Finished tasks now land on main by themselves. Previously a task ended with its work committed on its own branch, waiting for you to click Archive before anything merged — so completed work sat somewhere you never looked. With the new 'Auto-merge finished tasks to main' setting (Settings → Features), a task that finishes cleanly is fast-forwarded into main and pushed automatically. The safety checks are unchanged: it only ever fast-forwards (never rewrites main or resolves a conflict), it typechecks after merging and undoes the merge if that fails, and it refuses if your working tree is dirty. Nothing that failed, or that is still waiting on your input, is ever merged.
