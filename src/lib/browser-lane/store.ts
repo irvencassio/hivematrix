@@ -592,24 +592,43 @@ export function matchBrowserSiteReadiness(
   const wanted = (domains ?? []).map(readinessHost).filter(Boolean);
   if (wanted.length === 0) return none;
   const dashboard = getBrowserLaneReadinessDashboard({ staleAfterHours: opts.staleAfterHours, now: opts.now });
-  for (const site of dashboard.sites) {
-    const hosts = site.allowedDomains.map(readinessHost);
-    if (wanted.some((w) => hosts.some((h) => hostsMatch(w, h)))) {
-      return {
-        matched: true,
-        siteId: site.id,
-        siteName: site.displayName,
-        color: site.readiness.color,
-        status: site.readiness.status,
-        credentialRef: site.credentialRef,
-        traceRunId: site.readiness.traceRunId,
-        stale: site.readiness.stale,
-        lastRunAt: site.readiness.lastRunAt,
-        ageMs: site.readiness.ageMs,
-      };
-    }
-  }
-  return none;
+
+  // Ownership first, allowedDomains second.
+  //
+  // allowedDomains is a NAVIGATION allow-list, so an SSO site legitimately lists
+  // its identity provider: a google_sso site carries accounts.google.com and
+  // google.com so the login redirect is permitted. Matching that list alone made
+  // whichever such site happened to sort first the de-facto owner of google.com —
+  // so a plain Google job inherited read-only LinkedIn and was refused with
+  // "LinkedIn is configured read-only" (2026-07-22). A site OWNS a domain only
+  // when its own homeUrl says so.
+  //
+  // The allowedDomains pass is KEPT as a fallback: dropping it would fail OPEN,
+  // letting a write-shaped job past the read-only gate for a site that lists a
+  // second, genuinely-owned domain. Narrowing the match may only ever change
+  // WHICH site is blamed, never whether protection applies at all.
+  const byPrimary = dashboard.sites.find((site) => {
+    const primary = readinessHost(site.homeUrl);
+    return !!primary && wanted.some((w) => hostsMatch(w, primary));
+  });
+  const site = byPrimary
+    ?? dashboard.sites.find((s) => {
+      const hosts = s.allowedDomains.map(readinessHost);
+      return wanted.some((w) => hosts.some((h) => hostsMatch(w, h)));
+    });
+  if (!site) return none;
+  return {
+    matched: true,
+    siteId: site.id,
+    siteName: site.displayName,
+    color: site.readiness.color,
+    status: site.readiness.status,
+    credentialRef: site.credentialRef,
+    traceRunId: site.readiness.traceRunId,
+    stale: site.readiness.stale,
+    lastRunAt: site.readiness.lastRunAt,
+    ageMs: site.readiness.ageMs,
+  };
 }
 
 function rowToSite(row: BrowserSiteRow): BrowserSite {

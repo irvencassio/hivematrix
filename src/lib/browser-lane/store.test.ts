@@ -354,3 +354,52 @@ test("upsertBrowserSite rejects an invalid accessMode value", () => {
     ContractValidationError,
   );
 });
+
+test("an SSO site does not become the owner of its identity provider's domain", () => {
+  // Regression 2026-07-22: a plain Google search was refused with "LinkedIn is
+  // configured read-only". allowedDomains is a NAVIGATION allow-list, so a
+  // google_sso site legitimately lists accounts.google.com/google.com to permit
+  // the login redirect — but matching that list alone made whichever such site
+  // sorted first the de-facto owner of google.com, and every Google job
+  // inherited its read-only access mode.
+  // Sites are listed displayName ASC, and the old matcher took the FIRST
+  // allowedDomains hit — so which site "owned" google.com was decided by
+  // alphabetical accident. Name the SSO site so it sorts BEFORE the real owner;
+  // otherwise the ordering hides the bug instead of exposing it.
+  upsertBrowserSite({
+    id: "linkedin-sso",
+    displayName: "Aaa LinkedIn (sorts first)",
+    homeUrl: "https://linkedin.com/",
+    loginUrl: "https://linkedin.com/",
+    allowedDomains: ["linkedin.com", "accounts.google.com", "google.com"],
+    credentialRef: null,
+    authStrategy: "google_sso",
+    accessMode: "readonly",
+  });
+
+  // With no site owning google.com, the allowedDomains fallback still applies —
+  // narrowing the match must never fail OPEN and drop the read-only gate. (Which
+  // SSO site it lands on is incidental: every google_sso site carries the same
+  // provider hosts, which is exactly why this collision was systemic rather than
+  // a LinkedIn quirk.)
+  const before = matchBrowserSiteReadiness(["www.google.com"]);
+  assert.equal(before.matched, true, "fallback must still match, or the read-only gate silently stops applying");
+
+  // Register the real owner: now ownership decides, regardless of list order.
+  upsertBrowserSite({
+    id: "google-owner",
+    displayName: "Google",
+    homeUrl: "https://google.com/",
+    loginUrl: null,
+    allowedDomains: ["google.com"],
+    credentialRef: null,
+    authStrategy: "manual_session",
+  });
+
+  const m = matchBrowserSiteReadiness(["www.google.com"]);
+  assert.equal(m.siteId, "google-owner", "the site whose homeUrl IS google.com owns it, not the one that merely logs in through it");
+  assert.equal(matchBrowserSiteReadiness(["google.com"]).siteId, "google-owner");
+
+  // The SSO site still owns its own domain.
+  assert.equal(matchBrowserSiteReadiness(["www.linkedin.com"]).siteId, "linkedin-sso");
+});
