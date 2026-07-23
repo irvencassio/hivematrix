@@ -19,6 +19,8 @@ import { writeFileSync, readFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
+import { availableLaneTools } from "./lane-tools";
+
 /** MCP server name → Claude namespaces its tools as `mcp__<name>__<tool>`. */
 export const OUTBOUND_MCP_SERVER_NAME = "hivematrix";
 
@@ -32,17 +34,47 @@ export const OUTBOUND_MCP_TOOL_NAMES = [
 export interface OutboundMcpOptions {
   mailLaneEnabled?: boolean;
   messageLaneEnabled?: boolean;
+  /** Working directory lane tools act in (passed through to /bee/:tool). */
+  projectPath?: string;
+  /** Project label recorded on lane-tool calls. */
+  project?: string;
+}
+
+/**
+ * Lane tools exposed to a TASK agent, in MCP shape.
+ *
+ * Task agents used to get exactly three tools (send_imessage/send_email/
+ * draft_email) while Flash got the whole lane toolset — so anything that told a
+ * task to "use desktop_action" was describing a tool that did not exist in its
+ * process. Browser Lane's desktop fallback did exactly that: its prompt says
+ * "Drive the browser yourself with the desktop_action tool", the agent reported
+ * no such tool, and the task still finished as if it had done the work.
+ *
+ * Derived from availableLaneTools() — the same connectivity-gated source Flash
+ * uses — so the two can never drift apart again, and a lane that is unavailable
+ * right now is simply not advertised.
+ */
+export function taskLaneToolCatalog(): Array<{ name: string; description: string; inputSchema: unknown }> {
+  return availableLaneTools().map((t) => ({
+    name: t.function.name,
+    description: t.function.description,
+    inputSchema: t.function.parameters,
+  }));
 }
 
 export function outboundMcpToolNames(opts: OutboundMcpOptions = {}): string[] {
   return [
     ...(opts.messageLaneEnabled === false ? [] : [OUTBOUND_MCP_TOOL_NAMES[0]]),
     ...(opts.mailLaneEnabled === false ? [] : [OUTBOUND_MCP_TOOL_NAMES[1], OUTBOUND_MCP_TOOL_NAMES[2]]),
+    // Lane tools are gated server-side by the same capability/approval policy the
+    // /bee route enforces, so allow-listing them here only skips the CLI's own
+    // prompt — it does not widen what they may actually do.
+    ...taskLaneToolCatalog().map((t) => `mcp__${OUTBOUND_MCP_SERVER_NAME}__${t.name}`),
   ];
 }
 
 // Bump when OUTBOUND_MCP_SERVER_JS changes so the on-disk copy is rewritten.
-const SERVER_VERSION = "4";
+const SERVER_VERSION = "5";
 
 // The stdio MCP server (CommonJS, run by the bundled node). Deliberately avoids
 // template literals / ${} so it nests cleanly in this TS template string. Speaks
@@ -55,6 +87,9 @@ export const OUTBOUND_MCP_SERVER_JS = [
   'var PORT = process.env.HIVE_DAEMON_PORT || "3747";',
   'var MAIL_LANE_ENABLED = process.env.HIVE_MAIL_LANE_ENABLED !== "0";',
   'var MESSAGE_LANE_ENABLED = process.env.HIVE_MESSAGE_LANE_ENABLED !== "0";',
+  'var LANE_TOOLS_FILE = process.env.HIVE_TASK_LANE_TOOLS_FILE || "";',
+  'var PROJECT_PATH = process.env.HIVE_TASK_PROJECT_PATH || "";',
+  'var PROJECT = process.env.HIVE_TASK_PROJECT || "ops";',
   "function token() {",
   '  try { return fs.readFileSync(path.join(os.homedir(), ".hivematrix", "auth-token"), "utf8").trim(); }',
   '  catch (e) { return ""; }',
@@ -75,6 +110,27 @@ export const OUTBOUND_MCP_SERVER_JS = [
   "    req.write(body); req.end();",
   "  });",
   "}",
+  "// Lane tools are read from a file written at spawn time, so the catalog always",
+  "// matches what the daemon currently advertises rather than a copy baked in here.",
+  "function loadLaneTools() {",
+  '  try { return JSON.parse(fs.readFileSync(LANE_TOOLS_FILE, "utf8")); }',
+  "  catch (e) { return []; }",
+  "}",
+  "// Lane tools take a JSON body, unlike the form-encoded outbound endpoints.",
+  "function postJson(route, bodyObj) {",
+  "  return new Promise(function (resolve) {",
+  "    var body = JSON.stringify(bodyObj);",
+  "    var req = http.request(",
+  '      { host: "127.0.0.1", port: PORT, path: route, method: "POST",',
+  '        headers: { "Content-Type": "application/json",',
+  '                   "Content-Length": Buffer.byteLength(body),',
+  '                   "Authorization": "Bearer " + token() } },',
+  '      function (res) { var d = ""; res.on("data", function (c) { d += c; }); res.on("end", function () { resolve(d || "{}"); }); }',
+  "    );",
+  '    req.on("error", function (e) { resolve(JSON.stringify({ ok: false, message: "daemon unreachable: " + (e && e.message) })); });',
+  "    req.write(body); req.end();",
+  "  });",
+  "}",
   "var TOOLS = [",
   '  { name: "send_imessage",',
   '    description: "Send an SMS/iMessage to the operator or an allowlisted contact via HiveMatrix Message Lane. Use this whenever a message should be texted — never tell the user no SMS tool exists or to send it themselves. Only allowlisted handles are accepted; a refusal comes back as a clear message to relay.",',
@@ -87,11 +143,15 @@ export const OUTBOUND_MCP_SERVER_JS = [
   '    inputSchema: { type: "object", properties: { to: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }, required: ["to", "body"] } }',
   "];",
   "function toolsForCurrentState() {",
-  "  return TOOLS.filter(function (tool) {",
+  "  var base = TOOLS.filter(function (tool) {",
   "    if (!MESSAGE_LANE_ENABLED && tool.name === \"send_imessage\") return false;",
   "    if (!MAIL_LANE_ENABLED && (tool.name === \"send_email\" || tool.name === \"draft_email\")) return false;",
   "    return true;",
   "  });",
+  "  // Lane tools last; a name collision keeps the outbound definition above.",
+  "  var laneNames = {};",
+  "  base.forEach(function (t) { laneNames[t.name] = 1; });",
+  "  return base.concat(loadLaneTools().filter(function (t) { return t && t.name && !laneNames[t.name]; }));",
   "}",
   "function callTool(name, a) {",
   '  if (!MESSAGE_LANE_ENABLED && name === "send_imessage") return Promise.resolve(JSON.stringify({ ok: false, message: "Message Lane is disabled. Enable Message Lane before using SMS/iMessage tools." }));',
@@ -99,6 +159,12 @@ export const OUTBOUND_MCP_SERVER_JS = [
   '  if (!MAIL_LANE_ENABLED && (name === "send_email" || name === "draft_email")) return Promise.resolve(JSON.stringify({ ok: false, message: "Mail Lane is disabled. Enable or test Mail Lane before using email tools." }));',
   '  if (name === "send_email") return post("/mailbee/send", { to: a.to, subject: a.subject, body: a.body });',
   '  if (name === "draft_email") return post("/mailbee/draft", { to: a.to, subject: a.subject, body: a.body });',
+  "  // Lane tools (desktop_action, hivematrix_browser, brain_*, …) proxy to the",
+  "  // SAME /bee/:tool endpoint Flash uses, so the capability + approval gate stays",
+  "  // one server-side source of truth regardless of which agent called it.",
+  "  if (loadLaneTools().some(function (t) { return t && t.name === name; })) {",
+  '    return postJson("/bee/" + name, { args: a, projectPath: PROJECT_PATH, project: PROJECT });',
+  "  }",
   '  return Promise.resolve(JSON.stringify({ ok: false, message: "unknown tool: " + name }));',
   "}",
   "function send(msg) { process.stdout.write(JSON.stringify(msg) + String.fromCharCode(10)); }",
@@ -166,6 +232,9 @@ export function buildOutboundMcpConfig(nodePath: string, serverPath: string, por
           HIVE_DAEMON_PORT: port,
           HIVE_MAIL_LANE_ENABLED: opts.mailLaneEnabled === false ? "0" : "1",
           HIVE_MESSAGE_LANE_ENABLED: opts.messageLaneEnabled === false ? "0" : "1",
+          HIVE_TASK_LANE_TOOLS_FILE: join(mcpDir(), "task-lane-tools.json"),
+          HIVE_TASK_PROJECT_PATH: opts.projectPath ?? "",
+          HIVE_TASK_PROJECT: opts.project ?? "ops",
         },
       },
     },
@@ -186,6 +255,10 @@ export function prepareOutboundMcp(
   toolNames: string[];
 } {
   const serverPath = ensureOutboundMcpServer();
+  // Refresh the lane catalog every spawn: connectivity (and therefore which lanes
+  // are available) changes between runs, and a stale file would advertise a tool
+  // the daemon would then refuse.
+  writeFileSync(join(mcpDir(), "task-lane-tools.json"), JSON.stringify(taskLaneToolCatalog(), null, 2), { mode: 0o600 });
   const configPath = join(mcpDir(), "claude-mcp-config.json");
   writeFileSync(configPath, JSON.stringify(buildOutboundMcpConfig(nodePath, serverPath, port, opts), null, 2), { mode: 0o600 });
   return { configPath, toolNames: outboundMcpToolNames(opts) };

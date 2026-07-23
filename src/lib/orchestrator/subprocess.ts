@@ -606,7 +606,9 @@ export async function spawnAgent(
   // SENDING is a real tool call the harness can't talk itself out of (it once
   // claimed "No SMS tool available" and punted). The server proxies the same
   // trust-gated daemon endpoints; auto-approve them since the gate is server-side.
-  const outboundMcp = prepareOutboundMcp(process.env.HIVEMATRIX_PORT ?? "3747", process.execPath, { mailLaneEnabled, messageLaneEnabled });
+  // projectPath/project ride along so lane tools (desktop_action, hivematrix_browser,
+  // …) act in this task's directory rather than the daemon's cwd.
+  const outboundMcp = prepareOutboundMcp(process.env.HIVEMATRIX_PORT ?? "3747", process.execPath, { mailLaneEnabled, messageLaneEnabled, projectPath, project });
 
   // Prepend workflow skill prefix if applicable
   const prefix = resolvePromptPrefix(workflow, workflowStepIndex).trimEnd();
