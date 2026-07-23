@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.253 — 2026-07-23
+
+Fixes automatic merging failing on every project except HiveMatrix itself. When a finished task merged its work, the check that runs before keeping the merge always tried 'npm run typecheck' — which only exists in HiveMatrix. In any other project (an iOS app, a Swift app) that check could not run, so the merge was undone every single time. It now asks each project how it should be checked, and for a project that defines no check at all the merge goes through while stating plainly that nothing was verified — rather than silently claiming a check passed.
+
 ## v0.1.252 — 2026-07-23
 
 Browser Lane no longer depends on Codex at all. It used to prefer an OpenAI 'Computer Use' engine and fall back to Claude — but that engine needs a paid OpenAI API key and simply cannot run on a ChatGPT subscription, so it never actually ran. Worse, every Browser Lane problem was reported as 'no usable Codex auth — run codex login', sending you after a sign-in issue that did not exist. Claude driving a real browser is now the one and only engine, with nothing to sign into and no OpenAI account involved. The only thing Browser Lane checks now is whether Desktop Lane is running.
