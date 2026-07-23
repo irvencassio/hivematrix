@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.250 — 2026-07-23
+
+Background tasks can now actually use HiveMatrix's own tools. Until now a task could only send email and iMessage — it had none of the tools the chat assistant has, so any job that needed to drive your Mac, open a browser, or read your brain would report that the tool did not exist and quietly finish having done nothing. This is why Browser Lane's fallback never worked: it told the task to drive the browser with a tool the task did not have. Tasks now get the same 23 lane tools the assistant has, with the same permission checks applied on the server side.
+
 ## v0.1.249 — 2026-07-23
 
 Developer ID release
