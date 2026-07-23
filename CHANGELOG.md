@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.251 — 2026-07-23
+
+Fixes Browser Lane refusing jobs on the wrong site's behalf. A plain Google search was blocked with 'LinkedIn is configured read-only' — because sites that sign in through Google list Google's domains so the login redirect works, and Browser Lane was treating that as though LinkedIn owned Google. Any site that signs in with Google (LinkedIn, YouTube) could block unrelated work the same way. A site is now only considered the owner of a domain when it's actually that site's own address. Read-only protection is unchanged — it still applies, just to the right site.
+
 ## v0.1.250 — 2026-07-23
 
 Background tasks can now actually use HiveMatrix's own tools. Until now a task could only send email and iMessage — it had none of the tools the chat assistant has, so any job that needed to drive your Mac, open a browser, or read your brain would report that the tool did not exist and quietly finish having done nothing. This is why Browser Lane's fallback never worked: it told the task to drive the browser with a tool the task did not have. Tasks now get the same 23 lane tools the assistant has, with the same permission checks applied on the server side.
