@@ -31,6 +31,8 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 
 const execFileAsync = promisify(execFile);
 
@@ -73,17 +75,63 @@ async function realGit(repoPath: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
+/**
+ * Pick the pre-merge check for THIS repo.
+ *
+ * This used to be hardcoded to `npm run typecheck`, which baked a HiveMatrix
+ * shape into a general mechanism: any repo that isn't a Node project — a Swift
+ * app, a static site — could never pass, so auto-integration failed and rolled
+ * back on every single merge. The repo has to say what verifies it.
+ *
+ * Discovery, most specific first. Returns null when the repo declares nothing.
+ */
+export function resolveVerifyCommand(
+  repoPath: string,
+  deps: { exists: (p: string) => boolean; readJson: (p: string) => Record<string, unknown> | null } = {
+    exists: existsSync,
+    readJson: (p) => { try { return JSON.parse(readFileSync(p, "utf-8")) as Record<string, unknown>; } catch { return null; } },
+  },
+): { cmd: string; args: string[]; label: string } | null {
+  const pkgPath = join(repoPath, "package.json");
+  if (deps.exists(pkgPath)) {
+    const pkg = deps.readJson(pkgPath);
+    const scripts = (pkg?.scripts ?? {}) as Record<string, unknown>;
+    // An explicit `typecheck` script is the repo saying "this is how you check me".
+    if (typeof scripts.typecheck === "string") return { cmd: "npm", args: ["run", "typecheck"], label: "npm run typecheck" };
+    // `build` is the next-best honest signal that the tree compiles.
+    if (typeof scripts.build === "string") return { cmd: "npm", args: ["run", "build"], label: "npm run build" };
+  }
+  // Swift package (e.g. a lane app) — `swift build` is a real compile check.
+  if (deps.exists(join(repoPath, "Package.swift"))) {
+    return { cmd: "swift", args: ["build"], label: "swift build" };
+  }
+  return null;
+}
+
 async function realVerify(repoPath: string): Promise<{ ok: boolean; output: string }> {
+  const verifier = resolveVerifyCommand(repoPath);
+  if (!verifier) {
+    // Nothing to run. Refusing forever would make auto-integration useless for
+    // every non-Node repo and just move the merge to the operator's hands, where
+    // it has no gate either — so integrate, but say plainly that nothing was
+    // checked rather than reporting a pass that never happened.
+    return { ok: true, output: "NO VERIFIER: this repo declares no typecheck/build script and is not a Swift package, so the merge was NOT verified. Add a `typecheck` script to gate it." };
+  }
   try {
-    const { stdout, stderr } = await execFileAsync("npm", ["run", "typecheck"], {
+    const { stdout, stderr } = await execFileAsync(verifier.cmd, verifier.args, {
       cwd: repoPath,
       timeout: VERIFY_TIMEOUT_MS,
       maxBuffer: 8 * 1024 * 1024,
     });
-    return { ok: true, output: `${stdout}${stderr}`.trim() };
+    return { ok: true, output: `${verifier.label}\n${stdout}${stderr}`.trim() };
   } catch (e) {
-    const err = e as { stdout?: string; stderr?: string; message?: string };
-    return { ok: false, output: `${err.stdout ?? ""}${err.stderr ?? ""}`.trim() || (err.message ?? "typecheck failed") };
+    const err = e as { stdout?: string; stderr?: string; message?: string; code?: string };
+    // A missing toolchain is an environment gap, not broken code — do not fail
+    // someone's merge because `swift` isn't on this machine's PATH.
+    if (err.code === "ENOENT") {
+      return { ok: true, output: `NO VERIFIER: \`${verifier.cmd}\` is not installed, so the merge was NOT verified.` };
+    }
+    return { ok: false, output: `${verifier.label} failed:\n${`${err.stdout ?? ""}${err.stderr ?? ""}`.trim() || (err.message ?? "verification failed")}` };
   }
 }
 

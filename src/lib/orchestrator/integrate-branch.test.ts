@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  resolveVerifyCommand,
   integrateTaskBranch,
   needsOperatorAttention,
   _resetIntegrationQueuesForTests,
@@ -258,4 +259,54 @@ test("a failed typecheck still rolls back and never pushes", async () => {
   assert.equal(r.status, "verify_failed");
   assert.ok(calls.some((c) => c[0] === "reset"), "rolls main back");
   assert.ok(!calls.some((c) => c[0] === "push"), "must never push unverified code");
+});
+
+
+// --- verifier discovery ------------------------------------------------------
+// Regression 2026-07-22: the pre-merge check was hardcoded to `npm run
+// typecheck`, which baked a HiveMatrix shape into a general mechanism. Any repo
+// that isn't a Node project — a Swift app, an Xcode project, a static site —
+// could never pass, so auto-integration failed and rolled back on EVERY merge
+// there. The repo has to declare what verifies it.
+
+const fakeFs = (files: Record<string, unknown>) => ({
+  exists: (p: string) => p in files,
+  readJson: (p: string) => (files[p] ?? null) as Record<string, unknown> | null,
+});
+
+test("verifier discovery: an explicit typecheck script wins", () => {
+  const v = resolveVerifyCommand("/r", fakeFs({ "/r/package.json": { scripts: { typecheck: "tsc", build: "vite" } } }));
+  assert.equal(v?.label, "npm run typecheck");
+});
+
+test("verifier discovery: falls back to build, then to a Swift package", () => {
+  assert.equal(
+    resolveVerifyCommand("/r", fakeFs({ "/r/package.json": { scripts: { build: "vite" } } }))?.label,
+    "npm run build",
+  );
+  assert.equal(
+    resolveVerifyCommand("/r", fakeFs({ "/r/Package.swift": true }))?.label,
+    "swift build",
+    "a Swift app must be verifiable — it could never merge before",
+  );
+});
+
+test("verifier discovery: a repo declaring nothing returns null, it does not pretend npm works", () => {
+  assert.equal(resolveVerifyCommand("/r", fakeFs({})), null);
+  // package.json with no usable script is still nothing to run.
+  assert.equal(resolveVerifyCommand("/r", fakeFs({ "/r/package.json": { scripts: { test: "node --test" } } })), null);
+});
+
+test("a repo with no verifier INTEGRATES, and the detail says it was not verified", async () => {
+  // Refusing forever would make auto-integration useless for every non-Node repo
+  // and just move the merge to the operator, where it has no gate either. But it
+  // must never read as a pass that happened.
+  const { deps, calls } = fakeDeps({ ahead: 2 });
+  const noVerifier: IntegrateDeps = {
+    git: deps.git,
+    verify: async () => ({ ok: true, output: "NO VERIFIER: this repo declares no typecheck/build script and is not a Swift package, so the merge was NOT verified." }),
+  };
+  const r = await integrateTaskBranch(REPO, "hive/task-1", noVerifier);
+  assert.equal(r.status, "integrated");
+  assert.ok(!calls.some((c) => c[0] === "reset"), "must not roll back for lack of a verifier");
 });
