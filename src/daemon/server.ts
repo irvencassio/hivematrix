@@ -3311,8 +3311,15 @@ export function createDaemonServer() {
               staleAfterHours: getBrowserLaneReadinessConfig().staleAfterHours,
               createTask: async ({ workItem, projectPath: root, route }) => {
                 const { Task } = await import("@/lib/db");
-                const { buildBrowserBeeTaskDescription } = await import("@/lib/browser-lane/jobs");
-                const description = buildBrowserBeeTaskDescription(workItem.envelope, { requestedProjectPath: root });
+                const { buildBrowserBeeTaskDescription, buildCanopyBrowserTaskDescription } = await import("@/lib/browser-lane/jobs");
+                // T6: the COO door must land in the same browser as every other
+                // door. Under the canopy engine the task is told to call
+                // /lane/browser (which runs it in the Canopy Browser app) instead
+                // of being handed the drive-Chrome-yourself prompt.
+                const { resolveBrowserLaneEngine } = await import("@/lib/browser-lane/canopy-client");
+                const description = resolveBrowserLaneEngine() === "canopy"
+                  ? buildCanopyBrowserTaskDescription(workItem.envelope, { requestedProjectPath: root })
+                  : buildBrowserBeeTaskDescription(workItem.envelope, { requestedProjectPath: root });
                 const task = await Task.create({
                   title: workItem.envelope.title,
                   description,

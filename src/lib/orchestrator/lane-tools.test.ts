@@ -22,7 +22,14 @@ const SKILL_TMP = mkdtempSync(join(tmpdir(), "hm-lane-skills-"));
 const SKILL_HOME = join(SKILL_TMP, "home");
 const SKILL_BRAIN = join(SKILL_TMP, "brain");
 mkdirSync(join(SKILL_HOME, ".hivematrix"), { recursive: true });
-writeFileSync(join(SKILL_HOME, ".hivematrix", "config.json"), JSON.stringify({ memory: { brainRootDir: SKILL_BRAIN } }));
+// browserLane.engine is pinned to "desktop" for the whole file so the
+// executeBrowserBeeRun tests below keep exercising the desktop dispatch path
+// after T6 flipped the product default to "canopy". The canopy-engine tests
+// opt in explicitly by rewriting this file.
+writeFileSync(join(SKILL_HOME, ".hivematrix", "config.json"), JSON.stringify({
+  memory: { brainRootDir: SKILL_BRAIN },
+  browserLane: { engine: "desktop" },
+}));
 // A fake Codex api-key auth file so resolveBrowserBeeBacking() (called inside
 // executeBrowserBeeRun) picks the codex_computer_use backing in the Browser
 // Lane accessMode-gating tests below, without depending on this machine's
@@ -320,18 +327,110 @@ function installBrowserLaneFetchStub(t: TestContext, taskId = "task-stub"): { di
   return { dispatched };
 }
 
-test("executeBrowserBeeRun blocks form_fill against a readonly-access site and never dispatches", async (t) => {
+// ── T6: the Canopy Browser engine ──────────────────────────────────────────
+//
+// Policy now lives in the Canopy Browser app, not here. HiveMatrix's duplicate
+// read-only gate was removed; these tests assert the client behaviour that
+// replaced it — the app's refusal surfaced verbatim, and the `browser:blocked`
+// audit event (the Command Log's Blocked filter) re-emitted on receipt.
+
+const CANOPY_CONFIG_PATH = join(SKILL_HOME, ".hivematrix", "config.json");
+
+/** Point browserLane.engine at "canopy" for one test, then restore. */
+function withCanopyEngine(t: TestContext): void {
+  const original = readFileSync(CANOPY_CONFIG_PATH, "utf-8");
+  writeFileSync(CANOPY_CONFIG_PATH, JSON.stringify({ ...JSON.parse(original), browserLane: { engine: "canopy" } }));
+  t.after(() => writeFileSync(CANOPY_CONFIG_PATH, original));
+}
+
+/**
+ * Stubs the Canopy Browser app's POST /act plus the daemon loopback POST /tasks,
+ * so these tests never need a real app on :4021 or a real daemon. Records what
+ * was sent to /act and which task bodies were created.
+ */
+function installCanopyFetchStub(
+  t: TestContext,
+  actResponse: Record<string, unknown>,
+  taskId = "task-canopy-stub",
+): { act: Array<Record<string, unknown>>; tasks: Array<Record<string, unknown>> } {
+  const act: Array<Record<string, unknown>> = [];
+  const tasks: Array<Record<string, unknown>> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const url = String(input);
+    if (url.endsWith("/act") && init?.method === "POST") {
+      act.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify(actResponse), { status: 200 });
+    }
+    if (url.endsWith("/tasks") && init?.method === "POST") {
+      tasks.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({ _id: taskId, title: "Canopy Browser stub task" }), { status: 200 });
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  return { act, tasks };
+}
+
+const CANOPY_OK_RESPONSE = {
+  ok: true,
+  failedStep: null,
+  refusal: null,
+  humanLoginRequired: null,
+  steps: [
+    { index: 0, action: "navigate", ok: true, detail: "navigated to https://canopy-ok.example.com/report" },
+    { index: 1, action: "extract", ok: true, detail: "extracted 42 chars, 1 links" },
+  ],
+  finalPage: {
+    url: "https://canopy-ok.example.com/report",
+    title: "Quarterly report",
+    text: "Revenue is up.",
+    links: [{ title: "Details", url: "https://canopy-ok.example.com/details" }],
+  },
+};
+
+test("the canopy engine sends jobType as the policy action and never re-checks policy locally", async (t) => {
   getConnectivityPolicy().setManualOverride("cloud-ok");
   t.after(() => getConnectivityPolicy().setManualOverride(null));
-  const { dispatched } = installBrowserLaneFetchStub(t, "task-should-not-exist");
+  withCanopyEngine(t);
+  const { act } = installCanopyFetchStub(t, CANOPY_OK_RESPONSE, "task-canopy-action-1");
 
+  // A read-only site in HiveMatrix's local display cache. Pre-T6 this alone
+  // refused the run; now the app decides, and the local row is metadata only.
   upsertBrowserSite({
-    id: "readonly-crm-a",
-    displayName: "Readonly CRM A",
-    homeUrl: "https://readonly-crm-a.example.com/home",
-    allowedDomains: ["readonly-crm-a.example.com"],
+    id: "canopy-readonly-cache",
+    displayName: "Canopy Readonly Cache",
+    homeUrl: "https://canopy-ok.example.com/home",
+    allowedDomains: ["canopy-ok.example.com"],
     accessMode: "readonly",
   } as never);
+
+  const out = await executeLaneTool("hivematrix_browser", {
+    mode: "workflow",
+    objective: "Fill out the lead intake form",
+    startUrl: "https://canopy-ok.example.com/report",
+    jobType: "form_fill",
+  }, browserCtx());
+
+  assert.equal(act.length, 1, "the run must reach the app — HiveMatrix no longer refuses it locally");
+  assert.equal(act[0].action, "form_fill", "jobType is handed over as the app's policy action verb");
+  assert.equal(act[0].requester, "browser-lane-test");
+  assert.match(out, /completed/i);
+});
+
+test("the canopy engine surfaces the app's refusal verbatim and re-emits browser:blocked", async (t) => {
+  getConnectivityPolicy().setManualOverride("cloud-ok");
+  t.after(() => getConnectivityPolicy().setManualOverride(null));
+  withCanopyEngine(t);
+  const message = "Readonly CRM A is configured read-only — the form_fill action would write to the site, which is refused. Switch its access mode to read-write in Canopy Browser settings if this action is intended.";
+  const { tasks } = installCanopyFetchStub(t, {
+    ok: false,
+    failedStep: null,
+    steps: [{ index: 0, action: "form_fill", ok: false, detail: message }],
+    finalPage: null,
+    humanLoginRequired: null,
+    refusal: { code: "refusedReadOnly", siteId: "readonly-crm-a", siteName: "Readonly CRM A", message },
+  }, "task-should-not-exist");
 
   const out = await executeLaneTool("hivematrix_browser", {
     mode: "workflow",
@@ -340,10 +439,136 @@ test("executeBrowserBeeRun blocks form_fill against a readonly-access site and n
     jobType: "form_fill",
   }, browserCtx());
 
-  assert.match(out, /Error/, "a write-shaped job against a read-only site must be refused");
-  assert.match(out, /read-only/i, "the refusal must name the reason as read-only access");
-  assert.match(out, /Readonly CRM A/, "the refusal must name the site");
-  assert.equal(dispatched.length, 0, "a read-only site must never reach task dispatch for a write-shaped job");
+  assert.match(out, /^Error: /, "a refusal must read as an error to the caller");
+  assert.ok(out.includes(message), "the app's refusal message must be surfaced VERBATIM, not paraphrased");
+  assert.equal(tasks.length, 0, "a refused run must not create a board task");
+
+  const entry = readAudit({ event: "browser:blocked" }).find((e) => e.target === "readonly-crm-a");
+  assert.ok(entry, "a refusal must still produce a browser:blocked audit event — the Command Log's Blocked filter reads it");
+  assert.equal(entry!.status, "blocked");
+  assert.equal(entry!.actorKind, "agent");
+});
+
+test("the canopy engine passes humanLoginRequired through unchanged and creates no board task", async (t) => {
+  getConnectivityPolicy().setManualOverride("cloud-ok");
+  t.after(() => getConnectivityPolicy().setManualOverride(null));
+  withCanopyEngine(t);
+  const message = "Sign in to Example Portal in Canopy Browser, then retry — credentials are always a human click.";
+  const { tasks } = installCanopyFetchStub(t, {
+    ok: false,
+    failedStep: null,
+    steps: [{ index: 0, action: "navigate", ok: true, detail: "navigated" }],
+    finalPage: null,
+    refusal: null,
+    humanLoginRequired: {
+      code: "humanLoginRequired", siteId: "example-portal", siteName: "Example Portal",
+      url: "https://portal.example.com/login", hasSavedCredential: false, message,
+    },
+  }, "task-should-not-exist-either");
+
+  const out = await executeLaneTool("hivematrix_browser", {
+    mode: "workflow",
+    objective: "Check the portal inbox",
+    startUrl: "https://portal.example.com/inbox",
+    jobType: "authenticated_research",
+    requiresLogin: true,
+  }, browserCtx());
+
+  assert.ok(out.includes(message), "the sign-in message must be surfaced unchanged");
+  assert.equal(tasks.length, 0, "a login-walled run must not be recorded as a completed run");
+});
+
+test("the canopy engine writes a board task record (done, source browser-lane, transcript in output)", async (t) => {
+  getConnectivityPolicy().setManualOverride("cloud-ok");
+  t.after(() => getConnectivityPolicy().setManualOverride(null));
+  withCanopyEngine(t);
+  const { tasks } = installCanopyFetchStub(t, CANOPY_OK_RESPONSE, "task-canopy-board-1");
+
+  const out = await executeLaneTool("hivematrix_browser", {
+    mode: "snapshot",
+    objective: "Capture the quarterly report",
+    startUrl: "https://canopy-ok.example.com/report",
+    jobType: "capture",
+  }, browserCtx());
+
+  assert.equal(tasks.length, 1, "a direct run must still write a board record");
+  const body = tasks[0];
+  assert.equal(body.status, "done", "the run already happened — the record is terminal, never claimable");
+  assert.equal(body.source, "browser-lane", "the board filters Browser Lane work by source");
+  assert.equal(body.executor, "agent");
+  const output = body.output as Record<string, Record<string, unknown>>;
+  assert.ok(output.canopyBrowserRun, "the run must be recorded under output.canopyBrowserRun");
+  assert.equal(output.canopyBrowserRun.engine, "canopy");
+  assert.match(String(output.canopyBrowserRun.transcript), /Quarterly report/, "the transcript must be in the output");
+  assert.match(String(body.description), /Revenue is up\./, "the board card must show what the run found");
+  assert.match(out, /task-canopy-board-1/, "the caller is told where the run landed on the board");
+
+  const entry = readAudit({ event: "browser:job_created" }).find((e) => e.taskId === "task-canopy-board-1");
+  assert.ok(entry, "the run must be audited like a dispatch was");
+  assert.equal(entry!.status, "completed");
+});
+
+test("the canopy engine reports prose steps as not executed instead of pretending they ran", async (t) => {
+  getConnectivityPolicy().setManualOverride("cloud-ok");
+  t.after(() => getConnectivityPolicy().setManualOverride(null));
+  withCanopyEngine(t);
+  const { act } = installCanopyFetchStub(t, CANOPY_OK_RESPONSE, "task-canopy-prose-1");
+
+  const out = await executeLaneTool("hivematrix_browser", {
+    mode: "workflow",
+    objective: "Check the invitations",
+    startUrl: "https://canopy-ok.example.com/report",
+    jobType: "triage",
+    steps: ["click the invitations tab", "read the first three names"],
+  }, browserCtx());
+
+  assert.deepEqual(act[0].steps, [
+    { action: "navigate", url: "https://canopy-ok.example.com/report" },
+    { action: "extract" },
+  ], "prose steps are not sent to /act — it drives selectors");
+  assert.match(out, /Not executed/, "the caller must be told the prose steps did not run");
+  assert.match(out, /click the invitations tab/);
+});
+
+test("the canopy engine reports an unreachable app instead of a silent failure", async (t) => {
+  getConnectivityPolicy().setManualOverride("cloud-ok");
+  t.after(() => getConnectivityPolicy().setManualOverride(null));
+  withCanopyEngine(t);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    if (String(input).endsWith("/act")) throw new Error("connect ECONNREFUSED 127.0.0.1:4021");
+    return originalFetch(input, init);
+  }) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const out = await executeLaneTool("hivematrix_browser", {
+    mode: "open",
+    objective: "Open the report",
+    startUrl: "https://canopy-ok.example.com/report",
+  }, browserCtx());
+
+  assert.match(out, /^Error: Canopy Browser is unreachable/);
+  assert.match(out, /4021/, "the error must name where the app is expected to be listening");
+});
+
+test("with browserLane.engine absent, behaviour is unchanged — the desktop path still runs (T6 step 2)", async (t) => {
+  getConnectivityPolicy().setManualOverride("cloud-ok");
+  t.after(() => getConnectivityPolicy().setManualOverride(null));
+  const original = readFileSync(CANOPY_CONFIG_PATH, "utf-8");
+  const withoutFlag = { ...JSON.parse(original) } as Record<string, unknown>;
+  delete withoutFlag.browserLane;
+  writeFileSync(CANOPY_CONFIG_PATH, JSON.stringify(withoutFlag));
+  t.after(() => writeFileSync(CANOPY_CONFIG_PATH, original));
+  const { dispatched } = installBrowserLaneFetchStub(t, "task-no-flag-1");
+
+  const out = await executeLaneTool("hivematrix_browser", {
+    mode: "open",
+    objective: "Open the report",
+    startUrl: "https://canopy-ok.example.com/report",
+  }, browserCtx());
+
+  assert.match(out, /Created Browser Lane task/, "with no flag set the pre-T6 dispatch path must still run");
+  assert.equal(dispatched.length, 1);
 });
 
 test("executeBrowserBeeRun allows authenticated_research against a readonly-access site and stamps actorKind", async (t) => {
@@ -417,7 +642,7 @@ test("executeBrowserBeeRun resolves the Desktop fallback to a Claude model, not 
   // Opt into the Desktop fallback for this test only.
   const configPath = join(SKILL_HOME, ".hivematrix", "config.json");
   const originalConfig = readFileSync(configPath, "utf-8");
-  writeFileSync(configPath, JSON.stringify({ ...JSON.parse(originalConfig), browserLane: { desktopFallback: true } }));
+  writeFileSync(configPath, JSON.stringify({ ...JSON.parse(originalConfig), browserLane: { engine: "desktop", desktopFallback: true } }));
   t.after(() => writeFileSync(configPath, originalConfig));
 
   let capturedBody: Record<string, unknown> | null = null;

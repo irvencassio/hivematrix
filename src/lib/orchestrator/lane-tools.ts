@@ -1133,7 +1133,7 @@ async function executeBrowserLane(args: Record<string, unknown>, ctx: LaneToolCo
     return executeBrowserLaneRead({ ...args, query }, ctx);
   }
   if (mode === "open" || mode === "snapshot" || mode === "workflow") {
-    return executeBrowserBeeRun({
+    const runArgs = {
       ...args,
       objective: typeof args.objective === "string" && args.objective.trim()
         ? args.objective
@@ -1141,9 +1141,233 @@ async function executeBrowserLane(args: Record<string, unknown>, ctx: LaneToolCo
       startUrl: typeof args.startUrl === "string" && args.startUrl.trim()
         ? args.startUrl
         : args.url,
-    }, ctx);
+    };
+    // T6 cutover: which engine actually drives the browser. "canopy" runs the
+    // work IN the Canopy Browser app (the one process that owns the signed-in
+    // sessions and the site policy); "desktop" keeps the pre-T6 path, which
+    // dispatches the work to a generic agent driving Chrome/Safari through
+    // Desktop Lane. One config edit — {"browserLane":{"engine":"desktop"}} in
+    // ~/.hivematrix/config.json — is the whole rollback.
+    const { resolveBrowserLaneEngine } = await import("@/lib/browser-lane/canopy-client");
+    if (resolveBrowserLaneEngine() === "canopy") {
+      return executeCanopyBrowserRun(runArgs, ctx);
+    }
+    return executeBrowserBeeRun(runArgs, ctx);
   }
   return "Error: mode must be search | read | open | snapshot | workflow";
+}
+
+/**
+ * T6: run the browser work in the standalone Canopy Browser app over loopback
+ * HTTP (`POST /act`), instead of laundering it through a task for a generic
+ * agent to drive Chrome/Safari.
+ *
+ * Three things this deliberately does NOT do:
+ *
+ *  1. **It does not re-check site policy.** Read/write access mode, domain
+ *     scope and site ownership are enforced inside the app — the single
+ *     enforcement point. HiveMatrix's own duplicate `accessMode` gate (the
+ *     old DECISIONS.md Q20 check) was removed with this cutover; the app's
+ *     `refusal.message` is surfaced VERBATIM instead. The `browser:blocked`
+ *     audit event that gate used to emit is re-emitted here on receipt of a
+ *     refusal, so the Command Log's Blocked filter keeps working.
+ *  2. **It does not touch credentials.** A sign-in wall comes back as
+ *     `humanLoginRequired` with `finalPage: null`; it is passed through
+ *     unchanged. Filling credentials is a human click in the app, always.
+ *  3. **It does not claim prose steps ran.** `/act` drives selectors, not
+ *     natural language; Browser Lane's free-text `steps` are reported as
+ *     not executed rather than quietly dropped.
+ *
+ * Board parity: a completed run still writes a task record (source
+ * "browser-lane", transcript in `output`) so the board shows it exactly like a
+ * dispatched run did.
+ */
+async function executeCanopyBrowserRun(args: Record<string, unknown>, ctx: LaneToolContext): Promise<string> {
+  const { parseBrowserBeeJobCreate, buildBrowserBeeTaskRequestEnvelope } = await import("@/lib/browser-lane/jobs");
+  const {
+    buildCanopyActSteps,
+    requestCanopyBrowserAct,
+    resolveCanopyBrowserBaseUrl,
+    summarizeCanopyActResult,
+  } = await import("@/lib/browser-lane/canopy-client");
+  type CanopyActResult = import("@/lib/browser-lane/canopy-client").CanopyActResult;
+
+  let payload;
+  try {
+    payload = parseBrowserBeeJobCreate({
+      objective: args.objective,
+      startUrl: args.startUrl,
+      project: ctx.project,
+      requestedBy: ctx.requestedBy,
+      requiresLogin: args.requiresLogin,
+      steps: args.steps,
+      jobType: args.jobType,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Error: invalid Browser Lane request — ${msg}`;
+  }
+
+  const plan = buildCanopyActSteps({ startUrl: payload.startUrl, steps: args.steps });
+
+  let result: CanopyActResult;
+  try {
+    // `jobType` IS the policy verb: the app's PolicyEngine recognises the same
+    // read/write vocabulary HiveMatrix uses (authenticated_research/capture/
+    // triage = read; form_fill/site_ops = write), and an action it does not
+    // recognise fails closed. So no translation layer, and no policy opinion.
+    const res = await requestCanopyBrowserAct({
+      action: payload.jobType,
+      requester: ctx.requestedBy || "hivematrix",
+      steps: plan.steps,
+    });
+    result = await res.json() as CanopyActResult;
+    if (!result || !Array.isArray(result.steps)) {
+      return `Error: Canopy Browser returned an unreadable response (HTTP ${res.status}).`;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    recordAudit({
+      ts: "", event: "browser:job_created", actor: ctx.requestedBy, actorKind: ctx.actorKind,
+      project: payload.project, target: payload.startUrl, status: "unreachable",
+      summary: `${payload.title} — Canopy Browser unreachable`,
+    });
+    return `Error: Canopy Browser is unreachable — ${msg}. Open the Canopy Browser app (it serves runs on ${resolveCanopyBrowserBaseUrl()}/act) and retry.`;
+  }
+
+  // Policy refusal — the app's decision, surfaced verbatim. This is also the
+  // producer of the browser:blocked audit event the removed duplicate gate used
+  // to emit; without it the Command Log's Blocked filter goes silently empty.
+  if (result.refusal) {
+    recordAudit({
+      ts: "", event: "browser:blocked", actor: ctx.requestedBy, actorKind: ctx.actorKind,
+      project: payload.project, target: result.refusal.siteId ?? payload.startUrl, status: "blocked",
+      summary: `${payload.jobType} refused by Canopy Browser (${result.refusal.code}) — ${result.refusal.message}`,
+    });
+    return `Error: ${result.refusal.message}`;
+  }
+
+  // A sign-in wall. finalPage is null by design — the logged-out page is never
+  // returned as the answer. Passed through unchanged; only the app (and only a
+  // human click in it) can resolve this.
+  if (result.humanLoginRequired) {
+    recordAudit({
+      ts: "", event: "browser:login_required", actor: ctx.requestedBy, actorKind: ctx.actorKind,
+      project: payload.project, target: result.humanLoginRequired.siteId ?? payload.startUrl,
+      status: "login_required",
+      summary: `${payload.title} — ${result.humanLoginRequired.message}`,
+    });
+    return `Error: ${result.humanLoginRequired.message}`;
+  }
+
+  const transcript = summarizeCanopyActResult(result);
+  const notExecuted = plan.unexecutable.length
+    ? `\n\nNot executed — Canopy Browser drives selectors, not prose, so these requested steps did not run:\n${plan.unexecutable.map((s) => `- ${s}`).join("\n")}`
+    : "";
+  const envelope = buildBrowserBeeTaskRequestEnvelope(payload, ctx.projectPath, {
+    backing: "desktop_fallback",
+    backingModel: "canopy-browser",
+  });
+
+  // Board parity: a direct run still lands on the board as a task record, so the
+  // operator sees it exactly where dispatched runs used to appear.
+  const taskId = await recordCanopyBrowserBoardTask({
+    payload,
+    ctx,
+    envelope,
+    result,
+    transcript: `${transcript}${notExecuted}`,
+    plan,
+  });
+
+  recordAudit({
+    ts: "", event: "browser:job_created", actor: ctx.requestedBy, actorKind: ctx.actorKind,
+    project: payload.project, taskId: taskId ?? undefined, target: payload.startUrl,
+    summary: `${payload.title} — Canopy Browser${payload.requiresLogin ? " (login required)" : ""}`,
+    status: result.ok ? "completed" : "failed",
+  });
+
+  const boardNote = taskId
+    ? ` Recorded on the board as task ${taskId}.`
+    : " (The board record could not be written — the daemon's task API was unreachable.)";
+  if (!result.ok) {
+    const failed = result.failedStep != null ? result.steps.find((s) => s.index === result.failedStep) : null;
+    return `Error: Canopy Browser run failed${failed ? ` at step ${failed.index} (${failed.action}) — ${failed.detail}` : ""}.${boardNote}\n\n${transcript}${notExecuted}`;
+  }
+  return `Canopy Browser run completed for ${payload.startUrl}.${boardNote}\n\n${transcript}${notExecuted}`;
+}
+
+/**
+ * Write the board record for a direct Canopy Browser run. Returns the task id,
+ * or null when the daemon's task API is unreachable — a missing board row must
+ * never turn a successful browser run into a reported failure.
+ */
+async function recordCanopyBrowserBoardTask(input: {
+  payload: import("@/lib/browser-lane/jobs").BrowserBeeJobCreatePayload;
+  ctx: LaneToolContext;
+  envelope: import("@/lib/browser-lane/jobs").BrowserBeeTaskRequestEnvelope;
+  result: import("@/lib/browser-lane/canopy-client").CanopyActResult;
+  transcript: string;
+  plan: import("@/lib/browser-lane/canopy-client").CanopyActStepPlan;
+}): Promise<string | null> {
+  const { payload, ctx, envelope, result, transcript, plan } = input;
+  const base = `http://127.0.0.1:${process.env.HIVEMATRIX_PORT ?? "3747"}`;
+  const token = readToken("auth-token") ?? "";
+  const now = new Date().toISOString();
+  const description = [
+    `Canopy Browser run — ${payload.jobType}`,
+    "",
+    `Requested by: ${payload.requestedBy}`,
+    `Start URL: ${payload.startUrl}`,
+    "",
+    "Objective:",
+    payload.objective,
+    "",
+    "Transcript:",
+    transcript,
+  ].join("\n");
+  try {
+    const res = await fetch(`${base}/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        title: payload.title,
+        description,
+        project: payload.project,
+        projectPath: ctx.projectPath,
+        // The run already happened in this process — the record is history, not
+        // work to claim. The scheduler only claims status:"backlog", so a
+        // terminal status here can never be picked up and re-run.
+        status: result.ok ? "done" : "failed",
+        completedAt: now,
+        completedBy: "canopy-browser",
+        executor: "agent",
+        source: "browser-lane",
+        model: "canopy-browser",
+        error: result.ok ? null : `Canopy Browser run failed at step ${result.failedStep ?? "?"}`,
+        output: {
+          browserbeeRequest: envelope,
+          canopyBrowserRun: {
+            engine: "canopy",
+            baseUrl: undefined,
+            ok: result.ok,
+            failedStep: result.failedStep,
+            steps: result.steps,
+            finalPage: result.finalPage,
+            transcript,
+            requestedSteps: plan.steps,
+            unexecutableSteps: plan.unexecutable,
+          },
+        },
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return null;
+    const task = await res.json() as { _id?: string };
+    return task._id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: LaneToolContext): Promise<string> {
@@ -1170,28 +1394,18 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: LaneTool
     return `Error: invalid Browser Lane request — ${msg}`;
   }
 
-  // Access-mode gate: a readonly-access site (browser_sites.accessMode, set via
-  // the site picker) refuses write-shaped jobs — form_fill, site_ops — before
-  // any dispatch/task-creation happens below. Read-shaped jobs
-  // (authenticated_research, capture, triage) stay always-allowed. Reuses the
-  // existing domain-to-site matcher rather than a new lookup algorithm.
-  // See DECISIONS.md Q20.
-  if (payload.jobType === "form_fill" || payload.jobType === "site_ops") {
-    const { matchBrowserSiteReadiness, getBrowserSite } = await import("@/lib/browser-lane/store");
-    const match = matchBrowserSiteReadiness(payload.allowedDomains);
-    const site = match.matched && match.siteId ? getBrowserSite(match.siteId) : null;
-    if (site?.accessMode === "readonly") {
-      // A refusal is an event the operator must be able to see. Without this the
-      // gate is silent: the job never runs and nothing explains why. Feeds the
-      // Command Log's Blocked filter.
-      recordAudit({
-        ts: "", event: "browser:blocked", actor: ctx.requestedBy, actorKind: ctx.actorKind,
-        project: ctx.project, target: site.id, status: "blocked",
-        summary: `${payload.jobType} refused — site is read-only`,
-      });
-      return `Error: ${site.displayName} is configured read-only — the ${payload.jobType} job type would write to the site, which is refused. Switch its access mode to read-write in Browser Lane settings if this action is intended.`;
-    }
-  }
+  // T6 (2026-07-24): HiveMatrix's own read-only access-mode gate used to live
+  // here (DECISIONS.md Q20). It was REMOVED with the Canopy Browser cutover —
+  // site policy (accessMode, domain scope, ownership) is enforced inside the
+  // Canopy Browser app, the single enforcement point, and a client must not
+  // re-check it. executeCanopyBrowserRun surfaces the app's refusal message
+  // verbatim and re-emits the `browser:blocked` audit event this block used to
+  // produce (the Command Log's Blocked filter depends on it).
+  //
+  // CONSEQUENCE, stated plainly: this desktop path has no Canopy Browser in the
+  // loop, so with `browserLane.engine` rolled back to "desktop" nothing enforces
+  // read-only here. That is the price of the rollback lever, and it disappears
+  // when this path is deleted.
 
   // One engine: Claude drives a real desktop browser through Desktop Lane. The
   // Codex Computer Use branch was removed (2026-07-22) — gpt-5.4-computer-use
