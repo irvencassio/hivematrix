@@ -68,7 +68,10 @@ export async function maybeSelfHealBundleDrift(
   const runningVersion = deps.runningVersion ?? RUNNING_VERSION;
   const readOnDiskVersion = deps.readOnDiskVersion ?? (() => getBundledVersion());
   const isPackaged = deps.isPackaged ?? (() => getAppBundleRoot() !== null);
-  const restart = deps.restart ?? restartViaLaunchd;
+  // Bundle drift means an update swapped the .app underneath us, so in-flight
+  // work is interrupted by an *update*, not a plain restart — label it as such
+  // so the task's error text tells the operator what actually happened.
+  const restart = deps.restart ?? (() => restartViaLaunchd("app_update"));
   const log = deps.log ?? ((m) => console.warn(m));
 
   let onDiskVersion = runningVersion;

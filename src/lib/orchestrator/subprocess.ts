@@ -951,7 +951,12 @@ export async function spawnAgent(
   return agent;
 }
 
-export function killAgent(proc: ChildProcess): Promise<void> {
+/**
+ * Terminate an agent gracefully: SIGTERM, then SIGKILL only if it is still
+ * alive after `drainMs`. The drain window is a parameter so daemon shutdown can
+ * choose how long it is willing to wait before launchd forces the issue.
+ */
+export function killAgent(proc: ChildProcess, drainMs = 5000): Promise<void> {
   return new Promise((resolve) => {
     if (proc.killed || !proc.pid) {
       resolve();
@@ -965,7 +970,7 @@ export function killAgent(proc: ChildProcess): Promise<void> {
         // already dead
       }
       resolve();
-    }, 5000);
+    }, drainMs);
 
     proc.once("exit", () => {
       clearTimeout(forceTimeout);

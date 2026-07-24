@@ -465,7 +465,6 @@
     "dead-export:src/lib/orchestrator/outbound-mcp.ts#OUTBOUND_MCP_TOOL_NAMES",
     "dead-export:src/lib/orchestrator/outbound-mcp.ts#outboundMcpToolNames",
     "dead-export:src/lib/orchestrator/pid-registry.ts#getRegisteredPids",
-    "dead-export:src/lib/orchestrator/pid-registry.ts#isProcessAlive",
     "dead-export:src/lib/orchestrator/pim-preconditions.ts#parsePermissionNeeded",
     "dead-export:src/lib/orchestrator/pim-tools.ts#buildCalendarCreateScript",
     "dead-export:src/lib/orchestrator/pim-tools.ts#buildCalendarNextWithinScript",

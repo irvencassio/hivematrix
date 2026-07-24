@@ -9,6 +9,14 @@ import {
   type AgentProcess,
 } from "./subprocess";
 import { registerPid, unregisterPid } from "./pid-registry";
+import {
+  beginShutdown,
+  checkpointInFlightTasks,
+  describeInterruption,
+  isKilledExit,
+  getShutdownReason,
+  type InterruptionReason,
+} from "./shutdown-checkpoint";
 import { taskWorktreesEnabled, createTaskWorktree, removeTaskWorktree } from "./worktree";
 import { captureRunTelemetry } from "@/lib/observability/capture";
 import type { StreamEvent } from "./stream-parser";
@@ -103,6 +111,13 @@ class AgentManager {
   private lastEventAt = new Map<string, number>();
   private stuckRaisedFor = new Set<string>();
   private pendingSteers = new Map<string, PendingSteer>();
+  /**
+   * Task ids whose worker we are killing on purpose (operator cancel, or a
+   * steer that interrupts the run to resume it). Consumed by handleExit so a
+   * deliberate kill is not misreported as an interruption — and, conversely,
+   * so a kill we did NOT ask for is never misreported as an agent failure.
+   */
+  private intentionalKills = new Set<string>();
   private watchdogInterval: ReturnType<typeof setInterval> | null = null;
 
   // Spawn gate: prevents concurrent OAuth token refreshes by blocking new spawns
@@ -665,7 +680,11 @@ class AgentManager {
       // usage_limit delay (wait-until-reset, uncapped); this text-detected path
       // is the fallback, and one retry there is enough.
       const MAX_TRANSIENT_RETRIES = 1;
-      if (code !== 0) {
+      // A worker we killed (shutdown/update/group-signal) is NOT a transient
+      // agent failure and must not burn a transient-retry budget — it is
+      // handled by the interruption branch below, which resumes the session.
+      const killedByUs = isKilledExit(code, signal) && !this.intentionalKills.has(taskId);
+      if (code !== 0 && !killedByUs) {
         const transient = this.detectTransientFailure(agent);
         if (transient.transient) {
           // For auth failures, attempt token refresh before requeueing
@@ -971,7 +990,42 @@ class AgentManager {
             projectPath: agent.projectPath,
           });
         } catch { /* non-critical */ }
+      } else if (isKilledExit(code, signal) && !this.intentionalKills.has(taskId)) {
+        // WE KILLED IT — the agent did not fail.
+        //
+        // The worker inherits the daemon's process group, so any group-wide
+        // signal (launchd `kickstart -k` from the updater or a restart route,
+        // SIGTERM on app quit) lands on the agent too. Recording that as
+        // "Killed by signal: SIGKILL" / "Exited with code: 143" made a
+        // collateral kill indistinguishable from a genuine agent failure, and
+        // discarded the session so the work restarted from zero.
+        //
+        // Requeue to backlog with the session promoted to resumeSessionId so
+        // the scheduler resumes the run (`claude --resume`) instead of
+        // restarting it, and stamp an error that names the real cause.
+        const reason: InterruptionReason = getShutdownReason() ?? "unclean_exit";
+        const detail = signal ? `signal ${signal}` : `exit code ${code}`;
+        const error = describeInterruption(reason, detail);
+        const resumeSessionId = agent.sessionId ?? task?.sessionId ?? null;
+        await Task.findByIdAndUpdate(taskId, {
+          status: "backlog",
+          agentPid: null,
+          startedAt: null,
+          completedAt: null,
+          resumeSessionId,
+          error,
+          output: { ...accumulatedOutput, summary, pendingOptions },
+        });
+        console.warn(`[interrupted] task ${taskId} worker killed (${detail}) — requeued${resumeSessionId ? " for session resume" : " (no session to resume)"}`);
+        this.taskUpdateBroadcaster(taskId, {
+          status: "backlog",
+          agentPid: null,
+          error,
+          resumeSessionId,
+          turns,
+        });
       } else {
+        this.intentionalKills.delete(taskId);
         const completedAt = new Date().toISOString();
         const error = signal
           ? `Killed by signal: ${signal}`
@@ -1062,13 +1116,51 @@ class AgentManager {
   async killAgentByPid(pid: number) {
     const agent = this.agents.get(pid);
     if (!agent) return;
+    this.intentionalKills.add(agent.taskId);
     await killProcess(agent.proc);
   }
 
   async killAgentByTaskId(taskId: string) {
     const agent = Array.from(this.agents.values()).find((a) => a.taskId === taskId);
     if (!agent) return;
+    this.intentionalKills.add(taskId);
     await killProcess(agent.proc);
+  }
+
+  /**
+   * Graceful teardown of every running worker, for use by the daemon's
+   * shutdown handler and by anything about to `launchctl kickstart -k`.
+   *
+   * Order is the whole point: the durable checkpoint is written FIRST, so it
+   * has hit disk even if the drain window is cut short by an untrappable
+   * SIGKILL arriving from launchd. Only then are workers signalled, with
+   * SIGTERM and a drain window before SIGKILL (that escalation lives in
+   * `killAgent`).
+   */
+  async shutdownAllAgents(reason: InterruptionReason, drainMs = 5000): Promise<{ checkpointed: number; drained: number }> {
+    beginShutdown(reason);
+
+    let checkpointed = 0;
+    try {
+      const result = checkpointInFlightTasks(reason);
+      checkpointed = result.checkpointed;
+      if (checkpointed > 0) {
+        console.log(`[shutdown] checkpointed ${checkpointed} in-flight task(s) for resume: ${result.taskIds.join(", ")}`);
+      }
+    } catch (e) {
+      console.error("[shutdown] checkpoint failed:", e instanceof Error ? e.message : e);
+    }
+
+    const running = Array.from(this.agents.values());
+    if (running.length === 0) return { checkpointed, drained: 0 };
+
+    console.log(`[shutdown] draining ${running.length} worker(s) with SIGTERM (${drainMs}ms window)`);
+    const drains = running.map((a) => killProcess(a.proc, drainMs));
+    await Promise.race([
+      Promise.all(drains),
+      new Promise((resolve) => setTimeout(resolve, drainMs + 1000)),
+    ]);
+    return { checkpointed, drained: running.length };
   }
 
   async requestSteerByTaskId(taskId: string, message: string) {
