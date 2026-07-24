@@ -2,6 +2,10 @@
 
 Release notes for HiveMatrix. Newest first. Auto-maintained by `scripts/release.mjs`; the in-app **Settings → Release notes** reads the same data (`src/lib/version/changelog.ts`).
 
+## v0.1.254 — 2026-07-24
+
+First beta-channel publish: exercises the beta feed, the beta-channel pointer release, and the prerelease/--latest=false safety property end to end.
+
 ## v0.1.253 — 2026-07-23
 
 Fixes automatic merging failing on every project except HiveMatrix itself. When a finished task merged its work, the check that runs before keeping the merge always tried 'npm run typecheck' — which only exists in HiveMatrix. In any other project (an iOS app, a Swift app) that check could not run, so the merge was undone every single time. It now asks each project how it should be checked, and for a project that defines no check at all the merge goes through while stating plainly that nothing was verified — rather than silently claiming a check passed.
