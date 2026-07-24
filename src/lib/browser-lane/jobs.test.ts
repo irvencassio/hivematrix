@@ -7,6 +7,7 @@ import {
   buildBrowserBeeJobSnapshot,
   buildBrowserBeeTaskDescription,
   buildBrowserBeeTaskRequestEnvelope,
+  buildCanopyBrowserTaskDescription,
   parseBrowserBeeJobCreate,
   readBrowserBeeDesktopFallbackEnabled,
   resolveBrowserBeeBacking,
@@ -52,6 +53,31 @@ test("buildBrowserBeeTaskDescription points agents at Browser Lane", () => {
   assert.match(description, /Allowed domains: www\.linkedin\.com/);
   assert.match(description, /Execution steps:/);
   assert.match(description, /Success criteria:/);
+});
+
+test("buildCanopyBrowserTaskDescription routes the work to the app, never to a desktop browser", () => {
+  const payload = parseBrowserBeeJobCreate({
+    title: "Browser Lane LinkedIn triage",
+    project: "hive",
+    startUrl: "https://www.linkedin.com/messaging/",
+    objective: "Check recruiter messages and summarize urgent ones.",
+    siteLabel: "LinkedIn",
+    steps: ["Open messaging"],
+    requiresLogin: true,
+    jobType: "authenticated_research",
+  });
+
+  const description = buildCanopyBrowserTaskDescription(payload, {
+    requestedProjectPath: "/Users/example/Hive",
+    daemonPort: "3747",
+  });
+
+  assert.match(description, /Canopy Browser app/);
+  assert.match(description, /\/lane\/browser/, "the task must be pointed at the lane endpoint");
+  assert.match(description, /Do NOT use WebSearch, Chrome MCP, desktop_action/);
+  assert.doesNotMatch(description, /desktop\.script\.run|desktop\.ax\.query/, "the drive-Chrome-yourself instructions must not appear");
+  assert.match(description, /report that refusal message verbatim/);
+  assert.match(description, /Allowed domains: www\.linkedin\.com/, "the shared job-metadata block is reused, not re-invented");
 });
 
 test("buildBrowserBeeJobSnapshot reads task-backed request metadata", () => {

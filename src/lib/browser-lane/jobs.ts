@@ -379,6 +379,55 @@ export function buildBrowserBeeTaskDescription(
 }
 
 /**
+ * The Browser Lane job prompt for the CANOPY engine (T6, 2026-07-24).
+ *
+ * The desktop prompt above tells an agent to drive Chrome/Safari itself. Under
+ * `browserLane.engine: "canopy"` that is exactly what must NOT happen: the work
+ * belongs in the Canopy Browser app, which owns the signed-in sessions and the
+ * site policy. So this prompt gives the agent one instruction — call HiveMatrix's
+ * own Browser Lane endpoint, which routes into the app — and explicitly forbids
+ * ad-hoc browser tools, mirroring the wording the voice/task-intake door already
+ * uses (`buildVoiceBrowserLaneTask`). Same job, same envelope; different door,
+ * same destination.
+ */
+export function buildCanopyBrowserTaskDescription(
+  payload: BrowserBeeJobCreatePayload,
+  options: { requestedProjectPath: string; daemonPort?: string },
+): string {
+  const port = options.daemonPort ?? process.env.HIVEMATRIX_PORT ?? "3747";
+  const args = {
+    mode: payload.requiresLogin ? "workflow" : "open",
+    objective: payload.objective,
+    startUrl: payload.startUrl,
+    jobType: payload.jobType,
+    requiresLogin: payload.requiresLogin,
+    ...(payload.steps.length ? { steps: payload.steps } : {}),
+  };
+  const sections = [
+    "This task came from Browser Lane. The browser is the Canopy Browser app — a real WebKit browser that already holds the signed-in sessions and enforces the site policy (read/write access mode, domain scope, ownership).",
+    "Do NOT use WebSearch, Chrome MCP, desktop_action, or any ad-hoc browser tool. Do not open Chrome or Safari. Call HiveMatrix's Browser Lane endpoint and report exactly what it returns:",
+    "",
+    "```bash",
+    `curl -s -X POST "http://127.0.0.1:${port}/lane/browser" \\`,
+    `  -H "Authorization: Bearer $(cat ~/.hivematrix/auth-token)" \\`,
+    `  -H "Content-Type: application/json" \\`,
+    `  -d '${JSON.stringify({ args })}'`,
+    "```",
+    "",
+    "Equivalent model tool: hivematrix_browser",
+    "",
+    "If the response refuses the run (a read-only site, an out-of-scope domain) report that refusal message verbatim — it is the app's decision, not a bug to work around. If it reports that human login is required, stop and say so; credentials are always a human click in the Canopy Browser app.",
+    "",
+    ...buildBrowserBeeJobBodySections(payload, { requestedProjectPath: options.requestedProjectPath }),
+    "",
+    "Output expectations:",
+    "- Summarize what the run found on the site.",
+    "- Call out any refusal, login prompt, or failed step, quoting the message you were given.",
+  ];
+  return sections.join("\n");
+}
+
+/**
  * Description for the opt-in Desktop fallback: the same job, but driven by
  * Claude through Desktop Lane instead of Codex Computer Use. Used only
  * when Codex auth is unavailable and the operator has enabled the fallback.
