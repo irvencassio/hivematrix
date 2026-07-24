@@ -316,14 +316,34 @@ async function main(): Promise<void> {
 
   console.log("[hivematrix] Daemon ready");
 
-  // Graceful shutdown
-  const shutdown = () => {
-    console.log("[hivematrix] Shutting down...");
-    db.close();
-    process.exit(0);
+  // Graceful shutdown.
+  //
+  // This used to be `db.close(); process.exit(0)` — which killed the daemon
+  // while agent workers were mid-run. Because workers share the daemon's
+  // process group, the same signal already reached them, and their deaths were
+  // recorded as agent failures ("Exited with code: 143") with the session
+  // discarded. Now: checkpoint in-flight tasks durably FIRST, then drain
+  // workers with SIGTERM before exiting, so the work resumes on next boot.
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return; // a second signal must not re-enter mid-drain
+    shuttingDown = true;
+    console.log(`[hivematrix] Shutting down (${signal})...`);
+    void (async () => {
+      try {
+        const { agentManager } = await import("@/lib/orchestrator/agent-manager");
+        const { checkpointed, drained } = await agentManager.shutdownAllAgents("daemon_shutdown", 5000);
+        console.log(`[hivematrix] shutdown: ${checkpointed} task(s) checkpointed, ${drained} worker(s) drained`);
+      } catch (e) {
+        console.error("[hivematrix] shutdown drain failed:", e instanceof Error ? e.message : e);
+      } finally {
+        try { db.close(); } catch { /* already closed */ }
+        process.exit(0);
+      }
+    })();
   };
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 main().catch((err) => {

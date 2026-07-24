@@ -1484,8 +1484,12 @@ export function createDaemonServer() {
       // way to pick up a new bundle short of the full update flow, and the only
       // restart button in the product was buried in the Message Lane setup modal.
       //
-      // Guarded on in-flight work: `kickstart -k` SIGKILLs, so a running task
-      // dies mid-write. Refuses with 409 and a count unless {force:true}.
+      // Guarded on in-flight work: `kickstart -k` SIGKILLs the whole process
+      // group, so running workers die with it. `restartViaLaunchd` now
+      // checkpoints those tasks first (session saved, requeued for resume on
+      // next boot), so forcing is recoverable rather than destructive — but the
+      // run still loses its place, so keep asking. Refuses with 409 and a count
+      // unless {force:true}.
       if (req.method === "POST" && urlPath === "/system/restart-daemon") {
         const { getBundledDaemonPaths } = await import("@/lib/onboarding/app-bundle");
         if (!getBundledDaemonPaths()) {
@@ -1499,7 +1503,7 @@ export function createDaemonServer() {
           json(res, 409, {
             ok: false,
             activeTasks: busy,
-            error: `${busy} task(s) are still running. Restarting kills them mid-write. Cancel them first, or restart anyway.`,
+            error: `${busy} task(s) are still running. Restarting stops them — their sessions are saved and they resume on the next boot, but they lose their place. Cancel them first, or restart anyway.`,
           });
           return;
         }

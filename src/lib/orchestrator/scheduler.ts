@@ -2,6 +2,7 @@ import { Task } from "@/lib/db";
 import { SCHEDULER_INTERVAL_MS, getActiveProfile } from "@/lib/config/constants";
 import { NO_REPO_LOCK_PROJECTS } from "@/lib/routing/aliases";
 import { agentManager } from "./agent-manager";
+import { isInterruptionError } from "./shutdown-checkpoint";
 import { readCachedUsage, type ProfileUsage } from "@/lib/usage/fetcher";
 import { broadcast } from "@/lib/ws/broadcaster";
 import { missionTick } from "./mission-engine";
@@ -559,11 +560,19 @@ async function tick() {
         ? { output: { ...(task.output ?? {}), roleProvenance: autoRoleProvenance } }
         : {};
 
+      // An `Interrupted:` error is a record of the PREVIOUS run being killed.
+      // Once this task is dispatched again that record is stale, so clear it —
+      // otherwise a resumed task displays as errored while it is happily
+      // running. Non-interruption errors (spawn failures under retry) are left
+      // alone so the operator keeps seeing why a task is bouncing.
+      const clearStaleInterruption = isInterruptionError(task.error) ? { error: null } : {};
+
       await Task.findByIdAndUpdate(task._id.toString(), {
         status: "assigned",
         assignedAt,
         delayUntil: null,
         delayReason: null,
+        ...clearStaleInterruption,
         ...(effectiveModel && effectiveModel !== task.model ? { model: effectiveModel } : {}),
         ...(agentType !== ((task as Record<string, unknown>).agentType as string) ? { agentType } : {}),
         ...roleProvenanceUpdate,
