@@ -10,6 +10,7 @@ import { homedir } from "os";
 import { writeJsonAtomic } from "@/lib/config/atomic-write";
 import { detectBackends, type BackendStatus, type BackendId } from "./backends";
 import { claudeAliasId } from "./catalog";
+import { parseUpdateChannel, type UpdateChannel } from "@/lib/updater/channel";
 
 // Claude frontier models are referenced by the CLI's version-agnostic aliases,
 // so they always resolve to the latest model for the tier (no version to bump).
@@ -163,6 +164,25 @@ export function getAutoUpdate(): boolean {
 export function setAutoUpdate(on: boolean): void {
   const cfg = readConfig();
   cfg.autoUpdate = !!on;
+  writeConfig(cfg);
+}
+
+/**
+ * Update channel — "stable" (default) or "beta". Beta is an IN-APP OPT-IN: the
+ * website download is always stable, so a fresh install has no key here and
+ * resolves to stable. Read through the updater's own resolver so the daemon
+ * poller, the Rust shell and this settings surface can never disagree.
+ */
+export function getUpdateChannel(): UpdateChannel {
+  return parseUpdateChannel(readConfig().updateChannel);
+}
+export function setUpdateChannel(channel: UpdateChannel | string): void {
+  const cfg = readConfig();
+  const next = parseUpdateChannel(channel);
+  // Stable is the default, so it is stored as the ABSENCE of the key — that way
+  // a config that has never opted in and one that opted back out are the same
+  // thing, and both the TS and Rust readers fall to stable.
+  if (next === "beta") cfg.updateChannel = "beta"; else delete cfg.updateChannel;
   writeConfig(cfg);
 }
 

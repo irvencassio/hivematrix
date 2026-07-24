@@ -11,12 +11,13 @@ Apple **notarization**. This is NOT the Mac App Store.
 - Bundle ID: `com.irvcassio.hivematrix.core`
 - Team ID: `8B3CHTY93V`
 - Signing identity: `Developer ID Application: Irven Cassio (8B3CHTY93V)`
-- Update feed asset: `hivematrix-core.json`
+- Update feed asset: `hivematrix-core.json` (stable) · `hivematrix-core-beta.json` (beta)
 
 ## Canonical command
 
 ```bash
-./scripts/developer-id-release.sh --release
+./scripts/developer-id-release.sh --release            # publishes to BETA (the default)
+./scripts/developer-id-release.sh --release --stable   # publishes to STABLE (everyone)
 ```
 
 ## Exit codes (check these, don't parse prose)
@@ -33,7 +34,7 @@ Apple **notarization**. This is NOT the Mac App Store.
 |------|--------------|:----------:|:----------:|:--------------:|
 | `--verify-only` | prereqs + `typecheck`/`test`/`scope-wall` only | no | no | no |
 | `--build-only` (alias `--archive-only`) | build a signed `.app` + `.dmg` locally | yes¹ | no | no² |
-| `--release` | full pipeline: bump → build → notarize → staple → publish core feed → verify | yes | yes | yes |
+| `--release` | full pipeline: bump → build → notarize → staple → publish feed → verify | yes | yes | yes |
 
 ¹ unless `--skip-notarize` is passed. ² unless `--marketing-version` is passed.
 
@@ -41,6 +42,8 @@ Apple **notarization**. This is NOT the Mac App Store.
 
 | Flag | Meaning |
 |------|---------|
+| `--beta` | publish to the **beta** channel. **This is the default** — beta clients see it, stable clients do not, and the website download is untouched. |
+| `--stable` | publish to the **stable** channel: the release is marked *Latest* (so the website download resolves to it) and BOTH feeds are advanced. |
 | `--marketing-version X.Y.Z` | set the marketing version explicitly. On `--release`, if omitted, the patch is auto-incremented. |
 | `--skip-notarize` | **local dry run only.** Builds + signs but does NOT notarize/staple. **Refused (exit 2) with `--release`.** |
 | `--note "text"` | release note (goes into the changelog + commit message). |
@@ -72,7 +75,9 @@ Apple **notarization**. This is NOT the Mac App Store.
   - copies of every distributable artifact,
   - `release-metadata.json` — product, bundleId, version, buildNumber, gitCommit,
     signingIdentity, notarizationStatus, feed URL, and each artifact's `sha256`.
-- On `--release`: a GitHub release `vX.Y.Z` with the `hivematrix-core.json` update feed live, and a passing live-feed proof.
+- On `--release --beta` (default): a **prerelease** `vX.Y.Z` (never marked *Latest*), and the `beta-channel` pointer release's `hivematrix-core-beta.json` advanced. The stable feed is not touched.
+- On `--release --stable`: a `vX.Y.Z` release marked *Latest* carrying `hivematrix-core.json`, **and** the beta pointer advanced too (so beta clients are not stranded below stable).
+- Either way, a passing live-feed proof for the channel that was published.
 
 ## Examples
 
@@ -91,9 +96,15 @@ Local build WITH notarization, but do not publish:
 ./scripts/developer-id-release.sh --build-only
 ```
 
-Full signed + notarized release, auto patch-bump, publish to the website feed:
+Full signed + notarized release to the beta channel (the default — opted-in
+installs only, website download unchanged):
 ```bash
 ./scripts/developer-id-release.sh --release
+```
+
+Promote to everyone (website download + every install that has not opted in):
+```bash
+./scripts/developer-id-release.sh --release --stable
 ```
 
 Full release at an explicit marketing version, with a note:

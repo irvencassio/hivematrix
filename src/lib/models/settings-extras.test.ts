@@ -29,6 +29,27 @@ test("autoUpdate defaults off and round-trips", () => {
   assert.equal(s.getAutoUpdate(), false);
 });
 
+test("updateChannel defaults to stable, round-trips, and stores stable as the absent key", async () => {
+  const { readFileSync } = await import("node:fs");
+  const cfgPath = join(TMP, ".hivematrix", "config.json");
+
+  assert.equal(s.getUpdateChannel(), "stable", "beta is opt-in only — never the default");
+
+  s.setUpdateChannel("beta");
+  assert.equal(s.getUpdateChannel(), "beta");
+
+  s.setUpdateChannel("stable");
+  assert.equal(s.getUpdateChannel(), "stable");
+  // Opting back out must leave a config indistinguishable from one that never
+  // opted in, so every reader (TS daemon AND the Rust shell's substring match)
+  // falls to stable the same way.
+  assert.equal("updateChannel" in JSON.parse(readFileSync(cfgPath, "utf-8")), false);
+
+  // Junk fails safe rather than being stored verbatim.
+  s.setUpdateChannel("nightly");
+  assert.equal(s.getUpdateChannel(), "stable");
+});
+
 test("wallpaper opacity defaults to 82 and clamps to 0–100", () => {
   assert.equal(s.getThemeSettings().wallpaperOpacity, 82);
   s.setWallpaperOpacity(10);

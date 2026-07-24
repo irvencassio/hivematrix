@@ -1319,6 +1319,14 @@ export const CONSOLE_HTML = String.raw`<!DOCTYPE html>
         <span class="muted">Automatically install updates on launch</span>
       </div>
       <div class="muted" style="font-size:11px;margin-top:2px">Off = you'll see an "Update" button in the header to install when you choose.</div>
+      <div class="row" style="align-items:center;gap:10px;margin-top:8px">
+        <span class="muted">Channel</span>
+        <select id="s_updatechannel" onchange="saveUpdateChannel()" style="width:auto">
+          <option value="stable">Stable — released builds only</option>
+          <option value="beta">Beta — early builds, plus every stable release</option>
+        </select>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:2px">Stable by default. Beta is an opt-in here only — the download on the website is always the stable build. Switching back to Stable stops new beta builds; it does not downgrade the one you already have.</div>
 
       <label class="flbl" style="margin-top:16px">Autonomy</label>
       <div class="row" style="align-items:center; gap:10px">
@@ -7195,6 +7203,7 @@ function renderSettingsModelControls() {
   syncWallpaperOpacityRow();
   document.getElementById("s_location").value = m.location || "";
   document.getElementById("s_autoupdate").checked = !!m.autoUpdate;
+  document.getElementById("s_updatechannel").value = m.updateChannel === "beta" ? "beta" : "stable";
   document.getElementById("s_telemetry").checked = !!m.telemetryEnabled;
   document.getElementById("s_telemetry_status").textContent = "";
   const hasClaudeFrontier = backends.some(b => b.id === "claude" && b.configured);
@@ -7292,6 +7301,12 @@ async function saveAutoUpdate() {
   const autoUpdate = document.getElementById("s_autoupdate").checked;
   await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ autoUpdate }) });
   await loadModels();
+}
+async function saveUpdateChannel() {
+  const updateChannel = document.getElementById("s_updatechannel").value === "beta" ? "beta" : "stable";
+  await api("/settings", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ updateChannel }) });
+  await loadModels();
+  hmToast(updateChannel === "beta" ? "Update channel: Beta" : "Update channel: Stable", "ok");
 }
 async function saveTelemetry() {
   const enabled = document.getElementById("s_telemetry").checked;

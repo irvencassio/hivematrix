@@ -1721,21 +1721,38 @@ The Codex half of that decision stands; the engine half does not. Driving a
 *separate* browser process was the defect: that browser holds no session, so
 every authenticated workflow — the reason the lane exists — hit a login wall.
 
-**Policy is not duplicated.** HiveMatrix's own read-only `accessMode` gate (Q20)
-was **removed**; the app is the single enforcement point and its
-`refusal.message` is surfaced verbatim, `humanLoginRequired` passed through
-unchanged. Because that gate was the ONLY producer of the `browser:blocked`
-audit event on this path, the client **re-emits `browser:blocked` on receipt of
-a refusal** — without it the Command Log's Blocked filter silently empties.
-`browser_sites` + `src/lib/browser-lane/store.ts` are **kept as a display
-cache** (console, system-readiness, lane-setup, release-smoke read them).
+**Policy is not duplicated *on the canopy engine*.** HiveMatrix's own read-only
+`accessMode` gate (Q20) was **removed from that path**; the app is the single
+enforcement point and its `refusal.message` is surfaced verbatim,
+`humanLoginRequired` passed through unchanged. Because that gate was the ONLY
+producer of the `browser:blocked` audit event on this path, the client
+**re-emits `browser:blocked` on receipt of a refusal** — without it the Command
+Log's Blocked filter silently empties. `browser_sites` +
+`src/lib/browser-lane/store.ts` are **kept as a display cache** (console,
+system-readiness, lane-setup, release-smoke read them).
 
 **Rollback is one config edit:** `{"browserLane": {"engine": "desktop"}}` in
 `~/.hivematrix/config.json`. `executeBrowserBeeRun`, `browser-lane-app/` and
-packaging are all intact; deleting them is a separate, later decision. Known
-cost of the lever: the desktop path has no app in the loop and no local gate any
-more, so rolled back, nothing enforces read-only. It is an emergency lever, not
-a supported mode.
+packaging are all intact; deleting them is a separate, later decision.
+
+**Amended the same day (2026-07-24): the desktop path keeps a gate of its own.**
+As first landed, removing the gate meant the rollback lever also rolled back the
+*protection* — no app in the loop and no local check, so a write-shaped job
+against a read-only site simply ran. A rollback must reproduce pre-cutover
+behaviour, safety included; it is not a switch for turning the guardrail off. So
+the Q20 check is restored **inside `executeBrowserBeeRun`, scoped to the desktop
+engine only**. It is not a duplicate: on that path it is the only enforcement
+there is. Policy follows the enforcement point —
+
+- `engine: "canopy"` → no HiveMatrix-side check; the app's refusal, verbatim.
+- `engine: "desktop"` → local `accessMode` check before dispatch; `form_fill` /
+  `site_ops` refused against a `readonly` site (and `mode: "open"` normalizes to
+  `site_ops`, exactly as pre-T6), read-shaped types always allowed.
+
+Both engines emit `browser:blocked`, so the Command Log's Blocked filter is
+engine-independent. The lever's remaining cost is unchanged and real: the
+desktop browser holds no signed-in session, so authenticated workflows still hit
+login walls. It is an emergency lever, not a supported mode.
 
 **Honest limit.** The authenticated multi-step path is **unproven**: Canopy
 Browser sessions start empty, so no run has yet returned genuinely logged-in
@@ -1748,7 +1765,7 @@ are reported as **not executed** rather than silently dropped.
 `resolveCanopyBrowserBaseUrl`, `resolveBrowserLaneEngine`, `buildCanopyActSteps`,
 `summarizeCanopyActResult`); `src/lib/orchestrator/lane-tools.ts`
 (`executeCanopyBrowserRun`, `recordCanopyBrowserBoardTask`, the engine branch in
-`executeBrowserLane`, and the deletion of the Q20 gate);
+`executeBrowserLane`, and the Q20 gate scoped to the desktop engine);
 `src/lib/browser-lane/jobs.ts` (`buildCanopyBrowserTaskDescription`);
 `src/daemon/server.ts` (COO `createTask` picks the description by engine);
 `docs/canopy-browser-cutover.md` (new); `docs/browser-lane-claude-native.md`
@@ -1761,5 +1778,87 @@ dropping them". `src/lib/orchestrator/lane-tools.test.ts` — "the canopy engine
 surfaces the app's refusal verbatim and re-emits browser:blocked", "the canopy
 engine writes a board task record (done, source browser-lane, transcript in
 output)", "engine 'desktop' rolls the whole cutover back to the pre-T6 dispatch
-path". `src/lib/browser-lane/jobs.test.ts` — "buildCanopyBrowserTaskDescription
+path", "executeBrowserBeeRun blocks form_fill against a readonly-access site and
+never dispatches" (the restored desktop gate + its `browser:blocked` event),
+"the canopy engine sends jobType as the policy action and never re-checks policy
+locally" (the other side of the asymmetry).
+`src/lib/browser-lane/jobs.test.ts` — "buildCanopyBrowserTaskDescription
 routes the work to the app, never to a desktop browser".
+
+## Q25 — Update channels: stable (default) and an in-app beta opt-in (2026-07-24)
+
+**Decision.** HiveMatrix gets the same two-channel update model Canopy Terminal
+and Canopy Browser already run, so all three products behave identically:
+
+- The **download on the website is always the stable release.** A first-time
+  visitor can never land on a beta build.
+- **Beta is an in-app opt-in** — Settings → Updates → Channel, persisted as
+  `updateChannel` in `~/.hivematrix/config.json`, defaulting to `stable`.
+- **Stable clients see only stable. Beta clients see beta and stable.**
+- **v0.1.253 IS the stable baseline.** It is already published and already what
+  the site points at; no new version was cut to "establish" stable.
+
+**HiveMatrix checks its own feed, so switching channels needs no rebuild.**
+There are two update checks, and both had to become channel-aware:
+
+1. `src/lib/updater/feed-check.ts` — a plain `fetch()` of the feed JSON, run by
+   the daemon. It drives the console's "update available" pill and the Install
+   button. Channel is resolved per call, so a switch takes effect on the next
+   poll.
+2. `src-tauri/src/lib.rs` `check_for_update` — Tauri's `updater.check()`, which
+   does the actual download/verify/install. It resolves
+   `plugins.updater.endpoints` from the bundled `tauri.conf.json`, which is
+   fixed at build time — so this one is NOT switchable by config alone.
+   `tauri-plugin-updater` 2.10.1 exposes `app.updater_builder().endpoints(…)`,
+   so the shell now overrides the endpoint **at runtime** when beta is selected
+   (`channel_updater`). `tauri.conf.json` stays pointed at the stable feed, which
+   is what makes a never-opted-in install unable to resolve beta at all.
+
+**Two feed URLs, deliberately different shapes.** Stable keeps
+`releases/latest/download/hivematrix-core.json`. That path resolves to whatever
+GitHub marks **Latest**, which is also what the website download resolves
+through — so a beta must never hold "Latest", so betas are published as
+**prereleases**, so `releases/latest/download/` cannot reach them. The beta feed
+therefore lives on a permanent pointer release,
+`releases/download/beta-channel/hivematrix-core-beta.json`, whose asset is
+clobbered on every publish. The payoff: publishing a beta **cannot touch the
+stable feed at all** — no carry-forward step that could be skipped, and a failed
+beta publish leaves stable users untouched by construction.
+
+**Publishing defaults to beta.** `scripts/publish-release.sh` (and
+`developer-id-release.sh`) take `--beta` (default) / `--stable`, mirroring
+Canopy's `build-dmg.sh`. A `--stable` publish writes **both** feeds: the stable
+asset on the Latest-marked release, and the beta pointer too — otherwise a beta
+client would sit below the newest stable forever and "beta sees beta AND stable"
+would stop holding.
+
+**Rejected: one URL for both channels** (upload both assets to every release and
+mark betas Latest). It requires copying the previous stable feed forward onto
+every beta release, so a single skipped/failed carry-forward serves a beta build
+to every stable user — and it puts a beta at the website's download link. The
+failure mode is silent and points the wrong way.
+
+**Not verified without publishing:** no beta release exists yet, so the live
+`beta-channel` pointer release, the `--latest=false` behaviour on a real
+publish, and an end-to-end beta→stable install have not been exercised.
+
+**Code.** `src/lib/updater/channel.ts` (new — channel type, both feed URLs,
+`parseUpdateChannel`, `readUpdateChannel`); `src/lib/updater/feed-check.ts`
+(per-channel feed + channel-keyed cache); `src-tauri/src/lib.rs`
+(`beta_channel_selected`, `channel_updater`); `src/lib/models/available.ts`
+(`get/setUpdateChannel`); `src/daemon/server.ts` + `src/daemon/console.ts`
+(Settings → Updates → Channel); `scripts/publish-release.sh`,
+`scripts/developer-id-release.sh`, `scripts/verify-autoupdate-release.mts`,
+`scripts/write-release-metadata.mjs`; `docs/RELEASE.md`.
+
+**Provers:** `src/lib/updater/channel.test.ts` — "only the literal string 'beta'
+opts in — anything else fails safe to stable", "the beta feed uses a fixed
+pointer release, NOT releases/latest/download".
+`src/lib/updater/feed-check.test.ts` — "getUpdateStatus polls the feed for the
+selected channel and reports which one answered", "switching channel is not
+answered from the other channel's cached result".
+`scripts/update-channel-wiring.test.mjs` — "the app ships pointed at the STABLE
+feed — a fresh install cannot resolve beta", "publish defaults to beta, and only
+--stable can touch the Latest pointer", "every copy of the feed URLs agrees".
+`src/lib/models/settings-extras.test.ts` — "updateChannel defaults to stable,
+round-trips, and stores stable as the absent key".

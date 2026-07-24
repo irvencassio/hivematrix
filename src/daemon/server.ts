@@ -487,7 +487,7 @@ export function createDaemonServer() {
         const backends = detectBackends();
         const available = buildAvailableModels(backends);
         const theme = getThemeSettings();
-        const { getLocation, getAutoUpdate, getFrontierProvider, getRoleModelsForDisplay } = await import("@/lib/models/available");
+        const { getLocation, getAutoUpdate, getUpdateChannel, getFrontierProvider, getRoleModelsForDisplay } = await import("@/lib/models/available");
         const { getTelemetryConfig } = await import("@/lib/telemetry/telemetry");
         json(res, 200, {
           backends,
@@ -500,6 +500,7 @@ export function createDaemonServer() {
           wallpaperOpacity: theme.wallpaperOpacity,
           location: getLocation(),
           autoUpdate: getAutoUpdate(),
+          updateChannel: getUpdateChannel(),
           frontierProvider: getFrontierProvider(),
           roleModels: getRoleModelsForDisplay(),
           roleModelOptions: buildRoleModelOptions(backends),
@@ -1019,6 +1020,8 @@ export function createDaemonServer() {
         if (typeof body.wallpaperOpacity === "number") m.setWallpaperOpacity(body.wallpaperOpacity);
         if (typeof body.location === "string") m.setLocation(body.location);
         if (typeof body.autoUpdate === "boolean") m.setAutoUpdate(body.autoUpdate);
+        // Beta is an explicit opt-in; anything but the literal "beta" is stable.
+        if (body.updateChannel === "stable" || body.updateChannel === "beta") m.setUpdateChannel(body.updateChannel);
         if (body.frontierProvider === "claude" || body.frontierProvider === "codex") m.setFrontierProvider(body.frontierProvider);
         let embeddings = null;
         if (body.embeddings && typeof body.embeddings === "object") {
@@ -1047,7 +1050,7 @@ export function createDaemonServer() {
         json(res, 200, { ok: true, defaultModel: m.getDefaultModel(available), theme: theme.theme,
           hasWallpaper: !!theme.wallpaperPath, wallpaperPath: theme.wallpaperPath,
           wallpaperOpacity: theme.wallpaperOpacity, location: m.getLocation(), autoUpdate: m.getAutoUpdate(),
-          embeddings });
+          updateChannel: m.getUpdateChannel(), embeddings });
         return;
       }
 

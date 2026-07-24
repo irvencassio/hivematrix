@@ -11,12 +11,19 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { evaluateAutoUpdateProof, type AutoUpdateProof } from "../src/lib/updater/release-proof";
+import { feedUrlForChannel, parseUpdateChannel } from "../src/lib/updater/channel";
 
 const REPO = "irvencassio/hivematrix";
-// Core-identity feed asset — must match src-tauri/tauri.conf.json,
-// scripts/publish-release.sh (FEED_ASSET), and src/lib/updater/feed-check.ts.
-const FEED_ASSET = "hivematrix-core.json";
-const FEED_URL = `https://github.com/${REPO}/releases/latest/download/${FEED_ASSET}`;
+// Which channel this checkout was published to. Defaults to BETA to match
+// scripts/publish-release.sh — verifying the stable feed after a beta publish
+// would "fail" for the entirely correct reason that beta did not touch it.
+//   npm run release:verify -- --stable
+const CHANNEL = parseUpdateChannel(
+  process.argv.includes("--stable") ? "stable"
+    : process.argv.includes("--beta") ? "beta"
+      : process.env.HIVEMATRIX_RELEASE_CHANNEL ?? "beta",
+);
+const FEED_URL = feedUrlForChannel(CHANNEL);
 
 /**
  * GitHub's `releases/latest/download/<asset>` CDN redirect lags the release
@@ -43,7 +50,13 @@ function sh(cmd: string, args: string[], fallback: string | null = null): string
 
 async function fetchFeed(): Promise<{ version: string | null; sourceCommit: string | null; buildNumber: number | null }> {
   try {
-    const res = await fetch(FEED_URL, { signal: AbortSignal.timeout(10_000) });
+    // Cache-bust exactly as feed-check.ts does — the beta feed asset is
+    // CLOBBERED in place on a fixed URL, so a cached copy is the likeliest
+    // reason a just-published feed looks stale.
+    const res = await fetch(`${FEED_URL}?t=${Date.now()}`, {
+      signal: AbortSignal.timeout(10_000),
+      headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+    });
     if (res.ok) {
       const feed = await res.json() as { version?: string; sourceCommit?: string; buildNumber?: number };
       return {
@@ -118,7 +131,7 @@ async function main(): Promise<void> {
     proof = evaluate(await fetchFeed());
   }
 
-  console.log(`HiveMatrix auto-update release proof for ${tagName}`);
+  console.log(`HiveMatrix auto-update release proof for ${tagName} (${CHANNEL} channel — ${FEED_URL})`);
   for (const check of proof.checks) {
     console.log(`${check.ok ? "✓" : "✗"} ${check.id}: ${check.detail}`);
   }

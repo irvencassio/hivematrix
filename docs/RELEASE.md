@@ -8,10 +8,14 @@ runs setup once, and the app self-supervises (launchd) and self-updates.
 One deterministic, agent-callable command does the whole pipeline
 (bump → gates → build → sign → notarize → staple → publish → verify):
 ```bash
-./scripts/developer-id-release.sh --release            # auto patch-bump + publish
+./scripts/developer-id-release.sh --release            # auto patch-bump + publish to BETA (default)
+./scripts/developer-id-release.sh --release --stable   # publish to STABLE (everyone)
 ./scripts/developer-id-release.sh --verify-only        # prereqs + gates, no build
 ./scripts/developer-id-release.sh --build-only --skip-notarize   # local dry build
 ```
+**Publishing defaults to the beta channel.** Shipping a build is cheap; handing
+it to every install is the deliberate act — pass `--stable` for that. See
+[Update channels](#update-channels-stable--beta) below.
 See `docs/agent-commands/developer-id-release.md` for flags, inputs, outputs, and
 exit codes. The sections below document the underlying sub-scripts it orchestrates.
 
@@ -78,18 +82,17 @@ Cutting a release:
    `bash scripts/build-app.sh`
    This emits `…/bundle/macos/HiveMatrix.app.tar.gz` + `.sig` alongside the
    .app/.dmg.
-3. Publish: `bash scripts/publish-release.sh` — creates the `v<version>` GitHub
-   release with the .dmg, the .app.tar.gz, its .sig, and a generated
-   `latest.json` (the update manifest the endpoint in
-   `plugins.updater.endpoints` resolves via `releases/latest/download/`).
+3. Publish: `bash scripts/publish-release.sh [--beta|--stable]` (default
+   `--beta`) — creates the `v<version>` GitHub release with the .dmg, the
+   .app.tar.gz, its .sig, and the channel's update manifest.
    The publish script refuses to publish if `v<version>` already points at a
    different commit; installed apps only update when the version increases, so
    never re-use a version for new code.
 4. Prove the live feed:
-   `npm run release:verify`
+   `npm run release:verify -- --beta` (or `--stable`)
    This verifies that `package.json`, `src-tauri/tauri.conf.json`,
-   `src/lib/version.ts`, the `v<version>` tag, the GitHub release, and
-   `latest.json` all point at the current commit.
+   `src/lib/version.ts`, the `v<version>` tag, the GitHub release, and that
+   channel's feed all point at the current commit.
 
 Operational directive: keep
 `docs/directives/autoupdate-release-directive.md` as the standing checklist for
@@ -99,6 +102,48 @@ users until that directive's proof passes.
 Bootstrap note: builds ≤0.1.0 shipped with a placeholder pubkey and cannot
 consume this feed — install ≥0.1.1 manually once; every later release then
 auto-updates (the daemon's boot gate handles migrations on relaunch).
+
+## Update channels (stable + beta)
+
+Same model as Canopy Terminal and Canopy Browser. Decision: DECISIONS.md Q25.
+
+| | Stable | Beta |
+| --- | --- | --- |
+| Who gets it | everyone by default, and every website download | only installs that opted in |
+| Feed asset | `hivematrix-core.json` | `hivematrix-core-beta.json` |
+| Feed URL | `releases/latest/download/hivematrix-core.json` | `releases/download/beta-channel/hivematrix-core-beta.json` |
+| GitHub release | marked **Latest** | marked **prerelease**, explicitly `--latest=false` |
+| Publish | `--stable` | `--beta` (the default) |
+
+**Why the beta URL is shaped differently.** `releases/latest/download/…`
+resolves to whatever GitHub marks "Latest" — which is also what the website
+download link resolves through. A beta must never hold that pointer, so betas
+are prereleases, so `releases/latest/download/` cannot reach them. The beta feed
+therefore lives on a permanent pointer release, tag `beta-channel`, whose single
+asset is clobbered on every publish. Consequence worth relying on: **a beta
+publish cannot touch the stable feed**, so a half-finished beta publish leaves
+stable users completely unaffected.
+
+**A `--stable` publish writes BOTH feeds.** The stable asset goes on the
+Latest-marked release, and the beta pointer is advanced too — otherwise beta
+clients would sit below the newest stable and "beta sees beta and stable" would
+stop holding.
+
+**Which channel an install is on.** Settings → Updates → Channel, persisted as
+`updateChannel` in `~/.hivematrix/config.json`. Absent = stable; only the exact
+string `"beta"` opts in, so a corrupt or hand-edited config fails safe onto
+stable. Both readers — the daemon's `feed-check.ts` and the Rust shell's
+`beta_channel_selected()` — read that one key.
+
+**No rebuild is needed to switch.** `plugins.updater.endpoints` in
+`src-tauri/tauri.conf.json` is and stays the *stable* feed (so a never-opted-in
+install cannot resolve beta at all); when beta is selected the shell overrides
+the endpoint at runtime via `app.updater_builder().endpoints(…)`
+(`channel_updater` in `src-tauri/src/lib.rs`).
+
+**Switching back to Stable does not downgrade.** The updater only moves forward,
+so a beta install stays on its build until stable catches up to or passes it.
+
 
 ## First-run wizard (what the installed app sets up)
 Served from the daemon console when required setup is incomplete; each step POSTs

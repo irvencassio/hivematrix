@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { compareVersions, getUpdateStatus, applyUpdateViaRelaunch } from "./feed-check";
+import { BETA_FEED_URL, STABLE_FEED_URL } from "./channel";
 
 test("compareVersions orders dotted versions numerically", () => {
   assert.ok(compareVersions("0.1.4", "0.1.3") > 0);
@@ -32,6 +33,7 @@ test("getUpdateStatus defeats the GitHub CDN edge cache when fetching the feed",
   };
   await getUpdateStatus({
     force: true,
+    channel: "stable",
     fetchImpl: fetchImpl as unknown as typeof fetch,
     forceFlagPath: join(tmpdir(), "hm-unused-force"),
   });
@@ -41,6 +43,47 @@ test("getUpdateStatus defeats the GitHub CDN edge cache when fetching the feed",
   assert.match(seenUrl, /hivematrix-core\.json\?t=\d+/, "feed URL must carry a cache-busting query string");
   const headers = (seenInit?.headers ?? {}) as Record<string, string>;
   assert.equal(headers["Cache-Control"], "no-cache", "must also ask intermediaries not to serve a cached copy");
+});
+
+test("getUpdateStatus polls the feed for the selected channel and reports which one answered", async () => {
+  const seen: string[] = [];
+  const fetchImpl = (async (url: unknown) => {
+    seen.push(String(url).split("?")[0]);
+    return { ok: true, json: async () => ({ version: "99.0.0" }) } as unknown as Response;
+  }) as unknown as typeof fetch;
+  const forceFlagPath = join(tmpdir(), "hm-unused-force");
+
+  const stable = await getUpdateStatus({ force: true, channel: "stable", fetchImpl, forceFlagPath });
+  const beta = await getUpdateStatus({ force: true, channel: "beta", fetchImpl, forceFlagPath });
+
+  assert.deepEqual(seen, [STABLE_FEED_URL, BETA_FEED_URL]);
+  // The console labels the pill from this, so a beta answer must never be able
+  // to render as if it came from stable.
+  assert.equal(stable.channel, "stable");
+  assert.equal(beta.channel, "beta");
+});
+
+test("switching channel is not answered from the other channel's cached result", async () => {
+  // Regression guard for the cache being keyed by time alone: flipping the
+  // setting in Settings has to take effect on the next poll, not up to a minute
+  // later, or the operator sees "no update" on a channel they just joined.
+  const seen: string[] = [];
+  const fetchImpl = (async (url: unknown) => {
+    seen.push(String(url).split("?")[0]);
+    return { ok: true, json: async () => ({ version: "99.0.0" }) } as unknown as Response;
+  }) as unknown as typeof fetch;
+  const forceFlagPath = join(tmpdir(), "hm-unused-force");
+  const t0 = Date.now() + 20_000_000;
+
+  await getUpdateStatus({ force: true, channel: "stable", fetchImpl, forceFlagPath, nowMs: t0 });
+  // Same instant, no force: the STABLE answer is cached and must be reused.
+  await getUpdateStatus({ channel: "stable", fetchImpl, forceFlagPath, nowMs: t0 + 1_000 });
+  assert.deepEqual(seen, [STABLE_FEED_URL], "a same-channel poll inside the TTL is served from cache");
+
+  // Same instant, different channel: must refetch rather than reuse.
+  const beta = await getUpdateStatus({ channel: "beta", fetchImpl, forceFlagPath, nowMs: t0 + 2_000 });
+  assert.deepEqual(seen, [STABLE_FEED_URL, BETA_FEED_URL]);
+  assert.equal(beta.channel, "beta");
 });
 
 test("getUpdateStatus flags an update when the feed is newer", async () => {

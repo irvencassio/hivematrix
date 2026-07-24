@@ -414,6 +414,58 @@ fn should_install_update() -> bool {
         .unwrap_or(false)
 }
 
+/// Beta feed. `plugins.updater.endpoints` in tauri.conf.json is and stays the
+/// STABLE feed, so an app that has never opted in — including every fresh
+/// install off the website — can only ever resolve stable. Beta is reached by
+/// overriding the endpoint at runtime, below.
+///
+/// Must match BETA_FEED_URL in src/lib/updater/channel.ts and the beta pointer
+/// release written by scripts/publish-release.sh.
+#[cfg(desktop)]
+const BETA_FEED_URL: &str =
+    "https://github.com/irvencassio/hivematrix/releases/download/beta-channel/hivematrix-core-beta.json";
+
+/// Whether the operator opted into the beta channel in Settings. Same
+/// no-JSON-dep trick as should_install_update: whitespace-strip the daemon's
+/// pretty-printed config.json, then substring-match. Anything unreadable,
+/// missing or misspelled is STABLE — this must fail safe, never onto beta.
+#[cfg(desktop)]
+fn beta_channel_selected() -> bool {
+    let home = std::env::var("HOME").unwrap_or_default();
+    std::fs::read_to_string(std::path::Path::new(&home).join(".hivematrix/config.json"))
+        .map(|t| {
+            t.split_whitespace()
+                .collect::<String>()
+                .contains("\"updateChannel\":\"beta\"")
+        })
+        .unwrap_or(false)
+}
+
+/// Build the updater for the channel the operator is on. Stable uses the
+/// endpoint compiled into tauri.conf.json; beta overrides it at runtime, which
+/// is why switching channels needs no rebuild and no reinstall.
+///
+/// A beta URL that fails to parse degrades to the STABLE endpoint rather than
+/// leaving the app with no updater at all — losing updates entirely is the
+/// worse failure, and it is the safe direction.
+#[cfg(desktop)]
+fn channel_updater(app: &tauri::AppHandle) -> tauri_plugin_updater::Result<tauri_plugin_updater::Updater> {
+    use tauri_plugin_updater::UpdaterExt;
+    let mut builder = app.updater_builder();
+    if beta_channel_selected() {
+        match tauri::Url::parse(BETA_FEED_URL) {
+            Ok(url) => {
+                log::info!("updater: beta channel selected — polling {BETA_FEED_URL}");
+                builder = builder.endpoints(vec![url])?;
+            }
+            Err(e) => log::error!("updater: beta feed URL is invalid ({e}) — staying on the stable feed"),
+        }
+    } else {
+        log::info!("updater: stable channel");
+    }
+    builder.build()
+}
+
 /// Best-effort background update check via the Tauri updater (GitHub Releases
 /// feed). Because the UI is served by the daemon over http (no Tauri IPC), the
 /// check is driven from Rust, not JS. No-ops safely when the updater isn't
@@ -421,11 +473,10 @@ fn should_install_update() -> bool {
 /// daemon's boot gate then runs migrations + records the new version.
 #[cfg(desktop)]
 fn check_for_update(app: tauri::AppHandle) {
-    use tauri_plugin_updater::UpdaterExt;
     tauri::async_runtime::spawn(async move {
         let current = app.package_info().version.to_string();
         log::info!("updater: checking feed (current version {current})");
-        let updater = match app.updater() {
+        let updater = match channel_updater(&app) {
             Ok(u) => u,
             Err(e) => { log::warn!("updater: not configured: {e}"); return; }
         };
