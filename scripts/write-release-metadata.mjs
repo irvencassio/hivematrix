@@ -16,9 +16,22 @@ import { execFileSync } from "node:child_process";
 
 export const SIGNING_IDENTITY = "Developer ID Application: Irven Cassio (8B3CHTY93V)";
 export const FEED_ASSET = "hivematrix-core.json";
+export const BETA_FEED_ASSET = "hivematrix-core-beta.json";
+export const BETA_CHANNEL_TAG = "beta-channel";
+
+/**
+ * Feed asset + URL for a channel. Mirrors src/lib/updater/channel.ts — the beta
+ * feed lives on a fixed pointer release because a beta must never be "Latest"
+ * (see scripts/publish-release.sh).
+ */
+export function feedForChannel(channel) {
+  return channel === "beta"
+    ? { channel: "beta", asset: BETA_FEED_ASSET, url: `https://github.com/irvencassio/hivematrix/releases/download/${BETA_CHANNEL_TAG}/${BETA_FEED_ASSET}` }
+    : { channel: "stable", asset: FEED_ASSET, url: `https://github.com/irvencassio/hivematrix/releases/latest/download/${FEED_ASSET}` };
+}
 
 /** Pure: assemble the metadata object (no fs/sha). Tested-shape helper. */
-export function assembleMetadata({ productName, bundleId, version, buildNumber, gitCommit, notarization, artifacts }) {
+export function assembleMetadata({ productName, bundleId, version, buildNumber, gitCommit, notarization, artifacts, channel = "stable" }) {
   return {
     productName,
     bundleId,
@@ -27,10 +40,7 @@ export function assembleMetadata({ productName, bundleId, version, buildNumber, 
     gitCommit,
     signingIdentity: SIGNING_IDENTITY,
     notarizationStatus: notarization,
-    feed: {
-      asset: FEED_ASSET,
-      url: `https://github.com/irvencassio/hivematrix/releases/latest/download/${FEED_ASSET}`,
-    },
+    feed: feedForChannel(channel),
     artifacts,
     generatedAt: new Date().toISOString(),
   };
@@ -67,7 +77,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     .filter((p) => existsSync(p))
     .map((p) => ({ path: p, bytes: statSync(p).size, sha256: sha256(p) }));
 
-  const metadata = assembleMetadata({ ...state, notarization, artifacts });
+  const channel = process.env.HIVEMATRIX_RELEASE_CHANNEL === "beta" ? "beta" : "stable";
+  const metadata = assembleMetadata({ ...state, notarization, artifacts, channel });
   mkdirSync(outDir, { recursive: true });
   const out = join(outDir, "release-metadata.json");
   writeFileSync(out, JSON.stringify(metadata, null, 2) + "\n");

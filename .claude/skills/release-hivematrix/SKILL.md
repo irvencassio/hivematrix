@@ -19,11 +19,15 @@ options: |
 Deterministically release HiveMatrix using the canonical script:
 
 ```bash
-scripts/developer-id-release.sh --release                    # Full: bump→build→notarize→staple→publish→verify
+scripts/developer-id-release.sh --release                    # Full: bump→build→notarize→staple→publish→verify (BETA channel — the default)
+scripts/developer-id-release.sh --release --stable           # Same, promoted to STABLE (website download + everyone)
 scripts/developer-id-release.sh --verify-only                # Gates + prereqs only
 scripts/developer-id-release.sh --build-only                 # Local signed build (notarized)
 scripts/developer-id-release.sh --release --marketing-version 0.2.0 --note "Fix login bug"
 ```
+
+**`--release` publishes to BETA by default** — only installs that opted in via
+Settings → Updates → Channel receive it. Pass `--stable` to promote to everyone.
 
 This wraps `scripts/developer-id-release.sh`, the one canonical HiveMatrix macOS release command. Developer ID signing + Apple notarization for the public website DMG and external auto-update feed (NOT Mac App Store).
 

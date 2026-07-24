@@ -20,11 +20,16 @@ options: |
 
 **One canonical command — do not hand-roll the pipeline:**
 ```bash
-./scripts/developer-id-release.sh --release            # bump→build→sign→notarize→staple→publish→verify
+./scripts/developer-id-release.sh --release            # bump→build→sign→notarize→staple→publish→verify — BETA channel (default)
+./scripts/developer-id-release.sh --release --stable   # same, published to STABLE (website download + everyone)
 ./scripts/developer-id-release.sh --verify-only        # prereqs + gates, no build
 ./scripts/developer-id-release.sh --build-only --skip-notarize   # local dry build
 ./scripts/developer-id-release.sh --release --marketing-version 0.2.0 --note "…"
 ```
+**Publishing defaults to BETA.** `--release` alone ships only to installs that
+opted in via Settings → Updates → Channel; the website download and every other
+install stay on stable. Pass `--stable` to promote. Channel model: DECISIONS.md
+Q25 and `docs/RELEASE.md` § Update channels.
 Exit codes: `0` ok · `1` prereq/step failure · `2` bad usage. Full reference:
 `docs/agent-commands/developer-id-release.md`. Design + migration rationale:
 `docs/superpowers/specs/2026-07-05-developer-id-release-design.md`.
@@ -43,7 +48,8 @@ external auto-update feed. **Never** switch this to Mac App Store signing.
 | Provisioning profile name | `HiveMatrix Core` (type: Developer ID Application, platform OSX) |
 | Profile app-id | `8B3CHTY93V.com.irvcassio.hivematrix.core` |
 | Notary keychain profile | `hivematrix` |
-| Updater feed asset | `hivematrix-core.json` (legacy `latest.json` is frozen) |
+| Updater feed asset (stable) | `hivematrix-core.json` at `releases/latest/download/` (legacy `latest.json` is frozen) |
+| Updater feed asset (beta) | `hivematrix-core-beta.json` on the permanent `beta-channel` pointer release |
 | Apple ID (notary) | `cassio.irv@gmail.com` |
 
 ## Gotchas that WILL trip you (learned the hard way)
@@ -100,7 +106,7 @@ website DMG once.
 
 ## Outputs
 `build/developer-id/<version>-b<build>/`: signed `.app.zip`, `.dmg`,
-`.app.tar.gz`+`.sig`, `hivematrix-core.json`, and `release-metadata.json`
+`.app.tar.gz`+`.sig`, `hivematrix-core.json`, `hivematrix-core-beta.json`, and `release-metadata.json`
 (product, bundleId, version, build, gitCommit, signingIdentity, notarizationStatus,
 feed URL, per-artifact sha256). `build/` is gitignored.
 

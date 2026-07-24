@@ -8,12 +8,15 @@
 # Usage:
 #   ./scripts/developer-id-release.sh --verify-only
 #   ./scripts/developer-id-release.sh --build-only [--skip-notarize]
-#   ./scripts/developer-id-release.sh --release [--marketing-version X.Y.Z]
+#   ./scripts/developer-id-release.sh --release [--stable] [--marketing-version X.Y.Z]
 #
 # Flags:
 #   --verify-only              gates + prereqs only; no build, no bump  (exit 0/1)
 #   --build-only|--archive-only build a signed (notarized) .app+.dmg locally; no publish, no commit
-#   --release                  full: bump -> build -> notarize -> staple -> publish core feed -> verify
+#   --release                  full: bump -> build -> notarize -> staple -> publish feed -> verify
+#   --beta                     publish to the BETA channel (DEFAULT)
+#   --stable                   publish to the STABLE channel — what the website
+#                              download and every non-opted-in install receive
 #   --marketing-version X.Y.Z  set the marketing version (else auto patch-bump on --release)
 #   --skip-notarize            local dry run only; REFUSED with --release
 #
@@ -36,6 +39,9 @@ OUT_ROOT="build/developer-id"
 MODE=""
 MARKETING_VERSION=""
 SKIP_NOTARIZE=0
+# Beta by default: shipping a build is cheap, promoting it to everyone is the
+# deliberate act. Mirrors Canopy Terminal's build-dmg.sh --stable/--beta.
+CHANNEL="beta"
 NOTE="Developer ID release"
 
 die()  { echo "✗ developer-id-release: $*" >&2; exit 1; }
@@ -47,12 +53,14 @@ developer-id-release.sh — canonical HiveMatrix macOS Developer ID release comm
 Usage:
   ./scripts/developer-id-release.sh --verify-only
   ./scripts/developer-id-release.sh --build-only [--skip-notarize]
-  ./scripts/developer-id-release.sh --release [--marketing-version X.Y.Z] [--note "text"]
+  ./scripts/developer-id-release.sh --release [--stable] [--marketing-version X.Y.Z] [--note "text"]
 
 Flags:
   --verify-only               prereqs + gates only; no build, no bump
   --build-only | --archive-only   build a signed (notarized) .app+.dmg locally; no publish/commit
-  --release                   full: bump -> build -> notarize -> staple -> publish core feed -> verify
+  --release                   full: bump -> build -> notarize -> staple -> publish feed -> verify
+  --beta                      publish to the BETA channel (DEFAULT)
+  --stable                    publish to the STABLE channel (website download + everyone not opted in)
   --marketing-version X.Y.Z   set the marketing version (else auto patch-bump on --release)
   --skip-notarize             local dry run only; REFUSED with --release
   --note "text"               release note (changelog + commit message)
@@ -67,6 +75,8 @@ while [[ $# -gt 0 ]]; do
     --verify-only)                 MODE="verify" ;;
     --build-only|--archive-only)   MODE="build" ;;
     --release)                     MODE="release" ;;
+    --beta)                        CHANNEL="beta" ;;
+    --stable)                      CHANNEL="stable" ;;
     --marketing-version)           MARKETING_VERSION="${2:-}"; shift ;;
     --marketing-version=*)         MARKETING_VERSION="${1#*=}" ;;
     --note)                        NOTE="${2:-}"; shift ;;
@@ -91,6 +101,7 @@ echo "  bundle id : $BUNDLE_ID"
 echo "  team      : $TEAM_ID"
 echo "  identity  : $IDENTITY"
 echo "  mode      : $MODE$SKIP_LABEL"
+echo "  channel   : $CHANNEL"
 
 # ── Credential mechanism (printed, never the secret) ────────────────────────
 # shellcheck source=scripts/notary-credentials.sh
@@ -211,10 +222,10 @@ bash scripts/build-dmg.sh "$TARGET_VERSION"
 
 # ── Publish (release only) ──────────────────────────────────────────────────
 if [[ "$MODE" == "release" ]]; then
-  step "Publish GitHub release + core update feed"
-  bash scripts/publish-release.sh
-  step "Verify live auto-update feed"
-  npm run release:verify
+  step "Publish GitHub release + $CHANNEL update feed"
+  bash scripts/publish-release.sh "--$CHANNEL"
+  step "Verify live $CHANNEL auto-update feed"
+  npm run release:verify -- "--$CHANNEL"
 fi
 
 # ── Release metadata + artifact hashes ──────────────────────────────────────
@@ -228,8 +239,9 @@ ART=(
   "$BUNDLE/$PRODUCT.app.zip"
   "$BUNDLE/$PRODUCT-$TARGET_VERSION.dmg"
   "$BUNDLE/hivematrix-core.json"
+  "$BUNDLE/hivematrix-core-beta.json"
 )
-META="$(node scripts/write-release-metadata.mjs "$OUT_DIR" "$NSTATUS" "${ART[@]}")"
+META="$(HIVEMATRIX_RELEASE_CHANNEL="$CHANNEL" node scripts/write-release-metadata.mjs "$OUT_DIR" "$NSTATUS" "${ART[@]}")"
 # Mirror the distributable artifacts into the output dir for a self-contained drop.
 mkdir -p "$OUT_DIR"
 for a in "${ART[@]}"; do [[ -f "$a" ]] && cp -f "$a" "$OUT_DIR/" || true; done
@@ -260,5 +272,5 @@ fi
 step "Done"
 case "$MODE" in
   build)   echo "✓ Built $PRODUCT $TARGET_VERSION (b$BUILD_NUMBER)${SKIP_LABEL:+, un-notarized dry run}. Not published." ;;
-  release) echo "✓ Released $PRODUCT $TARGET_VERSION (b$BUILD_NUMBER). Core update feed is live; DMG published." ;;
+  release) echo "✓ Released $PRODUCT $TARGET_VERSION (b$BUILD_NUMBER) on the $CHANNEL channel. Update feed is live; DMG published." ;;
 esac

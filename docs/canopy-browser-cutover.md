@@ -32,12 +32,18 @@ because the app's `PolicyEngine` recognises the same vocabulary:
 `form_fill` / `site_ops` are writes, and an unrecognised action **fails closed**
 (treated as a write). So there is no translation layer to drift.
 
-## Policy lives in the app. Do not re-check it.
+## Policy lives in the app — *on the canopy engine*. Do not re-check it there.
 
 HiveMatrix used to run its own read-only `accessMode` gate before dispatch
-(DECISIONS.md Q20). **That gate was removed.** The app is the single enforcement
-point: it knows the site list, the access modes, the domain scope and the
-ownership rules, and it audits its own decisions.
+(DECISIONS.md Q20). **That gate was removed from this path.** The app is the
+single enforcement point: it knows the site list, the access modes, the domain
+scope and the ownership rules, and it audits its own decisions.
+
+This is scoped to `engine: "canopy"`. The `desktop` engine keeps a gate of its
+own — see [Rollback](#rollback) — because there is no app in that loop for
+policy to live in. The asymmetry is deliberate: **policy follows the enforcement
+point**, and duplicating it is only wrong when something else is already
+enforcing.
 
 A refusal comes back as `refusal: { code, siteId, siteName, message }`. The
 `message` is surfaced **verbatim** — never paraphrased, never second-guessed,
@@ -106,10 +112,38 @@ One edit to `~/.hivematrix/config.json`:
 reachable. Deleting them is a **separate, later step** and was deliberately not
 done here.
 
-**Known cost of the lever:** the desktop path has no Canopy Browser in the loop,
-and HiveMatrix's own read-only gate is gone, so rolled back to `"desktop"` nothing
-enforces read-only locally. Treat `"desktop"` as an emergency lever, not a
-supported mode.
+### The rollback restores the safety too (2026-07-24, same day)
+
+As first landed, T6 removed the read-only gate outright — which meant rolling
+back to `"desktop"` silently rolled back the *protection* as well: no Canopy
+Browser in the loop, and no local check either, so a write-shaped job against a
+read-only site just ran. A rollback lever must reproduce the pre-cutover
+behaviour, safety included; it must not double as a way to switch the guardrail
+off.
+
+So the gate is back — **as the desktop path's own check, not as a duplicate of
+the app's**:
+
+| engine | who enforces read-only | what the caller sees |
+| --- | --- | --- |
+| `canopy` | the Canopy Browser app, alone | the app's `refusal.message`, **verbatim** |
+| `desktop` | `executeBrowserBeeRun`, locally, before dispatch | the pre-T6 refusal text |
+
+Both emit the same `browser:blocked` audit event, so the Command Log's Blocked
+filter behaves identically on either engine.
+
+The desktop check is exactly the pre-T6 one (DECISIONS.md Q20): write-shaped job
+types (`form_fill`, `site_ops`) against a `browser_sites` row whose `accessMode`
+is `readonly` are refused before any task is created; read-shaped types
+(`authenticated_research`, `capture`, `triage`) are always allowed. Note that
+`mode: "open"` normalizes to the write-shaped default `site_ops` — that was true
+before the cutover too, and is unchanged.
+
+**Remaining cost of the lever:** the desktop path still drives a *separate*
+browser that holds no signed-in session, so authenticated workflows hit login
+walls — the original reason for the cutover. `"desktop"` is still an emergency
+lever, not a supported mode. What it is no longer is a silent loss of read-only
+protection.
 
 ## What has actually been exercised
 

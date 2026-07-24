@@ -1,11 +1,11 @@
 /**
  * Lightweight update indicator backing the console's "update available" pill.
  *
- * Checks the SAME GitHub release feed the Tauri app-updater consumes
- * (releases/latest/download/hivematrix-core.json) and compares its version to
- * the running bundle. The console polls getUpdateStatus(); applyUpdateViaRelaunch()
- * relaunches the desktop app so its updater pulls + installs (the daemon can't
- * touch the App-Management-protected /Applications bundle itself).
+ * Checks the SAME GitHub release feed the Tauri app-updater consumes — for the
+ * SAME channel — and compares its version to the running bundle. The console
+ * polls getUpdateStatus(); applyUpdateViaRelaunch() relaunches the desktop app
+ * so its updater pulls + installs (the daemon can't touch the
+ * App-Management-protected /Applications bundle itself).
  */
 
 import { spawn } from "child_process";
@@ -13,17 +13,22 @@ import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { dirname, join } from "path";
 import { getBundledVersion } from "@/lib/version/bundle-version";
+import { feedUrlForChannel, readUpdateChannel, type UpdateChannel } from "./channel";
 
 /** Flag file the desktop app checks to force one install even when auto-update is off. */
 export const FORCE_UPDATE_FLAG = join(homedir(), ".hivematrix", ".force-update");
 export const UPDATE_IN_PROGRESS_FLAG = join(homedir(), ".hivematrix", ".update-in-progress.json");
 
-// Must match plugins.updater.endpoints in src-tauri/tauri.conf.json.
+// The feed URL is chosen per CHANNEL at check time (see channel.ts) — the
+// stable feed is the same one plugins.updater.endpoints in
+// src-tauri/tauri.conf.json points at, and the Rust shell overrides its
+// endpoint to the beta feed at runtime when the operator has opted in. Both
+// sides read the same `updateChannel` key, so the pill and the installer can
+// never disagree about which channel is live.
+//
 // The core identity (com.irvcassio.hivematrix.core) polls its own feed asset so
 // the frozen old com.cassio.hivematrix `latest.json` never auto-jumps installs
 // across bundle IDs (which would reset every macOS TCC grant).
-const FEED_URL =
-  "https://github.com/irvencassio/hivematrix/releases/latest/download/hivematrix-core.json";
 const TTL_MS = 60 * 1000;
 /** Failed checks expire fast — see the ttl selection in getUpdateStatus. */
 const ERROR_TTL_MS = 5 * 1000;
@@ -35,6 +40,8 @@ export interface UpdateStatus {
   latest: string | null;
   updateAvailable: boolean;
   checkedAt: string;
+  /** Which feed this answer came from. Surfaced so the console can label the pill. */
+  channel: UpdateChannel;
   applying?: boolean;
   applyingVersion?: string;
   needsDaemonRestart?: boolean;
@@ -42,7 +49,9 @@ export interface UpdateStatus {
   error?: string;
 }
 
-let cache: { at: number; status: UpdateStatus } | null = null;
+// Keyed by channel: switching the channel in Settings must not be answered from
+// the other channel's cached result for up to a minute.
+let cache: { at: number; channel: UpdateChannel; status: UpdateStatus } | null = null;
 
 function clearPath(path: string): void {
   try { rmSync(path, { force: true }); } catch { /* best effort */ }
@@ -76,16 +85,20 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeof fetch; updateInProgressPath?: string; forceFlagPath?: string; nowMs?: number } = {}): Promise<UpdateStatus> {
+export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeof fetch; updateInProgressPath?: string; forceFlagPath?: string; nowMs?: number; channel?: UpdateChannel } = {}): Promise<UpdateStatus> {
   const current = getBundledVersion();
   const now = opts.nowMs ?? Date.now();
+  // Resolved per call, not once at module load: the operator can flip the
+  // channel in Settings while the daemon keeps running.
+  const channel = opts.channel ?? readUpdateChannel();
+  const FEED_URL = feedUrlForChannel(channel);
   // A FAILED check must not be cached as long as a successful one. A single
   // transient fetch timeout otherwise pins `updateAvailable:false` for the full
   // TTL, so the console's update indicator stays dark while an update really is
   // published — which is exactly how 0.1.220 looked "not staged" despite being
   // live on the feed. Errors expire fast so the next poll re-checks.
   const ttl = cache?.status.error ? ERROR_TTL_MS : TTL_MS;
-  if (!opts.force && cache && now - cache.at < ttl) return cache.status;
+  if (!opts.force && cache && cache.channel === channel && now - cache.at < ttl) return cache.status;
   const fetchImpl = opts.fetchImpl ?? fetch;
   let status: UpdateStatus;
   try {
@@ -110,6 +123,7 @@ export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeo
       latest,
       updateAvailable: !!latest && compareVersions(latest, current) > 0,
       checkedAt: new Date().toISOString(),
+      channel,
     };
     const applying = applyingMarker(opts.updateInProgressPath, now);
     if (status.updateAvailable && applying && applying.version === latest) {
@@ -131,10 +145,11 @@ export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeo
       latest: null,
       updateAvailable: false,
       checkedAt: new Date().toISOString(),
+      channel,
       error: e instanceof Error ? e.message : String(e),
     };
   }
-  cache = { at: now, status };
+  cache = { at: now, channel, status };
   return status;
 }
 
@@ -145,19 +160,19 @@ export async function getUpdateStatus(opts: { force?: boolean; fetchImpl?: typeo
  */
 export function applyUpdateViaRelaunch(
   spawnImpl: typeof spawn = spawn,
-  opts: { fetchImpl?: typeof fetch; forceFlagPath?: string; updateInProgressPath?: string } = {},
+  opts: { fetchImpl?: typeof fetch; forceFlagPath?: string; updateInProgressPath?: string; channel?: UpdateChannel } = {},
 ): Promise<{ ok: boolean; detail: string; version?: string }> {
   return applyUpdateViaRelaunchAsync(spawnImpl, opts);
 }
 
 async function applyUpdateViaRelaunchAsync(
   spawnImpl: typeof spawn,
-  opts: { fetchImpl?: typeof fetch; forceFlagPath?: string; updateInProgressPath?: string },
+  opts: { fetchImpl?: typeof fetch; forceFlagPath?: string; updateInProgressPath?: string; channel?: UpdateChannel },
 ): Promise<{ ok: boolean; detail: string; version?: string }> {
   const forceFlagPath = opts.forceFlagPath ?? FORCE_UPDATE_FLAG;
   const updateInProgressPath = opts.updateInProgressPath ?? UPDATE_IN_PROGRESS_FLAG;
   try {
-    const status = await getUpdateStatus({ force: true, fetchImpl: opts.fetchImpl, updateInProgressPath, forceFlagPath });
+    const status = await getUpdateStatus({ force: true, fetchImpl: opts.fetchImpl, updateInProgressPath, forceFlagPath, channel: opts.channel });
     if (!status.updateAvailable || !status.latest) {
       clearPath(forceFlagPath);
       clearPath(updateInProgressPath);

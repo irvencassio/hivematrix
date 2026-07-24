@@ -396,7 +396,10 @@ test("the canopy engine sends jobType as the policy action and never re-checks p
   const { act } = installCanopyFetchStub(t, CANOPY_OK_RESPONSE, "task-canopy-action-1");
 
   // A read-only site in HiveMatrix's local display cache. Pre-T6 this alone
-  // refused the run; now the app decides, and the local row is metadata only.
+  // refused the run; on the canopy engine the app decides and the local row is
+  // metadata only. (The desktop engine still refuses on exactly this row — see
+  // "executeBrowserBeeRun blocks form_fill against a readonly-access site".
+  // The asymmetry is the point: policy follows the enforcement point.)
   upsertBrowserSite({
     id: "canopy-readonly-cache",
     displayName: "Canopy Readonly Cache",
@@ -575,16 +578,63 @@ test("engine 'desktop' rolls the whole cutover back to the pre-T6 dispatch path"
   t.after(() => getConnectivityPolicy().setManualOverride(null));
   // The file-level config already pins engine:"desktop" — this asserts the lever
   // actually works, i.e. rollback is one config edit and nothing more.
+  //
+  // Deliberately a domain with NO browser_sites row: `mode: "open"` normalizes
+  // to the write-shaped default jobType `site_ops`, and the desktop path's
+  // restored read-only gate would (correctly) refuse it on any of the read-only
+  // fixture domains. This test is about the engine lever, not about policy.
   const { dispatched } = installBrowserLaneFetchStub(t, "task-rollback-1");
 
   const out = await executeLaneTool("hivematrix_browser", {
     mode: "open",
     objective: "Open the report",
-    startUrl: "https://canopy-ok.example.com/report",
+    startUrl: "https://desktop-rollback.example.com/report",
   }, browserCtx());
 
   assert.match(out, /Created Browser Lane task/, "engine 'desktop' must restore the pre-T6 dispatch path");
   assert.equal(dispatched.length, 1);
+});
+
+/**
+ * The desktop rollback path's OWN read-only gate (restored 2026-07-24).
+ *
+ * T6 removed HiveMatrix's duplicate accessMode check because the Canopy Browser
+ * app is the single enforcement point — correct for `engine: "canopy"`. But
+ * `engine: "desktop"` puts no app in the loop, so removing it there left the
+ * rollback lever with NO read-only protection at all. A rollback must restore
+ * the pre-cutover behaviour, safety included.
+ */
+test("executeBrowserBeeRun blocks form_fill against a readonly-access site and never dispatches", async (t) => {
+  getConnectivityPolicy().setManualOverride("cloud-ok");
+  t.after(() => getConnectivityPolicy().setManualOverride(null));
+  const { dispatched } = installBrowserLaneFetchStub(t, "task-should-not-exist");
+
+  upsertBrowserSite({
+    id: "readonly-crm-a",
+    displayName: "Readonly CRM A",
+    homeUrl: "https://readonly-crm-a.example.com/home",
+    allowedDomains: ["readonly-crm-a.example.com"],
+    accessMode: "readonly",
+  } as never);
+
+  const out = await executeLaneTool("hivematrix_browser", {
+    mode: "workflow",
+    objective: "Fill out the lead intake form",
+    startUrl: "https://readonly-crm-a.example.com/leads/new",
+    jobType: "form_fill",
+  }, browserCtx("agent"));
+
+  assert.match(out, /Error/, "a write-shaped job against a read-only site must be refused");
+  assert.match(out, /read-only/i, "the refusal must name the reason as read-only access");
+  assert.match(out, /Readonly CRM A/, "the refusal must name the site");
+  assert.equal(dispatched.length, 0, "a read-only site must never reach task dispatch for a write-shaped job");
+
+  // Same event the canopy path re-emits on an app refusal, so the Command Log's
+  // Blocked filter behaves identically whichever engine is live.
+  const entry = readAudit({ event: "browser:blocked" }).find((e) => e.target === "readonly-crm-a" && e.summary?.includes("site is read-only"));
+  assert.ok(entry, "a desktop-path refusal must produce a browser:blocked audit event");
+  assert.equal(entry!.status, "blocked");
+  assert.equal(entry!.actorKind, "agent");
 });
 
 test("executeBrowserBeeRun allows authenticated_research against a readonly-access site and stamps actorKind", async (t) => {

@@ -1148,6 +1148,11 @@ async function executeBrowserLane(args: Record<string, unknown>, ctx: LaneToolCo
     // dispatches the work to a generic agent driving Chrome/Safari through
     // Desktop Lane. One config edit — {"browserLane":{"engine":"desktop"}} in
     // ~/.hivematrix/config.json — is the whole rollback.
+    //
+    // Policy is asymmetric on purpose, because the two engines have different
+    // enforcement points: "canopy" defers entirely to the app (no HiveMatrix
+    // check, refusal surfaced verbatim); "desktop" runs its own read-only gate
+    // inside executeBrowserBeeRun, because nothing else in that loop would.
     const { resolveBrowserLaneEngine } = await import("@/lib/browser-lane/canopy-client");
     if (resolveBrowserLaneEngine() === "canopy") {
       return executeCanopyBrowserRun(runArgs, ctx);
@@ -1167,10 +1172,13 @@ async function executeBrowserLane(args: Record<string, unknown>, ctx: LaneToolCo
  *  1. **It does not re-check site policy.** Read/write access mode, domain
  *     scope and site ownership are enforced inside the app — the single
  *     enforcement point. HiveMatrix's own duplicate `accessMode` gate (the
- *     old DECISIONS.md Q20 check) was removed with this cutover; the app's
- *     `refusal.message` is surfaced VERBATIM instead. The `browser:blocked`
- *     audit event that gate used to emit is re-emitted here on receipt of a
- *     refusal, so the Command Log's Blocked filter keeps working.
+ *     old DECISIONS.md Q20 check) was removed from THIS path with the cutover;
+ *     the app's `refusal.message` is surfaced VERBATIM instead. The
+ *     `browser:blocked` audit event that gate used to emit is re-emitted here
+ *     on receipt of a refusal, so the Command Log's Blocked filter keeps
+ *     working. (The `desktop` rollback path keeps a gate of its OWN — no app is
+ *     in that loop, so there it is the only enforcement there is, not a
+ *     duplicate. See `executeBrowserBeeRun`.)
  *  2. **It does not touch credentials.** A sign-in wall comes back as
  *     `humanLoginRequired` with `finalPage: null`; it is passed through
  *     unchanged. Filling credentials is a human click in the app, always.
@@ -1394,18 +1402,44 @@ async function executeBrowserBeeRun(args: Record<string, unknown>, ctx: LaneTool
     return `Error: invalid Browser Lane request — ${msg}`;
   }
 
-  // T6 (2026-07-24): HiveMatrix's own read-only access-mode gate used to live
-  // here (DECISIONS.md Q20). It was REMOVED with the Canopy Browser cutover —
-  // site policy (accessMode, domain scope, ownership) is enforced inside the
-  // Canopy Browser app, the single enforcement point, and a client must not
-  // re-check it. executeCanopyBrowserRun surfaces the app's refusal message
-  // verbatim and re-emits the `browser:blocked` audit event this block used to
-  // produce (the Command Log's Blocked filter depends on it).
+  // ── The DESKTOP path's own read-only gate ────────────────────────────────
   //
-  // CONSEQUENCE, stated plainly: this desktop path has no Canopy Browser in the
-  // loop, so with `browserLane.engine` rolled back to "desktop" nothing enforces
-  // read-only here. That is the price of the rollback lever, and it disappears
-  // when this path is deleted.
+  // This is NOT the duplicate of the app's policy that T6 removed. It is the
+  // only policy check that exists on this path at all.
+  //
+  // Under `browserLane.engine: "canopy"` HiveMatrix does not check policy: the
+  // Canopy Browser app is the single enforcement point and its refusal is
+  // surfaced verbatim (see executeCanopyBrowserRun). But `engine: "desktop"` is
+  // the rollback lever, and it dispatches the work to a generic agent driving
+  // Chrome/Safari — no Canopy Browser is anywhere in that loop, so with no gate
+  // here the rollback silently drops read-only protection entirely. A rollback
+  // lever must restore the PRE-cutover behaviour, safety included; it must not
+  // be a way to turn the guardrail off.
+  //
+  // So the pre-T6 check (DECISIONS.md Q20/Q24) lives here, on the desktop path
+  // only: a readonly-access site (browser_sites.accessMode, set via the site
+  // picker) refuses write-shaped jobs — form_fill, site_ops — before any
+  // dispatch/task-creation happens below. Read-shaped jobs
+  // (authenticated_research, capture, triage) stay always-allowed. Reuses the
+  // existing domain-to-site matcher rather than a new lookup algorithm.
+  if (payload.jobType === "form_fill" || payload.jobType === "site_ops") {
+    const { matchBrowserSiteReadiness, getBrowserSite } = await import("@/lib/browser-lane/store");
+    const match = matchBrowserSiteReadiness(payload.allowedDomains);
+    const site = match.matched && match.siteId ? getBrowserSite(match.siteId) : null;
+    if (site?.accessMode === "readonly") {
+      // A refusal is an event the operator must be able to see. Without this the
+      // gate is silent: the job never runs and nothing explains why. Feeds the
+      // Command Log's Blocked filter — the same `browser:blocked` event the
+      // canopy path re-emits when the app refuses, so the filter behaves
+      // identically on both engines.
+      recordAudit({
+        ts: "", event: "browser:blocked", actor: ctx.requestedBy, actorKind: ctx.actorKind,
+        project: ctx.project, target: site.id, status: "blocked",
+        summary: `${payload.jobType} refused — site is read-only`,
+      });
+      return `Error: ${site.displayName} is configured read-only — the ${payload.jobType} job type would write to the site, which is refused. Switch its access mode to read-write in Browser Lane settings if this action is intended.`;
+    }
+  }
 
   // One engine: Claude drives a real desktop browser through Desktop Lane. The
   // Codex Computer Use branch was removed (2026-07-22) — gpt-5.4-computer-use
