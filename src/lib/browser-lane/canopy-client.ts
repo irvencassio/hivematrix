@@ -150,10 +150,12 @@ export async function requestCanopyBrowserAct(request: CanopyActRequest): Promis
 export type BrowserLaneEngine = "desktop" | "canopy";
 
 /**
- * T6 lands the flag defaulted to "desktop" so the cutover is opt-in first; the
- * final step of T6 flips it to "canopy".
+ * T6 step 6 flipped this from "desktop" to "canopy": the Canopy Browser app is
+ * now the engine. The desktop path is still intact and reachable — put
+ * {"browserLane": {"engine": "desktop"}} in ~/.hivematrix/config.json to roll
+ * the whole cutover back with one edit.
  */
-export const DEFAULT_BROWSER_LANE_ENGINE: BrowserLaneEngine = "desktop";
+export const DEFAULT_BROWSER_LANE_ENGINE: BrowserLaneEngine = "canopy";
 
 export function resolveBrowserLaneEngine(config?: Record<string, unknown>): BrowserLaneEngine {
   const cfg = config ?? readHiveConfig();

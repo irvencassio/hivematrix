@@ -1703,3 +1703,63 @@ patternNudgeEnabled defaults false even via DEFAULT_CONFIG spread (fresh
 install stays off)", "tickPatternNudge: same kind within 3-day cooldown
 suppresses delivery", "setHeartbeatConfig: enabling Pattern Nudges seeds
 lastPatternNudgeCheckedDay only — NOT lastPatternNudgeSentDay".
+
+## Q24 — Browser Lane's engine is the Canopy Browser app; HiveMatrix is a client (2026-07-24)
+
+**Decision.** Browser Lane's stateful modes (`open`, `snapshot`, `workflow`) run
+**inside the standalone Canopy Browser app**, not in a Chrome/Safari session
+driven by a dispatched agent. HiveMatrix talks to it over **loopback HTTP** —
+`POST {CANOPY_BROWSER_BASE_URL, default http://127.0.0.1:4021}/act` with an
+`{action, requester, steps}` envelope — deliberately **not** MCP: HiveMatrix has
+no MCP client and does not gain one, and the app's own `docs/automation-api.md`
+names this endpoint as the HiveMatrix integration path. `search`/`read` are
+untouched and still go to the read service on `:4011`.
+
+This **supersedes** `docs/browser-lane-claude-native.md`, which declared
+"Claude drives a real desktop browser through Desktop Lane" a closed decision.
+The Codex half of that decision stands; the engine half does not. Driving a
+*separate* browser process was the defect: that browser holds no session, so
+every authenticated workflow — the reason the lane exists — hit a login wall.
+
+**Policy is not duplicated.** HiveMatrix's own read-only `accessMode` gate (Q20)
+was **removed**; the app is the single enforcement point and its
+`refusal.message` is surfaced verbatim, `humanLoginRequired` passed through
+unchanged. Because that gate was the ONLY producer of the `browser:blocked`
+audit event on this path, the client **re-emits `browser:blocked` on receipt of
+a refusal** — without it the Command Log's Blocked filter silently empties.
+`browser_sites` + `src/lib/browser-lane/store.ts` are **kept as a display
+cache** (console, system-readiness, lane-setup, release-smoke read them).
+
+**Rollback is one config edit:** `{"browserLane": {"engine": "desktop"}}` in
+`~/.hivematrix/config.json`. `executeBrowserBeeRun`, `browser-lane-app/` and
+packaging are all intact; deleting them is a separate, later decision. Known
+cost of the lever: the desktop path has no app in the loop and no local gate any
+more, so rolled back, nothing enforces read-only. It is an emergency lever, not
+a supported mode.
+
+**Honest limit.** The authenticated multi-step path is **unproven**: Canopy
+Browser sessions start empty, so no run has yet returned genuinely logged-in
+content. Live exercise so far covers navigate→extract on a real page, a real
+`refusedReadOnly` refusal, and the documented HTTP 400 on a malformed body.
+Also: `/act` drives selectors, not prose, so Browser Lane's free-text `steps`
+are reported as **not executed** rather than silently dropped.
+
+**Code.** `src/lib/browser-lane/canopy-client.ts` (new — `requestCanopyBrowserAct`,
+`resolveCanopyBrowserBaseUrl`, `resolveBrowserLaneEngine`, `buildCanopyActSteps`,
+`summarizeCanopyActResult`); `src/lib/orchestrator/lane-tools.ts`
+(`executeCanopyBrowserRun`, `recordCanopyBrowserBoardTask`, the engine branch in
+`executeBrowserLane`, and the deletion of the Q20 gate);
+`src/lib/browser-lane/jobs.ts` (`buildCanopyBrowserTaskDescription`);
+`src/daemon/server.ts` (COO `createTask` picks the description by engine);
+`docs/canopy-browser-cutover.md` (new); `docs/browser-lane-claude-native.md`
+(superseded banner); `COMPONENT-MAP.md`.
+
+**Provers:** `src/lib/browser-lane/canopy-client.test.ts` — "resolveBrowserLaneEngine
+defaults to canopy and honours an explicit desktop rollback",
+"buildCanopyActSteps reports prose steps as unexecutable instead of silently
+dropping them". `src/lib/orchestrator/lane-tools.test.ts` — "the canopy engine
+surfaces the app's refusal verbatim and re-emits browser:blocked", "the canopy
+engine writes a board task record (done, source browser-lane, transcript in
+output)", "engine 'desktop' rolls the whole cutover back to the pre-T6 dispatch
+path". `src/lib/browser-lane/jobs.test.ts` — "buildCanopyBrowserTaskDescription
+routes the work to the app, never to a desktop browser".

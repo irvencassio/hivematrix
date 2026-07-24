@@ -48,11 +48,13 @@ test("resolveCanopyBrowserBaseUrl defaults to loopback :4021 and honours CANOPY_
   assert.equal(resolveCanopyBrowserBaseUrl(), "http://127.0.0.1:9999", "a trailing slash must be trimmed");
 });
 
-test("resolveBrowserLaneEngine falls back to the default when the flag is absent or junk", () => {
-  assert.equal(resolveBrowserLaneEngine({}), "desktop");
-  assert.equal(resolveBrowserLaneEngine({ browserLane: {} }), "desktop");
-  assert.equal(resolveBrowserLaneEngine({ browserLane: { engine: "nonsense" } }), "desktop");
+test("resolveBrowserLaneEngine defaults to canopy and honours an explicit desktop rollback", () => {
+  // T6 step 6: absent (or unreadable) config means the Canopy Browser app.
+  assert.equal(resolveBrowserLaneEngine({}), "canopy");
+  assert.equal(resolveBrowserLaneEngine({ browserLane: {} }), "canopy");
+  assert.equal(resolveBrowserLaneEngine({ browserLane: { engine: "nonsense" } }), "canopy");
   assert.equal(resolveBrowserLaneEngine({ browserLane: { engine: "canopy" } }), "canopy");
+  // The one-edit rollback lever.
   assert.equal(resolveBrowserLaneEngine({ browserLane: { engine: " Desktop " } }), "desktop");
 });
 

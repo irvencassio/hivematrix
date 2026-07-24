@@ -1,6 +1,37 @@
 # Browser Lane is Claude-native — do not reintroduce Codex
 
-**Decided 2026-07-22 (HiveMatrix 0.1.252). This is a closed decision.**
+> ## ⚠ SUPERSEDED on 2026-07-24 by the T6 Canopy Browser cutover
+>
+> **The engine described below is no longer the engine.** This document said
+> Browser Lane's engine *is* Claude driving Chrome/Safari through Desktop Lane.
+> T6 reversed that: `open` / `snapshot` / `workflow` now run **inside the
+> standalone Canopy Browser app**, which HiveMatrix drives as a client over
+> loopback HTTP (`POST /act`). See **[canopy-browser-cutover.md](canopy-browser-cutover.md)**.
+>
+> **Why it was reversed.** Driving a *separate* browser process is precisely the
+> problem: that browser has no session. Every authenticated workflow — the whole
+> reason the lane exists — hit a login wall, and the only remedy on offer was
+> re-entering credentials in a browser HiveMatrix does not own. Canopy Browser
+> already holds those sessions and already enforces site policy, so the honest
+> move was to stop laundering the work through a generic agent and call the app
+> that can actually do it.
+>
+> **What is still true below.** Everything about *Codex*. Codex was removed from
+> Browser Lane for good, `codex_computer_use` is still read-only-historical, and
+> nobody should reach for `codex login` when Browser Lane misbehaves. That part of
+> this decision stands.
+>
+> **What is no longer true below.** The "What the engine actually is" and "The
+> only real precondition" sections. `desktop_action`, `resolveBrowserBeeBacking`
+> and the Desktop Lane precondition now describe only the **rollback path**,
+> reachable with `{"browserLane": {"engine": "desktop"}}` in
+> `~/.hivematrix/config.json`.
+>
+> **If you are about to "fix" HiveMatrix back to driving a desktop browser: don't.**
+> That is not a regression to repair, it is a decision that was reversed on
+> purpose. Read the cutover doc first, and ask the operator.
+
+**Decided 2026-07-22 (HiveMatrix 0.1.252). Superseded 2026-07-24 — see above.**
 
 Browser Lane has **one engine**: Claude drives a real desktop browser through
 Desktop Lane. There is no Codex backing, no OpenAI dependency, and no auth to

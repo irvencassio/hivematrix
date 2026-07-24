@@ -551,7 +551,7 @@ test("the canopy engine reports an unreachable app instead of a silent failure",
   assert.match(out, /4021/, "the error must name where the app is expected to be listening");
 });
 
-test("with browserLane.engine absent, behaviour is unchanged — the desktop path still runs (T6 step 2)", async (t) => {
+test("with browserLane.engine absent the Canopy Browser app is the default (T6 step 6)", async (t) => {
   getConnectivityPolicy().setManualOverride("cloud-ok");
   t.after(() => getConnectivityPolicy().setManualOverride(null));
   const original = readFileSync(CANOPY_CONFIG_PATH, "utf-8");
@@ -559,7 +559,23 @@ test("with browserLane.engine absent, behaviour is unchanged — the desktop pat
   delete withoutFlag.browserLane;
   writeFileSync(CANOPY_CONFIG_PATH, JSON.stringify(withoutFlag));
   t.after(() => writeFileSync(CANOPY_CONFIG_PATH, original));
-  const { dispatched } = installBrowserLaneFetchStub(t, "task-no-flag-1");
+  const { act } = installCanopyFetchStub(t, CANOPY_OK_RESPONSE, "task-canopy-default-1");
+
+  await executeLaneTool("hivematrix_browser", {
+    mode: "open",
+    objective: "Open the report",
+    startUrl: "https://canopy-ok.example.com/report",
+  }, browserCtx());
+
+  assert.equal(act.length, 1, "with no flag set, browser work must go to the Canopy Browser app");
+});
+
+test("engine 'desktop' rolls the whole cutover back to the pre-T6 dispatch path", async (t) => {
+  getConnectivityPolicy().setManualOverride("cloud-ok");
+  t.after(() => getConnectivityPolicy().setManualOverride(null));
+  // The file-level config already pins engine:"desktop" — this asserts the lever
+  // actually works, i.e. rollback is one config edit and nothing more.
+  const { dispatched } = installBrowserLaneFetchStub(t, "task-rollback-1");
 
   const out = await executeLaneTool("hivematrix_browser", {
     mode: "open",
@@ -567,7 +583,7 @@ test("with browserLane.engine absent, behaviour is unchanged — the desktop pat
     startUrl: "https://canopy-ok.example.com/report",
   }, browserCtx());
 
-  assert.match(out, /Created Browser Lane task/, "with no flag set the pre-T6 dispatch path must still run");
+  assert.match(out, /Created Browser Lane task/, "engine 'desktop' must restore the pre-T6 dispatch path");
   assert.equal(dispatched.length, 1);
 });
 
